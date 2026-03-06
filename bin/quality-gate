@@ -21,7 +21,8 @@
 
 set -euo pipefail
 
-WORKSPACE="/Users/moltymac/.openclaw/workspace"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WORKSPACE="${OPENCLAW_WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 FAILURES=0
 WARNINGS=0
 

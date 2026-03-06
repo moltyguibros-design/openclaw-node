@@ -1,7 +1,8 @@
 import path from "path";
 
+const HOME = process.env.HOME || "/home/" + (process.env.USER || "openclaw");
 export const WORKSPACE_ROOT =
-  process.env.WORKSPACE_ROOT || "/Users/moltymac/.openclaw/workspace";
+  process.env.WORKSPACE_ROOT || path.join(HOME, ".openclaw", "workspace");
 
 export const DB_PATH =
   process.env.DB_PATH ||

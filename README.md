@@ -103,6 +103,40 @@ bash uninstall.sh --purge  # Remove everything including all data
 
 Also works on macOS (uses launchd instead of systemd).
 
+### System dependencies installed automatically
+
+| Package | Purpose |
+|---|---|
+| `nodejs` (18+) | Runtime for daemon, MC, and Node.js scripts |
+| `python3` + `python3-pip` | Runtime for boot compiler, trust registry, evolution |
+| `build-essential` | Compiles `better-sqlite3` native module |
+| `git` | Version control |
+| `sqlite3` | Database engine |
+| `curl` | HTTP calls from scripts |
+| `jq` | JSON processing in test/workflow scripts |
+| `pyyaml` (pip) | Required by `bin/compile-boot` for YAML parsing |
+| `scrot` (Linux) | Screenshot capture (fallback: gnome-screenshot, flameshot) |
+
+### Skills with their own dependencies
+
+The installer auto-detects and installs these:
+- **memorylayer** — npm: `axios`
+- **moltbook-registry** — npm: `ethers`, `dotenv`
+- **prompt-guard** — pip: `pyyaml`
+- **crypto-price** — pip: `matplotlib`
+- **fast-browser-use** — Rust (requires manual `cargo build` if needed)
+
+## Obsidian Setup
+
+The installer deploys the vault scaffold with 22 domain folders and the **Local REST API** plugin pre-installed. On first Obsidian launch:
+
+1. Obsidian will auto-download 5 missing community plugins (dataview, templater, kanban, git, graph-analysis) — requires internet
+2. Generate an API key in the Local REST API plugin settings
+3. Save the key to `~/.openclaw/workspace/projects/arcane-vault/.obsidian-api-key`
+4. The memory daemon will sync workspace files to the vault every 30 minutes
+
+If not using Obsidian, the sync is disabled by default in `obsidian-sync.json` (set `"enabled": false`).
+
 ## Environment Variables
 
 See `openclaw.env.example` for all available configuration. Key variables:
@@ -113,7 +147,7 @@ See `openclaw.env.example` for all available configuration. Key variables:
 | `OPENCLAW_TIMEZONE` | Yes | Timezone (e.g. `America/Montreal`) |
 | `ANTHROPIC_API_KEY` | Optional | For Claude-powered features |
 | `OPENAI_API_KEY` | Optional | For OpenAI-powered features |
-| `GOOGLE_API_KEY` | Optional | For Gemini-powered features |
+| `GOOGLE_API_KEY` | Optional | For Gemini + Mission Control TTS |
 | `DISCORD_BOT_TOKEN` | Optional | For Discord integration |
 | `TELEGRAM_BOT_TOKEN` | Optional | For Telegram integration |
 | `WEB_SEARCH_API_KEY` | Optional | For web search capability |

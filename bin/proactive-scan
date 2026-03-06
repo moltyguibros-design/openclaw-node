@@ -16,7 +16,8 @@
 
 set -euo pipefail
 
-WORKSPACE="/Users/moltymac/.openclaw/workspace"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WORKSPACE="${OPENCLAW_WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 ACTIVE_TASKS="$WORKSPACE/memory/active-tasks.md"
 TRUST_REGISTRY="$WORKSPACE/.tmp/trust-registry.json"
 DRY_RUN=false
@@ -35,7 +36,7 @@ import json, re, os, subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-workspace = "/Users/moltymac/.openclaw/workspace"
+workspace = os.environ.get("OPENCLAW_WORKSPACE", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 active_tasks = os.path.join(workspace, "memory/active-tasks.md")
 trust_registry = os.path.join(workspace, ".tmp/trust-registry.json")
 triggers = []

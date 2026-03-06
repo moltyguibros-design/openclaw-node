@@ -13,7 +13,8 @@ import fs from "fs";
 import path from "path";
 import { getActiveItems } from "./extract";
 
-const WORKSPACE = process.env.WORKSPACE_ROOT || "/Users/moltymac/.openclaw/workspace";
+const HOME = process.env.HOME || "/home/" + (process.env.USER || "openclaw");
+const WORKSPACE = process.env.WORKSPACE_ROOT || path.join(HOME, ".openclaw", "workspace");
 const CATEGORIES_DIR = path.join(WORKSPACE, "memory", "categories");
 
 export const VALID_CATEGORIES = [

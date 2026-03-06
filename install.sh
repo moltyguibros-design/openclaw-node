@@ -148,6 +148,52 @@ if ! $UPDATE_ONLY; then
       run sudo apt-get install -y build-essential
     fi
   fi
+
+  # curl
+  if command -v curl >/dev/null 2>&1; then
+    info "curl found"
+  else
+    if [ "$OS" = "linux" ]; then
+      run sudo apt-get install -y curl
+    fi
+  fi
+
+  # jq (used by test scripts and JSON processing)
+  if command -v jq >/dev/null 2>&1; then
+    info "jq found"
+  else
+    if [ "$OS" = "linux" ]; then
+      run sudo apt-get install -y jq
+    else
+      warn "jq not found — install with: brew install jq (optional, used by test scripts)"
+    fi
+  fi
+
+  # Python pip (needed for pyyaml)
+  if [ "$OS" = "linux" ]; then
+    if ! command -v pip3 >/dev/null 2>&1; then
+      info "Installing python3-pip..."
+      run sudo apt-get install -y python3-pip
+    fi
+  fi
+
+  # PyYAML (required by compile-boot)
+  if python3 -c "import yaml" 2>/dev/null; then
+    info "PyYAML found"
+  else
+    info "Installing PyYAML (required by compile-boot)..."
+    run pip3 install --user pyyaml 2>/dev/null || run pip install --user pyyaml 2>/dev/null || warn "Could not install pyyaml — compile-boot will not work"
+  fi
+
+  # Screenshot tool (Linux only)
+  if [ "$OS" = "linux" ]; then
+    if command -v scrot >/dev/null 2>&1 || command -v gnome-screenshot >/dev/null 2>&1 || command -v flameshot >/dev/null 2>&1; then
+      info "Screenshot tool found"
+    else
+      info "Installing scrot (screenshot capture)..."
+      run sudo apt-get install -y scrot || warn "Could not install scrot — screenshots will not work"
+    fi
+  fi
 fi
 
 # ============================================================
@@ -230,6 +276,21 @@ step "Step 6: Skills"
 
 run rsync -av "$REPO_DIR/skills/" "$WORKSPACE/skills/"
 info "Skills installed to $WORKSPACE/skills/ ($(ls "$REPO_DIR/skills/" | wc -l | tr -d ' ') skills)"
+
+# Install skill-specific dependencies (npm/pip where needed)
+info "Installing skill dependencies..."
+for skill_dir in "$WORKSPACE/skills"/*/; do
+  skill_name=$(basename "$skill_dir")
+  # npm-based skills
+  if [ -f "$skill_dir/package.json" ] && [ ! -d "$skill_dir/node_modules" ]; then
+    (cd "$skill_dir" && run npm install --production 2>/dev/null) && info "  npm: $skill_name" || warn "  npm failed: $skill_name"
+  fi
+  # pip-based skills
+  if [ -f "$skill_dir/requirements.txt" ]; then
+    run pip3 install --user -r "$skill_dir/requirements.txt" 2>/dev/null || warn "  pip failed: $skill_name"
+    info "  pip: $skill_name"
+  fi
+done
 
 # ============================================================
 # Step 7: Environment File
@@ -364,11 +425,19 @@ fi
 # Create .env.local for MC if not exists
 if [ ! -f "$MC_DIR/.env.local" ]; then
   cat > "$MC_DIR/.env.local" << MCENV
-WORKSPACE_PATH=$WORKSPACE
-DATABASE_URL=file:./mc.db
+# Mission Control Environment
+WORKSPACE_ROOT=$WORKSPACE
+OPENCLAW_HOME=$OPENCLAW_ROOT
+DB_PATH=./data/mission-control.db
+
+# TTS (optional — falls back to Edge TTS if missing)
+GEMINI_API_KEY=${GOOGLE_API_KEY:-}
 MCENV
   info "Created Mission Control .env.local"
 fi
+
+# Ensure data directory exists for SQLite
+run mkdir -p "$MC_DIR/data"
 
 # ============================================================
 # Step 12: ClawVault

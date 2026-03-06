@@ -2,6 +2,7 @@
 # bin/screenshot — Capture desktop screenshot for OpenClaw
 # Usage: screenshot [--display N] [--delay N] [--clipboard] [output_path]
 #
+# Cross-platform: macOS (screencapture), Linux (scrot/gnome-screenshot/import)
 # Defaults: full main display, no delay, saved to .tmp/screenshots/<timestamp>.png
 # Returns: absolute path to captured image on stdout
 
@@ -12,39 +13,26 @@ SCREENSHOT_DIR="$WORKSPACE/.tmp/screenshots"
 mkdir -p "$SCREENSHOT_DIR"
 
 # Defaults
-DISPLAY_FLAG=""
 DELAY=""
+DELAY_SECS=0
 CLIPBOARD=false
 OUTPUT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --display|-D)
-      DISPLAY_FLAG="-D${2}"
-      shift 2
-      ;;
-    --delay|-T)
-      DELAY="-T${2}"
-      shift 2
-      ;;
-    --clipboard|-c)
-      CLIPBOARD=true
-      shift
-      ;;
+    --display|-D) shift 2 ;;  # display selection (macOS only, ignored on Linux)
+    --delay|-T) DELAY_SECS="$2"; shift 2 ;;
+    --clipboard|-c) CLIPBOARD=true; shift ;;
     --help|-h)
-      echo "Usage: screenshot [--display N] [--delay N] [--clipboard] [output_path]"
+      echo "Usage: screenshot [--delay N] [--clipboard] [output_path]"
       echo ""
       echo "Options:"
-      echo "  --display N   Capture display N (1=main, 2=secondary)"
       echo "  --delay N     Wait N seconds before capture"
       echo "  --clipboard   Also copy to clipboard"
       echo "  output_path   Custom output path (default: .tmp/screenshots/<timestamp>.png)"
       exit 0
       ;;
-    *)
-      OUTPUT="$1"
-      shift
-      ;;
+    *) OUTPUT="$1"; shift ;;
   esac
 done
 
@@ -54,34 +42,55 @@ if [[ -z "$OUTPUT" ]]; then
   OUTPUT="$SCREENSHOT_DIR/${TIMESTAMP}.png"
 fi
 
-# Build screencapture args
-ARGS=(-x)  # silent (no shutter sound)
+detect_os() {
+  case "$(uname -s)" in
+    Darwin) echo "macos" ;;
+    Linux)  echo "linux" ;;
+    *)      echo "unknown" ;;
+  esac
+}
 
-if [[ -n "$DISPLAY_FLAG" ]]; then
-  ARGS+=("$DISPLAY_FLAG")
-fi
+OS=$(detect_os)
 
-if [[ -n "$DELAY" ]]; then
-  ARGS+=("$DELAY")
-fi
+capture_macos() {
+  local args=(-x)  # silent
+  [[ "$DELAY_SECS" -gt 0 ]] && args+=("-T$DELAY_SECS")
+  $CLIPBOARD && args+=(-c)
+  args+=("$OUTPUT")
+  screencapture "${args[@]}" 2>/dev/null
+}
 
-if $CLIPBOARD; then
-  ARGS+=(-c)
-fi
+capture_linux() {
+  [[ "$DELAY_SECS" -gt 0 ]] && sleep "$DELAY_SECS"
 
-ARGS+=("$OUTPUT")
-
-# Capture
-if screencapture "${ARGS[@]}" 2>/dev/null; then
-  if [[ -f "$OUTPUT" ]]; then
-    echo "$OUTPUT"
+  if command -v scrot >/dev/null 2>&1; then
+    scrot "$OUTPUT"
+    $CLIPBOARD && command -v xclip >/dev/null 2>&1 && xclip -selection clipboard -t image/png -i "$OUTPUT"
+  elif command -v gnome-screenshot >/dev/null 2>&1; then
+    gnome-screenshot -f "$OUTPUT"
+    $CLIPBOARD && command -v xclip >/dev/null 2>&1 && xclip -selection clipboard -t image/png -i "$OUTPUT"
+  elif command -v import >/dev/null 2>&1; then
+    import -window root "$OUTPUT"
+  elif command -v flameshot >/dev/null 2>&1; then
+    flameshot full -p "$(dirname "$OUTPUT")" -r > "$OUTPUT"
   else
-    echo "ERROR: screencapture ran but no file produced at $OUTPUT" >&2
-    echo "Check System Settings > Privacy & Security > Screen Recording" >&2
+    echo "ERROR: No screenshot tool found. Install one of: scrot, gnome-screenshot, flameshot, imagemagick" >&2
     exit 1
   fi
+}
+
+case "$OS" in
+  macos)  capture_macos ;;
+  linux)  capture_linux ;;
+  *)
+    echo "ERROR: Unsupported platform for screenshots" >&2
+    exit 1
+    ;;
+esac
+
+if [[ -f "$OUTPUT" ]]; then
+  echo "$OUTPUT"
 else
-  echo "ERROR: screencapture failed. Check screen recording permissions." >&2
-  echo "System Settings > Privacy & Security > Screen Recording > enable for Terminal/iTerm" >&2
+  echo "ERROR: Screenshot capture failed — no file at $OUTPUT" >&2
   exit 1
 fi

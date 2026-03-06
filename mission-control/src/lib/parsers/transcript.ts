@@ -17,11 +17,13 @@ export interface TranscriptEvent {
 /**
  * Transcript source directories — scans ALL frontend transcript stores.
  */
+const HOME = process.env.HOME || "/home/" + (process.env.USER || "openclaw");
+const USER = process.env.USER || path.basename(HOME);
 const TRANSCRIPT_DIRS = [
-  // Claude Code workspace sessions
-  path.join(process.env.HOME || "/Users/moltymac", ".claude/projects/-Users-moltymac--openclaw-workspace"),
+  // Claude Code workspace sessions (path varies by username)
+  path.join(HOME, `.claude/projects/-Users-${USER}--openclaw-workspace`),
   // OpenClaw Gateway sessions (Discord, Telegram, etc.)
-  path.join(process.env.HOME || "/Users/moltymac", ".openclaw/agents/main/sessions"),
+  path.join(HOME, ".openclaw/agents/main/sessions"),
 ];
 
 /**
@@ -185,12 +187,13 @@ export function getRecentTranscriptActivity(limit: number = 50): TranscriptEvent
  * Shorten a file path for display by removing the workspace prefix.
  */
 function shortenPath(fp: string): string {
+  const home = process.env.HOME || "";
   const prefixes = [
-    "/Users/moltymac/.openclaw/workspace/",
-    "/Users/moltymac/",
+    path.join(home, ".openclaw/workspace") + "/",
+    home + "/",
   ];
   for (const prefix of prefixes) {
-    if (fp.startsWith(prefix)) {
+    if (prefix && fp.startsWith(prefix)) {
       return fp.slice(prefix.length);
     }
   }

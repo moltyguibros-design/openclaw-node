@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/Users/moltymac/.openclaw/workspace/skills"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="${OPENCLAW_WORKSPACE:-$(dirname "$(dirname "$SCRIPT_DIR")")}/skills"
 DIST="$ROOT/dist"
 
 echo "== Golden Skills v3 Check =="
@@ -16,7 +17,8 @@ for f in \
 done
 
 echo "[2/4] Run arcane prepush_check script"
-"$ROOT/arcane-dev-ops/scripts/prepush_check.sh" "/Users/moltymac/.openclaw/workspace/projects/arcane" "npx hardhat test" >/tmp/arcane_prepush_check.out
+WORKSPACE="${OPENCLAW_WORKSPACE:-$(dirname "$(dirname "$SCRIPT_DIR")")}"
+"$ROOT/arcane-dev-ops/scripts/prepush_check.sh" "$WORKSPACE/projects/arcane" "npx hardhat test" >/tmp/arcane_prepush_check.out
 head -n 8 /tmp/arcane_prepush_check.out
 
 echo "[3/4] Run channel triage snapshot script (quick)"

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # auto-checkpoint — Claude Code frontend adapter
 #
 # Called by Claude Code PostToolUse hook on Edit|Write|Bash.

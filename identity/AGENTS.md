@@ -76,8 +76,8 @@ Capture what matters. Decisions, context, things to remember. Skip the secrets u
 
 ### 🐘 ClawVault Integration (Safe Mode)
 
-- Primary vault path: `/Users/moltymac/.openclaw/workspace/memory-vault`
-- Wrapper command (preferred): `/Users/moltymac/.openclaw/workspace/bin/clawvault-local`
+- Primary vault path: `$OPENCLAW_WORKSPACE/memory-vault`
+- Wrapper command (preferred): `$OPENCLAW_WORKSPACE/bin/clawvault-local`
 - The wrapper auto-injects `--vault` and ensures `qmd` is in PATH.
 
 **Automated via auto-checkpoint (no manual calls needed):**
