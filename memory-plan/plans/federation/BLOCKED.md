@@ -5,9 +5,15 @@
 a step failure) applied to the **D15** verdict.
 **Trigger**: step 2.6's premise benchmark closed FAILED — run 2 final tally solo 3 · grappe 2 ·
 tie 0, below the D3 ≥4-of-5 bar (D15).
-**External action:** the operator makes ONE call — close the federation plan at this verdict, or
+**External action:** ~~the operator makes ONE call — close the federation plan at this verdict, or
 approve a redesigned convergence protocol (new DECISIONS entry) to be proven by a NEW
-preregistered benchmark. Nothing downstream runs until then.
+preregistered benchmark.~~ **The call was made 2026-08-05: D16 (operator ruling).** Consensus
+gating is dead; the redesign is DEFINED as a deterministic fixed-pass pipeline (draft → reviews
+ingested → revision → ships unconditionally — no votes, no sign-offs, ever). **The block STANDS
+until pipeline mode passes a NEW preregistered five-task benchmark** under the committed
+apparatus (new RUN_RULES revision: gate-forfeit clause vestigial, budget/infra clauses carry
+over). Implementing pipeline mode + running that benchmark is the plan's only forward path and
+starts on operator go.
 
 ## Why
 

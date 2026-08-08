@@ -14,7 +14,7 @@ the verdict + redesign-door decision (D15), and carry VERSION to v2.6. Governanc
 no code, no further executions. Files under "26-disposition".
 **Set at:** 2026-08-03 (operator "gogo"; prior idle header set 2026-08-02 during governance
 recovery; refreshed 2026-08-05 for the disposition batch — the run-scope expired at 00:00Z)
-**Expires:** 2026-08-07T00:00:00Z
+**Expires:** 2026-08-09T00:00:00Z
 
 ```files 26-disposition
 memory-plan/plans/federation/INVENTORY.md

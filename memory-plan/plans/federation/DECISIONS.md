@@ -521,6 +521,36 @@ every smoke. What was NOT falsified: quality. The grappe won BOTH blind comparis
 (21-18, 20-15), with judges verifying citations against source. The broken component is the
 **unanimity-gated finalization protocol**, not the collaboration concept.
 
+## D16 — Consensus gating is DEAD; federation is a deterministic pipeline (OPERATOR RULING, 2026-08-05)
+
+**Decision.** Operator ruling, verbatim intent: *"the eventual federation will work by itself as
+an automated prompt-response-ingestion-response system — not a 'do you think it's good.'"* All
+agreement machinery is removed from the federation design going forward: no votes, no sign-offs,
+no convergence bars, no unanimity, no subjective quality gates anywhere inside the flow. A
+federation work unit is a FIXED-PASS deterministic pipeline — draft → reviews ingested as input →
+revision — and the result **ships unconditionally** at the end of the last pass. No participant
+can hold an output hostage. Quality is judged downstream by use and by evidence programs (blind
+scoring, telemetry), never by polling the participants.
+
+**Why.** The D15 evidence decomposes exactly along this line: both blind quality wins were
+produced by the pipeline segment (draft → review-artifacts → revision); every reliability
+failure — 3 of 5 run-2 pairs, and the chronic gate across all three smokes and run 1 — was the
+opinion gate at the end. The circling ceremony (votes, sub-round barriers, reviewer sign-offs,
+finalization unanimity) was agent-grown elaboration approved in bulk inside larger plans, not an
+operator requirement; the operator has now explicitly rejected it, and the benchmark had already
+falsified it independently.
+
+**Consequences.** (1) `circling_strategy`'s vote/finalization machinery is retired from the
+forward design — existing code and tests remain as history; nothing new builds on them. (2) The
+D15 redesign door is now DEFINED: pipeline mode (fixed passes, unconditional ship). (3) Per D15,
+the block stands until pipeline mode passes a NEW preregistered five-task benchmark under the
+existing committed apparatus (fed-run-driver + RUN_RULES pattern; forfeit rules simplify — the
+gate-forfeit clause becomes vestigial since no gate exists; budget and infra clauses carry over).
+(4) Blocks 4 (management) and 5 (savant), when/if reached, inherit the same law: deterministic
+dataflow, no consensus gating — the 3/5-quorum management design must be re-derived under D16
+before any of it is built. (5) The mesh solo lane is untouched — benchmark-proven reliable
+(8/8 completions across smokes and runs).
+
 **Consequences.** D14's rerun mandate is discharged. The July hand-run's "qualified pass" is
 superseded by a properly powered negative result. Any future iteration must preregister anew —
 no reuse of this run's artifacts as evidence for a redesigned protocol, and no retroactive
