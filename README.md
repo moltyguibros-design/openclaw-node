@@ -32,6 +32,43 @@ and only then downloads the repo and runs `install.sh --enable-services`.
 You are asked for your password once. Homebrew and apt install into system locations;
 that is not automatable away.
 
+#### It runs in two waves
+
+**Wave 1 — binaries and a running node.** Homebrew, Xcode CLT, Node 22, Python 3, Git,
+SQLite3, jq, nats-server, ollama, Tailscale, then `install.sh --enable-services`. A few
+hundred MB. No models.
+
+**Wave 2 — the LLM brain, only after you confirm.** The local model is 5–18 GB depending
+on your RAM tier, plus ~2 GB for the `Xenova/bge-m3` embedder. That never starts unasked:
+
+```
+  Detected RAM   : 64 GB
+  Recommended    : qwen3:32b  (~18 GB download)
+  Embedder       : Xenova/bge-m3  (~2 GB, required for semantic search)
+  ─────────────────────────────────
+  Total download : ~20 GB
+
+  [y] download qwen3:32b + embedder   (~20 GB)
+  [s] skip — set it up later
+  [c] choose a different model
+```
+
+Tiers follow `bin/check-llm-baseline.mjs`: ≥48 GB → `qwen3:32b`, ≥32 GB → `qwen3:14b`,
+≥16 GB → `qwen3:8b`. Below 16 GB there is no viable local tier and wave 2 says so instead
+of downloading something that will thrash.
+
+The prompt reads `/dev/tty`, not stdin — under `curl … | bash` stdin is the script itself.
+**With no terminal (CI, cron, `nohup`) it skips rather than hangs or downloads unattended.**
+Wave 2 is re-runnable and standalone at any time:
+
+```bash
+bash scripts/install/llm-setup.sh            # ask, then pull
+bash scripts/install/llm-setup.sh --check    # report only, download nothing
+bash scripts/install/llm-setup.sh --yes      # unattended: take the recommendation
+```
+
+Passing `--skip-llm` to bootstrap skips wave 2 entirely.
+
 Flags pass straight through:
 
 ```bash

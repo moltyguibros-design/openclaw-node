@@ -285,21 +285,42 @@ else
   ok "source at $SRC"
 fi
 
-step "Running install.sh"
+step "Wave 1: running install.sh"
 cd "$SRC" || die "cannot enter $SRC"
+
+# Wave 1 is binaries + a running node. --skip-llm is forced here so the 5-20 GB
+# model pull never starts unannounced; wave 2 below asks first. If the caller
+# already passed --skip-llm they want no models at all, so wave 2 is skipped too.
+USER_SKIP_LLM=false
+for a in "$@"; do [ "$a" = "--skip-llm" ] && USER_SKIP_LLM=true; done
+
 if [ $# -gt 0 ]; then
-  bash install.sh --enable-services "$@"
+  bash install.sh --enable-services --skip-llm "$@"
 else
-  bash install.sh --enable-services
+  bash install.sh --enable-services --skip-llm
 fi
 RC=$?
 
-echo ""
-if [ $RC -eq 0 ]; then
-  ok "node installed. Next:"
-  echo "    tailscale up                 # authenticate the mesh (opens a browser)"
-  echo "    open http://localhost:3000   # Mission Control"
-else
+if [ $RC -ne 0 ]; then
+  echo ""
   err "install.sh exited $RC — dependencies were fine, the failure is downstream."
+  exit $RC
 fi
-exit $RC
+ok "wave 1 complete — node installed and running (no models yet)"
+
+# ============================================================
+# Wave 2 — models, only after the user says so
+# ============================================================
+if $USER_SKIP_LLM; then
+  echo ""
+  ok "--skip-llm given: no models. Set them up any time with:"
+  echo "    bash $SRC/scripts/install/llm-setup.sh"
+else
+  bash "$SRC/scripts/install/llm-setup.sh"
+fi
+
+echo ""
+ok "done. Next:"
+echo "    tailscale up                 # authenticate the mesh (opens a browser)"
+echo "    open http://localhost:3000   # Mission Control"
+exit 0

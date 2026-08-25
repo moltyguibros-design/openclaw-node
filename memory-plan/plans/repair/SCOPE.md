@@ -23,9 +23,16 @@ Tailscale included), wire it into `install.sh`, repair the macOS/Linux branches 
 bootstrap.sh
 scripts/install/prereqs.sh
 scripts/install/system-deps.sh
+scripts/install/llm-setup.sh
 install.sh
 README.md
 ```
+
+**Addendum 2026-08-24 (operator: "second wave for the llm model, with confirmation"):**
+wave 1 (bootstrap.sh) installs binaries only and runs `install.sh --skip-llm`; wave 2
+(`scripts/install/llm-setup.sh`) prompts before downloading the RAM-tiered Qwen3 model
+(5-18 GB) plus the Xenova/bge-m3 embedder (~2 GB). Prompt reads `/dev/tty`, since under
+`curl | bash` stdin is the script itself. No tty means SKIP, never hang.
 
 ```files
 services/launchd/*
