@@ -1,6 +1,11 @@
 # SCOPE — federation plan
 
-**Status:** active
+**Status:** idle
+**Closed at:** 2026-08-24 — the 2.6 disposition batch below completed and its window expired
+2026-08-09; the header was left reading `active` while `Expires` had passed, which blocks every
+write rather than allowing any. Returned to `idle` so it reflects reality and one-scope-per-session
+discipline holds. Federation itself remains BLOCKED per D15/BLOCKED.md — this changes scope
+bookkeeping only, not the plan's blocked status.
 **Goal:** Operator "gogo" 2026-08-03: execute the reopened 2.6 premise benchmark per D14 —
 resume from the v2.6-pre design (five comparable tasks, same advanced LLM/tools per arm, blind
 scoring, cost recorded). Phase 1 of the step is the D11 worker-readiness pre-screen: 3

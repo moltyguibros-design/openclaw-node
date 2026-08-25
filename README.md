@@ -17,7 +17,31 @@ Installable package for deploying an OpenClaw node. Includes the full infrastruc
 
 ## Quick Start
 
-### Option 1: npx (recommended)
+### On a new machine — one command
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/bootstrap.sh | bash
+```
+
+This is the **only** entrypoint that works on a machine with nothing on it. It assumes
+just `bash` + `curl` (stock on macOS and Ubuntu) and a sudo-capable user, then installs
+Homebrew (macOS), the Xcode Command Line Tools, Node 22, Python 3, Git, SQLite3, build
+tools, jq, nats-server, ollama and Tailscale — verifies each one is actually on `PATH` —
+and only then downloads the repo and runs `install.sh --enable-services`.
+
+You are asked for your password once. Homebrew and apt install into system locations;
+that is not automatable away.
+
+Flags pass straight through:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/bootstrap.sh | bash -s -- --skip-llm --role=worker
+```
+
+If any dependency is missing at the end, bootstrap **refuses to start `install.sh`** and
+exits non-zero rather than leaving you a half-installed node.
+
+### If the machine already has Node 22+
 
 ```bash
 npx openclaw-node-harness            # Full install — identity, skills, MC, services, everything
@@ -25,21 +49,30 @@ npx openclaw-node-harness --update   # Update existing install (skip system deps
 npx openclaw-node-harness --mesh-only # Worker nodes — mesh agent + NATS only, no full stack
 ```
 
-### Option 2: Git clone
+> `npx` requires npm, which requires Node. It therefore **cannot install Node**, and
+> cannot bootstrap a virgin machine — use the `curl | bash` command above for that.
+> This package also declares `engines: { node: ">=22" }`, so npm refuses to run it on
+> Node 18–21 even though older docs described the baseline as "Node.js 18+".
+
+### From a clone
 
 ```bash
 git clone https://github.com/moltyguibros-design/openclaw-node.git
 cd openclaw-node
+bash scripts/install/prereqs.sh       # Install/verify system deps (--check to verify only)
 bash install.sh --enable-services     # Full install: start everything + acceptance gate
 bash install.sh                       # Files/units only (start later with --update --enable-services)
 bash install.sh --update              # Update existing
 ```
 
+`install.sh` runs `prereqs.sh` itself as Step 1 and aborts if the baseline is incomplete;
+running it by hand first is just a way to see what is missing before committing.
+
 What a node needs and what "running" means is specified in [docs/NODE_SPEC.md](docs/NODE_SPEC.md);
 the verification matrix is [docs/INSTALL_TEST_PROTOCOL.md](docs/INSTALL_TEST_PROTOCOL.md).
 
 The installer will:
-1. Check/install system dependencies — Node.js 18+, Python 3, Git, SQLite3, build tools, **nats-server** (the bus), **ollama** (the local LLM; skip with `--skip-llm`)
+1. Verify system dependencies via `scripts/install/prereqs.sh` — Node.js 22+, Python 3, Git, SQLite3, build tools, `jq`, **nats-server** (the bus), **ollama** (the local LLM; skip with `--skip-llm`), **Tailscale** (needed for multi-machine clustering). Each is confirmed on `PATH`; the install **aborts** if any is missing rather than continuing partially installed.
 2. Install the repo's runtime `node_modules` (the mesh daemons exec from the repo tree)
 3. Create the `~/.openclaw/` directory structure and copy scripts, libs (incl. mcp-knowledge), identity files, souls, and skills
 4. Generate configuration from templates — including the **single-node NATS bus** (`nats.conf`, loopback + generated token) and an env file with the **local-first LLM defaults** (`MESH_LLM_PROVIDER=ollama`, RAM-tiered `LLM_MODEL`)
@@ -128,13 +161,22 @@ OpenClaw targets lightweight **consumer hardware** (see [docs/NODE_SPEC.md §1](
 - **macOS** (primary dev target; nodes default to the `lead` role, services via launchd)
 - **Linux with systemd** (Ubuntu 20.04+; nodes default to `worker`, services via systemd)
 
-Baseline: Node.js 18+, Python 3.8+, Git, SQLite 3. On Linux the installer apt-installs anything missing; on macOS install Node/Python yourself (Homebrew) — the installer errors out rather than apt-installing.
+Baseline: **Node.js 22+** (the `engines` floor; Mission Control requires it), Python 3.8+,
+Git, SQLite 3, plus a working compiler for `better-sqlite3`.
 
-### System dependencies installed automatically
+### System dependencies
+
+`bootstrap.sh` installs all of the below on both platforms, including Homebrew itself on
+macOS. `install.sh` installs them via `scripts/install/prereqs.sh` provided a package
+manager is already present (Homebrew on macOS, apt on Debian/Ubuntu) — it will not
+bootstrap Homebrew for you, and it aborts rather than continuing with a partial baseline.
+
+Every item is verified by checking that the binary is on `PATH`, not by trusting the
+package manager's exit code.
 
 | Package | Purpose |
 |---|---|
-| `nodejs` (18+) | Runtime for daemon, MC, and Node.js scripts |
+| `nodejs` (22+) | Runtime for daemon, MC, and Node.js scripts |
 | `nats-server` | The message bus every subsystem talks through (single-node loopback by default; R=3 cluster is opt-in) |
 | `ollama` | Local LLM runtime for memory extraction + local mesh agents (skip with `--skip-llm`) |
 | `python3` + `python3-pip` | Runtime for boot compiler, trust registry, evolution |
@@ -143,6 +185,8 @@ Baseline: Node.js 18+, Python 3.8+, Git, SQLite 3. On Linux the installer apt-in
 | `sqlite3` | Database engine |
 | `curl` | HTTP calls from scripts |
 | `jq` | JSON processing in test/workflow scripts |
+| `tailscale` | Mesh VPN. `install.sh` derives `--cluster-bind` from `tailscale ip -4`; without it multi-machine NATS clustering silently degrades to a single node. Installed but **not** authenticated — run `tailscale up` yourself. |
+| `homebrew` | macOS package manager. Installed by `bootstrap.sh` only; it also pulls in the Xcode Command Line Tools, which is where the compiler comes from. |
 | `pyyaml` (pip) | Required by `bin/compile-boot` for YAML parsing |
 | `scrot` (Linux) | Screenshot capture (fallback: gnome-screenshot, flameshot) |
 
