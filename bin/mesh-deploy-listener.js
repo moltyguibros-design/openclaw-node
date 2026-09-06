@@ -25,8 +25,7 @@ const tracer = createTracer('mesh-deploy-listener');
 
 // ── Config ───────────────────────────────────────────────────────────────
 
-const NODE_ID = process.env.OPENCLAW_NODE_ID ||
-  os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+const NODE_ID = require('../lib/node-id').resolveNodeId();
 // NOTE: REPO_DIR defaults to ~/openclaw (runtime). The git repo lives at
 // ~/openclaw-node. See mesh-deploy.js "Two-directory problem" comment.
 const REPO_DIR = process.env.OPENCLAW_REPO_DIR ||

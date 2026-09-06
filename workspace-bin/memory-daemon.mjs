@@ -32,6 +32,7 @@ import path from 'path';
 import os from 'os';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
+import { resolveNodeId } from '../lib/node-id.js';
 
 // --- Tracer ---
 const require = createRequire(import.meta.url);
@@ -148,7 +149,10 @@ const __dirname = path.dirname(__filename);
 // CONFIGURATION
 // ============================================================
 
-const NODE_ID = process.env.OPENCLAW_NODE_ID || os.hostname();
+// One derivation for every daemon (lib/node-id). The raw-hostname fallback
+// produced ids that failed the event envelope regex and split the node's
+// identity across processes (review I13/P10).
+const NODE_ID = resolveNodeId();
 const WORKSPACE = process.env.OPENCLAW_WORKSPACE || path.dirname(__dirname);
 const HOME = os.homedir();
 const CONFIG_PATH = path.join(HOME, '.openclaw/config/daemon.json');

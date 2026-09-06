@@ -13,8 +13,16 @@ elif $SKIP_VERIFY; then
 elif $ENABLE_SERVICES; then
   info "Letting services settle (10s)..."
   sleep 10
+  # --skip-llm installs no model on purpose: tell the gate so the LLM axis is
+  # N/A (covered) instead of a FAIL that would reject every documented install.
+  GATE_ARGS=""
+  if $SKIP_LLM; then
+    warn "LLM axis skipped (--skip-llm) — the gate will not prove model-backed extraction"
+    GATE_ARGS="--skip-axis llm"
+  fi
   set +e
-  "$NODE_BIN" "$WORKSPACE/bin/node-acceptance.mjs" --report "$OPENCLAW_ROOT/.install-acceptance.md"
+  # shellcheck disable=SC2086
+  "$NODE_BIN" "$WORKSPACE/bin/node-acceptance.mjs" $GATE_ARGS --report "$OPENCLAW_ROOT/.install-acceptance.md"
   GATE_RC=$?
   set -e
   if [ "$GATE_RC" -eq 0 ]; then

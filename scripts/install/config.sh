@@ -35,6 +35,16 @@ if [ -f "$ENV_FILE" ]; then
   done < "$ENV_FILE"
 fi
 
+# Persist the node id so it is STABLE across re-runs and hostname changes.
+# env.sh derives it from the hostname on every run; without this line a rename
+# (or a later derivation change) re-labels the node on --update while its KV
+# entries, JetStream durables and daemon-state files keep the old id (review
+# I13/L11). A value already in the file wins (it was exported by the loop above).
+if [ -f "$ENV_FILE" ] && [ "$DRY_RUN" != true ] && ! grep -q '^OPENCLAW_NODE_ID=' "$ENV_FILE"; then
+  echo "OPENCLAW_NODE_ID=$OPENCLAW_NODE_ID" >> "$ENV_FILE"
+  info "Persisted OPENCLAW_NODE_ID=$OPENCLAW_NODE_ID to $ENV_FILE (stable node identity)"
+fi
+
 # Generate OPENCLAW_NATS_TOKEN if not set — server-side auth token (D2, federation step 1.1).
 # Clients already resolve+send it via lib/nats-resolve.js; this closes the server-side gap.
 if [ -z "${OPENCLAW_NATS_TOKEN:-}" ]; then

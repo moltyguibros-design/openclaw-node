@@ -53,7 +53,7 @@ const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
 const BUDGET_CHECK_INTERVAL = 30000; // 30s
 const STALL_MINUTES = parseInt(process.env.MESH_STALL_MINUTES || '5'); // no heartbeat for this long → stalled
 const CIRCLING_STEP_TIMEOUT_MS = parseInt(process.env.MESH_CIRCLING_STEP_TIMEOUT_MS || String(10 * 60 * 1000)); // 10 min default
-const NODE_ID = os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+const NODE_ID = require('../lib/node-id').resolveNodeId();
 
 let nc, store, collabStore, planStore;
 

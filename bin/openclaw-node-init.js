@@ -403,7 +403,7 @@ function installMeshCode(repoUrl) {
 // ── Service Installation ─────────────────────────────
 
 function installService(osInfo, meshDir, config) {
-  const nodeId = os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+  const nodeId = require('../lib/node-id').resolveNodeId();
   const nodeBin = process.execPath;
   const provider = config.provider;
 
@@ -795,7 +795,7 @@ async function main() {
   // ── Step 1: Detect OS ──
   step(1, 'Detecting environment...');
   const osInfo = detectOS();
-  const nodeId = os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+  const nodeId = require('../lib/node-id').resolveNodeId();
   ok(`OS: ${osInfo.os} (${osInfo.arch})`);
   ok(`Node ID: ${nodeId}`);
   ok(`Service type: ${osInfo.serviceType}`);

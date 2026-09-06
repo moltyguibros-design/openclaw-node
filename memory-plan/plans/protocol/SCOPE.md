@@ -22,7 +22,36 @@ Phase 0+1, prior runtime-repair (4.1-4.4) and the review-doc batch are preserved
 **Set at:** 2026-09-06T00:00:00Z
 **Expires:** 2026-09-10T00:00:00Z
 
-```files remediation-phase3-2026-09-06
+```files remediation-phase4-2026-09-06
+bootstrap.sh
+mesh-install.sh
+scripts/install/verify.sh
+scripts/install/components.sh
+scripts/install/config.sh
+scripts/install/env.sh
+services/launchd/*.plist
+services/systemd/openclaw-memory-daemon.service
+bin/node-acceptance.mjs
+lib/node-acceptance.mjs
+lib/node-acceptance-probes.mjs
+lib/node-id.js
+test/node-id.test.mjs
+bin/mesh-task-daemon.js
+bin/mesh-agent.js
+bin/mesh-health-publisher.js
+bin/mesh-deploy-listener.js
+bin/openclaw-node-init.js
+workspace-bin/memory-daemon.mjs
+lib/operator-auth.mjs
+lib/mesh-tasks.js
+test/install-modules.test.mjs
+test/node-acceptance.test.mjs
+test/mesh-tasks-status.test.js
+test/wiring-manifest.test.mjs
+memory-plan/plans/protocol/SCOPE.md
+```
+
+```files remediation-phase3-2026-09-06 closed
 package.json
 .claude/settings.json
 .claude/hooks/scope-check.sh
