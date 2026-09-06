@@ -1,13 +1,18 @@
 # SCOPE — protocol plan
 
-**Status:** done
-**Goal:** Runtime repair 4.4, under the operator-approved 2026-08-02 four-step runtime block:
-replace the unauthenticated scheduler-heartbeat curl with one installer-owned, loopback-only helper
-that reads Mission Control's existing session token internally, preserves the POST auth gate, and
-proves recurring launchd ticks return HTTP 200 with exit 0. Consolidation hard-cap performance and
-the runtime failures exposed by 4.3 remain separate findings.
-**Set at:** 2026-08-02T18:04:00-04:00
-**Expires:** 2026-08-04T00:00:00Z
+**Status:** active
+**Goal:** Land the operator-requested repo-wide adversarial + lifecycle review as a committed
+deliverable. This is a documentation-only scope: it adds one review report at the repo root and a
+triage pointer in this plan's OUT_OF_SCOPE.md. No production code is touched. Prior runtime-repair
+history for this plan (4.1-4.4, all closed) is preserved below.
+**Set at:** 2026-09-06T00:00:00Z
+**Expires:** 2026-09-08T00:00:00Z
+
+```files adversarial-review-2026-09-06
+ADVERSARIAL_REVIEW_2026-09-06.md
+memory-plan/plans/protocol/SCOPE.md
+memory-plan/plans/protocol/OUT_OF_SCOPE.md
+```
 
 ```files governance-recovery-2026-08-02 closed
 memory-plan/plans/protocol/SCOPE.md
