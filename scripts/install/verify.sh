@@ -28,6 +28,14 @@ elif $ENABLE_SERVICES; then
   if [ "$GATE_RC" -eq 0 ]; then
     GATE_STATE="accepted"
     info "ACCEPTED — the node is functionally running (evidence: $OPENCLAW_ROOT/.install-acceptance.md)"
+  elif [ "$GATE_RC" -eq 2 ] && $SKIP_LLM; then
+    # INCOMPLETE (not REJECTED): nothing FAILED, but a required check could not
+    # be observed — on a model-less first wave the memory store is empty, so
+    # retrieval has nothing to prove. The install proceeds UNPROVEN on that
+    # axis and says so; the second wave (--update --enable-services) re-gates.
+    GATE_STATE="incomplete"
+    warn "INCOMPLETE — no check failed, but the node is UNPROVEN on the skipped/empty axes (evidence: $OPENCLAW_ROOT/.install-acceptance.md)"
+    warn "Pull models, then re-gate: bash $0 --update --enable-services"
   else
     error "Acceptance gate FAILED (exit $GATE_RC: 1=REJECTED 2=INCOMPLETE 3=harness error)"
     error "The node is NOT fully operational. Evidence: $OPENCLAW_ROOT/.install-acceptance.md"

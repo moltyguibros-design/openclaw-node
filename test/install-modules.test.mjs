@@ -107,6 +107,9 @@ test('preserved behaviors sit in their modules', () => {
   // --skip-llm must reach the gate as --skip-axis llm, or every documented
   // model-less install is rejected by its own acceptance step.
   assert.ok(moduleSrc['verify.sh'].includes('--skip-axis llm'));
+  // P5-4: an INCOMPLETE gate (exit 2) under --skip-llm is a loud warning, not
+  // a failed install; a REJECTED gate (exit 1) still fails it.
+  assert.ok(moduleSrc['verify.sh'].includes('"$GATE_RC" -eq 2 ] && $SKIP_LLM'));
 });
 
 test('mcp-knowledge is owned by the root dependency workspace', () => {

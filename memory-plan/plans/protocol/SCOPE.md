@@ -22,7 +22,33 @@ Phase 0+1, prior runtime-repair (4.1-4.4) and the review-doc batch are preserved
 **Set at:** 2026-09-06T00:00:00Z
 **Expires:** 2026-09-10T00:00:00Z
 
-```files remediation-phase4-2026-09-06
+```files remediation-phase5a-2026-09-06
+lib/extraction-store.mjs
+lib/consolidation.mjs
+lib/pre-compression-flush.mjs
+lib/memory-formatter.mjs
+lib/extraction-prompt.mjs
+lib/extraction-schema.mjs
+lib/obsidian-summarizer.mjs
+lib/memory-watcher.mjs
+lib/node-acceptance-probes.mjs
+bin/consolidate.mjs
+test/extraction-store.test.mjs
+test/consolidation.test.mjs
+test/pre-compression-flush.test.mjs
+test/memory-formatter.test.mjs
+test/extraction-prompt.test.mjs
+test/extraction-schema.test.mjs
+test/obsidian-summarizer.test.mjs
+test/memory-watcher.test.mjs
+test/node-acceptance.test.mjs
+test/node-acceptance-probes.test.mjs
+test/install-modules.test.mjs
+scripts/install/verify.sh
+memory-plan/plans/protocol/SCOPE.md
+```
+
+```files remediation-phase4-2026-09-06 closed
 bootstrap.sh
 mesh-install.sh
 scripts/install/verify.sh
