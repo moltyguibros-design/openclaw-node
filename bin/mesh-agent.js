@@ -1324,7 +1324,7 @@ async function executeCollabTask(task) {
   }, 10000);
 
   // Signal start
-  await natsRequest('mesh.tasks.start', { task_id: task.task_id }).catch(err => warn(`mesh.tasks.start: ${err.message}`));
+  await natsRequest('mesh.tasks.start', { task_id: task.task_id, node_id: NODE_ID }).catch(err => warn(`mesh.tasks.start: ${err.message}`));
 
   try {
     for await (const roundMsg of roundSub) {
@@ -1549,7 +1549,9 @@ async function executeTask(task) {
   const workspaceIsolated = true;
 
   // Signal start (include isolation status so daemon knows)
-  await natsRequest('mesh.tasks.start', { task_id: task.task_id, workspace_isolated: workspaceIsolated });
+  // node_id: the daemon now enforces ownership on start/complete/release
+  // (only the claiming node may drive its task) — the same check fail had.
+  await natsRequest('mesh.tasks.start', { task_id: task.task_id, node_id: NODE_ID, workspace_isolated: workspaceIsolated });
   writeAgentState('working', task.task_id);
   log(`Started: ${task.task_id} (dir: ${worktreePath ? 'worktree' : 'workspace'})`);
 
@@ -1666,6 +1668,7 @@ async function executeTask(task) {
 
       await natsRequest('mesh.tasks.complete', {
         task_id: task.task_id,
+        node_id: NODE_ID,
         result: {
           success: true, summary, artifacts: [],
           cost: sessionInfo?.cost || null,
@@ -1711,6 +1714,7 @@ async function executeTask(task) {
 
       await natsRequest('mesh.tasks.complete', {
         task_id: task.task_id,
+        node_id: NODE_ID,
         result: {
           success: true,
           summary: `Metric passed on attempt ${attempt}. ${summary.slice(0, 200)}`,
@@ -1758,6 +1762,7 @@ async function executeTask(task) {
   const reason = `Exhausted ${attempts.length}/${MAX_ATTEMPTS} attempts. Last: ${attempts[attempts.length - 1]?.result?.slice(0, 200) || 'unknown'}`;
   await natsRequest('mesh.tasks.release', {
     task_id: task.task_id,
+    node_id: NODE_ID,
     reason,
     attempts,
   });

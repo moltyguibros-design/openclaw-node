@@ -1,15 +1,51 @@
 # SCOPE — protocol plan
 
 **Status:** active
-**Goal:** Execute Phase 0 + Phase 1 of REMEDIATION_PLAN_2026-09-06.md — one-line hardening
-(secrets file perms, drop the foreign npm package, unbreak CI, contain the mirror workflow) and the
-three unauthenticated RCE sinks (argv/hardened-filter fixes). Code + focused tests only; runtime
-evidence (deploy/restart on the live host) is out of reach in this environment and is noted per item.
-Prior runtime-repair history (4.1-4.4) and the review-doc batch are preserved as closed blocks below.
+**Goal:** Execute Phase 2 of REMEDIATION_PLAN_2026-09-06.md — authorization != reachability.
+2a mesh-side: ownership checks on task start/complete (mirroring handleFail), signed operator-action
+gating for approve/reject/cancel/plan/gate mutations (one shared verify core, no third copy),
+strict signed-deploy default, verifyEvent/registry comments made truthful and strict-by-default.
+2b Mission Control: session token on every /api method, no cookie hand-out to unauthenticated GET
+(query-token bootstrap), file routes hardened (realpath + size cap + secret deny), id sanitization.
+Local consumers that GET :3000 read the 0600 session token like scheduler-heartbeat already does.
+Code + focused tests + MC build only; runtime evidence on the live host is the operator's step.
+Per-node NATS nkeys is deferred (needs install-time credential provisioning).
+Phase 0+1, prior runtime-repair (4.1-4.4) and the review-doc batch are preserved as closed blocks.
 **Set at:** 2026-09-06T00:00:00Z
-**Expires:** 2026-09-09T00:00:00Z
+**Expires:** 2026-09-10T00:00:00Z
 
-```files remediation-phase0-1-2026-09-06
+```files remediation-phase2-2026-09-06
+bin/mesh-task-daemon.js
+bin/mesh-agent.js
+bin/mesh.js
+lib/node-identity.mjs
+lib/deploy-trigger-auth.mjs
+lib/operator-auth.mjs
+lib/mc-session-token.mjs
+lib/node-watch.mjs
+workspace-bin/mc-health.mjs
+workspace-bin/memory-maintenance.mjs
+test/node-identity.test.mjs
+test/deploy-trigger-auth.test.mjs
+test/operator-auth.test.mjs
+test/wiring-manifest.test.mjs
+mission-control/src/lib/server-auth.ts
+mission-control/src/middleware.ts
+mission-control/src/lib/mesh-sign.ts
+mission-control/src/lib/__tests__/server-auth.test.ts
+mission-control/src/app/api/memory-file/route.ts
+mission-control/src/app/api/workspace/read/route.ts
+mission-control/src/app/api/memory/doc/route.ts
+mission-control/src/app/api/tasks/[id]/route.ts
+mission-control/src/app/api/tasks/[id]/handoff/route.ts
+mission-control/src/app/api/souls/[id]/propagate/route.ts
+mission-control/src/app/api/souls/[id]/prompt/route.ts
+mission-control/src/app/api/souls/[id]/evolution/route.ts
+mission-control/src/app/api/cowork/intervene/route.ts
+memory-plan/plans/protocol/SCOPE.md
+```
+
+```files remediation-phase0-1-2026-09-06 closed
 lib/exec-safety.js
 bin/mesh-agent.js
 bin/mesh-task-daemon.js
