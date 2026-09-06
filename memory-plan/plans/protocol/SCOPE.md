@@ -32,7 +32,9 @@ test/wiring-manifest.test.mjs
 mission-control/src/lib/server-auth.ts
 mission-control/src/middleware.ts
 mission-control/src/lib/mesh-sign.ts
+mission-control/src/lib/safe-path.ts
 mission-control/src/lib/__tests__/server-auth.test.ts
+mission-control/src/lib/__tests__/safe-path.test.ts
 mission-control/src/app/api/memory-file/route.ts
 mission-control/src/app/api/workspace/read/route.ts
 mission-control/src/app/api/memory/doc/route.ts
