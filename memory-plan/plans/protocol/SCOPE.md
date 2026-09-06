@@ -22,6 +22,10 @@ scripts/install/integrations.sh
 test/install-modules.test.mjs
 .github/workflows/test.yml
 .github/workflows/mirror.yml
+package.json
+package-lock.json
+mission-control/package.json
+mission-control/package-lock.json
 memory-plan/plans/protocol/SCOPE.md
 ```
 
