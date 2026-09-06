@@ -163,7 +163,9 @@ OPENCLAW_NATS_TOKEN=${OPENCLAW_NATS_TOKEN:-}
 # TTS (optional — falls back to Edge TTS if missing)
 GEMINI_API_KEY=${GOOGLE_API_KEY:-}
 MCENV
-  info "Created Mission Control .env.local"
+  # Holds the NATS token and an API key — never leave it at the default umask.
+  chmod 600 "$MC_DIR/.env.local"
+  info "Created Mission Control .env.local (mode 600)"
 fi
 
 # Ensure data directory exists for SQLite
@@ -177,12 +179,17 @@ step "Step 12: Playwright Browser"
 
 if $SANDBOX; then
   info "Sandbox: skipping Playwright"
-elif [ -f "$WORKSPACE/node_modules/.package-lock.json" ] && grep -q '"playwright"' "$WORKSPACE/node_modules/.package-lock.json" 2>/dev/null; then
-  info "Playwright already installed in workspace"
+elif [ -e "$WORKSPACE/node_modules/playwright" ]; then
+  # playwright is a ROOT dependency; the workspace node_modules tree is a set
+  # of symlinks into the root install (workspace.sh link_dependency_tree).
+  # Running `npm install --save playwright` INSIDE the workspace was the root
+  # cause of the "vanished node_modules links" bug: npm reconciled the
+  # workspace against its own (near-empty) package.json and pruned every
+  # symlinked mesh dependency as extraneous. Never npm-install in the workspace.
+  info "Playwright available via the shared dependency tree"
+  (cd "$REPO_DIR" && run npx playwright install chromium 2>/dev/null) || warn "Chromium browser install failed"
 else
-  info "Installing Playwright + Chromium (web-fetch fallback for anti-bot sites)..."
-  (cd "$WORKSPACE" && run npm install --save playwright 2>/dev/null) || warn "Playwright npm install failed"
-  (cd "$WORKSPACE" && run npx playwright install chromium 2>/dev/null) || warn "Chromium browser install failed"
+  warn "playwright missing from the shared dependency tree — the root 'npm install' did not complete; re-run install.sh"
 fi
 
 # ============================================================

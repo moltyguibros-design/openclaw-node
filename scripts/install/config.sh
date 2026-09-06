@@ -12,6 +12,13 @@ else
   info "Environment file already exists at $ENV_FILE"
 fi
 
+# The env file carries the NATS bus token and every cloud API key. The example
+# it is copied from is 0644, and nothing below re-hardens it, so without this a
+# fresh install leaves the whole credential set world-readable.
+if [ -f "$ENV_FILE" ]; then
+  run chmod 600 "$ENV_FILE"
+fi
+
 # Source env file for config generation (safe key=value parsing — no shell execution)
 if [ -f "$ENV_FILE" ]; then
   while IFS= read -r line; do
@@ -26,6 +33,16 @@ if [ -f "$ENV_FILE" ]; then
     # Only export valid variable names
     [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && export "$key=$value"
   done < "$ENV_FILE"
+fi
+
+# Persist the node id so it is STABLE across re-runs and hostname changes.
+# env.sh derives it from the hostname on every run; without this line a rename
+# (or a later derivation change) re-labels the node on --update while its KV
+# entries, JetStream durables and daemon-state files keep the old id (review
+# I13/L11). A value already in the file wins (it was exported by the loop above).
+if [ -f "$ENV_FILE" ] && [ "$DRY_RUN" != true ] && ! grep -q '^OPENCLAW_NODE_ID=' "$ENV_FILE"; then
+  echo "OPENCLAW_NODE_ID=$OPENCLAW_NODE_ID" >> "$ENV_FILE"
+  info "Persisted OPENCLAW_NODE_ID=$OPENCLAW_NODE_ID to $ENV_FILE (stable node identity)"
 fi
 
 # Generate OPENCLAW_NATS_TOKEN if not set — server-side auth token (D2, federation step 1.1).

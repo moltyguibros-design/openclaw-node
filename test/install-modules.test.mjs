@@ -99,9 +99,17 @@ test('cluster dry-run guard and cluster security live in config.sh', () => {
 test('preserved behaviors sit in their modules', () => {
   assert.ok(moduleSrc['env.sh'].includes('claude_project_path() {'));
   assert.ok(moduleSrc['env.sh'].includes("sed 's|[/.]|-|g'"));
-  assert.ok(moduleSrc['system-deps.sh'].includes('"$NODE_VERSION" -ge 22'));
+  // The Node >= 22 check moved into prereqs.sh (node_ok); system-deps.sh now
+  // delegates to it rather than carrying its own version comparison.
+  assert.ok(moduleSrc['system-deps.sh'].includes('PREREQ_SCRIPT'));
   assert.ok(moduleSrc['helpers.sh'].includes('echo "  [dry-run] $*"'));
   assert.ok(moduleSrc['verify.sh'].includes('node-acceptance.mjs'));
+  // --skip-llm must reach the gate as --skip-axis llm, or every documented
+  // model-less install is rejected by its own acceptance step.
+  assert.ok(moduleSrc['verify.sh'].includes('--skip-axis llm'));
+  // P5-4: an INCOMPLETE gate (exit 2) under --skip-llm is a loud warning, not
+  // a failed install; a REJECTED gate (exit 1) still fails it.
+  assert.ok(moduleSrc['verify.sh'].includes('"$GATE_RC" -eq 2 ] && $SKIP_LLM'));
 });
 
 test('mcp-knowledge is owned by the root dependency workspace', () => {
@@ -142,4 +150,28 @@ test('scheduler heartbeat helper is installer-owned and both units invoke it', (
   assert.doesNotMatch(heartbeatLaunchd, /\/usr\/bin\/curl/);
   assert.doesNotMatch(heartbeatSystemd, /\/usr\/bin\/curl/);
   assert.doesNotMatch(`${heartbeatLaunchd}\n${heartbeatSystemd}`, /Authorization|Bearer/);
+});
+
+// mesh-install.sh treats the join-token payload as untrusted: an expired token
+// or one steering the clone at a foreign repo must die before touching the
+// machine (no node install, no git clone). Both checks run at script top level,
+// before any package manager is invoked, so they are safe to exercise here.
+const MESH_INSTALL = join(ROOT, 'mesh-install.sh');
+const b64url = obj => Buffer.from(JSON.stringify({ p: obj, s: 'deadbeef' })).toString('base64url');
+const runMeshInstall = token => spawnSync('bash', [MESH_INSTALL], {
+  encoding: 'utf8',
+  env: { ...process.env, MESH_JOIN_TOKEN: token, HOME: join(ROOT, 'test', '.no-such-home') },
+});
+
+test('mesh-install.sh refuses an expired join token', () => {
+  const r = runMeshInstall(b64url({ v: 3, repo: 'https://github.com/moltyguibros-design/openclaw-node.git', expires: Date.now() - 60_000 }));
+  assert.notEqual(r.status, 0);
+  assert.match(r.stdout + r.stderr, /expired/);
+});
+
+test('mesh-install.sh refuses a join token pointing at a repo outside the allowlist', () => {
+  const r = runMeshInstall(b64url({ v: 3, repo: 'https://github.com/evil/openclaw-node.git', expires: Date.now() + 3_600_000 }));
+  assert.notEqual(r.status, 0);
+  assert.match(r.stdout + r.stderr, /unrecognised repo/);
+  assert.doesNotMatch(r.stdout + r.stderr, /Cloning/);
 });

@@ -9,7 +9,9 @@
 
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
-const { createTask, TASK_STATUS } = require("../lib/mesh-tasks");
+const { createTask, TaskStore, TASK_STATUS, DEFAULT_MAX_REJECTIONS } = require("../lib/mesh-tasks");
+const { StringCodec } = require("nats");
+const sc = StringCodec();
 
 describe("TASK_STATUS enum", () => {
   it("contains all expected statuses", () => {
@@ -93,5 +95,106 @@ describe("createTask()", () => {
     const after = new Date().toISOString();
     assert.ok(task.created_at >= before);
     assert.ok(task.created_at <= after);
+  });
+});
+
+// In-memory stand-in for the JetStream KV bucket: get/put/update(CAS)/delete/keys.
+function mockKv() {
+  const rows = new Map();
+  let rev = 0;
+  return {
+    async get(k) { const r = rows.get(k); return r ? { value: r.value, revision: r.revision } : null; },
+    async put(k, v) { rows.set(k, { value: v, revision: ++rev }); },
+    async update(k, v, expected) {
+      const r = rows.get(k);
+      if (!r || r.revision !== expected) { const e = new Error("wrong last sequence"); e.code = "10071"; throw e; }
+      rows.set(k, { value: v, revision: ++rev });
+    },
+    async delete(k) { rows.delete(k); },
+    async keys() { return (async function* () { for (const k of [...rows.keys()]) yield k; })(); },
+  };
+}
+
+async function seed(store, task) { await store.put(task); return task; }
+const pending = (id, extra = {}) => ({ ...createTask({ task_id: id, title: id }), status: TASK_STATUS.PENDING_REVIEW, owner: "w1", ...extra });
+
+describe("markRejected() reject→requeue cap (P4-5)", () => {
+  it("re-queues below the cap and counts each rejection", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, pending("T-1"));
+    const t = await store.markRejected("T-1", "nope", { maxRejections: 3 });
+    assert.equal(t.status, TASK_STATUS.QUEUED);
+    assert.equal(t.rejection_count, 1);
+    assert.equal(t.rejection_reason, "nope");
+    assert.equal(t.result, null);
+  });
+
+  it("terminates as FAILED once the cap is reached instead of re-queuing forever", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, pending("T-2", { rejection_count: 2 }));
+    const t = await store.markRejected("T-2", "still wrong", { maxRejections: 3 });
+    assert.equal(t.status, TASK_STATUS.FAILED);
+    assert.equal(t.rejection_count, 3);
+    assert.match(t.result.summary, /Rejected 3×/);
+    // terminal: a further reject is refused
+    assert.equal(await store.markRejected("T-2", "again"), null);
+  });
+
+  it("defaults to DEFAULT_MAX_REJECTIONS", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, pending("T-3", { rejection_count: DEFAULT_MAX_REJECTIONS - 1 }));
+    const t = await store.markRejected("T-3", "x");
+    assert.equal(t.status, TASK_STATUS.FAILED);
+  });
+});
+
+describe("recordMerge() merge-after-review (P4-4)", () => {
+  it("records the merge on a completed task without touching the rest of the result", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, { ...createTask({ task_id: "T-4", title: "t" }), status: TASK_STATUS.COMPLETED, owner: "w1", result: { success: true, summary: "s", merged: false } });
+    const t = await store.recordMerge("T-4", { sha: "abc1234", merged: true, conflict: false, branch: "mesh/T-4" });
+    assert.equal(t.result.merged, true);
+    assert.equal(t.result.sha, "abc1234");
+    assert.equal(t.result.summary, "s");
+    assert.ok(t.merged_at);
+  });
+
+  it("refuses to record a merge on a task that is not completed (pending_review must stay unmerged)", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, pending("T-5"));
+    assert.equal(await store.recordMerge("T-5", { merged: true }), null);
+  });
+});
+
+describe("pruneTerminal() KV hygiene (P4-5)", () => {
+  const DAY = 86400000;
+  const now = Date.parse("2026-09-06T12:00:00Z");
+  const old = new Date(now - 30 * DAY).toISOString();
+  const fresh = new Date(now - 1 * DAY).toISOString();
+
+  it("deletes old terminal tasks, keeps fresh ones and every non-terminal task", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, { ...createTask({ task_id: "old-done", title: "t" }), status: TASK_STATUS.COMPLETED, completed_at: old });
+    await seed(store, { ...createTask({ task_id: "old-failed", title: "t" }), status: TASK_STATUS.FAILED, completed_at: old });
+    await seed(store, { ...createTask({ task_id: "fresh-done", title: "t" }), status: TASK_STATUS.COMPLETED, completed_at: fresh });
+    await seed(store, { ...createTask({ task_id: "old-running", title: "t" }), status: TASK_STATUS.RUNNING, created_at: old });
+    const pruned = await store.pruneTerminal({ maxAgeMs: 14 * DAY, now });
+    assert.deepEqual(pruned.sort(), ["old-done", "old-failed"]);
+    assert.ok(await store.get("fresh-done"));
+    assert.ok(await store.get("old-running"));
+  });
+
+  it("keeps a terminal task still referenced by a live task's depends_on (a pruned dep would strand it)", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, { ...createTask({ task_id: "dep", title: "t" }), status: TASK_STATUS.COMPLETED, completed_at: old });
+    await seed(store, { ...createTask({ task_id: "child", title: "t", depends_on: ["dep"] }), status: TASK_STATUS.QUEUED });
+    assert.deepEqual(await store.pruneTerminal({ maxAgeMs: 14 * DAY, now }), []);
+    assert.ok(await store.get("dep"));
+  });
+
+  it("is a no-op when disabled (maxAgeMs 0)", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, { ...createTask({ task_id: "x", title: "t" }), status: TASK_STATUS.COMPLETED, completed_at: old });
+    assert.deepEqual(await store.pruneTerminal({ maxAgeMs: 0, now }), []);
   });
 });

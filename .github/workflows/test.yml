@@ -28,7 +28,22 @@ jobs:
         # VISIBLY via the per-file census (see test/helpers/embedder-available.mjs).
         env:
           OPENCLAW_NO_EMBED_MODEL: "1"
-        run: npm test
+        # On failure, surface the failing `not ok` blocks into the tail of the
+        # step log. node:test's TAP reporter prints failures inline (thousands
+        # of lines up) and never recaps at the end, so a red run otherwise shows
+        # only the summary counts — the failing test name is unreadable without
+        # downloading the raw log. This makes a red suite self-describing.
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee /tmp/root-test.log || rc=$?
+          if [ "${rc:-0}" -ne 0 ]; then
+            echo "::group::Failing tests (not ok blocks)"
+            grep -nE "^[[:space:]]*not ok" /tmp/root-test.log | head -50 || true
+            echo "---"
+            grep -nE "not ok" -A 30 /tmp/root-test.log | head -600 || true
+            echo "::endgroup::"
+          fi
+          exit "${rc:-0}"
       - name: Root dependency audit — high severity gate
         run: npm audit --audit-level=high
       - name: Packed-tarball smoke — the two past packaging escapes stay caught
@@ -36,7 +51,10 @@ jobs:
         run: |
           npm pack --dry-run 2>&1 | tee /tmp/pack.txt
           grep -q " install.sh" /tmp/pack.txt
-          test "$(grep -c " scripts/install/.*\.sh" /tmp/pack.txt)" = "9"
+          # Drift-lock: every install module in the tree must ship in the tarball.
+          # Compared against the tree, not a hard-coded count, so adding a module
+          # cannot silently break the gate (it did at 9 -> 11).
+          test "$(grep -c " scripts/install/.*\.sh" /tmp/pack.txt)" = "$(ls scripts/install/*.sh | wc -l | tr -d ' ')"
           grep -q " packages/event-schemas/dist/" /tmp/pack.txt
 
   mission-control-tests:

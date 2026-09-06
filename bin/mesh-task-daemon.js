@@ -34,7 +34,8 @@
 const { connect, StringCodec } = require('nats');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-task-daemon');
-const { createTask, TaskStore, TASK_STATUS, KV_BUCKET } = require('../lib/mesh-tasks');
+const { createTask, TaskStore, TASK_STATUS, DEFAULT_MAX_REJECTIONS, KV_BUCKET } = require('../lib/mesh-tasks');
+const { validateMetricCommand } = require('../lib/exec-safety');
 const { createSession, CollabStore, COLLAB_STATUS, COLLAB_KV_BUCKET, COLLAB_MODE, isModeImplemented } = require('../lib/mesh-collab');
 const { createPlan, autoRoutePlan, PlanStore, PLAN_STATUS, SUBTASK_STATUS, PLANS_KV_BUCKET } = require('../lib/mesh-plans');
 const { findRole, findRoleByScope, validateRequiredOutputs, checkForbiddenPatterns } = require('../lib/role-loader');
@@ -51,8 +52,11 @@ const sc = StringCodec();
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
 const BUDGET_CHECK_INTERVAL = 30000; // 30s
 const STALL_MINUTES = parseInt(process.env.MESH_STALL_MINUTES || '5'); // no heartbeat for this long → stalled
+const MAX_REJECTIONS = parseInt(process.env.MESH_MAX_REJECTIONS || String(DEFAULT_MAX_REJECTIONS)); // reject→requeue cap (P4-5)
+const TASK_TTL_DAYS = parseInt(process.env.MESH_TASK_TTL_DAYS || '14'); // terminal tasks pruned after this; 0 disables
+const TASK_TTL_MS = TASK_TTL_DAYS > 0 ? TASK_TTL_DAYS * 86400000 : 0;
 const CIRCLING_STEP_TIMEOUT_MS = parseInt(process.env.MESH_CIRCLING_STEP_TIMEOUT_MS || String(10 * 60 * 1000)); // 10 min default
-const NODE_ID = os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+const NODE_ID = require('../lib/node-id').resolveNodeId();
 
 let nc, store, collabStore, planStore;
 
@@ -86,6 +90,40 @@ function parseRequest(msg) {
   }
 }
 
+// ── Authorization ──────────────────────────────────
+//
+// Which credential may perform which mutation is decided in ONE place,
+// lib/operator-auth.mjs (authorizeTaskMutation); handlers only declare what
+// they are. Two credentials exist on the bus:
+//   owner    — params.node_id equals task.owner (the node that claimed it),
+//              the same check handleFail already made;
+//   operator — the request is signed by a key in the operator allowlist
+//              (defaults to this node's own identity, so the local CLI and
+//              Mission Control work with zero configuration).
+// Holding the shared NATS token is neither. That is the whole point.
+
+let _operatorAuth = null;
+async function operatorAuth() {
+  if (!_operatorAuth) _operatorAuth = await import('../lib/operator-auth.mjs');
+  return _operatorAuth;
+}
+
+/**
+ * Gate a mutation. On refusal, answers the request with an error and returns
+ * false so the handler can simply `return`.
+ */
+async function authorize(msg, params, task, { action, allowOwner = false, allowOperator = true }) {
+  const { authorizeTaskMutation } = await operatorAuth();
+  const decision = authorizeTaskMutation({ action, params, task, allowOwner, allowOperator });
+  if (!decision.ok) {
+    warn(`AUTHZ REFUSED ${decision.reason}`);
+    respondError(msg, `${action} refused: ${decision.reason}`);
+    return false;
+  }
+  if (decision.via === 'operator') log(`AUTHZ ${action}: signed operator request accepted`);
+  return true;
+}
+
 // ── Event Publishing ───────────────────────────────
 // Fire-and-forget pub/sub events on every state change.
 // Subscribers (mesh-bridge, MC, etc.) listen on mesh.events.>
@@ -107,6 +145,17 @@ async function handleSubmit(msg) {
 
   if (!params.task_id || !params.title) {
     return respondError(msg, 'task_id and title are required');
+  }
+
+  // Server-side metric gate. The worker re-checks before running, but the
+  // daemon is the only place every submit path (NATS, kanban bridge, proposals)
+  // converges, so a bad metric must be refused here, fail-closed.
+  if (params.metric) {
+    const check = validateMetricCommand(params.metric);
+    if (!check.allowed) {
+      log(`SUBMIT REJECTED ${params.task_id}: metric refused — ${check.reason}`);
+      return respondError(msg, `Metric refused: ${check.reason}`);
+    }
   }
 
   // Check if task already exists
@@ -225,8 +274,15 @@ async function handleClaim(msg) {
  * Expects: { task_id }
  */
 async function handleStart(msg) {
-  const { task_id } = parseRequest(msg);
+  const params = parseRequest(msg);
+  const { task_id } = params;
   if (!task_id) return respondError(msg, 'task_id is required');
+
+  // Only the node that CLAIMED the task may start it. Previously any bus
+  // client could flip another node's task to running.
+  const existing = await store.get(task_id);
+  if (!existing) return respondError(msg, `Task ${task_id} not found`);
+  if (!(await authorize(msg, params, existing, { action: 'start', allowOwner: true, allowOperator: false }))) return;
 
   const task = await store.markRunning(task_id);
   if (!task) return respondError(msg, `Task ${task_id} not found`);
@@ -241,7 +297,8 @@ async function handleStart(msg) {
  * Expects: { task_id, result: { success, summary, artifacts?, diff_stat? } }
  */
 async function handleComplete(msg) {
-  const { task_id, result } = parseRequest(msg);
+  const params = parseRequest(msg);
+  const { task_id, result } = params;
   if (!task_id) return respondError(msg, 'task_id is required');
 
   // Determine if this task requires human review before completing.
@@ -256,6 +313,11 @@ async function handleComplete(msg) {
   //     * local → no (Daedalus/companion handles these interactively)
   const existingTask = await store.get(task_id);
   if (!existingTask) return respondError(msg, `Task ${task_id} not found`);
+
+  // The claiming node completes its own task; a signed operator request may
+  // force-complete (Mission Control "force converge"). Anyone else — including
+  // a peer with the shared NATS token fabricating { success: true } — is refused.
+  if (!(await authorize(msg, params, existingTask, { action: 'complete', allowOwner: true, allowOperator: true }))) return;
 
   let needsReview = existingTask.requires_review;
   let reviewReason = needsReview ? 'explicit_requires_review' : null;
@@ -492,8 +554,13 @@ async function handleHeartbeat(msg) {
  * Different from fail: "released" means all retries exhausted, escalation required.
  */
 async function handleRelease(msg) {
-  const { task_id, reason, attempts } = parseRequest(msg);
+  const params = parseRequest(msg);
+  const { task_id, reason, attempts } = params;
   if (!task_id) return respondError(msg, 'task_id is required');
+
+  const existing = await store.get(task_id);
+  if (!existing) return respondError(msg, `Task ${task_id} not found`);
+  if (!(await authorize(msg, params, existing, { action: 'release', allowOwner: true, allowOperator: true }))) return;
 
   const task = await store.markReleased(task_id, reason || 'released for human triage', attempts || []);
   if (!task) return respondError(msg, `Task ${task_id} not found`);
@@ -509,11 +576,13 @@ async function handleRelease(msg) {
  * Expects: { task_id, reason? }
  */
 async function handleCancel(msg) {
-  const { task_id, reason } = parseRequest(msg);
+  const params = parseRequest(msg);
+  const { task_id, reason } = params;
   if (!task_id) return respondError(msg, 'task_id is required');
 
   const task = await store.get(task_id);
   if (!task) return respondError(msg, `Task ${task_id} not found`);
+  if (!(await authorize(msg, params, task, { action: 'cancel' }))) return;
 
   task.status = TASK_STATUS.CANCELLED;
   task.completed_at = new Date().toISOString();
@@ -533,14 +602,26 @@ async function handleCancel(msg) {
  * Transitions to completed and advances plan wave if applicable.
  */
 async function handleTaskApprove(msg) {
-  const { task_id } = parseRequest(msg);
+  const params = parseRequest(msg);
+  const { task_id } = params;
   if (!task_id) return respondError(msg, 'task_id is required');
+
+  // The human-review gate. Previously one unsigned message approved any task
+  // (review H-1/H-10); now only a signed operator request does.
+  if (!(await authorize(msg, params, null, { action: 'approve' }))) return;
 
   const task = await store.markApproved(task_id);
   if (!task) return respondError(msg, `Task ${task_id} not found or not in pending_review status`);
 
   log(`APPROVED ${task_id}: human review passed`);
   publishEvent('completed', task);
+
+  // Merge-after-review (P4-4): the branch only reaches main now. The owning
+  // agent merges and reports via mesh.tasks.merged; if it is offline it
+  // reconciles its kept branches on next start.
+  if (task.owner) {
+    nc.publish(`mesh.agent.${task.owner}.approved`, sc.encode(JSON.stringify({ task_id })));
+  }
 
   // Now advance plan wave (this was blocked while in pending_review)
   await checkPlanProgress(task_id, 'completed');
@@ -553,15 +634,67 @@ async function handleTaskApprove(msg) {
  * Re-queues the task with rejection reason injected for next attempt.
  */
 async function handleTaskReject(msg) {
-  const { task_id, reason } = parseRequest(msg);
+  const params = parseRequest(msg);
+  const { task_id, reason } = params;
   if (!task_id) return respondError(msg, 'task_id is required');
 
-  const task = await store.markRejected(task_id, reason || 'Rejected by reviewer');
+  // Unsigned reject was an unbounded re-execution primitive (reject → requeue
+  // → re-run → re-merge, forever). Operator signature required.
+  if (!(await authorize(msg, params, null, { action: 'reject' }))) return;
+
+  const task = await store.markRejected(task_id, reason || 'Rejected by reviewer', { maxRejections: MAX_REJECTIONS });
   if (!task) return respondError(msg, `Task ${task_id} not found or not in pending_review status`);
 
-  log(`REJECTED ${task_id}: ${reason || 'no reason'} — re-queued for retry`);
-  publishEvent('rejected', task);
+  // The owning agent kept the task branch unmerged while review was pending
+  // (P4-4); tell it to drop that branch. Best-effort — the next attempt's
+  // worktree creation deletes a stale branch of the same name anyway.
+  if (task.owner) {
+    nc.publish(`mesh.agent.${task.owner}.rejected`, sc.encode(JSON.stringify({ task_id, reason: task.rejection_reason })));
+  }
+
+  if (task.status === TASK_STATUS.FAILED) {
+    log(`REJECTED ${task_id} (${task.rejection_count}× — cap ${MAX_REJECTIONS} reached): ${reason || 'no reason'} — FAILED, not re-queued`);
+    publishEvent('failed', task);
+    await updatePlanSubtaskStatus(task_id, 'failed');
+  } else {
+    log(`REJECTED ${task_id} (${task.rejection_count}/${MAX_REJECTIONS}): ${reason || 'no reason'} — re-queued for retry`);
+    publishEvent('rejected', task);
+  }
   respond(msg, task);
+}
+
+/**
+ * mesh.tasks.merged — The owning agent reports the post-approval merge outcome.
+ * Expects: { task_id, node_id, sha, merged, conflict?, branch? }
+ * Only the owner may record it (a peer with the shared token cannot mark a
+ * task "merged" it never merged).
+ */
+async function handleTaskMerged(msg) {
+  const params = parseRequest(msg);
+  const { task_id, sha, merged, conflict, branch } = params;
+  if (!task_id) return respondError(msg, 'task_id is required');
+
+  const existing = await store.get(task_id);
+  if (!existing) return respondError(msg, `Task ${task_id} not found`);
+  if (!(await authorize(msg, params, existing, { action: 'merged', allowOwner: true, allowOperator: true }))) return;
+
+  const task = await store.recordMerge(task_id, { sha: sha || null, merged: !!merged, conflict: !!conflict, branch: branch || null });
+  if (!task) return respondError(msg, `Task ${task_id} is not completed — nothing to merge`);
+
+  log(`MERGED ${task_id}: merged=${!!merged}${conflict ? ' CONFLICT (branch kept)' : ''}${sha ? ` sha=${sha}` : ''}`);
+  publishEvent('merged', task);
+  respond(msg, task);
+}
+
+// Terminal-task hygiene (P4-5): the KV bucket is scanned on every claim/list.
+async function pruneTerminalTasks() {
+  if (!TASK_TTL_MS) return;
+  try {
+    const pruned = await store.pruneTerminal({ maxAgeMs: TASK_TTL_MS });
+    if (pruned.length) log(`PRUNED ${pruned.length} terminal task(s) older than ${TASK_TTL_DAYS}d: ${pruned.slice(0, 5).join(', ')}${pruned.length > 5 ? ', …' : ''}`);
+  } catch (err) {
+    warn(`pruneTerminalTasks: ${err.message}`);
+  }
 }
 
 // ── Budget Enforcement + Stall Detection ────────────
@@ -1716,8 +1849,10 @@ async function completeCirclingSession(sessionId) {
  * Resumes the circling protocol after a gate point.
  */
 async function handleCirclingGateApprove(msg) {
-  const { session_id } = parseRequest(msg);
+  const params = parseRequest(msg);
+  const { session_id } = params;
   if (!session_id) return respondError(msg, 'session_id required');
+  if (!(await authorize(msg, params, null, { action: 'gate.approve' }))) return;
 
   const session = await collabStore.get(session_id);
   if (!session || !session.circling) return respondError(msg, 'Not a circling session');
@@ -1759,8 +1894,10 @@ async function handleCirclingGateApprove(msg) {
  * Forces another sub-round.
  */
 async function handleCirclingGateReject(msg) {
-  const { session_id } = parseRequest(msg);
+  const params = parseRequest(msg);
+  const { session_id } = params;
   if (!session_id) return respondError(msg, 'session_id required');
+  if (!(await authorize(msg, params, null, { action: 'gate.reject' }))) return;
 
   const session = await collabStore.get(session_id);
   if (!session || !session.circling) return respondError(msg, 'Not a circling session');
@@ -2044,8 +2181,10 @@ async function handlePlanList(msg) {
  * Triggers: subtask materialization → dispatch wave 0
  */
 async function handlePlanApprove(msg) {
-  const { plan_id, approved_by } = parseRequest(msg);
+  const params = parseRequest(msg);
+  const { plan_id, approved_by } = params;
   if (!plan_id) return respondError(msg, 'plan_id is required');
+  if (!(await authorize(msg, params, null, { action: 'plan.approve' }))) return;
 
   const plan = await planStore.approve(plan_id, approved_by || 'gui');
   if (!plan) return respondError(msg, `Plan ${plan_id} not found`);
@@ -2065,8 +2204,10 @@ async function handlePlanApprove(msg) {
  * Expects: { plan_id, reason? }
  */
 async function handlePlanAbort(msg) {
-  const { plan_id, reason } = parseRequest(msg);
+  const params = parseRequest(msg);
+  const { plan_id, reason } = params;
   if (!plan_id) return respondError(msg, 'plan_id is required');
+  if (!(await authorize(msg, params, null, { action: 'plan.abort' }))) return;
 
   const plan = await planStore.markAborted(plan_id, reason || 'manually aborted');
   if (!plan) return respondError(msg, `Plan ${plan_id} not found`);
@@ -2083,8 +2224,19 @@ async function handlePlanAbort(msg) {
  * Expects: { plan_id, subtask_id, status, result?, mesh_task_id?, kanban_task_id?, owner? }
  */
 async function handlePlanSubtaskUpdate(msg) {
-  const { plan_id, subtask_id, ...updates } = parseRequest(msg);
+  const params = parseRequest(msg);
+  const { plan_id, subtask_id } = params;
   if (!plan_id || !subtask_id) return respondError(msg, 'plan_id and subtask_id required');
+  if (!(await authorize(msg, params, null, { action: 'plan.subtask.update' }))) return;
+
+  // Mass-assignment sink (review critic, plan-forgery path #4): the old
+  // `...updates` spread let any bus client set ANY subtask field. Only these
+  // may come off the bus; the signing envelope and everything else is dropped.
+  const { stripOperatorEnvelope } = await operatorAuth();
+  const body = stripOperatorEnvelope(params);
+  const SUBTASK_UPDATABLE = ['status', 'result', 'mesh_task_id', 'kanban_task_id', 'owner'];
+  const updates = {};
+  for (const k of SUBTASK_UPDATABLE) if (body[k] !== undefined) updates[k] = body[k];
 
   const plan = await planStore.updateSubtask(plan_id, subtask_id, updates);
   if (!plan) return respondError(msg, `Plan ${plan_id} or subtask ${subtask_id} not found`);
@@ -2517,6 +2669,7 @@ async function main() {
     'mesh.tasks.cancel':    handleCancel,
     'mesh.tasks.approve':   handleTaskApprove,
     'mesh.tasks.reject':    handleTaskReject,
+    'mesh.tasks.merged':    handleTaskMerged,
     // Collab handlers
     'mesh.collab.create':   handleCollabCreate,
     'mesh.collab.join':     handleCollabJoin,
@@ -2569,6 +2722,8 @@ async function main() {
   }, 5000); // check every 5s
   const circlingStepSweepTimer = setInterval(sweepCirclingStepTimeouts, 60000); // every 60s
   const collabRoundSweepTimer = setInterval(sweepCollabRoundTimeouts, 60000); // every 60s (P1 #4)
+  const pruneTimer = setInterval(pruneTerminalTasks, 3600000); // hourly (P4-5)
+  pruneTerminalTasks();
   log(`Proposal processing: every ${BUDGET_CHECK_INTERVAL / 1000}s`);
   log(`Budget enforcement: every ${BUDGET_CHECK_INTERVAL / 1000}s`);
   log(`Stall detection: every ${BUDGET_CHECK_INTERVAL / 1000}s (threshold: ${STALL_MINUTES}m)`);
@@ -2588,6 +2743,7 @@ async function main() {
     clearInterval(recruitTimer);
     if (circlingStepSweepTimer) clearInterval(circlingStepSweepTimer);
     if (collabRoundSweepTimer) clearInterval(collabRoundSweepTimer);
+    if (pruneTimer) clearInterval(pruneTimer);
     if (circlingStepTimers) {
       log(`Clearing ${circlingStepTimers.size} circling step timers...`);
       for (const timer of circlingStepTimers.values()) clearTimeout(timer);

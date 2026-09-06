@@ -230,8 +230,7 @@ package manager's exit code.
 ### Skills with their own dependencies
 
 The installer auto-detects and installs these:
-- **memorylayer** — npm: `axios`
-- **moltbook-registry** — npm: `ethers`, `dotenv`
+- ~~memorylayer~~ / ~~moltbook-registry~~ — **quarantined** (`skills/_quarantine/README.md`): external memory exfil and mainnet wallet actions by design; not installed.
 - **prompt-guard** — pip: `pyyaml`
 - **crypto-price** — pip: `matplotlib`
 - **fast-browser-use** — Rust (requires manual `cargo build` if needed)
