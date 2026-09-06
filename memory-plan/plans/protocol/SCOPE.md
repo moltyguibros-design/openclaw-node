@@ -1,7 +1,15 @@
 # SCOPE — protocol plan
 
 **Status:** active
-**Goal:** Execute Phase 2 of REMEDIATION_PLAN_2026-09-06.md — authorization != reachability.
+**Goal:** Execute Phase 3 of REMEDIATION_PLAN_2026-09-06.md — make the gates mechanical: git hooks
+installed on every clone via npm prepare, a real force-push deny in settings, the tick refuses to
+close a step on a red suite or a missing Runtime-Evidence trailer, plan-lint FAILs (not WARNs) a
+trailer-less close, scope-check hardened (no ../symlink escape, `*` never crosses `/`, fail-closed
+on empty input, out-of-repo paths not the hook's business), and the stale governance state
+reconciled (repair scope idle, CLAUDE/AGENTS truthful about CI, the suite, D16 and Codex). Branch
+protection is a GitHub setting the operator must flip; a NATS service in CI to un-skip the mesh
+suites is noted, not done. Phase 2 (below) is closed.
+(Phase 2 goal, retained for the record:) authorization != reachability.
 2a mesh-side: ownership checks on task start/complete (mirroring handleFail), signed operator-action
 gating for approve/reject/cancel/plan/gate mutations (one shared verify core, no third copy),
 strict signed-deploy default, verifyEvent/registry comments made truthful and strict-by-default.
@@ -14,7 +22,24 @@ Phase 0+1, prior runtime-repair (4.1-4.4) and the review-doc batch are preserved
 **Set at:** 2026-09-06T00:00:00Z
 **Expires:** 2026-09-10T00:00:00Z
 
-```files remediation-phase2-2026-09-06
+```files remediation-phase3-2026-09-06
+package.json
+.claude/settings.json
+.claude/hooks/scope-check.sh
+.claude/hooks/validate-push.sh
+config/git-hooks/pre-commit
+config/git-hooks/pre-push
+workspace-bin/plan-tick.sh
+workspace-bin/plan-lint.sh
+test/gate-mutation.test.mjs
+test/plan-protocol.test.mjs
+CLAUDE.md
+AGENTS.md
+memory-plan/plans/protocol/SCOPE.md
+memory-plan/plans/repair/SCOPE.md
+```
+
+```files remediation-phase2-2026-09-06 closed
 bin/mesh-task-daemon.js
 bin/mesh-agent.js
 bin/mesh.js
