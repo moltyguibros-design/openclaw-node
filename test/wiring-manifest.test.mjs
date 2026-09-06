@@ -69,6 +69,13 @@ const REQUIRED_PRODUCTION_WIRES = [
   { factory: 'createHyperAgentStore',   calledIn: 'workspace-bin/memory-daemon.mjs' },
   { factory: 'createPendingReflections', calledIn: 'workspace-bin/memory-daemon.mjs' },
   { factory: 'recordHyperagentTask',     calledIn: 'bin/mesh-agent.js' },
+  // Phase 4b lifecycle handoffs (REMEDIATION_PLAN P4-4/P4-5/P4-9): each of
+  // these is a behaviour that only exists if its entrypoint actually calls it.
+  { factory: 'reconcileKeptBranches',    calledIn: 'bin/mesh-agent.js' },      // merge-after-review catch-up
+  { factory: 'mergeIfApproved',          calledIn: 'bin/mesh-agent.js' },      // merge gated on the daemon's verdict
+  { factory: 'pruneTerminalTasks',       calledIn: 'bin/mesh-task-daemon.js' }, // MESH_TASKS hygiene
+  { factory: 'shouldCatchUp',            calledIn: 'bin/mesh-deploy-listener.js' }, // merged-but-failed ≠ deployed
+  { factory: 'writeDeployMarker',        calledIn: 'bin/mesh-deploy-listener.js' },
   // The flush runs OFF the daemon's main thread since the flush-worker change
   // (audits/flush_worker): the daemon invokes runFlushInWorker at every flush
   // site, and the worker is the one that calls the real runFlush. Both wires

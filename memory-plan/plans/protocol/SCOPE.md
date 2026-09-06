@@ -48,6 +48,7 @@ test/install-modules.test.mjs
 test/node-acceptance.test.mjs
 test/mesh-tasks-status.test.js
 test/wiring-manifest.test.mjs
+test/deploy-rollback.test.mjs
 memory-plan/plans/protocol/SCOPE.md
 ```
 

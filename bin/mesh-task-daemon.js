@@ -34,7 +34,7 @@
 const { connect, StringCodec } = require('nats');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-task-daemon');
-const { createTask, TaskStore, TASK_STATUS, KV_BUCKET } = require('../lib/mesh-tasks');
+const { createTask, TaskStore, TASK_STATUS, DEFAULT_MAX_REJECTIONS, KV_BUCKET } = require('../lib/mesh-tasks');
 const { validateMetricCommand } = require('../lib/exec-safety');
 const { createSession, CollabStore, COLLAB_STATUS, COLLAB_KV_BUCKET, COLLAB_MODE, isModeImplemented } = require('../lib/mesh-collab');
 const { createPlan, autoRoutePlan, PlanStore, PLAN_STATUS, SUBTASK_STATUS, PLANS_KV_BUCKET } = require('../lib/mesh-plans');
@@ -52,6 +52,9 @@ const sc = StringCodec();
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
 const BUDGET_CHECK_INTERVAL = 30000; // 30s
 const STALL_MINUTES = parseInt(process.env.MESH_STALL_MINUTES || '5'); // no heartbeat for this long → stalled
+const MAX_REJECTIONS = parseInt(process.env.MESH_MAX_REJECTIONS || String(DEFAULT_MAX_REJECTIONS)); // reject→requeue cap (P4-5)
+const TASK_TTL_DAYS = parseInt(process.env.MESH_TASK_TTL_DAYS || '14'); // terminal tasks pruned after this; 0 disables
+const TASK_TTL_MS = TASK_TTL_DAYS > 0 ? TASK_TTL_DAYS * 86400000 : 0;
 const CIRCLING_STEP_TIMEOUT_MS = parseInt(process.env.MESH_CIRCLING_STEP_TIMEOUT_MS || String(10 * 60 * 1000)); // 10 min default
 const NODE_ID = require('../lib/node-id').resolveNodeId();
 
@@ -613,6 +616,13 @@ async function handleTaskApprove(msg) {
   log(`APPROVED ${task_id}: human review passed`);
   publishEvent('completed', task);
 
+  // Merge-after-review (P4-4): the branch only reaches main now. The owning
+  // agent merges and reports via mesh.tasks.merged; if it is offline it
+  // reconciles its kept branches on next start.
+  if (task.owner) {
+    nc.publish(`mesh.agent.${task.owner}.approved`, sc.encode(JSON.stringify({ task_id })));
+  }
+
   // Now advance plan wave (this was blocked while in pending_review)
   await checkPlanProgress(task_id, 'completed');
 
@@ -632,12 +642,59 @@ async function handleTaskReject(msg) {
   // → re-run → re-merge, forever). Operator signature required.
   if (!(await authorize(msg, params, null, { action: 'reject' }))) return;
 
-  const task = await store.markRejected(task_id, reason || 'Rejected by reviewer');
+  const task = await store.markRejected(task_id, reason || 'Rejected by reviewer', { maxRejections: MAX_REJECTIONS });
   if (!task) return respondError(msg, `Task ${task_id} not found or not in pending_review status`);
 
-  log(`REJECTED ${task_id}: ${reason || 'no reason'} — re-queued for retry`);
-  publishEvent('rejected', task);
+  // The owning agent kept the task branch unmerged while review was pending
+  // (P4-4); tell it to drop that branch. Best-effort — the next attempt's
+  // worktree creation deletes a stale branch of the same name anyway.
+  if (task.owner) {
+    nc.publish(`mesh.agent.${task.owner}.rejected`, sc.encode(JSON.stringify({ task_id, reason: task.rejection_reason })));
+  }
+
+  if (task.status === TASK_STATUS.FAILED) {
+    log(`REJECTED ${task_id} (${task.rejection_count}× — cap ${MAX_REJECTIONS} reached): ${reason || 'no reason'} — FAILED, not re-queued`);
+    publishEvent('failed', task);
+    await updatePlanSubtaskStatus(task_id, 'failed');
+  } else {
+    log(`REJECTED ${task_id} (${task.rejection_count}/${MAX_REJECTIONS}): ${reason || 'no reason'} — re-queued for retry`);
+    publishEvent('rejected', task);
+  }
   respond(msg, task);
+}
+
+/**
+ * mesh.tasks.merged — The owning agent reports the post-approval merge outcome.
+ * Expects: { task_id, node_id, sha, merged, conflict?, branch? }
+ * Only the owner may record it (a peer with the shared token cannot mark a
+ * task "merged" it never merged).
+ */
+async function handleTaskMerged(msg) {
+  const params = parseRequest(msg);
+  const { task_id, sha, merged, conflict, branch } = params;
+  if (!task_id) return respondError(msg, 'task_id is required');
+
+  const existing = await store.get(task_id);
+  if (!existing) return respondError(msg, `Task ${task_id} not found`);
+  if (!(await authorize(msg, params, existing, { action: 'merged', allowOwner: true, allowOperator: true }))) return;
+
+  const task = await store.recordMerge(task_id, { sha: sha || null, merged: !!merged, conflict: !!conflict, branch: branch || null });
+  if (!task) return respondError(msg, `Task ${task_id} is not completed — nothing to merge`);
+
+  log(`MERGED ${task_id}: merged=${!!merged}${conflict ? ' CONFLICT (branch kept)' : ''}${sha ? ` sha=${sha}` : ''}`);
+  publishEvent('merged', task);
+  respond(msg, task);
+}
+
+// Terminal-task hygiene (P4-5): the KV bucket is scanned on every claim/list.
+async function pruneTerminalTasks() {
+  if (!TASK_TTL_MS) return;
+  try {
+    const pruned = await store.pruneTerminal({ maxAgeMs: TASK_TTL_MS });
+    if (pruned.length) log(`PRUNED ${pruned.length} terminal task(s) older than ${TASK_TTL_DAYS}d: ${pruned.slice(0, 5).join(', ')}${pruned.length > 5 ? ', …' : ''}`);
+  } catch (err) {
+    warn(`pruneTerminalTasks: ${err.message}`);
+  }
 }
 
 // ── Budget Enforcement + Stall Detection ────────────
@@ -2612,6 +2669,7 @@ async function main() {
     'mesh.tasks.cancel':    handleCancel,
     'mesh.tasks.approve':   handleTaskApprove,
     'mesh.tasks.reject':    handleTaskReject,
+    'mesh.tasks.merged':    handleTaskMerged,
     // Collab handlers
     'mesh.collab.create':   handleCollabCreate,
     'mesh.collab.join':     handleCollabJoin,
@@ -2664,6 +2722,8 @@ async function main() {
   }, 5000); // check every 5s
   const circlingStepSweepTimer = setInterval(sweepCirclingStepTimeouts, 60000); // every 60s
   const collabRoundSweepTimer = setInterval(sweepCollabRoundTimeouts, 60000); // every 60s (P1 #4)
+  const pruneTimer = setInterval(pruneTerminalTasks, 3600000); // hourly (P4-5)
+  pruneTerminalTasks();
   log(`Proposal processing: every ${BUDGET_CHECK_INTERVAL / 1000}s`);
   log(`Budget enforcement: every ${BUDGET_CHECK_INTERVAL / 1000}s`);
   log(`Stall detection: every ${BUDGET_CHECK_INTERVAL / 1000}s (threshold: ${STALL_MINUTES}m)`);
@@ -2683,6 +2743,7 @@ async function main() {
     clearInterval(recruitTimer);
     if (circlingStepSweepTimer) clearInterval(circlingStepSweepTimer);
     if (collabRoundSweepTimer) clearInterval(collabRoundSweepTimer);
+    if (pruneTimer) clearInterval(pruneTimer);
     if (circlingStepTimers) {
       log(`Clearing ${circlingStepTimers.size} circling step timers...`);
       for (const timer of circlingStepTimers.values()) clearTimeout(timer);
