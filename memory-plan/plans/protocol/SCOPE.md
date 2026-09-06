@@ -10,6 +10,7 @@ history for this plan (4.1-4.4, all closed) is preserved below.
 
 ```files adversarial-review-2026-09-06
 ADVERSARIAL_REVIEW_2026-09-06.md
+REMEDIATION_PLAN_2026-09-06.md
 memory-plan/plans/protocol/SCOPE.md
 memory-plan/plans/protocol/OUT_OF_SCOPE.md
 ```
