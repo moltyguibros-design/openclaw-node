@@ -22,7 +22,36 @@ Phase 0+1, prior runtime-repair (4.1-4.4) and the review-doc batch are preserved
 **Set at:** 2026-09-06T00:00:00Z
 **Expires:** 2026-09-10T00:00:00Z
 
-```files remediation-phase5a-2026-09-06
+```files remediation-phase5b-2026-09-06
+lib/ollama-queue.mjs
+workspace-bin/memory-daemon.mjs
+bin/consolidation-scheduler.mjs
+workspace-bin/web-fetch.mjs
+lib/mcp-knowledge/server.mjs
+lib/event-schemas.mjs
+mission-control/src/lib/parsers/task-markdown.ts
+mission-control/src/lib/sync/tasks.ts
+mission-control/src/lib/db/schema.ts
+mission-control/src/lib/db/index.ts
+mission-control/src/lib/__tests__/task-markdown.test.ts
+skills/openclaw-skill-scanner/install-hook.sh
+skills/openclaw-skill-scanner/scanner.py
+skills/openclaw-skill-scanner/SKILL.md
+skills/prompt-guard/scripts/detect.py
+skills/prompt-guard/SKILL.md
+skills/_quarantine/**
+skills/memorylayer/**
+skills/moltbook-registry/**
+identity/AGENTS.md
+README.md
+test/consolidation-scheduler.test.mjs
+test/web-fetch-guard.test.mjs
+test/skill-scanner.test.mjs
+test/wiring-manifest.test.mjs
+memory-plan/plans/protocol/SCOPE.md
+```
+
+```files remediation-phase5a-2026-09-06 closed
 lib/extraction-store.mjs
 lib/consolidation.mjs
 lib/pre-compression-flush.mjs

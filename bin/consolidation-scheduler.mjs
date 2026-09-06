@@ -75,6 +75,15 @@ export function isQueueIdle(getStateFn) {
     return { idle: false, reason: `${state.queue_depth} pending jobs` };
   }
 
+  // Worker-thread jobs (P5-3): extraction runs off the main thread with its
+  // own queue; the parent registers them as external jobs. Consolidating
+  // while one is open means two writers on the same DB.
+  const external = Array.isArray(state.external_jobs) ? state.external_jobs : [];
+  if (external.length > 0) {
+    const j = external[0];
+    return { idle: false, reason: `${external.length} worker ${j.type} job(s) running (elapsed ${j.elapsed_ms}ms)` };
+  }
+
   // Recent extraction activity — check if last extraction was within IDLE_THRESHOLD
   if (state.history.extraction.count > 0 && state.history.extraction.avg_ms > 0) {
     // We can't know exact last-completion time from getState(), but if the queue

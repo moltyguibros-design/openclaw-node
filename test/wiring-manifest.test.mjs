@@ -76,6 +76,13 @@ const REQUIRED_PRODUCTION_WIRES = [
   { factory: 'pruneTerminalTasks',       calledIn: 'bin/mesh-task-daemon.js' }, // MESH_TASKS hygiene
   { factory: 'shouldCatchUp',            calledIn: 'bin/mesh-deploy-listener.js' }, // merged-but-failed ≠ deployed
   { factory: 'writeDeployMarker',        calledIn: 'bin/mesh-deploy-listener.js' },
+  // Phase 5 data-integrity / silent-failure fixes.
+  { factory: 'pruneStale',               calledIn: 'bin/consolidate.mjs' },            // decay is terminal (P5-2)
+  { factory: 'markExternalJob',          calledIn: 'workspace-bin/memory-daemon.mjs' }, // worker-aware idle gate (P5-3)
+  { factory: 'loadEventSchemas',         calledIn: 'workspace-bin/memory-daemon.mjs' }, // fail fast on missing dist (P5-7)
+  { factory: 'assertPublicUrl',          calledIn: 'workspace-bin/web-fetch.mjs' },     // SSRF guard (P5-7)
+  { factory: 'checkHttpOrigin',          calledIn: 'lib/mcp-knowledge/server.mjs' },   // Host/Origin gate (P5-7)
+  { factory: 'withKanbanLockSync',       calledIn: 'mission-control/src/lib/sync/tasks.ts' }, // MC takes the kanban lock (P5-5)
   // The flush runs OFF the daemon's main thread since the flush-worker change
   // (audits/flush_worker): the daemon invokes runFlushInWorker at every flush
   // site, and the worker is the one that calls the real runFlush. Both wires
