@@ -12,6 +12,13 @@ else
   info "Environment file already exists at $ENV_FILE"
 fi
 
+# The env file carries the NATS bus token and every cloud API key. The example
+# it is copied from is 0644, and nothing below re-hardens it, so without this a
+# fresh install leaves the whole credential set world-readable.
+if [ -f "$ENV_FILE" ]; then
+  run chmod 600 "$ENV_FILE"
+fi
+
 # Source env file for config generation (safe key=value parsing — no shell execution)
 if [ -f "$ENV_FILE" ]; then
   while IFS= read -r line; do

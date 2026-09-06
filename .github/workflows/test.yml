@@ -36,7 +36,10 @@ jobs:
         run: |
           npm pack --dry-run 2>&1 | tee /tmp/pack.txt
           grep -q " install.sh" /tmp/pack.txt
-          test "$(grep -c " scripts/install/.*\.sh" /tmp/pack.txt)" = "9"
+          # Drift-lock: every install module in the tree must ship in the tarball.
+          # Compared against the tree, not a hard-coded count, so adding a module
+          # cannot silently break the gate (it did at 9 -> 11).
+          test "$(grep -c " scripts/install/.*\.sh" /tmp/pack.txt)" = "$(ls scripts/install/*.sh | wc -l | tr -d ' ')"
           grep -q " packages/event-schemas/dist/" /tmp/pack.txt
 
   mission-control-tests:

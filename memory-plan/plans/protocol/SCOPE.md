@@ -1,14 +1,31 @@
 # SCOPE — protocol plan
 
 **Status:** active
-**Goal:** Land the operator-requested repo-wide adversarial + lifecycle review as a committed
-deliverable. This is a documentation-only scope: it adds one review report at the repo root and a
-triage pointer in this plan's OUT_OF_SCOPE.md. No production code is touched. Prior runtime-repair
-history for this plan (4.1-4.4, all closed) is preserved below.
+**Goal:** Execute Phase 0 + Phase 1 of REMEDIATION_PLAN_2026-09-06.md — one-line hardening
+(secrets file perms, drop the foreign npm package, unbreak CI, contain the mirror workflow) and the
+three unauthenticated RCE sinks (argv/hardened-filter fixes). Code + focused tests only; runtime
+evidence (deploy/restart on the live host) is out of reach in this environment and is noted per item.
+Prior runtime-repair history (4.1-4.4) and the review-doc batch are preserved as closed blocks below.
 **Set at:** 2026-09-06T00:00:00Z
-**Expires:** 2026-09-08T00:00:00Z
+**Expires:** 2026-09-09T00:00:00Z
 
-```files adversarial-review-2026-09-06
+```files remediation-phase0-1-2026-09-06
+lib/exec-safety.js
+bin/mesh-agent.js
+bin/mesh-task-daemon.js
+lib/llm-providers.js
+lib/mesh-harness.js
+test/exec-safety.test.js
+scripts/install/config.sh
+scripts/install/components.sh
+scripts/install/integrations.sh
+test/install-modules.test.mjs
+.github/workflows/test.yml
+.github/workflows/mirror.yml
+memory-plan/plans/protocol/SCOPE.md
+```
+
+```files adversarial-review-2026-09-06 closed
 ADVERSARIAL_REVIEW_2026-09-06.md
 REMEDIATION_PLAN_2026-09-06.md
 memory-plan/plans/protocol/SCOPE.md

@@ -35,6 +35,7 @@ const { connect, StringCodec } = require('nats');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-task-daemon');
 const { createTask, TaskStore, TASK_STATUS, KV_BUCKET } = require('../lib/mesh-tasks');
+const { validateMetricCommand } = require('../lib/exec-safety');
 const { createSession, CollabStore, COLLAB_STATUS, COLLAB_KV_BUCKET, COLLAB_MODE, isModeImplemented } = require('../lib/mesh-collab');
 const { createPlan, autoRoutePlan, PlanStore, PLAN_STATUS, SUBTASK_STATUS, PLANS_KV_BUCKET } = require('../lib/mesh-plans');
 const { findRole, findRoleByScope, validateRequiredOutputs, checkForbiddenPatterns } = require('../lib/role-loader');
@@ -107,6 +108,17 @@ async function handleSubmit(msg) {
 
   if (!params.task_id || !params.title) {
     return respondError(msg, 'task_id and title are required');
+  }
+
+  // Server-side metric gate. The worker re-checks before running, but the
+  // daemon is the only place every submit path (NATS, kanban bridge, proposals)
+  // converges, so a bad metric must be refused here, fail-closed.
+  if (params.metric) {
+    const check = validateMetricCommand(params.metric);
+    if (!check.allowed) {
+      log(`SUBMIT REJECTED ${params.task_id}: metric refused — ${check.reason}`);
+      return respondError(msg, `Metric refused: ${check.reason}`);
+    }
   }
 
   // Check if task already exists

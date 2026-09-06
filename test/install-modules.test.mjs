@@ -99,7 +99,9 @@ test('cluster dry-run guard and cluster security live in config.sh', () => {
 test('preserved behaviors sit in their modules', () => {
   assert.ok(moduleSrc['env.sh'].includes('claude_project_path() {'));
   assert.ok(moduleSrc['env.sh'].includes("sed 's|[/.]|-|g'"));
-  assert.ok(moduleSrc['system-deps.sh'].includes('"$NODE_VERSION" -ge 22'));
+  // The Node >= 22 check moved into prereqs.sh (node_ok); system-deps.sh now
+  // delegates to it rather than carrying its own version comparison.
+  assert.ok(moduleSrc['system-deps.sh'].includes('PREREQ_SCRIPT'));
   assert.ok(moduleSrc['helpers.sh'].includes('echo "  [dry-run] $*"'));
   assert.ok(moduleSrc['verify.sh'].includes('node-acceptance.mjs'));
 });

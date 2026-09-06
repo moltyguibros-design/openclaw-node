@@ -163,7 +163,9 @@ OPENCLAW_NATS_TOKEN=${OPENCLAW_NATS_TOKEN:-}
 # TTS (optional — falls back to Edge TTS if missing)
 GEMINI_API_KEY=${GOOGLE_API_KEY:-}
 MCENV
-  info "Created Mission Control .env.local"
+  # Holds the NATS token and an API key — never leave it at the default umask.
+  chmod 600 "$MC_DIR/.env.local"
+  info "Created Mission Control .env.local (mode 600)"
 fi
 
 # Ensure data directory exists for SQLite

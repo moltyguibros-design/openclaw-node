@@ -45,6 +45,7 @@ const fs = require('fs');
 const { getActivityState, getSessionInfo } = require('../lib/agent-activity');
 const { loadAllRules, matchRules, formatRulesForPrompt, detectFrameworks, activateFrameworkRules } = require('../lib/rule-loader');
 const { loadHarnessRules, runMeshHarness, runPostCommitValidation, formatHarnessForPrompt } = require('../lib/mesh-harness');
+const { validateMetricCommand } = require('../lib/exec-safety');
 const { findRole, formatRoleForPrompt } = require('../lib/role-loader');
 
 const sc = StringCodec();
@@ -736,15 +737,11 @@ function runLLM(prompt, task, worktreePath) {
 
 // ── Metric Evaluation ─────────────────────────────────
 
-const ALLOWED_METRIC_PREFIXES = [
-  'npm test', 'npm run', 'node ', 'pytest', 'cargo test',
-  'go test', 'make test', 'jest', 'vitest', 'mocha',
-];
-
+// The metric filter lives in lib/exec-safety.js (validateMetricCommand) so the
+// worker and the task daemon's submit gate share one hardened definition. The
+// previous inline copy did not block a bare `&` or a space-less `>file`.
 function isAllowedMetric(cmd) {
-  if (/[\n\r\0;`]|\$\(|\|\||&&|<\(|>\(|<<|>>|>\s|\|/.test(cmd)) return false;
-  if (/\bnode\s+(-e\b|--eval\b|-p\b|--print\b|-r\b|--require\b|--import\b)/.test(cmd)) return false;
-  return ALLOWED_METRIC_PREFIXES.some(prefix => cmd.startsWith(prefix));
+  return validateMetricCommand(cmd).allowed;
 }
 
 /**

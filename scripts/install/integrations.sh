@@ -35,13 +35,12 @@ if $MESH_AVAILABLE; then
       info "Mesh skill updated in ~/.openclaw/skills/mesh/"
     fi
   else
-    info "Setting up mesh network (NATS, agent, shared folder, health/repair)..."
-    if command -v npx >/dev/null 2>&1; then
-      # npx openclaw-mesh handles sudo internally
-      run npx openclaw-mesh 2>&1 || warn "Mesh setup had issues — run 'npx openclaw-mesh' manually to debug"
-    else
-      warn "npx not found — install mesh manually: npx openclaw-mesh"
-    fi
+    # The standalone `npx openclaw-mesh` fleet layer was retired (federation
+    # DECISIONS D4); the package name on the public registry is now owned by an
+    # unrelated third party, so running it here was a supply-chain hole. The mesh
+    # is served by this repo's own bin/mesh*.js and the rendered service units.
+    info "Mesh CLI not on PATH — mesh daemons are provided by the rendered service units"
+    info "and \$REPO_DIR/bin/mesh.js; nothing further to install here."
   fi
 
   # Install mesh skill to managed location (tier 2: visible to all agents)
