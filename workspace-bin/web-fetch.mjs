@@ -107,11 +107,28 @@ export function isPrivateIp(ip) {
 }
 
 /**
- * Throws unless `url` is http(s) to a hostname whose EVERY resolved address is
- * public. Resolution happens here so a DNS name that maps to 127.0.0.1 or
- * 169.254.169.254 is refused before any connection.
+ * Chromium resolver rule pinning `hostname` to an address this process already
+ * vetted, so the browser cannot resolve the name a second time and reach a
+ * different host (DNS rebinding). Returns null when there is nothing to pin.
+ *
+ * The rule binds Chromium's own resolver, which means DIRECT connections. A
+ * proxied request is resolved by the proxy, where the egress policy is the
+ * control instead; the launch bypass list decides which path a host takes.
  */
-export async function assertPublicUrl(url, { lookup = (h) => dns.lookup(h, { all: true }) } = {}) {
+export function resolverRules(hostname, addresses) {
+  const host = String(hostname || '').replace(/^\[|\]$/g, '');
+  if (!host || net.isIP(host)) return null;
+  const target = (addresses || []).find(a => a && !isPrivateIp(a));
+  return target ? `MAP ${host} ${target}` : null;
+}
+
+/**
+ * Resolves `url` and returns it with the vetted addresses, throwing unless it
+ * is http(s) to a hostname whose EVERY resolved address is public. Resolution
+ * happens here so a DNS name that maps to 127.0.0.1 or 169.254.169.254 is
+ * refused before any connection, and the caller can pin what was approved.
+ */
+export async function resolvePublicUrl(url, { lookup = (h) => dns.lookup(h, { all: true }) } = {}) {
   let parsed;
   try { parsed = new URL(url); } catch { throw new Error(`invalid URL: ${url}`); }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
@@ -124,7 +141,7 @@ export async function assertPublicUrl(url, { lookup = (h) => dns.lookup(h, { all
   }
   if (net.isIP(host)) {
     if (isPrivateIp(host)) throw new Error(`refused: ${host} is a private/reserved address`);
-    return parsed;
+    return { url: parsed, addresses: [host] };
   }
   let addrs;
   try { addrs = await lookup(host); } catch (e) { throw new Error(`refused: cannot resolve ${host} (${e.message})`); }
@@ -132,6 +149,12 @@ export async function assertPublicUrl(url, { lookup = (h) => dns.lookup(h, { all
   if (!list.length) throw new Error(`refused: ${host} resolved to nothing`);
   const bad = list.find(isPrivateIp);
   if (bad) throw new Error(`refused: ${host} resolves to private/reserved address ${bad}`);
+  return { url: parsed, addresses: list };
+}
+
+/** The URL-only form every existing caller uses, including the sub-request guard. */
+export async function assertPublicUrl(url, opts) {
+  const { url: parsed } = await resolvePublicUrl(url, opts);
   return parsed;
 }
 
@@ -151,8 +174,11 @@ async function main() {
     if (args[i] === '--screenshot' && args[i + 1]) flags.screenshot = args[++i];
   }
 
-  try { await assertPublicUrl(url); }
-  catch (e) { console.error(`web-fetch: ${e.message}`); process.exit(2); }
+  let pinned = null;
+  try {
+    const { url: safe, addresses } = await resolvePublicUrl(url);
+    pinned = resolverRules(safe.hostname, addresses);
+  } catch (e) { console.error(`web-fetch: ${e.message}`); process.exit(2); }
 
   const { chromium } = await import('playwright');
   // WEB_FETCH_CHROMIUM points at a system Chromium when Playwright's own
@@ -162,6 +188,9 @@ async function main() {
     headless: true,
     executablePath: process.env.WEB_FETCH_CHROMIUM || undefined,
     proxy: proxyServer ? { server: proxyServer, bypass: chromiumBypassList() } : undefined,
+    // Pin the document host to the address vetted above: without it the browser
+    // resolves the name again and a rebind lands between check and connect.
+    args: pinned ? [`--host-resolver-rules=${pinned}`] : [],
   });
   try {
     const page = await browser.newPage();

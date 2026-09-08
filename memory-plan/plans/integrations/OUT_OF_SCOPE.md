@@ -19,3 +19,10 @@ Format per entry: date · area/file · one-line problem · severity guess · nex
   silently blocks every browser-backed runtime evidence in a cloud session and looks like a code
   fault. Next toucher: whoever runs a browser step in a cloud session, or whoever maintains the
   session image.
+
+- 2026-09-08 · `workspace-bin/web-fetch.mjs` sub-request path · Sub-resources loaded by a fetched
+  page are validated at check time by the route guard but are not address-pinned the way the
+  document host now is, so the same resolve-twice window remains for them. Severity: low — a page
+  would have to control DNS for one of its own sub-resource hosts, and the guard still rejects a
+  private answer at check time. Next toucher: whoever revisits the fetch guard, or any step that
+  starts trusting sub-resource content.

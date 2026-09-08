@@ -21,7 +21,7 @@ recorded as UNKNOWN until the operator probes the design box; repo-tree rows are
 | | |
 |---|---|
 | **Status** | LIVE — `--markdown` readability path |
-| **Verified** | 2026-09-08 (step 1.1) — `node workspace-bin/web-fetch.mjs https://pypi.org/project/requests/ --markdown` exit 0, header `# requests` + `words: 378 (defuddle 194ms)`, nav labels absent that the raw fetch carries; bundle delivered by `addInitScript` before navigation; `chromiumBypassList()` strips CIDR entries from NO_PROXY; `WEB_FETCH_CHROMIUM` overrides the browser path. `assertPublicUrl` still resolves once and does not pin the address (step 1.2) |
+| **Verified** | 2026-09-08 (step 1.1) — `node workspace-bin/web-fetch.mjs https://pypi.org/project/requests/ --markdown` exit 0, header `# requests` + `words: 378 (defuddle 194ms)`, nav labels absent that the raw fetch carries; bundle delivered by `addInitScript` before navigation; `chromiumBypassList()` strips CIDR entries from NO_PROXY; `WEB_FETCH_CHROMIUM` overrides the browser path. Step 1.2: `resolvePublicUrl` returns the vetted addresses and the document host is pinned with `--host-resolver-rules`; private literals refused with exit 2; the pin proven to bind (MAP to 192.0.2.1 → ERR_CONNECTION_REFUSED, unpinned → 200). Sub-requests remain check-time only |
 
 ### defuddle dependency
 

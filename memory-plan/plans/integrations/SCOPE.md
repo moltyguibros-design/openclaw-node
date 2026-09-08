@@ -1,7 +1,7 @@
 # SCOPE — integrations plan
 
 **Status:** active
-**Goal:** Step 1.2 — web-fetch address pinning: resolve once, reject if any address is private, pin the vetted address for Chromium so a DNS rebind cannot reach a private host. (Block 0 and step 1.1 closed 2026-09-08.)
+**Goal:** Step 1.3 — harness rule `lazy-senior-ladder` (tier 2, local+mesh) with an advisory added-dependency `post_validate` command. (Block 0, steps 1.1 and 1.2 closed 2026-09-08.)
 **Set at:** 2026-09-08
 **Expires:** 2026-09-15T23:59:00Z
 
@@ -26,7 +26,7 @@ memory-plan/plans/integrations/VERSION
 memory-plan/plans/integrations/audits/step11_web_fetch_markdown/*
 ```
 
-```files step12
+```files step12 closed
 workspace-bin/web-fetch.mjs
 test/web-fetch-guard.test.mjs
 memory-plan/plans/integrations/INVENTORY.md
@@ -34,6 +34,15 @@ memory-plan/plans/integrations/COMPONENT_REGISTRY.md
 memory-plan/plans/integrations/DECISIONS.md
 memory-plan/plans/integrations/VERSION
 memory-plan/plans/integrations/audits/step12_web_fetch_pinning/*
+```
+
+```files step13
+config/harness-rules.json
+test/harness-lazy-senior.test.mjs
+memory-plan/plans/integrations/INVENTORY.md
+memory-plan/plans/integrations/COMPONENT_REGISTRY.md
+memory-plan/plans/integrations/VERSION
+memory-plan/plans/integrations/audits/step13_lazy_senior_ladder/*
 ```
 
 ## How this file works

@@ -38,7 +38,7 @@ from it is re-derivable from the artifact text.
 | Block | Step | Version | Status | Description |
 |-------|------|---------|--------|-------------|
 | 1 | 1.1 | v1.1 | [x] | web-fetch `--markdown`: inject the Defuddle full bundle into the rendered page and print a provenance header plus Markdown, falling back to innerText under a word floor |
-| 1 | 1.2 | v1.2 | [ ] | web-fetch address pinning: resolve once, reject if any address is private, pin the vetted address for Chromium so a DNS rebind cannot reach a private host |
+| 1 | 1.2 | v1.2 | [x] | web-fetch address pinning: resolve once, reject if any address is private, pin the vetted address for Chromium so a DNS rebind cannot reach a private host |
 | 1 | 1.3 | v1.3 | [ ] | harness rule `lazy-senior-ladder` (tier 2, local+mesh) with an advisory added-dependency `post_validate` command |
 | 1 | 1.4 | v1.4 | [ ] | skill `ponytail-review` installed and wired as a fourth `multi-review` perspective |
 | 1 | 1.5 | v1.5 | [ ] | six agent-skills ports (debugging-and-error-recovery, incremental-implementation, doubt-driven-development, interview-me, deprecation-and-migration, code-review-and-quality) with collision-checked triggers |
@@ -54,6 +54,7 @@ from it is re-derivable from the artifact text.
 > **Needs:** `assertPublicUrl` in `workspace-bin/web-fetch.mjs` (resolves once today); Chromium launch args in the same file; the `page.route('**/*')` guard retained for sub-requests.
 > **Feeds:** every consumer of web-fetch; the same pinning helper is reused by 4.6 and 6.2 for plain fetches.
 > **Verify:** `code:` unit test with a stubbed `dns.lookup` returning public then private: the browser is launched with `--host-resolver-rules=MAP <host> <public-ip>` and the request never reaches the private address · `runtime:` a rebinding test host is refused with exit 2.
+> **Closed 2026-09-08:** private literals refused with exit 2 (loopback and metadata IP); pinning proven to bind by falsification — the same URL mapped to 192.0.2.1 gives ERR_CONNECTION_REFUSED where the unpinned navigation returns 200; a live `--markdown` fetch still succeeds with pinning active. 81 tests / 80 pass / 0 fail across the three web-fetch files.
 
 > **1.3 — Goal:** worker prompts that mention implementation keywords carry the seven-rung ladder, and a worker commit that adds a dependency logs a post-commit validation failure.
 > **Needs:** `config/harness-rules.json` schema (id/tier/type/scope/content/activateOn/mesh_enforcement/mesh_validate_command); `lib/mesh-harness.js` dispatch of `post_validate` (line ~391) and `formatHarnessForPrompt` substring matching; D6 locked (tier 2, not tier 1).
