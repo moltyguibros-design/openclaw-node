@@ -1,7 +1,7 @@
 # SCOPE — integrations plan
 
 **Status:** active
-**Goal:** Step 1.1 — web-fetch `--markdown`: inject the Defuddle full bundle into the rendered page and print a provenance header plus Markdown, falling back to innerText under a word floor. (Block 0 docs batch closed 2026-09-08.)
+**Goal:** Step 1.2 — web-fetch address pinning: resolve once, reject if any address is private, pin the vetted address for Chromium so a DNS rebind cannot reach a private host. (Block 0 and step 1.1 closed 2026-09-08.)
 **Set at:** 2026-09-08
 **Expires:** 2026-09-15T23:59:00Z
 
@@ -14,7 +14,7 @@ memory-plan/plans/integrations/TICK_PROMPT.md
 memory-plan/plans/integrations/automation.json
 ```
 
-```files step11
+```files step11 closed
 workspace-bin/web-fetch.mjs
 package.json
 package-lock.json
@@ -24,6 +24,16 @@ memory-plan/plans/integrations/INVENTORY.md
 memory-plan/plans/integrations/COMPONENT_REGISTRY.md
 memory-plan/plans/integrations/VERSION
 memory-plan/plans/integrations/audits/step11_web_fetch_markdown/*
+```
+
+```files step12
+workspace-bin/web-fetch.mjs
+test/web-fetch-guard.test.mjs
+memory-plan/plans/integrations/INVENTORY.md
+memory-plan/plans/integrations/COMPONENT_REGISTRY.md
+memory-plan/plans/integrations/DECISIONS.md
+memory-plan/plans/integrations/VERSION
+memory-plan/plans/integrations/audits/step12_web_fetch_pinning/*
 ```
 
 ## How this file works

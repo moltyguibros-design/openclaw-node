@@ -11,6 +11,13 @@
  *   node bin/web-fetch.mjs <url> --selector "article"  # extract specific element
  *   node bin/web-fetch.mjs <url> --wait 5000        # custom wait (ms)
  *   node bin/web-fetch.mjs <url> --screenshot out.png  # save screenshot
+ *   node bin/web-fetch.mjs <url> --markdown         # readability pass → provenance header + Markdown
+ *
+ * --markdown injects the Defuddle bundle into the rendered page (inline
+ * script content, never a network request, so the route guard below is not
+ * involved) and prints the article as Markdown with a title/author/date
+ * header. Pages where the extractor finds fewer than WEB_FETCH_MIN_WORDS
+ * words fall back to innerText so a thin or app-shell page still yields text.
  *
  * Reachability guard (review P5-7): this tool runs with the node's network
  * position, so an agent-supplied URL used to reach the NATS monitor, the
@@ -22,8 +29,47 @@
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 
 export const MAX_OUTPUT_BYTES = Number(process.env.WEB_FETCH_MAX_BYTES) || 2 * 1024 * 1024;
+export const MIN_CLEAN_WORDS = Number(process.env.WEB_FETCH_MIN_WORDS) || 40;
+
+// The exports map of the package hides dist/, so resolve through the `full`
+// export (the only build that carries the Markdown converter). Resolved lazily:
+// importing this module must not require the dependency to be installed.
+function defuddleBundlePath() {
+  return createRequire(import.meta.url).resolve('defuddle/full');
+}
+
+/**
+ * Chromium's proxy-bypass parser takes hostname and suffix entries only. A
+ * NO_PROXY carrying CIDR blocks (as container runtimes write it) is rejected
+ * wholesale, which silently sends direct-only hosts through the proxy — where
+ * a re-terminating proxy's certificate then fails validation. Keep the names.
+ */
+export function chromiumBypassList(raw = process.env.NO_PROXY || process.env.no_proxy || '') {
+  const names = raw.split(',')
+    .map(e => e.trim())
+    .filter(e => e && !e.includes('/') && !net.isIP(e.replace(/^\[|\]$/g, '')));
+  return names.length ? names.join(',') : undefined;
+}
+
+/** The extractor found enough of an article to trust over raw innerText. */
+export function shouldUseClean(result, minWords = MIN_CLEAN_WORDS) {
+  return Boolean(result && typeof result.content === 'string' && (result.wordCount || 0) >= minWords);
+}
+
+/** Provenance header + Markdown body, the shape downstream extractors read. */
+export function formatCleanOutput(result, url) {
+  const head = [
+    `# ${result.title || '(untitled)'}`,
+    result.author && `author: ${result.author}`,
+    result.published && `published: ${result.published}`,
+    `source: ${url}`,
+    `words: ${result.wordCount} (defuddle ${result.parseTime}ms)`,
+  ].filter(Boolean).join('\n');
+  return `${head}\n\n${result.content}`;
+}
 
 const BLOCKED_HOSTNAMES = new Set(['localhost', 'metadata', 'metadata.google.internal', 'instance-data']);
 
@@ -94,11 +140,11 @@ async function main() {
   const url = args.find(a => !a.startsWith('--'));
 
   if (!url) {
-    console.error('Usage: web-fetch.mjs <url> [--html] [--selector "css"] [--wait ms] [--screenshot file]');
+    console.error('Usage: web-fetch.mjs <url> [--html] [--markdown] [--selector "css"] [--wait ms] [--screenshot file]');
     process.exit(1);
   }
 
-  const flags = { html: args.includes('--html'), selector: null, wait: 3000, screenshot: null };
+  const flags = { html: args.includes('--html'), markdown: args.includes('--markdown'), selector: null, wait: 3000, screenshot: null };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--selector' && args[i + 1]) flags.selector = args[++i];
     if (args[i] === '--wait' && args[i + 1]) flags.wait = parseInt(args[++i], 10);
@@ -109,7 +155,14 @@ async function main() {
   catch (e) { console.error(`web-fetch: ${e.message}`); process.exit(2); }
 
   const { chromium } = await import('playwright');
-  const browser = await chromium.launch({ headless: true });
+  // WEB_FETCH_CHROMIUM points at a system Chromium when Playwright's own
+  // download is absent (CI runners, a box that never ran `playwright install`).
+  const proxyServer = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.WEB_FETCH_CHROMIUM || undefined,
+    proxy: proxyServer ? { server: proxyServer, bypass: chromiumBypassList() } : undefined,
+  });
   try {
     const page = await browser.newPage();
     // Every sub-request and redirect target passes the same guard: a public
@@ -118,6 +171,10 @@ async function main() {
       try { await assertPublicUrl(route.request().url()); await route.continue(); }
       catch { await route.abort('blockedbyclient'); }
     });
+    // Delivered before navigation and over the debugger protocol: an injected
+    // <script> element is refused by any page whose CSP forbids inline script.
+    if (flags.markdown && !flags.selector) await page.addInitScript({ path: defuddleBundlePath() });
+
     await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
 
     if (flags.wait > 0) await page.waitForTimeout(flags.wait);
@@ -128,11 +185,22 @@ async function main() {
     }
 
     let out;
-    if (flags.selector) {
+    if (flags.markdown && !flags.selector) {
+      const result = await page.evaluate(
+        (u) => new window.Defuddle(document, { markdown: true, url: u }).parse(),
+        page.url(),
+      );
+      if (shouldUseClean(result)) {
+        out = formatCleanOutput(result, page.url());
+      } else {
+        console.error(`web-fetch: defuddle yielded ${result?.wordCount ?? 0} words (< ${MIN_CLEAN_WORDS}), falling back to innerText`);
+      }
+    }
+    if (out === undefined && flags.selector) {
       const el = await page.$(flags.selector);
       if (!el) { console.error(`Selector "${flags.selector}" not found`); process.exit(1); }
       out = flags.html ? await el.innerHTML() : await el.innerText();
-    } else {
+    } else if (out === undefined) {
       out = flags.html ? await page.content() : await page.innerText('body');
     }
     if (Buffer.byteLength(out, 'utf8') > MAX_OUTPUT_BYTES) {

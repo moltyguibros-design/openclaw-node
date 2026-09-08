@@ -148,7 +148,7 @@
     "scope": [
       "local"
     ],
-    "content": "RULE: When WebFetch fails, returns empty content, or a site blocks automated access (anti-bot, JS-rendered, login wall), fall back to Playwright via: node bin/web-fetch.mjs <url> [--html] [--selector \"css\"] [--wait ms] [--screenshot file.png]. This renders the full page with a real Chromium browser.",
+    "content": "RULE: When WebFetch fails, returns empty content, or a site blocks automated access (anti-bot, JS-rendered, login wall), fall back to Playwright via: node bin/web-fetch.mjs <url> [--html] [--selector \"css\"] [--wait ms] [--screenshot file.png] [--markdown]. This renders the full page with a real Chromium browser; --markdown strips nav/footers and prints a title/author/date header plus the article as Markdown, the right default when the text feeds an extractor or a summary.",
     "pattern": null,
     "activateOn": [
       "WebFetch",

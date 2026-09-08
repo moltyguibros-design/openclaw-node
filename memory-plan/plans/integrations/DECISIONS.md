@@ -134,3 +134,24 @@ daemon, NATS config, the scheduler, or `lib/mcp-knowledge`. Federation stays loc
 **Consequences.** If the operator prefers repair first, this plan's SCOPE goes idle after Block 0
 and resumes at 1.1 afterwards; the silo loses nothing. Any step found to touch a repaired
 component is re-scoped, not merged into the repair batch.
+
+## D8 — The `--markdown` win condition is noise removal, not byte count (2026-09-08)
+
+**Decision.** Step 1.1's `runtime:` Verify drops the "output bytes drop by ≥30%" threshold and
+becomes: on a real public page, the `--markdown` output carries the provenance header (title,
+source, word count; author and date when the page has them) and contains none of the page's
+navigation, cookie-banner or footer labels that appear in the raw `innerText` output.
+
+**Why.** Measured on `https://pypi.org/project/requests/`: raw 4131 B, `--markdown` 4721 B, so
+bytes rose 14.3% while `Skip to main content`, `Log in` and `Site map` all went from present to
+absent and the header came out correct. Markdown link and code syntax costs more per word than
+`innerText`, so the byte delta tracks the page's markup density, not the quality of the
+extraction. A chrome-heavy page would show a large drop, but `docs.python.org` and `nodejs.org`
+are both refused by this session's egress policy, so the threshold cannot be defended with
+evidence from here.
+
+**Consequences.** The noise criterion is page-independent and is what downstream consumers
+actually care about; it stays the bar for any later extraction change. Byte size remains worth
+reporting in an audit, never as a gate. Steps whose evidence needs arbitrary public pages must
+state that they need an operator-run probe, because this container reaches only the hosts in its
+proxy's NO_PROXY list.

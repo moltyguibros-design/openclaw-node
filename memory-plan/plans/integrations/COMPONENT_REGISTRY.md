@@ -20,15 +20,15 @@ recorded as UNKNOWN until the operator probes the design box; repo-tree rows are
 
 | | |
 |---|---|
-| **Status** | LIVE — innerText only |
-| **Verified** | 2026-09-08 — `grep -o "'--[a-z]*'" workspace-bin/web-fetch.mjs` → `--html --screenshot --selector --wait`; no `--markdown`; `assertPublicUrl` resolves once and does not pin the address |
+| **Status** | LIVE — `--markdown` readability path |
+| **Verified** | 2026-09-08 (step 1.1) — `node workspace-bin/web-fetch.mjs https://pypi.org/project/requests/ --markdown` exit 0, header `# requests` + `words: 378 (defuddle 194ms)`, nav labels absent that the raw fetch carries; bundle delivered by `addInitScript` before navigation; `chromiumBypassList()` strips CIDR entries from NO_PROXY; `WEB_FETCH_CHROMIUM` overrides the browser path. `assertPublicUrl` still resolves once and does not pin the address (step 1.2) |
 
 ### defuddle dependency
 
 | | |
 |---|---|
-| **Status** | UNBUILT |
-| **Verified** | 2026-09-08 — `grep -c defuddle package.json` → 0; the in-page mechanism was proven in a scratch test (Playwright 1.51.1, `defuddle/full`, title/author/published/wordCount extracted, nav and footer stripped) |
+| **Status** | LIVE — ^0.19.3 |
+| **Verified** | 2026-09-08 (step 1.1) — in package.json + package-lock.json; resolved at run time through the `defuddle/full` export; exercised in-page against a served fixture and against a live public page |
 
 ## Family 2: Harness rules and skills
 

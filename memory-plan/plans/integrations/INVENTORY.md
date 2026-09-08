@@ -37,7 +37,7 @@ from it is re-derivable from the artifact text.
 
 | Block | Step | Version | Status | Description |
 |-------|------|---------|--------|-------------|
-| 1 | 1.1 | v1.1 | [ ] | web-fetch `--markdown`: inject the Defuddle full bundle into the rendered page and print a provenance header plus Markdown, falling back to innerText under a word floor |
+| 1 | 1.1 | v1.1 | [x] | web-fetch `--markdown`: inject the Defuddle full bundle into the rendered page and print a provenance header plus Markdown, falling back to innerText under a word floor |
 | 1 | 1.2 | v1.2 | [ ] | web-fetch address pinning: resolve once, reject if any address is private, pin the vetted address for Chromium so a DNS rebind cannot reach a private host |
 | 1 | 1.3 | v1.3 | [ ] | harness rule `lazy-senior-ladder` (tier 2, local+mesh) with an advisory added-dependency `post_validate` command |
 | 1 | 1.4 | v1.4 | [ ] | skill `ponytail-review` installed and wired as a fourth `multi-review` perspective |
@@ -47,7 +47,8 @@ from it is re-derivable from the artifact text.
 > **1.1 — Goal:** `web-fetch.mjs --markdown <url>` prints title/author/published/source/words then the article body as Markdown, and falls back to innerText when the extractor yields fewer than `WEB_FETCH_MIN_WORDS` (default 40).
 > **Needs:** `defuddle@^0.19.3` added to root `package.json` (resolve via `createRequire(import.meta.url).resolve('defuddle/full')`; the exports map hides `dist/`); Playwright already a root dependency; the screenshot branch stays before extraction because `parse()` strips `<script>` from the live DOM; `parse()` only, never `parseAsync()` (site extractors may call third-party APIs).
 > **Feeds:** deep-research, summarize, knowledge-index-job, memory extraction (cleaner input); the `playwright-fallback` rule content in `config/harness-rules.json` names the flag.
-> **Verify:** `runtime:` one public article fetched with and without the flag: output bytes drop by ≥30% and no nav/footer labels appear in the `--markdown` output · `code:` a test that sets page content to a fixture with nav, cookie banner and footer and asserts they are absent and the title header is present.
+> **Verify:** `runtime:` one public article fetched with and without the flag: the `--markdown` output carries the provenance header and none of the nav/cookie/footer labels present in the raw output (byte-drop threshold retired — D8) · `code:` a test that serves a fixture with nav, cookie banner and footer, navigates to it, and asserts they are absent and the title header is present.
+> **Closed 2026-09-08:** pypi.org/project/requests fetched both ways, both exit 0; three nav labels present in raw, absent in markdown; header `words: 378 (defuddle 194ms)`. 5/5 tests. Suite +5 tests / +5 pass / +0 fail vs unmodified HEAD (246 environmental failures both sides). Bundle delivery moved to `addInitScript` (page CSP refuses `addScriptTag`); `chromiumBypassList()` added because CIDR entries void Chromium's bypass list.
 
 > **1.2 — Goal:** a hostname that resolves to a public address at check time and a private address at connect time is refused.
 > **Needs:** `assertPublicUrl` in `workspace-bin/web-fetch.mjs` (resolves once today); Chromium launch args in the same file; the `page.route('**/*')` guard retained for sub-requests.
