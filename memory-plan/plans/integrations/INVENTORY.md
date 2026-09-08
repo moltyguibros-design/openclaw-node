@@ -40,7 +40,7 @@ from it is re-derivable from the artifact text.
 | 1 | 1.1 | v1.1 | [x] | web-fetch `--markdown`: inject the Defuddle full bundle into the rendered page and print a provenance header plus Markdown, falling back to innerText under a word floor |
 | 1 | 1.2 | v1.2 | [x] | web-fetch address pinning: resolve once, reject if any address is private, pin the vetted address for Chromium so a DNS rebind cannot reach a private host |
 | 1 | 1.3 | v1.3 | [x] | harness rule `lazy-senior-ladder` (tier 2, local+mesh) with an advisory added-dependency `post_validate` command |
-| 1 | 1.4 | v1.4 | [ ] | skill `ponytail-review` installed and wired as a fourth `multi-review` perspective |
+| 1 | 1.4 | v1.4 | [x] | skill `ponytail-review` installed and wired as a fourth `multi-review` perspective |
 | 1 | 1.5 | v1.5 | [ ] | six agent-skills ports (debugging-and-error-recovery, incremental-implementation, doubt-driven-development, interview-me, deprecation-and-migration, code-review-and-quality) with collision-checked triggers |
 | 1 | 1.6 | v1.6 | [ ] | `summarize` skill gains a local yt-dlp subtitle path so YouTube works with no Apify token |
 
@@ -66,6 +66,7 @@ from it is re-derivable from the artifact text.
 > **Needs:** the ponytail `skills/ponytail-review` body (MIT); node frontmatter with triggers "review for over-engineering", "what can we delete", "is this over-engineered", "find speculative abstractions" and negatives "refactor suggestions", "tech debt cleanup", "security scan skill"; a routing-eval baseline saved before the edit; `workspace-bin/multi-review` prompt-block structure.
 > **Feeds:** `multi-review` callers; the quality-gate reviewer flow.
 > **Verify:** `code:` `skill-audit --skill ponytail-review --min-grade B` exits 0; `skill-routing-eval --compare <baseline>` reports no regression; `openclaw-skill-scanner` scores it clean · `runtime:` `multi-review --files lib/mesh-harness.js` prints four prompt blocks.
+> **Closed 2026-09-08:** audit 100/100 grade A; scanner 0/0 exit 0; routing 780/780 → 787/787, both 100.0%, no new collision; `multi-review` prints four reviewer blocks and "After all 4 reviewers complete".
 
 > **1.5 — Goal:** six skills installed in node format, each grade B or better, with zero routing regressions against the pre-step baseline.
 > **Needs:** the six SKILL.md bodies (MIT); the frontmatter drafts from the extraction artifact; rewording rules (CONSTRAINTS.md → harness-rules + active SCOPE; nested-subagent / `codex exec` text → "a fresh mesh task carrying only artifact + contract"); scanner and skill-audit runnable.

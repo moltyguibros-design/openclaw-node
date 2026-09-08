@@ -43,8 +43,8 @@ recorded as UNKNOWN until the operator probes the design box; repo-tree rows are
 
 | | |
 |---|---|
-| **Status** | LIVE — 108 skills |
-| **Verified** | 2026-09-08 — `ls skills | wc -l` → 108; absent: ponytail-review, archify, codebase-memory, gods-eye-view, and the six agent-skills ports; `skills/_quarantine/` holds memorylayer and moltbook-registry |
+| **Status** | LIVE — 109 skills |
+| **Verified** | 2026-09-08 — `ls skills | wc -l` → 108; `skills/_quarantine/` holds memorylayer and moltbook-registry. 2026-09-08 (step 1.4): `ponytail-review` added (audit 100/100 grade A, scanner clean, routing 100.0% with no new collision) and wired as `multi-review`'s fourth perspective. Still absent: archify, codebase-memory, gods-eye-view, and the six agent-skills ports |
 
 ## Family 3: MCP servers
 

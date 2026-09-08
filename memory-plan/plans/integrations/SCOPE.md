@@ -1,7 +1,7 @@
 # SCOPE — integrations plan
 
 **Status:** active
-**Goal:** Step 1.4 — skill `ponytail-review` installed and wired as a fourth `multi-review` perspective. (Block 0, steps 1.1–1.3 closed 2026-09-08.)
+**Goal:** Step 1.5 — six agent-skills ports with collision-checked triggers. (Block 0, steps 1.1–1.4 closed 2026-09-08.)
 **Set at:** 2026-09-08
 **Expires:** 2026-09-15T23:59:00Z
 
@@ -46,13 +46,26 @@ memory-plan/plans/integrations/VERSION
 memory-plan/plans/integrations/audits/step13_lazy_senior_ladder/*
 ```
 
-```files step14
+```files step14 closed
 skills/ponytail-review/*
 workspace-bin/multi-review
 memory-plan/plans/integrations/INVENTORY.md
 memory-plan/plans/integrations/COMPONENT_REGISTRY.md
 memory-plan/plans/integrations/VERSION
 memory-plan/plans/integrations/audits/step14_ponytail_review/*
+```
+
+```files step15
+skills/debugging-and-error-recovery/*
+skills/incremental-implementation/*
+skills/doubt-driven-development/*
+skills/interview-me/*
+skills/deprecation-and-migration/*
+skills/code-review-and-quality/*
+memory-plan/plans/integrations/INVENTORY.md
+memory-plan/plans/integrations/COMPONENT_REGISTRY.md
+memory-plan/plans/integrations/VERSION
+memory-plan/plans/integrations/audits/step15_agent_skills_ports/*
 ```
 
 ## How this file works
