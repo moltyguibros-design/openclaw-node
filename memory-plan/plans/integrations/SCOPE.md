@@ -1,7 +1,7 @@
 # SCOPE — integrations plan
 
 **Status:** active
-**Goal:** Step 1.3 — harness rule `lazy-senior-ladder` (tier 2, local+mesh) with an advisory added-dependency `post_validate` command. (Block 0, steps 1.1 and 1.2 closed 2026-09-08.)
+**Goal:** Step 1.4 — skill `ponytail-review` installed and wired as a fourth `multi-review` perspective. (Block 0, steps 1.1–1.3 closed 2026-09-08.)
 **Set at:** 2026-09-08
 **Expires:** 2026-09-15T23:59:00Z
 
@@ -36,13 +36,23 @@ memory-plan/plans/integrations/VERSION
 memory-plan/plans/integrations/audits/step12_web_fetch_pinning/*
 ```
 
-```files step13
+```files step13 closed
 config/harness-rules.json
+bin/check-added-deps.sh
 test/harness-lazy-senior.test.mjs
 memory-plan/plans/integrations/INVENTORY.md
 memory-plan/plans/integrations/COMPONENT_REGISTRY.md
 memory-plan/plans/integrations/VERSION
 memory-plan/plans/integrations/audits/step13_lazy_senior_ladder/*
+```
+
+```files step14
+skills/ponytail-review/*
+workspace-bin/multi-review
+memory-plan/plans/integrations/INVENTORY.md
+memory-plan/plans/integrations/COMPONENT_REGISTRY.md
+memory-plan/plans/integrations/VERSION
+memory-plan/plans/integrations/audits/step14_ponytail_review/*
 ```
 
 ## How this file works

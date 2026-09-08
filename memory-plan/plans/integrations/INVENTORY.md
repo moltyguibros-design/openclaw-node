@@ -39,7 +39,7 @@ from it is re-derivable from the artifact text.
 |-------|------|---------|--------|-------------|
 | 1 | 1.1 | v1.1 | [x] | web-fetch `--markdown`: inject the Defuddle full bundle into the rendered page and print a provenance header plus Markdown, falling back to innerText under a word floor |
 | 1 | 1.2 | v1.2 | [x] | web-fetch address pinning: resolve once, reject if any address is private, pin the vetted address for Chromium so a DNS rebind cannot reach a private host |
-| 1 | 1.3 | v1.3 | [ ] | harness rule `lazy-senior-ladder` (tier 2, local+mesh) with an advisory added-dependency `post_validate` command |
+| 1 | 1.3 | v1.3 | [x] | harness rule `lazy-senior-ladder` (tier 2, local+mesh) with an advisory added-dependency `post_validate` command |
 | 1 | 1.4 | v1.4 | [ ] | skill `ponytail-review` installed and wired as a fourth `multi-review` perspective |
 | 1 | 1.5 | v1.5 | [ ] | six agent-skills ports (debugging-and-error-recovery, incremental-implementation, doubt-driven-development, interview-me, deprecation-and-migration, code-review-and-quality) with collision-checked triggers |
 | 1 | 1.6 | v1.6 | [ ] | `summarize` skill gains a local yt-dlp subtitle path so YouTube works with no Apify token |
@@ -59,7 +59,8 @@ from it is re-derivable from the artifact text.
 > **1.3 — Goal:** worker prompts that mention implementation keywords carry the seven-rung ladder, and a worker commit that adds a dependency logs a post-commit validation failure.
 > **Needs:** `config/harness-rules.json` schema (id/tier/type/scope/content/activateOn/mesh_enforcement/mesh_validate_command); `lib/mesh-harness.js` dispatch of `post_validate` (line ~391) and `formatHarnessForPrompt` substring matching; D6 locked (tier 2, not tier 1).
 > **Feeds:** every mesh worker prompt; local sessions through the companion bridge; the hyperagent A/B that may later promote it.
-> **Verify:** `code:` `formatHarnessForPrompt` includes the rule for a prompt containing "implement" and excludes it for "summarize this" · `runtime:` a mesh task whose commit adds a line to `package.json` dependencies produces `[HARNESS] POST-COMMIT FAIL` in the agent log.
+> **Verify:** `code:` `formatHarnessForPrompt` includes the rule for a task-shaped activation string naming implementation work and excludes it otherwise · `runtime:` a commit adding a dependency, run through the real `runPostCommitValidation`, produces `[HARNESS] POST-COMMIT FAIL: lazy-senior-ladder`.
+> **Closed 2026-09-08:** 7/7 tests; real worktree probe silent on a code-only commit and naming `is-odd` on the dependency commit. Command is `bash ./bin/check-added-deps.sh` because exec-safety refuses the drafted `! … | grep -qE` form. Outstanding operator step: `harness-sync` to the deployed `~/.openclaw/harness-rules.json`, which is what mesh workers read. Found en route: `git-conventional-commits` has never been able to run (OUT_OF_SCOPE).
 
 > **1.4 — Goal:** `skills/ponytail-review/SKILL.md` exists in node format and `multi-review` emits a fourth "Simplicity" prompt block.
 > **Needs:** the ponytail `skills/ponytail-review` body (MIT); node frontmatter with triggers "review for over-engineering", "what can we delete", "is this over-engineered", "find speculative abstractions" and negatives "refactor suggestions", "tech debt cleanup", "security scan skill"; a routing-eval baseline saved before the edit; `workspace-bin/multi-review` prompt-block structure.

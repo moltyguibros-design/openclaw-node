@@ -26,3 +26,13 @@ Format per entry: date · area/file · one-line problem · severity guess · nex
   would have to control DNS for one of its own sub-resource hosts, and the guard still rejects a
   private answer at check time. Next toucher: whoever revisits the fetch guard, or any step that
   starts trusting sub-resource content.
+
+- 2026-09-08 · `config/harness-rules.json` rule `git-conventional-commits` + `lib/exec-safety.js` ·
+  The rule's `mesh_validate_command` can never run: its grep pattern contains regex alternation,
+  and the shell-chaining detector reads those `|` characters as pipes into a disallowed command,
+  so every mesh task logs `POST-COMMIT FAIL: git-conventional-commits — Validation command
+  blocked` regardless of the commit message. The check has therefore never validated anything,
+  and its permanent failure line trains readers to ignore POST-COMMIT FAIL output. Observed while
+  running the real validation path for step 1.3. Severity: medium — a governance check believed
+  active is inert, and the noise degrades a signal other rules depend on. Next toucher: whoever
+  owns harness enforcement, or the next step that adds a `post_validate` rule.

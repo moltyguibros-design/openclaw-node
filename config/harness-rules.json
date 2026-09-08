@@ -239,5 +239,40 @@
     "id": "hyperagent-reflection-ready",
     "managed": true,
     "retired": true
+  },
+  {
+    "id": "lazy-senior-ladder",
+    "description": "Climb the decision ladder before writing code: YAGNI, reuse, stdlib, native, installed dep, one line, minimum",
+    "tier": 2,
+    "type": "inject",
+    "scope": [
+      "local",
+      "mesh"
+    ],
+    "content": "RULE (lazy-senior ladder): Read the code the task touches and trace the real flow first. Then, before writing code, stop at the first rung that holds: 1) Does this need to exist at all? (YAGNI) 2) Already in this codebase? Reuse it. 3) Standard library does it? Use it. 4) Native platform feature covers it? Use it. 5) Already-installed dependency solves it? Use it. 6) Can it be one line? Do that. 7) Only then: the minimum code that works. Bug fix = root cause: grep every caller and fix the shared function once. No unrequested abstractions, no new dependencies, no boilerplate. Deletion over addition, boring over clever, fewest files. Never lazy about: understanding the problem, input validation at trust boundaries, error handling that prevents data loss, security, accessibility, anything explicitly requested. Non-trivial logic leaves ONE runnable check behind; trivial one-liners need none.",
+    "pattern": null,
+    "activateOn": [
+      "implement",
+      "add a feature",
+      "write a function",
+      "add a helper",
+      "refactor",
+      "new dependency",
+      "npm install",
+      "pip install",
+      "abstraction",
+      "boilerplate",
+      "simplify",
+      "fix the bug"
+    ],
+    "active": true,
+    "tags": [
+      "simplicity",
+      "yagni",
+      "scope"
+    ],
+    "mesh_enforcement": "post_validate",
+    "mesh_validate_command": "bash ./bin/check-added-deps.sh",
+    "_mesh_note": "Advisory: runPostCommitValidation logs the finding, it never blocks the merge. Rung 5 asks whether an already-installed dependency would have done."
   }
 ]

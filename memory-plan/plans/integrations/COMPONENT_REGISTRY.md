@@ -36,8 +36,8 @@ recorded as UNKNOWN until the operator probes the design box; repo-tree rows are
 
 | | |
 |---|---|
-| **Status** | LIVE — 13 rules |
-| **Verified** | 2026-09-08 — ids: build-before-done, no-silent-failure, no-assume-running, session-boot-context, git-conventional-commits, no-hardcoded-secrets, playwright-fallback, scope-enforcement, block-sudo-in-scripts, block-rm-rf, hyperagent-task-close, hyperagent-task-start, hyperagent-reflection-ready; no `lazy-senior-ladder`; `lib/mesh-harness.js:391` dispatches `post_validate` |
+| **Status** | LIVE — 14 rules |
+| **Verified** | 2026-09-08 — ids: build-before-done, no-silent-failure, no-assume-running, session-boot-context, git-conventional-commits, no-hardcoded-secrets, playwright-fallback, scope-enforcement, block-sudo-in-scripts, block-rm-rf, hyperagent-task-close, hyperagent-task-start, hyperagent-reflection-ready. 2026-09-08 (step 1.3): `lazy-senior-ladder` added (tier 2, local+mesh, `post_validate` → `bash ./bin/check-added-deps.sh`); injection and the advisory both proven against a real worktree. Mesh workers read the deployed `~/.openclaw/harness-rules.json`, so the rule is inert there until `harness-sync` runs. `git-conventional-commits` is blocked by exec-safety on every commit (OUT_OF_SCOPE) |
 
 ### skills/ tree
 
