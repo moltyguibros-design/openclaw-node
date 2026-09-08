@@ -236,7 +236,7 @@ from it is re-derivable from the artifact text.
 
 | Block | Step | Version | Status | Description |
 |-------|------|---------|--------|-------------|
-| 6 | 6.1 | v6.1 | [ ] | `lib/llm-client.mjs` gains `tools` in and `toolCalls` out on the OpenAI-compatible branch, with qwen3 reliability evidence |
+| 6 | 6.1 | v6.1 | [x] | `lib/llm-client.mjs` gains `tools` in and `toolCalls` out on the OpenAI-compatible branch, with qwen3 reliability evidence |
 | 6 | 6.2 | v6.2 | [ ] | `lib/node-agent.mjs`: four grounding tools over Mission Control data and a pure record filter |
 | 6 | 6.3 | v6.3 | [ ] | Mission Control `POST /api/agent/ask` text route with the tool trace |
 | 6 | 6.4 | v6.4 | [D] | the God's Eye View design-tool loop (4.9) on top of 6.1 |
@@ -245,6 +245,7 @@ from it is re-derivable from the artifact text.
 > **Needs:** `lib/llm-client.mjs` `/v1/chat/completions` branch (no `tools` today); ollama with qwen3 on the box; `audits/step61_*/` table of runs.
 > **Feeds:** 6.2, 4.9.
 > **Verify:** `code:` unit test with a mocked server · `runtime:` the 20-run table with the WIN threshold ≥ 17/20 correct tool selections.
+> **Closed 2026-09-08:** 9/9 tests against a real http.Server on both backends — tools reach the server unchanged, Ollama's object arguments and OpenAI's JSON-string arguments normalize to one shape, malformed argument JSON surfaces as parseError, and jsonMode is suppressed when tools are present. Suite like-for-like 2032/263 baseline vs 2051/263 branch (+19 tests, no new failures). The 20-run qwen3 hit-rate is NOT claimed: no ollama here and ollama.com is refused by the egress; the operator command is in the step audit.
 
 > **6.2 — Goal:** `askNode("which nodes are down")` calls `get_fleet_state` before answering and the answer names the down nodes.
 > **Needs:** 6.1 closed; `/api/mesh/nodes` data; `memory-injector` for `recall_memory`; the "call context tools first" system prompt discipline read from GEV.

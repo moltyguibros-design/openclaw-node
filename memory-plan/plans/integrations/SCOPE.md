@@ -1,7 +1,7 @@
 # SCOPE — integrations plan
 
-**Status:** active
-**Goal:** Step 6.1 — `lib/llm-client.mjs` gains tool calling (`tools` in, `toolCalls` out) with qwen3 reliability evidence recorded before anything depends on it. (5.2 closed 2026-09-08.)
+**Status:** idle
+**Status note:** no step in flight. 5.2 and 6.1 closed 2026-09-08. Everything still open needs the operator: 2.1–2.2 (macOS binary), 3.x (VoiceStudio), 4.x (Node 24 + clone + the data-source decision), 5.1 (Orca), 5.3–5.4 (runnable here), 6.2–6.3 (gated on the qwen3 tool-selection probe from 6.1). Set the next goal with the operator before editing.
 **Set at:** 2026-09-08
 **Expires:** 2026-09-15T23:59:00Z
 
@@ -107,7 +107,7 @@ memory-plan/plans/integrations/VERSION
 memory-plan/plans/integrations/audits/step52_activity_state_consumed/*
 ```
 
-```files step61
+```files step61 closed
 lib/llm-client.mjs
 test/llm-client-tools.test.mjs
 memory-plan/plans/integrations/INVENTORY.md

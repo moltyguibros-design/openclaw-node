@@ -125,5 +125,5 @@ recorded as UNKNOWN until the operator probes the design box; repo-tree rows are
 
 | | |
 |---|---|
-| **Status** | LIVE — no tool calling |
-| **Verified** | 2026-09-08 — `grep -c tools lib/llm-client.mjs` → 0; native `/api/chat` with `think:false`, no `tools` or `tool_calls` handling |
+| **Status** | LIVE — tool calling on both backends |
+| **Verified** | 2026-09-08 (step 6.1) — `generate()` accepts `tools`/`toolChoice` and returns normalized `toolCalls` on Ollama native `/api/chat` (object arguments) and `/v1/chat/completions` (JSON-string arguments); `format: 'json'` suppressed when tools are present; 9/9 tests against a real HTTP server. `generateAnalysis()` deliberately unchanged. Model-side reliability (qwen3 tool selection, ≥17/20) is an operator probe — no ollama in this session |
