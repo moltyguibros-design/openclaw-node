@@ -293,7 +293,7 @@ elif [ "$OS" = "macos" ]; then
   if $DRY_RUN; then
     echo "  [dry-run] bash $REPO_DIR/services/launcher/build-launcher-app.sh"
   elif bash "$REPO_DIR/services/launcher/build-launcher-app.sh" >/dev/null 2>&1; then
-    info "Stack launcher built → ~/Applications/OpenClaw Stack.app (double-click or Dock it)"
+    info "Stack launcher → Desktop + ~/Applications: \"OpenClaw Stack\" (double-click: starts everything, opens Mission Control)"
   else
     warn "Stack launcher app not built — start manually: node $REPO_DIR/bin/openclaw-stack.mjs up"
   fi
@@ -308,5 +308,13 @@ elif [ "$OS" = "linux" ]; then
       "$REPO_DIR/services/launcher/openclaw-stack.desktop" > "$DESKTOP_DIR/openclaw-stack.desktop"
   fi
   run chmod +x "$DESKTOP_DIR/openclaw-stack.desktop"
+  # App menu AND the Desktop: an entry only in ~/.local/share/applications is
+  # invisible to anyone who does not already know it exists.
+  if [ -d "$HOME/Desktop" ]; then
+    run cp "$DESKTOP_DIR/openclaw-stack.desktop" "$HOME/Desktop/openclaw-stack.desktop"
+    run chmod +x "$HOME/Desktop/openclaw-stack.desktop"
+    gio set "$HOME/Desktop/openclaw-stack.desktop" metadata::trusted true 2>/dev/null || true
+    info "Desktop shortcut → $HOME/Desktop/openclaw-stack.desktop"
+  fi
   info "Stack launcher installed → $DESKTOP_DIR/openclaw-stack.desktop (app menu: OpenClaw Stack)"
 fi

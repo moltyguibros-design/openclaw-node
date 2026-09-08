@@ -331,3 +331,32 @@ test('llm-setup keeps the embedder failure reason and offers a model-free retry'
   assert.match(llm, /if \[ "\$MODE" != embedder \] && \[ -z "\$ENDPOINT" \]; then\n\s+have ollama \|\|/);
   assert.match(llm, /elif \[ "\$MODE" = embedder \]; then\n\s+# --embedder-only/);
 });
+
+// A second install.sh run failed with "Node.js not found after dependency
+// install" on a Mac where node, ollama and nats-server were all installed:
+// prereqs.sh evals `brew shellenv` inside its own subprocess, so the PATH it
+// fixes never reaches install.sh. Every entry point must self-heal.
+test('install entry points put Homebrew on their own PATH', () => {
+  for (const [name, src] of [['install.sh', installSrc], ['llm-setup.sh', readFileSync(join(ROOT, 'scripts/install/llm-setup.sh'), 'utf8')]]) {
+    assert.match(src, /for _brew in \/opt\/homebrew\/bin\/brew \/usr\/local\/bin\/brew; do/, `${name} must resolve brew itself`);
+    assert.match(src, /eval "\$\("\$_brew" shellenv\)"/, `${name} must apply shellenv in its own shell`);
+  }
+  const env = moduleSrc['env.sh'];
+  assert.match(env, /for p in \/opt\/homebrew\/bin\/node \/usr\/local\/bin\/node; do/, 'node has a keg fallback');
+  assert.match(env, /your shell PATH is stale/, 'the abort names the actual fix');
+  assert.doesNotMatch(env, /Node\.js not found after dependency install/);
+});
+
+// "where do i click to start it" — the launcher existed but sat only in
+// ~/Applications (invisible in Launchpad) and opened nothing, so a double-click
+// looked like a no-op. It must land on the Desktop and show Mission Control.
+test('the stack launcher is findable and opens Mission Control', () => {
+  const mac = readFileSync(join(ROOT, 'services/launcher/build-launcher-app.sh'), 'utf8');
+  assert.match(mac, /DESKTOP_LINK="\$HOME\/Desktop\/OpenClaw Stack\.app"/);
+  assert.match(mac, /ln -sfn "\$\{DEST\}" "\$\{DESKTOP_LINK\}"/);
+  assert.match(mac, /osacompile -o "\$\{DEST\}" -e "\$\{START\}" -e "\$\{OPEN_MC\}"/, 'start AND open, in that order');
+  assert.match(mac, /\/usr\/bin\/open http:\/\/127\.0\.0\.1:3000/);
+  const desktop = readFileSync(join(ROOT, 'services/launcher/openclaw-stack.desktop'), 'utf8');
+  assert.match(desktop, /xdg-open http:\/\/127\.0\.0\.1:3000/);
+  assert.match(moduleSrc['services.sh'], /Desktop shortcut → \$HOME\/Desktop\/openclaw-stack\.desktop/);
+});

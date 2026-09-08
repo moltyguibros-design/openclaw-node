@@ -48,6 +48,17 @@ fi
 declare -f info >/dev/null 2>&1 || info() { echo -e "\033[0;32m[+]\033[0m $*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# Homebrew on PATH, in THIS shell. prereqs.sh evals `brew shellenv` too, but it
+# runs as a subprocess, so the PATH it fixes dies with it: a terminal opened
+# before Homebrew existed reached env.sh with no node and the installer aborted
+# "Node.js not found after dependency install" while node, ollama and
+# nats-server all sat in /opt/homebrew/bin. Every entry point does this itself.
+if ! command -v brew >/dev/null 2>&1; then
+  for _brew in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    [ -x "$_brew" ] && eval "$("$_brew" shellenv)" && break
+  done
+fi
+
 OPENCLAW_ROOT="${OPENCLAW_ROOT:-$HOME/.openclaw}"
 ENV_FILE="${ENV_FILE:-$OPENCLAW_ROOT/openclaw.env}"
 WORKSPACE="${WORKSPACE:-$OPENCLAW_ROOT/workspace}"

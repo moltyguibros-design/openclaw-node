@@ -1,7 +1,18 @@
 # ── Resolve NODE_BIN (used by service templates) ──
 NODE_BIN="$(command -v node 2>/dev/null || echo "")"
 if [ -z "$NODE_BIN" ]; then
-  error "Node.js not found after dependency install — cannot continue"
+  # Installed but unlinked (Homebrew keg, stale shell PATH) — use it and say so.
+  for p in /opt/homebrew/bin/node /usr/local/bin/node; do
+    [ -x "$p" ] || continue
+    NODE_BIN="$p"; PATH="$(dirname "$p"):$PATH"; export PATH
+    warn "node was not on PATH — using $NODE_BIN (open a new terminal to fix your shell)"
+    break
+  done
+fi
+if [ -z "$NODE_BIN" ]; then
+  error "Node.js not found — cannot continue."
+  error "If it IS installed, your shell PATH is stale: open a new terminal, or run"
+  error "  eval \"\$(/opt/homebrew/bin/brew shellenv)\"   # then re-run this command"
   exit 1
 fi
 export NODE_BIN

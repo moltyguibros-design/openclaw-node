@@ -28,7 +28,18 @@ Phase 0+1, prior runtime-repair (4.1-4.4) and the review-doc batch are preserved
 **Set at:** 2026-09-06T00:00:00Z
 **Expires:** 2026-09-10T00:00:00Z
 
-```files embedder-prefetch-honesty-2026-09-08
+```files launcher-and-path-2026-09-08
+install.sh
+scripts/install/llm-setup.sh
+scripts/install/env.sh
+scripts/install/services.sh
+services/launcher/build-launcher-app.sh
+services/launcher/openclaw-stack.desktop
+test/install-modules.test.mjs
+memory-plan/plans/protocol/SCOPE.md
+```
+
+```files embedder-prefetch-honesty-2026-09-08 closed
 scripts/install/llm-setup.sh
 test/install-modules.test.mjs
 memory-plan/plans/protocol/SCOPE.md

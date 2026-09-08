@@ -2,7 +2,7 @@
 Type=Application
 Name=OpenClaw Stack
 Comment=Start the full OpenClaw node (services, bridge, watchers) and report via notification
-Exec=${NODE_BIN} ${OPENCLAW_REPO_DIR}/bin/openclaw-stack.mjs up
+Exec=sh -c '${NODE_BIN} ${OPENCLAW_REPO_DIR}/bin/openclaw-stack.mjs up; for i in $(seq 1 12); do curl -fsS -o /dev/null --max-time 2 http://127.0.0.1:3000 && break; sleep 1; done; xdg-open http://127.0.0.1:3000'
 Icon=${HOME}/.openclaw/share/notify-icons/app.png
 Terminal=false
 Categories=Utility;
