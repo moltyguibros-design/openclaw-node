@@ -1,7 +1,7 @@
 # SCOPE — integrations plan
 
-**Status:** active
-**Goal:** Step 2.4 — the memory-daemon lifecycle and memory-pipeline dataflow diagrams delivered to docs/diagrams and linked from docs/ARCHITECTURE.md. (Block 1 closed; 2.3 closed 2026-09-08; 2.1–2.2 need the operator's macOS box.)
+**Status:** idle
+**Status note:** no step in flight. Blocks 1 and 2's runnable rows are closed (2.1–2.2 need the operator's macOS box). The next fully-runnable work is Block 5.2 (agent-state detector) or Block 6.1 (tool calling); Block 3 and 4 open with operator installs. Set the next goal with the operator before editing.
 **Set at:** 2026-09-08
 **Expires:** 2026-09-15T23:59:00Z
 
@@ -86,7 +86,7 @@ memory-plan/plans/integrations/VERSION
 memory-plan/plans/integrations/audits/step23_archify_skill/*
 ```
 
-```files step24
+```files step24 closed
 docs/diagrams/**
 docs/ARCHITECTURE.md
 memory-plan/plans/integrations/INVENTORY.md

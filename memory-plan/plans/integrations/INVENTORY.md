@@ -89,7 +89,7 @@ from it is re-derivable from the artifact text.
 | 2 | 2.1 | v2.1 | [ ] | codebase-memory-mcp binary installed by hand under `~/.openclaw/workspace/lib/` with SHA-256 verified and the resident watcher disabled, documented in a runbook |
 | 2 | 2.2 | v2.2 | [ ] | `.mcp.json` registers `codebase-memory` beside `knowledge`, with `.codebase-memory/` ignored and a wrapper skill naming its tools |
 | 2 | 2.3 | v2.3 | [x] | skill `archify` installed from the upstream skill directory with the update check disabled by env |
-| 2 | 2.4 | v2.4 | [ ] | two showcase-valid diagrams (memory daemon lifecycle, JSONL-to-inject dataflow) delivered under `docs/diagrams/` and linked from `docs/ARCHITECTURE.md`, fonts stripped for offline viewing |
+| 2 | 2.4 | v2.4 | [x] | two showcase-valid diagrams (memory daemon lifecycle, JSONL-to-inject dataflow) delivered under `docs/diagrams/` and linked from `docs/ARCHITECTURE.md`, fonts stripped for offline viewing |
 
 > **2.1 — Goal:** the binary runs from `~/.openclaw/workspace/lib/codebase-memory-mcp/` and its config shows `auto_index false` and `watcher_enabled false`.
 > **Needs:** release v0.10.8 `darwin-arm64` tarball and `checksums.txt`; operator present (macOS box); D4 locked (never the upstream `install` subcommand, which injects hooks into `~/.claude/settings.json`); `docs/runbooks/` directory created.
@@ -111,6 +111,7 @@ from it is re-derivable from the artifact text.
 > **Needs:** 2.3 closed; the two IR JSONs (lifecycle + dataflow, showcase-valid on 2026-09-08); `docs/diagrams/` directory; the two Google Fonts `<link>` tags removed post-render.
 > **Feeds:** `docs/ARCHITECTURE.md` readers; Mission Control docs links.
 > **Verify:** `code:` `archify validate <type> <ir> --quality showcase --json` reports 9 checks passed for both · `runtime:` DevTools network tab shows zero external requests when each HTML opens · `visual:` operator confirms the lifecycle rail reads ENDED→BOOT→ACTIVE→IDLE→ENDED.
+> **Closed 2026-09-08:** both delivered at 9/9 showcase; fonts stripped so 0 external URLs remain; each opened in a real browser from file:// with a request listener — 0 external requests, 0 page errors, 37 and 42 rendered SVG labels. Linked from docs/ARCHITECTURE.md with their source IRs named.
 
 ---
 

@@ -103,6 +103,13 @@ recorded as UNKNOWN until the operator probes the design box; repo-tree rows are
 | **Status** | UNBUILT |
 | **Verified** | 2026-09-08 — `ls docs/runbooks` → no such directory |
 
+### docs/diagrams/
+
+| | |
+|---|---|
+| **Status** | LIVE — two self-contained diagrams |
+| **Verified** | 2026-09-08 (step 2.4) — `memory-daemon-lifecycle.html` and `memory-pipeline-dataflow.html` delivered at 9/9 showcase, Google Fonts links stripped, opened from `file://` in Chromium with a request listener: 0 external requests, 0 page errors, 37 and 42 SVG labels. Sources are `skills/archify/examples/*.json`, linked from `docs/ARCHITECTURE.md` |
+
 ## Family 7: Mesh agent state
 
 ### bin/mesh-agent.js worktree and heartbeat
