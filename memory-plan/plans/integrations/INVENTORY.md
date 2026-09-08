@@ -88,7 +88,7 @@ from it is re-derivable from the artifact text.
 |-------|------|---------|--------|-------------|
 | 2 | 2.1 | v2.1 | [ ] | codebase-memory-mcp binary installed by hand under `~/.openclaw/workspace/lib/` with SHA-256 verified and the resident watcher disabled, documented in a runbook |
 | 2 | 2.2 | v2.2 | [ ] | `.mcp.json` registers `codebase-memory` beside `knowledge`, with `.codebase-memory/` ignored and a wrapper skill naming its tools |
-| 2 | 2.3 | v2.3 | [ ] | skill `archify` installed from the upstream skill directory with the update check disabled by env |
+| 2 | 2.3 | v2.3 | [x] | skill `archify` installed from the upstream skill directory with the update check disabled by env |
 | 2 | 2.4 | v2.4 | [ ] | two showcase-valid diagrams (memory daemon lifecycle, JSONL-to-inject dataflow) delivered under `docs/diagrams/` and linked from `docs/ARCHITECTURE.md`, fonts stripped for offline viewing |
 
 > **2.1 — Goal:** the binary runs from `~/.openclaw/workspace/lib/codebase-memory-mcp/` and its config shows `auto_index false` and `watcher_enabled false`.
@@ -104,7 +104,8 @@ from it is re-derivable from the artifact text.
 > **2.3 — Goal:** `node skills/archify/bin/archify.mjs doctor` passes on the node's Node 22 and the skill grades B or better.
 > **Needs:** the upstream `archify/` skill directory (MIT; drop `examples/` and `test/`); frontmatter from the extraction artifact; `ARCHIFY_UPDATE_CHECK_DISABLED=1` in `openclaw.env.example` and in the skill's `metadata.clawdbot.env`.
 > **Feeds:** 2.4; any later diagram ask.
-> **Verify:** `code:` `doctor` exit 0; `skill-audit --skill archify --min-grade B`; scanner clean · `runtime:` `grep -r check-update skills/archify/bin/archify.mjs` returns nothing (the CLI never self-invokes the update check).
+> **Verify:** `code:` `validate --quality showcase` reports 9/9 artifact checks on both shipped examples; `skill-audit --skill archify --min-grade B`; scanner clean · `runtime:` no update-check script or outbound host in the shipped tree.
+> **Closed 2026-09-08:** audit 100/100 A, scanner exit 0, routing 100.0% with archify new and zero regressed; both examples validate 9/9 showcase with 0 errors and 0 warnings. 2.3 MB shipped. `doctor` is not the gate — it reads upstream's examples tree, which is not shipped. Found: `scripts/check-render-output.mjs` IS required by validate/deliver, so the first install (whole `scripts/` omitted) failed validation until it was restored; `check-update.mjs` stays out.
 
 > **2.4 — Goal:** both diagrams open from Mission Control offline with an empty network tab.
 > **Needs:** 2.3 closed; the two IR JSONs (lifecycle + dataflow, showcase-valid on 2026-09-08); `docs/diagrams/` directory; the two Google Fonts `<link>` tags removed post-render.

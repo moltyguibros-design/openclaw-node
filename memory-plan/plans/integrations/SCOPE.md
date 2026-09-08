@@ -1,7 +1,7 @@
 # SCOPE — integrations plan
 
 **Status:** active
-**Goal:** Step 2.3 — Archify skill installed with its update check disabled. (Block 1 closed 2026-09-08: 1.1–1.5 done, 1.6 deferred per D9. Step 2.1–2.2 need the operator's macOS box, so the chain takes 2.3 next.)
+**Goal:** Step 2.4 — the memory-daemon lifecycle and memory-pipeline dataflow diagrams delivered to docs/diagrams and linked from docs/ARCHITECTURE.md. (Block 1 closed; 2.3 closed 2026-09-08; 2.1–2.2 need the operator's macOS box.)
 **Set at:** 2026-09-08
 **Expires:** 2026-09-15T23:59:00Z
 
@@ -77,13 +77,22 @@ memory-plan/plans/integrations/BLOCKED.md
 memory-plan/plans/integrations/audits/step16_summarize_ytdlp/*
 ```
 
-```files step23
+```files step23 closed
 skills/archify/**
 openclaw.env.example
 memory-plan/plans/integrations/INVENTORY.md
 memory-plan/plans/integrations/COMPONENT_REGISTRY.md
 memory-plan/plans/integrations/VERSION
 memory-plan/plans/integrations/audits/step23_archify_skill/*
+```
+
+```files step24
+docs/diagrams/**
+docs/ARCHITECTURE.md
+memory-plan/plans/integrations/INVENTORY.md
+memory-plan/plans/integrations/COMPONENT_REGISTRY.md
+memory-plan/plans/integrations/VERSION
+memory-plan/plans/integrations/audits/step24_architecture_diagrams/*
 ```
 
 ## How this file works
