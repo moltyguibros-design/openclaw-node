@@ -175,3 +175,28 @@ outcome for a stalled plan.
 until someone runs it. The operator's command is recorded in the step's audit. Any future step
 whose evidence needs a host outside the proxy's bypass list takes the same shape: land the change,
 verify what is verifiable, defer the probe with the exact command, and say so plainly.
+
+## D10 — Step 5.2 is re-scoped: the detector exists, its signal is discarded (2026-09-08)
+
+**Decision.** Do not build `lib/agent-status.js` or a Claude hook listener. `lib/agent-activity.js`
+already classifies worker state from Claude's JSONL — `starting`, `active`, `ready`, `idle`,
+`waiting_input`, `blocked` — and `bin/mesh-agent.js` already sends it in every heartbeat as
+`activity_state`. Step 5.2 becomes: make that signal count, in the daemon that receives it.
+
+**Why.** The plan's Block-0 registry recorded "no `activity_state` in the heartbeat", taken from
+the absence of `lib/agent-status.js`. That was wrong, and building on it would have produced a
+second detector beside a working one — the exact parallel-implementation failure MASTER_PLAN §4.6
+forbids and this plan was written to avoid. Reading the code instead of the registry showed the
+real defect, which is worse than a missing detector: `handleHeartbeat` (`bin/mesh-task-daemon.js`)
+destructures only `task_id` and calls `store.touchActivity`, which refreshes `last_activity` and
+renews the lease. `activity_state` and `activity_timestamp` are silently dropped. So a Claude
+worker parked at a permission prompt keeps heartbeating every 60 s, and each heartbeat resets the
+stall clock and renews the lease — the stall detector, the one mechanism meant to catch a stuck
+worker, is defeated by the stuck worker's own heartbeat. It sits there until its budget expires.
+
+**Consequences.** The change is confined to the consumer side: the daemon persists the reported
+state, and a task reporting `waiting_input` or `blocked` past a threshold is released for human
+triage instead of being kept alive. Orca's hook-based approach stays unported — the node's JSONL
+reader covers the same states for the provider that matters, and a hook listener would need a
+loopback server and per-provider settings injection for no additional signal. The Orca cockpit
+setup (5.1) is unaffected.

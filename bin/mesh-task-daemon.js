@@ -52,6 +52,10 @@ const sc = StringCodec();
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
 const BUDGET_CHECK_INTERVAL = 30000; // 30s
 const STALL_MINUTES = parseInt(process.env.MESH_STALL_MINUTES || '5'); // no heartbeat for this long → stalled
+// A worker that keeps heartbeating while reporting waiting_input/blocked is
+// alive but not progressing; it needs a human, and the stall detector cannot
+// see it because its own heartbeat resets the clock (D10).
+const NOT_PROGRESSING_MINUTES = parseInt(process.env.MESH_NOT_PROGRESSING_MINUTES || '10');
 const MAX_REJECTIONS = parseInt(process.env.MESH_MAX_REJECTIONS || String(DEFAULT_MAX_REJECTIONS)); // reject→requeue cap (P4-5)
 const TASK_TTL_DAYS = parseInt(process.env.MESH_TASK_TTL_DAYS || '14'); // terminal tasks pruned after this; 0 disables
 const LEASE_MS = parseInt(process.env.MESH_LEASE_MS || String(DEFAULT_LEASE_MS)); // owner must renew within this (heartbeat is 60s) — P4-5
@@ -550,7 +554,7 @@ async function handleGet(msg) {
  */
 async function handleHeartbeat(msg) {
   const params = parseRequest(msg);
-  const { task_id } = params;
+  const { task_id, activity_state, activity_timestamp } = params;
   if (!task_id) return respondError(msg, 'task_id is required');
 
   // A heartbeat RENEWS the lease, so it is an owner action: anyone on the bus
@@ -560,11 +564,17 @@ async function handleHeartbeat(msg) {
   if (!existing) return respondError(msg, `Task ${task_id} not found`);
   if (!(await authorize(msg, params, existing, { action: 'heartbeat', allowOwner: true, allowOperator: false }))) return;
 
-  const task = await store.touchActivity(task_id);
+  // The worker reports what it is DOING, not just that it is alive. Without
+  // this the state was dropped here and a worker parked on a permission prompt
+  // renewed its own lease forever (D10).
+  const task = await store.touchActivity(task_id, {
+    activityState: typeof activity_state === 'string' ? activity_state : null,
+    activityTimestamp: typeof activity_timestamp === 'string' ? activity_timestamp : null,
+  });
   if (!task) return respondError(msg, `Task ${task_id} not found`);
 
   publishEvent('heartbeat', task);
-  respond(msg, { task_id, last_activity: task.last_activity });
+  respond(msg, { task_id, last_activity: task.last_activity, activity_state: task.activity_state || null });
 }
 
 /**
@@ -737,6 +747,27 @@ async function detectStalls() {
     }
   } catch (err) {
     warn(`reapExpiredLeases: ${err.message}`);
+  }
+
+  // Alive but not progressing: the worker keeps heartbeating while reporting
+  // waiting_input or blocked, which renews its own lease and resets the stall
+  // clock. Nothing above can see it, so it is handled before stall detection
+  // and released for the human it is already waiting on (D10).
+  try {
+    for (const task of await store.findNotProgressing(NOT_PROGRESSING_MINUTES)) {
+      const since = task.activity_state_since || task.last_activity;
+      const stuckMin = ((Date.now() - new Date(since)) / 60000).toFixed(1);
+      const reason = `agent reported ${task.activity_state} for ${stuckMin}m (threshold ${NOT_PROGRESSING_MINUTES}m) — needs a human`;
+      log(`NOT PROGRESSING ${task.task_id}: ${reason}`);
+      const released = await store.markReleased(task.task_id, reason, []);
+      if (released) {
+        publishEvent('released', released);
+        await cleanupTaskCollabSession(released, reason);
+        await checkPlanProgress(task.task_id, 'failed');
+      }
+    }
+  } catch (err) {
+    warn(`findNotProgressing: ${err.message}`);
   }
 
   const stalled = await store.findStalled(STALL_MINUTES);

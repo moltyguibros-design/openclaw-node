@@ -116,8 +116,8 @@ recorded as UNKNOWN until the operator probes the design box; repo-tree rows are
 
 | | |
 |---|---|
-| **Status** | LIVE — no agent-state signal |
-| **Verified** | 2026-09-08 — `createWorktree` at `~/.openclaw/worktrees/<taskId>` on `mesh/<taskId>` (lines 489–540); cleanup deletes the branch unconditionally; no hook listener, no `activity_state` in the heartbeat; `lib/agent-status.js` absent |
+| **Status** | LIVE — agent state reported AND consumed |
+| **Verified** | 2026-09-08 (step 5.2) — the Block-0 row claiming "no `activity_state` in the heartbeat" was wrong: `grep -n activity_state bin/mesh-agent.js` → lines 793–798, and `lib/agent-activity.js` classifies starting/active/ready/idle/waiting_input/blocked from Claude's JSONL. The real gap was the consumer: `handleHeartbeat` dropped the field while renewing the lease. Now `touchActivity` persists `activity_state`/`activity_timestamp`/`activity_state_since` and `findNotProgressing` releases a worker stuck past `MESH_NOT_PROGRESSING_MINUTES`; proven on real nats-server v2.10.22 + JetStream. `createWorktree` unchanged; cleanup still deletes the branch unconditionally (step 5.4) |
 
 ## Family 8: Local LLM client
 

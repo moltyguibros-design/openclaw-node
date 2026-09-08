@@ -206,7 +206,7 @@ from it is re-derivable from the artifact text.
 | Block | Step | Version | Status | Description |
 |-------|------|---------|--------|-------------|
 | 5 | 5.1 | v5.1 | [ ] | Orca cockpit runbook: worktree base, `mesh/` branch prefix, external worktree visibility, openclaw agent overrides, telemetry off |
-| 5 | 5.2 | v5.2 | [ ] | `lib/agent-status.js`: hook listener and event mapping so mesh-agent reports working / waiting / done |
+| 5 | 5.2 | v5.2 | [x] | `lib/agent-status.js`: hook listener and event mapping so mesh-agent reports working / waiting / done |
 | 5 | 5.3 | v5.3 | [ ] | task-daemon reaper: 30-minute staleness and missed-Stop inference |
 | 5 | 5.4 | v5.4 | [ ] | mesh-agent worktree hygiene: orphan-gitdir proof and preserve-branch-by-default |
 
@@ -215,7 +215,7 @@ from it is re-derivable from the artifact text.
 > **Feeds:** the operator's daily driving; 5.2 hook endpoint coexists with Orca's own.
 > **Verify:** `visual:` the worktree row in Orca · `runtime:` `orca worktree list --json` includes the path.
 
-> **5.2 — Goal:** a worker that reaches a permission prompt reports `activity_state: waiting` within one heartbeat.
+> **5.2 — Goal (re-scoped, D10):** the daemon consumes the `activity_state` the worker already reports, so a worker parked on a permission prompt stops renewing its own lease forever.
 > **Needs:** `bin/mesh-agent.js` spawn point (~line 775) accepting a `--settings` JSON for Claude; a loopback `http.Server` on port 0 with a token; endpoint file `~/.openclaw/agent-hooks/endpoint.env`; the event mapping (tool events → working; PermissionRequest or PreToolUse of AskUserQuestion → waiting; Stop → done); the blocked-sentinel regex for hookless providers; never touching `~/.claude/settings.json`.
 > **Feeds:** heartbeat payload; budget watchdog treats `waiting` as blocked; Mission Control mesh page.
 > **Verify:** `runtime:` a scripted worker that triggers a permission prompt shows `waiting` in the next heartbeat · `code:` unit test for the mapping.

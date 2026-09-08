@@ -1,7 +1,7 @@
 # SCOPE — integrations plan
 
-**Status:** idle
-**Status note:** no step in flight. Blocks 1 and 2's runnable rows are closed (2.1–2.2 need the operator's macOS box). The next fully-runnable work is Block 5.2 (agent-state detector) or Block 6.1 (tool calling); Block 3 and 4 open with operator installs. Set the next goal with the operator before editing.
+**Status:** active
+**Goal:** Step 6.1 — `lib/llm-client.mjs` gains tool calling (`tools` in, `toolCalls` out) with qwen3 reliability evidence recorded before anything depends on it. (5.2 closed 2026-09-08.)
 **Set at:** 2026-09-08
 **Expires:** 2026-09-15T23:59:00Z
 
@@ -93,6 +93,27 @@ memory-plan/plans/integrations/INVENTORY.md
 memory-plan/plans/integrations/COMPONENT_REGISTRY.md
 memory-plan/plans/integrations/VERSION
 memory-plan/plans/integrations/audits/step24_architecture_diagrams/*
+```
+
+```files step52 closed
+bin/mesh-task-daemon.js
+lib/mesh-tasks.js
+bin/mesh-agent.js
+test/mesh-activity-state.test.mjs
+memory-plan/plans/integrations/INVENTORY.md
+memory-plan/plans/integrations/COMPONENT_REGISTRY.md
+memory-plan/plans/integrations/DECISIONS.md
+memory-plan/plans/integrations/VERSION
+memory-plan/plans/integrations/audits/step52_activity_state_consumed/*
+```
+
+```files step61
+lib/llm-client.mjs
+test/llm-client-tools.test.mjs
+memory-plan/plans/integrations/INVENTORY.md
+memory-plan/plans/integrations/COMPONENT_REGISTRY.md
+memory-plan/plans/integrations/VERSION
+memory-plan/plans/integrations/audits/step61_llm_tool_calling/*
 ```
 
 ## How this file works
