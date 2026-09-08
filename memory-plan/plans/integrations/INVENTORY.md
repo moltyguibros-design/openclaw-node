@@ -41,7 +41,7 @@ from it is re-derivable from the artifact text.
 | 1 | 1.2 | v1.2 | [x] | web-fetch address pinning: resolve once, reject if any address is private, pin the vetted address for Chromium so a DNS rebind cannot reach a private host |
 | 1 | 1.3 | v1.3 | [x] | harness rule `lazy-senior-ladder` (tier 2, local+mesh) with an advisory added-dependency `post_validate` command |
 | 1 | 1.4 | v1.4 | [x] | skill `ponytail-review` installed and wired as a fourth `multi-review` perspective |
-| 1 | 1.5 | v1.5 | [ ] | six agent-skills ports (debugging-and-error-recovery, incremental-implementation, doubt-driven-development, interview-me, deprecation-and-migration, code-review-and-quality) with collision-checked triggers |
+| 1 | 1.5 | v1.5 | [x] | six agent-skills ports (debugging-and-error-recovery, incremental-implementation, doubt-driven-development, interview-me, deprecation-and-migration, code-review-and-quality) with collision-checked triggers |
 | 1 | 1.6 | v1.6 | [ ] | `summarize` skill gains a local yt-dlp subtitle path so YouTube works with no Apify token |
 
 > **1.1 — Goal:** `web-fetch.mjs --markdown <url>` prints title/author/published/source/words then the article body as Markdown, and falls back to innerText when the extractor yields fewer than `WEB_FETCH_MIN_WORDS` (default 40).
@@ -72,6 +72,7 @@ from it is re-derivable from the artifact text.
 > **Needs:** the six SKILL.md bodies (MIT); the frontmatter drafts from the extraction artifact; rewording rules (CONSTRAINTS.md → harness-rules + active SCOPE; nested-subagent / `codex exec` text → "a fresh mesh task carrying only artifact + contract"); scanner and skill-audit runnable.
 > **Feeds:** skill routing for engineering asks; `multi-review` may cite code-review-and-quality's five axes.
 > **Verify:** `code:` scanner clean on all six; `skill-audit --min-grade B` exits 0; `skill-routing-eval --compare <baseline>` no regression · `runtime:` the skill loader lists all six.
+> **Closed 2026-09-08:** audit 100/95/93/100/100/88 (five A, one B); scanner exit 0 with zero findings on each; routing 787/787 → 829/829, both 100.0%, zero regressed after replacing two colliding triggers ("review this pull request" hit `github`, "grill me before building" hit `epic-hypothesis`).
 
 > **1.6 — Goal:** `summarize` produces a YouTube summary with `APIFY_API_TOKEN` unset.
 > **Needs:** `yt-dlp` on PATH (documented in the skill's `requires.bins`); `skills/summarize/SKILL.md` current fallback section.
