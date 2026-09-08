@@ -155,3 +155,23 @@ actually care about; it stays the bar for any later extraction change. Byte size
 reporting in an audit, never as a gate. Steps whose evidence needs arbitrary public pages must
 state that they need an operator-run probe, because this container reaches only the hosts in its
 proxy's NO_PROXY list.
+
+## D9 — Step 1.6 lands its change and defers its probe to the operator's box (2026-09-08)
+
+**Decision.** The local yt-dlp subtitle path is written into `skills/summarize/SKILL.md` and
+verified as far as this session can verify it, but INVENTORY row 1.6 is marked `[D]` rather than
+`[x]`. Its runtime evidence — a real YouTube video summarized with `APIFY_API_TOKEN` unset — is an
+operator probe. The row un-defers to `[x]` when that probe is pasted into the step's audit.
+
+**Why.** This session's egress policy refuses YouTube at the proxy: `curl` to `www.youtube.com`,
+`m.youtube.com` and `i.ytimg.com` all return `CONNECT tunnel failed, response 403`, and `yt-dlp`
+fails with `Tunnel connection failed: 403 Forbidden` after three retries. The evidence cannot be
+produced here at all, so closing the row would be a fake close (MASTER_PLAN §5, the cardinal
+failure). Writing `BLOCKED.md` would be the other option, but that halts the whole chain, and the
+next block's Archify steps need nothing from the network — so blocking would trade one honest
+outcome for a stalled plan.
+
+**Consequences.** Block 1's exit criterion is met by 1.1–1.5; 1.6's code is in the tree and inert
+until someone runs it. The operator's command is recorded in the step's audit. Any future step
+whose evidence needs a host outside the proxy's bypass list takes the same shape: land the change,
+verify what is verifiable, defer the probe with the exact command, and say so plainly.

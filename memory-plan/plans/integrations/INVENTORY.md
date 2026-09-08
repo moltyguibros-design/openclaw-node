@@ -42,7 +42,7 @@ from it is re-derivable from the artifact text.
 | 1 | 1.3 | v1.3 | [x] | harness rule `lazy-senior-ladder` (tier 2, local+mesh) with an advisory added-dependency `post_validate` command |
 | 1 | 1.4 | v1.4 | [x] | skill `ponytail-review` installed and wired as a fourth `multi-review` perspective |
 | 1 | 1.5 | v1.5 | [x] | six agent-skills ports (debugging-and-error-recovery, incremental-implementation, doubt-driven-development, interview-me, deprecation-and-migration, code-review-and-quality) with collision-checked triggers |
-| 1 | 1.6 | v1.6 | [ ] | `summarize` skill gains a local yt-dlp subtitle path so YouTube works with no Apify token |
+| 1 | 1.6 | v1.6 | [D] | `summarize` skill gains a local yt-dlp subtitle path so YouTube works with no Apify token |
 
 > **1.1 — Goal:** `web-fetch.mjs --markdown <url>` prints title/author/published/source/words then the article body as Markdown, and falls back to innerText when the extractor yields fewer than `WEB_FETCH_MIN_WORDS` (default 40).
 > **Needs:** `defuddle@^0.19.3` added to root `package.json` (resolve via `createRequire(import.meta.url).resolve('defuddle/full')`; the exports map hides `dist/`); Playwright already a root dependency; the screenshot branch stays before extraction because `parse()` strips `<script>` from the live DOM; `parse()` only, never `parseAsync()` (site extractors may call third-party APIs).
@@ -78,6 +78,7 @@ from it is re-derivable from the artifact text.
 > **Needs:** `yt-dlp` on PATH (documented in the skill's `requires.bins`); `skills/summarize/SKILL.md` current fallback section.
 > **Feeds:** research and marketing skills that cite video sources.
 > **Verify:** `runtime:` one public YouTube URL summarized end to end with no Apify token in the environment, subtitles fetched by yt-dlp visible in the log.
+> **Deferred 2026-09-08 (D9):** the change is in the tree — `## YouTube without Apify` recipe, `--youtube auto` described honestly, yt-dlp added as an optional install; audit 100/100 A, scanner exit 0, routing unchanged. The end-to-end probe cannot run here: this session's egress refuses YouTube with `CONNECT tunnel failed, response 403`, and yt-dlp fails the same way. The exact operator command is in `audits/step16_summarize_ytdlp/AUDIT_POST.md`; paste its output there and flip this row to `[x]`.
 
 ---
 

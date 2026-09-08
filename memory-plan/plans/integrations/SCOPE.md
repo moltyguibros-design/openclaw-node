@@ -1,7 +1,7 @@
 # SCOPE — integrations plan
 
 **Status:** active
-**Goal:** Step 1.6 — `summarize` skill gains a local yt-dlp subtitle path so YouTube works with no Apify token. (Block 0, steps 1.1–1.5 closed 2026-09-08.)
+**Goal:** Step 2.3 — Archify skill installed with its update check disabled. (Block 1 closed 2026-09-08: 1.1–1.5 done, 1.6 deferred per D9. Step 2.1–2.2 need the operator's macOS box, so the chain takes 2.3 next.)
 **Set at:** 2026-09-08
 **Expires:** 2026-09-15T23:59:00Z
 
@@ -68,13 +68,22 @@ memory-plan/plans/integrations/VERSION
 memory-plan/plans/integrations/audits/step15_agent_skills_ports/*
 ```
 
-```files step16
+```files step16 closed
 skills/summarize/SKILL.md
 memory-plan/plans/integrations/INVENTORY.md
 memory-plan/plans/integrations/COMPONENT_REGISTRY.md
 memory-plan/plans/integrations/VERSION
 memory-plan/plans/integrations/BLOCKED.md
 memory-plan/plans/integrations/audits/step16_summarize_ytdlp/*
+```
+
+```files step23
+skills/archify/**
+openclaw.env.example
+memory-plan/plans/integrations/INVENTORY.md
+memory-plan/plans/integrations/COMPONENT_REGISTRY.md
+memory-plan/plans/integrations/VERSION
+memory-plan/plans/integrations/audits/step23_archify_skill/*
 ```
 
 ## How this file works
