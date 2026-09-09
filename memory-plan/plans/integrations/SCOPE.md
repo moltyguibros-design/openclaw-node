@@ -1,7 +1,7 @@
 # SCOPE — integrations plan
 
-**Status:** active
-**Goal:** Step 5.3 — cap the stall-clearing alive check, so a worker that answers "alive" while making no progress cannot reset the stall detector forever; and stop mislabelling a dead worker as one waiting on a human.
+**Status:** idle
+**Status note:** no step in flight. Block 5 is closed except 5.1 (Orca runbook, needs the desktop app). Remaining work all needs the operator: 2.1–2.2 (macOS binary), 3.x (VoiceStudio), 4.x (Node 24 + clone + data-source decision), 6.2–6.3 (gated on the qwen3 tool-selection probe from 6.1). Set the next goal with the operator before editing.
 **Set at:** 2026-09-08
 **Expires:** 2026-09-15T23:59:00Z
 
@@ -116,7 +116,7 @@ memory-plan/plans/integrations/VERSION
 memory-plan/plans/integrations/audits/step61_llm_tool_calling/*
 ```
 
-```files step53
+```files step53 closed
 bin/mesh-task-daemon.js
 lib/mesh-tasks.js
 test/mesh-stall-clear-cap.test.mjs
@@ -124,6 +124,15 @@ memory-plan/plans/integrations/INVENTORY.md
 memory-plan/plans/integrations/COMPONENT_REGISTRY.md
 memory-plan/plans/integrations/VERSION
 memory-plan/plans/integrations/audits/step53_stall_clear_cap/*
+```
+
+```files step54 closed
+bin/mesh-agent.js
+test/mesh-worktree-hygiene.test.mjs
+memory-plan/plans/integrations/INVENTORY.md
+memory-plan/plans/integrations/COMPONENT_REGISTRY.md
+memory-plan/plans/integrations/VERSION
+memory-plan/plans/integrations/audits/step54_worktree_hygiene/*
 ```
 
 ## How this file works

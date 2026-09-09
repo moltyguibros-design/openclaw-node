@@ -208,7 +208,7 @@ from it is re-derivable from the artifact text.
 | 5 | 5.1 | v5.1 | [ ] | Orca cockpit runbook: worktree base, `mesh/` branch prefix, external worktree visibility, openclaw agent overrides, telemetry off |
 | 5 | 5.2 | v5.2 | [x] | `lib/agent-status.js`: hook listener and event mapping so mesh-agent reports working / waiting / done |
 | 5 | 5.3 | v5.3 | [x] | task-daemon reaper: cap the stall-clearing alive check at a 30-minute window |
-| 5 | 5.4 | v5.4 | [ ] | mesh-agent worktree hygiene: orphan-gitdir proof and preserve-branch-by-default |
+| 5 | 5.4 | v5.4 | [x] | mesh-agent worktree hygiene: orphan-gitdir proof and preserve-branch-by-default |
 
 > **5.1 — Goal:** a worktree created by the daemon at `~/.openclaw/worktrees/<taskId>` on `mesh/<taskId>` is listed in Orca.
 > **Needs:** Orca installed by the operator; settings `worktreeBasePath`, `nestWorkspaces=false`, branch prefix custom `mesh/`, `worktreeVisibilityDefaults.external=show`, `agentCmdOverrides.openclaw`, `agentDefaultEnv` with `MESH_*`; `DO_NOT_TRACK=1` in the launch env; `docs/runbooks/orca-cockpit.md`.
@@ -227,6 +227,7 @@ from it is re-derivable from the artifact text.
 > **Verify:** `runtime:` a stalled worker is re-queued after the window with a log line naming the cause · `code:` test for the inference guard.
 
 > **5.4 — Goal:** cleanup of a crashed task leaves its `mesh/<taskId>` branch in place and refuses to remove a worktree whose `.git` file does not point at this repo.
+> **Closed 2026-09-09:** 10/10 tests on real repositories; runtime probe — a foreign directory at the task path survives and creation fails closed, a branch holding the only copy of a worker's commits is kept while its worktree is removed, an empty branch is still deleted. Suite like-for-like 2051/263 baseline vs 2071/263 branch (+20 tests across 5.3 and 5.4, no new failures).
 > **Needs:** `cleanupWorktree` in `bin/mesh-agent.js`; the orphan-gitdir proof pattern.
 > **Feeds:** operator review of failed tasks; 5.1 (Orca shows the preserved branch).
 > **Verify:** `code:` tests for both paths · `runtime:` `git branch --list 'mesh/*'` still shows the branch after a simulated crash.
