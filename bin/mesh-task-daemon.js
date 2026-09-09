@@ -56,6 +56,10 @@ const STALL_MINUTES = parseInt(process.env.MESH_STALL_MINUTES || '5'); // no hea
 // alive but not progressing; it needs a human, and the stall detector cannot
 // see it because its own heartbeat resets the clock (D10).
 const NOT_PROGRESSING_MINUTES = parseInt(process.env.MESH_NOT_PROGRESSING_MINUTES || '10');
+// An agent can answer the alive check truthfully while its child process is
+// wedged. Without a bound, every pass clears the stall and the task never
+// reaches triage — so consecutive clears are capped by wall time.
+const STALL_CLEAR_WINDOW_MINUTES = parseInt(process.env.MESH_STALL_CLEAR_WINDOW_MINUTES || '30');
 const MAX_REJECTIONS = parseInt(process.env.MESH_MAX_REJECTIONS || String(DEFAULT_MAX_REJECTIONS)); // reject→requeue cap (P4-5)
 const TASK_TTL_DAYS = parseInt(process.env.MESH_TASK_TTL_DAYS || '14'); // terminal tasks pruned after this; 0 disables
 const LEASE_MS = parseInt(process.env.MESH_LEASE_MS || String(DEFAULT_LEASE_MS)); // owner must renew within this (heartbeat is 60s) — P4-5
@@ -754,7 +758,12 @@ async function detectStalls() {
   // clock. Nothing above can see it, so it is handled before stall detection
   // and released for the human it is already waiting on (D10).
   try {
-    for (const task of await store.findNotProgressing(NOT_PROGRESSING_MINUTES)) {
+    // Only tasks whose worker is still heartbeating: one that died while parked
+    // is a stall, and the branch below labels and handles it correctly.
+    const parked = await store.findNotProgressing(NOT_PROGRESSING_MINUTES, undefined, {
+      heartbeatWithinMs: STALL_MINUTES * 60 * 1000,
+    });
+    for (const task of parked) {
       const since = task.activity_state_since || task.last_activity;
       const stuckMin = ((Date.now() - new Date(since)) / 60000).toFixed(1);
       const reason = `agent reported ${task.activity_state} for ${stuckMin}m (threshold ${NOT_PROGRESSING_MINUTES}m) — needs a human`;
@@ -788,10 +797,17 @@ async function detectStalls() {
         );
         const response = JSON.parse(sc.decode(reply.data));
         if (response.alive) {
-          // Agent is still working — extend deadline by touching activity
-          await store.touchActivity(task.task_id);
-          log(`STALL CLEARED ${task.task_id}: agent ${task.owner} confirmed alive. Extended deadline.`);
-          continue;
+          const clearedFor = TaskStore.stallClearedForMinutes(task);
+          if (clearedFor !== null && clearedFor >= STALL_CLEAR_WINDOW_MINUTES) {
+            // "Alive" has been the only signal for the whole window. The agent
+            // is running and getting nowhere; believing it again just hides the
+            // task from triage for another pass.
+            log(`STALL CLEAR EXHAUSTED ${task.task_id}: agent ${task.owner} answered alive ${task.stall_clear_count || 0}x over ${clearedFor.toFixed(1)}m — releasing anyway`);
+          } else {
+            const cleared = await store.markStallCleared(task.task_id);
+            log(`STALL CLEARED ${task.task_id}: agent ${task.owner} confirmed alive (clear ${cleared?.stall_clear_count || 1} of this run). Extended deadline.`);
+            continue;
+          }
         }
       } catch {
         // Intentional: no response within 5s — agent is truly unresponsive
@@ -828,11 +844,11 @@ async function detectStalls() {
       }
     }
 
-    const releasedTask = await store.markReleased(
-      task.task_id,
-      `Stall detected: no agent heartbeat for ${silentMin}m, alive check failed`,
-      task.attempts
-    );
+    const clearedFor = TaskStore.stallClearedForMinutes(task);
+    const stallReason = clearedFor !== null && clearedFor >= STALL_CLEAR_WINDOW_MINUTES
+      ? `Alive but not progressing: agent answered the alive check ${task.stall_clear_count || 0}x over ${clearedFor.toFixed(1)}m (window ${STALL_CLEAR_WINDOW_MINUTES}m) without finishing`
+      : `Stall detected: no agent heartbeat for ${silentMin}m, alive check failed`;
+    const releasedTask = await store.markReleased(task.task_id, stallReason, task.attempts);
     if (releasedTask) publishEvent('released', releasedTask);
 
     // Update plan progress if this task belongs to a plan

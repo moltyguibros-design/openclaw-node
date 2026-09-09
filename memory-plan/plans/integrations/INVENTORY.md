@@ -207,7 +207,7 @@ from it is re-derivable from the artifact text.
 |-------|------|---------|--------|-------------|
 | 5 | 5.1 | v5.1 | [ ] | Orca cockpit runbook: worktree base, `mesh/` branch prefix, external worktree visibility, openclaw agent overrides, telemetry off |
 | 5 | 5.2 | v5.2 | [x] | `lib/agent-status.js`: hook listener and event mapping so mesh-agent reports working / waiting / done |
-| 5 | 5.3 | v5.3 | [ ] | task-daemon reaper: 30-minute staleness and missed-Stop inference |
+| 5 | 5.3 | v5.3 | [x] | task-daemon reaper: cap the stall-clearing alive check at a 30-minute window |
 | 5 | 5.4 | v5.4 | [ ] | mesh-agent worktree hygiene: orphan-gitdir proof and preserve-branch-by-default |
 
 > **5.1 — Goal:** a worktree created by the daemon at `~/.openclaw/worktrees/<taskId>` on `mesh/<taskId>` is listed in Orca.
@@ -220,7 +220,8 @@ from it is re-derivable from the artifact text.
 > **Feeds:** heartbeat payload; budget watchdog treats `waiting` as blocked; Mission Control mesh page.
 > **Verify:** `runtime:` a scripted worker that triggers a permission prompt shows `waiting` in the next heartbeat · `code:` unit test for the mapping.
 
-> **5.3 — Goal:** a worker whose last status is older than 30 minutes is reaped, and a missed Stop is inferred only when the terminal baseline matches.
+> **5.3 — Goal (re-scoped):** an agent that answers the alive check while making no progress cannot reset the stall detector forever. Missed-Stop inference was dropped: it reads a terminal baseline this node does not have.
+> **Closed 2026-09-09:** 37/37 tests; real nats-server + JetStream probe — 6 clears over 31m past a 30m window releases with "answered the alive check 6x over 31.0m", a worker heartbeat resets the window, and a dead-while-parked worker now falls to findStalled instead of being mislabelled.
 > **Needs:** 5.2 closed; `bin/mesh-task-daemon.js` lease and reject paths.
 > **Feeds:** task queue health.
 > **Verify:** `runtime:` a stalled worker is re-queued after the window with a log line naming the cause · `code:` test for the inference guard.
