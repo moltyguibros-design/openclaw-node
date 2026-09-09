@@ -12,7 +12,7 @@ negative_triggers:
   - "read this file"
   - "extract data from"
 homepage: https://summarize.sh
-metadata: {"clawdbot":{"emoji":"🧾","requires":{"bins":["summarize"]},"install":[{"id":"brew","kind":"brew","formula":"steipete/tap/summarize","bins":["summarize"],"label":"Install summarize (brew)"}]}}
+metadata: {"clawdbot":{"emoji":"🧾","requires":{"bins":["summarize"]},"install":[{"id":"brew","kind":"brew","formula":"steipete/tap/summarize","bins":["summarize"],"label":"Install summarize (brew)"},{"id":"yt-dlp","kind":"brew","formula":"yt-dlp","bins":["yt-dlp"],"label":"Install yt-dlp (optional, local YouTube subtitles)"}]}}
 ---
 
 # Summarize
@@ -44,7 +44,22 @@ Default model is `google/gemini-3-flash-preview` if none is set.
 - `--extract-only` (URLs only)
 - `--json` (machine readable)
 - `--firecrawl auto|off|always` (fallback extraction)
-- `--youtube auto` (Apify fallback if `APIFY_API_TOKEN` set)
+- `--youtube auto` (sends the video to Apify when `APIFY_API_TOKEN` is set — see below for the local path)
+
+## YouTube without Apify
+
+`--youtube auto` reaches a hosted service. When `yt-dlp` is on PATH, fetch the subtitles locally
+and summarize the text file instead — nothing but the summarizer's own model call leaves the machine:
+
+```bash
+yt-dlp --skip-download --write-auto-subs --sub-lang en --sub-format vtt \
+  -o "$TMPDIR/%(id)s.%(ext)s" "https://youtu.be/VIDEO_ID"
+summarize "$TMPDIR/VIDEO_ID.en.vtt"
+```
+
+Use `--write-subs` instead of `--write-auto-subs` when the video has human captions, and
+`--sub-lang <code>` for another language. If yt-dlp reports no subtitles, the video has none and
+`--youtube auto` is the remaining option.
 
 ## Config
 
@@ -56,4 +71,4 @@ Optional config file: `~/.summarize/config.json`
 
 Optional services:
 - `FIRECRAWL_API_KEY` for blocked sites
-- `APIFY_API_TOKEN` for YouTube fallback
+- `APIFY_API_TOKEN` for the hosted YouTube fallback — not needed if `yt-dlp` is installed
