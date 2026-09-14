@@ -144,3 +144,65 @@ ownership defects, not threshold-tuning problems.
 **Consequences.** Each step must deploy and observe its corrected signal before closing. No auth
 exemption, watcher downgrade, dependency duplication, or retrospective health claim is accepted.
 Federation 2.6 remains blocked until Block 4 closes.
+
+## D10 — An expired scope is a named state, not a silent absence (2026-09-14)
+
+**Decision.** `scope-check.sh` classifies each `SCOPE.md` into five states — `override`, `active`,
+`expired`, `malformed`, `inactive` — instead of the previous binary "usable / empty". The three
+denying states stay denying: an expired scope still exits 2 and the allow-list is unchanged. What
+changes is the verdict the operator reads. When every scope is denied but at least one carries
+`**Status:** active`, the hook reports `scope EXPIRED`, names the lapsed plan file, echoes its
+`Expires` verbatim with an elapsed clause, and lists the three real remedies — including the fact
+that `**Override:** true` is evaluated only inside a live window and so will not lift the block.
+A `**Expires:**` that is neither `no-expiry` nor ISO-8601 UTC is reported as unparseable rather
+than being silently read as expired.
+
+**Why.** The two conditions "no plan is active" and "a plan is active but its window closed" had
+the same representation (an empty return from `scope_active_state`) and therefore the same message:
+`no active scope`. That message is false in the second case, and false in the precise way that costs
+the most time — it tells an operator to go set a `Status` they can see is already set, so they look
+for a parser bug, a path bug, or a broken hook instead of a date. It has now cost three incidents:
+federation (2026-08-24, window closed 2026-08-09, the header left reading `active`), repair
+(2026-08-26, caught two weeks later with CLAUDE.md still claiming no scope was active), and protocol
+(`Expires: 2026-09-10`, found 2026-09-14 — four days in which every `Edit`/`Write` in the repo was
+refused). Three occurrences of one diagnostic defect is the defect, not the bookkeeping around it.
+
+**Consequences.** The fix is diagnostic only; no write that was refused before is permitted now, and
+`test/gate-mutation.test.mjs` pins both halves — that an expired scope still exits 2, and that its
+headline is not the old misdiagnosis. Those tests run the hook out of a throwaway repo tree (a copy
+of the script under `<tmp>/.claude/hooks/` roots `REPO_ROOT` at `<tmp>` via `$0/../..`) rather than
+introducing an environment variable to redirect the scope directory: a settable scope path would be
+a fail-open on the repo's only mechanically enforced write gate. The deeper exposure this incident
+names is not fixed here — nothing *notices* an expiry until a write is attempted, and CLAUDE.md's
+prose about which scope is active is maintained by hand and was wrong in all three cases. A
+scheduled or tick-time freshness check, and a CLAUDE.md governance line generated rather than
+written, are captured as open items, not done.
+
+## D11 — The scope contract is removed; D10 is moot (2026-09-14)
+
+**Decision.** The per-file write gate is gone: `.claude/hooks/scope-check.sh`, its `PreToolUse`
+registration in `.claude/settings.json`, all six `memory-plan/plans/*/SCOPE.md` files, the
+`SCOPE.template.md` scaffold, the `plan-lint.sh` master-plan SCOPE checks and scope-hygiene grades,
+the viewer's `parseScope`/`/scope` route and "Current Scope" card, the "set scope before editing"
+section in every `TICK_PROMPT.md`, and the governing prose in `MASTER_PLAN.md` §4.2/§6.2,
+`PROTOCOL.md` §8, `COWORK_MODEL.md` and both bootstrap docs. D10 — shipped three hours earlier,
+making an expired scope report itself as expired rather than as absent — is superseded: the thing
+it improved no longer exists.
+
+**Why.** Operator instruction, 2026-09-14, unambiguous and repeated. The mechanism's record
+supports it: in roughly two months it latched the entire repo shut three times (federation
+2026-08-24, repair 2026-08-26, protocol 2026-09-10, the last for four days), each time because a
+date passed rather than because anyone did anything wrong, and there is no recorded instance of it
+stopping a bad write. It also could not see Bash writes at all — `sed -i`, `tee`, redirects — which
+`CLAUDE.md` acknowledged as "a known hole, not permission", so the discipline was already carried by
+convention for a large share of edits while the cost fell entirely on the tools that played by the
+rules.
+
+**Consequences.** Nothing gates writes now. The `OUT_OF_SCOPE.md` files stay — they hold real
+captured drift and remain the place to record something noticed but not acted on. The 9-phase
+lifecycle, the `Runtime-Evidence:` commit trailer, `plan-lint.sh`'s remaining surfaces, and the
+commit/push validators are untouched: the parts of the discipline that never depended on a
+permission slip. What is genuinely lost is the one mechanical check on step boundaries; §4.2 of
+MASTER_PLAN now asks for that as convention. If it needs to come back, it should come back as
+something that cannot latch — advisory, or keyed to the step actually in flight rather than to a
+wall-clock deadline.
