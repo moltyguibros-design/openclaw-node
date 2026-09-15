@@ -1,7 +1,13 @@
 # SCOPE — protocol plan
 
 **Status:** active
-**Goal:** Phase 7 (2026-09-07): per-node NATS credentials — the identity ed25519 key doubles as the
+**Goal:** (2026-09-15) author `REMEDIATION_PLAN_2026-09-15.md` — turn the 25-pass + 50-pass reviews
+(204 findings; ledgers in this plan's OUT_OF_SCOPE 2026-09-14/15 entries) into an ordered, scoped,
+verifiable fix sequence in the repo's convention (companion to REMEDIATION_PLAN_2026-09-06.md). This
+scope authors the PLAN DOCUMENT only — no source fixes; each phase it defines becomes its own future
+scope batch. Prior goal (2026-09-14) unblock the sharp audit gate — DONE (block below closed).
+Earlier launcher/PATH work below.
+Earlier goal — Phase 7 (2026-09-07): per-node NATS credentials — the identity ed25519 key doubles as the
 NATS nkey, `OPENCLAW_NATS_AUTH=token|nkey|nkey-strict` (default token, no behaviour change until the
 operator flips), server users block rendered from the identity registry into an included
 `nats-auth.conf`, worker deny on `mesh.deploy.trigger`, every credential-less connect routed through
@@ -25,10 +31,36 @@ Local consumers that GET :3000 read the 0600 session token like scheduler-heartb
 Code + focused tests + MC build only; runtime evidence on the live host is the operator's step.
 Per-node NATS nkeys is deferred (needs install-time credential provisioning).
 Phase 0+1, prior runtime-repair (4.1-4.4) and the review-doc batch are preserved as closed blocks.
-**Set at:** 2026-09-06T00:00:00Z
-**Expires:** 2026-09-10T00:00:00Z
+**Set at:** 2026-09-15T00:00:00Z
+**Expires:** 2026-09-19T00:00:00Z
 
-```files embedder-prefetch-honesty-2026-09-08
+```files remediation-plan-2026-09-15
+REMEDIATION_PLAN_2026-09-15.md
+REVIEW_FINDINGS_2026-09-15.md
+memory-plan/plans/protocol/SCOPE.md
+memory-plan/plans/protocol/OUT_OF_SCOPE.md
+```
+
+```files sharp-advisory-audit-gate-2026-09-14 closed
+package.json
+package-lock.json
+mission-control/package.json
+mission-control/package-lock.json
+memory-plan/plans/protocol/SCOPE.md
+```
+
+```files launcher-and-path-2026-09-08
+install.sh
+scripts/install/llm-setup.sh
+scripts/install/env.sh
+scripts/install/services.sh
+services/launcher/build-launcher-app.sh
+services/launcher/openclaw-stack.desktop
+test/install-modules.test.mjs
+memory-plan/plans/protocol/SCOPE.md
+```
+
+```files embedder-prefetch-honesty-2026-09-08 closed
 scripts/install/llm-setup.sh
 test/install-modules.test.mjs
 memory-plan/plans/protocol/SCOPE.md
