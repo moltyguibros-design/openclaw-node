@@ -493,6 +493,34 @@ const WORKTREE_BASE = process.env.MESH_WORKTREE_BASE || path.join(process.env.HO
  * Each task gets an isolated branch and working directory.
  * On failure, returns null (falls back to shared workspace).
  */
+/**
+ * The `gitdir:` target inside a worktree's `.git` marker, or null when the path
+ * is not a worktree. A real clone has a `.git` DIRECTORY and returns null: a
+ * repository is never something this code may remove.
+ */
+function worktreeGitdir(dirPath) {
+  const marker = path.join(dirPath, '.git');
+  let stat;
+  try { stat = fs.lstatSync(marker); } catch { return null; }
+  if (!stat.isFile()) return null;
+  const match = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(marker, 'utf8'));
+  return match ? match[1] : null;
+}
+
+/**
+ * True only for a worktree registered under THIS workspace's admin directory.
+ * `git worktree remove` fails exactly when a path is not our worktree, which is
+ * also when deleting it would destroy something we do not own — so the fallback
+ * removal has to prove ownership first rather than trusting the path alone.
+ */
+function isOwnWorktree(dirPath, workspace = WORKSPACE) {
+  const target = worktreeGitdir(dirPath);
+  if (!target) return false;
+  const admin = path.join(workspace, '.git', 'worktrees') + path.sep;
+  const resolve = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  return (resolve(target) + path.sep).startsWith(resolve(admin) + path.sep);
+}
+
 function createWorktree(taskId) {
   if (!/^[\w][\w.-]{0,127}$/.test(taskId)) {
     throw new Error(`Invalid taskId: contains unsafe characters`);
@@ -509,7 +537,10 @@ function createWorktree(taskId) {
       try {
         execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: WORKSPACE, timeout: 10000 });
       } catch (err) {
-        warn(`git worktree remove failed for ${worktreePath}: ${err.message} — cleaning up manually`);
+        if (!isOwnWorktree(worktreePath)) {
+          throw new Error(`refusing to delete ${worktreePath}: not a worktree of ${WORKSPACE} (${err.message})`);
+        }
+        warn(`git worktree remove failed for ${worktreePath}: ${err.message} — proven ours, cleaning up manually`);
         fs.rmSync(worktreePath, { recursive: true, force: true });
       }
       // Also clean up the branch if it exists
@@ -726,14 +757,18 @@ function cleanupWorktree(worktreePath, keep = false) {
       timeout: 10000,
       stdio: 'pipe',
     });
+    let branchState = 'kept';
     if (!keep) {
-      execFileSync('git', ['branch', '-D', branch], {
-        cwd: WORKSPACE,
-        timeout: 5000,
-        stdio: 'ignore',
-      });
+      try {
+        // -d, never -D: git refuses exactly when the branch still holds commits
+        // that exist nowhere else, which is the one case worth interrupting for.
+        execFileSync('git', ['branch', '-d', branch], { cwd: WORKSPACE, timeout: 5000, stdio: 'pipe' });
+        branchState = 'deleted';
+      } catch {
+        branchState = 'kept (holds unmerged commits)';
+      }
     }
-    log(`Worktree cleaned: ${worktreePath} (branch ${keep ? 'kept' : 'deleted'})`);
+    log(`Worktree cleaned: ${worktreePath} (branch ${branchState})`);
   } catch (err) {
     log(`Worktree cleanup warning: ${err.message}`);
   }
@@ -2144,5 +2179,5 @@ if (require.main === module) {
 }
 
 // Test surface: the pure prompt builders + harness injectors (no NATS / side effects).
-module.exports = { buildCirclingPrompt, buildCollabPrompt, buildInitialPrompt, buildRetryPrompt, injectRules, injectRole, injectMemory, injectHyperagentStrategy, recallForTask, readNodeMemory, recordHyperagentTask, deriveExecutionClass };
+module.exports = { worktreeGitdir, isOwnWorktree, cleanupWorktree, createWorktree, buildCirclingPrompt, buildCollabPrompt, buildInitialPrompt, buildRetryPrompt, injectRules, injectRole, injectMemory, injectHyperagentStrategy, recallForTask, readNodeMemory, recordHyperagentTask, deriveExecutionClass };
 // deploy-v7f0130b
