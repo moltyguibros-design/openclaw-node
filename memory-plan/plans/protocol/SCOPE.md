@@ -1,7 +1,78 @@
 # SCOPE — protocol plan
 
 **Status:** active
-**Goal:** Phase 7 (2026-09-07): per-node NATS credentials — the identity ed25519 key doubles as the
+**Goal:** Step 4.5 — consolidation performance. Attribute the hard-cap overrun before touching it:
+add per-phase timing to all nine checkpoints in `runConsolidationCycle` (only `decay` is timed
+today, which is why the 300000ms overrun has never been attributed to a phase), run a real cycle
+on live data, and publish the phase breakdown. Then optimize whichever phase actually dominates —
+prime suspects are `summaries` (a per-entity LLM loop in obsidian-summarizer) and `vault-surfaces`
+(four sequential vault-I/O awaits), neither confirmed yet. Per step 4.1 carry-forward #4, raising
+HARD_CAP_MS is NOT the deliverable and is not evidence of optimization: the close gate is a real
+complete cycle inside the existing cap, with the phase breakdown as its proof. Folded in: correct
+the governance docs to match the repo — CLAUDE.md still advertises the closed 4.1-4.4 runtime
+repair as "queued" six weeks on, and neither CLAUDE.md nor AGENTS.md reflects PRs #7-#11 or D17.
+Second goal (step 5.1, added 2026-09-19): typed audit findings, a justified-deviation table, and a
+sync-impact header on canonical edits — three holes in the operating base, borrowed from
+`github/spec-kit` and each backed by a `plan-lint.sh` check. Detail in the 5.1 block below.
+**Set at:** 2026-09-14T00:00:00Z
+**Expires:** 2026-09-21T00:00:00Z
+
+```files consolidation-performance-4.5-2026-09-14
+bin/consolidate.mjs
+bin/consolidation-scheduler.mjs
+lib/consolidation.mjs
+lib/obsidian-summarizer.mjs
+lib/obsidian-session-notes.mjs
+lib/obsidian-decision-notes.mjs
+lib/obsidian-theme-notes.mjs
+lib/obsidian-digest.mjs
+lib/local-event-log.mjs
+test/consolidation.test.mjs
+test/consolidation-scheduler.test.mjs
+test/obsidian-summarizer.test.mjs
+CLAUDE.md
+AGENTS.md
+memory-plan/plans/protocol/SCOPE.md
+memory-plan/plans/protocol/INVENTORY.md
+memory-plan/plans/protocol/VERSION
+memory-plan/plans/protocol/COMPONENT_REGISTRY.md
+memory-plan/plans/protocol/DECISIONS.md
+memory-plan/plans/protocol/audits/step45_consolidation_performance/*
+```
+
+**Second open block — step 5.1 (Block 5, opened 2026-09-19).** Close three named holes in the
+operating base, each borrowed from `github/spec-kit` (MIT, Copyright GitHub, Inc.) and each given a
+mechanical check so we import the idea and not its weakness — spec-kit's own gates are prompt-level
+and an agent that skips the read just proceeds:
+
+1. **Findings are binary.** `AUDIT_POST` §4 offers only `[POSITIVE]`/`[NEGATIVE]`, so two real
+   classes have nowhere to go: code that *contradicts* a stated principle or DECISION, and code
+   that is *unrequested* (present but asked for by no step — the drift class, today caught only by
+   hand in `OUT_OF_SCOPE.md`). Type every finding `missing | partial | contradicts | unrequested`.
+2. **Deviations are unrecorded.** MASTER_PLAN §4 carries ten non-negotiables and §4.10 explicitly
+   invites amending the framework, but there is no structured place to record a *justified* one —
+   so a deviation either happens silently or gets misfiled as drift. Require a table naming the
+   principle, why the step needs it, and the simpler alternative that was rejected.
+3. **Canonical edits leave no trace.** `sync-canonical.sh` fans five docs into six silos — the
+   highest-blast-radius change in the repo — and records nothing about what an edit invalidated.
+   Require a sync-impact header: version change, rationale, dependents re-checked, follow-ups.
+
+Not in this step: a full `converge`-style repo-vs-plan gap assessor. It overlaps the existing
+AUDIT_POST §6 carry-forward mechanism and is a build, not an amendment — captured, not started.
+
+```files borrowed-governance-5.1-2026-09-19
+memory-plan/canonical/PROTOCOL.md
+memory-plan/canonical/MASTER_PLAN.md
+memory-plan/canonical/templates/AUDIT_PRE.template.md
+memory-plan/canonical/templates/AUDIT_POST.template.md
+memory-plan/plans/*/PROTOCOL.md
+memory-plan/plans/*/MASTER_PLAN.md
+workspace-bin/plan-lint.sh
+memory-plan/plans/protocol/ROADMAP.md
+memory-plan/plans/protocol/audits/step51_borrowed_governance/*
+```
+
+(Earlier goal — Phase 7 / embedder prefetch, retained for the record:) Phase 7 (2026-09-07): per-node NATS credentials — the identity ed25519 key doubles as the
 NATS nkey, `OPENCLAW_NATS_AUTH=token|nkey|nkey-strict` (default token, no behaviour change until the
 operator flips), server users block rendered from the identity registry into an included
 `nats-auth.conf`, worker deny on `mesh.deploy.trigger`, every credential-less connect routed through
@@ -25,10 +96,8 @@ Local consumers that GET :3000 read the 0600 session token like scheduler-heartb
 Code + focused tests + MC build only; runtime evidence on the live host is the operator's step.
 Per-node NATS nkeys is deferred (needs install-time credential provisioning).
 Phase 0+1, prior runtime-repair (4.1-4.4) and the review-doc batch are preserved as closed blocks.
-**Set at:** 2026-09-06T00:00:00Z
-**Expires:** 2026-09-10T00:00:00Z
 
-```files embedder-prefetch-honesty-2026-09-08
+```files embedder-prefetch-honesty-2026-09-08 closed
 scripts/install/llm-setup.sh
 test/install-modules.test.mjs
 memory-plan/plans/protocol/SCOPE.md
