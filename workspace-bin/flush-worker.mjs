@@ -26,7 +26,7 @@ try {
     const result = await store.importSession(jsonlPath, { source, format });
     parentPort.postMessage({ ok: true, result });
   } else {
-    const { jsonlPath, memoryMdPath, charBudget, checkShouldFlush, contextWindowTokens } = workerData;
+    const { jsonlPath, memoryMdPath, charBudget, checkShouldFlush, contextWindowTokens, deferrable } = workerData;
     const { runFlush, shouldFlush, USE_LLM_EXTRACTION } = await import('../lib/pre-compression-flush.mjs');
     let check = null;
     if (checkShouldFlush) {
@@ -49,7 +49,9 @@ try {
           // the daemon's own getExtractionStore() failure produces.
         }
       }
-      const result = await runFlush(jsonlPath, memoryMdPath, { charBudget, llmClient, extractionStore });
+      const result = await runFlush(jsonlPath, memoryMdPath, {
+        charBudget, llmClient, extractionStore, deferrable: Boolean(deferrable),
+      });
       if (check) result.check = check;
       parentPort.postMessage({ ok: true, result });
     }
