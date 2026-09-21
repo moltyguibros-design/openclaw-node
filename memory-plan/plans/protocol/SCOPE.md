@@ -1,7 +1,80 @@
 # SCOPE — protocol plan
 
 **Status:** active
-**Goal:** Phase 7 (2026-09-07): per-node NATS credentials — the identity ed25519 key doubles as the
+**Goal:** 2026-09-14 — observability events carry the session they came from. `observability_events`
+has thirteen columns and none of them correlate: no session, trace, span or parent id. Every event
+from every session lands in one flat table keyed only by (timestamp, node_id, module, function), so
+even now that tool activity is recorded (prior batch, PR #16) the rows cannot be grouped back into
+the run that produced them — which is what a diagnosis would have to read first. Fix: a `session_id`
+column, migrated onto already-deployed tables rather than only new ones, threaded through
+`tracer.emit()`, and populated by the one component that actually knows the answer — the session
+trace emitter, which is handed the transcript path. ONE outcome: rows can be grouped by session.
+Pairing a `tool.result` back to its `tool.call` by `tool_use_id` is a second correlation outcome and
+is NOT in this batch (PROTOCOL §11). Stacks on the emitter branch, so it carries PR #16's commit and
+PR #14's sharp gate fix; both no-op once main takes them.
+**Prior goal (trace emitter tool activity, shipped as PR #16):** session trace emitter records tool activity. The emitter classifies transcript
+entries by top-level `entry.type` and carries `ENTRY_MAP` keys for `tool_use`/`tool_result`, but in
+the Claude Code transcript format that `lib/transcript-parser.mjs` documents and
+`workspace-bin/subagent-audit.mjs` parses, tool activity arrives as content blocks inside
+`message.content` — so those two keys never match and every tool call, tool result and tool error is
+absent from `observability_events`. Reproduced: a four-entry transcript whose tool result carries
+`is_error` emits four `lifecycle` events, zero `tool.call`, zero `tool.result`, zero `error`. Fix:
+walk `message.content` blocks and pair `tool_use`/`tool_result` by `tool_use_id`, the logic the
+subagent auditor already implements, and give the emitter its first test — no test in the suite
+currently exercises it. ONE outcome: tool activity reaches the trace. The missing session/trace
+correlation column on `observability_events` is a separate storage-schema step (PROTOCOL §11
+atomicity) and is NOT in this batch. Carries the sharp gate fix (PR #14) as a ported commit so CI is
+green; it no-ops once main takes #14.
+**Set at:** 2026-09-14T17:05:00Z
+**Expires:** 2026-09-16T00:00:00Z
+
+```files obs-events-session-correlation-2026-09-14
+lib/obs-db.js
+lib/tracer.js
+workspace-bin/session-trace-emitter.mjs
+test/session-trace-emitter.test.mjs
+test/obs-db-session-correlation.test.mjs
+# Second, divergent copy of this schema (MASTER_PLAN 4.6): Mission Control
+# also CREATEs observability_events. obs-db's migration repairs a table MC
+# made, but leaving the twin definitions disagreeing is half-done work.
+mission-control/src/lib/db/index.ts
+# Flaky test that failed THIS batch's CI run and is unrelated to it:
+# nats-nkey-server's first connect timed out at 3s on a loaded runner
+# while the rest of the file passed. No re-run permission (403), so the
+# drive-to-green path is to make the test robust rather than leave it.
+test/nats-nkey-server.test.mjs
+memory-plan/plans/protocol/SCOPE.md
+```
+
+```files trace-emitter-tool-spans-2026-09-14 closed
+workspace-bin/session-trace-emitter.mjs
+test/session-trace-emitter.test.mjs
+memory-plan/plans/protocol/SCOPE.md
+```
+
+**Prior goal (sharp advisory audit gate, shipped as PR #14):** CI's `npm audit --audit-level=high` step fails on
+both `unit-tests` and `mission-control-tests` for advisory GHSA-rgj7-g3m4-5g8c (`sharp <0.35.4`,
+libheif, high). The tests themselves are green (2209 tests, 0 fail) — this is a dependency gate, and
+it fails repo-wide, on `main` and every open PR, because the advisory was published after `main` last
+ran CI green at `7ba85ef`. Both manifests already allow the fixed version (`overrides.sharp:
+"^0.35.0"`) but CI runs `npm ci` and both lockfiles resolve `sharp@0.35.3`. Fix: raise both override
+floors past the advisory and re-resolve both lockfiles. Verified against a scratch copy — root audit
+goes from 2 high / exit 1 to 0 vulnerabilities / exit 0, resolving `sharp@0.35.4`. The six remaining
+mission-control findings are moderate (`esbuild` via `drizzle-kit`) and sit below the gate threshold;
+they are not in scope. Operator-approved 2026-09-14 ("Scope it on a new branch"), branch
+`claude/sharp-advisory-audit-gate-8s464m` off `main`.
+**Set at:** 2026-09-14T16:40:00Z
+**Expires:** 2026-09-16T00:00:00Z
+
+```files sharp-advisory-audit-gate-2026-09-14 closed
+package.json
+package-lock.json
+mission-control/package.json
+mission-control/package-lock.json
+memory-plan/plans/protocol/SCOPE.md
+```
+
+**Prior goal (Phase 7, closed):** per-node NATS credentials — the identity ed25519 key doubles as the
 NATS nkey, `OPENCLAW_NATS_AUTH=token|nkey|nkey-strict` (default token, no behaviour change until the
 operator flips), server users block rendered from the identity registry into an included
 `nats-auth.conf`, worker deny on `mesh.deploy.trigger`, every credential-less connect routed through
@@ -25,10 +98,10 @@ Local consumers that GET :3000 read the 0600 session token like scheduler-heartb
 Code + focused tests + MC build only; runtime evidence on the live host is the operator's step.
 Per-node NATS nkeys is deferred (needs install-time credential provisioning).
 Phase 0+1, prior runtime-repair (4.1-4.4) and the review-doc batch are preserved as closed blocks.
-**Set at:** 2026-09-06T00:00:00Z
-**Expires:** 2026-09-10T00:00:00Z
+(Phase 7 ran under Set at 2026-09-06T00:00:00Z / Expires 2026-09-10T00:00:00Z; both shipped and the
+window passed, so the live carriers above govern.)
 
-```files embedder-prefetch-honesty-2026-09-08
+```files embedder-prefetch-honesty-2026-09-08 closed
 scripts/install/llm-setup.sh
 test/install-modules.test.mjs
 memory-plan/plans/protocol/SCOPE.md
