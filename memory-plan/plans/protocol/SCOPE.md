@@ -1,7 +1,63 @@
 # SCOPE — protocol plan
 
 **Status:** active
-**Goal:** Phase 7 (2026-09-07): per-node NATS credentials — the identity ed25519 key doubles as the
+**Goal:** 2026-09-15 — approval attribution records the VERIFIED signer. Three places stamp who
+approved something with a value that was never verified: `lib/mesh-tasks.js` markApproved sets
+`reviewed_by = 'human'`, `bin/hyperagent.mjs` calls approve/rejectProposal with the literal
+`'human'`, and `bin/mesh-task-daemon.js` handlePlanApprove records `approved_by || 'gui'` where
+`approved_by` is CALLER-SUPPLIED and unverified — so an automated approval lands in the ledger
+wearing the operator's own handle. Authorization is already correct on the mesh paths
+(authorizeTaskMutation gates them); it is attribution that is fabricated. `verifySignedRequest`
+verifies `event.signer_pubkey` against the trusted operator keys and then discards it, so the one
+verified identity in the system never reaches the record.
+ONE outcome: an approval records who actually authorized it. Surface the verified signer_pubkey,
+thread it through authorizeTaskMutation and the daemon's authorize(), and record it. This changes
+what is RECORDED, never what is ALLOWED — no authorization verdict moves.
+NOT in this batch: the hyperagent CLI half of H-10. That path has no identity source at all (it
+never imports operator-auth), so fixing it means DECIDING whether hyperagent approvals must be
+signed — an operator ruling with a workflow cost, not a bug fix. Left for that decision.
+Carries the sharp gate fix (PR #14) as a ported commit so CI is green; no-ops once main takes it.
+**Set at:** 2026-09-15T12:05:00Z
+**Expires:** 2026-09-17T00:00:00Z
+
+```files approval-attribution-verified-signer-2026-09-15
+lib/node-identity.mjs
+lib/operator-auth.mjs
+lib/mesh-tasks.js
+bin/mesh-task-daemon.js
+test/approval-attribution.test.mjs
+# Its deepEqual assertions pin the exact return shape of verifySignedRequest
+# and authorizeTaskMutation, which this batch deliberately widens.
+test/operator-auth.test.mjs
+# Second consumer of verifySignedRequest; its deepEqual assertions pin the
+# same shape. Found by the full suite, not by reading.
+test/deploy-trigger-auth.test.mjs
+memory-plan/plans/protocol/SCOPE.md
+```
+
+**Prior goal (sharp advisory audit gate, shipped as PR #14):** CI's `npm audit --audit-level=high` step fails on CI's `npm audit --audit-level=high` step fails on
+both `unit-tests` and `mission-control-tests` for advisory GHSA-rgj7-g3m4-5g8c (`sharp <0.35.4`,
+libheif, high). The tests themselves are green (2209 tests, 0 fail) — this is a dependency gate, and
+it fails repo-wide, on `main` and every open PR, because the advisory was published after `main` last
+ran CI green at `7ba85ef`. Both manifests already allow the fixed version (`overrides.sharp:
+"^0.35.0"`) but CI runs `npm ci` and both lockfiles resolve `sharp@0.35.3`. Fix: raise both override
+floors past the advisory and re-resolve both lockfiles. Verified against a scratch copy — root audit
+goes from 2 high / exit 1 to 0 vulnerabilities / exit 0, resolving `sharp@0.35.4`. The six remaining
+mission-control findings are moderate (`esbuild` via `drizzle-kit`) and sit below the gate threshold;
+they are not in scope. Operator-approved 2026-09-14 ("Scope it on a new branch"), branch
+`claude/sharp-advisory-audit-gate-8s464m` off `main`.
+**Set at:** 2026-09-14T16:40:00Z
+**Expires:** 2026-09-16T00:00:00Z
+
+```files sharp-advisory-audit-gate-2026-09-14 closed
+package.json
+package-lock.json
+mission-control/package.json
+mission-control/package-lock.json
+memory-plan/plans/protocol/SCOPE.md
+```
+
+**Prior goal (Phase 7, closed):** per-node NATS credentials — the identity ed25519 key doubles as the
 NATS nkey, `OPENCLAW_NATS_AUTH=token|nkey|nkey-strict` (default token, no behaviour change until the
 operator flips), server users block rendered from the identity registry into an included
 `nats-auth.conf`, worker deny on `mesh.deploy.trigger`, every credential-less connect routed through
@@ -25,10 +81,10 @@ Local consumers that GET :3000 read the 0600 session token like scheduler-heartb
 Code + focused tests + MC build only; runtime evidence on the live host is the operator's step.
 Per-node NATS nkeys is deferred (needs install-time credential provisioning).
 Phase 0+1, prior runtime-repair (4.1-4.4) and the review-doc batch are preserved as closed blocks.
-**Set at:** 2026-09-06T00:00:00Z
-**Expires:** 2026-09-10T00:00:00Z
+(Phase 7 ran under Set at 2026-09-06T00:00:00Z / Expires 2026-09-10T00:00:00Z; both shipped and the
+window passed, so the live carriers above govern.)
 
-```files embedder-prefetch-honesty-2026-09-08
+```files embedder-prefetch-honesty-2026-09-08 closed
 scripts/install/llm-setup.sh
 test/install-modules.test.mjs
 memory-plan/plans/protocol/SCOPE.md
