@@ -52,6 +52,14 @@ const sc = StringCodec();
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
 const BUDGET_CHECK_INTERVAL = 30000; // 30s
 const STALL_MINUTES = parseInt(process.env.MESH_STALL_MINUTES || '5'); // no heartbeat for this long → stalled
+// A worker that keeps heartbeating while reporting waiting_input/blocked is
+// alive but not progressing; it needs a human, and the stall detector cannot
+// see it because its own heartbeat resets the clock (D10).
+const NOT_PROGRESSING_MINUTES = parseInt(process.env.MESH_NOT_PROGRESSING_MINUTES || '10');
+// An agent can answer the alive check truthfully while its child process is
+// wedged. Without a bound, every pass clears the stall and the task never
+// reaches triage — so consecutive clears are capped by wall time.
+const STALL_CLEAR_WINDOW_MINUTES = parseInt(process.env.MESH_STALL_CLEAR_WINDOW_MINUTES || '30');
 const MAX_REJECTIONS = parseInt(process.env.MESH_MAX_REJECTIONS || String(DEFAULT_MAX_REJECTIONS)); // reject→requeue cap (P4-5)
 const TASK_TTL_DAYS = parseInt(process.env.MESH_TASK_TTL_DAYS || '14'); // terminal tasks pruned after this; 0 disables
 const LEASE_MS = parseInt(process.env.MESH_LEASE_MS || String(DEFAULT_LEASE_MS)); // owner must renew within this (heartbeat is 60s) — P4-5
@@ -550,7 +558,7 @@ async function handleGet(msg) {
  */
 async function handleHeartbeat(msg) {
   const params = parseRequest(msg);
-  const { task_id } = params;
+  const { task_id, activity_state, activity_timestamp } = params;
   if (!task_id) return respondError(msg, 'task_id is required');
 
   // A heartbeat RENEWS the lease, so it is an owner action: anyone on the bus
@@ -560,11 +568,17 @@ async function handleHeartbeat(msg) {
   if (!existing) return respondError(msg, `Task ${task_id} not found`);
   if (!(await authorize(msg, params, existing, { action: 'heartbeat', allowOwner: true, allowOperator: false }))) return;
 
-  const task = await store.touchActivity(task_id);
+  // The worker reports what it is DOING, not just that it is alive. Without
+  // this the state was dropped here and a worker parked on a permission prompt
+  // renewed its own lease forever (D10).
+  const task = await store.touchActivity(task_id, {
+    activityState: typeof activity_state === 'string' ? activity_state : null,
+    activityTimestamp: typeof activity_timestamp === 'string' ? activity_timestamp : null,
+  });
   if (!task) return respondError(msg, `Task ${task_id} not found`);
 
   publishEvent('heartbeat', task);
-  respond(msg, { task_id, last_activity: task.last_activity });
+  respond(msg, { task_id, last_activity: task.last_activity, activity_state: task.activity_state || null });
 }
 
 /**
@@ -739,6 +753,32 @@ async function detectStalls() {
     warn(`reapExpiredLeases: ${err.message}`);
   }
 
+  // Alive but not progressing: the worker keeps heartbeating while reporting
+  // waiting_input or blocked, which renews its own lease and resets the stall
+  // clock. Nothing above can see it, so it is handled before stall detection
+  // and released for the human it is already waiting on (D10).
+  try {
+    // Only tasks whose worker is still heartbeating: one that died while parked
+    // is a stall, and the branch below labels and handles it correctly.
+    const parked = await store.findNotProgressing(NOT_PROGRESSING_MINUTES, undefined, {
+      heartbeatWithinMs: STALL_MINUTES * 60 * 1000,
+    });
+    for (const task of parked) {
+      const since = task.activity_state_since || task.last_activity;
+      const stuckMin = ((Date.now() - new Date(since)) / 60000).toFixed(1);
+      const reason = `agent reported ${task.activity_state} for ${stuckMin}m (threshold ${NOT_PROGRESSING_MINUTES}m) — needs a human`;
+      log(`NOT PROGRESSING ${task.task_id}: ${reason}`);
+      const released = await store.markReleased(task.task_id, reason, []);
+      if (released) {
+        publishEvent('released', released);
+        await cleanupTaskCollabSession(released, reason);
+        await checkPlanProgress(task.task_id, 'failed');
+      }
+    }
+  } catch (err) {
+    warn(`findNotProgressing: ${err.message}`);
+  }
+
   const stalled = await store.findStalled(STALL_MINUTES);
 
   for (const task of stalled) {
@@ -757,10 +797,17 @@ async function detectStalls() {
         );
         const response = JSON.parse(sc.decode(reply.data));
         if (response.alive) {
-          // Agent is still working — extend deadline by touching activity
-          await store.touchActivity(task.task_id);
-          log(`STALL CLEARED ${task.task_id}: agent ${task.owner} confirmed alive. Extended deadline.`);
-          continue;
+          const clearedFor = TaskStore.stallClearedForMinutes(task);
+          if (clearedFor !== null && clearedFor >= STALL_CLEAR_WINDOW_MINUTES) {
+            // "Alive" has been the only signal for the whole window. The agent
+            // is running and getting nowhere; believing it again just hides the
+            // task from triage for another pass.
+            log(`STALL CLEAR EXHAUSTED ${task.task_id}: agent ${task.owner} answered alive ${task.stall_clear_count || 0}x over ${clearedFor.toFixed(1)}m — releasing anyway`);
+          } else {
+            const cleared = await store.markStallCleared(task.task_id);
+            log(`STALL CLEARED ${task.task_id}: agent ${task.owner} confirmed alive (clear ${cleared?.stall_clear_count || 1} of this run). Extended deadline.`);
+            continue;
+          }
         }
       } catch {
         // Intentional: no response within 5s — agent is truly unresponsive
@@ -797,11 +844,11 @@ async function detectStalls() {
       }
     }
 
-    const releasedTask = await store.markReleased(
-      task.task_id,
-      `Stall detected: no agent heartbeat for ${silentMin}m, alive check failed`,
-      task.attempts
-    );
+    const clearedFor = TaskStore.stallClearedForMinutes(task);
+    const stallReason = clearedFor !== null && clearedFor >= STALL_CLEAR_WINDOW_MINUTES
+      ? `Alive but not progressing: agent answered the alive check ${task.stall_clear_count || 0}x over ${clearedFor.toFixed(1)}m (window ${STALL_CLEAR_WINDOW_MINUTES}m) without finishing`
+      : `Stall detected: no agent heartbeat for ${silentMin}m, alive check failed`;
+    const releasedTask = await store.markReleased(task.task_id, stallReason, task.attempts);
     if (releasedTask) publishEvent('released', releasedTask);
 
     // Update plan progress if this task belongs to a plan
