@@ -11,6 +11,13 @@
  *   node bin/web-fetch.mjs <url> --selector "article"  # extract specific element
  *   node bin/web-fetch.mjs <url> --wait 5000        # custom wait (ms)
  *   node bin/web-fetch.mjs <url> --screenshot out.png  # save screenshot
+ *   node bin/web-fetch.mjs <url> --markdown         # readability pass → provenance header + Markdown
+ *
+ * --markdown injects the Defuddle bundle into the rendered page (inline
+ * script content, never a network request, so the route guard below is not
+ * involved) and prints the article as Markdown with a title/author/date
+ * header. Pages where the extractor finds fewer than WEB_FETCH_MIN_WORDS
+ * words fall back to innerText so a thin or app-shell page still yields text.
  *
  * Reachability guard (review P5-7): this tool runs with the node's network
  * position, so an agent-supplied URL used to reach the NATS monitor, the
@@ -22,8 +29,47 @@
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 
 export const MAX_OUTPUT_BYTES = Number(process.env.WEB_FETCH_MAX_BYTES) || 2 * 1024 * 1024;
+export const MIN_CLEAN_WORDS = Number(process.env.WEB_FETCH_MIN_WORDS) || 40;
+
+// The exports map of the package hides dist/, so resolve through the `full`
+// export (the only build that carries the Markdown converter). Resolved lazily:
+// importing this module must not require the dependency to be installed.
+function defuddleBundlePath() {
+  return createRequire(import.meta.url).resolve('defuddle/full');
+}
+
+/**
+ * Chromium's proxy-bypass parser takes hostname and suffix entries only. A
+ * NO_PROXY carrying CIDR blocks (as container runtimes write it) is rejected
+ * wholesale, which silently sends direct-only hosts through the proxy — where
+ * a re-terminating proxy's certificate then fails validation. Keep the names.
+ */
+export function chromiumBypassList(raw = process.env.NO_PROXY || process.env.no_proxy || '') {
+  const names = raw.split(',')
+    .map(e => e.trim())
+    .filter(e => e && !e.includes('/') && !net.isIP(e.replace(/^\[|\]$/g, '')));
+  return names.length ? names.join(',') : undefined;
+}
+
+/** The extractor found enough of an article to trust over raw innerText. */
+export function shouldUseClean(result, minWords = MIN_CLEAN_WORDS) {
+  return Boolean(result && typeof result.content === 'string' && (result.wordCount || 0) >= minWords);
+}
+
+/** Provenance header + Markdown body, the shape downstream extractors read. */
+export function formatCleanOutput(result, url) {
+  const head = [
+    `# ${result.title || '(untitled)'}`,
+    result.author && `author: ${result.author}`,
+    result.published && `published: ${result.published}`,
+    `source: ${url}`,
+    `words: ${result.wordCount} (defuddle ${result.parseTime}ms)`,
+  ].filter(Boolean).join('\n');
+  return `${head}\n\n${result.content}`;
+}
 
 const BLOCKED_HOSTNAMES = new Set(['localhost', 'metadata', 'metadata.google.internal', 'instance-data']);
 
@@ -61,11 +107,28 @@ export function isPrivateIp(ip) {
 }
 
 /**
- * Throws unless `url` is http(s) to a hostname whose EVERY resolved address is
- * public. Resolution happens here so a DNS name that maps to 127.0.0.1 or
- * 169.254.169.254 is refused before any connection.
+ * Chromium resolver rule pinning `hostname` to an address this process already
+ * vetted, so the browser cannot resolve the name a second time and reach a
+ * different host (DNS rebinding). Returns null when there is nothing to pin.
+ *
+ * The rule binds Chromium's own resolver, which means DIRECT connections. A
+ * proxied request is resolved by the proxy, where the egress policy is the
+ * control instead; the launch bypass list decides which path a host takes.
  */
-export async function assertPublicUrl(url, { lookup = (h) => dns.lookup(h, { all: true }) } = {}) {
+export function resolverRules(hostname, addresses) {
+  const host = String(hostname || '').replace(/^\[|\]$/g, '');
+  if (!host || net.isIP(host)) return null;
+  const target = (addresses || []).find(a => a && !isPrivateIp(a));
+  return target ? `MAP ${host} ${target}` : null;
+}
+
+/**
+ * Resolves `url` and returns it with the vetted addresses, throwing unless it
+ * is http(s) to a hostname whose EVERY resolved address is public. Resolution
+ * happens here so a DNS name that maps to 127.0.0.1 or 169.254.169.254 is
+ * refused before any connection, and the caller can pin what was approved.
+ */
+export async function resolvePublicUrl(url, { lookup = (h) => dns.lookup(h, { all: true }) } = {}) {
   let parsed;
   try { parsed = new URL(url); } catch { throw new Error(`invalid URL: ${url}`); }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
@@ -78,7 +141,7 @@ export async function assertPublicUrl(url, { lookup = (h) => dns.lookup(h, { all
   }
   if (net.isIP(host)) {
     if (isPrivateIp(host)) throw new Error(`refused: ${host} is a private/reserved address`);
-    return parsed;
+    return { url: parsed, addresses: [host] };
   }
   let addrs;
   try { addrs = await lookup(host); } catch (e) { throw new Error(`refused: cannot resolve ${host} (${e.message})`); }
@@ -86,6 +149,12 @@ export async function assertPublicUrl(url, { lookup = (h) => dns.lookup(h, { all
   if (!list.length) throw new Error(`refused: ${host} resolved to nothing`);
   const bad = list.find(isPrivateIp);
   if (bad) throw new Error(`refused: ${host} resolves to private/reserved address ${bad}`);
+  return { url: parsed, addresses: list };
+}
+
+/** The URL-only form every existing caller uses, including the sub-request guard. */
+export async function assertPublicUrl(url, opts) {
+  const { url: parsed } = await resolvePublicUrl(url, opts);
   return parsed;
 }
 
@@ -94,22 +163,35 @@ async function main() {
   const url = args.find(a => !a.startsWith('--'));
 
   if (!url) {
-    console.error('Usage: web-fetch.mjs <url> [--html] [--selector "css"] [--wait ms] [--screenshot file]');
+    console.error('Usage: web-fetch.mjs <url> [--html] [--markdown] [--selector "css"] [--wait ms] [--screenshot file]');
     process.exit(1);
   }
 
-  const flags = { html: args.includes('--html'), selector: null, wait: 3000, screenshot: null };
+  const flags = { html: args.includes('--html'), markdown: args.includes('--markdown'), selector: null, wait: 3000, screenshot: null };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--selector' && args[i + 1]) flags.selector = args[++i];
     if (args[i] === '--wait' && args[i + 1]) flags.wait = parseInt(args[++i], 10);
     if (args[i] === '--screenshot' && args[i + 1]) flags.screenshot = args[++i];
   }
 
-  try { await assertPublicUrl(url); }
-  catch (e) { console.error(`web-fetch: ${e.message}`); process.exit(2); }
+  let pinned = null;
+  try {
+    const { url: safe, addresses } = await resolvePublicUrl(url);
+    pinned = resolverRules(safe.hostname, addresses);
+  } catch (e) { console.error(`web-fetch: ${e.message}`); process.exit(2); }
 
   const { chromium } = await import('playwright');
-  const browser = await chromium.launch({ headless: true });
+  // WEB_FETCH_CHROMIUM points at a system Chromium when Playwright's own
+  // download is absent (CI runners, a box that never ran `playwright install`).
+  const proxyServer = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.WEB_FETCH_CHROMIUM || undefined,
+    proxy: proxyServer ? { server: proxyServer, bypass: chromiumBypassList() } : undefined,
+    // Pin the document host to the address vetted above: without it the browser
+    // resolves the name again and a rebind lands between check and connect.
+    args: pinned ? [`--host-resolver-rules=${pinned}`] : [],
+  });
   try {
     const page = await browser.newPage();
     // Every sub-request and redirect target passes the same guard: a public
@@ -118,6 +200,10 @@ async function main() {
       try { await assertPublicUrl(route.request().url()); await route.continue(); }
       catch { await route.abort('blockedbyclient'); }
     });
+    // Delivered before navigation and over the debugger protocol: an injected
+    // <script> element is refused by any page whose CSP forbids inline script.
+    if (flags.markdown && !flags.selector) await page.addInitScript({ path: defuddleBundlePath() });
+
     await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
 
     if (flags.wait > 0) await page.waitForTimeout(flags.wait);
@@ -128,11 +214,22 @@ async function main() {
     }
 
     let out;
-    if (flags.selector) {
+    if (flags.markdown && !flags.selector) {
+      const result = await page.evaluate(
+        (u) => new window.Defuddle(document, { markdown: true, url: u }).parse(),
+        page.url(),
+      );
+      if (shouldUseClean(result)) {
+        out = formatCleanOutput(result, page.url());
+      } else {
+        console.error(`web-fetch: defuddle yielded ${result?.wordCount ?? 0} words (< ${MIN_CLEAN_WORDS}), falling back to innerText`);
+      }
+    }
+    if (out === undefined && flags.selector) {
       const el = await page.$(flags.selector);
       if (!el) { console.error(`Selector "${flags.selector}" not found`); process.exit(1); }
       out = flags.html ? await el.innerHTML() : await el.innerText();
-    } else {
+    } else if (out === undefined) {
       out = flags.html ? await page.content() : await page.innerText('body');
     }
     if (Buffer.byteLength(out, 'utf8') > MAX_OUTPUT_BYTES) {

@@ -7,7 +7,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { isPrivateIp, assertPublicUrl } from '../workspace-bin/web-fetch.mjs';
+import { isPrivateIp, assertPublicUrl, resolvePublicUrl, resolverRules, chromiumBypassList } from '../workspace-bin/web-fetch.mjs';
 
 describe('isPrivateIp', () => {
   for (const ip of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.1', '169.254.169.254',
@@ -51,6 +51,49 @@ describe('assertPublicUrl', () => {
     const lookup = resolving({ 'example.com': ['93.184.216.34'] });
     const u = await assertPublicUrl('https://example.com/page?x=1', { lookup });
     assert.equal(u.hostname, 'example.com');
+  });
+});
+
+describe('address pinning (integrations 1.2)', () => {
+  const resolving = (map) => async (h) => { if (!(h in map)) throw new Error('ENOTFOUND'); return map[h].map(address => ({ address })); };
+
+  it('returns the vetted addresses alongside the URL', async () => {
+    const { url, addresses } = await resolvePublicUrl('https://example.com/p', { lookup: resolving({ 'example.com': ['93.184.216.34', '1.1.1.1'] }) });
+    assert.equal(url.hostname, 'example.com');
+    assert.deepEqual(addresses, ['93.184.216.34', '1.1.1.1']);
+  });
+
+  it('pins the address that was checked, so a rebind at connect time cannot move the host', async () => {
+    // First answer public, every later answer private: the shape of a rebind.
+    let call = 0;
+    const lookup = async () => (call++ === 0 ? [{ address: '93.184.216.34' }] : [{ address: '127.0.0.1' }]);
+    const { url, addresses } = await resolvePublicUrl('https://rebind.example/', { lookup });
+    const rule = resolverRules(url.hostname, addresses);
+    assert.equal(rule, 'MAP rebind.example 93.184.216.34');
+    // The browser is launched with this rule, so the second answer is never consulted.
+    assert.doesNotMatch(rule, /127\.0\.0\.1/);
+  });
+
+  it('refuses outright when the checked answer is already private', async () => {
+    await assert.rejects(resolvePublicUrl('https://evil.example/', { lookup: resolving({ 'evil.example': ['127.0.0.1'] }) }), /resolves to private/);
+  });
+
+  it('has nothing to pin for an IP literal and never pins a private address', () => {
+    assert.equal(resolverRules('93.184.216.34', ['93.184.216.34']), null);
+    assert.equal(resolverRules('[2606:4700::1111]', ['2606:4700::1111']), null); // a bracketed literal is still a literal
+    assert.equal(resolverRules('v6.example', ['2606:4700::1111']), 'MAP v6.example 2606:4700::1111');
+    assert.equal(resolverRules('example.com', ['127.0.0.1']), null);
+    assert.equal(resolverRules('', ['1.1.1.1']), null);
+  });
+});
+
+describe('chromiumBypassList (integrations 1.1)', () => {
+  it('keeps hostnames and suffixes and drops CIDR blocks and bare IPs', () => {
+    assert.equal(chromiumBypassList('localhost,10.0.0.0/8,pypi.org,::1,.svc.cluster.local'), 'localhost,pypi.org,.svc.cluster.local');
+  });
+  it('is undefined when nothing survives, so Playwright omits the option', () => {
+    assert.equal(chromiumBypassList('10.0.0.0/8,127.0.0.1'), undefined);
+    assert.equal(chromiumBypassList(''), undefined);
   });
 });
 

@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {"title": "Memory Pipeline: JSONL to Inject", "quality_profile": "showcase", "viewBox": [1080, 640]},
+  "stages": [
+    {"label": "Sources"},
+    {"label": "Ingest"},
+    {"label": "Process"},
+    {"label": "Store"},
+    {"label": "Serve"}
+  ],
+  "nodes": [
+    {"id": "jsonl", "type": "external", "label": "JSONL transcripts", "sublabel": "~/.claude/projects", "stage": 0, "row": 1},
+    {"id": "daemon", "type": "backend", "label": "memory daemon", "sublabel": "ingest on mtime", "stage": 1, "row": 1},
+    {"id": "extract", "type": "backend", "label": "Extraction", "sublabel": "qwen3 via ollama", "stage": 2, "row": 1},
+    {"id": "consolidate", "type": "backend", "label": "Consolidation", "sublabel": "throttled background", "stage": 3, "row": 2},
+    {"id": "statedb", "type": "database", "label": "state.db", "sublabel": "sessions, events", "stage": 3, "row": 0},
+    {"id": "knowledgedb", "type": "database", "label": "knowledge.db", "sublabel": "facts, embeddings", "stage": 3, "row": 1},
+    {"id": "inject", "type": "backend", "label": "inject server", "sublabel": ":7893", "stage": 4, "row": 1},
+    {"id": "bridge", "type": "backend", "label": "companion bridge", "sublabel": ":8787", "stage": 4, "row": 2}
+  ],
+  "flows": [
+    {"from": "jsonl", "to": "daemon", "label": "new turns", "classification": "local file", "variant": "emphasis", "route": "straight"},
+    {"from": "daemon", "to": "extract", "label": "session text", "variant": "emphasis", "route": "straight", "labelDx": -10},
+    {"from": "daemon", "to": "statedb", "label": "session state", "classification": "sqlite", "route": "vertical-channel", "channelX": 455},
+    {"from": "daemon", "to": "consolidate", "label": "throttled tick", "variant": "dashed", "route": "vertical-channel", "channelX": 455},
+    {"from": "extract", "to": "knowledgedb", "label": "extracted facts", "classification": "sqlite + vec", "variant": "emphasis", "route": "straight"},
+    {"from": "consolidate", "to": "knowledgedb", "label": "merged facts", "variant": "dashed", "fromSide": "top", "toSide": "bottom", "route": "straight"},
+    {"from": "knowledgedb", "to": "inject", "label": "context recall", "classification": "read-only", "route": "straight", "labelDx": -6},
+    {"from": "statedb", "to": "inject", "label": "session status", "classification": "read-only", "route": "vertical-channel", "channelX": 895},
+    {"from": "inject", "to": "bridge", "label": "companion context", "classification": "loopback only", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelDy": 24}
+  ],
+  "cards": [
+    {"dot": "cyan", "title": "Local-first", "items": ["Every hop is on this machine", "No phone-home by default"]}
+  ]
+}

@@ -5,12 +5,13 @@
 #   bin/multi-review --task-id T-xxx --files file1 file2
 #   bin/multi-review --help
 #
-# Generates 3 review prompt blocks for parallel sub-agent spawning:
+# Generates 4 review prompt blocks for parallel sub-agent spawning:
 #   1. Logic & Edge Cases
 #   2. Security & Scalability
 #   3. Architecture & Patterns
+#   4. Simplicity (over-engineering only — skills/ponytail-review)
 #
-# Output: Review prompts to stdout. Caller spawns 3 Explore sub-agents.
+# Output: Review prompts to stdout. Caller spawns 4 Explore sub-agents.
 
 set -euo pipefail
 
@@ -116,14 +117,42 @@ For each issue found, report:
 If no issues found, state "Architecture review: PASS" with brief reasoning.
 
 ========================================
+REVIEWER 4: Simplicity
+========================================
+
+You are a specialist hunting over-engineering, and nothing else. Follow the skills/ponytail-review
+skill. Read the following files and analyze them.
+
+Task: ${TASK_ID:-unspecified}
+Files to review:
+${FILE_LIST}
+
+Focus areas:
+- Code that reinvents something the standard library already ships
+- A dependency doing what the platform does natively
+- Abstractions with one implementation, config nobody sets, a layer with one caller
+- Speculative flexibility and dead options nobody asked for
+- Same logic in fewer lines
+
+Report one line per finding:
+  L<line>: <delete|stdlib|native|yagni|shrink> <what>. <replacement>.
+End with: net: -<N> lines possible.
+
+Correctness, security and performance belong to reviewers 1-3 — do not repeat them here. Never
+flag a smoke test or an assertion behind non-trivial logic; that is this node's minimum, not bloat.
+
+If there is nothing to cut, state "Lean already. Ship."
+
+========================================
 CONSOLIDATION TEMPLATE
 ========================================
 
-After all 3 reviewers complete, consolidate:
+After all 4 reviewers complete, consolidate:
 - Total issues: [N critical, N major, N minor]
 - Blocking issues (critical): [list or "none"]
 - Recommended fixes (major): [list or "none"]
 - Suggestions (minor): [list or "none"]
+- Lines the simplicity pass says can go: [net figure or "none"]
 - Verdict: APPROVE / REVISE / REJECT
 
 Rule: ANY critical issue = REVISE or REJECT. No exceptions.

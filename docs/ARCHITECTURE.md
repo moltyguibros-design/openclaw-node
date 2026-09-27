@@ -48,6 +48,15 @@ OpenClaw's memory system is a **platform-level service** independent of any fron
 └────────────────────────────────────────────────────────────────────┘
 ```
 
+Two rendered views of the same system, generated from a typed spec by `skills/archify` and
+self-contained (open the file, no network, no build step). Their sources are the skill's own
+examples, so a change to the system is a change to the JSON, re-validated and re-delivered:
+
+| Diagram | Shows | Source |
+|---|---|---|
+| [Memory daemon session lifecycle](diagrams/memory-daemon-lifecycle.html) | `ENDED → BOOT → ACTIVE → IDLE → ENDED`, the timeouts on each edge, and what a session switch does | `skills/archify/examples/lifecycle.example.json` |
+| [Memory pipeline: JSONL to inject](diagrams/memory-pipeline-dataflow.html) | transcripts through ingest, extraction and consolidation into `state.db` / `knowledge.db`, out to the inject server and the companion bridge | `skills/archify/examples/dataflow.example.json` |
+
 ## Services (launchd / systemd / pm2)
 
 | Service | Label | Type | Purpose |

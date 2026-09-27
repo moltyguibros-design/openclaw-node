@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {"title": "Memory Daemon Session Lifecycle", "quality_profile": "showcase", "viewBox": [980, 720]},
+  "lanes": [
+    {"id": "main", "label": "Daemon states"},
+    {"id": "terminal", "label": "Session switch"}
+  ],
+  "states": [
+    {"id": "ended", "type": "start", "label": "ENDED", "sublabel": "no live session", "lane": "main", "col": 0, "step": "01"},
+    {"id": "boot", "type": "active", "label": "BOOT", "sublabel": "session bootstrap", "lane": "main", "col": 1, "step": "02"},
+    {"id": "active", "type": "active", "label": "ACTIVE", "sublabel": "status sync, background work", "lane": "main", "col": 2, "step": "03"},
+    {"id": "idle", "type": "waiting", "label": "IDLE", "sublabel": "15 min without JSONL writes", "lane": "main", "col": 3, "step": "04"},
+    {"id": "closed", "type": "success", "label": "ENDED", "sublabel": "5 min idle timeout", "lane": "main", "col": 4, "step": "05"},
+    {"id": "switch", "type": "neutral", "label": "New session JSONL", "sublabel": "ACTIVE -> ENDED -> BOOT", "lane": "terminal", "col": 0}
+  ],
+  "transitions": [
+    {"id": "detect", "from": "ended", "to": "boot", "label": "JSONL mtime moves", "route": "straight", "labelDy": -25},
+    {"id": "bootstrap", "from": "boot", "to": "active", "label": "phase 0 done", "route": "straight", "labelDy": -25},
+    {"id": "quiet", "from": "active", "to": "idle", "label": "no writes 15 min", "route": "straight", "labelDy": -25, "labelDx": -72},
+    {"id": "expire", "from": "idle", "to": "closed", "label": "idle 5 min", "route": "straight", "labelDy": -25},
+    {"id": "resume", "from": "idle", "to": "active", "label": "JSONL write", "variant": "emphasis", "route": "top-channel"},
+    {"id": "switch-out", "from": "active", "to": "switch", "label": "other session writes", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelDy": 24}
+  ],
+  "cards": [
+    {"dot": "emerald", "title": "Main rail", "items": ["ENDED -> BOOT -> ACTIVE -> IDLE -> ENDED", "Activity is JSONL mtime, not process liveness"]},
+    {"dot": "amber", "title": "Timeouts", "items": ["ACTIVE -> IDLE after 15 min without writes", "IDLE -> ENDED after 5 more min"]}
+  ]
+}
