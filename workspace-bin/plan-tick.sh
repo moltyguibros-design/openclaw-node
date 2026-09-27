@@ -79,8 +79,12 @@ if [ "${MODE}" = "preflight" ]; then
     log "next step:   NONE — all steps closed (plan complete)"
   fi
   command -v claude >/dev/null 2>&1 && log "claude CLI:  present" || log "claude CLI:  MISSING (real tick would FATAL)"
-  LINT="$REPO/workspace-bin/plan-lint.sh"
-  [ -x "$LINT" ] && log "$("$LINT" "$PLAN_ID" --summary 2>/dev/null || true)"
+  LINT_RC=0
+  LINT_VERDICT="$(bash "${REPO}/workspace-bin/plan-lint.sh" "${PLAN_ID}" --summary 2>/dev/null)" || LINT_RC=$?
+  case "${LINT_RC}:${LINT_VERDICT}" in
+    '0:conformance: '*' → CONFORMANT'|'1:conformance: '*' → NONCONFORMANT') log "${LINT_VERDICT}" ;;
+    *) log "conformance: ${PLAN_ID} — plan-lint did not finish (exit ${LINT_RC}, no usable verdict)" ;;
+  esac
   log "=== end preflight ==="
   exit 0
 fi
@@ -154,28 +158,38 @@ fi
 # ── Conformance gate (plan-lint) ─────────────────────────────────────────────
 # A nonconformant silo is never driven headless. Before, plan-lint ran only in
 # --preflight; the real tick trusted the silo blindly (review: honor-system gate).
+# Only an explicit CONFORMANT verdict opens it: a lint that dies before its
+# summary line prints no NONCONFORMANT either (2026-09-27, plan-lint's set -e
+# abort on a silo without audits/), and grepping for that word let the tick run.
 write_lint_block() {
-  local lint_out="$1"
+  local lint_out="$1" trigger="$2" action="$3"
   [ -f "${BLOCK_FILE}" ] && return 0
   {
     printf '# CONTINUATION_BLOCKED — %s\n\n' "$(ts)"
     printf '**Step**: %s\n' "$(printf '%s' "${NEXT}" | awk -F'|' '{print $2": "$3}')"
     printf '**Phase you were in**: pre-tick (wrapper gate)\n'
-    printf '**Trigger**: plan-lint NONCONFORMANT — the tick refused to drive a silo with FAILs\n\n'
+    printf '**Trigger**: %s\n\n' "${trigger}"
     printf '## What failed\n\n```\n%s\n```\n\n' "${lint_out}"
-    printf '**External action:** fix every FAIL above (run `workspace-bin/plan-lint.sh %s`), then delete this file to resume.\n' "${PLAN_ID}"
+    printf '**External action:** %s (run `workspace-bin/plan-lint.sh %s`), then delete this file to resume.\n' "${action}" "${PLAN_ID}"
   } > "${BLOCK_FILE}"
   log "wrote ${BLOCK_FILE} — plan-lint gate (operator action required)"
 }
-LINT="${REPO}/workspace-bin/plan-lint.sh"
-if [ -x "${LINT}" ] && [ "${WORKPLAN_LINT_GATE:-1}" != "0" ]; then
-  LINT_OUT="$("${LINT}" "${PLAN_ID}" 2>&1 || true)"
-  if printf '%s' "${LINT_OUT}" | grep -q 'NONCONFORMANT'; then
-    log "skip: plan-lint NONCONFORMANT — not invoking claude"
-    printf '%s\n' "${LINT_OUT}" | grep -E 'FAIL' | sed 's/^/        /' || true
-    write_lint_block "${LINT_OUT}"
-    maybe_autopause "plan-lint NONCONFORMANT"; exit 0
-  fi
+if [ "${WORKPLAN_LINT_GATE:-1}" != "0" ]; then
+  LINT_RC=0
+  LINT_OUT="$(bash "${REPO}/workspace-bin/plan-lint.sh" "${PLAN_ID}" 2>&1)" || LINT_RC=$?
+  case "${LINT_RC}:${LINT_OUT##*$'\n'}" in
+    '0:summary: '*' → CONFORMANT') ;;
+    '1:summary: '*' → NONCONFORMANT')
+      log "skip: plan-lint NONCONFORMANT — not invoking claude"
+      printf '%s\n' "${LINT_OUT}" | grep -E 'FAIL' | sed 's/^/        /' || true
+      write_lint_block "${LINT_OUT}" "plan-lint NONCONFORMANT — the tick refused to drive a silo with FAILs" "fix every FAIL above"
+      maybe_autopause "plan-lint NONCONFORMANT"; exit 0 ;;
+    *)
+      log "skip: plan-lint did not finish (exit ${LINT_RC}, no usable verdict) — not invoking claude"
+      printf '%s\n' "${LINT_OUT}" | tail -3 | sed 's/^/        /'
+      write_lint_block "${LINT_OUT}" "plan-lint did not finish (exit ${LINT_RC}, no usable verdict) — the tick refused to drive a silo it could not grade" "find why the lint does not exit with its verdict"
+      maybe_autopause "plan-lint did not finish"; exit 0 ;;
+  esac
 fi
 
 if [ -z "${NEXT}" ]; then

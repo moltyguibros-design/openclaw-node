@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-// plan-lint derives its repo root from its own location, so its suite builds a
-// disposable fake repo and copies the script under test into it.
+// plan-lint and plan-tick derive their repo root from their own location, so
+// their suites build disposable fake repos and copy the script under test in.
 let tmp;
 before(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-protocol-')); });
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -33,6 +33,80 @@ describe('validate-push hook — force push is refused, not warned (review Phase
   it('allows an ordinary push and ignores non-push commands', () => {
     assert.equal(run('git push -u origin feature'), 0);
     assert.equal(run('npm test'), 0);
+  });
+});
+
+describe('plan-tick — the plan-lint gate opens only on a CONFORMANT verdict', () => {
+  const ID = 'tgate';
+  let root, plan, tick, bin, home, marker;
+
+  before(() => {
+    root = path.join(tmp, 'tickrepo');
+    plan = path.join(root, 'memory-plan', 'plans', ID);
+    bin = path.join(tmp, 'tickbin');
+    home = path.join(tmp, 'tickhome');
+    marker = path.join(tmp, 'claude-invoked');
+    for (const d of [path.join(root, 'workspace-bin'), plan, bin, home]) fs.mkdirSync(d, { recursive: true });
+    assert.equal(spawnSync('git', ['init', '-q', root]).status, 0);
+    tick = path.join(root, 'workspace-bin', 'plan-tick.sh');
+    fs.copyFileSync(path.join(REPO, 'workspace-bin', 'plan-tick.sh'), tick);
+    fs.writeFileSync(path.join(plan, 'INVENTORY.md'), '# INV\n\n| 1 | 1.1 | v1.1 | [ ] | open |\n');
+    fs.writeFileSync(path.join(plan, 'VERSION'), 'v1.0\n');
+    fs.writeFileSync(path.join(plan, 'TICK_PROMPT.md'), 'tick\n');
+    fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/bash\ncat >/dev/null\ntouch '${marker}'\n`, { mode: 0o755 });
+  });
+
+  // lint: the body of a stub plan-lint.sh, or null for no plan-lint.sh at all.
+  function tickWith(lint, ...args) {
+    const stub = path.join(root, 'workspace-bin', 'plan-lint.sh');
+    const block = path.join(plan, 'BLOCKED.md');
+    for (const f of [stub, block, marker]) fs.rmSync(f, { force: true });
+    if (lint !== null) fs.writeFileSync(stub, `#!/bin/bash\n${lint}\n`, { mode: 0o755 });
+    const r = spawnSync('bash', [tick, ID, ...args], {
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, WORKPLAN_AUTOPAUSE: '0', WORKPLAN_LINT_GATE: '1', DRY_RUN: '0' },
+    });
+    return { ...r, blocked: fs.existsSync(block) ? fs.readFileSync(block, 'utf8') : null, claudeRan: fs.existsSync(marker) };
+  }
+
+  it('blocks without invoking claude when the lint dies before its summary line', () => {
+    const r = tickWith('echo "plan-lint: tgate"\necho "  [PASS] steps        all open rows carry the §11 contract"\nexit 1');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(r.claudeRan, false);
+    assert.match(r.blocked, /^\*\*Trigger\*\*: plan-lint did not finish \(exit 1, no usable verdict\)/m);
+    assert.match(r.blocked, /all open rows carry the §11 contract/);
+    assert.match(r.blocked, /^\*\*External action:\*\*/m);
+  });
+
+  it('blocks when plan-lint.sh is missing', () => {
+    const r = tickWith(null);
+    assert.equal(r.claudeRan, false);
+    assert.match(r.blocked, /plan-lint did not finish \(exit 127, no usable verdict\)/);
+  });
+
+  it('blocks when a CONFORMANT summary comes with a failing exit code', () => {
+    const r = tickWith('echo "summary: 9 PASS · 0 WARN · 0 FAIL → CONFORMANT"\nexit 2');
+    assert.equal(r.claudeRan, false);
+    assert.match(r.blocked, /plan-lint did not finish \(exit 2, no usable verdict\)/);
+  });
+
+  it('blocks on a NONCONFORMANT verdict', () => {
+    const r = tickWith('echo "  [FAIL] history      tick-logs/ missing"\necho "summary: 1 PASS · 0 WARN · 1 FAIL → NONCONFORMANT"\nexit 1');
+    assert.equal(r.claudeRan, false);
+    assert.match(r.blocked, /^\*\*Trigger\*\*: plan-lint NONCONFORMANT/m);
+  });
+
+  it('runs the tick on a CONFORMANT verdict', () => {
+    const r = tickWith('echo "summary: 9 PASS · 0 WARN · 0 FAIL → CONFORMANT"');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(r.blocked, null);
+    assert.equal(r.claudeRan, true);
+  });
+
+  it('--preflight reports a lint that did not finish', () => {
+    const r = tickWith('echo "plan-lint: tgate"\nexit 1', '--preflight');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /conformance: tgate — plan-lint did not finish \(exit 1, no usable verdict\)/);
   });
 });
 
