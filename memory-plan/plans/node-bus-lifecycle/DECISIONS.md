@@ -557,3 +557,23 @@ hashes, never publish raw inherited values. The five-job cohort is the sole
 JournaledHold.TIMERS set: scheduler-heartbeat, consolidation-scheduler,
 observer, transcript-archive and log-rotate. `lane-watchdog` is a separate
 KeepAlive service and must not be wrapped with a closed-exit0 timer gate.
+
+## D26 — Tie the rotating inherited SSH socket to the launchd domain (2026-09-30 20:37 EDT)
+
+A saved 3.9 candidate re-verification found `SSH_AUTH_SOCK` changed in all five
+neutral launchd probes while every other key/value and cwd stayed fixed. The
+new hash matched `launchctl getenv SSH_AUTH_SOCK`. Pinning that inherited
+socket's captured pathname would make the candidate refuse after an ordinary
+agent rotation or login. The five jobs do not configure this variable in
+their plists. Treat only this inherited key as optional/dynamic: if present,
+the private launcher and neutral verifier require its received value to equal
+the current launchd user-domain value; if absent, no value is invented. Hash
+`/bin/launchctl` before the launcher trusts it. Preserve exact hashes for all
+configured and other inherited environment values and refuse any unexpected
+key. A rotation between spawn and check refuses safely. This is not a general
+environment override or a claim against a malicious same-owner domain.
+
+Candidate `timer-entry-candidate-20260930-5` supersedes `-3` and `-4`; it
+keeps the same five application baselines and the Node24 private release.
+Claude's second adversarial check accepts the narrow policy and notes the
+safe-refusal race. No production job or environment was changed.

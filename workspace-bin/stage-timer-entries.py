@@ -85,6 +85,18 @@ def sha_bytes(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def received_environment(received, configured, label):
+    environment = dict(received['environment'])
+    if 'SSH_AUTH_SOCK' in configured:
+        raise RuntimeError('SSH_AUTH_SOCK must be inherited: ' + label)
+    if 'SSH_AUTH_SOCK' in environment:
+        domain_value = run('/bin/launchctl', 'getenv', 'SSH_AUTH_SOCK').removesuffix('\n')
+        if not domain_value or environment.pop('SSH_AUTH_SOCK') != sha_bytes(domain_value.encode()):
+            raise RuntimeError('SSH_AUTH_SOCK domain environment differs: ' + label)
+    environment['XPC_SERVICE_NAME'] = sha_bytes(label.encode())
+    return environment
+
+
 def probe(label, original, root):
     probe_label = 'ai.openclaw.timer-entry-probe-' + uuid.uuid4().hex[:12]
     output = root / (probe_label + '.json')
@@ -168,8 +180,7 @@ def _stage(output, release, source_root):
             raise RuntimeError('installed label differs: ' + label)
         loaded_hashes[label] = loaded(label, original)
         received = probe(label, original, output)
-        environment = received['environment']
-        environment['XPC_SERVICE_NAME'] = sha_bytes(label.encode())
+        environment = received_environment(received, original.get('EnvironmentVariables', {}), label)
         argv = list(original['ProgramArguments'])
         if name == 'consolidation-scheduler':
             expected_script = str(pathlib.Path.home() / '.openclaw/workspace/bin/consolidation-scheduler.mjs')
@@ -192,7 +203,8 @@ def _stage(output, release, source_root):
         if name == 'consolidation-scheduler':
             sources = []
         jobs[label] = {'argv': argv, 'cwd': received['cwd'],
-                       'environment': environment, 'source': sources}
+                       'environment': environment,
+                       'dynamic_environment': ['SSH_AUTH_SOCK'], 'source': sources}
         originals[label] = {'plist_sha256': sha(path), 'loaded_sha256': loaded_hashes[label]}
         if name == 'observer':
             originals[label]['source_link'] = os.readlink(live_script)
@@ -209,6 +221,7 @@ def _stage(output, release, source_root):
             executables[resolved] = sha(resolved)
     executables['/usr/bin/python3'] = sha('/usr/bin/python3')
     executables['/usr/sbin/sysctl'] = sha('/usr/sbin/sysctl')
+    executables['/bin/launchctl'] = sha('/bin/launchctl')
     launcher_interpreter = run('/usr/bin/python3', '-I', '-S', '-c', 'import sys;print(sys.executable)').strip()
     executables[launcher_interpreter] = sha(launcher_interpreter)
     files = source_files(release, jobs) + [code, gate_code]
@@ -239,7 +252,7 @@ def _stage(output, release, source_root):
         candidate_path.chmod(0o600)
     evidence = {'candidate_root': str(output), 'manifest_sha256': manifest_sha,
                 'release_manifest_sha256': manifest['release_manifest_sha256'],
-                'jobs': {name: {'environment_keys': sorted(job['environment']),
+                'jobs': {name: {'environment_keys': sorted(set(job['environment']) | set(job['dynamic_environment'])),
                                 'cwd': job['cwd'], 'candidate_plist_sha256': sha(output / 'candidates' / (name + '.plist'))}
                          for name, job in jobs.items()},
                 'source_files': len(files), 'delegated_executables': sorted(executables)}
@@ -289,9 +302,10 @@ def verify(output):
         original = plistlib.loads(original_path.read_bytes())
         loaded(label, original)
         received = probe(label, original, output)
-        environment = received['environment']
-        environment['XPC_SERVICE_NAME'] = sha_bytes(label.encode())
-        if environment != manifest['jobs'][label]['environment'] or received['cwd'] != manifest['jobs'][label]['cwd']:
+        environment = received_environment(received, original.get('EnvironmentVariables', {}), label)
+        if manifest['jobs'][label]['dynamic_environment'] != ['SSH_AUTH_SOCK'] \
+                or environment != manifest['jobs'][label]['environment'] \
+                or received['cwd'] != manifest['jobs'][label]['cwd']:
             raise RuntimeError('received launch environment drifted: ' + label)
         for command in DELEGATED[name]:
             if shutil.which(command, path=received['path']) != manifest['resolution'][command]:

@@ -10,6 +10,7 @@ import tempfile
 import time
 import unittest
 import uuid
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -45,8 +46,7 @@ class TimerEntryTest(unittest.TestCase):
         self.app.chmod(0o600)
         self.argv = ['/usr/bin/python3', '-I', '-S', str(self.app), str(self.output)]
         received = self.stage.probe(self.label, {}, self.root)
-        environment = received['environment']
-        environment['XPC_SERVICE_NAME'] = self.stage.sha_bytes(self.label.encode())
+        environment = self.stage.received_environment(received, {}, self.label)
         self.manifest = self.root / 'manifest.json'
         value = {'version': 1, 'gate_code': str(self.root / 'service_gate.py'),
                  'gate_root': str(self.root / 'gate'), 'gate_pins': self.pins,
@@ -54,10 +54,12 @@ class TimerEntryTest(unittest.TestCase):
                      'import sys;print(sys.executable)'], check=True, text=True,
                      capture_output=True).stdout.strip(),
                  'jobs': {self.label: {'argv': self.argv, 'cwd': received['cwd'],
-                                       'environment': environment}},
+                                       'environment': environment,
+                                       'dynamic_environment': ['SSH_AUTH_SOCK']}},
                  'files': {str(self.root / name): sha(self.root / name)
                            for name in ('timer-entry.py', 'service_gate.py', 'app.py')},
-                 'executables': {'/usr/bin/python3': sha(pathlib.Path('/usr/bin/python3'))},
+                 'executables': {'/usr/bin/python3': sha(pathlib.Path('/usr/bin/python3')),
+                                 '/bin/launchctl': sha(pathlib.Path('/bin/launchctl'))},
                  'resolution': {}}
         self.manifest.write_text(json.dumps(value))
         self.manifest.chmod(0o600)
@@ -118,6 +120,28 @@ class TimerEntryTest(unittest.TestCase):
         self.launch()
         self.assertFalse(self.output.exists())
         self.assertIn('received environment keys differ', self.stderr.read_text())
+
+    def test_changed_inherited_socket_refuses_before_application(self):
+        plist = plistlib.loads(self.plist.read_bytes())
+        plist['EnvironmentVariables'] = {'SSH_AUTH_SOCK': '/nonexistent/alternate.sock'}
+        self.plist.write_bytes(plistlib.dumps(plist))
+        self.launch()
+        self.assertFalse(self.output.exists())
+        self.assertIn('SSH_AUTH_SOCK domain environment differs', self.stderr.read_text())
+
+    def test_rotated_or_absent_inherited_socket_keeps_saved_contract(self):
+        received = {'environment': {'HOME': self.stage.sha_bytes(b'/tmp/fixture'),
+                                    'SSH_AUTH_SOCK': self.stage.sha_bytes(b'/tmp/new-agent.sock')}}
+        with mock.patch.object(self.stage, 'run', return_value='/tmp/new-agent.sock\n'):
+            current = self.stage.received_environment(received, {}, self.label)
+        self.assertNotIn('SSH_AUTH_SOCK', current)
+        self.assertEqual(current['HOME'], received['environment']['HOME'])
+        received['environment'].pop('SSH_AUTH_SOCK')
+        self.assertEqual(self.stage.received_environment(received, {}, self.label), current)
+        received['environment']['SSH_AUTH_SOCK'] = self.stage.sha_bytes(b'/tmp/other.sock')
+        with mock.patch.object(self.stage, 'run', return_value='/tmp/new-agent.sock\n'):
+            with self.assertRaisesRegex(RuntimeError, 'SSH_AUTH_SOCK domain environment differs'):
+                self.stage.received_environment(received, {}, self.label)
 
     def test_gate_pin_and_delegation_substitution_refuse(self):
         plist = plistlib.loads(self.plist.read_bytes())

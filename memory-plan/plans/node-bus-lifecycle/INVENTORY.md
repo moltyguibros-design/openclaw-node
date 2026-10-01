@@ -97,7 +97,7 @@
 > **Feeds:**3.9/3.11's source identity and foreground contract.
 > **Verify:**code/runtime: static literal and computed resolution, native binding and subprocess inventories agree with the staged graph; meaningful private real-entry/event/notification/cleanup controls pass with source/dependency identity retained. No hidden memory-daemon deployment or remote-inference cancellation claim.
 
-> **3.9 — Goal:** the five rendered timer entries have exact reviewed launch environment content and protected admission/source pins, preserving application interpreter/flags/cwd/schedules; consolidation and observer have the declared source-path relocations of D25.
+> **3.9 — Goal:** the five rendered timer entries have the reviewed launch environment contract and protected admission/source pins, preserving application interpreter/flags/cwd/schedules; consolidation and observer have the declared source-path relocations of D25, and D26 governs the inherited SSH-agent socket.
 > **Needs:**3.6/3.7/3.8 closed; actual loaded plist/environment/command resolution; existing Python-I-S runner; protected location outside ordinary deploy copy/chmod/prune.
 > **Feeds:**3.10/3.11's installation baseline.
 > **Verify:**code/runtime: owned launch-boundary/preload/delegation mismatch and code/pin substitution negatives refuse before application work; exact application settings and new supervisor prefix are explicitly baselined. An in-Python check cannot retroactively protect Python's dynamic loader. No production units installed.

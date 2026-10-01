@@ -7,6 +7,7 @@ import os
 import pathlib
 import shutil
 import stat
+import subprocess
 import sys
 
 
@@ -47,11 +48,20 @@ def verify(manifest, label, argv):
     require(os.getcwd() == job['cwd'], 'application working directory differs')
     require(os.environ.get('XPC_SERVICE_NAME') == label, 'launchd service identity differs')
     actual = set(os.environ)
-    expected = set(job['environment'])
-    require(actual == expected, 'received environment keys differ')
+    require(job['dynamic_environment'] == ['SSH_AUTH_SOCK'],
+            'dynamic environment policy differs')
+    require(actual - {'SSH_AUTH_SOCK'} == set(job['environment']),
+            'received environment keys differ')
     for key, value in job['environment'].items():
         require(hashlib.sha256(os.environ[key].encode()).hexdigest() == value,
                 'received environment value differs: ' + key)
+    require(sha('/bin/launchctl') == manifest['executables']['/bin/launchctl'],
+            'launchd environment reader differs')
+    if 'SSH_AUTH_SOCK' in actual:
+        domain_socket = subprocess.run(['/bin/launchctl', 'getenv', 'SSH_AUTH_SOCK'],
+                                       check=True, capture_output=True, text=True).stdout.removesuffix('\n')
+        require(bool(domain_socket) and os.environ['SSH_AUTH_SOCK'] == domain_socket,
+                'SSH_AUTH_SOCK domain environment differs')
     for key in actual:
         require(not (key.startswith('DYLD_') or key.startswith('LD_') or key in {
             'NODE_OPTIONS', 'NODE_PATH', 'BASH_ENV', 'ENV', 'PYTHONPATH',
@@ -95,7 +105,7 @@ def main():
         with module.Gate(args.gate_root, {'lock': args.gate_lock_pin,
                                           'root': args.gate_root_pin}) as gate:
             return gate.run(argv)
-    except (OSError, ValueError, KeyError, TypeError, Refused) as error:
+    except (OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError, Refused) as error:
         print('timer entry refused: ' + str(error), file=sys.stderr)
         return 78
 

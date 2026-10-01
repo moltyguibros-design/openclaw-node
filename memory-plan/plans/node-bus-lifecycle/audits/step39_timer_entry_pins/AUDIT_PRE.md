@@ -89,3 +89,7 @@ plists are rendered and inspected but not installed under the five real labels.
   argv element without asserting the loaded argv shape. Both are now refused
   during staging. Its redundant XPC hash observation was resolved by checking
   the hash as well as the service identity.
+- A later saved-candidate verification refused solely because inherited
+  `SSH_AUTH_SOCK` rotated in the launchd user domain. D26 narrows that one
+  key to optional domain-verified content; all configured and other inherited
+  values stay pinned. Candidate `-5` supersedes `-3` and `-4`.
