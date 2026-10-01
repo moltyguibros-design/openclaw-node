@@ -147,6 +147,8 @@ jobs:
           /usr/bin/python3 test/test_nats_root_lock.py
           /usr/bin/python3 test/test_nats_root_journal.py
           /usr/bin/python3 test/test_nats_user_transfer.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_journal.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_journal_hold.py
           node --test test/nats-legacy-lock.test.mjs
 
   mission-control-tests:

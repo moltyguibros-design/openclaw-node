@@ -150,7 +150,7 @@ class UserTransferTest(unittest.TestCase):
         journal.close()
         metadata = fixture.root / '.DS_Store'
         metadata.write_bytes(b'Finder metadata')
-        metadata.chmod(0o644)
+        metadata.chmod(0o640)
         with patch.object(module, 'boot_identity', return_value='boot-a'):
             with module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction) as reader:
                 self.assertEqual(reader.observation['head'], transfer['sha256'])

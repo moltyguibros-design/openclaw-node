@@ -369,3 +369,11 @@ that real macOS positive control, allows owner-owned Finder metadata, refuses
 unknown forward-window events, and detects replacement of either held owner
 lock. Local root/transfer suites pass 68/68 and user journal/hold 115/115.
 The branch remains draft until revised-head CI and review pass.
+
+Checkpoint 2026-10-01 19:15 EDT: Claude's exact-head review of 0006d8b
+reported no blocker. Its two minor refusal cases are now closed: owner-owned
+regular Finder metadata is allowed regardless of mode under the 0700 journal
+directory, and deeply nested malformed JSON returns `Refused`. macOS CI now
+runs the existing user journal and hold suites as well as the real-gate
+validator test. Local focused tests remain 68/68; user/hold tests 115/115.
+Revised CI is pending. Production gates remain closed.

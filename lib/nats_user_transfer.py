@@ -159,7 +159,8 @@ class UserTransfer:
             self.records = self._records()
             self._validate()
             self._lock_identities()
-        except (OSError, subprocess.CalledProcessError, KeyError, TypeError, ValueError) as error:
+        except (OSError, subprocess.CalledProcessError, KeyError, TypeError,
+                ValueError, RecursionError) as error:
             self.close()
             raise Refused('user preservation transfer is unobservable or malformed') from error
         except BaseException:
@@ -208,7 +209,6 @@ class UserTransfer:
             finder = self.journal_root / '.DS_Store'
             info = finder.lstat()
             require(stat.S_ISREG(info.st_mode) and info.st_uid == self.uid
-                    and stat.S_IMODE(info.st_mode) in (0o600, 0o644)
                     and info.st_nlink == 1,
                     'user preservation Finder metadata identity differs')
             require_no_acl(finder)
@@ -345,7 +345,8 @@ class UserTransfer:
                     'user transfer journal changed after root admission')
             self._validate()
             return self.observation
-        except (OSError, subprocess.CalledProcessError, KeyError, TypeError, ValueError) as error:
+        except (OSError, subprocess.CalledProcessError, KeyError, TypeError,
+                ValueError, RecursionError) as error:
             raise Refused('user preservation transfer is unobservable or malformed') from error
 
     def close(self):
