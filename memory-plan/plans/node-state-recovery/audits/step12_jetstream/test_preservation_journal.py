@@ -1,5 +1,6 @@
 import copy
 import errno
+import hashlib
 import json
 import os
 import pathlib
@@ -61,14 +62,20 @@ def full_node_inventory():
 
 
 def full_entrypoint_evidence(prior):
+    gui = sorted('ai.openclaw.' + unit for unit, state in prior.items() if state['loaded'])
     return {'verified': True,
             'installed': {'ai.openclaw.' + unit: {
                 'path': '/owned/' + unit + '.plist',
                 'sha256': state['identity']['plist_sha256']}
                 for unit, state in prior.items()},
-            'loaded': {'gui': sorted('ai.openclaw.' + unit for unit, state in prior.items()
-                                   if state['loaded']), 'user': [], 'system': []},
-            'roots': ['/owned'], 'disabled_artifacts': {}}
+            'loaded': {'gui': gui, 'user': [], 'system': []},
+            'loaded_identity': {'gui': {label: {
+                'source': '/owned/' + label.removeprefix('ai.openclaw.') + '.plist',
+                'program': '/owned/node', 'working_directory': '/owned',
+                'arguments_sha256': hashlib.sha256(b'[]').hexdigest(),
+                'environment_sha256': {}}
+                                        for label in gui}, 'user': {}, 'system': {}},
+            'roots': ['/owned'], 'disabled_artifacts': {}, 'inert_artifacts': {}}
 
 
 class JournalTests(unittest.TestCase):
@@ -139,15 +146,21 @@ class JournalTests(unittest.TestCase):
                 with self.assertRaisesRegex(Refused, 'outside its original'):
                     journal.check_entrypoints()
                 current = copy.deepcopy(baseline)
+                current['loaded_identity']['gui']['ai.openclaw.gateway']['program'] = '/owned/other-node'
+                with self.assertRaisesRegex(Refused, 'configuration changed'):
+                    journal.check_entrypoints()
+                current = copy.deepcopy(baseline)
                 hold = SimpleNamespace(journal=journal, check_forward=lambda: None)
                 def stop_viewer():
                     current['loaded']['gui'].remove('ai.openclaw.workplan-viewer')
+                    del current['loaded_identity']['gui']['ai.openclaw.workplan-viewer']
                 journal.mutate('workplan-viewer', 'stop', stop_viewer,
                                lambda: {'verified': True}, hold=hold)
                 self.assertEqual(journal.records[-1]['evidence']['entrypoint_loaded'],
                                  current['loaded'])
                 def unload_timer():
                     current['loaded']['gui'].remove('ai.openclaw.consolidation-scheduler')
+                    del current['loaded_identity']['gui']['ai.openclaw.consolidation-scheduler']
                 journal.mutate('consolidation-scheduler', 'unload', unload_timer,
                                lambda: {'verified': True}, hold=hold)
                 self.assertEqual(journal.records[-1]['evidence']['entrypoint_loaded'],
@@ -176,6 +189,7 @@ class JournalTests(unittest.TestCase):
                 with self.assertRaisesRegex(Refused, 'continuous launchd and process watch'):
                     journal.append('sealed')
                 current['loaded']['gui'].remove('ai.openclaw.gateway')
+                del current['loaded_identity']['gui']['ai.openclaw.gateway']
                 with self.assertRaisesRegex(Refused, 'were not restored'):
                     journal.resolve()
                 self.assertEqual(journal.records[-1]['event'], 'recovery-finished')
@@ -214,6 +228,7 @@ class JournalTests(unittest.TestCase):
             self.assertEqual(reopened.scope, FULL_NODE_SCOPE)
             changed = copy.deepcopy(evidence)
             changed['loaded']['gui'].remove('ai.openclaw.gateway')
+            del changed['loaded_identity']['gui']['ai.openclaw.gateway']
             with patch('preservation_journal.capture_entrypoint_inventory', return_value=changed):
                 with self.assertRaisesRegex(Refused, 'were not restored'):
                     reopened.check_entrypoints(final=True)
@@ -1230,6 +1245,21 @@ with legacy_journal(root,prior,boot='boot-a',node_lock=node_lock) as journal:
         self.assertNotEqual(static_identity(unit), after_entry)
         with self.assertRaisesRegex(Refused, 'resolved entry files'):
             static_identity(unit, dependencies={'package': parent})
+
+    def test_static_identity_hashes_program_over_custom_argv_zero(self):
+        import plistlib
+        from preservation_journal import static_identity
+        parent = pathlib.Path(self.temp.name)
+        program = parent / 'actual-executable'
+        program.write_bytes(b'first executable')
+        unit = parent / 'owned-program.plist'
+        unit.write_bytes(plistlib.dumps({'Program': str(program),
+                                        'ProgramArguments': ['custom-argv-zero'],
+                                        'WorkingDirectory': str(parent)}))
+        before = static_identity(unit)
+        self.assertIn(str(program.resolve()), before['files'])
+        program.write_bytes(b'changed executable')
+        self.assertNotEqual(static_identity(unit), before)
 
     def test_static_identity_binds_the_resolved_working_directory(self):
         import plistlib

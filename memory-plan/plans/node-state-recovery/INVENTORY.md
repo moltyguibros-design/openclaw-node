@@ -131,3 +131,264 @@ continuous launchd/process watch exists. The current read-only scan takes
 4.75 seconds and still refuses the same two root-managed system jobs. The
 controller, privileged job disposition, healthy cold masters, isolated
 restores and verified production resumption remain open at 1.2[A]/v1.2-pre.
+
+Checkpoint 2026-10-01 02:58:37 EDT: after PR #169 merged, the next source
+branch inverted launchd discovery toward a closed-world preflight. The
+read-only host scan now sees five additional installed jobs and nine loaded
+third-party/root jobs beyond the proposed cohort; none is implicitly
+approved. Empty legacy plists are recorded by hash. The 91 focused
+scanner/journal tests pass. Explicit safe exclusions, disposition of the
+root-managed agent and remote management job, a continuous writer fence,
+the controller, healthy cold masters, isolated restores and runtime service
+resumption remain open. Step 1.2 remains [A] at v1.2-pre.
+
+Checkpoint 2026-10-01 03:11:15 EDT: Claude's closed-world review identified
+`Program` precedence, undeclared loader variables and untrusted path-prefix
+classification. Draft PR #170 binds the effective program, refuses undeclared
+code-loading environment, parses launchd rows strictly, and counts dynamic
+GUI jobs unless proven safe. The 120 scanner/journal/managed Mac tests pass
+with one domain-specific skip. The live preflight remains closed; process
+activity and copy-input continuity are still unproved, and no production
+service was changed.
+
+D24 records the remaining copy-integrity boundary: a user-level FSEvents
+stream cannot certify an uninterrupted cold copy, and an owned Mac control
+showed a pre-opened descriptor can write through `UF_IMMUTABLE`. The full-node
+seal stays refused until a privileged open-handle check, durable immutable
+freeze/undo and crash recovery are proved; the root jobs and explicit outside
+job exclusions also remain open.
+
+Claude's PR #170 exact-head review identified loaded-only environment,
+inherited environment, argument-whitespace and Apple-symlink bypasses; the
+source and owned regression checks now refuse them. Four source plist
+templates no longer set `NODE_PATH`, but their installed live copies still
+do. The source remains a draft until its new exact-head checks and adversarial
+follow-up pass. Step 1.2 stays [A] at v1.2-pre.
+
+D26 narrows the remaining source boundary: raw newlines in `launchctl print`
+can spoof text structure, so loaded-but-idle jobs require pinned re-bootstrap
+or structured attestation before a full-node seal. A single read-only APFS
+snapshot is the target cold-copy input, with privileged owned proof and
+quiescence still open. No live snapshot, root-job mutation, or full-node hold
+has occurred.
+
+Checkpoint 2026-10-01 04:17 EDT: PR #170 head `43ae5a0` passes exact CI
+and 187 owned Mac Python tests (one domain skip); Claude's exact-head
+challenge finds no additional fail-open source defect. D27 records two
+remaining operational boundaries: ordinary Apple launchd text can make
+the all-domain scanner refuse, and even a later `restored`/`resolved`
+full-node receipt cannot attest an idle job from unescaped text alone.
+Pinned re-bootstrap/domain environment, privileged APFS snapshot proof,
+unknown/root-job disposition, continuous admission, three healthy cold
+masters and verified resumption remain open. Step 1.2 stays [A] at
+v1.2-pre; no production hold or copy was started.
+
+D28's revised read-only scanner now completes across the three live launchd
+domains and reports the 29 GUI and 11 system extras explicitly. Its 188-test
+owned Mac suite passes with one domain skip and no production NATS contact.
+The cohort still refuses, and no source change certifies idle loaded jobs,
+Apple user-code dispatch, continuous admission or a cold copy. Full-node
+controller, privileged job/snapshot mechanism, three healthy masters,
+isolated restores and live resumption remain open at 1.2[A]/v1.2-pre.
+
+D29 corrects two regressions Claude found at PR #170 head `79a6ff5`:
+approved working directories printed after `arguments` are compared, and
+Unicode line separators in identity values cannot truncate a loaded program.
+The 190-test owned suite passes with one domain skip. The current read-only
+three-domain scan still reports 29 extra GUI and 11 extra system jobs; 17
+approved jobs match, while four installed mesh jobs correctly refuse their
+live `NODE_PATH` loader. The complete cohort still refuses. Idle-job
+attestation, domain-environment binding, a privileged snapshot, three cold
+masters and verified resumption remain open at 1.2[A]/v1.2-pre.
+
+D30 replaces the unavailable APFS snapshot path with an explicitly
+uncertified candidate-copy experiment. The new copier verifies three owned
+store trees before, during and after copying; an isolated three-server
+restore recovers the seeded JetStream stream and durable consumer. The
+stop-to-first-manifest writer-exclusion proof is still absent: writable
+`mmap` can change bytes before ctime publication, and protected-process
+mapping enumeration is inaccessible from this user session. The candidate
+does not count as a cold master or a preservation receipt. Pinned idle-job
+re-bootstrap, complete writer fencing, live stop/copy/resume and step closure
+remain open at 1.2[A]/v1.2-pre.
+
+An opt-in owned APFS image test now proves that a normal unmount refuses a
+descriptor-free writable mapping and a descriptor in transit, and that a
+read-only remount refuses writes. It does not close the stop-to-unmount
+same-user writer interval or authorize a live store migration.
+
+D31 adds an end-to-end owned-volume control: three owned NATS members run on
+an ownership-enforcing APFS image, stop normally, then the image is unmounted,
+remounted read-only and copied. The second source manifest equals the saved
+pre-restore candidate manifest. The current live stores remain operator-owned,
+so the fixture cannot certify a production cold point. A separate non-login
+NATS uid, protected job and file paths, cross-uid identity evidence, and the
+existing continuous full-node watch remain prerequisites. An argv-only process
+dump now refuses before identity binding. Step 1.2 remains open; no cold
+master, production bracket or seal was recorded.
+
+D32 corrects the macOS argument decoder for a zero-padding layout in which
+Apple auxiliary strings directly follow environment strings. Eight owned
+process lengths and forged-prefix controls pass; unknown layouts refuse.
+This does not supply the missing cross-uid or continuous admission proof.
+
+D33 adds explicit refusal for unreadable store subdirectories, directory-entry
+coverage, and restored-message read-back. A same-length corruption negative
+fails at message retrieval even when stream metadata matches. The APFS fixture
+checks effective mount flags with an owners-off negative. Read-only inspection
+found a system-domain Tailscale job whose invoked app has an operator-writable
+ancestor; its privileged path must be classified before a root helper can
+claim protected execution. These remain source and owned-fixture controls;
+there is no production cold master or full-node seal.
+
+The final Mac suite for D33 passes 204 tests with three expected skips. Two
+earlier full runs exposed overly narrow restore-only event matching and an
+owned NATS placement startup race; both fixtures were corrected and the exact
+suite rerun. Exact-head CI and adversarial review remain open, as do protected
+cross-uid ownership, continuous admission, the detached production driver,
+three healthy cold masters and live restoration acceptance.
+
+D34 corrects the routed-read overclaim: an owned restored member must become
+stream leader before its message read counts as that replica's read-back.
+Single-follower and all-replica corruption negatives both fail at message
+retrieval; a copy-side manifest also detects a changed single replica before
+restore. The publication digest is still operator-held, and the live NATS
+stores remain same-uid. The production isolation and full-node gates remain
+open at 1.2[A]/v1.2-pre.
+
+D35 narrows the owned restore evidence: member-by-member leader rotation is
+a cluster recovery check because healthy peers can refill a damaged copied
+store before it leads. The current post-publication corruption controls and
+copy-side manifest do not prove a source store was independently healthy at
+the cold point. An isolated per-store content/recovery check, protected
+publication digest, dedicated service identity and production restoration
+remain open. PR #170 head `6868c1f` has green Node 20, Node 22 and Mission
+Control CI; this does not close step 1.2 or permit full-node `seal()`.
+
+D36 adds the independent per-member *state* check to the owned fixture:
+each candidate store is inspected alone on a disposable server before any
+peer can refill it, then cluster-level message reads and a catch-up-log
+tripwire run. Source-side empty blocks and a missing stream that previously
+passed now refuse; same-length source corruption refuses at message read.
+The one-message fixture is not the production all-message content baseline.
+Protected ownership, production cold masters, the controller and verified
+live restoration remain open at 1.2[A]/v1.2-pre.
+
+D37 adds the last pre-stop Raft group-name check that D36 lacked, and makes
+the owned durable cursor nonzero before its isolated comparison. Source-side
+missing Raft and consumer folders now refuse even if the repaired cluster
+would serve the message. The four-test owned cluster suite passes. Deeper
+per-group log-byte and production all-message proof, protected custody, and
+the full-node driver remain open; step 1.2 stays [A].
+
+D38 adds an offline sentinel for saved term, peers and nonempty snapshot/log
+content in every observed Raft group before an owned member can be repaired
+by its peers. Three new source-side damage controls refuse; the eight-mode
+negative suite and stable-source 208-test Mac recovery suite pass. The
+bounded fixture still does not prove every production Raft log byte or
+retained message. Exact-head CI/review, the protected writer and publication
+boundary, production cold masters, the full-node driver and live resumption
+remain open at 1.2[A]/v1.2-pre; `seal()` stays disabled.
+
+D39 corrects the owned fixture's same-length Raft-content false acceptance
+after stop: normal shutdown changes Raft bytes, so a live pre-stop file hash
+is not comparable to the stopped candidate. A full Raft file/directory view
+saved immediately after normal owned shutdown now detects later source-side
+junk snapshots, logs, peers and vote bytes before isolated startup. Other
+damage is injected before that baseline so the structural and local-state
+checks retain independent negative controls. The positive and earlier
+eleven-mode suite pass locally; the changed-vote control also refuses. The
+refined twelve-mode suite, exact-source complete suite, CI and Claude review
+are open.
+This owner-held test baseline does not authenticate latent pre-stop damage or
+close the protected production writer/cold-master gates; 1.2 remains [A].
+
+The refined twelve-mode owned negative suite and complete Mac recovery suite
+pass at stable source (208 tests, three expected skips). The baseline and
+candidate comparison is still an owner-held fixture continuity check; exact
+CI, adversarial review, protected live custody, three cold masters, the
+production driver and resumption remain open.
+
+D40 follows Claude's exact-head `7d40a3f` review: CI passed 3/3 and the
+stopped-Raft-byte claim had no source blocker. A healthy meta-snapshot
+catch-up warning caused a false refusal, while latent damaged Raft contents
+could still be accepted. The owned fixture now exempts only that warning,
+records the actual integrity line on refusal, and includes a latent junk
+snapshot control that must reach `Snapshot corrupt`. The fixture retries
+transient observations during pre-baseline settling and post-stepdown
+election within their deadlines. The focused four-test cluster suite and
+complete 208-test Mac recovery suite pass, with three expected skips.
+Protected production custody, per-member Raft replay and peer/vote
+metadata validation, three healthy cold masters, the full driver and
+verified resumption remain open; 1.2 stays `[A]`.
+
+D41 adds a disposable NATS-native replay of each copied owned member against
+one fresh empty routing peer before the candidate meets its original peers.
+All recorded Raft groups must replay to at least their observed committed and
+applied indexes without leader election, and the blank peer must have no
+account groups. A source-side hollow-WAL control passes the earlier structural
+and local-state checks but refuses at member 1's replay index. The healthy
+owned run and focused negative pass locally; complete exact-source suite,
+CI and independent review are pending. Peer/vote metadata validation,
+protected production custody, all-message baseline, three live cold masters,
+the detached controller and verified resumption remain open at 1.2 `[A]`.
+
+The corrected complete Mac recovery suite passes 209 tests with three expected
+skips; final-source replay focus passes 2/2. Exact-source CI and Claude review
+remain pending. No production preservation window was opened.
+
+D42 settles every owned `$G` group's committed/applied index across the three
+members after stepdown, before stop and copy, so the subsequent per-member
+replay reaches the same captured cluster threshold. It scans each replay log
+before reporting an index timeout. The owned cluster module passes 5/5 with
+normal cleanup, followed by five more healthy replays; `35f8a8a` CI passed
+3/3 and Claude found no false acceptance
+in that preceding head. Exact D42 CI/review, protected production custody,
+peer/vote validation, three healthy live cold masters, detached orchestration
+and verified resumption remain open. Step 1.2 is still `[A]` at `v1.2-pre`.
+
+D43 correction, 2026-10-01 11:07 EDT: retained Mac evidence shows D42 could
+accept equal pre-election stream indexes while no new leader existed. The
+owned post-stepdown capture now requires the elected leader, equal
+committed/applied/persisted indexes in `$G` and `$SYS/_meta_`, and an advance
+to settle for one second. The latent damage control requires its actual
+replay-log warning.
+Six corrected healthy Mac replays capture and
+independently reach stream index `4` on each member, rather than accepting
+the old index `2`. The final exact-source cluster module passed 5/5 in
+271.532 seconds with normal cleanup. This only establishes the captured
+owned reference; exact CI and adversarial review remain pending. The
+protected production writer, three cold masters, peer/vote validation and
+verified resumption remain open at 1.2 `[A]`/`v1.2-pre`.
+
+D44 checkpoint, 2026-10-01 11:40 EDT: `ad9927a` exact CI passed 3/3.
+The D43 election/advance check now has a deterministic regression for
+pre-commit leader changes, leaderless mixed terms, incomplete persistence
+and in-flight metadata. The final owned cluster module passed 6/6 in
+276.778 seconds with normal cleanup. Exact D44 CI/review are pending;
+protected live custody, three cold masters and verified resumption remain
+open at step 1.2 `[A]`/`v1.2-pre`.
+
+D45 checkpoint, 2026-10-01 11:56 EDT: exact `75149d1` CI passed 3/3.
+Claude's read-only mutation check found missing deterministic refusal rows;
+the predicate itself rejected them. The unit test now covers cross-member
+leader, term and index disagreements, absent groups, unchanged leadership
+and the maximum pre-stepdown index. The owned Mac module passed 6/6 in
+270.827 seconds with normal cleanup. Exact D45 CI/review remain pending;
+step 1.2 remains `[A]` at `v1.2-pre`.
+
+D46 checkpoint, 2026-10-01 12:00 EDT: three additional deterministic
+refusals close the remaining non-equivalent predicate mutants found by
+Claude. The focused unit passes. The live predicate and capture loop are
+unchanged; prior full Mac module passed 6/6. Exact new CI/review are
+pending, and step 1.2 remains `[A]` at `v1.2-pre`.
+
+D47 checkpoint, 2026-10-01 12:08 EDT: the deterministic test now places
+stream, consumer, metadata and group-set dissent at each of the three
+member positions. This closes three positional test gaps found by Claude;
+the focused test passes and the live predicate is unchanged. Exact new
+CI/review remain pending. Step 1.2 stays `[A]`/`v1.2-pre`.
+
+The D47 phrase "live predicate" means the owned three-member fixture;
+`post_stepdown_ready()` is not called by production services. The lagging
+before-reference test now rotates across all three member positions too.

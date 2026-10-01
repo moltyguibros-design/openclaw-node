@@ -97,13 +97,16 @@ def static_identity(plist_path, files=(), dependencies=None):
     raw = pathlib.Path(plist_path).read_bytes()
     plist = plistlib.loads(raw)
     argv = plist['ProgramArguments']
+    executable = plist.get('Program', argv[0])
+    require(isinstance(executable, str) and pathlib.Path(executable).is_absolute(),
+            'LaunchAgent executable must be an absolute path')
     dependencies = {name: str(pathlib.Path(path).resolve(strict=True))
                     for name, path in (dependencies or {}).items()}
     require(all(pathlib.Path(path).is_file() for path in dependencies.values()),
             'dependencies must be resolved entry files; include package.json in files')
     cwd = pathlib.Path(plist.get('WorkingDirectory', '/'))
     arguments = [pathlib.Path(arg) if pathlib.Path(arg).is_absolute() else cwd / arg for arg in argv]
-    paths = {pathlib.Path(path).resolve(strict=True) for path in (argv[0], *files, *dependencies.values())}
+    paths = {pathlib.Path(path).resolve(strict=True) for path in (executable, *files, *dependencies.values())}
     paths.update(path.resolve(strict=True) for path in arguments if path.is_file())
     return {'plist_sha256': hashlib.sha256(raw).hexdigest(), 'argv': argv,
             'working_directory': str(cwd.resolve(strict=True)),
@@ -187,7 +190,8 @@ def valid_prior(prior, scope=None):
 
 def valid_entrypoint_inventory(evidence, prior):
     require(isinstance(evidence, dict) and evidence.get('verified') is True
-            and set(evidence) == {'verified', 'installed', 'loaded', 'roots', 'disabled_artifacts'},
+            and set(evidence) == {'verified', 'installed', 'loaded', 'loaded_identity', 'roots',
+                                  'disabled_artifacts', 'inert_artifacts'},
             'full-node entrypoint inventory is absent')
     installed = evidence['installed']
     loaded = evidence['loaded']
@@ -202,13 +206,36 @@ def valid_entrypoint_inventory(evidence, prior):
     require(set().union(*map(set, loaded.values())) == expected_loaded
             and sum(map(len, loaded.values())) == len(expected_loaded),
             'full-node loaded entrypoints differ from the baseline')
+    identities = evidence['loaded_identity']
+    require(isinstance(identities, dict) and set(identities) == set(loaded)
+            and all(isinstance(identities[domain], dict)
+                    and set(identities[domain]) == set(loaded[domain])
+                    for domain in loaded),
+            'full-node loaded job identities are incomplete')
+    for domain, entries in identities.items():
+        for label, identity in entries.items():
+            require(isinstance(identity, dict) and set(identity) == {
+                'source', 'program', 'working_directory', 'arguments_sha256',
+                'environment_sha256'}
+                and identity['source'] == installed.get(label, {}).get('path')
+                and isinstance(identity['program'], str) and identity['program'].startswith('/')
+                and isinstance(identity['working_directory'], str)
+                and re.fullmatch(r'[0-9a-f]{64}', identity['arguments_sha256'])
+                and isinstance(identity['environment_sha256'], dict)
+                and all(isinstance(key, str) and re.fullmatch(r'[0-9a-f]{64}', value)
+                        for key, value in identity['environment_sha256'].items()),
+                'full-node loaded job provenance is incomplete: ' + domain + '/' + label)
     require(isinstance(evidence['roots'], list) and evidence['roots']
             and all(isinstance(root, str) and pathlib.Path(root).is_absolute()
                     for root in evidence['roots'])
             and isinstance(evidence['disabled_artifacts'], dict)
             and all(pathlib.Path(path).is_absolute()
                     and re.fullmatch(r'[0-9a-f]{64}', str(digest))
-                    for path, digest in evidence['disabled_artifacts'].items()),
+                    for path, digest in evidence['disabled_artifacts'].items())
+            and isinstance(evidence['inert_artifacts'], dict)
+            and all(pathlib.Path(path).is_absolute()
+                    and re.fullmatch(r'[0-9a-f]{64}', str(digest))
+                    for path, digest in evidence['inert_artifacts'].items()),
             'full-node entrypoint roots or disabled artifacts are incomplete')
     for unit in UNITS:
         entry = installed['ai.openclaw.' + unit]
@@ -394,11 +421,18 @@ class Journal:
         current = capture_entrypoint_inventory(UNITS)
         saved = self.entrypoint_inventory
         require(all(current[key] == saved[key] for key in
-                    ('installed', 'roots', 'disabled_artifacts')),
+                    ('installed', 'roots', 'disabled_artifacts', 'inert_artifacts')),
                 'full-node installed entrypoint identity changed')
         require(all(set(current['loaded'][domain]) <= set(saved['loaded'][domain])
                     for domain in ('gui', 'user', 'system')),
                 'full-node job loaded outside its original domain or state')
+        require(all(set(current['loaded_identity'][domain]) == set(current['loaded'][domain])
+                    for domain in ('gui', 'user', 'system')),
+                'full-node loaded job identity map is incomplete')
+        require(all(all(identity == saved['loaded_identity'][domain].get(label)
+                        for label, identity in current['loaded_identity'][domain].items())
+                    for domain in ('gui', 'user', 'system')),
+                'full-node loaded job configuration changed')
         if forward:
             previous = next((row['evidence']['entrypoint_loaded'] for row in reversed(self.records)
                              if row['event'] == 'verified'

@@ -774,3 +774,647 @@ loaded inventory. The listener's child check narrows deployment risk but does
 not prove its asynchronous `deploying` flag is false; the full driver must
 obtain that proof and rule out pending catch-up before restoration completes.
 No production service was stopped or modified, and no cold master was taken.
+
+### Closed-world launchd scan in source — 2026-10-01 02:58:37 EDT
+
+The next source branch reverses the scanner's default for standard non-system
+plist directories and loaded GUI/user/system jobs: an ordinary job is now
+included unless its resolved launchd source and executable are root-owned,
+non-group-writable files in an Apple-managed system tree.
+Empty `{}` legacy plists are recorded separately by path and hash; nonempty
+unlabeled plists refuse. Neutral wrappers and self-declared `com.apple.*` or
+`application.*` labels no longer escape solely because their executable is
+outside known OpenClaw roots.
+
+The read-only host scan found 28 installed labeled jobs: 23 proposed cohort
+members and five extras (`com.google.GoogleUpdater.wake`,
+`com.openclaw.agent`, `com.openclaw.tailscale-up`, `com.tailscale.autostart`,
+`meshagent`). Two empty Google Keystone plists are inert artifacts. It found
+25 GUI-loaded labels (21 cohort, four extras), zero user-loaded, and five
+system-loaded extras. The extras are not accepted exclusions; a full-node
+baseline still refuses. Ninety-one focused scanner/journal tests pass on this
+source. No live hold, job mutation, or cold NATS master was attempted.
+
+The same branch now binds launchd's explicit `Program` executable in the
+static file hash and compares the loaded program with the plist before a
+managed stop. A scratch plist with a custom `ProgramArguments[0]` and a
+different `Program` exercises the precedence case. The managed Mac and
+journal suites pass 97 tests with one explicit domain-specific skip; their
+owned NATS server reports no production connections.
+
+Claude's subsequent read-only challenge showed that even a runningboardd
+registration does not prove a GUI app cannot run user code. The source no
+longer exempts such apps: the conservative read-only scan now finds 50
+GUI-loaded labels (29 beyond the cohort), zero user-loaded, and 11
+system-loaded extras. The strict parser refuses unparsed or duplicated rows
+and checks that a real `launchctl print` detail names the listed job. Apple
+provenance now resolves actual paths and requires root-owned, non-writable
+components instead of trusting a `/System/Library` text prefix. The managed
+process binding parses only the real environment section, records every
+effective variable hash, and refuses undeclared or code-loading variables.
+None of these changes opens a preservation window; a complete exclusion
+policy and a continuous or effect-based copy fence remain unproved.
+The preflight now captures a hash-only environment and argument identity for
+each loaded job and requires each approved loaded source path, effective
+program, arguments, working directory and declared environment to match its
+installed plist. The journal rechecks the identity of each still-loaded job
+through forward work and final restoration. This closes same-label reloading
+from a different plist without claiming that a point-in-time scan detects a
+load-run-unload between scans.
+The combined scanner, journal and managed Mac suites pass 120 tests with one
+explicit domain-specific skip; the owned servers made no production NATS
+connections. No production job was stopped or changed.
+
+An additional private temp-file control tested the proposed copy freeze on
+this Mac. After setting `UF_IMMUTABLE`, `open(O_WRONLY)` failed with EPERM,
+while `pwrite()` through a descriptor opened before the flag succeeded and
+changed the byte. The flag was cleared and the temp file removed in the same
+control. This confirms that freeze cannot be certification unless all
+pre-existing writable handles and mappings, including root processes, are
+ruled out before the flag is applied. No live store flag was changed.
+
+Claude's read-only review at PR #170 head `25d2d24` reproduced three
+source-level bypasses in scratch: extra or inherited loaded environment
+variables, stripped trailing argument space, and Apple provenance reached
+through a writable symlink. The later local source checks the original and
+resolved path ancestry, preserves printed argument bytes, parses inherited,
+default and job environment blocks, and refuses undeclared or loader
+variables even when a plist declares them. The real gateway's loaded
+arguments matched its installed plist, and all 15 effective environment
+keys passed the shared policy without exposing their values. Four installed
+mesh plists still carry `NODE_PATH`; no live plist or process was changed.
+
+An owned temporary LaunchAgent showed launchd prints literal newlines in an
+environment value. A value can visually close its `environment` block before
+the next variable line. The scanner now refuses any variable-shaped line
+outside the parsed environment blocks. All 21 currently loaded approved GUI
+jobs still parse; the owned probe was booted out and removed.
+
+Claude's follow-up at head `1efb819` re-ran P1–P6 and found all six refused,
+then raised a new raw-newline argument/cwd spoof. An owned Mac LaunchAgent
+with an argument containing `a\n\t}` confirmed launchd emits those bytes
+literally. The later scanner rejects unmatched section boundaries, duplicate
+path/program/cwd fields, variable-shaped rows outside environment blocks,
+reordered environment blocks, and the additional Python and `LD_*` loader
+names. Its 21 currently loaded approved GUI jobs still parse. This is a
+fail-closed text check, not a structured attestation for idle jobs. The
+temporary probe was booted out; no production job was touched.
+
+Read-only inspection of the three installed NATS plists and their config
+files places `jetstream`, `jetstream-2` and `jetstream-3` on the same APFS
+Data volume (`/dev/disk4s5`). This satisfies the single-volume precondition
+for an APFS snapshot design but does not prove privileged creation, mounting
+or a cold writer-free instant. No snapshot was created.
+
+2026-10-01 04:17 EDT — PR #170 head `43ae5a0` passes Node 20, Node 22
+and Mission Control CI. The complete owned Mac Python recovery suite passes
+187 tests with one explicit domain skip, three owned cluster servers and no
+production NATS connections. Its only earlier failure was a test fixture
+pointing at absent `/bin/false`; the corrected `/usr/bin/false` control passes.
+The tree is clean after push. Claude's exact-head scratch probes found no
+source defect that defeats the fail-closed checkpoint; balanced newline
+spoofs still pass the text parser, as D26 declares. The live full-domain
+read-only scan refuses some honest Apple job output before classification,
+so neither scan availability nor idle-job attestation is accepted. The
+three live NATS store roots share device 16777233; no live store was copied,
+snapshotted, stopped or changed. See D27 for the restoration and APFS
+carry-forwards.
+
+2026-10-01 04:32 EDT — The D28 header-only classification change passes the
+complete owned Mac Python recovery suite: 188 tests, one domain skip, three
+owned NATS servers, zero production NATS connections and normal owned-server
+cleanup. A fresh read-only scan of all loaded GUI, user and system jobs
+completes in 11.52 seconds: 21 approved GUI jobs, 29 extra GUI jobs, zero
+user extras and 11 system extras. The complete preflight still refuses on
+the installed cohort mismatch. A nested Apple event-trigger `path` no
+longer masquerades as a duplicate job source; an argument-forged Apple
+source outside the identity header remains unknown. The owned
+`launchctl list <label>` probe also emitted raw newlines, so it is not an
+alternative structured attestation. `tmutil destinationinfo` reports no
+Time Machine destination, and noninteractive administrator access is
+unavailable; neither APFS snapshot creation nor root-job disposition was
+attempted. No production job or store was changed.
+
+2026-10-01 04:49 EDT — Claude's exact-head review of `79a6ff5` found two
+source regressions: `working directory` printed after `arguments` was lost,
+and `splitlines()` truncated a loaded program at U+2028. D29's correction
+passes focused counterexamples for both directions of the working-directory
+comparison and for approved/unapproved Unicode separator values. A read-only
+live scan of the three launchd domains completes: 21 approved GUI jobs, 29
+extra GUI jobs, zero user jobs and 11 extra system jobs. Seventeen approved
+jobs match their loaded plist identity; four mesh jobs refuse because their
+installed live plists still declare `NODE_PATH`. Five installed jobs are
+outside the cohort. Complete preflight therefore still refuses.
+
+The first complete owned suite run reached 190 tests with one skip but failed
+an unrelated cluster readiness assertion: a stable Raft observation was
+accepted before every group had elected a leader. The isolated cluster test
+passed on retry; its readiness loop now requires elected leaders before the
+one-second stability interval. The complete rerun passes 190 tests with one
+domain-specific skip, three owned NATS servers, zero production NATS
+connections and normal cleanup. No production job, service or store changed;
+no APFS snapshot or full-node hold was attempted. Exact pushed CI and Claude
+re-review of D29 remain pending at this checkpoint.
+
+2026-10-01 05:42 EDT — PR #170 head `a5f4719` passed Node 20, Node 22 and
+Mission Control CI. Claude's exact-code-head re-review of `a38f079` found no
+new source blocker; it reiterated that launchd's literal-LF text cannot
+attest an idle loaded job. The draft PR remains deliberately non-operational.
+
+D30's owned candidate-copy implementation inventories and hashes three
+JetStream store trees, refuses symlinks, hardlinks and special files, checks
+source identity and bytes during copying, rechecks the source, hashes the
+copy and publishes only after all comparisons pass. Six focused controls
+pass, including writes after the baseline, an unflushed writable mapping,
+new directory entries and linked-file refusal. The existing three-member
+owned NATS fixture then cleanly stopped, copied the three actual store trees,
+and restored them on separate owned ports. Across two repeat runs, the
+restored stream and durable consumer state matched the baseline multiset
+after Raft election. The initial per-server comparison had failed because
+the durable consumer's `pending` view moved with the elected leader; the
+final comparison preserves all three replica states while allowing the
+leader to move. The complete Mac recovery suite passed 196 tests with one
+domain skip; the owned servers exited normally, and it reported zero
+production NATS connections. The first suite invocation was missing the
+worktree's external `RECOVERY_NATS_MODULE` path and failed setup; the rerun
+with the installed module path passed.
+
+An owned macOS memory probe changed file bytes through a shared writable
+mapping with its descriptor closed. `lsof` listed the file as `txt`, not an
+open writable descriptor. `proc_pidinfo(PROC_PIDREGIONPATHINFO)` found that
+mapping in its own process; calls for root `meshagent` and `syspolicyd`
+returned `EPERM` before any region. `proc_listpidspath` found the owned
+mapping but is not a completeness proof. On an owned APFS sparse image,
+the mapped write left ctime unchanged immediately and after `fsync` of a
+read-only descriptor; ctime advanced on `munmap`. That falsifies a
+stop-time ctime check as a standalone guarantee.
+
+The opt-in `RECOVERY_APFS_TEST=1` fixture passed on this Mac. It created an
+owned 256 MiB APFS sparse image, verified a stable volume UUID, and saw a
+normal unmount refuse `Resource busy` for both a descriptor-free writable
+mapping and an unread UNIX-socket-transferred write descriptor. After
+releasing the references, normal unmount succeeded. A read-only remount
+refused `O_RDWR` with `EROFS`; the candidate copier read three roots from
+that read-only mount. An unwritable bare mountpoint refused new store
+creation; read-write remount retained the original bytes. An additional
+opt-in run passed with `-owners on` at attach and explicit `owners` on each
+remount; `GlobalPermissionsEnabled` stayed true. The fixture detached and
+cleaned its image. These tests cover owned volume mechanics,
+not the live Data volume or a certified production preservation point.
+Claude's Message 137 independently challenged the proposed root scan as
+incomplete, including descriptors in transit and Mach memory entries, and
+proposed a dedicated volume/unmount bracket. Message 139 then challenged the
+stop-to-unmount writer interval: while NATS runs as the operator uid, another
+same-uid process can acquire a write capability before stop. Its proposed
+dedicated service uid is a design challenge, not an implemented control. No
+production service, volume, store or journal was changed, and full-node
+`seal()` remains refused.
+
+Read-only live ownership check at 05:46 EDT: all three NATS processes run as
+`moltymac` (PIDs 815, 831, 842), and the three store roots are owned by UID
+501 on Data device 16777233. Their modes are 0755, 0700 and 0700; sizes are
+38,484, 460 and 64,536 KiB. A separate volume alone would not exclude
+other processes under this same account from writing between NATS exit and
+unmount. No live configuration, process or permission was changed.
+
+`workspace-bin/plan-lint.sh node-state-recovery` completed with 11 PASS,
+one WARN and two pre-existing FAIL results: missing `automation.json` and
+`tick-logs/` in this checkout. The plan step was not advanced or closed.
+
+At 05:55 EDT, the opt-in owned-volume cluster control passed in 10.6 s. It
+ran the existing three-member JetStream fixture on a 512 MiB APFS image with
+ownership enforcement, cleanly stopped both original and restored clusters,
+unmounted normally, remounted read-only, and copied all three original store
+roots again. The resulting manifest hash equaled the first copy's saved
+pre-restore manifest hash; source and destination file hashes matched, the
+volume UUID and ownership setting stayed stable, and cleanup detached the
+image. An initial draft compared against the first copy after its restore
+cluster had changed the files; that invalid comparison was corrected before
+the passing run. The test does not exercise a separate service uid or a
+production volume and cannot certify absence of a same-uid pre-stop writer.
+
+The live `system/com.openclaw.agent` job is a KeepAlive LaunchDaemon whose
+script path is missing and under the operator's writable home. `launchctl
+print` reports `username = moltymac`, and the plist declares that same
+`UserName`; Claude's initial description of this job as a root execution
+path was incorrect. The correction was sent for adversarial re-review. A
+new focused regression proves that an argv-only process dump with no observed
+environment refuses before identity binding; both focused identity tests
+passed. This is local code evidence, not protected cross-uid process evidence.
+
+The combined relevant run passed 61 tests with one existing user-domain
+bootstrap skip in 42.5 s: candidate-copy controls, both opt-in APFS controls,
+entrypoint checks and managed-launchd stop/watch cases. It used only owned
+NATS servers, reported no production NATS connections, and cleaned those
+servers normally. PR #170 head `4f2c1a1` separately passed all three CI jobs;
+this newer change requires its own CI run after push.
+
+At 06:08 EDT, Claude's follow-up corrected its `com.openclaw.agent` claim:
+the root-owned plist runs as `moltymac`, while the run-as identity of the
+other legacy system job still needs direct inspection. It also identified a
+macOS process-argument layout with zero padding between environment and
+Apple auxiliary strings. A local synthetic probe reproduced the old parser
+misclassifying `pfz` and `stack_guard` as environment. An owned `/bin/sleep`
+probe with eight environment lengths observed the zero-padding layout and
+verified that the revised decoder returns exactly the two declared variables
+in every case. Unit controls cover zero through seven padding bytes, an
+argv-only dump, and a fake auxiliary prefix before `NODE_OPTIONS`; all pass.
+The managed-launchd and entrypoint subset passed 56 tests with one existing
+domain skip, no production NATS connections and normal owned-server exit.
+Head `da85d40` passed all three CI jobs, and its complete Mac recovery suite
+passed 199 tests with three expected skips before this decoder correction.
+
+At 06:19 EDT, Claude's exact `da85d40` review reproduced two source defects:
+`os.walk` silently omitted a mode-000 store subdirectory, and an isolated
+restore with a same-length payload change in all three copied replicas still
+passed the previous metadata comparison. The copier now raises `Refused` on
+directory traversal errors, checks that every listed child was inventoried,
+and compares source/copy directory listings. A real unlistable-subdirectory
+test passes. The owned cluster now reads the seeded message before the quiet
+window and from all three restored members; a negative subprocess corrupts
+all three copied message blocks and sees message-get 404, so it is accepted
+only as a failing restore. The focused cold-copy, both APFS and cluster tests
+passed 11/11 in 47.2 s with no production ports or routes.
+
+The APFS tests now inspect `statfs` directly rather than relying solely on
+`diskutil`'s `GlobalPermissionsEnabled`: `MNT_IGNORE_OWNERSHIP` is clear
+after all three owners-on mounts and set after an owners-off attach. The
+sparse image remains operator-owned, so this is a mount-behavior test, not
+cross-uid isolation evidence. Read-only inspection found that loaded
+`system/com.openclaw.tailscale-up` has no `UserName`; its root-owned
+`/usr/local/bin/tailscale` wrapper invokes an app beneath `/Applications`,
+which is group-writable to this operator's `admin` group. No job was started
+or changed. PR #170 head `086edaa` passed Node 20, Node 22 and Mission
+Control CI; the newer copier/read-back changes still need exact CI and
+adversarial re-review.
+
+At 06:33 EDT, the final Mac recovery suite passed 204 tests with three
+expected skips in 218.9 s. The owned three-member NATS fixture reported no
+production connections and normal cleanup. Two preceding full runs each had
+one test failure: first, the intent-only/open integration fixture observed a
+valid protective re-drain rather than the test's overly narrow leave-open
+event; second, a negative corruption child attempted stream placement before
+the owned metadata group became ready. The integration assertion now accepts
+either restore-only path without certification, and the cluster fixture waits
+for current metadata replicas and retries only NATS's transient "no suitable
+peers for placement" refusal. The targeted cluster control passed twice after
+that readiness correction. These were fixture corrections; the final 204-test
+pass is the result for the exact pending source. No production preservation
+window was entered. Exact-head CI and Claude re-review remain pending.
+
+At 06:45 EDT, all three CI jobs passed on `d7fba03`. Claude reproduced that
+the three client-port reads can all be routed to one healthy stream leader:
+five of nine scratch restores with a corrupted follower passed. The next
+source revision adds a copy-side manifest checked by a separate verifier and
+uses preferred leader transfer so each restored member serves the original
+message while it is leader. Nine focused copier tests pass. Two direct
+single-follower corruption runs failed as intended at message-get 404; the
+three-test owned cluster suite passed in 30.9 s with no production routes.
+The copy-side manifest detects later byte or structure changes, while its
+digest still needs protected retention for production authenticity. The full
+Mac suite, exact-head CI and adversarial re-review for this newer revision
+are pending; no live NATS state was changed.
+
+At 06:53 EDT, Claude's exact `d7fba03` verdict closed the unreadable-tree
+blocker and confirmed the routed-read blocker. Its Linux scratch suite passed
+204 tests with platform/root skips. The first Mac full suite with preferred
+leader rotation and the copy-side manifest passed 207 tests with three skips
+in 228.9 s. The final negative now corrupts each replica separately and
+requires `restore-message-get` 404, which cannot be satisfied by the pre-stop
+read. Its three-test cluster suite passed in 61.3 s. The opt-in APFS aggregate
+first timed out because it launched that entire expanded cluster suite under
+a 60 s child limit; the normal detach initially returned busy, then succeeded
+after the timed-out child exited. No owned NATS process remained, and the
+disposable image was removed. The aggregate now invokes only the positive
+owned restore; all 11 copier/APFS/owned-volume tests pass in 20.2 s. At
+06:56 EDT the Mac recovery suite passed 207 tests
+with three expected skips in 244.3 s. Owned NATS fixtures reported no
+production connections and normal cleanup. A following refusal-only change
+made directory sync traversal raise on listing errors too; its nine focused
+copier tests pass. Exact-head CI and adversarial re-review of the
+leader-rotation revision remain open. All production services and stores
+remain untouched.
+
+At 07:08 EDT, PR #170 exact head `6868c1f` passed all three CI jobs.
+Adversarial isolation work found the leader-rotation read-back cannot certify
+each copied member independently: a damaged source member may be rebuilt by
+peers during restored-cluster startup, before it is made leader. The existing
+single-member corruption negatives alter the *published candidate* and
+deliberately skip `verify_candidate` to test the restore read separately;
+they do not model source-side damage before the copy. The publication digest
+also lacks protected retention. D35 records the narrowed cluster-level
+claim. No production cold master or full-node seal was accepted.
+
+At 07:16 EDT, Claude's `6868c1f` review showed source-side emptied blocks or
+removed stream folders on one or two members can be faithfully copied,
+verified, then healed by peers during restored-cluster startup. A single
+member started in clustered mode with no reachable routes exposes its local
+`/jsz` state without catch-up: intact stores report one message/46 bytes/seq
+1, an emptied block reports zero messages, and a removed stream is absent.
+The new owned fixture compares each isolated member with its pre-stop state
+before clustered restore, and checks for catch-up/rebuild logs afterwards.
+It moves corruption injection to the stopped source stores before the copy.
+The four-test cluster suite passed in 86.9 s, including single and double
+empty blocks, missing stream, and same-length payload negatives; the positive
+re-passed after the log tripwire. These are disposable fixtures on private
+ports. Complete Mac suite, exact new CI and adversarial re-review remain
+pending; no live store or service was changed.
+
+At 07:32 EDT, Claude's exact `f6021e3` review reproduced a source-side
+member with missing stream/consumer Raft folders that passed isolated stream
+state and restored-cluster reads without catch-up log entries. The candidate
+now requires exact Raft group directory names from the member's last pre-stop
+monitoring record. A source-side missing-group control refuses at member 1;
+a missing durable-consumer folder refuses in the isolated state comparison.
+The fixture also `ackAck`-confirms one message, yielding nonzero delivered
+and ack-floor cursors for local comparison. After bounded local readiness and
+cleanup fixes, its four tests pass in 141.6 s. The earlier full Mac run with
+this branch failed before the managed launchd fixture because this checkout
+has no `node_modules` link; its rerun with the explicit installed module path
+was invalidated by source edits made while that long run was in progress.
+Neither failure is recorded as a green suite. A complete run against a stable
+final source, exact CI and Claude review remain pending. No production
+service, store, job or journal was changed.
+
+At 07:37 EDT, exact-head `4f80735` CI's Node 22 recovery fixture failed in
+the missing-consumer negative *before* source damage: the newly created
+owned durable answered the first `consumer.next` with transient HTTP 503
+`no responders`. That is a fixture startup race, not the negative's intended
+refusal. The fixture now retries only that pre-delivery stage for up to ten
+seconds; it does not retry a delivered message or a failed acknowledgement.
+The positive owned restore passed locally after this change. New exact CI
+and a stable full Mac suite are required; the failed run is retained here.
+
+At 07:47 EDT, exact-head `567ca57` CI did not pass. Node 22 timed out while
+creating the owned fixture stream for the `empty-1` source-damage control,
+before the intended damage was applied. Node 20's broad root suite failed an
+unrelated Foreman supervisor timing assertion; Mission Control passed. The
+fixture now gives the JetStream manager a bounded longer request deadline and,
+if stream creation still times out, reads back the committed stream config
+instead of issuing a second ambiguous create. The Mac recovery suite completed
+208 tests with three skips, but source changed during the run, so it is not
+final exact-source evidence. The new offline Raft-content controls and this
+startup correction still need focused, full-suite and exact-head CI results.
+
+At 07:49 EDT, the focused source-side damage suite passed: eight damaged
+source-store modes each copied into the candidate and refused at the intended
+member/stage. The added controls empty a Raft group, remove its log and
+snapshots, or remove its saved term file; none can be accepted by a healthy
+peer's later repair. The complete exact-source Mac suite and CI remain open.
+
+At 07:54 EDT, the complete Mac recovery suite passed at the same unchanged
+Python source: 208 tests in 356.048 s, three expected skips. The owned
+three-member cluster reported normal cleanup, no production connections,
+and a successful isolated-member and restored-cluster proof. This is local
+fixture evidence. Exact-head CI and Claude's adversarial re-review remain
+open, as do the protected production preservation and restoration gates.
+
+At 08:03 EDT, PR #170 head `c9569ea` passed all three CI jobs: Node 20, Node
+22 and Mission Control. Claude then reproduced four deeper false acceptances
+at that exact head: nonempty junk Raft snapshots, log blocks, peers indexes
+and changed saved vote bytes could be faithfully copied, silently repaired
+and reported as an owned restore proof. A direct pre-stop hash experiment
+failed on an undamaged cluster because normal NATS shutdown changed several
+Raft files. That refused local experiment was not committed.
+
+The next uncommitted fixture revision captures full Raft file digests and
+directory entries **after** normal owned-server shutdown. Its positive restore
+passed in 14.462 s. The eleven-mode source-damage suite passed in 92.646 s;
+a twelfth changed-vote mode separately refused at the intended member. A
+subsequent coverage correction puts the four junk-byte mutations after the
+saved stopped view, and the structural, local-state and payload mutations
+before it; candidate byte equality is checked before isolated startup. The
+saved view tests post-stop fidelity, not validity of bytes already damaged at
+that view, and has no protected production custody. The refined twelve-mode
+suite, final complete suite, exact CI and Claude follow-up are still required.
+
+At 08:16 EDT, the refined twelve-mode source-damage suite passed in 84.777 s.
+The pre-baseline structural/local damage modes still refuse at their intended
+semantic checks; four post-baseline junk-byte modes refuse at the copied
+member's stopped-byte comparison. The complete exact-source suite is running.
+
+At 08:22 EDT, the complete Mac recovery suite passed at stable revised source:
+208 tests in 373.743 s, three expected skips, normal cleanup of all owned
+NATS processes and no production connections. The earlier `c9569ea` CI is
+green 3/3, but this refined baseline revision still needs its own exact-head
+CI and code-level Claude review. No live service, store, job or journal was
+changed.
+
+At 09:16 EDT, `7d40a3f` passed all three CI jobs (run 36861425295). Claude's
+exact-head review found no false acceptance within the owned stopped-Raft-byte
+claim, confirmed the fixture order and independently tested damaged stored
+members. A latent hollow Raft WAL, peers index or saved vote can still pass;
+NATS-native replay can detect the tested hollow WAL, but peer/vote metadata
+needs separate validation. All remain unclosed. Claude also found
+one healthy restore refused by the broad `catchup` log term among 24 positive
+runs, and one pre-damage observation failure among about 105 cluster runs.
+
+The subsequent D40 fixture correction excludes only the observed benign
+meta-leader snapshot warning, reports matching integrity lines, and places a
+latent junk snapshot before the stopped baseline so `Snapshot corrupt` must
+cause a refusal. Settling reads retry transient `Refused` observations within
+existing deadlines; the quiet-window checks still refuse. The four-test
+cluster module passed in 183.702 s, including the new negative and normal
+owned-server cleanup. A first broad run was misconfigured: the worktree's
+absent `node_modules` path broke managed-launchd setup, and three restore-only
+timing cases failed. It is not counted as validation. Repeating with
+`RECOVERY_NATS_MODULE=/Users/moltymac/openclaw-nodedev/node_modules/nats`,
+`RECOVERY_NODE=/usr/local/bin/node` and the installed NATS server passed 208
+tests in 368.095 s, three expected skips, normal owned-server cleanup and no
+production connections. Exact new CI and Claude review are pending. Nothing
+in the live node was stopped, copied, deployed or sealed.
+
+The silo lint remains nonconformant for two pre-existing manifest omissions:
+`automation.json` and `tick-logs/` are absent on `origin/main` as well as this
+branch. It also warns that the active `v1.2-pre` step has accumulated many
+source commits. Neither condition was introduced by D40; the missing
+automation/history surfaces need their own plan decision rather than being
+silently created inside this preservation fixture correction.
+
+## D41 owned per-member replay — 2026-10-01 09:55 EDT
+
+The owned three-member fixture now replays each copied member on a disposable
+working store with one fresh empty routing peer, before any original peers
+can heal it. Its per-group persisted indexes must reach the last observed
+committed/applied indexes and remain stable for two seconds; no member group
+may become leader and the blank peer has no account group. Each scratch
+server exits normally, the member log has no damage line, and the untouched
+candidate is reverified before the ordinary three-member restore. The
+healthy focused case passed in 21.743 seconds. A source-side stream-group
+snapshot/WAL/index deletion and same-length junk mutation passed the earlier
+structural, copy and isolated-state checks but refused at member 1's replay
+index zero; its focused negative harness passed in 29.109 seconds. Installed
+NATS is 2.12.6 and the installed Node runner is v24.13.0.
+
+The first complete 209-test run failed one assertion in an existing negative
+control: a latent junk snapshot now reaches `Snapshot corrupt` during replay
+rather than at the later restored-cluster log scan. The expected stage was
+corrected without weakening the required warning. A complete exact-source
+rerun then passed. This local fixture does not validate saved peer/vote
+metadata or unobserved committed tails, and it is not a protected production
+cold master. No production process, store, job, volume or journal was changed.
+
+At 10:02 EDT, the corrected complete Mac recovery suite passed 209 tests in
+396.620 seconds with three expected skips, owned-server normal cleanup and
+no production connections. A subsequent final-source focus reran the
+healthy replay and hollow-WAL refusal after tightening the explicit Raft
+`LEADER` state, node-ID and reserved-port assertions: 2 tests passed in
+60.044 seconds. The complete-suite run had loaded the preceding assertion
+revision; exact-final-source CI and Claude review remain required. The
+`v1.2-pre` version and disabled full-node `seal()` are unchanged.
+
+Exact-head `0befa89` CI run 36873531410 exposed a nondeterministic stage in
+the latent junk-snapshot control: Node 22 refused the damaged member at its
+stream-group replay index zero before the log scan; the Mac run had reached
+the explicit `Snapshot corrupt` warning instead. The parent had required
+only the warning, so that Node 22 job failed despite a real refusal. The
+control is being corrected to accept only those two named outcomes, and the
+shortfall path now reports the damaged group with actual and required
+indexes. Node 20 failed an unchanged Foreman STOP-hysteresis timing test;
+the replay fixture did not fail there. CI for the correction is pending.
+
+At 10:13 EDT, the corrected local hollow-WAL and full source-damage controls
+passed 2 tests in 122.607 seconds. The latent snapshot control now accepts
+only a member-1 replay damage warning containing `Snapshot corrupt` or an
+explicit member-1 stream-group persisted-index shortfall. A generic timeout,
+different member failure or later peer-assisted repair cannot satisfy that
+control. The source is awaiting a new exact-head CI run.
+
+## D42 settled owned replay — 2026-10-01 10:49 EDT
+
+`35f8a8a` passed Node 20, Node 22 and Mission Control CI (run 36874991837).
+Claude's read-only exact-head check found no false acceptance: its real parent
+assertions passed 12/12 latent junk-snapshot cases, eight by member-1
+`Snapshot corrupt` and four by numeric member-1 stream-group index shortfall;
+the hollow-WAL control passed 4/4 by shortfall. Fourteen crafted wrong-reason
+child outputs were rejected. The reviewer found the former stream leader's
+post-stepdown record two entries behind the cluster in 9/12 healthy runs,
+despite healthy replay reaching the cluster maximum across 189 member-group
+checks.
+
+The owned fixture now waits within five seconds for equal committed/applied
+indexes across all three members' `$G` groups after stepdown. It scans replay
+damage logs after scratch shutdown even if index replay timed out, before
+reporting a shortfall. A transient monitoring refusal no longer erases the
+last observed shortfall. Syntax, diff hygiene and the focused healthy case
+passed; the full owned cluster module passed 5/5 in 261.318 seconds, including
+the hollow-WAL and latent junk-snapshot controls. All scratch servers exited
+normally. Five further healthy owned replays passed in 21.3, 21.2, 20.4,
+22.3 and 20.0 seconds; no production NATS process, store, job, volume or
+journal changed.
+Exact D42 CI and independent review are pending. This remains owned-fixture
+evidence, not a protected production cold-master certificate.
+
+## D43 post-election capture correction — 2026-10-01 11:07 EDT
+
+Exact `b26abc2` CI passed all three jobs (run 36879933285), but retained Mac
+evidence invalidated its claimed post-election reference. Six healthy D42
+`group-evidence.json` files captured the stream group at committed/applied
+`2/2` on all members both before and after stepdown. One `after` observation
+had no leader on two members and mixed terms. After normal shutdown their
+isolated replay indexes included `[3,3,3]`, `[5,5,3]` and `[5,5,4]`: a
+later peer-assisted repair could supply entries omitted from the first
+member's D42 threshold.
+
+The D43 owned capture now requires an agreed nonempty leader and term for
+each `$G` group and `$SYS/_meta_`, with committed/applied/persisted indexes
+equal on each member; its stream leader must change and the committed index
+must exceed the pre-stepdown maximum. The entire Raft state must remain
+unchanged for one second within the five-second deadline. Six corrected
+healthy Mac runs passed in 22.7, 21.2, 20.9, 21.2, 20.7 and 23.8 seconds.
+Each captured `before=[2,2,2]`, `after=[4,4,4]` for the stream group, and
+each member's isolated replay reached at least the captured index. All
+scratch servers exited normally. The final exact-source cluster module passed
+5/5 in 271.532 seconds with normal cleanup; exact D43 CI/review remain
+pending. The reference still excludes entries written
+after capture and does not certify a production cold master. No live NATS
+process, store, job, volume or journal changed; `seal()` remains disabled.
+
+Claude's exact `b26abc2` review confirmed the NATS timing mechanism and
+rejected the Mac-shaped premature observations offline; it did not reproduce
+an early capture on Linux.
+Its scratch strict-capture prototype passed ten healthy Linux runs with
+stream index `4` and no replay below the captured threshold. It also found
+that the D42 latent junk-snapshot parent could accept a numeric shortfall
+without proving the log-damage warning. D43 now requires the specific
+`Snapshot corrupt` warning; this final refinement still awaits exact-source
+CI verification. The final exact-source owned cluster module passed 5/5 in
+271.532 seconds, including the strict latent warning and hollow-WAL controls,
+with normal scratch cleanup.
+
+An offline predicate check against the six retained D42 and six retained
+index-advance Mac captures found that D42 accepted all twelve observations,
+including all six early index-2 states. The final elected/advanced/index-equal
+predicate rejected all six early states and accepted all six later index-4
+states. Those later records also had agreed `$SYS/_meta_` leaders, terms and
+persisted indexes. This is deterministic evidence for the previously missed
+interleaving, complemented by the passing exact-source integration run.
+
+## D44 deterministic election regression — 2026-10-01 11:40 EDT
+
+Exact `ad9927a` CI passed Node 20, Node 22 and Mission Control (run
+36884044547). The post-stepdown predicate is now callable independently of
+the live sampling loop. Its regression refuses the previously missed
+elected-but-pre-commit index-2 state, leaderless mixed-term reports,
+unapplied/unpersisted index-4 entries and in-flight metadata; a fully
+agreed index-4 state passes. The real loop uses that same predicate and
+retains its one-second unchanged-state watch. The final owned cluster
+module passed 6/6 in 276.778 seconds, with the real stream captured at
+index 4 and isolated replay indexes `[5,5,4]`. All scratch servers exited
+normally. Sequential shutdown may add leadership-transfer entries after the
+captured point, accounting for replay indexes above four on two members; it
+does not establish a common post-shutdown tail. Exact new CI and Claude
+review are pending. Live NATS PIDs
+815/831/842 and their operator-owned configs/stores remain unchanged;
+this is not production cold-master evidence.
+
+## D45 deterministic refusal coverage — 2026-10-01 11:56 EDT
+
+Exact `75149d1` CI passed Node 20, Node 22 and Mission Control (run
+36886669475). Claude's read-only mutation check found test coverage gaps,
+not a predicate acceptance bug. The widened test refuses cross-member
+leader, term and persisted-index disagreement for stream, consumer and
+metadata groups; missing groups; an unchanged stream leader; and a capture
+index below one member's prior maximum. It retains the earlier premature
+election, in-flight and accepted settled cases. The live predicate and
+one-second capture loop did not change. The final owned Mac cluster module
+passed 6/6 in 270.827 seconds; scratch cleanup reported no failures.
+Exact D45 CI and Claude review remain pending. No production NATS process,
+store, job, volume or journal changed; full-node `seal()` remains disabled.
+
+## D46 remaining mutation rows — 2026-10-01 12:00 EDT
+
+Claude's exact `6a3fd96` mutation run found three surviving test mutants.
+The current predicate already refused the associated states: all three
+members reporting no leader after index advance, persisted index ahead
+of committed, and one member reporting an extra `$G` group. One row for
+each is now in the deterministic unit; the focused test passes. Claude's
+scratch copy of these rows killed all 11 mutants it tried. The last full
+owned Mac module on the unchanged capture path passed 6/6 in 270.827
+seconds. Exact new CI/review remain pending. This is still an owned
+reference, not a production cold-master certificate.
+
+D45's title described intended coverage ahead of the tested facts. The
+three D46 rows close the specifically observed mutation gaps; the 11
+mutants are a bounded check, not an exhaustive proof of Raft validity.
+
+## D47 per-member disagreement coverage — 2026-10-01 12:08 EDT
+
+Claude's exact `08d9167` review found three additional positional test
+mutants after the 11 original mutants were caught. The synthetic stream,
+consumer, metadata, missing-group and extra-group disagreements now rotate
+through all three member positions; the focused deterministic test passes.
+Claude confirmed in scratch that perturbing every member catches those
+positional weakenings. No production-facing predicate or live capture-loop
+code changed. Exact new CI and adversarial review remain pending; the
+last complete owned Mac module passed 6/6 in 270.827 seconds on the same
+capture path. This is bounded test evidence, not live cold-master proof.
+
+The D46 title's "last gaps" described only the 11 sampled mutations, and
+`post_stepdown_ready()` is part of the owned fixture, not production code.
+The one-second stability hold and five-second deadline have not been
+unit-tested deterministically.
+
+The D47 "live capture-loop" phrase refers to the owned fixture. The
+prior-index maximum test now puts the lagging baseline member at all three
+positions; the focused unit passes. No production code was changed.

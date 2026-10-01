@@ -7,16 +7,19 @@ import secrets
 import select
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from managed_launchd import Launchd, StopWatch, process_exists, unload_idle_timer
+from managed_launchd import (Launchd, StopWatch, decode_process_arguments,
+                             process_arguments, process_exists, running_identity, unload_idle_timer)
 from legacy_fixture import legacy_journal
-from preservation_checks import Refused, http_json
+from preservation_checks import Refused, http_json, verify_environment_hashes
 from preservation_journal import Journal
 from test_preservation_journal import inventory
 
@@ -38,6 +41,64 @@ def wait_for(check, seconds=10):
 
 
 class StopWatchPreflight(unittest.TestCase):
+    def test_process_environment_stops_before_apple_auxiliary_vector(self):
+        data = (struct.pack('i', 1) + b'/bin/node\0\0/bin/node\0'
+                + b'HOME=/owned\0NODE_OPTIONS=--require /tmp/evil.js\0\0dyld_file=fake\0')
+        argv, environment = decode_process_arguments(data)
+        self.assertEqual(argv, ['/bin/node'])
+        self.assertEqual(set(environment), {'HOME', 'NODE_OPTIONS'})
+
+    def test_process_environment_stops_at_unpadded_apple_auxiliary_vector(self):
+        apple = (b'pfz=1\0stack_guard=2\0malloc_entropy=3\0ptr_munge=4\0'
+                 b'main_stack=5\0executable_file=6\0dyld_file=7\0')
+        prefix = struct.pack('i', 1) + b'/bin/node\0\0/bin/node\0HOME=/owned\0'
+        for padding in range(8):
+            with self.subTest(padding=padding):
+                argv, environment = decode_process_arguments(prefix + b'\0' * padding + apple)
+                self.assertEqual(argv, ['/bin/node'])
+                verify_environment_hashes(environment, {'HOME': '/owned'})
+
+    def test_fake_apple_prefix_cannot_hide_later_loader_variable(self):
+        apple = (b'pfz=1\0stack_guard=2\0malloc_entropy=3\0ptr_munge=4\0main_stack=5\0')
+        prefix = (struct.pack('i', 1) + b'/bin/node\0\0/bin/node\0HOME=/owned\0'
+                  + apple + b'NODE_OPTIONS=--require=/tmp/evil.js\0')
+        _, environment = decode_process_arguments(prefix + apple)
+        with self.assertRaisesRegex(Refused, 'code loader'):
+            verify_environment_hashes(environment, {'HOME': '/owned'})
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'requires the macOS process argument layout')
+    def test_owned_process_environment_all_eight_padding_lengths(self):
+        for length in range(8):
+            with self.subTest(length=length):
+                declared = {'HOME': '/tmp', 'PAD': 'x' * length}
+                process = subprocess.Popen(['/bin/sleep', '5'], env=declared)
+                try:
+                    argv, environment = process_arguments(process.pid)
+                    self.assertEqual(argv, ['/bin/sleep', '5'])
+                    verify_environment_hashes(environment, declared)
+                finally:
+                    process.terminate()
+                    process.wait(timeout=5)
+
+    def test_undeclared_node_loader_refuses_before_binding(self):
+        with patch('managed_launchd.process_info', return_value={
+                'pid': 101, 'state': 2, 'start_ns': 1}), \
+             patch('managed_launchd.process_arguments', return_value=(
+                ['/bin/node'], {'NODE_OPTIONS': hashlib.sha256(b'--require /tmp/evil.js').hexdigest()})):
+            with self.assertRaisesRegex(Refused, 'code loader'):
+                running_identity(101, '/bin/node', {}, {})
+
+    def test_argv_only_process_dump_refuses_before_binding(self):
+        data = struct.pack('i', 1) + b'/bin/node\0\0/bin/node\0'
+        argv, environment = decode_process_arguments(data)
+        self.assertEqual(argv, ['/bin/node'])
+        self.assertEqual(environment, {})
+        with patch('managed_launchd.process_info', return_value={
+                'pid': 101, 'state': 2, 'start_ns': 1}), \
+             patch('managed_launchd.process_arguments', return_value=(argv, environment)):
+            with self.assertRaisesRegex(Refused, 'process environment unavailable'):
+                running_identity(101, '/bin/node', {}, {})
+
     def test_deploy_listener_with_child_refuses_before_signal(self):
         status = {'pid': 101}
         watch = SimpleNamespace(prepared=True, drain=lambda: None,
@@ -222,6 +283,15 @@ os.execv('/bin/sleep',['sleep','30'])
         self.launch()
         with self.assertRaisesRegex(Refused, 'argv does not match'):
             self.service.bind([self.node, '/nonexistent'], self.node, self.directory)
+        self.assertTrue(self.service.status()['running'])
+
+    def test_plist_program_drift_refuses_before_service_stop(self):
+        self.launch()
+        plist = plistlib.loads(self.plist.read_bytes())
+        plist['Program'] = '/bin/echo'
+        self.plist.write_bytes(plistlib.dumps(plist))
+        with self.assertRaisesRegex(Refused, 'loaded program differs from approved plist'):
+            self.service.bind([self.node, str(self.script)], self.node, self.directory)
         self.assertTrue(self.service.status()['running'])
 
     def test_idle_timer_unloads_without_new_log_bytes(self):
@@ -411,7 +481,7 @@ os.execv('/bin/sleep',['sleep','30'])
         plist = plistlib.loads(self.plist.read_bytes())
         plist['EnvironmentVariables']['OWNED_TOKEN'] = secrets.token_hex(32)
         self.plist.write_bytes(plistlib.dumps(plist))
-        with self.assertRaisesRegex(Refused, 'running environment differs') as error:
+        with self.assertRaisesRegex(Refused, 'loaded environment differs') as error:
             self.service.bind([self.node, str(self.script)], self.node, self.directory)
         self.assertNotIn(self.token, str(error.exception))
         self.assertNotIn(plist['EnvironmentVariables']['OWNED_TOKEN'], str(error.exception))

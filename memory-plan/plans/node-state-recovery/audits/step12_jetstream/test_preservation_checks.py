@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import http.server
 import json
 import os
@@ -9,6 +10,7 @@ import select
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -17,8 +19,9 @@ from unittest.mock import patch
 
 from preservation_checks import (
     QuietWindow, Refused, STOP_ORDER, capture, verify_admissions,
-    disabled_entrypoint_artifacts, http_json, installed_entrypoints, loaded_entrypoints, verify_completion,
-    verify_entrypoint_inventory, verify_queue, verify_streams, verify_timer_idle,
+    disabled_entrypoint_artifacts, http_json, installed_entrypoints, launchctl_arguments,
+    loaded_entrypoints, verify_completion,
+    inert_entrypoint_artifacts, verify_entrypoint_inventory, verify_queue, verify_streams, verify_timer_idle,
 )
 
 
@@ -53,6 +56,22 @@ class Gates(unittest.TestCase):
                 'gui/501', [protected], inspect=lambda _: 'program = /owned/node\n')
             self.assertTrue(verify_entrypoint_inventory(installed, gui, set(), set(),
                 {'gateway', 'workplan-viewer'})['verified'])
+            gateway_argv = plistlib.loads(pathlib.Path(installed['ai.openclaw.gateway']).read_bytes())['ProgramArguments']
+            identity = {'gui': {'ai.openclaw.gateway': {
+                'source': installed['ai.openclaw.gateway'], 'program': '/owned/node',
+                'working_directory': '',
+                'arguments_sha256': hashlib.sha256(json.dumps(gateway_argv, separators=(',', ':')).encode()).hexdigest(),
+                'environment_sha256': {}}},
+                        'user': {}, 'system': {}}
+            self.assertTrue(verify_entrypoint_inventory(installed, gui, set(), set(),
+                {'gateway', 'workplan-viewer'}, loaded_identity=identity)['verified'])
+            identity['gui']['ai.openclaw.gateway']['source'] = '/tmp/other.plist'
+            self.refused(lambda: verify_entrypoint_inventory(installed, gui, set(), set(),
+                {'gateway', 'workplan-viewer'}, loaded_identity=identity))
+            identity['gui']['ai.openclaw.gateway']['source'] = installed['ai.openclaw.gateway']
+            identity['gui']['ai.openclaw.gateway']['program'] = '/tmp/other-node'
+            self.refused(lambda: verify_entrypoint_inventory(installed, gui, set(), set(),
+                {'gateway', 'workplan-viewer'}, loaded_identity=identity))
             self.refused(lambda: verify_entrypoint_inventory(installed,
                 gui, set(), {'com.openclaw.agent'}, {'gateway', 'workplan-viewer'}))
             add('other.agent', ['/owned/node', str(protected / 'worker.js')])
@@ -104,7 +123,7 @@ class Gates(unittest.TestCase):
                         self.assertEqual(actual, {label})
                 self.assertEqual(loaded_entrypoints('services = {\n  1 - com.apple.idle\n}\n',
                     'system', [protected], inspect=lambda _: 'path = /System/Library/idle.plist\n'
-                        'program = /usr/libexec/idle\n'), set())
+                        'program = /usr/libexec/idle\n'), {'com.apple.idle'})
                 dynamic = directory / 'local.dynamic.plist'
                 dynamic.write_bytes(plistlib.dumps({'Label': 'local.dynamic',
                     'ProgramArguments': ['/bin/sh', '-c', 'exec "$SCRIPT"']}))
@@ -135,6 +154,191 @@ class Gates(unittest.TestCase):
                             'gui/501', [protected], inspect=lambda _: detail)
                         self.assertEqual(actual, {label})
                         path.unlink()
+
+    def test_closed_world_launchd_provenance(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-entrypoints-owned-') as root:
+            directory = pathlib.Path(root)
+            for label, program in (
+                    ('quiet.helper', '/usr/local/bin/taskpolicy'),
+                    ('application.fake', '/tmp/Fake.app/Contents/MacOS/Fake'),
+                    ('com.apple.claimed', '/usr/libexec/claimed')):
+                (directory / (label + '.plist')).write_bytes(plistlib.dumps({
+                    'Label': label, 'ProgramArguments': [program]}))
+            inert = directory / 'old.keystone.plist'
+            inert.write_bytes(plistlib.dumps({}))
+            installed = installed_entrypoints(directory, [])
+            self.assertEqual(set(installed), {'quiet.helper', 'application.fake', 'com.apple.claimed'})
+            self.assertEqual(set(inert_entrypoint_artifacts([directory])), {str(inert.resolve())})
+            details = {
+                'quiet.helper': 'path = /Library/LaunchDaemons/quiet.helper.plist\nprogram = /usr/local/bin/taskpolicy\n',
+                'application.fake': 'path = /tmp/application.fake.plist\nprogram = /tmp/Fake.app/Contents/MacOS/Fake\n',
+                'com.apple.claimed': 'path = /Library/LaunchDaemons/com.apple.claimed.plist\nprogram = /usr/libexec/claimed\n',
+                'com.apple.real': 'path = /System/Volumes/Preboot/Cryptexes/App/System/Library/LaunchAgents/com.apple.real.plist\nprogram = /System/Cryptexes/App/usr/libexec/real\n',
+                'application.registered': 'path = (submitted by runningboardd.101)\nprogram = /Applications/Registered.app/Contents/MacOS/Registered\n',
+                'com.apple.missing-path': 'program = /usr/libexec/real\n',
+            }
+            text = 'services = {\n' + ''.join(f'  1 - {label}\n' for label in details) + '}\n'
+            loaded = loaded_entrypoints(text, 'gui/501', [], inspect=details.__getitem__)
+            self.assertEqual(loaded, set(details))
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'requires Apple system volume')
+    def test_actual_system_volume_provenance(self):
+        from preservation_checks import apple_system_source
+        self.assertTrue(apple_system_source(
+            '/System/Library/LaunchDaemons/com.apple.configd.plist', '/usr/libexec/configd'))
+        self.assertFalse(apple_system_source(
+            '/System/Library/LaunchDaemons/../../../../tmp/configd.plist', '/usr/libexec/configd'))
+        with tempfile.TemporaryDirectory(prefix='openclaw-system-alias-owned-') as root:
+            alias = pathlib.Path(root) / 'com.apple.configd.plist'
+            alias.symlink_to('/System/Library/LaunchDaemons/com.apple.configd.plist')
+            self.assertFalse(apple_system_source(str(alias), '/usr/libexec/configd'))
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'requires launchd')
+    def test_actual_launchctl_multiline_argument_refuses(self):
+        label = 'local.openclaw-owned-argv-' + secrets.token_hex(4)
+        domain = 'gui/' + str(os.getuid())
+        with tempfile.TemporaryDirectory(prefix='openclaw-argv-probe-') as root:
+            path = pathlib.Path(root) / (label + '.plist')
+            path.write_bytes(plistlib.dumps({'Label': label,
+                'ProgramArguments': ['/bin/sleep', 'a\n\t}'], 'RunAtLoad': False}))
+            result = subprocess.run(['/bin/launchctl', 'bootstrap', domain, str(path)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            try:
+                detail = subprocess.check_output(['/bin/launchctl', 'print', domain + '/' + label],
+                                                 text=True)
+                self.assertIn('a\n\t}', detail)
+                self.refused(lambda: launchctl_arguments(detail))
+            finally:
+                result = subprocess.run(['/bin/launchctl', 'bootout', domain + '/' + label],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unlabeled_nonempty_plist_refuses(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-entrypoints-owned-') as root:
+            pathlib.Path(root, 'unknown.plist').write_bytes(plistlib.dumps({
+                'ProgramArguments': ['/tmp/unknown']}))
+            self.refused(lambda: installed_entrypoints(root, []))
+
+    def test_loaded_inventory_refuses_unparsed_duplicate_or_mismatched_detail(self):
+        detail = 'path = /tmp/local.plist\nprogram = /bin/echo\n'
+        self.refused(lambda: loaded_entrypoints('services = {\n  1 - local job\n}\n',
+            'gui/501', [], inspect=lambda _: detail))
+        self.refused(lambda: loaded_entrypoints('services = {\n  1 - local.job\n  2 - local.job\n}\n',
+            'gui/501', [], inspect=lambda _: detail))
+        with patch('preservation_checks.subprocess.check_output',
+                   return_value='gui/501/wrong.job = {\n' + detail):
+            self.refused(lambda: loaded_entrypoints('services = {\n  1 - local.job\n}\n',
+                'gui/501', []))
+
+    def test_unapproved_jobs_classify_from_header_without_trusting_injected_fields(self):
+        domain = 'services = {\n  1 - com.apple.honest\n  2 - local.missing\n  3 - local.other\n}\n'
+        details = {
+            'com.apple.honest': ('path = /System/Library/LaunchAgents/com.apple.honest.plist\n'
+                'program = /usr/libexec/honest\narguments = {\n  a => b\n}\n'),
+            'local.missing': ('program = /usr/libexec/honest\narguments = {\n'
+                '  /usr/libexec/honest\n  x\n\tpath = /System/Library/LaunchAgents/com.apple.honest.plist\n}\n'),
+            'local.other': ('path = /tmp/local.other.plist\nprogram = /bin/sh\n'
+                'environment = {\n  VALUE => {\n}\n'),
+        }
+        with patch('preservation_checks.apple_system_source',
+                   side_effect=lambda source, program: source ==
+                   '/System/Library/LaunchAgents/com.apple.honest.plist'
+                   and program == '/usr/libexec/honest'):
+            loaded = loaded_entrypoints(domain, 'gui/501', [], inspect=details.__getitem__,
+                approved_labels={'ai.openclaw.gateway'})
+        self.assertEqual(loaded, {'local.missing', 'local.other'})
+        self.refused(lambda: verify_entrypoint_inventory({}, loaded, set(), set(), set()))
+        details['local.missing'] = ('program = /usr/libexec/honest\n'
+            'path = /System/Library/LaunchAgents/com.apple.honest.plist\n'
+            'arguments = {\n  /usr/libexec/honest\n}\n')
+        with patch('preservation_checks.apple_system_source', return_value=True):
+            self.assertIn('local.missing', loaded_entrypoints(domain, 'gui/501', [],
+                inspect=details.__getitem__, approved_labels={'ai.openclaw.gateway'}))
+        details['local.missing'] = ('path = /System/Library/LaunchAgents/com.apple.honest.plist\n'
+            'program = /usr/libexec/honest\u2028/System/Library/LaunchAgents/forged.plist\n')
+        with patch('preservation_checks.apple_system_source', return_value=True):
+            self.assertIn('local.missing', loaded_entrypoints(domain, 'gui/501', [],
+                inspect=details.__getitem__, approved_labels={'ai.openclaw.gateway'}))
+        details['local.other'] = ('path = /tmp/local.other.plist\n'
+            'path = /System/Library/LaunchAgents/com.apple.honest.plist\n'
+            'program = /usr/libexec/honest\n')
+        self.refused(lambda: loaded_entrypoints(domain, 'gui/501', [],
+            inspect=details.__getitem__, approved_labels={'ai.openclaw.gateway'}))
+        service = ('gui/501/com.apple.honest = {\n'
+            '\tpath = /System/Library/LaunchAgents/com.apple.honest.plist\n'
+            '\tprogram = /usr/libexec/honest\n'
+            '\tevent triggers = {\n\t\tchannel => {\n'
+            '\t\t\tpath = /var/run/honest.socket\n\t\t}\n\t}\n}\n')
+        with patch('preservation_checks.apple_system_source', return_value=True), \
+             patch('preservation_checks.subprocess.check_output', return_value=service):
+            self.assertEqual(loaded_entrypoints('services = {\n  1 - com.apple.honest\n}\n',
+                'gui/501', [], approved_labels={'ai.openclaw.gateway'}), set())
+
+    def test_approved_working_directory_after_arguments_is_bound(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-cwd-owned-') as root:
+            plist = pathlib.Path(root) / 'ai.openclaw.gateway.plist'
+            declared = {'Label': 'ai.openclaw.gateway', 'ProgramArguments': ['/owned/node'],
+                        'WorkingDirectory': root}
+            plist.write_bytes(plistlib.dumps(declared))
+            detail = ('path = ' + str(plist.resolve()) + '\nprogram = /owned/node\n'
+                      'arguments = {\n  /owned/node\n}\nworking directory = ' + root + '\n')
+            identity = loaded_entrypoints('services = {\n  1 - ai.openclaw.gateway\n}\n',
+                'gui/501', [], inspect=lambda _: detail, include_identity=True,
+                approved_labels={'ai.openclaw.gateway'})
+            self.assertEqual(identity['ai.openclaw.gateway']['working_directory'], root)
+            self.assertTrue(verify_entrypoint_inventory(
+                {'ai.openclaw.gateway': str(plist.resolve())}, set(identity), set(), set(),
+                {'gateway'}, loaded_identity={'gui': identity, 'user': {}, 'system': {}})['verified'])
+            declared.pop('WorkingDirectory')
+            plist.write_bytes(plistlib.dumps(declared))
+            self.refused(lambda: verify_entrypoint_inventory(
+                {'ai.openclaw.gateway': str(plist.resolve())}, set(identity), set(), set(),
+                {'gateway'}, loaded_identity={'gui': identity, 'user': {}, 'system': {}}))
+
+    def test_approved_program_unicode_line_separator_refuses(self):
+        detail = ('path = /owned/gateway.plist\n'
+                  'program = /owned/node\u2028/foreign/code\n'
+                  'arguments = {\n  /owned/node\n}\n')
+        self.refused(lambda: loaded_entrypoints('services = {\n  1 - ai.openclaw.gateway\n}\n',
+            'gui/501', [], inspect=lambda _: detail, include_identity=True,
+            approved_labels={'ai.openclaw.gateway'}))
+
+    def test_loaded_configuration_refuses_extra_environment_and_argument_whitespace(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-loaded-config-owned-') as root:
+            path = pathlib.Path(root) / 'ai.openclaw.gateway.plist'
+            arguments = ['/owned/node', '/owned/gateway.js']
+            def check(declared, detail, refused=True):
+                def verify():
+                    path.write_bytes(plistlib.dumps({'Label': 'ai.openclaw.gateway',
+                        'ProgramArguments': arguments, 'EnvironmentVariables': declared}))
+                    installed = installed_entrypoints(root, [])
+                    identities = loaded_entrypoints('services = {\n  1 - ai.openclaw.gateway\n}\n',
+                        'gui/501', [], inspect=lambda _: 'path = ' + str(path.resolve()) + '\n'
+                        'program = /owned/node\n' + detail, include_identity=True)
+                    return verify_entrypoint_inventory(installed,
+                        set(identities), set(), set(), {'gateway'},
+                        loaded_identity={'gui': identities, 'user': {}, 'system': {}})
+                if refused:
+                    self.refused(verify)
+                else:
+                    self.assertTrue(verify()['verified'])
+            ordinary = 'arguments = {\n  /owned/node\n  /owned/gateway.js\n}\n'
+            check({}, ordinary, refused=False)
+            check({}, ordinary + 'environment = {\n  NODE_OPTIONS => --require=/tmp/evil.js\n}\n')
+            check({'NODE_OPTIONS': '--require=/tmp/evil.js'}, ordinary +
+                  'environment = {\n  NODE_OPTIONS => --require=/tmp/evil.js\n}\n')
+            check({}, ordinary + 'inherited environment = {\n'
+                  '  NODE_OPTIONS => --require=/tmp/evil.js\n}\n')
+            check({}, ordinary + 'environment = {\n  OSLogRateLimit => 64\n}\n'
+                  '  NODE_OPTIONS => --require=/tmp/evil.js\n')
+            check({}, 'arguments = {\n  /owned/node\n  /owned/gateway.js\n}\n}\n')
+            check({'HOME': '/Users/op'}, ordinary +
+                  'environment = {\n  HOME => /tmp/evil\n}\n'
+                  'inherited environment = {\n  HOME => /Users/op\n}\n')
+            check({'LD_PRELOAD': '/tmp/evil.dylib'}, ordinary +
+                  'environment = {\n  LD_PRELOAD => /tmp/evil.dylib\n}\n')
+            check({}, 'arguments = {\n  /owned/node\n  /owned/gateway.js \n}\n')
 
     def test_timer_signal_race(self):
         verify_timer_idle({'loaded': True}, False, [20, 0], [20, 0])

@@ -9,11 +9,17 @@ import struct
 import subprocess
 import time
 
-from preservation_checks import Refused, require, verify_completion, verify_timer_idle
+from preservation_checks import (Refused, launchctl_arguments, require,
+                                 verify_completion, verify_environment_hashes, verify_timer_idle)
 
 
 EXIT_FLAGS = 0x84000000
 CHANGE_FLAGS = 0x60000000
+APPLE_ARGUMENT_KEYS = (
+    b'pfz', b'stack_guard', b'malloc_entropy', b'ptr_munge', b'main_stack',
+    b'executable_file', b'dyld_file', b'executable_cdhash',
+    b'executable_boothash', b'arm64e_abi', b'th_port', b'security_config',
+)
 
 
 def command(argv, timeout=10):
@@ -30,14 +36,7 @@ def process_exists(pid):
         return False
 
 
-def process_arguments(pid):
-    library = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True)
-    mib = (ctypes.c_int * 3)(1, 49, pid)
-    size = ctypes.c_size_t()
-    require(library.sysctl(mib, 3, None, ctypes.byref(size), None, 0) == 0, 'process argv unavailable')
-    buffer = ctypes.create_string_buffer(size.value)
-    require(library.sysctl(mib, 3, buffer, ctypes.byref(size), None, 0) == 0, 'process argv changed or unavailable')
-    data = buffer.raw[:size.value]
+def decode_process_arguments(data):
     argc = struct.unpack_from('i', data)[0]
     offset = data.index(b'\0', 4) + 1
     while offset < len(data) and data[offset] == 0:
@@ -47,12 +46,37 @@ def process_arguments(pid):
         end = data.index(b'\0', offset)
         argv.append(data[offset:end].decode())
         offset = end + 1
-    environment = {}
+    items = []
     for item in data[offset:].split(b'\0'):
+        if not item:
+            break
+        items.append(item)
+    names = [item.split(b'=', 1)[0] for item in items]
+    for start in reversed(range(len(names) - 4)):
+        suffix = names[start:]
+        if suffix[:5] != list(APPLE_ARGUMENT_KEYS[:5]):
+            continue
+        positions = [APPLE_ARGUMENT_KEYS.index(name) for name in suffix
+                     if name in APPLE_ARGUMENT_KEYS]
+        if len(positions) == len(suffix) and positions == sorted(set(positions)):
+            items = items[:start]
+            break
+    environment = {}
+    for item in items:
         if b'=' in item:
             name, value = item.split(b'=', 1)
             environment[name.decode()] = hashlib.sha256(value).hexdigest()
     return argv, environment
+
+
+def process_arguments(pid):
+    library = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True)
+    mib = (ctypes.c_int * 3)(1, 49, pid)
+    size = ctypes.c_size_t()
+    require(library.sysctl(mib, 3, None, ctypes.byref(size), None, 0) == 0, 'process argv unavailable')
+    buffer = ctypes.create_string_buffer(size.value)
+    require(library.sysctl(mib, 3, buffer, ctypes.byref(size), None, 0) == 0, 'process argv changed or unavailable')
+    return decode_process_arguments(buffer.raw[:size.value])
 
 
 def process_argv(pid):
@@ -78,10 +102,8 @@ def running_identity(pid, executable, files, declared_environment):
     started = process_info(pid)
     require(started['state'] != 5, 'service owner is a zombie')
     argv, environment = process_arguments(pid)
-    expected = {key: hashlib.sha256(value.encode()).hexdigest()
-                for key, value in declared_environment.items()}
-    require(all(environment.get(key) == digest for key, digest in expected.items()),
-            'running environment differs from approved declaration')
+    require(environment, 'process environment unavailable')
+    verify_environment_hashes(environment, declared_environment)
     pins = {}
     for path, expected_hash in files.items():
         info = pathlib.Path(path).stat()
@@ -110,7 +132,7 @@ def running_identity(pid, executable, files, declared_environment):
     require(current['pid'] == started['pid'] and current['start_ns'] == started['start_ns']
             and current['state'] != 5, 'process generation changed during identity inspection')
     return {'process': {key: started[key] for key in ('pid', 'start_ns')},
-            'files': pins, 'environment_sha256': expected, 'argv': argv}
+            'files': pins, 'environment_sha256': environment, 'argv': argv}
 
 
 def process_executable(pid):
@@ -203,6 +225,9 @@ class Launchd:
         require(loaded['path'] == str(self.plist.resolve(strict=True)),
                 'loaded plist provenance differs from approved file')
         require(loaded['arguments'] == plist['ProgramArguments'], 'loaded arguments differ from approved plist')
+        approved_program = plist.get('Program', plist['ProgramArguments'][0])
+        require(loaded['program'] == str(pathlib.Path(approved_program).resolve(strict=True)),
+                'loaded program differs from approved plist')
         executable = str(pathlib.Path(executable).resolve(strict=True))
         paths = {self.plist.resolve(strict=True), pathlib.Path(executable)}
         paths.update(pathlib.Path(arg).resolve(strict=True) for arg in expected_argv
@@ -219,13 +244,14 @@ class Launchd:
     def configuration(self):
         text = command(['/bin/launchctl', 'print', self.target])
         def field(name):
-            match = re.search(r'^\s*' + re.escape(name) + r' = (.+)$', text, re.M)
-            require(match is not None, 'loaded job lacks ' + name)
-            return match[1]
-        arguments = re.search(r'^\s*arguments = \{\n(.*?)^\s*\}', text, re.M | re.S)
-        require(arguments is not None, 'loaded job lacks arguments')
+            matches = re.findall(r'^[ \t]*' + re.escape(name) + r' = (.+)$', text, re.M)
+            require(len(matches) == 1, 'loaded job lacks or duplicates ' + name)
+            return matches[0]
+        arguments = launchctl_arguments(text)
+        require(arguments, 'loaded job lacks arguments')
         return {'path': str(pathlib.Path(field('path')).resolve(strict=True)),
-                'arguments': [line.strip() for line in arguments[1].splitlines()],
+                'program': str(pathlib.Path(field('program')).resolve(strict=True)),
+                'arguments': arguments,
                 'logs': sorted({str(pathlib.Path(field(name)).resolve(strict=True))
                                 for name in ('stdout path', 'stderr path')})}
 

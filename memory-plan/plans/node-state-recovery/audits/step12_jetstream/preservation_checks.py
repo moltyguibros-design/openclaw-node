@@ -32,6 +32,136 @@ RESUME_ORDER = (
     'scheduler-heartbeat', 'node-watch', 'health-watch', 'gateway',
     'workplan-viewer', 'mesh-deploy-listener',
 )
+APPLE_SYSTEM_SOURCES = (
+    '/System/Library/',
+    '/System/Volumes/Preboot/Cryptexes/App/System/Library/',
+    '/Library/Apple/System/Library/',
+)
+APPLE_SYSTEM_PROGRAMS = APPLE_SYSTEM_SOURCES + (
+    '/System/Cryptexes/App/', '/usr/libexec/', '/usr/sbin/', '/bin/', '/sbin/',
+)
+AMBIENT_ENVIRONMENT = frozenset({
+    'HOME', 'PATH', 'TMPDIR', 'LOGNAME', 'SHELL', 'SSH_AUTH_SOCK',
+    'USER', 'XPC_FLAGS', 'XPC_SERVICE_NAME', 'OSLogRateLimit',
+})
+LOADER_ENVIRONMENT = frozenset({
+    'NODE_OPTIONS', 'NODE_PATH', 'PYTHONPATH', 'PYTHONHOME',
+    'PYTHONINSPECT', 'PYTHONSTARTUP', 'BASH_ENV', 'ENV', 'ZDOTDIR',
+})
+
+
+def verify_environment_hashes(actual, declared):
+    expected = {key: hashlib.sha256(value.encode()).hexdigest()
+                for key, value in declared.items()}
+    require(not (set(actual) & LOADER_ENVIRONMENT)
+            and not any(key.startswith(('DYLD_', 'LD_')) for key in actual),
+            'loaded environment contains a code loader')
+    require(set(actual) <= set(expected) | AMBIENT_ENVIRONMENT,
+            'loaded environment contains an undeclared variable')
+    require(all(actual.get(key) == digest for key, digest in expected.items()),
+            'loaded environment differs from approved declaration')
+
+
+def launchctl_blocks(text):
+    lines = text.split('\n')
+    blocks = []
+    position = 0
+    stack = []
+    for line in lines:
+        opened = re.fullmatch(r'([ \t]*)[^{}\n]+ (?:=|=>) \{', line)
+        closed = re.fullmatch(r'([ \t]*)\}', line)
+        if opened:
+            stack.append(opened[1])
+        elif closed:
+            require(stack and stack.pop() == closed[1],
+                    'launchd output has an unmatched section boundary')
+    require(not stack, 'launchd output has an unterminated section')
+    while position < len(lines):
+        header = re.fullmatch(r'([ \t]*)([^{}\n]+) = \{', lines[position])
+        if header is None:
+            position += 1
+            continue
+        indentation, name = header.groups()
+        if name != 'arguments' and not name.endswith('environment'):
+            position += 1
+            continue
+        body = []
+        position += 1
+        while position < len(lines) and lines[position] != indentation + '}':
+            body.append(lines[position])
+            position += 1
+        require(position < len(lines), 'launchd section is unterminated: ' + name)
+        blocks.append((name, indentation, body))
+        position += 1
+    return blocks
+
+
+def launchctl_rows(indentation, body, name):
+    if not body:
+        return []
+    prefix = indentation + ('\t' if body[0].startswith(indentation + '\t') else '  ')
+    require(all(row.startswith(prefix) for row in body),
+            'launchd ' + name + ' contains an unparsed line')
+    return [row[len(prefix):] for row in body]
+
+
+def launchctl_arguments(text):
+    sections = [(indentation, body) for name, indentation, body in launchctl_blocks(text)
+                if name == 'arguments']
+    require(len(sections) <= 1, 'launchd arguments occur more than once')
+    return launchctl_rows(*sections[0], 'arguments') if sections else []
+
+
+def launchctl_environment(text):
+    sections = [(name, indentation, body) for name, indentation, body in launchctl_blocks(text)
+                if name.endswith('environment')]
+    environment = {}
+    order = {'inherited environment': 0, 'default environment': 1, 'environment': 2}
+    variable_row = re.compile(r'[ \t]*[A-Za-z_][A-Za-z0-9_]* => .*')
+    visible_rows = sum(bool(variable_row.fullmatch(line)) for line in text.split('\n'))
+    section_rows = sum(bool(variable_row.fullmatch(line)) for _, _, body in sections for line in body)
+    require(visible_rows == section_rows,
+            'launchd environment contains a variable outside its section')
+    require(len(sections) == len({name for name, _, _ in sections})
+            and all(name in order for name, _, _ in sections)
+            and [order[name] for name, _, _ in sections]
+                == sorted(order[name] for name, _, _ in sections),
+            'launchd environment contains a duplicate or unknown section')
+    for name, indentation, body in sections:
+        within = set()
+        for line in launchctl_rows(indentation, body, name):
+            entry = re.fullmatch(r'([A-Za-z_][A-Za-z0-9_]*) => (.*)', line)
+            require(entry is not None and entry[1] not in within,
+                    'launchd environment contains an unparsed or duplicate variable')
+            within.add(entry[1])
+            environment[entry[1]] = entry[2]
+    return environment
+
+
+def protected_system_path(path, roots):
+    try:
+        original = pathlib.Path(path)
+        if not original.is_absolute():
+            return False
+        for component in (original, *original.parents):
+            info = component.lstat()
+            if info.st_uid != 0 or info.st_mode & 0o022:
+                return False
+        resolved = original.resolve(strict=True)
+        if not any(str(resolved).startswith(root) for root in roots):
+            return False
+        for component in (resolved, *resolved.parents):
+            info = component.stat()
+            if info.st_uid != 0 or info.st_mode & 0o022:
+                return False
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def apple_system_source(source, program=''):
+    return (protected_system_path(source, APPLE_SYSTEM_SOURCES)
+            and protected_system_path(program, APPLE_SYSTEM_PROGRAMS))
 
 
 def production_entrypoint_roots(home=None):
@@ -44,7 +174,7 @@ def production_entrypoint_roots(home=None):
 
 
 def suspicious_hardlink(path, source, label):
-    if str(source).startswith('/System/Library/'):
+    if apple_system_source(source, path):
         return False
     if label.startswith('application.') and '.app/Contents/MacOS/' in str(path):
         return False
@@ -95,7 +225,7 @@ def relevant_entrypoint(label, values, roots, home=None, environment=None,
 def unclassified_executable(program, arguments, source, label):
     executable = program or (arguments[0] if arguments else '')
     name = pathlib.Path(executable).name
-    if str(source).startswith('/System/Library/'):
+    if apple_system_source(source, executable):
         return False
     if (name in {'sh', 'bash', 'zsh', 'env', 'osascript', 'npm', 'npx', 'bun', 'deno',
                  'caffeinate', 'nice', 'nohup', 'arch', 'xcrun'}
@@ -122,27 +252,46 @@ def installed_entrypoints(directory, protected_roots):
         except (OSError, ValueError, TypeError) as error:
             raise Refused('installed LaunchAgent plist cannot be read: ' + path.name) from error
         require(isinstance(plist, dict), 'installed LaunchAgent plist is not a dictionary: ' + path.name)
+        if not plist:
+            continue
         label = plist.get('Label')
+        require(isinstance(label, str), 'installed launchd job lacks a label: ' + path.name)
         values = plist.get('ProgramArguments', [])
         location = plist.get('WorkingDirectory', '')
         environment = plist.get('EnvironmentVariables', {})
         scan = [plist.get('Program'), location]
         if isinstance(values, list):
             scan.extend(values)
-        relevant = (isinstance(label, str)
-                    and (relevant_entrypoint(label, scan, roots,
-                                             environment=environment if isinstance(environment, dict) else {},
-                                             working_directory=location, source=path)
-                         or unclassified_executable(plist.get('Program'),
-                                                     values if isinstance(values, list) else [], path, label)))
+        relevant = (not apple_system_source(path, plist.get('Program'))
+                    or relevant_entrypoint(label, scan, roots,
+                                           environment=environment if isinstance(environment, dict) else {},
+                                           working_directory=location, source=path)
+                    or unclassified_executable(plist.get('Program'),
+                                               values if isinstance(values, list) else [], path, label))
         if not relevant:
             continue
-        require(isinstance(label, str), 'installed OpenClaw LaunchAgent lacks a label: ' + path.name)
         require(isinstance(values, list) and all(isinstance(value, str) for value in values),
-                'installed OpenClaw LaunchAgent has invalid arguments: ' + path.name)
-        require(path.name == label + '.plist' and label not in found and not path.is_symlink(),
-                'installed OpenClaw LaunchAgent has ambiguous identity: ' + path.name)
+                'installed launchd job has invalid arguments: ' + path.name)
+        require(label not in found and not path.is_symlink(),
+                'installed launchd job has ambiguous identity: ' + path.name)
         found[label] = str(path.resolve(strict=True))
+    return found
+
+
+def inert_entrypoint_artifacts(directories):
+    found = {}
+    for item in directories:
+        folder = pathlib.Path(item)
+        require(folder.is_dir(), 'LaunchAgent artifact directory is missing: ' + str(folder))
+        for path in folder.glob('*.plist'):
+            try:
+                raw = path.read_bytes()
+                plist = plistlib.loads(raw)
+            except (OSError, ValueError, TypeError) as error:
+                raise Refused('installed LaunchAgent plist cannot be read: ' + path.name) from error
+            if plist == {}:
+                require(not path.is_symlink(), 'inert LaunchAgent artifact is a symlink: ' + path.name)
+                found[str(path.resolve(strict=True))] = hashlib.sha256(raw).hexdigest()
     return found
 
 
@@ -170,66 +319,121 @@ def disabled_entrypoint_artifacts(directories):
     return found
 
 
-def loaded_entrypoints(domain_text, domain, protected_roots, inspect=None):
+def loaded_entrypoints(domain_text, domain, protected_roots, inspect=None, include_identity=False,
+                       approved_labels=None):
     match = re.search(r'^\s*services = \{\n(.*?)^\s*\}', domain_text, re.M | re.S)
     require(match is not None, 'launchd domain lacks a services inventory')
     roots = tuple({pathlib.Path(root).resolve(strict=False) for root in protected_roots})
+    require_header = inspect is None
     inspect = inspect or (lambda label: subprocess.check_output(
         ['/bin/launchctl', 'print', domain + '/' + label], text=True, timeout=10))
     labels = set()
+    identities = {}
+    seen = set()
     for line in match[1].splitlines():
-        fields = line.split()
-        if len(fields) < 3:
-            continue
-        label = fields[-1]
+        row = re.fullmatch(r'\s*\d+\s+\S+\s+([A-Za-z0-9._:@/+\-]+)\s*', line)
+        require(row is not None, 'launchd services inventory contains an unparsed job')
+        label = row[1]
+        require(label not in seen, 'launchd services inventory contains a duplicate job')
+        seen.add(label)
         try:
-            details = inspect(label)
+            service_text = inspect(label)
         except (OSError, subprocess.SubprocessError) as error:
             raise Refused('loaded launchd service cannot be inspected: ' + label) from error
-        values = []
+        if require_header:
+            require(service_text.startswith(domain + '/' + label + ' = {\n'),
+                    'launchd service inspection identity differs: ' + label)
+        lines = service_text.split('\n')[1:] if require_header else service_text.split('\n')
+        header = []
+        for line in lines:
+            if re.fullmatch(r'[ \t]*[^{}\n]+ (?:=|=>) \{', line):
+                break
+            header.append(line)
         fields = {}
+        positions = {}
+        field_prefix = '\t' if require_header else ''
         for key in ('path', 'program', 'working directory'):
-            field = re.search(r'^\s*' + re.escape(key) + r' = (.+)$', details, re.M)
-            if field:
-                fields[key] = field[1]
-                values.append(field[1])
-        arguments = re.search(r'^\s*arguments = \{\n(.*?)^\s*\}', details, re.M | re.S)
-        argv = []
-        if arguments:
-            argv = [line.strip() for line in arguments[1].splitlines()]
-            values.extend(argv)
-        environment = {}
-        for section in re.finditer(r'^\s*(?:default )?environment = \{\n(.*?)^\s*\}',
-                                   details, re.M | re.S):
-            for line in section[1].splitlines():
-                entry = re.match(r'^\s*([A-Za-z_][A-Za-z0-9_]*) => (.*)$', line)
-                if entry:
-                    environment[entry[1]] = entry[2]
-        if (relevant_entrypoint(label, [*values, *environment.values()], roots,
-                                environment=environment,
-                                working_directory=fields.get('working directory'),
-                                source=fields.get('path', ''))
-                or unclassified_executable(fields.get('program'), argv, fields.get('path', ''), label)):
+            field = re.escape(field_prefix + key) + r' = (.+)'
+            matches = re.findall(r'^' + field + r'$', service_text, re.M)
+            require(len(matches) <= 1, 'launchd service has a duplicate ' + key + ': ' + label)
+            if key == 'working directory':
+                if matches:
+                    fields[key] = matches[0]
+                continue
+            top = [(index, match[1]) for index, line in enumerate(header)
+                   if (match := re.fullmatch(field, line))]
+            if top:
+                positions[key], fields[key] = top[0]
+        source = fields.get('path', '')
+        program = fields.get('program', '')
+        printable_identity = all(value.isprintable() for value in fields.values())
+        if approved_labels is not None and label not in approved_labels:
+            if not (printable_identity
+                    and positions.get('path', float('inf')) < positions.get('program', -1)
+                    and apple_system_source(source, program)):
+                labels.add(label)
+                identities[label] = {'unclassified': True, 'source': source, 'program': program}
+            continue
+        require(printable_identity, 'launchd service identity contains a control character: ' + label)
+        values = list(fields.values())
+        argv = launchctl_arguments(service_text)
+        values.extend(argv)
+        environment = launchctl_environment(service_text)
+        relevant = (relevant_entrypoint(label, [*values, *environment.values()], roots,
+                                        environment=environment,
+                                        working_directory=fields.get('working directory'), source=source)
+                    or unclassified_executable(program, argv, source, label))
+        if relevant or not apple_system_source(source, program):
             labels.add(label)
-    return labels
+            identities[label] = {
+                'source': source,
+                'program': program,
+                'working_directory': fields.get('working directory', ''),
+                'arguments_sha256': hashlib.sha256(json.dumps(argv, separators=(',', ':')).encode()).hexdigest(),
+                'environment_sha256': {key: hashlib.sha256(value.encode()).hexdigest()
+                                       for key, value in sorted(environment.items())},
+            }
+    return identities if include_identity else labels
 
 
 def verify_entrypoint_inventory(installed, gui_loaded, user_loaded, system_loaded, expected,
-                                roots=(), disabled_artifacts=None):
+                                roots=(), disabled_artifacts=None, inert_artifacts=None,
+                                loaded_identity=None):
     expected = {'ai.openclaw.' + unit for unit in expected}
-    require(set(installed) == expected, 'installed OpenClaw jobs differ from the approved cohort')
+    require(set(installed) == expected, 'installed launchd jobs differ from the approved cohort')
     require(gui_loaded <= expected and user_loaded <= expected and system_loaded <= expected,
-            'unclassified OpenClaw job is loaded')
+            'unclassified launchd job is loaded')
     require(not (gui_loaded & user_loaded or gui_loaded & system_loaded or user_loaded & system_loaded),
             'OpenClaw job is loaded in two launchd domains')
+    if loaded_identity is not None:
+        require(set(loaded_identity) == {'gui', 'user', 'system'}
+                and all(set(loaded_identity[domain]) == labels for domain, labels in (
+                    ('gui', gui_loaded), ('user', user_loaded), ('system', system_loaded))),
+                'loaded launchd identity does not cover every job')
+        for domain, entries in loaded_identity.items():
+            for label, identity in entries.items():
+                if label in expected:
+                    require(identity['source'] == installed[label],
+                            'approved loaded job differs from its installed plist: ' + domain + '/' + label)
+                    plist = plistlib.loads(pathlib.Path(installed[label]).read_bytes())
+                    arguments = plist['ProgramArguments']
+                    declared = plist.get('EnvironmentVariables', {})
+                    verify_environment_hashes(identity['environment_sha256'], declared)
+                    require(identity['program'] == plist.get('Program', arguments[0])
+                            and identity['working_directory'] == plist.get('WorkingDirectory', '')
+                            and identity['arguments_sha256'] == hashlib.sha256(
+                                json.dumps(arguments, separators=(',', ':')).encode()).hexdigest(),
+                            'approved loaded job configuration differs from its plist: ' + domain + '/' + label)
     return {'verified': True,
             'installed': {label: {'path': path,
                                   'sha256': hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()}
                           for label, path in sorted(installed.items())},
             'loaded': {'gui': sorted(gui_loaded), 'user': sorted(user_loaded),
                        'system': sorted(system_loaded)},
+            'loaded_identity': loaded_identity or {'gui': {}, 'user': {}, 'system': {}},
             'roots': sorted(str(pathlib.Path(root).resolve(strict=False)) for root in roots),
-            'disabled_artifacts': dict(sorted((disabled_artifacts or {}).items()))}
+            'disabled_artifacts': dict(sorted((disabled_artifacts or {}).items())),
+            'inert_artifacts': dict(sorted((inert_artifacts or {}).items()))}
 
 
 def capture_entrypoint_inventory(expected):
@@ -239,15 +443,23 @@ def capture_entrypoint_inventory(expected):
     roots = production_entrypoint_roots(home)
     installed = installed_entrypoints(directories, roots)
     disabled = disabled_entrypoint_artifacts(directories)
+    inert = inert_entrypoint_artifacts(directories)
     domains = ('gui/' + str(os.getuid()), 'user/' + str(os.getuid()), 'system')
-    loaded = [loaded_entrypoints(subprocess.check_output(['/bin/launchctl', 'print', domain],
-               text=True, timeout=10), domain, roots) for domain in domains]
+    approved = {'ai.openclaw.' + unit for unit in expected}
+    identities = [loaded_entrypoints(subprocess.check_output(['/bin/launchctl', 'print', domain],
+                  text=True, timeout=10), domain, roots, include_identity=True,
+                  approved_labels=approved) for domain in domains]
+    loaded = [set(entries) for entries in identities]
     evidence = verify_entrypoint_inventory(installed, *loaded, expected,
-                                           roots=roots, disabled_artifacts=disabled)
+                                           roots=roots, disabled_artifacts=disabled,
+                                           inert_artifacts=inert,
+                                           loaded_identity=dict(zip(('gui', 'user', 'system'), identities)))
     again = installed_entrypoints(directories, roots)
     require(again == installed and all(hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
             == evidence['installed'][label]['sha256'] for label, path in again.items()),
             'installed entrypoint changed during preflight')
+    require(inert_entrypoint_artifacts(directories) == inert,
+            'inert entrypoint artifact changed during preflight')
     return evidence
 
 
