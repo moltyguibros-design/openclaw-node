@@ -321,3 +321,15 @@ binds forward admission to the current boot, matches the user journal's boot
 hash format, and creates the public outcome directory at its fixed mode under
 a restrictive umask. Focused Mac tests pass 59/59. The revision needs a new
 exact-head CI and Claude review; live state is unchanged and 1.2 remains [A].
+
+Checkpoint 2026-10-01 18:16 EDT: PR #180 merged at e918a3e with 4/4 CI,
+Claude's no-blocker exact-head review, and 59/59 local Mac root-lock fixtures.
+The new user-transfer source branch records a full-node NATS transfer intent
+and freezes its journal until an owner-checked, exact-binding root `returned`
+receipt closes it. Returned windows remain restore-only. Local tests pass
+112/112 for the user journal and hold, 59/59 for the root journal and lock.
+This is source-only: root `declined`, post-marker `rolled-back`, and `accepted`
+outcomes, physical user-journal validation in the root driver, root service
+admission/census, protected marker/rollback, cold masters and live cutover are
+still open. The production macOS-root path remains gated; no live service or
+protected store was changed. Step 1.2 remains [A] at v1.2-pre.
