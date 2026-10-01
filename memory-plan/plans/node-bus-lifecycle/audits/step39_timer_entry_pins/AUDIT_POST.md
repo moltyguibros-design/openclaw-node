@@ -11,9 +11,9 @@
 
 ## 2. Greppable deltas
 
-- `rg -n 'def verify|def main|Gate.run' workspace-bin/timer-entry.py`: the entry checks content, arguments, received environment and source before gate handoff.
-- `rg -n 'def loaded|def probe|def _stage|def verify' workspace-bin/stage-timer-entries.py`: loaded plist checks, neutral launchd environment observation, candidate rendering and saved-baseline verification.
-- `rg -n 'def test_' test/timer_entry_test.py`: four actual Mac owned launchd controls.
+- `rg -n 'def verify|def main|gate.run' workspace-bin/timer-entry.py`: first hit `44:def verify`; the entry checks content, arguments, received environment and source before gate handoff.
+- `rg -n 'def loaded|def probe|def _stage|def verify' workspace-bin/stage-timer-entries.py`: first hit `52:def loaded`; loaded plist checks, neutral launchd environment observation, candidate rendering and saved-baseline verification.
+- `rg -n 'def test_' test/timer_entry_test.py`: first hit `102:    def test_open_closed_and_source_substitution`; six actual Mac owned launchd controls.
 - `rg -n 'D25|3.9' memory-plan/plans/node-bus-lifecycle/{DECISIONS.md,INVENTORY.md}`: declared two source-path relocations and the bounded step contract.
 
 ## 3. Cross-references
@@ -25,7 +25,7 @@ The 3.9 Goal/Needs/Feeds/Verify, AUDIT_PRE §6 and D25–D26 match the implement
 - [POSITIVE] The five installed and loaded entries matched the staged baseline; a fresh owner-private launchd observation recorded received environment value hashes without publishing values. Saved verification re-probed the environment, source tree, executable resolution, gate pins and candidate plist dictionaries.
 - [POSITIVE] Six owned Mac tests passed: open gate launches the fixture application; closed gate admits no application work; source, launcher, manifest, environment, gate-pin, delegated-resolution and wrong SSH-socket changes refuse before work.
 - [POSITIVE] Claude's adversarial source review found staging/runtime UID parity and consolidation-argv shape mismatches. Both were corrected before the accepted candidate was staged; XPC identity and its value hash are both checked.
-- [POSITIVE] Preceding-source CI attempt 2 passed both root Node 20 and Node 22 jobs. Node 22 attempt 1 failed one unrelated mesh lifecycle timeout and was rerun without source changes. Corrected exact-source CI is still required.
+- [POSITIVE] Exact-source CI 36797763658 at `cae7186` passed both root Node 20 and Node 22 jobs. The earlier source's Node 22 attempt 1 had one unrelated mesh lifecycle timeout and passed on rerun without source changes.
 - [POSITIVE] Re-verification caught the inherited SSH-agent socket rotation; candidate `-5` accepts its current launchd-domain value without recapturing stable values. Claude's adversarial review accepted that narrow policy and safe-refusal race.
 - [NEGATIVE] Mission Control's dependency audit is red on a Next.js advisory in the existing lockfile; the same audit gate was red on unmodified main before this step. The local Mac root suite also remains red/unstable in unrelated test files, detailed in `RUNTIME_EVIDENCE.md`. Neither is represented as a full green suite.
 - [NEGATIVE] Plan lint reports the pre-existing absence of this silo's `automation.json` and `tick-logs/`; canonical sync and inventory/audit coverage pass.

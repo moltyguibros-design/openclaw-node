@@ -82,5 +82,8 @@ it. The accepted candidate `-5` re-verifies with five jobs and 1,885 source
 files. Six owned tests pass after this change, including rotation/absence
 contract and wrong-socket refusal. Claude's second adversarial review found
 the compare safe, with a rotation between process spawn and check causing
-refusal; that is safe failure. Exact-source CI for this correction is still
-pending. The five production units remain unchanged.
+refusal; that is safe failure. Exact source
+`cae718689c170580f304b3a86a01d276b92cc03d` ran in CI 36797763658:
+both root Node 20 and Node 22 unit jobs passed. Mission Control's dependency
+audit remains red on the unchanged lockfile. The five production units remain
+unchanged.

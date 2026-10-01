@@ -577,3 +577,11 @@ Candidate `timer-entry-candidate-20260930-5` supersedes `-3` and `-4`; it
 keeps the same five application baselines and the Node24 private release.
 Claude's second adversarial check accepts the narrow policy and notes the
 safe-refusal race. No production job or environment was changed.
+
+D26/3.9 closure (2026-09-30 20:51 EDT): candidate `-5` manifest SHA-256
+`96e829f379978d0b67e61d2464d3624e4a9d426e8671fac4dab1e9c5a47d4644`
+re-verifies all five installed/loaded settings and 1,885 source files. Six
+owned Mac controls pass; exact source `cae7186` passes root Node20/22 CI
+36797763658. The separate Mission Control audit remains red on its existing
+lockfile. Close 3.9[x]/v3.9 as a staged candidate only. Step 3.10 must prove
+the safe first transition; 3.11 owns actual commissioning.
