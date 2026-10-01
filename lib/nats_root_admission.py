@@ -32,7 +32,8 @@ class BoundRootJournal:
     @classmethod
     def reopen(cls, site, root_uid, root_gid, transaction,
                node_lock, user_journal_root, user_uid):
-        user = UserTransfer(node_lock, user_journal_root, user_uid, transaction)
+        user = UserTransfer(node_lock, user_journal_root, user_uid, transaction,
+                            prior_boot=True)
         try:
             root = LockBootstrapJournal(site, root_uid, root_gid)
             try:
@@ -54,16 +55,21 @@ class BoundRootJournal:
                 or saved['user_transfer_sha256'] != observed['head']
                 or beginning.get('user_evidence') !=
                 {'baseline': self.user.records[0], 'transfer': self.user.records[-1]}
-                or saved['boot'] != boot_identity()):
+                or saved['boot'] != self.user.records[0]['boot']):
             raise Refused('root transaction does not bind the still-open user transfer')
+        self.return_only = saved['boot'] != boot_identity()
 
     def observation(self, observe_physical):
         self._check_descriptor()
+        if self.return_only:
+            raise Refused('prior-boot root transaction can only return before marker')
         return {'boot': boot_identity(), 'user_transfer': self.user.observation,
                 'admission': observe_physical()}
 
     def acquire_after_intent(self, lock_path, observe_physical, process_census, seconds=10):
         self._check_descriptor()
+        if self.return_only:
+            raise Refused('prior-boot root transaction can only return before marker')
         return self.root.acquire_after_intent(lock_path,
             lambda: self.observation(observe_physical), process_census, seconds)
 

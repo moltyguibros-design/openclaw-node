@@ -395,3 +395,10 @@ PR #183's independent adversarial review is still probing reboot reentry;
 neither slice authorizes production root bootstrap. The physical driver,
 outcome lifecycle, protected staging, cold masters, isolated restores, and
 live acceptance remain open at 1.2 [A].
+
+Checkpoint 2026-10-01 19:33 EDT: bound root reentry now distinguishes a
+prior-boot intent from a current-boot one. A prior-boot transfer must match
+the root-owned copies and may only take the pre-marker return path; it cannot
+readmit the writer. The new reboot fixture passes with the user-transfer
+checks. Production release observations and the full outcome lifecycle remain
+open; the root tripwire stays closed.

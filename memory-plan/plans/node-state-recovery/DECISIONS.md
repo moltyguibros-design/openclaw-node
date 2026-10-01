@@ -866,6 +866,19 @@ without these copies, but the bound path rejects them on reentry and the
 production macOS-root tripwire remains closed.
 
 This anchors the owner-trusted transfer in root-owned storage. It does not
-turn a caller-supplied physical verdict into a trusted observation, support a
-new-boot user-transfer reentry, or supply the declined/accepted/rollback
-outcomes and protected NATS cutover. Step 1.2 remains active.
+turn a caller-supplied physical verdict into a trusted observation or supply
+the declined/accepted/rollback outcomes and protected NATS cutover. Step 1.2
+remains active.
+
+## D48 — Permit prior-boot reentry only for pre-marker return (2026-10-01 19:33 EDT)
+
+A root intent may survive a VM reboot before marker publication. The bound
+reentry reader may then load the owner journal from its prior boot under the
+node and journal locks, but it must match that boot and the exact root-owned
+copies in the existing root intent. It cannot resume writer admission or
+recompute the old physical admission verdict on the new boot. It can only
+record a verified pre-marker return using fresh release evidence, after which
+the existing user journal remains restore-only. A new root begin still
+requires a current-boot user transfer. This is a source control; production
+root execution remains gated and fresh physical release verification is not
+yet implemented.
