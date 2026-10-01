@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from preservation_journal import FULL_NODE_SCOPE, Journal, Refused, TIMER_SCOPE, TIMER_UNITS, UNITS, encoded, matches, valid_record
+import preservation_journal
 from legacy_fixture import legacy_journal
 
 
@@ -180,6 +181,12 @@ class JournalTests(unittest.TestCase):
         closed = journal.complete_nats_return()
         self.assertEqual(closed['outcome'], 'returned')
         self.assertIsNone(journal.nats_transfer_open())
+        marker.write_text('{}')
+        with self.assertRaisesRegex(Refused, 'marker already exists'):
+            journal.recover(lambda *_: self.fail('legacy restore ran behind marker'),
+                            lambda *_: self.fail('observation ran behind marker'),
+                            lambda: self.fail('readiness ran behind marker'), hold=hold)
+        marker.unlink()
         with self.assertRaisesRegex(Refused, 'restore-only'):
             journal.mutate('nats', 'unload', lambda: None, lambda: {'verified': True}, hold=hold)
         journal.close()
@@ -187,6 +194,37 @@ class JournalTests(unittest.TestCase):
             self.assertIsNone(reopened.nats_transfer_open())
             with self.assertRaisesRegex(Refused, 'restore-only'):
                 reopened.require_forward()
+
+    def test_production_transfer_refuses_before_durable_intent(self):
+        journal, hold, observe, _ = self.prepared_nats_transfer()
+        before = len(journal.records)
+        with patch.object(preservation_journal.sys, 'platform', 'darwin'), patch(
+                'preservation_journal.NATS_WRITER_MARKER',
+                pathlib.Path('/private/var/db/openclaw-nats/writer-handoff.json')):
+            with self.assertRaisesRegex(Refused, 'production NATS transfer awaits'):
+                journal.transfer_nats(str(uuid.uuid4()), hold, observe)
+        self.assertEqual(len(journal.records), before)
+
+    def test_returned_legacy_restore_holds_shared_exclusion_and_checks_marker(self):
+        lock = pathlib.Path(self.temp.name) / 'writer.lock'
+        lock.write_bytes(b'nonce')
+        lock.chmod(0o644)
+        marker = pathlib.Path(self.temp.name) / 'writer-handoff.json'
+        with patch('preservation_journal.NATS_LEGACY_LOCK', lock), patch(
+                'preservation_journal.NATS_WRITER_MARKER', marker), patch(
+                'preservation_journal.NATS_ROOT_UID', os.getuid()):
+            with preservation_journal.nats_legacy_restore_guard():
+                script = ('import fcntl,os,sys; '
+                          'f=os.open(sys.argv[1],os.O_RDONLY); '
+                          'fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)')
+                blocked = subprocess.run([sys.executable, '-c', script, str(lock)],
+                                         capture_output=True, text=True)
+                self.assertNotEqual(blocked.returncode, 0)
+                self.assertIn('BlockingIOError', blocked.stderr)
+            marker.write_text('{}')
+            with self.assertRaisesRegex(Refused, 'marker already exists'):
+                with preservation_journal.nats_legacy_restore_guard():
+                    self.fail('legacy restoration entered behind marker')
 
     def test_new_unscoped_journal_refuses_before_creation(self):
         with self.assertRaisesRegex(Refused, 'explicit protected scope'):

@@ -792,3 +792,11 @@ no-root-intent refusal needs a root-owned `declined` outcome. Until those
 branches and the pinned physical root driver are implemented and reviewed,
 the root journal's production macOS-root tripwire remains in place. No live
 preservation hold or NATS service is changed by this decision.
+
+Claude's exact-head challenge of PR #181 found that a transfer could otherwise
+freeze a production journal before any root transaction existed. The user
+transfer entrypoint now also refuses on the production macOS marker path until
+`declined` and root validation exist. A returned legacy restoration checks the
+marker and, when the shared writer lock exists, holds it shared across each
+NATS restore and verification. Any transfer record ends same-process
+`JournaledHold` forward certification, even after a root return.

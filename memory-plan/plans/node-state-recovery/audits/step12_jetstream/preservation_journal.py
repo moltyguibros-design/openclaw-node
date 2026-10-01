@@ -1,4 +1,5 @@
 import datetime
+import contextlib
 import fcntl
 import hashlib
 import json
@@ -24,6 +25,7 @@ NATS_TRANSFER_UNITS = ('nats', 'nats-2', 'nats-3', 'nats-1')
 NATS_WRITER_MARKER = pathlib.Path('/private/var/db/openclaw-nats/writer-handoff.json')
 NATS_ROOT_OUTCOMES = pathlib.Path('/private/var/db/openclaw-nats-outcomes')
 NATS_ROOT_UID = 0
+NATS_LEGACY_LOCK = pathlib.Path('/private/var/db/openclaw-nats-writer.lock')
 
 
 def require_no_nats_marker():
@@ -66,6 +68,44 @@ def read_nats_root_return(transaction):
                     ('ledger_sha256', 'user_baseline_sha256', 'user_transfer_sha256')),
             'root NATS outcome receipt is incomplete')
     return receipt
+
+
+@contextlib.contextmanager
+def nats_legacy_restore_guard():
+    require_no_nats_marker()
+    try:
+        named = NATS_LEGACY_LOCK.lstat()
+    except FileNotFoundError:
+        yield
+        require_no_nats_marker()
+        return
+    except OSError as error:
+        raise Refused('legacy NATS writer lock is unobservable') from error
+    require(stat.S_ISREG(named.st_mode) and named.st_uid == NATS_ROOT_UID
+            and stat.S_IMODE(named.st_mode) == 0o644 and named.st_nlink == 1,
+            'legacy NATS writer lock identity differs')
+    try:
+        fd = os.open(NATS_LEGACY_LOCK, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as error:
+        raise Refused('legacy NATS writer lock is unobservable') from error
+    try:
+        opened = os.fstat(fd)
+        require((opened.st_dev, opened.st_ino, opened.st_ctime_ns) ==
+                (named.st_dev, named.st_ino, named.st_ctime_ns),
+                'legacy NATS writer lock changed')
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise Refused('root NATS writer currently holds exclusive exclusion') from error
+        require_no_nats_marker()
+        yield
+        current = NATS_LEGACY_LOCK.lstat()
+        require((current.st_dev, current.st_ino, current.st_ctime_ns) ==
+                (opened.st_dev, opened.st_ino, opened.st_ctime_ns),
+                'legacy NATS writer lock changed during restoration')
+        require_no_nats_marker()
+    finally:
+        os.close(fd)
 
 
 def boot_identity():
@@ -633,6 +673,9 @@ class Journal:
                                     root_receipt_sha256=hashlib.sha256(encoded(receipt)).hexdigest())
 
     def transfer_nats(self, root_transaction, hold, observe):
+        require(not (sys.platform == 'darwin' and NATS_WRITER_MARKER ==
+                     pathlib.Path('/private/var/db/openclaw-nats/writer-handoff.json')),
+                'production NATS transfer awaits root decline and journal validation')
         require(self.scope == FULL_NODE_SCOPE and self.node_lock is not None,
                 'NATS transfer requires the full-node preservation owner')
         require(hold is not None and hold.journal is self and callable(observe),
@@ -742,6 +785,9 @@ class Journal:
 
     def recover(self, restore, observe, final_check, diagnostics=None, hold=None):
         require(self.nats_transfer_open() is None, 'NATS transfer is open; await a root outcome')
+        returned_transfer = any(row['event'] == 'nats-transfer-closed' for row in self.records)
+        if returned_transfer:
+            require_no_nats_marker()
         require(self.node_lock is not None and (self.lock is not None or self.write_failed),
                 'recovery requires the node lock')
         require(not self.sealed, 'sealed journal cannot restore services')
@@ -790,12 +836,16 @@ class Journal:
             prior = self.prior[unit]
             def verify():
                 actual = observe(unit, prior)
+                if returned_transfer and unit.startswith('nats'):
+                    require_no_nats_marker()
                 require(actual.get('identity') == prior['identity'], 'immutable service identity changed')
                 require(matches(actual, prior), 'prior service state was not restored')
                 require(actual.get('verified') is True, 'service readiness was not verified')
                 return actual
             try:
                 actual = observe(unit, prior)
+                if returned_transfer and unit.startswith('nats'):
+                    require_no_nats_marker()
                 require(all(isinstance(actual.get(k), bool) for k in ('loaded', 'running', 'disabled')),
                         'actual service state is incomplete')
                 require(actual.get('identity') == prior['identity'], 'immutable service identity changed')
@@ -812,11 +862,13 @@ class Journal:
                 if held:
                     hold.before_restore()
                 record('restoration-intent', unit=unit, action='restore-prior')
-                restore(unit, prior)
-                if held:
-                    hold.check_closed()
-                evidence = verify()
-                record('recovery-verified', unit=unit, evidence=evidence)
+                guard = nats_legacy_restore_guard() if returned_transfer and unit.startswith('nats') else contextlib.nullcontext()
+                with guard:
+                    restore(unit, prior)
+                    if held:
+                        hold.check_closed()
+                    evidence = verify()
+                    record('recovery-verified', unit=unit, evidence=evidence)
             except Exception as error:
                 errors.append({'unit': unit, 'reason': type(error).__name__})
                 if held and self.write_failed:
@@ -835,6 +887,8 @@ class Journal:
             except Exception as error:
                 errors.append({'unit': unit, 'reason': type(error).__name__})
         try:
+            if returned_transfer:
+                require_no_nats_marker()
             evidence = final_check()
             require(isinstance(evidence, dict) and evidence.get('verified') is True,
                     'final physical ownership or member-1 hold was not verified')
