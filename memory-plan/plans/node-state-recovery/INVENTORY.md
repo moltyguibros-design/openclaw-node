@@ -386,3 +386,12 @@ directory, and deeply nested malformed JSON returns `Refused`. macOS CI now
 runs the existing user journal and hold suites as well as the real-gate
 validator test. Local focused tests remain 68/68; user/hold tests 115/115.
 Revised CI is pending. Production gates remain closed.
+
+Checkpoint 2026-10-01 19:29 EDT: a dependent source slice now includes the
+exact validated user baseline and transfer records in the root-owned intent
+and checks their content hashes, descriptor binding, and equality on bound
+reentry. Root journal and bound admission controls pass 51/51 locally.
+PR #183's independent adversarial review is still probing reboot reentry;
+neither slice authorizes production root bootstrap. The physical driver,
+outcome lifecycle, protected staging, cold masters, isolated restores, and
+live acceptance remain open at 1.2 [A].

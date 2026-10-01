@@ -852,3 +852,20 @@ is still available behind the macOS-root tripwire, and the root ledger has not
 yet durably copied the user baseline and transfer records. The tripwire stays
 closed until those interfaces are replaced by pinned root-owned observations
 and the declined/accepted/rollback lifecycle is complete.
+
+## D47 — Copy transfer evidence into the root intent (2026-10-01 19:29 EDT)
+
+The bound root bootstrap writes the exact validated user baseline and terminal
+transfer records into its root-owned `lock-create-intent`, in the same durable
+append as the descriptor. The root ledger validates each record's content hash
+and its linkage to the descriptor; bound reentry requires the copies to equal
+the records reread under the owner node and journal locks. No separate copy
+write follows intent, so a crash cannot leave an intent that assumes evidence
+was pinned when it was not. The low-level journal still permits fixture intents
+without these copies, but the bound path rejects them on reentry and the
+production macOS-root tripwire remains closed.
+
+This anchors the owner-trusted transfer in root-owned storage. It does not
+turn a caller-supplied physical verdict into a trusted observation, support a
+new-boot user-transfer reentry, or supply the declined/accepted/rollback
+outcomes and protected NATS cutover. Step 1.2 remains active.

@@ -53,8 +53,13 @@ class BoundRootJournalTest(unittest.TestCase):
 
     def test_begin_binds_terminal_transfer_and_keeps_owner_excluded(self):
         with self.begin() as bound:
-            saved = bound.root.current[0]['data']['descriptor']
+            beginning = bound.root.current[0]['data']
+            saved = beginning['descriptor']
             self.assertEqual(saved['user_transfer_sha256'], self.transfer['sha256'])
+            self.assertEqual(beginning['user_evidence'], {
+                'baseline': self.journal.records[0], 'transfer': self.transfer})
+            self.assertEqual(bound.root._read()[0]['data']['user_evidence'],
+                             beginning['user_evidence'])
             with self.assertRaisesRegex(module.Refused, 'controller still holds'):
                 nats_user_transfer.UserTransfer(
                     self.fixture.node_lock, self.fixture.root, self.uid, self.transaction)
@@ -84,6 +89,21 @@ class BoundRootJournalTest(unittest.TestCase):
                        'user_transfer': {'verified': True,
                                          'root_transaction': self.transaction,
                                          'head': 'f' * 64,
+                                         'baseline_sha256': self.journal.records[0]['sha256'],
+                                         'journal_root': str(self.fixture.root.resolve())},
+                       'admission': self.admission()}
+        with nats_root_journal.LockBootstrapJournal.begin(
+                self.site, self.lock, self.uid, self.gid,
+                self.transaction, observation):
+            pass
+        with self.assertRaisesRegex(module.Refused, 'does not bind'):
+            self.reopen()
+
+    def test_reopen_refuses_matching_descriptor_without_root_owned_evidence(self):
+        observation = {'boot': 'a' * 64,
+                       'user_transfer': {'verified': True,
+                                         'root_transaction': self.transaction,
+                                         'head': self.transfer['sha256'],
                                          'baseline_sha256': self.journal.records[0]['sha256'],
                                          'journal_root': str(self.fixture.root.resolve())},
                        'admission': self.admission()}
