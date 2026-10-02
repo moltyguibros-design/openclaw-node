@@ -105,7 +105,8 @@ class RootJournalTest(unittest.TestCase):
         self.site.rmdir()
         state = module.LockBootstrapJournal.inspect_readonly(
             self.site, self.uid, self.gid)
-        self.assertEqual(state, {'site': 'absent', 'ledger': 'absent',
+        self.assertEqual(state, {'scope': 'ledger-only',
+                                 'site_directory': 'absent', 'ledger_directory': 'absent',
                                  'head': None, 'records': 0,
                                  'last_event': None, 'transaction': None})
         self.assertFalse(self.site.exists())
@@ -118,7 +119,8 @@ class RootJournalTest(unittest.TestCase):
         before = record.stat().st_mtime_ns
         state = module.LockBootstrapJournal.inspect_readonly(
             self.site, self.uid, self.gid)
-        self.assertEqual(state, {'site': 'present', 'ledger': 'present',
+        self.assertEqual(state, {'scope': 'ledger-only',
+                                 'site_directory': 'present', 'ledger_directory': 'present',
                                  'head': head, 'records': 1,
                                  'last_event': 'lock-create-intent',
                                  'transaction': self.transaction})

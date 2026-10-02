@@ -975,7 +975,9 @@ an active intent. The read-only path now lists and opens records relative to
 the held directory descriptor, compares each opened record with its named
 identity, and rechecks the site and ledger directory identities before
 returning. The report calls the final record `last_event`, since an active
-intent is not a terminal outcome. Owned before-read and after-read swaps
+intent is not a terminal outcome. It declares `scope: ledger-only` and uses
+`site_directory`/`ledger_directory` names: directory presence is not marker,
+stage, lock or process absence. Owned before-read and after-read swaps
 refuse. A privileged actor writing outside the ledger protocol could still
 swap a name transiently between syscall checks; this is not a claim of
 atomic exclusion from out-of-protocol root activity. The production physical

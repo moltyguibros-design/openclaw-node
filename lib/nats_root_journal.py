@@ -240,8 +240,9 @@ class LockBootstrapJournal:
             site_identity = None
         protected_parent(root, uid, gid)
         if not present(root):
-            return {'site': 'present' if site_present else 'absent',
-                    'ledger': 'absent', 'head': None, 'records': 0,
+            return {'scope': 'ledger-only',
+                    'site_directory': 'present' if site_present else 'absent',
+                    'ledger_directory': 'absent', 'head': None, 'records': 0,
                     'last_event': None, 'transaction': None}
         directory(root, uid, gid, 0o700)
         journal = object.__new__(cls)
@@ -277,8 +278,9 @@ class LockBootstrapJournal:
                 if (site_identity.st_dev, site_identity.st_ino, site_identity.st_ctime_ns) != (
                         current_site.st_dev, current_site.st_ino, current_site.st_ctime_ns):
                     raise Refused('root writer site changed during inspection')
-            return {'site': 'present' if site_present else 'absent',
-                    'ledger': 'present',
+            return {'scope': 'ledger-only',
+                    'site_directory': 'present' if site_present else 'absent',
+                    'ledger_directory': 'present',
                     'head': journal.records[-1]['sha256'] if journal.records else None,
                     'records': len(journal.records), 'last_event': last_event,
                     'transaction': transaction}
