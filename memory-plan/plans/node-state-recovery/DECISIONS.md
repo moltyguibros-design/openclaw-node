@@ -950,3 +950,18 @@ outside that fence and is not claimed to be atomically excluded. Decline
 records produced by the earlier source-only PR #185 lack the new evidence
 field and cannot be replayed by this format. No production records exist:
 the macOS-root decline tripwire has stayed closed throughout both slices.
+
+## D53 — Separate read-only root inspection from recovery (2026-10-01 20:47 EDT)
+
+The eventual physical observer needs the root ledger head without taking an
+action. The ordinary journal constructor takes exclusive ownership and its
+reader settles pending files, so it cannot serve an observe-only command.
+`inspect_readonly` opens an existing ledger directory without creating it,
+takes a nonblocking shared lock, validates a complete chain, and reports only
+the site/ledger presence, head, count, terminal event and transaction. Any
+pending record refuses and remains untouched, including a published
+two-link pending record. An exclusive active driver also refuses. A missing
+site and ledger are observable as absent, not fabricated as an empty
+transaction. This provides one non-mutating input to the future fixed-path
+observer; it does not perform launchd/process/store census or authorize
+production decline.

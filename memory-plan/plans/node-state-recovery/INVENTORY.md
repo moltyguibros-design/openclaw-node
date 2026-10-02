@@ -438,3 +438,12 @@ malformed-evidence control pass; the root journal, bound admission, decline
 and user-transfer suites pass 82/82 locally. Revised-head CI and adversarial
 review are pending. The protected observer, root-owned installation, cold
 masters and live acceptance remain open at 1.2 [A].
+
+Checkpoint 2026-10-01 20:47 EDT: PR #186 merged with Claude's revised-head
+no-blocker review and green 4/4 CI. D53 adds non-mutating root ledger
+inspection for the future observe-only driver: absent state is reported
+without creation, a valid chain is summarized, pending records stay in place
+and refuse, and an active driver refuses. The focused root-journal suite
+passes 49/49 on macOS. Exact CI/review of this new source slice are pending;
+the fixed-path physical observer, protected installation and live recovery
+remain open at 1.2 [A].

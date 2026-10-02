@@ -100,6 +100,48 @@ class RootJournalTest(unittest.TestCase):
         with self.assertRaisesRegex(module.Refused, 'already has an active transaction'):
             self.begin()
 
+    def test_readonly_inspection_of_absent_state_creates_nothing(self):
+        self.site.rmdir()
+        state = module.LockBootstrapJournal.inspect_readonly(
+            self.site, self.uid, self.gid)
+        self.assertEqual(state, {'site': 'absent', 'ledger': 'absent',
+                                 'head': None, 'records': 0,
+                                 'terminal': None, 'transaction': None})
+        self.assertFalse(self.site.exists())
+        self.assertFalse(self.ledger.exists())
+
+    def test_readonly_inspection_validates_chain_without_writes(self):
+        with self.begin() as journal:
+            head = journal.records[-1]['sha256']
+        record = self.ledger / '000000.json'
+        before = record.stat().st_mtime_ns
+        state = module.LockBootstrapJournal.inspect_readonly(
+            self.site, self.uid, self.gid)
+        self.assertEqual(state, {'site': 'present', 'ledger': 'present',
+                                 'head': head, 'records': 1,
+                                 'terminal': 'lock-create-intent',
+                                 'transaction': self.transaction})
+        self.assertEqual(record.stat().st_mtime_ns, before)
+
+    def test_readonly_inspection_never_settles_pending_record(self):
+        with self.begin() as journal:
+            pending = journal.root / ('.pending-' + uuid.uuid4().hex)
+            pending.write_bytes(b'interrupted')
+            pending.chmod(0o600)
+        with self.assertRaisesRegex(module.Refused, 'unresolved pending'):
+            module.LockBootstrapJournal.inspect_readonly(self.site, self.uid, self.gid)
+        self.assertTrue(pending.exists())
+        pending.unlink()
+        os.link(self.ledger / '000000.json', pending)
+        with self.assertRaisesRegex(module.Refused, 'unresolved pending'):
+            module.LockBootstrapJournal.inspect_readonly(self.site, self.uid, self.gid)
+        self.assertTrue(pending.exists())
+
+    def test_readonly_inspection_refuses_active_driver(self):
+        with self.begin():
+            with self.assertRaisesRegex(module.Refused, 'active driver'):
+                module.LockBootstrapJournal.inspect_readonly(self.site, self.uid, self.gid)
+
     def test_pending_before_publication_is_discarded(self):
         with self.begin() as journal:
             pending = journal.root / ('.pending-' + uuid.uuid4().hex)

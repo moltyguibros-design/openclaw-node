@@ -227,6 +227,49 @@ class LockBootstrapJournal:
             self.close()
             raise
 
+    @classmethod
+    def inspect_readonly(cls, site, uid, gid):
+        site = pathlib.Path(site)
+        root = site.parent / (site.name + '-ledger')
+        protected_parent(site, uid, gid)
+        site_present = present(site)
+        if site_present:
+            directory(site, uid, gid, 0o755)
+        protected_parent(root, uid, gid)
+        if not present(root):
+            return {'site': 'present' if site_present else 'absent',
+                    'ledger': 'absent', 'head': None, 'records': 0,
+                    'terminal': None, 'transaction': None}
+        directory(root, uid, gid, 0o700)
+        journal = object.__new__(cls)
+        journal.site, journal.root, journal.uid, journal.gid = site, root, uid, gid
+        journal.fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            try:
+                fcntl.flock(journal.fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise Refused('root writer ledger has an active driver') from error
+            opened, named = os.fstat(journal.fd), root.lstat()
+            if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
+                raise Refused('root writer ledger changed during inspection')
+            journal.records = journal._read(settle_pending=False)
+            if journal.records:
+                journal._validate()
+                first = journal.current[0]
+                transaction = (first['data']['transaction'] if first['event'] ==
+                               'transfer-declined' else first['data']['descriptor']['transaction'])
+                terminal = journal.current[-1]['event']
+            else:
+                transaction = None
+                terminal = None
+            return {'site': 'present' if site_present else 'absent',
+                    'ledger': 'present',
+                    'head': journal.records[-1]['sha256'] if journal.records else None,
+                    'records': len(journal.records), 'terminal': terminal,
+                    'transaction': transaction}
+        finally:
+            journal.close()
+
     def _exclusive(self):
         fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
@@ -551,9 +594,11 @@ class LockBootstrapJournal:
         finally:
             os.close(fd)
 
-    def _read(self):
+    def _read(self, settle_pending=True):
         entries = sorted(self.root.iterdir())
         pending = [path for path in entries if re.fullmatch(r'\.pending-[0-9a-f]{32}', path.name)]
+        if pending and not settle_pending:
+            raise Refused('root writer ledger has an unresolved pending record')
         for path in pending:
             info = path.lstat()
             if (not stat.S_ISREG(info.st_mode) or info.st_uid != self.uid or info.st_gid != self.gid
