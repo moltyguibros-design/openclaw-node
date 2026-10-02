@@ -983,3 +983,18 @@ swap a name transiently between syscall checks; this is not a claim of
 atomic exclusion from out-of-protocol root activity. The production physical
 observer must bracket the complete launchd/process/store census under its
 own pinned inputs before a decline is authorized.
+
+## D55 — Bound read-only inspection to opened file types and identities (2026-10-01 22:01 EDT)
+
+Claude's revised-head review of PR #187 found no blocker, but a FIFO named as
+a ledger record could block the read-only inspector while it held the shared
+ledger lock. An opened directory record could leak a descriptor. The reader
+now opens each name nonblocking without a controlling terminal, rejects a
+non-regular descriptor before wrapping it as a stream, and closes that
+descriptor on every refusal. It checks record identity again after reading
+and after chain validation. Site and ledger mode, owner, ACL and named
+identity are checked against opened directories; disappearing paths become
+`Refused`. A concurrent driver or inspector now reports a busy ledger rather
+than claiming the other participant is an active driver. These are
+observe-only source checks, not a physical NATS census or a production
+cutover authorization. The protected macOS-root tripwire remains closed.

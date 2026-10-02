@@ -456,3 +456,11 @@ the named site/ledger identities, and marks the output `ledger-only` with
 The focused Mac root-journal suite passes 51/51, including before- and
 after-read swaps. Revised-head CI and review remain pending; production
 physical census and root installation are still unbuilt.
+
+Checkpoint 2026-10-01 22:01 EDT: Claude's 0cb808c review found no blocker and
+green 4/4 CI, but exposed a FIFO hang, a directory-record descriptor leak,
+and path/permission race reports. D55 adds nonblocking typed record opens,
+descriptor cleanup, opened-directory validation, final record rechecks and
+uniform refusal. Focused regressions pass after the VM restart; full suites
+and revised-head review remain pending. The production observer and root
+installation remain unbuilt; 1.2 stays [A] at v1.2-pre.
