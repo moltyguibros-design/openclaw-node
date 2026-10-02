@@ -18,11 +18,110 @@ import {
   coerceExtractionResult,
   extractJsonFromText,
   buildExtractionPrompt,
+  parseWithPrimer,
   extractStructured,
 } from '../lib/extraction-prompt.mjs';
 import { validateExtractionResult } from '../lib/extraction-schema.mjs';
 
 describe('coerceExtractionResult', () => {
+  it('accepts typed known-memory references and drops unknown or wrong-kind ids', () => {
+    const known = {
+      entities: [{ id: 11, name: 'Aurora Project', type: 'project' }, { id: 12, name: 'ACCPROBE', type: 'project' }],
+      decisions: [{ id: 17, decision: 'Use Postgres for ACCPROBE' }],
+    };
+    const out = coerceExtractionResult({
+      entities: [
+        { name: 'Aurora Project', type: 'project', ref: 'entity #11' },
+        { name: 'Other', type: 'project', ref: 'entity #999' },
+        { name: 'Wrong', type: 'project', ref: 'decision #17' },
+        { name: 'Aurora', type: 'project', ref: 'entity #11', aliases: ['Aurora Service', 'Project Borealis', 'Postgres'] },
+        { name: 'Postgres', type: 'project', ref: 'entity #11' },
+        { name: 'Aurora Project', type: 'technology', ref: 'entity #11' },
+        { name: 'Borealis Project', type: 'project', ref: 'entity #11' },
+      ],
+      decisions: [
+        { decision: 'Use SQLite for ACCPROBE', rationale: 'embedded', supersedes: 'decision #17' },
+        { decision: 'Other', rationale: 'test', supersedes: 'decision #999' },
+        { decision: 'Wrong', rationale: 'test', supersedes: 'entity #11' },
+        { decision: 'Use SQLite for unrelated work', rationale: 'test', supersedes: 'decision #17' },
+      ],
+    }, known);
+    assert.equal(out.entities[0].ref, 11);
+    assert.equal(out.entities[1].ref, undefined);
+    assert.equal(out.entities[2].ref, undefined);
+    assert.equal(out.entities[3].ref, undefined);
+    assert.equal(out.entities[3].aliases, undefined);
+    assert.equal(out.entities[4].ref, undefined);
+    assert.equal(out.entities[5].ref, undefined);
+    assert.equal(out.entities[6].ref, undefined);
+    assert.equal(out.decisions[0].supersedes, 17);
+    assert.equal(out.decisions[1].supersedes, undefined);
+    assert.equal(out.decisions[2].supersedes, undefined);
+    assert.equal(out.decisions[3].supersedes, undefined);
+  });
+
+  it('requires the same identity for refs and aliases, not a shared component word', () => {
+    const known = { entities: [
+      { id: 1, name: 'memory-daemon', type: 'technology' },
+      { id: 2, name: 'test/llm-client.test.mjs', type: 'file' },
+      { id: 3, name: 'Claude Code', type: 'technology' },
+      { id: 4, name: 'Postgres', type: 'technology' },
+      { id: 5, name: 'NATS JetStream', type: 'technology' },
+      { id: 6, name: 'NATS Server', type: 'technology' },
+    ], decisions: [] };
+    const names = [
+      ['memory-watcher', 1, false],
+      ['test/extraction-store.test.mjs', 2, false],
+      ['Claude Desktop', 3, false],
+      ['PostgreSQL', 4, true],
+      ['JetStream', 5, true],
+      ['Server', 6, false],
+    ];
+    for (const [name, id, shouldLink] of names) {
+      const out = coerceExtractionResult({ entities: [{ name, type: known.entities[id - 1].type, ref: id, aliases: ['unrelated-service', name] }] }, known);
+      assert.equal(out.entities[0].ref === id, shouldLink, name);
+      assert.ok(!out.entities[0].aliases?.includes('unrelated-service'), name);
+    }
+  });
+
+  it('supersedes only decisions that share a supplied entity', () => {
+    const known = { entities: [{ id: 5, name: 'ACCPROBE', type: 'project' }], decisions: [
+      { id: 1, decision: 'Use Postgres for ACCPROBE' },
+      { id: 2, decision: 'Rotate NATS credentials every quarter' },
+    ] };
+    const out = coerceExtractionResult({ decisions: [
+      { decision: 'Use SQLite for ACCPROBE', rationale: 'portable', supersedes: 1 },
+      { decision: 'Rotate gateway token every week', rationale: 'security', supersedes: 2 },
+    ] }, known);
+    assert.equal(out.decisions[0].supersedes, 1);
+    assert.equal(out.decisions[1].supersedes, undefined);
+  });
+
+  it('does not treat a generic acronym suffix as a decision anchor', () => {
+    const out = coerceExtractionResult({ decisions: [{ decision: 'Use the server for storage', rationale: 'fast', supersedes: 3 }] }, {
+      entities: [{ id: 1, name: 'NATS Server', type: 'technology' }],
+      decisions: [{ id: 3, decision: 'Run NATS Server on three nodes' }],
+    });
+    assert.equal(out.decisions[0].supersedes, undefined);
+  });
+
+  it('does not hide a storage decision through a shared generic concept', () => {
+    const out = coerceExtractionResult({ decisions: [{ decision: 'Cap memory usage at 2 GB', rationale: 'budget', supersedes: 9 }] }, {
+      entities: [{ id: 1, name: 'memory', type: 'concept' }],
+      decisions: [{ id: 9, decision: 'Use SQLite for the memory store' }],
+    });
+    assert.equal(out.decisions[0].supersedes, undefined);
+  });
+
+  it('drops references when no known-memory list was supplied', () => {
+    const out = coerceExtractionResult({
+      entities: [{ name: 'JetStream', type: 'technology', ref: 'entity #11' }],
+      decisions: [{ decision: 'Use SQLite for Aurora', rationale: 'portable', supersedes: 'decision #17' }],
+    });
+    assert.equal(out.entities[0].ref, undefined);
+    assert.equal(out.decisions[0].supersedes, undefined);
+  });
+
   it('returns raw object passthrough for null / non-object input', () => {
     assert.equal(coerceExtractionResult(null), null);
     assert.equal(coerceExtractionResult(undefined), undefined);
@@ -281,9 +380,60 @@ describe('buildExtractionPrompt', () => {
     assert.match(out[1].content, /Hello there/);
     assert.match(out[1].content, /Hi!/);
   });
+
+  it('matches Qwen3 non-thinking prefill when priming JSON', () => {
+    assert.equal(buildExtractionPrompt([], { jsonPrimer: true, qwen3Primer: true }).at(-1).content, '<think>\n\n</think>\n\n{');
+    assert.equal(buildExtractionPrompt([], { jsonPrimer: true }).at(-1).content, '{');
+  });
+});
+
+describe('parseWithPrimer', () => {
+  it('accepts a fresh object after the model closes an empty primer', () => {
+    assert.deepEqual(parseWithPrimer('}\n{"entities": []}', true), { entities: [] });
+    assert.throws(() => parseWithPrimer('}', true));
+  });
+
+  it('accepts a fresh object after an empty thinking block', () => {
+    assert.deepEqual(parseWithPrimer('<think>\n\n</think>\n\n{"entities": []}', true), { entities: [] });
+  });
+
+  it('still rejects ambiguous repeated objects', () => {
+    assert.throws(() => parseWithPrimer('"entities": []}{"entities": [1]}', true), /another JSON object/);
+  });
 });
 
 describe('extractStructured', () => {
+  it('uses the non-thinking primer only for the tested Qwen3 model', async () => {
+    const empty = '{"entities":[]}';
+    for (const [model, primer] of [['qwen3:8b', '<think>\n\n</think>\n\n{'], ['qwen3:8b-instruct-2507', '{']]) {
+      let prompt;
+      await extractStructured({ model, generate: async (messages) => {
+        prompt = messages;
+        return { content: empty };
+      } }, []);
+      assert.equal(prompt.at(-1).content, primer);
+    }
+  });
+
+  it('preserves typed references only to supplied known memories', async () => {
+    const knownMemories = {
+      entities: [{ id: 11, name: 'ACCPROBE', type: 'project' }],
+      decisions: [{ id: 17, decision: 'Use Postgres for ACCPROBE' }],
+    };
+    const mockClient = {
+      model: 'qwen2.5:3b',
+      generate: async () => ({
+        content: JSON.stringify({
+          entities: [{ name: 'ACCPROBE', type: 'project', ref: 'entity #11' }],
+          decisions: [{ decision: 'Use SQLite for ACCPROBE', rationale: 'embedded', supersedes: 'decision #17' }],
+        }),
+      }),
+    };
+    const result = await extractStructured(mockClient, [{ role: 'user', content: 'Use SQLite for ACCPROBE' }], { knownMemories });
+    assert.equal(result.entities[0].ref, 11);
+    assert.equal(result.decisions[0].supersedes, 17);
+  });
+
   it('returns parsed + validated result on happy path', async () => {
     const mockClient = {
       generate: async () => ({
@@ -330,6 +480,47 @@ describe('extractStructured', () => {
     assert.deepEqual(result.entities, []);
   });
 
+  it('accepts complete JSON at the output limit but rejects a second object', async () => {
+    const first = '{"entities":[],"themes":[],"actions":[],"decisions":[],"friction_signals":[],"relationships":[]}';
+    const mockClient = { generate: async () => ({ content: `${first}   `, finishReason: 'length' }) };
+    assert.deepEqual((await extractStructured(mockClient, [])).entities, []);
+    mockClient.generate = async () => ({ content: `${first}{"entities":[]}`, finishReason: 'stop' });
+    await assert.rejects(() => extractStructured(mockClient, []), /another JSON object/);
+    mockClient.generate = async () => ({ content: `{"entities":[]}${first}`, finishReason: 'stop' });
+    await assert.rejects(() => extractStructured(mockClient, []), /another JSON object/);
+    mockClient.generate = async () => ({ content: '{"entities":', finishReason: 'length' });
+    await assert.rejects(() => extractStructured(mockClient, []), /output token limit/);
+    mockClient.generate = async () => ({ content: `${first}, "themes": ["storage", "datab`, finishReason: 'length' });
+    await assert.rejects(() => extractStructured(mockClient, []), /output token limit/);
+  });
+
+  it('refuses fragments and wrapped objects instead of recording an empty extraction', async () => {
+    const mockClient = { model: 'qwen2.5:3b', generate: async () => ({ content: '{"decision":"Use SQLite"}' }) };
+    await assert.rejects(() => extractStructured(mockClient, []), /not an extraction object/);
+    mockClient.generate = async () => ({ content: '{"extraction":{"entities":[]}}' });
+    await assert.rejects(() => extractStructured(mockClient, []), /not an extraction object/);
+    mockClient.model = 'qwen3:8b';
+    mockClient.generate = async () => ({ content: '{"decision":"Use SQLite"}]}' });
+    await assert.rejects(() => extractStructured(mockClient, []), /not an extraction object/);
+  });
+
+  it('refuses an earlier valid object hidden by a larger invalid thinking block', async () => {
+    const envelope = '{"entities":[],"themes":[],"actions":[],"decisions":[],"friction_signals":[],"relationships":[]}';
+    const mockClient = { generate: async () => ({ content: '{"entities":[{"name":"Borealis"}]}\n{thinking: this is an invalid and rather long model preamble}\n' + envelope }) };
+    await assert.rejects(() => extractStructured(mockClient, []), /another JSON object/);
+    mockClient.generate = async () => ({ content: '"unterminated preamble\n{"entities":[{"name":"Borealis"}]}\n' + envelope });
+    await assert.rejects(() => extractStructured(mockClient, []), /not valid JSON|another JSON object/);
+  });
+
+  it('rejects malformed envelope members without dropping wrapped facts', async () => {
+    const mockClient = { generate: async () => ({ content: '{"entities":"none","summary":"uses SQLite"}' }) };
+    await assert.rejects(() => extractStructured(mockClient, []), /not an extraction object/);
+    mockClient.generate = async () => ({ content: '{"entities":[],"extraction":{"decisions":[{"decision":"Use SQLite"}]}}' });
+    await assert.rejects(() => extractStructured(mockClient, []), /not an extraction object/);
+    mockClient.generate = async () => ({ content: '{}' });
+    await assert.rejects(() => extractStructured(mockClient, []), /not an extraction object/);
+  });
+
   it('throws on invalid JSON with informative message', async () => {
     const mockClient = {
       generate: async () => ({ content: 'not json {{{' }),
@@ -340,15 +531,13 @@ describe('extractStructured', () => {
     );
   });
 
-  it('throws ZodError on schema-invalid result that coercer cannot save', async () => {
+  it('rejects an object with no extraction-envelope field', async () => {
     const mockClient = {
       generate: async () => ({
         content: JSON.stringify({ /* missing required fields */ }),
       }),
     };
-    // Coercer produces empty-array defaults → validates OK actually
-    const result = await extractStructured(mockClient, []);
-    assert.equal(result.entities.length, 0);
+    await assert.rejects(() => extractStructured(mockClient, []), /not an extraction object/);
   });
 });
 
