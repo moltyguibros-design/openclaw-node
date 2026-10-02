@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import subprocess
 import sys
@@ -106,7 +107,7 @@ class RootJournalTest(unittest.TestCase):
             self.site, self.uid, self.gid)
         self.assertEqual(state, {'site': 'absent', 'ledger': 'absent',
                                  'head': None, 'records': 0,
-                                 'terminal': None, 'transaction': None})
+                                 'last_event': None, 'transaction': None})
         self.assertFalse(self.site.exists())
         self.assertFalse(self.ledger.exists())
 
@@ -119,7 +120,7 @@ class RootJournalTest(unittest.TestCase):
             self.site, self.uid, self.gid)
         self.assertEqual(state, {'site': 'present', 'ledger': 'present',
                                  'head': head, 'records': 1,
-                                 'terminal': 'lock-create-intent',
+                                 'last_event': 'lock-create-intent',
                                  'transaction': self.transaction})
         self.assertEqual(record.stat().st_mtime_ns, before)
 
@@ -140,6 +141,44 @@ class RootJournalTest(unittest.TestCase):
     def test_readonly_inspection_refuses_active_driver(self):
         with self.begin():
             with self.assertRaisesRegex(module.Refused, 'active driver'):
+                module.LockBootstrapJournal.inspect_readonly(self.site, self.uid, self.gid)
+
+    def test_readonly_inspection_refuses_stale_ledger_swapped_during_read(self):
+        with self.begin() as journal:
+            with self.acquire(journal):
+                pass
+            self.returned(journal)
+        stale = self.base / 'stale-ledger'
+        shutil.copytree(self.ledger, stale)
+        successor, _ = self.successor()
+        successor.close()
+        original = module.LockBootstrapJournal._read
+        displaced = self.base / 'active-ledger'
+        def swap_before_read(journal, settle_pending=True):
+            if not settle_pending:
+                journal.root.rename(displaced)
+                stale.rename(journal.root)
+            return original(journal, settle_pending)
+        with patch.object(module.LockBootstrapJournal, '_read', new=swap_before_read):
+            with self.assertRaisesRegex(module.Refused, 'path changed'):
+                module.LockBootstrapJournal.inspect_readonly(self.site, self.uid, self.gid)
+        self.assertTrue(displaced.exists())
+
+    def test_readonly_inspection_refuses_ledger_swapped_after_read(self):
+        with self.begin():
+            pass
+        stale = self.base / 'stale-ledger'
+        shutil.copytree(self.ledger, stale)
+        original = module.LockBootstrapJournal._read
+        displaced = self.base / 'active-ledger'
+        def swap_after_read(journal, settle_pending=True):
+            records = original(journal, settle_pending)
+            if not settle_pending:
+                journal.root.rename(displaced)
+                stale.rename(journal.root)
+            return records
+        with patch.object(module.LockBootstrapJournal, '_read', new=swap_after_read):
+            with self.assertRaisesRegex(module.Refused, 'ledger changed'):
                 module.LockBootstrapJournal.inspect_readonly(self.site, self.uid, self.gid)
 
     def test_pending_before_publication_is_discarded(self):

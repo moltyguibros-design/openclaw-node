@@ -447,3 +447,11 @@ and refuse, and an active driver refuses. The focused root-journal suite
 passes 49/49 on macOS. Exact CI/review of this new source slice are pending;
 the fixed-path physical observer, protected installation and live recovery
 remain open at 1.2 [A].
+
+Checkpoint 2026-10-01 20:53 EDT: Claude's PR #187 probe showed a same-site
+stale ledger directory could be substituted during a path-based read. D54
+pins record enumeration and open to the held directory descriptor, rechecks
+the named site/ledger identities, and names the report field `last_event`.
+The focused Mac root-journal suite passes 51/51, including before- and
+after-read swaps. Revised-head CI and review remain pending; production
+physical census and root installation are still unbuilt.

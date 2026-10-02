@@ -965,3 +965,19 @@ site and ledger are observable as absent, not fabricated as an empty
 transaction. This provides one non-mutating input to the future fixed-path
 observer; it does not perform launchd/process/store census or authorize
 production decline.
+
+## D54 — Bind observe-only reads to the locked directory (2026-10-01 20:53 EDT)
+
+Claude's PR #187 probe replaced the ledger pathname with a valid older copy
+after `inspect_readonly` had locked the original directory. A path-based read
+could then report the old `returned` event while the held directory contained
+an active intent. The read-only path now lists and opens records relative to
+the held directory descriptor, compares each opened record with its named
+identity, and rechecks the site and ledger directory identities before
+returning. The report calls the final record `last_event`, since an active
+intent is not a terminal outcome. Owned before-read and after-read swaps
+refuse. A privileged actor writing outside the ledger protocol could still
+swap a name transiently between syscall checks; this is not a claim of
+atomic exclusion from out-of-protocol root activity. The production physical
+observer must bracket the complete launchd/process/store census under its
+own pinned inputs before a decline is authorized.

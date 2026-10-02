@@ -235,11 +235,14 @@ class LockBootstrapJournal:
         site_present = present(site)
         if site_present:
             directory(site, uid, gid, 0o755)
+            site_identity = site.lstat()
+        else:
+            site_identity = None
         protected_parent(root, uid, gid)
         if not present(root):
             return {'site': 'present' if site_present else 'absent',
                     'ledger': 'absent', 'head': None, 'records': 0,
-                    'terminal': None, 'transaction': None}
+                    'last_event': None, 'transaction': None}
         directory(root, uid, gid, 0o700)
         journal = object.__new__(cls)
         journal.site, journal.root, journal.uid, journal.gid = site, root, uid, gid
@@ -250,7 +253,8 @@ class LockBootstrapJournal:
             except BlockingIOError as error:
                 raise Refused('root writer ledger has an active driver') from error
             opened, named = os.fstat(journal.fd), root.lstat()
-            if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
+            identity = (opened.st_dev, opened.st_ino, opened.st_ctime_ns)
+            if identity != (named.st_dev, named.st_ino, named.st_ctime_ns):
                 raise Refused('root writer ledger changed during inspection')
             journal.records = journal._read(settle_pending=False)
             if journal.records:
@@ -258,14 +262,25 @@ class LockBootstrapJournal:
                 first = journal.current[0]
                 transaction = (first['data']['transaction'] if first['event'] ==
                                'transfer-declined' else first['data']['descriptor']['transaction'])
-                terminal = journal.current[-1]['event']
+                last_event = journal.current[-1]['event']
             else:
                 transaction = None
-                terminal = None
+                last_event = None
+            named = root.lstat()
+            if identity != (named.st_dev, named.st_ino, named.st_ctime_ns):
+                raise Refused('root writer ledger changed during inspection')
+            if site_identity is None:
+                if present(site):
+                    raise Refused('root writer site appeared during inspection')
+            else:
+                current_site = site.lstat()
+                if (site_identity.st_dev, site_identity.st_ino, site_identity.st_ctime_ns) != (
+                        current_site.st_dev, current_site.st_ino, current_site.st_ctime_ns):
+                    raise Refused('root writer site changed during inspection')
             return {'site': 'present' if site_present else 'absent',
                     'ledger': 'present',
                     'head': journal.records[-1]['sha256'] if journal.records else None,
-                    'records': len(journal.records), 'terminal': terminal,
+                    'records': len(journal.records), 'last_event': last_event,
                     'transaction': transaction}
         finally:
             journal.close()
@@ -595,11 +610,13 @@ class LockBootstrapJournal:
             os.close(fd)
 
     def _read(self, settle_pending=True):
-        entries = sorted(self.root.iterdir())
-        pending = [path for path in entries if re.fullmatch(r'\.pending-[0-9a-f]{32}', path.name)]
+        names = sorted(path.name for path in self.root.iterdir()) if settle_pending else sorted(
+            os.listdir(self.fd))
+        pending = [name for name in names if re.fullmatch(r'\.pending-[0-9a-f]{32}', name)]
         if pending and not settle_pending:
             raise Refused('root writer ledger has an unresolved pending record')
-        for path in pending:
+        for name in pending:
+            path = self.root / name
             info = path.lstat()
             if (not stat.S_ISREG(info.st_mode) or info.st_uid != self.uid or info.st_gid != self.gid
                     or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink not in (1, 2)):
@@ -615,14 +632,27 @@ class LockBootstrapJournal:
                     raise Refused('root journal pending record is ambiguous') from error
             path.unlink()
             sync_dir(self.root)
-        files = [path for path in entries if path not in pending]
-        if [path.name for path in files] != [f'{index:06d}.json' for index in range(len(files))]:
+        files = [name for name in names if name not in pending]
+        if files != [f'{index:06d}.json' for index in range(len(files))]:
             raise Refused('root writer lock journal is incomplete or contains unknown files')
         records = []
-        for index, path in enumerate(files):
-            record_file(path, self.uid, self.gid)
+        for index, name in enumerate(files):
+            path = self.root / name
             try:
-                record = json.loads(path.read_bytes())
+                if settle_pending:
+                    record_file(path, self.uid, self.gid)
+                    raw = path.read_bytes()
+                else:
+                    with os.fdopen(os.open(name, os.O_RDONLY | os.O_NOFOLLOW,
+                                           dir_fd=self.fd), 'rb') as handle:
+                        info = os.fstat(handle.fileno())
+                        record_file(path, self.uid, self.gid)
+                        named = path.lstat()
+                        if (info.st_dev, info.st_ino, info.st_ctime_ns) != (
+                                named.st_dev, named.st_ino, named.st_ctime_ns):
+                            raise Refused('root writer record path changed during inspection')
+                        raw = handle.read()
+                record = json.loads(raw)
             except (OSError, ValueError) as error:
                 raise Refused('root writer lock record is unreadable') from error
             previous = records[-1]['sha256'] if records else None
