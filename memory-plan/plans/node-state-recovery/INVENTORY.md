@@ -973,3 +973,14 @@ servers stopped. This is synthetic evidence only. The actual host VM image,
 three serving cold masters, acceptance engine/receipt, writer-gap contract
 and truthful production resumption remain open at 1.2 [A]/v1.2-pre. See
 step12_jetstream/COLD_STORE_ARCHIVE_DIVERGENCE_FIXTURE.json.
+
+Checkpoint 2026-10-03 14:07 EDT: an owned direct-baseline driver now captures
+server identity, complete reachable stream digests and consumer positions in
+private manifests, with explicit offline assignments. The owned fixture
+passed final standalone/cluster captures and rejected false-offline,
+undeclared-offline and failed-auth cases; all owned servers stopped. This is
+synthetic pre-stop evidence, not an accepted production baseline or common
+quiet point. The host's powered-off UTM backing artifact and execution path,
+three serving cold masters, host receipt, writer-gap decision, isolated
+restores and service resumption remain open. Step 1.2 stays [A]/v1.2-pre;
+see step12_jetstream/COLD_BASELINE_FIXTURE.json.

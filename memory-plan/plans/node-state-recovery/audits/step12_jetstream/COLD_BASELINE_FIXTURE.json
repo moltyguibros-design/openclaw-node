@@ -1,0 +1,42 @@
+{
+  "scope": "owned isolated fixture only; no production quiet-point or cold-master acceptance",
+  "run_at_utc": "2026-10-03T18:07:29.754Z",
+  "driver_source_sha256": "0a3cb0d4cfed163be12243290ef3d4167ce8a6df21e25df033963a7cb3fd4127",
+  "fixture_source_sha256": "cbe6f81d9b3bbc82f8fbf77ec9e49ce01727a52749e1809ebce6a23f2323919c",
+  "recovery_source_sha256": "8a9b78e0332997ec6814bcfdad7e7843c62221a771d6d6d5fb90a494f5373eaf",
+  "nats_cli": {
+    "version": "0.3.1",
+    "sha256": "6be41e7097aac6278c3b9e4f394fc1536996608e921aa14fceae1bf0e800da0f"
+  },
+  "nats_server": {
+    "version": "2.12.6",
+    "sha256": "c3a71e72f6fc5dd008988f34b57fd2ab1fe69ab18d409f0a0aeebc51160e76e1"
+  },
+  "successful_private_manifests": {
+    "standalone": {
+      "server_name": "snapshot-source",
+      "streams": 3,
+      "history_last_sequence": 13,
+      "matches_final_source_content_and_consumers": true
+    },
+    "cluster_member": {
+      "server_name": "member-1",
+      "streams": 3,
+      "offline_r1_last_sequence": 8,
+      "matches_final_source_content_and_consumers": true
+    },
+    "survivors": {
+      "streams": 3,
+      "offline_r1_assignment_explicit": true,
+      "replicated_content_matches_source": true
+    }
+  },
+  "refusals": {
+    "live_stream_declared_offline": true,
+    "offline_stream_not_declared": true,
+    "failed_authentication_recorded": true
+  },
+  "private_directory_mode": "0700",
+  "private_manifest_and_failure_mode": "0600",
+  "owned_servers_stopped": true
+}

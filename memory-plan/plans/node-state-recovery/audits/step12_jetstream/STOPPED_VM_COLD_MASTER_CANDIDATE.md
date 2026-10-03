@@ -161,3 +161,21 @@ hashes and counts are in `COLD_STORE_ARCHIVE_DIVERGENCE_FIXTURE.json`.
 This control demonstrates why the eventual acceptance must boot extracted
 `store_dir` trees directly. It does not establish the host image's provenance,
 the three real serving masters, physical writer absence or production recovery.
+
+## Owned final-baseline control — 2026-10-03
+
+The direct pre-stop capture driver now writes an owner-private manifest for
+each connected server, including its server identity, stream inventory,
+content digest and consumer positions. In the owned fixture it captured the
+standalone after the late sequence 13 and the cluster member after its late
+R1 sequence 8; its survivor capture recorded the R1 assignment as explicitly
+offline. False-offline and undeclared-offline claims, as well as failed
+authentication, produced private failure records. All owned servers stopped
+and none of the test's cold masters were booted. The compact results are in
+`COLD_BASELINE_FIXTURE.json`.
+
+This remains a sequence of read-only observations made against owned NATS
+processes. It does not show a production writer hold, simultaneous state
+across the three serving stores, a powered-off host image or a valid host
+receipt. The host route, trust-gap decision, extracted master hashes, isolated
+production restores and truthful resumption remain open.
