@@ -15,7 +15,9 @@ including after `sync`, `fsync` and `F_FULLFSYNC`. A clean timestamp fence is
 therefore a refusal tripwire only. The proposed substitute is a full guest
 power-off followed by a host-side copy of the complete VM backing image.
 That removes the guest execution substrate for the powered-off copy window,
-not the preceding interval between NATS exit and guest power-off. It moves
+not the preceding interval between NATS exit and guest power-off. The
+guest-to-host store hash comparison checks for changes after the in-guest
+hash, but cannot prove writer absence before it. This path moves
 the host, hypervisor and backing-storage copy into the trusted base; the
 guest cannot attest those facts itself.
 
@@ -54,11 +56,12 @@ refuses the route and requires operator handoff.
    high-water marks. Refuse absent or ambiguous stores, configs, service
    identities or changed inventory. These hashes corroborate the later
    host copy; they do not independently certify writer absence between
-   server exit and power-off. A mapped write in that interval could be
-   present in both the guest hash and the host copy. The later isolated
-   restore must compare the histories to the pre-stop running snapshots;
-   any change outside that semantic comparison remains a trust gap until
-   the recovery contract defines and accepts its scope.
+   server exit and the in-guest hash. A mapped write before that hash
+   could be present in both the guest hash and the host copy; a later
+   write must make the host-versus-guest store hash comparison refuse.
+   The isolated restore must compare histories to the pre-stop running
+   snapshots. Changes outside that semantic comparison remain a trust gap
+   until the recovery contract defines and accepts its scope.
 7. Shut down the guest cleanly, with a recorded OS shutdown transition.
    A forced stop or a suspended guest is not a clean-stop observation.
 
