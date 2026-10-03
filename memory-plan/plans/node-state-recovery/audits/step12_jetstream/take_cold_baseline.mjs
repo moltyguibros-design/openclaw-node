@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { api, capture, jsonPrivate, openBus, privateDir } from './recovery.mjs';
+import { api, capture, consumerState, jsonPrivate, openBus, privateDir } from './recovery.mjs';
 
 const [server, target, offlineList = ''] = process.argv.slice(2);
 assert(server && target && process.env.NATS_TOKEN,
@@ -28,6 +28,13 @@ async function names() {
   }
   assert.equal(new Set(result).size, result.length, 'duplicate stream in inventory');
   return result.sort();
+}
+
+async function consumers(stream) {
+  const jsm = await nc.jetstreamManager();
+  const result = [];
+  for await (const info of jsm.consumers.list(stream)) result.push(consumerState(info));
+  return result.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 try {
@@ -68,6 +75,7 @@ try {
     const final = await api(nc, `$JS.API.STREAM.INFO.${row.stream}`, { deleted_details: true });
     assert.deepEqual(final.config, row.snapshot.config, `stream config changed during baseline: ${row.stream}`);
     assert.deepEqual(final.state, row.snapshot.state, `stream state changed during baseline: ${row.stream}`);
+    assert.deepEqual(await consumers(row.stream), row.snapshot.consumers, `consumer positions changed during baseline: ${row.stream}`);
   }
   manifest.finishedAt = new Date().toISOString();
   jsonPrivate(path.join(target, 'manifest.json'), manifest);

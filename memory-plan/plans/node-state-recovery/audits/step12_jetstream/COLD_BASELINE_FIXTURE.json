@@ -1,7 +1,7 @@
 {
   "scope": "owned isolated fixture only; no production quiet-point or cold-master acceptance",
-  "run_at_utc": "2026-10-03T18:19:03.931Z",
-  "driver_source_sha256": "c29daced7decfa0c26b85b971275cf0a3f4726c20d448b8f3a236c6bd1b26824",
+  "run_at_utc": "2026-10-03T18:25:16.959Z",
+  "driver_source_sha256": "3eec4118ca52b97cfc859b63d03ca215a7e40a0d1df15b2dbd90624a6c3bca56",
   "fixture_source_sha256": "309cd608049627849597386a1699fd22cd203921a740fcbf957ef4cc7b26e080",
   "recovery_source_sha256": "8a9b78e0332997ec6814bcfdad7e7843c62221a771d6d6d5fb90a494f5373eaf",
   "nats_cli": {
@@ -38,7 +38,7 @@
     "token_absent_from_failure_record": true,
     "no_success_manifest_after_refusal": true
   },
-  "final_stream_state_and_offline_recheck_passed": true,
+  "final_stream_state_consumer_and_offline_recheck_passed": true,
   "private_directory_mode": "0700",
   "private_manifest_and_failure_mode": "0600",
   "owned_servers_stopped": true
