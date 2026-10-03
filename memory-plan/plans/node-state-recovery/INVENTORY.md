@@ -950,3 +950,15 @@ dependencies, and neither this repair nor the recapture certifies physical
 writer absence, three healthy cold masters or a NATS cutover. Step 1.2
 remains [A]/v1.2-pre; see the post-vault-watcher artifact in
 step12_jetstream.
+
+Checkpoint 2026-10-03 13:23 EDT: draft PR #224 records a candidate
+powered-off-VM route for historical JetStream snapshots, with three serving
+cold masters and the separately held member-1 history kept distinct. Claude
+found no blocker in the candidate at 407d20b, and its four exact-head checks
+passed. The branch now includes the post-vault-watcher baseline from main;
+the host UTM package path and host-side execution path remain unverified.
+A typed host receipt, historical acceptance manifest, treatment of the
+pre-power-off writer gap, three extracted and isolated-restored cold masters,
+and verified service resumption still remain. No live NATS service, store or
+VM was changed. Step 1.2 stays [A]/v1.2-pre; neither the full-node Journal
+nor the cold masters are sealed.
