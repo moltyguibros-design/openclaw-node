@@ -26,6 +26,23 @@ Production use requires the separate writer hold and final comparison against
 extracted cold-store restores; this tool alone never certifies a master or a
 stopped VM.
 
+`probe_cold_trees.mjs` is the isolated direct-store comparison after a copy has
+already been extracted and frozen. Its private JSON plan names the pinned
+`binary` and `binarySha256`, one `standalone` role, two
+`cluster.members`, the `cluster.name` and `cluster.offline` stream names,
+and a separate `held` role with its `streams`. Each role supplies the original
+server `name`, an absolute, owner-read-only `master` store directory and the
+absolute private `baseline` manifest from `take_cold_baseline.mjs`. The tool
+requires four distinct masters, copies each into a private working directory,
+and boots only those working copies on isolated loopback ports. It first reads
+the held R1 history without routing, verifies the two survivors retain the
+explicit offline assignment, then joins a second working copy of held R1 to
+verify the recovered stream. It compares stream content, configuration, state
+and consumers, rehashes every master, and writes private `probe.json` only on
+success. A mismatch writes `FAILED.json` and refuses. This tests the local
+restore mechanism; a host provenance receipt and production acceptance are
+separate gates.
+
 Run the driver with an existing token supplied through its process environment,
 never argv, URLs, tracing or a public transcript:
 

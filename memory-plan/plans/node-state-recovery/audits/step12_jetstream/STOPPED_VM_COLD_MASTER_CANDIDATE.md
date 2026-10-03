@@ -187,3 +187,21 @@ processes. It does not show a production writer hold, simultaneous state
 across the three serving stores, a powered-off host image or a valid host
 receipt. The host route, trust-gap decision, extracted master hashes, isolated
 production restores and truthful resumption remain open.
+
+## Owned direct-store acceptance-mechanism control — 2026-10-03
+
+`probe_cold_trees.mjs` now accepts four distinct frozen, owner-private store
+trees and four matching direct pre-stop manifests. In the owned fixture it
+boots only working copies, verifies standalone history through sequence 13,
+reads held R1 history through sequence 8 without routing, checks the two
+survivors retain R1's offline assignment, then rejoins a second held working
+copy and compares R1's content, configuration, state and consumer positions.
+The four masters remain unchanged. Replacing the standalone direct baseline
+with the earlier online archive produces `FAILED.json` and no success report.
+All owned servers stopped after the run. The compact hashes and results are in
+`COLD_TREE_PROBE_FIXTURE.json`.
+
+This proves the layout-independent isolated comparison path against synthetic
+stores. No powered-off host image, original guest extraction, host receipt,
+production master or protected writer absence was observed. The three serving
+cold masters and truthful production resumption remain open.

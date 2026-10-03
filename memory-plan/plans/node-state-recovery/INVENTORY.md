@@ -984,3 +984,13 @@ quiet point. The host's powered-off UTM backing artifact and execution path,
 three serving cold masters, host receipt, writer-gap decision, isolated
 restores and service resumption remain open. Step 1.2 stays [A]/v1.2-pre;
 see step12_jetstream/COLD_BASELINE_FIXTURE.json.
+
+Checkpoint 2026-10-03 14:46 EDT: an owned isolated direct-store probe boots
+working copies of four frozen distinct store trees, checks standalone content,
+held R1 in isolation, the two survivors' offline assignment and R1 after
+rejoin, then rehashes every master. The owned fixture passed and a deliberately
+stale archive baseline refused with no success report; all test servers
+stopped. This is synthetic restore-mechanism evidence only. Host-side stopped
+VM access, three real serving cold masters, the typed host receipt, protected
+writer-gap decision and truthful production resumption remain open; 1.2 stays
+[A]/v1.2-pre. See step12_jetstream/COLD_TREE_PROBE_FIXTURE.json.
