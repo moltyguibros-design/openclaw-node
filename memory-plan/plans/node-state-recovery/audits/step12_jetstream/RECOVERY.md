@@ -15,6 +15,39 @@ selected contexts. `test_recovery.mjs` creates and gracefully stops owned server
 on fresh loopback ports outside the production port set. It keeps private
 fixture evidence in its reported temporary directory.
 
+`take_cold_baseline.mjs` records a direct, read-only pre-stop stream capture,
+including the connected server identity, exact content digests and consumer
+positions. It requires a new private directory and an explicit list of known
+offline assignments. Changed or duplicate inventory, an undeclared offline
+stream, a supposedly offline stream that responds, or failed authentication
+produces a private `FAILED.json` and no success manifest. Its sequential
+captures and final state/consumer recheck are not a common quiet point.
+The caller also supplies the expected server name, server ID and cluster name
+(`-` for standalone). The connection must match all three before any stream
+is read. Pin those values from the managed unit/config/process and matching
+monitor identity in the current preflight; deriving them only from whichever
+server happens to answer the ambiguous client port would defeat the check.
+Production use requires the separate writer hold and final comparison against
+extracted cold-store restores; this tool alone never certifies a master or a
+stopped VM.
+
+`probe_cold_trees.mjs` is the isolated direct-store comparison after a copy has
+already been extracted and frozen. Its private JSON plan names the pinned
+`binary` and `binarySha256`, one `standalone` role, two
+`cluster.members`, the `cluster.name` and `cluster.offline` stream names,
+and a separate `held` role with its `streams`. Each role supplies the original
+server `name`, an absolute, owner-read-only `master` store directory and the
+absolute private `baseline` manifest from `take_cold_baseline.mjs`. The tool
+requires four distinct masters, copies each into a private working directory,
+and boots only those working copies on isolated loopback ports. It first reads
+the held R1 history without routing, verifies the two survivors retain the
+explicit offline assignment, then joins a second working copy of held R1 to
+verify the recovered stream. It compares stream content, configuration, state
+and consumers, rehashes every master, and writes private `probe.json` only on
+success. A mismatch writes `FAILED.json` and refuses. This tests the local
+restore mechanism; a host provenance receipt and production acceptance are
+separate gates.
+
 Run the driver with an existing token supplied through its process environment,
 never argv, URLs, tracing or a public transcript:
 
@@ -30,6 +63,19 @@ value directly into the child environment. No shell command substitution or
 printout. Unexpected offline streams or changed inventory refuse acceptance.
 The manifest records snapshot-time metadata plus before/after observations;
 these are separate points and must not be claimed simultaneous.
+
+The direct pre-stop capture uses the same private token delivery and URL rule:
+
+```
+NATS_TOKEN=<loaded privately> node take_cold_baseline.mjs \
+  nats://127.0.0.1:<port> <expected-server-name> <expected-server-id> \
+  <expected-cluster-or-> <new-private-absolute-dir> \
+  [comma-separated-known-offline-streams]
+```
+
+Keep its manifest private. Record the source server identity and each stream's
+offline assignment in the later host receipt; never combine same-named streams
+from the standalone and cluster into one inventory.
 
 For an isolated R3 stream restored to a standalone fixture, use the explicit
 `--replicas=1` override and record this replica policy delta. CLI 0.3.1's

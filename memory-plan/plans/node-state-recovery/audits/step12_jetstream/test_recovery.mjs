@@ -10,6 +10,8 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { api, capture, cliBackup, cliRestore, consumerState, copyCold, digest, hashTree, jsonPrivate, openBus, privateDir, run, writePrivate } from './recovery.mjs';
 const { headers } = createRequire(import.meta.url)('nats');
+const coldBaselineDriver = path.join(path.dirname(fileURLToPath(import.meta.url)), 'take_cold_baseline.mjs');
+const coldTreeProbe = path.join(path.dirname(fileURLToPath(import.meta.url)), 'probe_cold_trees.mjs');
 process.umask(0o077);
 const cli = process.argv[2] || '/opt/homebrew/bin/nats';
 const binary = process.argv[3] || '/opt/homebrew/bin/nats-server';
@@ -63,6 +65,25 @@ async function stop(item) {
 }
 
 async function bus(item) { const nc = await openBus(`nats://127.0.0.1:${item.client}`, token); connections.push(nc); return nc; }
+
+function baselineArgs(item, info, target, offline = '') {
+  return [coldBaselineDriver, `nats://127.0.0.1:${item.client}`, item.name, info.server_id, info.cluster || '-', target, offline];
+}
+
+async function boundInfo(item) {
+  const peer = await openBus(`nats://127.0.0.1:${item.client}`, token);
+  try { assert.equal(peer.info.server_name, item.name); return peer.info; }
+  finally { await peer.close(); }
+}
+
+function freezeTree(dir) {
+  const st = fs.lstatSync(dir);
+  assert(!st.isSymbolicLink());
+  if (st.isDirectory()) {
+    for (const name of fs.readdirSync(dir)) freezeTree(path.join(dir, name));
+    fs.chmodSync(dir, 0o500);
+  } else { assert(st.isFile()); fs.chmodSync(dir, 0o400); }
+}
 
 async function waitInfo(nc, stream) {
   for (let i = 0; i < 150; i++) {
@@ -222,6 +243,7 @@ try {
   await jsm.consumers.add('HISTORY', { durable_name: 'pending', ack_policy: 'explicit', deliver_policy: 'all', ack_wait: 1000000000 });
   const pending = await js.consumers.get('HISTORY', 'pending');
   assert(await pending.next({ expires: 1000 }));
+  await jsm.consumers.add('HISTORY', { durable_name: 'cold-tail', ack_policy: 'explicit', deliver_policy: 'new' });
   const original = await capture(nc, 'HISTORY');
   const backup = path.join(root, 'snapshot-HISTORY');
   const metadata = await cliBackup(cli, `nats://127.0.0.1:${source.client}`, token, 'HISTORY', backup);
@@ -240,10 +262,11 @@ try {
   await delay(1100);
   const replay = await (await restoredNC.jetstream().consumers.get('HISTORY', 'pending')).next({ expires: 2000 });
   assert.equal(replay.info.streamSequence, 1); assert(replay.info.redelivered); assert(await replay.ackAck());
+  await jsm.consumers.delete('HISTORY', 'pending');
   results.snapshot = { messages: restored.content.messages, holes: restored.content.holes, sha256: restored.content.sha256, exactHeadersAndTimestamps: true, consumerPositions: true, pendingRedelivery: true };
   results.nondefaultConfig = { archiveValuesRetained: true, streamConfigExact: true, consumerConfigExact: true };
 
-  const kv = await js.views.kv('FIXTURE', { history: 3, ttl: 60000, storage: 'file' });
+  const kv = await js.views.kv('FIXTURE', { history: 3, ttl: 600000, storage: 'file' });
   for (let i = 0; i < 5; i++) await kv.put('revisions', Buffer.from('revision-' + i));
   await kv.put('deleted', Buffer.from('old')); await kv.delete('deleted');
   await kv.put('purged', Buffer.from('old')); await kv.purge('purged');
@@ -286,15 +309,66 @@ try {
   assert.equal(driverManifest.streams.find(s => s.stream === 'HISTORY').snapshot.state.messages, 10);
   assert.equal(driverManifest.streams.find(s => s.stream === 'HEALTH').snapshot.state.messages, 0);
   results.deployedSnapshotDriver = true;
+  await js.publish('history.cold-only', Buffer.from('after-online-archive'));
+  const coldTail = await js.consumers.get('HISTORY', 'cold-tail');
+  const coldTailMessage = await coldTail.next({ expires: 1000 });
+  assert.equal(coldTailMessage.seq, original.content.last + 1);
+  assert(await coldTailMessage.ackAck());
+  const coldSource = await capture(nc, 'HISTORY');
+  assert.equal(coldSource.content.last, original.content.last + 1);
+  assert.equal(coldSource.content.messages, original.content.messages + 1);
+  assert.equal(coldSource.consumers.find(c => c.name === 'cold-tail').ack_floor.stream_seq, coldSource.content.last);
+  assert.notDeepEqual(coldSource.consumers, original.consumers);
+  assert.notDeepEqual(restored.content, coldSource.content);
+  const standaloneBaseline = path.join(root, 'prestop-standalone');
+  await run(process.execPath, baselineArgs(source, nc.info, standaloneBaseline), { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' });
+  const standaloneManifest = JSON.parse(fs.readFileSync(path.join(standaloneBaseline, 'manifest.json')));
+  assert.equal(standaloneManifest.serverInfo.server_name, source.name);
+  assert.deepEqual(standaloneManifest.expectedServer, { name: source.name, id: nc.info.server_id, cluster: '-' });
+  const standaloneRows = standaloneManifest.streams;
+  const historyBaseline = standaloneRows.find(row => row.stream === 'HISTORY')?.snapshot;
+  assert.deepEqual(historyBaseline.content, coldSource.content);
+  assert.deepEqual(historyBaseline.consumers, coldSource.consumers);
+  assert(historyBaseline.consumers.every(consumer => consumer.num_ack_pending === 0));
+  const falseOffline = path.join(root, 'prestop-false-offline');
+  await assert.rejects(run(process.execPath, baselineArgs(source, nc.info, falseOffline, 'HISTORY'), { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' }));
+  assert.match(JSON.parse(fs.readFileSync(path.join(falseOffline, 'FAILED.json'))).error, /previously offline stream returned/);
+  assert(!fs.existsSync(path.join(falseOffline, 'manifest.json')));
+  const failedAuth = path.join(root, 'prestop-failed-auth');
+  await assert.rejects(run(process.execPath, baselineArgs(source, nc.info, failedAuth), { env: { ...process.env, NATS_TOKEN: 'invalid-' + token }, stdio: 'ignore' }));
+  const authFailure = fs.readFileSync(path.join(failedAuth, 'FAILED.json'), 'utf8');
+  assert.match(JSON.parse(authFailure).error, /Authorization Violation/);
+  assert(!authFailure.includes(token));
+  assert(!fs.existsSync(path.join(failedAuth, 'manifest.json')));
+  const wrongName = path.join(root, 'prestop-wrong-name');
+  const wrongNameArgs = baselineArgs(source, nc.info, wrongName);
+  wrongNameArgs[2] = 'member-1';
+  await assert.rejects(run(process.execPath, wrongNameArgs, { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' }));
+  assert.match(JSON.parse(fs.readFileSync(path.join(wrongName, 'FAILED.json'))).error, /unexpected NATS server name/);
+  assert(!fs.existsSync(path.join(wrongName, 'manifest.json')));
+  const wrongId = path.join(root, 'prestop-wrong-id');
+  const wrongIdArgs = baselineArgs(source, nc.info, wrongId);
+  wrongIdArgs[3] = 'N' + 'A'.repeat(55);
+  await assert.rejects(run(process.execPath, wrongIdArgs, { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' }));
+  assert.match(JSON.parse(fs.readFileSync(path.join(wrongId, 'FAILED.json'))).error, /unexpected NATS server ID/);
+  assert(!fs.existsSync(path.join(wrongId, 'manifest.json')));
+  const wrongCluster = path.join(root, 'prestop-wrong-cluster');
+  const wrongClusterArgs = baselineArgs(source, nc.info, wrongCluster);
+  wrongClusterArgs[4] = 'recovery-fixture';
+  await assert.rejects(run(process.execPath, wrongClusterArgs, { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' }));
+  assert.match(JSON.parse(fs.readFileSync(path.join(wrongCluster, 'FAILED.json'))).error, /unexpected NATS cluster/);
+  assert(!fs.existsSync(path.join(wrongCluster, 'manifest.json')));
   await nc.close(); await stop(source);
   const cold = path.join(root, 'master-standalone'); const coldHashes = copyCold(source.store, cold);
   const working = path.join(root, 'working-standalone'); copyCold(cold, working);
   const clone = await start('snapshot-source', working), cloneNC = await bus(clone);
   const coldRestored = await capture(cloneNC, 'HISTORY');
-  assert.deepEqual(coldRestored.content, original.content);
-  assert.deepEqual(coldRestored.consumers, original.consumers);
+  assert.deepEqual(coldRestored.content, coldSource.content);
+  assert.deepEqual(coldRestored.config, coldSource.config);
+  for (const key of ['messages', 'bytes', 'first_seq', 'last_seq', 'num_deleted', 'deleted']) assert.deepEqual(coldRestored.state[key], coldSource.state[key]);
+  assert.deepEqual(coldRestored.consumers, coldSource.consumers);
   assert.deepEqual(hashTree(cold), coldHashes);
-  results.coldStandalone = { immutableMaster: true, contentMatches: true };
+  results.coldStandalone = { immutableMaster: true, contentMatches: true, archiveHighWater: original.content.last, coldHighWater: coldSource.content.last, archiveDiffersFromColdCopy: true };
 
   const selected = await ports(9), triples = [selected.slice(0, 3), selected.slice(3, 6), selected.slice(6, 9)];
   const routes = triples.map(p => p[2]);
@@ -323,6 +397,7 @@ try {
   await manager.consumers.add('OFFLINE_R1', { durable_name: 'offline-drained', ack_policy: 'explicit', deliver_policy: 'all' });
   const offlineConsumer = await memberNC.jetstream().consumers.get('OFFLINE_R1', 'offline-drained');
   for (let i = 0; i < 3; i++) { const m = await offlineConsumer.next({ expires: 1000 }); assert(await m.ackAck()); }
+  await manager.consumers.add('OFFLINE_R1', { durable_name: 'cold-tail', ack_policy: 'explicit', deliver_policy: 'new' });
   const offlineOriginal = await capture(memberNC, 'OFFLINE_R1');
   await assertRoutes(members);
   await assert.rejects(assertRoutes(members.slice(0, 2)), /route escaped fixture peers/);
@@ -349,6 +424,29 @@ try {
   assert.equal(r1restored.config.num_replicas, 1);
   assert.deepEqual({ ...r1restored.config, num_replicas: 3 }, replicated.config);
   results.replicaOverride = { source: 3, isolatedRestore: 1, contentMatches: true, unexpectedPeerDetected: true };
+  await memberNC.jetstream().publish('offline', Buffer.from('after-earlier-r1-capture'));
+  const offlineTail = await memberNC.jetstream().consumers.get('OFFLINE_R1', 'cold-tail');
+  const offlineTailMessage = await offlineTail.next({ expires: 1000 });
+  assert.equal(offlineTailMessage.seq, offlineOriginal.content.last + 1);
+  assert(await offlineTailMessage.ackAck());
+  const offlineColdSource = await capture(memberNC, 'OFFLINE_R1');
+  assert.equal(offlineColdSource.content.last, offlineOriginal.content.last + 1);
+  assert.equal(offlineColdSource.content.messages, offlineOriginal.content.messages + 1);
+  assert.equal(offlineColdSource.consumers.find(c => c.name === 'cold-tail').ack_floor.stream_seq, offlineColdSource.content.last);
+  assert.notDeepEqual(offlineColdSource.consumers, offlineOriginal.consumers);
+  const clusterBaseline = path.join(root, 'prestop-cluster');
+  await run(process.execPath, baselineArgs(members[0], memberNC.info, clusterBaseline), { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' });
+  const clusterManifest = JSON.parse(fs.readFileSync(path.join(clusterBaseline, 'manifest.json')));
+  assert.equal(clusterManifest.serverInfo.server_name, members[0].name);
+  assert.deepEqual(clusterManifest.expectedServer, { name: members[0].name, id: memberNC.info.server_id, cluster: 'recovery-fixture' });
+  const clusterRows = clusterManifest.streams;
+  const offlineBaseline = clusterRows.find(row => row.stream === 'OFFLINE_R1')?.snapshot;
+  assert.deepEqual(offlineBaseline.content, offlineColdSource.content);
+  assert.deepEqual(offlineBaseline.consumers, offlineColdSource.consumers);
+  assert(offlineBaseline.consumers.every(consumer => consumer.num_ack_pending === 0));
+  assert.deepEqual(clusterRows.find(row => row.stream === 'REPLICATED')?.snapshot.content, replicated.content);
+  const heldBaseline = path.join(root, 'prestop-held');
+  await run(process.execPath, baselineArgs(owner, await boundInfo(owner), heldBaseline), { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' });
   await memberNC.close(); await stop(owner);
   const survivors = members.filter(m => m !== owner);
   const survivorNC = await bus(survivors[0]);
@@ -359,6 +457,18 @@ try {
   assert.equal(offlineManifest.streams.find(s => s.stream === 'OFFLINE_R1').offline, true);
   assert.equal(offlineManifest.streams.find(s => s.stream === 'REPLICATED').snapshot.state.messages, 3);
   results.offlineSnapshotDriver = true;
+  const survivorBaseline = path.join(root, 'prestop-survivors');
+  await run(process.execPath, baselineArgs(survivors[0], survivorNC.info, survivorBaseline, 'OFFLINE_R1'), { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' });
+  const survivorRows = JSON.parse(fs.readFileSync(path.join(survivorBaseline, 'manifest.json'))).streams;
+  assert.equal(survivorRows.find(row => row.stream === 'OFFLINE_R1')?.offline, true);
+  assert.deepEqual(survivorRows.find(row => row.stream === 'REPLICATED')?.snapshot.content, replicated.content);
+  const secondSurvivorBaseline = path.join(root, 'prestop-second-survivor');
+  await run(process.execPath, baselineArgs(survivors[1], await boundInfo(survivors[1]), secondSurvivorBaseline, 'OFFLINE_R1'), { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' });
+  const undeclaredOffline = path.join(root, 'prestop-undeclared-offline');
+  await assert.rejects(run(process.execPath, baselineArgs(survivors[0], survivorNC.info, undeclaredOffline), { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' }));
+  assert.match(JSON.parse(fs.readFileSync(path.join(undeclaredOffline, 'FAILED.json'))).error, /stream is offline/);
+  assert(!fs.existsSync(path.join(undeclaredOffline, 'manifest.json')));
+  results.coldBaselineDriver = { standaloneFinal: true, clusterFinal: true, noAckPendingAtBaseline: true, offlineAssignmentExplicit: true, falseOfflineRejected: true, undeclaredOfflineRejected: true, wrongNameRejected: true, wrongIdRejected: true, wrongClusterRejected: true, authorizationViolationRecorded: true, tokenAbsentFromFailure: true, noSuccessManifestAfterRefusal: true };
   await survivorNC.close();
   for (const m of survivors) await stop(m);
   const masters = members.map((m, i) => path.join(root, 'master-member-' + i));
@@ -378,19 +488,23 @@ try {
   cloned.push(await start('member-' + (oi + 1), path.join(root, 'working-member-' + oi), cloneTriples.map(p => p[2]), cloneTriples[oi]));
   await waitInfo(isolatedNC, 'OFFLINE_R1');
   const clusterRestored = await capture(isolatedNC, 'OFFLINE_R1');
-  assert.deepEqual(clusterRestored.content, offlineOriginal.content);
-  assert.deepEqual(clusterRestored.consumers, offlineOriginal.consumers);
+  assert.deepEqual(clusterRestored.content, offlineColdSource.content);
+  assert.notDeepEqual(clusterRestored.content, offlineOriginal.content);
+  assert.deepEqual(clusterRestored.config, offlineColdSource.config);
+  for (const key of ['messages', 'bytes', 'first_seq', 'last_seq', 'num_deleted', 'deleted']) assert.deepEqual(clusterRestored.state[key], offlineColdSource.state[key]);
+  assert.deepEqual(clusterRestored.consumers, offlineColdSource.consumers);
   await delay(1100);
-  assert.deepEqual((await capture(isolatedNC, 'OFFLINE_R1')).consumers, offlineOriginal.consumers);
+  assert.deepEqual((await capture(isolatedNC, 'OFFLINE_R1')).consumers, offlineColdSource.consumers);
   await assertRoutes(cloned);
   for (let i = 0; i < 3; i++) assert.deepEqual(hashTree(masters[i]), hashes[i]);
-  results.offlineR1 = { messages: 7, remappedThreeMemberCluster: true, immutableMasters: true, routesConfined: true };
+  results.offlineR1 = { messages: offlineColdSource.content.messages, earlierHighWater: offlineOriginal.content.last, coldHighWater: offlineColdSource.content.last, earlierCaptureDiffersFromColdCopy: true, remappedThreeMemberCluster: true, immutableMasters: true, routesConfined: true };
   const singleWorking = path.join(root, 'working-offline-single'); copyCold(masters[oi], singleWorking);
   const singleMember = await start('member-' + (oi + 1), singleWorking);
   const singleNC = await bus(singleMember);
   const standaloneMemberContent = await capture(singleNC, 'OFFLINE_R1');
-  assert.deepEqual(standaloneMemberContent.content, offlineOriginal.content);
-  assert.deepEqual(standaloneMemberContent.consumers, offlineOriginal.consumers);
+  assert.deepEqual(standaloneMemberContent.content, offlineColdSource.content);
+  assert.deepEqual(standaloneMemberContent.config, offlineColdSource.config);
+  assert.deepEqual(standaloneMemberContent.consumers, offlineColdSource.consumers);
   results.offlineR1.nonClusteredLoad = true;
   assert.deepEqual(hashTree(masters[oi]), hashes[oi]);
   await stop(cloned.find(m => m.store === path.join(root, 'working-member-' + oi)));
@@ -399,6 +513,38 @@ try {
   await assert.rejects(waitOffline(isolatedNC, 'OFFLINE_R1'), err => err.api?.code === 404);
   assert.deepEqual(hashTree(masters[oi]), hashes[oi]);
   results.deletedAssignmentRefusesRejoin = true;
+  for (const master of [cold, ...masters]) freezeTree(master);
+  const treePlan = {
+    binary,
+    binarySha256: provenance[1].sha256,
+    standalone: { name: source.name, master: cold, baseline: path.join(standaloneBaseline, 'manifest.json') },
+    cluster: { name: 'recovery-fixture', offline: ['OFFLINE_R1'], members: survivors.map((member, index) => ({ name: member.name, master: masters[members.indexOf(member)], baseline: path.join(index === 0 ? survivorBaseline : secondSurvivorBaseline, 'manifest.json') })) },
+    held: { name: owner.name, master: masters[oi], baseline: path.join(heldBaseline, 'manifest.json'), streams: ['OFFLINE_R1'] }
+  };
+  const treePlanFile = path.join(root, 'cold-tree-plan.json');
+  jsonPrivate(treePlanFile, treePlan);
+  const treeProbe = path.join(root, 'cold-tree-probe');
+  await run(process.execPath, [coldTreeProbe, treePlanFile, treeProbe], { stdio: 'ignore' });
+  const treeReport = JSON.parse(fs.readFileSync(path.join(treeProbe, 'probe.json')));
+  assert.equal(treeReport.standalone.find(row => row.stream === 'HISTORY').last, coldSource.content.last);
+  assert.equal(treeReport.held.find(row => row.stream === 'OFFLINE_R1').last, offlineColdSource.content.last);
+  assert(treeReport.offlineBeforeRejoin.includes('OFFLINE_R1'));
+  assert.equal(treeReport.rejoined.find(row => row.stream === 'OFFLINE_R1').last, offlineColdSource.content.last);
+  assert.deepEqual(hashTree(cold), coldHashes);
+  for (let i = 0; i < 3; i++) assert.deepEqual(hashTree(masters[i]), hashes[i]);
+  const staleBaseline = structuredClone(standaloneManifest);
+  staleBaseline.streams.find(row => row.stream === 'HISTORY').snapshot = original;
+  const staleBaselineFile = path.join(root, 'stale-online-baseline.json');
+  jsonPrivate(staleBaselineFile, staleBaseline);
+  const stalePlanFile = path.join(root, 'stale-cold-tree-plan.json');
+  jsonPrivate(stalePlanFile, { ...treePlan, standalone: { ...treePlan.standalone, baseline: staleBaselineFile } });
+  const staleProbe = path.join(root, 'stale-cold-tree-probe');
+  await assert.rejects(run(process.execPath, [coldTreeProbe, stalePlanFile, staleProbe], { stdio: 'ignore' }));
+  assert.match(JSON.parse(fs.readFileSync(path.join(staleProbe, 'FAILED.json'))).error, /cold content mismatch: HISTORY/);
+  assert(!fs.existsSync(path.join(staleProbe, 'probe.json')));
+  assert.deepEqual(hashTree(cold), coldHashes);
+  for (let i = 0; i < 3; i++) assert.deepEqual(hashTree(masters[i]), hashes[i]);
+  results.coldTreeProbe = { standaloneLast: coldSource.content.last, heldLast: offlineColdSource.content.last, offlineClusterAssignment: true, mastersUnchanged: true, staleArchiveBaselineRejected: true };
   passed = true;
 } catch (err) {
   jsonPrivate(path.join(root, 'FAILED.json'), { at: new Date().toISOString(), phase, error: err.message });

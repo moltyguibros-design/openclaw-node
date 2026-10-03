@@ -950,3 +950,58 @@ dependencies, and neither this repair nor the recapture certifies physical
 writer absence, three healthy cold masters or a NATS cutover. Step 1.2
 remains [A]/v1.2-pre; see the post-vault-watcher artifact in
 step12_jetstream.
+
+Checkpoint 2026-10-03 13:23 EDT: draft PR #224 records a candidate
+powered-off-VM route for historical JetStream snapshots, with three serving
+cold masters and the separately held member-1 history kept distinct. Claude
+found no blocker in the candidate at 407d20b, and its four exact-head checks
+passed. The branch now includes the post-vault-watcher baseline from main;
+the host UTM package path and host-side execution path remain unverified.
+A typed host receipt, historical acceptance manifest, treatment of the
+pre-power-off writer gap, three extracted and isolated-restored cold masters,
+and verified service resumption still remain. No live NATS service, store or
+VM was changed. Step 1.2 stays [A]/v1.2-pre; neither the full-node Journal
+nor the cold masters are sealed.
+
+Checkpoint 2026-10-03 13:48 EDT: the owned JetStream fixture now separates
+online-archive evidence from direct cold-store evidence with a deliberately
+late message and consumer acknowledgement. Standalone archive sequence 12
+differs from its cold clone at 13; the fixture's held R1 earlier capture is 7
+and its separate single-member cold clone is 8. The fixture passed on the
+installed NATS CLI/server, with only working copies booted and all owned
+servers stopped. This is synthetic evidence only. The actual host VM image,
+three serving cold masters, acceptance engine/receipt, writer-gap contract
+and truthful production resumption remain open at 1.2 [A]/v1.2-pre. See
+step12_jetstream/COLD_STORE_ARCHIVE_DIVERGENCE_FIXTURE.json.
+
+Checkpoint 2026-10-03 14:07 EDT: an owned direct-baseline driver now captures
+server identity, complete reachable stream digests and consumer positions in
+private manifests, with explicit offline assignments. The owned fixture
+passed final standalone/cluster captures and rejected false-offline,
+undeclared-offline and failed-auth cases; all owned servers stopped. This is
+synthetic pre-stop evidence, not an accepted production baseline or common
+quiet point. The host's powered-off UTM backing artifact and execution path,
+three serving cold masters, host receipt, writer-gap decision, isolated
+restores and service resumption remain open. Step 1.2 stays [A]/v1.2-pre;
+see step12_jetstream/COLD_BASELINE_FIXTURE.json.
+
+Checkpoint 2026-10-03 14:46 EDT: an owned isolated direct-store probe boots
+working copies of four frozen distinct store trees, checks standalone content,
+held R1 in isolation, the two survivors' offline assignment and R1 after
+rejoin, then rehashes every master. The owned fixture passed and a deliberately
+stale archive baseline refused with no success report; all test servers
+stopped. This is synthetic restore-mechanism evidence only. Host-side stopped
+VM access, three real serving cold masters, the typed host receipt, protected
+writer-gap decision and truthful production resumption remain open; 1.2 stays
+[A]/v1.2-pre. See step12_jetstream/COLD_TREE_PROBE_FIXTURE.json.
+
+Checkpoint 2026-10-03 15:04 EDT: the direct pre-stop JetStream capture now
+requires a pinned server name, ID and cluster, refusing a wrong listener
+owner before any stream read. Owned controls for wrong name, ID and cluster
+all produced private failure records without success manifests; the complete
+four-tree fixture still passed and all test servers stopped. The expected
+identity must come from independent managed-service and monitor preflight,
+not the ambiguous 4222 endpoint alone. This closes one port-flip capture
+hazard, not the production writer-gap, host image, three serving cold masters
+or resumption; 1.2 stays [A]/v1.2-pre. See
+step12_jetstream/COLD_BASELINE_IDENTITY_FIXTURE.json.
