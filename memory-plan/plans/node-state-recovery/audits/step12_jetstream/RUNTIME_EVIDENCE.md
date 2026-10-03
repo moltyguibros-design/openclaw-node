@@ -952,3 +952,77 @@ not a full-node Journal baseline. It does not establish transitive dependency
 pinning, continuous process provenance or physical writer exclusion. No NATS
 history was copied, sealed or migrated. Step 1.2 remains active at
 `v1.2-pre`.
+
+### Memory-daemon node-scoped maintenance — 2026-10-03 12:24 EDT
+
+The installed daemon's persisted session state was ENDED. Its previous
+entry ran both Obsidian sync and graph-cache refresh only inside the
+ACTIVE/IDLE branch; the graph cache had not refreshed since September 28.
+A private release copied the installed first-party execution tree and
+changed only that scheduling boundary. It passed an isolated HOME/vault
+control: one sync and one graph refresh, with the second call throttled.
+The installed completion-result gate was retained in that release and
+restored to committed source. Focused source tests passed 31/31.
+
+The live `ai.openclaw.memory-daemon` plist was backed up byte-for-byte,
+then its entry path alone was repointed after the old launchd job stopped.
+The old process logged SIGTERM and `Daemon stopped`; the new job ran as PID
+92501 from the staged release. The daemon logged an Obsidian sync child
+exit and a graph refresh; SQLite `graph_cache_meta.last_refresh_at` became
+`2026-10-03T16:18:10.322Z` with 451 nodes and 2388 edges. The next
+node-watch report graded `obs.graph_cache`, `mem.daemon` and `mem.ingest`
+WORKING. The existing private Obsidian sync config has `enabled:false`, so
+its child exited without writing notes. Calling that exit "sync done" in
+the daemon log is a misleading label, not proof of vault publication.
+`obs.sync` remained BROKEN for stale local concept notes. That probe reads
+a different vault root; the disabled sync command does not establish the
+cause of its staleness. The setting remains untouched pending operator
+intent.
+
+The source-owned entrypoint preflight accepted 23 installed units, 21
+GUI-loaded, no user/system-loaded units, and the same sole Tailscale
+exclusion. Relative to the watcher recapture, only the memory-daemon plist
+changed (`a3fb84ea…` → `7752da7b…`). The source release manifest and
+loaded entry are pinned in
+`POST_MEMORY_DAEMON_BASELINE_RECAPTURE_20261003.json` (SHA-256
+`a8116ea654a9041b606c5a497a3e4c9f7ea2e7256524bbf44433631d0b451a06`).
+The mesh-agent plist and private mode-0600 host-Ollama setting still match
+the October 1 operator addendum. Third-party dependencies remain a shared
+mutable link. The NATS stream overlap remains BROKEN. No NATS history was
+copied, sealed or migrated, and this is not a full-node Journal baseline.
+
+### Local vault-note watcher correction — 2026-10-03 12:48 EDT
+
+The `obs.sync` watcher reported BROKEN because it examined only the
+`concepts/` directory, whose newest note was over four hours old. The same
+local vault had fresh Markdown notes in `sessions/` and `daily/`. The probe
+now checks all five directories managed by `obsidian-vault.mjs` and labels
+the observed signal "Local vault notes". Its ID remains `obs.sync` for
+report continuity. This signal does not establish publication by the
+separate Obsidian sync CLI, which remains disabled by private config.
+
+The focused source suite passed 57/57, including a regression that holds
+concept notes stale while a session note is fresh, then verifies stale and
+empty-vault outcomes. A staged release copied the previous watcher release
+and replaced only `lib/node-watch.mjs`; its patched file SHA-256 is
+`49979e31c04e150c67aa0df17a477a8c95c71719d9d8ca83404e998da91ea133`.
+An isolated read from that release graded the real vault WORKING. The live
+plist was backed up before its entry changed from the prior release to
+`node-watch-vault-20261003`; launchd now runs PID 7411. The first watcher
+report after restart briefly missed the healthy memory-daemon PID; the
+next report and an independent launchctl/health-check read saw PID 92501.
+That report grades `obs.sync`, `obs.graph_cache`, `mem.daemon` and
+`mem.ingest` WORKING (24 WORKING, 2 BROKEN, 3 OFF, 7 UNKNOWN overall).
+`net.stream` and `fed.grappe.members` remain BROKEN.
+
+The source-owned entrypoint preflight again accepted 23 installed units,
+21 GUI-loaded, and the same sole Tailscale exclusion. Only the node-watch
+plist changed since the post-memory-daemon recapture (`0fa1cf48…` to
+`63704075…`); both host-Ollama plist settings and the mode-0600 private env
+still match the October 1 operator addendum. The sanitized artifact is
+`POST_VAULT_WATCHER_BASELINE_RECAPTURE_20261003.json` (SHA-256
+`9af514c37d50617c4087fc8089fd51272dfb60762de11a8931755610a751d023`).
+Third-party dependencies remain a shared mutable link. This is a
+point-in-time structural recapture, not a full-node Journal baseline,
+physical writer exclusion or permission to move NATS histories. Recovery
+1.2 remains at `v1.2-pre`.
