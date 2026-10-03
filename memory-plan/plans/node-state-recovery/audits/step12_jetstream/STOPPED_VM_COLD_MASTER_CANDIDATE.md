@@ -21,15 +21,24 @@ hash, but cannot prove writer absence before it. This path moves
 the host, hypervisor and backing-storage copy into the trusted base; the
 guest cannot attest those facts itself.
 
-This sequence is not executable with the current Journal. Before stopping
-any writer for a real attempt, an implementation must add a durable
-`cold-copy-pending` hold and a startup interlock that parks the saved writer
-cohort and application clients after any reboot. The existing restore-only
-path restores prior running units; invoking it automatically after master
-capture would invalidate those masters. The hold must be read back from
-durable storage and exercised in owned reboot fixtures before this route
-can be used. A crash or reboot at any transition without that interlock
-refuses the route and requires operator handoff.
+This candidate is only for step 1.2's historical, individually verified
+JetStream snapshots. The three new masters are the serving standalone store
+and cluster members 2/3; the separately held member-1 R1 master remains a
+fourth, distinct history. Extract, test, freeze and rehash the three new
+masters from the powered-off image **before the original guest boots**. Its later
+restore-only recovery resumes the live stores, which may then diverge from the
+frozen masters without changing their historical bytes. A failed or incomplete
+acceptance cannot be repaired from the resumed stores; it requires a new
+stopped-VM copy window. The current Journal still cannot seal this route:
+`seal()` requires an uninterrupted forward window, and a clean power-off
+ends that window. A separate, typed host receipt and historical acceptance
+manifest must be implemented before any step 1.2 certification.
+
+This does not authorize migration or treating the restored node as running
+on the certified master state. That later go-forward cutover needs a durable
+`cold-copy-pending` hold and a startup interlock that keeps old writers and
+clients parked across reboot. Existing restore-only recovery drives prior
+running units back online; using it during a cutover would defeat that hold.
 
 ## Preconditions inside the guest
 
@@ -45,14 +54,10 @@ refuses the route and requires operator handoff.
    the running servers. Pin all three source roles separately, including
    stream holes, consumer positions and the snapshot high-water marks.
    Refuse an absent or ambiguous source before a stop.
-4. Persist and read back the `cold-copy-pending` hold for the exact cohort.
-   Its startup interlock must precede any launchd restoration after reboot,
-   including restore-only recovery. The current Journal cannot do this.
-5. Stop NATS through the managed sequence in `RECOVERY.md`: member 1
+4. Stop NATS through the managed sequence in `RECOVERY.md`: member 1
    remains held, then members 2/3 stop before the standalone. Require
    clean-exit logs, no open store owners, and no forced termination.
-   The durable hold keeps the old writer jobs parked after any reboot.
-6. Hash each stopped store tree and verify the source identity and captured
+5. Hash each stopped store tree and verify the source identity and captured
    high-water marks. Refuse absent or ambiguous stores, configs, service
    identities or changed inventory. These hashes corroborate the later
    host copy; they do not independently certify writer absence between
@@ -62,13 +67,16 @@ refuses the route and requires operator handoff.
    The isolated restore must compare histories to the pre-stop running
    snapshots. Changes outside that semantic comparison remain a trust gap
    until the recovery contract defines and accepts its scope.
-7. Shut down the guest cleanly, with a recorded OS shutdown transition.
+6. Shut down the guest cleanly, with a recorded OS shutdown transition.
    A forced stop or a suspended guest is not a clean-stop observation.
 
 ## Host handoff
 
-The operator must identify the actual hypervisor and complete backing
-artifact before any host command is prescribed. The host receipt must
+The operator must identify the complete UTM backing artifact before any host
+command is prescribed. The UTM identification comes from the same-node
+host-Ollama installation evidence in PR #195 (`VirtualMac2,1` and host gateway
+`192.168.64.1`), not from an image-path inspection. The guest has no verified
+path to the UTM package or host copy. The host receipt must
 attest a powered-off state, not pause/suspend or saved RAM; disabled
 autostart/auto-resume/automatic snapshots for the window; and no second
 VM instance opening the same image. It must identify every component of
@@ -107,16 +115,17 @@ master refuses the path.
 
 ## Boot, rollback and acceptance
 
-The original guest may boot only into the durable `cold-copy-pending`
-posture: clients and old writers parked before any restore-only action.
-Do not run it concurrently with a clone using the same identities or
-network. Before durable first-bootstrap-intent, an abandoned migration
-may use the original guest or host image for rollback only through an
-explicit operator-controlled transition that invalidates the cold masters,
-rechecks the complete saved inventory, and then invokes restoration of
-the prior jobs. Existing automatic restore-only recovery is not that
-transition. After first-bootstrap-intent, returning to the old guest is a
-reverse migration with new preservation and verification.
+Keep the original guest powered off until all three masters have been
+extracted, restored in isolation, accepted, made read-only with `uchg`, and
+rehash-verified. A failed acceptance remains a failed attempt; booting the
+original and taking another copy later creates a new window. Do not run the
+original concurrently with an isolated clone using its identities or network.
+After accepted historical copies are fixed, the original may boot and the
+existing restore-only path may restore its prior jobs. Verify the resumed
+services and their original identities without claiming the live stores still
+equal the masters. A go-forward migration instead needs the separate durable
+startup interlock, first-bootstrap intent and reverse-path controls in
+`ROOT_WRITER_MIGRATION_DESIGN.md`; restore-only recovery is not that cutover.
 
 This path addresses the three NATS cold masters only. A full-image copy
 does not certify the gateway task SQLite store, viewer plan ticks or other
@@ -126,11 +135,12 @@ drain and store-level checks required by `RECOVERY.md`; that is separate
 work in recovery 1.3.
 
 An accepted implementation would amend the continuous-watch clause in
-`RECOVERY.md` for this path only, add a typed host receipt and root-driver
-verification, then permit `seal()` only after all guest/host/image/restore
-proofs pass, including an accepted treatment of the pre-power-off trust
-gap. The current code has no cold-copy hold, startup interlock, receipt or
-host verifier. This candidate does not authorize a cold-copy claim, seal,
-root migration or service retirement. Host operator access, the
-hypervisor product and the complete backing-image path are still unknown
-from inside the guest.
+`RECOVERY.md` for this historical path only and add a typed host receipt,
+root-driver verification and separate acceptance manifest after all
+guest/host/image/restore proofs pass, including an accepted treatment of the
+pre-power-off trust gap. It must not relabel a reopened Journal as an
+uninterrupted `seal()`. The current code has no host receipt, host verifier
+or historical acceptance manifest. This candidate does not authorize a
+cold-copy claim, seal, root migration or service retirement. Host operator
+access and the complete UTM backing-image path remain unknown from inside
+the guest.
