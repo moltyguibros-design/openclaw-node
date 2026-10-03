@@ -962,3 +962,14 @@ pre-power-off writer gap, three extracted and isolated-restored cold masters,
 and verified service resumption still remain. No live NATS service, store or
 VM was changed. Step 1.2 stays [A]/v1.2-pre; neither the full-node Journal
 nor the cold masters are sealed.
+
+Checkpoint 2026-10-03 13:48 EDT: the owned JetStream fixture now separates
+online-archive evidence from direct cold-store evidence with a deliberately
+late message and consumer acknowledgement. Standalone archive sequence 12
+differs from its cold clone at 13; the fixture's held R1 earlier capture is 7
+and its separate single-member cold clone is 8. The fixture passed on the
+installed NATS CLI/server, with only working copies booted and all owned
+servers stopped. This is synthetic evidence only. The actual host VM image,
+three serving cold masters, acceptance engine/receipt, writer-gap contract
+and truthful production resumption remain open at 1.2 [A]/v1.2-pre. See
+step12_jetstream/COLD_STORE_ARCHIVE_DIVERGENCE_FIXTURE.json.

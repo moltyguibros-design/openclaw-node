@@ -144,3 +144,20 @@ or historical acceptance manifest. This candidate does not authorize a
 cold-copy claim, seal, root migration or service retirement. Host operator
 access and the complete UTM backing-image path remain unknown from inside
 the guest.
+
+## Owned archive-divergence control — 2026-10-03
+
+`test_recovery.mjs` now keeps a valid online standalone archive at sequence 12,
+then publishes and acknowledges sequence 13 before clean server stop. Its
+direct cold-store clone restores sequence 13 and the advanced consumer ack
+floor; the archive restore still reflects the earlier state. The fixture's
+held R1 member has an earlier-capture sequence 7 versus direct cold-store
+sequence 8, including an isolated single-member boot. Content, config,
+sequence state and consumers are compared with the matching final pre-stop
+capture, and each cold master is rehashed after booting only a working copy.
+The 2026-10-03 owned run passed on NATS CLI 0.3.1 and server 2.12.6; compact
+hashes and counts are in `COLD_STORE_ARCHIVE_DIVERGENCE_FIXTURE.json`.
+
+This control demonstrates why the eventual acceptance must boot extracted
+`store_dir` trees directly. It does not establish the host image's provenance,
+the three real serving masters, physical writer absence or production recovery.
