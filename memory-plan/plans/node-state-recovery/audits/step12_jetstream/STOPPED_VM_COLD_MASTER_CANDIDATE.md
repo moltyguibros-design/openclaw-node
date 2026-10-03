@@ -169,7 +169,8 @@ each connected server, including its server identity, stream inventory,
 content digest and consumer positions. In the owned fixture it captured the
 standalone after the late sequence 13 and the cluster member after its late
 R1 sequence 8; its survivor capture recorded the R1 assignment as explicitly
-offline. False-offline and undeclared-offline claims, as well as failed
+offline. It rechecks stream config/state and offline assignments before success.
+False-offline and undeclared-offline claims, as well as failed
 authentication, produced private failure records. All owned servers stopped
 and none of the test's cold masters were booted. The compact results are in
 `COLD_BASELINE_FIXTURE.json`.

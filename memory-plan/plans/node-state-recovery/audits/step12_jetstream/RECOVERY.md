@@ -21,9 +21,9 @@ positions. It requires a new private directory and an explicit list of known
 offline assignments. Changed or duplicate inventory, an undeclared offline
 stream, a supposedly offline stream that responds, or failed authentication
 produces a private `FAILED.json` and no success manifest. Its sequential
-captures are not a common quiet point. A production use requires the separate
-writer hold and final comparison against extracted cold-store restores; this
-tool alone never certifies a master or a stopped VM.
+captures and final state recheck are not a common quiet point. Production use
+requires the separate writer hold and final comparison against extracted
+cold-store restores; this tool alone never certifies a master or a stopped VM.
 
 Run the driver with an existing token supplied through its process environment,
 never argv, URLs, tracing or a public transcript:

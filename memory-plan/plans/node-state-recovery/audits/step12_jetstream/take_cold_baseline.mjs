@@ -55,6 +55,20 @@ try {
   }
   assert.deepEqual(await names(), originalNames, 'stream inventory changed during baseline');
   for (const stream of expectedOffline) assert(originalNames.includes(stream), 'expected offline assignment is absent');
+  for (const row of manifest.streams) {
+    if (row.offline) {
+      try {
+        await api(nc, `$JS.API.STREAM.INFO.${row.stream}`);
+        assert.fail('offline assignment became available during baseline');
+      } catch (err) {
+        if (err.api?.code !== 500 || err.api.description !== 'stream is offline') throw err;
+      }
+      continue;
+    }
+    const final = await api(nc, `$JS.API.STREAM.INFO.${row.stream}`, { deleted_details: true });
+    assert.deepEqual(final.config, row.snapshot.config, `stream config changed during baseline: ${row.stream}`);
+    assert.deepEqual(final.state, row.snapshot.state, `stream state changed during baseline: ${row.stream}`);
+  }
   manifest.finishedAt = new Date().toISOString();
   jsonPrivate(path.join(target, 'manifest.json'), manifest);
   console.log(JSON.stringify({ target, streams: manifest.streams.map(row => ({ stream: row.stream, offline: !!row.offline, last: row.snapshot?.content.last })) }));

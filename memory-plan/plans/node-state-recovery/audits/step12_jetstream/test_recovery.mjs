@@ -310,9 +310,13 @@ try {
   const falseOffline = path.join(root, 'prestop-false-offline');
   await assert.rejects(run(process.execPath, [coldBaselineDriver, `nats://127.0.0.1:${source.client}`, falseOffline, 'HISTORY'], { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' }));
   assert.match(JSON.parse(fs.readFileSync(path.join(falseOffline, 'FAILED.json'))).error, /previously offline stream returned/);
+  assert(!fs.existsSync(path.join(falseOffline, 'manifest.json')));
   const failedAuth = path.join(root, 'prestop-failed-auth');
   await assert.rejects(run(process.execPath, [coldBaselineDriver, `nats://127.0.0.1:${source.client}`, failedAuth], { env: { ...process.env, NATS_TOKEN: 'invalid-' + token }, stdio: 'ignore' }));
-  assert(fs.existsSync(path.join(failedAuth, 'FAILED.json')));
+  const authFailure = fs.readFileSync(path.join(failedAuth, 'FAILED.json'), 'utf8');
+  assert.match(JSON.parse(authFailure).error, /Authorization Violation/);
+  assert(!authFailure.includes(token));
+  assert(!fs.existsSync(path.join(failedAuth, 'manifest.json')));
   await nc.close(); await stop(source);
   const cold = path.join(root, 'master-standalone'); const coldHashes = copyCold(source.store, cold);
   const working = path.join(root, 'working-standalone'); copyCold(cold, working);
@@ -416,7 +420,8 @@ try {
   const undeclaredOffline = path.join(root, 'prestop-undeclared-offline');
   await assert.rejects(run(process.execPath, [coldBaselineDriver, `nats://127.0.0.1:${survivors[0].client}`, undeclaredOffline], { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' }));
   assert.match(JSON.parse(fs.readFileSync(path.join(undeclaredOffline, 'FAILED.json'))).error, /stream is offline/);
-  results.coldBaselineDriver = { standaloneFinal: true, clusterFinal: true, offlineAssignmentExplicit: true, falseOfflineRejected: true, undeclaredOfflineRejected: true, failedAuthRecorded: true };
+  assert(!fs.existsSync(path.join(undeclaredOffline, 'manifest.json')));
+  results.coldBaselineDriver = { standaloneFinal: true, clusterFinal: true, offlineAssignmentExplicit: true, falseOfflineRejected: true, undeclaredOfflineRejected: true, authorizationViolationRecorded: true, tokenAbsentFromFailure: true, noSuccessManifestAfterRefusal: true };
   await survivorNC.close();
   for (const m of survivors) await stop(m);
   const masters = members.map((m, i) => path.join(root, 'master-member-' + i));
