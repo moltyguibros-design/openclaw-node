@@ -176,6 +176,12 @@ authentication, produced private failure records. All owned servers stopped
 and none of the test's cold masters were booted. The compact results are in
 `COLD_BASELINE_FIXTURE.json`.
 
+The archive's pending-redelivery control finishes before the final source
+capture; its owned source consumer is then removed. The final standalone and
+held-R1 fixture baselines assert zero acknowledgements pending, matching the
+production drain precondition without relying on the one-second redelivery
+timer remaining idle during the baseline sweep.
+
 This remains a sequence of read-only observations made against owned NATS
 processes. It does not show a production writer hold, simultaneous state
 across the three serving stores, a powered-off host image or a valid host

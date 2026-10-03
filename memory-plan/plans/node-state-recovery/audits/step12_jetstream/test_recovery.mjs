@@ -242,6 +242,7 @@ try {
   await delay(1100);
   const replay = await (await restoredNC.jetstream().consumers.get('HISTORY', 'pending')).next({ expires: 2000 });
   assert.equal(replay.info.streamSequence, 1); assert(replay.info.redelivered); assert(await replay.ackAck());
+  await jsm.consumers.delete('HISTORY', 'pending');
   results.snapshot = { messages: restored.content.messages, holes: restored.content.holes, sha256: restored.content.sha256, exactHeadersAndTimestamps: true, consumerPositions: true, pendingRedelivery: true };
   results.nondefaultConfig = { archiveValuesRetained: true, streamConfigExact: true, consumerConfigExact: true };
 
@@ -307,6 +308,7 @@ try {
   const historyBaseline = standaloneRows.find(row => row.stream === 'HISTORY')?.snapshot;
   assert.deepEqual(historyBaseline.content, coldSource.content);
   assert.deepEqual(historyBaseline.consumers, coldSource.consumers);
+  assert(historyBaseline.consumers.every(consumer => consumer.num_ack_pending === 0));
   const falseOffline = path.join(root, 'prestop-false-offline');
   await assert.rejects(run(process.execPath, [coldBaselineDriver, `nats://127.0.0.1:${source.client}`, falseOffline, 'HISTORY'], { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' }));
   assert.match(JSON.parse(fs.readFileSync(path.join(falseOffline, 'FAILED.json'))).error, /previously offline stream returned/);
@@ -401,6 +403,7 @@ try {
   const offlineBaseline = clusterRows.find(row => row.stream === 'OFFLINE_R1')?.snapshot;
   assert.deepEqual(offlineBaseline.content, offlineColdSource.content);
   assert.deepEqual(offlineBaseline.consumers, offlineColdSource.consumers);
+  assert(offlineBaseline.consumers.every(consumer => consumer.num_ack_pending === 0));
   assert.deepEqual(clusterRows.find(row => row.stream === 'REPLICATED')?.snapshot.content, replicated.content);
   await memberNC.close(); await stop(owner);
   const survivors = members.filter(m => m !== owner);
@@ -421,7 +424,7 @@ try {
   await assert.rejects(run(process.execPath, [coldBaselineDriver, `nats://127.0.0.1:${survivors[0].client}`, undeclaredOffline], { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' }));
   assert.match(JSON.parse(fs.readFileSync(path.join(undeclaredOffline, 'FAILED.json'))).error, /stream is offline/);
   assert(!fs.existsSync(path.join(undeclaredOffline, 'manifest.json')));
-  results.coldBaselineDriver = { standaloneFinal: true, clusterFinal: true, offlineAssignmentExplicit: true, falseOfflineRejected: true, undeclaredOfflineRejected: true, authorizationViolationRecorded: true, tokenAbsentFromFailure: true, noSuccessManifestAfterRefusal: true };
+  results.coldBaselineDriver = { standaloneFinal: true, clusterFinal: true, noAckPendingAtBaseline: true, offlineAssignmentExplicit: true, falseOfflineRejected: true, undeclaredOfflineRejected: true, authorizationViolationRecorded: true, tokenAbsentFromFailure: true, noSuccessManifestAfterRefusal: true };
   await survivorNC.close();
   for (const m of survivors) await stop(m);
   const masters = members.map((m, i) => path.join(root, 'master-member-' + i));
