@@ -3,15 +3,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { api, capture, consumerState, jsonPrivate, openBus, privateDir } from './recovery.mjs';
 
-const [server, target, offlineList = ''] = process.argv.slice(2);
-assert(server && target && process.env.NATS_TOKEN,
-  'usage: NATS_TOKEN=<local secret> node take_cold_baseline.mjs <loopback-server> <new-private-dir> [known-offline-streams]');
+const [server, expectedName, expectedId, expectedCluster, target, offlineList = ''] = process.argv.slice(2);
+assert(server && expectedName && expectedId && expectedCluster && target && process.env.NATS_TOKEN,
+  'usage: NATS_TOKEN=<local secret> node take_cold_baseline.mjs <loopback-server> <expected-name> <expected-server-id> <expected-cluster-or-> <new-private-dir> [known-offline-streams]');
 assert(path.isAbsolute(target) && !fs.existsSync(target));
+assert.match(expectedName, /^[A-Za-z0-9_-]+$/);
+assert.match(expectedId, /^N[A-Z2-7]+$/);
+assert.match(expectedCluster, /^[-A-Za-z0-9_]+$/);
 process.umask(0o077);
 privateDir(target);
 
 const expectedOffline = new Set(offlineList.split(',').filter(Boolean));
-const manifest = { startedAt: new Date().toISOString(), server, streams: [] };
+const manifest = { startedAt: new Date().toISOString(), server, expectedServer: { name: expectedName, id: expectedId, cluster: expectedCluster }, streams: [] };
 let nc;
 
 async function names() {
@@ -45,6 +48,9 @@ try {
     version: nc.info.version,
     cluster: nc.info.cluster,
   };
+  assert.equal(manifest.serverInfo.server_name, expectedName, 'connected to unexpected NATS server name');
+  assert.equal(manifest.serverInfo.server_id, expectedId, 'connected to unexpected NATS server ID');
+  assert.equal(manifest.serverInfo.cluster || '-', expectedCluster, 'connected to unexpected NATS cluster');
   const originalNames = await names();
   for (const stream of originalNames) {
     assert(/^[A-Za-z0-9_-]+$/.test(stream));

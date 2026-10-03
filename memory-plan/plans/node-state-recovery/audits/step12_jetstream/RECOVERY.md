@@ -22,6 +22,11 @@ offline assignments. Changed or duplicate inventory, an undeclared offline
 stream, a supposedly offline stream that responds, or failed authentication
 produces a private `FAILED.json` and no success manifest. Its sequential
 captures and final state/consumer recheck are not a common quiet point.
+The caller also supplies the expected server name, server ID and cluster name
+(`-` for standalone). The connection must match all three before any stream
+is read. Pin those values from the managed unit/config/process and matching
+monitor identity in the current preflight; deriving them only from whichever
+server happens to answer the ambiguous client port would defeat the check.
 Production use requires the separate writer hold and final comparison against
 extracted cold-store restores; this tool alone never certifies a master or a
 stopped VM.
@@ -63,7 +68,8 @@ The direct pre-stop capture uses the same private token delivery and URL rule:
 
 ```
 NATS_TOKEN=<loaded privately> node take_cold_baseline.mjs \
-  nats://127.0.0.1:<port> <new-private-absolute-dir> \
+  nats://127.0.0.1:<port> <expected-server-name> <expected-server-id> \
+  <expected-cluster-or-> <new-private-absolute-dir> \
   [comma-separated-known-offline-streams]
 ```
 

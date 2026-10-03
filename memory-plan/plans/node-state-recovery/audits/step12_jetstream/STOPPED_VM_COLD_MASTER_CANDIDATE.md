@@ -188,6 +188,20 @@ across the three serving stores, a powered-off host image or a valid host
 receipt. The host route, trust-gap decision, extracted master hashes, isolated
 production restores and truthful resumption remain open.
 
+## Port-owner identity control — 2026-10-03
+
+The real standalone and held member 1 have historically competed for client
+port 4222 and monitor port 8222. A baseline now requires the expected server
+name, server ID and cluster name, and refuses a mismatch before reading any
+stream. The owned fixture passes correctly pinned standalone/cluster captures
+and refuses a wrong name, ID or cluster with `FAILED.json` and no success
+manifest. This binds the client connection to an independently pinned
+preflight identity; it does not make an ambiguous port safe if the caller
+simply copies its expected values from the endpoint that answered. The
+production service/process/monitor binding, complete historical baselines
+and host-powered-off master provenance remain open. Compact evidence is in
+`COLD_BASELINE_IDENTITY_FIXTURE.json`.
+
 ## Owned direct-store acceptance-mechanism control — 2026-10-03
 
 `probe_cold_trees.mjs` now accepts four distinct frozen, owner-private store

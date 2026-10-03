@@ -994,3 +994,14 @@ stopped. This is synthetic restore-mechanism evidence only. Host-side stopped
 VM access, three real serving cold masters, the typed host receipt, protected
 writer-gap decision and truthful production resumption remain open; 1.2 stays
 [A]/v1.2-pre. See step12_jetstream/COLD_TREE_PROBE_FIXTURE.json.
+
+Checkpoint 2026-10-03 15:04 EDT: the direct pre-stop JetStream capture now
+requires a pinned server name, ID and cluster, refusing a wrong listener
+owner before any stream read. Owned controls for wrong name, ID and cluster
+all produced private failure records without success manifests; the complete
+four-tree fixture still passed and all test servers stopped. The expected
+identity must come from independent managed-service and monitor preflight,
+not the ambiguous 4222 endpoint alone. This closes one port-flip capture
+hazard, not the production writer-gap, host image, three serving cold masters
+or resumption; 1.2 stays [A]/v1.2-pre. See
+step12_jetstream/COLD_BASELINE_IDENTITY_FIXTURE.json.
