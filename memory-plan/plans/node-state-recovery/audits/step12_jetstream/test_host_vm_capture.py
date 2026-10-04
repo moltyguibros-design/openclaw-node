@@ -12,6 +12,8 @@ import time
 import unittest
 
 from stopped_tree_match import guest_capture, host_match
+from host_clone_dispose import dispose
+from host_vm_capture import clone_only
 
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -164,6 +166,31 @@ class HostCaptureTest(unittest.TestCase):
         self.assertTrue((refused / 'FAILED.json').exists())
         self.assertFalse((refused / 'CAPTURE.json').exists())
         self.assertFalse((refused / 'powered-off-image.asif').exists())
+
+        with self.assertRaisesRegex(RuntimeError, 'stopped VM'):
+            dispose(spec, output, output / 'dispose-while-running', fixture=True)
+        self.assertTrue((output / 'dispose-while-running' / 'FAILED.json').exists())
+        self.assertFalse((output / 'dispose-while-running' / 'DISPOSE.json').exists())
+        self.assertTrue((output / 'powered-off-image.asif').exists())
+
+        second_holder.terminate()
+        second_holder.wait(timeout=5)
+        state.write_text('stopped\n')
+        clone = output / 'powered-off-image.asif'
+        with open(clone, 'r+b') as changed:
+            changed.write(b'X')
+        with self.assertRaisesRegex(RuntimeError, 'temporary clone changed'):
+            dispose(spec, output, output / 'dispose-changed-clone', fixture=True)
+        self.assertTrue((output / 'dispose-changed-clone' / 'FAILED.json').exists())
+        self.assertTrue(clone.exists())
+        clone.unlink()
+        clone_only(source, clone)
+        clone.chmod(0o600)
+        disposed = dispose(spec, output, output / 'dispose-after-stop', fixture=True)
+        self.assertTrue(disposed['clone_absent'])
+        self.assertTrue((output / 'dispose-after-stop' / 'DISPOSE.json').exists())
+        self.assertFalse((output / 'powered-off-image.asif').exists())
+        self.assertTrue(source.exists())
 
 
 if __name__ == '__main__':

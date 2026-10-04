@@ -79,6 +79,17 @@ and rehashed host files exactly, then makes the extracted trees read-only.
 `MATCH.json` is a content result only; it is neither writer-exclusion proof nor
 isolated restoration acceptance.
 
+`host_clone_dispose.py` removes the temporary full-image clone from a completed
+capture while a fresh host preflight reports the original VM stopped with no
+image holder. It checks the armed and capture receipts, source image identity,
+and full source/clone hashes before unlinking the clone, then fsyncs the parent
+and repeats the stopped/no-holder check. A failed check leaves a failure
+receipt; a successful `DISPOSE.json` proves only sampled clone removal. It does
+not start the VM, accept a master, or prevent an independent UTM start during
+the operation. A production boot still needs a controller that holds UTM down
+through disposal and verifies clone absence before issuing start. A failed
+capture with no `CAPTURE.json` needs separate fail-closed cleanup.
+
 `host_vm_preflight.py` checks the pinned UTM package, configuration and
 controller binary from the host account's Remote Login context. It asks a
 short-lived job in the logged-in GUI domain for UTM's power state, then

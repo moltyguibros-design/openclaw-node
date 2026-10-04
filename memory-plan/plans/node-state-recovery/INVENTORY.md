@@ -1103,3 +1103,15 @@ The production VM remains started. No actual image or history was copied,
 restored or accepted; the full-node hold, shutdown provenance and service
 resumption gates remain open at 1.2 [A]/v1.2-pre. See
 step12_jetstream/HOST_CAPTURE_BINDING_20261004.json.
+
+Checkpoint 2026-10-04 15:52 EDT: Claude's read-only adversarial review of
+PR #224 at 1133b83b found no blocker in the mechanism-only host capture and
+matching delta, but identified retained same-volume clone lifetime as the
+next safety-critical production gate. A disposable Mac fixture now refuses
+clone disposal while the VM is reported running and removes the clone with a
+private receipt only after a fresh stopped/no-holder preflight and full image
+hashes. Absolute-path and hardlink extraction refusals are also covered.
+This source/fixture work does not prevent an independent UTM restart, clean
+up an incomplete capture, accept real stores, or authorize a production VM
+stop. Exact-head CI and review of the new disposal delta remain pending;
+1.2 stays [A]/v1.2-pre.
