@@ -1210,5 +1210,12 @@ identity change between its running arm observation and stopped extraction.
 Two focused regressions and the synthetic ASIF capture pass locally; the
 host's current stale vmstate was inspected read-only. This narrows accidental
 suspend acceptance but does not prove a clean shutdown or cold restart.
-Exact-head CI and adversarial review remain pending; no production hold,
-VM stop, clone or history acceptance occurred. Step 1.2 remains [A]/v1.2-pre.
+All four exact-head CI jobs passed at d85caa20 (run 37236853002), and
+Claude's read-only delta review found no blocker. The exact ten-file source
+package is staged inactive and hash-verified on the host; a fresh read-only
+preflight still reports the VM started with one image holder and the stale
+vmstate present. Real UTM clean-shutdown behavior could still make the
+candidate refuse, so a disposable VM rehearsal remains required. No
+production hold, VM stop, clone or history acceptance occurred. See
+step12_jetstream/HOST_VMSTATE_GATE_20261004.json. Step 1.2 remains
+[A]/v1.2-pre.
