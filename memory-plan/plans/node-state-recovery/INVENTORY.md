@@ -1085,3 +1085,11 @@ all 212 required dependency files. An owned four-history fixture run from that
 directory passed with every test server stopped, unchanged masters and stale
 baseline refusal. This is synthetic restore capability, not a real cold-master
 test; see step12_jetstream/HOST_ISOLATED_RUNTIME_20261004.json.
+
+The separately pinned release verifier refused that host package until the
+dependency root was made owner-only, then verified all nine top-level files
+and 212 dependencies. A wrong manifest pin refused with no success receipt;
+owned mutation controls cover changed code, changed dependency, readable
+directory and an extra symlink. The original failed receipt remains. This
+integrity gate does not attest any VM power state or real history; see
+step12_jetstream/HOST_RUNTIME_VERIFY_20261004.json.
