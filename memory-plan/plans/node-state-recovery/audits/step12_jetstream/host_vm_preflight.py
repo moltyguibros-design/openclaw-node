@@ -70,12 +70,20 @@ def write_record(path, value):
 
 def gui_status_helper(utmctl, vm_uuid, output):
     result = subprocess.run([utmctl, 'status', vm_uuid], capture_output=True, timeout=15)
-    write_record(pathlib.Path(output), {
+    path = pathlib.Path(output)
+    temporary = path.with_name(path.name + '.tmp')
+    write_record(temporary, {
         'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'returncode': result.returncode,
         'stdout': result.stdout.decode(errors='replace').strip(),
         'stderr': result.stderr.decode(errors='replace').strip()[:300],
     })
+    os.replace(temporary, path)
+    fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def gui_utm_status(utmctl, vm_uuid, output):

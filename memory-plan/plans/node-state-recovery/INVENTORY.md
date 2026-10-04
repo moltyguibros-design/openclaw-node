@@ -1175,4 +1175,13 @@ step12_jetstream/HOST_BOOT_GUARD_DESIGN_20261004.md: prove real disposable UTM
 start/refusal, then implement crash-safe clone-first reconciliation. Clearing
 the source flag yields only a bootable disk; the separate VM start decision
 still needs accepted histories or an explicitly designed abort path. Neither
-controller exists yet.
+production controller exists yet.
+
+A disposable crash-reconciliation mechanism now recovers from an immutable
+source plus an orphan clone, refuses an attached clone, another sibling clone
+or a changed completed-capture source, and yields only a scoped `BOOTABLE`
+receipt. Its guest and Mac-host fixtures pass. A repeated preflight in that
+fixture exposed a GUI status publication race; `host_vm_preflight.py` now
+publishes that JSON by atomic rename, with a deterministic regression check.
+These tools remain disconnected from the production VM and do not authorize
+its start. Real UTM behavior and the full-node hold remain open.

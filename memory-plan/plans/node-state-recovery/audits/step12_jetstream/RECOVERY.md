@@ -104,6 +104,20 @@ does not prove continuous writer exclusion. A real disposable UTM start refusal
 and crash-safe clone-first reconciliation are required before considering it
 for production.
 
+`host_vm_reconcile.py` is a stopped-VM recovery mechanism for an interrupted
+guarded clone attempt. It binds the private arm and initial preflight records
+to a fresh source-image preflight, refuses a changed completed-capture source,
+and removes only the fixed clone after checking its inode, holders and disk
+attachment. It scans sibling recovery directories for another fixed clone
+before clearing the source's immutable flag. Its `BOOTABLE.json` says only
+that the original image is writable again, no clone remains and UTM was
+sampled stopped; it does not start the VM or accept masters. A mismatch writes
+`OPERATOR_REQUIRED.json` and does not blindly unlock. This tool is tested on
+disposable images but is not yet wired into the production capture/boot path.
+Its source identity pin may refuse after a host reboot if the image's device
+number changes, requiring an explicit operator recovery instead of a guessed
+replacement identity.
+
 `host_vm_preflight.py` checks the pinned UTM package, configuration and
 controller binary from the host account's Remote Login context. It asks a
 short-lived job in the logged-in GUI domain for UTM's power state, then
@@ -112,6 +126,8 @@ record or failure record. This is read-only and does not authorize shutdown:
 the started-state result is just an identity check. A host capture controller
 must obtain fresh stopped-state observations after the guest exits and maintain
 the no-holder window throughout image copying and extraction.
+The GUI helper publishes its status by atomic rename after writing and syncing
+the JSON; readers never accept the temporary or partly written file.
 
 Run the driver with an existing token supplied through its process environment,
 never argv, URLs, tracing or a public transcript:
