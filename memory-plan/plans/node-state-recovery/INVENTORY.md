@@ -1040,3 +1040,9 @@ The ASIF extractor now also refuses traversal and symlink entries, restricts
 new file modes and records detach failure before success. Guest and host Mac
 fixtures pass; exact-head CI for the preceding extractor commit passed 4/4.
 These are mechanism results only. No production VM stop or cold master exists.
+
+The host read-only preflight now checks UTM package/config/image identity and
+combines the SSH account's package access with a one-shot GUI UTM status query.
+It reported the pinned VM `started` with one image holder; a wrong config hash
+failed closed. It does not control guest shutdown or certify a cold-copy
+window; see step12_jetstream/HOST_VM_PREFLIGHT_FIXTURE.json.

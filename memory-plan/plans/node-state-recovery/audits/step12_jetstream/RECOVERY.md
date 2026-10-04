@@ -60,6 +60,15 @@ image came from a powered-off guest; a separate typed host receipt and guest
 stop evidence must supply that provenance before production use. Its macOS
 synthetic ASIF fixture tests the extraction and wrong-volume refusal.
 
+`host_vm_preflight.py` checks the pinned UTM package, configuration and
+controller binary from the host account's Remote Login context. It asks a
+short-lived job in the logged-in GUI domain for UTM's power state, then
+compares it with open image holders. It writes a private, fsynced preflight
+record or failure record. This is read-only and does not authorize shutdown:
+the started-state result is just an identity check. A host capture controller
+must obtain fresh stopped-state observations after the guest exits and maintain
+the no-holder window throughout image copying and extraction.
+
 Run the driver with an existing token supplied through its process environment,
 never argv, URLs, tracing or a public transcript:
 

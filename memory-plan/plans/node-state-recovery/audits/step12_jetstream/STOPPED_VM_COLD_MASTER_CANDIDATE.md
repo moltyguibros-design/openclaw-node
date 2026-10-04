@@ -317,3 +317,19 @@ advanced as expected over their archived copies. The test exercised wrong
 listener and stale-archive refusals. All inputs were synthetic. This proves
 the host can execute the restore comparison machinery, not that any production
 store has been preserved or restored.
+
+## Host preflight control — 2026-10-04 12:39 EDT
+
+A detached child launched through the host's authenticated Remote Login
+session remained alive after that session ended and could read the pinned UTM
+config. A Python LaunchAgent in the GUI domain could call `utmctl status` but
+macOS privacy controls denied it direct access to the UTM package. The
+read-only `host_vm_preflight.py` now combines those two privileges: it verifies
+the package, config hash, writable image, controller hash and owner from the
+SSH-owned process, launches a short GUI-domain status helper, checks image
+holders and writes a private record. The host run identified the pinned VM as
+`started`, its 211,136,020,480-byte image and one holder. A wrong config hash
+produced `FAILED.json` and no success record. The VM remained running. This
+does not prove a future detached controller can survive every login change or
+host reboot, nor a clean stop or absence of holders during a cold copy. Compact
+evidence is in `HOST_VM_PREFLIGHT_FIXTURE.json`.
