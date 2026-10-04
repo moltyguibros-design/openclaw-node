@@ -219,3 +219,34 @@ This proves the layout-independent isolated comparison path against synthetic
 stores. No powered-off host image, original guest extraction, host receipt,
 production master or protected writer absence was observed. The three serving
 cold masters and truthful production resumption remain open.
+
+## Host discovery — 2026-10-04 11:51 EDT
+
+An authenticated read-only SSH inventory on the Mac host identified UTM 4.7.5
+and the package candidate at
+`~/Library/Containers/com.utmapp.UTM/Data/Documents/moltMacOS.utm`. Its
+`config.plist` names `moltMacOS`, UUID
+`79B25660-B7F1-4DDC-B379-52A4EB317DAE`, one writable image
+`Data/CA8B46FE-B9C1-4588-B8DB-1C5D40D620FA.img`, Apple virtualization,
+and a shared-network MAC matching the running guest. The package also has
+`Data/AuxiliaryStorage`, `Data/vmstate`, and `screenshot.png`; no symlinks
+were found. The config hash was
+`de181e164d416eacaf5cefd2ff9ff46330995983397fbb28d9cb746af173f4c5`.
+The image is 211,136,020,480 bytes; auxiliary storage is 33,579,164 bytes.
+The 14,629,736,448-byte `vmstate` last changed on 2026-07-26 and is not
+evidence of the current power state. The active Apple virtualization process
+held the image open during this inspection, so none of these observations is
+a powered-off copy or a cold master.
+
+The local Data volume is APFS with 115.7 GB free, less than the package's
+roughly 210 GiB allocated footprint. A disposable 16 MiB same-volume
+`cp -c` control produced a distinct clone whose bytes stayed unchanged after
+a source write. A complete APFS clone may fit, but its shared physical store
+offers only same-disk rollback and needs a capacity margin for later writes;
+the real package was not cloned. UTM's `utmctl` reports OSStatus -1743 from
+SSH and explicitly says it cannot control the app from an SSH session. A
+host-GUI stop/restart handoff and a durable host-side copy/receipt mechanism
+remain necessary before a production window can begin. The powered-off
+state, image-component completeness, source/copy hashes, pre-power-off writer
+gap, three extracted masters, isolated restores and resumption are still
+unverified.

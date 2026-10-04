@@ -1005,3 +1005,13 @@ not the ambiguous 4222 endpoint alone. This closes one port-flip capture
 hazard, not the production writer-gap, host image, three serving cold masters
 or resumption; 1.2 stays [A]/v1.2-pre. See
 step12_jetstream/COLD_BASELINE_IDENTITY_FIXTURE.json.
+
+Checkpoint 2026-10-04 11:51 EDT: SSH access to the Mac host established the
+UTM 4.7.5 package candidate, its single 211 GB writable image, auxiliary
+storage and stale vmstate. The running virtualization process still owns the
+image. The local APFS volume has only 115.7 GB free; a disposable same-volume
+clone control passed, but no real image was copied. UTM control refuses SSH
+sessions, so a host-GUI power handoff and durable host copy/receipt are still
+required. This is read-only production discovery plus a disposable synthetic
+clone test, not a stopped-VM or cold-master observation. Step 1.2 remains
+[A]/v1.2-pre; see step12_jetstream/STOPPED_VM_COLD_MASTER_CANDIDATE.md.
