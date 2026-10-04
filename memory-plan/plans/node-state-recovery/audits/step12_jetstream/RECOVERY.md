@@ -86,9 +86,13 @@ and full source/clone hashes before unlinking the clone, then fsyncs the parent
 and repeats the stopped/no-holder check. A failed check leaves a failure
 receipt; a successful `DISPOSE.json` proves only sampled clone removal. It does
 not start the VM, accept a master, or prevent an independent UTM start during
-the operation. A production boot still needs a controller that holds UTM down
-through disposal and verifies clone absence before issuing start. A failed
-capture with no `CAPTURE.json` needs separate fail-closed cleanup.
+the operation. Its `cleanup-failed` action also removes an orphaned clone from
+an attempt with private `ARMED.json` and `FAILED.json` but no `CAPTURE.json`.
+It binds the failed attempt to the same source-image file identity and refuses a clone
+still held open or listed as an attached disk image. Both actions recheck the
+stopped state after unlinking and issue receipts that do not authorize boot.
+A production controller must hold UTM down continuously through either path
+and verify clone absence before issuing start.
 
 `host_vm_preflight.py` checks the pinned UTM package, configuration and
 controller binary from the host account's Remote Login context. It asks a

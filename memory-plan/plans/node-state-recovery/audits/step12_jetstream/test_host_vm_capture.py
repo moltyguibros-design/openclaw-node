@@ -12,7 +12,7 @@ import time
 import unittest
 
 from stopped_tree_match import guest_capture, host_match
-from host_clone_dispose import dispose
+from host_clone_dispose import cleanup_failed, dispose
 from host_vm_capture import clone_only
 
 
@@ -40,14 +40,26 @@ class HostCaptureTest(unittest.TestCase):
             if process.poll() is None:
                 process.terminate()
                 process.wait(timeout=5)
-        for disk in reversed(self.disks):
-            run('/usr/sbin/diskutil', 'eject', disk)
+        while self.disks:
+            self.eject()
         for directory, dirs, files in os.walk(self.root):
             for name in dirs:
                 os.chmod(pathlib.Path(directory) / name, 0o700)
             for name in files:
                 os.chmod(pathlib.Path(directory) / name, 0o600)
         shutil.rmtree(self.root)
+
+    def eject(self):
+        disk = self.disks[-1]
+        for _ in range(20):
+            result = subprocess.run(['/usr/sbin/diskutil', 'eject', disk], capture_output=True)
+            if result.returncode == 0:
+                self.disks.pop()
+                return
+            if b'Volume failed to eject' not in result.stderr:
+                raise AssertionError(result.stderr.decode(errors='replace')[:500])
+            time.sleep(0.25)
+        raise AssertionError(f'disposable image did not eject: {disk}')
 
     def test_external_stop_then_cold_extract(self):
         package = self.root / 'Owned.utm'
@@ -75,7 +87,7 @@ class HostCaptureTest(unittest.TestCase):
         store_spec.chmod(0o600)
         guest_output = self.root / 'guest-stopped'
         guest_capture(store_spec, guest_output, mount)
-        run('/usr/sbin/diskutil', 'eject', self.disks.pop())
+        self.eject()
         vm_uuid = '00000000-0000-0000-0000-000000000002'
         config = package / 'config.plist'
         config.write_bytes(plistlib.dumps({
@@ -190,6 +202,54 @@ class HostCaptureTest(unittest.TestCase):
         self.assertTrue(disposed['clone_absent'])
         self.assertTrue((output / 'dispose-after-stop' / 'DISPOSE.json').exists())
         self.assertFalse((output / 'powered-off-image.asif').exists())
+        self.assertTrue(source.exists())
+
+        wrong_store_spec = self.root / 'wrong-store-spec.json'
+        wrong_store_spec.write_text(json.dumps({
+            'data_volume_uuid': '00000000-0000-0000-0000-000000000000',
+            'stores': stores,
+        }))
+        wrong_store_spec.chmod(0o600)
+        state.write_text('started\n')
+        third_holder = subprocess.Popen([sys.executable, '-c',
+                                         'import sys,time; f=open(sys.argv[1],"rb"); time.sleep(30)',
+                                         str(source)], stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL)
+        self.processes.append(third_holder)
+        time.sleep(0.2)
+        failed_capture = self.root / 'failed-capture'
+        failed_worker = subprocess.Popen([sys.executable, str(CAPTURE), str(spec),
+                                          str(wrong_store_spec), str(failed_capture), '20', '--fixture'],
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        self.processes.append(failed_worker)
+        deadline = time.monotonic() + 15
+        while not (failed_capture / 'ARMED.json').exists() and time.monotonic() < deadline:
+            if failed_worker.poll() is not None:
+                raise AssertionError(failed_worker.stderr.read().decode())
+            time.sleep(0.1)
+        self.assertTrue((failed_capture / 'ARMED.json').exists())
+        third_holder.terminate()
+        third_holder.wait(timeout=5)
+        state.write_text('stopped\n')
+        failed_worker.communicate(timeout=30)
+        self.assertNotEqual(failed_worker.returncode, 0)
+        self.assertTrue((failed_capture / 'FAILED.json').exists())
+        self.assertFalse((failed_capture / 'CAPTURE.json').exists())
+        failed_clone = failed_capture / 'powered-off-image.asif'
+        self.assertTrue(failed_clone.exists())
+
+        attached_clone = plistlib.loads(run('/usr/sbin/diskutil', 'image', 'attach', '--plist',
+                                             '--readOnly', '--noMount', str(failed_clone)))
+        self.disks.append(attached_clone['system-entities'][0]['dev-entry'])
+        with self.assertRaisesRegex(RuntimeError, 'clone'):
+            cleanup_failed(spec, failed_capture, failed_capture / 'cleanup-attached', fixture=True)
+        self.assertTrue(failed_clone.exists())
+        self.eject()
+        cleaned = cleanup_failed(spec, failed_capture, failed_capture / 'cleanup-detached',
+                                 fixture=True)
+        self.assertTrue(cleaned['clone_absent'])
+        self.assertTrue((failed_capture / 'cleanup-detached' / 'CLEANUP.json').exists())
+        self.assertFalse(failed_clone.exists())
         self.assertTrue(source.exists())
 
 

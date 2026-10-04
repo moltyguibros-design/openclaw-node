@@ -1124,3 +1124,13 @@ inactive owner-private package and verified by manifest hash; see
 step12_jetstream/HOST_STAGED_DISPOSAL_20261004.json. This work does not prevent
 an independent UTM restart, clean up an incomplete capture, accept real
 stores, or authorize a production VM stop. 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-04 16:10 EDT: the host disposal tool now has a separate
+failed-capture cleanup action. An owned ASIF fixture induced a capture failure
+after clone creation, proved cleanup refuses while that clone is attached,
+then ejected and removed the orphan with the original image intact. The
+action requires the failed/armed records, the same source-image file identity,
+no clone holder or disk-image attachment, and stopped/no-holder observations
+before and after unlink. This is a disposable mechanism test, not a production
+boot interlock or master acceptance. Exact-head CI and adversarial review of
+this delta remain pending; 1.2 stays [A]/v1.2-pre.
