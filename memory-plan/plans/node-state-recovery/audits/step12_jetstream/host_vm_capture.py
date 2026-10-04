@@ -62,7 +62,7 @@ def same_host_image(before, after):
             (before['image_device'], before['image_inode'], before['image_size']))
 
 
-def capture(host_spec_path, store_spec_path, output, wait_seconds):
+def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False):
     os.umask(0o077)
     host_spec_path = pathlib.Path(host_spec_path)
     store_spec_path = pathlib.Path(store_spec_path)
@@ -72,6 +72,14 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds):
     host = pinned_spec(host_spec_path, {'package', 'name', 'uuid', 'image_name',
                                           'config_sha256', 'utmctl', 'utmctl_sha256'})
     stores = pinned_spec(store_spec_path, {'data_volume_uuid', 'stores'})
+    if fixture:
+        require(host['uuid'] == '00000000-0000-0000-0000-000000000002'
+                and pathlib.Path(host['package']).parent == output.parent,
+                'fixture capture must use the owned disposable VM package')
+    else:
+        require(output.parent == pathlib.Path.home() /
+                'Library/Application Support/OpenClawRecovery',
+                'production capture requires the durable host recovery directory')
     require(isinstance(stores['stores'], list) and len(stores['stores']) == 4,
             'capture requires four store declarations')
     require(1 <= wait_seconds <= 3600, 'shutdown wait must be bounded to one hour')
@@ -123,6 +131,8 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds):
         after_clone = preflight(host_spec_path, output / 'after-clone')
         require(after_clone['state'] == 'stopped' and same_host_image(first, after_clone),
                 'VM restarted or host rebooted during clone')
+        require(shutil.disk_usage(output).free >= 20 * 1024 ** 3,
+                'host free-space floor fell below 20 GiB after clone')
         source_sha = file_hash(source)
         clone_sha = file_hash(clone)
         require(source_sha == clone_sha, 'source and clone hashes differ')
@@ -137,6 +147,8 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds):
         require(after_extract['state'] == 'stopped' and same_host_image(first, after_extract)
                 and file_hash(source) == source_sha and file_hash(clone) == clone_sha,
                 'VM restarted or image changed during extraction')
+        require(shutil.disk_usage(output).free >= 20 * 1024 ** 3,
+                'host free-space floor fell below 20 GiB after extraction')
         result = {
             'scope': 'sampled stopped-state image extraction; uninterrupted power-off, clean shutdown and master acceptance external',
             'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -156,5 +168,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds):
 
 
 if __name__ == '__main__':
-    require(len(sys.argv) == 5, 'usage: host_vm_capture.py HOST_SPEC STORE_SPEC OUTPUT WAIT_SECONDS')
-    capture(sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]))
+    require(len(sys.argv) in (5, 6),
+            'usage: host_vm_capture.py HOST_SPEC STORE_SPEC OUTPUT WAIT_SECONDS [--fixture]')
+    require(len(sys.argv) == 5 or sys.argv[5] == '--fixture', 'invalid capture option')
+    capture(sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), len(sys.argv) == 6)

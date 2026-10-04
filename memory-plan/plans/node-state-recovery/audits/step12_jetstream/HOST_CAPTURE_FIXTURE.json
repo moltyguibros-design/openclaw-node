@@ -1,6 +1,7 @@
 {
   "date": "2026-10-04",
   "scope": "disposable VM-shaped ASIF/APFS fixture only; production VM remained running",
+  "host_preparation": "persistent ~/Library/Application Support/OpenClawRecovery created owner-only on the same host device as the VM image; no production image copied",
   "method": "host worker starts while fixture disk is held, waits for an external stop, requires two consistent stopped/no-holder observations, invokes clonefile without a copy fallback, hashes source and clone, extracts four stores read-only, rechecks stopped state and image bytes",
   "guest_fixture": {
     "positive": "four marker stores extracted; sampled final VM state stopped",

@@ -60,10 +60,14 @@ image came from a powered-off guest; a separate typed host receipt and guest
 stop evidence must supply that provenance before production use. Its macOS
 synthetic ASIF fixture tests the extraction and wrong-volume refusal.
 
-`host_vm_capture.py` is a host-side candidate capture worker. It waits for an
+`host_vm_capture.py` is a host-side candidate capture worker. Its production
+output parent must be the owner-private, persistent host
+`~/Library/Application Support/OpenClawRecovery` directory; disposable
+fixtures have a separate guarded mode. It waits for an
 external guest shutdown, uses two sampled stopped/no-holder observations,
 calls `clonefile(2)` without fallback, hashes source and clone, runs the
-extractor and rechecks the stopped state. The worker never issues a stop or
+extractor and rechecks the stopped state and a 20 GiB free-space floor. The
+worker never issues a stop or
 restart. Its `CAPTURE.json` is not a historical acceptance receipt: the clean
 guest shutdown, uninterrupted host exclusion, guest-to-host store comparison,
 isolated production restore and resumption are still required.

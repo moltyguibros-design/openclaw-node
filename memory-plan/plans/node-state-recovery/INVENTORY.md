@@ -1058,3 +1058,6 @@ four-store disposable fixture on both Macs, and a changed extracted file
 refuses. The guest source hash still needs the real managed writer hold; the
 actual three serving histories and held R1 have not been copied or restored.
 See step12_jetstream/HOST_STOPPED_TREE_MATCH_FIXTURE.json.
+
+The host's persistent owner-only recovery directory now exists on the VM
+image's device. No production image or store has been copied into it.

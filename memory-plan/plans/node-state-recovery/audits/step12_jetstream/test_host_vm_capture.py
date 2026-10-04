@@ -94,6 +94,11 @@ class HostCaptureTest(unittest.TestCase):
             'utmctl_sha256': hashlib.sha256(controller.read_bytes()).hexdigest(),
         }))
         spec.chmod(0o600)
+        unsafe = self.root / 'unsafe-production-path'
+        refused_path = subprocess.run([sys.executable, str(CAPTURE), str(spec),
+                                       str(store_spec), str(unsafe), '1'], capture_output=True)
+        self.assertNotEqual(refused_path.returncode, 0)
+        self.assertFalse(unsafe.exists())
         holder = subprocess.Popen([sys.executable, '-c',
                                    'import sys,time; f=open(sys.argv[1],"rb"); time.sleep(30)',
                                    str(source)], stdout=subprocess.DEVNULL,
@@ -102,7 +107,7 @@ class HostCaptureTest(unittest.TestCase):
         time.sleep(0.2)
         output = self.root / 'capture'
         worker = subprocess.Popen([sys.executable, str(CAPTURE), str(spec), str(store_spec),
-                                   str(output), '20'], stdout=subprocess.DEVNULL,
+                                   str(output), '20', '--fixture'], stdout=subprocess.DEVNULL,
                                   stderr=subprocess.PIPE)
         self.processes.append(worker)
         deadline = time.monotonic() + 15
@@ -145,7 +150,7 @@ class HostCaptureTest(unittest.TestCase):
         time.sleep(0.2)
         refused = self.root / 'no-shutdown'
         no_stop = subprocess.run([sys.executable, str(CAPTURE), str(spec), str(store_spec),
-                                  str(refused), '1'], capture_output=True)
+                                  str(refused), '1', '--fixture'], capture_output=True)
         self.assertNotEqual(no_stop.returncode, 0)
         self.assertTrue((refused / 'FAILED.json').exists())
         self.assertFalse((refused / 'CAPTURE.json').exists())

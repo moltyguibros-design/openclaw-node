@@ -347,6 +347,11 @@ clone digests, extracts the four declared stores through the read-only ASIF
 tool, and rechecks the pinned host boot, image identity and sampled stopped
 state. It writes a candidate `CAPTURE.json` or a failure record and leaves
 the VM off; it never declares a historical master accepted.
+Production output is restricted to an owner-private persistent host recovery
+directory, with a 20 GiB capacity floor before and after the clone and store
+extraction. Fixture mode requires the reserved synthetic VM identity.
+The host's persistent directory was created owner-only on the same device as
+the image; it contains no production capture or master yet.
 
 A disposable VM-shaped ASIF/APFS fixture passed on the guest and on the host.
 On the host, the fixture ran in a detached Remote Login child after the
