@@ -1078,3 +1078,10 @@ recovery directory. Running the staged preflight reported the pinned VM
 `started` with one image holder and unchanged config/controller hashes. This
 is preparation, not a shutdown, image capture or master acceptance; see
 step12_jetstream/HOST_STAGED_TOOLS_20261004.json.
+
+The host's persistent isolated restore runtime now has byte-matched Node
+24.13.0, NATS CLI 0.3.1, NATS server 2.12.6, the current recovery scripts and
+all 212 required dependency files. An owned four-history fixture run from that
+directory passed with every test server stopped, unchanged masters and stale
+baseline refusal. This is synthetic restore capability, not a real cold-master
+test; see step12_jetstream/HOST_ISOLATED_RUNTIME_20261004.json.
