@@ -352,6 +352,10 @@ directory, with a 20 GiB capacity floor before and after the clone and store
 extraction. Fixture mode requires the reserved synthetic VM identity.
 The host's persistent directory was created owner-only on the same device as
 the image; it contains no production capture or master yet.
+The pinned UTM identity and four role paths were placed there as 0600 JSON
+inputs. A fresh read-only preflight using those durable inputs still reports
+the intended VM `started` with one image holder. Their hashes and the capacity
+reading are in `HOST_PREPARED_SPECS.json`; neither input starts a capture.
 
 A disposable VM-shaped ASIF/APFS fixture passed on the guest and on the host.
 On the host, the fixture ran in a detached Remote Login child after the

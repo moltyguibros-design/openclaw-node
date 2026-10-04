@@ -1061,3 +1061,6 @@ See step12_jetstream/HOST_STOPPED_TREE_MATCH_FIXTURE.json.
 
 The host's persistent owner-only recovery directory now exists on the VM
 image's device. No production image or store has been copied into it.
+The host's pinned 0600 VM and four-store specifications pass a fresh read-only
+preflight there; UTM is still `started` with one disk holder. See
+step12_jetstream/HOST_PREPARED_SPECS.json.
