@@ -155,6 +155,7 @@ jobs:
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_journal.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_asif_extract.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_image_immutable.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_release_verify.py
           PYTHONPATH="$PWD/memory-plan/plans/node-state-recovery/audits/step12_jetstream" /usr/bin/python3 -m unittest -q \
             test_preservation_checks.Gates.test_only_exact_tailscale_system_job_can_be_excluded \

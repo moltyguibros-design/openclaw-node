@@ -94,6 +94,16 @@ stopped state after unlinking and issue receipts that do not authorize boot.
 A production controller must hold UTM down continuously through either path
 and verify clone absence before issuing start.
 
+`host_image_immutable.py` is an isolated, pinned `UF_IMMUTABLE` file-flag
+operation for disposable host-image guard tests. It verifies a literal,
+owner-owned, singly linked image file by device, inode and size before changing
+the flag through its open descriptor, and verifies the same inode afterward.
+It is not wired into capture, disposal or boot. An existing writable descriptor
+can still write after the flag is set, and the owner can clear it; this flag
+does not prove continuous writer exclusion. A real disposable UTM start refusal
+and crash-safe clone-first reconciliation are required before considering it
+for production.
+
 `host_vm_preflight.py` checks the pinned UTM package, configuration and
 controller binary from the host account's Remote Login context. It asks a
 short-lived job in the logged-in GUI domain for UTM's power state, then

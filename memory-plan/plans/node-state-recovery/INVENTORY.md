@@ -1155,3 +1155,11 @@ enters the production capture path, a disposable UTM start/refusal/recovery
 test and idempotent clone-first boot reconciliation are required. No source
 flag was applied to the production VM; 1.2 remains [A]/v1.2-pre. See
 step12_jetstream/HOST_UCHG_DESIGN_PROBE_20261004.json.
+
+The isolated `host_image_immutable.py` primitive and macOS fixture now verify
+the flag operation by open file identity, refusal of wrong inode and symlink,
+the pre-existing writable-descriptor bypass, inherited clone flag, read-only
+attach, clone-only unlock and eventual source unlock. The fixture passed on
+both guest and Mac host with disposable ASIF files. The primitive is not
+connected to the production capture or boot path; UTM-level behavior and
+crash reconciliation remain the next safety work.
