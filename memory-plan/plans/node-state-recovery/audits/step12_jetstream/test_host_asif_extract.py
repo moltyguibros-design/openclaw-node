@@ -104,6 +104,16 @@ class HostAsifExtractTest(unittest.TestCase):
         self.assertTrue((self.root / 'bad-path' / 'FAILED.json').exists())
         self.assertFalse((self.root / 'bad-path' / 'manifest.json').exists())
 
+        absolute = dict(spec, stores=[dict(row) for row in stores])
+        absolute['stores'][0]['relative_path'] = '/Users/moltymac/.openclaw/nats/standalone'
+        spec_path.write_text(json.dumps(absolute))
+        bad_absolute = subprocess.run([sys.executable, str(TOOL), str(clone), str(spec_path),
+                                       str(self.root / 'bad-absolute')], capture_output=True)
+        self.assertNotEqual(bad_absolute.returncode, 0)
+        self.assertIn('invalid store path',
+                      (self.root / 'bad-absolute' / 'FAILED.json').read_text())
+        self.assertFalse((self.root / 'bad-absolute' / 'manifest.json').exists())
+
         live = self.attach(source)
         live_mount = pathlib.Path(next(row['mount-point'] for row in live
                                        if row.get('volume-name') == 'Data'))
@@ -119,6 +129,25 @@ class HostAsifExtractTest(unittest.TestCase):
         self.assertNotEqual(bad_link.returncode, 0)
         self.assertTrue((self.root / 'bad-link' / 'FAILED.json').exists())
         self.assertFalse((self.root / 'bad-link' / 'manifest.json').exists())
+
+        live = self.attach(source)
+        live_mount = pathlib.Path(next(row['mount-point'] for row in live
+                                       if row.get('volume-name') == 'Data'))
+        store = live_mount / stores[0]['relative_path']
+        (store / 'escaped-link').unlink()
+        os.link(store / 'stream.dat', store / 'linked.dat')
+        self.eject()
+        hardlinked = self.root / 'hardlinked.asif'
+        run('/bin/cp', '-c', str(source), str(hardlinked))
+        os.chmod(hardlinked, 0o600)
+        hardlinked_spec = dict(spec, image_sha256=hashlib.sha256(hardlinked.read_bytes()).hexdigest())
+        spec_path.write_text(json.dumps(hardlinked_spec))
+        bad_hardlink = subprocess.run([sys.executable, str(TOOL), str(hardlinked), str(spec_path),
+                                       str(self.root / 'bad-hardlink')], capture_output=True)
+        self.assertNotEqual(bad_hardlink.returncode, 0)
+        self.assertIn('non-regular or linked store entry',
+                      (self.root / 'bad-hardlink' / 'FAILED.json').read_text())
+        self.assertFalse((self.root / 'bad-hardlink' / 'manifest.json').exists())
 
 
 if __name__ == '__main__':
