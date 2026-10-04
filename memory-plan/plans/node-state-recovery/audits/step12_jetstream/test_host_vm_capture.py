@@ -10,10 +10,12 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 from stopped_tree_match import guest_capture, host_match
 from host_clone_dispose import cleanup_failed, dispose
-from host_vm_capture import clone_only
+from host_vm_capture import capture, clone_only
+from host_vm_preflight import vmstate_identity
 
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -25,6 +27,53 @@ def run(*args):
     if result.returncode:
         raise AssertionError((args, result.stderr.decode(errors='replace')[:500]))
     return result.stdout
+
+
+class VmstateGateTest(unittest.TestCase):
+    def test_vmstate_change_refuses_before_clone(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-vmstate-gate-') as temporary:
+            root = pathlib.Path(temporary).resolve()
+            root.chmod(0o700)
+            host_spec = root / 'host.json'
+            host_spec.write_text(json.dumps({
+                'package': str(root / 'Owned.utm'), 'name': 'Owned',
+                'uuid': '00000000-0000-0000-0000-000000000002',
+                'image_name': '00000000-0000-0000-0000-000000000001.img',
+                'config_sha256': '0' * 64, 'utmctl': '/tmp/unused',
+                'utmctl_sha256': '0' * 64,
+            }))
+            host_spec.chmod(0o600)
+            store_spec = root / 'stores.json'
+            store_spec.write_text(json.dumps({
+                'data_volume_uuid': '00000000-0000-0000-0000-000000000003',
+                'stores': [{'role': role, 'relative_path': role}
+                           for role in ('standalone', 'member1', 'member2', 'member3')],
+            }))
+            store_spec.chmod(0o600)
+            before = {'state': 'started', 'host_boot_session': 'boot',
+                      'image_device': 1, 'image_inode': 2, 'image_size': 3,
+                      'vmstate': {'device': 1, 'inode': 4, 'size': 5, 'mtime_ns': 6}}
+            stopped = dict(before, state='stopped', holders_consistent=True,
+                           vmstate=dict(before['vmstate'], mtime_ns=7))
+            output = root / 'capture'
+            with mock.patch('host_vm_capture.preflight', side_effect=[before, stopped]):
+                with self.assertRaisesRegex(RuntimeError, 'identity changed'):
+                    capture(host_spec, store_spec, output, 1, fixture=True)
+            self.assertTrue((output / 'FAILED.json').exists())
+            self.assertFalse((output / 'CAPTURE.json').exists())
+            self.assertFalse((output / 'powered-off-image.asif').exists())
+
+    def test_vmstate_identity_refuses_link(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-vmstate-path-') as temporary:
+            root = pathlib.Path(temporary)
+            source = root / 'source'
+            source.write_bytes(b'stale')
+            self.assertEqual(vmstate_identity(root / 'missing'), None)
+            self.assertEqual(vmstate_identity(source)['size'], 5)
+            self.assertIn('ctime_ns', vmstate_identity(source))
+            (root / 'vmstate').symlink_to(source)
+            with self.assertRaisesRegex(RuntimeError, 'regular file'):
+                vmstate_identity(root / 'vmstate')
 
 
 @unittest.skipUnless(sys.platform == 'darwin', 'requires macOS ASIF and GUI launchd')
@@ -65,6 +114,7 @@ class HostCaptureTest(unittest.TestCase):
         package = self.root / 'Owned.utm'
         data = package / 'Data'
         data.mkdir(parents=True)
+        (data / 'vmstate').write_bytes(b'old suspend state')
         source = data / '00000000-0000-0000-0000-000000000001.img'
         run('/usr/sbin/diskutil', 'image', 'create', 'blank', '--format', 'ASIF',
             '--size', '128m', '--fs', 'APFS', '--volumeName', 'Data', str(source))
@@ -137,6 +187,8 @@ class HostCaptureTest(unittest.TestCase):
         self.assertEqual(worker.returncode, 0, stderr.decode())
         result = json.loads((output / 'CAPTURE.json').read_text())
         self.assertEqual(result['vm_state_at_final_check'], 'stopped')
+        self.assertEqual(result['vmstate_at_arm'], result['vmstate_at_final_check'])
+        self.assertEqual(result['vmstate_at_arm']['size'], len(b'old suspend state'))
         self.assertFalse((output / 'FAILED.json').exists())
         for role in ('standalone', 'member1', 'member2', 'member3'):
             self.assertEqual((output / 'extracted-stores' / role / 'stream.dat').read_text(),

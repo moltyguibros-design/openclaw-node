@@ -388,3 +388,16 @@ altering the capture receipt refuses the match. This closes a provenance gap
 where a free-standing extracted directory could have been matched without its
 capture receipt. It still cannot attest continuous VM power-off or a clean
 guest shutdown.
+
+## Sampled vmstate refusal candidate — 2026-10-04
+
+The host preflight now records the owner-owned `Data/vmstate` inode, device,
+size and nanosecond modification/change times, or its absence. The capture worker
+requires that identity to match its initial running observation at every
+stopped-state check through extraction. A changed or newly created vmstate
+refuses before a clone when observed during shutdown. Disposable tests cover
+this refusal and symlink rejection; the full synthetic ASIF capture still
+passes. On the real host, the existing 14,629,736,448-byte vmstate is owned
+by UID 501 and has not been touched by this work. This is a sampled suspend
+warning only. It does not attest a clean power-down, uninterrupted power-off
+or a cold restart, and it has not been staged or invoked on the host.

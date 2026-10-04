@@ -1204,3 +1204,11 @@ delta review found no blocker. Ten source files are staged on the host in an
 inactive 0700/0600, hash-verified package; no production VM or service was
 changed. See step12_jetstream/HOST_GUARD_INTENT_20261004.json. This remains
 a disposable source candidate at 1.2 [A]/v1.2-pre.
+
+The inactive host capture candidate now refuses a sampled `Data/vmstate`
+identity change between its running arm observation and stopped extraction.
+Two focused regressions and the synthetic ASIF capture pass locally; the
+host's current stale vmstate was inspected read-only. This narrows accidental
+suspend acceptance but does not prove a clean shutdown or cold restart.
+Exact-head CI and adversarial review remain pending; no production hold,
+VM stop, clone or history acceptance occurred. Step 1.2 remains [A]/v1.2-pre.

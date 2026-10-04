@@ -66,7 +66,12 @@ output parent must be the owner-private, persistent host
 fixtures have a separate guarded mode. It waits for an
 external guest shutdown, uses two sampled stopped/no-holder observations,
 calls `clonefile(2)` without fallback, hashes source and clone, runs the
-extractor and rechecks the stopped state and a 20 GiB free-space floor. The
+extractor and rechecks the stopped state and a 20 GiB free-space floor. Host
+preflight records the owned `Data/vmstate` file identity (or its absence), and
+capture refuses any sampled change from the initial running observation
+through extraction; that change could indicate a suspend instead of a clean
+shutdown. An unchanged stale `vmstate` is not proof of a cold boot, so the
+later start decision must still exclude resume. The
 worker never issues a stop or
 restart. Its `CAPTURE.json` is not a historical acceptance receipt: the clean
 guest shutdown, uninterrupted host exclusion, guest-to-host store comparison,

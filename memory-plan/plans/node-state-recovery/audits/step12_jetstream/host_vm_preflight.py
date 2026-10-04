@@ -54,6 +54,14 @@ def regular_file(path, owner=None):
     return info
 
 
+def vmstate_identity(path):
+    if not os.path.lexists(path):
+        return None
+    info = regular_file(path, os.getuid())
+    return {'device': info.st_dev, 'inode': info.st_ino, 'size': info.st_size,
+            'mtime_ns': info.st_mtime_ns, 'ctime_ns': info.st_ctime_ns}
+
+
 def write_record(path, value):
     with open(path, 'x', encoding='utf-8') as output:
         os.chmod(path, 0o600)
@@ -157,6 +165,7 @@ def preflight(spec_path, output, allow_transition=False):
         image = data / spec['image_name']
         require(image.resolve() == image, 'UTM image path is redirected')
         image_info = regular_file(image, os.getuid())
+        vmstate = vmstate_identity(data / 'vmstate')
         regular_file(utmctl)
         require(digest(utmctl) == spec['utmctl_sha256'] and os.access(utmctl, os.X_OK),
                 'UTM controller binary differs')
@@ -178,6 +187,7 @@ def preflight(spec_path, output, allow_transition=False):
             'state': state, 'state_observed_at_utc': status['at_utc'],
             'image': str(image), 'image_size': image_info.st_size,
             'image_device': image_info.st_dev, 'image_inode': image_info.st_ino,
+            'vmstate': vmstate,
             'image_holders': pids, 'holders_consistent': consistent,
             'free_bytes': shutil.disk_usage(image.parent).free,
         }

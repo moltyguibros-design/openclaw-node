@@ -59,7 +59,8 @@ def clone_only(source, target):
 def same_host_image(before, after):
     return (after['host_boot_session'] == before['host_boot_session']
             and (after['image_device'], after['image_inode'], after['image_size']) ==
-            (before['image_device'], before['image_inode'], before['image_size']))
+            (before['image_device'], before['image_inode'], before['image_size'])
+            and after['vmstate'] == before['vmstate'])
 
 
 def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False):
@@ -102,7 +103,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
             observation = preflight(host_spec_path, output / f'power-{sequence:04d}',
                                     allow_transition=True)
             require(same_host_image(first, observation),
-                    'host boot or VM image identity changed while waiting')
+                    'host boot, VM image or vmstate identity changed while waiting')
             if observation['state'] == 'stopped' and observation['holders_consistent']:
                 stopped_count += 1
                 if stopped_count == 2:
@@ -130,7 +131,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         fsync_parent(output)
         after_clone = preflight(host_spec_path, output / 'after-clone')
         require(after_clone['state'] == 'stopped' and same_host_image(first, after_clone),
-                'VM restarted or host rebooted during clone')
+                'VM restarted or host, image or vmstate identity changed during clone')
         require(shutil.disk_usage(output).free >= 20 * 1024 ** 3,
                 'host free-space floor fell below 20 GiB after clone')
         source_sha = file_hash(source)
@@ -138,7 +139,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         require(source_sha == clone_sha, 'source and clone hashes differ')
         after_hash = preflight(host_spec_path, output / 'after-hash')
         require(after_hash['state'] == 'stopped' and same_host_image(first, after_hash),
-                'VM restarted or host rebooted during image hashing')
+                'VM restarted or host, image or vmstate identity changed during image hashing')
         extraction_spec = dict(stores, image_sha256=clone_sha)
         spec_out = output / 'extraction-spec.json'
         write_record(spec_out, extraction_spec)
@@ -146,7 +147,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         after_extract = preflight(host_spec_path, output / 'after-extract')
         require(after_extract['state'] == 'stopped' and same_host_image(first, after_extract)
                 and file_hash(source) == source_sha and file_hash(clone) == clone_sha,
-                'VM restarted or image changed during extraction')
+                'VM restarted or host, image or vmstate changed during extraction')
         require(shutil.disk_usage(output).free >= 20 * 1024 ** 3,
                 'host free-space floor fell below 20 GiB after extraction')
         result = {
@@ -155,6 +156,8 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
             'vm_uuid': host['uuid'], 'host_boot_session': first['host_boot_session'],
             'source_image_sha256': source_sha, 'clone_image_sha256': clone_sha,
             'source_size': first['image_size'], 'clone_size': clone_info.st_size,
+            'vmstate_at_arm': first['vmstate'],
+            'vmstate_at_final_check': after_extract['vmstate'],
             'data_volume_uuid': stores['data_volume_uuid'],
             'extraction_manifest_sha256': file_hash(output / 'extracted-stores' / 'manifest.json'),
             'store_roles': sorted(extracted['stores']),
