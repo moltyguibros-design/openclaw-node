@@ -240,8 +240,10 @@ a powered-off copy or a cold master.
 
 The local Data volume is APFS with 115.7 GB free, less than the package's
 roughly 210 GiB allocated footprint. A disposable 16 MiB same-volume
-`cp -c` control produced a distinct clone whose bytes stayed unchanged after
-a source write. A complete APFS clone may fit, but its shared physical store
+`cp -c` control produced a distinct copy whose bytes stayed unchanged after
+a source write. The local `cp(1)` manual says `-c` falls back to `copyfile(2)`
+when `clonefile(2)` is unavailable, so this was not clone-only evidence. A
+complete APFS clone may fit, but its shared physical store
 offers only same-disk rollback and needs a capacity margin for later writes;
 the real package was not cloned. UTM's `utmctl` reports OSStatus -1743 from
 SSH and explicitly says it cannot control the app from an SSH session. A
@@ -333,3 +335,25 @@ produced `FAILED.json` and no success record. The VM remained running. This
 does not prove a future detached controller can survive every login change or
 host reboot, nor a clean stop or absence of holders during a cold copy. Compact
 evidence is in `HOST_VM_PREFLIGHT_FIXTURE.json`.
+
+## Host capture worker rehearsal — 2026-10-04
+
+`host_vm_capture.py` starts from the authenticated host account while the VM
+is running. It does not stop or boot a guest. It records an arm point, waits
+up to a declared deadline for two consecutive UTM `stopped` observations
+with no image holder, then invokes `clonefile(2)` directly so unsupported
+cloning cannot silently become a full physical copy. It checks source and
+clone digests, extracts the four declared stores through the read-only ASIF
+tool, and rechecks the pinned host boot, image identity and sampled stopped
+state. It writes a candidate `CAPTURE.json` or a failure record and leaves
+the VM off; it never declares a historical master accepted.
+
+A disposable VM-shaped ASIF/APFS fixture passed on the guest and on the host.
+On the host, the fixture ran in a detached Remote Login child after the
+initiating SSH session ended. Both runs extracted four owned marker stores;
+a no-shutdown control refused before cloning. The first test exposed a normal
+transition where the image holder vanished before UTM changed from `started`
+to `stopped`; the worker now waits through that transient mismatch. These are
+sampled observations, not proof of uninterrupted power-off throughout a real
+211 GB copy. No production image was cloned or opened. Compact evidence is
+in `HOST_CAPTURE_FIXTURE.json`.

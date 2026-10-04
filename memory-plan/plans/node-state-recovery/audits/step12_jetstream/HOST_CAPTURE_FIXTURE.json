@@ -1,0 +1,23 @@
+{
+  "date": "2026-10-04",
+  "scope": "disposable VM-shaped ASIF/APFS fixture only; production VM remained running",
+  "method": "host worker starts while fixture disk is held, waits for an external stop, requires two consistent stopped/no-holder observations, invokes clonefile without a copy fallback, hashes source and clone, extracts four stores read-only, rechecks stopped state and image bytes",
+  "guest_fixture": {
+    "positive": "four marker stores extracted; sampled final VM state stopped",
+    "negative": "no shutdown before deadline wrote FAILED.json and no clone or CAPTURE.json",
+    "result": "1 test passed"
+  },
+  "host_fixture": {
+    "positive": "four marker stores extracted; sampled final VM state stopped",
+    "negative": "no shutdown before deadline wrote FAILED.json and no clone or CAPTURE.json",
+    "detached_from_ssh": true,
+    "result": "1 test passed"
+  },
+  "unverified": [
+    "real guest clean shutdown",
+    "uninterrupted stopped/no-holder interval rather than sampled observations",
+    "production UTM image ASIF attach and store extraction",
+    "pre-stop-to-host store identity and isolated production restores",
+    "historical cold-master acceptance and service resumption"
+  ]
+}

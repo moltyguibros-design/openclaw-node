@@ -1046,3 +1046,9 @@ combines the SSH account's package access with a one-shot GUI UTM status query.
 It reported the pinned VM `started` with one image holder; a wrong config hash
 failed closed. It does not control guest shutdown or certify a cold-copy
 window; see step12_jetstream/HOST_VM_PREFLIGHT_FIXTURE.json.
+
+The host capture worker now passes a disposable VM-shaped ASIF rehearsal on
+guest and host, including a detached host execution and a no-shutdown refusal.
+It uses clonefile directly because `cp -c` may fall back to a full copy. It
+does not stop the production guest and its sampled stopped-state capture is
+not a cold-master acceptance; see step12_jetstream/HOST_CAPTURE_FIXTURE.json.

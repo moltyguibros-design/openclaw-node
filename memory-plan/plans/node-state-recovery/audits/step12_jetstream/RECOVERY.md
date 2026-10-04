@@ -60,6 +60,14 @@ image came from a powered-off guest; a separate typed host receipt and guest
 stop evidence must supply that provenance before production use. Its macOS
 synthetic ASIF fixture tests the extraction and wrong-volume refusal.
 
+`host_vm_capture.py` is a host-side candidate capture worker. It waits for an
+external guest shutdown, uses two sampled stopped/no-holder observations,
+calls `clonefile(2)` without fallback, hashes source and clone, runs the
+extractor and rechecks the stopped state. The worker never issues a stop or
+restart. Its `CAPTURE.json` is not a historical acceptance receipt: the clean
+guest shutdown, uninterrupted host exclusion, guest-to-host store comparison,
+isolated production restore and resumption are still required.
+
 `host_vm_preflight.py` checks the pinned UTM package, configuration and
 controller binary from the host account's Remote Login context. It asks a
 short-lived job in the logged-in GUI domain for UTM's power state, then

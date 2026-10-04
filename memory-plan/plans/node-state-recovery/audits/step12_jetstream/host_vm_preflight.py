@@ -107,7 +107,7 @@ def gui_utm_status(utmctl, vm_uuid, output):
     return status
 
 
-def preflight(spec_path, output):
+def preflight(spec_path, output, allow_transition=False):
     os.umask(0o077)
     spec_path = pathlib.Path(spec_path)
     output = pathlib.Path(output)
@@ -159,9 +159,8 @@ def preflight(spec_path, output):
         require(holders.returncode in (0, 1) and not holders.stderr,
                 'image holder observation failed')
         pids = sorted({int(line) for line in holders.stdout.splitlines()})
-        require((state == 'started' and len(pids) == 1)
-                or (state == 'stopped' and not pids),
-                'UTM state and image holders disagree')
+        consistent = (state == 'started' and len(pids) == 1) or (state == 'stopped' and not pids)
+        require(consistent or allow_transition, 'UTM state and image holders disagree')
         result = {
             'scope': 'read-only host preflight; not a shutdown or cold-copy receipt',
             'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -171,7 +170,8 @@ def preflight(spec_path, output):
             'state': state, 'state_observed_at_utc': status['at_utc'],
             'image': str(image), 'image_size': image_info.st_size,
             'image_device': image_info.st_dev, 'image_inode': image_info.st_ino,
-            'image_holders': pids, 'free_bytes': shutil.disk_usage(image.parent).free,
+            'image_holders': pids, 'holders_consistent': consistent,
+            'free_bytes': shutil.disk_usage(image.parent).free,
         }
     except Exception as error:
         write_record(output / 'FAILED.json', {'error': str(error)})
