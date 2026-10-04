@@ -1198,5 +1198,9 @@ Claude's exact f95414ab guard-intent review found no blocker and pointed out
 that a prior successful `BOOTABLE` receipt should not allow a later flag to
 be cleared by reusing that old intent. The reconciler now permits an
 idempotent repeat only if the source is still unguarded and the clone absent;
-a re-guarded source refuses. The guest fixture passes, and exact new Mac-host
-and CI checks are pending. This remains a disposable source candidate.
+a re-guarded source refuses. Guest and Mac-host fixtures pass, all four
+exact-head CI jobs pass at 15b384df (run 37234974722), and Claude's narrow
+delta review found no blocker. Ten source files are staged on the host in an
+inactive 0700/0600, hash-verified package; no production VM or service was
+changed. See step12_jetstream/HOST_GUARD_INTENT_20261004.json. This remains
+a disposable source candidate at 1.2 [A]/v1.2-pre.
