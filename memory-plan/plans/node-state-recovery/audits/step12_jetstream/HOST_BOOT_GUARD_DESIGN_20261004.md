@@ -71,3 +71,9 @@ refuses even if an old arm receipt and an immutable image exist. The intent
 narrows accidental reuse of an older recovery directory; it cannot exclude
 a same-user actor with a pre-existing writable descriptor. Neither the guard
 nor the reconciler is connected to the production capture or boot path.
+
+A later reconciliation may repeat an already successful `BOOTABLE` check only
+while the source remains unguarded and the fixed clone remains absent. If an
+immutable flag reappears after that receipt, the old intent cannot clear it;
+the run refuses for operator review. This closes stale-intent reuse after a
+successful recovery without weakening idempotent no-op checks.

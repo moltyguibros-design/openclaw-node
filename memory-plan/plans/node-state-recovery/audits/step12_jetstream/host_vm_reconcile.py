@@ -16,6 +16,27 @@ from host_vm_capture import file_hash, fsync_parent
 from host_vm_preflight import owned_directory, preflight, require, write_record
 
 
+BOOTABLE_SCOPE = ('temporary clone absent and source image bootable; '
+                  'no VM start or cold-master acceptance')
+
+
+def prior_bootable(capture_dir, vm_uuid, identity):
+    found = False
+    for child in capture_dir.iterdir():
+        info = child.lstat()
+        require(not stat.S_ISLNK(info.st_mode), 'capture contains a symlink')
+        if not stat.S_ISDIR(info.st_mode) or not os.path.lexists(child / 'BOOTABLE.json'):
+            continue
+        owned_directory(child)
+        receipt = private_record(child / 'BOOTABLE.json')
+        require(receipt['scope'] == BOOTABLE_SCOPE and receipt['vm_uuid'] == vm_uuid
+                and (receipt['source_image_device'], receipt['source_image_inode'],
+                     receipt['source_image_size']) == identity,
+                'prior BOOTABLE receipt identifies another source')
+        found = True
+    return found
+
+
 def unattached(clone):
     holders = subprocess.run(['/usr/sbin/lsof', '-t', '--', str(clone)],
                              capture_output=True, timeout=15)
@@ -83,6 +104,11 @@ def reconcile(host_spec, capture_dir, output, fixture=False):
                                         initial['image_size']),
                 'stopped VM or original source image differs')
         source = pathlib.Path(before['image'])
+        clone = capture_dir / 'powered-off-image.asif'
+        if prior_bootable(capture_dir, before['vm_uuid'], source_identity):
+            require(not os.path.lexists(clone)
+                    and not bool(source.lstat().st_flags & stat.UF_IMMUTABLE),
+                    'source was guarded again after a BOOTABLE receipt')
         capture_path = capture_dir / 'CAPTURE.json'
         if os.path.lexists(capture_path):
             capture = private_record(capture_path)
@@ -92,7 +118,6 @@ def reconcile(host_spec, capture_dir, output, fixture=False):
                     and capture['source_size'] == before['image_size']
                     and file_hash(source) == capture['source_image_sha256'],
                     'completed capture source image changed')
-        clone = capture_dir / 'powered-off-image.asif'
         if os.path.lexists(clone):
             info = clone.lstat()
             require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
@@ -120,7 +145,7 @@ def reconcile(host_spec, capture_dir, output, fixture=False):
                 and not bool(source.lstat().st_flags & stat.UF_IMMUTABLE),
                 'VM, clone or source flag changed after unlock')
         result = {
-            'scope': 'temporary clone absent and source image bootable; no VM start or cold-master acceptance',
+            'scope': BOOTABLE_SCOPE,
             'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'vm_uuid': before['vm_uuid'], 'host_boot_session': before['host_boot_session'],
             'source_image_device': source_identity[0],

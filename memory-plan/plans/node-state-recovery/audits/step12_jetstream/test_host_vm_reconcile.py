@@ -164,6 +164,11 @@ class HostReconcileTest(unittest.TestCase):
             self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
             again = reconcile(spec, capture, capture / 'repeated', fixture=True)
             self.assertTrue(again['clone_absent'])
+            change_immutable(source, source_identity, True)
+            with self.assertRaisesRegex(RuntimeError, 'guarded again'):
+                reconcile(spec, capture, capture / 'reguarded', fixture=True)
+            self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
+            change_immutable(source, source_identity, False)
 
             completed = root / 'completed-capture'
             completed.mkdir(mode=0o700)

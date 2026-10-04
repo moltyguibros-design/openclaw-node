@@ -106,7 +106,8 @@ for production.
 
 `host_vm_reconcile.py` is a stopped-VM recovery mechanism for an interrupted
 guarded clone attempt. It binds the private arm and initial preflight records
-to a fresh source-image preflight, refuses a changed completed-capture source,
+and a durable `GUARD_INTENT.json` written before the flag operation to a fresh
+source-image preflight. It refuses a changed completed-capture source,
 and removes only the fixed clone after checking its inode, holders and disk
 attachment. It scans sibling recovery directories for another fixed clone
 before clearing the source's immutable flag. Its `BOOTABLE.json` says only
@@ -114,6 +115,8 @@ that the original image is writable again, no clone remains and UTM was
 sampled stopped; it does not start the VM or accept masters. A mismatch writes
 `OPERATOR_REQUIRED.json` and does not blindly unlock. This tool is tested on
 disposable images but is not yet wired into the production capture/boot path.
+After a successful `BOOTABLE` receipt, a repeat run refuses any newly guarded
+source or recreated clone rather than using the old intent to clear it.
 Its source identity pin may refuse after a host reboot if the image's device
 number changes, requiring an explicit operator recovery instead of a guessed
 replacement identity.

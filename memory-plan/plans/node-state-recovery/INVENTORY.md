@@ -1193,3 +1193,10 @@ cannot clear an unrelated guarded image. Disposable guest and Mac-host
 regressions cover that refusal and a complete guard/reconcile cycle. This
 does not establish a continuous production no-start bracket or cold-master
 acceptance; step 1.2 remains [A]/v1.2-pre.
+
+Claude's exact f95414ab guard-intent review found no blocker and pointed out
+that a prior successful `BOOTABLE` receipt should not allow a later flag to
+be cleared by reusing that old intent. The reconciler now permits an
+idempotent repeat only if the source is still unguarded and the clone absent;
+a re-guarded source refuses. The guest fixture passes, and exact new Mac-host
+and CI checks are pending. This remains a disposable source candidate.
