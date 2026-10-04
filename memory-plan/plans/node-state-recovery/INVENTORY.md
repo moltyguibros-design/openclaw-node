@@ -1144,3 +1144,14 @@ rerun. These results cover mechanism and staging only. No production VM stop,
 clone or real-store restore occurred; the continuous UTM hold, boot interlock,
 historical master acceptance and truthful service resumption remain open at
 1.2 [A]/v1.2-pre. See step12_jetstream/HOST_FAILED_CLEANUP_20261004.json.
+
+At 2026-10-04 16:29 EDT, disposable guest/host probes showed that `uchg`
+blocks a new writable open and survives `clonefile`, but an existing writable
+descriptor can still write after the flag is set. A read-only attach of an
+immutable synthetic ASIF clone passed on the guest. The host has no external
+volume mounted with room for the full image. Claude's adversarial design review
+identified stranded immutability as an availability hazard. Before this guard
+enters the production capture path, a disposable UTM start/refusal/recovery
+test and idempotent clone-first boot reconciliation are required. No source
+flag was applied to the production VM; 1.2 remains [A]/v1.2-pre. See
+step12_jetstream/HOST_UCHG_DESIGN_PROBE_20261004.json.
