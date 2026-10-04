@@ -1163,3 +1163,9 @@ attach, clone-only unlock and eventual source unlock. The fixture passed on
 both guest and Mac host with disposable ASIF files. The primitive is not
 connected to the production capture or boot path; UTM-level behavior and
 crash reconciliation remain the next safety work.
+
+At 2026-10-04 16:39 EDT, exact-head CI run 37232577479 passed all four jobs
+at 09f5b8da, and Claude's read-only delta review found no blocker in the
+isolated primitive. The Mac host's disposable fixture also passed, then its
+temporary test files were removed. No production hold was acquired. See
+step12_jetstream/HOST_IMMUTABLE_PRIMITIVE_20261004.json.
