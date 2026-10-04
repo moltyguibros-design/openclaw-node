@@ -62,3 +62,12 @@ No external volume with enough room for a full durable image copy is mounted
 on the Mac host as of this checkpoint. If one becomes available, preserving an
 off-volume copy can avoid this same-volume COW exclusion problem, but the
 guest full-node hold and real-store acceptance are still required.
+
+An inactive source candidate now writes `GUARD_INTENT.json` after a fresh
+stopped/no-holder preflight and before setting `UF_IMMUTABLE`. The crash
+reconciler requires that intent to match the arm receipt, initial source
+identity and image path before clearing the source flag. A missing intent
+refuses even if an old arm receipt and an immutable image exist. The intent
+narrows accidental reuse of an older recovery directory; it cannot exclude
+a same-user actor with a pre-existing writable descriptor. Neither the guard
+nor the reconciler is connected to the production capture or boot path.

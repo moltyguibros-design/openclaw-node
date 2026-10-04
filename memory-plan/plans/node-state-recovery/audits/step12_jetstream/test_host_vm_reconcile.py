@@ -18,6 +18,7 @@ from host_image_immutable import change_immutable
 from host_clone_dispose import CAPTURE_SCOPE
 from host_vm_capture import clone_only, file_hash
 from host_vm_preflight import preflight, write_record
+from host_vm_guard import GUARD_SCOPE, guard
 from host_vm_reconcile import reconcile
 
 
@@ -115,6 +116,13 @@ class HostReconcileTest(unittest.TestCase):
             source_identity = (first['image_device'], first['image_inode'],
                                first['image_size'])
             change_immutable(source, source_identity, True)
+            with self.assertRaises(FileNotFoundError):
+                reconcile(spec, capture, capture / 'without-guard-intent', fixture=True)
+            self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
+            change_immutable(source, source_identity, False)
+            guard(spec, capture, fixture=True)
+            self.assertTrue((capture / 'GUARD_INTENT.json').exists())
+            self.assertTrue((capture / 'GUARD.json').exists())
             clone = capture / 'powered-off-image.asif'
             clone_only(source, clone)
             clones.append(clone)
@@ -165,6 +173,14 @@ class HostReconcileTest(unittest.TestCase):
                 'vm_uuid': vm_uuid, 'host_boot_session': completed_initial['host_boot_session'],
                 'image_device': completed_initial['image_device'],
                 'image_inode': completed_initial['image_inode'],
+            })
+            write_record(completed / 'GUARD_INTENT.json', {
+                'scope': GUARD_SCOPE, 'vm_uuid': vm_uuid,
+                'host_boot_session': completed_initial['host_boot_session'],
+                'source_image': str(source),
+                'source_image_device': source_identity[0],
+                'source_image_inode': source_identity[1],
+                'source_image_size': source_identity[2],
             })
             source_hash = file_hash(source)
             write_record(completed / 'CAPTURE.json', {

@@ -1185,3 +1185,11 @@ fixture exposed a GUI status publication race; `host_vm_preflight.py` now
 publishes that JSON by atomic rename, with a deterministic regression check.
 These tools remain disconnected from the production VM and do not authorize
 its start. Real UTM behavior and the full-node hold remain open.
+
+The inactive guard candidate now writes a durable intent bound to the armed
+attempt and stopped image identity before applying the source flag. The
+reconciler refuses a missing or mismatched intent, so an old arm receipt alone
+cannot clear an unrelated guarded image. Disposable guest and Mac-host
+regressions cover that refusal and a complete guard/reconcile cycle. This
+does not establish a continuous production no-start bracket or cold-master
+acceptance; step 1.2 remains [A]/v1.2-pre.

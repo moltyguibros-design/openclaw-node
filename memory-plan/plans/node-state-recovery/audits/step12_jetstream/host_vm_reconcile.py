@@ -11,6 +11,7 @@ import sys
 
 from host_clone_dispose import CAPTURE_SCOPE, private_record
 from host_image_immutable import change_immutable
+from host_vm_guard import GUARD_SCOPE
 from host_vm_capture import file_hash, fsync_parent
 from host_vm_preflight import owned_directory, preflight, require, write_record
 
@@ -65,6 +66,15 @@ def reconcile(host_spec, capture_dir, output, fixture=False):
                 and (armed['image_device'], armed['image_inode']) ==
                 (initial['image_device'], initial['image_inode']),
                 'armed source identity differs')
+        intent = private_record(capture_dir / 'GUARD_INTENT.json')
+        require(intent['scope'] == GUARD_SCOPE
+                and intent['vm_uuid'] == armed['vm_uuid']
+                and intent['host_boot_session'] == armed['host_boot_session']
+                and intent['source_image'] == initial['image']
+                and (intent['source_image_device'], intent['source_image_inode'],
+                     intent['source_image_size']) ==
+                (initial['image_device'], initial['image_inode'], initial['image_size']),
+                'guard intent does not identify this source')
         before = preflight(host_spec, output / 'before-reconcile')
         source_identity = (before['image_device'], before['image_inode'], before['image_size'])
         require(before['state'] == 'stopped' and before['holders_consistent']
