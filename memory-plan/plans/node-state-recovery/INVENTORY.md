@@ -1071,3 +1071,10 @@ same fixture failed once and passed on subsequent local runs; the restore
 still refuses a missing or changed stream. The initial name query now retries
 only request timeouts within a bounded interval, and failure records identify
 which cluster-read phase refused. No production bus or VM was changed.
+
+At 2026-10-04 13:28 EDT, the four Python host preservation tools were copied
+as owner-private, hash-checked regular files into the host's persistent
+recovery directory. Running the staged preflight reported the pinned VM
+`started` with one image holder and unchanged config/controller hashes. This
+is preparation, not a shutdown, image capture or master acceptance; see
+step12_jetstream/HOST_STAGED_TOOLS_20261004.json.
