@@ -1169,3 +1169,10 @@ at 09f5b8da, and Claude's read-only delta review found no blocker in the
 isolated primitive. The Mac host's disposable fixture also passed, then its
 temporary test files were removed. No production hold was acquired. See
 step12_jetstream/HOST_IMMUTABLE_PRIMITIVE_20261004.json.
+
+The next host slice is specified in
+step12_jetstream/HOST_BOOT_GUARD_DESIGN_20261004.md: prove real disposable UTM
+start/refusal, then implement crash-safe clone-first reconciliation. Clearing
+the source flag yields only a bootable disk; the separate VM start decision
+still needs accepted histories or an explicitly designed abort path. Neither
+controller exists yet.
