@@ -300,8 +300,20 @@ synthetic four-store ASIF fixture. It pins the image digest and guest Data
 volume UUID, mounts read-only, copies each declared store into owner-private
 regular files, rehashes source and copy, ejects, and writes a success manifest
 only afterward. Both the Mac host and guest fixture recovered all four marker
-files; a wrong Data volume UUID refused with a failure record and no success
-manifest. This is a mechanism test only. It neither acquires the production
+files; wrong Data volume UUID, path traversal and symlink controls refused
+with failure records and no success manifest. The extractor restricts new
+files to owner-only access and records detach or mountpoint cleanup failures
+without issuing a success manifest. The exact-head Mac CI run completed with
+no skipped tests. This is a mechanism test only. It neither acquires the production
 clone nor attests VM stop, source provenance, uninterrupted image-holder
 absence, pre-stop stream equivalence, immutable masters or live resumption.
 Compact outcomes are in `HOST_ASIF_EXTRACT_FIXTURE.json`.
+
+The host also ran the full existing isolated JetStream recovery fixture from
+owner-private staged Node and NATS binaries. Its `acceptance.json` reports
+`pass: true` and all owned servers stopped. The direct cold-tree probe left its
+four source masters unchanged; the standalone and held R1 high-water values
+advanced as expected over their archived copies. The test exercised wrong
+listener and stale-archive refusals. All inputs were synthetic. This proves
+the host can execute the restore comparison machinery, not that any production
+store has been preserved or restored.

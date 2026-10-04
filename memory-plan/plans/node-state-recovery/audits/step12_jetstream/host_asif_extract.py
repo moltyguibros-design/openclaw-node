@@ -120,6 +120,7 @@ def write_json(path, value):
 
 
 def extract(image, spec_path, output):
+    os.umask(0o077)
     image = pathlib.Path(image)
     spec_path = pathlib.Path(spec_path)
     output = pathlib.Path(output)
@@ -150,6 +151,7 @@ def extract(image, spec_path, output):
     mounted.mkdir(mode=0o700)
     disk = None
     success = None
+    errors = []
     try:
         attached = plistlib.loads(command('/usr/sbin/diskutil', 'image', 'attach',
                                            '--plist', '--readOnly', '--noMount', str(image)))
@@ -181,12 +183,20 @@ def extract(image, spec_path, output):
                    'image_sha256': spec['image_sha256'],
                    'data_volume_uuid': spec['data_volume_uuid'], 'stores': stores}
     except Exception as error:
-        write_json(output / 'FAILED.json', {'error': str(error)})
-        raise
+        errors.append(str(error))
     finally:
         if disk is not None:
-            command('/usr/sbin/diskutil', 'eject', disk)
-        mounted.rmdir()
+            try:
+                command('/usr/sbin/diskutil', 'eject', disk)
+            except Exception as error:
+                errors.append('eject: ' + str(error))
+        try:
+            mounted.rmdir()
+        except Exception as error:
+            errors.append('mountpoint: ' + str(error))
+    if errors:
+        write_json(output / 'FAILED.json', {'errors': errors})
+        raise RuntimeError('; '.join(errors))
     write_json(output / 'manifest.json', success)
     return success
 

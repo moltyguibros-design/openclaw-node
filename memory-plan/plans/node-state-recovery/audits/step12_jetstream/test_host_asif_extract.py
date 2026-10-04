@@ -22,9 +22,7 @@ def run(*args):
     return result.stdout
 
 
-@unittest.skipUnless(sys.platform == 'darwin' and b'ASIF' in subprocess.run(
-    ['/usr/sbin/diskutil', 'image', 'create', 'blank'], capture_output=True).stdout,
-    'requires macOS ASIF image tools')
+@unittest.skipUnless(sys.platform == 'darwin', 'requires macOS image tools')
 class HostAsifExtractTest(unittest.TestCase):
     def setUp(self):
         self.root = pathlib.Path(tempfile.mkdtemp(prefix='openclaw-asif-extract-'))
@@ -96,6 +94,31 @@ class HostAsifExtractTest(unittest.TestCase):
                                     str(self.root / 'bad-image')], capture_output=True)
         self.assertNotEqual(bad_image.returncode, 0)
         self.assertFalse((self.root / 'bad-image').exists())
+
+        traversal = dict(spec, stores=[dict(row) for row in stores])
+        traversal['stores'][0]['relative_path'] = 'Users/../moltymac/.openclaw/nats/standalone'
+        spec_path.write_text(json.dumps(traversal))
+        bad_path = subprocess.run([sys.executable, str(TOOL), str(clone), str(spec_path),
+                                   str(self.root / 'bad-path')], capture_output=True)
+        self.assertNotEqual(bad_path.returncode, 0)
+        self.assertTrue((self.root / 'bad-path' / 'FAILED.json').exists())
+        self.assertFalse((self.root / 'bad-path' / 'manifest.json').exists())
+
+        live = self.attach(source)
+        live_mount = pathlib.Path(next(row['mount-point'] for row in live
+                                       if row.get('volume-name') == 'Data'))
+        (live_mount / stores[0]['relative_path'] / 'escaped-link').symlink_to('/tmp')
+        self.eject()
+        linked = self.root / 'linked.asif'
+        run('/bin/cp', '-c', str(source), str(linked))
+        os.chmod(linked, 0o600)
+        linked_spec = dict(spec, image_sha256=hashlib.sha256(linked.read_bytes()).hexdigest())
+        spec_path.write_text(json.dumps(linked_spec))
+        bad_link = subprocess.run([sys.executable, str(TOOL), str(linked), str(spec_path),
+                                   str(self.root / 'bad-link')], capture_output=True)
+        self.assertNotEqual(bad_link.returncode, 0)
+        self.assertTrue((self.root / 'bad-link' / 'FAILED.json').exists())
+        self.assertFalse((self.root / 'bad-link' / 'manifest.json').exists())
 
 
 if __name__ == '__main__':

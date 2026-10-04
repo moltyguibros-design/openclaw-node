@@ -1033,3 +1033,10 @@ declared store trees from an owner-private read-only clone and refuse a wrong
 Data-volume UUID or image hash. This is a tested source component, not a host
 power controller or production extraction. The plan's live and restoration
 gates above remain open; see step12_jetstream/HOST_ASIF_EXTRACT_FIXTURE.json.
+
+Checkpoint 2026-10-04: the host's isolated four-store JetStream fixture passed
+with all owned test servers stopped and original synthetic masters unchanged.
+The ASIF extractor now also refuses traversal and symlink entries, restricts
+new file modes and records detach failure before success. Guest and host Mac
+fixtures pass; exact-head CI for the preceding extractor commit passed 4/4.
+These are mechanism results only. No production VM stop or cold master exists.
