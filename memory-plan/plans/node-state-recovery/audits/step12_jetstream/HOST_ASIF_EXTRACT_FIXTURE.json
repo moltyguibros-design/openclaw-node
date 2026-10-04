@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-04",
+  "scope": "disposable ASIF/APFS mechanism fixture only; no production VM stop, clone or store extraction",
+  "host": {
+    "macos": "26.6.2",
+    "format": "ASIF",
+    "clone": "same-volume cp -c of a disposable image",
+    "attachment": "diskutil image attach --readOnly --noMount",
+    "mount": "diskutil mount readOnly at an owner-private path",
+    "positive": "four declared marker files extracted; manifest image hash matched; mounted image ejected",
+    "negative": "wrong Data volume UUID refused with FAILED.json and no manifest.json"
+  },
+  "guest": {
+    "test": "test_host_asif_extract.py",
+    "positive": "four declared store files extracted and matched",
+    "negative": "wrong Data volume UUID refused with FAILED.json; wrong image hash refused before output creation",
+    "result": "1 test passed"
+  },
+  "unverified": [
+    "production UTM image attach after power-off",
+    "clean guest shutdown and uninterrupted host no-holder window",
+    "host provenance receipt",
+    "actual NATS store extraction and isolated restore",
+    "temporary full-image clone removal before guest restart",
+    "production service restoration"
+  ]
+}

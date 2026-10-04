@@ -48,6 +48,18 @@ success. A mismatch writes `FAILED.json` and refuses. This tests the local
 restore mechanism; a host provenance receipt and production acceptance are
 separate gates.
 
+`host_asif_extract.py` is a host-side read-only extraction mechanism for an
+already copied ASIF image. Its owner-private JSON specification pins the image
+SHA-256, the guest Data volume UUID, and four distinct guest-relative store
+paths. It attaches the supplied image read-only, requires the matching
+unencrypted Data volume mounted read-only, copies regular owner-owned files
+into four private trees, checks every copied file and the image hash again,
+ejects the image, then writes `manifest.json`. A mismatch writes `FAILED.json`
+without a success manifest. This tool does not stop a VM or prove that the
+image came from a powered-off guest; a separate typed host receipt and guest
+stop evidence must supply that provenance before production use. Its macOS
+synthetic ASIF fixture tests the extraction and wrong-volume refusal.
+
 Run the driver with an existing token supplied through its process environment,
 never argv, URLs, tracing or a public transcript:
 

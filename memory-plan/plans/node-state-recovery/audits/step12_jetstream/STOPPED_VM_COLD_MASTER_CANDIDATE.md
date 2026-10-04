@@ -141,9 +141,9 @@ guest/host/image/restore proofs pass, including an accepted treatment of the
 pre-power-off trust gap. It must not relabel a reopened Journal as an
 uninterrupted `seal()`. The current code has no host receipt, host verifier
 or historical acceptance manifest. This candidate does not authorize a
-cold-copy claim, seal, root migration or service retirement. Host operator
-access and the complete UTM backing-image path remain unknown from inside
-the guest.
+cold-copy claim, seal, root migration or service retirement. The later host
+discovery below identifies a package candidate and control route; neither is
+yet a powered-off artifact or an accepted handoff.
 
 ## Owned archive-divergence control — 2026-10-03
 
@@ -250,3 +250,58 @@ remain necessary before a production window can begin. The powered-off
 state, image-component completeness, source/copy hashes, pre-power-off writer
 gap, three extracted masters, isolated restores and resumption are still
 unverified.
+
+## Host control and ASIF extraction rehearsal — 2026-10-04 12:08 EDT
+
+The authenticated host account is UID 501, matching the guest store owner.
+The live image's first four bytes are `shdw`; [UTM's 4.7 release notes](https://github.com/utmapp/UTM/releases/tag/v4.7.0)
+say its Apple backend on macOS 26 creates ASIF drives by default, and
+[Apple documents](https://developer.apple.com/documentation/virtualization/vzdiskimagestoragedeviceattachment)
+ASIF as a supported VM disk format. The header alone is not conclusive format
+identification. `hdiutil imageinfo` did not recognize this
+live image, and `diskutil image info` refused it while the virtualization
+process held it open. Do not treat either response as an image-health result.
+
+An owner-private one-shot LaunchAgent in the logged-in `gui/501` domain ran
+`utmctl status` for the pinned UUID and returned `started`. The same verb
+refused from ordinary SSH. The test agent and its temporary files were
+removed. This proves that GUI-domain dispatch can query UTM while that login
+session exists; it does not prove a controller survives logout, a host reboot,
+or a guest power transition. The installed `utmctl stop` help says its default
+is forced power-off and `--request` asks the guest OS to power down. A future
+controller must use a guest-initiated or explicitly requested clean shutdown,
+then independently verify the stopped image and shutdown evidence; it must
+never silently fall through to the default force behavior.
+
+On the host, `diskutil image create blank --format ASIF` made a disposable
+128 MB APFS image. A marker was written, the image ejected, cloned with
+`cp -c`, attached with `diskutil image attach --readOnly --noMount`, and its
+APFS volume mounted read-only. The marker read back exactly; the clone's
+header also began `shdw`. The test image was ejected and its temporary files
+removed. This establishes a host-side read-only extraction mechanism on a
+synthetic ASIF image, not that the 211 GB UTM image can be opened or its guest
+Data volume mounted after power-off. The actual guest Data volume has UUID
+`EF14FD3D-7953-4A6D-9596-CB90B6024CD1`, name `Data`, and FileVault is off;
+those are future mount-selection pins, not current host observations of a
+clone. The four live NATS store trees are about 107 MB combined; their source
+paths and owner must be rechecked at the stop window.
+
+A temporary same-volume COW clone could be removed **before** the original
+guest restarts, after extracting and accepting the small store masters. That
+would avoid retaining a divergent 211 GB clone next to a running guest, but
+free-space floor, clone allocation, read-only mount, source/copy identity,
+detachment and clone disposal all need a tested host transaction and failure
+receipt. The retained masters would remain same-disk logical rollback, not
+machine-loss recovery. No live VM stop, full-image clone, guest mount, store
+extraction or cold-master acceptance occurred in this rehearsal.
+
+The bounded `host_asif_extract.py` component now exercises that read leg on a
+synthetic four-store ASIF fixture. It pins the image digest and guest Data
+volume UUID, mounts read-only, copies each declared store into owner-private
+regular files, rehashes source and copy, ejects, and writes a success manifest
+only afterward. Both the Mac host and guest fixture recovered all four marker
+files; a wrong Data volume UUID refused with a failure record and no success
+manifest. This is a mechanism test only. It neither acquires the production
+clone nor attests VM stop, source provenance, uninterrupted image-holder
+absence, pre-stop stream equivalence, immutable masters or live resumption.
+Compact outcomes are in `HOST_ASIF_EXTRACT_FIXTURE.json`.

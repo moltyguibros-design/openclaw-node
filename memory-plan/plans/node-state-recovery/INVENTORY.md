@@ -1015,3 +1015,21 @@ sessions, so a host-GUI power handoff and durable host copy/receipt are still
 required. This is read-only production discovery plus a disposable synthetic
 clone test, not a stopped-VM or cold-master observation. Step 1.2 remains
 [A]/v1.2-pre; see step12_jetstream/STOPPED_VM_COLD_MASTER_CANDIDATE.md.
+
+Checkpoint 2026-10-04 12:08 EDT: the host's logged-in launchd domain ran a
+one-shot UTM status query and identified the pinned guest as started; ordinary
+SSH UTM control still refuses. The installed stop verb defaults to a forced
+power-off and requires `--request` for a guest shutdown request. A disposable
+ASIF image was cloned, attached and mounted read-only on the host, with its
+marker recovered exactly; no real UTM image was copied or mounted. Guest
+FileVault is off and the four NATS store trees total about 107 MB, suggesting
+an ephemeral COW image clone could be discarded before guest restart after
+extracting masters. A durable host handoff, capacity floor, clean shutdown,
+typed receipt, production extraction, three isolated restores and truthful
+resumption remain unimplemented. Step 1.2 stays [A]/v1.2-pre.
+
+The bounded host ASIF extractor and its macOS fixture now copy all four
+declared store trees from an owner-private read-only clone and refuse a wrong
+Data-volume UUID or image hash. This is a tested source component, not a host
+power controller or production extraction. The plan's live and restoration
+gates above remain open; see step12_jetstream/HOST_ASIF_EXTRACT_FIXTURE.json.
