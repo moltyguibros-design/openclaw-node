@@ -1134,3 +1134,13 @@ no clone holder or disk-image attachment, and stopped/no-holder observations
 before and after unlink. This is a disposable mechanism test, not a production
 boot interlock or master acceptance. Exact-head CI and adversarial review of
 this delta remain pending; 1.2 stays [A]/v1.2-pre.
+
+At 2026-10-04 16:17 EDT, the updated host package's seven files verified
+against source-manifest SHA-256 d8efb760c9ae97e61c27e1033d6e1f46fad18e24809b1f0d3a376690f2346451.
+The disposable failed-capture fixture passed on both Macs, Claude's read-only
+ad581126 review found no blocker, and exact-head CI run 37231113880 passed
+all four jobs. The previous Node 22 duplicate-port failure also cleared on
+rerun. These results cover mechanism and staging only. No production VM stop,
+clone or real-store restore occurred; the continuous UTM hold, boot interlock,
+historical master acceptance and truthful service resumption remain open at
+1.2 [A]/v1.2-pre. See step12_jetstream/HOST_FAILED_CLEANUP_20261004.json.
