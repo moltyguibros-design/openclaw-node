@@ -1111,7 +1111,16 @@ next safety-critical production gate. A disposable Mac fixture now refuses
 clone disposal while the VM is reported running and removes the clone with a
 private receipt only after a fresh stopped/no-holder preflight and full image
 hashes. Absolute-path and hardlink extraction refusals are also covered.
-This source/fixture work does not prevent an independent UTM restart, clean
-up an incomplete capture, accept real stores, or authorize a production VM
-stop. Exact-head CI and review of the new disposal delta remain pending;
-1.2 stays [A]/v1.2-pre.
+Claude's read-only delta review at dcebda81 found no code blocker and confirmed
+that a continuous host restart interlock and failed-capture cleanup remain
+required. CI at that head failed only when the disposable ASIF fixture's
+immediate eject returned "Volume failed to eject" after hardlink creation; the
+fixture now makes bounded retries for that exact transient result. Exact-head
+macOS, Node 20 and Mission Control CI checks for the retry passed. The Node 22
+job failed in an unrelated mesh-agent lifecycle fixture because two independent
+free-port requests returned the same port; its failed job is rerunning. The
+seven reviewed host files were staged as an
+inactive owner-private package and verified by manifest hash; see
+step12_jetstream/HOST_STAGED_DISPOSAL_20261004.json. This work does not prevent
+an independent UTM restart, clean up an incomplete capture, accept real
+stores, or authorize a production VM stop. 1.2 stays [A]/v1.2-pre.
