@@ -1064,3 +1064,10 @@ image's device. No production image or store has been copied into it.
 The host's pinned 0600 VM and four-store specifications pass a fresh read-only
 preflight there; UTM is still `started` with one disk holder. See
 step12_jetstream/HOST_PREPARED_SPECS.json.
+
+The next exact-head CI run exposed an intermittent `TIMEOUT` while the owned
+two-member cold-restore cluster answered its initial stream-name query. The
+same fixture failed once and passed on subsequent local runs; the restore
+still refuses a missing or changed stream. The initial name query now retries
+only request timeouts within a bounded interval, and failure records identify
+which cluster-read phase refused. No production bus or VM was changed.

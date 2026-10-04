@@ -131,10 +131,10 @@ async function bus(item) {
   return nc;
 }
 
-async function names(nc) {
+async function names(nc, timeout = 10000) {
   const found = [];
   for (let offset = 0;;) {
-    const page = await api(nc, '$JS.API.STREAM.NAMES', { offset });
+    const page = await api(nc, '$JS.API.STREAM.NAMES', { offset }, timeout);
     found.push(...page.streams);
     offset += page.streams.length;
     if (offset >= page.total) break;
@@ -143,8 +143,21 @@ async function names(nc) {
   return found.sort();
 }
 
-async function exactNames(nc, expected) {
-  assert.deepEqual(await names(nc), [...expected].sort(), 'isolated stream inventory mismatch');
+async function exactNames(nc, expected, timeout = 10000) {
+  assert.deepEqual(await names(nc, timeout), [...expected].sort(), 'isolated stream inventory mismatch');
+}
+
+async function waitExactNames(nc, expected) {
+  const deadline = performance.now() + 20000;
+  for (;;) {
+    try {
+      await exactNames(nc, expected, 2000);
+      return;
+    } catch (err) {
+      if (err.code !== 'TIMEOUT' || performance.now() >= deadline) throw err;
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
 }
 
 async function compare(nc, data, selected = data.streams.map(row => row.stream)) {
@@ -247,11 +260,14 @@ try {
   for (const item of members) item.nc = await bus(item);
   phase = 'cluster-routes';
   await waitRoutes(members);
-  phase = 'cluster-streams';
+  phase = 'cluster-streams-ready';
   await waitActive(members[0].nc, firstCluster);
-  await exactNames(members[0].nc, firstCluster.streams.map(row => row.stream));
-  await exactNames(members[1].nc, secondCluster.streams.map(row => row.stream));
+  phase = 'cluster-streams-first-names';
+  await waitExactNames(members[0].nc, firstCluster.streams.map(row => row.stream));
+  phase = 'cluster-streams-second-names';
+  await waitExactNames(members[1].nc, secondCluster.streams.map(row => row.stream));
   for (const stream of plan.cluster.offline) {
+    phase = 'cluster-streams-offline-' + stream;
     try {
       await api(members[0].nc, `$JS.API.STREAM.INFO.${stream}`, {}, 1000);
       assert.fail(`held stream unexpectedly served without its master: ${stream}`);
