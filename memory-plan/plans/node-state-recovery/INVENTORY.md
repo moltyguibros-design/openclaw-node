@@ -1052,3 +1052,9 @@ guest and host, including a detached host execution and a no-shutdown refusal.
 It uses clonefile directly because `cp -c` may fall back to a full copy. It
 does not stop the production guest and its sampled stopped-state capture is
 not a cold-master acceptance; see step12_jetstream/HOST_CAPTURE_FIXTURE.json.
+
+Guest-to-host stopped-store content matching now passes the integrated
+four-store disposable fixture on both Macs, and a changed extracted file
+refuses. The guest source hash still needs the real managed writer hold; the
+actual three serving histories and held R1 have not been copied or restored.
+See step12_jetstream/HOST_STOPPED_TREE_MATCH_FIXTURE.json.

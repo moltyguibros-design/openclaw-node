@@ -357,3 +357,16 @@ to `stopped`; the worker now waits through that transient mismatch. These are
 sampled observations, not proof of uninterrupted power-off throughout a real
 211 GB copy. No production image was cloned or opened. Compact evidence is
 in `HOST_CAPTURE_FIXTURE.json`.
+
+## Guest-to-host stopped-tree match rehearsal — 2026-10-04
+
+`stopped_tree_match.py` captures a private per-role file/directory manifest
+from the guest store paths after the writers are stopped. On the host it
+compares those entries against both the ASIF extraction manifest and a fresh
+read of the extracted bytes, then makes matching trees read-only and rehashes
+them. It writes `MATCH.json` only after every role agrees. The integrated
+disposable fixture passed on guest and host for four store trees; changing one
+extracted file produced only `FAILED.json`. This supplies a content comparison
+mechanism, not proof that production writers were excluded when the guest
+manifest was taken. The compact result is in
+`HOST_STOPPED_TREE_MATCH_FIXTURE.json`.

@@ -11,6 +11,8 @@ import tempfile
 import time
 import unittest
 
+from stopped_tree_match import guest_capture, host_match
+
 
 HERE = pathlib.Path(__file__).resolve().parent
 CAPTURE = HERE / 'host_vm_capture.py'
@@ -38,6 +40,11 @@ class HostCaptureTest(unittest.TestCase):
                 process.wait(timeout=5)
         for disk in reversed(self.disks):
             run('/usr/sbin/diskutil', 'eject', disk)
+        for directory, dirs, files in os.walk(self.root):
+            for name in dirs:
+                os.chmod(pathlib.Path(directory) / name, 0o700)
+            for name in files:
+                os.chmod(pathlib.Path(directory) / name, 0o600)
         shutil.rmtree(self.root)
 
     def test_external_stop_then_cold_extract(self):
@@ -60,6 +67,12 @@ class HostCaptureTest(unittest.TestCase):
             location.mkdir(parents=True)
             (location / 'stream.dat').write_text('owned-' + role)
             stores.append({'role': role, 'relative_path': relative})
+        store_spec = self.root / 'store-spec.json'
+        store_spec.write_text(json.dumps({'data_volume_uuid': volume_info['VolumeUUID'],
+                                          'stores': stores}))
+        store_spec.chmod(0o600)
+        guest_output = self.root / 'guest-stopped'
+        guest_capture(store_spec, guest_output, mount)
         run('/usr/sbin/diskutil', 'eject', self.disks.pop())
         vm_uuid = '00000000-0000-0000-0000-000000000002'
         config = package / 'config.plist'
@@ -81,10 +94,6 @@ class HostCaptureTest(unittest.TestCase):
             'utmctl_sha256': hashlib.sha256(controller.read_bytes()).hexdigest(),
         }))
         spec.chmod(0o600)
-        store_spec = self.root / 'store-spec.json'
-        store_spec.write_text(json.dumps({'data_volume_uuid': volume_info['VolumeUUID'],
-                                          'stores': stores}))
-        store_spec.chmod(0o600)
         holder = subprocess.Popen([sys.executable, '-c',
                                    'import sys,time; f=open(sys.argv[1],"rb"); time.sleep(30)',
                                    str(source)], stdout=subprocess.DEVNULL,
@@ -113,6 +122,19 @@ class HostCaptureTest(unittest.TestCase):
         for role in ('standalone', 'member1', 'member2', 'member3'):
             self.assertEqual((output / 'extracted-stores' / role / 'stream.dat').read_text(),
                              'owned-' + role)
+        matched = self.root / 'matched'
+        host_match(guest_output / 'manifest.json', output / 'extracted-stores', matched)
+        self.assertTrue((matched / 'MATCH.json').exists())
+        standalone = output / 'extracted-stores' / 'standalone'
+        os.chmod(standalone, 0o700)
+        file = standalone / 'stream.dat'
+        os.chmod(file, 0o600)
+        file.write_text('altered')
+        mismatch = self.root / 'mismatch'
+        with self.assertRaises(RuntimeError):
+            host_match(guest_output / 'manifest.json', output / 'extracted-stores', mismatch)
+        self.assertTrue((mismatch / 'FAILED.json').exists())
+        self.assertFalse((mismatch / 'MATCH.json').exists())
 
         state.write_text('started\n')
         second_holder = subprocess.Popen([sys.executable, '-c',

@@ -68,6 +68,13 @@ restart. Its `CAPTURE.json` is not a historical acceptance receipt: the clean
 guest shutdown, uninterrupted host exclusion, guest-to-host store comparison,
 isolated production restore and resumption are still required.
 
+`stopped_tree_match.py capture` records the four guest store trees under a
+private specification after managed NATS stop. Its `match` action runs on the
+host after ASIF extraction, compares the guest manifest, extraction manifest
+and rehashed host files exactly, then makes the extracted trees read-only.
+`MATCH.json` is a content result only; it is neither writer-exclusion proof nor
+isolated restoration acceptance.
+
 `host_vm_preflight.py` checks the pinned UTM package, configuration and
 controller binary from the host account's Remote Login context. It asks a
 short-lived job in the logged-in GUI domain for UTM's power state, then
