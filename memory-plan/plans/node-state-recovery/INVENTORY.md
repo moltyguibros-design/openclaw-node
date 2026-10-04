@@ -1093,3 +1093,13 @@ owned mutation controls cover changed code, changed dependency, readable
 directory and an extra symlink. The original failed receipt remains. This
 integrity gate does not attest any VM power state or real history; see
 step12_jetstream/HOST_RUNTIME_VERIFY_20261004.json.
+
+At 2026-10-04 13:57 EDT, the stopped-tree matcher was bound to the private
+host capture receipt and the exact cloned image. Guest and host disposable
+ASIF fixtures pass, including a changed-receipt refusal. The updated tools
+were staged as owner-private, hash-checked regular files on the host; the
+isolated restore runtime still verifies against its separate pinned manifest.
+The production VM remains started. No actual image or history was copied,
+restored or accepted; the full-node hold, shutdown provenance and service
+resumption gates remain open at 1.2 [A]/v1.2-pre. See
+step12_jetstream/HOST_CAPTURE_BINDING_20261004.json.
