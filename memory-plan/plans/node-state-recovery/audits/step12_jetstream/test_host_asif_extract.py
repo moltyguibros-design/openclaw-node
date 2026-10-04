@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 
@@ -30,8 +31,8 @@ class HostAsifExtractTest(unittest.TestCase):
         self.disks = []
 
     def tearDown(self):
-        for disk in reversed(self.disks):
-            run('/usr/sbin/diskutil', 'eject', disk)
+        while self.disks:
+            self.eject()
         shutil.rmtree(self.root)
 
     def attach(self, path, *flags):
@@ -42,7 +43,16 @@ class HostAsifExtractTest(unittest.TestCase):
         return entities
 
     def eject(self):
-        run('/usr/sbin/diskutil', 'eject', self.disks.pop())
+        disk = self.disks[-1]
+        for _ in range(20):
+            result = subprocess.run(['/usr/sbin/diskutil', 'eject', disk], capture_output=True)
+            if result.returncode == 0:
+                self.disks.pop()
+                return
+            if b'Volume failed to eject' not in result.stderr:
+                raise AssertionError(result.stderr.decode(errors='replace')[:500])
+            time.sleep(0.25)
+        raise AssertionError(f'disposable image did not eject: {disk}')
 
     def test_real_asif_mount_extracts_four_stores_and_refuses_wrong_volume(self):
         source = self.root / 'source.asif'
