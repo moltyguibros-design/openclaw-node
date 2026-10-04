@@ -130,6 +130,15 @@ class HostCaptureTest(unittest.TestCase):
         matched = self.root / 'matched'
         host_match(guest_output / 'manifest.json', output / 'extracted-stores', matched)
         self.assertTrue((matched / 'MATCH.json').exists())
+        capture_receipt = output / 'CAPTURE.json'
+        original_receipt = capture_receipt.read_bytes()
+        changed_receipt = json.loads(original_receipt)
+        changed_receipt['clone_image_sha256'] = '0' * 64
+        capture_receipt.write_text(json.dumps(changed_receipt))
+        with self.assertRaisesRegex(RuntimeError, 'capture receipt'):
+            host_match(guest_output / 'manifest.json', output / 'extracted-stores',
+                       self.root / 'wrong-capture')
+        capture_receipt.write_bytes(original_receipt)
         standalone = output / 'extracted-stores' / 'standalone'
         os.chmod(standalone, 0o700)
         file = standalone / 'stream.dat'

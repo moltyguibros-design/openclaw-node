@@ -126,13 +126,29 @@ def host_match(guest_path, extracted, output):
     output = pathlib.Path(output)
     private_file(guest_path)
     private_parent(extracted)
+    private_parent(extracted.parent)
     private_parent(output.parent)
     guest = json.loads(guest_path.read_text())
     manifest_path = extracted / 'manifest.json'
+    capture_path = extracted.parent / 'CAPTURE.json'
+    image_path = extracted.parent / 'powered-off-image.asif'
     private_file(manifest_path)
+    private_file(capture_path)
+    private_file(image_path)
     host = json.loads(manifest_path.read_text())
+    capture = json.loads(capture_path.read_text())
     new_output(output)
     try:
+        require(capture['scope'] == 'sampled stopped-state image extraction; uninterrupted power-off, clean shutdown and master acceptance external'
+                and capture['vm_state_at_final_check'] == 'stopped'
+                and capture['source_image_sha256'] == capture['clone_image_sha256']
+                and capture['clone_image_sha256'] == host['image_sha256']
+                and capture['extraction_manifest_sha256'] == sha256(manifest_path)
+                and capture['data_volume_uuid'] == host['data_volume_uuid']
+                and capture['store_roles'] == sorted(ROLES)
+                and capture['clone_size'] == image_path.stat().st_size
+                and sha256(image_path) == capture['clone_image_sha256'],
+                'capture receipt, cloned image and extracted stores differ')
         require(set(guest['stores']) == ROLES and set(host['stores']) == ROLES
                 and guest['data_volume_uuid'] == host['data_volume_uuid'],
                 'guest and host store roles or Data volume differ')
@@ -153,6 +169,7 @@ def host_match(guest_path, extracted, output):
         result = {'scope': 'content match and read-only mode; not historical master acceptance',
                   'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                   'guest_manifest_sha256': sha256(guest_path),
+                  'capture_sha256': sha256(capture_path),
                   'extraction_manifest_sha256': sha256(manifest_path),
                   'image_sha256': host['image_sha256'],
                   'data_volume_uuid': guest['data_volume_uuid'], 'matched': matched}

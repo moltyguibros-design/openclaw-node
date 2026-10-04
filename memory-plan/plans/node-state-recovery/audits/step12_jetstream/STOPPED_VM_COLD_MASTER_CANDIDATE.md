@@ -379,3 +379,12 @@ extracted file produced only `FAILED.json`. This supplies a content comparison
 mechanism, not proof that production writers were excluded when the guest
 manifest was taken. The compact result is in
 `HOST_STOPPED_TREE_MATCH_FIXTURE.json`.
+
+The matcher now also requires the private `CAPTURE.json` and the exact cloned
+image beside the extracted trees. It checks that the receipt binds the
+extraction manifest, image digest, Data volume and four roles, then rehashes
+the clone before it can write `MATCH.json`. The disposable ASIF fixture passes;
+altering the capture receipt refuses the match. This closes a provenance gap
+where a free-standing extracted directory could have been matched without its
+capture receipt. It still cannot attest continuous VM power-off or a clean
+guest shutdown.
