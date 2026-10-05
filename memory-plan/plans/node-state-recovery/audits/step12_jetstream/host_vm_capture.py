@@ -142,6 +142,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         observation = None
         sequence = 0
         stopped_count = 0
+        guard_observed = False
         while time.monotonic() < deadline:
             observation = preflight(host_spec_path, output / f'power-{sequence:04d}',
                                     allow_transition=True)
@@ -150,14 +151,19 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
             if observation['state'] == 'stopped' and observation['holders_consistent']:
                 stopped_count += 1
                 if stopped_count >= 2 and os.path.lexists(output / 'GUARD.json'):
+                    guard_observed = True
                     break
             else:
                 stopped_count = 0
             sequence += 1
             time.sleep(2)
-        require(observation is not None and observation['state'] == 'stopped'
+        require(guard_observed and observation is not None and observation['state'] == 'stopped'
                 and observation['holders_consistent'] and os.path.lexists(output / 'GUARD.json'),
                 'VM did not stop with a completed image guard before the capture deadline')
+        observation = preflight(host_spec_path, output / 'before-clone')
+        require(observation['state'] == 'stopped' and observation['holders_consistent']
+                and same_host_image(first, observation),
+                'VM restarted or source identity changed before clone')
         guard_sha = guarded_source(output, first, observation)
         require(shutil.disk_usage(output).free >= 20 * 1024 ** 3,
                 'host free-space floor is below 20 GiB')

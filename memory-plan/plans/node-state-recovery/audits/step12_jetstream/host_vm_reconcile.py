@@ -4,12 +4,10 @@
 import datetime
 import os
 import pathlib
-import plistlib
 import stat
-import subprocess
 import sys
 
-from host_clone_dispose import CAPTURE_SCOPE, private_record
+from host_clone_dispose import CAPTURE_SCOPE, private_record, unattached
 from host_image_immutable import change_immutable
 from host_vm_guard import GUARD_SCOPE
 from host_vm_capture import FIXTURE_UUID, HOST_SPEC_FIELDS, file_hash, fsync_parent, pinned_spec
@@ -36,20 +34,6 @@ def prior_bootable(capture_dir, vm_uuid, identity):
                 'prior BOOTABLE receipt identifies another source')
         found = True
     return found
-
-
-def unattached(clone):
-    holders = subprocess.run(['/usr/sbin/lsof', '-t', '--', str(clone)],
-                             capture_output=True, timeout=15)
-    require(holders.returncode == 1 and not holders.stdout and not holders.stderr,
-            'temporary clone has an open holder')
-    attached = subprocess.run(['/usr/bin/hdiutil', 'info', '-plist'],
-                              capture_output=True, timeout=15)
-    require(attached.returncode == 0 and not attached.stderr,
-            'attached image inventory failed')
-    images = plistlib.loads(attached.stdout)['images']
-    require(all(pathlib.Path(row['image-path']).resolve() != clone.resolve()
-                for row in images), 'temporary clone remains attached')
 
 
 def no_other_clone(root, current):

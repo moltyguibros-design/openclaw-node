@@ -1302,3 +1302,13 @@ and a missing-guard negative refuses before cloning. This is sampled guard
 binding, not a continuous no-writer claim. No production VM or service has
 changed; full-node hold, UTM rehearsal, historical acceptance and resumption
 remain open at 1.2 [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 00:19 EDT: the capture wait now requires the guard to
+have been observed during a stopped/no-holder sample, then takes a fresh
+pre-clone preflight. Successful clone disposal now uses the same open-holder
+and disk-attachment refusal as failed-capture cleanup and reconciliation.
+The disposable ASIF fixture attaches the completed clone read-only, confirms
+disposal refuses with the clone intact, ejects it, then completes disposal.
+The local host test group passes (9/9). This remains a sampled, disposable
+mechanism; no production VM or service changed, and 1.2 remains
+[A]/v1.2-pre.

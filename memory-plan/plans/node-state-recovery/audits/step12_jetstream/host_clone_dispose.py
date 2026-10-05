@@ -27,6 +27,20 @@ def private_record(path):
     return json.loads(path.read_text())
 
 
+def unattached(clone):
+    holders = subprocess.run(['/usr/sbin/lsof', '-t', '--', str(clone)],
+                             capture_output=True, timeout=15)
+    require(holders.returncode == 1 and not holders.stdout and not holders.stderr,
+            'temporary clone has an open holder')
+    attached = subprocess.run(['/usr/bin/hdiutil', 'info', '-plist'],
+                              capture_output=True, timeout=15)
+    require(attached.returncode == 0 and not attached.stderr,
+            'attached image inventory failed')
+    images = plistlib.loads(attached.stdout)['images']
+    require(all(pathlib.Path(row['image-path']).resolve() != clone.resolve()
+                for row in images), 'temporary clone remains attached')
+
+
 def dispose(host_spec, capture_dir, output, fixture=False):
     os.umask(0o077)
     host_spec = pathlib.Path(host_spec)
@@ -67,6 +81,7 @@ def dispose(host_spec, capture_dir, output, fixture=False):
         require(file_hash(pathlib.Path(before['image'])) == capture['source_image_sha256']
                 and file_hash(clone) == capture['clone_image_sha256'],
                 'source or temporary clone changed since capture')
+        unattached(clone)
         clone.unlink()
         fsync_parent(capture_dir)
         after = preflight(host_spec, output / 'after-dispose')
@@ -132,17 +147,7 @@ def cleanup_failed(host_spec, capture_dir, output, fixture=False):
                 (before['image_device'], before['image_inode'])
                 and initial['image_size'] == before['image_size'],
                 'failed capture, clone or stopped VM identity differs')
-        holders = subprocess.run(['/usr/sbin/lsof', '-t', '--', str(clone)],
-                                 capture_output=True, timeout=15)
-        require(holders.returncode == 1 and not holders.stdout and not holders.stderr,
-                'failed clone still has a holder')
-        attached = subprocess.run(['/usr/bin/hdiutil', 'info', '-plist'],
-                                  capture_output=True, timeout=15)
-        require(attached.returncode == 0 and not attached.stderr,
-                'attached image inventory failed')
-        images = plistlib.loads(attached.stdout)['images']
-        require(all(pathlib.Path(row['image-path']).resolve() != clone.resolve()
-                    for row in images), 'failed clone remains attached')
+        unattached(clone)
         change_immutable(clone, (info.st_dev, info.st_ino, info.st_size), False)
         clone.unlink()
         fsync_parent(capture_dir)

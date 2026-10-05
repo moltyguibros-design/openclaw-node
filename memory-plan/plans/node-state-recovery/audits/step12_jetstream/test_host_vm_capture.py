@@ -322,6 +322,15 @@ class HostCaptureTest(unittest.TestCase):
         info = clone.lstat()
         change_immutable(clone, (info.st_dev, info.st_ino, info.st_size), False)
         clone.chmod(0o600)
+        attached_clone = plistlib.loads(run('/usr/sbin/diskutil', 'image', 'attach', '--plist',
+                                             '--readOnly', '--noMount', str(clone)))
+        self.disks.append(attached_clone['system-entities'][0]['dev-entry'])
+        with self.assertRaisesRegex(RuntimeError, 'clone'):
+            dispose(spec, output, output / 'dispose-attached', fixture=True)
+        self.assertTrue(clone.exists())
+        self.assertTrue((output / 'dispose-attached' / 'FAILED.json').exists())
+        self.assertFalse((output / 'dispose-attached' / 'DISPOSE.json').exists())
+        self.eject()
         disposed = dispose(spec, output, output / 'dispose-after-stop', fixture=True)
         self.assertTrue(disposed['clone_absent'])
         self.assertTrue((output / 'dispose-after-stop' / 'DISPOSE.json').exists())
