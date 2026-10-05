@@ -1656,3 +1656,26 @@ No production service, VM or NATS store changed. The full-node driver,
 continuous 23-job/root/user/detached-process exclusion, deploy fence, stopped
 VM decision, four-history acceptance and verified resumption remain open;
 step 1.2 stays [A]/v1.2-pre.
+
+## D85 — Pin the owned stop fixture and its failure ordering (2026-10-05 16:07 EDT)
+
+Claude's exact-head review of D84 found no blocker in the full-node path, but
+the tests did not catch moving `disable_for_hold()` before the second
+readiness check. An owned macOS job now changes readiness after the durable
+intent and must remain enabled and running, with a failed receipt recording
+`disabled_override_observed: false`. A Linux control refuses a foreign hold
+before held unload, and another composes the actual `StopWatch.mutate()` with
+a real full-node `Journal`, checking the listener-first fence and unload
+action while simulating only launchd and the kernel watcher. The managed
+suite passes 38 tests with one domain skip; the journal suite passes 116.
+
+The macOS CI fixture now downloads NATS server 2.12.6 for the runner's
+architecture and checks the release artifact's SHA-256 before extraction,
+matching the Linux fixture's pinned server version. The previous D84 run was
+still queued during review; exact-head CI for this correction remains
+pending. The integration test uses a hold facade stub, and no native
+execution hold plus real listener stop has yet run end to end. The legacy
+scope's unit/label binding and the facade's journal-write trust remain
+latent boundaries without a production `StopWatch` caller; full-node binding
+is enforced before intent. No production service, VM or NATS history changed.
+Step 1.2 remains [A]/v1.2-pre.

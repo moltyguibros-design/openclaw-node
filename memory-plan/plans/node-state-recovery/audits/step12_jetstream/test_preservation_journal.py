@@ -16,6 +16,7 @@ from unittest.mock import patch
 from preservation_journal import CommittedRefusal, FULL_NODE_SCOPE, Journal, NATS_TRANSFER_UNITS, Refused, TIMER_SCOPE, TIMER_UNITS, UNITS, encoded, matches, valid_record
 import preservation_journal
 from preservation_checks import TAILSCALE_BINARY, TAILSCALE_LABEL, TAILSCALE_PLIST, TAILSCALE_WRAPPER
+from managed_launchd import StopWatch
 from legacy_fixture import legacy_journal
 
 
@@ -505,6 +506,39 @@ class JournalTests(unittest.TestCase):
                             if row['event'] == 'verified']
                 self.assertEqual(verified, [('scheduler-heartbeat', 'close-execution-hold'),
                                             ('mesh-deploy-listener', 'disable-and-unload'), ('nats', 'unload')])
+
+    def test_managed_stop_composes_with_full_node_listener_journal(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        disabled = {'value': False}
+        steps = []
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                hold.mutate = lambda unit, action, apply, verify, failure_evidence: journal.mutate(
+                    unit, action, apply, verify, failure_evidence=failure_evidence, hold=hold)
+                anchor_hold(journal, hold)
+                def disable():
+                    self.assertEqual(journal.records[-1]['event'], 'intent')
+                    self.assertEqual(journal.records[-1]['action'], 'disable-and-unload')
+                    disabled['value'] = True
+                    steps.append('disable')
+                def bootout():
+                    self.assertTrue(disabled['value'])
+                    current['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener')
+                    steps.append('bootout')
+                watch = SimpleNamespace(
+                    service=SimpleNamespace(label='ai.openclaw.mesh-deploy-listener',
+                                            disabled=lambda: disabled['value'], disable_for_hold=disable),
+                    require_disabled=True, ready_for_intent=lambda: None, apply=bootout,
+                    verify=lambda *_: listener_stop_evidence(), failure_evidence=lambda error: {})
+                evidence = StopWatch.mutate(watch, journal, 'mesh-deploy-listener',
+                                            lambda: True, lambda: True, hold=hold)
+                self.assertTrue(evidence['disabled_override_verified'])
+                self.assertTrue(journal.listener_fenced())
+                self.assertEqual(steps, ['disable', 'bootout'])
 
     def test_full_scope_listener_stop_requires_persistent_process_proof(self):
         prior = full_node_inventory()

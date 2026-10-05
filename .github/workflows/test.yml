@@ -146,7 +146,17 @@ jobs:
           node-version: 22
       - name: Install owned launchd fixture dependencies
         run: |
-          brew install nats-server
+          case "$(uname -m)" in
+            arm64) nats_arch=arm64; nats_sha=b9b287b786e83e783702214d516042f6397f7c1c4916985c6ec5e6d9d490151c ;;
+            x86_64) nats_arch=amd64; nats_sha=d7bc326ebbaf0a032ae1b03b99e4d863d9320ad010f37a22b2e8306ab3272ca0 ;;
+            *) exit 1 ;;
+          esac
+          nats_fixture_dir="$(mktemp -d)"
+          curl -fL --retry 3 --output "$nats_fixture_dir/nats.tar.gz" \
+            "https://github.com/nats-io/nats-server/releases/download/v2.12.6/nats-server-v2.12.6-darwin-${nats_arch}.tar.gz"
+          printf '%s  %s\n' "$nats_sha" "$nats_fixture_dir/nats.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$nats_fixture_dir/nats.tar.gz" -C "$nats_fixture_dir"
+          echo "$nats_fixture_dir/nats-server-v2.12.6-darwin-${nats_arch}" >> "$GITHUB_PATH"
           npm ci --ignore-scripts --no-audit --no-fund
       - name: Verify macOS descriptor and subprocess lock behavior
         env:

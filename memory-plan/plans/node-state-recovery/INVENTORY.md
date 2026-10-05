@@ -1677,3 +1677,14 @@ integration, enable-capable recovery for all 23 jobs, continuous exclusion,
 deploy fence, stopped-VM decision, real-history acceptance and verified
 resumption remain open. No production service, VM or history changed;
 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 16:07 EDT: D85 adds Claude's missing post-intent
+readiness negative, a foreign-held-unload refusal and an actual
+`StopWatch.mutate()` composition against a full-node journal with simulated
+launchd. The owned macOS stop suite passes 38 tests with one domain skip;
+the journal suite passes 116. macOS CI now uses a SHA-256-checked NATS 2.12.6
+release artifact; exact-head CI is pending. This is fixture and source
+evidence, not a native hold plus real production listener stop. The complete
+writer/VM hold, four-history restore and acceptance, and verified resumption
+remain open. No production service, VM or NATS store changed; 1.2 remains
+[A]/v1.2-pre.
