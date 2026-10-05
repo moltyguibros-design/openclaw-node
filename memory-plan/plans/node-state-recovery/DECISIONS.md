@@ -1171,3 +1171,33 @@ marker, and create or replace the lock mid-action to prove refusal. Private test
 must never read or create the production marker or lock. The
 production full-node driver, complete readiness checks, legacy root-job
 retirement, healthy cold masters, and cutover remain open at 1.2.
+
+## D62 — Planned VM reboot requires a persistent full-node hold (2026-10-04 23:31 EDT)
+
+D8's bootout-only restoration describes an interrupted preservation window,
+not the planned stopped-VM capture path. In that path the guest must boot again
+before real-history restore and acceptance can finish. Bootout-only jobs may
+start at login before the recovery controller runs; `already-restored` records
+their current state without enforcing the dependency or deploy-listener order.
+It therefore cannot certify the planned shutdown or authorize acceptance.
+
+Before a production stop, a full-node controller must durably record the
+baseline and persistently fence every approved job that could write or launch
+another writer across a guest boot, including NATS, clients, viewer, gateway,
+deploy listener, and timers. It must prove the root-managed legacy agent is
+retired or held and that excluded jobs remain unchanged. The exact disable,
+unload, and re-enable mechanism needs a disposable-VM reboot rehearsal; no
+point-in-time launchd inventory is a continuous no-restart certificate. The
+controller must keep the deploy listener fenced until deploy-marker/HEAD and
+pending-deploy checks pass, then restore it last. A reboot ends the live
+quiet window. The controller must keep the captured evidence and choose either
+an accepted cold-master path or an explicit abort that restores the prior node
+without claiming a new recovery point. That decision and its physical checks
+must precede any reopening of the execution gate or service restoration. An
+unexpected auto-start refuses the path rather than becoming an
+`already-restored` success.
+
+The full-node production driver, continuous watch, detached-process coverage,
+other launch-path census, host UTM autostart control, disposable rehearsal and
+real-history acceptance remain unimplemented. This decision changes no live
+job, VM, store, or permission and leaves 1.2 [A]/v1.2-pre.

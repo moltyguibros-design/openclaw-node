@@ -83,3 +83,10 @@ matching `GUARD.json` against its durable intent. An aborted guard can still
 recover the image's bootability, but its receipt records `guard_completed:false`.
 Neither value is a VM start authorization; the missing boot controller must
 make an independent acceptance or explicit abort decision.
+
+`GUARD.json` is published after the post-flag check through a private
+temporary file, file sync, atomic rename and directory sync. A crash while
+writing the temporary file leaves no completion receipt, so reconciliation
+can report `guard_completed:false` and restore bootability after its other
+checks pass. The field does not prove that a later `CAPTURE.json` was created
+under that guard: the capture tool does not yet bind those two operations.

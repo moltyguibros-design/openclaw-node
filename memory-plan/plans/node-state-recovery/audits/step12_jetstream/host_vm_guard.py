@@ -9,6 +9,7 @@ import sys
 
 from host_clone_dispose import private_record
 from host_image_immutable import change_immutable
+from host_vm_capture import fsync_parent
 from host_vm_preflight import owned_directory, preflight, require, write_record
 
 
@@ -67,10 +68,15 @@ def guard(host_spec, capture_dir, fixture=False):
             and (after['image_device'], after['image_inode'], after['image_size']) == identity
             and bool(source.lstat().st_flags & stat.UF_IMMUTABLE),
             'VM or source changed after image guard')
-    write_record(capture_dir / 'GUARD.json', {
+    receipt = capture_dir / 'GUARD.json'
+    temporary = capture_dir / 'GUARD.json.tmp'
+    write_record(temporary, {
         **intent, 'scope': 'stopped source image guarded; no clone or VM start',
         'guarded_at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
     })
+    require(not os.path.lexists(receipt), 'guard completion receipt already exists')
+    os.replace(temporary, receipt)
+    fsync_parent(capture_dir)
     return intent
 
 

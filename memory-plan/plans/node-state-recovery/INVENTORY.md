@@ -1249,3 +1249,18 @@ macOS reconciliation fixture passes (2/2), and plan-lint remains conformant.
 `BOOTABLE` still means disk bootability only; no VM start controller, real
 UTM rehearsal, full-node hold, cold-master acceptance or service resumption
 is claimed. No production state changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-04 23:33 EDT: Claude's read-only full-node review found
+that no production 23-unit hold driver exists, and the planned post-capture
+guest boot would allow bootout-only jobs to restart before recovery can enforce
+dependency or deploy-listener order. D62 records the persistent-hold and
+explicit acceptance-or-abort requirement for this planned reboot. The review
+also identified detached-process, other launch-path and host UTM autostart
+gaps; none is certified by the current point-in-time scans. Claude's review
+of the `guard_completed` receipt found no false-acceptance blocker but did
+find that a partial `GUARD.json` write could strand an immutable image. The
+guard now publishes that receipt atomically, and the macOS interrupted-write
+regression recovers a bootable source with `guard_completed:false`. The local
+reconciliation fixture passes (2/2). This is still a disposable mechanism;
+no production hold, VM stop, cold master, history acceptance or resumption
+occurred. Step 1.2 remains [A]/v1.2-pre.

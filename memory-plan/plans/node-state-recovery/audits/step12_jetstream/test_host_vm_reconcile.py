@@ -208,6 +208,35 @@ class HostReconcileTest(unittest.TestCase):
             self.assertFalse(recovered_held['guard_completed'])
             self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
 
+            interrupted = root / 'interrupted-guard-receipt'
+            interrupted.mkdir(mode=0o700)
+            interrupted_initial = preflight(spec, interrupted / 'before-shutdown')
+            write_record(interrupted / 'ARMED.json', {
+                'scope': 'waiting for external guest shutdown; no stop request issued',
+                'vm_uuid': vm_uuid, 'host_boot_session': interrupted_initial['host_boot_session'],
+                'image_device': interrupted_initial['image_device'],
+                'image_inode': interrupted_initial['image_inode'],
+            })
+            original_write = host_vm_guard.write_record
+
+            def partial_receipt(path, value):
+                if pathlib.Path(path).name != 'GUARD.json.tmp':
+                    return original_write(path, value)
+                self.assertFalse((interrupted / 'GUARD.json').exists())
+                pathlib.Path(path).write_text('{"partial":')
+                raise OSError('interrupted guard receipt write')
+
+            with patch.object(host_vm_guard, 'write_record', partial_receipt):
+                with self.assertRaisesRegex(OSError, 'interrupted guard receipt write'):
+                    guard(spec, interrupted, fixture=True)
+            self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
+            self.assertTrue((interrupted / 'GUARD.json.tmp').exists())
+            self.assertFalse((interrupted / 'GUARD.json').exists())
+            interrupted_recovery = reconcile(spec, interrupted,
+                                             interrupted / 'recovered', fixture=True)
+            self.assertFalse(interrupted_recovery['guard_completed'])
+            self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
+
             completed = root / 'completed-capture'
             completed.mkdir(mode=0o700)
             completed_initial = preflight(spec, completed / 'before-shutdown')
