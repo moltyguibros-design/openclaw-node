@@ -988,7 +988,9 @@ class Journal:
             committed = None
             try:
                 guard = (nats_legacy_restore_guard() if nats_guarded
-                         and unit in NATS_TRANSFER_UNITS else contextlib.nullcontext())
+                         and (unit in NATS_TRANSFER_UNITS or
+                              self.scope == FULL_NODE_SCOPE and unit == 'mesh-deploy-listener')
+                         else contextlib.nullcontext())
                 with guard as precommit:
                     actual = observe(unit, prior)
                     require(all(isinstance(actual.get(k), bool) for k in ('loaded', 'running', 'disabled')),

@@ -1502,3 +1502,17 @@ actual environment, and refuse unobservable inputs. The forward stop order
 is not yet enforced, and the complete physical hold and production resumption
 remain open. No production service, VM or NATS store changed; step 1.2 stays
 [A]/v1.2-pre.
+
+## D78 — Hold the NATS exclusion across deploy-listener release (2026-10-05 12:29 EDT)
+
+Claude's exact-head review caught a D77 error: the listener's release gate
+ran inside the restore loop's per-unit context, but that context was a no-op
+for `mesh-deploy-listener` because it only selected the NATS transfer units.
+Include the listener in the legacy NATS guard for full-node recovery. Its
+precommit check, physical and entrypoint checks, deploy-fence callback,
+durable release row and listener restore now share the same lock interval.
+The owned clean-path test attempts an exclusive writer lock from another
+process inside both the fence and restore callbacks and requires refusal.
+The journal suite passes 106 tests. This proves the local lock boundary,
+not a production deploy fence or continuous full-node hold. No production
+service, VM or NATS store changed; step 1.2 stays [A]/v1.2-pre.

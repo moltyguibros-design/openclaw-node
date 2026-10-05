@@ -584,6 +584,14 @@ class JournalTests(unittest.TestCase):
                          scope=FULL_NODE_SCOPE) as journal:
                 current['mesh-deploy-listener'].update(loaded=False, running=False)
                 restored = []
+                script = ('import fcntl,os,sys; '
+                          'fd=os.open(sys.argv[1],os.O_RDONLY); '
+                          'fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)')
+                def assert_guarded():
+                    probe = subprocess.run([sys.executable, '-c', script, str(self.nats_lock)],
+                                           capture_output=True, text=True, timeout=5)
+                    self.assertNotEqual(probe.returncode, 0)
+                    self.assertIn('BlockingIOError', probe.stderr)
                 hold = SimpleNamespace(journal=journal, prepare=lambda *_: None,
                     before_restore=lambda: None, check_closed=lambda: None,
                     complete=lambda *_: {'verified': True})
@@ -591,12 +599,16 @@ class JournalTests(unittest.TestCase):
                     self.assertEqual(unit, 'mesh-deploy-listener')
                     self.assertTrue(any(row['event'] == 'listener-release-verified'
                                         for row in journal.records))
+                    assert_guarded()
                     restored.append(unit)
                     current[unit] = copy.deepcopy(wanted)
+                def fence():
+                    assert_guarded()
+                    return {'verified': True}
                 result = journal.recover(restore,
                     lambda unit, _: {**current[unit], 'verified': True},
                     lambda: {'verified': True}, hold=hold,
-                    deploy_fence=lambda: {'verified': True})
+                    deploy_fence=fence)
                 self.assertTrue(result['restored'], result)
                 self.assertEqual(restored, ['mesh-deploy-listener'])
                 rows = [(row['event'], row.get('unit')) for row in journal.records]

@@ -1592,3 +1592,12 @@ cases. The actual deploy-marker and pending-work fence, forward stop-order
 enforcement, persistent full-node hold, stopped-VM decision controller and
 real-history acceptance remain open. No production service, VM or NATS store
 changed; 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 12:29 EDT: Claude found that D77's listener release
+was using a no-op per-unit guard. D78 includes the listener in the NATS
+legacy lock interval. The owned clean-path test now proves an independent
+exclusive writer cannot take that lock during either the deploy-fence
+decision or the listener restore. The journal suite passes 106 tests.
+Production deploy-fence logic, full-node hold and all capture/acceptance
+gates remain open. No production service, VM or NATS store changed; 1.2 stays
+[A]/v1.2-pre.
