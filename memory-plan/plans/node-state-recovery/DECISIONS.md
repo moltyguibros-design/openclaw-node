@@ -1516,3 +1516,20 @@ process inside both the fence and restore callbacks and requires refusal.
 The journal suite passes 106 tests. This proves the local lock boundary,
 not a production deploy fence or continuous full-node hold. No production
 service, VM or NATS store changed; step 1.2 stays [A]/v1.2-pre.
+
+## D79 — Require a completed listener restoration before trusting a prior release (2026-10-05 12:40 EDT)
+
+Claude's exact-head review found that a crash after
+`listener-release-verified` but before the listener's restoration could let
+an out-of-band restart be treated as already restored on the next recovery.
+The preflight now compares the latest forward listener intent with a later
+`recovery-verified` or `already-restored` row for that listener, not merely
+with a release row. A release receipt alone does not certify a completed
+restart. The owned negative simulates that crash and outside restart and
+requires refusal before the deploy fence or any restore. Other refusal tests
+now count fence, completion and restore calls instead of relying on
+`self.fail()` exceptions that `recover()` catches; they also pin a listener
+started during recovery. The journal suite passes 107 tests. This is owned
+fixture evidence, not a production deploy fence, full-node hold, stopped-VM
+decision or service resumption. No production service, VM or NATS store
+changed; step 1.2 stays [A]/v1.2-pre.

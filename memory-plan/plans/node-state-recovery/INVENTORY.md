@@ -1601,3 +1601,14 @@ decision or the listener restore. The journal suite passes 106 tests.
 Production deploy-fence logic, full-node hold and all capture/acceptance
 gates remain open. No production service, VM or NATS store changed; 1.2 stays
 [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 12:40 EDT: D79 closes Claude's crash-after-release
+gap: a release row without a later listener recovery-verified or
+already-restored row cannot authorize a listener found running on a later
+attempt. The owned negative refuses before the fence or any restore. Tests
+for late service and listener drift now use call counts so recovery cannot
+swallow a test assertion and appear to pass. The journal suite passes
+107 tests. This does not supply the production deploy fence, persistent
+hold, stopped-VM decision controller, four-history acceptance or verified
+service resumption. No production service, VM or NATS store changed;
+1.2 stays [A]/v1.2-pre.

@@ -549,9 +549,10 @@ class JournalTests(unittest.TestCase):
                         current['mesh-deploy-listener'].update(loaded=False, running=False)
                         restored = []
                         fence_calls = []
+                        complete_calls = []
                         hold = SimpleNamespace(journal=journal, prepare=lambda *_: None,
                             before_restore=lambda: None, check_closed=lambda: None,
-                            complete=lambda *_: self.fail('execution hold reopened after failed release'))
+                            complete=lambda *_: complete_calls.append(True) or {'verified': True})
                         def restore(unit, wanted):
                             restored.append(unit)
                             current[unit] = copy.deepcopy(wanted)
@@ -565,6 +566,7 @@ class JournalTests(unittest.TestCase):
                         self.assertFalse(result['restored'])
                         self.assertEqual(restored, [])
                         self.assertEqual(fence_calls, [] if failed_gate == 'final-state' else [True])
+                        self.assertEqual(complete_calls, [])
                         self.assertFalse(any(row['event'] == 'listener-release-verified'
                                              for row in journal.records))
                         self.assertFalse(any(row['event'] == 'execution-hold-restored'
@@ -628,6 +630,7 @@ class JournalTests(unittest.TestCase):
             with Journal(self.root, prior, node_lock=self.node_lock,
                          scope=FULL_NODE_SCOPE) as journal:
                 current['mesh-deploy-listener'].update(loaded=False, running=False)
+                restored = []
                 hold = SimpleNamespace(journal=journal, prepare=lambda *_: None,
                     before_restore=lambda: None, check_closed=lambda: None)
                 original = journal.append
@@ -637,10 +640,11 @@ class JournalTests(unittest.TestCase):
                     return original(event, **data)
                 with patch.object(journal, 'append', side_effect=append):
                     with self.assertRaises(Refused):
-                        journal.recover(lambda *_: self.fail('listener started without release receipt'),
+                        journal.recover(lambda unit, _: restored.append(unit),
                             lambda unit, _: {**current[unit], 'verified': True},
                             lambda: {'verified': True}, hold=hold,
                             deploy_fence=lambda: {'verified': True})
+                self.assertEqual(restored, [])
                 self.assertFalse(any(row['event'] == 'restoration-intent'
                                      and row.get('unit') == 'mesh-deploy-listener'
                                      for row in journal.records))
@@ -664,18 +668,57 @@ class JournalTests(unittest.TestCase):
                     lambda: {'verified': True}, hold=hold)
                 current['mesh-deploy-listener'] = copy.deepcopy(prior['mesh-deploy-listener'])
                 restored = []
+                fence_calls = []
+                def fence():
+                    fence_calls.append(True)
+                    return {'verified': True}
                 result = journal.recover(lambda unit, _: restored.append(unit),
                     lambda unit, _: {**current[unit], 'verified': True},
                     lambda: {'verified': True}, hold=hold,
-                    deploy_fence=lambda: self.fail('fence reached after unapproved restart'))
+                    deploy_fence=fence)
                 self.assertFalse(result['restored'])
                 self.assertEqual(restored, [])
+                self.assertEqual(fence_calls, [])
                 self.assertIn('mesh-deploy-listener', [row['unit'] for row in result['errors']])
                 self.assertFalse(any(row['event'] == 'listener-release-verified'
                                      for row in journal.records))
 
+    def test_full_scope_refuses_listener_restart_after_unfinished_release(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None, complete=lambda *_: {'verified': True})
+                journal.mutate('mesh-deploy-listener', 'stop',
+                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False),
+                    lambda: {'verified': True}, hold=hold)
+                journal.append('listener-release-verified', evidence={'verified': True})
+                current['mesh-deploy-listener'] = copy.deepcopy(prior['mesh-deploy-listener'])
+                restored = []
+                fence_calls = []
+                result = journal.recover(lambda unit, _: restored.append(unit),
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: fence_calls.append(True) or {'verified': True})
+                self.assertFalse(result['restored'])
+                self.assertEqual(restored, [])
+                self.assertEqual(fence_calls, [])
+                self.assertIn('mesh-deploy-listener', [row['unit'] for row in result['errors']])
+                self.assertFalse(any(row['event'] == 'already-restored'
+                                     and row.get('unit') == 'mesh-deploy-listener'
+                                     for row in journal.records))
+
     def test_full_scope_refuses_listener_release_after_late_service_or_job_drift(self):
-        for drift in ('service', 'extra-job', 'missing-job'):
+        for drift in ('service', 'extra-job', 'missing-job', 'listener-start'):
             with self.subTest(drift=drift):
                 prior = full_node_inventory()
                 current = copy.deepcopy(prior)
@@ -696,6 +739,8 @@ class JournalTests(unittest.TestCase):
                                  node_lock=root / 'node.lock', scope=FULL_NODE_SCOPE) as journal:
                         current['mesh-deploy-listener'].update(loaded=False, running=False)
                         restored = []
+                        fence_calls = []
+                        complete_calls = []
                         listener_observations = []
                         def observe(unit, _):
                             if unit == 'mesh-deploy-listener':
@@ -704,15 +749,22 @@ class JournalTests(unittest.TestCase):
                                     releasing.append(True)
                                     if drift == 'service':
                                         current['gateway']['running'] = False
+                                    if drift == 'listener-start':
+                                        current['mesh-deploy-listener'] = copy.deepcopy(prior['mesh-deploy-listener'])
                             return {**current[unit], 'verified': True}
                         hold = SimpleNamespace(journal=journal, prepare=lambda *_: None,
                             before_restore=lambda: None, check_closed=lambda: None,
-                            complete=lambda *_: self.fail('hold reopened after drift'))
+                            complete=lambda *_: complete_calls.append(True) or {'verified': True})
+                        def fence():
+                            fence_calls.append(True)
+                            return {'verified': True}
                         result = journal.recover(lambda unit, _: restored.append(unit), observe,
                             lambda: {'verified': True}, hold=hold,
-                            deploy_fence=lambda: self.fail('fence reached after drift'))
+                            deploy_fence=fence)
                         self.assertFalse(result['restored'])
                         self.assertEqual(restored, [])
+                        self.assertEqual(fence_calls, [])
+                        self.assertEqual(complete_calls, [])
                         self.assertFalse(any(row['event'] == 'listener-release-verified'
                                              for row in journal.records))
 

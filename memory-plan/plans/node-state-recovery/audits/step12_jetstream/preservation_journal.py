@@ -957,9 +957,10 @@ class Journal:
                 latest_intent = max((row['sequence'] for row in self.records
                                      if row['event'] == 'intent'
                                      and row.get('unit') == 'mesh-deploy-listener'), default=0)
-                latest_release = max((row['sequence'] for row in self.records
-                                      if row['event'] == 'listener-release-verified'), default=0)
-                require(not (latest_intent > latest_release
+                latest_restored = max((row['sequence'] for row in self.records
+                                       if row['event'] in ('recovery-verified', 'already-restored')
+                                       and row.get('unit') == 'mesh-deploy-listener'), default=0)
+                require(not (latest_intent > latest_restored
                              and (listener['loaded'] or listener['running'])),
                         'deploy listener restarted before its release gate')
             except Exception as error:
