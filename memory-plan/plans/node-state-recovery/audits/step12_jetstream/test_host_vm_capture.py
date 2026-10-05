@@ -16,7 +16,10 @@ import host_vm_capture
 from stopped_tree_match import guest_capture, host_match
 from host_clone_dispose import cleanup_failed, dispose
 from host_vm_capture import capture, clone_only, publish_capture_record
+from host_vm_guard import guard
+from host_image_immutable import change_immutable
 from host_vm_preflight import vmstate_identity
+from host_vm_reconcile import reconcile
 
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -85,6 +88,39 @@ class VmstateGateTest(unittest.TestCase):
             self.assertFalse((output / 'CAPTURE.json').exists())
             self.assertFalse((output / 'powered-off-image.asif').exists())
 
+    def test_stopped_vm_without_guard_refuses_before_clone(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-vmstate-gate-') as temporary:
+            root = pathlib.Path(temporary).resolve()
+            root.chmod(0o700)
+            host_spec = root / 'host.json'
+            host_spec.write_text(json.dumps({
+                'package': str(root / 'Owned.utm'), 'name': 'Owned',
+                'uuid': '00000000-0000-0000-0000-000000000002',
+                'image_name': '00000000-0000-0000-0000-000000000001.img',
+                'config_sha256': '0' * 64, 'utmctl': '/tmp/unused',
+                'utmctl_sha256': '0' * 64,
+            }))
+            host_spec.chmod(0o600)
+            store_spec = root / 'stores.json'
+            store_spec.write_text(json.dumps({
+                'data_volume_uuid': '00000000-0000-0000-0000-000000000003',
+                'stores': [{'role': role, 'relative_path': role}
+                           for role in ('standalone', 'member1', 'member2', 'member3')],
+            }))
+            store_spec.chmod(0o600)
+            before = {'state': 'started', 'host_boot_session': 'boot',
+                      'image_device': 1, 'image_inode': 2, 'image_size': 3,
+                      'vmstate': None}
+            stopped = dict(before, state='stopped', holders_consistent=True)
+            output = root / 'capture'
+            with mock.patch('host_vm_capture.preflight', side_effect=[before, stopped]), \
+                    mock.patch('host_vm_capture.clone_only') as clone:
+                with self.assertRaisesRegex(RuntimeError, 'completed image guard'):
+                    capture(host_spec, store_spec, output, 1, fixture=True)
+            clone.assert_not_called()
+            self.assertTrue((output / 'FAILED.json').exists())
+            self.assertFalse((output / 'CAPTURE.json').exists())
+
     def test_vmstate_identity_refuses_link(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-vmstate-path-') as temporary:
             root = pathlib.Path(temporary)
@@ -117,7 +153,9 @@ class HostCaptureTest(unittest.TestCase):
             for name in dirs:
                 os.chmod(pathlib.Path(directory) / name, 0o700)
             for name in files:
-                os.chmod(pathlib.Path(directory) / name, 0o600)
+                path = pathlib.Path(directory) / name
+                os.chflags(path, 0)
+                os.chmod(path, 0o600)
         shutil.rmtree(self.root)
 
     def eject(self):
@@ -205,11 +243,14 @@ class HostCaptureTest(unittest.TestCase):
         holder.terminate()
         holder.wait(timeout=5)
         state.write_text('stopped\n')
+        guard(spec, output, fixture=True)
         _, stderr = worker.communicate(timeout=30)
         self.assertEqual(worker.returncode, 0, stderr.decode())
         result = json.loads((output / 'CAPTURE.json').read_text())
         self.assertEqual(result['vm_state_at_final_check'], 'stopped')
         self.assertEqual(result['vmstate_at_arm'], result['vmstate_at_final_check'])
+        self.assertEqual(result['guard_receipt_sha256'],
+                         hashlib.sha256((output / 'GUARD.json').read_bytes()).hexdigest())
         self.assertEqual(result['vmstate_at_arm']['size'], len(b'old suspend state'))
         self.assertFalse((output / 'FAILED.json').exists())
         for role in ('standalone', 'member1', 'member2', 'member3'):
@@ -218,6 +259,13 @@ class HostCaptureTest(unittest.TestCase):
         matched = self.root / 'matched'
         host_match(guest_output / 'manifest.json', output / 'extracted-stores', matched)
         self.assertTrue((matched / 'MATCH.json').exists())
+        guard_receipt = output / 'GUARD.json'
+        original_guard_receipt = guard_receipt.read_bytes()
+        guard_receipt.write_bytes(original_guard_receipt + b' ')
+        with self.assertRaisesRegex(RuntimeError, 'capture receipt'):
+            host_match(guest_output / 'manifest.json', output / 'extracted-stores',
+                       self.root / 'wrong-guard')
+        guard_receipt.write_bytes(original_guard_receipt)
         capture_receipt = output / 'CAPTURE.json'
         original_receipt = capture_receipt.read_bytes()
         changed_receipt = json.loads(original_receipt)
@@ -271,12 +319,15 @@ class HostCaptureTest(unittest.TestCase):
         self.assertTrue(clone.exists())
         clone.unlink()
         clone_only(source, clone)
+        info = clone.lstat()
+        change_immutable(clone, (info.st_dev, info.st_ino, info.st_size), False)
         clone.chmod(0o600)
         disposed = dispose(spec, output, output / 'dispose-after-stop', fixture=True)
         self.assertTrue(disposed['clone_absent'])
         self.assertTrue((output / 'dispose-after-stop' / 'DISPOSE.json').exists())
         self.assertFalse((output / 'powered-off-image.asif').exists())
         self.assertTrue(source.exists())
+        self.assertTrue(reconcile(spec, output, output / 'bootable', fixture=True)['guard_completed'])
 
         wrong_store_spec = self.root / 'wrong-store-spec.json'
         wrong_store_spec.write_text(json.dumps({
@@ -305,6 +356,7 @@ class HostCaptureTest(unittest.TestCase):
         third_holder.terminate()
         third_holder.wait(timeout=5)
         state.write_text('stopped\n')
+        guard(spec, failed_capture, fixture=True)
         failed_worker.communicate(timeout=30)
         self.assertNotEqual(failed_worker.returncode, 0)
         self.assertTrue((failed_capture / 'FAILED.json').exists())
@@ -319,12 +371,16 @@ class HostCaptureTest(unittest.TestCase):
             cleanup_failed(spec, failed_capture, failed_capture / 'cleanup-attached', fixture=True)
         self.assertTrue(failed_clone.exists())
         self.eject()
+        info = failed_clone.lstat()
+        change_immutable(failed_clone, (info.st_dev, info.st_ino, info.st_size), True)
         cleaned = cleanup_failed(spec, failed_capture, failed_capture / 'cleanup-detached',
                                  fixture=True)
         self.assertTrue(cleaned['clone_absent'])
         self.assertTrue((failed_capture / 'cleanup-detached' / 'CLEANUP.json').exists())
         self.assertFalse(failed_clone.exists())
         self.assertTrue(source.exists())
+        self.assertFalse(reconcile(spec, failed_capture, failed_capture / 'bootable',
+                                   fixture=True)['capture_completed'])
 
 
 if __name__ == '__main__':

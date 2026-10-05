@@ -1214,3 +1214,19 @@ The full-node production driver, continuous watch, detached-process coverage,
 other launch-path census, host UTM autostart control, disposable rehearsal and
 real-history acceptance remain unimplemented. This decision changes no live
 job, VM, store, or permission and leaves 1.2 [A]/v1.2-pre.
+
+## D63 — Bind image extraction to a completed source guard (2026-10-04 23:59 EDT)
+
+The stopped-VM capture worker must refuse to clone until a completed
+`GUARD.json` and its matching intent and post-guard stopped/no-holder
+preflight exist in the same private capture directory. It rechecks the
+guarded source and the receipt hash at each later sampling boundary and
+records that hash in `CAPTURE.json`. `clonefile` inherits `UF_IMMUTABLE`, so
+the worker clears the flag on the verified clone inode only before read-only
+extraction; the original source stays guarded until separate reconciliation.
+The guest/host tree matcher refuses a missing or changed guard receipt against
+the capture receipt's pinned hash. Failed-capture cleanup clears the inherited
+flag on a verified, unattached clone before unlinking it.
+Missing or changed guard evidence refuses the attempt without accepting a
+cold master. The check does not prove continuous exclusion of a same-owner
+writer or replace the missing full-node hold and real UTM rehearsal.

@@ -9,7 +9,7 @@ import sys
 
 from host_clone_dispose import private_record
 from host_image_immutable import change_immutable
-from host_vm_capture import fsync_parent
+from host_vm_capture import FIXTURE_UUID, HOST_SPEC_FIELDS, fsync_parent, pinned_spec
 from host_vm_preflight import owned_directory, preflight, require, write_record
 
 
@@ -22,7 +22,11 @@ def guard(host_spec, capture_dir, fixture=False):
     owned_directory(capture_dir.parent)
     owned_directory(capture_dir)
     if fixture:
-        require(capture_dir.parent.name.startswith('openclaw-host-reconcile-'),
+        host = pinned_spec(pathlib.Path(host_spec), HOST_SPEC_FIELDS)
+        require(capture_dir.parent.name.startswith(('openclaw-host-reconcile-',
+                                                    'openclaw-host-capture-'))
+                and host['uuid'] == FIXTURE_UUID
+                and pathlib.Path(host['package']).parent == capture_dir.parent,
                 'fixture guard requires the owned test parent')
     else:
         require(capture_dir.parent == pathlib.Path.home() /

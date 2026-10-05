@@ -10,6 +10,7 @@ import stat
 import subprocess
 import sys
 
+from host_image_immutable import change_immutable
 from host_vm_capture import file_hash, fsync_parent
 from host_vm_preflight import owned_directory, preflight, require, write_record
 
@@ -122,6 +123,7 @@ def cleanup_failed(host_spec, capture_dir, output, fixture=False):
         require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
                 and info.st_nlink == 1 and info.st_dev == before['image_device']
                 and info.st_ino != before['image_inode']
+                and info.st_size == before['image_size']
                 and before['state'] == 'stopped' and before['holders_consistent']
                 and armed['vm_uuid'] == initial['vm_uuid'] == before['vm_uuid']
                 and armed['host_boot_session'] == initial['host_boot_session'] == before['host_boot_session']
@@ -141,6 +143,7 @@ def cleanup_failed(host_spec, capture_dir, output, fixture=False):
         images = plistlib.loads(attached.stdout)['images']
         require(all(pathlib.Path(row['image-path']).resolve() != clone.resolve()
                     for row in images), 'failed clone remains attached')
+        change_immutable(clone, (info.st_dev, info.st_ino, info.st_size), False)
         clone.unlink()
         fsync_parent(capture_dir)
         after = preflight(host_spec, output / 'after-cleanup')

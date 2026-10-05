@@ -131,9 +131,11 @@ def host_match(guest_path, extracted, output):
     guest = json.loads(guest_path.read_text())
     manifest_path = extracted / 'manifest.json'
     capture_path = extracted.parent / 'CAPTURE.json'
+    guard_path = extracted.parent / 'GUARD.json'
     image_path = extracted.parent / 'powered-off-image.asif'
     private_file(manifest_path)
     private_file(capture_path)
+    private_file(guard_path)
     private_file(image_path)
     host = json.loads(manifest_path.read_text())
     capture = json.loads(capture_path.read_text())
@@ -142,6 +144,7 @@ def host_match(guest_path, extracted, output):
         require(capture['scope'] == 'sampled stopped-state image extraction; uninterrupted power-off, clean shutdown and master acceptance external'
                 and capture['vm_state_at_final_check'] == 'stopped'
                 and capture['source_image_sha256'] == capture['clone_image_sha256']
+                and capture['guard_receipt_sha256'] == sha256(guard_path)
                 and capture['clone_image_sha256'] == host['image_sha256']
                 and capture['extraction_manifest_sha256'] == sha256(manifest_path)
                 and capture['data_volume_uuid'] == host['data_volume_uuid']

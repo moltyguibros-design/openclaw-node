@@ -1289,3 +1289,16 @@ D62 now distinguishes expected Tailscale helper execution under D60 from
 cohort auto-start and includes failed-acceptance aborts. Production capture
 ordering, full-node hold, real UTM rehearsal, cold masters and runtime
 resumption remain unproven; 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-04 23:59 EDT: the inactive capture candidate now requires
+a matching completed image guard before creating the clone, rechecks the
+guarded source and receipt hash through extraction, and records the guard hash
+in its capture receipt; the guest/host matcher rechecks that hash. The
+disposable ASIF capture exposed that `clonefile`
+inherits the immutable flag; the worker now clears it on the verified clone
+only, and failed-capture cleanup can remove an interrupted immutable clone.
+The Mac fixture exercises guarded capture, disposal and reconciliation,
+and a missing-guard negative refuses before cloning. This is sampled guard
+binding, not a continuous no-writer claim. No production VM or service has
+changed; full-node hold, UTM rehearsal, historical acceptance and resumption
+remain open at 1.2 [A]/v1.2-pre.

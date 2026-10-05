@@ -88,8 +88,17 @@ make an independent acceptance or explicit abort decision.
 temporary file, file sync, atomic rename and directory sync. A crash while
 writing the temporary file leaves no completion receipt, so reconciliation
 can report `guard_completed:false` and restore bootability after its other
-checks pass. The field does not prove that a later `CAPTURE.json` was created
-under that guard: the capture tool does not yet bind those two operations.
+checks pass. The capture worker now requires the matching private guard
+intent, completion receipt and passing post-guard preflight before it clones
+the image. It rechecks the source flag and guard-receipt hash after cloning,
+hashing and extraction, and records that hash in `CAPTURE.json`. The clone
+inherits the immutable flag; the worker clears it on the clone inode only.
+Failed-capture cleanup also clears that flag on a verified, unattached clone
+before removing it, covering interruption before the worker can clear it.
+The later guest/host tree comparison also checks that the guard receipt still
+has the hash pinned by the capture receipt.
+These are sampled checks, not proof that an owner never cleared and reapplied
+the flag or that no pre-existing writable descriptor wrote between samples.
 An unexpected existing guard intent, completion receipt or temporary receipt
 refuses before the source flag changes. `BOOTABLE.json` also publishes through
 a synced temporary file and atomic rename. An interrupted BOOTABLE write leaves

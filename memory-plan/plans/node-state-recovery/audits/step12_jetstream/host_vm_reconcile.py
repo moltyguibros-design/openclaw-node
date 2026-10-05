@@ -12,7 +12,7 @@ import sys
 from host_clone_dispose import CAPTURE_SCOPE, private_record
 from host_image_immutable import change_immutable
 from host_vm_guard import GUARD_SCOPE
-from host_vm_capture import file_hash, fsync_parent
+from host_vm_capture import FIXTURE_UUID, HOST_SPEC_FIELDS, file_hash, fsync_parent, pinned_spec
 from host_vm_preflight import owned_directory, preflight, require, write_record
 
 
@@ -71,7 +71,11 @@ def reconcile(host_spec, capture_dir, output, fixture=False):
     require(output.parent == capture_dir and not os.path.lexists(output),
             'reconcile output must be new inside the capture directory')
     if fixture:
-        require(capture_dir.parent.name.startswith('openclaw-host-reconcile-'),
+        host = pinned_spec(host_spec, HOST_SPEC_FIELDS)
+        require(capture_dir.parent.name.startswith(('openclaw-host-reconcile-',
+                                                    'openclaw-host-capture-'))
+                and host['uuid'] == FIXTURE_UUID
+                and pathlib.Path(host['package']).parent == capture_dir.parent,
                 'fixture reconcile requires the owned test parent')
     else:
         require(capture_dir.parent == pathlib.Path.home() /

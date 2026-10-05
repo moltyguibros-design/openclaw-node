@@ -16,7 +16,12 @@ import sys
 import time
 
 from host_asif_extract import extract
+from host_image_immutable import change_immutable
 from host_vm_preflight import owned_directory, preflight, require, write_record
+
+HOST_SPEC_FIELDS = {'package', 'name', 'uuid', 'image_name', 'config_sha256',
+                    'utmctl', 'utmctl_sha256'}
+FIXTURE_UUID = '00000000-0000-0000-0000-000000000002'
 
 
 def file_hash(path):
@@ -70,6 +75,38 @@ def same_host_image(before, after):
             and after['vmstate'] == before['vmstate'])
 
 
+def guarded_source(output, initial, observed):
+    intent_path = output / 'GUARD_INTENT.json'
+    receipt_path = output / 'GUARD.json'
+    intent = pinned_spec(intent_path, {'scope', 'at_utc', 'vm_uuid', 'host_boot_session',
+                                      'source_image', 'source_image_device',
+                                      'source_image_inode', 'source_image_size'})
+    receipt = pinned_spec(receipt_path, set(intent) | {'guarded_at_utc'})
+    after = pinned_spec(output / 'after-guard/preflight.json',
+                        {'scope', 'at_utc', 'host_boot_session', 'package', 'config_sha256',
+                         'vm_uuid', 'utmctl_sha256', 'state', 'state_observed_at_utc',
+                         'image', 'image_size', 'image_device', 'image_inode', 'vmstate',
+                         'image_holders', 'holders_consistent', 'free_bytes'})
+    identity = (initial['image_device'], initial['image_inode'], initial['image_size'])
+    require(not os.path.lexists(output / 'after-guard/FAILED.json')
+            and intent['scope'] == 'stopped source image guard intent; no clone or VM start'
+            and receipt == {**intent, 'scope': 'stopped source image guarded; no clone or VM start',
+                            'guarded_at_utc': receipt['guarded_at_utc']}
+            and isinstance(receipt['guarded_at_utc'], str) and receipt['guarded_at_utc']
+            and intent['vm_uuid'] == initial['vm_uuid'] == observed['vm_uuid'] == after['vm_uuid']
+            and intent['host_boot_session'] == initial['host_boot_session'] == observed['host_boot_session'] == after['host_boot_session']
+            and intent['source_image'] == initial['image'] == observed['image'] == after['image']
+            and (intent['source_image_device'], intent['source_image_inode'],
+                 intent['source_image_size']) == identity
+            and after['state'] == observed['state'] == 'stopped'
+            and after['holders_consistent'] and not after['image_holders']
+            and observed['holders_consistent'] and not observed['image_holders']
+            and same_host_image(initial, after) and same_host_image(initial, observed)
+            and bool(pathlib.Path(observed['image']).lstat().st_flags & stat.UF_IMMUTABLE),
+            'completed image guard or stopped source identity differs')
+    return file_hash(receipt_path)
+
+
 def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False):
     os.umask(0o077)
     host_spec_path = pathlib.Path(host_spec_path)
@@ -77,11 +114,10 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
     output = pathlib.Path(output)
     owned_directory(output.parent)
     require(not os.path.lexists(output), 'capture output already exists')
-    host = pinned_spec(host_spec_path, {'package', 'name', 'uuid', 'image_name',
-                                          'config_sha256', 'utmctl', 'utmctl_sha256'})
+    host = pinned_spec(host_spec_path, HOST_SPEC_FIELDS)
     stores = pinned_spec(store_spec_path, {'data_volume_uuid', 'stores'})
     if fixture:
-        require(host['uuid'] == '00000000-0000-0000-0000-000000000002'
+        require(host['uuid'] == FIXTURE_UUID
                 and pathlib.Path(host['package']).parent == output.parent,
                 'fixture capture must use the owned disposable VM package')
     else:
@@ -113,15 +149,16 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
                     'host boot, VM image or vmstate identity changed while waiting')
             if observation['state'] == 'stopped' and observation['holders_consistent']:
                 stopped_count += 1
-                if stopped_count == 2:
+                if stopped_count >= 2 and os.path.lexists(output / 'GUARD.json'):
                     break
             else:
                 stopped_count = 0
             sequence += 1
             time.sleep(2)
         require(observation is not None and observation['state'] == 'stopped'
-                and observation['holders_consistent'],
-                'VM did not stop before the capture deadline')
+                and observation['holders_consistent'] and os.path.lexists(output / 'GUARD.json'),
+                'VM did not stop with a completed image guard before the capture deadline')
+        guard_sha = guarded_source(output, first, observation)
         require(shutil.disk_usage(output).free >= 20 * 1024 ** 3,
                 'host free-space floor is below 20 GiB')
         source = pathlib.Path(observation['image'])
@@ -132,6 +169,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
                 and clone_info.st_nlink == 1 and clone_info.st_dev == observation['image_device']
                 and clone_info.st_size == observation['image_size'],
                 'cloned image shape, owner or volume differs')
+        change_immutable(clone, (clone_info.st_dev, clone_info.st_ino, clone_info.st_size), False)
         os.chmod(clone, 0o600)
         with open(clone, 'rb') as handle:
             os.fsync(handle.fileno())
@@ -139,6 +177,8 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         after_clone = preflight(host_spec_path, output / 'after-clone')
         require(after_clone['state'] == 'stopped' and same_host_image(first, after_clone),
                 'VM restarted or host, image or vmstate identity changed during clone')
+        require(guarded_source(output, first, after_clone) == guard_sha,
+                'image guard changed during clone')
         require(shutil.disk_usage(output).free >= 20 * 1024 ** 3,
                 'host free-space floor fell below 20 GiB after clone')
         source_sha = file_hash(source)
@@ -147,6 +187,8 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         after_hash = preflight(host_spec_path, output / 'after-hash')
         require(after_hash['state'] == 'stopped' and same_host_image(first, after_hash),
                 'VM restarted or host, image or vmstate identity changed during image hashing')
+        require(guarded_source(output, first, after_hash) == guard_sha,
+                'image guard changed during hashing')
         extraction_spec = dict(stores, image_sha256=clone_sha)
         spec_out = output / 'extraction-spec.json'
         write_record(spec_out, extraction_spec)
@@ -155,6 +197,8 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         require(after_extract['state'] == 'stopped' and same_host_image(first, after_extract)
                 and file_hash(source) == source_sha and file_hash(clone) == clone_sha,
                 'VM restarted or host, image or vmstate changed during extraction')
+        require(guarded_source(output, first, after_extract) == guard_sha,
+                'image guard changed during extraction')
         require(shutil.disk_usage(output).free >= 20 * 1024 ** 3,
                 'host free-space floor fell below 20 GiB after extraction')
         result = {
@@ -162,6 +206,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
             'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'vm_uuid': host['uuid'], 'host_boot_session': first['host_boot_session'],
             'source_image_sha256': source_sha, 'clone_image_sha256': clone_sha,
+            'guard_receipt_sha256': guard_sha,
             'source_size': first['image_size'], 'clone_size': clone_info.st_size,
             'vmstate_at_arm': first['vmstate'],
             'vmstate_at_final_check': after_extract['vmstate'],
