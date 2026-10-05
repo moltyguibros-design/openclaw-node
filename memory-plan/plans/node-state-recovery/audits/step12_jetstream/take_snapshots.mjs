@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { api, cliBackup, consumerState, hashTree, jsonPrivate, openBus, privateDir } from './recovery.mjs';
+import { api, cliBackup, listConsumerStates, hashTree, jsonPrivate, openBus, privateDir } from './recovery.mjs';
 const [server, target, cli, offlineList = ''] = process.argv.slice(2);
 assert(server && target && cli && process.env.NATS_TOKEN, 'usage: NATS_TOKEN=<local secret> node take_snapshots.mjs <loopback-server> <new-private-dir> <nats-cli> [known-offline-streams]');
 assert(path.isAbsolute(target) && !fs.existsSync(target));
@@ -19,9 +19,7 @@ async function names() {
   return list.sort();
 }
 async function consumers(stream) {
-  const jsm = await nc.jetstreamManager(), result = [];
-  for await (const c of jsm.consumers.list(stream)) result.push(consumerState(c));
-  return result.sort((a, b) => a.name.localeCompare(b.name));
+  return listConsumerStates(nc, stream);
 }
 const manifest = { startedAt: new Date().toISOString(), server, streams: [] };
 try {

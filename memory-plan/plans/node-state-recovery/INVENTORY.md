@@ -1507,3 +1507,27 @@ with one existing skip. This is still only the bound service tree; a wholly
 detached group, root/user jobs, host autostart and reboot persistence require
 the missing full-node hold. No production service changed; 1.2 remains
 [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 07:41 EDT: D72 closes a second consumer-inventory false
+acceptance found in Claude's review. An owned NATS 2.12.6 cluster returns an
+R2 durable in `CONSUMER.LIST.missing` with zero consumer rows after its leader
+stops, even though the R3 stream remains online. The shared raw paginated
+lister now refuses that response, plus D70's empty-name R1 placeholder, in
+baseline, snapshot and capture paths. One owned loopback run with an
+acknowledged R2 durable produced the missing-only response and a failed cold
+baseline with no success manifest. Subsequent real runs timed out on the list
+request, so the repeatable regression injects the exact raw response into the
+shared lister. The real R1 placeholder and positive four-history fixture still
+pass with all test servers stopped. Per-member replica
+validation and independent expected-consumer inventory remain open, along
+with the full-node hold, VM and resumption gates. No production history or
+service changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 07:54 EDT: D73 restores the post-loop observation of
+held `nats-1` and `federation-tick` during full-node recovery while retaining
+D68's pre-loop check. In a disposable journal, either job changing as
+`nats-2` restores now produces a named error, no restored result and no
+execution-hold release. The 100-test journal suite passes. These are two
+samples, not a continuous exclusion proof; the complete production hold and
+restart barriers remain open. No production job changed; 1.2 remains
+[A]/v1.2-pre.

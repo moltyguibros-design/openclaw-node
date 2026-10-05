@@ -1002,8 +1002,7 @@ class Journal:
                     break
                 if unit.startswith('nats'):
                     buses_ready = False
-        if self.scope != FULL_NODE_SCOPE:
-            check_held_units()
+        check_held_units()
         try:
             guard = nats_legacy_restore_guard() if nats_guarded else contextlib.nullcontext()
             with guard:

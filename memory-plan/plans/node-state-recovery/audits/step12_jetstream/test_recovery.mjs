@@ -8,7 +8,7 @@ import { once } from 'node:events';
 import { randomBytes, createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { api, capture, cliBackup, cliRestore, consumerState, copyCold, digest, hashTree, jsonPrivate, openBus, privateDir, run, writePrivate } from './recovery.mjs';
+import { api, capture, cliBackup, cliRestore, consumerState, copyCold, digest, hashTree, jsonPrivate, listConsumerStates, openBus, privateDir, run, writePrivate } from './recovery.mjs';
 const { headers } = createRequire(import.meta.url)('nats');
 const coldBaselineDriver = path.join(path.dirname(fileURLToPath(import.meta.url)), 'take_cold_baseline.mjs');
 const coldTreeProbe = path.join(path.dirname(fileURLToPath(import.meta.url)), 'probe_cold_trees.mjs');
@@ -112,6 +112,22 @@ async function waitOffline(nc, stream) {
     await delay(100);
   }
   throw new Error('Expected offline assignment was not observed');
+}
+
+async function waitMissingConsumer(nc, stream, name) {
+  let last = 'no response';
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      const page = await api(nc, `$JS.API.CONSUMER.LIST.${stream}`, {}, 1000);
+      if (page.missing?.includes(name)) return page;
+      last = JSON.stringify(page);
+    } catch (error) {
+      if (error.code !== 'TIMEOUT') throw error;
+      last = 'timeout';
+    }
+    await delay(250);
+  }
+  throw new Error(`missing consumer was not reported: ${name}; last=${last}`);
 }
 
 async function assertRoutes(items) {
@@ -231,11 +247,18 @@ for (const [key, value] of Object.entries({ subject: 'history.y', time: '2026-09
 }
 const holeBus = { request: async () => ({ data: Buffer.from(JSON.stringify({ error: { code: 404, err_code: 10037, description: 'no message found' } })) }) };
 assert.notEqual((await digest(holeBus, 'fixture', 1, 1)).sha256, baseDigest.sha256);
+assert.throws(() => consumerState({ name: '', config: { durable_name: 'missing-owner' } }),
+  /consumer list contains an unavailable consumer: missing-owner/);
+const missingOnlyBus = { request: async () => ({ data: Buffer.from(JSON.stringify({
+  total: 1, missing: ['held-r2'], consumers: [],
+})) }) };
+await assert.rejects(listConsumerStates(missingOnlyBus, 'fixture'),
+  /consumer inventory reports unavailable: held-r2/);
 const mismatchedDeletes = {
   request: async (subject, data) => ({ data: Buffer.from(JSON.stringify(subject.includes('.INFO.')
     ? { config: {}, state: { messages: 1, first_seq: 1, last_seq: 2, bytes: 3, num_deleted: 1, deleted: [1] } }
+    : subject.includes('.CONSUMER.LIST.') ? { total: 0 }
     : JSON.parse(Buffer.from(data)).seq === 1 ? { message: originalRecord } : { error: { code: 404, err_code: 10037 } })) }),
-  jetstreamManager: async () => ({ consumers: { list: async function* () {} } })
 };
 await assert.rejects(capture(mismatchedDeletes, 'fixture'), /deleted sequences differ/);
 results.digestSensitivity = { subject: true, nanosecondTimestamp: true, rawHeaders: true, binaryPayload: true, deletedHole: true };
@@ -412,19 +435,14 @@ try {
   await stop(consumerOwner);
   const consumerSurvivor = members.find(item => item !== consumerOwner);
   const consumerNC = await bus(consumerSurvivor);
-  let placeholder;
-  for (let attempt = 0; attempt < 30; attempt++) {
-    placeholder = await api(consumerNC, '$JS.API.CONSUMER.LIST.CONSUMER_PLACEHOLDER');
-    if (placeholder.missing?.includes('held-r1')) break;
-    await delay(100);
-  }
+  const placeholder = await waitMissingConsumer(consumerNC, 'CONSUMER_PLACEHOLDER', 'held-r1');
   assert(placeholder.missing?.includes('held-r1'));
   assert(placeholder.consumers?.some(info => info.name === '' && info.config?.durable_name === 'held-r1'));
   const unavailableConsumerBaseline = path.join(root, 'prestop-unavailable-consumer');
   await assert.rejects(run(process.execPath, baselineArgs(consumerSurvivor, consumerNC.info, unavailableConsumerBaseline),
     { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' }));
   assert.match(JSON.parse(fs.readFileSync(path.join(unavailableConsumerBaseline, 'FAILED.json'))).error,
-    /consumer list contains an unavailable consumer: held-r1/);
+    /consumer inventory reports unavailable: held-r1/);
   assert(!fs.existsSync(path.join(unavailableConsumerBaseline, 'manifest.json')));
   await consumerNC.close();
   await restart(consumerOwner);
@@ -434,6 +452,7 @@ try {
   manager = await memberNC.jetstreamManager();
   await manager.streams.delete('CONSUMER_PLACEHOLDER');
   results.unavailableConsumerBaselineRejected = true;
+  results.missingOnlyConsumerResponseRejected = true;
   phase = 'cluster-offline-r1-create';
   await manager.streams.add({ name: 'OFFLINE_R1', subjects: ['offline'], storage: 'file', num_replicas: 1, placement: { cluster: 'recovery-fixture', tags: [] } });
   const located = await waitInfo(memberNC, 'OFFLINE_R1');

@@ -472,6 +472,36 @@ class JournalTests(unittest.TestCase):
                 self.assertIn('nats-1', [row['unit'] for row in result['errors']])
                 self.assertFalse(any(row['event'] == 'restoration-intent' for row in journal.records))
 
+    def test_full_scope_refuses_held_unit_changed_during_restoration(self):
+        for held_unit in ('nats-1', 'federation-tick'):
+            with self.subTest(held_unit=held_unit):
+                prior = full_node_inventory()
+                current = copy.deepcopy(prior)
+                current['nats-2'].update(loaded=False, running=False)
+                restored = []
+                def restore(unit, wanted):
+                    restored.append(unit)
+                    current[unit] = copy.deepcopy(wanted)
+                    if unit == 'nats-2':
+                        current[held_unit].update(loaded=True, running=True, disabled=False)
+                case_root = pathlib.Path(self.temp.name) / ('case-' + held_unit)
+                with patch('preservation_journal.capture_entrypoint_inventory',
+                           return_value=full_entrypoint_evidence(prior)):
+                    with Journal(case_root / 'journals' / 'journal', prior,
+                                 node_lock=case_root / 'node.lock',
+                                 scope=FULL_NODE_SCOPE) as journal:
+                        hold = SimpleNamespace(journal=journal, prepare=lambda *_: None,
+                            before_restore=lambda: None, check_closed=lambda: None,
+                            complete=lambda *_: self.fail('hold reopened after held unit changed'))
+                        result = journal.recover(restore,
+                            lambda unit, _: {**current[unit], 'verified': True},
+                            lambda: {'verified': True}, hold=hold)
+                        self.assertEqual(restored, ['nats-2'])
+                        self.assertFalse(result['restored'])
+                        self.assertIn(held_unit, [row['unit'] for row in result['errors']])
+                        self.assertFalse(any(row['event'] == 'execution-hold-restored'
+                                             for row in journal.records))
+
     def test_full_scope_does_not_release_deploy_listener_after_gateway_failure(self):
         prior = full_node_inventory()
         current = copy.deepcopy(prior)

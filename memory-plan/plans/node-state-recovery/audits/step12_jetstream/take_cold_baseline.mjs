@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { api, capture, consumerState, jsonPrivate, openBus, privateDir } from './recovery.mjs';
+import { api, capture, listConsumerStates, jsonPrivate, openBus, privateDir } from './recovery.mjs';
 
 const [server, expectedName, expectedId, expectedCluster, target, offlineList = ''] = process.argv.slice(2);
 assert(server && expectedName && expectedId && expectedCluster && target && process.env.NATS_TOKEN,
@@ -34,10 +34,7 @@ async function names() {
 }
 
 async function consumers(stream) {
-  const jsm = await nc.jetstreamManager();
-  const result = [];
-  for await (const info of jsm.consumers.list(stream)) result.push(consumerState(info));
-  return result.sort((a, b) => a.name.localeCompare(b.name));
+  return listConsumerStates(nc, stream);
 }
 
 try {

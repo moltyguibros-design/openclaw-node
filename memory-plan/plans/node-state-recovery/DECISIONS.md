@@ -1377,3 +1377,39 @@ survivor-refusal test, pass; the complete owned macOS launchd suite passes
 reachable at binding remains outside this tree census, as do unowned writers,
 root/user jobs and reboot persistence. No production unit was stopped and
 step 1.2 remains [A]/v1.2-pre.
+
+## D72 — Refuse missing-only consumer inventories before recording a cold history (2026-10-05 07:41 EDT)
+
+Claude's independent review found a second NATS 2.12.6 consumer-loss shape:
+when an R2 durable's leader is stopped but its R3 stream stays online, the
+raw `CONSUMER.LIST` reports the durable in `missing` while returning no
+consumer row. The JetStream client iterator silently presents an empty list,
+so D70's empty-name refusal alone can record a false baseline. Use one raw,
+paginated consumer lister for cold baselines, snapshot manifests and stream
+captures. Refuse any `missing` names, incomplete or changing pagination,
+empty-name placeholders and duplicate names before writing a successful
+manifest. One owned three-member NATS run with an acknowledged R2 durable
+observed the missing-only response after its leader stopped, and the cold
+baseline wrote `FAILED.json` without a manifest. Repeated attempts were not
+deterministic: the consumer-list request sometimes timed out instead of
+returning the missing-only shape. The automated regression therefore injects
+that exact raw response into the shared lister; the existing real R1
+placeholder case still refuses, and the positive four-history fixture passes
+with all owned servers stopped. This closes the two observed consumer-list
+false acceptances in code, not independent discovery of an entirely absent
+consumer, per-member replica validation or production acceptance.
+No production history or service changed; step 1.2 stays [A]/v1.2-pre.
+
+## D73 — Recheck excluded member and federation job after service restoration (2026-10-05 07:54 EDT)
+
+Claude found that D68 moved the `nats-1` and `federation-tick` check before the
+restoration loop and inadvertently removed the post-loop check in full-node
+recovery. The early check prevents restoring any service when the hold is
+already broken, but an override can change while other services are being
+restored. Run the same held-unit observation again after the loop, before the
+final-state receipt or execution-hold reopening. The owned regression flips
+each held unit when `nats-2` is restored and requires `restored: false`, a
+named error and no `execution-hold-restored` record. The full journal suite
+passes 100 tests. This samples and detects a late change; it does not prove
+continuous member-1 exclusion or prevent a transient rejoin. No production
+job was changed; step 1.2 remains [A]/v1.2-pre.
