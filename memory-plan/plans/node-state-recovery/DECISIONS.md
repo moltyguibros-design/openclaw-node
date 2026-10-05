@@ -1585,3 +1585,29 @@ NATS before the listener. Its simulated and native-hold paths now record the
 listener stop first; all 10 root-admission fixture tests pass locally. The
 native-hold path still uses simulated listener stop evidence, not a real
 managed-process stop.
+
+## D82 — Root admission independently validates listener-first transfer (2026-10-05 14:30 EDT)
+
+Claude's exact-head read-only review of D81 found a root trust-boundary gap:
+the user-side `transfer_nats()` refused a journal without a verified listener
+stop, but root `UserTransfer` admitted a separately written transfer intent
+after NATS stops with no listener rows. Root admission now requires the
+original published hold as the first intent, one listener
+`disable-and-unload` as the next intent, a matching verified receipt with
+normal bootout and termination, disabled override, no surviving process or
+network endpoints, and the original hold watch session. It requires the
+listener to be absent from the recorded loaded set and each NATS stop intent
+and receipt to follow that listener receipt. This is an independent root
+check; it does not rely on the user-side journal method having run.
+
+Owned negatives construct a well-formed transfer intent with no listener,
+with a listener stopped after NATS, with a NATS intent inserted before the
+listener proof, and with each stop-proof field invalid in turn. A separate
+negative now reaches the original hold-certificate check
+instead of being refused earlier for a missing publication. The root transfer
+suite passes 15 tests, root admission 7, root decline 22, and the journal
+suite 114. The listener stop and root proof are still disposable-fixture
+evidence. Production transfer remains refused, and the full-node driver,
+continuous hold, real VM capture, four-history acceptance and verified
+resumption remain open. No production service, VM or NATS store changed;
+step 1.2 stays [A]/v1.2-pre.

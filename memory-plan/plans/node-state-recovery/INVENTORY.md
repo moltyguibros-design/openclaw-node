@@ -1642,3 +1642,14 @@ and native-hold paths now stage a listener stop first; the 10 root-admission
 fixture tests pass locally. The native path uses owned simulated stop evidence,
 so it does not prove the production process stop. CI rerun remains required;
 step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 14:30 EDT: D82 closes Claude's independent root-admission
+gap: root now refuses a transfer journal without a listener-first,
+persistently disabled stop receipt bound to the original hold session. Owned
+negative fixtures omit the listener, move it after NATS, insert a NATS intent
+before listener verification, corrupt each proof field, or change the original
+hold certificate. Root transfer 15, root
+admission 7, root decline 22 and journal 114 tests pass locally. This remains
+fixture evidence; production transfer, full-node hold, real-history restore,
+capture decisions and service resumption remain open. No production service,
+VM or NATS store changed; 1.2 stays [A]/v1.2-pre.

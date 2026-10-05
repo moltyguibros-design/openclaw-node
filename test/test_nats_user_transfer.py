@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import os
 import json
 from pathlib import Path
@@ -42,7 +43,8 @@ class UserTransferTest(unittest.TestCase):
                 with self.assertRaises(module.Refused):
                     module.valid_baseline({**baseline, **change})
 
-    def prepared(self, extra_event=None, boot='boot-a'):
+    def prepared(self, extra_event=None, boot='boot-a', missing_listener=False,
+                 late_listener=False):
         fixture = fixture_module.JournalTests('test_nats_transfer_freezes_user_journal_before_root_outcome')
         fixture.setUp()
         self.addCleanup(fixture.tearDown)
@@ -77,23 +79,110 @@ class UserTransferTest(unittest.TestCase):
                        action='close-execution-hold',
                        evidence={**certificate,
                                  'entrypoint_loaded': copy.deepcopy(loaded['loaded'])})
-        journal.mutate('mesh-deploy-listener', 'disable-and-unload',
-                       lambda: loaded['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener'),
-                       lambda: {**fixture_module.listener_stop_evidence(),
-                                'execution_hold': certificate}, hold=hold)
+        if not missing_listener:
+            journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                           lambda: loaded['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener'),
+                           lambda: {**fixture_module.listener_stop_evidence(),
+                                    'execution_hold': certificate}, hold=hold)
         for unit in ('nats', 'nats-2', 'nats-3'):
-            journal.mutate(unit, 'unload',
-                           lambda unit=unit: loaded['loaded']['gui'].remove('ai.openclaw.' + unit),
-                           lambda: {'verified': True, 'execution_hold': certificate}, hold=hold)
+            if missing_listener:
+                intent = journal.append('intent', unit=unit, action='unload')
+                loaded['loaded']['gui'].remove('ai.openclaw.' + unit)
+                journal.append('verified', intent=intent['sequence'], unit=unit,
+                               action='unload', evidence={'verified': True,
+                               'execution_hold': certificate,
+                               'entrypoint_loaded': copy.deepcopy(loaded['loaded'])})
+            else:
+                journal.mutate(unit, 'unload',
+                               lambda unit=unit: loaded['loaded']['gui'].remove('ai.openclaw.' + unit),
+                               lambda: {'verified': True, 'execution_hold': certificate}, hold=hold)
         def observe(unit, saved):
             if unit == 'nats-1':
                 return {**saved, 'verified': True}
             return {**saved, 'loaded': False, 'running': False, 'verified': True}
+        if late_listener:
+            intent = journal.append('intent', unit='mesh-deploy-listener',
+                                    action='disable-and-unload')
+            loaded['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener')
+            journal.append('verified', intent=intent['sequence'],
+                unit='mesh-deploy-listener', action='disable-and-unload',
+                evidence={**fixture_module.listener_stop_evidence(),
+                          'execution_hold': certificate,
+                          'entrypoint_loaded': copy.deepcopy(loaded['loaded'])})
         transaction = str(uuid.uuid4())
         if extra_event is not None:
             journal.append(extra_event)
-        transfer = journal.transfer_nats(transaction, hold, observe)
+        if missing_listener:
+            transfer = journal.append('nats-transfer-intent', root_transaction=transaction,
+                units=list(fixture_module.NATS_TRANSFER_UNITS),
+                baseline_sha256=journal.records[0]['sha256'],
+                observations={unit: observe(unit, prior[unit])
+                              for unit in fixture_module.NATS_TRANSFER_UNITS},
+                hold_sha256=hashlib.sha256(module.encoded(certificate)).hexdigest(),
+                hold_evidence=certificate)
+        else:
+            transfer = journal.transfer_nats(transaction, hold, observe)
         return fixture, journal, transaction, transfer
+
+    def test_root_refuses_transfer_without_listener_stop_receipt(self):
+        fixture, journal, transaction, _ = self.prepared(missing_listener=True)
+        journal.close()
+        with patch.object(module, 'boot_identity', return_value='boot-a'):
+            with self.assertRaisesRegex(module.Refused, 'listener stop intent is absent'):
+                module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
+
+    def test_root_refuses_listener_stopped_after_nats(self):
+        fixture, journal, transaction, _ = self.prepared(
+            missing_listener=True, late_listener=True)
+        journal.close()
+        with patch.object(module, 'boot_identity', return_value='boot-a'):
+            with self.assertRaisesRegex(module.Refused, 'listener stop intent is absent or out of order'):
+                module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
+
+    def test_root_refuses_nats_intent_before_listener_stop_proof(self):
+        fixture, journal, transaction, _ = self.prepared()
+        journal.close()
+        rows = copy.deepcopy(journal.records)
+        listener_index = next(index for index, row in enumerate(rows)
+                              if row['event'] == 'verified'
+                              and row.get('unit') == 'mesh-deploy-listener')
+        nats_index = next(index for index, row in enumerate(rows)
+                          if row['event'] == 'intent' and row.get('unit') == 'nats')
+        self.assertEqual(nats_index, listener_index + 1)
+        rows[listener_index], rows[nats_index] = rows[nats_index], rows[listener_index]
+        nats_verified = next(row for row in rows if row['event'] == 'verified'
+                             and row.get('unit') == 'nats')
+        nats_verified['intent'] = listener_index
+        for index, row in enumerate(rows):
+            row['sequence'] = index
+            row['previous'] = rows[index - 1]['sha256'] if index else None
+            row['sha256'] = hashlib.sha256(module.encoded(
+                {key: value for key, value in row.items() if key != 'sha256'})).hexdigest()
+            (fixture.root / f'{index:06d}.json').write_bytes(module.encoded(row))
+        with patch.object(module, 'boot_identity', return_value='boot-a'):
+            with self.assertRaisesRegex(module.Refused, 'service intent precedes listener stop proof'):
+                module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
+
+    def test_root_refuses_incomplete_listener_stop_proof(self):
+        changes = [(key, False) for key in module.LISTENER_STOP_FIELDS]
+        changes += [('bootout', {'returncode': 1, 'timed_out': False}),
+                    ('termination', {'signal': 9})]
+        for field, value in changes:
+            with self.subTest(field=field):
+                fixture, journal, transaction, _ = self.prepared()
+                journal.close()
+                rows = copy.deepcopy(journal.records)
+                listener = next(row for row in rows if row['event'] == 'verified'
+                                and row.get('unit') == 'mesh-deploy-listener')
+                listener['evidence'][field] = value
+                for index, row in enumerate(rows):
+                    row['previous'] = rows[index - 1]['sha256'] if index else None
+                    row['sha256'] = hashlib.sha256(module.encoded(
+                        {key: value for key, value in row.items() if key != 'sha256'})).hexdigest()
+                    (fixture.root / f'{index:06d}.json').write_bytes(module.encoded(row))
+                with patch.object(module, 'boot_identity', return_value='boot-a'):
+                    with self.assertRaisesRegex(module.Refused, 'listener stop proof differs'):
+                        module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
     def test_root_refuses_live_owner_then_pins_exact_transfer(self):
         fixture, journal, transaction, transfer = self.prepared()
@@ -146,7 +235,7 @@ class UserTransferTest(unittest.TestCase):
             with self.assertRaisesRegex(module.Refused, 'transfer intent differs'):
                 module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
-    def test_root_refuses_transfer_without_original_hold_certificate(self):
+    def test_root_refuses_transfer_without_original_hold_publication(self):
         fixture = fixture_module.JournalTests('test_nats_transfer_freezes_user_journal_before_root_outcome')
         fixture.setUp()
         self.addCleanup(fixture.tearDown)
@@ -157,6 +246,20 @@ class UserTransferTest(unittest.TestCase):
         journal.close()
         with patch.object(module, 'boot_identity', return_value='boot-a'):
             with self.assertRaisesRegex(module.Refused, 'original hold publication differs'):
+                module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
+
+    def test_root_refuses_transfer_with_changed_hold_certificate(self):
+        fixture, journal, transaction, _ = self.prepared()
+        journal.close()
+        transfer = copy.deepcopy(journal.records[-1])
+        transfer['hold_evidence']['watch_session_id'] = 'other-session'
+        transfer['hold_sha256'] = hashlib.sha256(
+            module.encoded(transfer['hold_evidence'])).hexdigest()
+        transfer['sha256'] = hashlib.sha256(module.encoded(
+            {key: value for key, value in transfer.items() if key != 'sha256'})).hexdigest()
+        (fixture.root / f'{transfer["sequence"]:06d}.json').write_bytes(module.encoded(transfer))
+        with patch.object(module, 'boot_identity', return_value='boot-a'):
+            with self.assertRaisesRegex(module.Refused, 'original hold certificate differs'):
                 module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
     def test_root_refuses_replaced_owner_lock_during_recheck(self):
