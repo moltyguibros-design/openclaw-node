@@ -1581,3 +1581,14 @@ preflight tests pass with a timeout negative. This is a local liveness guard;
 the persistent full-node hold, deployment fence, stopped-VM decision path,
 four-history acceptance and verified resumption remain open. No production
 job, VM or NATS store changed; 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 12:13 EDT: D77 moves the deploy listener's release
+behind the second held-unit check, a fresh check of the other 22 services,
+physical ownership and loaded jobs, and a required deploy-fence callback.
+The release evidence is durable before any listener restore; an unexpected
+restart after this journal stopped the listener now refuses. The owned
+journal suite passes 106 tests, including late failure and clean release
+cases. The actual deploy-marker and pending-work fence, forward stop-order
+enforcement, persistent full-node hold, stopped-VM decision controller and
+real-history acceptance remain open. No production service, VM or NATS store
+changed; 1.2 stays [A]/v1.2-pre.

@@ -574,7 +574,7 @@ class Journal:
             require(current['loaded'] == expected,
                     'full-node loaded jobs changed inside the forward window')
         if final:
-            require(current['loaded'] == saved['loaded'],
+            require(current['loaded'] == (expected_loaded if expected_loaded is not None else saved['loaded']),
                     'full-node loaded entrypoints were not restored')
         return current
 
@@ -868,7 +868,7 @@ class Journal:
                             error_type=type(error).__name__, **detail)
             raise
 
-    def recover(self, restore, observe, final_check, diagnostics=None, hold=None):
+    def recover(self, restore, observe, final_check, diagnostics=None, hold=None, deploy_fence=None):
         require(self.scope != FULL_NODE_SCOPE or self.boot == self.records[0]['boot'],
                 'full-node reboot recovery requires a verified boot hold decision')
         require(self.nats_transfer_open() is None, 'NATS transfer is open; await a root outcome')
@@ -880,6 +880,8 @@ class Journal:
                 'recovery requires the node lock')
         require(not self.sealed, 'sealed journal cannot restore services')
         require(callable(final_check), 'recovery requires final physical ownership checks')
+        require(self.scope != FULL_NODE_SCOPE or callable(deploy_fence),
+                'full-node recovery requires a deploy listener fence')
         held = 'execution_hold' in self.prior['scheduler-heartbeat']
         require((hold is not None) == held and (not held or hold.journal is self),
                 'baselined execution hold requires its journal recovery facade')
@@ -947,14 +949,32 @@ class Journal:
         held_errors_before = len(errors)
         if self.scope == FULL_NODE_SCOPE:
             check_held_units()
+            try:
+                listener = observe('mesh-deploy-listener', self.prior['mesh-deploy-listener'])
+                require(all(isinstance(listener.get(key), bool) for key in ('loaded', 'running', 'disabled'))
+                        and listener.get('identity') == self.prior['mesh-deploy-listener']['identity'],
+                        'deploy listener preflight is incomplete')
+                latest_intent = max((row['sequence'] for row in self.records
+                                     if row['event'] == 'intent'
+                                     and row.get('unit') == 'mesh-deploy-listener'), default=0)
+                latest_release = max((row['sequence'] for row in self.records
+                                      if row['event'] == 'listener-release-verified'), default=0)
+                require(not (latest_intent > latest_release
+                             and (listener['loaded'] or listener['running'])),
+                        'deploy listener restarted before its release gate')
+            except Exception as error:
+                errors.append({'unit': 'mesh-deploy-listener', 'reason': type(error).__name__,
+                               'detail': str(error)})
         held_preflight_failed = len(errors) != held_errors_before
         buses_ready = True
         for unit in (u for u in RESUME_ORDER if u in self.prior):
             if held_preflight_failed:
                 break
-            if self.scope == FULL_NODE_SCOPE and unit == 'mesh-deploy-listener' and errors:
-                errors.append({'unit': unit, 'reason': 'prior restoration was not verified'})
-                continue
+            if self.scope == FULL_NODE_SCOPE and unit == 'mesh-deploy-listener':
+                check_held_units()
+                if errors:
+                    errors.append({'unit': unit, 'reason': 'prior restoration was not verified'})
+                    continue
             if not unit.startswith('nats') and not buses_ready:
                 errors.append({'unit': unit, 'reason': 'bus recovery was not verified'})
                 continue
@@ -975,6 +995,35 @@ class Journal:
                             'actual service state is incomplete')
                     require(actual.get('identity') == prior['identity'], 'immutable service identity changed')
                     record('recovery-observed', unit=unit, evidence=actual)
+                    if self.scope == FULL_NODE_SCOPE and unit == 'mesh-deploy-listener':
+                        require(not (actual['loaded'] or actual['running']) or listener['loaded'] or listener['running'],
+                                'deploy listener started outside its release gate')
+                        require(matches(actual, prior) or not actual['loaded'] and not actual['running'],
+                                'deploy listener is partly restored')
+                        services = {}
+                        for other, saved in self.prior.items():
+                            if other == unit:
+                                continue
+                            observed = observe(other, saved)
+                            require(observed.get('identity') == saved['identity']
+                                    and matches(observed, saved) and observed.get('verified') is True,
+                                    'service readiness changed before deploy listener release: ' + other)
+                            services[other] = observed
+                        physical = final_check()
+                        require(isinstance(physical, dict) and physical.get('verified') is True,
+                                'final physical ownership changed before deploy listener release')
+                        expected = {domain: sorted(set(labels) - {'ai.openclaw.mesh-deploy-listener'})
+                                    for domain, labels in self.entrypoint_inventory['loaded'].items()}
+                        if actual['loaded']:
+                            expected = self.entrypoint_inventory['loaded']
+                        entrypoints = self.check_entrypoints(final=True, expected_loaded=expected)
+                        fence = deploy_fence()
+                        require(isinstance(fence, dict) and fence.get('verified') is True,
+                                'deploy listener fence was not verified')
+                        record('listener-release-verified', evidence={
+                            'services': services, 'physical': physical,
+                            'entrypoints': entrypoints, 'deploy_fence': fence,
+                            'already_running': actual['running']})
                     if matches(actual, prior):
                         require(actual.get('verified') is True, 'existing service readiness was not verified')
                         record('already-restored', unit=unit, evidence=actual)

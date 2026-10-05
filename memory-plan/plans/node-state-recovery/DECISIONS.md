@@ -1473,3 +1473,32 @@ or unloaded status. The owned preflight tests pass. This bounds only this
 inspection; it does not prove persistent disablement, process coverage,
 shutdown, or service resumption. No production job or VM changed and step 1.2
 remains [A]/v1.2-pre.
+
+## D77 — Gate the deploy listener on final recovery evidence (2026-10-05 12:13 EDT)
+
+Claude's read-only review reproduced a full-node recovery error: the deploy
+listener could start before the second held-unit check, final physical check,
+loaded-job equality check, or execution-hold readiness failed. It could also
+be treated as already restored after this journal stopped it and it restarted
+outside the release sequence. Keep the listener in the resume order, but run
+the second held-unit check before it and require a new, explicit deploy-fence
+callback for every full-node recovery before recording any recovery row.
+Immediately before listener release, under one NATS guard, re-observe the
+other 22 units, check physical ownership, compare the loaded-job set with the
+saved set excluding the listener, run the fence, and durably record
+`listener-release-verified`. Only then may a restoration intent start the
+listener. If it is already running, record `already-restored` only after the
+same gate, and refuse an unapproved restart after a listener intent.
+
+The owned journal suite passes 106 tests. New negative fixtures keep the
+listener stopped after physical, held-unit, service-readiness, loaded-job or
+fence failure or a failed release-record write; a positive fixture checks
+the durable release row precedes the listener restore. No failed-release
+fixture calls `hold.complete`. The
+callback is a contract, not a production implementation: the full-node
+driver must still check the signed latest deploy marker, local HEAD and
+deployment records, pending work and deploy processes using the listener's
+actual environment, and refuse unobservable inputs. The forward stop order
+is not yet enforced, and the complete physical hold and production resumption
+remain open. No production service, VM or NATS store changed; step 1.2 stays
+[A]/v1.2-pre.
