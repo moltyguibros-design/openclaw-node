@@ -1175,10 +1175,11 @@ retirement, healthy cold masters, and cutover remain open at 1.2.
 ## D62 — Planned VM reboot requires a persistent full-node hold (2026-10-04 23:31 EDT)
 
 D8's bootout-only restoration describes an interrupted preservation window,
-not the planned stopped-VM capture path. In that path the guest must boot again
-before real-history restore and acceptance can finish. Bootout-only jobs may
-start at login before the recovery controller runs; `already-restored` records
-their current state without enforcing the dependency or deploy-listener order.
+not the planned stopped-VM capture path. In that path the historical stores
+must be extracted, tested and frozen before the original guest boots again.
+Bootout-only jobs may start at login before the recovery controller runs;
+`already-restored` records their current state without enforcing the
+dependency or deploy-listener order.
 It therefore cannot certify the planned shutdown or authorize acceptance.
 
 Before a production stop, a full-node controller must durably record the
