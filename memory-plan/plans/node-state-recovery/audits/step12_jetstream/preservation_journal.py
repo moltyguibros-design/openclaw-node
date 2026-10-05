@@ -869,6 +869,8 @@ class Journal:
             raise
 
     def recover(self, restore, observe, final_check, diagnostics=None, hold=None):
+        require(self.scope != FULL_NODE_SCOPE or self.boot == self.records[0]['boot'],
+                'full-node reboot recovery requires a verified boot hold decision')
         require(self.nats_transfer_open() is None, 'NATS transfer is open; await a root outcome')
         nats_guarded = self.scope == FULL_NODE_SCOPE or (self.scope is None and any(
             self.prior[unit]['class'] != 'absent' for unit in NATS_TRANSFER_UNITS))

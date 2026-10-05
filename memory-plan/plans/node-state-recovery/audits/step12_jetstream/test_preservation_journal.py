@@ -680,7 +680,7 @@ class JournalTests(unittest.TestCase):
         with self.assertRaisesRegex(Refused, 'not approved'):
             preservation_journal.valid_entrypoint_inventory(malformed, prior)
 
-    def test_excluded_job_reanchors_for_restore_only_after_reboot_or_app_update(self):
+    def test_full_node_reboot_refuses_recovery_before_boot_hold_decision(self):
         prior = full_node_inventory()
         baseline = full_entrypoint_evidence(prior)
         baseline['excluded'] = tailscale_record()
@@ -694,20 +694,16 @@ class JournalTests(unittest.TestCase):
             current['excluded'][TAILSCALE_LABEL]['launchd']['runs'] = 2
             current['excluded'][TAILSCALE_LABEL]['boot'] = '7' * 64
             with Journal(self.root, boot='7' * 64, node_lock=self.node_lock) as reopened:
-                hold = SimpleNamespace(journal=reopened, prepare=lambda *_: None,
-                    complete=lambda *_: {'verified': True})
                 with self.assertRaisesRegex(Refused, 'excluded system job changed'):
                     reopened.check_entrypoints()
-                result = reopened.recover(lambda *_: self.fail('already restored'),
-                    lambda unit, _: {**prior[unit], 'verified': True},
-                    lambda: {'verified': True}, hold=hold)
-                self.assertTrue(result['restored'])
-                self.assertEqual(reopened.records[-1]['event'], 'recovery-finished')
-                self.assertFalse(next(row for row in reopened.records
-                    if row['event'] == 'recovery-started')['excluded_unchanged_since_baseline'])
-                self.assertEqual(reopened.check_entrypoints(final=True)['excluded'],
-                                 current['excluded'])
-                reopened.resolve()
+                before = len(reopened.records)
+                with self.assertRaisesRegex(Refused, 'boot hold decision'):
+                    reopened.recover(lambda *_: self.fail('restoration entered'),
+                        lambda *_: self.fail('observation entered'),
+                        lambda: self.fail('final check entered'))
+                self.assertEqual(len(reopened.records), before)
+                with self.assertRaisesRegex(Refused, 'unrestored node'):
+                    reopened.resolve()
 
     def test_excluded_job_run_during_nats_transfer_is_durably_reported(self):
         journal, hold, observe, _ = self.prepared_nats_transfer(tailscale_record())

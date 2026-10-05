@@ -1263,3 +1263,17 @@ controller and no-intent abort path remain production gates.
 Missing or changed guard evidence refuses the attempt without accepting a
 cold master. The check does not prove continuous exclusion of a same-owner
 writer or replace the missing full-node hold and real UTM rehearsal.
+
+## D64 — Refuse full-node journal recovery across reboot until the boot hold exists (2026-10-05 03:16 EDT)
+
+D62 requires a durable boot decision and a verified persistent hold before
+full-node restoration after a planned VM shutdown. That controller does not
+exist yet. `Journal.recover()` previously accepted a unit that had restarted
+at login as `already-restored` whenever its sampled state matched the saved
+baseline, without proving the writer remained fenced or that dependency order
+was respected. Until the boot-time controller and its evidence contract are
+implemented, a full-node journal opened in a different boot session refuses
+recovery before observation, mutation, or receipt append. This is a temporary
+fail-closed boundary, not a recovery mechanism or proof of a full-node hold.
+Timer and legacy-scope interrupted restoration retain their existing behavior.
+No production service or VM is changed, and step 1.2 stays [A]/v1.2-pre.

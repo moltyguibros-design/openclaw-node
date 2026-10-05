@@ -1430,3 +1430,13 @@ warning). CI and Claude review of this exact revision remain pending. This
 remains one GUI-domain job; no production hold, other-domain restart exclusion,
 reboot persistence, or production VM change is claimed. Step 1.2 stays
 [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 03:16 EDT: D64 closes one false-restoration path while
+the D62 boot controller is absent. A full-node journal reopened in another
+boot now refuses `recover()` before observing or restoring a service, so a
+login auto-start cannot be labeled `already-restored` by that API. The owned
+journal suite passes 97/97 locally, including the new no-callback/no-record
+reboot assertion. The actual persistent 23-job hold, boot decision, detached
+process census, safe service order and real-history acceptance remain open;
+this refusal does not make the node operational. No production service or VM
+was changed; 1.2 remains [A]/v1.2-pre.
