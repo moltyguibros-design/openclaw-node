@@ -1251,9 +1251,15 @@ through its terminal-write attempt; reconciliation refuses while that lock is he
 before reading the guard or touching the clone or source flag. After arming,
 capture publishes `FAILED.json` or `CAPTURE.json` under the armed receipt lock,
 ordering its terminal state with the guard. These locks do not exclude a
-sibling capture attempt against the same source, nor prove that a killed
-worker is still active. A source-wide controller and no-intent abort path
-remain production gates.
+sibling capture attempt against the same source. A killed worker releases the
+activity lock without a terminal receipt; the guard now probes that lock
+without waiting before publishing intent and refuses when the lock is free.
+A concurrent reconciler may also hold that lock, but the armed receipt lock
+then orders the guard and reconciler before the latter clears the source flag.
+Reconciliation may proceed as crash recovery, subject to its physical checks.
+Child processes started by the worker remain outside the lock. Never
+wait on the activity lock while holding the armed receipt lock. A source-wide
+controller and no-intent abort path remain production gates.
 Missing or changed guard evidence refuses the attempt without accepting a
 cold master. The check does not prove continuous exclusion of a same-owner
 writer or replace the missing full-node hold and real UTM rehearsal.

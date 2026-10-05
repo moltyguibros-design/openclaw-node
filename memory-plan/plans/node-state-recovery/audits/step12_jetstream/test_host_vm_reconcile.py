@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import contextlib
 import hashlib
 import fcntl
 import json
@@ -36,6 +37,16 @@ def run(*args):
 def inactive_capture_lock(capture_dir):
     fd = os.open(capture_dir / 'CAPTURE_ACTIVE.lock', os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
     os.close(fd)
+
+
+@contextlib.contextmanager
+def active_capture_lock(capture_dir):
+    fd = os.open(capture_dir / 'CAPTURE_ACTIVE.lock', os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
 
 
 @unittest.skipUnless(sys.platform == 'darwin', 'requires macOS ASIF and GUI launchd')
@@ -130,18 +141,22 @@ class HostReconcileTest(unittest.TestCase):
                 reconcile(spec, capture, capture / 'without-guard-intent', fixture=True)
             self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
             change_immutable(source, source_identity, False)
+            with self.assertRaisesRegex(RuntimeError, 'capture worker is not active'):
+                guard(spec, capture, fixture=True)
+            self.assertFalse((capture / 'GUARD_INTENT.json').exists())
             original_write = host_vm_guard.write_record
             def partial_intent(path, value):
                 if not pathlib.Path(path).name.startswith('GUARD_INTENT.json.tmp.'):
                     return original_write(path, value)
                 pathlib.Path(path).write_text('{"partial":')
                 raise OSError('interrupted guard intent write')
-            with patch.object(host_vm_guard, 'write_record', partial_intent):
-                with self.assertRaisesRegex(OSError, 'interrupted guard intent write'):
-                    guard(spec, capture, fixture=True)
-            self.assertFalse((capture / 'GUARD_INTENT.json').exists())
-            self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
-            guard(spec, capture, fixture=True)
+            with active_capture_lock(capture):
+                with patch.object(host_vm_guard, 'write_record', partial_intent):
+                    with self.assertRaisesRegex(OSError, 'interrupted guard intent write'):
+                        guard(spec, capture, fixture=True)
+                self.assertFalse((capture / 'GUARD_INTENT.json').exists())
+                self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
+                guard(spec, capture, fixture=True)
             self.assertTrue((capture / 'GUARD_INTENT.json').exists())
             self.assertTrue((capture / 'GUARD.json').exists())
             active_fd = os.open(capture / 'CAPTURE_ACTIVE.lock', os.O_RDWR)
@@ -219,9 +234,10 @@ class HostReconcileTest(unittest.TestCase):
                 return change_immutable(path, identity, present)
 
             try:
-                with patch.object(host_vm_guard, 'change_immutable', open_during_guard):
-                    with self.assertRaisesRegex(RuntimeError, 'image holders disagree'):
-                        guard(spec, held, fixture=True)
+                with active_capture_lock(held):
+                    with patch.object(host_vm_guard, 'change_immutable', open_during_guard):
+                        with self.assertRaisesRegex(RuntimeError, 'image holders disagree'):
+                            guard(spec, held, fixture=True)
                 self.assertTrue((held / 'GUARD_INTENT.json').exists())
                 self.assertFalse((held / 'GUARD.json').exists())
                 self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
@@ -288,16 +304,22 @@ class HostReconcileTest(unittest.TestCase):
 
             first_worker = threading.Thread(target=guard_worker)
             second_worker = threading.Thread(target=reconcile_worker)
+            capture_fd = os.open(serialized / 'CAPTURE_ACTIVE.lock', os.O_RDWR)
+            fcntl.flock(capture_fd, fcntl.LOCK_EX)
             first_worker.start()
             try:
                 self.assertTrue(entered.wait(10))
                 self.assertTrue((serialized / 'GUARD_INTENT.json').exists())
+                os.close(capture_fd)
+                capture_fd = None
                 second_worker.start()
                 self.assertTrue(reconcile_ready.wait(10))
                 self.assertFalse(reconcile_preflight.wait(1))
                 self.assertFalse((serialized / 'concurrent' / 'BOOTABLE.json').exists())
                 self.assertTrue(second_worker.is_alive())
             finally:
+                if capture_fd is not None:
+                    os.close(capture_fd)
                 release.set()
                 first_worker.join(timeout=10)
                 if second_worker.ident is not None:
@@ -335,9 +357,10 @@ class HostReconcileTest(unittest.TestCase):
                 pathlib.Path(path).write_text('{"partial":')
                 raise OSError('interrupted guard receipt write')
 
-            with patch.object(host_vm_guard, 'write_record', partial_receipt):
-                with self.assertRaisesRegex(OSError, 'interrupted guard receipt write'):
-                    guard(spec, interrupted, fixture=True)
+            with active_capture_lock(interrupted):
+                with patch.object(host_vm_guard, 'write_record', partial_receipt):
+                    with self.assertRaisesRegex(OSError, 'interrupted guard receipt write'):
+                        guard(spec, interrupted, fixture=True)
             self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
             self.assertTrue((interrupted / 'GUARD.json.tmp').exists())
             self.assertFalse((interrupted / 'GUARD.json').exists())

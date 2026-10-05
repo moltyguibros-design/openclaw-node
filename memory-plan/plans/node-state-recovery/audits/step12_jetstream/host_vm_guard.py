@@ -30,6 +30,22 @@ def publish_guard_intent(capture_dir, intent):
     fsync_parent(capture_dir)
 
 
+def require_active_capture(capture_dir):
+    fd = os.open(capture_dir / 'CAPTURE_ACTIVE.lock', os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
+                and info.st_nlink == 1 and stat.S_IMODE(info.st_mode) == 0o600,
+                'capture worker lock is not owner-private')
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
+        raise RuntimeError('capture worker is not active')
+    finally:
+        os.close(fd)
+
+
 def guard(host_spec, capture_dir, fixture=False):
     os.umask(0o077)
     capture_dir = pathlib.Path(capture_dir)
@@ -64,6 +80,7 @@ def guard_locked(host_spec, capture_dir):
     require(not any(os.path.lexists(capture_dir / name) for name in
                     ('FAILED.json', 'CAPTURE.json')),
             'capture attempt already ended')
+    require_active_capture(capture_dir)
     armed = private_record(capture_dir / 'ARMED.json')
     initial = private_record(capture_dir / 'before-shutdown/preflight.json')
     require(armed['scope'] == 'waiting for external guest shutdown; no stop request issued'
@@ -96,6 +113,7 @@ def guard_locked(host_spec, capture_dir):
     require(not any(os.path.lexists(capture_dir / name) for name in
                     ('FAILED.json', 'CAPTURE.json')),
             'capture attempt already ended')
+    require_active_capture(capture_dir)
     publish_guard_intent(capture_dir, intent)
     change_immutable(source, identity, True)
     after = preflight(host_spec, capture_dir / 'after-guard')

@@ -1353,9 +1353,9 @@ shutdown; the full-node hold, UTM rehearsal, historical acceptance and
 resumption remain open at 1.2 [A]/v1.2-pre.
 
 Checkpoint 2026-10-05 01:25 EDT: Claude found no blocker in the same-attempt
-guard/reconcile serialization at `e465b9c8`, but demonstrated that an active
-capture paused before cloning could race reconciliation and leave a false
-`BOOTABLE` claim. The capture worker now holds an attempt-local activity lock
+guard/reconcile serialization at `e465b9c8`, but identified by inspection
+that an active capture paused before cloning could race reconciliation and
+leave a false `BOOTABLE` claim. The capture worker now holds an attempt-local activity lock
 from before arming through its terminal-write attempt; reconciliation
 refuses that lock non-blockingly before touching the image. Capture also
 serializes its terminal write with guard publication on `ARMED.json`. The
@@ -1368,3 +1368,13 @@ failed-job rerun with all four checks green. Sibling attempts, a killed worker
 without a terminal receipt, the full-node hold and real UTM rehearsal remain
 unproven; no production VM or service changed. Step 1.2 remains
 [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 01:40 EDT: Claude found no same-attempt false
+`BOOTABLE` path or deadlock in `23825654`; all four exact-head CI jobs passed.
+The review clarified that a killed capture worker releases its activity lock
+without a terminal receipt. The guard now probes that lock without waiting
+before publishing intent and refuses when the lock is free; the disposable
+fixture checks that refusal leaves no intent or image flag and that a live lock still
+permits a guarded attempt. No source-wide exclusion, no-intent abort receipt,
+real UTM rehearsal, full-node hold or production stop is claimed. Step 1.2
+remains [A]/v1.2-pre.
