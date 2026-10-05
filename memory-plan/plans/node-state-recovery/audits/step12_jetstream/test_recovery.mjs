@@ -39,7 +39,7 @@ async function start(name, store, clusterPorts, selected) {
   const [client, monitor, route] = selected || await ports(3);
   privateDir(store);
   const config = path.join(root, name + '-' + client + '.conf');
-  let text = `server_name: ${name}\nlisten: 127.0.0.1:${client}\nhttp: 127.0.0.1:${monitor}\nauthorization { token: "${token}" }\njetstream { store_dir: "${store}", max_memory_store: 1GB, max_file_store: 2GB }\n`;
+  let text = `server_name: ${name}\nserver_tags: [${JSON.stringify(name)}]\nlisten: 127.0.0.1:${client}\nhttp: 127.0.0.1:${monitor}\nauthorization { token: "${token}" }\njetstream { store_dir: "${store}", max_memory_store: 1GB, max_file_store: 2GB }\n`;
   if (clusterPorts) text += `cluster { name: recovery-fixture, listen: 127.0.0.1:${route}, no_advertise: true, authorization { user: recovery, password: "${routeToken}" }, routes: [${clusterPorts.filter(p => p !== route).map(p => `"nats-route://recovery:${routeToken}@127.0.0.1:${p}"`).join(',')}] }\n`;
   writePrivate(config, text);
   const fd = fs.openSync(config + '.log', 'wx', 0o600);
@@ -393,6 +393,9 @@ try {
   await manager.streams.add({ name: 'OFFLINE_R1', subjects: ['offline'], storage: 'file', num_replicas: 1, placement: { cluster: 'recovery-fixture', tags: [] } });
   const located = await waitInfo(memberNC, 'OFFLINE_R1');
   const ownerName = located.cluster.leader, owner = members.find(i => fs.readFileSync(i.config, 'utf8').includes(`server_name: ${ownerName}\n`)); assert(owner);
+  await manager.streams.add({ name: 'SECOND_R1', subjects: ['second-offline'], storage: 'file', num_replicas: 1,
+    placement: { cluster: 'recovery-fixture', tags: [ownerName] } });
+  assert.equal((await waitInfo(memberNC, 'SECOND_R1')).cluster.leader, ownerName);
   for (let i = 0; i < 7; i++) await memberNC.jetstream().publish('offline', Buffer.from('record-' + i));
   await manager.consumers.add('OFFLINE_R1', { durable_name: 'offline-drained', ack_policy: 'explicit', deliver_policy: 'all' });
   const offlineConsumer = await memberNC.jetstream().consumers.get('OFFLINE_R1', 'offline-drained');
@@ -451,19 +454,20 @@ try {
   const survivors = members.filter(m => m !== owner);
   const survivorNC = await bus(survivors[0]);
   await waitOffline(survivorNC, 'OFFLINE_R1');
+  await waitOffline(survivorNC, 'SECOND_R1');
   const offlineTarget = path.join(root, 'driver-offline');
-  await run(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), 'take_snapshots.mjs'), `nats://127.0.0.1:${survivors[0].client}`, offlineTarget, cli, 'OFFLINE_R1'], { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' });
+  await run(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), 'take_snapshots.mjs'), `nats://127.0.0.1:${survivors[0].client}`, offlineTarget, cli, 'OFFLINE_R1,SECOND_R1'], { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' });
   const offlineManifest = JSON.parse(fs.readFileSync(path.join(offlineTarget, 'manifest.json')));
   assert.equal(offlineManifest.streams.find(s => s.stream === 'OFFLINE_R1').offline, true);
   assert.equal(offlineManifest.streams.find(s => s.stream === 'REPLICATED').snapshot.state.messages, 3);
   results.offlineSnapshotDriver = true;
   const survivorBaseline = path.join(root, 'prestop-survivors');
-  await run(process.execPath, baselineArgs(survivors[0], survivorNC.info, survivorBaseline, 'OFFLINE_R1'), { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' });
+  await run(process.execPath, baselineArgs(survivors[0], survivorNC.info, survivorBaseline, 'OFFLINE_R1,SECOND_R1'), { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' });
   const survivorRows = JSON.parse(fs.readFileSync(path.join(survivorBaseline, 'manifest.json'))).streams;
   assert.equal(survivorRows.find(row => row.stream === 'OFFLINE_R1')?.offline, true);
   assert.deepEqual(survivorRows.find(row => row.stream === 'REPLICATED')?.snapshot.content, replicated.content);
   const secondSurvivorBaseline = path.join(root, 'prestop-second-survivor');
-  await run(process.execPath, baselineArgs(survivors[1], await boundInfo(survivors[1]), secondSurvivorBaseline, 'OFFLINE_R1'), { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' });
+  await run(process.execPath, baselineArgs(survivors[1], await boundInfo(survivors[1]), secondSurvivorBaseline, 'OFFLINE_R1,SECOND_R1'), { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' });
   const undeclaredOffline = path.join(root, 'prestop-undeclared-offline');
   await assert.rejects(run(process.execPath, baselineArgs(survivors[0], survivorNC.info, undeclaredOffline), { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' }));
   assert.match(JSON.parse(fs.readFileSync(path.join(undeclaredOffline, 'FAILED.json'))).error, /stream is offline/);
@@ -518,8 +522,8 @@ try {
     binary,
     binarySha256: provenance[1].sha256,
     standalone: { name: source.name, master: cold, baseline: path.join(standaloneBaseline, 'manifest.json') },
-    cluster: { name: 'recovery-fixture', offline: ['OFFLINE_R1'], members: survivors.map((member, index) => ({ name: member.name, master: masters[members.indexOf(member)], baseline: path.join(index === 0 ? survivorBaseline : secondSurvivorBaseline, 'manifest.json') })) },
-    held: { name: owner.name, master: masters[oi], baseline: path.join(heldBaseline, 'manifest.json'), streams: ['OFFLINE_R1'] }
+    cluster: { name: 'recovery-fixture', offline: ['OFFLINE_R1', 'SECOND_R1'], members: survivors.map((member, index) => ({ name: member.name, master: masters[members.indexOf(member)], baseline: path.join(index === 0 ? survivorBaseline : secondSurvivorBaseline, 'manifest.json') })) },
+    held: { name: owner.name, master: masters[oi], baseline: path.join(heldBaseline, 'manifest.json'), streams: ['OFFLINE_R1', 'SECOND_R1'] }
   };
   const treePlanFile = path.join(root, 'cold-tree-plan.json');
   jsonPrivate(treePlanFile, treePlan);
@@ -542,11 +546,19 @@ try {
   assert.match(JSON.parse(fs.readFileSync(path.join(omittedTarget, 'FAILED.json'))).error,
     /held baseline R1 stream set differs from offline assignments/);
   assert.deepEqual(hashTree(masters[oi]), hashes[oi]);
+  const incompletePlanFile = path.join(root, 'incomplete-r1-plan.json');
+  jsonPrivate(incompletePlanFile, { ...treePlan, held: { ...treePlan.held, streams: ['OFFLINE_R1'] } });
+  const incompleteTarget = path.join(root, 'incomplete-r1-probe');
+  await assert.rejects(run(process.execPath, [coldTreeProbe, incompletePlanFile, incompleteTarget], { stdio: 'ignore' }));
+  assert.match(JSON.parse(fs.readFileSync(path.join(incompleteTarget, 'FAILED.json'))).error,
+    /held stream set omits an offline R1 history/);
+  assert.deepEqual(hashTree(masters[oi]), hashes[oi]);
   const treeProbe = path.join(root, 'cold-tree-probe');
   await run(process.execPath, [coldTreeProbe, treePlanFile, treeProbe], { stdio: 'ignore' });
   const treeReport = JSON.parse(fs.readFileSync(path.join(treeProbe, 'probe.json')));
   assert.equal(treeReport.standalone.find(row => row.stream === 'HISTORY').last, coldSource.content.last);
   assert.equal(treeReport.held.find(row => row.stream === 'OFFLINE_R1').last, offlineColdSource.content.last);
+  assert.equal(treeReport.held.find(row => row.stream === 'SECOND_R1').last, 0);
   assert(treeReport.offlineBeforeRejoin.includes('OFFLINE_R1'));
   assert.equal(treeReport.rejoined.find(row => row.stream === 'OFFLINE_R1').last, offlineColdSource.content.last);
   assert.deepEqual(hashTree(cold), coldHashes);
@@ -563,7 +575,7 @@ try {
   assert(!fs.existsSync(path.join(staleProbe, 'probe.json')));
   assert.deepEqual(hashTree(cold), coldHashes);
   for (let i = 0; i < 3; i++) assert.deepEqual(hashTree(masters[i]), hashes[i]);
-  results.coldTreeProbe = { standaloneLast: coldSource.content.last, heldLast: offlineColdSource.content.last, offlineClusterAssignment: true, mastersUnchanged: true, staleArchiveBaselineRejected: true, overlappingTargetRejected: true, omittedR1Rejected: true };
+  results.coldTreeProbe = { standaloneLast: coldSource.content.last, heldLast: offlineColdSource.content.last, offlineClusterAssignment: true, mastersUnchanged: true, staleArchiveBaselineRejected: true, overlappingTargetRejected: true, omittedR1Rejected: true, omittedR1PlanRejected: true };
   passed = true;
 } catch (err) {
   jsonPrivate(path.join(root, 'FAILED.json'), { at: new Date().toISOString(), phase, error: err.message });

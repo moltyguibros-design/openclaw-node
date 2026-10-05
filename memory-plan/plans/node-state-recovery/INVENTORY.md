@@ -1476,3 +1476,12 @@ hold suite still passes 43/43. Continuous member-1 exclusion, a deploy fence
 and a clean-path pre-listener final check remain open, as do the other step
 1.2 acceptance and resumption gates. No production service was changed;
 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 06:59 EDT: D69 closes the D66 test gap found by
+Claude. The disposable cluster now has two genuinely offline R1 streams on
+the held member. An otherwise valid plan that omits the second held stream
+refuses at validation before any probe server starts; the master hash remains
+unchanged. The positive four-history fixture passes and all owned servers
+stop. Per-member replica validation, offline consumer positions, a deploy
+fence and full-node hold are still open. No production store or service was
+changed; 1.2 remains [A]/v1.2-pre.

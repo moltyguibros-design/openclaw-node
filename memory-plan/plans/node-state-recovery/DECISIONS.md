@@ -1333,3 +1333,16 @@ This is sampled ordering, not a continuous member-1 exclusion. A clean-path
 listener is still restored before the final physical check, and there is no
 durable pending-deploy fence or full-node driver. Those remain production
 resumption gates; step 1.2 stays [A]/v1.2-pre.
+
+## D69 — Exercise the actual omitted-R1 plan with two held streams (2026-10-05 06:59 EDT)
+
+Claude confirmed D66's set-equality code closes the omitted-R1 path, but its
+first negative fixture only altered the held baseline. The disposable cluster
+now assigns a second empty R1 stream to the same member by a unique server tag.
+Both serving baselines observe both streams offline, and the held baseline
+records both as R1. A plan declaring only the first must refuse at the
+`held.streams` equality check before any isolated server starts, with the
+source master hash unchanged. The positive four-history fixture still passes
+with both R1 streams. This closes the test gap in D66; it does not address
+per-member replica reads or offline consumer placeholders. Step 1.2 remains
+[A]/v1.2-pre, with no production store changed.
