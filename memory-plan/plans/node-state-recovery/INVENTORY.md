@@ -1531,3 +1531,14 @@ execution-hold release. The 100-test journal suite passes. These are two
 samples, not a continuous exclusion proof; the complete production hold and
 restart barriers remain open. No production job changed; 1.2 remains
 [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 08:09 EDT: D74 corrects the D72 fixture limit. Claude's
+three disposable R2 trials showed that NATS takes about four seconds to
+report the missing consumer; our one-second fixture requests caused the
+apparent nondeterminism. The fixture now uses the normal ten-second request,
+retries transient post-leader-loss 503, and again requires the real missing-only
+response and an acknowledged consumer position. Cold baseline and snapshot
+commands both refuse with the consumer named and no success manifest, then
+the positive four-history probe passes and all owned servers stop. This is
+owned test evidence only. Serving-member replica verification, the physical
+hold and production acceptance remain open; 1.2 stays [A]/v1.2-pre.

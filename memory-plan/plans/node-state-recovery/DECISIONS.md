@@ -1413,3 +1413,21 @@ named error and no `execution-hold-restored` record. The full journal suite
 passes 100 tests. This samples and detects a late change; it does not prove
 continuous member-1 exclusion or prevent a transient rejoin. No production
 job was changed; step 1.2 remains [A]/v1.2-pre.
+
+## D74 — Give the missing-consumer fixture the server's full list window (2026-10-05 08:09 EDT)
+
+Claude reproduced the R2 missing-only response in three owned NATS 2.12.6
+trials. Its consumer-list gather takes about four seconds: a one-second client
+request always timed out, whereas a ten-second request returned `total: 1`,
+no rows and `missing: [r2c]`, and `take_cold_baseline` refused without a
+manifest. That explains D72's intermittent real fixture when its helper used
+a one-second timeout. Restore the normal ten-second request deadline, retry a
+transient JetStream 503 after leader loss, and make the automated fixture
+again require a real acknowledged R2 consumer to yield the missing-only
+response. Both the cold baseline and the snapshot command must refuse with
+the consumer named and no success manifest. The injected raw-response
+negative remains as a small direct parser control. The complete owned
+four-history fixture passes with all servers stopped. This corrects D72's
+fixture-evidence limitation; it does not resolve the per-member replica or
+full-node hold gates. No production NATS member was touched and step 1.2
+remains [A]/v1.2-pre.

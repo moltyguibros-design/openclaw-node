@@ -108,7 +108,7 @@ async function waitInfo(nc, stream) {
 async function waitOffline(nc, stream) {
   for (let i = 0; i < 30; i++) {
     try { await api(nc, `$JS.API.STREAM.INFO.${stream}`, {}, 1000); }
-    catch (err) { if (err.api?.code === 500) return; if (err.code !== 'TIMEOUT') throw err; }
+    catch (err) { if (err.api?.code === 500) return; if (err.code !== 'TIMEOUT' && err.api?.code !== 503) throw err; }
     await delay(100);
   }
   throw new Error('Expected offline assignment was not observed');
@@ -116,14 +116,14 @@ async function waitOffline(nc, stream) {
 
 async function waitMissingConsumer(nc, stream, name) {
   let last = 'no response';
-  for (let attempt = 0; attempt < 30; attempt++) {
+  for (let attempt = 0; attempt < 8; attempt++) {
     try {
-      const page = await api(nc, `$JS.API.CONSUMER.LIST.${stream}`, {}, 1000);
+      const page = await api(nc, `$JS.API.CONSUMER.LIST.${stream}`);
       if (page.missing?.includes(name)) return page;
       last = JSON.stringify(page);
     } catch (error) {
-      if (error.code !== 'TIMEOUT') throw error;
-      last = 'timeout';
+      if (error.code !== 'TIMEOUT' && error.api?.code !== 503) throw error;
+      last = error.message;
     }
     await delay(250);
   }
@@ -453,6 +453,44 @@ try {
   await manager.streams.delete('CONSUMER_PLACEHOLDER');
   results.unavailableConsumerBaselineRejected = true;
   results.missingOnlyConsumerResponseRejected = true;
+  phase = 'cluster-missing-consumer-without-placeholder';
+  await manager.streams.add({ name: 'CONSUMER_PLACEHOLDER', subjects: ['consumer-placeholder'], storage: 'file', num_replicas: 3 });
+  await memberNC.jetstream().publish('consumer-placeholder', Buffer.from('acknowledged-r2'));
+  await manager.consumers.add('CONSUMER_PLACEHOLDER', { durable_name: 'held-r2', ack_policy: 'explicit', num_replicas: 2 });
+  const r2Consumer = await memberNC.jetstream().consumers.get('CONSUMER_PLACEHOLDER', 'held-r2');
+  const r2Message = await r2Consumer.next({ expires: 1000 }); assert(await r2Message.ackAck());
+  const r2Info = await manager.consumers.info('CONSUMER_PLACEHOLDER', 'held-r2');
+  assert(r2Info.ack_floor.consumer_seq > 0);
+  const r2Owner = members.find(item => item.name === r2Info.cluster.leader); assert(r2Owner);
+  await stop(r2Owner);
+  const r2Survivor = members.find(item => item !== r2Owner);
+  const r2NC = await bus(r2Survivor);
+  const omitted = await waitMissingConsumer(r2NC, 'CONSUMER_PLACEHOLDER', 'held-r2');
+  assert.equal(omitted.total, 1);
+  assert.equal((omitted.consumers || []).length, 0);
+  const omittedConsumerBaseline = path.join(root, 'prestop-omitted-consumer');
+  await assert.rejects(run(process.execPath, baselineArgs(r2Survivor, r2NC.info, omittedConsumerBaseline),
+    { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' }));
+  assert.match(JSON.parse(fs.readFileSync(path.join(omittedConsumerBaseline, 'FAILED.json'))).error,
+    /consumer inventory reports unavailable: held-r2/);
+  assert(!fs.existsSync(path.join(omittedConsumerBaseline, 'manifest.json')));
+  const omittedConsumerSnapshot = path.join(root, 'prestop-omitted-consumer-snapshot');
+  await assert.rejects(run(process.execPath, [
+    path.join(path.dirname(fileURLToPath(import.meta.url)), 'take_snapshots.mjs'),
+    `nats://127.0.0.1:${r2Survivor.client}`, omittedConsumerSnapshot, cli,
+  ], { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' }));
+  assert.match(JSON.parse(fs.readFileSync(path.join(omittedConsumerSnapshot, 'FAILED.json'))).error,
+    /consumer inventory reports unavailable: held-r2/);
+  assert(!fs.existsSync(path.join(omittedConsumerSnapshot, 'manifest.json')));
+  await r2NC.close();
+  await restart(r2Owner);
+  await waitCluster(members, memberNames);
+  await memberNC.close();
+  memberNC = await bus(members[0]);
+  manager = await memberNC.jetstreamManager();
+  await manager.streams.delete('CONSUMER_PLACEHOLDER');
+  results.omittedConsumerBaselineRejected = true;
+  results.omittedConsumerSnapshotRejected = true;
   phase = 'cluster-offline-r1-create';
   await manager.streams.add({ name: 'OFFLINE_R1', subjects: ['offline'], storage: 'file', num_replicas: 1, placement: { cluster: 'recovery-fixture', tags: [] } });
   const located = await waitInfo(memberNC, 'OFFLINE_R1');
