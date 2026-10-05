@@ -262,6 +262,34 @@ class HostReconcileTest(unittest.TestCase):
             self.assertFalse(interrupted_recovery['guard_completed'])
             self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
 
+            partial_capture = root / 'partial-capture-receipt'
+            partial_capture.mkdir(mode=0o700)
+            partial_initial = preflight(spec, partial_capture / 'before-shutdown')
+            write_record(partial_capture / 'ARMED.json', {
+                'scope': 'waiting for external guest shutdown; no stop request issued',
+                'vm_uuid': vm_uuid, 'host_boot_session': partial_initial['host_boot_session'],
+                'image_device': partial_initial['image_device'],
+                'image_inode': partial_initial['image_inode'],
+            })
+            write_record(partial_capture / 'GUARD_INTENT.json', {
+                'scope': GUARD_SCOPE, 'vm_uuid': vm_uuid,
+                'host_boot_session': partial_initial['host_boot_session'],
+                'source_image': str(source),
+                'source_image_device': source_identity[0],
+                'source_image_inode': source_identity[1],
+                'source_image_size': source_identity[2],
+            })
+            change_immutable(source, source_identity, True)
+            partial_clone = partial_capture / 'powered-off-image.asif'
+            clone_only(source, partial_clone)
+            clones.append(partial_clone)
+            (partial_capture / 'CAPTURE.json.tmp').write_text('{"partial":')
+            partial_recovery = reconcile(spec, partial_capture,
+                                         partial_capture / 'recovered', fixture=True)
+            self.assertFalse(partial_recovery['capture_completed'])
+            self.assertFalse(partial_clone.exists())
+            self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
+
             completed = root / 'completed-capture'
             completed.mkdir(mode=0o700)
             completed_initial = preflight(spec, completed / 'before-shutdown')

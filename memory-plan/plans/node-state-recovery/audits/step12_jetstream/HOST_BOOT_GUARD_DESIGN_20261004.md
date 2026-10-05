@@ -95,3 +95,8 @@ refuses before the source flag changes. `BOOTABLE.json` also publishes through
 a synced temporary file and atomic rename. An interrupted BOOTABLE write leaves
 only a temporary file; a fresh reconciliation can issue a complete receipt
 after checking the stopped source again.
+The capture worker now publishes `CAPTURE.json` through the same synced
+temporary-file and atomic-rename sequence. An interrupted write leaves only
+`CAPTURE.json.tmp`; reconciliation ignores it, removes an unattached clone
+and clears the source flag after fresh checks. This is crash convergence for
+the receipt, not proof of an uninterrupted stopped VM or accepted masters.

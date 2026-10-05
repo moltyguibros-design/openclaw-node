@@ -45,6 +45,13 @@ def fsync_parent(path):
         os.close(fd)
 
 
+def publish_capture_record(output, result):
+    temporary = output / 'CAPTURE.json.tmp'
+    write_record(temporary, result)
+    os.replace(temporary, output / 'CAPTURE.json')
+    fsync_parent(output)
+
+
 def clone_only(source, target):
     library = ctypes.CDLL(None, use_errno=True)
     function = library.clonefile
@@ -163,7 +170,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
             'store_roles': sorted(extracted['stores']),
             'vm_state_at_final_check': 'stopped',
         }
-        write_record(output / 'CAPTURE.json', result)
+        publish_capture_record(output, result)
         return result
     except Exception as error:
         write_record(output / 'FAILED.json', {'error': str(error)})

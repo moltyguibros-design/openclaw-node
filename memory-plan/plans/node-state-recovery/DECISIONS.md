@@ -1177,30 +1177,34 @@ retirement, healthy cold masters, and cutover remain open at 1.2.
 D8's bootout-only restoration describes an interrupted preservation window,
 not the planned stopped-VM capture path. In that path the original guest stays
 powered off while all three serving histories are extracted, restored in
-isolation, accepted and frozen. Alternatively, an explicit failed-capture
-abort may permit a later boot only after host cleanup and a checked decision
-to restore the prior node without claiming a new recovery point. This follows
-the ordering in `STOPPED_VM_COLD_MASTER_CANDIDATE.md`.
+isolation, accepted and frozen. Alternatively, an explicit failed-capture or
+failed-acceptance abort may permit a later boot only after host cleanup and a
+checked decision to restore the prior node without claiming a new recovery
+point. This follows `STOPPED_VM_COLD_MASTER_CANDIDATE.md`.
+
 Bootout-only jobs may start at login before the recovery controller runs;
 `already-restored` records their current state without enforcing the
-dependency or deploy-listener order.
-It therefore cannot certify the planned shutdown or authorize acceptance.
+dependency or deploy-listener order. It therefore cannot certify the planned
+shutdown or authorize acceptance.
 
 Before a production stop, a full-node controller must durably record the
 baseline and persistently fence every approved job that could write or launch
 another writer across a guest boot, including NATS, clients, viewer, gateway,
 deploy listener, and the five timer jobs. The timers' existing on-disk
-execution gate does not excuse an unplanned `RunAtLoad` start at login. It
-must prove the root-managed legacy agent is
-retired or held and that excluded jobs remain unchanged. The exact disable,
-unload, and re-enable mechanism needs a disposable-VM reboot rehearsal; no
-point-in-time launchd inventory is a continuous no-restart certificate. The
-controller must keep the deploy listener fenced until deploy-marker/HEAD and
-pending-deploy checks pass, then restore it last. A reboot ends the live
-quiet window. The controller must keep the captured evidence and choose the
-accepted cold-master path or the explicit abort before the later boot. Before
-calling `Journal.recover()` it must independently compare the actual boot-time
-jobs and processes with the recorded hold and refuse unexpected starts;
+execution gate does not excuse an unplanned `RunAtLoad` start at login. The
+controller must prove the root-managed legacy agent is retired or held and
+that excluded jobs remain unchanged within the preservation window. At the
+later boot, D60 requires a fresh exclusion anchor for the Tailscale helper;
+its expected `RunAtLoad` execution is not a cohort restart.
+The exact disable, unload, and re-enable mechanism needs a disposable-VM
+reboot rehearsal; no point-in-time launchd inventory is a continuous
+no-restart certificate. The controller must keep the deploy listener fenced
+until deploy-marker/HEAD and pending-deploy checks pass, then restore it last.
+A reboot ends the live quiet window. The controller must keep the captured
+evidence and choose the accepted cold-master path or the explicit abort before
+the later boot. Before calling `Journal.recover()` it must independently
+compare the actual boot-time jobs and processes with the recorded hold and
+refuse unexpected starts;
 `already-restored` is not a substitute for that check. The decision and its
 physical checks must precede any reopening of the execution gate or service
 restoration. An unexpected auto-start refuses the path rather than becoming

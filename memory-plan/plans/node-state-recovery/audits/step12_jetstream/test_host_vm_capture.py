@@ -12,9 +12,10 @@ import time
 import unittest
 from unittest import mock
 
+import host_vm_capture
 from stopped_tree_match import guest_capture, host_match
 from host_clone_dispose import cleanup_failed, dispose
-from host_vm_capture import capture, clone_only
+from host_vm_capture import capture, clone_only, publish_capture_record
 from host_vm_preflight import vmstate_identity
 
 
@@ -30,6 +31,27 @@ def run(*args):
 
 
 class VmstateGateTest(unittest.TestCase):
+    def test_partial_capture_receipt_is_never_published(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-capture-receipt-') as temporary:
+            root = pathlib.Path(temporary)
+            output = root / 'capture'
+            output.mkdir()
+            def partial_write(path, value):
+                self.assertEqual(path.name, 'CAPTURE.json.tmp')
+                self.assertFalse((output / 'CAPTURE.json').exists())
+                path.write_text('{"partial":')
+                raise OSError('interrupted capture receipt write')
+
+            with mock.patch.object(host_vm_capture, 'write_record', partial_write):
+                with self.assertRaisesRegex(OSError, 'interrupted capture receipt write'):
+                    publish_capture_record(output, {'verified': True})
+            self.assertFalse((output / 'CAPTURE.json').exists())
+            self.assertEqual((output / 'CAPTURE.json.tmp').read_text(), '{"partial":')
+            (output / 'CAPTURE.json.tmp').unlink()
+            publish_capture_record(output, {'verified': True})
+            self.assertEqual(json.loads((output / 'CAPTURE.json').read_text()),
+                             {'verified': True})
+
     def test_vmstate_change_refuses_before_clone(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-vmstate-gate-') as temporary:
             root = pathlib.Path(temporary).resolve()

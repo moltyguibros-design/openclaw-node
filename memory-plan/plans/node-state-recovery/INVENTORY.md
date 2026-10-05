@@ -1277,3 +1277,15 @@ Local macOS reconciliation tests pass (2/2), including partial guard and
 BOOTABLE receipt writes. No production VM or service changed; full-node hold,
 real UTM rehearsal, real-history acceptance and resumption remain open at
 1.2 [A]/v1.2-pre.
+
+Checkpoint 2026-10-04 23:46 EDT: Claude's re-review found no blocker in the
+guard/BOOTABLE crash fixes or corrected D62. It exposed a separate existing
+strand point: a partial final `CAPTURE.json` would stop clone cleanup and
+source unlocking. The capture worker now publishes that receipt atomically;
+a partial temporary receipt is ignored by reconciliation after fresh stopped,
+no-holder and source-identity checks. Local macOS capture tests pass (4/4)
+and reconciliation tests pass (2/2), including the partial-capture recovery.
+D62 now distinguishes expected Tailscale helper execution under D60 from
+cohort auto-start and includes failed-acceptance aborts. Production capture
+ordering, full-node hold, real UTM rehearsal, cold masters and runtime
+resumption remain unproven; 1.2 stays [A]/v1.2-pre.
