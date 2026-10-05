@@ -1449,3 +1449,13 @@ verified the target was not created and the master tree hash stayed unchanged.
 This closes a probe path-isolation defect, not the remaining full-node hold,
 real-history capture/restore, historical acceptance, or boot/resumption gates.
 No production history or service was changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 05:31 EDT: D66 closes the isolated probe's omitted-R1
+set check. It now requires `held.streams`, the two serving baselines' offline
+assignments and the held baseline's R1 snapshots to identify the same streams
+before starting servers. The disposable four-history fixture passes, including
+a negative held-baseline mutation refused at validation with its master hash
+unchanged. Claude's other findings on per-member replica validation, offline
+consumer positions and recovery ordering remain under review; this is not
+production history acceptance. No production service or history was changed;
+1.2 remains [A]/v1.2-pre.

@@ -531,6 +531,17 @@ try {
   assert.match(overlap.stderr, /cold target overlaps master/);
   assert(!fs.existsSync(overlappedTarget));
   assert.deepEqual(hashTree(cold), coldHashes);
+  const omittedBaseline = structuredClone(JSON.parse(fs.readFileSync(treePlan.held.baseline)));
+  omittedBaseline.streams.find(row => row.stream === 'REPLICATED').snapshot.config.num_replicas = 1;
+  const omittedBaselineFile = path.join(root, 'omitted-r1-baseline.json');
+  jsonPrivate(omittedBaselineFile, omittedBaseline);
+  const omittedPlanFile = path.join(root, 'omitted-r1-plan.json');
+  jsonPrivate(omittedPlanFile, { ...treePlan, held: { ...treePlan.held, baseline: omittedBaselineFile } });
+  const omittedTarget = path.join(root, 'omitted-r1-probe');
+  await assert.rejects(run(process.execPath, [coldTreeProbe, omittedPlanFile, omittedTarget], { stdio: 'ignore' }));
+  assert.match(JSON.parse(fs.readFileSync(path.join(omittedTarget, 'FAILED.json'))).error,
+    /held baseline R1 stream set differs from offline assignments/);
+  assert.deepEqual(hashTree(masters[oi]), hashes[oi]);
   const treeProbe = path.join(root, 'cold-tree-probe');
   await run(process.execPath, [coldTreeProbe, treePlanFile, treeProbe], { stdio: 'ignore' });
   const treeReport = JSON.parse(fs.readFileSync(path.join(treeProbe, 'probe.json')));
@@ -552,7 +563,7 @@ try {
   assert(!fs.existsSync(path.join(staleProbe, 'probe.json')));
   assert.deepEqual(hashTree(cold), coldHashes);
   for (let i = 0; i < 3; i++) assert.deepEqual(hashTree(masters[i]), hashes[i]);
-  results.coldTreeProbe = { standaloneLast: coldSource.content.last, heldLast: offlineColdSource.content.last, offlineClusterAssignment: true, mastersUnchanged: true, staleArchiveBaselineRejected: true, overlappingTargetRejected: true };
+  results.coldTreeProbe = { standaloneLast: coldSource.content.last, heldLast: offlineColdSource.content.last, offlineClusterAssignment: true, mastersUnchanged: true, staleArchiveBaselineRejected: true, overlappingTargetRejected: true, omittedR1Rejected: true };
   passed = true;
 } catch (err) {
   jsonPrivate(path.join(root, 'FAILED.json'), { at: new Date().toISOString(), phase, error: err.message });

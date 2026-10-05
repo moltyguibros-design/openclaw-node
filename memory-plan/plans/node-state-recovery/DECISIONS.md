@@ -1291,3 +1291,16 @@ master and requires refusal without creating the output or changing the master
 hash. This is path isolation for the mechanism probe, not production history
 acceptance or protection against a concurrent same-owner filesystem rewrite.
 No production history was copied or changed; step 1.2 remains [A]/v1.2-pre.
+
+## D66 — Require the held R1 set to cover every offline assignment (2026-10-05 05:31 EDT)
+
+The isolated cold-tree probe previously accepted `held.streams` as a subset
+of `cluster.offline`. An omitted member-1-only R1 stream would not be compared
+on the held standalone boot or after rejoin. Before starting any isolated
+server, require the declared held set, the serving members' offline set, and
+the held baseline's R1 snapshot set to be equal. A disposable negative fixture
+marks another stream R1 in the held baseline while omitting it from the plan;
+the probe now refuses at validation, with the source master hash unchanged.
+This checks set completeness relative to the supplied baselines. It does not
+independently prove the member-1 baseline's history, verify each serving
+replica locally, or close production acceptance. Step 1.2 stays [A]/v1.2-pre.

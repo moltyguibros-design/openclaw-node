@@ -248,10 +248,12 @@ try {
   const secondCluster = baselines.get(plan.cluster.members[1].name);
   assert.deepEqual(firstCluster.streams.map(row => [row.stream, !!row.offline]), secondCluster.streams.map(row => [row.stream, !!row.offline]));
   assert.deepEqual(firstCluster.streams.filter(row => row.offline).map(row => row.stream).sort(), [...plan.cluster.offline].sort());
+  assert.deepEqual([...plan.held.streams].sort(), [...plan.cluster.offline].sort(), 'held stream set omits an offline R1 history');
+  assert.deepEqual(baselines.get(plan.held.name).streams.filter(row => row.snapshot?.config.num_replicas === 1)
+    .map(row => row.stream).sort(), [...plan.cluster.offline].sort(), 'held baseline R1 stream set differs from offline assignments');
   for (const stream of plan.held.streams) {
     const row = baselines.get(plan.held.name).streams.find(row => row.stream === stream);
     assert(row?.snapshot && row.snapshot.config.num_replicas === 1);
-    assert(plan.cluster.offline.includes(stream));
   }
   const hashes = new Map(roles.map(role => [role.name, treeHash(role.master)]));
   const selected = await ports(15);
