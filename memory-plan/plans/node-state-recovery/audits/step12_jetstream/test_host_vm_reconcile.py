@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 import host_vm_preflight
 import host_vm_guard
+import host_vm_reconcile
 from host_image_immutable import change_immutable
 from host_clone_dispose import CAPTURE_SCOPE
 from host_vm_capture import clone_only, file_hash
@@ -208,6 +209,14 @@ class HostReconcileTest(unittest.TestCase):
             self.assertFalse(recovered_held['guard_completed'])
             self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
 
+            unexpected = root / 'unexpected-guard-receipt'
+            unexpected.mkdir(mode=0o700)
+            write_record(unexpected / 'GUARD.json', {'unrelated': True})
+            with self.assertRaisesRegex(RuntimeError, 'guard artifact already exists'):
+                guard(spec, unexpected, fixture=True)
+            self.assertFalse((unexpected / 'GUARD_INTENT.json').exists())
+            self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
+
             interrupted = root / 'interrupted-guard-receipt'
             interrupted.mkdir(mode=0o700)
             interrupted_initial = preflight(spec, interrupted / 'before-shutdown')
@@ -232,6 +241,22 @@ class HostReconcileTest(unittest.TestCase):
             self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
             self.assertTrue((interrupted / 'GUARD.json.tmp').exists())
             self.assertFalse((interrupted / 'GUARD.json').exists())
+            original_reconcile_write = host_vm_reconcile.write_record
+
+            def partial_bootable(path, value):
+                if pathlib.Path(path).name != 'BOOTABLE.json.tmp':
+                    return original_reconcile_write(path, value)
+                self.assertFalse((pathlib.Path(path).parent / 'BOOTABLE.json').exists())
+                pathlib.Path(path).write_text('{"partial":')
+                raise OSError('interrupted bootable receipt write')
+
+            with patch.object(host_vm_reconcile, 'write_record', partial_bootable):
+                with self.assertRaisesRegex(OSError, 'interrupted bootable receipt write'):
+                    reconcile(spec, interrupted, interrupted / 'partial-bootable', fixture=True)
+            self.assertTrue((interrupted / 'partial-bootable' / 'BOOTABLE.json.tmp').exists())
+            self.assertFalse((interrupted / 'partial-bootable' / 'BOOTABLE.json').exists())
+            self.assertTrue((interrupted / 'partial-bootable' / 'OPERATOR_REQUIRED.json').exists())
+            self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
             interrupted_recovery = reconcile(spec, interrupted,
                                              interrupted / 'recovered', fixture=True)
             self.assertFalse(interrupted_recovery['guard_completed'])

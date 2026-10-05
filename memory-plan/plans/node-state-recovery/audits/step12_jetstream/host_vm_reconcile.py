@@ -167,7 +167,10 @@ def reconcile(host_spec, capture_dir, output, fixture=False):
             'guard_completed': guard_completed,
             'capture_completed': os.path.lexists(capture_path),
         }
-        write_record(output / 'BOOTABLE.json', result)
+        temporary = output / 'BOOTABLE.json.tmp'
+        write_record(temporary, result)
+        os.replace(temporary, output / 'BOOTABLE.json')
+        fsync_parent(output)
         return result
     except Exception as error:
         write_record(output / 'OPERATOR_REQUIRED.json', {

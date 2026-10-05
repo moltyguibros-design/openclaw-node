@@ -1264,3 +1264,16 @@ regression recovers a bootable source with `guard_completed:false`. The local
 reconciliation fixture passes (2/2). This is still a disposable mechanism;
 no production hold, VM stop, cold master, history acceptance or resumption
 occurred. Step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-04 23:39 EDT: Claude accepted the atomic guard receipt
+code and blocked D62's first draft because it inverted the stopped-VM order.
+D62 now keeps the original guest off through host-side isolated restore,
+historical acceptance and freeze, or until an explicit failed-capture abort
+after host cleanup. It requires the boot-time job/process check before
+`Journal.recover()` can label an owner `already-restored`; gated timer starts
+are not silently exempted. The guard now refuses pre-existing receipt artifacts
+before changing the image flag, and BOOTABLE publishes atomically as well.
+Local macOS reconciliation tests pass (2/2), including partial guard and
+BOOTABLE receipt writes. No production VM or service changed; full-node hold,
+real UTM rehearsal, real-history acceptance and resumption remain open at
+1.2 [A]/v1.2-pre.

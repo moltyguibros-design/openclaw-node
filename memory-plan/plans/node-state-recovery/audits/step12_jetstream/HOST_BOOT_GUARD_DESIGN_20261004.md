@@ -90,3 +90,8 @@ writing the temporary file leaves no completion receipt, so reconciliation
 can report `guard_completed:false` and restore bootability after its other
 checks pass. The field does not prove that a later `CAPTURE.json` was created
 under that guard: the capture tool does not yet bind those two operations.
+An unexpected existing guard intent, completion receipt or temporary receipt
+refuses before the source flag changes. `BOOTABLE.json` also publishes through
+a synced temporary file and atomic rename. An interrupted BOOTABLE write leaves
+only a temporary file; a fresh reconciliation can issue a complete receipt
+after checking the stopped source again.

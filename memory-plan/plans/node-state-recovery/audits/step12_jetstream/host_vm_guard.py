@@ -28,8 +28,9 @@ def guard(host_spec, capture_dir, fixture=False):
         require(capture_dir.parent == pathlib.Path.home() /
                 'Library/Application Support/OpenClawRecovery',
                 'production guard requires the durable host recovery directory')
-    require(not os.path.lexists(capture_dir / 'GUARD_INTENT.json'),
-            'guard intent already exists; reconcile the prior attempt')
+    require(not any(os.path.lexists(capture_dir / name) for name in
+                    ('GUARD_INTENT.json', 'GUARD.json', 'GUARD.json.tmp')),
+            'guard artifact already exists; reconcile the prior attempt')
     armed = private_record(capture_dir / 'ARMED.json')
     initial = private_record(capture_dir / 'before-shutdown/preflight.json')
     require(armed['scope'] == 'waiting for external guest shutdown; no stop request issued'
