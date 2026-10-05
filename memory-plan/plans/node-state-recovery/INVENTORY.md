@@ -1707,3 +1707,10 @@ journal tests pass locally. D86 exact-head CI passed all four jobs. The
 complete continuous writer/VM hold, stopped-VM capture, real four-history
 acceptance and verified service resumption remain open. No production
 service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 19:57 EDT: D87's first exact-head macOS CI job
+found an older root-transfer fixture with ungated timer argv. The fixture
+now uses the owned gated-timer identity for its full timer cohort; all 16
+root-transfer tests pass locally. The CI refusal was in test setup, before
+any production action. Exact-head CI for the fixture repair remains pending.
+No production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.

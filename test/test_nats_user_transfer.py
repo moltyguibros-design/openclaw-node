@@ -327,6 +327,8 @@ class UserTransferTest(unittest.TestCase):
             prior = fixture_module.full_node_inventory()
             prior['scheduler-heartbeat']['execution_hold'] = describe(
                 gate, sorted(fixture_module.TIMER_UNITS))
+            for unit in fixture_module.TIMER_UNITS:
+                prior[unit]['identity'] = hold_fixture.gated_identity(unit, gate_root, pins)
             loaded = fixture_module.full_entrypoint_evidence(prior)
             with patch('preservation_journal.capture_entrypoint_inventory',
                        side_effect=lambda _: copy.deepcopy(loaded)), patch(
