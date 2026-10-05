@@ -1230,6 +1230,12 @@ flag on a verified, unattached clone before unlinking it.
 The capture wait must observe the guard within its stopped/no-holder polling
 loop and take a fresh pre-clone preflight. Completed-capture disposal must
 likewise refuse an open or attached clone before unlinking it.
+Before any guard intent is written, a failed transient preflight may be
+retried in a fresh preflight directory within the same armed attempt. Once
+the intent exists, the guard remains one-shot and reconciliation is required.
+Reconciliation must also check the host disk-image inventory even when the
+clone path is absent, before clearing the source flag; an attached image may
+survive an external unlink of its pathname.
 Missing or changed guard evidence refuses the attempt without accepting a
 cold master. The check does not prove continuous exclusion of a same-owner
 writer or replace the missing full-node hold and real UTM rehearsal.

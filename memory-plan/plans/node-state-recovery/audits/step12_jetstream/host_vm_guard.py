@@ -6,6 +6,7 @@ import os
 import pathlib
 import stat
 import sys
+import uuid
 
 from host_clone_dispose import private_record
 from host_image_immutable import change_immutable
@@ -43,7 +44,7 @@ def guard(host_spec, capture_dir, fixture=False):
             and (armed['image_device'], armed['image_inode']) ==
             (initial['image_device'], initial['image_inode']),
             'armed source identity differs')
-    before = preflight(host_spec, capture_dir / 'before-guard')
+    before = preflight(host_spec, capture_dir / ('before-guard-' + uuid.uuid4().hex))
     identity = (initial['image_device'], initial['image_inode'], initial['image_size'])
     require(before['state'] == 'stopped' and before['holders_consistent']
             and before['vm_uuid'] == armed['vm_uuid']

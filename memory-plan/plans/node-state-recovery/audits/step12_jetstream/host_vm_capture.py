@@ -88,6 +88,7 @@ def guarded_source(output, initial, observed):
                          'image', 'image_size', 'image_device', 'image_inode', 'vmstate',
                          'image_holders', 'holders_consistent', 'free_bytes'})
     identity = (initial['image_device'], initial['image_inode'], initial['image_size'])
+    source_info = pathlib.Path(observed['image']).lstat()
     require(not os.path.lexists(output / 'after-guard/FAILED.json')
             and intent['scope'] == 'stopped source image guard intent; no clone or VM start'
             and receipt == {**intent, 'scope': 'stopped source image guarded; no clone or VM start',
@@ -102,7 +103,9 @@ def guarded_source(output, initial, observed):
             and after['holders_consistent'] and not after['image_holders']
             and observed['holders_consistent'] and not observed['image_holders']
             and same_host_image(initial, after) and same_host_image(initial, observed)
-            and bool(pathlib.Path(observed['image']).lstat().st_flags & stat.UF_IMMUTABLE),
+            and stat.S_ISREG(source_info.st_mode)
+            and (source_info.st_dev, source_info.st_ino, source_info.st_size) == identity
+            and bool(source_info.st_flags & stat.UF_IMMUTABLE),
             'completed image guard or stopped source identity differs')
     return file_hash(receipt_path)
 

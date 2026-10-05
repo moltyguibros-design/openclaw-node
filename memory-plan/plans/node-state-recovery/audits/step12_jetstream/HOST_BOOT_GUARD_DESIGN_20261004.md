@@ -97,6 +97,12 @@ Failed-capture cleanup also clears that flag on a verified, unattached clone
 before removing it, covering interruption before the worker can clear it.
 The later guest/host tree comparison also checks that the guard receipt still
 has the hash pinned by the capture receipt.
+Completed-capture disposal checks open holders and disk-image attachments
+before unlinking its clone. Reconciliation checks the attachment inventory
+even if the clone pathname is absent, because a detached pathname does not
+detach an already attached image. A transient guard preflight failure before
+intent publication can be retried with a fresh preflight directory; a
+post-intent failure stays one-shot and requires reconciliation.
 These are sampled checks, not proof that an owner never cleared and reapplied
 the flag or that no pre-existing writable descriptor wrote between samples.
 An unexpected existing guard intent, completion receipt or temporary receipt

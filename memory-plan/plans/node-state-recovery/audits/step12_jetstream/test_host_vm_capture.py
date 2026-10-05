@@ -5,6 +5,7 @@ import os
 import pathlib
 import plistlib
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -242,6 +243,10 @@ class HostCaptureTest(unittest.TestCase):
         self.assertTrue((output / 'ARMED.json').exists())
         holder.terminate()
         holder.wait(timeout=5)
+        with self.assertRaisesRegex(RuntimeError, 'holder|disagree'):
+            guard(spec, output, fixture=True)
+        self.assertFalse((output / 'GUARD_INTENT.json').exists())
+        self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
         state.write_text('stopped\n')
         guard(spec, output, fixture=True)
         _, stderr = worker.communicate(timeout=30)
@@ -336,6 +341,18 @@ class HostCaptureTest(unittest.TestCase):
         self.assertTrue((output / 'dispose-after-stop' / 'DISPOSE.json').exists())
         self.assertFalse((output / 'powered-off-image.asif').exists())
         self.assertTrue(source.exists())
+        clone_only(source, clone)
+        info = clone.lstat()
+        change_immutable(clone, (info.st_dev, info.st_ino, info.st_size), False)
+        orphan = plistlib.loads(run('/usr/sbin/diskutil', 'image', 'attach', '--plist',
+                                    '--readOnly', '--noMount', str(clone)))
+        self.disks.append(orphan['system-entities'][0]['dev-entry'])
+        clone.unlink()
+        with self.assertRaisesRegex(RuntimeError, 'attached'):
+            reconcile(spec, output, output / 'orphan-attachment', fixture=True)
+        self.assertTrue((output / 'orphan-attachment' / 'OPERATOR_REQUIRED.json').exists())
+        self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
+        self.eject()
         self.assertTrue(reconcile(spec, output, output / 'bootable', fixture=True)['guard_completed'])
 
         wrong_store_spec = self.root / 'wrong-store-spec.json'

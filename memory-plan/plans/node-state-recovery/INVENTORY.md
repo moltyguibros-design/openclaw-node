@@ -1312,3 +1312,15 @@ disposal refuses with the clone intact, ejects it, then completes disposal.
 The local host test group passes (9/9). This remains a sampled, disposable
 mechanism; no production VM or service changed, and 1.2 remains
 [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 00:27 EDT: Claude's read-only review of 9ca5e89d
+found no new false-acceptance path but confirmed that completed-clone disposal
+could unlink an attached image. The attached-clone refusal landed at
+396e4950, whose four CI jobs passed. A disposable host probe showed that
+`hdiutil info` retains an attachment's original path even after external
+unlink. Reconciliation now checks for that attachment before unlocking the
+source, including when the clone path is gone. A transient pre-intent guard
+failure can be retried in a fresh preflight directory; post-intent failure
+still requires reconciliation. The host fixture pins both cases and passes
+9/9 locally. This does not establish a complete abort controller or permit
+production VM shutdown; step 1.2 remains [A]/v1.2-pre.

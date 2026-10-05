@@ -7,7 +7,7 @@ import pathlib
 import stat
 import sys
 
-from host_clone_dispose import CAPTURE_SCOPE, private_record, unattached
+from host_clone_dispose import CAPTURE_SCOPE, no_attachment, private_record, unattached
 from host_image_immutable import change_immutable
 from host_vm_guard import GUARD_SCOPE
 from host_vm_capture import FIXTURE_UUID, HOST_SPEC_FIELDS, file_hash, fsync_parent, pinned_spec
@@ -128,6 +128,7 @@ def reconcile(host_spec, capture_dir, output, fixture=False):
             change_immutable(clone, (info.st_dev, info.st_ino, info.st_size), False)
             clone.unlink()
             fsync_parent(capture_dir)
+        no_attachment(clone)
         no_other_clone(capture_dir.parent, capture_dir)
         after_clone = preflight(host_spec, output / 'after-clone-removal')
         require(after_clone['state'] == 'stopped' and after_clone['holders_consistent']

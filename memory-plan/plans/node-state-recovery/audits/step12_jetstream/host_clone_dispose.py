@@ -32,6 +32,10 @@ def unattached(clone):
                              capture_output=True, timeout=15)
     require(holders.returncode == 1 and not holders.stdout and not holders.stderr,
             'temporary clone has an open holder')
+    no_attachment(clone)
+
+
+def no_attachment(clone):
     attached = subprocess.run(['/usr/bin/hdiutil', 'info', '-plist'],
                               capture_output=True, timeout=15)
     require(attached.returncode == 0 and not attached.stderr,
