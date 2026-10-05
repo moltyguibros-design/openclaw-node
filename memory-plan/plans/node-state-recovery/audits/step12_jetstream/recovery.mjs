@@ -76,6 +76,8 @@ export async function digest(nc, stream, first, last) {
 }
 
 export function consumerState(info) {
+  assert(typeof info.name === 'string' && info.name.length > 0,
+    `consumer list contains an unavailable consumer: ${info.config?.durable_name || 'unnamed'}`);
   return {
     name: info.name, config: info.config,
     delivered: { consumer_seq: info.delivered.consumer_seq, stream_seq: info.delivered.stream_seq },

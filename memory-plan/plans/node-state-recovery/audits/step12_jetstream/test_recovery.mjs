@@ -64,6 +64,18 @@ async function stop(item) {
   assert.match(fs.readFileSync(item.config + '.log', 'utf8'), /Server Exiting/);
 }
 
+async function restart(item) {
+  assert.notEqual(item.proc.exitCode, null);
+  const fd = fs.openSync(item.config + '.log', 'a', 0o600);
+  item.proc = spawn(binary, ['--config', item.config], { stdio: ['ignore', fd, fd] }); fs.closeSync(fd);
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (item.proc.exitCode !== null) throw new Error(`owned server exited after restart: ${item.name}`);
+    try { const response = await fetch(`http://127.0.0.1:${item.monitor}/healthz?js-enabled-only=true`); if (response.ok) return; } catch {}
+    await delay(50);
+  }
+  throw new Error(`owned server restart timeout: ${item.name}`);
+}
+
 async function bus(item) { const nc = await openBus(`nats://127.0.0.1:${item.client}`, token); connections.push(nc); return nc; }
 
 function baselineArgs(item, info, target, offline = '') {
@@ -387,8 +399,41 @@ try {
   const ready = await waitCluster(members, memberNames);
   jsonPrivate(path.join(root, 'cluster-placement-ready.json'), ready);
   results.placementPredicateNegatives = placementCounterexamples(ready, memberNames);
-  const memberNC = await bus(members[0]);
-  const manager = await memberNC.jetstreamManager();
+  let memberNC = await bus(members[0]);
+  let manager = await memberNC.jetstreamManager();
+  phase = 'cluster-offline-consumer-placeholder';
+  await manager.streams.add({ name: 'CONSUMER_PLACEHOLDER', subjects: ['consumer-placeholder'], storage: 'file', num_replicas: 3 });
+  await memberNC.jetstream().publish('consumer-placeholder', Buffer.from('acknowledged'));
+  await manager.consumers.add('CONSUMER_PLACEHOLDER', { durable_name: 'held-r1', ack_policy: 'explicit', num_replicas: 1 });
+  const heldConsumer = await memberNC.jetstream().consumers.get('CONSUMER_PLACEHOLDER', 'held-r1');
+  const heldMessage = await heldConsumer.next({ expires: 1000 }); assert(await heldMessage.ackAck());
+  const consumerOwnerName = (await manager.consumers.info('CONSUMER_PLACEHOLDER', 'held-r1')).cluster.leader;
+  const consumerOwner = members.find(item => item.name === consumerOwnerName); assert(consumerOwner);
+  await stop(consumerOwner);
+  const consumerSurvivor = members.find(item => item !== consumerOwner);
+  const consumerNC = await bus(consumerSurvivor);
+  let placeholder;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    placeholder = await api(consumerNC, '$JS.API.CONSUMER.LIST.CONSUMER_PLACEHOLDER');
+    if (placeholder.missing?.includes('held-r1')) break;
+    await delay(100);
+  }
+  assert(placeholder.missing?.includes('held-r1'));
+  assert(placeholder.consumers?.some(info => info.name === '' && info.config?.durable_name === 'held-r1'));
+  const unavailableConsumerBaseline = path.join(root, 'prestop-unavailable-consumer');
+  await assert.rejects(run(process.execPath, baselineArgs(consumerSurvivor, consumerNC.info, unavailableConsumerBaseline),
+    { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' }));
+  assert.match(JSON.parse(fs.readFileSync(path.join(unavailableConsumerBaseline, 'FAILED.json'))).error,
+    /consumer list contains an unavailable consumer: held-r1/);
+  assert(!fs.existsSync(path.join(unavailableConsumerBaseline, 'manifest.json')));
+  await consumerNC.close();
+  await restart(consumerOwner);
+  await waitCluster(members, memberNames);
+  await memberNC.close();
+  memberNC = await bus(members[0]);
+  manager = await memberNC.jetstreamManager();
+  await manager.streams.delete('CONSUMER_PLACEHOLDER');
+  results.unavailableConsumerBaselineRejected = true;
   phase = 'cluster-offline-r1-create';
   await manager.streams.add({ name: 'OFFLINE_R1', subjects: ['offline'], storage: 'file', num_replicas: 1, placement: { cluster: 'recovery-fixture', tags: [] } });
   const located = await waitInfo(memberNC, 'OFFLINE_R1');

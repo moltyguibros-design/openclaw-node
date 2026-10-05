@@ -1346,3 +1346,19 @@ source master hash unchanged. The positive four-history fixture still passes
 with both R1 streams. This closes the test gap in D66; it does not address
 per-member replica reads or offline consumer placeholders. Step 1.2 remains
 [A]/v1.2-pre, with no production store changed.
+
+## D70 — Refuse unavailable R1 consumer positions in cold baselines (2026-10-05 07:10 EDT)
+
+When an R1 durable consumer is hosted only by a stopped member but its R3
+stream remains online, NATS 2.12.6 can return a `CONSUMER.LIST` placeholder
+with an empty `name`, zero positions, and a `missing` entry. The shared
+`consumerState()` conversion now refuses an empty name instead of recording
+that placeholder as a real consumer position. The disposable three-member
+fixture creates an R1 durable on an R3 stream, acknowledges a message, stops
+that consumer's owner, observes the actual placeholder and `missing` entry,
+and requires `take_cold_baseline` to write `FAILED.json` without a manifest.
+It restarts the owned member and then completes the four-history positive
+probe with all owned processes stopped. This closes the observed false
+acceptance on NATS 2.12.6. It does not establish per-member replica contents,
+independent knowledge of every expected consumer, or production acceptance.
+No production NATS member or history was touched; step 1.2 stays [A]/v1.2-pre.

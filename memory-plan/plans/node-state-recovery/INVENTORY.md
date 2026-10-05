@@ -1485,3 +1485,15 @@ unchanged. The positive four-history fixture passes and all owned servers
 stop. Per-member replica validation, offline consumer positions, a deploy
 fence and full-node hold are still open. No production store or service was
 changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 07:10 EDT: D70 makes a cold baseline refuse an
+unavailable R1 consumer on an otherwise available R3 stream. In a disposable
+three-member NATS 2.12.6 cluster, a durable acknowledged a message before its
+single consumer replica's owner stopped. A survivor then returned an empty-name
+placeholder with `missing` naming that consumer. `take_cold_baseline` now
+failed without a success manifest; after the owned member restarted and the
+temporary stream was removed, the full four-history fixture still passed and
+all owned processes stopped. This addresses the observed consumer-position
+false acceptance, not per-member replica verification, independent consumer
+inventory, or any production hold/restore gate. No production history or
+service changed; 1.2 remains [A]/v1.2-pre.
