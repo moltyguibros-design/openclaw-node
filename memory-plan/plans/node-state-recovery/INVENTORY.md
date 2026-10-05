@@ -1400,8 +1400,21 @@ override is disabled and rechecks it after bootout. Managed bootstrap and
 kickstart refuse a disabled label. The owned fixture checks the stop proof and
 refused restart; a small dependency-free macOS CI fixture tests the same
 disable/bootout/re-enable sequence. The launchd override covers only the GUI
-domain and this test does not prove reboot persistence or prevent another
-program from calling launchctl directly. The test label is stable now, but
+domain and that head did not prove reboot persistence or a direct launchctl
+restart refusal. The test label is stable now, but
 earlier local runs left three random test-label entries and the stable label
 marked `enabled` in the host launchd override database; no production label
 was disabled. The full-node hold remains open at 1.2 [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 02:44 EDT: Claude found that the refused-restart
+assertion at `2df27167` was self-checking: `Launchd.bootstrap()` refused
+before launchctl could be asked. The macOS fixture now also calls
+`launchctl bootstrap` directly while the owned GUI label is disabled. On the
+operator host it returned nonzero, left the job unloaded, and did not recreate
+its ready marker during a one-second observation. The wrapper refusal remains
+a separate check. The two owned fixtures use distinct stable labels and
+recover a stale disabled override for their own label at setup if it is
+unloaded. This proves one
+direct GUI-domain bootstrap refusal on this host, not legacy `load`, other
+domains or reboot persistence. No production service or VM changed; 1.2
+remains [A]/v1.2-pre.

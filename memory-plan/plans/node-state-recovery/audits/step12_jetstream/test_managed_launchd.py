@@ -150,6 +150,8 @@ os.execv('/bin/sleep',['sleep','30'])
         self.err.touch(mode=0o600)
         self.plist = self.directory / 'unit.plist'
         self.service = Launchd(self.name, self.plist)
+        if suffix == 'hold-probe' and not self.service.status()['loaded'] and self.service.disabled():
+            self.service.enable_after_hold()
 
     def launch(self, mode='good', run_at_load=True, exit_timeout=5, identity_files=None, load_elsewhere=False):
         env = {'HOME': str(self.directory), 'OWNED_NATS_PACKAGE': str(self.package),

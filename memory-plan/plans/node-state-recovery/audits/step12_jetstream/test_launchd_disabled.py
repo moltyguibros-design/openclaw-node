@@ -13,7 +13,7 @@ from managed_launchd import Launchd, Refused
 @unittest.skipUnless(sys.platform == 'darwin', 'requires macOS launchd')
 class DisabledLaunchd(unittest.TestCase):
     def test_owned_gui_override_blocks_managed_restart_until_enabled(self):
-        label = 'ai.openclaw.preservation-owned.hold-probe'
+        label = 'ai.openclaw.preservation-owned.hold-bootstrap'
         with tempfile.TemporaryDirectory(prefix='openclaw-launchd-disabled-') as directory:
             root = pathlib.Path(directory)
             ready = root / 'ready'
@@ -28,6 +28,8 @@ class DisabledLaunchd(unittest.TestCase):
             service = Launchd(label, plist)
             override_attempted = False
             try:
+                if not service.status()['loaded'] and service.disabled():
+                    service.enable_after_hold()
                 service.bootstrap()
                 deadline = time.monotonic() + 10
                 while not (ready.exists() and service.status()['running']) and time.monotonic() < deadline:
@@ -41,6 +43,12 @@ class DisabledLaunchd(unittest.TestCase):
                 self.assertFalse(service.status()['loaded'])
                 self.assertTrue(service.disabled())
                 ready.unlink()
+                direct = subprocess.run(['/bin/launchctl', 'bootstrap', 'gui/' + str(os.getuid()),
+                                         str(plist)], capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(direct.returncode, 0, direct)
+                self.assertFalse(service.status()['loaded'])
+                time.sleep(1)
+                self.assertFalse(ready.exists())
                 with self.assertRaisesRegex(Refused, 'disabled managed unit'):
                     service.bootstrap()
                 self.assertFalse(service.status()['loaded'])
