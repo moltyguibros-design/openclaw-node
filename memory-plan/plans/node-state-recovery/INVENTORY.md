@@ -1440,3 +1440,12 @@ reboot assertion. The actual persistent 23-job hold, boot decision, detached
 process census, safe service order and real-history acceptance remain open;
 this refusal does not make the node operational. No production service or VM
 was changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 03:29 EDT: D65 makes the isolated four-history probe
+reject an output directory that physically overlaps any cold master before
+creating that directory, including an absent path under a symlinked ancestor.
+The disposable NATS fixture passed with the new alias regression; it also
+verified the target was not created and the master tree hash stayed unchanged.
+This closes a probe path-isolation defect, not the remaining full-node hold,
+real-history capture/restore, historical acceptance, or boot/resumption gates.
+No production history or service was changed; 1.2 remains [A]/v1.2-pre.

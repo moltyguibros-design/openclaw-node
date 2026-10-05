@@ -1277,3 +1277,17 @@ recovery before observation, mutation, or receipt append. This is a temporary
 fail-closed boundary, not a recovery mechanism or proof of a full-node hold.
 Timer and legacy-scope interrupted restoration retain their existing behavior.
 No production service or VM is changed, and step 1.2 stays [A]/v1.2-pre.
+
+## D65 — Reject a cold-probe output nested in a master through a symlinked ancestor (2026-10-05 03:29 EDT)
+
+The isolated four-history probe used a lexical overlap check after creating
+its output directory. A symlinked ancestor of an otherwise absent output path
+could point inside a cold master, so even the initial directory creation could
+alter that master before the overlap check ran. Resolve the nearest existing
+output ancestor and each master to physical paths, reject equal or nested
+paths before creating output, then verify the created path resolves as planned.
+The disposable four-history fixture now supplies a symlink alias into a frozen
+master and requires refusal without creating the output or changing the master
+hash. This is path isolation for the mechanism probe, not production history
+acceptance or protection against a concurrent same-owner filesystem rewrite.
+No production history was copied or changed; step 1.2 remains [A]/v1.2-pre.

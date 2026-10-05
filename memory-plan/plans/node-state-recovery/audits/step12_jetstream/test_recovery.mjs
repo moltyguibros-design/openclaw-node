@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { randomBytes, createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -523,6 +523,14 @@ try {
   };
   const treePlanFile = path.join(root, 'cold-tree-plan.json');
   jsonPrivate(treePlanFile, treePlan);
+  const masterAlias = path.join(root, 'cold-master-alias');
+  fs.symlinkSync(cold, masterAlias);
+  const overlappedTarget = path.join(masterAlias, 'unintended-probe');
+  const overlap = spawnSync(process.execPath, [coldTreeProbe, treePlanFile, overlappedTarget], { encoding: 'utf8' });
+  assert.notEqual(overlap.status, 0);
+  assert.match(overlap.stderr, /cold target overlaps master/);
+  assert(!fs.existsSync(overlappedTarget));
+  assert.deepEqual(hashTree(cold), coldHashes);
   const treeProbe = path.join(root, 'cold-tree-probe');
   await run(process.execPath, [coldTreeProbe, treePlanFile, treeProbe], { stdio: 'ignore' });
   const treeReport = JSON.parse(fs.readFileSync(path.join(treeProbe, 'probe.json')));
@@ -544,7 +552,7 @@ try {
   assert(!fs.existsSync(path.join(staleProbe, 'probe.json')));
   assert.deepEqual(hashTree(cold), coldHashes);
   for (let i = 0; i < 3; i++) assert.deepEqual(hashTree(masters[i]), hashes[i]);
-  results.coldTreeProbe = { standaloneLast: coldSource.content.last, heldLast: offlineColdSource.content.last, offlineClusterAssignment: true, mastersUnchanged: true, staleArchiveBaselineRejected: true };
+  results.coldTreeProbe = { standaloneLast: coldSource.content.last, heldLast: offlineColdSource.content.last, offlineClusterAssignment: true, mastersUnchanged: true, staleArchiveBaselineRejected: true, overlappingTargetRejected: true };
   passed = true;
 } catch (err) {
   jsonPrivate(path.join(root, 'FAILED.json'), { at: new Date().toISOString(), phase, error: err.message });

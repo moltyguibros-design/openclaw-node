@@ -11,11 +11,25 @@ const [planFile, target] = process.argv.slice(2);
 assert(planFile && target && path.isAbsolute(planFile) && path.isAbsolute(target) && !fs.existsSync(target),
   'usage: node probe_cold_trees.mjs <private-plan.json> <new-private-dir>');
 process.umask(0o077);
-privateDir(target);
 
 const planStat = fs.lstatSync(planFile);
 assert(planStat.isFile() && !planStat.isSymbolicLink() && planStat.uid === process.getuid() && !(planStat.mode & 0o077));
 const plan = JSON.parse(fs.readFileSync(planFile, 'utf8'));
+const roles = [plan.standalone, ...plan.cluster.members, plan.held];
+let ancestor = path.dirname(target);
+const missing = [path.basename(target)];
+while (!fs.existsSync(ancestor)) {
+  missing.unshift(path.basename(ancestor));
+  ancestor = path.dirname(ancestor);
+}
+const targetReal = path.join(fs.realpathSync(ancestor), ...missing);
+assert(roles.every(role => {
+  assert(path.isAbsolute(role.master));
+  const master = fs.realpathSync(role.master);
+  return targetReal !== master && !targetReal.startsWith(master + path.sep) && !master.startsWith(targetReal + path.sep);
+}), 'cold target overlaps master');
+privateDir(target);
+assert.equal(fs.realpathSync(target), targetReal);
 const servers = [];
 const connections = [];
 const token = randomBytes(32).toString('hex');
@@ -224,9 +238,7 @@ try {
   assert.equal(plan.cluster.members.length, 2);
   assert(plan.cluster.offline.length > 0 && plan.held.streams.length > 0);
   roleName(plan.cluster.name);
-  const roles = [plan.standalone, ...plan.cluster.members, plan.held];
   assert.equal(new Set(roles.map(role => role.name)).size, 4);
-  assert(roles.every(role => !path.resolve(target).startsWith(path.resolve(role.master) + path.sep) && !path.resolve(role.master).startsWith(path.resolve(target) + path.sep)));
   assert.equal(new Set(roles.map(role => fs.realpathSync(role.master))).size, 4);
   const baselines = new Map(roles.map(role => [role.name, baseline(role)]));
   assert(!baselines.get(plan.standalone.name).serverInfo.cluster);
