@@ -77,3 +77,9 @@ while the source remains unguarded and the fixed clone remains absent. If an
 immutable flag reappears after that receipt, the old intent cannot clear it;
 the run refuses for operator review. This closes stale-intent reuse after a
 successful recovery without weakening idempotent no-op checks.
+
+The `BOOTABLE` receipt now records `guard_completed` only after checking a
+matching `GUARD.json` against its durable intent. An aborted guard can still
+recover the image's bootability, but its receipt records `guard_completed:false`.
+Neither value is a VM start authorization; the missing boot controller must
+make an independent acceptance or explicit abort decision.

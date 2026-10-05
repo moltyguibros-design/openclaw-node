@@ -1239,3 +1239,13 @@ refuses while the holder remains before restoring bootability after it closes.
 The local macOS fixture passes; the interrupted host fixture has no result.
 Real UTM start/refusal behavior and the full-node hold remain unproven. No
 production VM or service changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-04 23:25 EDT: the host reconciler now validates any
+`GUARD.json` against its durable intent and records `guard_completed` in the
+scoped `BOOTABLE` receipt. Recovery after an aborted guard records false; a
+completed guard records true. The holder-present negative now asserts that
+the source remains immutable and `OPERATOR_REQUIRED.json` exists. The local
+macOS reconciliation fixture passes (2/2), and plan-lint remains conformant.
+`BOOTABLE` still means disk bootability only; no VM start controller, real
+UTM rehearsal, full-node hold, cold-master acceptance or service resumption
+is claimed. No production state changed; 1.2 remains [A]/v1.2-pre.

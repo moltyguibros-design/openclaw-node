@@ -161,6 +161,7 @@ class HostReconcileTest(unittest.TestCase):
             other.unlink()
             result = reconcile(spec, capture, capture / 'recovered', fixture=True)
             self.assertTrue(result['clone_absent'])
+            self.assertTrue(result['guard_completed'])
             self.assertFalse(result['source_immutable'])
             self.assertTrue((capture / 'recovered' / 'BOOTABLE.json').exists())
             self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
@@ -197,11 +198,14 @@ class HostReconcileTest(unittest.TestCase):
                 self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
                 with self.assertRaisesRegex(RuntimeError, 'image holders disagree'):
                     reconcile(spec, held, held / 'holder-present', fixture=True)
+                self.assertTrue((held / 'holder-present' / 'OPERATOR_REQUIRED.json').exists())
+                self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
             finally:
                 if writable is not None:
                     os.close(writable)
             recovered_held = reconcile(spec, held, held / 'holder-gone', fixture=True)
             self.assertTrue(recovered_held['clone_absent'])
+            self.assertFalse(recovered_held['guard_completed'])
             self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
 
             completed = root / 'completed-capture'

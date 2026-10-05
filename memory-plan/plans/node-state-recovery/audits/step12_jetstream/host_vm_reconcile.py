@@ -30,6 +30,7 @@ def prior_bootable(capture_dir, vm_uuid, identity):
         owned_directory(child)
         receipt = private_record(child / 'BOOTABLE.json')
         require(receipt['scope'] == BOOTABLE_SCOPE and receipt['vm_uuid'] == vm_uuid
+                and isinstance(receipt.get('guard_completed'), bool)
                 and (receipt['source_image_device'], receipt['source_image_inode'],
                      receipt['source_image_size']) == identity,
                 'prior BOOTABLE receipt identifies another source')
@@ -104,6 +105,16 @@ def reconcile(host_spec, capture_dir, output, fixture=False):
                                         initial['image_size']),
                 'stopped VM or original source image differs')
         source = pathlib.Path(before['image'])
+        guarded_path = capture_dir / 'GUARD.json'
+        guard_completed = False
+        if os.path.lexists(guarded_path):
+            guarded = private_record(guarded_path)
+            require(set(guarded) == set(intent) | {'guarded_at_utc'}
+                    and guarded['scope'] == 'stopped source image guarded; no clone or VM start'
+                    and all(guarded.get(key) == value for key, value in intent.items()
+                            if key != 'scope'),
+                    'guard completion receipt differs from its intent')
+            guard_completed = True
         clone = capture_dir / 'powered-off-image.asif'
         if prior_bootable(capture_dir, before['vm_uuid'], source_identity):
             require(not os.path.lexists(clone)
@@ -153,6 +164,7 @@ def reconcile(host_spec, capture_dir, output, fixture=False):
             'source_image_size': source_identity[2],
             'clone_absent': True, 'source_immutable': False,
             'vm_state_at_final_check': 'stopped',
+            'guard_completed': guard_completed,
             'capture_completed': os.path.lexists(capture_path),
         }
         write_record(output / 'BOOTABLE.json', result)
