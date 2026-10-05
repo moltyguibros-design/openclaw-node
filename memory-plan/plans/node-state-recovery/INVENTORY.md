@@ -1381,9 +1381,9 @@ The local host group passes 12/12. No source-wide exclusion, no-intent abort rec
 real UTM rehearsal, full-node hold or production stop is claimed. Step 1.2
 remains [A]/v1.2-pre.
 
-Checkpoint 2026-10-05 02:22 EDT: the GUI launchd adapter now verifies a
-disabled override before a managed stop and refuses to re-enable while the
-job is still loaded. The owned macOS fixture arms its process watch, disables
+Checkpoint 2026-10-05 02:22 EDT: the GUI launchd adapter now has a disabled
+override probe and separate disable/re-enable methods. Re-enable refuses while
+the job is still loaded. The owned macOS fixture arms its process watch, disables
 its disposable job, observes a normal stop, confirms the disabled override
 survives bootout, then re-enables and restarts the same job. The restore-only
 prototype uses the same override inspection. This is a per-job primitive,
@@ -1391,3 +1391,17 @@ not a production 23-job hold or a reboot-persistence test. Root/user jobs,
 detached processes, other launch paths, host UTM autostart, continuous
 exclusion and the D62 boot decision remain open. No production service or VM
 was changed; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 02:38 EDT: Claude's exact-head review of `04f654b3`
+found no production-code blocker but showed that the stop path did not require
+the override, the fixture had not tried a blocked restart, and CI skipped the
+macOS-only test. The opt-in managed stop now refuses bootout unless the GUI
+override is disabled and rechecks it after bootout. Managed bootstrap and
+kickstart refuse a disabled label. The owned fixture checks the stop proof and
+refused restart; a small dependency-free macOS CI fixture tests the same
+disable/bootout/re-enable sequence. The launchd override covers only the GUI
+domain and this test does not prove reboot persistence or prevent another
+program from calling launchctl directly. The test label is stable now, but
+earlier local runs left three random test-label entries and the stable label
+marked `enabled` in the host launchd override database; no production label
+was disabled. The full-node hold remains open at 1.2 [A]/v1.2-pre.

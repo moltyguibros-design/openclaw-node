@@ -232,10 +232,12 @@ class Launchd:
     def bootstrap(self):
         require(not self.status()['loaded'], 'refusing to bootstrap an existing owner')
         require(not self.status('user')['loaded'], 'refusing to bootstrap an owner in another domain')
+        require(not self.disabled(), 'refusing to bootstrap a disabled managed unit')
         command(['/bin/launchctl', 'bootstrap', 'gui/' + str(os.getuid()), str(self.plist)])
 
     def kickstart(self):
         require(self.status()['loaded'] and not self.status()['running'], 'refusing to restart an existing owner')
+        require(not self.disabled(), 'refusing to kickstart a disabled managed unit')
         command(['/bin/launchctl', 'kickstart', self.target])
 
     def disabled(self):
@@ -262,7 +264,8 @@ class Launchd:
 
 class StopWatch:
     def __init__(self, service, binding, paths, completion_service, allowed_signals=(),
-                 startup_segment=None, bus_client_names=None, process_contracts=None):
+                 startup_segment=None, bus_client_names=None, process_contracts=None,
+                 require_disabled=False):
         self.service = service
         self.binding = binding
         require(sorted({str(pathlib.Path(path).resolve(strict=True)) for path in paths}) == binding['logs'],
@@ -284,6 +287,7 @@ class StopWatch:
         self.lifecycle = []
         self.kernel_events = []
         self.bootout = None
+        self.require_disabled = require_disabled
         self.file_handles = {}
         self.prepared = False
         self.group = binding['tree'][owner]['group']
@@ -416,6 +420,8 @@ class StopWatch:
         self.ready_for_intent()
         self.drain()
         self.unchanged_lifecycle()
+        if self.require_disabled:
+            require(self.service.disabled(), 'persistent hold requires a disabled managed unit before bootout')
         started = time.monotonic()
         result = subprocess.Popen(['/bin/launchctl', 'bootout', self.service.target],
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -440,6 +446,8 @@ class StopWatch:
         require(not self.service.status()['loaded'], 'managed service remains loaded')
         require(self.bootout is not None and not self.bootout['timed_out'] and self.bootout['returncode'] == 0,
                 'bootout did not complete successfully; exit evidence retained')
+        if self.require_disabled:
+            require(self.service.disabled(), 'managed unit lost its disabled override after bootout')
         self.unchanged_lifecycle()
         for pid, event in self.events.items():
             require(not process_exists(pid), 'service or descendant survives')
@@ -460,6 +468,7 @@ class StopWatch:
                 'bootout': self.bootout,
                 'process_contracts': {str(pid): contract for pid, contract in self.contracts.items()},
                 'unit_unloaded': True, 'descendants_absent': True,
+                'disabled_override_verified': self.require_disabled,
                 'connections_closed': True, 'listeners_absent': True,
                 'log_offsets': self.offsets, 'termination': termination}
 

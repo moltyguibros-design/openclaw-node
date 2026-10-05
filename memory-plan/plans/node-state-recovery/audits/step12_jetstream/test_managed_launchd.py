@@ -47,6 +47,13 @@ class StopWatchPreflight(unittest.TestCase):
         with self.assertRaisesRegex(Refused, 'deploy listener has a child'):
             StopWatch.ready_for_intent(watch)
 
+    def test_persistent_stop_refuses_without_disabled_override(self):
+        watch = SimpleNamespace(ready_for_intent=lambda: None, drain=lambda: None,
+            unchanged_lifecycle=lambda: None, require_disabled=True,
+            service=SimpleNamespace(disabled=lambda: False))
+        with self.assertRaisesRegex(Refused, 'requires a disabled managed unit'):
+            StopWatch.apply(watch)
+
 
 @unittest.skipUnless(sys.platform == 'darwin', 'requires actual macOS launchd and exit events')
 class OwnedLaunchd(unittest.TestCase):
@@ -129,7 +136,11 @@ os.execv('/bin/sleep',['sleep','30'])
         (cls.root / 'proofs.json').write_text(json.dumps(cls.proofs, indent=2) + '\n')
 
     def setUp(self):
-        self.name = 'ai.openclaw.preservation-owned.' + secrets.token_hex(8)
+        self.hold_override_attempted = False
+        suffix = ('hold-probe' if self._testMethodName ==
+                  'test_owned_job_disable_precedes_stop_and_enable_precedes_restart'
+                  else secrets.token_hex(8))
+        self.name = 'ai.openclaw.preservation-owned.' + suffix
         self.directory = self.root / self.name
         self.directory.mkdir(mode=0o700)
         self.ready = self.directory / 'ready.json'
@@ -169,15 +180,21 @@ os.execv('/bin/sleep',['sleep','30'])
 
     def tearDown(self):
         (self.directory / 'child-stop').touch(mode=0o600)
-        if self.service.status()['loaded']:
-            subprocess.run(['/bin/launchctl', 'bootout', self.service.target], capture_output=True, timeout=10)
-        if self.service.disabled():
-            self.service.enable_after_hold()
-        if (self.directory / 'child-ready.json').exists():
-            pid = json.loads((self.directory / 'child-ready.json').read_text())['pid']
-            if (self.directory / 'exec').exists() and process_exists(pid):
-                os.kill(pid, 15)
-            wait_for(lambda: not process_exists(pid))
+        try:
+            if self.service.status()['loaded']:
+                subprocess.run(['/bin/launchctl', 'bootout', self.service.target],
+                               capture_output=True, check=True, timeout=10)
+        finally:
+            try:
+                if (self.directory / 'child-ready.json').exists():
+                    pid = json.loads((self.directory / 'child-ready.json').read_text())['pid']
+                    if (self.directory / 'exec').exists() and process_exists(pid):
+                        os.kill(pid, 15)
+                    wait_for(lambda: not process_exists(pid))
+            finally:
+                if (self.hold_override_attempted and not self.service.status()['loaded']
+                        and self.service.disabled()):
+                    self.service.enable_after_hold()
 
     def connection_closed(self):
         report = http_json(self.monitor, '/connz?state=closed&limit=10000')
@@ -237,7 +254,9 @@ os.execv('/bin/sleep',['sleep','30'])
 
     def test_owned_job_disable_precedes_stop_and_enable_precedes_restart(self):
         binding = self.launch()
-        with StopWatch(self.service, binding, [self.log, self.err], 'mesh-task-daemon') as watch:
+        with StopWatch(self.service, binding, [self.log, self.err], 'mesh-task-daemon',
+                       require_disabled=True) as watch:
+            self.hold_override_attempted = True
             self.service.disable_for_hold()
             self.assertTrue(self.service.disabled())
             self.assertTrue(self.service.status()['running'])
@@ -246,11 +265,16 @@ os.execv('/bin/sleep',['sleep','30'])
             watch.apply()
             proof = watch.verify(self.connection_closed, self.listener_absent)
         self.assertTrue(proof['verified'])
+        self.assertTrue(proof['disabled_override_verified'])
         self.assertFalse(self.service.status()['loaded'])
         self.assertTrue(self.service.disabled())
+        self.ready.unlink()
+        with self.assertRaisesRegex(Refused, 'disabled managed unit'):
+            self.service.bootstrap()
+        self.assertFalse(self.service.status()['loaded'])
+        self.assertFalse(self.ready.exists())
         self.service.enable_after_hold()
         self.assertFalse(self.service.disabled())
-        self.ready.unlink()
         self.service.bootstrap()
         wait_for(lambda: self.ready.exists() and self.service.status()['running'])
         self.proofs.append({'test': self._testMethodName, 'stop': proof,
