@@ -39,6 +39,16 @@ def wait_for(check, seconds=10):
 
 
 class StopWatchPreflight(unittest.TestCase):
+    def test_status_inspection_has_a_deadline(self):
+        service = Launchd('ai.openclaw.gateway', '/owned/gateway.plist')
+        target = 'gui/' + str(os.getuid()) + '/ai.openclaw.gateway'
+        with patch('managed_launchd.subprocess.run',
+                   side_effect=subprocess.TimeoutExpired(['/bin/launchctl', 'print', target], 10)) as run:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                service.status()
+        run.assert_called_once_with(['/bin/launchctl', 'print', target],
+                                    capture_output=True, text=True, timeout=10)
+
     def test_process_tree_closes_over_orphaned_group_member_children(self):
         processes = '100 1 100\n200 1 100\n300 200 300\n400 300 400\n'
         with patch('managed_launchd.command', return_value=processes):

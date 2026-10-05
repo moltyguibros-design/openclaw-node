@@ -177,7 +177,7 @@ class Launchd:
 
     def status(self, domain='gui'):
         target = domain + '/' + str(os.getuid()) + '/' + self.label
-        result = subprocess.run(['/bin/launchctl', 'print', target], capture_output=True, text=True)
+        result = subprocess.run(['/bin/launchctl', 'print', target], capture_output=True, text=True, timeout=10)
         if result.returncode:
             require(result.returncode == 113 and 'Could not find service' in result.stderr,
                     'managed unit inspection failed')

@@ -1460,3 +1460,16 @@ controller exists. Old staged tool packages still require retirement before
 production use because they can act before receipt publication. These are
 fail-closed source changes and fixture evidence only; they do not certify a
 production capture or VM boot.
+
+## D76 — Bound launchd status inspection during a managed stop (2026-10-05 11:50 EDT)
+
+The managed stop and recovery paths inspect each launchd job through
+`Launchd.status()`. Unlike the other managed commands, its `launchctl print`
+call had no deadline, so a hung inspection could strand a partly applied
+full-node hold or restoration without producing a refusal. Give it the same
+ten-second deadline as `command()`. A mocked timeout regression requires the
+deadline to be passed and the inspection to fail rather than yield a loaded
+or unloaded status. The owned preflight tests pass. This bounds only this
+inspection; it does not prove persistent disablement, process coverage,
+shutdown, or service resumption. No production job or VM changed and step 1.2
+remains [A]/v1.2-pre.

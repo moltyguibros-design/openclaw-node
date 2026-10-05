@@ -1573,3 +1573,11 @@ controller exists. Retiring old staged packages, proving the full-node hold,
 real UTM guard behavior, terminal decisions and isolated real-history restores
 remain open. No production VM, service or NATS store changed; 1.2 stays
 [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 11:50 EDT: D76 bounds `Launchd.status()` inspection
+at ten seconds, matching other managed commands, so a hung `launchctl print`
+fails the stop/recovery path instead of waiting indefinitely. The owned
+preflight tests pass with a timeout negative. This is a local liveness guard;
+the persistent full-node hold, deployment fence, stopped-VM decision path,
+four-history acceptance and verified resumption remain open. No production
+job, VM or NATS store changed; 1.2 stays [A]/v1.2-pre.
