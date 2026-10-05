@@ -582,6 +582,30 @@ class JournalTests(unittest.TestCase):
                 self.assertEqual(len(journal.records), before)
                 self.assertEqual(calls, [])
 
+    def test_full_scope_listener_proof_before_its_intent_refuses(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                current['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener')
+                future_intent = len(journal.records) + 1
+                journal.append('verified', intent=future_intent,
+                               unit='mesh-deploy-listener', action='disable-and-unload',
+                               evidence={**listener_stop_evidence(),
+                               'entrypoint_loaded': copy.deepcopy(current['loaded'])})
+                intent = journal.append('intent', unit='mesh-deploy-listener',
+                                        action='disable-and-unload')
+                self.assertEqual(intent['sequence'], future_intent)
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'listener must be verifiably disabled'):
+                    journal.mutate('nats', 'unload', lambda: self.fail('NATS unload ran'),
+                                   lambda: {'verified': True}, hold=hold)
+                self.assertEqual(len(journal.records), before)
+
     def test_full_scope_rechecks_entrypoints_but_restores_known_units_after_drift(self):
         prior = full_node_inventory()
         with patch('preservation_journal.capture_entrypoint_inventory',

@@ -833,7 +833,8 @@ class Journal:
                 or not any(row['event'] == 'verified' and row.get('intent') == intents[0]['sequence']
                            for row in self.records)):
             return False
-        return any(row['event'] == 'verified' and row.get('intent') == intents[1]['sequence']
+        return any(row['event'] == 'verified' and row['sequence'] > intents[1]['sequence']
+                   and row.get('intent') == intents[1]['sequence']
                    and self.listener_stop_proven(row.get('evidence')) for row in self.records)
 
     @staticmethod

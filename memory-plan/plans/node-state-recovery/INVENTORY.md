@@ -1653,3 +1653,13 @@ admission 7, root decline 22 and journal 114 tests pass locally. This remains
 fixture evidence; production transfer, full-node hold, real-history restore,
 capture decisions and service resumption remain open. No production service,
 VM or NATS store changed; 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 14:44 EDT: D83 refuses a forged listener completion
+recorded before its own stop intent at both user and root boundaries. Owned
+negatives retain a valid journal hash chain while reversing those rows, and
+corrupt the root session, loaded-set, verified and bootout proof in turn.
+The journal suite passes 115 tests, root transfer 16, root admission 7 and
+root decline 22; plan lint is conformant.
+Production hold, real listener stop, VM capture, four-history acceptance and
+service resumption remain open. No production service, VM or NATS store
+changed; 1.2 stays [A]/v1.2-pre.

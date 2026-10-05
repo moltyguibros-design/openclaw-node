@@ -370,7 +370,9 @@ class UserTransfer:
         listener_rows = [row for row in self.records[:-1]
                          if row['event'] == 'verified'
                          and row.get('intent') == listener_intents[0]['sequence']]
-        require(len(listener_rows) == 1, 'user transfer listener stop receipt is absent')
+        require(len(listener_rows) == 1
+                and listener_rows[0]['sequence'] > listener_intents[0]['sequence'],
+                'user transfer listener stop receipt is absent or precedes its intent')
         listener = listener_rows[0]
         stop = listener.get('evidence')
         require(all(row['sequence'] > listener['sequence'] for row in intents[2:]),

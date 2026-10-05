@@ -1611,3 +1611,20 @@ evidence. Production transfer remains refused, and the full-node driver,
 continuous hold, real VM capture, four-history acceptance and verified
 resumption remain open. No production service, VM or NATS store changed;
 step 1.2 stays [A]/v1.2-pre.
+
+## D83 — Reject listener completion before its own intent (2026-10-05 14:44 EDT)
+
+Claude's read-only follow-up on D82 found one remaining forged-journal order:
+root admission selected a listener `verified` row by its `intent` value but
+did not require the row to follow that intent. The user-side durable receipt
+check had the same gap. Both now require the listener receipt sequence to be
+after its own stop intent. Owned negatives reorder the same complete listener
+rows without breaking the hash chain and require root refusal, and append a
+future-intent listener receipt in the user journal and require refusal before
+NATS unload. The root transfer fixture also mutates the session binding,
+loaded-set proof, verified flag and bootout timeout; each refuses. These are
+defensive checks against a buggy or separately written journal. The journal
+suite passes 115 tests, root transfer 16, root admission 7 and root decline
+22; plan lint is conformant. This is not evidence
+that a real listener stop or production NATS transfer has occurred. No
+production service, VM or NATS store changed; step 1.2 stays [A]/v1.2-pre.

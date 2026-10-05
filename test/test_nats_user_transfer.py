@@ -163,9 +163,35 @@ class UserTransferTest(unittest.TestCase):
             with self.assertRaisesRegex(module.Refused, 'service intent precedes listener stop proof'):
                 module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
+    def test_root_refuses_listener_proof_before_its_intent(self):
+        fixture, journal, transaction, _ = self.prepared()
+        journal.close()
+        rows = copy.deepcopy(journal.records)
+        intent_index = next(index for index, row in enumerate(rows)
+                            if row['event'] == 'intent'
+                            and row.get('unit') == 'mesh-deploy-listener')
+        proof_index = intent_index + 1
+        self.assertEqual(rows[proof_index]['event'], 'verified')
+        rows[intent_index], rows[proof_index] = rows[proof_index], rows[intent_index]
+        rows[intent_index]['intent'] = proof_index
+        for index, row in enumerate(rows):
+            row['sequence'] = index
+            row['previous'] = rows[index - 1]['sha256'] if index else None
+            row['sha256'] = hashlib.sha256(module.encoded(
+                {key: value for key, value in row.items() if key != 'sha256'})).hexdigest()
+            (fixture.root / f'{index:06d}.json').write_bytes(module.encoded(row))
+        with patch.object(module, 'boot_identity', return_value='boot-a'):
+            with self.assertRaisesRegex(module.Refused, 'listener stop receipt is absent or precedes'):
+                module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
+
     def test_root_refuses_incomplete_listener_stop_proof(self):
         changes = [(key, False) for key in module.LISTENER_STOP_FIELDS]
         changes += [('bootout', {'returncode': 1, 'timed_out': False}),
+                    ('bootout', {'returncode': 0, 'timed_out': True}),
+                    ('verified', False),
+                    ('execution_hold', {'watch_session_id': 'other-session'}),
+                    ('entrypoint_loaded', {'gui': ['ai.openclaw.mesh-deploy-listener'],
+                                           'user': [], 'system': []}),
                     ('termination', {'signal': 9})]
         for field, value in changes:
             with self.subTest(field=field):
