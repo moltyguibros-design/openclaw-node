@@ -1573,8 +1573,15 @@ NATS before the listener, a bare `stop`, a second listener stop, incomplete
 disable/bootout/termination proof, and forged NATS receipts without the
 listener fence. The hold suite passes 43 tests. A restore-only full-suite run
 had one final-readiness failure in a loaded-daemon fixture; that single test
-passed on isolated rerun, and a second full-suite run passed 30/30. This is journal contract and disposable-fixture
-evidence, not a production driver. A macOS test with the real full-node hold,
+passed on isolated rerun, and a second full-suite run passed 30/30. This is
+journal contract and disposable-fixture evidence, not a production driver.
+An end-to-end macOS test with the real hold and managed listener stop,
 continuous restart exclusion, a deploy snapshot and release fence, stopped-VM
 controller, four-history acceptance and service resumption remain open. No
 production service, VM or NATS store changed; step 1.2 stays [A]/v1.2-pre.
+
+The first CI run exposed a second NATS-transfer fixture that still stopped
+NATS before the listener. Its simulated and native-hold paths now record the
+listener stop first; all 10 root-admission fixture tests pass locally. The
+native-hold path still uses simulated listener stop evidence, not a real
+managed-process stop.

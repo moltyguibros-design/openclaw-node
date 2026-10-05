@@ -1635,3 +1635,10 @@ one full-suite final-readiness failure, and the full suite passed on rerun
 real macOS hold rehearsal, deploy fence, VM stop/capture and four-history
 acceptance remain open. No production service, VM or NATS store changed; 1.2
 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 14:14 EDT: the first D81 CI run found an older root
+transfer fixture still stopping NATS before the listener. Both its simulated
+and native-hold paths now stage a listener stop first; the 10 root-admission
+fixture tests pass locally. The native path uses owned simulated stop evidence,
+so it does not prove the production process stop. CI rerun remains required;
+step 1.2 stays [A]/v1.2-pre.

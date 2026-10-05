@@ -77,6 +77,10 @@ class UserTransferTest(unittest.TestCase):
                        action='close-execution-hold',
                        evidence={**certificate,
                                  'entrypoint_loaded': copy.deepcopy(loaded['loaded'])})
+        journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                       lambda: loaded['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener'),
+                       lambda: {**fixture_module.listener_stop_evidence(),
+                                'execution_hold': certificate}, hold=hold)
         for unit in ('nats', 'nats-2', 'nats-3'):
             journal.mutate(unit, 'unload',
                            lambda unit=unit: loaded['loaded']['gui'].remove('ai.openclaw.' + unit),
@@ -152,7 +156,7 @@ class UserTransferTest(unittest.TestCase):
         journal.transfer_nats(transaction, hold, observe)
         journal.close()
         with patch.object(module, 'boot_identity', return_value='boot-a'):
-            with self.assertRaisesRegex(module.Refused, 'no unique original execution hold'):
+            with self.assertRaisesRegex(module.Refused, 'original hold publication differs'):
                 module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
     def test_root_refuses_replaced_owner_lock_during_recheck(self):
@@ -207,6 +211,9 @@ class UserTransferTest(unittest.TestCase):
                                  'baseline_sha256': journal.records[0]['sha256']})
                     try:
                         hold.close_and_drain()
+                        hold.mutate('mesh-deploy-listener', 'disable-and-unload',
+                            lambda: loaded['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener'),
+                            fixture_module.listener_stop_evidence)
                         for unit in ('nats', 'nats-2', 'nats-3'):
                             hold.mutate(unit, 'unload',
                                 lambda unit=unit: loaded['loaded']['gui'].remove('ai.openclaw.' + unit),
