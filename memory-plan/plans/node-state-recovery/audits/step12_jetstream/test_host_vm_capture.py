@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import hashlib
+import fcntl
 import json
 import os
 import pathlib
@@ -9,6 +10,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -19,7 +21,7 @@ from host_clone_dispose import cleanup_failed, dispose
 from host_vm_capture import capture, clone_only, publish_capture_record
 from host_vm_guard import guard
 from host_image_immutable import change_immutable
-from host_vm_preflight import preflight, vmstate_identity
+from host_vm_preflight import preflight, vmstate_identity, write_record
 from host_vm_reconcile import reconcile
 
 
@@ -35,6 +37,146 @@ def run(*args):
 
 
 class VmstateGateTest(unittest.TestCase):
+    def test_reconcile_refuses_capture_paused_before_clone(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-host-capture-active-') as temporary:
+            root = pathlib.Path(temporary).resolve()
+            root.chmod(0o700)
+            host_spec = root / 'host.json'
+            host_spec.write_text(json.dumps({
+                'package': str(root / 'Owned.utm'), 'name': 'Owned',
+                'uuid': '00000000-0000-0000-0000-000000000002',
+                'image_name': '00000000-0000-0000-0000-000000000001.img',
+                'config_sha256': '0' * 64, 'utmctl': '/tmp/unused',
+                'utmctl_sha256': '0' * 64,
+            }))
+            host_spec.chmod(0o600)
+            store_spec = root / 'stores.json'
+            store_spec.write_text(json.dumps({
+                'data_volume_uuid': '00000000-0000-0000-0000-000000000003',
+                'stores': [{'role': role, 'relative_path': role}
+                           for role in ('standalone', 'member1', 'member2', 'member3')],
+            }))
+            store_spec.chmod(0o600)
+            output = root / 'capture'
+            source = root / 'source.asif'
+            source.write_bytes(b'fixture')
+            first = {'state': 'started', 'host_boot_session': 'boot',
+                     'image_device': 1, 'image_inode': 2, 'image_size': 3,
+                     'image': str(source), 'vm_uuid': '00000000-0000-0000-0000-000000000002',
+                     'holders_consistent': True, 'vmstate': None}
+            stopped = dict(first, state='stopped')
+            observations = 0
+            entered, release = threading.Event(), threading.Event()
+            errors = []
+
+            def observed_preflight(*args, **kwargs):
+                nonlocal observations
+                observations += 1
+                if observations == 1:
+                    write_record(output / 'GUARD.json', {'fixture': True})
+                    return first
+                return stopped
+
+            def paused_clone(*args):
+                entered.set()
+                if not release.wait(5):
+                    raise RuntimeError('clone fixture was not released')
+                raise RuntimeError('clone fixture stopped')
+
+            def worker():
+                try:
+                    capture(host_spec, store_spec, output, 5, fixture=True)
+                except Exception as error:
+                    errors.append(error)
+
+            with mock.patch.object(host_vm_capture, 'preflight', observed_preflight), \
+                    mock.patch.object(host_vm_capture, 'guarded_source', return_value='guard-hash'), \
+                    mock.patch.object(host_vm_capture, 'clone_only', paused_clone), \
+                    mock.patch.object(host_vm_capture.shutil, 'disk_usage',
+                                      return_value=mock.Mock(free=30 * 1024 ** 3)):
+                thread = threading.Thread(target=worker)
+                thread.start()
+                try:
+                    self.assertTrue(entered.wait(5))
+                    with self.assertRaisesRegex(RuntimeError, 'capture worker is still active'):
+                        reconcile(host_spec, output, output / 'reconcile-while-cloning',
+                                  fixture=True)
+                    self.assertTrue((output / 'reconcile-while-cloning' /
+                                     'OPERATOR_REQUIRED.json').exists())
+                    self.assertFalse((output / 'reconcile-while-cloning' / 'BOOTABLE.json').exists())
+                finally:
+                    release.set()
+                    thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(str(errors[0]), 'clone fixture stopped')
+            self.assertTrue((output / 'FAILED.json').exists())
+
+    def test_terminal_failure_waits_for_guard_receipt_lock(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-terminal-lock-') as temporary:
+            root = pathlib.Path(temporary).resolve()
+            root.chmod(0o700)
+            host_spec = root / 'host.json'
+            host_spec.write_text(json.dumps({
+                'package': str(root / 'Owned.utm'), 'name': 'Owned',
+                'uuid': '00000000-0000-0000-0000-000000000002',
+                'image_name': '00000000-0000-0000-0000-000000000001.img',
+                'config_sha256': '0' * 64, 'utmctl': '/tmp/unused',
+                'utmctl_sha256': '0' * 64,
+            }))
+            host_spec.chmod(0o600)
+            store_spec = root / 'stores.json'
+            store_spec.write_text(json.dumps({
+                'data_volume_uuid': '00000000-0000-0000-0000-000000000003',
+                'stores': [{'role': role, 'relative_path': role}
+                           for role in ('standalone', 'member1', 'member2', 'member3')],
+            }))
+            store_spec.chmod(0o600)
+            output = root / 'capture'
+            before = {'state': 'started', 'host_boot_session': 'boot',
+                      'image_device': 1, 'image_inode': 2, 'image_size': 3,
+                      'vmstate': None}
+            entered, release, failure_write = threading.Event(), threading.Event(), threading.Event()
+            errors = []
+            original_write = host_vm_capture.write_record
+
+            def observed_preflight(*args, **kwargs):
+                if not entered.is_set():
+                    return before
+                raise RuntimeError('terminal fixture failure')
+
+            def observed_write(path, value):
+                if pathlib.Path(path).name == 'ARMED.json':
+                    original_write(path, value)
+                    entered.set()
+                    if not release.wait(5):
+                        raise RuntimeError('terminal fixture was not released')
+                    return
+                if pathlib.Path(path).name == 'FAILED.json':
+                    failure_write.set()
+                return original_write(path, value)
+
+            def worker():
+                try:
+                    capture(host_spec, store_spec, output, 1, fixture=True)
+                except Exception as error:
+                    errors.append(error)
+
+            with mock.patch.object(host_vm_capture, 'preflight', observed_preflight), \
+                    mock.patch.object(host_vm_capture, 'write_record', observed_write):
+                thread = threading.Thread(target=worker)
+                thread.start()
+                self.assertTrue(entered.wait(5))
+                with (output / 'ARMED.json').open('rb') as armed:
+                    fcntl.flock(armed, fcntl.LOCK_EX)
+                    release.set()
+                    self.assertFalse(failure_write.wait(0.2))
+                    self.assertFalse((output / 'FAILED.json').exists())
+                thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(str(errors[0]), 'terminal fixture failure')
+            self.assertTrue(failure_write.is_set())
+            self.assertTrue((output / 'FAILED.json').exists())
+
     def test_partial_capture_receipt_is_never_published(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-capture-receipt-') as temporary:
             root = pathlib.Path(temporary)
@@ -248,6 +390,9 @@ class HostCaptureTest(unittest.TestCase):
                 raise AssertionError(worker.stderr.read().decode())
             time.sleep(0.1)
         self.assertTrue((output / 'ARMED.json').exists())
+        with (output / 'CAPTURE_ACTIVE.lock').open('rb') as active:
+            with self.assertRaises(BlockingIOError):
+                fcntl.flock(active, fcntl.LOCK_EX | fcntl.LOCK_NB)
         holder.terminate()
         holder.wait(timeout=5)
         with self.assertRaisesRegex(RuntimeError, 'holder|disagree'):
@@ -258,6 +403,8 @@ class HostCaptureTest(unittest.TestCase):
         guard(spec, output, fixture=True)
         _, stderr = worker.communicate(timeout=30)
         self.assertEqual(worker.returncode, 0, stderr.decode())
+        with (output / 'CAPTURE_ACTIVE.lock').open('rb') as active:
+            fcntl.flock(active, fcntl.LOCK_EX | fcntl.LOCK_NB)
         result = json.loads((output / 'CAPTURE.json').read_text())
         self.assertEqual(result['vm_state_at_final_check'], 'stopped')
         self.assertEqual(result['vmstate_at_arm'], result['vmstate_at_final_check'])

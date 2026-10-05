@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import hashlib
+import fcntl
 import json
 import os
 import pathlib
@@ -30,6 +31,11 @@ def run(*args):
     if result.returncode:
         raise AssertionError(result.stderr.decode(errors='replace')[:500])
     return result.stdout
+
+
+def inactive_capture_lock(capture_dir):
+    fd = os.open(capture_dir / 'CAPTURE_ACTIVE.lock', os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
+    os.close(fd)
 
 
 @unittest.skipUnless(sys.platform == 'darwin', 'requires macOS ASIF and GUI launchd')
@@ -116,6 +122,7 @@ class HostReconcileTest(unittest.TestCase):
                 'image_device': first['image_device'],
                 'image_inode': first['image_inode'],
             })
+            inactive_capture_lock(capture)
             source_identity = (first['image_device'], first['image_inode'],
                                first['image_size'])
             change_immutable(source, source_identity, True)
@@ -137,6 +144,15 @@ class HostReconcileTest(unittest.TestCase):
             guard(spec, capture, fixture=True)
             self.assertTrue((capture / 'GUARD_INTENT.json').exists())
             self.assertTrue((capture / 'GUARD.json').exists())
+            active_fd = os.open(capture / 'CAPTURE_ACTIVE.lock', os.O_RDWR)
+            try:
+                fcntl.flock(active_fd, fcntl.LOCK_EX)
+                with self.assertRaisesRegex(RuntimeError, 'capture worker is still active'):
+                    reconcile(spec, capture, capture / 'capture-active', fixture=True)
+                self.assertTrue((capture / 'capture-active' / 'OPERATOR_REQUIRED.json').exists())
+                self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
+            finally:
+                os.close(active_fd)
             clone = capture / 'powered-off-image.asif'
             clone_only(source, clone)
             clones.append(clone)
@@ -194,6 +210,7 @@ class HostReconcileTest(unittest.TestCase):
                 'image_device': held_initial['image_device'],
                 'image_inode': held_initial['image_inode'],
             })
+            inactive_capture_lock(held)
             writable = None
 
             def open_during_guard(path, identity, present):
@@ -229,6 +246,7 @@ class HostReconcileTest(unittest.TestCase):
                 'image_device': serialized_initial['image_device'],
                 'image_inode': serialized_initial['image_inode'],
             })
+            inactive_capture_lock(serialized)
             entered, release = threading.Event(), threading.Event()
             reconcile_ready, reconcile_preflight = threading.Event(), threading.Event()
             errors = []
@@ -307,6 +325,7 @@ class HostReconcileTest(unittest.TestCase):
                 'image_device': interrupted_initial['image_device'],
                 'image_inode': interrupted_initial['image_inode'],
             })
+            inactive_capture_lock(interrupted)
             original_write = host_vm_guard.write_record
 
             def partial_receipt(path, value):
@@ -352,6 +371,7 @@ class HostReconcileTest(unittest.TestCase):
                 'image_device': partial_initial['image_device'],
                 'image_inode': partial_initial['image_inode'],
             })
+            inactive_capture_lock(partial_capture)
             write_record(partial_capture / 'GUARD_INTENT.json', {
                 'scope': GUARD_SCOPE, 'vm_uuid': vm_uuid,
                 'host_boot_session': partial_initial['host_boot_session'],
@@ -380,6 +400,7 @@ class HostReconcileTest(unittest.TestCase):
                 'image_device': completed_initial['image_device'],
                 'image_inode': completed_initial['image_inode'],
             })
+            inactive_capture_lock(completed)
             write_record(completed / 'GUARD_INTENT.json', {
                 'scope': GUARD_SCOPE, 'vm_uuid': vm_uuid,
                 'host_boot_session': completed_initial['host_boot_session'],

@@ -1245,9 +1245,15 @@ The guard now holds the armed receipt lock from its final terminal check
 through immutable flagging and `GUARD.json` publication. Reconciliation takes
 that same lock before reading the intent and keeps it through its terminal
 receipt. A guard paused after intent publication therefore cannot race a
-`BOOTABLE` receipt and later re-guard the source. The capture worker does not
-yet participate in this lock; its terminal writes and active extraction need
-a separate lifecycle interlock before a production arm.
+`BOOTABLE` receipt and later re-guard the source within one attempt directory.
+The capture worker now owns an attempt-local activity lock from before arming
+through its terminal-write attempt; reconciliation refuses while that lock is held,
+before reading the guard or touching the clone or source flag. After arming,
+capture publishes `FAILED.json` or `CAPTURE.json` under the armed receipt lock,
+ordering its terminal state with the guard. These locks do not exclude a
+sibling capture attempt against the same source, nor prove that a killed
+worker is still active. A source-wide controller and no-intent abort path
+remain production gates.
 Missing or changed guard evidence refuses the attempt without accepting a
 cold master. The check does not prove continuous exclusion of a same-owner
 writer or replace the missing full-node hold and real UTM rehearsal.

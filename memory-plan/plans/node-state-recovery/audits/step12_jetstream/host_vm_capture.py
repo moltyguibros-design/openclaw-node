@@ -6,6 +6,7 @@ This worker does not stop or restart the VM and does not accept cold masters.
 
 import datetime
 import ctypes
+import fcntl
 import hashlib
 import json
 import os
@@ -132,7 +133,13 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
     require(1 <= wait_seconds <= 3600, 'shutdown wait must be bounded to one hour')
     output.mkdir(mode=0o700)
     fsync_parent(output.parent)
+    active_fd = None
     try:
+        active_fd = os.open(output / 'CAPTURE_ACTIVE.lock',
+                            os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        fcntl.flock(active_fd, fcntl.LOCK_EX)
+        os.fsync(active_fd)
+        fsync_parent(output)
         first = preflight(host_spec_path, output / 'before-shutdown')
         require(first['state'] == 'started', 'capture did not begin with a running VM')
         write_record(output / 'ARMED.json', {
@@ -224,11 +231,21 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
             'store_roles': sorted(extracted['stores']),
             'vm_state_at_final_check': 'stopped',
         }
-        publish_capture_record(output, result)
+        with (output / 'ARMED.json').open('rb') as armed:
+            fcntl.flock(armed, fcntl.LOCK_EX)
+            publish_capture_record(output, result)
         return result
     except Exception as error:
-        write_record(output / 'FAILED.json', {'error': str(error)})
+        if os.path.lexists(output / 'ARMED.json'):
+            with (output / 'ARMED.json').open('rb') as armed:
+                fcntl.flock(armed, fcntl.LOCK_EX)
+                write_record(output / 'FAILED.json', {'error': str(error)})
+        else:
+            write_record(output / 'FAILED.json', {'error': str(error)})
         raise
+    finally:
+        if active_fd is not None:
+            os.close(active_fd)
 
 
 if __name__ == '__main__':

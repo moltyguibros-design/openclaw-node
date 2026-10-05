@@ -1351,3 +1351,20 @@ issue `BOOTABLE` until the guard finishes; it then records
 serialized against reconciliation. This does not authorize production VM
 shutdown; the full-node hold, UTM rehearsal, historical acceptance and
 resumption remain open at 1.2 [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 01:25 EDT: Claude found no blocker in the same-attempt
+guard/reconcile serialization at `e465b9c8`, but demonstrated that an active
+capture paused before cloning could race reconciliation and leave a false
+`BOOTABLE` claim. The capture worker now holds an attempt-local activity lock
+from before arming through its terminal-write attempt; reconciliation
+refuses that lock non-blockingly before touching the image. Capture also
+serializes its terminal write with guard publication on `ARMED.json`. The
+disposable fixtures pin lock ownership during the worker's shutdown wait,
+reconcile refusal while capture is paused immediately before cloning, and
+terminal failure waiting for the armed lock. The local host group passes
+12/12. The prior exact-head CI's macOS job
+first hit an unrelated `mesh-agent` restore-only timeout, then passed on a
+failed-job rerun with all four checks green. Sibling attempts, a killed worker
+without a terminal receipt, the full-node hold and real UTM rehearsal remain
+unproven; no production VM or service changed. Step 1.2 remains
+[A]/v1.2-pre.

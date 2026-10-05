@@ -69,7 +69,17 @@ def reconcile(host_spec, capture_dir, output, fixture=False):
     output.mkdir(mode=0o700)
     fsync_parent(capture_dir)
     armed_fd = None
+    active_fd = None
     try:
+        active_fd = os.open(capture_dir / 'CAPTURE_ACTIVE.lock', os.O_RDONLY | os.O_NOFOLLOW)
+        active_info = os.fstat(active_fd)
+        require(stat.S_ISREG(active_info.st_mode) and active_info.st_uid == os.getuid()
+                and active_info.st_nlink == 1 and stat.S_IMODE(active_info.st_mode) == 0o600,
+                'capture worker lock is not owner-private')
+        try:
+            fcntl.flock(active_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError('capture worker is still active') from error
         armed_fd = os.open(capture_dir / 'ARMED.json', os.O_RDONLY | os.O_NOFOLLOW)
         fcntl.flock(armed_fd, fcntl.LOCK_EX)
         armed = private_record(capture_dir / 'ARMED.json')
@@ -174,6 +184,8 @@ def reconcile(host_spec, capture_dir, output, fixture=False):
     finally:
         if armed_fd is not None:
             os.close(armed_fd)
+        if active_fd is not None:
+            os.close(active_fd)
 
 
 if __name__ == '__main__':
