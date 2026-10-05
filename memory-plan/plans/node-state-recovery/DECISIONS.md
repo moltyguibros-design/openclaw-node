@@ -1316,3 +1316,20 @@ A cross-platform four-process regression pins the orphaned-helper case, and
 the owned macOS launchd suite passes 26 tests (one existing skip). This fixes
 the scoped tree census. It does not prove an exhaustive census of unrelated
 detached writers or a full-node hold; step 1.2 remains [A]/v1.2-pre.
+
+## D68 — Precheck held units before full-node restoration and withhold the deployer after errors (2026-10-05 05:47 EDT)
+
+Full-node recovery previously restored serving NATS members and clients before
+checking that member 1 and federation-tick were still held. Verify both held
+units under the legacy NATS guard before the ordered restore loop; if either
+has changed, issue no restoration intent. Separately, a failure of a prior
+service or entrypoint check must keep mesh-deploy-listener from being restored
+by the same attempt. Keep D23's recovery of independently verified ordinary
+units after entrypoint drift; only the deployer is withheld. Two negative
+journal tests pin the member-1-first and gateway-failure cases, and the full
+journal suite passes 99/99.
+
+This is sampled ordering, not a continuous member-1 exclusion. A clean-path
+listener is still restored before the final physical check, and there is no
+durable pending-deploy fence or full-node driver. Those remain production
+resumption gates; step 1.2 stays [A]/v1.2-pre.

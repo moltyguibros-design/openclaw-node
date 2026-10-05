@@ -455,6 +455,47 @@ class JournalTests(unittest.TestCase):
                 self.assertIn('entrypoints', [row['unit'] for row in result['errors']])
                 self.assertEqual(journal.records[-1]['event'], 'recovery-finished')
 
+    def test_full_scope_refuses_all_restores_when_member_one_hold_changed(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        current['nats-1'].update(loaded=True, running=True, disabled=False)
+        current['nats-2'].update(loaded=False, running=False)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=full_entrypoint_evidence(prior)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, prepare=lambda *_: None)
+                result = journal.recover(lambda *_: self.fail('restore preceded member-1 check'),
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold)
+                self.assertFalse(result['restored'])
+                self.assertIn('nats-1', [row['unit'] for row in result['errors']])
+                self.assertFalse(any(row['event'] == 'restoration-intent' for row in journal.records))
+
+    def test_full_scope_does_not_release_deploy_listener_after_gateway_failure(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        for unit in ('gateway', 'mesh-deploy-listener'):
+            current[unit].update(loaded=False, running=False)
+        restored = []
+        def restore(unit, wanted):
+            restored.append(unit)
+            if unit == 'gateway':
+                raise Refused('gateway restoration failed')
+            current[unit] = copy.deepcopy(wanted)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=full_entrypoint_evidence(prior)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, prepare=lambda *_: None,
+                    before_restore=lambda: None, check_closed=lambda: None)
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold)
+                self.assertEqual(restored, ['gateway'])
+                self.assertFalse(result['restored'])
+                self.assertIn('mesh-deploy-listener', [row['unit'] for row in result['errors']])
+
     def test_full_scope_recovery_refuses_root_marker_without_transfer(self):
         prior = full_node_inventory()
         with patch('preservation_journal.capture_entrypoint_inventory',

@@ -1466,3 +1466,13 @@ four-process negative regression passes, and the disposable macOS launchd
 suite passes 26 tests (one existing skip). This does not cover arbitrary
 detached writers, root/user agents, or the absent full-node hold driver. No
 production service was stopped; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 05:47 EDT: D68 moves full-node checks of the held
+member-1 and federation jobs ahead of all service restoration; a mismatch
+produces no restoration intent. A prior service or entrypoint error also
+withholds the deploy listener while preserving D23's restoration of safe known
+units. The two negative regressions and full journal suite pass 99/99; the
+hold suite still passes 43/43. Continuous member-1 exclusion, a deploy fence
+and a clean-path pre-listener final check remain open, as do the other step
+1.2 acceptance and resumption gates. No production service was changed;
+1.2 remains [A]/v1.2-pre.

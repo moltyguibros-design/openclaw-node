@@ -929,8 +929,32 @@ class Journal:
         except Exception as error:
             errors.append({'unit': 'entrypoints', 'reason': type(error).__name__,
                            'detail': str(error)})
+        def check_held_units():
+            for unit in (u for u in self.prior if u not in RESUME_ORDER and not (held and self.write_failed)):
+                try:
+                    require(unit in ('nats-1', 'federation-tick'), 'unknown unit needs manual restoration')
+                    guard = (nats_legacy_restore_guard() if nats_guarded
+                             and unit in NATS_TRANSFER_UNITS else contextlib.nullcontext())
+                    with guard:
+                        actual = observe(unit, self.prior[unit])
+                        require(matches(actual, self.prior[unit]) and actual.get('verified') is True
+                                and actual.get('identity') == self.prior[unit]['identity'],
+                                'non-running installed unit or member-1 hold changed')
+                        record('held-unit-verified' if unit == 'nats-1' else 'unloaded-unit-verified',
+                               unit=unit, evidence=actual)
+                except Exception as error:
+                    errors.append({'unit': unit, 'reason': type(error).__name__})
+        held_errors_before = len(errors)
+        if self.scope == FULL_NODE_SCOPE:
+            check_held_units()
+        held_preflight_failed = len(errors) != held_errors_before
         buses_ready = True
         for unit in (u for u in RESUME_ORDER if u in self.prior):
+            if held_preflight_failed:
+                break
+            if self.scope == FULL_NODE_SCOPE and unit == 'mesh-deploy-listener' and errors:
+                errors.append({'unit': unit, 'reason': 'prior restoration was not verified'})
+                continue
             if not unit.startswith('nats') and not buses_ready:
                 errors.append({'unit': unit, 'reason': 'bus recovery was not verified'})
                 continue
@@ -978,20 +1002,8 @@ class Journal:
                     break
                 if unit.startswith('nats'):
                     buses_ready = False
-        for unit in (u for u in self.prior if u not in RESUME_ORDER and not (held and self.write_failed)):
-            try:
-                require(unit in ('nats-1', 'federation-tick'), 'unknown unit needs manual restoration')
-                guard = (nats_legacy_restore_guard() if nats_guarded
-                         and unit in NATS_TRANSFER_UNITS else contextlib.nullcontext())
-                with guard:
-                    actual = observe(unit, self.prior[unit])
-                    require(matches(actual, self.prior[unit]) and actual.get('verified') is True
-                            and actual.get('identity') == self.prior[unit]['identity'],
-                            'non-running installed unit or member-1 hold changed')
-                    record('held-unit-verified' if unit == 'nats-1' else 'unloaded-unit-verified',
-                           unit=unit, evidence=actual)
-            except Exception as error:
-                errors.append({'unit': unit, 'reason': type(error).__name__})
+        if self.scope != FULL_NODE_SCOPE:
+            check_held_units()
         try:
             guard = nats_legacy_restore_guard() if nats_guarded else contextlib.nullcontext()
             with guard:
