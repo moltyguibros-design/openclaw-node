@@ -137,7 +137,9 @@ def process_tree(owner, group=None):
     descendants = ({owner} if owner in rows else set()) | {
         pid for pid, row in rows.items() if row['group'] == group}
     while True:
-        found = {pid for pid, row in rows.items() if row['parent'] in descendants}
+        groups = {rows[pid]['group'] for pid in descendants}
+        found = {pid for pid, row in rows.items()
+                 if row['parent'] in descendants or row['group'] in groups}
         if found <= descendants:
             break
         descendants |= found
@@ -290,7 +292,7 @@ class StopWatch:
         self.require_disabled = require_disabled
         self.file_handles = {}
         self.prepared = False
-        self.group = binding['tree'][owner]['group']
+        self.groups = {row['group'] for row in binding['tree'].values()}
         require(isinstance(binding['status'].get('exit_timeout'), int) and binding['status']['exit_timeout'] > 0,
                 'loaded finite exit timeout unavailable')
         self.queue = select.kqueue()
@@ -403,8 +405,10 @@ class StopWatch:
                     'deploy listener has a child; wait for deployment to finish')
         for pid in self.events:
             self.normal_exit(pid)
-        require(set(process_tree(self.binding['status']['pid']))
-                == set(self.binding['tree']) - set(self.events),
+        current_tree = process_tree(self.binding['status']['pid'])
+        expected = set(self.binding['tree']) - set(self.events)
+        require(set(current_tree) == expected and all(
+            current_tree[pid]['group'] == self.binding['tree'][pid]['group'] for pid in expected),
                 'process descendants or group changed before signal')
 
     def normal_exit(self, pid):
@@ -452,7 +456,8 @@ class StopWatch:
         for pid, event in self.events.items():
             require(not process_exists(pid), 'service or descendant survives')
             self.normal_exit(pid)
-        require(not process_tree(self.binding['status']['pid'], self.group), 'former process group survives')
+        require(not any(process_tree(self.binding['status']['pid'], group)
+                        for group in self.groups), 'former process group survives')
         require(connection_check() is True, 'former bus connection is not normally closed')
         require(listener_check() is True, 'former process listener survives')
         owner_status = self.events[self.binding['status']['pid']]['wait_status']

@@ -1497,3 +1497,13 @@ all owned processes stopped. This addresses the observed consumer-position
 false acceptance, not per-member replica verification, independent consumer
 inventory, or any production hold/restore gate. No production history or
 service changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 07:31 EDT: D71 follows Claude's process-tree review.
+The owned launchd census now closes over children and every discovered
+process group, and the watcher refuses a pre-signal group change or a
+survivor in any group recorded at bind. Synthetic orphaned-group negatives
+exclude an unrelated session, and the full owned macOS suite passes 29 tests
+with one existing skip. This is still only the bound service tree; a wholly
+detached group, root/user jobs, host autostart and reboot persistence require
+the missing full-node hold. No production service changed; 1.2 remains
+[A]/v1.2-pre.

@@ -1362,3 +1362,18 @@ probe with all owned processes stopped. This closes the observed false
 acceptance on NATS 2.12.6. It does not establish per-member replica contents,
 independent knowledge of every expected consumer, or production acceptance.
 No production NATS member or history was touched; step 1.2 stays [A]/v1.2-pre.
+
+## D71 — Close the owned stop census over descendant process groups (2026-10-05 07:31 EDT)
+
+Claude's review of D67 found that a descendant could create its own process
+group and leave an orphan there. The original closure added children of the
+owner's group but did not add other members of a newly discovered group.
+Compute the fixed point over both parent-child edges and process-group
+membership. The stop watcher records every bound group's ID, refuses a group
+change in its pre-signal sample, and checks each recorded group for survivors
+after bootout. Synthetic orphaned-group and unrelated-session cases, plus a
+survivor-refusal test, pass; the complete owned macOS launchd suite passes
+29 tests with one existing skip. A fully detached group with no member
+reachable at binding remains outside this tree census, as do unowned writers,
+root/user jobs and reboot persistence. No production unit was stopped and
+step 1.2 remains [A]/v1.2-pre.

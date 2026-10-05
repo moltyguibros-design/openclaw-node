@@ -44,6 +44,40 @@ class StopWatchPreflight(unittest.TestCase):
         with patch('managed_launchd.command', return_value=processes):
             self.assertEqual(set(process_tree(100)), {100, 200, 300, 400})
 
+    def test_process_tree_closes_over_descendant_groups(self):
+        tables = (
+            '100 1 100\n200 100 200\n300 1 200\n500 1 500\n',
+            '100 1 100\n200 1 100\n300 200 300\n400 1 300\n500 1 500\n',
+        )
+        for processes in tables:
+            with self.subTest(processes=processes), patch('managed_launchd.command', return_value=processes):
+                self.assertEqual(set(process_tree(100)), set(int(line.split()[0]) for line in processes.splitlines()) - {500})
+
+    def test_stop_refuses_survivor_in_descendant_group(self):
+        watch = SimpleNamespace(binding={'tree': {100: {}, 200: {}}, 'status': {'pid': 100, 'exit_timeout': 1}},
+            events={100: {}, 200: {}}, drain=lambda *_: None,
+            service=SimpleNamespace(status=lambda: {'loaded': False}),
+            bootout={'timed_out': False, 'returncode': 0}, require_disabled=False,
+            unchanged_lifecycle=lambda: None, normal_exit=lambda *_: None,
+            groups={100, 200})
+        with patch('managed_launchd.process_exists', return_value=False), patch('managed_launchd.process_tree',
+                side_effect=lambda _, group: {300: {}} if group == 200 else {}):
+            with self.assertRaisesRegex(Refused, 'former process group survives'):
+                StopWatch.verify(watch, lambda: self.fail('bus check reached'),
+                    lambda: self.fail('listener check reached'), deadline=0)
+
+    def test_stop_refuses_process_group_change_before_signal(self):
+        status = {'pid': 100}
+        watch = SimpleNamespace(prepared=True, drain=lambda: None,
+            unchanged_lifecycle=lambda: None, service=SimpleNamespace(
+                label='ai.openclaw.gateway', status=lambda: status),
+            binding={'status': status, 'tree': {100: {'group': 100}, 200: {'group': 200}}},
+            events={})
+        with patch('managed_launchd.process_tree', return_value={
+                100: {'group': 100}, 200: {'group': 300}}):
+            with self.assertRaisesRegex(Refused, 'process descendants or group changed'):
+                StopWatch.ready_for_intent(watch)
+
     def test_deploy_listener_with_child_refuses_before_signal(self):
         status = {'pid': 101}
         watch = SimpleNamespace(prepared=True, drain=lambda: None,
