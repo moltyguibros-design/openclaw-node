@@ -144,6 +144,7 @@ class HostReconcileTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'capture worker is not active'):
                 guard(spec, capture, fixture=True)
             self.assertFalse((capture / 'GUARD_INTENT.json').exists())
+            self.assertFalse(list(capture.glob('before-guard-*')))
             self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
 
             died_during_preflight = root / 'died-during-preflight'
@@ -163,8 +164,9 @@ class HostReconcileTest(unittest.TestCase):
             def worker_died_after_preflight(*args, **kwargs):
                 nonlocal dying_fd
                 observed = original_preflight(*args, **kwargs)
-                os.close(dying_fd)
-                dying_fd = None
+                if dying_fd is not None:
+                    os.close(dying_fd)
+                    dying_fd = None
                 return observed
 
             try:
@@ -174,6 +176,7 @@ class HostReconcileTest(unittest.TestCase):
             finally:
                 if dying_fd is not None:
                     os.close(dying_fd)
+            self.assertIsNone(dying_fd)
             self.assertFalse((died_during_preflight / 'GUARD_INTENT.json').exists())
             self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
             original_write = host_vm_guard.write_record
