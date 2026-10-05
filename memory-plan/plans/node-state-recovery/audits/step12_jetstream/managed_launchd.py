@@ -10,6 +10,7 @@ import subprocess
 import time
 
 from preservation_checks import Refused, require, verify_completion, verify_timer_idle
+from preservation_journal import FULL_NODE_SCOPE
 
 
 EXIT_FLAGS = 0x84000000
@@ -477,8 +478,38 @@ class StopWatch:
                 'connections_closed': True, 'listeners_absent': True,
                 'log_offsets': self.offsets, 'termination': termination}
 
-    def mutate(self, journal, unit, connection_check, listener_check):
+    def mutate(self, journal, unit, connection_check, listener_check, hold=None):
+        if journal.scope == FULL_NODE_SCOPE:
+            require(self.service.label == 'ai.openclaw.' + unit,
+                    'managed stop owner differs from journal unit')
+            require(unit != 'mesh-deploy-listener' or self.require_disabled,
+                    'deploy listener requires a persistent managed stop')
+            require(unit == 'mesh-deploy-listener' or not self.require_disabled,
+                    'other full-node units lack an enable-capable recovery adapter')
         self.ready_for_intent()
+        if self.require_disabled:
+            require(hold is not None and hold.journal is journal,
+                    'persistent stop requires the original execution hold')
+            require(not self.service.disabled(), 'managed unit was disabled before its stop intent')
+            def apply():
+                self.ready_for_intent()
+                self.service.disable_for_hold()
+                self.apply()
+            def failed(error):
+                evidence = self.failure_evidence(error)
+                try:
+                    evidence['disabled_override_observed'] = self.service.disabled()
+                except Exception as inspection_error:
+                    evidence['disabled_override_inspection_error'] = type(inspection_error).__name__
+                return evidence
+            return hold.mutate(unit, 'disable-and-unload', apply,
+                               lambda: self.verify(connection_check, listener_check),
+                               failure_evidence=failed)
+        if hold is not None:
+            require(hold.journal is journal, 'held stop requires the original execution hold')
+            return hold.mutate(unit, 'unload', self.apply,
+                               lambda: self.verify(connection_check, listener_check),
+                               failure_evidence=self.failure_evidence)
         return journal.mutate(unit, 'stop', self.apply,
                               lambda: self.verify(connection_check, listener_check),
                               failure_evidence=self.failure_evidence)

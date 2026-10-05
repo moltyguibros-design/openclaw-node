@@ -104,6 +104,55 @@ class StopWatchPreflight(unittest.TestCase):
         with self.assertRaisesRegex(Refused, 'requires a disabled managed unit'):
             StopWatch.apply(watch)
 
+    def test_persistent_stop_refuses_without_its_journal_hold(self):
+        watch = SimpleNamespace(ready_for_intent=lambda: None, require_disabled=True)
+        journal = SimpleNamespace(scope=None)
+        with self.assertRaisesRegex(Refused, 'original execution hold'):
+            StopWatch.mutate(watch, journal, 'mesh-deploy-listener', lambda: True, lambda: True)
+        with self.assertRaisesRegex(Refused, 'original execution hold'):
+            StopWatch.mutate(watch, journal, 'mesh-deploy-listener', lambda: True, lambda: True,
+                             hold=SimpleNamespace(journal=object()))
+
+    def test_held_stop_records_unload_without_disabling(self):
+        journal = SimpleNamespace(scope=None)
+        calls = []
+        hold = SimpleNamespace(journal=journal, mutate=lambda unit, action, apply, verify,
+                               failure_evidence: calls.append((unit, action)))
+        watch = SimpleNamespace(ready_for_intent=lambda: None, require_disabled=False,
+                                apply=lambda: None, verify=lambda *_: {'verified': True},
+                                failure_evidence=lambda error: {})
+        StopWatch.mutate(watch, journal, 'nats', lambda: True, lambda: True, hold=hold)
+        self.assertEqual(calls, [('nats', 'unload')])
+
+    def test_full_node_stop_requires_the_bound_unit_label(self):
+        watch = SimpleNamespace(service=SimpleNamespace(label='ai.openclaw.gateway'),
+                                ready_for_intent=lambda: self.fail('stop watch reached'))
+        with self.assertRaisesRegex(Refused, 'owner differs from journal unit'):
+            StopWatch.mutate(watch, SimpleNamespace(scope='full-node'), 'mesh-deploy-listener',
+                             lambda: True, lambda: True)
+
+    def test_full_node_stop_refuses_unrestorable_override_or_plain_listener(self):
+        journal = SimpleNamespace(scope='full-node')
+        for unit, persistent, expected in (
+                ('mesh-deploy-listener', False, 'deploy listener requires'),
+                ('gateway', True, 'other full-node units lack')):
+            watch = SimpleNamespace(service=SimpleNamespace(label='ai.openclaw.' + unit),
+                                    require_disabled=persistent,
+                                    ready_for_intent=lambda: self.fail('stop watch reached'))
+            with self.subTest(unit=unit), self.assertRaisesRegex(Refused, expected):
+                StopWatch.mutate(watch, journal, unit, lambda: True, lambda: True)
+
+    def test_persistent_stop_refuses_a_preexisting_override_before_intent(self):
+        journal = SimpleNamespace(scope='full-node')
+        hold = SimpleNamespace(journal=journal,
+                               mutate=lambda *_args, **_kwargs: self.fail('intent reached'))
+        watch = SimpleNamespace(service=SimpleNamespace(
+            label='ai.openclaw.mesh-deploy-listener', disabled=lambda: True),
+            require_disabled=True, ready_for_intent=lambda: None)
+        with self.assertRaisesRegex(Refused, 'disabled before its stop intent'):
+            StopWatch.mutate(watch, journal, 'mesh-deploy-listener', lambda: True,
+                             lambda: True, hold=hold)
+
 
 @unittest.skipUnless(sys.platform == 'darwin', 'requires actual macOS launchd and exit events')
 class OwnedLaunchd(unittest.TestCase):
@@ -309,13 +358,27 @@ os.execv('/bin/sleep',['sleep','30'])
         with StopWatch(self.service, binding, [self.log, self.err], 'mesh-task-daemon',
                        require_disabled=True) as watch:
             self.hold_override_attempted = True
-            self.service.disable_for_hold()
-            self.assertTrue(self.service.disabled())
-            self.assertTrue(self.service.status()['running'])
-            with self.assertRaisesRegex(Refused, 'still loaded'):
-                self.service.enable_after_hold()
-            watch.apply()
-            proof = watch.verify(self.connection_closed, self.listener_absent)
+            journal_parent = self.directory / 'journals'
+            journal_parent.mkdir(mode=0o700)
+            with legacy_journal(journal_parent / 'window', inventory({'nats': {}, 'mesh-task-daemon': {}}),
+                                boot='owned', node_lock=self.directory / 'node.lock') as journal:
+                def held_mutate(unit, action, apply, verify, failure_evidence):
+                    return journal.mutate(unit, action, apply, verify, failure_evidence=failure_evidence)
+                hold = SimpleNamespace(journal=journal, mutate=held_mutate)
+                disable = self.service.disable_for_hold
+                def after_intent():
+                    self.assertEqual(journal.records[-1]['event'], 'intent')
+                    self.assertEqual(journal.records[-1]['action'], 'disable-and-unload')
+                    self.assertTrue(self.service.status()['running'])
+                    disable()
+                    with self.assertRaisesRegex(Refused, 'still loaded'):
+                        self.service.enable_after_hold()
+                with patch.object(self.service, 'disable_for_hold', side_effect=after_intent):
+                    proof = watch.mutate(journal, 'mesh-task-daemon', self.connection_closed,
+                                         self.listener_absent, hold=hold)
+                self.assertEqual([row['event'] for row in journal.records],
+                                 ['baseline', 'intent', 'verified'])
+                self.assertEqual(journal.records[-1]['action'], 'disable-and-unload')
         self.assertTrue(proof['verified'])
         self.assertTrue(proof['disabled_override_verified'])
         self.assertFalse(self.service.status()['loaded'])
@@ -331,6 +394,34 @@ os.execv('/bin/sleep',['sleep','30'])
         wait_for(lambda: self.ready.exists() and self.service.status()['running'])
         self.proofs.append({'test': self._testMethodName, 'stop': proof,
                             'disabled_after_bootout': True, 'restarted_after_enable': True})
+
+    def test_post_disable_stop_failure_is_durable_and_keeps_override(self):
+        binding = self.launch()
+        journal_parent = self.directory / 'journals'
+        journal_parent.mkdir(mode=0o700)
+        journal_root = journal_parent / 'window'
+        with StopWatch(self.service, binding, [self.log, self.err], 'mesh-task-daemon',
+                       require_disabled=True) as watch:
+            self.hold_override_attempted = True
+            with legacy_journal(journal_root, inventory({'nats': {}, 'mesh-task-daemon': {}}),
+                                boot='owned', node_lock=self.directory / 'node.lock') as journal:
+                def held_mutate(unit, action, apply, verify, failure_evidence):
+                    return journal.mutate(unit, action, apply, verify, failure_evidence=failure_evidence)
+                hold = SimpleNamespace(journal=journal, mutate=held_mutate)
+                with patch.object(watch, 'apply', side_effect=Refused('owned failure after disable')):
+                    with self.assertRaisesRegex(Refused, 'owned failure after disable'):
+                        watch.mutate(journal, 'mesh-task-daemon', self.connection_closed,
+                                     self.listener_absent, hold=hold)
+                self.assertEqual([row['event'] for row in journal.records],
+                                 ['baseline', 'intent', 'failed'])
+                self.assertEqual(journal.records[-1]['action'], 'disable-and-unload')
+                self.assertIsNone(journal.records[-1]['evidence']['bootout'])
+                self.assertTrue(journal.records[-1]['evidence']['disabled_override_observed'])
+        self.assertTrue(self.service.disabled())
+        self.assertTrue(self.service.status()['running'])
+        with Journal(journal_root, boot='owned', node_lock=self.directory / 'node.lock') as reopened:
+            with self.assertRaisesRegex(Refused, 'reopened'):
+                reopened.require_forward()
 
     def test_forced_kill_is_observed_past_loaded_exit_timeout_and_refused(self):
         binding = self.launch('hang', exit_timeout=1)

@@ -1663,3 +1663,17 @@ root decline 22; plan lint is conformant.
 Production hold, real listener stop, VM capture, four-history acceptance and
 service resumption remain open. No production service, VM or NATS store
 changed; 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 15:52 EDT: D84 connects a persistent managed stop to
+the journaled execution hold: a disposable launchd job is disabled only
+after its durable `disable-and-unload` intent, and its normal exit, absent
+connections/listeners and lasting override are verified before the receipt.
+A forced post-disable failure leaves a durable failed row and the override
+still disabled; full-node label mismatches refuse before any intent. The
+owned macOS managed-stop suite passes 36 tests with one domain skip; the
+adjacent journal/hold suites pass 158 tests. macOS CI now includes the owned
+suite, with exact-head results pending. The native hold plus real listener
+integration, enable-capable recovery for all 23 jobs, continuous exclusion,
+deploy fence, stopped-VM decision, real-history acceptance and verified
+resumption remain open. No production service, VM or history changed;
+1.2 remains [A]/v1.2-pre.

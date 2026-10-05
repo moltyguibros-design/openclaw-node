@@ -1628,3 +1628,31 @@ suite passes 115 tests, root transfer 16, root admission 7 and root decline
 22; plan lint is conformant. This is not evidence
 that a real listener stop or production NATS transfer has occurred. No
 production service, VM or NATS store changed; step 1.2 stays [A]/v1.2-pre.
+
+## D84 — Compose a journaled managed listener stop with the execution hold (2026-10-05 15:52 EDT)
+
+The D81 listener-first rule could not be met by `StopWatch.mutate()`: it
+always recorded a plain `stop` and had no execution-hold facade. A persistent
+managed stop now checks the bound full-node label, the original hold and the
+enabled override before a durable intent; its journaled `apply` disables the
+owned launchd job before bootout. The receipt uses `disable-and-unload`, with
+the existing kernel, process, connection, listener, normal-exit and disabled
+override proof. A failed stop records the observed disabled override, or a
+named inspection failure, with the kernel evidence. An ordinary held stop
+uses the facade with an `unload` receipt; a full-node listener cannot take
+that path, and other full-node units cannot take the persistent path until
+their enable-capable recovery adapter exists.
+
+Claude challenged the draft composition with a wrong-unit watch, a held
+plain-stop path, disabled-but-running failures and the missing macOS CI
+coverage. The label binding and separate held-unload path address the first
+two; the failure receipt now records the override observation. The complete
+owned macOS managed-stop suite passes 36 tests with one explicit domain skip;
+the journal and hold suites pass 158 tests. CI now installs the owned NATS
+fixture dependencies and runs the managed-stop suite on macOS; exact-head CI
+is pending. The positive owned job uses a journal-backed hold stub, so it
+does not prove the native execution hold plus a real listener stop end to end.
+No production service, VM or NATS store changed. The full-node driver,
+continuous 23-job/root/user/detached-process exclusion, deploy fence, stopped
+VM decision, four-history acceptance and verified resumption remain open;
+step 1.2 stays [A]/v1.2-pre.

@@ -144,6 +144,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install owned launchd fixture dependencies
+        run: |
+          brew install nats-server
+          npm ci --ignore-scripts --no-audit --no-fund
       - name: Verify macOS descriptor and subprocess lock behavior
         env:
           PYTHONDONTWRITEBYTECODE: "1"
@@ -166,6 +170,7 @@ jobs:
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_journal_hold.py
           PYTHONPATH="$PWD/memory-plan/plans/node-state-recovery/audits/step12_jetstream" /usr/bin/python3 -m unittest -q test_restore_only
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_disabled.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_managed_launchd.py
           /usr/bin/python3 test/test_nats_root_admission.py
           /usr/bin/python3 test/test_nats_root_decline.py
           /usr/bin/python3 test/test_nats_macos_proc.py
