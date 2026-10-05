@@ -1220,13 +1220,14 @@ production hold, VM stop, clone or history acceptance occurred. See
 step12_jetstream/HOST_VMSTATE_GATE_20261004.json. Step 1.2 remains
 [A]/v1.2-pre.
 
-Checkpoint 2026-10-04 21:36 EDT: a read-only recheck of the already frozen
-member-1 R1 master matched all 128 recorded store entries (82 files,
-6,346,296 bytes); every entry remained owner-owned, read-only and immutable.
-Its original config, plist and manifest hashes were recorded again. Member 1
-remains disabled and unloaded. The 23 installed job hashes match the latest
-post-vault-watcher structural baseline, with 21 GUI jobs loaded and one
-approved system exclusion. This is one retained historical copy, not a new
-common recovery point or acceptance of the three serving histories. No live
-VM, service or NATS store changed; 1.2 remains [A]/v1.2-pre. See
+Checkpoint 2026-10-04 21:36 EDT: the retained member-1 R1 tree was
+self-consistent with its co-located 128-entry manifest (82 files, 6,346,296
+bytes). Every entry was owner-owned, read-only and immutable at observation.
+The manifest SHA-256 was pinned here for the first time; without an
+independent September 28 pin, continuity since the reported freeze is not
+proven. Member 1 was disabled and unloaded. The 23 installed job hashes
+matched the post-vault-watcher structural baseline, with 21 GUI jobs loaded
+and one approved system exclusion. This is not a new common recovery point
+or acceptance of the three serving histories. No live VM, service or NATS
+store changed; 1.2 remains [A]/v1.2-pre. See
 step12_jetstream/HELD_R1_RECHECK_20261004.json.
