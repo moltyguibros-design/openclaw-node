@@ -1623,3 +1623,15 @@ adapter must refuse an already-running listener, and the full-node hold,
 deploy fence, stopped-VM decision, real-history acceptance and resumption
 remain open. No production service, VM or NATS store changed; 1.2 stays
 [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 14:06 EDT: D81 makes a verified execution-hold anchor
+and persistently disabled deploy-listener stop precede every other full-node
+mutation and the NATS-transfer intent. The listener receipt is matched to its
+own durable intent and checked for bootout, normal exit, disabled override and
+absent process/network remnants. The journal suite passes 113 tests and the
+hold suite 43; the restore-only loaded-daemon test passed in isolation after
+one full-suite final-readiness failure, and the full suite passed on rerun
+(30/30). The production full-node controller,
+real macOS hold rehearsal, deploy fence, VM stop/capture and four-history
+acceptance remain open. No production service, VM or NATS store changed; 1.2
+stays [A]/v1.2-pre.

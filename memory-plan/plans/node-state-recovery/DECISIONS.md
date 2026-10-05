@@ -1554,3 +1554,27 @@ refuse an already-running listener at start time, and a verified start step
 with its own durable receipt may narrow the retry boundary. The complete
 full-node hold and deploy fence remain prerequisites to production release.
 No production service, VM or NATS store changed; step 1.2 stays [A]/v1.2-pre.
+
+## D81 — Require a durable, persistently disabled listener stop before full-node work (2026-10-05 14:06 EDT)
+
+The full-node journal previously accepted any forward mutation order even
+though STOP_ORDER starts with the deploy listener. Require the execution-hold
+anchor as the first verified intent, then one `disable-and-unload` listener
+intent with a matching verified receipt before any other service mutation.
+The listener receipt must report successful bootout, normal owner termination,
+no remaining descendants, connections or listeners, and a verified launchd
+disabled override. The journal checks the listener's loaded-set removal around
+verification and rechecks the durable receipt before later work. NATS transfer
+performs the same check because it can write an intent without `mutate()`.
+
+Claude independently reproduced the order gap and NATS-transfer bypass using
+owned fixtures. The journal suite passes 113 tests, including negatives for
+NATS before the listener, a bare `stop`, a second listener stop, incomplete
+disable/bootout/termination proof, and forged NATS receipts without the
+listener fence. The hold suite passes 43 tests. A restore-only full-suite run
+had one final-readiness failure in a loaded-daemon fixture; that single test
+passed on isolated rerun, and a second full-suite run passed 30/30. This is journal contract and disposable-fixture
+evidence, not a production driver. A macOS test with the real full-node hold,
+continuous restart exclusion, a deploy snapshot and release fence, stopped-VM
+controller, four-history acceptance and service resumption remain open. No
+production service, VM or NATS store changed; step 1.2 stays [A]/v1.2-pre.

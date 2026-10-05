@@ -23,6 +23,8 @@ TIMER_SCOPE = 'timer-commissioning'
 FULL_NODE_SCOPE = 'full-node'
 TERMINAL = ('sealed', 'resolved')
 NATS_TRANSFER_UNITS = ('nats', 'nats-2', 'nats-3', 'nats-1')
+LISTENER_STOP_FIELDS = ('unit_unloaded', 'descendants_absent',
+                        'disabled_override_verified', 'connections_closed', 'listeners_absent')
 NATS_WRITER_MARKER = pathlib.Path('/private/var/db/openclaw-nats/writer-handoff.json')
 NATS_ROOT_OUTCOMES = pathlib.Path('/private/var/db/openclaw-nats-outcomes')
 NATS_ROOT_UID = 0
@@ -770,6 +772,7 @@ class Journal:
         except (TypeError, ValueError) as error:
             raise Refused('NATS transfer transaction is invalid') from error
         self.require_forward()
+        require(self.listener_fenced(), 'deploy listener must be verifiably disabled before NATS transfer')
         require(self.nats_transfer_open() is None, 'NATS transfer already exists')
         require_no_nats_marker()
         entrypoints = self.check_entrypoints(forward=True)
@@ -819,6 +822,30 @@ class Journal:
         require(not self.pending_intents() and not list(self.root.glob('.pending-*')),
                 'incomplete durable intent may only restore prior services')
 
+    def listener_fenced(self):
+        intents = [row for row in self.records if row['event'] == 'intent']
+        if (len(intents) < 2
+                or intents[0].get('unit') != 'scheduler-heartbeat'
+                or intents[0].get('action') != 'close-execution-hold'
+                or intents[1].get('unit') != 'mesh-deploy-listener'
+                or intents[1].get('action') != 'disable-and-unload'
+                or sum(row.get('unit') == 'mesh-deploy-listener' for row in intents) != 1
+                or not any(row['event'] == 'verified' and row.get('intent') == intents[0]['sequence']
+                           for row in self.records)):
+            return False
+        return any(row['event'] == 'verified' and row.get('intent') == intents[1]['sequence']
+                   and self.listener_stop_proven(row.get('evidence')) for row in self.records)
+
+    @staticmethod
+    def listener_stop_proven(evidence):
+        return (isinstance(evidence, dict)
+                and evidence.get('verified') is True
+                and all(evidence.get(key) is True for key in LISTENER_STOP_FIELDS)
+                and isinstance(evidence.get('bootout'), dict)
+                and evidence['bootout'].get('returncode') == 0
+                and evidence['bootout'].get('timed_out') is False
+                and evidence.get('termination') in ({'signal': 15}, {'exit': 0}))
+
     def mutate(self, unit, action, apply, verify, failure_evidence=None, intent_fields=None, hold=None):
         require(self.scope != TIMER_SCOPE or unit == 'scheduler-heartbeat'
                 and action == 'close-execution-hold' and not any(r['event'] == 'intent' for r in self.records)
@@ -835,6 +862,20 @@ class Journal:
                 'baselined execution hold requires its forward facade')
         if held:
             hold.check_forward()
+        if self.scope == FULL_NODE_SCOPE:
+            intents = [row for row in self.records if row['event'] == 'intent']
+            if unit == 'scheduler-heartbeat' and action == 'close-execution-hold':
+                require(not intents, 'execution hold must be the first full-node intent')
+            elif unit == 'mesh-deploy-listener':
+                require(action == 'disable-and-unload' and len(intents) == 1
+                        and intents[0].get('unit') == 'scheduler-heartbeat'
+                        and intents[0].get('action') == 'close-execution-hold'
+                        and any(row['event'] == 'verified' and row.get('intent') == intents[0]['sequence']
+                                for row in self.records),
+                        'deploy listener must follow the verified execution hold')
+            else:
+                require(self.listener_fenced(),
+                        'deploy listener must be verifiably disabled before other full-node work')
         fields = intent_fields or {}
         require(isinstance(fields, dict) and not set(fields) & {'unit', 'action'},
                 'intent fields cannot replace the mutation owner')
@@ -854,6 +895,9 @@ class Journal:
             evidence = verify()
             require(isinstance(evidence, dict) and evidence.get('verified') is True,
                     'mutation lacks verified evidence')
+            if self.scope == FULL_NODE_SCOPE and unit == 'mesh-deploy-listener':
+                require(self.listener_stop_proven(evidence),
+                        'deploy listener stop lacks persistent unload and process proof')
             if self.scope == FULL_NODE_SCOPE:
                 after_verify = self.check_entrypoints(forward=True, expected_loaded=expected)
                 require(after_verify['loaded'] == before_verify['loaded'],
