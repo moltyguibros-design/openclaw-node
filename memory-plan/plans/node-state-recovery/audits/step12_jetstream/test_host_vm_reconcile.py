@@ -12,8 +12,10 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 import host_vm_preflight
+import host_vm_guard
 from host_image_immutable import change_immutable
 from host_clone_dispose import CAPTURE_SCOPE
 from host_vm_capture import clone_only, file_hash
@@ -169,6 +171,38 @@ class HostReconcileTest(unittest.TestCase):
                 reconcile(spec, capture, capture / 'reguarded', fixture=True)
             self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
             change_immutable(source, source_identity, False)
+
+            held = root / 'held-capture'
+            held.mkdir(mode=0o700)
+            held_initial = preflight(spec, held / 'before-shutdown')
+            write_record(held / 'ARMED.json', {
+                'scope': 'waiting for external guest shutdown; no stop request issued',
+                'vm_uuid': vm_uuid, 'host_boot_session': held_initial['host_boot_session'],
+                'image_device': held_initial['image_device'],
+                'image_inode': held_initial['image_inode'],
+            })
+            writable = None
+
+            def open_during_guard(path, identity, present):
+                nonlocal writable
+                writable = os.open(path, os.O_RDWR)
+                return change_immutable(path, identity, present)
+
+            try:
+                with patch.object(host_vm_guard, 'change_immutable', open_during_guard):
+                    with self.assertRaisesRegex(RuntimeError, 'image holders disagree'):
+                        guard(spec, held, fixture=True)
+                self.assertTrue((held / 'GUARD_INTENT.json').exists())
+                self.assertFalse((held / 'GUARD.json').exists())
+                self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
+                with self.assertRaisesRegex(RuntimeError, 'image holders disagree'):
+                    reconcile(spec, held, held / 'holder-present', fixture=True)
+            finally:
+                if writable is not None:
+                    os.close(writable)
+            recovered_held = reconcile(spec, held, held / 'holder-gone', fixture=True)
+            self.assertTrue(recovered_held['clone_absent'])
+            self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
 
             completed = root / 'completed-capture'
             completed.mkdir(mode=0o700)

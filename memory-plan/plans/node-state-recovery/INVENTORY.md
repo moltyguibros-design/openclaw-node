@@ -1231,3 +1231,11 @@ and one approved system exclusion. This is not a new common recovery point
 or acceptance of the three serving histories. No live VM, service or NATS
 store changed; 1.2 remains [A]/v1.2-pre. See
 step12_jetstream/HELD_R1_RECHECK_20261004.json.
+
+An owned synthetic ASIF regression now opens a writable image descriptor
+between the guard's initial stopped/no-holder observation and its flag change.
+The post-guard observation refuses without a GUARD receipt, and reconciliation
+refuses while the holder remains before restoring bootability after it closes.
+The local macOS fixture passes; the interrupted host fixture has no result.
+Real UTM start/refusal behavior and the full-node hold remain unproven. No
+production VM or service changed; 1.2 remains [A]/v1.2-pre.
