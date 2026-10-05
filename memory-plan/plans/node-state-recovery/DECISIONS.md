@@ -1241,6 +1241,13 @@ as well as process holders; user-level `lsof` did not report an attached
 disposable ASIF. The guard refuses a terminal capture attempt and publishes
 its intent atomically before setting the source flag. A torn temporary
 intent leaves no final intent or flag and can be retried.
+The guard now holds the armed receipt lock from its final terminal check
+through immutable flagging and `GUARD.json` publication. Reconciliation takes
+that same lock before reading the intent and keeps it through its terminal
+receipt. A guard paused after intent publication therefore cannot race a
+`BOOTABLE` receipt and later re-guard the source. The capture worker does not
+yet participate in this lock; its terminal writes and active extraction need
+a separate lifecycle interlock before a production arm.
 Missing or changed guard evidence refuses the attempt without accepting a
 cold master. The check does not prove continuous exclusion of a same-owner
 writer or replace the missing full-node hold and real UTM rehearsal.

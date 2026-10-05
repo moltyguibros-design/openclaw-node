@@ -1337,3 +1337,17 @@ changing the flag. A deliberately interrupted intent write leaves no final
 intent or immutable source, and a retry succeeds. The local host group passes
 9/9. These disposable checks do not prove continuous exclusion or authorize
 production shutdown; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 01:04 EDT: Claude's review of `658982fe` found that the
+armed receipt lock ended after intent publication. A paused guard could then
+allow reconciliation to issue `BOOTABLE`, resume, and flag the source again.
+The guard now holds that lock through its immutable flag and `GUARD.json`
+receipt; reconciliation holds the same lock through `BOOTABLE` or
+`OPERATOR_REQUIRED`. A disposable macOS concurrency fixture pauses the guard
+after intent publication and checks reconciliation cannot enter preflight or
+issue `BOOTABLE` until the guard finishes; it then records
+`guard_completed:true` and an unflagged source. The local host group passes
+10/10. Capture-worker terminal writes and active extraction are not yet
+serialized against reconciliation. This does not authorize production VM
+shutdown; the full-node hold, UTM rehearsal, historical acceptance and
+resumption remain open at 1.2 [A]/v1.2-pre.

@@ -220,6 +220,76 @@ class HostReconcileTest(unittest.TestCase):
             self.assertFalse(recovered_held['guard_completed'])
             self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
 
+            serialized = root / 'serialized-guard'
+            serialized.mkdir(mode=0o700)
+            serialized_initial = preflight(spec, serialized / 'before-shutdown')
+            write_record(serialized / 'ARMED.json', {
+                'scope': 'waiting for external guest shutdown; no stop request issued',
+                'vm_uuid': vm_uuid, 'host_boot_session': serialized_initial['host_boot_session'],
+                'image_device': serialized_initial['image_device'],
+                'image_inode': serialized_initial['image_inode'],
+            })
+            entered, release = threading.Event(), threading.Event()
+            reconcile_ready, reconcile_preflight = threading.Event(), threading.Event()
+            errors = []
+            result = {}
+            original_change = host_vm_guard.change_immutable
+            original_fsync = host_vm_reconcile.fsync_parent
+            original_reconcile_preflight = host_vm_reconcile.preflight
+
+            def paused_change(path, identity, present):
+                entered.set()
+                if not release.wait(10):
+                    raise RuntimeError('guard fixture was not released')
+                return original_change(path, identity, present)
+
+            def observed_fsync(path):
+                value = original_fsync(path)
+                if path == serialized:
+                    reconcile_ready.set()
+                return value
+
+            def observed_preflight(*args, **kwargs):
+                reconcile_preflight.set()
+                return original_reconcile_preflight(*args, **kwargs)
+
+            def guard_worker():
+                try:
+                    with patch.object(host_vm_guard, 'change_immutable', paused_change):
+                        guard(spec, serialized, fixture=True)
+                except Exception as error:
+                    errors.append(error)
+
+            def reconcile_worker():
+                try:
+                    with patch.object(host_vm_reconcile, 'fsync_parent', observed_fsync), \
+                            patch.object(host_vm_reconcile, 'preflight', observed_preflight):
+                        result.update(reconcile(spec, serialized, serialized / 'concurrent', fixture=True))
+                except Exception as error:
+                    errors.append(error)
+
+            first_worker = threading.Thread(target=guard_worker)
+            second_worker = threading.Thread(target=reconcile_worker)
+            first_worker.start()
+            try:
+                self.assertTrue(entered.wait(10))
+                self.assertTrue((serialized / 'GUARD_INTENT.json').exists())
+                second_worker.start()
+                self.assertTrue(reconcile_ready.wait(10))
+                self.assertFalse(reconcile_preflight.wait(1))
+                self.assertFalse((serialized / 'concurrent' / 'BOOTABLE.json').exists())
+                self.assertTrue(second_worker.is_alive())
+            finally:
+                release.set()
+                first_worker.join(timeout=10)
+                if second_worker.ident is not None:
+                    second_worker.join(timeout=10)
+            self.assertFalse(errors, errors)
+            self.assertFalse(first_worker.is_alive())
+            self.assertFalse(second_worker.is_alive())
+            self.assertTrue(result['guard_completed'])
+            self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
+
             unexpected = root / 'unexpected-guard-receipt'
             unexpected.mkdir(mode=0o700)
             write_record(unexpected / 'GUARD.json', {'unrelated': True})

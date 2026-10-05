@@ -2,6 +2,7 @@
 """Recover a stopped source image after a guarded clone attempt; never start UTM."""
 
 import datetime
+import fcntl
 import os
 import pathlib
 import stat
@@ -67,7 +68,10 @@ def reconcile(host_spec, capture_dir, output, fixture=False):
                 'production reconcile requires the durable host recovery directory')
     output.mkdir(mode=0o700)
     fsync_parent(capture_dir)
+    armed_fd = None
     try:
+        armed_fd = os.open(capture_dir / 'ARMED.json', os.O_RDONLY | os.O_NOFOLLOW)
+        fcntl.flock(armed_fd, fcntl.LOCK_EX)
         armed = private_record(capture_dir / 'ARMED.json')
         initial = private_record(capture_dir / 'before-shutdown/preflight.json')
         require(armed['scope'] == 'waiting for external guest shutdown; no stop request issued'
@@ -167,6 +171,9 @@ def reconcile(host_spec, capture_dir, output, fixture=False):
             'error': str(error),
         })
         raise
+    finally:
+        if armed_fd is not None:
+            os.close(armed_fd)
 
 
 if __name__ == '__main__':

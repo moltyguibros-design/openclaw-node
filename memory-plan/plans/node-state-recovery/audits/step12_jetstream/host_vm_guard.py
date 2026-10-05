@@ -21,15 +21,13 @@ GUARD_SCOPE = 'stopped source image guard intent; no clone or VM start'
 def publish_guard_intent(capture_dir, intent):
     receipt = capture_dir / 'GUARD_INTENT.json'
     temporary = capture_dir / ('GUARD_INTENT.json.tmp.' + uuid.uuid4().hex)
-    with (capture_dir / 'ARMED.json').open('rb') as armed:
-        fcntl.flock(armed, fcntl.LOCK_EX)
-        require(not os.path.lexists(receipt), 'guard intent already exists')
-        require(not any(os.path.lexists(capture_dir / name) for name in
-                        ('FAILED.json', 'CAPTURE.json')),
-                'capture attempt already ended')
-        write_record(temporary, intent)
-        os.replace(temporary, receipt)
-        fsync_parent(capture_dir)
+    require(not os.path.lexists(receipt), 'guard intent already exists')
+    require(not any(os.path.lexists(capture_dir / name) for name in
+                    ('FAILED.json', 'CAPTURE.json')),
+            'capture attempt already ended')
+    write_record(temporary, intent)
+    os.replace(temporary, receipt)
+    fsync_parent(capture_dir)
 
 
 def guard(host_spec, capture_dir, fixture=False):
@@ -48,6 +46,18 @@ def guard(host_spec, capture_dir, fixture=False):
         require(capture_dir.parent == pathlib.Path.home() /
                 'Library/Application Support/OpenClawRecovery',
                 'production guard requires the durable host recovery directory')
+    require(not any(os.path.lexists(capture_dir / name) for name in
+                    ('GUARD_INTENT.json', 'GUARD.json', 'GUARD.json.tmp')),
+            'guard artifact already exists; reconcile the prior attempt')
+    require(not any(os.path.lexists(capture_dir / name) for name in
+                    ('FAILED.json', 'CAPTURE.json')),
+            'capture attempt already ended')
+    with (capture_dir / 'ARMED.json').open('rb') as armed:
+        fcntl.flock(armed, fcntl.LOCK_EX)
+        return guard_locked(host_spec, capture_dir)
+
+
+def guard_locked(host_spec, capture_dir):
     require(not any(os.path.lexists(capture_dir / name) for name in
                     ('GUARD_INTENT.json', 'GUARD.json', 'GUARD.json.tmp')),
             'guard artifact already exists; reconcile the prior attempt')
