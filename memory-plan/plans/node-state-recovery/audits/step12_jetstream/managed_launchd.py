@@ -238,6 +238,27 @@ class Launchd:
         require(self.status()['loaded'] and not self.status()['running'], 'refusing to restart an existing owner')
         command(['/bin/launchctl', 'kickstart', self.target])
 
+    def disabled(self):
+        result = command(['/bin/launchctl', 'print-disabled', 'gui/' + str(os.getuid())])
+        values = re.findall(r'^\s*"' + re.escape(self.label) + r'" => ([^\n]+)$', result, re.M)
+        require(len(values) <= 1 and all(value in ('enabled', 'disabled') for value in values),
+                'managed disabled override is ambiguous')
+        return values == ['disabled']
+
+    def disable_for_hold(self):
+        require(self.status()['loaded'] and not self.status('user')['loaded'],
+                'managed unit is not exclusively loaded in the GUI domain')
+        require(not self.disabled(), 'managed unit is already disabled')
+        command(['/bin/launchctl', 'disable', self.target])
+        require(self.disabled(), 'managed unit was not disabled')
+
+    def enable_after_hold(self):
+        require(not self.status()['loaded'] and not self.status('user')['loaded'],
+                'managed unit is still loaded')
+        require(self.disabled(), 'managed unit was not disabled')
+        command(['/bin/launchctl', 'enable', self.target])
+        require(not self.disabled(), 'managed unit remains disabled')
+
 
 class StopWatch:
     def __init__(self, service, binding, paths, completion_service, allowed_signals=(),

@@ -1380,3 +1380,14 @@ preflight and confirms the guard's final probe refuses before intent or flag.
 The local host group passes 12/12. No source-wide exclusion, no-intent abort receipt,
 real UTM rehearsal, full-node hold or production stop is claimed. Step 1.2
 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 02:22 EDT: the GUI launchd adapter now verifies a
+disabled override before a managed stop and refuses to re-enable while the
+job is still loaded. The owned macOS fixture arms its process watch, disables
+its disposable job, observes a normal stop, confirms the disabled override
+survives bootout, then re-enables and restarts the same job. The restore-only
+prototype uses the same override inspection. This is a per-job primitive,
+not a production 23-job hold or a reboot-persistence test. Root/user jobs,
+detached processes, other launch paths, host UTM autostart, continuous
+exclusion and the D62 boot decision remain open. No production service or VM
+was changed; step 1.2 remains [A]/v1.2-pre.

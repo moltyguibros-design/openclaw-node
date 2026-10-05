@@ -171,6 +171,8 @@ os.execv('/bin/sleep',['sleep','30'])
         (self.directory / 'child-stop').touch(mode=0o600)
         if self.service.status()['loaded']:
             subprocess.run(['/bin/launchctl', 'bootout', self.service.target], capture_output=True, timeout=10)
+        if self.service.disabled():
+            self.service.enable_after_hold()
         if (self.directory / 'child-ready.json').exists():
             pid = json.loads((self.directory / 'child-ready.json').read_text())['pid']
             if (self.directory / 'exec').exists() and process_exists(pid):
@@ -232,6 +234,27 @@ os.execv('/bin/sleep',['sleep','30'])
             verify()
         self.assertFalse(self.service.status()['loaded'])
         self.assertEqual(self.log.stat().st_size, 0)
+
+    def test_owned_job_disable_precedes_stop_and_enable_precedes_restart(self):
+        binding = self.launch()
+        with StopWatch(self.service, binding, [self.log, self.err], 'mesh-task-daemon') as watch:
+            self.service.disable_for_hold()
+            self.assertTrue(self.service.disabled())
+            self.assertTrue(self.service.status()['running'])
+            with self.assertRaisesRegex(Refused, 'still loaded'):
+                self.service.enable_after_hold()
+            watch.apply()
+            proof = watch.verify(self.connection_closed, self.listener_absent)
+        self.assertTrue(proof['verified'])
+        self.assertFalse(self.service.status()['loaded'])
+        self.assertTrue(self.service.disabled())
+        self.service.enable_after_hold()
+        self.assertFalse(self.service.disabled())
+        self.ready.unlink()
+        self.service.bootstrap()
+        wait_for(lambda: self.ready.exists() and self.service.status()['running'])
+        self.proofs.append({'test': self._testMethodName, 'stop': proof,
+                            'disabled_after_bootout': True, 'restarted_after_enable': True})
 
     def test_forced_kill_is_observed_past_loaded_exit_timeout_and_refused(self):
         binding = self.launch('hang', exit_timeout=1)
