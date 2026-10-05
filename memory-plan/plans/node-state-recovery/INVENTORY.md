@@ -1612,3 +1612,14 @@ swallow a test assertion and appear to pass. The journal suite passes
 hold, stopped-VM decision controller, four-history acceptance or verified
 service resumption. No production service, VM or NATS store changed;
 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 13:05 EDT: Claude's exact-head review found no new
+journal release blocker, but a missing test of the listener's NATS commit
+point. D80's owned negative creates a root handoff marker during the deploy
+fence and requires the precommit check to prevent any listener restore. A
+partial-start test documents the conservative retry: an unverified running
+listener must be stopped before recovery can restart it. The production
+adapter must refuse an already-running listener, and the full-node hold,
+deploy fence, stopped-VM decision, real-history acceptance and resumption
+remain open. No production service, VM or NATS store changed; 1.2 stays
+[A]/v1.2-pre.

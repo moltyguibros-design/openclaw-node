@@ -962,7 +962,7 @@ class Journal:
                                        and row.get('unit') == 'mesh-deploy-listener'), default=0)
                 require(not (latest_intent > latest_restored
                              and (listener['loaded'] or listener['running'])),
-                        'deploy listener restarted before its release gate')
+                        'deploy listener is running without verified restoration; stop it before retry')
             except Exception as error:
                 errors.append({'unit': 'mesh-deploy-listener', 'reason': type(error).__name__,
                                'detail': str(error)})

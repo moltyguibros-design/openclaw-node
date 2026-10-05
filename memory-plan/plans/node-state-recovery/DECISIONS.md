@@ -1533,3 +1533,24 @@ started during recovery. The journal suite passes 107 tests. This is owned
 fixture evidence, not a production deploy fence, full-node hold, stopped-VM
 decision or service resumption. No production service, VM or NATS store
 changed; step 1.2 stays [A]/v1.2-pre.
+
+## D80 — Pin listener precommit and retain the conservative retry boundary (2026-10-05 13:05 EDT)
+
+Claude's read-only review of `f72fdaa1` found no new journal release
+blocker, but a mutation that skipped the listener's NATS `precommit()` still
+passed the existing suites. A new owned negative now creates the root handoff
+marker inside the deploy fence and requires zero listener restores; it fails
+if the precommit check is skipped. Another owned test starts the listener
+through the journal, makes its readiness step fail, then verifies that a
+retry refuses while the listener remains running and succeeds only after it
+is stopped. The refusal text now names the missing durable restoration proof
+and required stop instead of claiming the listener started before release.
+
+The conservative retry can also refuse a listener that the journal did
+legitimately start if the subsequent verification or receipt write failed.
+That ambiguity is intentional for now: an outside start during the release
+window can leave the same durable rows. A future production adapter must
+refuse an already-running listener at start time, and a verified start step
+with its own durable receipt may narrow the retry boundary. The complete
+full-node hold and deploy fence remain prerequisites to production release.
+No production service, VM or NATS store changed; step 1.2 stays [A]/v1.2-pre.
