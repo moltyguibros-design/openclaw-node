@@ -1697,3 +1697,17 @@ exact-head CI remains pending;
 full-node production hold, stopped-VM capture, four-history acceptance and
 service resumption remain open. No production service, VM or NATS history
 changed; step 1.2 remains [A]/v1.2-pre.
+
+## D87 — Refuse an ungated installed timer before the hold (2026-10-05 19:55 EDT)
+
+A closed execution-hold marker cannot stop a scheduled job whose installed
+`ProgramArguments` bypasses `timer-entry.py`. For scoped timer commissioning
+and full-node holds, `JournaledHold` now requires every baselined timer to
+use the staged Python gate, the saved gate root and pins, its own label, and
+the pinned manifest digest. It refuses an ungated observer before closing the
+gate. The owned native hold suite passes 44 tests and the preservation journal
+suite passes 116. D86's exact-head CI passed all four jobs. This validates
+a static entry shape; continuous 23-job, root/user, detached-process and
+host UTM autostart exclusion still need a production controller and rehearsal.
+No production service, VM or NATS history changed; step 1.2 remains
+[A]/v1.2-pre.

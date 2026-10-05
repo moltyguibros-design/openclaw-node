@@ -1699,3 +1699,11 @@ D86 exact-head CI remains pending. This adds fixture evidence, not a
 production full-node hold or service resumption. No production service, VM or
 NATS history changed;
 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 19:55 EDT: D87 refuses a scoped execution hold when
+any baselined timer bypasses the staged gate command or saved pins. An owned
+ungated-observer negative refuses before gate closure; 44 native-hold and 116
+journal tests pass locally. D86 exact-head CI passed all four jobs. The
+complete continuous writer/VM hold, stopped-VM capture, real four-history
+acceptance and verified service resumption remain open. No production
+service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.

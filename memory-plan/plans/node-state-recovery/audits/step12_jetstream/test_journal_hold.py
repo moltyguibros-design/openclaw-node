@@ -36,6 +36,18 @@ def inventory():
     return copy.deepcopy(prior)
 
 
+def gated_identity(unit, gate_root, pins):
+    entry = gate_root.parent / 'timer-entry.py'
+    manifest = gate_root.parent / 'timer-entry-manifest.json'
+    digest = '2' * 64
+    return {'plist_sha256': '0' * 64,
+            'argv': ['/usr/bin/python3', '-I', '-S', str(entry), str(manifest), digest,
+                     'ai.openclaw.' + unit, str(gate_root), pins['lock'],
+                     pins['root'], '--', '/owned/' + unit],
+            'files': {str(entry): '1' * 64, str(manifest): digest},
+            'dependencies': {}, 'working_directory': '/'}
+
+
 class HoldTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='openclaw-journal-hold-owned-')
@@ -60,6 +72,7 @@ class HoldTests(unittest.TestCase):
         self.gate = gate_module.Gate(self.gate_root, self.pin)
         self.prior = inventory()
         self.prior[ANCHOR]['execution_hold'] = describe(self.gate, [ANCHOR])
+        self.prior[ANCHOR]['identity'] = gated_identity(ANCHOR, self.gate_root, self.pin)
         self.current = copy.deepcopy(self.prior)
         self.physical = True
         self.calls = []
@@ -147,10 +160,7 @@ class HoldTests(unittest.TestCase):
                 for unit in TIMER_UNITS:
                     prior[unit] = {'class': 'timer', 'loaded': True, 'running': False,
                                    'disabled': False,
-                                   'identity': {'plist_sha256': '0' * 64,
-                                                'argv': ['/owned/' + unit],
-                                                'files': {'/owned/' + unit: '1' * 64},
-                                                'dependencies': {}, 'working_directory': '/'}}
+                                   'identity': gated_identity(unit, gate_root, pins)}
                 prior[ANCHOR]['execution_hold'] = describe(gate, sorted(TIMER_UNITS))
                 baseline = root / 'journals' / 'timer'
                 with Journal(baseline, prior, boot='owned-boot', node_lock=root / 'node.lock',
@@ -181,6 +191,30 @@ class HoldTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, 'original closed observer'):
             self.hold.mutate('mesh-agent', 'copy', lambda: self.fail('must not run'), lambda: {'verified': True})
         self.assertEqual(len(self.journal.records), 1)
+
+    def test_timer_scope_refuses_ungated_entry_before_close(self):
+        changes = {
+            'ungated': lambda argv: ['/owned/observer'],
+            'wrong-label': lambda argv: [*argv[:6], 'ai.openclaw.other', *argv[7:]],
+            'wrong-pin': lambda argv: [*argv[:8], 'wrong-lock-pin', *argv[9:]],
+            'wrong-manifest': lambda argv: [*argv[:5], '0' * 64, *argv[6:]],
+        }
+        for case, change in changes.items():
+            with self.subTest(case=case):
+                prior = {unit: {'class': 'timer', 'loaded': True, 'running': False,
+                                'disabled': False,
+                                'identity': gated_identity(unit, self.gate_root, self.pin)}
+                         for unit in TIMER_UNITS}
+                prior[ANCHOR]['execution_hold'] = describe(self.gate, sorted(TIMER_UNITS))
+                argv = prior['observer']['identity']['argv']
+                prior['observer']['identity']['argv'] = change(argv)
+                isolated = self.root / case
+                isolated.mkdir(mode=0o700)
+                with Journal(isolated / 'journals/window', prior, boot='owned-boot',
+                             node_lock=isolated / 'node.lock', scope=TIMER_SCOPE) as journal:
+                    with self.assertRaisesRegex(Exception, 'timer entry is ungated: observer'):
+                        JournaledHold(journal, self.gate, self.fast)
+                    self.assertIsNone(self.gate.marker())
 
     @unittest.skipUnless(sys.platform == 'darwin', 'continuous native observer is a Mac acceptance contract')
     def test_full_scope_hold_completion_does_not_certify_without_process_watch(self):
@@ -646,9 +680,7 @@ class TimerScopeReopenTests(unittest.TestCase):
             for unit in TIMER_UNITS:
                 prior[unit] = {'class': 'timer', 'loaded': True, 'running': False,
                                'disabled': False,
-                               'identity': {'plist_sha256': '0' * 64, 'argv': ['/owned/' + unit],
-                                            'files': {'/owned/' + unit: '1' * 64},
-                                            'dependencies': {}, 'working_directory': '/'}}
+                               'identity': gated_identity(unit, gate_root, pins)}
             with gate_module.Gate(gate_root, pins) as gate:
                 prior[ANCHOR]['execution_hold'] = describe(gate, sorted(TIMER_UNITS))
                 with Journal(journal_root, prior, boot='owned-boot', node_lock=node_lock,
