@@ -144,6 +144,38 @@ class HostReconcileTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'capture worker is not active'):
                 guard(spec, capture, fixture=True)
             self.assertFalse((capture / 'GUARD_INTENT.json').exists())
+            self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
+
+            died_during_preflight = root / 'died-during-preflight'
+            died_during_preflight.mkdir(mode=0o700)
+            died_initial = preflight(spec, died_during_preflight / 'before-shutdown')
+            write_record(died_during_preflight / 'ARMED.json', {
+                'scope': 'waiting for external guest shutdown; no stop request issued',
+                'vm_uuid': vm_uuid, 'host_boot_session': died_initial['host_boot_session'],
+                'image_device': died_initial['image_device'],
+                'image_inode': died_initial['image_inode'],
+            })
+            inactive_capture_lock(died_during_preflight)
+            dying_fd = os.open(died_during_preflight / 'CAPTURE_ACTIVE.lock', os.O_RDWR)
+            fcntl.flock(dying_fd, fcntl.LOCK_EX)
+            original_preflight = host_vm_guard.preflight
+
+            def worker_died_after_preflight(*args, **kwargs):
+                nonlocal dying_fd
+                observed = original_preflight(*args, **kwargs)
+                os.close(dying_fd)
+                dying_fd = None
+                return observed
+
+            try:
+                with patch.object(host_vm_guard, 'preflight', worker_died_after_preflight):
+                    with self.assertRaisesRegex(RuntimeError, 'capture worker is not active'):
+                        guard(spec, died_during_preflight, fixture=True)
+            finally:
+                if dying_fd is not None:
+                    os.close(dying_fd)
+            self.assertFalse((died_during_preflight / 'GUARD_INTENT.json').exists())
+            self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
             original_write = host_vm_guard.write_record
             def partial_intent(path, value):
                 if not pathlib.Path(path).name.startswith('GUARD_INTENT.json.tmp.'):

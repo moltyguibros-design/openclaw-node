@@ -1375,6 +1375,8 @@ The review clarified that a killed capture worker releases its activity lock
 without a terminal receipt. The guard now probes that lock without waiting
 before publishing intent and refuses when the lock is free; the disposable
 fixture checks that refusal leaves no intent or image flag and that a live lock still
-permits a guarded attempt. No source-wide exclusion, no-intent abort receipt,
+permits a guarded attempt. A second fixture releases the worker lock after
+preflight and confirms the guard's final probe refuses before intent or flag.
+The local host group passes 12/12. No source-wide exclusion, no-intent abort receipt,
 real UTM rehearsal, full-node hold or production stop is claimed. Step 1.2
 remains [A]/v1.2-pre.
