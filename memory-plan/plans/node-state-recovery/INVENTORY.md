@@ -1542,3 +1542,14 @@ commands both refuse with the consumer named and no success manifest, then
 the positive four-history probe passes and all owned servers stop. This is
 owned test evidence only. Serving-member replica verification, the physical
 hold and production acceptance remain open; 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 08:32 EDT: Claude's exact-head review confirmed that
+reverting the snapshot consumer lister makes the owned R2 fixture accept a
+missing consumer, while the unchanged fixture refuses with the required
+message and no manifest. The fixture now also waits for stream information
+after observing the missing-consumer response, so a stream leadership delay
+cannot become a different failure. CI at the previous head found an unrelated
+task-daemon test collision: two separately sampled ephemeral ports were
+identical. The fixture now resamples its monitor port until distinct; all
+seven task-daemon lifecycle tests pass locally. CI for this correction remains
+required. No production history or service changed; 1.2 remains [A]/v1.2-pre.

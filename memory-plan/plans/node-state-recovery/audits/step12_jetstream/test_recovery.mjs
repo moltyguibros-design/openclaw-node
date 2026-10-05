@@ -468,6 +468,7 @@ try {
   const omitted = await waitMissingConsumer(r2NC, 'CONSUMER_PLACEHOLDER', 'held-r2');
   assert.equal(omitted.total, 1);
   assert.equal((omitted.consumers || []).length, 0);
+  await waitInfo(r2NC, 'CONSUMER_PLACEHOLDER');
   const omittedConsumerBaseline = path.join(root, 'prestop-omitted-consumer');
   await assert.rejects(run(process.execPath, baselineArgs(r2Survivor, r2NC.info, omittedConsumerBaseline),
     { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' }));
