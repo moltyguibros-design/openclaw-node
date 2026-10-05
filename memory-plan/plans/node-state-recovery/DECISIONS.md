@@ -1679,3 +1679,21 @@ scope's unit/label binding and the facade's journal-write trust remain
 latent boundaries without a production `StopWatch` caller; full-node binding
 is enforced before intent. No production service, VM or NATS history changed.
 Step 1.2 remains [A]/v1.2-pre.
+
+## D86 — Connect native stop evidence to the listener fence (2026-10-05 17:45 EDT)
+
+Claude's D85 review found that the full-node journal composition test feeds
+canned listener stop evidence to `Journal.listener_stop_proven()`. That test
+checks ordering and fence behavior, but it does not constrain the actual
+`StopWatch.verify()` evidence shape. The owned macOS persistent-stop test now
+passes its real stop receipt into `Journal.listener_stop_proven()`. This
+refuses missing proof keys and values that are truthy but not the required
+booleans before such a receipt can anchor a full-node transfer. The native
+launchd suite passes 38 tests with one domain skip, and plan lint is
+conformant. D85's canceled CI jobs were rerun on the same head and all four
+jobs passed; the macOS log ran 116 journal and 38 managed-stop tests with one
+domain skip, and the pinned NATS download passed its checksum. D86's
+exact-head CI remains pending;
+full-node production hold, stopped-VM capture, four-history acceptance and
+service resumption remain open. No production service, VM or NATS history
+changed; step 1.2 remains [A]/v1.2-pre.

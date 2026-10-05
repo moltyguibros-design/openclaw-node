@@ -1688,3 +1688,14 @@ evidence, not a native hold plus real production listener stop. The complete
 writer/VM hold, four-history restore and acceptance, and verified resumption
 remain open. No production service, VM or NATS store changed; 1.2 remains
 [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 17:45 EDT: D86 binds the owned native launchd stop
+receipt to the full-node journal listener proof predicate. The macOS owned
+suite passes 38 tests with one domain skip, and plan lint is conformant.
+The earlier D85 CI run had three jobs canceled before runner acquisition;
+the failed jobs were rerun and all four passed on the same head, including
+116 journal and 38 managed-stop tests on macOS with the pinned NATS download.
+D86 exact-head CI remains pending. This adds fixture evidence, not a
+production full-node hold or service resumption. No production service, VM or
+NATS history changed;
+1.2 remains [A]/v1.2-pre.
