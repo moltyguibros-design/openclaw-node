@@ -1459,3 +1459,10 @@ unchanged. Claude's other findings on per-member replica validation, offline
 consumer positions and recovery ordering remain under review; this is not
 production history acceptance. No production service or history was changed;
 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 05:39 EDT: D67 fixes the owned launchd stop census
+missing descendants of orphaned members of the owner's process group. The
+four-process negative regression passes, and the disposable macOS launchd
+suite passes 26 tests (one existing skip). This does not cover arbitrary
+detached writers, root/user agents, or the absent full-node hold driver. No
+production service was stopped; 1.2 remains [A]/v1.2-pre.

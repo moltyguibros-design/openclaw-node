@@ -13,8 +13,9 @@ import tempfile
 import time
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from managed_launchd import Launchd, StopWatch, process_exists, unload_idle_timer
+from managed_launchd import Launchd, StopWatch, process_exists, process_tree, unload_idle_timer
 from legacy_fixture import legacy_journal
 from preservation_checks import Refused, http_json
 from preservation_journal import Journal
@@ -38,6 +39,11 @@ def wait_for(check, seconds=10):
 
 
 class StopWatchPreflight(unittest.TestCase):
+    def test_process_tree_closes_over_orphaned_group_member_children(self):
+        processes = '100 1 100\n200 1 100\n300 200 300\n400 300 400\n'
+        with patch('managed_launchd.command', return_value=processes):
+            self.assertEqual(set(process_tree(100)), {100, 200, 300, 400})
+
     def test_deploy_listener_with_child_refuses_before_signal(self):
         status = {'pid': 101}
         watch = SimpleNamespace(prepared=True, drain=lambda: None,

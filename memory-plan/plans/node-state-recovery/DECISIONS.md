@@ -1304,3 +1304,15 @@ the probe now refuses at validation, with the source master hash unchanged.
 This checks set completeness relative to the supplied baselines. It does not
 independently prove the member-1 baseline's history, verify each serving
 replica locally, or close production acceptance. Step 1.2 stays [A]/v1.2-pre.
+
+## D67 — Close the owned process census over orphaned group members (2026-10-05 05:39 EDT)
+
+The launchd stop watcher enumerated descendants of the owner before adding
+all processes in the owner's process group. A helper reparented to PID 1 but
+still in that group could have a live child in another group; the child was
+absent from the watch and later survivor check. Seed the closure with the
+owner's whole group, then recursively include every child's descendants.
+A cross-platform four-process regression pins the orphaned-helper case, and
+the owned macOS launchd suite passes 26 tests (one existing skip). This fixes
+the scoped tree census. It does not prove an exhaustive census of unrelated
+detached writers or a full-node hold; step 1.2 remains [A]/v1.2-pre.

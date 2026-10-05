@@ -134,13 +134,13 @@ def process_tree(owner, group=None):
         rows[pid] = {'parent': parent, 'group': process_group}
     require(owner in rows or group is not None, 'service owner disappeared')
     group = rows[owner]['group'] if group is None else group
-    descendants = {owner} if owner in rows else set()
+    descendants = ({owner} if owner in rows else set()) | {
+        pid for pid, row in rows.items() if row['group'] == group}
     while True:
         found = {pid for pid, row in rows.items() if row['parent'] in descendants}
         if found <= descendants:
             break
         descendants |= found
-    descendants |= {pid for pid, row in rows.items() if row['group'] == group}
     return {pid: rows[pid] for pid in descendants}
 
 
