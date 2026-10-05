@@ -5,14 +5,13 @@ import datetime
 import json
 import os
 import pathlib
-import plistlib
 import stat
 import subprocess
 import sys
 
 from host_image_immutable import change_immutable
 from host_vm_capture import file_hash, fsync_parent
-from host_vm_preflight import owned_directory, preflight, require, write_record
+from host_vm_preflight import no_disk_attachment, owned_directory, preflight, require, write_record
 
 
 CAPTURE_SCOPE = ('sampled stopped-state image extraction; uninterrupted power-off, '
@@ -32,17 +31,7 @@ def unattached(clone):
                              capture_output=True, timeout=15)
     require(holders.returncode == 1 and not holders.stdout and not holders.stderr,
             'temporary clone has an open holder')
-    no_attachment(clone)
-
-
-def no_attachment(clone):
-    attached = subprocess.run(['/usr/bin/hdiutil', 'info', '-plist'],
-                              capture_output=True, timeout=15)
-    require(attached.returncode == 0 and not attached.stderr,
-            'attached image inventory failed')
-    images = plistlib.loads(attached.stdout)['images']
-    require(all(pathlib.Path(row['image-path']).resolve() != clone.resolve()
-                for row in images), 'temporary clone remains attached')
+    no_disk_attachment(clone)
 
 
 def dispose(host_spec, capture_dir, output, fixture=False):

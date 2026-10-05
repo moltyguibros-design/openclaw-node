@@ -1324,3 +1324,16 @@ failure can be retried in a fresh preflight directory; post-intent failure
 still requires reconciliation. The host fixture pins both cases and passes
 9/9 locally. This does not establish a complete abort controller or permit
 production VM shutdown; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 00:48 EDT: a disposable macOS probe showed user-level
+`lsof` reports no holder for either a read-only or writable `hdiutil`
+attachment of an ASIF image. Host preflight now refuses an attached source
+image before guard, capture or reconciliation can treat it as stopped and
+idle. The fixture refuses a writable source attachment before guard and a
+read-only source attachment before reconciliation unlock.
+The guard also refuses a capture directory already marked failed or complete;
+its intent now publishes atomically under the armed receipt lock before
+changing the flag. A deliberately interrupted intent write leaves no final
+intent or immutable source, and a retry succeeds. The local host group passes
+9/9. These disposable checks do not prove continuous exclusion or authorize
+production shutdown; 1.2 remains [A]/v1.2-pre.

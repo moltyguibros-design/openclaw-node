@@ -103,6 +103,12 @@ even if the clone pathname is absent, because a detached pathname does not
 detach an already attached image. A transient guard preflight failure before
 intent publication can be retried with a fresh preflight directory; a
 post-intent failure stays one-shot and requires reconciliation.
+Host preflight also refuses a disk-image attachment of the source: a
+disposable ASIF attached through `hdiutil` was invisible to user-level
+`lsof`. The guard refuses a capture directory already marked failed or
+complete, and writes its intent through a private temporary file and atomic
+rename before applying the source flag. An interrupted temporary intent
+write is retriable; a published intent remains one-shot.
 These are sampled checks, not proof that an owner never cleared and reapplied
 the flag or that no pre-existing writable descriptor wrote between samples.
 An unexpected existing guard intent, completion receipt or temporary receipt

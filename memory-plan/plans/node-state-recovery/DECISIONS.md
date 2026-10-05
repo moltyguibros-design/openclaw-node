@@ -1236,6 +1236,11 @@ the intent exists, the guard remains one-shot and reconciliation is required.
 Reconciliation must also check the host disk-image inventory even when the
 clone path is absent, before clearing the source flag; an attached image may
 survive an external unlink of its pathname.
+Host preflight must check the disk-image attachment inventory for the source
+as well as process holders; user-level `lsof` did not report an attached
+disposable ASIF. The guard refuses a terminal capture attempt and publishes
+its intent atomically before setting the source flag. A torn temporary
+intent leaves no final intent or flag and can be retried.
 Missing or changed guard evidence refuses the attempt without accepting a
 cold master. The check does not prove continuous exclusion of a same-owner
 writer or replace the missing full-node hold and real UTM rehearsal.

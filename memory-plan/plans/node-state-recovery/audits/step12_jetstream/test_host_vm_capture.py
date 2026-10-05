@@ -19,7 +19,7 @@ from host_clone_dispose import cleanup_failed, dispose
 from host_vm_capture import capture, clone_only, publish_capture_record
 from host_vm_guard import guard
 from host_image_immutable import change_immutable
-from host_vm_preflight import vmstate_identity
+from host_vm_preflight import preflight, vmstate_identity
 from host_vm_reconcile import reconcile
 
 
@@ -219,6 +219,13 @@ class HostCaptureTest(unittest.TestCase):
             'utmctl_sha256': hashlib.sha256(controller.read_bytes()).hexdigest(),
         }))
         spec.chmod(0o600)
+        attached_source = plistlib.loads(run('/usr/sbin/diskutil', 'image', 'attach',
+                                              '--plist', '--noMount', str(source)))
+        self.disks.append(attached_source['system-entities'][0]['dev-entry'])
+        with self.assertRaisesRegex(RuntimeError, 'image remains attached'):
+            preflight(spec, self.root / 'source-attached')
+        self.assertTrue((self.root / 'source-attached' / 'FAILED.json').exists())
+        self.eject()
         unsafe = self.root / 'unsafe-production-path'
         refused_path = subprocess.run([sys.executable, str(CAPTURE), str(spec),
                                        str(store_spec), str(unsafe), '1'], capture_output=True)
@@ -305,6 +312,9 @@ class HostCaptureTest(unittest.TestCase):
         self.assertTrue((refused / 'FAILED.json').exists())
         self.assertFalse((refused / 'CAPTURE.json').exists())
         self.assertFalse((refused / 'powered-off-image.asif').exists())
+        with self.assertRaisesRegex(RuntimeError, 'already ended'):
+            guard(spec, refused, fixture=True)
+        self.assertFalse((refused / 'GUARD_INTENT.json').exists())
 
         with self.assertRaisesRegex(RuntimeError, 'stopped VM'):
             dispose(spec, output, output / 'dispose-while-running', fixture=True)
@@ -330,7 +340,7 @@ class HostCaptureTest(unittest.TestCase):
         attached_clone = plistlib.loads(run('/usr/sbin/diskutil', 'image', 'attach', '--plist',
                                              '--readOnly', '--noMount', str(clone)))
         self.disks.append(attached_clone['system-entities'][0]['dev-entry'])
-        with self.assertRaisesRegex(RuntimeError, 'clone'):
+        with self.assertRaisesRegex(RuntimeError, 'attached'):
             dispose(spec, output, output / 'dispose-attached', fixture=True)
         self.assertTrue(clone.exists())
         self.assertTrue((output / 'dispose-attached' / 'FAILED.json').exists())
@@ -351,6 +361,14 @@ class HostCaptureTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'attached'):
             reconcile(spec, output, output / 'orphan-attachment', fixture=True)
         self.assertTrue((output / 'orphan-attachment' / 'OPERATOR_REQUIRED.json').exists())
+        self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
+        self.eject()
+        attached_source = plistlib.loads(run('/usr/sbin/diskutil', 'image', 'attach',
+                                              '--plist', '--readOnly', '--noMount', str(source)))
+        self.disks.append(attached_source['system-entities'][0]['dev-entry'])
+        with self.assertRaisesRegex(RuntimeError, 'image remains attached'):
+            reconcile(spec, output, output / 'source-attached', fixture=True)
+        self.assertTrue((output / 'source-attached' / 'OPERATOR_REQUIRED.json').exists())
         self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
         self.eject()
         self.assertTrue(reconcile(spec, output, output / 'bootable', fixture=True)['guard_completed'])
@@ -393,7 +411,7 @@ class HostCaptureTest(unittest.TestCase):
         attached_clone = plistlib.loads(run('/usr/sbin/diskutil', 'image', 'attach', '--plist',
                                              '--readOnly', '--noMount', str(failed_clone)))
         self.disks.append(attached_clone['system-entities'][0]['dev-entry'])
-        with self.assertRaisesRegex(RuntimeError, 'clone'):
+        with self.assertRaisesRegex(RuntimeError, 'attached'):
             cleanup_failed(spec, failed_capture, failed_capture / 'cleanup-attached', fixture=True)
         self.assertTrue(failed_clone.exists())
         self.eject()

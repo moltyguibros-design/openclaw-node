@@ -123,6 +123,17 @@ class HostReconcileTest(unittest.TestCase):
                 reconcile(spec, capture, capture / 'without-guard-intent', fixture=True)
             self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
             change_immutable(source, source_identity, False)
+            original_write = host_vm_guard.write_record
+            def partial_intent(path, value):
+                if not pathlib.Path(path).name.startswith('GUARD_INTENT.json.tmp.'):
+                    return original_write(path, value)
+                pathlib.Path(path).write_text('{"partial":')
+                raise OSError('interrupted guard intent write')
+            with patch.object(host_vm_guard, 'write_record', partial_intent):
+                with self.assertRaisesRegex(OSError, 'interrupted guard intent write'):
+                    guard(spec, capture, fixture=True)
+            self.assertFalse((capture / 'GUARD_INTENT.json').exists())
+            self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
             guard(spec, capture, fixture=True)
             self.assertTrue((capture / 'GUARD_INTENT.json').exists())
             self.assertTrue((capture / 'GUARD.json').exists())

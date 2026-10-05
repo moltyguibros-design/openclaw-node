@@ -2,6 +2,7 @@
 """Guard a stopped UTM image for one pinned capture; never stop or start UTM."""
 
 import datetime
+import fcntl
 import os
 import pathlib
 import stat
@@ -15,6 +16,20 @@ from host_vm_preflight import owned_directory, preflight, require, write_record
 
 
 GUARD_SCOPE = 'stopped source image guard intent; no clone or VM start'
+
+
+def publish_guard_intent(capture_dir, intent):
+    receipt = capture_dir / 'GUARD_INTENT.json'
+    temporary = capture_dir / ('GUARD_INTENT.json.tmp.' + uuid.uuid4().hex)
+    with (capture_dir / 'ARMED.json').open('rb') as armed:
+        fcntl.flock(armed, fcntl.LOCK_EX)
+        require(not os.path.lexists(receipt), 'guard intent already exists')
+        require(not any(os.path.lexists(capture_dir / name) for name in
+                        ('FAILED.json', 'CAPTURE.json')),
+                'capture attempt already ended')
+        write_record(temporary, intent)
+        os.replace(temporary, receipt)
+        fsync_parent(capture_dir)
 
 
 def guard(host_spec, capture_dir, fixture=False):
@@ -36,6 +51,9 @@ def guard(host_spec, capture_dir, fixture=False):
     require(not any(os.path.lexists(capture_dir / name) for name in
                     ('GUARD_INTENT.json', 'GUARD.json', 'GUARD.json.tmp')),
             'guard artifact already exists; reconcile the prior attempt')
+    require(not any(os.path.lexists(capture_dir / name) for name in
+                    ('FAILED.json', 'CAPTURE.json')),
+            'capture attempt already ended')
     armed = private_record(capture_dir / 'ARMED.json')
     initial = private_record(capture_dir / 'before-shutdown/preflight.json')
     require(armed['scope'] == 'waiting for external guest shutdown; no stop request issued'
@@ -65,7 +83,10 @@ def guard(host_spec, capture_dir, fixture=False):
         'source_image_inode': identity[1],
         'source_image_size': identity[2],
     }
-    write_record(capture_dir / 'GUARD_INTENT.json', intent)
+    require(not any(os.path.lexists(capture_dir / name) for name in
+                    ('FAILED.json', 'CAPTURE.json')),
+            'capture attempt already ended')
+    publish_guard_intent(capture_dir, intent)
     change_immutable(source, identity, True)
     after = preflight(host_spec, capture_dir / 'after-guard')
     require(after['state'] == 'stopped' and after['holders_consistent']

@@ -54,6 +54,19 @@ def regular_file(path, owner=None):
     return info
 
 
+def no_disk_attachment(path):
+    attached = subprocess.run(['/usr/bin/hdiutil', 'info', '-plist'],
+                              capture_output=True, timeout=15)
+    require(attached.returncode == 0 and not attached.stderr,
+            'attached image inventory failed')
+    images = plistlib.loads(attached.stdout)['images']
+    for row in images:
+        image = pathlib.Path(row['image-path'])
+        require(image.resolve() != path.resolve()
+                and not (image.exists() and path.exists() and os.path.samefile(image, path)),
+                'image remains attached')
+
+
 def vmstate_identity(path):
     if not os.path.lexists(path):
         return None
@@ -165,6 +178,7 @@ def preflight(spec_path, output, allow_transition=False):
         image = data / spec['image_name']
         require(image.resolve() == image, 'UTM image path is redirected')
         image_info = regular_file(image, os.getuid())
+        no_disk_attachment(image)
         vmstate = vmstate_identity(data / 'vmstate')
         regular_file(utmctl)
         require(digest(utmctl) == spec['utmctl_sha256'] and os.access(utmctl, os.X_OK),
