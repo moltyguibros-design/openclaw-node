@@ -121,3 +121,14 @@ temporary-file and atomic-rename sequence. An interrupted write leaves only
 `CAPTURE.json.tmp`; reconciliation ignores it, removes an unattached clone
 and clears the source flag after fresh checks. This is crash convergence for
 the receipt, not proof of an uninterrupted stopped VM or accepted masters.
+
+2026-10-05 correction (D75): the table and completed-capture disposal path
+above are superseded. Any published `CAPTURE.json` retains the clone and source
+flag until a bound acceptance or explicit abort decision exists; reconcile and
+dispose now refuse before removing either. Reconcile still recovers an attempt
+without `CAPTURE.json`, but its `BOOTABLE.json` is host cleanup only, not the
+D62 abort or permission to start UTM. A sibling completed capture also prevents
+source unlock if its clone pathname was lost. Production capture entry is
+disabled until the decision controller exists, and old staged tool packages
+must be retired before production use. The new receipt scope makes those older
+tools refuse after publication, but cannot protect the interval before it.

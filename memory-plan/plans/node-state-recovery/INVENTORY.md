@@ -1553,3 +1553,23 @@ task-daemon test collision: two separately sampled ephemeral ports were
 identical. The fixture now resamples its monitor port until distinct; all
 seven task-daemon lifecycle tests pass locally. CI for this correction remains
 required. No production history or service changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 09:13 EDT: D75 makes completed-capture disposal and
+reconciliation refuse before clone deletion or source unlock until a bound
+acceptance or explicit abort decision exists. The owned host tests pass 9/9;
+their completed-capture negatives retain the clone and immutable source while
+interrupted-guard and failed-capture cleanup remain tested. This is source and
+disposable-fixture evidence only. The acceptance/abort and boot controllers,
+full-node hold, real UTM start/refusal rehearsal and real-history restores
+remain open. No production VM, service or NATS store changed; 1.2 stays
+[A]/v1.2-pre.
+
+Checkpoint 2026-10-05 09:30 EDT: Claude challenged D75 against staged host
+tool copies, a vanished sibling clone and the missing terminal decision. The
+new receipt scope makes old staged tools refuse after publication; reconcile
+also refuses a sibling completed receipt with no clone. Production capture
+entry now refuses before creating an attempt until an acceptance/abort
+controller exists. Retiring old staged packages, proving the full-node hold,
+real UTM guard behavior, terminal decisions and isolated real-history restores
+remain open. No production VM, service or NATS store changed; 1.2 stays
+[A]/v1.2-pre.

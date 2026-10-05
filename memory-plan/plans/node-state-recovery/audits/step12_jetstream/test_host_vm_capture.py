@@ -37,6 +37,29 @@ def run(*args):
 
 
 class VmstateGateTest(unittest.TestCase):
+    def test_production_capture_requires_decision_controller_before_output_creation(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-host-capture-entry-') as temporary:
+            root = pathlib.Path(temporary).resolve()
+            durable = root / 'Library/Application Support/OpenClawRecovery'
+            durable.mkdir(parents=True, mode=0o700)
+            durable.chmod(0o700)
+            host = root / 'host.json'
+            host.write_text(json.dumps({
+                'package': str(root / 'Owned.utm'), 'name': 'Owned',
+                'uuid': '00000000-0000-0000-0000-000000000002',
+                'image_name': 'image.asif', 'config_sha256': '0' * 64,
+                'utmctl': '/tmp/unused', 'utmctl_sha256': '0' * 64,
+            }))
+            host.chmod(0o600)
+            stores = root / 'stores.json'
+            stores.write_text(json.dumps({'data_volume_uuid': '0' * 36, 'stores': []}))
+            stores.chmod(0o600)
+            output = durable / 'capture'
+            with mock.patch.object(pathlib.Path, 'home', return_value=root):
+                with self.assertRaisesRegex(RuntimeError, 'requires a verified acceptance or abort'):
+                    capture(host, stores, output, 5)
+            self.assertFalse(output.exists())
+
     def test_reconcile_refuses_capture_paused_before_clone(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-host-capture-active-') as temporary:
             root = pathlib.Path(temporary).resolve()
@@ -407,6 +430,9 @@ class HostCaptureTest(unittest.TestCase):
             fcntl.flock(active, fcntl.LOCK_EX | fcntl.LOCK_NB)
         result = json.loads((output / 'CAPTURE.json').read_text())
         self.assertEqual(result['vm_state_at_final_check'], 'stopped')
+        self.assertNotEqual(result['scope'],
+                            'sampled stopped-state image extraction; uninterrupted power-off, '
+                            'clean shutdown and master acceptance external')
         self.assertEqual(result['vmstate_at_arm'], result['vmstate_at_final_check'])
         self.assertEqual(result['guard_receipt_sha256'],
                          hashlib.sha256((output / 'GUARD.json').read_bytes()).hexdigest())
@@ -427,6 +453,14 @@ class HostCaptureTest(unittest.TestCase):
         guard_receipt.write_bytes(original_guard_receipt)
         capture_receipt = output / 'CAPTURE.json'
         original_receipt = capture_receipt.read_bytes()
+        old_receipt = json.loads(original_receipt)
+        old_receipt['scope'] = ('sampled stopped-state image extraction; uninterrupted '
+                                'power-off, clean shutdown and master acceptance external')
+        capture_receipt.write_text(json.dumps(old_receipt))
+        with self.assertRaisesRegex(RuntimeError, 'capture receipt'):
+            host_match(guest_output / 'manifest.json', output / 'extracted-stores',
+                       self.root / 'old-scope')
+        capture_receipt.write_bytes(original_receipt)
         changed_receipt = json.loads(original_receipt)
         changed_receipt['clone_image_sha256'] = '0' * 64
         capture_receipt.write_text(json.dumps(changed_receipt))
@@ -493,32 +527,24 @@ class HostCaptureTest(unittest.TestCase):
         self.assertTrue((output / 'dispose-attached' / 'FAILED.json').exists())
         self.assertFalse((output / 'dispose-attached' / 'DISPOSE.json').exists())
         self.eject()
-        disposed = dispose(spec, output, output / 'dispose-after-stop', fixture=True)
-        self.assertTrue(disposed['clone_absent'])
-        self.assertTrue((output / 'dispose-after-stop' / 'DISPOSE.json').exists())
-        self.assertFalse((output / 'powered-off-image.asif').exists())
-        self.assertTrue(source.exists())
-        clone_only(source, clone)
-        info = clone.lstat()
-        change_immutable(clone, (info.st_dev, info.st_ino, info.st_size), False)
-        orphan = plistlib.loads(run('/usr/sbin/diskutil', 'image', 'attach', '--plist',
-                                    '--readOnly', '--noMount', str(clone)))
-        self.disks.append(orphan['system-entities'][0]['dev-entry'])
+        with self.assertRaisesRegex(RuntimeError, 'requires verified acceptance or abort'):
+            dispose(spec, output, output / 'dispose-after-stop', fixture=True)
+        self.assertTrue((output / 'dispose-after-stop' / 'FAILED.json').exists())
+        self.assertFalse((output / 'dispose-after-stop' / 'DISPOSE.json').exists())
+        self.assertTrue(clone.exists())
+        with self.assertRaisesRegex(RuntimeError, 'requires verified acceptance or abort'):
+            reconcile(spec, output, output / 'bootable', fixture=True)
+        self.assertTrue((output / 'bootable' / 'OPERATOR_REQUIRED.json').exists())
+        self.assertFalse((output / 'bootable' / 'BOOTABLE.json').exists())
+        self.assertTrue(clone.exists())
+        self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
+        os.chflags(clone, clone.lstat().st_flags & ~stat.UF_IMMUTABLE)
         clone.unlink()
-        with self.assertRaisesRegex(RuntimeError, 'attached'):
-            reconcile(spec, output, output / 'orphan-attachment', fixture=True)
-        self.assertTrue((output / 'orphan-attachment' / 'OPERATOR_REQUIRED.json').exists())
-        self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
-        self.eject()
-        attached_source = plistlib.loads(run('/usr/sbin/diskutil', 'image', 'attach',
-                                              '--plist', '--readOnly', '--noMount', str(source)))
-        self.disks.append(attached_source['system-entities'][0]['dev-entry'])
-        with self.assertRaisesRegex(RuntimeError, 'image remains attached'):
-            reconcile(spec, output, output / 'source-attached', fixture=True)
-        self.assertTrue((output / 'source-attached' / 'OPERATOR_REQUIRED.json').exists())
-        self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
-        self.eject()
-        self.assertTrue(reconcile(spec, output, output / 'bootable', fixture=True)['guard_completed'])
+        os.chflags(source, source.lstat().st_flags & ~stat.UF_IMMUTABLE)
+        for directory, children, _ in os.walk(output):
+            for child in children:
+                os.chmod(pathlib.Path(directory) / child, 0o700)
+        shutil.rmtree(output)
 
         wrong_store_spec = self.root / 'wrong-store-spec.json'
         wrong_store_spec.write_text(json.dumps({

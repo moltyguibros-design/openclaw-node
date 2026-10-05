@@ -23,6 +23,8 @@ from host_vm_preflight import owned_directory, preflight, require, write_record
 HOST_SPEC_FIELDS = {'package', 'name', 'uuid', 'image_name', 'config_sha256',
                     'utmctl', 'utmctl_sha256'}
 FIXTURE_UUID = '00000000-0000-0000-0000-000000000002'
+CAPTURE_SCOPE = ('guarded stopped-state image extraction; completed capture requires '
+                 'verified acceptance or explicit abort before source release')
 
 
 def file_hash(path):
@@ -128,6 +130,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         require(output.parent == pathlib.Path.home() /
                 'Library/Application Support/OpenClawRecovery',
                 'production capture requires the durable host recovery directory')
+        raise RuntimeError('production capture requires a verified acceptance or abort controller')
     require(isinstance(stores['stores'], list) and len(stores['stores']) == 4,
             'capture requires four store declarations')
     require(1 <= wait_seconds <= 3600, 'shutdown wait must be bounded to one hour')
@@ -218,7 +221,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         require(shutil.disk_usage(output).free >= 20 * 1024 ** 3,
                 'host free-space floor fell below 20 GiB after extraction')
         result = {
-            'scope': 'sampled stopped-state image extraction; uninterrupted power-off, clean shutdown and master acceptance external',
+            'scope': CAPTURE_SCOPE,
             'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'vm_uuid': host['uuid'], 'host_boot_session': first['host_boot_session'],
             'source_image_sha256': source_sha, 'clone_image_sha256': clone_sha,

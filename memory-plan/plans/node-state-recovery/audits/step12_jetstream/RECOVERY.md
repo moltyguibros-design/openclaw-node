@@ -60,10 +60,12 @@ image came from a powered-off guest; a separate typed host receipt and guest
 stop evidence must supply that provenance before production use. Its macOS
 synthetic ASIF fixture tests the extraction and wrong-volume refusal.
 
-`host_vm_capture.py` is a host-side candidate capture worker. Its production
-output parent must be the owner-private, persistent host
+`host_vm_capture.py` is a host-side candidate capture worker. Production entry
+currently refuses before creating an attempt because a bound acceptance or
+abort controller does not yet exist. Its eventual production output parent
+must be the owner-private, persistent host
 `~/Library/Application Support/OpenClawRecovery` directory; disposable
-fixtures have a separate guarded mode. It waits for an
+fixtures have a separate guarded mode. In that mode it waits for an
 external guest shutdown, uses two sampled stopped/no-holder observations,
 calls `clonefile(2)` without fallback, hashes source and clone, runs the
 extractor and rechecks the stopped state and a 20 GiB free-space floor. Host
@@ -84,20 +86,21 @@ and rehashed host files exactly, then makes the extracted trees read-only.
 `MATCH.json` is a content result only; it is neither writer-exclusion proof nor
 isolated restoration acceptance.
 
-`host_clone_dispose.py` removes the temporary full-image clone from a completed
-capture while a fresh host preflight reports the original VM stopped with no
-image holder. It checks the armed and capture receipts, source image identity,
-and full source/clone hashes before unlinking the clone, then fsyncs the parent
-and repeats the stopped/no-holder check. A failed check leaves a failure
-receipt; a successful `DISPOSE.json` proves only sampled clone removal. It does
-not start the VM, accept a master, or prevent an independent UTM start during
-the operation. Its `cleanup-failed` action also removes an orphaned clone from
-an attempt with private `ARMED.json` and `FAILED.json` but no `CAPTURE.json`.
-It binds the failed attempt to the same source-image file identity and refuses a clone
-still held open or listed as an attached disk image. Both actions recheck the
-stopped state after unlinking and issue receipts that do not authorize boot.
-A production controller must hold UTM down continuously through either path
-and verify clone absence before issuing start.
+`host_clone_dispose.py` refuses disposal of a completed capture after checking
+the armed and capture receipts, source image identity, full source/clone hashes
+and open holders. It leaves the clone intact with `FAILED.json`: there is no
+bound acceptance or explicit abort decision yet, and removing the clone would
+make `stopped_tree_match.py match` impossible. Its `cleanup-failed` action still
+removes an orphaned clone from an attempt with private `ARMED.json` and
+`FAILED.json` but no `CAPTURE.json`. It binds the failed attempt to the same
+source-image file identity and refuses a clone still held open or listed as an
+attached disk image. That failed-capture cleanup rechecks the stopped state
+after unlinking and issues a receipt that does not authorize boot. A production
+controller must hold UTM down continuously and decide acceptance or abort
+before any completed-capture clone disposal or VM start. The new capture
+receipt scope makes older staged disposal and reconciliation tools refuse a
+new completed receipt. Retiring those staged packages remains a separate
+production gate, since an old tool can act before receipt publication.
 
 `host_image_immutable.py` is an isolated, pinned `UF_IMMUTABLE` file-flag
 operation for disposable host-image guard tests. It verifies a literal,
@@ -110,12 +113,15 @@ and crash-safe clone-first reconciliation are required before considering it
 for production.
 
 `host_vm_reconcile.py` is a stopped-VM recovery mechanism for an interrupted
-guarded clone attempt. It binds the private arm and initial preflight records
-and a durable `GUARD_INTENT.json` written before the flag operation to a fresh
-source-image preflight. It refuses a changed completed-capture source,
-and removes only the fixed clone after checking its inode, holders and disk
-attachment. It scans sibling recovery directories for another fixed clone
-before clearing the source's immutable flag. Its `BOOTABLE.json` says only
+guarded clone attempt without `CAPTURE.json`. It binds the private arm and
+initial preflight records and a durable `GUARD_INTENT.json` written before the
+flag operation to a fresh source-image preflight. A completed capture is
+rehash-checked but then refused with `OPERATOR_REQUIRED.json` before clone
+removal or source unlock, pending a bound acceptance or explicit abort decision.
+For an interrupted attempt it removes only the fixed clone after checking its
+inode, holders and disk attachment. It scans sibling recovery directories for
+another fixed clone or completed `CAPTURE.json` before clearing the source's
+immutable flag. Its `BOOTABLE.json` says only
 that the original image is writable again, no clone remains and UTM was
 sampled stopped; it does not start the VM or accept masters. A mismatch writes
 `OPERATOR_REQUIRED.json` and does not blindly unlock. This tool is tested on

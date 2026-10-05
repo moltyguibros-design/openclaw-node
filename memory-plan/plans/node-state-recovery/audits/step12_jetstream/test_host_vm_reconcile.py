@@ -224,6 +224,45 @@ class HostReconcileTest(unittest.TestCase):
                     raise AssertionError(result.stderr.decode(errors='replace')[:500])
                 time.sleep(0.25)
             self.assertIsNone(disk)
+            orphan = plistlib.loads(run('/usr/sbin/diskutil', 'image', 'attach',
+                                         '--plist', '--readOnly', '--noMount', str(clone)))
+            disk = orphan['system-entities'][0]['dev-entry']
+            clone_info = clone.lstat()
+            change_immutable(clone, (clone_info.st_dev, clone_info.st_ino, clone_info.st_size), False)
+            clone.unlink()
+            with self.assertRaisesRegex(RuntimeError, 'attached'):
+                reconcile(spec, capture, capture / 'orphan-attachment', fixture=True)
+            self.assertTrue((capture / 'orphan-attachment' / 'OPERATOR_REQUIRED.json').exists())
+            self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
+            for attempt in range(20):
+                result = subprocess.run(['/usr/sbin/diskutil', 'eject', disk],
+                                        capture_output=True)
+                if result.returncode == 0:
+                    break
+                if b'Volume failed to eject' not in result.stderr:
+                    raise AssertionError(result.stderr.decode(errors='replace')[:500])
+                time.sleep(0.25)
+            else:
+                raise AssertionError('orphan image did not eject')
+            disk = None
+            attached_source = plistlib.loads(run('/usr/sbin/diskutil', 'image', 'attach',
+                                                  '--plist', '--readOnly', '--noMount', str(source)))
+            disk = attached_source['system-entities'][0]['dev-entry']
+            with self.assertRaisesRegex(RuntimeError, 'image remains attached'):
+                reconcile(spec, capture, capture / 'source-attached', fixture=True)
+            self.assertTrue((capture / 'source-attached' / 'OPERATOR_REQUIRED.json').exists())
+            self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
+            for attempt in range(20):
+                result = subprocess.run(['/usr/sbin/diskutil', 'eject', disk],
+                                        capture_output=True)
+                if result.returncode == 0:
+                    break
+                if b'Volume failed to eject' not in result.stderr:
+                    raise AssertionError(result.stderr.decode(errors='replace')[:500])
+                time.sleep(0.25)
+            else:
+                raise AssertionError('source image did not eject')
+            disk = None
             sibling = root / 'older-capture'
             sibling.mkdir(mode=0o700)
             other = sibling / 'powered-off-image.asif'
@@ -237,6 +276,13 @@ class HostReconcileTest(unittest.TestCase):
             info = other.lstat()
             change_immutable(other, (info.st_dev, info.st_ino, info.st_size), False)
             other.unlink()
+            write_record(sibling / 'CAPTURE.json', {'scope': CAPTURE_SCOPE})
+            with self.assertRaisesRegex(RuntimeError, 'completed capture'):
+                reconcile(spec, capture, capture / 'other-completed-capture', fixture=True)
+            self.assertTrue((capture / 'other-completed-capture' /
+                             'OPERATOR_REQUIRED.json').exists())
+            self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
+            (sibling / 'CAPTURE.json').unlink()
             result = reconcile(spec, capture, capture / 'recovered', fixture=True)
             self.assertTrue(result['clone_absent'])
             self.assertTrue(result['guard_completed'])
@@ -492,11 +538,25 @@ class HostReconcileTest(unittest.TestCase):
                 repaired.seek(-1, os.SEEK_END)
                 repaired.write(old_tail)
             change_immutable(source, source_identity, True)
-            recovered_capture = reconcile(spec, completed, completed / 'repaired-source',
-                                          fixture=True)
-            self.assertTrue(recovered_capture['capture_completed'])
-            self.assertFalse(completed_clone.exists())
-            self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
+            with self.assertRaisesRegex(RuntimeError, 'requires verified acceptance or abort'):
+                reconcile(spec, completed, completed / 'repaired-source', fixture=True)
+            self.assertTrue((completed / 'repaired-source' / 'OPERATOR_REQUIRED.json').exists())
+            self.assertFalse((completed / 'repaired-source' / 'BOOTABLE.json').exists())
+            self.assertTrue(completed_clone.exists())
+            self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
+            write_record(completed / 'FAILED.json', {'error': 'post-publication failure'})
+            with self.assertRaisesRegex(RuntimeError, 'requires verified acceptance or abort'):
+                reconcile(spec, completed, completed / 'capture-and-failure', fixture=True)
+            self.assertTrue(completed_clone.exists())
+            self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
+            clone_info = completed_clone.lstat()
+            change_immutable(completed_clone,
+                             (clone_info.st_dev, clone_info.st_ino, clone_info.st_size), False)
+            completed_clone.unlink()
+            with self.assertRaisesRegex(RuntimeError, 'requires verified acceptance or abort'):
+                reconcile(spec, completed, completed / 'missing-clone', fixture=True)
+            self.assertFalse((completed / 'missing-clone' / 'BOOTABLE.json').exists())
+            self.assertTrue(source.lstat().st_flags & stat.UF_IMMUTABLE)
         finally:
             if disk:
                 run('/usr/sbin/diskutil', 'eject', disk)

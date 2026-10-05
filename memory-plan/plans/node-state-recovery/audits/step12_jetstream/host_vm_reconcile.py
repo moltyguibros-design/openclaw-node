@@ -42,8 +42,9 @@ def no_other_clone(root, current):
         info = child.lstat()
         require(not stat.S_ISLNK(info.st_mode), 'recovery root contains a symlink')
         if stat.S_ISDIR(info.st_mode) and child != current:
-            require(not os.path.lexists(child / 'powered-off-image.asif'),
-                    'another temporary image clone still exists')
+            require(not os.path.lexists(child / 'powered-off-image.asif')
+                    and not os.path.lexists(child / 'CAPTURE.json'),
+                    'another temporary image clone or completed capture still exists')
 
 
 def reconcile(host_spec, capture_dir, output, fixture=False):
@@ -131,6 +132,7 @@ def reconcile(host_spec, capture_dir, output, fixture=False):
                     and capture['source_size'] == before['image_size']
                     and file_hash(source) == capture['source_image_sha256'],
                     'completed capture source image changed')
+            raise RuntimeError('completed capture requires verified acceptance or abort before reconciliation')
         if os.path.lexists(clone):
             info = clone.lstat()
             require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()

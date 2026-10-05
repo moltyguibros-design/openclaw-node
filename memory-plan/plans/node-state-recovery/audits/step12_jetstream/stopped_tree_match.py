@@ -11,6 +11,7 @@ import stat
 import sys
 
 from host_asif_extract import declared_path, private_parent, require, write_json
+from host_vm_capture import CAPTURE_SCOPE
 
 
 ROLES = {'standalone', 'member1', 'member2', 'member3'}
@@ -141,7 +142,7 @@ def host_match(guest_path, extracted, output):
     capture = json.loads(capture_path.read_text())
     new_output(output)
     try:
-        require(capture['scope'] == 'sampled stopped-state image extraction; uninterrupted power-off, clean shutdown and master acceptance external'
+        require(capture['scope'] == CAPTURE_SCOPE
                 and capture['vm_state_at_final_check'] == 'stopped'
                 and capture['source_image_sha256'] == capture['clone_image_sha256']
                 and capture['guard_receipt_sha256'] == sha256(guard_path)

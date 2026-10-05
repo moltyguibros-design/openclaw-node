@@ -1431,3 +1431,32 @@ four-history fixture passes with all servers stopped. This corrects D72's
 fixture-evidence limitation; it does not resolve the per-member replica or
 full-node hold gates. No production NATS member was touched and step 1.2
 remains [A]/v1.2-pre.
+
+## D75 — Retain completed-capture evidence until an acceptance or abort decision (2026-10-05 09:13 EDT)
+
+The existing completed-capture disposal and reconciliation paths could delete
+the only image clone before `stopped_tree_match.py` used it, then clear the
+source image's immutable flag without a historical acceptance or explicit
+abort decision. Until that decision controller exists, completed-capture
+disposal now refuses after its source/clone and holder checks, leaving the
+clone intact. Reconciliation still checks a completed capture's source hash
+but refuses before clone removal or source unlock. Its no-`CAPTURE.json`
+interrupted-guard path and failed-clone cleanup remain available. The owned
+macOS fixtures require refusal receipts, an intact clone and an immutable
+source after a completed capture; the host test group passes 10/10. This is a
+fail-closed evidence boundary, not an acceptance, abort, boot controller or
+proof that UTM respects the source flag. No production VM, service or NATS
+store was touched; step 1.2 remains [A]/v1.2-pre.
+
+Claude's read-only challenge found that previously staged host tool copies
+could still accept the old `CAPTURE.json` scope, that a sibling attempt could
+unlock the source after a completed capture lost its clone pathname, and that
+this slice gives a completed capture no safe terminal transition. The capture
+receipt now uses a new scope shared by the worker, matcher, disposal and
+reconciler; older staged tools refuse it after publication. The sibling scan
+also refuses any completed receipt, even if its clone is absent. Production
+capture entry refuses before output creation until a durable decision
+controller exists. Old staged tool packages still require retirement before
+production use because they can act before receipt publication. These are
+fail-closed source changes and fixture evidence only; they do not certify a
+production capture or VM boot.
