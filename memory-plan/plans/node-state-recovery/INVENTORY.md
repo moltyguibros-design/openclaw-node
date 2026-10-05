@@ -1418,3 +1418,15 @@ unloaded. This proves one
 direct GUI-domain bootstrap refusal on this host, not legacy `load`, other
 domains or reboot persistence. No production service or VM changed; 1.2
 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 03:02 EDT: the direct launchctl fixture now waits a
+second after owned-job bootout before testing disabled bootstrap, then uses
+the same raw bootstrap command immediately after re-enabling the label. The
+disabled attempt returned nonzero with no loaded job or ready marker; the
+enabled attempt loaded and ran the owned job. This controls for a transient
+post-bootout refusal in the previous test. The dedicated macOS fixture passes
+locally (1/1), and plan-lint is conformant (14 pass, one existing idle-step
+warning). CI and Claude review of this exact revision remain pending. This
+remains one GUI-domain job; no production hold, other-domain restart exclusion,
+reboot persistence, or production VM change is claimed. Step 1.2 stays
+[A]/v1.2-pre.
