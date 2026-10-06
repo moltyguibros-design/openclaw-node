@@ -892,6 +892,28 @@ class Journal:
                 and evidence['bootout'].get('timed_out') is False
                 and evidence.get('termination') in ({'signal': 15}, {'exit': 0}))
 
+    @staticmethod
+    def idle_stop_proven(unit, evidence):
+        spawn = evidence.get('spawn_evidence') if isinstance(evidence, dict) else None
+        prior = evidence.get('prior') if isinstance(evidence, dict) else None
+        return (isinstance(evidence, dict) and evidence.get('verified') is True
+                and evidence.get('unloaded') is True
+                and evidence.get('logs_unchanged') is True
+                and evidence.get('disabled_override_verified') is True
+                and isinstance(prior, dict) and prior.get('loaded') is True
+                and prior.get('running') is False
+                and isinstance(spawn, dict)
+                and spawn.get('label') == 'ai.openclaw.' + unit
+                and spawn.get('coverage_complete') is True
+                and spawn.get('spawns') == [])
+
+    def full_node_stop_proven(self, unit, evidence):
+        kind = self.prior[unit]['class']
+        return ((kind in ('daemon', 'on-demand', 'known-broken')
+                 and self.managed_stop_proven(evidence))
+                or (kind in ('timer', 'on-demand', 'known-broken')
+                    and self.idle_stop_proven(unit, evidence)))
+
     def mutate(self, unit, action, apply, verify, failure_evidence=None, intent_fields=None, hold=None):
         require(self.scope != TIMER_SCOPE or unit == 'scheduler-heartbeat'
                 and action == 'close-execution-hold' and not any(r['event'] == 'intent' for r in self.records)
@@ -946,12 +968,16 @@ class Journal:
             evidence = verify()
             require(isinstance(evidence, dict) and evidence.get('verified') is True,
                     'mutation lacks verified evidence')
-            if self.scope == FULL_NODE_SCOPE and unit == 'mesh-deploy-listener':
-                require(self.managed_stop_proven(evidence),
-                        'deploy listener stop lacks persistent unload and process proof')
-            if self.scope == FULL_NODE_SCOPE and unit in NATS_TRANSFER_UNITS:
-                require(self.managed_stop_proven(evidence),
-                        'NATS stop lacks persistent unload and process proof: ' + unit)
+            if self.scope == FULL_NODE_SCOPE and action == 'disable-and-unload':
+                if unit == 'mesh-deploy-listener':
+                    require(self.full_node_stop_proven(unit, evidence),
+                            'deploy listener stop lacks persistent unload and process proof')
+                elif unit in NATS_TRANSFER_UNITS:
+                    require(self.full_node_stop_proven(unit, evidence),
+                            'NATS stop lacks persistent unload and process proof: ' + unit)
+                else:
+                    require(self.full_node_stop_proven(unit, evidence),
+                            'full-node stop lacks class-specific persistent proof: ' + unit)
             if self.scope == FULL_NODE_SCOPE:
                 after_verify = self.check_entrypoints(forward=True, expected_loaded=expected,
                                                       expected_overrides=before_verify['overrides'])

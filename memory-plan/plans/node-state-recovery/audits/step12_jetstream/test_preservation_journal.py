@@ -100,6 +100,14 @@ def listener_stop_evidence():
             'termination': {'signal': 15}}
 
 
+def timer_stop_evidence(unit):
+    return {'verified': True, 'prior': {'loaded': True, 'running': False},
+            'unloaded': True, 'logs_unchanged': True,
+            'disabled_override_verified': True,
+            'spawn_evidence': {'label': 'ai.openclaw.' + unit,
+                               'coverage_complete': True, 'spawns': []}}
+
+
 def anchor_hold(journal, hold):
     journal.mutate('scheduler-heartbeat', 'close-execution-hold',
                    lambda: None, lambda: {'verified': True}, hold=hold)
@@ -734,6 +742,69 @@ class JournalTests(unittest.TestCase):
                 self.assertFalse(any(row['event'] == 'verified' and row.get('unit') == 'nats'
                                      for row in journal.records))
 
+    def test_full_scope_requires_class_specific_stop_proof(self):
+        prior = full_node_inventory()
+        journal = Journal.__new__(Journal)
+        journal.prior = prior
+        self.assertTrue(journal.full_node_stop_proven('gateway', listener_stop_evidence()))
+        self.assertTrue(journal.full_node_stop_proven('observer', timer_stop_evidence('observer')))
+        for unit in ('mesh-agent', 'mesh-tool-discord'):
+            self.assertTrue(journal.full_node_stop_proven(unit, listener_stop_evidence()))
+            self.assertTrue(journal.full_node_stop_proven(unit, timer_stop_evidence(unit)))
+            self.assertFalse(journal.full_node_stop_proven(unit, {'verified': True}))
+        self.assertFalse(journal.full_node_stop_proven('gateway', timer_stop_evidence('gateway')))
+        self.assertFalse(journal.full_node_stop_proven('observer', listener_stop_evidence()))
+        for change in ({'disabled_override_verified': False},
+                       {'prior': {'loaded': True, 'running': True}},
+                       {'spawn_evidence': {'label': 'ai.openclaw.observer',
+                                           'coverage_complete': False, 'spawns': []}},
+                       {'spawn_evidence': {'label': 'ai.openclaw.gateway',
+                                           'coverage_complete': True, 'spawns': []}},
+                       {'spawn_evidence': {'label': 'ai.openclaw.observer',
+                                           'coverage_complete': True, 'spawns': [123]}}):
+            self.assertFalse(journal.full_node_stop_proven(
+                'observer', {**timer_stop_evidence('observer'), **change}))
+
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fence_listener(current), listener_stop_evidence, hold=hold)
+                with self.assertRaisesRegex(Refused, 'class-specific persistent proof: gateway'):
+                    journal.mutate('gateway', 'disable-and-unload',
+                                   lambda: fence_unit(current, 'gateway'),
+                                   lambda: {'verified': True}, hold=hold)
+                self.assertEqual([row['event'] for row in journal.records[-2:]], ['intent', 'failed'])
+                with self.assertRaisesRegex(Refused, 'may only restore prior services'):
+                    journal.mutate('observer', 'disable-and-unload',
+                                   lambda: self.fail('stop ran'),
+                                   lambda: timer_stop_evidence('observer'), hold=hold)
+
+    def test_full_scope_accepts_class_proofs_for_every_loaded_job(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                units = ['mesh-deploy-listener'] + [unit for unit in preservation_journal.RESUME_ORDER
+                                                    if unit != 'mesh-deploy-listener']
+                for unit in units:
+                    evidence = (timer_stop_evidence(unit) if prior[unit]['class'] in
+                                ('timer', 'on-demand', 'known-broken') else listener_stop_evidence())
+                    journal.mutate(unit, 'disable-and-unload',
+                                   lambda unit=unit: fence_unit(current, unit),
+                                   lambda evidence=evidence: evidence, hold=hold)
+                stopped = [row['unit'] for row in journal.records
+                           if row['event'] == 'verified' and row.get('action') == 'disable-and-unload']
+                self.assertEqual(stopped, units)
+
     def test_full_scope_listener_stop_rejects_incomplete_exit_proof(self):
         cases = [(key, {key: None}) for key in (
             'unit_unloaded', 'descendants_absent', 'disabled_override_verified',
@@ -1182,7 +1253,7 @@ class JournalTests(unittest.TestCase):
                     listener_stop_evidence, hold=hold)
                 journal.mutate('gateway', 'disable-and-unload',
                     lambda: current['gateway'].update(loaded=False, running=False, disabled=True),
-                    lambda: {'verified': True}, hold=hold)
+                    listener_stop_evidence, hold=hold)
                 before = len(journal.records)
                 before_state = copy.deepcopy(journal.active)
                 with self.assertRaisesRegex(Refused, 'stopped unit state changed before verified recovery: gateway'):
@@ -1216,7 +1287,7 @@ class JournalTests(unittest.TestCase):
                     listener_stop_evidence, hold=hold)
                 journal.mutate('gateway', 'disable-and-unload',
                     lambda: current['gateway'].update(loaded=False, running=False, disabled=True),
-                    lambda: {'verified': True}, hold=hold)
+                    listener_stop_evidence, hold=hold)
                 current['gateway']['disabled'] = False
                 before = len(journal.records)
                 with self.assertRaisesRegex(Refused, 'stopped unit state changed before verified recovery: gateway'):
@@ -1250,10 +1321,10 @@ class JournalTests(unittest.TestCase):
                     listener_stop_evidence, hold=hold)
                 journal.mutate('gateway', 'disable-and-unload',
                     lambda: current['gateway'].update(loaded=False, running=False, disabled=True),
-                    lambda: {'verified': True}, hold=hold)
+                    listener_stop_evidence, hold=hold)
                 journal.mutate('workplan-viewer', 'disable-and-unload',
                     lambda: current['workplan-viewer'].update(loaded=False, running=False, disabled=True),
-                    lambda: {'verified': True}, hold=hold)
+                    listener_stop_evidence, hold=hold)
                 def observe(unit, _):
                     if unit == 'health-watch':
                         current['gateway'] = copy.deepcopy(prior['gateway'])
@@ -1293,7 +1364,7 @@ class JournalTests(unittest.TestCase):
                 for unit in ('gateway', 'workplan-viewer'):
                     journal.mutate(unit, 'disable-and-unload',
                         lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
-                        lambda: {'verified': True}, hold=hold)
+                        listener_stop_evidence, hold=hold)
                 def observe(unit, _):
                     if unit == 'health-watch':
                         current['gateway']['unobservable'] = True
@@ -1616,13 +1687,13 @@ class JournalTests(unittest.TestCase):
                 def stop_viewer():
                     fence_unit(current, 'workplan-viewer')
                 journal.mutate('workplan-viewer', 'disable-and-unload', stop_viewer,
-                               lambda: {'verified': True}, hold=hold)
+                               listener_stop_evidence, hold=hold)
                 self.assertEqual(journal.records[-1]['evidence']['entrypoint_loaded'],
                                  current['loaded'])
                 def unload_timer():
                     fence_unit(current, 'consolidation-scheduler')
                 journal.mutate('consolidation-scheduler', 'disable-and-unload', unload_timer,
-                               lambda: {'verified': True}, hold=hold)
+                               lambda: timer_stop_evidence('consolidation-scheduler'), hold=hold)
                 self.assertEqual(journal.records[-1]['evidence']['entrypoint_loaded'],
                                  current['loaded'])
                 current = copy.deepcopy(baseline)

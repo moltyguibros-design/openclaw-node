@@ -1988,3 +1988,31 @@ with the full-node journal's `ai.openclaw.nats` label requirement. Neither
 the root physical census nor the production stop/restore driver was
 exercised. No live service, VM or production NATS store changed; step 1.2
 remains [A]/v1.2-pre.
+
+## D100 — Require class-specific full-node stop receipts (2026-10-06 05:09 EDT)
+
+Every full-node `disable-and-unload` mutation now requires a persistent-stop
+receipt matched to its prior-state class. Daemons require the managed
+`StopWatch` unload, override, exit, descendant, connection and listener
+fields. Timers require the idle-unload receipt with an intact override,
+unchanged logs and complete zero-spawn evidence for that unit's launchd
+label. The on-demand mesh agent and known-broken Discord integration may
+use either shape because their observed loaded state can be idle or running.
+The scheduler's separate `close-execution-hold` intent remains its anchor;
+its later `disable-and-unload` uses the timer rule. The prior listener and
+NATS-specific refusal messages are retained. An owned full-node journal
+fixture stops all 21 loaded jobs with class-shaped receipts, and negatives
+reject weak, cross-class, incorrect-label, incomplete and spawned timer
+receipts. Existing recovery fixtures now supply realistic receipt shapes.
+The preservation suite passes 136 tests, the journal-hold suite passes 44,
+and plan lint is conformant (14 pass, one existing warning).
+
+This is a receipt-shape gate after the stop action, not the all-job hold
+certificate or physical proof. A mismatch writes a failed row and makes
+forward work restore-only. `StopWatch.mutate` still refuses persistent
+stops for non-listener jobs pending an enable-capable recovery adapter.
+`unload_idle_timer` currently has no production spawn-evidence producer;
+the strict timer shape remains unreachable there. A future certificate
+must bind receipts to the original execution-hold watch session and fresh
+entrypoint/physical observations. No production service, VM or NATS store
+changed; step 1.2 remains [A]/v1.2-pre.

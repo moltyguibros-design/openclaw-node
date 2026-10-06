@@ -1893,3 +1893,11 @@ throwaway label; retained temporary artifacts and crash-only override
 residue are documented. Full-node journal composition and physical root
 admission are still unproved. No production service, VM or history changed;
 step 1.2 remains [A].
+
+Checkpoint 2026-10-06 05:09 EDT: D100 requires class-specific persistent
+stop evidence for every loaded full-node job, rather than only the deploy
+listener and NATS servers. The owned journal fixture exercises all 21 loaded
+jobs and negative receipt shapes. This is still a user-journal shape gate,
+not an all-job hold certificate or root physical observation. The production
+non-listener stop and timer spawn-evidence paths remain closed, and no live
+service, VM or NATS history changed; step 1.2 remains [A]/v1.2-pre.
