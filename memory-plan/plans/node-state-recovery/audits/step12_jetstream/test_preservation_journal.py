@@ -739,6 +739,23 @@ class JournalTests(unittest.TestCase):
                                    gui_only_stop, listener_stop_evidence, hold=hold)
                 self.assertFalse(journal.listener_fenced())
 
+    def test_full_scope_listener_stop_requires_gui_override_when_user_disabled(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                def user_only_stop():
+                    current['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener')
+                    current['overrides']['user']['ai.openclaw.mesh-deploy-listener'] = True
+                with self.assertRaisesRegex(Refused, 'disabled overrides changed'):
+                    journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                                   user_only_stop, listener_stop_evidence, hold=hold)
+                self.assertFalse(journal.listener_fenced())
+
     def test_full_scope_rechecks_durable_listener_proof_before_nats(self):
         prior = full_node_inventory()
         current = full_entrypoint_evidence(prior)

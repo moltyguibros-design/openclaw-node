@@ -1733,14 +1733,16 @@ disposable GUI job changes both GUI and user `print-disabled` views. The
 parser, listener re-enable, held-member drift, foreign-system-enable and
 baseline negatives pass locally, along with the focused preservation suites.
 The cross-process root transfer reader now requires the same listener
-override proof and compares every later verified stop receipt against the
-previous maps. A `disable-and-unload` receipt must show its own label
-disabled in both user views, while preserving every other label; a later
-NATS receipt that claims the held member was re-enabled refuses. The user
-journal applies the same two-view rule. Disposable negatives cover a missing
-GUI disable, missing user disable, explicit system enable and later held-
-member override loss. This closes the receipt-continuity gap in D88; it does
-not turn sampled observations into a continuous host fence.
+override proof and walks every verified receipt from the baseline through
+the NATS stops. A `disable-and-unload` receipt must show its own label
+disabled in both user views, preserve every other label and retain any
+pre-existing system disable; the transfer intent binds a final observed
+override map. A forged pre-listener hold receipt, an extra verified row, a
+later NATS receipt claiming the held member was re-enabled, or a changed
+transfer map refuses. The user journal applies the same two-view rule.
+Disposable negatives isolate missing GUI and user disables, explicit system
+enable, and each continuity boundary. This closes the receipt-continuity
+gap in D88; it does not turn sampled observations into a continuous host fence.
 This is sampled detection, not a persistent hold or continuous no-restart
 certificate. The other installed jobs still lack disable-and-unload and an
 enable-capable production restore; the root/user/detached-process and other

@@ -1759,3 +1759,14 @@ refuse. The preservation suite passed 125 tests, root-transfer suite passed
 17, and plan lint is conformant (14 pass, one longstanding warning). Exact-
 head CI for this final receipt-continuity change remains pending. No
 production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 22:40 EDT: Exact-head CI for d539c1a1 passed all
+four jobs. Claude's second read-only adversarial review found that the root
+reader's override walk started after the listener receipt, and that the
+missing-GUI tests also left the user view unset. The reader now walks every
+verified receipt from the baseline, rejects extra pre-listener receipts,
+and binds the final override map in the NATS transfer intent. Isolated
+user-only-disable negatives now protect both GUI checks. Local root-transfer
+tests pass 20/20; the preservation and hold suites pass 170/170. Exact-head
+CI for these final changes remains pending. No production service, VM or
+NATS history changed; 1.2 remains [A]/v1.2-pre.

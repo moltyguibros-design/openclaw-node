@@ -128,6 +128,7 @@ class UserTransferTest(unittest.TestCase):
                 baseline_sha256=journal.records[0]['sha256'],
                 observations={unit: observe(unit, prior[unit])
                               for unit in fixture_module.NATS_TRANSFER_UNITS},
+                entrypoint_overrides=copy.deepcopy(loaded['overrides']),
                 hold_sha256=hashlib.sha256(module.encoded(certificate)).hexdigest(),
                 hold_evidence=certificate)
         else:
@@ -199,6 +200,9 @@ class UserTransferTest(unittest.TestCase):
             fixture_module.full_node_inventory())['overrides']
         overrides['gui']['ai.openclaw.mesh-deploy-listener'] = True
         overrides['user']['ai.openclaw.mesh-deploy-listener'] = None
+        user_only_overrides = copy.deepcopy(overrides)
+        user_only_overrides['gui']['ai.openclaw.mesh-deploy-listener'] = None
+        user_only_overrides['user']['ai.openclaw.mesh-deploy-listener'] = True
         changes = [(key, False) for key in module.LISTENER_STOP_FIELDS]
         changes += [('bootout', {'returncode': 1, 'timed_out': False}),
                     ('bootout', {'returncode': 0, 'timed_out': True}),
@@ -208,6 +212,7 @@ class UserTransferTest(unittest.TestCase):
                                            'user': [], 'system': []}),
                     ('entrypoint_overrides', {'gui': {}, 'user': {}, 'system': {}}),
                     ('entrypoint_overrides', overrides),
+                    ('entrypoint_overrides', user_only_overrides),
                     ('termination', {'signal': 9})]
         for field, value in changes:
             with self.subTest(field=field):
@@ -238,6 +243,59 @@ class UserTransferTest(unittest.TestCase):
             row['sha256'] = hashlib.sha256(module.encoded(
                 {key: value for key, value in row.items() if key != 'sha256'})).hexdigest()
             (fixture.root / f'{index:06d}.json').write_bytes(module.encoded(row))
+        with patch.object(module, 'boot_identity', return_value='boot-a'):
+            with self.assertRaisesRegex(module.Refused, 'disabled override continuity differs'):
+                module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
+
+    def test_root_refuses_override_loss_in_original_hold_receipt(self):
+        fixture, journal, transaction, _ = self.prepared()
+        journal.close()
+        rows = copy.deepcopy(journal.records)
+        hold = next(row for row in rows if row['event'] == 'verified'
+                    and row.get('action') == 'close-execution-hold')
+        hold['evidence']['entrypoint_overrides']['gui']['ai.openclaw.nats-1'] = False
+        for index, row in enumerate(rows):
+            row['previous'] = rows[index - 1]['sha256'] if index else None
+            row['sha256'] = hashlib.sha256(module.encoded(
+                {key: value for key, value in row.items() if key != 'sha256'})).hexdigest()
+            (fixture.root / f'{index:06d}.json').write_bytes(module.encoded(row))
+        with patch.object(module, 'boot_identity', return_value='boot-a'):
+            with self.assertRaisesRegex(module.Refused, 'disabled override continuity differs'):
+                module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
+
+    def test_root_refuses_extra_verified_receipt_before_listener(self):
+        fixture, journal, transaction, _ = self.prepared()
+        journal.close()
+        rows = copy.deepcopy(journal.records)
+        insert_at = next(index for index, row in enumerate(rows)
+                         if row['event'] == 'intent'
+                         and row.get('unit') == 'mesh-deploy-listener')
+        extra = copy.deepcopy(rows[insert_at - 1])
+        extra['unit'] = 'observer'
+        extra['action'] = 'unload'
+        rows.insert(insert_at, extra)
+        for index, row in enumerate(rows):
+            if index > insert_at and isinstance(row.get('intent'), int) and row['intent'] >= insert_at:
+                row['intent'] += 1
+            row['sequence'] = index
+            row['previous'] = rows[index - 1]['sha256'] if index else None
+            row['sha256'] = hashlib.sha256(module.encoded(
+                {key: value for key, value in row.items() if key != 'sha256'})).hexdigest()
+            (fixture.root / f'{index:06d}.json').write_bytes(module.encoded(row))
+            (fixture.root / f'{index:06d}.json').chmod(0o600)
+        with patch.object(module, 'boot_identity', return_value='boot-a'):
+            with self.assertRaisesRegex(module.Refused, 'unexpected pre-listener receipt'):
+                module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
+
+    def test_root_refuses_override_loss_at_transfer_intent(self):
+        fixture, journal, transaction, _ = self.prepared()
+        journal.close()
+        rows = copy.deepcopy(journal.records)
+        transfer = rows[-1]
+        transfer['entrypoint_overrides']['gui']['ai.openclaw.nats-1'] = False
+        transfer['sha256'] = hashlib.sha256(module.encoded(
+            {key: value for key, value in transfer.items() if key != 'sha256'})).hexdigest()
+        (fixture.root / f'{len(rows) - 1:06d}.json').write_bytes(module.encoded(transfer))
         with patch.object(module, 'boot_identity', return_value='boot-a'):
             with self.assertRaisesRegex(module.Refused, 'disabled override continuity differs'):
                 module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)

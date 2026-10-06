@@ -319,7 +319,8 @@ class UserTransfer:
         require(transfer.get('event') == 'nats-transfer-intent'
                 and set(transfer) == {'sequence', 'previous', 'event', 'boot', 'at',
                                       'root_transaction', 'units', 'baseline_sha256',
-                                      'observations', 'hold_sha256', 'hold_evidence', 'sha256'}
+                                      'observations', 'hold_sha256', 'hold_evidence',
+                                      'entrypoint_overrides', 'sha256'}
                 and transfer['root_transaction'] == self.transaction
                 and transfer['units'] == list(NATS)
                 and transfer['baseline_sha256'] == baseline['sha256']
@@ -359,6 +360,7 @@ class UserTransfer:
         original = closed[0].get('evidence')
         evidence = transfer['hold_evidence']
         require(isinstance(original, dict) and original.get('verified') is True
+                and original.get('entrypoint_loaded') == baseline['entrypoint_inventory']['loaded']
                 and original.get('restoration_only') is False
                 and original.get('kernel_file_watch') is True
                 and isinstance(original.get('path_watch'), dict)
@@ -389,6 +391,9 @@ class UserTransfer:
                 'user transfer listener stop receipt is absent or precedes its intent')
         listener = listener_rows[0]
         stop = listener.get('evidence')
+        require([row['sequence'] for row in self.records[:listener['sequence']]
+                 if row['event'] == 'verified'] == [closed[0]['sequence']],
+                'user transfer has an unexpected pre-listener receipt')
         require(all(row['sequence'] > listener['sequence'] for row in intents[2:]),
                 'user transfer service intent precedes listener stop proof')
         require(listener.get('unit') == 'mesh-deploy-listener'
@@ -449,14 +454,19 @@ class UserTransfer:
                             original['watch_session_id']
                             for row in self.records[:-1]),
                         'user transfer NATS stop receipt is absent: ' + unit)
-        previous_overrides = stop['entrypoint_overrides']
-        for row in self.records[listener['sequence'] + 1:-1]:
+        previous_overrides = baseline['entrypoint_inventory']['overrides']
+        installed_labels = set(baseline['entrypoint_inventory']['installed'])
+        for row in self.records[1:-1]:
             if row['event'] != 'verified':
                 continue
             evidence = row.get('evidence')
             current = evidence.get('entrypoint_overrides') if isinstance(evidence, dict) else None
             require(isinstance(current, dict) and set(current) == {'gui', 'user', 'system'}
-                    and all(isinstance(values, dict) for values in current.values()),
+                    and all(isinstance(values, dict) and installed_labels <= set(values)
+                            and all(label.startswith(('ai.openclaw.', 'com.openclaw.'))
+                                    and (value is None or isinstance(value, bool))
+                                    for label, value in values.items())
+                            for values in current.values()),
                     'user transfer disabled override continuity differs')
             if row.get('action') == 'disable-and-unload':
                 label = 'ai.openclaw.' + (row.get('unit') if isinstance(row.get('unit'), str) else '')
@@ -476,6 +486,8 @@ class UserTransfer:
                 require(current == previous_overrides,
                         'user transfer disabled override continuity differs')
             previous_overrides = current
+        require(transfer.get('entrypoint_overrides') == previous_overrides,
+                'user transfer disabled override continuity differs')
         require(not any(row['event'] in ('failed', 'recovery-started', 'hold-superseded')
                         for row in self.records), 'user transfer continuity was broken')
         completed = {row['intent'] for row in self.records
@@ -498,13 +510,15 @@ class UserTransfer:
                 and transfer.get('event') == 'nats-transfer-intent'
                 and set(transfer) == {'sequence', 'previous', 'event', 'boot', 'at',
                                       'root_transaction', 'units', 'baseline_sha256',
-                                      'observations', 'hold_sha256', 'hold_evidence', 'sha256'}
+                                      'observations', 'hold_sha256', 'hold_evidence',
+                                      'entrypoint_overrides', 'sha256'}
                 and transfer.get('root_transaction') == self.transaction
                 and transfer.get('units') == list(NATS)
                 and transfer.get('baseline_sha256') == baseline['sha256']
                 and isinstance(transfer.get('observations'), dict)
                 and set(transfer['observations']) == set(NATS)
                 and isinstance(transfer.get('hold_evidence'), dict)
+                and isinstance(transfer.get('entrypoint_overrides'), dict)
                 and isinstance(transfer.get('hold_sha256'), str)
                 and HEX.fullmatch(transfer['hold_sha256'])
                 and hashlib.sha256(encoded(transfer['hold_evidence'])).hexdigest() ==
