@@ -1934,3 +1934,11 @@ and the guest path must match that server's pre-stop monitor path. The
 full-node hold, stopped-VM capture, three serving cold masters, four real
 history restores, acceptance and verified resumption remain open. No live
 service or VM changed; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 15:37 EDT: Claude independently verified D104's three
+mechanism refusals on owned NATS 2.12.6 servers and found no blocker in that
+delta. D105 adds an unchanged leader-epoch check across each replicated stream
+read and records the serving leader in the probe report. The Node 22 owned
+fixture passes with all servers stopped. Provenance binding, expired-stream
+treatment, full-node hold and the production stop/capture/restore/resume chain
+remain open; step 1.2 remains [A]/v1.2-pre.

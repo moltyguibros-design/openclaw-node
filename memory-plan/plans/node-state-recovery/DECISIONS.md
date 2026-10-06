@@ -2095,3 +2095,21 @@ the guest-provenance gap described in the review. The full-node hold,
 stopped-VM capture, four real-history restores, acceptance and verified
 resumption remain open. No production service, VM or NATS history changed;
 step 1.2 remains [A]/v1.2-pre.
+
+## D105 — Pin the leader epoch across each cold member read (2026-10-06 15:37 EDT)
+
+Claude's read-only review of D104 independently passed its owned positive and
+three corruption negatives. It found that checking the preferred stream leader
+before and after `capture()` did not prove the leader stayed the same during
+the read. The probe now requires `leader_since` to be present and unchanged
+across each replicated stream capture, and records the actual leader and epoch
+in `memberReads`. The positive fixture requires each recorded leader to equal
+the intended member. This makes the evidence explain which copy served each
+comparison and refuses a leader transfer, including a transfer away and back,
+during the capture. The owned NATS 2.12.6 fixture passed on Node 22 with all
+servers stopped.
+
+The review found no D104 mechanism blocker. It confirmed that the plan digest
+and stopped-tree role still need trusted provenance, and that expiring R1/KV
+streams can refuse after their baseline ages. Those production acceptance
+gates remain open. This change did not contact or modify the live node.

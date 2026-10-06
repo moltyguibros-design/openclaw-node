@@ -693,6 +693,7 @@ try {
   assert.deepEqual(treeReport.memberLocal.map(row => row.member).sort(), treePlan.cluster.members.map(row => row.name).sort());
   assert.deepEqual(treeReport.memberReads.map(row => `${row.member}/${row.stream}`).sort(),
     treePlan.cluster.members.flatMap(row => ['EMPTY_R3', 'REPLICATED'].map(stream => `${row.name}/${stream}`)).sort());
+  assert(treeReport.memberReads.every(row => row.leader === row.member && row.leaderSince));
   assert.deepEqual(hashTree(cold), coldHashes);
   for (let i = 0; i < 3; i++) assert.deepEqual(hashTree(masters[i]), hashes[i]);
   const swappedPlan = structuredClone(treePlan);

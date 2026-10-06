@@ -25,8 +25,9 @@ captures and final state/consumer recheck are not a common quiet point.
 The caller also supplies the expected server name, server ID, cluster name
 (`-` for standalone), and that server's loopback monitor URL. The connection
 and monitor must agree on identity before any stream is read. The manifest
-records the monitor's physical JetStream store directory, which must match
-the role's path in the stopped-tree extraction specification. Pin the
+records the monitor's physical JetStream store directory. A production plan
+builder must check it against the role's path in the stopped-tree extraction
+specification; the baseline tool does not make that comparison. Pin the
 expected identity from the managed unit/config/process in the current
 preflight; deriving it only from whichever server answers the ambiguous
 client port would defeat the check.
@@ -49,7 +50,8 @@ and boots only those working copies on isolated loopback ports. It reads the
 standalone and held R1 histories without routing. Before the survivors form a
 quorum, it checks each one alone through its local monitor. After they join,
 it verifies the held streams remain offline, forces each survivor to lead each
-replicated active stream, and compares content while that member leads. It
+replicated active stream, and compares content under an unchanged leader epoch.
+Consumer positions are still read from each consumer's own leader. It
 then joins a second working copy of held R1 to verify the recovered streams.
 It compares stream content, configuration, state
 and consumers, rehashes every master, and writes private `probe.json` only on

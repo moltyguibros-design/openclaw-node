@@ -259,7 +259,11 @@ async function waitLeader(nc, stream, preferred, serving) {
       const peers = info.cluster?.replicas || [];
       const other = serving.find(name => name !== preferred);
       const peer = peers.find(row => row.name === other);
-      if (info.cluster?.leader === preferred && peer?.current && !peer.offline && !(peer.lag || 0)) return;
+      if (info.cluster?.leader === preferred && peer?.current && !peer.offline && !(peer.lag || 0)) {
+        assert(typeof info.cluster.leader_since === 'string' && info.cluster.leader_since.length > 0,
+          `cold stream has no leader epoch: ${stream}`);
+        return info.cluster;
+      }
     } catch {}
     await new Promise(resolve => setTimeout(resolve, 100));
   }
@@ -354,10 +358,13 @@ try {
         await api(item.nc, `$JS.API.STREAM.LEADER.STEPDOWN.${row.stream}`,
           { placement: { preferred: item.role } });
       }
-      await waitLeader(item.nc, row.stream, item.role, serving);
+      const leaderBefore = await waitLeader(item.nc, row.stream, item.role, serving);
       await compare(item.nc, data, [row.stream]);
-      await waitLeader(item.nc, row.stream, item.role, serving);
-      memberReads.push({ member: item.role, stream: row.stream });
+      const leaderAfter = await waitLeader(item.nc, row.stream, item.role, serving);
+      assert.equal(leaderAfter.leader_since, leaderBefore.leader_since,
+        `cold stream leader changed during capture: ${row.stream}`);
+      memberReads.push({ member: item.role, stream: row.stream,
+        leader: leaderBefore.leader, leaderSince: leaderBefore.leader_since });
     }
   }
   phase = 'cluster-compare';
