@@ -1738,3 +1738,12 @@ Mission Control shipped-dependency audit found a new high-severity
 `source-map-js` advisory; its lockfile now pins 1.2.2, and the high-severity
 audit gate passes locally. Exact-head CI for these repairs is pending. No
 production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 22:13 EDT: The next exact-head CI passed Mission
+Control and the repaired root-transfer fixtures. The Node 20 job then failed
+at the root dependency audit on a new critical `proxy-addr` advisory; Node 22
+was cancelled by the matrix fail-fast. The root lockfile now pins 2.0.8.
+An owned `npm ci --ignore-scripts` and the high-severity root audit pass
+locally; seven moderate findings remain below the configured gate. Exact-head
+CI for this lockfile repair is pending. No production service, VM or NATS
+history changed; 1.2 remains [A]/v1.2-pre.
