@@ -674,7 +674,16 @@ try {
     /held stream set omits an offline R1 history/);
   assert.deepEqual(hashTree(masters[oi]), hashes[oi]);
   const treeProbe = path.join(root, 'cold-tree-probe');
-  await run(process.execPath, [coldTreeProbe, treePlanFile, treeProbe], { stdio: 'ignore' });
+  try {
+    await run(process.execPath, [coldTreeProbe, treePlanFile, treeProbe], { stdio: 'ignore' });
+  } catch (error) {
+    const failure = path.join(treeProbe, 'FAILED.json');
+    if (fs.existsSync(failure)) {
+      const detail = JSON.parse(fs.readFileSync(failure, 'utf8'));
+      throw new Error(`cold-tree probe refused at ${detail.phase}: ${detail.error}`, { cause: error });
+    }
+    throw error;
+  }
   const treeReport = JSON.parse(fs.readFileSync(path.join(treeProbe, 'probe.json')));
   assert.equal(treeReport.standalone.find(row => row.stream === 'HISTORY').last, coldSource.content.last);
   assert.equal(treeReport.held.find(row => row.stream === 'OFFLINE_R1').last, offlineColdSource.content.last);
