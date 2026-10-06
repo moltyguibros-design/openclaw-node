@@ -8,6 +8,7 @@ import time
 import unittest
 
 from managed_launchd import Launchd, Refused
+from preservation_checks import disabled_overrides
 
 
 @unittest.skipUnless(sys.platform == 'darwin', 'requires macOS launchd')
@@ -26,6 +27,11 @@ class DisabledLaunchd(unittest.TestCase):
                 'StandardOutPath': str(root / 'out.log'),
                 'StandardErrorPath': str(root / 'err.log')}))
             service = Launchd(label, plist)
+            def override(domain):
+                output = subprocess.check_output(['/bin/launchctl', 'print-disabled',
+                                                  domain + '/' + str(os.getuid())],
+                                                 text=True, timeout=10)
+                return disabled_overrides(output, {label})[label]
             override_attempted = False
             try:
                 if not service.status()['loaded'] and service.disabled():
@@ -37,6 +43,8 @@ class DisabledLaunchd(unittest.TestCase):
                 self.assertTrue(ready.exists() and service.status()['running'])
                 override_attempted = True
                 service.disable_for_hold()
+                self.assertIs(override('gui'), True)
+                self.assertIs(override('user'), True)
                 self.assertTrue(service.status()['running'])
                 subprocess.run(['/bin/launchctl', 'bootout', service.target], check=True,
                                capture_output=True, timeout=10)
@@ -57,6 +65,8 @@ class DisabledLaunchd(unittest.TestCase):
                 self.assertFalse(ready.exists())
                 service.enable_after_hold()
                 self.assertFalse(service.disabled())
+                self.assertIsNot(override('gui'), True)
+                self.assertIsNot(override('user'), True)
                 subprocess.run(direct_command, check=True, capture_output=True, text=True, timeout=10)
                 deadline = time.monotonic() + 10
                 while not (ready.exists() and service.status()['running']) and time.monotonic() < deadline:

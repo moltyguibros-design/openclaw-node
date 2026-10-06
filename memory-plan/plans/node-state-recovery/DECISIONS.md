@@ -1711,3 +1711,30 @@ a static entry shape; continuous 23-job, root/user, detached-process and
 host UTM autostart exclusion still need a production controller and rehearsal.
 No production service, VM or NATS history changed; step 1.2 remains
 [A]/v1.2-pre.
+
+## D88 — Observe launchd disabled overrides throughout full-node forward work (2026-10-05 21:51 EDT)
+
+A verified listener `disable-and-unload` receipt previously stayed "fenced"
+after its launchd disabled override was cleared without reloading the job.
+The loaded-label check could not see that change; a disposable journal and
+managed-stop reproduction accepted the next mutation. The full-node
+entrypoint census now reads `print-disabled` in the GUI, user and system
+domains twice per observation, retaining every `ai.openclaw.*` and
+`com.openclaw.*` override. The baseline requires the pre-held member 1 and
+federation timer disabled in both user views, with no explicit system enable.
+Every forward journal step compares the override maps with its last verified
+receipt. A `disable-and-unload` may change only its own label to disabled;
+the verified receipt records the observed maps. A cleared listener or
+member-1 override, an unrelated label change, or an unexpected foreign-domain
+enable refuses before the next intent or NATS transfer.
+
+An owned macOS launchd control confirmed that disabling and re-enabling its
+disposable GUI job changes both GUI and user `print-disabled` views. The
+parser, listener re-enable, held-member drift, foreign-system-enable and
+baseline negatives pass locally, along with the focused preservation suites.
+This is sampled detection, not a persistent hold or continuous no-restart
+certificate. The other installed jobs still lack disable-and-unload and an
+enable-capable production restore; the root/user/detached-process and other
+launch-path census, boot check, host guard rehearsal, capture decision
+controller, four-history acceptance and resumption remain open. No production
+service, VM or NATS store changed; step 1.2 remains [A]/v1.2-pre.

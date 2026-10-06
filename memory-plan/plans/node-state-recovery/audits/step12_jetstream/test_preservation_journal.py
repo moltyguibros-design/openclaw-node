@@ -65,6 +65,12 @@ def full_node_inventory():
 
 
 def full_entrypoint_evidence(prior):
+    overrides = {domain: {'ai.openclaw.' + unit: None for unit in prior}
+                 for domain in ('gui', 'user', 'system')}
+    for unit, state in prior.items():
+        if state['disabled']:
+            overrides['gui']['ai.openclaw.' + unit] = True
+            overrides['user']['ai.openclaw.' + unit] = True
     return {'verified': True,
             'installed': {'ai.openclaw.' + unit: {
                 'path': '/owned/' + unit + '.plist',
@@ -72,7 +78,14 @@ def full_entrypoint_evidence(prior):
                 for unit, state in prior.items()},
             'loaded': {'gui': sorted('ai.openclaw.' + unit for unit, state in prior.items()
                                    if state['loaded']), 'user': [], 'system': []},
-            'roots': ['/owned'], 'disabled_artifacts': {}, 'excluded': {}}
+            'roots': ['/owned'], 'disabled_artifacts': {}, 'excluded': {},
+            'overrides': overrides}
+
+
+def fence_listener(entrypoints):
+    entrypoints['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener')
+    entrypoints['overrides']['gui']['ai.openclaw.mesh-deploy-listener'] = True
+    entrypoints['overrides']['user']['ai.openclaw.mesh-deploy-listener'] = True
 
 
 def listener_stop_evidence():
@@ -141,7 +154,7 @@ class JournalTests(unittest.TestCase):
         hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
         anchor_hold(journal, hold)
         journal.mutate('mesh-deploy-listener', 'disable-and-unload',
-                       lambda: loaded['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener'),
+                       lambda: fence_listener(loaded),
                        listener_stop_evidence, hold=hold)
         for unit in ('nats', 'nats-2', 'nats-3'):
             journal.mutate(unit, 'unload',
@@ -191,6 +204,16 @@ class JournalTests(unittest.TestCase):
             self.assertEqual(reopened.nats_transfer_open()['sha256'], record['sha256'])
             with self.assertRaisesRegex(Refused, 'transfer is open'):
                 reopened.append('recovery-started')
+
+    def test_nats_transfer_refuses_cleared_listener_override_before_intent(self):
+        journal, hold, observe, _ = self.prepared_nats_transfer()
+        current = journal.check_entrypoints(forward=True)
+        current['overrides']['gui']['ai.openclaw.mesh-deploy-listener'] = False
+        before = len(journal.records)
+        with patch('preservation_journal.capture_entrypoint_inventory', return_value=current):
+            with self.assertRaisesRegex(Refused, 'disabled overrides changed'):
+                journal.transfer_nats(str(uuid.uuid4()), hold, observe)
+        self.assertEqual(len(journal.records), before)
 
     def test_nats_transfer_refuses_marker_and_uncertified_unit(self):
         journal, hold, observe, marker = self.prepared_nats_transfer()
@@ -465,6 +488,15 @@ class JournalTests(unittest.TestCase):
                         scope=FULL_NODE_SCOPE)
         self.assertFalse(self.root.exists())
 
+    def test_full_scope_requires_held_overrides_in_both_user_views(self):
+        prior = full_node_inventory()
+        evidence = full_entrypoint_evidence(prior)
+        evidence['overrides']['user']['ai.openclaw.nats-1'] = False
+        with patch('preservation_journal.capture_entrypoint_inventory', return_value=evidence):
+            with self.assertRaisesRegex(Refused, 'disabled overrides differ'):
+                Journal(self.root, prior, node_lock=self.node_lock, scope=FULL_NODE_SCOPE)
+        self.assertFalse(self.root.exists())
+
     def test_full_scope_listener_stop_precedes_other_forward_mutations(self):
         prior = full_node_inventory()
         current = full_entrypoint_evidence(prior)
@@ -493,7 +525,7 @@ class JournalTests(unittest.TestCase):
                                    listener_stop_evidence, hold=hold)
                 self.assertEqual(len(journal.records), before)
                 journal.mutate('mesh-deploy-listener', 'disable-and-unload',
-                               lambda: current['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener'),
+                               lambda: fence_listener(current),
                                listener_stop_evidence, hold=hold)
                 with self.assertRaisesRegex(Refused, 'listener must follow'):
                     journal.mutate('mesh-deploy-listener', 'disable-and-unload',
@@ -527,7 +559,7 @@ class JournalTests(unittest.TestCase):
                     steps.append('disable')
                 def bootout():
                     self.assertTrue(disabled['value'])
-                    current['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener')
+                    fence_listener(current)
                     steps.append('bootout')
                 watch = SimpleNamespace(
                     service=SimpleNamespace(label='ai.openclaw.mesh-deploy-listener',
@@ -540,6 +572,80 @@ class JournalTests(unittest.TestCase):
                 self.assertTrue(journal.listener_fenced())
                 self.assertEqual(steps, ['disable', 'bootout'])
 
+    def test_full_scope_refuses_reenabled_listener_without_reload(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fence_listener(current), listener_stop_evidence, hold=hold)
+                current['overrides']['gui']['ai.openclaw.mesh-deploy-listener'] = False
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'disabled overrides changed'):
+                    journal.mutate('workplan-viewer', 'unload',
+                                   lambda: self.fail('viewer stop ran'),
+                                   lambda: {'verified': True}, hold=hold)
+                self.assertEqual(len(journal.records), before)
+
+    def test_full_scope_refuses_held_member_override_loss(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fence_listener(current), listener_stop_evidence, hold=hold)
+                current['overrides']['user']['ai.openclaw.nats-1'] = False
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'disabled overrides changed'):
+                    journal.mutate('workplan-viewer', 'unload',
+                                   lambda: self.fail('viewer stop ran'),
+                                   lambda: {'verified': True}, hold=hold)
+                self.assertEqual(len(journal.records), before)
+
+    def test_full_scope_refuses_unrelated_override_change(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fence_listener(current), listener_stop_evidence, hold=hold)
+                current['overrides']['gui']['ai.openclaw.gateway'] = True
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'disabled overrides changed'):
+                    journal.mutate('workplan-viewer', 'unload',
+                                   lambda: self.fail('viewer stop ran'),
+                                   lambda: {'verified': True}, hold=hold)
+                self.assertEqual(len(journal.records), before)
+
+    def test_full_scope_refuses_foreign_enabled_listener_override(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                def apply():
+                    fence_listener(current)
+                    current['overrides']['system']['ai.openclaw.mesh-deploy-listener'] = False
+                with self.assertRaisesRegex(Refused, 'disabled overrides changed'):
+                    journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                                   apply, listener_stop_evidence, hold=hold)
+                self.assertFalse(journal.listener_fenced())
+
     def test_full_scope_listener_stop_requires_persistent_process_proof(self):
         prior = full_node_inventory()
         current = full_entrypoint_evidence(prior)
@@ -551,7 +657,7 @@ class JournalTests(unittest.TestCase):
                 anchor_hold(journal, hold)
                 with self.assertRaisesRegex(Refused, 'lacks persistent unload and process proof'):
                     journal.mutate('mesh-deploy-listener', 'disable-and-unload',
-                                   lambda: current['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener'),
+                                   lambda: fence_listener(current),
                                    lambda: {'verified': True}, hold=hold)
                 self.assertFalse(any(row['event'] == 'verified'
                                      and row.get('unit') == 'mesh-deploy-listener'
@@ -587,7 +693,7 @@ class JournalTests(unittest.TestCase):
                         evidence = {**listener_stop_evidence(), **change}
                         with self.assertRaisesRegex(Refused, 'lacks persistent unload and process proof'):
                             journal.mutate('mesh-deploy-listener', 'disable-and-unload',
-                                lambda: current['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener'),
+                                lambda: fence_listener(current),
                                 lambda: evidence, hold=hold)
                         self.assertFalse(journal.listener_fenced())
 
@@ -603,12 +709,13 @@ class JournalTests(unittest.TestCase):
                 anchor_hold(journal, hold)
                 intent = journal.append('intent', unit='mesh-deploy-listener',
                                         action='disable-and-unload')
-                current['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener')
+                fence_listener(current)
                 proof = listener_stop_evidence()
                 del proof['connections_closed']
                 journal.append('verified', intent=intent['sequence'], unit='mesh-deploy-listener',
                                action='disable-and-unload', evidence={**proof,
-                               'entrypoint_loaded': copy.deepcopy(current['loaded'])})
+                               'entrypoint_loaded': copy.deepcopy(current['loaded']),
+                               'entrypoint_overrides': copy.deepcopy(current['overrides'])})
                 before = len(journal.records)
                 with self.assertRaisesRegex(Refused, 'listener must be verifiably disabled'):
                     journal.mutate('nats', 'unload', lambda: calls.append('nats'),
@@ -625,12 +732,13 @@ class JournalTests(unittest.TestCase):
                          scope=FULL_NODE_SCOPE) as journal:
                 hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
                 anchor_hold(journal, hold)
-                current['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener')
+                fence_listener(current)
                 future_intent = len(journal.records) + 1
                 journal.append('verified', intent=future_intent,
                                unit='mesh-deploy-listener', action='disable-and-unload',
                                evidence={**listener_stop_evidence(),
-                               'entrypoint_loaded': copy.deepcopy(current['loaded'])})
+                               'entrypoint_loaded': copy.deepcopy(current['loaded']),
+                               'entrypoint_overrides': copy.deepcopy(current['overrides'])})
                 intent = journal.append('intent', unit='mesh-deploy-listener',
                                         action='disable-and-unload')
                 self.assertEqual(intent['sequence'], future_intent)
@@ -795,6 +903,8 @@ class JournalTests(unittest.TestCase):
             result = copy.deepcopy(baseline)
             result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
                                              if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
             return result
         with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
             with Journal(self.root, prior, node_lock=self.node_lock,
@@ -903,6 +1013,8 @@ class JournalTests(unittest.TestCase):
             result = copy.deepcopy(baseline)
             result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
                                              if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
             return result
         with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
             with Journal(self.root, prior, node_lock=self.node_lock,
@@ -911,7 +1023,7 @@ class JournalTests(unittest.TestCase):
                     prepare=lambda *_: None, complete=lambda *_: self.fail('hold reopened'))
                 anchor_hold(journal, hold)
                 journal.mutate('mesh-deploy-listener', 'disable-and-unload',
-                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False),
+                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True),
                     listener_stop_evidence, hold=hold)
                 current['mesh-deploy-listener'] = copy.deepcopy(prior['mesh-deploy-listener'])
                 restored = []
@@ -938,6 +1050,8 @@ class JournalTests(unittest.TestCase):
             result = copy.deepcopy(baseline)
             result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
                                              if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
             return result
         with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
             with Journal(self.root, prior, node_lock=self.node_lock,
@@ -947,7 +1061,7 @@ class JournalTests(unittest.TestCase):
                     check_closed=lambda: None, complete=lambda *_: {'verified': True})
                 anchor_hold(journal, hold)
                 journal.mutate('mesh-deploy-listener', 'disable-and-unload',
-                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False),
+                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True),
                     listener_stop_evidence, hold=hold)
                 journal.append('listener-release-verified', evidence={'verified': True})
                 current['mesh-deploy-listener'] = copy.deepcopy(prior['mesh-deploy-listener'])
@@ -973,6 +1087,8 @@ class JournalTests(unittest.TestCase):
             result = copy.deepcopy(baseline)
             result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
                                              if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
             return result
         with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
             with Journal(self.root, prior, node_lock=self.node_lock,
@@ -985,7 +1101,7 @@ class JournalTests(unittest.TestCase):
                     complete=lambda *_: {'verified': True})
                 anchor_hold(journal, hold)
                 journal.mutate('mesh-deploy-listener', 'disable-and-unload',
-                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False),
+                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True),
                     listener_stop_evidence, hold=hold)
                 def fence():
                     fence_calls.append(True)
@@ -1189,7 +1305,7 @@ class JournalTests(unittest.TestCase):
                 hold = SimpleNamespace(journal=journal, check_forward=lambda: None)
                 anchor_hold(journal, hold)
                 journal.mutate('mesh-deploy-listener', 'disable-and-unload',
-                               lambda: current['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener'),
+                               lambda: fence_listener(current),
                                listener_stop_evidence, hold=hold)
                 def stop_viewer():
                     current['loaded']['gui'].remove('ai.openclaw.workplan-viewer')

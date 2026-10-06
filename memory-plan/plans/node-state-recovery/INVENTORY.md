@@ -1714,3 +1714,17 @@ now uses the owned gated-timer identity for its full timer cohort; all 16
 root-transfer tests pass locally. The CI refusal was in test setup, before
 any production action. Exact-head CI for the fixture repair remains pending.
 No production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 21:51 EDT: D88 adds a three-domain launchd disabled-
+override census to full-node baseline and every forward journal check. An
+owned disposable listener re-enable without reload now refuses before the
+next mutation; member-1 and unrelated-override negatives also refuse.
+Owned macOS launchd showed that its GUI and user override views move
+together. The focused preservation and owned launchd suites passed: 183
+tests, one skipped; the NATS-transfer negative refuses before a durable
+transfer intent. Exact-head CI remains pending for D88.
+This only samples a fence. Persistent stops and restore for the remaining
+jobs, detached and other launch paths, continuous watch, reboot rehearsal,
+host decision controller, four cold-history acceptance and verified
+resumption remain open. No production service, VM or NATS history changed;
+1.2 remains [A]/v1.2-pre.

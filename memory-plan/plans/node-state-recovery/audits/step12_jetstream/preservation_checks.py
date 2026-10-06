@@ -399,8 +399,19 @@ def loaded_entrypoints(domain_text, domain, protected_roots, inspect=None):
     return labels
 
 
+def disabled_overrides(output, labels):
+    found = {}
+    for label, value in re.findall(r'^\s*"([^"\n]+)" => ([^\n]+)$', output, re.M):
+        if not label.startswith(('ai.openclaw.', 'com.openclaw.')):
+            continue
+        require(label not in found and value in ('enabled', 'disabled', 'true', 'false'),
+                'launchd disabled override is ambiguous: ' + label)
+        found[label] = value in ('disabled', 'true')
+    return {label: found.pop(label, None) for label in sorted(labels)} | dict(sorted(found.items()))
+
+
 def verify_entrypoint_inventory(installed, gui_loaded, user_loaded, system_loaded, expected,
-                                roots=(), disabled_artifacts=None, excluded=None):
+                                roots=(), disabled_artifacts=None, excluded=None, overrides=None):
     expected = {'ai.openclaw.' + unit for unit in expected}
     excluded = excluded if excluded is not None else {}
     valid_tailscale_exclusion(excluded)
@@ -426,7 +437,9 @@ def verify_entrypoint_inventory(installed, gui_loaded, user_loaded, system_loade
                        'system': sorted(system_loaded - excluded_labels)},
             'roots': sorted(str(pathlib.Path(root).resolve(strict=False)) for root in roots),
             'disabled_artifacts': dict(sorted((disabled_artifacts or {}).items())),
-            'excluded': excluded}
+            'excluded': excluded,
+            'overrides': overrides if overrides is not None else
+            {domain: {} for domain in ('gui', 'user', 'system')}}
 
 
 def capture_entrypoint_inventory(expected):
@@ -442,6 +455,10 @@ def capture_entrypoint_inventory(expected):
     loaded = [loaded_entrypoints(listing, domain, roots)
               for listing, domain in zip(listings, domains)]
     expected_labels = {'ai.openclaw.' + unit for unit in expected}
+    override_output = [subprocess.check_output(['/bin/launchctl', 'print-disabled', domain],
+                       text=True, timeout=10) for domain in domains]
+    overrides = {name: disabled_overrides(output, expected_labels)
+                 for name, output in zip(('gui', 'user', 'system'), override_output)}
     require(set(installed) <= expected_labels | {TAILSCALE_LABEL}
             and loaded[0] <= expected_labels and loaded[1] <= expected_labels
             and loaded[2] <= expected_labels | {TAILSCALE_LABEL},
@@ -449,8 +466,12 @@ def capture_entrypoint_inventory(expected):
     excluded = tailscale_exclusion(installed, *loaded, system_listing=listings[2])
     evidence = verify_entrypoint_inventory(installed, *loaded, expected,
                                            roots=roots, disabled_artifacts=disabled,
-                                           excluded=excluded)
+                                           excluded=excluded, overrides=overrides)
     again = installed_entrypoints(directories, roots)
+    require({name: disabled_overrides(subprocess.check_output(
+                ['/bin/launchctl', 'print-disabled', domain], text=True, timeout=10), expected_labels)
+             for name, domain in zip(('gui', 'user', 'system'), domains)} == overrides,
+            'launchd disabled overrides changed during preflight')
     require(again == installed and all(hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
             == (evidence['excluded'][label]['plist']['sha256'] if label in excluded else
                 evidence['installed'][label]['sha256']) for label, path in again.items())

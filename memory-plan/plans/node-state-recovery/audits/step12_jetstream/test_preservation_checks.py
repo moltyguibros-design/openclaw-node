@@ -19,7 +19,8 @@ from unittest.mock import Mock, patch
 from preservation_checks import (
     QuietWindow, Refused, STOP_ORDER, capture, verify_admissions,
     TAILSCALE_BINARY, TAILSCALE_LABEL, TAILSCALE_WRAPPER,
-    disabled_entrypoint_artifacts, http_json, installed_entrypoints, loaded_entrypoints, verify_completion,
+    disabled_entrypoint_artifacts, disabled_overrides, http_json, installed_entrypoints,
+    loaded_entrypoints, verify_completion,
     root_file, tailscale_exclusion, tailscale_launchd_state, valid_tailscale_plist,
     verify_entrypoint_inventory,
     verify_queue, verify_streams, verify_timer_idle,
@@ -30,6 +31,19 @@ class Gates(unittest.TestCase):
     def refused(self, call):
         with self.assertRaises(Refused):
             call()
+
+    def test_disabled_override_parser_preserves_domain_evidence(self):
+        labels = {'ai.openclaw.nats-1', 'ai.openclaw.mesh-deploy-listener'}
+        output = '"ai.openclaw.nats-1" => true\n"com.openclaw.old" => disabled\n'
+        self.assertEqual(disabled_overrides(output, labels), {
+            'ai.openclaw.mesh-deploy-listener': None,
+            'ai.openclaw.nats-1': True,
+            'com.openclaw.old': True})
+        self.assertFalse(disabled_overrides('"ai.openclaw.nats-1" => enabled\n', labels)
+                         ['ai.openclaw.nats-1'])
+        self.refused(lambda: disabled_overrides(
+            '"ai.openclaw.nats-1" => true\n"ai.openclaw.nats-1" => false\n', labels))
+        self.refused(lambda: disabled_overrides('"ai.openclaw.nats-1" => maybe\n', labels))
 
     def test_only_exact_tailscale_system_job_can_be_excluded(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-entrypoints-owned-') as root:

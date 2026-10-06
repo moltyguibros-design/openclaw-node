@@ -339,7 +339,7 @@ def valid_prior(prior, scope=None):
 def valid_entrypoint_inventory(evidence, prior):
     require(isinstance(evidence, dict) and evidence.get('verified') is True
             and set(evidence) == {'verified', 'installed', 'loaded', 'roots',
-                                  'disabled_artifacts', 'excluded'},
+                                  'disabled_artifacts', 'excluded', 'overrides'},
             'full-node entrypoint inventory is absent')
     installed = evidence['installed']
     loaded = evidence['loaded']
@@ -352,6 +352,21 @@ def valid_entrypoint_inventory(evidence, prior):
             and all(isinstance(value, list) and len(value) == len(set(value))
                     for value in loaded.values()),
             'full-node loaded entrypoints are incomplete')
+    labels = {'ai.openclaw.' + unit for unit in UNITS}
+    overrides = evidence['overrides']
+    require(isinstance(overrides, dict) and set(overrides) == {'gui', 'user', 'system'}
+            and all(isinstance(values, dict) and labels <= set(values)
+                    and all(label.startswith(('ai.openclaw.', 'com.openclaw.'))
+                            and (value is None or isinstance(value, bool))
+                            for label, value in values.items())
+                    for values in overrides.values()),
+            'full-node disabled overrides are incomplete')
+    require(all((overrides['gui']['ai.openclaw.' + unit] is True
+                 and overrides['user']['ai.openclaw.' + unit] is True
+                 and overrides['system']['ai.openclaw.' + unit] is not False)
+                if state['disabled'] else overrides['gui']['ai.openclaw.' + unit] is not True
+                for unit, state in prior.items()),
+            'full-node disabled overrides differ from the baseline')
     expected_loaded = {'ai.openclaw.' + unit for unit, state in prior.items() if state['loaded']}
     require(set().union(*map(set, loaded.values())) == expected_loaded
             and sum(map(len, loaded.values())) == len(expected_loaded),
@@ -544,7 +559,8 @@ class Journal:
         self.scope = self.records[0].get('scope')
         self.entrypoint_inventory = self.records[0].get('entrypoint_inventory')
 
-    def check_entrypoints(self, final=False, forward=False, expected_loaded=None):
+    def check_entrypoints(self, final=False, forward=False, expected_loaded=None,
+                          expected_overrides=None, newly_disabled=None):
         if self.scope != FULL_NODE_SCOPE:
             return None
         current = capture_entrypoint_inventory(UNITS)
@@ -575,6 +591,27 @@ class Journal:
             expected = expected_loaded if expected_loaded is not None else previous
             require(current['loaded'] == expected,
                     'full-node loaded jobs changed inside the forward window')
+            previous_overrides = next((row['evidence']['entrypoint_overrides']
+                                       for row in reversed(self.records)
+                                       if row['event'] == 'verified'
+                                       and 'entrypoint_overrides' in row.get('evidence', {})),
+                                      saved['overrides'])
+            expected = expected_overrides if expected_overrides is not None else previous_overrides
+            if newly_disabled is None:
+                require(current['overrides'] == expected,
+                        'full-node launchd disabled overrides changed inside the forward window')
+            else:
+                require(current['overrides']['gui'][newly_disabled] is True
+                        and all(current['overrides'][domain][newly_disabled] is not False
+                                for domain in ('user', 'system'))
+                        and all({label: value for label, value in current['overrides'][domain].items()
+                                 if label != newly_disabled}
+                                == {label: value for label, value in expected[domain].items()
+                                    if label != newly_disabled}
+                                and (current['overrides'][domain][newly_disabled]
+                                     in (expected[domain][newly_disabled], True))
+                                for domain in ('gui', 'user', 'system')),
+                        'full-node launchd disabled overrides changed inside the forward window')
         if final:
             require(current['loaded'] == (expected_loaded if expected_loaded is not None else saved['loaded']),
                     'full-node loaded entrypoints were not restored')
@@ -892,7 +929,10 @@ class Journal:
             if self.scope == FULL_NODE_SCOPE and action in ('stop', 'unload', 'disable-and-unload'):
                 expected = {domain: sorted(set(labels) - {'ai.openclaw.' + unit})
                             for domain, labels in expected.items()}
-            before_verify = self.check_entrypoints(forward=True, expected_loaded=expected)
+            newly_disabled = ('ai.openclaw.' + unit if self.scope == FULL_NODE_SCOPE
+                              and action == 'disable-and-unload' else None)
+            before_verify = self.check_entrypoints(forward=True, expected_loaded=expected,
+                                                   newly_disabled=newly_disabled)
             evidence = verify()
             require(isinstance(evidence, dict) and evidence.get('verified') is True,
                     'mutation lacks verified evidence')
@@ -900,10 +940,12 @@ class Journal:
                 require(self.listener_stop_proven(evidence),
                         'deploy listener stop lacks persistent unload and process proof')
             if self.scope == FULL_NODE_SCOPE:
-                after_verify = self.check_entrypoints(forward=True, expected_loaded=expected)
+                after_verify = self.check_entrypoints(forward=True, expected_loaded=expected,
+                                                      expected_overrides=before_verify['overrides'])
                 require(after_verify['loaded'] == before_verify['loaded'],
                         'full-node job changed during mutation verification')
-                evidence = {**evidence, 'entrypoint_loaded': after_verify['loaded']}
+                evidence = {**evidence, 'entrypoint_loaded': after_verify['loaded'],
+                            'entrypoint_overrides': after_verify['overrides']}
             self.append('verified', intent=intent['sequence'], unit=unit, action=action, evidence=evidence)
             return evidence
         except Exception as error:
