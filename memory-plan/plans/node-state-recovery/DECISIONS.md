@@ -2152,3 +2152,22 @@ valid capture; a backdated host-generated manifest can still pass. The
 full-node hold, production capture, four real-history restores, acceptance
 and verified resumption remain open. No production VM, service or NATS store
 was stopped or changed; step 1.2 remains [A]/v1.2-pre.
+
+## D108 — Re-fence an unloaded job after an interrupted enable (2026-10-06 17:20 EDT)
+
+An enable-capable recovery adapter needs to re-establish a persistent hold if
+it enables a stopped job and then fails before bootstrap. The existing
+`disable_for_hold()` deliberately requires a loaded job, so it cannot repair
+that disabled-override gap. `Launchd.disable_unloaded_for_hold()` now requires
+the owned label to be unloaded in both GUI and user domains, requires the
+override to be clear, disables it, and verifies it stayed unloaded and
+disabled. An actual owned macOS launchd control exercised an interrupted
+enable, re-fenced the unloaded job, proved direct bootstrap refused, then
+re-enabled and bootstrapped it. The managed-launchd suite passes 43 tests
+with one explicit cross-domain skip.
+
+This is a compensation primitive, not the recovery adapter: no journal
+callback invokes it, and a crash between enable and re-fencing still needs
+a boot-time controller. The current full-node non-listener production stop
+refusal remains. No production service, VM or NATS history changed; step 1.2
+stays [A]/v1.2-pre.

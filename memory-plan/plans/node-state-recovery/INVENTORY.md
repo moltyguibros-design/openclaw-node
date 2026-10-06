@@ -1960,3 +1960,13 @@ declaration and clock-order failures now have distinct diagnostics. Guest
 origin, clock synchronization, full-node hold, production capture, four
 real-history restores, acceptance and resumption remain open. No production
 VM or service changed; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 17:20 EDT: D108 adds a narrowly scoped launchd
+compensation primitive for an unloaded job whose disabled override was
+cleared during a failed restoration. An actual owned macOS job was
+re-fenced after an interrupted enable: direct bootstrap refused, while
+re-enable then bootstrap succeeded. The managed-launchd suite passes
+43 tests with one explicit domain skip. No journal restore callback uses
+this yet, so a complete full-node hold and recovery adapter remain open;
+no production service, VM or NATS history changed. Step 1.2 stays
+[A]/v1.2-pre.

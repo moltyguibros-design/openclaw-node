@@ -257,6 +257,14 @@ class Launchd:
         command(['/bin/launchctl', 'disable', self.target])
         require(self.disabled(), 'managed unit was not disabled')
 
+    def disable_unloaded_for_hold(self):
+        require(not self.status()['loaded'] and not self.status('user')['loaded'],
+                'managed unit is loaded while restoring its disabled override')
+        require(not self.disabled(), 'managed unit is already disabled')
+        command(['/bin/launchctl', 'disable', self.target])
+        require(not self.status()['loaded'] and not self.status('user')['loaded'] and self.disabled(),
+                'managed unit did not remain unloaded and disabled')
+
     def enable_after_hold(self):
         require(not self.status()['loaded'] and not self.status('user')['loaded'],
                 'managed unit is still loaded')

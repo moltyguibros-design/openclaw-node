@@ -416,6 +416,32 @@ os.execv('/bin/sleep',['sleep','30'])
             verify()
         self.assertFalse(self.service.status()['loaded'])
 
+    def test_unloaded_job_can_be_refenced_after_interrupted_enable(self):
+        self.launch(run_at_load=False)
+        self.hold_override_attempted = True
+        self.service.disable_for_hold()
+        with self.assertRaisesRegex(Refused, 'loaded while restoring'):
+            self.service.disable_unloaded_for_hold()
+        subprocess.run(['/bin/launchctl', 'bootout', self.service.target],
+                       capture_output=True, check=True, timeout=10)
+        self.service.enable_after_hold()
+        self.assertFalse(self.service.disabled())
+        self.service.disable_unloaded_for_hold()
+        self.assertTrue(self.service.disabled())
+        self.assertFalse(self.service.status()['loaded'])
+        with self.assertRaisesRegex(Refused, 'already disabled'):
+            self.service.disable_unloaded_for_hold()
+        time.sleep(1)
+        direct = subprocess.run(['/bin/launchctl', 'bootstrap', 'gui/' + str(os.getuid()),
+                                 str(self.plist)], capture_output=True, text=True)
+        self.assertNotEqual(direct.returncode, 0)
+        self.assertFalse(self.service.status()['loaded'])
+        self.service.enable_after_hold()
+        self.service.bootstrap()
+        self.assertTrue(self.service.status()['loaded'])
+        self.proofs.append({'test': self._testMethodName, 'refenced_unloaded': True,
+                            'direct_bootstrap_refused': direct.returncode})
+
     def test_owned_job_disable_precedes_stop_and_enable_precedes_restart(self):
         binding = self.launch()
         with StopWatch(self.service, binding, [self.log, self.err], 'mesh-task-daemon',
