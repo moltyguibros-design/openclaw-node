@@ -2054,11 +2054,13 @@ Claude's read-only review of D102 at 456ec93d confirmed that the rejected
 receipt cannot be read as a verified one, while finding two untested cases:
 an unverified candidate and an unserializable candidate. The negative fixture
 now checks both after reopening the hash-chained journal. A failing diagnostic
-callback no longer replaces the original stop refusal or prevents a durable
-`failed` row; its exception type is recorded separately. The row records a
-fixed failure stage instead of arbitrary exception text, which distinguishes
-receipt-shape refusal from later entrypoint drift without persisting a
+callback raising an `Exception` no longer replaces the original stop refusal
+or prevents a durable `failed` row; its exception type is recorded separately.
+The row records a fixed failure stage instead of arbitrary exception text,
+distinguishing receipt-shape refusal from later entrypoint drift without a
 callback-provided message. The raw rejected candidate remains owner-private
 and is retained only when JSON-serializable. This is restoration evidence,
 not an all-job hold certificate or authority to stop the VM. No production
 service, VM or NATS history changed; step 1.2 remains [A]/v1.2-pre.
+`SystemExit` and `KeyboardInterrupt` still escape the mutation guard and
+leave a pending intent; reopening remains restore-only in that case.
