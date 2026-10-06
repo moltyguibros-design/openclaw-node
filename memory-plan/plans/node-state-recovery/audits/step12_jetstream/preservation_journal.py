@@ -950,6 +950,7 @@ class Journal:
         require(isinstance(fields, dict) and not set(fields) & {'unit', 'action'},
                 'intent fields cannot replace the mutation owner')
         intent = self.append('intent', unit=unit, action=action, **fields)
+        rejected_evidence = None
         try:
             apply()
             if held:
@@ -966,6 +967,8 @@ class Journal:
             before_verify = self.check_entrypoints(forward=True, expected_loaded=expected,
                                                    newly_disabled=newly_disabled)
             evidence = verify()
+            if isinstance(evidence, dict):
+                rejected_evidence = json.loads(encoded(evidence))
             require(isinstance(evidence, dict) and evidence.get('verified') is True,
                     'mutation lacks verified evidence')
             if self.scope == FULL_NODE_SCOPE and action == 'disable-and-unload':
@@ -990,6 +993,8 @@ class Journal:
         except Exception as error:
             if not self.write_failed:
                 detail = {} if failure_evidence is None else {'evidence': failure_evidence(error)}
+                if rejected_evidence is not None:
+                    detail['rejected_evidence'] = rejected_evidence
                 self.append('failed', intent=intent['sequence'], unit=unit, action=action,
                             error_type=type(error).__name__, **detail)
             raise

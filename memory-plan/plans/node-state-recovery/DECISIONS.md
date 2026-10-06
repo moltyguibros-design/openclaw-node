@@ -2035,3 +2035,15 @@ receipt is also absent from the journal's failed row; this is a forensic
 gap, not acceptance evidence. A future complete hold certificate must
 bind every receipt to the original watch session and fresh physical state.
 No live service, VM or NATS store changed; step 1.2 remains [A]/v1.2-pre.
+
+## D102 — Retain rejected stop receipts in the failure chain (2026-10-06 09:00 EDT)
+
+When `verify()` returns a serializable dictionary but a later journal check
+refuses it, the durable `failed` row now keeps that exact candidate under
+`rejected_evidence`. The existing adapter-supplied failure evidence remains
+separate. This lets a restore operator distinguish an incomplete stop receipt
+from a stop that produced no receipt, without treating the rejected proof as
+verified. A focused full-node negative checks the persisted hash-chained row;
+the journal and hold suites pass 180 tests. No production service, VM or NATS
+history changed. The all-job certificate, physical admission and shutdown
+gates remain open; step 1.2 remains [A]/v1.2-pre.

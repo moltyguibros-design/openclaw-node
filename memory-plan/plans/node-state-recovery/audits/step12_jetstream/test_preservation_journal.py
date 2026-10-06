@@ -783,6 +783,10 @@ class JournalTests(unittest.TestCase):
                                    lambda: fence_unit(current, 'gateway'),
                                    lambda: {'verified': True}, hold=hold)
                 self.assertEqual([row['event'] for row in journal.records[-2:]], ['intent', 'failed'])
+                self.assertEqual(journal.records[-1]['rejected_evidence'], {'verified': True})
+                receipt = self.root / f"{journal.records[-1]['sequence']:06d}.json"
+                self.assertEqual(valid_record(json.loads(receipt.read_bytes()))['rejected_evidence'],
+                                 {'verified': True})
                 with self.assertRaisesRegex(Refused, 'may only restore prior services'):
                     journal.mutate('observer', 'disable-and-unload',
                                    lambda: self.fail('stop ran'),

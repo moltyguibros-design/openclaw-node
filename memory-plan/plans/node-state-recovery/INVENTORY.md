@@ -1909,3 +1909,10 @@ records that direct journal callers can bypass the current adapter guard,
 all loaded-idle classes lack a production spawn-evidence producer, and
 failed rows do not retain rejected receipts. No production service, VM or
 history changed; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 09:00 EDT: D102 retains a rejected serializable
+stop receipt in the durable failure row, separately from adapter failure
+evidence. The full-node negative and 180 journal/hold tests pass. This
+improves restoration forensics but does not certify an all-job hold or
+physical absence. No production service, VM or history changed; step 1.2
+remains [A]/v1.2-pre.
