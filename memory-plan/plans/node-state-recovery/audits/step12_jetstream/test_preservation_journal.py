@@ -781,9 +781,12 @@ class JournalTests(unittest.TestCase):
                 with self.assertRaisesRegex(Refused, 'class-specific persistent proof: gateway'):
                     journal.mutate('gateway', 'disable-and-unload',
                                    lambda: fence_unit(current, 'gateway'),
-                                   lambda: {'verified': True}, hold=hold)
+                                   lambda: {'verified': True},
+                                   failure_evidence=lambda _: {'diagnostic': 'owned'}, hold=hold)
                 self.assertEqual([row['event'] for row in journal.records[-2:]], ['intent', 'failed'])
                 self.assertEqual(journal.records[-1]['rejected_evidence'], {'verified': True})
+                self.assertEqual(journal.records[-1]['evidence'], {'diagnostic': 'owned'})
+                self.assertEqual(journal.records[-1]['failure_stage'], 'persistent-stop-proof')
                 receipt = self.root / f"{journal.records[-1]['sequence']:06d}.json"
                 self.assertEqual(valid_record(json.loads(receipt.read_bytes()))['rejected_evidence'],
                                  {'verified': True})
@@ -2081,6 +2084,39 @@ class JournalTests(unittest.TestCase):
             self.assertEqual(reopened.records[-1]['error_type'], 'Refused')
             with self.assertRaisesRegex(Refused, 'reopened'):
                 reopened.require_forward()
+
+    def test_rejected_receipt_and_diagnostic_failure_remain_durable(self):
+        def broken_diagnostic(_):
+            raise RuntimeError('diagnostic failed')
+        for name, candidate in (
+                ('unverified', {'verified': False, 'observed': 'owned'}),
+                ('unserializable', {'verified': True, 'observed': {1}})):
+            with self.subTest(name=name):
+                case_dir = pathlib.Path(self.temp.name) / name
+                case_dir.mkdir(mode=0o700)
+                root = case_dir / 'journals' / 'journal'
+                node_lock = case_dir / 'node.lock'
+                with legacy_journal(root, PRIOR, boot='boot-a', node_lock=node_lock) as journal:
+                    expected_error = Refused if name == 'unverified' else TypeError
+                    with self.assertRaises(expected_error):
+                        journal.mutate('mesh-agent', 'stop', lambda: None,
+                                       lambda: candidate,
+                                       failure_evidence=broken_diagnostic)
+                    failed = journal.records[-1]
+                    self.assertEqual(failed['event'], 'failed')
+                    self.assertEqual(failed['failure_evidence_error'], 'RuntimeError')
+                    if name == 'unverified':
+                        self.assertEqual(failed['rejected_evidence'], candidate)
+                        self.assertEqual(failed['failure_stage'], 'verified-evidence')
+                    else:
+                        self.assertNotIn('rejected_evidence', failed)
+                        self.assertEqual(failed['error_type'], 'TypeError')
+                        self.assertEqual(failed['failure_stage'], 'evidence-serialization')
+                with Journal(root, boot='boot-a', node_lock=node_lock) as reopened:
+                    self.assertEqual(reopened.records[-1], failed)
+                    self.assertEqual(len(reopened.pending_intents()), 1)
+                    with self.assertRaisesRegex(Refused, 'only restore'):
+                        reopened.require_forward()
 
     def test_non_string_dictionary_keys_refuse_before_writing_a_poisoned_record(self):
         with self.journal(PRIOR) as journal:

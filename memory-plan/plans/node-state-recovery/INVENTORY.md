@@ -1916,3 +1916,10 @@ evidence. The full-node negative and 180 journal/hold tests pass. This
 improves restoration forensics but does not certify an all-job hold or
 physical absence. No production service, VM or history changed; step 1.2
 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 09:12 EDT: Claude's D102 review found the unverified
+and unserializable candidate cases unpinned, and a diagnostic callback
+could still mask the stop failure. D103 records a fixed failure stage,
+retains the original failure when diagnostics raise, and verifies both
+negative candidates after journal reopen. The full hold, shutdown and
+four-history acceptance gates remain open; step 1.2 remains [A]/v1.2-pre.

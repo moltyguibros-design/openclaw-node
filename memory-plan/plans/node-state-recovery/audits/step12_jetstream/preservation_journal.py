@@ -951,8 +951,10 @@ class Journal:
                 'intent fields cannot replace the mutation owner')
         intent = self.append('intent', unit=unit, action=action, **fields)
         rejected_evidence = None
+        failure_stage = 'apply'
         try:
             apply()
+            failure_stage = 'pre-verify'
             if held:
                 hold.check_forward()
             expected = next((row['evidence']['entrypoint_loaded'] for row in reversed(self.records)
@@ -966,11 +968,15 @@ class Journal:
                               and action == 'disable-and-unload' else None)
             before_verify = self.check_entrypoints(forward=True, expected_loaded=expected,
                                                    newly_disabled=newly_disabled)
+            failure_stage = 'verify-callback'
             evidence = verify()
+            failure_stage = 'evidence-serialization'
             if isinstance(evidence, dict):
                 rejected_evidence = json.loads(encoded(evidence))
+            failure_stage = 'verified-evidence'
             require(isinstance(evidence, dict) and evidence.get('verified') is True,
                     'mutation lacks verified evidence')
+            failure_stage = 'persistent-stop-proof'
             if self.scope == FULL_NODE_SCOPE and action == 'disable-and-unload':
                 if unit == 'mesh-deploy-listener':
                     require(self.full_node_stop_proven(unit, evidence),
@@ -981,6 +987,7 @@ class Journal:
                 else:
                     require(self.full_node_stop_proven(unit, evidence),
                             'full-node stop lacks class-specific persistent proof: ' + unit)
+            failure_stage = 'entrypoint-postcheck'
             if self.scope == FULL_NODE_SCOPE:
                 after_verify = self.check_entrypoints(forward=True, expected_loaded=expected,
                                                       expected_overrides=before_verify['overrides'])
@@ -992,7 +999,12 @@ class Journal:
             return evidence
         except Exception as error:
             if not self.write_failed:
-                detail = {} if failure_evidence is None else {'evidence': failure_evidence(error)}
+                detail = {'failure_stage': failure_stage}
+                if failure_evidence is not None:
+                    try:
+                        detail['evidence'] = json.loads(encoded(failure_evidence(error)))
+                    except Exception as inspection_error:
+                        detail['failure_evidence_error'] = type(inspection_error).__name__
                 if rejected_evidence is not None:
                     detail['rejected_evidence'] = rejected_evidence
                 self.append('failed', intent=intent['sequence'], unit=unit, action=action,
