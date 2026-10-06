@@ -541,7 +541,14 @@ try {
   assert.equal(offlineColdSource.consumers.find(c => c.name === 'cold-tail').ack_floor.stream_seq, offlineColdSource.content.last);
   assert.notDeepEqual(offlineColdSource.consumers, offlineOriginal.consumers);
   const clusterBaseline = path.join(root, 'prestop-cluster');
-  await run(process.execPath, baselineArgs(members[0], memberNC.info, clusterBaseline), { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' });
+  phase = 'cluster-cold-baseline';
+  try {
+    await run(process.execPath, baselineArgs(members[0], memberNC.info, clusterBaseline), { env: { ...process.env, NATS_TOKEN: token }, stdio: 'ignore' });
+  } catch (error) {
+    const failure = path.join(clusterBaseline, 'FAILED.json');
+    if (fs.existsSync(failure)) throw new Error('cluster baseline refused: ' + JSON.parse(fs.readFileSync(failure)).error, { cause: error });
+    throw error;
+  }
   const clusterManifest = JSON.parse(fs.readFileSync(path.join(clusterBaseline, 'manifest.json')));
   assert.equal(clusterManifest.serverInfo.server_name, members[0].name);
   assert.deepEqual(clusterManifest.expectedServer, { name: members[0].name, id: memberNC.info.server_id, cluster: 'recovery-fixture' });

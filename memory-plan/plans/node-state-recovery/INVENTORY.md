@@ -1843,3 +1843,13 @@ intent alone cannot distinguish the journal's enable from an outside one.
 The first macOS CI failure at D92 was an owned launchctl command timeout,
 not a proven readiness-loop timeout. D94 exact-head CI remains pending.
 No production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 00:44 EDT: D94 exact-head CI passed all four jobs on
+rerun. D95 CI again failed in the isolated JetStream fixture while the
+Node 20 job was cancelled by fail-fast; the test's broad phase label and
+silenced child hid the cause. The fixture now labels its cluster baseline
+step and surfaces only that owned child's saved error if it fails. The
+unchanged fixture passed twice locally against NATS server 2.12.6 and CLI
+0.3.1, with all owned servers stopped. Exact-head CI for the diagnostic
+change remains pending. No production service, VM or NATS history changed;
+1.2 remains [A]/v1.2-pre.
