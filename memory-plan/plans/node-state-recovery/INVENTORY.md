@@ -1781,3 +1781,14 @@ Exact-head CI for this change remains pending. This does not supply the
 full-node journal driver, production spawn watch, enable-capable restore,
 or the reboot and host gates. No production service, VM or NATS history
 changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 23:09 EDT: Claude's read-only challenge found that a
+stopped job found running at recovery could be accepted as already
+restored. D90 now refuses any full-node stopped unit without a later
+`recovery-verified` receipt if it has reappeared loaded or running, before
+hold preparation or any restoration write. An owned restarted-NATS negative
+and three listener-restart cases pass; the complete preservation suite
+passes 127 tests. The separate boot-time hold decision, persistent stops
+for the remaining jobs, enable-capable restore, continuous watch, and host
+capture gates are still open. Exact-head CI for D89–D90 is pending. No
+production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.

@@ -1065,6 +1065,41 @@ class JournalTests(unittest.TestCase):
                                      and row.get('unit') == 'mesh-deploy-listener'
                                      for row in journal.records))
 
+    def test_full_scope_refuses_restarted_nats_before_any_restore(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: self.fail('hold preparation ran'))
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True),
+                    listener_stop_evidence, hold=hold)
+                journal.mutate('nats', 'disable-and-unload',
+                    lambda: current['nats'].update(loaded=False, running=False, disabled=True),
+                    lambda: {'verified': True}, hold=hold)
+                current['nats'] = copy.deepcopy(prior['nats'])
+                before = len(journal.records)
+                restored = []
+                with self.assertRaisesRegex(Refused, 'stopped unit restarted before verified recovery: nats'):
+                    journal.recover(lambda unit, _: restored.append(unit),
+                        lambda unit, _: {**current[unit], 'verified': True},
+                        lambda: {'verified': True}, hold=hold,
+                        deploy_fence=lambda: {'verified': True})
+                self.assertEqual(restored, [])
+                self.assertEqual(len(journal.records), before)
+
     def test_full_scope_refuses_listener_restart_before_release(self):
         prior = full_node_inventory()
         current = copy.deepcopy(prior)
@@ -1092,14 +1127,15 @@ class JournalTests(unittest.TestCase):
                 def fence():
                     fence_calls.append(True)
                     return {'verified': True}
-                result = journal.recover(lambda unit, _: restored.append(unit),
-                    lambda unit, _: {**current[unit], 'verified': True},
-                    lambda: {'verified': True}, hold=hold,
-                    deploy_fence=fence)
-                self.assertFalse(result['restored'])
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'stopped unit restarted before verified recovery'):
+                    journal.recover(lambda unit, _: restored.append(unit),
+                        lambda unit, _: {**current[unit], 'verified': True},
+                        lambda: {'verified': True}, hold=hold,
+                        deploy_fence=fence)
                 self.assertEqual(restored, [])
                 self.assertEqual(fence_calls, [])
-                self.assertIn('mesh-deploy-listener', [row['unit'] for row in result['errors']])
+                self.assertEqual(len(journal.records), before)
                 self.assertFalse(any(row['event'] == 'listener-release-verified'
                                      for row in journal.records))
 
@@ -1129,14 +1165,15 @@ class JournalTests(unittest.TestCase):
                 current['mesh-deploy-listener'] = copy.deepcopy(prior['mesh-deploy-listener'])
                 restored = []
                 fence_calls = []
-                result = journal.recover(lambda unit, _: restored.append(unit),
-                    lambda unit, _: {**current[unit], 'verified': True},
-                    lambda: {'verified': True}, hold=hold,
-                    deploy_fence=lambda: fence_calls.append(True) or {'verified': True})
-                self.assertFalse(result['restored'])
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'stopped unit restarted before verified recovery'):
+                    journal.recover(lambda unit, _: restored.append(unit),
+                        lambda unit, _: {**current[unit], 'verified': True},
+                        lambda: {'verified': True}, hold=hold,
+                        deploy_fence=lambda: fence_calls.append(True) or {'verified': True})
                 self.assertEqual(restored, [])
                 self.assertEqual(fence_calls, [])
-                self.assertIn('mesh-deploy-listener', [row['unit'] for row in result['errors']])
+                self.assertEqual(len(journal.records), before)
                 self.assertFalse(any(row['event'] == 'already-restored'
                                      and row.get('unit') == 'mesh-deploy-listener'
                                      for row in journal.records))
@@ -1181,12 +1218,10 @@ class JournalTests(unittest.TestCase):
                 first = recover()
                 self.assertFalse(first['restored'])
                 self.assertEqual(starts, ['mesh-deploy-listener'])
-                second = recover()
-                self.assertFalse(second['restored'])
+                with self.assertRaisesRegex(Refused, 'stopped unit restarted before verified recovery'):
+                    recover()
                 self.assertEqual(starts, ['mesh-deploy-listener'])
                 self.assertEqual(fence_calls, [True])
-                self.assertTrue(any('stop it before retry' in row.get('detail', '')
-                                    for row in second['errors']))
                 current['mesh-deploy-listener'].update(loaded=False, running=False)
                 third = recover()
                 self.assertTrue(third['restored'], third)

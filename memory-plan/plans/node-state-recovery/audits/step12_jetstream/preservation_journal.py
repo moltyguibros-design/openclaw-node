@@ -979,6 +979,20 @@ class Journal:
         held = 'execution_hold' in self.prior['scheduler-heartbeat']
         require((hold is not None) == held and (not held or hold.journal is self),
                 'baselined execution hold requires its journal recovery facade')
+        if self.scope == FULL_NODE_SCOPE:
+            stopped = {}
+            for row in self.records:
+                if row['event'] == 'intent' and row.get('action') in ('stop', 'unload', 'disable-and-unload'):
+                    stopped[row['unit']] = row['sequence']
+                elif row['event'] == 'recovery-verified' and row.get('unit') in stopped:
+                    del stopped[row['unit']]
+            with nats_legacy_restore_guard():
+                for unit in stopped:
+                    actual = observe(unit, self.prior[unit])
+                    require(all(isinstance(actual.get(key), bool) for key in ('loaded', 'running', 'disabled'))
+                            and actual.get('identity') == self.prior[unit]['identity']
+                            and not actual['loaded'] and not actual['running'],
+                            'stopped unit restarted before verified recovery: ' + unit)
         if held:
             guard = nats_legacy_restore_guard() if nats_guarded else contextlib.nullcontext()
             with guard:

@@ -1769,3 +1769,25 @@ production caller yet journals all timer stops or re-enables the baselined
 jobs; continuous launch-path and process coverage, disposable VM reboot,
 host capture, four-history acceptance and verified resumption remain open.
 No production service, VM or NATS store changed; step 1.2 stays [A]/v1.2-pre.
+
+## D90 — Refuse a restarted stopped job before recovery mutates state (2026-10-05 23:09 EDT)
+
+Claude's read-only D62 review demonstrated that `Journal.recover()` could
+classify a job with a verified persistent stop as `already-restored` if it
+reappeared running before recovery. That can turn an unexpected restart into
+a successful restoration. Full-node recovery now walks stop intents and
+later `recovery-verified` receipts before hold preparation or any new
+journal/state write. It observes every stopped, unverified unit under the
+legacy NATS guard and refuses if the unit is loaded or running, its observed
+state is incomplete, or its identity changed. A failed or interrupted stop
+intent also requires this preflight; an `already-restored` row does not
+authorize an out-of-band restart. A prior verified restoration does.
+
+Disposable tests show that a reappearing NATS server and deploy listener
+are refused before any other restore or new journal record, including after
+an incomplete listener release. The existing interrupted-listener test
+still recovers after the listener is stopped again. The preservation
+journal suite passed 127 tests. This is a same-boot recovery preflight; it
+does not replace D62's independent boot-time hold check, continuous watch,
+or an enable-capable production restore. No live service, VM or NATS store
+changed; step 1.2 remains [A]/v1.2-pre.
