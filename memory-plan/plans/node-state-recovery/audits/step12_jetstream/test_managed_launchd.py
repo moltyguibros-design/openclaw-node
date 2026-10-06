@@ -480,7 +480,7 @@ jetstream {{ store_dir: "{self.directory / 'store'}" }}
                 return http_json(monitor, '/varz')
             except Refused:
                 return False
-        wait_for(ready)
+        self.assertEqual(wait_for(ready)['version'], '2.12.6')
         binding = self.service.bind(argv, self.nats, self.directory)
         with socket.create_connection(('127.0.0.1', port), timeout=2) as client:
             client.settimeout(2)
@@ -502,7 +502,8 @@ jetstream {{ store_dir: "{self.directory / 'store'}" }}
                         return connection.connect_ex(('127.0.0.1', port)) != 0
                 proof = watch.verify(lambda: client.recv(1) == b'', listener_absent)
         self.assertTrue(Journal.managed_stop_proven(proof))
-        self.assertIn(proof['termination'], ({'exit': 0}, {'signal': 15}))
+        self.assertEqual(proof['termination'], {'exit': 0})
+        self.assertEqual(proof['exits'][str(proof['owner'])]['wait_status'], 0)
         self.assertTrue(self.service.disabled())
         self.proofs.append({'test': self._testMethodName, 'stop': proof,
                             'isolated_port': port, 'owned_connection_closed': True,

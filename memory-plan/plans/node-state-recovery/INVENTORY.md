@@ -1883,3 +1883,13 @@ shape only: no client-drain proof, journaled full-node NATS stop, all-job
 certificate, root physical census, disposable reboot, production capture,
 four-history acceptance or verified resumption follows from it. No live
 service, VM or production NATS history changed; step 1.2 remains [A].
+
+Checkpoint 2026-10-06 03:10 EDT: Claude's read-only D98 challenge confirmed
+the owned real-server stop and exact-head four-job CI pass, but found the
+specific version and exit-0 claims were not asserted. D99 pins both using
+`/varz.version`, the termination field and kernel wait status. The focused
+owned macOS test passes locally. Normal fixture teardown re-enables the
+throwaway label; retained temporary artifacts and crash-only override
+residue are documented. Full-node journal composition and physical root
+admission are still unproved. No production service, VM or history changed;
+step 1.2 remains [A].

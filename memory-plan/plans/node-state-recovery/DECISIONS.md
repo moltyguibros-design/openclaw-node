@@ -1968,3 +1968,23 @@ exists. No all-job certificate, root physical census, disposable reboot,
 stopped-VM capture, four-history acceptance or production resumption is
 claimed. No live service, VM or production NATS store changed; step 1.2
 remains [A]/v1.2-pre.
+
+## D99 — Pin the owned NATS version and exact normal exit (2026-10-06 03:10 EDT)
+
+Claude's read-only review of D98 at 0ba99c3f reproduced the isolated
+SIGTERM/EOF/marker behavior and confirmed that exact-head CI passed all four
+jobs, including the 42-test macOS launchd suite. It also found that the
+version and exit-0 statements in D98 were author observations: the test
+accepted either normal `SIGTERM` or exit 0 and did not check `/varz.version`.
+The owned test now requires `/varz.version == 2.12.6`,
+`termination == {'exit': 0}`, and kernel wait status 0, so those claims become checked
+regression evidence. The focused macOS test passes locally.
+
+The fixture deliberately retains its temporary root, store, logs and
+`proofs.json` for inspection. Normal teardown re-enables its unique launchd
+label; a hard kill between disable and teardown can leave that throwaway
+label disabled. The test uses a unique owned label, so it does not compose
+with the full-node journal's `ai.openclaw.nats` label requirement. Neither
+the root physical census nor the production stop/restore driver was
+exercised. No live service, VM or production NATS store changed; step 1.2
+remains [A]/v1.2-pre.
