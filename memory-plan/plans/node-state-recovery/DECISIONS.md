@@ -1944,3 +1944,27 @@ the current owned launchd fixture runs a Node script. Both facts remain
 production gates, alongside the all-job hold certificate and disposable
 reboot. No production service, VM or NATS store changed; step 1.2 stays
 [A]/v1.2-pre.
+
+## D98 — Observe a real NATS persistent-stop exit on owned launchd (2026-10-06 02:56 EDT)
+
+An owned macOS launchd job now starts the installed nats-server 2.12.6 with
+JetStream storage, client and monitoring listeners under a fresh temporary
+directory and loopback ports. `StopWatch` binds the running binary, config,
+plist and logs, watches its kernel exit, disables its unique job label, and
+boots it out. The observed owner exit was `{'exit': 0}` with wait status 0;
+the NATS log contained one `Server Exiting` marker. Bootout returned 0, the
+job was unloaded, an owned NATS client received EOF, its client listener
+closed, and its disabled override remained set. `Journal.managed_stop_proven()`
+accepted the resulting receipt.
+The owned test cleanup re-enables the label. This gives D96 a real-server
+termination control rather than only the Node-script control.
+The owned launchd suite passes 42 tests with one unavailable user-domain
+control skipped; plan lint is conformant (14 pass, one idle-step warning).
+
+The owned client proves one connection closure, not production client-drain
+evidence. The test calls `StopWatch` directly because full-node `mutate()` still
+refuses persistent stops for NATS until an enable-capable recovery adapter
+exists. No all-job certificate, root physical census, disposable reboot,
+stopped-VM capture, four-history acceptance or production resumption is
+claimed. No live service, VM or production NATS store changed; step 1.2
+remains [A]/v1.2-pre.

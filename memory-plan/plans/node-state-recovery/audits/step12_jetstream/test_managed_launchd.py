@@ -459,6 +459,55 @@ os.execv('/bin/sleep',['sleep','30'])
         self.proofs.append({'test': self._testMethodName, 'stop': proof,
                             'disabled_after_bootout': True, 'restarted_after_enable': True})
 
+    def test_owned_nats_persistent_stop_has_transfer_termination_shape(self):
+        port, monitor = free_port(), free_port()
+        config = self.directory / 'nats.conf'
+        config.write_text(f'''server_name: owned-stop-{secrets.token_hex(4)}
+host: 127.0.0.1
+port: {port}
+http_port: {monitor}
+jetstream {{ store_dir: "{self.directory / 'store'}" }}
+''')
+        argv = [self.nats, '-c', str(config)]
+        self.plist.write_bytes(plistlib.dumps({
+            'Label': self.name, 'ProgramArguments': argv,
+            'WorkingDirectory': str(self.directory), 'RunAtLoad': True,
+            'KeepAlive': False, 'ExitTimeOut': 5,
+            'StandardOutPath': str(self.log), 'StandardErrorPath': str(self.err)}))
+        self.service.bootstrap()
+        def ready():
+            try:
+                return http_json(monitor, '/varz')
+            except Refused:
+                return False
+        wait_for(ready)
+        binding = self.service.bind(argv, self.nats, self.directory)
+        with socket.create_connection(('127.0.0.1', port), timeout=2) as client:
+            client.settimeout(2)
+            self.assertIn(b'INFO', client.recv(8192))
+            client.sendall(b'CONNECT {"verbose":false}\r\nPING\r\n')
+            reply = b''
+            while b'PONG' not in reply:
+                chunk = client.recv(8192)
+                self.assertTrue(chunk)
+                reply += chunk
+            with StopWatch(self.service, binding, [self.log, self.err], 'nats',
+                           allowed_signals=(15,), require_disabled=True) as watch:
+                self.hold_override_attempted = True
+                self.service.disable_for_hold()
+                watch.apply()
+                def listener_absent():
+                    with socket.socket() as connection:
+                        connection.settimeout(.2)
+                        return connection.connect_ex(('127.0.0.1', port)) != 0
+                proof = watch.verify(lambda: client.recv(1) == b'', listener_absent)
+        self.assertTrue(Journal.managed_stop_proven(proof))
+        self.assertIn(proof['termination'], ({'exit': 0}, {'signal': 15}))
+        self.assertTrue(self.service.disabled())
+        self.proofs.append({'test': self._testMethodName, 'stop': proof,
+                            'isolated_port': port, 'owned_connection_closed': True,
+                            'production_connections': False})
+
     def test_post_disable_stop_failure_is_durable_and_keeps_override(self):
         binding = self.launch()
         journal_parent = self.directory / 'journals'

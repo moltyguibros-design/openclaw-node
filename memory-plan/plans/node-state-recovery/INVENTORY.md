@@ -1873,3 +1873,13 @@ pass (134 preservation, 22 user-to-root). D96 exact-head CI passed four jobs.
 The fields remain user-writable and root physical NATS/store-holder admission
 is not wired; no full-node certificate, real NATS persistent-stop proof,
 disposable reboot or production capture is claimed. Step 1.2 stays [A].
+
+Checkpoint 2026-10-06 02:56 EDT: D98's owned macOS launchd control stopped
+a real nats-server 2.12.6 JetStream process with the persistent `StopWatch`
+path. The kernel exit status was 0, the normal NATS log marker appeared, the
+job unloaded with its override still disabled, and D96's managed-stop
+predicate accepted the receipt. This observes the real-server termination
+shape only: no client-drain proof, journaled full-node NATS stop, all-job
+certificate, root physical census, disposable reboot, production capture,
+four-history acceptance or verified resumption follows from it. No live
+service, VM or production NATS history changed; step 1.2 remains [A].
