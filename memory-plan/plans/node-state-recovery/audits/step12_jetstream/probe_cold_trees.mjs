@@ -53,6 +53,7 @@ function frozenTree(dir) {
 function baseline(role) {
   roleName(role.name);
   assert(path.isAbsolute(role.master) && path.isAbsolute(role.baseline));
+  assert.match(role.masterSha256, /^[0-9a-f]{64}$/);
   privateRegular(role.baseline);
   frozenTree(role.master);
   const data = JSON.parse(fs.readFileSync(role.baseline, 'utf8'));
@@ -225,6 +226,46 @@ async function waitActive(nc, data) {
   }
 }
 
+async function localState(item, data) {
+  const jsz = await monitor(item.http, 'jsz?streams=true');
+  const varz = await monitor(item.http, 'varz');
+  assert.equal(jsz.server_id, varz.server_id);
+  assert.equal(varz.server_name, item.role);
+  assert.equal(fs.realpathSync(path.dirname(jsz.config.store_dir)), fs.realpathSync(item.working));
+  assert(!jsz.meta_cluster?.leader, `isolated member unexpectedly has quorum: ${item.role}`);
+  const details = (jsz.account_details || []).flatMap(account => account.stream_detail || []);
+  assert.equal(new Set(details.map(row => row.name)).size, details.length, 'ambiguous local stream names');
+  const checked = [];
+  for (const row of data.streams.filter(row => !row.offline && row.snapshot.config.num_replicas > 1)) {
+    const actual = details.find(detail => detail.name === row.stream);
+    assert(actual, `missing local cold stream: ${item.role}/${row.stream}`);
+    for (const key of ['messages', 'bytes', 'first_seq', 'last_seq']) {
+      assert.equal(actual.state[key] || 0, row.snapshot.state[key] || 0,
+        `local cold state mismatch: ${item.role}/${row.stream}/${key}`);
+    }
+    const deletionCount = state => (state.num_deleted || 0)
+      - (state.messages === 0 && state.last_seq === 0 && state.deleted?.includes(0) ? 1 : 0);
+    assert.equal(deletionCount(actual.state), deletionCount(row.snapshot.state),
+      `local cold deletion count mismatch: ${item.role}/${row.stream}`);
+    checked.push(row.stream);
+  }
+  return { member: item.role, streams: checked };
+}
+
+async function waitLeader(nc, stream, preferred, serving) {
+  for (let attempt = 0; attempt < 150; attempt++) {
+    try {
+      const info = await api(nc, `$JS.API.STREAM.INFO.${stream}`, {}, 1000);
+      const peers = info.cluster?.replicas || [];
+      const other = serving.find(name => name !== preferred);
+      const peer = peers.find(row => row.name === other);
+      if (info.cluster?.leader === preferred && peer?.current && !peer.offline && !(peer.lag || 0)) return;
+    } catch {}
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error(`cold stream did not become current under ${preferred}: ${stream}`);
+}
+
 let failure;
 let report;
 let phase = 'validate';
@@ -256,6 +297,8 @@ try {
     assert(row?.snapshot && row.snapshot.config.num_replicas === 1);
   }
   const hashes = new Map(roles.map(role => [role.name, treeHash(role.master)]));
+  for (const role of roles) assert.equal(hashes.get(role.name), role.masterSha256,
+    `cold master differs from its recorded extraction: ${role.name}`);
   const selected = await ports(15);
   phase = 'standalone';
   const standalone = await start(plan.standalone, selected.slice(0, 3));
@@ -269,6 +312,15 @@ try {
   const heldRows = await compare(heldNC, baselines.get(plan.held.name), plan.held.streams);
   phase = 'cluster';
   const clusterPorts = [selected.slice(3, 6), selected.slice(6, 9), selected.slice(12, 15)];
+  const memberLocal = [];
+  for (let i = 0; i < 2; i++) {
+    const role = plan.cluster.members[i];
+    phase = 'member-local-' + role.name;
+    const item = await start(role, clusterPorts[i], { name: plan.cluster.name, routes: clusterPorts.map(row => row[2]) }, '-local');
+    memberLocal.push(await localState(item, baselines.get(role.name)));
+    await stop(item);
+  }
+  phase = 'cluster';
   const members = [];
   for (let i = 0; i < 2; i++) members.push(await start(plan.cluster.members[i], clusterPorts[i], { name: plan.cluster.name, routes: clusterPorts.map(row => row[2]) }));
   for (const item of members) item.nc = await bus(item);
@@ -291,6 +343,24 @@ try {
   }
   phase = 'cluster-compare';
   const activeStreams = firstCluster.streams.filter(row => !row.offline).map(row => row.stream);
+  const memberReads = [];
+  const serving = members.map(item => item.role);
+  for (const item of members) {
+    const data = baselines.get(item.role);
+    for (const row of data.streams.filter(row => !row.offline && row.snapshot.config.num_replicas > 1)) {
+      phase = 'cluster-member-reads-' + item.role;
+      const before = await api(item.nc, `$JS.API.STREAM.INFO.${row.stream}`);
+      if (before.cluster?.leader !== item.role) {
+        await api(item.nc, `$JS.API.STREAM.LEADER.STEPDOWN.${row.stream}`,
+          { placement: { preferred: item.role } });
+      }
+      await waitLeader(item.nc, row.stream, item.role, serving);
+      await compare(item.nc, data, [row.stream]);
+      await waitLeader(item.nc, row.stream, item.role, serving);
+      memberReads.push({ member: item.role, stream: row.stream });
+    }
+  }
+  phase = 'cluster-compare';
   const clusterRows = await compare(members[0].nc, firstCluster, activeStreams);
   await compare(members[1].nc, secondCluster, activeStreams);
   phase = 'cluster-held-rejoin';
@@ -304,7 +374,7 @@ try {
   assert.deepEqual(rejoinedRows, heldRows);
   for (const item of members) assert.equal((await monitor(item.http, 'connz?limit=100')).total, 1);
   for (const role of roles) assert.equal(treeHash(role.master), hashes.get(role.name), `cold master changed: ${role.name}`);
-  report = { scope: 'isolated direct-store mechanism probe; not host provenance or production acceptance', at: new Date().toISOString(), binary: binaryReal, binarySha256, roles: roles.map(role => ({ role: role.name, masterSha256: hashes.get(role.name) })), standalone: standaloneRows, held: heldRows, cluster: clusterRows, offlineBeforeRejoin: [...plan.cluster.offline], rejoined: rejoinedRows };
+  report = { scope: 'isolated direct-store mechanism probe; not host provenance or production acceptance', at: new Date().toISOString(), binary: binaryReal, binarySha256, roles: roles.map(role => ({ role: role.name, masterSha256: hashes.get(role.name) })), standalone: standaloneRows, held: heldRows, cluster: clusterRows, memberLocal, memberReads, offlineBeforeRejoin: [...plan.cluster.offline], rejoined: rejoinedRows };
 } catch (err) { failure = err; }
 
 for (const nc of connections) {

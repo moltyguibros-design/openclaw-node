@@ -3,19 +3,38 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { api, capture, listConsumerStates, jsonPrivate, openBus, privateDir } from './recovery.mjs';
 
-const [server, expectedName, expectedId, expectedCluster, target, offlineList = ''] = process.argv.slice(2);
-assert(server && expectedName && expectedId && expectedCluster && target && process.env.NATS_TOKEN,
-  'usage: NATS_TOKEN=<local secret> node take_cold_baseline.mjs <loopback-server> <expected-name> <expected-server-id> <expected-cluster-or-> <new-private-dir> [known-offline-streams]');
+const [server, expectedName, expectedId, expectedCluster, target, offlineList = '', monitorURL] = process.argv.slice(2);
+assert(server && expectedName && expectedId && expectedCluster && target && monitorURL && process.env.NATS_TOKEN,
+  'usage: NATS_TOKEN=<local secret> node take_cold_baseline.mjs <loopback-server> <expected-name> <expected-server-id> <expected-cluster-or-> <new-private-dir> <known-offline-streams-or-empty> <loopback-monitor-url>');
 assert(path.isAbsolute(target) && !fs.existsSync(target));
 assert.match(expectedName, /^[A-Za-z0-9_-]+$/);
 assert.match(expectedId, /^N[A-Z2-7]+$/);
 assert.match(expectedCluster, /^[-A-Za-z0-9_]+$/);
+const monitor = new URL(monitorURL);
+assert(monitor.protocol === 'http:' && monitor.hostname === '127.0.0.1' && monitor.port
+  && !monitor.username && !monitor.password && monitor.pathname === '/' && !monitor.search && !monitor.hash,
+  'monitor must be a loopback HTTP origin');
 process.umask(0o077);
 privateDir(target);
 
 const expectedOffline = new Set(offlineList.split(',').filter(Boolean));
 const manifest = { startedAt: new Date().toISOString(), server, expectedServer: { name: expectedName, id: expectedId, cluster: expectedCluster }, streams: [] };
 let nc;
+
+async function monitorIdentity() {
+  const [jsResponse, varResponse] = await Promise.all([
+    fetch(new URL('/jsz', monitor), { signal: AbortSignal.timeout(2000) }),
+    fetch(new URL('/varz', monitor), { signal: AbortSignal.timeout(2000) }),
+  ]);
+  assert(jsResponse.ok && varResponse.ok, 'monitor did not answer');
+  const [jsz, varz] = await Promise.all([jsResponse.json(), varResponse.json()]);
+  assert.equal(jsz.server_id, expectedId, 'JetStream monitor belongs to another server');
+  assert.equal(varz.server_id, expectedId, 'server monitor belongs to another server');
+  assert.equal(varz.server_name, expectedName, 'monitor reports another server name');
+  assert(typeof jsz.config?.store_dir === 'string' && jsz.config.store_dir.endsWith(path.sep + 'jetstream'),
+    'monitor has no expected JetStream store directory');
+  return fs.realpathSync(path.dirname(jsz.config.store_dir));
+}
 
 async function names() {
   const result = [];
@@ -48,6 +67,7 @@ try {
   assert.equal(manifest.serverInfo.server_name, expectedName, 'connected to unexpected NATS server name');
   assert.equal(manifest.serverInfo.server_id, expectedId, 'connected to unexpected NATS server ID');
   assert.equal(manifest.serverInfo.cluster || '-', expectedCluster, 'connected to unexpected NATS cluster');
+  manifest.serverInfo.storeDir = await monitorIdentity();
   const originalNames = await names();
   for (const stream of originalNames) {
     assert(/^[A-Za-z0-9_-]+$/.test(stream));
@@ -64,6 +84,7 @@ try {
     }
   }
   assert.deepEqual(await names(), originalNames, 'stream inventory changed during baseline');
+  assert.equal(await monitorIdentity(), manifest.serverInfo.storeDir, 'server store directory changed during baseline');
   for (const stream of expectedOffline) assert(originalNames.includes(stream), 'expected offline assignment is absent');
   for (const row of manifest.streams) {
     if (row.offline) {

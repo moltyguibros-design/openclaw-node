@@ -1923,3 +1923,14 @@ could still mask the stop failure. D103 records a fixed failure stage,
 retains the original failure when diagnostics raise, and verifies both
 negative candidates after journal reopen. The full hold, shutdown and
 four-history acceptance gates remain open; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 15:16 EDT: D104's disposable NATS 2.12.6 fixture
+refuses swapped serving masters, removed follower message blocks and a
+same-length flipped payload after the isolated probe's role digest,
+member-local and forced-leader checks. The baseline records a monitor-bound
+physical store path for later role binding. These are mechanism controls;
+the plan digest must still be derived from a trusted MATCH extraction role,
+and the guest path must match that server's pre-stop monitor path. The
+full-node hold, stopped-VM capture, three serving cold masters, four real
+history restores, acceptance and verified resumption remain open. No live
+service or VM changed; step 1.2 remains [A]/v1.2-pre.

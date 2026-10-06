@@ -2064,3 +2064,34 @@ not an all-job hold certificate or authority to stop the VM. No production
 service, VM or NATS history changed; step 1.2 remains [A]/v1.2-pre.
 `SystemExit` and `KeyboardInterrupt` still escape the mutation guard and
 leave a pending intent; reopening remains restore-only in that case.
+
+## D104 — Refuse the three owned cold-master false accepts (2026-10-06 15:16 EDT)
+
+At 157ccc6a the unmodified isolated probe wrote `probe.json` when the two
+serving masters were swapped. Claude independently reproduced that case,
+a follower with its message blocks removed, and election-dependent acceptance
+of a same-length flipped payload on disposable NATS 2.12.6 clusters. Each
+member connection uses the stream leader's JetStream API, so two connections
+alone do not verify two local copies.
+
+The cold-tree plan now requires a per-role digest of the frozen master. The
+probe compares it before boot, checks each surviving member's local stream
+state through `/jsz` while that member has no quorum, then makes each member
+lead every replicated active stream and compares the full stream capture
+while it leads. The direct pre-stop baseline now binds its connection to the
+matching loopback monitor and records the physical store directory. The owned
+fixture passes with all servers stopped. Three negatives refuse swapped
+paths before a working copy, removed message blocks before the pair forms,
+and a flipped payload under forced leadership. Two additional flipped-payload
+runs also refused at the member-read phase. The original masters remained
+unchanged in every case.
+
+This closes those false accepts in the isolated mechanism fixture, not
+production acceptance. A plan author can still swap both a master path and
+its self-declared digest. Production planning must derive each digest from
+the MATCH-verified extraction role and check that role's guest path against
+the recorded pre-stop monitor store directory. `MATCH.json` itself still has
+the guest-provenance gap described in the review. The full-node hold,
+stopped-VM capture, four real-history restores, acceptance and verified
+resumption remain open. No production service, VM or NATS history changed;
+step 1.2 remains [A]/v1.2-pre.

@@ -22,11 +22,14 @@ offline assignments. Changed or duplicate inventory, an undeclared offline
 stream, a supposedly offline stream that responds, or failed authentication
 produces a private `FAILED.json` and no success manifest. Its sequential
 captures and final state/consumer recheck are not a common quiet point.
-The caller also supplies the expected server name, server ID and cluster name
-(`-` for standalone). The connection must match all three before any stream
-is read. Pin those values from the managed unit/config/process and matching
-monitor identity in the current preflight; deriving them only from whichever
-server happens to answer the ambiguous client port would defeat the check.
+The caller also supplies the expected server name, server ID, cluster name
+(`-` for standalone), and that server's loopback monitor URL. The connection
+and monitor must agree on identity before any stream is read. The manifest
+records the monitor's physical JetStream store directory, which must match
+the role's path in the stopped-tree extraction specification. Pin the
+expected identity from the managed unit/config/process in the current
+preflight; deriving it only from whichever server answers the ambiguous
+client port would defeat the check.
 Production use requires the separate writer hold and final comparison against
 extracted cold-store restores; this tool alone never certifies a master or a
 stopped VM.
@@ -36,13 +39,19 @@ already been extracted and frozen. Its private JSON plan names the pinned
 `binary` and `binarySha256`, one `standalone` role, two
 `cluster.members`, the `cluster.name` and `cluster.offline` stream names,
 and a separate `held` role with its `streams`. Each role supplies the original
-server `name`, an absolute, owner-read-only `master` store directory and the
-absolute private `baseline` manifest from `take_cold_baseline.mjs`. The tool
+server `name`, an absolute, owner-read-only `master` store directory, its
+`masterSha256` digest, and the absolute private `baseline` manifest from
+`take_cold_baseline.mjs`. The digest is SHA-256 of the JSON serialization of
+the sorted `hashTree(master)` entries; derive it from the role's MATCH-verified
+extraction tree, never from a master path selected in the plan. The tool
 requires four distinct masters, copies each into a private working directory,
-and boots only those working copies on isolated loopback ports. It first reads
-the held R1 history without routing, verifies the two survivors retain the
-explicit offline assignment, then joins a second working copy of held R1 to
-verify the recovered stream. It compares stream content, configuration, state
+and boots only those working copies on isolated loopback ports. It reads the
+standalone and held R1 histories without routing. Before the survivors form a
+quorum, it checks each one alone through its local monitor. After they join,
+it verifies the held streams remain offline, forces each survivor to lead each
+replicated active stream, and compares content while that member leads. It
+then joins a second working copy of held R1 to verify the recovered streams.
+It compares stream content, configuration, state
 and consumers, rehashes every master, and writes private `probe.json` only on
 success. A mismatch writes `FAILED.json` and refuses. This tests the local
 restore mechanism; a host provenance receipt and production acceptance are
@@ -165,7 +174,8 @@ The direct pre-stop capture uses the same private token delivery and URL rule:
 NATS_TOKEN=<loaded privately> node take_cold_baseline.mjs \
   nats://127.0.0.1:<port> <expected-server-name> <expected-server-id> \
   <expected-cluster-or-> <new-private-absolute-dir> \
-  [comma-separated-known-offline-streams]
+  <comma-separated-known-offline-streams-or-empty> \
+  http://127.0.0.1:<monitor-port>
 ```
 
 Keep its manifest private. Record the source server identity and each stream's
