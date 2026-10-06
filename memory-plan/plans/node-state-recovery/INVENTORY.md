@@ -1812,3 +1812,16 @@ preservation and 44 hold tests. The check is sampled, and an ambiguous
 failed restore or failed idle-timer stop still needs a controlled retry
 procedure. Exact-head CI for D92 is pending. No production service, VM or
 NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 00:12 EDT: D92's exact-head CI passed all four jobs
+after a failed macOS owned-service readiness wait passed on rerun. Claude's
+independent D92 challenge found that an observation exception at a stopped
+unit's restore turn let later units restore. D93 now aborts that loop and
+requires a persistent stop's disabled override to remain set, including
+while the job is unloaded. Owned negatives cover the lost override and an
+unobservable gateway with a later stopped viewer; the hold-preparation
+negative also checks the node receipt. The preservation and hold suites
+pass 176 tests; plan lint is conformant (14 pass, one warning). The all-job
+certificate, continuous watch, restart-safe adapter, disposable reboot,
+host capture and four-history acceptance remain open. No production
+service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.

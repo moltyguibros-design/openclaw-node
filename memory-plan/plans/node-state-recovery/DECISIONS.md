@@ -1835,3 +1835,32 @@ because the current journal cannot prove whether that running generation
 came from its own restore or an outside launcher. D89's failed idle-timer
 stop likewise needs a controlled repair path. Those remain open; no live
 service, VM or NATS store changed, and step 1.2 stays [A]/v1.2-pre.
+
+## D93 — Retain the persistent stop override through recovery (2026-10-06 00:12 EDT)
+
+D92 rejected a stopped job that reappeared loaded or running, but accepted
+one whose `disable-and-unload` override had been cleared while it remained
+unloaded. Recovery's entrypoint check did not compare disabled overrides.
+The stopped-unit preflight and per-unit check now require `disabled: true`
+for a pending persistent stop. A disposable negative clears the gateway
+override while it remains unloaded and confirms refusal before hold
+preparation or a journal/state write. Earlier `stop` and `unload` receipts
+remain subject to the D92 unloaded check; D91 already refuses new ones in
+full-node scope.
+
+Claude's independent review also found that an observation exception at a
+stopped unit's restore turn bypassed D92's abort flag, allowing later units
+to restore. Such an exception now aborts the restore loop. Owned tests make
+the later viewer a stopped unit and show that neither a gateway restart nor
+an unobservable gateway restores it. The hold-preparation negative now
+checks the node receipt as well as journal rows. The preservation and hold
+suites pass 176 tests, and plan lint is conformant (14 pass, one warning).
+D92's exact-head CI passed
+all four jobs on rerun; its first macOS attempt timed out waiting for an
+owned service's readiness in the separate restore-only prototype.
+
+These are sampled checks, not a continuous no-restart fence or a complete
+full-node hold certificate. Failed-restore retry, reboot, stopped-VM
+capture, four-history acceptance and verified production resumption remain
+open. No live service, VM or NATS store changed; step 1.2 remains
+[A]/v1.2-pre.

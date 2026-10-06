@@ -985,7 +985,7 @@ class Journal:
             stopped = {}
             for row in self.records:
                 if row['event'] == 'intent' and row.get('action') in ('stop', 'unload', 'disable-and-unload'):
-                    stopped[row['unit']] = row['sequence']
+                    stopped[row['unit']] = row['action']
                 elif row['event'] == 'recovery-verified' and row.get('unit') in stopped:
                     del stopped[row['unit']]
             def stopped_state_ok(unit, actual):
@@ -993,13 +993,14 @@ class Journal:
                         and all(isinstance(actual.get(key), bool)
                                 for key in ('loaded', 'running', 'disabled'))
                         and actual.get('identity') == self.prior[unit]['identity']
-                        and not actual['loaded'] and not actual['running'])
+                        and not actual['loaded'] and not actual['running']
+                        and (stopped[unit] != 'disable-and-unload' or actual['disabled']))
             def check_stopped():
                 with nats_legacy_restore_guard():
                     for unit in stopped:
                         actual = observe(unit, self.prior[unit])
                         require(stopped_state_ok(unit, actual),
-                                'stopped unit restarted before verified recovery: ' + unit)
+                                'stopped unit state changed before verified recovery: ' + unit)
             check_stopped()
         if held:
             guard = nats_legacy_restore_guard() if nats_guarded else contextlib.nullcontext()
@@ -1112,11 +1113,15 @@ class Journal:
                               self.scope == FULL_NODE_SCOPE and unit == 'mesh-deploy-listener')
                          else contextlib.nullcontext())
                 with guard as precommit:
-                    actual = observe(unit, prior)
+                    try:
+                        actual = observe(unit, prior)
+                    except Exception:
+                        unsafe_restart = self.scope == FULL_NODE_SCOPE and unit in stopped
+                        raise
                     if self.scope == FULL_NODE_SCOPE and unit in stopped:
                         unsafe_restart = not stopped_state_ok(unit, actual)
                         require(not unsafe_restart,
-                                'stopped unit restarted before verified recovery: ' + unit)
+                                'stopped unit state changed before verified recovery: ' + unit)
                     require(all(isinstance(actual.get(k), bool) for k in ('loaded', 'running', 'disabled')),
                             'actual service state is incomplete')
                     require(actual.get('identity') == prior['identity'], 'immutable service identity changed')
