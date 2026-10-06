@@ -2016,3 +2016,22 @@ the strict timer shape remains unreachable there. A future certificate
 must bind receipts to the original execution-hold watch session and fresh
 entrypoint/physical observations. No production service, VM or NATS store
 changed; step 1.2 remains [A]/v1.2-pre.
+
+## D101 — Pin idle receipt clauses and delimit D100 reachability (2026-10-06 05:22 EDT)
+
+Claude's read-only challenge of D100 at d4e63130 found no new false
+acceptance or refusal in the receipt predicate. Exact-head CI run
+37441636415 passed all four jobs. The owned negative test now rejects
+`verified=False`, `unloaded=False`, changed logs and a prior job that was
+not loaded, closing the four unpinned idle-receipt clauses.
+
+D100 is not an adapter admission gate: a caller can invoke `Journal.mutate`
+directly with a shaped receipt even though `StopWatch.mutate` refuses
+persistent non-listener stops until recovery can re-enable them. A production
+driver must not bypass that guard. Neither timer nor loaded-idle on-demand
+or known-broken job has a production spawn-evidence producer, so the idle
+shape cannot currently be issued for any of those classes. A rejected
+receipt is also absent from the journal's failed row; this is a forensic
+gap, not acceptance evidence. A future complete hold certificate must
+bind every receipt to the original watch session and fresh physical state.
+No live service, VM or NATS store changed; step 1.2 remains [A]/v1.2-pre.

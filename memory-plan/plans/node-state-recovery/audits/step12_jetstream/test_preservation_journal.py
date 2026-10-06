@@ -754,7 +754,11 @@ class JournalTests(unittest.TestCase):
             self.assertFalse(journal.full_node_stop_proven(unit, {'verified': True}))
         self.assertFalse(journal.full_node_stop_proven('gateway', timer_stop_evidence('gateway')))
         self.assertFalse(journal.full_node_stop_proven('observer', listener_stop_evidence()))
-        for change in ({'disabled_override_verified': False},
+        for change in ({'verified': False},
+                       {'unloaded': False},
+                       {'logs_unchanged': False},
+                       {'disabled_override_verified': False},
+                       {'prior': {'loaded': False, 'running': False}},
                        {'prior': {'loaded': True, 'running': True}},
                        {'spawn_evidence': {'label': 'ai.openclaw.observer',
                                            'coverage_complete': False, 'spawns': []}},

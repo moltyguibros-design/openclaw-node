@@ -1901,3 +1901,11 @@ jobs and negative receipt shapes. This is still a user-journal shape gate,
 not an all-job hold certificate or root physical observation. The production
 non-listener stop and timer spawn-evidence paths remain closed, and no live
 service, VM or NATS history changed; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 05:22 EDT: Claude’s read-only D100 review at
+d4e63130 found no new receipt-predicate false acceptance or refusal; all
+four exact-head CI jobs passed. D101 pins four idle-receipt clauses and
+records that direct journal callers can bypass the current adapter guard,
+all loaded-idle classes lack a production spawn-evidence producer, and
+failed rows do not retain rejected receipts. No production service, VM or
+history changed; step 1.2 remains [A]/v1.2-pre.
