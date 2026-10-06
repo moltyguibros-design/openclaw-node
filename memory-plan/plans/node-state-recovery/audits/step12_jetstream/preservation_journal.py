@@ -602,8 +602,8 @@ class Journal:
                         'full-node launchd disabled overrides changed inside the forward window')
             else:
                 require(current['overrides']['gui'][newly_disabled] is True
-                        and all(current['overrides'][domain][newly_disabled] is not False
-                                for domain in ('user', 'system'))
+                        and current['overrides']['user'][newly_disabled] is True
+                        and current['overrides']['system'][newly_disabled] is not False
                         and all({label: value for label, value in current['overrides'][domain].items()
                                  if label != newly_disabled}
                                 == {label: value for label, value in expected[domain].items()

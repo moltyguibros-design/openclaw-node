@@ -1747,3 +1747,15 @@ An owned `npm ci --ignore-scripts` and the high-severity root audit pass
 locally; seven moderate findings remain below the configured gate. Exact-head
 CI for this lockfile repair is pending. No production service, VM or NATS
 history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 22:22 EDT: Exact-head CI for the lockfile repair
+passed all four jobs. Claude's independent read-only review of D88 found
+that the root transfer reader did not compare the listener's disabled
+override proof with subsequent verified stop receipts. The root reader now
+checks every later receipt; both journal and reader require a newly stopped
+listener disabled in GUI and user views. Owned negatives for missing GUI or
+user disable, explicit system enable, and later held-member override loss
+refuse. The preservation suite passed 125 tests, root-transfer suite passed
+17, and plan lint is conformant (14 pass, one longstanding warning). Exact-
+head CI for this final receipt-continuity change remains pending. No
+production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.

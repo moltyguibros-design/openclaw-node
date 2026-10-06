@@ -41,6 +41,10 @@ class UserTransferTest(unittest.TestCase):
             {'entrypoint_inventory': {**inventory, 'overrides': {
                 **inventory['overrides'], 'gui': {
                     **inventory['overrides']['gui'], 'ai.openclaw.nats-1': False}}}},
+            {'entrypoint_inventory': {**inventory, 'overrides': {
+                **inventory['overrides'], 'gui': {
+                    key: value for key, value in inventory['overrides']['gui'].items()
+                    if key != 'ai.openclaw.nats-1'}}}},
         ):
             with self.subTest(change=change):
                 with self.assertRaises(module.Refused):
@@ -191,6 +195,10 @@ class UserTransferTest(unittest.TestCase):
                 module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
     def test_root_refuses_incomplete_listener_stop_proof(self):
+        overrides = fixture_module.full_entrypoint_evidence(
+            fixture_module.full_node_inventory())['overrides']
+        overrides['gui']['ai.openclaw.mesh-deploy-listener'] = True
+        overrides['user']['ai.openclaw.mesh-deploy-listener'] = None
         changes = [(key, False) for key in module.LISTENER_STOP_FIELDS]
         changes += [('bootout', {'returncode': 1, 'timed_out': False}),
                     ('bootout', {'returncode': 0, 'timed_out': True}),
@@ -199,6 +207,7 @@ class UserTransferTest(unittest.TestCase):
                     ('entrypoint_loaded', {'gui': ['ai.openclaw.mesh-deploy-listener'],
                                            'user': [], 'system': []}),
                     ('entrypoint_overrides', {'gui': {}, 'user': {}, 'system': {}}),
+                    ('entrypoint_overrides', overrides),
                     ('termination', {'signal': 9})]
         for field, value in changes:
             with self.subTest(field=field):
@@ -216,6 +225,22 @@ class UserTransferTest(unittest.TestCase):
                 with patch.object(module, 'boot_identity', return_value='boot-a'):
                     with self.assertRaisesRegex(module.Refused, 'listener stop proof differs'):
                         module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
+
+    def test_root_refuses_held_member_override_loss_in_nats_receipt(self):
+        fixture, journal, transaction, _ = self.prepared()
+        journal.close()
+        rows = copy.deepcopy(journal.records)
+        nats = next(row for row in rows if row['event'] == 'verified'
+                    and row.get('unit') == 'nats')
+        nats['evidence']['entrypoint_overrides']['gui']['ai.openclaw.nats-1'] = False
+        for index, row in enumerate(rows):
+            row['previous'] = rows[index - 1]['sha256'] if index else None
+            row['sha256'] = hashlib.sha256(module.encoded(
+                {key: value for key, value in row.items() if key != 'sha256'})).hexdigest()
+            (fixture.root / f'{index:06d}.json').write_bytes(module.encoded(row))
+        with patch.object(module, 'boot_identity', return_value='boot-a'):
+            with self.assertRaisesRegex(module.Refused, 'disabled override continuity differs'):
+                module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
     def test_root_refuses_live_owner_then_pins_exact_transfer(self):
         fixture, journal, transaction, transfer = self.prepared()

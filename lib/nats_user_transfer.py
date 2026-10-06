@@ -411,13 +411,16 @@ class UserTransfer:
                         for values in stop['entrypoint_overrides'].values())
                 and stop['entrypoint_overrides']['gui'].get(
                     'ai.openclaw.mesh-deploy-listener') is True
-                and all(stop['entrypoint_overrides'][domain].get(
-                            'ai.openclaw.mesh-deploy-listener') is not False
-                        and {label: value for label, value in stop['entrypoint_overrides'][domain].items()
-                             if label != 'ai.openclaw.mesh-deploy-listener'} ==
-                            {label: value for label, value in
-                             baseline['entrypoint_inventory']['overrides'][domain].items()
-                             if label != 'ai.openclaw.mesh-deploy-listener'}
+                and stop['entrypoint_overrides']['user'].get(
+                    'ai.openclaw.mesh-deploy-listener') is True
+                and stop['entrypoint_overrides']['system'].get(
+                    'ai.openclaw.mesh-deploy-listener') is not False
+                and all(
+                        {label: value for label, value in stop['entrypoint_overrides'][domain].items()
+                         if label != 'ai.openclaw.mesh-deploy-listener'} ==
+                        {label: value for label, value in
+                         baseline['entrypoint_inventory']['overrides'][domain].items()
+                         if label != 'ai.openclaw.mesh-deploy-listener'}
                         for domain in ('gui', 'user', 'system')),
                 'user transfer listener stop proof differs')
         for unit in NATS:
@@ -446,6 +449,33 @@ class UserTransfer:
                             original['watch_session_id']
                             for row in self.records[:-1]),
                         'user transfer NATS stop receipt is absent: ' + unit)
+        previous_overrides = stop['entrypoint_overrides']
+        for row in self.records[listener['sequence'] + 1:-1]:
+            if row['event'] != 'verified':
+                continue
+            evidence = row.get('evidence')
+            current = evidence.get('entrypoint_overrides') if isinstance(evidence, dict) else None
+            require(isinstance(current, dict) and set(current) == {'gui', 'user', 'system'}
+                    and all(isinstance(values, dict) for values in current.values()),
+                    'user transfer disabled override continuity differs')
+            if row.get('action') == 'disable-and-unload':
+                label = 'ai.openclaw.' + (row.get('unit') if isinstance(row.get('unit'), str) else '')
+                require(label in baseline['entrypoint_inventory']['installed']
+                        and current['gui'].get(label) is True
+                        and current['user'].get(label) is True
+                        and current['system'].get(label) is not False
+                        and all(current[domain].get(label)
+                                in (previous_overrides[domain].get(label), True)
+                                and {key: value for key, value in current[domain].items()
+                                     if key != label} ==
+                                    {key: value for key, value in previous_overrides[domain].items()
+                                     if key != label}
+                                for domain in ('gui', 'user', 'system')),
+                        'user transfer disabled override continuity differs')
+            else:
+                require(current == previous_overrides,
+                        'user transfer disabled override continuity differs')
+            previous_overrides = current
         require(not any(row['event'] in ('failed', 'recovery-started', 'hold-superseded')
                         for row in self.records), 'user transfer continuity was broken')
         completed = {row['intent'] for row in self.records
