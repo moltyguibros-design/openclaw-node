@@ -1878,3 +1878,23 @@ is conformant (14 pass, one warning). This is a test-fixture correction,
 not a new production hold
 capability. D93 exact-head CI passed four jobs before this correction; no
 live service, VM or NATS store changed. Step 1.2 remains [A]/v1.2-pre.
+
+## D95 — Keep an ambiguous enabled-unloaded retry fenced (2026-10-06 00:27 EDT)
+
+Claude's read-only D93 review reproduced a restore that enables a stopped
+job, then fails before bootstrap. The unit is unloaded and enabled. D93
+refuses the retry, whereas D92 would have retried it. Do not exempt this
+state merely because the journal has `restoration-intent`: an outside
+`launchctl enable` after that intent is observationally identical, and a
+login or reboot could then start the service in the unresolved window.
+Current `Launchd.disable_for_hold()` requires a loaded unit, so the
+production retry still needs a journaled, verifiable way to re-disable an
+unloaded unit. Until that exists, recovery stays fenced and an operator
+must reconcile the override. This is an explicit additional failed-restore
+case under the existing step 1.2 gate, not accepted resumption evidence.
+
+Correction to D93's CI description: the first macOS attempt raised
+`TimeoutExpired` from an owned `launchctl` command. The owned restore-only
+readiness loop would have converted its own timeout to `Refused`; the exact
+command that timed out was not identified. The failed job passed on rerun.
+No production service, VM or NATS store changed.

@@ -1834,3 +1834,12 @@ branch in a disposable copy now fails both because the viewer is restored.
 The focused suites pass 176 tests and plan lint is conformant (14 pass,
 one warning). Exact-head CI for D94 remains pending. No
 production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 00:27 EDT: Claude's D93 review independently
+confirmed the override and unobservable-unit refusals, and identified an
+enable-then-fail retry that D93 now fences while the job is unloaded. D95
+retains that refusal until a journaled re-disable/retry path exists; an
+intent alone cannot distinguish the journal's enable from an outside one.
+The first macOS CI failure at D92 was an owned launchctl command timeout,
+not a proven readiness-loop timeout. D94 exact-head CI remains pending.
+No production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
