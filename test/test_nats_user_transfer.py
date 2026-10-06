@@ -249,25 +249,35 @@ class UserTransferTest(unittest.TestCase):
                         module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
     def test_root_refuses_incomplete_nats_stop_proof(self):
-        for field, value in (('verified', False),
-                             ('unit_unloaded', False),
-                             ('bootout', {'returncode': 1, 'timed_out': False}),
-                             ('termination', {'signal': 9})):
-            with self.subTest(field=field):
-                fixture, journal, transaction, _ = self.prepared()
-                journal.close()
-                rows = copy.deepcopy(journal.records)
-                nats = next(row for row in rows if row['event'] == 'verified'
-                            and row.get('unit') == 'nats')
-                nats['evidence'][field] = value
-                for index, row in enumerate(rows):
-                    row['previous'] = rows[index - 1]['sha256'] if index else None
-                    row['sha256'] = hashlib.sha256(module.encoded(
-                        {key: item for key, item in row.items() if key != 'sha256'})).hexdigest()
-                    (fixture.root / f'{index:06d}.json').write_bytes(module.encoded(row))
-                with patch.object(module, 'boot_identity', return_value='boot-a'):
-                    with self.assertRaisesRegex(module.Refused, 'NATS stop receipt is absent'):
-                        module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
+        fixture, journal, transaction, _ = self.prepared()
+        def reader():
+            value = object.__new__(module.UserTransfer)
+            value.records = copy.deepcopy(journal.records)
+            value.transaction = transaction
+            value.prior_boot = False
+            value.decline_only = False
+            value.node_lock = fixture.node_lock
+            value.journal_root = fixture.root
+            value.uid = os.getuid()
+            return value
+        with patch.object(module, 'boot_identity', return_value='boot-a'):
+            intact = reader()
+            intact._validate()
+            self.assertTrue(intact.observation['verified'])
+        for unit in ('nats', 'nats-2', 'nats-3'):
+            for field, value in (('verified', False),
+                                 ('unit_unloaded', False),
+                                 ('bootout', {'returncode': 1, 'timed_out': False}),
+                                 ('bootout', {'returncode': 0, 'timed_out': True}),
+                                 ('termination', {'signal': 9})):
+                with self.subTest(unit=unit, field=field):
+                    altered = reader()
+                    row = next(row for row in altered.records if row['event'] == 'verified'
+                               and row.get('unit') == unit)
+                    row['evidence'][field] = value
+                    with patch.object(module, 'boot_identity', return_value='boot-a'):
+                        with self.assertRaisesRegex(module.Refused, 'NATS stop receipt is absent'):
+                            altered._validate()
 
     def test_root_refuses_held_member_override_loss_in_nats_receipt(self):
         fixture, journal, transaction, _ = self.prepared()

@@ -141,7 +141,7 @@ class JournalTests(unittest.TestCase):
             return legacy_journal(root or self.root, prior, boot=boot, node_lock=self.node_lock)
         return Journal(root or self.root, boot=boot, node_lock=self.node_lock)
 
-    def prepared_nats_transfer(self, excluded=None):
+    def prepared_nats_transfer(self, excluded=None, weak_unit=None):
         prior = full_node_inventory()
         loaded = full_entrypoint_evidence(prior)
         loaded['excluded'] = copy.deepcopy(excluded or {})
@@ -162,9 +162,18 @@ class JournalTests(unittest.TestCase):
                        lambda: fence_listener(loaded),
                        listener_stop_evidence, hold=hold)
         for unit in ('nats', 'nats-2', 'nats-3'):
-            journal.mutate(unit, 'disable-and-unload',
-                           lambda unit=unit: fence_unit(loaded, unit),
-                           listener_stop_evidence, hold=hold)
+            if unit == weak_unit:
+                intent = journal.append('intent', unit=unit, action='disable-and-unload')
+                fence_unit(loaded, unit)
+                journal.append('verified', intent=intent['sequence'], unit=unit,
+                               action='disable-and-unload', evidence={
+                                   'verified': True,
+                                   'entrypoint_loaded': copy.deepcopy(loaded['loaded']),
+                                   'entrypoint_overrides': copy.deepcopy(loaded['overrides'])})
+            else:
+                journal.mutate(unit, 'disable-and-unload',
+                               lambda unit=unit: fence_unit(loaded, unit),
+                               listener_stop_evidence, hold=hold)
         def observe(unit, saved):
             if unit == 'nats-1':
                 return {**saved, 'verified': True}
@@ -231,6 +240,13 @@ class JournalTests(unittest.TestCase):
         with self.assertRaisesRegex(Refused, 'writer is still active'):
             journal.transfer_nats(str(uuid.uuid4()), hold,
                                   lambda unit, saved: {**observe(unit, saved), 'running': unit == 'nats'})
+        self.assertEqual(len(journal.records), before)
+
+    def test_nats_transfer_refuses_weak_preexisting_stop_receipt(self):
+        journal, hold, observe, _ = self.prepared_nats_transfer(weak_unit='nats-2')
+        before = len(journal.records)
+        with self.assertRaisesRegex(Refused, 'no verified persistent journal receipt: nats-2'):
+            journal.transfer_nats(str(uuid.uuid4()), hold, observe)
         self.assertEqual(len(journal.records), before)
 
     def test_nats_transfer_refuses_receipts_without_listener_fence(self):

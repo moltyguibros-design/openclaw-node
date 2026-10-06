@@ -1922,3 +1922,25 @@ review of the prior green head identified those boundaries and the need to
 place any future certificate after all stops but before NATS transfer; it did
 not review this patch. No production service, VM or NATS store changed, and
 step 1.2 remains [A]/v1.2-pre.
+
+## D97 — Pin both NATS receipt validators and retain the physical-admission gate (2026-10-06 01:15 EDT)
+
+Claude's read-only D96 challenge confirmed the receipt-shape refusal but found
+that the new root negative could refuse on UID setup before reaching the NATS
+predicate in a root-run test environment. The root test now validates a complete
+unmodified reader first, then changes each serving member's receipt in memory
+and requires the named NATS refusal. It covers failed and timed-out bootout,
+missing unload and abnormal termination. A new user-journal negative hand-
+appends a weak `nats-2` stop after the listener and requires `transfer_nats()`
+to refuse without a transfer intent; otherwise the new `mutate()` guard alone
+would make the transfer check untested. The preservation suite passes 134 tests
+and user-to-root transfer passes 22. D96's exact-head CI passed all four jobs.
+
+These checks still trust user-writable receipt fields. Root admission has
+physical-observation and process-census hooks, but the live NATS and store-
+holder censuses are not wired into them. A real NATS 2.12.6 stop under the
+persistent `StopWatch` path has also not established its termination field;
+the current owned launchd fixture runs a Node script. Both facts remain
+production gates, alongside the all-job hold certificate and disposable
+reboot. No production service, VM or NATS store changed; step 1.2 stays
+[A]/v1.2-pre.

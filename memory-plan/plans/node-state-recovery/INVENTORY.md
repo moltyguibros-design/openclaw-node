@@ -1863,3 +1863,13 @@ the other jobs' per-class proof, all-job hold certificate, reboot rehearsal,
 host capture, isolated real-history acceptance and verified resumption remain
 open. No production service, VM or NATS history changed; 1.2 remains
 [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 01:15 EDT: Claude's read-only D96 review found an
+untested user transfer guard and a root negative that could refuse before the
+NATS predicate in a root-run environment. D97 now gives the root validator a
+positive control and challenges all three serving member receipts; a hand-
+appended weak `nats-2` receipt tests the user transfer guard. Focused suites
+pass (134 preservation, 22 user-to-root). D96 exact-head CI passed four jobs.
+The fields remain user-writable and root physical NATS/store-holder admission
+is not wired; no full-node certificate, real NATS persistent-stop proof,
+disposable reboot or production capture is claimed. Step 1.2 stays [A].
