@@ -1802,3 +1802,13 @@ This is an action-level guard, not per-class stop proof or an all-21-job
 certificate. The production persistent-stop restriction and post-reboot
 recovery refusal remain. Exact-head CI for D91 is pending. No production
 service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 23:53 EDT: Exact-head CI for D91 passed all four
+jobs. Claude's read-only D89–D90 challenge then reproduced a gateway restart
+after D90's preflight that recovery accepted as already restored. D92 adds a
+second preflight after hold preparation and a per-unit check during recovery;
+owned prepare-time and later-loop restart negatives pass, along with 130
+preservation and 44 hold tests. The check is sampled, and an ambiguous
+failed restore or failed idle-timer stop still needs a controlled retry
+procedure. Exact-head CI for D92 is pending. No production service, VM or
+NATS history changed; 1.2 remains [A]/v1.2-pre.

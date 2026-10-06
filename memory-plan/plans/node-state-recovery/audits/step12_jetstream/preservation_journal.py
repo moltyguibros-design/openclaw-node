@@ -988,17 +988,25 @@ class Journal:
                     stopped[row['unit']] = row['sequence']
                 elif row['event'] == 'recovery-verified' and row.get('unit') in stopped:
                     del stopped[row['unit']]
-            with nats_legacy_restore_guard():
-                for unit in stopped:
-                    actual = observe(unit, self.prior[unit])
-                    require(all(isinstance(actual.get(key), bool) for key in ('loaded', 'running', 'disabled'))
-                            and actual.get('identity') == self.prior[unit]['identity']
-                            and not actual['loaded'] and not actual['running'],
-                            'stopped unit restarted before verified recovery: ' + unit)
+            def stopped_state_ok(unit, actual):
+                return (isinstance(actual, dict)
+                        and all(isinstance(actual.get(key), bool)
+                                for key in ('loaded', 'running', 'disabled'))
+                        and actual.get('identity') == self.prior[unit]['identity']
+                        and not actual['loaded'] and not actual['running'])
+            def check_stopped():
+                with nats_legacy_restore_guard():
+                    for unit in stopped:
+                        actual = observe(unit, self.prior[unit])
+                        require(stopped_state_ok(unit, actual),
+                                'stopped unit restarted before verified recovery: ' + unit)
+            check_stopped()
         if held:
             guard = nats_legacy_restore_guard() if nats_guarded else contextlib.nullcontext()
             with guard:
                 hold.prepare(observe, final_check)
+        if self.scope == FULL_NODE_SCOPE:
+            check_stopped()
         errors = []
         diagnostics = diagnostics or (lambda row: print(json.dumps(row), file=sys.stderr, flush=True))
         def record(event, **data):
@@ -1078,6 +1086,7 @@ class Journal:
                                'detail': str(error)})
         held_preflight_failed = len(errors) != held_errors_before
         buses_ready = True
+        unsafe_restart = False
         for unit in (u for u in RESUME_ORDER if u in self.prior):
             if held_preflight_failed:
                 break
@@ -1104,6 +1113,10 @@ class Journal:
                          else contextlib.nullcontext())
                 with guard as precommit:
                     actual = observe(unit, prior)
+                    if self.scope == FULL_NODE_SCOPE and unit in stopped:
+                        unsafe_restart = not stopped_state_ok(unit, actual)
+                        require(not unsafe_restart,
+                                'stopped unit restarted before verified recovery: ' + unit)
                     require(all(isinstance(actual.get(k), bool) for k in ('loaded', 'running', 'disabled')),
                             'actual service state is incomplete')
                     require(actual.get('identity') == prior['identity'], 'immutable service identity changed')
@@ -1160,6 +1173,8 @@ class Journal:
             except Exception as error:
                 errors.append({'unit': unit, 'reason': type(error).__name__,
                                **({'after_commit': committed} if committed else {})})
+                if unsafe_restart:
+                    break
                 if held and self.write_failed:
                     break
                 if unit.startswith('nats'):

@@ -1811,3 +1811,27 @@ launchd evidence, nor that all 21 loaded jobs were stopped. The existing
 production stop refusal remains until an enable-capable restore and
 complete hold certificate are proven. No live service, VM or NATS store
 changed; step 1.2 stays [A]/v1.2-pre.
+
+## D92 — Recheck stopped jobs during recovery (2026-10-05 23:53 EDT)
+
+Claude's disposable review of D90 reproduced an out-of-band gateway restart
+between its one-time preflight and the gateway's place in `RESUME_ORDER`.
+Recovery then recorded `already-restored` without calling the restore
+adapter. Full-node recovery now repeats the stopped-unit preflight after
+`hold.prepare` and before its first state or journal write. It also checks
+each unverified stopped unit again at its restore turn; if it reappeared
+loaded or running, lost identity, or became unobservable, recovery records
+an error and stops the restore loop
+instead of accepting it as already restored or restoring later services.
+
+Disposable tests restart the gateway during hold preparation and while the
+loop observes `health-watch`. The first leaves journal bytes unchanged; the
+second returns unrestored, does not call the restore adapter, and never
+records `already-restored` for the gateway. The preservation suite passes
+130 tests and the hold suite 44. This narrows a sampled recovery race; it
+is not a continuous no-restart fence. A restore that started a service but
+failed readiness still requires an operator-mediated stop before retry,
+because the current journal cannot prove whether that running generation
+came from its own restore or an outside launcher. D89's failed idle-timer
+stop likewise needs a controlled repair path. Those remain open; no live
+service, VM or NATS store changed, and step 1.2 stays [A]/v1.2-pre.
