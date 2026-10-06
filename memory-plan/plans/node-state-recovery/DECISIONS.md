@@ -1749,3 +1749,23 @@ enable-capable production restore; the root/user/detached-process and other
 launch-path census, boot check, host guard rehearsal, capture decision
 controller, four-history acceptance and resumption remain open. No production
 service, VM or NATS store changed; step 1.2 remains [A]/v1.2-pre.
+
+## D89 — Give idle timers a persistent-stop primitive (2026-10-05 22:58 EDT)
+
+An idle timer unload previously lacked the opt-in disabled override needed
+for a full-node boot hold. `unload_idle_timer` can now disable its owned GUI
+job after a caller's durable stop intent, recheck that it stayed idle, then
+boot it out. Its verifier requires the override to remain disabled as well
+as unchanged logs and complete no-spawn evidence. A start during disable
+refuses before bootout and leaves the override in place for safe recovery.
+An owned macOS control waited one second, then showed that a direct launchd
+bootstrap fails while the timer is disabled and succeeds after re-enable;
+another control refuses an override lost before verification. The complete
+managed-launchd suite passed 41 tests with one domain skip. The spawn
+evidence in these owned controls is a fixture, not production watch proof.
+
+This is a primitive, not a full-node driver or a reboot certificate. No
+production caller yet journals all timer stops or re-enables the baselined
+jobs; continuous launch-path and process coverage, disposable VM reboot,
+host capture, four-history acceptance and verified resumption remain open.
+No production service, VM or NATS store changed; step 1.2 stays [A]/v1.2-pre.

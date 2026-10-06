@@ -1770,3 +1770,14 @@ user-only-disable negatives now protect both GUI checks. Local root-transfer
 tests pass 20/20; the preservation and hold suites pass 170/170. Exact-head
 CI for these final changes remains pending. No production service, VM or
 NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 22:58 EDT: D89 adds an opt-in persistent idle-timer
+stop: disable before bootout, refuse if the timer starts during disable,
+and require the override to survive verification. Owned macOS controls
+showed a delayed direct bootstrap refusal, re-enable and restoration,
+and refusal of a lost override. The managed-launchd suite passed 41 tests
+with one domain skip; plan lint is conformant (14 pass, one warning).
+Exact-head CI for this change remains pending. This does not supply the
+full-node journal driver, production spawn watch, enable-capable restore,
+or the reboot and host gates. No production service, VM or NATS history
+changed; 1.2 remains [A]/v1.2-pre.

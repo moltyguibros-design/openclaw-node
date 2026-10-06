@@ -529,7 +529,7 @@ class StopWatch:
         self.close()
 
 
-def unload_idle_timer(service, paths, spawn_evidence=None):
+def unload_idle_timer(service, paths, spawn_evidence=None, require_disabled=False):
     before = service.status()
     require(before['loaded'] and not before['running'], 'timer is not idle')
     loaded = service.configuration()
@@ -541,14 +541,19 @@ def unload_idle_timer(service, paths, spawn_evidence=None):
     def apply():
         current = service.status()
         require(current == before, 'timer started before unload')
+        if require_disabled:
+            service.disable_for_hold()
+            require(service.status() == before, 'timer started while establishing its disabled override')
         command(['/bin/launchctl', 'bootout', service.target])
     def verify():
         after = service.status()
         verify_timer_idle(before, after['loaded'], offsets, log_offsets(paths))
+        if require_disabled:
+            require(service.disabled(), 'timer lost its disabled override after bootout')
         require(spawn_evidence is not None, 'timer spawn-race evidence is absent; idle observations alone are insufficient')
         evidence = spawn_evidence()
         require(evidence['label'] == service.label and evidence['coverage_complete'] is True
                 and evidence['spawns'] == [], 'timer spawned during unload or spawn evidence is incomplete')
         return {'verified': True, 'prior': before, 'unloaded': True, 'logs_unchanged': True,
-                'spawn_evidence': evidence}
+                'spawn_evidence': evidence, 'disabled_override_verified': require_disabled}
     return apply, verify

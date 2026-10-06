@@ -39,6 +39,25 @@ def wait_for(check, seconds=10):
 
 
 class StopWatchPreflight(unittest.TestCase):
+    def test_persistent_idle_timer_refuses_a_start_during_disable(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-owned-idle-race-') as directory:
+            root = pathlib.Path(directory)
+            plist = root / 'timer.plist'
+            log = root / 'timer.log'
+            plist.write_bytes(b'owned timer')
+            log.write_bytes(b'')
+            state = {'loaded': True, 'running': False, 'pid': None}
+            def disable():
+                state.update(running=True, pid=123)
+            service = SimpleNamespace(plist=plist, status=lambda: dict(state),
+                configuration=lambda: {'path': str(plist.resolve()), 'logs': [str(log.resolve())]},
+                disable_for_hold=disable)
+            apply, _ = unload_idle_timer(service, [log], require_disabled=True)
+            with patch('managed_launchd.command') as command:
+                with self.assertRaisesRegex(Refused, 'started while establishing'):
+                    apply()
+            command.assert_not_called()
+
     def test_status_inspection_has_a_deadline(self):
         service = Launchd('ai.openclaw.gateway', '/owned/gateway.plist')
         target = 'gui/' + str(os.getuid()) + '/ai.openclaw.gateway'
@@ -358,6 +377,44 @@ os.execv('/bin/sleep',['sleep','30'])
             verify()
         self.assertFalse(self.service.status()['loaded'])
         self.assertEqual(self.log.stat().st_size, 0)
+
+    def test_idle_timer_persistent_stop_refuses_direct_restart_until_release(self):
+        self.launch(run_at_load=False)
+        apply, verify = unload_idle_timer(
+            self.service, [self.log, self.err],
+            spawn_evidence=lambda: {'label': self.service.label,
+                                    'coverage_complete': True, 'spawns': []},
+            require_disabled=True)
+        apply()
+        proof = verify()
+        self.assertTrue(proof['disabled_override_verified'])
+        self.assertFalse(self.service.status()['loaded'])
+        self.assertTrue(self.service.disabled())
+        time.sleep(1)
+        bootstrap = ['/bin/launchctl', 'bootstrap', 'gui/' + str(os.getuid()), str(self.plist)]
+        direct = subprocess.run(bootstrap, capture_output=True, text=True)
+        self.assertNotEqual(direct.returncode, 0)
+        self.assertFalse(self.service.status()['loaded'])
+        self.service.enable_after_hold()
+        restarted = subprocess.run(bootstrap, capture_output=True, text=True)
+        self.assertEqual(restarted.returncode, 0, restarted.stderr)
+        self.assertTrue(self.service.status()['loaded'])
+        self.proofs.append({'test': self._testMethodName, 'stop': proof,
+                            'direct_bootstrap_refused': direct.returncode,
+                            'restored_after_enable': True})
+
+    def test_idle_timer_persistent_stop_refuses_a_lost_override(self):
+        self.launch(run_at_load=False)
+        apply, verify = unload_idle_timer(
+            self.service, [self.log, self.err],
+            spawn_evidence=lambda: {'label': self.service.label,
+                                    'coverage_complete': True, 'spawns': []},
+            require_disabled=True)
+        apply()
+        self.service.enable_after_hold()
+        with self.assertRaisesRegex(Refused, 'lost its disabled override'):
+            verify()
+        self.assertFalse(self.service.status()['loaded'])
 
     def test_owned_job_disable_precedes_stop_and_enable_precedes_restart(self):
         binding = self.launch()
