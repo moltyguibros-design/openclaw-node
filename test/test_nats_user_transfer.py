@@ -97,14 +97,16 @@ class UserTransferTest(unittest.TestCase):
                 intent = journal.append('intent', unit=unit, action='disable-and-unload')
                 fixture_module.fence_unit(loaded, unit)
                 journal.append('verified', intent=intent['sequence'], unit=unit,
-                               action='disable-and-unload', evidence={'verified': True,
-                               'execution_hold': certificate,
-                               'entrypoint_loaded': copy.deepcopy(loaded['loaded']),
-                               'entrypoint_overrides': copy.deepcopy(loaded['overrides'])})
+                               action='disable-and-unload', evidence={
+                                   **fixture_module.listener_stop_evidence(),
+                                   'execution_hold': certificate,
+                                   'entrypoint_loaded': copy.deepcopy(loaded['loaded']),
+                                   'entrypoint_overrides': copy.deepcopy(loaded['overrides'])})
             else:
                 journal.mutate(unit, 'disable-and-unload',
                                lambda unit=unit: fixture_module.fence_unit(loaded, unit),
-                               lambda: {'verified': True, 'execution_hold': certificate}, hold=hold)
+                               lambda: {**fixture_module.listener_stop_evidence(),
+                                        'execution_hold': certificate}, hold=hold)
         def observe(unit, saved):
             if unit == 'nats-1':
                 return {**saved, 'verified': True}
@@ -244,6 +246,27 @@ class UserTransferTest(unittest.TestCase):
                     (fixture.root / f'{index:06d}.json').write_bytes(module.encoded(row))
                 with patch.object(module, 'boot_identity', return_value='boot-a'):
                     with self.assertRaisesRegex(module.Refused, 'listener stop proof differs'):
+                        module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
+
+    def test_root_refuses_incomplete_nats_stop_proof(self):
+        for field, value in (('verified', False),
+                             ('unit_unloaded', False),
+                             ('bootout', {'returncode': 1, 'timed_out': False}),
+                             ('termination', {'signal': 9})):
+            with self.subTest(field=field):
+                fixture, journal, transaction, _ = self.prepared()
+                journal.close()
+                rows = copy.deepcopy(journal.records)
+                nats = next(row for row in rows if row['event'] == 'verified'
+                            and row.get('unit') == 'nats')
+                nats['evidence'][field] = value
+                for index, row in enumerate(rows):
+                    row['previous'] = rows[index - 1]['sha256'] if index else None
+                    row['sha256'] = hashlib.sha256(module.encoded(
+                        {key: item for key, item in row.items() if key != 'sha256'})).hexdigest()
+                    (fixture.root / f'{index:06d}.json').write_bytes(module.encoded(row))
+                with patch.object(module, 'boot_identity', return_value='boot-a'):
+                    with self.assertRaisesRegex(module.Refused, 'NATS stop receipt is absent'):
                         module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
     def test_root_refuses_held_member_override_loss_in_nats_receipt(self):
@@ -453,7 +476,7 @@ class UserTransferTest(unittest.TestCase):
                         for unit in ('nats', 'nats-2', 'nats-3'):
                             hold.mutate(unit, 'disable-and-unload',
                                 lambda unit=unit: fixture_module.fence_unit(loaded, unit),
-                                lambda: {'verified': True})
+                                fixture_module.listener_stop_evidence)
                         transaction = str(uuid.uuid4())
                         transfer = journal.transfer_nats(transaction, hold,
                             lambda unit, saved: {**saved, 'verified': True,

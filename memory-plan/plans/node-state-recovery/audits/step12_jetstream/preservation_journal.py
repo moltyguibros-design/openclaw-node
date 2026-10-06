@@ -838,6 +838,7 @@ class Journal:
                         'legacy NATS writer is still active: ' + unit)
                 require(any(row['event'] == 'verified' and row.get('unit') == unit
                             and row.get('action') == 'disable-and-unload'
+                            and self.managed_stop_proven(row.get('evidence'))
                             for row in self.records),
                         'legacy NATS stop has no verified persistent journal receipt: ' + unit)
             observations[unit] = actual
@@ -879,10 +880,10 @@ class Journal:
             return False
         return any(row['event'] == 'verified' and row['sequence'] > intents[1]['sequence']
                    and row.get('intent') == intents[1]['sequence']
-                   and self.listener_stop_proven(row.get('evidence')) for row in self.records)
+                   and self.managed_stop_proven(row.get('evidence')) for row in self.records)
 
     @staticmethod
-    def listener_stop_proven(evidence):
+    def managed_stop_proven(evidence):
         return (isinstance(evidence, dict)
                 and evidence.get('verified') is True
                 and all(evidence.get(key) is True for key in LISTENER_STOP_FIELDS)
@@ -946,8 +947,11 @@ class Journal:
             require(isinstance(evidence, dict) and evidence.get('verified') is True,
                     'mutation lacks verified evidence')
             if self.scope == FULL_NODE_SCOPE and unit == 'mesh-deploy-listener':
-                require(self.listener_stop_proven(evidence),
+                require(self.managed_stop_proven(evidence),
                         'deploy listener stop lacks persistent unload and process proof')
+            if self.scope == FULL_NODE_SCOPE and unit in NATS_TRANSFER_UNITS:
+                require(self.managed_stop_proven(evidence),
+                        'NATS stop lacks persistent unload and process proof: ' + unit)
             if self.scope == FULL_NODE_SCOPE:
                 after_verify = self.check_entrypoints(forward=True, expected_loaded=expected,
                                                       expected_overrides=before_verify['overrides'])

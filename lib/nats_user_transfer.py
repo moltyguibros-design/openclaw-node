@@ -449,6 +449,13 @@ class UserTransfer:
                             and self.records[row['intent']].get('action') == row['action']
                             and self.records[row['intent']]['sequence'] > listener['sequence']
                             and isinstance(row.get('evidence'), dict)
+                            and row['evidence'].get('verified') is True
+                            and all(row['evidence'].get(key) is True
+                                    for key in LISTENER_STOP_FIELDS)
+                            and isinstance(row['evidence'].get('bootout'), dict)
+                            and row['evidence']['bootout'].get('returncode') == 0
+                            and row['evidence']['bootout'].get('timed_out') is False
+                            and row['evidence'].get('termination') in ({'signal': 15}, {'exit': 0})
                             and isinstance(row['evidence'].get('execution_hold'), dict)
                             and row['evidence']['execution_hold'].get('watch_session_id') ==
                             original['watch_session_id']

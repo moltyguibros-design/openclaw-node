@@ -1898,3 +1898,27 @@ Correction to D93's CI description: the first macOS attempt raised
 readiness loop would have converted its own timeout to `Refused`; the exact
 command that timed out was not identified. The failed job passed on rerun.
 No production service, VM or NATS store changed.
+
+## D96 — Require managed stop proof for serving NATS transfer receipts (2026-10-06 01:04 EDT)
+
+An owned full-node journal could record each serving NATS member as stopped
+with only `verified: true`; the root transfer reader checked the action and
+hold session but not the unload, process-absence, normal-termination,
+connection, listener or bootout fields. Both sides now require the same
+managed-stop evidence shape already
+required for the deploy listener. The user journal refuses a weak NATS stop
+before its verified row and rechecks the proof at transfer; the independent
+root reader refuses weak or altered NATS receipts. Disposable negatives cover
+a bare verified flag, false unload, failed bootout and abnormal termination.
+The preservation journal suite passes 133 tests, the user-to-root and root
+journal suites pass 88, and the owned macOS launchd suite passes 41 with one
+domain skip. Plan lint is conformant with its existing idle-step warning.
+
+This closes the bare-receipt acceptance gap for the three serving NATS
+stops; it validates receipt fields, not their producer's provenance. The
+other full-node units still lack per-class stop proof, an all-job
+certificate and an enable-capable production restore. Claude's read-only
+review of the prior green head identified those boundaries and the need to
+place any future certificate after all stops but before NATS transfer; it did
+not review this patch. No production service, VM or NATS store changed, and
+step 1.2 remains [A]/v1.2-pre.

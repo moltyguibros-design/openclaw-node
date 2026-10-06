@@ -164,7 +164,7 @@ class JournalTests(unittest.TestCase):
         for unit in ('nats', 'nats-2', 'nats-3'):
             journal.mutate(unit, 'disable-and-unload',
                            lambda unit=unit: fence_unit(loaded, unit),
-                           lambda: {'verified': True}, hold=hold)
+                           listener_stop_evidence, hold=hold)
         def observe(unit, saved):
             if unit == 'nats-1':
                 return {**saved, 'verified': True}
@@ -547,7 +547,7 @@ class JournalTests(unittest.TestCase):
                                    lambda: calls.append('second-listener'), listener_stop_evidence, hold=hold)
                 journal.mutate('nats', 'disable-and-unload',
                                lambda: fence_unit(current, 'nats'),
-                               lambda: calls.append('nats') or {'verified': True}, hold=hold)
+                               lambda: calls.append('nats') or listener_stop_evidence(), hold=hold)
                 self.assertEqual(calls, ['hold', 'nats'])
                 verified = [(row['unit'], row['action']) for row in journal.records
                             if row['event'] == 'verified']
@@ -699,6 +699,24 @@ class JournalTests(unittest.TestCase):
                 with self.assertRaisesRegex(Refused, 'may only restore prior services'):
                     journal.mutate('nats', 'disable-and-unload', lambda: None,
                                    lambda: {'verified': True}, hold=hold)
+
+    def test_full_scope_nats_stop_requires_persistent_process_proof(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fence_listener(current), listener_stop_evidence, hold=hold)
+                with self.assertRaisesRegex(Refused, 'NATS stop lacks persistent unload and process proof'):
+                    journal.mutate('nats', 'disable-and-unload',
+                                   lambda: fence_unit(current, 'nats'),
+                                   lambda: {'verified': True}, hold=hold)
+                self.assertFalse(any(row['event'] == 'verified' and row.get('unit') == 'nats'
+                                     for row in journal.records))
 
     def test_full_scope_listener_stop_rejects_incomplete_exit_proof(self):
         cases = [(key, {key: None}) for key in (
@@ -1113,7 +1131,7 @@ class JournalTests(unittest.TestCase):
                     listener_stop_evidence, hold=hold)
                 journal.mutate('nats', 'disable-and-unload',
                     lambda: current['nats'].update(loaded=False, running=False, disabled=True),
-                    lambda: {'verified': True}, hold=hold)
+                    listener_stop_evidence, hold=hold)
                 current['nats'] = copy.deepcopy(prior['nats'])
                 before = len(journal.records)
                 restored = []

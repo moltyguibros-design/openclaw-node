@@ -1853,3 +1853,13 @@ unchanged fixture passed twice locally against NATS server 2.12.6 and CLI
 0.3.1, with all owned servers stopped. Exact-head CI for the diagnostic
 change remains pending. No production service, VM or NATS history changed;
 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 01:04 EDT: D96 makes both the full-node user journal
+and independent root reader refuse serving NATS stop receipts lacking the
+managed unload/process/connection/override proof already required for the
+deploy listener. Focused preservation, root-transfer and owned launchd tests
+pass (133, 88, and 41 with one domain skip). This is a source-only safeguard;
+the other jobs' per-class proof, all-job hold certificate, reboot rehearsal,
+host capture, isolated real-history acceptance and verified resumption remain
+open. No production service, VM or NATS history changed; 1.2 remains
+[A]/v1.2-pre.
