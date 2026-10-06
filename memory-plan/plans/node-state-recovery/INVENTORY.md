@@ -1825,3 +1825,12 @@ pass 176 tests; plan lint is conformant (14 pass, one warning). The all-job
 certificate, continuous watch, restart-safe adapter, disposable reboot,
 host capture and four-history acceptance remain open. No production
 service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 00:23 EDT: D93 exact-head CI passed all four jobs.
+Claude then found the two later-loop regressions lacked the hold facade's
+restore hooks, so they could pass without reaching the later viewer. D94
+supplies those hooks. Both pristine tests pass; removing the recovery-abort
+branch in a disposable copy now fails both because the viewer is restored.
+The focused suites pass 176 tests and plan lint is conformant (14 pass,
+one warning). Exact-head CI for D94 remains pending. No
+production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.

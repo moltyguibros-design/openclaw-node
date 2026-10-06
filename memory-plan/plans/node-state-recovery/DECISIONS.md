@@ -1864,3 +1864,17 @@ full-node hold certificate. Failed-restore retry, reboot, stopped-VM
 capture, four-history acceptance and verified production resumption remain
 open. No live service, VM or NATS store changed; step 1.2 remains
 [A]/v1.2-pre.
+
+## D94 — Make the recovery-abort regression test reach restore (2026-10-06 00:23 EDT)
+
+Claude's read-only D93 review found that the owned hold facade in the two
+later-loop negatives lacked `before_restore` and `check_closed`. If the
+recovery abort were removed, that missing method could prevent the later
+viewer's restore callback and make the tests pass for the wrong reason.
+Both facades now provide no-op restore hooks. The pristine tests pass; in a
+disposable copy with the abort removed, both fail because `workplan-viewer`
+is restored. The preservation and hold suites pass 176 tests, and plan lint
+is conformant (14 pass, one warning). This is a test-fixture correction,
+not a new production hold
+capability. D93 exact-head CI passed four jobs before this correction; no
+live service, VM or NATS store changed. Step 1.2 remains [A]/v1.2-pre.

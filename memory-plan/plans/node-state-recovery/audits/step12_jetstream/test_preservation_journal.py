@@ -1208,7 +1208,8 @@ class JournalTests(unittest.TestCase):
             with Journal(self.root, prior, node_lock=self.node_lock,
                          scope=FULL_NODE_SCOPE) as journal:
                 hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
-                    prepare=lambda *_: None, complete=lambda *_: self.fail('hold reopened'))
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None, complete=lambda *_: self.fail('hold reopened'))
                 anchor_hold(journal, hold)
                 journal.mutate('mesh-deploy-listener', 'disable-and-unload',
                     lambda: current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True),
@@ -1249,7 +1250,8 @@ class JournalTests(unittest.TestCase):
             with Journal(self.root, prior, node_lock=self.node_lock,
                          scope=FULL_NODE_SCOPE) as journal:
                 hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
-                    prepare=lambda *_: None, complete=lambda *_: self.fail('hold reopened'))
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None, complete=lambda *_: self.fail('hold reopened'))
                 anchor_hold(journal, hold)
                 journal.mutate('mesh-deploy-listener', 'disable-and-unload',
                     lambda: current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True),
