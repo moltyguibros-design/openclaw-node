@@ -1792,3 +1792,13 @@ passes 127 tests. The separate boot-time hold decision, persistent stops
 for the remaining jobs, enable-capable restore, continuous watch, and host
 capture gates are still open. Exact-head CI for D89–D90 is pending. No
 production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 23:28 EDT: D91 refuses a plain `unload` as a
+full-node stop before applying it or recording a new intent, and both sides
+of the NATS user-to-root handoff now require persistent serving-member stop
+receipts. The disposable plain-unload journal and root-reader negatives pass;
+focused suites pass 128 preservation, 44 hold, and 21 root-transfer tests.
+This is an action-level guard, not per-class stop proof or an all-21-job
+certificate. The production persistent-stop restriction and post-reboot
+recovery refusal remain. Exact-head CI for D91 is pending. No production
+service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.

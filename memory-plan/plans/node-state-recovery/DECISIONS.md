@@ -1791,3 +1791,23 @@ journal suite passed 127 tests. This is a same-boot recovery preflight; it
 does not replace D62's independent boot-time hold check, continuous watch,
 or an enable-capable production restore. No live service, VM or NATS store
 changed; step 1.2 remains [A]/v1.2-pre.
+
+## D91 — Require persistent stop actions throughout full-node transfer (2026-10-05 23:28 EDT)
+
+A plain `unload` could previously be recorded as a verified full-node stop
+after the deploy listener was fenced, even though launchd could load that
+job again at login. Full-node `Journal.mutate()` now permits only the
+execution-hold anchor or `disable-and-unload` for a baselined service. The
+NATS user-to-root transfer also requires a verified persistent stop for each
+serving member in both the user journal and the root reader. A disposable
+negative refuses a plain NATS unload before `apply()` or a new intent; a
+second negative makes the root reader refuse a plain-unload receipt.
+
+The preservation journal suite passed 128 tests, the hold suite 44, and the
+root transfer suite 21. This closes acceptance of a *plain-unload action*
+as a full-node receipt. It does not prove that an arbitrary
+`disable-and-unload` receipt contains the required per-class process and
+launchd evidence, nor that all 21 loaded jobs were stopped. The existing
+production stop refusal remains until an enable-capable restore and
+complete hold certificate are proven. No live service, VM or NATS store
+changed; step 1.2 stays [A]/v1.2-pre.

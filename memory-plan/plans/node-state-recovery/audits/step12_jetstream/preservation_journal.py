@@ -837,9 +837,9 @@ class Journal:
                 require(not actual['loaded'] and not actual['running'],
                         'legacy NATS writer is still active: ' + unit)
                 require(any(row['event'] == 'verified' and row.get('unit') == unit
-                            and row.get('action') in ('unload', 'disable-and-unload')
+                            and row.get('action') == 'disable-and-unload'
                             for row in self.records),
-                        'legacy NATS stop has no verified journal receipt: ' + unit)
+                        'legacy NATS stop has no verified persistent journal receipt: ' + unit)
             observations[unit] = actual
         require_no_nats_marker()
         hold.check_forward()
@@ -919,6 +919,8 @@ class Journal:
                                 for row in self.records),
                         'deploy listener must follow the verified execution hold')
             else:
+                require(action == 'disable-and-unload',
+                        'full-node stop requires a persistent disabled override')
                 require(self.listener_fenced(),
                         'deploy listener must be verifiably disabled before other full-node work')
         fields = intent_fields or {}

@@ -82,10 +82,15 @@ def full_entrypoint_evidence(prior):
             'overrides': overrides}
 
 
+def fence_unit(entrypoints, unit):
+    label = 'ai.openclaw.' + unit
+    entrypoints['loaded']['gui'].remove(label)
+    entrypoints['overrides']['gui'][label] = True
+    entrypoints['overrides']['user'][label] = True
+
+
 def fence_listener(entrypoints):
-    entrypoints['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener')
-    entrypoints['overrides']['gui']['ai.openclaw.mesh-deploy-listener'] = True
-    entrypoints['overrides']['user']['ai.openclaw.mesh-deploy-listener'] = True
+    fence_unit(entrypoints, 'mesh-deploy-listener')
 
 
 def listener_stop_evidence():
@@ -157,13 +162,14 @@ class JournalTests(unittest.TestCase):
                        lambda: fence_listener(loaded),
                        listener_stop_evidence, hold=hold)
         for unit in ('nats', 'nats-2', 'nats-3'):
-            journal.mutate(unit, 'unload',
-                           lambda unit=unit: loaded['loaded']['gui'].remove('ai.openclaw.' + unit),
+            journal.mutate(unit, 'disable-and-unload',
+                           lambda unit=unit: fence_unit(loaded, unit),
                            lambda: {'verified': True}, hold=hold)
         def observe(unit, saved):
             if unit == 'nats-1':
                 return {**saved, 'verified': True}
-            return {**saved, 'loaded': False, 'running': False, 'verified': True}
+            return {**saved, 'loaded': False, 'running': False,
+                    'disabled': unit in ('nats', 'nats-2', 'nats-3'), 'verified': True}
         return journal, hold, observe, marker
 
     def publish_nats_return(self, journal, transfer, **changes):
@@ -522,12 +528,12 @@ class JournalTests(unittest.TestCase):
                                lambda: calls.append('hold'), lambda: {'verified': True}, hold=hold)
                 before = len(journal.records)
                 with self.assertRaisesRegex(Refused, 'listener must be verifiably disabled'):
-                    journal.mutate('nats', 'unload', lambda: calls.append('nats'),
+                    journal.mutate('nats', 'disable-and-unload', lambda: calls.append('nats'),
                                    lambda: {'verified': True}, hold=hold)
                 self.assertEqual(len(journal.records), before)
                 self.assertEqual(calls, ['hold'])
                 with self.assertRaisesRegex(Refused, 'listener must be verifiably disabled'):
-                    journal.mutate('scheduler-heartbeat', 'unload',
+                    journal.mutate('scheduler-heartbeat', 'disable-and-unload',
                                    lambda: calls.append('early-timer'), lambda: {'verified': True}, hold=hold)
                 with self.assertRaisesRegex(Refused, 'listener must follow'):
                     journal.mutate('mesh-deploy-listener', 'stop', lambda: calls.append('listener'),
@@ -539,14 +545,33 @@ class JournalTests(unittest.TestCase):
                 with self.assertRaisesRegex(Refused, 'listener must follow'):
                     journal.mutate('mesh-deploy-listener', 'disable-and-unload',
                                    lambda: calls.append('second-listener'), listener_stop_evidence, hold=hold)
-                journal.mutate('nats', 'unload',
-                               lambda: current['loaded']['gui'].remove('ai.openclaw.nats'),
+                journal.mutate('nats', 'disable-and-unload',
+                               lambda: fence_unit(current, 'nats'),
                                lambda: calls.append('nats') or {'verified': True}, hold=hold)
                 self.assertEqual(calls, ['hold', 'nats'])
                 verified = [(row['unit'], row['action']) for row in journal.records
                             if row['event'] == 'verified']
                 self.assertEqual(verified, [('scheduler-heartbeat', 'close-execution-hold'),
-                                            ('mesh-deploy-listener', 'disable-and-unload'), ('nats', 'unload')])
+                                            ('mesh-deploy-listener', 'disable-and-unload'),
+                                            ('nats', 'disable-and-unload')])
+
+    def test_full_scope_refuses_a_plain_unload_after_listener_hold(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fence_listener(current), listener_stop_evidence, hold=hold)
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'persistent disabled override'):
+                    journal.mutate('nats', 'unload',
+                                   lambda: self.fail('plain unload ran'),
+                                   lambda: {'verified': True}, hold=hold)
+                self.assertEqual(len(journal.records), before)
 
     def test_managed_stop_composes_with_full_node_listener_journal(self):
         prior = full_node_inventory()
@@ -595,7 +620,7 @@ class JournalTests(unittest.TestCase):
                 current['overrides']['gui']['ai.openclaw.mesh-deploy-listener'] = False
                 before = len(journal.records)
                 with self.assertRaisesRegex(Refused, 'disabled overrides changed'):
-                    journal.mutate('workplan-viewer', 'unload',
+                    journal.mutate('workplan-viewer', 'disable-and-unload',
                                    lambda: self.fail('viewer stop ran'),
                                    lambda: {'verified': True}, hold=hold)
                 self.assertEqual(len(journal.records), before)
@@ -614,7 +639,7 @@ class JournalTests(unittest.TestCase):
                 current['overrides']['user']['ai.openclaw.nats-1'] = False
                 before = len(journal.records)
                 with self.assertRaisesRegex(Refused, 'disabled overrides changed'):
-                    journal.mutate('workplan-viewer', 'unload',
+                    journal.mutate('workplan-viewer', 'disable-and-unload',
                                    lambda: self.fail('viewer stop ran'),
                                    lambda: {'verified': True}, hold=hold)
                 self.assertEqual(len(journal.records), before)
@@ -633,7 +658,7 @@ class JournalTests(unittest.TestCase):
                 current['overrides']['gui']['ai.openclaw.gateway'] = True
                 before = len(journal.records)
                 with self.assertRaisesRegex(Refused, 'disabled overrides changed'):
-                    journal.mutate('workplan-viewer', 'unload',
+                    journal.mutate('workplan-viewer', 'disable-and-unload',
                                    lambda: self.fail('viewer stop ran'),
                                    lambda: {'verified': True}, hold=hold)
                 self.assertEqual(len(journal.records), before)
@@ -672,7 +697,7 @@ class JournalTests(unittest.TestCase):
                                      and row.get('unit') == 'mesh-deploy-listener'
                                      for row in journal.records))
                 with self.assertRaisesRegex(Refused, 'may only restore prior services'):
-                    journal.mutate('nats', 'unload', lambda: None,
+                    journal.mutate('nats', 'disable-and-unload', lambda: None,
                                    lambda: {'verified': True}, hold=hold)
 
     def test_full_scope_listener_stop_rejects_incomplete_exit_proof(self):
@@ -777,7 +802,7 @@ class JournalTests(unittest.TestCase):
                                'entrypoint_overrides': copy.deepcopy(current['overrides'])})
                 before = len(journal.records)
                 with self.assertRaisesRegex(Refused, 'listener must be verifiably disabled'):
-                    journal.mutate('nats', 'unload', lambda: calls.append('nats'),
+                    journal.mutate('nats', 'disable-and-unload', lambda: calls.append('nats'),
                                    lambda: {'verified': True}, hold=hold)
                 self.assertEqual(len(journal.records), before)
                 self.assertEqual(calls, [])
@@ -803,7 +828,7 @@ class JournalTests(unittest.TestCase):
                 self.assertEqual(intent['sequence'], future_intent)
                 before = len(journal.records)
                 with self.assertRaisesRegex(Refused, 'listener must be verifiably disabled'):
-                    journal.mutate('nats', 'unload', lambda: self.fail('NATS unload ran'),
+                    journal.mutate('nats', 'disable-and-unload', lambda: self.fail('NATS unload ran'),
                                    lambda: {'verified': True}, hold=hold)
                 self.assertEqual(len(journal.records), before)
 
@@ -1406,14 +1431,14 @@ class JournalTests(unittest.TestCase):
                                lambda: fence_listener(current),
                                listener_stop_evidence, hold=hold)
                 def stop_viewer():
-                    current['loaded']['gui'].remove('ai.openclaw.workplan-viewer')
-                journal.mutate('workplan-viewer', 'stop', stop_viewer,
+                    fence_unit(current, 'workplan-viewer')
+                journal.mutate('workplan-viewer', 'disable-and-unload', stop_viewer,
                                lambda: {'verified': True}, hold=hold)
                 self.assertEqual(journal.records[-1]['evidence']['entrypoint_loaded'],
                                  current['loaded'])
                 def unload_timer():
-                    current['loaded']['gui'].remove('ai.openclaw.consolidation-scheduler')
-                journal.mutate('consolidation-scheduler', 'unload', unload_timer,
+                    fence_unit(current, 'consolidation-scheduler')
+                journal.mutate('consolidation-scheduler', 'disable-and-unload', unload_timer,
                                lambda: {'verified': True}, hold=hold)
                 self.assertEqual(journal.records[-1]['evidence']['entrypoint_loaded'],
                                  current['loaded'])

@@ -441,7 +441,7 @@ class UserTransfer:
             if unit != 'nats-1':
                 require(any(row['event'] == 'verified' and row['sequence'] > listener['sequence']
                             and row.get('unit') == unit
-                            and row.get('action') in ('unload', 'disable-and-unload')
+                            and row.get('action') == 'disable-and-unload'
                             and isinstance(row.get('intent'), int)
                             and 0 <= row['intent'] < row['sequence']
                             and self.records[row['intent']].get('event') == 'intent'

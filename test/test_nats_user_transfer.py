@@ -94,21 +94,22 @@ class UserTransferTest(unittest.TestCase):
                                     'execution_hold': certificate}, hold=hold)
         for unit in ('nats', 'nats-2', 'nats-3'):
             if missing_listener:
-                intent = journal.append('intent', unit=unit, action='unload')
-                loaded['loaded']['gui'].remove('ai.openclaw.' + unit)
+                intent = journal.append('intent', unit=unit, action='disable-and-unload')
+                fixture_module.fence_unit(loaded, unit)
                 journal.append('verified', intent=intent['sequence'], unit=unit,
-                               action='unload', evidence={'verified': True,
+                               action='disable-and-unload', evidence={'verified': True,
                                'execution_hold': certificate,
                                'entrypoint_loaded': copy.deepcopy(loaded['loaded']),
                                'entrypoint_overrides': copy.deepcopy(loaded['overrides'])})
             else:
-                journal.mutate(unit, 'unload',
-                               lambda unit=unit: loaded['loaded']['gui'].remove('ai.openclaw.' + unit),
+                journal.mutate(unit, 'disable-and-unload',
+                               lambda unit=unit: fixture_module.fence_unit(loaded, unit),
                                lambda: {'verified': True, 'execution_hold': certificate}, hold=hold)
         def observe(unit, saved):
             if unit == 'nats-1':
                 return {**saved, 'verified': True}
-            return {**saved, 'loaded': False, 'running': False, 'verified': True}
+            return {**saved, 'loaded': False, 'running': False, 'disabled': True,
+                    'verified': True}
         if late_listener:
             intent = journal.append('intent', unit='mesh-deploy-listener',
                                     action='disable-and-unload')
@@ -141,6 +142,20 @@ class UserTransferTest(unittest.TestCase):
         with patch.object(module, 'boot_identity', return_value='boot-a'):
             with self.assertRaisesRegex(module.Refused, 'listener stop intent is absent'):
                 module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
+
+    def test_root_refuses_a_plain_nats_unload_receipt(self):
+        _, journal, transaction, _ = self.prepared()
+        reader = object.__new__(module.UserTransfer)
+        reader.records = copy.deepcopy(journal.records)
+        reader.transaction = transaction
+        reader.prior_boot = False
+        reader.decline_only = False
+        for row in reader.records:
+            if row.get('unit') == 'nats' and row['event'] in ('intent', 'verified'):
+                row['action'] = 'unload'
+        with patch.object(module, 'boot_identity', return_value='boot-a'):
+            with self.assertRaisesRegex(module.Refused, 'NATS stop receipt is absent'):
+                reader._validate()
 
     def test_root_refuses_listener_stopped_after_nats(self):
         fixture, journal, transaction, _ = self.prepared(
@@ -436,13 +451,13 @@ class UserTransferTest(unittest.TestCase):
                             lambda: fixture_module.fence_listener(loaded),
                             fixture_module.listener_stop_evidence)
                         for unit in ('nats', 'nats-2', 'nats-3'):
-                            hold.mutate(unit, 'unload',
-                                lambda unit=unit: loaded['loaded']['gui'].remove('ai.openclaw.' + unit),
+                            hold.mutate(unit, 'disable-and-unload',
+                                lambda unit=unit: fixture_module.fence_unit(loaded, unit),
                                 lambda: {'verified': True})
                         transaction = str(uuid.uuid4())
                         transfer = journal.transfer_nats(transaction, hold,
                             lambda unit, saved: {**saved, 'verified': True,
-                                'loaded': False, 'running': False})
+                                'loaded': False, 'running': False, 'disabled': True})
                     finally:
                         hold.close()
         with patch.object(module, 'boot_identity', return_value='boot-a'):
