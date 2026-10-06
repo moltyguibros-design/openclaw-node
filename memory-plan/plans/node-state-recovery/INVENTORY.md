@@ -1942,3 +1942,12 @@ read and records the serving leader in the probe report. The Node 22 owned
 fixture passes with all servers stopped. Provenance binding, expired-stream
 treatment, full-node hold and the production stop/capture/restore/resume chain
 remain open; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 16:49 EDT: D106 binds the guest stopped-tree manifest
+and host capture receipt to byte-identical four-path store specifications,
+with guest scope and pre-guard timestamp checks. The disposable macOS ASIF
+fixture refuses a swapped guest role path and two malformed guest claims;
+the host capture suite passes eight tests. Guest-origin attestation, full-node
+hold, production capture, four real-history restores, acceptance and verified
+resumption remain open. No production VM or service changed; step 1.2 stays
+[A]/v1.2-pre.

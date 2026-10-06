@@ -122,6 +122,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
     require(not os.path.lexists(output), 'capture output already exists')
     host = pinned_spec(host_spec_path, HOST_SPEC_FIELDS)
     stores = pinned_spec(store_spec_path, {'data_volume_uuid', 'stores'})
+    store_spec_sha256 = file_hash(store_spec_path)
     if fixture:
         require(host['uuid'] == FIXTURE_UUID
                 and pathlib.Path(host['package']).parent == output.parent,
@@ -220,6 +221,8 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
                 'image guard changed during extraction')
         require(shutil.disk_usage(output).free >= 20 * 1024 ** 3,
                 'host free-space floor fell below 20 GiB after extraction')
+        require(file_hash(store_spec_path) == store_spec_sha256,
+                'store specification changed during capture')
         result = {
             'scope': CAPTURE_SCOPE,
             'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -230,6 +233,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
             'vmstate_at_arm': first['vmstate'],
             'vmstate_at_final_check': after_extract['vmstate'],
             'data_volume_uuid': stores['data_volume_uuid'],
+            'store_spec_sha256': store_spec_sha256,
             'extraction_manifest_sha256': file_hash(output / 'extracted-stores' / 'manifest.json'),
             'store_roles': sorted(extracted['stores']),
             'vm_state_at_final_check': 'stopped',

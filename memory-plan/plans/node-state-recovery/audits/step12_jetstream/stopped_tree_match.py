@@ -140,6 +140,7 @@ def host_match(guest_path, extracted, output):
     private_file(image_path)
     host = json.loads(manifest_path.read_text())
     capture = json.loads(capture_path.read_text())
+    guard = json.loads(guard_path.read_text())
     new_output(output)
     try:
         require(capture['scope'] == CAPTURE_SCOPE
@@ -153,6 +154,13 @@ def host_match(guest_path, extracted, output):
                 and capture['clone_size'] == image_path.stat().st_size
                 and sha256(image_path) == capture['clone_image_sha256'],
                 'capture receipt, cloned image and extracted stores differ')
+        guest_at = datetime.datetime.fromisoformat(guest['at_utc'])
+        guard_at = datetime.datetime.fromisoformat(guard['guarded_at_utc'])
+        require(guest['scope'] == 'guest stopped-tree content observation; writer exclusion external'
+                and guest['spec_sha256'] == capture['store_spec_sha256']
+                and guest_at.tzinfo is not None and guard_at.tzinfo is not None
+                and guest_at < guard_at,
+                'guest scope, store declaration or pre-guard time differs')
         require(set(guest['stores']) == ROLES and set(host['stores']) == ROLES
                 and guest['data_volume_uuid'] == host['data_volume_uuid'],
                 'guest and host store roles or Data volume differ')

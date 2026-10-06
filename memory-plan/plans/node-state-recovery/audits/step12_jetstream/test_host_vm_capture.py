@@ -363,6 +363,13 @@ class HostCaptureTest(unittest.TestCase):
         store_spec.chmod(0o600)
         guest_output = self.root / 'guest-stopped'
         guest_capture(store_spec, guest_output, mount)
+        swapped_spec = json.loads(store_spec.read_text())
+        swapped_spec['stores'][1]['relative_path'], swapped_spec['stores'][2]['relative_path'] = (
+            swapped_spec['stores'][2]['relative_path'], swapped_spec['stores'][1]['relative_path'])
+        swapped_spec_path = self.root / 'swapped-store-spec.json'
+        write_record(swapped_spec_path, swapped_spec)
+        swapped_guest = self.root / 'swapped-guest-stopped'
+        guest_capture(swapped_spec_path, swapped_guest, mount)
         self.eject()
         vm_uuid = '00000000-0000-0000-0000-000000000002'
         config = package / 'config.plist'
@@ -436,6 +443,8 @@ class HostCaptureTest(unittest.TestCase):
         self.assertEqual(result['vmstate_at_arm'], result['vmstate_at_final_check'])
         self.assertEqual(result['guard_receipt_sha256'],
                          hashlib.sha256((output / 'GUARD.json').read_bytes()).hexdigest())
+        self.assertEqual(result['store_spec_sha256'],
+                         hashlib.sha256(store_spec.read_bytes()).hexdigest())
         self.assertEqual(result['vmstate_at_arm']['size'], len(b'old suspend state'))
         self.assertFalse((output / 'FAILED.json').exists())
         for role in ('standalone', 'member1', 'member2', 'member3'):
@@ -444,6 +453,22 @@ class HostCaptureTest(unittest.TestCase):
         matched = self.root / 'matched'
         host_match(guest_output / 'manifest.json', output / 'extracted-stores', matched)
         self.assertTrue((matched / 'MATCH.json').exists())
+        swapped_match = self.root / 'swapped-guest-match'
+        with self.assertRaisesRegex(RuntimeError, 'guest scope, store declaration or pre-guard time differs'):
+            host_match(swapped_guest / 'manifest.json', output / 'extracted-stores', swapped_match)
+        self.assertTrue((swapped_match / 'FAILED.json').exists())
+        self.assertFalse((swapped_match / 'MATCH.json').exists())
+        original_guest = json.loads((guest_output / 'manifest.json').read_text())
+        for label, changes in (
+                ('wrong-guest-scope', {'scope': 'host-generated content observation'}),
+                ('late-guest-capture', {'at_utc': json.loads((output / 'GUARD.json').read_text())['guarded_at_utc']})):
+            candidate = self.root / f'{label}.json'
+            write_record(candidate, dict(original_guest, **changes))
+            refused = self.root / f'{label}-match'
+            with self.assertRaisesRegex(RuntimeError, 'guest scope, store declaration or pre-guard time differs'):
+                host_match(candidate, output / 'extracted-stores', refused)
+            self.assertTrue((refused / 'FAILED.json').exists())
+            self.assertFalse((refused / 'MATCH.json').exists())
         guard_receipt = output / 'GUARD.json'
         original_guard_receipt = guard_receipt.read_bytes()
         guard_receipt.write_bytes(original_guard_receipt + b' ')

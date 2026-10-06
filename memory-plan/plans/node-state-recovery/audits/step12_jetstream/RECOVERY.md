@@ -94,8 +94,14 @@ isolated production restore and resumption are still required.
 private specification after managed NATS stop. Its `match` action runs on the
 host after ASIF extraction, compares the guest manifest, extraction manifest
 and rehashed host files exactly, then makes the extracted trees read-only.
-`MATCH.json` is a content result only; it is neither writer-exclusion proof nor
-isolated restoration acceptance.
+The host capture receipt pins the exact store-specification bytes; `match`
+requires the guest manifest's specification hash to agree and its declared
+scope and timestamp to precede the host image guard. Both sides must use the
+same owner-private store specification. This binds the four role paths in the
+content comparison but does not attest which machine produced the guest
+manifest: a stale or host-generated manifest with matching content can still
+pass. `MATCH.json` is a content result only; it is neither guest-origin or
+writer-exclusion proof nor isolated restoration acceptance.
 
 `host_clone_dispose.py` refuses disposal of a completed capture after checking
 the armed and capture receipts, source image identity, full source/clone hashes

@@ -2113,3 +2113,22 @@ The review found no D104 mechanism blocker. It confirmed that the plan digest
 and stopped-tree role still need trusted provenance, and that expiring R1/KV
 streams can refuse after their baseline ages. Those production acceptance
 gates remain open. This change did not contact or modify the live node.
+
+## D106 — Bind stopped-tree comparison to the same four-path specification (2026-10-06 16:49 EDT)
+
+The host capture receipt now records the digest of the owner-private store
+specification and refuses if that file changes during capture. The guest
+stopped-tree manifest already records its specification digest. The host
+matcher now requires those digests to agree, requires the guest content scope,
+and requires the guest capture timestamp to precede the host image-guard
+receipt. A disposable macOS ASIF fixture with member 1 and member 2 paths
+swapped in the guest specification refuses before `MATCH.json`; altered scope
+and late-timestamp negatives refuse too. The focused fixture and the eight-test
+host capture suite pass.
+
+This makes a path mismatch observable but does not authenticate the guest
+manifest's origin. Someone with the same owner access could still produce a
+matching specification and manifest on the host, and a stale manifest with
+identical content and an earlier timestamp can still pass. Production capture
+continues to refuse without its acceptance/abort controller. No VM, production
+service or NATS store was stopped or changed; step 1.2 remains [A]/v1.2-pre.
