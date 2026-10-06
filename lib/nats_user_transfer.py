@@ -147,12 +147,26 @@ def valid_baseline(row):
     inventory = row.get('entrypoint_inventory')
     labels = {'ai.openclaw.' + unit for unit in UNITS}
     require(isinstance(inventory, dict) and set(inventory) ==
-            {'verified', 'installed', 'loaded', 'roots', 'disabled_artifacts', 'excluded'}
+            {'verified', 'installed', 'loaded', 'roots', 'disabled_artifacts', 'excluded',
+             'overrides'}
             and inventory['verified'] is True and isinstance(inventory['installed'], dict)
             and set(inventory['installed']) == labels and isinstance(inventory['loaded'], dict)
             and set(inventory['loaded']) == {'gui', 'user', 'system'},
             'user transfer entrypoint inventory differs')
     valid_excluded_job(inventory['excluded'], row.get('boot'))
+    overrides = inventory['overrides']
+    require(isinstance(overrides, dict) and set(overrides) == {'gui', 'user', 'system'}
+            and all(isinstance(values, dict) and labels <= set(values)
+                    and all(label.startswith(('ai.openclaw.', 'com.openclaw.'))
+                            and (value is None or isinstance(value, bool))
+                            for label, value in values.items())
+                    for values in overrides.values())
+            and all((overrides['gui']['ai.openclaw.' + unit] is True
+                     and overrides['user']['ai.openclaw.' + unit] is True
+                     and overrides['system']['ai.openclaw.' + unit] is not False)
+                    if state['disabled'] else overrides['gui']['ai.openclaw.' + unit] is not True
+                    for unit, state in prior.items()),
+            'user transfer disabled overrides differ')
     for unit in UNITS:
         installed = inventory['installed']['ai.openclaw.' + unit]
         require(isinstance(installed, dict) and set(installed) == {'path', 'sha256'}
@@ -390,7 +404,21 @@ class UserTransfer:
                 and isinstance(stop.get('entrypoint_loaded'), dict)
                 and set(stop['entrypoint_loaded']) == {'gui', 'user', 'system'}
                 and all('ai.openclaw.mesh-deploy-listener' not in labels
-                        for labels in stop['entrypoint_loaded'].values()),
+                        for labels in stop['entrypoint_loaded'].values())
+                and isinstance(stop.get('entrypoint_overrides'), dict)
+                and set(stop['entrypoint_overrides']) == {'gui', 'user', 'system'}
+                and all(isinstance(values, dict)
+                        for values in stop['entrypoint_overrides'].values())
+                and stop['entrypoint_overrides']['gui'].get(
+                    'ai.openclaw.mesh-deploy-listener') is True
+                and all(stop['entrypoint_overrides'][domain].get(
+                            'ai.openclaw.mesh-deploy-listener') is not False
+                        and {label: value for label, value in stop['entrypoint_overrides'][domain].items()
+                             if label != 'ai.openclaw.mesh-deploy-listener'} ==
+                            {label: value for label, value in
+                             baseline['entrypoint_inventory']['overrides'][domain].items()
+                             if label != 'ai.openclaw.mesh-deploy-listener'}
+                        for domain in ('gui', 'user', 'system')),
                 'user transfer listener stop proof differs')
         for unit in NATS:
             actual = transfer['observations'][unit]

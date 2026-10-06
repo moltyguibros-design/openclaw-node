@@ -1728,3 +1728,13 @@ jobs, detached and other launch paths, continuous watch, reboot rehearsal,
 host decision controller, four cold-history acceptance and verified
 resumption remain open. No production service, VM or NATS history changed;
 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 22:04 EDT: D88's first exact-head CI exposed a stale
+root-transfer schema and fixture: the root reader refused the new override
+inventory, and its owned listener-stop fixture did not simulate disabling the
+override. The root reader now validates baseline and listener-stop override
+evidence; all 16 root-transfer tests pass locally on macOS. The independent
+Mission Control shipped-dependency audit found a new high-severity
+`source-map-js` advisory; its lockfile now pins 1.2.2, and the high-severity
+audit gate passes locally. Exact-head CI for these repairs is pending. No
+production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.

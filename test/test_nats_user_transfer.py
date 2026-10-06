@@ -38,6 +38,9 @@ class UserTransferTest(unittest.TestCase):
                     **inventory['excluded'][fixture_module.TAILSCALE_LABEL],
                     'launchd': {**inventory['excluded'][fixture_module.TAILSCALE_LABEL]['launchd'],
                                 'runs': True}}}}},
+            {'entrypoint_inventory': {**inventory, 'overrides': {
+                **inventory['overrides'], 'gui': {
+                    **inventory['overrides']['gui'], 'ai.openclaw.nats-1': False}}}},
         ):
             with self.subTest(change=change):
                 with self.assertRaises(module.Refused):
@@ -78,10 +81,11 @@ class UserTransferTest(unittest.TestCase):
         journal.append('verified', intent=intent['sequence'], unit='scheduler-heartbeat',
                        action='close-execution-hold',
                        evidence={**certificate,
-                                 'entrypoint_loaded': copy.deepcopy(loaded['loaded'])})
+                                 'entrypoint_loaded': copy.deepcopy(loaded['loaded']),
+                                 'entrypoint_overrides': copy.deepcopy(loaded['overrides'])})
         if not missing_listener:
             journal.mutate('mesh-deploy-listener', 'disable-and-unload',
-                           lambda: loaded['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener'),
+                           lambda: fixture_module.fence_listener(loaded),
                            lambda: {**fixture_module.listener_stop_evidence(),
                                     'execution_hold': certificate}, hold=hold)
         for unit in ('nats', 'nats-2', 'nats-3'):
@@ -91,7 +95,8 @@ class UserTransferTest(unittest.TestCase):
                 journal.append('verified', intent=intent['sequence'], unit=unit,
                                action='unload', evidence={'verified': True,
                                'execution_hold': certificate,
-                               'entrypoint_loaded': copy.deepcopy(loaded['loaded'])})
+                               'entrypoint_loaded': copy.deepcopy(loaded['loaded']),
+                               'entrypoint_overrides': copy.deepcopy(loaded['overrides'])})
             else:
                 journal.mutate(unit, 'unload',
                                lambda unit=unit: loaded['loaded']['gui'].remove('ai.openclaw.' + unit),
@@ -103,12 +108,13 @@ class UserTransferTest(unittest.TestCase):
         if late_listener:
             intent = journal.append('intent', unit='mesh-deploy-listener',
                                     action='disable-and-unload')
-            loaded['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener')
+            fixture_module.fence_listener(loaded)
             journal.append('verified', intent=intent['sequence'],
                 unit='mesh-deploy-listener', action='disable-and-unload',
                 evidence={**fixture_module.listener_stop_evidence(),
                           'execution_hold': certificate,
-                          'entrypoint_loaded': copy.deepcopy(loaded['loaded'])})
+                          'entrypoint_loaded': copy.deepcopy(loaded['loaded']),
+                          'entrypoint_overrides': copy.deepcopy(loaded['overrides'])})
         transaction = str(uuid.uuid4())
         if extra_event is not None:
             journal.append(extra_event)
@@ -192,6 +198,7 @@ class UserTransferTest(unittest.TestCase):
                     ('execution_hold', {'watch_session_id': 'other-session'}),
                     ('entrypoint_loaded', {'gui': ['ai.openclaw.mesh-deploy-listener'],
                                            'user': [], 'system': []}),
+                    ('entrypoint_overrides', {'gui': {}, 'user': {}, 'system': {}}),
                     ('termination', {'signal': 9})]
         for field, value in changes:
             with self.subTest(field=field):
@@ -343,7 +350,7 @@ class UserTransferTest(unittest.TestCase):
                     try:
                         hold.close_and_drain()
                         hold.mutate('mesh-deploy-listener', 'disable-and-unload',
-                            lambda: loaded['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener'),
+                            lambda: fixture_module.fence_listener(loaded),
                             fixture_module.listener_stop_evidence)
                         for unit in ('nats', 'nats-2', 'nats-3'):
                             hold.mutate(unit, 'unload',
