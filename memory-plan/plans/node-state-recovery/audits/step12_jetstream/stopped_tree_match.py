@@ -57,7 +57,8 @@ def entries(root):
 
 def store_spec(path):
     private_file(path)
-    value = json.loads(path.read_text())
+    contents = path.read_bytes()
+    value = json.loads(contents)
     require(set(value) == {'data_volume_uuid', 'stores'}
             and re.fullmatch(r'[0-9A-F-]{36}', value['data_volume_uuid'])
             and isinstance(value['stores'], list) and len(value['stores']) == 4
@@ -65,7 +66,7 @@ def store_spec(path):
                     for row in value['stores'])
             and {row['role'] for row in value['stores']} == ROLES,
             'stopped-store specification differs')
-    return value
+    return value, hashlib.sha256(contents).hexdigest()
 
 
 def new_output(output):
@@ -78,7 +79,7 @@ def guest_capture(spec_path, output, root=pathlib.Path('/')):
     os.umask(0o077)
     spec_path = pathlib.Path(spec_path)
     output = pathlib.Path(output)
-    spec = store_spec(spec_path)
+    spec, spec_sha256 = store_spec(spec_path)
     new_output(output)
     try:
         stores = {}
@@ -87,10 +88,12 @@ def guest_capture(spec_path, output, root=pathlib.Path('/')):
             stores[row['role']] = entries(source)
             require(any(item['type'] == 'file' for item in stores[row['role']]),
                     f'empty stopped store: {row["role"]}')
+        require(sha256(spec_path) == spec_sha256,
+                'store specification changed during guest capture')
         result = {'scope': 'guest stopped-tree content observation; writer exclusion external',
                   'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                   'data_volume_uuid': spec['data_volume_uuid'],
-                  'spec_sha256': sha256(spec_path), 'stores': stores}
+                  'spec_sha256': spec_sha256, 'stores': stores}
         write_json(output / 'manifest.json', result)
         return result
     except Exception as error:
@@ -156,11 +159,14 @@ def host_match(guest_path, extracted, output):
                 'capture receipt, cloned image and extracted stores differ')
         guest_at = datetime.datetime.fromisoformat(guest['at_utc'])
         guard_at = datetime.datetime.fromisoformat(guard['guarded_at_utc'])
-        require(guest['scope'] == 'guest stopped-tree content observation; writer exclusion external'
-                and guest['spec_sha256'] == capture['store_spec_sha256']
-                and guest_at.tzinfo is not None and guard_at.tzinfo is not None
-                and guest_at < guard_at,
-                'guest scope, store declaration or pre-guard time differs')
+        require(guest['scope'] == 'guest stopped-tree content observation; writer exclusion external',
+                'guest stopped-tree scope differs')
+        require(guest['spec_sha256'] == capture['store_spec_sha256'],
+                'guest store specification differs from host capture')
+        require(guest_at.tzinfo is not None and guard_at.tzinfo is not None,
+                'guest or host guard timestamp lacks timezone')
+        require(guest_at < guard_at,
+                f'guest capture is not before host guard: guest={guest_at.isoformat()} guard={guard_at.isoformat()}')
         require(set(guest['stores']) == ROLES and set(host['stores']) == ROLES
                 and guest['data_volume_uuid'] == host['data_volume_uuid'],
                 'guest and host store roles or Data volume differ')

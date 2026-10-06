@@ -35,14 +35,15 @@ def file_hash(path):
     return h.hexdigest()
 
 
-def pinned_spec(path, expected):
+def pinned_spec(path, expected, with_digest=False):
     info = path.lstat()
     require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
             and info.st_nlink == 1 and stat.S_IMODE(info.st_mode) == 0o600,
             'capture specification is not owner-private')
-    value = json.loads(path.read_text())
+    contents = path.read_bytes()
+    value = json.loads(contents)
     require(set(value) == expected, 'capture specification shape differs')
-    return value
+    return (value, hashlib.sha256(contents).hexdigest()) if with_digest else value
 
 
 def fsync_parent(path):
@@ -121,8 +122,8 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
     owned_directory(output.parent)
     require(not os.path.lexists(output), 'capture output already exists')
     host = pinned_spec(host_spec_path, HOST_SPEC_FIELDS)
-    stores = pinned_spec(store_spec_path, {'data_volume_uuid', 'stores'})
-    store_spec_sha256 = file_hash(store_spec_path)
+    stores, store_spec_sha256 = pinned_spec(store_spec_path,
+                                            {'data_volume_uuid', 'stores'}, with_digest=True)
     if fixture:
         require(host['uuid'] == FIXTURE_UUID
                 and pathlib.Path(host['package']).parent == output.parent,

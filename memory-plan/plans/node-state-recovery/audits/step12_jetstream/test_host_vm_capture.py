@@ -16,6 +16,7 @@ import unittest
 from unittest import mock
 
 import host_vm_capture
+import stopped_tree_match
 from stopped_tree_match import guest_capture, host_match
 from host_clone_dispose import cleanup_failed, dispose
 from host_vm_capture import capture, clone_only, publish_capture_record
@@ -37,6 +38,36 @@ def run(*args):
 
 
 class VmstateGateTest(unittest.TestCase):
+    def test_guest_capture_refuses_store_spec_rewrite_during_walk(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-guest-spec-rewrite-') as temporary:
+            root = pathlib.Path(temporary).resolve()
+            stores = []
+            for role in ('standalone', 'member1', 'member2', 'member3'):
+                relative = 'stores/' + role
+                directory = root / relative
+                directory.mkdir(parents=True)
+                (directory / 'data').write_text(role)
+                stores.append({'role': role, 'relative_path': relative})
+            spec = root / 'stores.json'
+            original = {'data_volume_uuid': 'A' * 36, 'stores': stores}
+            spec.write_text(json.dumps(original))
+            spec.chmod(0o600)
+            swapped = json.loads(json.dumps(original))
+            swapped['stores'][2]['relative_path'], swapped['stores'][3]['relative_path'] = (
+                swapped['stores'][3]['relative_path'], swapped['stores'][2]['relative_path'])
+            original_entries = stopped_tree_match.entries
+            def rewrite_after_first_tree(path):
+                result = original_entries(path)
+                if path == root / stores[0]['relative_path']:
+                    spec.write_text(json.dumps(swapped))
+                return result
+            output = root / 'guest-output'
+            with mock.patch.object(stopped_tree_match, 'entries', side_effect=rewrite_after_first_tree):
+                with self.assertRaisesRegex(RuntimeError, 'store specification changed'):
+                    guest_capture(spec, output, root)
+            self.assertTrue((output / 'FAILED.json').exists())
+            self.assertFalse((output / 'manifest.json').exists())
+
     def test_production_capture_requires_decision_controller_before_output_creation(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-host-capture-entry-') as temporary:
             root = pathlib.Path(temporary).resolve()
@@ -454,18 +485,22 @@ class HostCaptureTest(unittest.TestCase):
         host_match(guest_output / 'manifest.json', output / 'extracted-stores', matched)
         self.assertTrue((matched / 'MATCH.json').exists())
         swapped_match = self.root / 'swapped-guest-match'
-        with self.assertRaisesRegex(RuntimeError, 'guest scope, store declaration or pre-guard time differs'):
+        with self.assertRaisesRegex(RuntimeError, 'guest store specification differs'):
             host_match(swapped_guest / 'manifest.json', output / 'extracted-stores', swapped_match)
         self.assertTrue((swapped_match / 'FAILED.json').exists())
         self.assertFalse((swapped_match / 'MATCH.json').exists())
         original_guest = json.loads((guest_output / 'manifest.json').read_text())
-        for label, changes in (
-                ('wrong-guest-scope', {'scope': 'host-generated content observation'}),
-                ('late-guest-capture', {'at_utc': json.loads((output / 'GUARD.json').read_text())['guarded_at_utc']})):
+        for label, changes, refusal in (
+                ('wrong-guest-scope', {'scope': 'host-generated content observation'},
+                 'guest stopped-tree scope differs'),
+                ('wrong-guest-spec', {'spec_sha256': 'f' * 64},
+                 'guest store specification differs'),
+                ('late-guest-capture', {'at_utc': json.loads((output / 'GUARD.json').read_text())['guarded_at_utc']},
+                 'guest capture is not before host guard')):
             candidate = self.root / f'{label}.json'
             write_record(candidate, dict(original_guest, **changes))
             refused = self.root / f'{label}-match'
-            with self.assertRaisesRegex(RuntimeError, 'guest scope, store declaration or pre-guard time differs'):
+            with self.assertRaisesRegex(RuntimeError, refusal):
                 host_match(candidate, output / 'extracted-stores', refused)
             self.assertTrue((refused / 'FAILED.json').exists())
             self.assertFalse((refused / 'MATCH.json').exists())

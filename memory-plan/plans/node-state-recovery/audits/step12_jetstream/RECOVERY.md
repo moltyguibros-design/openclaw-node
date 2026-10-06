@@ -97,8 +97,11 @@ and rehashed host files exactly, then makes the extracted trees read-only.
 The host capture receipt pins the exact store-specification bytes; `match`
 requires the guest manifest's specification hash to agree and its declared
 scope and timestamp to precede the host image guard. Both sides must use the
-same owner-private store specification. This binds the four role paths in the
-content comparison but does not attest which machine produced the guest
+same owner-private store specification. Each producer parses and hashes one
+read of that file and refuses a later observed rewrite. A clock difference
+between guest and host can cause a pre-guard timestamp refusal; the failure
+receipt records both timestamps for diagnosis. This binds the four role paths
+in the content comparison but does not attest which machine produced the guest
 manifest: a stale or host-generated manifest with matching content can still
 pass. `MATCH.json` is a content result only; it is neither guest-origin or
 writer-exclusion proof nor isolated restoration acceptance.

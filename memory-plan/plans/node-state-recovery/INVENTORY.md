@@ -1951,3 +1951,12 @@ the host capture suite passes eight tests. Guest-origin attestation, full-node
 hold, production capture, four real-history restores, acceptance and verified
 resumption remain open. No production VM or service changed; step 1.2 stays
 [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 17:01 EDT: Claude found no D106 static-binding blocker
+and independently reproduced the digest, scope and time refusals. D107 binds
+each producer's parsed store roles to the same bytes it hashes, refuses an
+observed guest-side spec rewrite, and adds a digest-only ASIF negative. Scope,
+declaration and clock-order failures now have distinct diagnostics. Guest
+origin, clock synchronization, full-node hold, production capture, four
+real-history restores, acceptance and resumption remain open. No production
+VM or service changed; step 1.2 remains [A]/v1.2-pre.

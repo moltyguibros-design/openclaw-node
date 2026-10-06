@@ -2132,3 +2132,23 @@ matching specification and manifest on the host, and a stale manifest with
 identical content and an earlier timestamp can still pass. Production capture
 continues to refuse without its acceptance/abort controller. No VM, production
 service or NATS store was stopped or changed; step 1.2 remains [A]/v1.2-pre.
+
+## D107 — Hash the same specification bytes that each producer parses (2026-10-06 17:01 EDT)
+
+Claude's independent D106 review found no blocker in the static binding but
+pointed out that both producers parsed and hashed their store specification
+in separate reads. A disposable rewrite between those reads reproduced a
+guest manifest whose digest named a swapped role declaration while its entries
+came from the original declaration. Both producers now hash the exact bytes
+they parse. Guest capture also refuses an observed rewrite during the tree
+walk, leaving `FAILED.json` and no success manifest. The macOS ASIF fixture
+adds a digest-only mismatch to exercise the new clause even when tree content
+matches, and matcher refusals distinguish scope, declaration and clock order.
+The nine-test capture suite and plan lint pass on the owned checkout.
+
+This does not prove that the guest clock is synchronized with the host or
+authenticate the manifest's origin. A cross-machine clock skew can refuse a
+valid capture; a backdated host-generated manifest can still pass. The
+full-node hold, production capture, four real-history restores, acceptance
+and verified resumption remain open. No production VM, service or NATS store
+was stopped or changed; step 1.2 remains [A]/v1.2-pre.
