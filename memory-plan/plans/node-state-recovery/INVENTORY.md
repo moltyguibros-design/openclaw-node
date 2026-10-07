@@ -1636,14 +1636,6 @@ real macOS hold rehearsal, deploy fence, VM stop/capture and four-history
 acceptance remain open. No production service, VM or NATS store changed; 1.2
 stays [A]/v1.2-pre.
 
-Checkpoint 2026-10-07 07:40 EDT: D115 retains the failed daemon restoration's
-physical outcome in the durable recovery error instead of recording only its
-exception type. Claude's D114 review confirmed no new false acceptance, but
-identified the still-unimplemented reconciliation of a running, disabled
-owner and the need to measure readiness budgets before production use. The
-full-node non-listener stop guard remains closed. No production VM, service
-or NATS history changed; step 1.2 stays [A]/v1.2-pre.
-
 Checkpoint 2026-10-05 14:14 EDT: the first D81 CI run found an older root
 transfer fixture still stopping NATS before the listener. Both its simulated
 and native-hold paths now stage a listener stop first; the 10 root-admission
@@ -2053,5 +2045,22 @@ pin the one-intent, previously-recovered, and timer/NATS exclusions; its
 suite passes 144 tests. Plan lint is conformant on the operator checkout.
 Automatic process compensation, a survivor census, a full-node hold driver,
 stopped-VM capture, four-history acceptance and verified service resumption
+remain open. No production VM, service or NATS history changed; step 1.2
+stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 07:40 EDT: D115 retains the failed daemon restoration's
+physical outcome in the durable recovery error instead of recording only its
+exception type. Claude's D114 review confirmed no new false acceptance, but
+identified the still-unimplemented reconciliation of a running, disabled
+owner and the need to measure readiness budgets before production use. The
+full-node non-listener stop guard remains closed. No production VM, service
+or NATS history changed; step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 09:22 EDT: D116 closes the interrupted-enable path
+Claude found in D114's physical correction. `KeyboardInterrupt` now attempts
+to restore the disabled override and still propagates; an owned preflight
+negative and an intent-only reopened-journal negative pass. The full managed
+launchd suite passes 49 tests with one domain skip. Running-owner
+reconciliation, the full-node hold and all later capture and acceptance gates
 remain open. No production VM, service or NATS history changed; step 1.2
 stays [A]/v1.2-pre.

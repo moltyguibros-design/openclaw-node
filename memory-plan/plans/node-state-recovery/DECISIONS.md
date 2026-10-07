@@ -2342,3 +2342,19 @@ that state. No production adapter may use this restart path until that path,
 its survivor proof, and measured per-unit readiness budgets are in place.
 The full-node non-listener stop guard remains closed; no production VM,
 service, or NATS history changed. Step 1.2 remains [A]/v1.2-pre.
+
+## D116 — Restore the disabled override on interrupted daemon restart (2026-10-07 09:22 EDT)
+
+Claude's D114 review found that `KeyboardInterrupt` or `SystemExit` between
+enable and bootstrap bypassed the disabled-override correction. The daemon
+restore now attempts the same physical correction for `BaseException`, then
+re-raises interruptions instead of turning them into normal refusal results.
+The durable `override-clear-intent` remains the recovery fence even if no
+`recovery-finished` row was written. A platform-independent interruption
+negative proves that an interrupted enable restores the override and
+propagates `KeyboardInterrupt`; the journal negative now leaves the intent
+as its last row and proves a reopened recovery refuses before state writes.
+
+This does not provide process reconciliation for a running disabled owner.
+The full-node non-listener stop guard remains closed, and no production VM,
+service, or NATS history changed. Step 1.2 remains [A]/v1.2-pre.

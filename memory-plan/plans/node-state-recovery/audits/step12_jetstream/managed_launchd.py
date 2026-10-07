@@ -301,7 +301,7 @@ def restore_disabled_daemon(service, journal, unit, prior, ready, timeout=5):
                 return binding
             time.sleep(.05)
         raise Refused('restored daemon did not reach readiness: ' + unit)
-    except Exception as error:
+    except BaseException as error:
         try:
             gui, user = service.status(), service.status('user')
             require(not user['loaded'], 'restored daemon is loaded in another domain')
@@ -315,6 +315,8 @@ def restore_disabled_daemon(service, journal, unit, prior, ready, timeout=5):
             physical = 'disabled override restored; owner running=' + str(state['running'])
         except Exception as fence_error:
             physical = 'disabled override unverified: ' + str(fence_error)
+        if not isinstance(error, Exception):
+            raise
         raise Refused(str(error) + '; ' + physical) from error
 
 

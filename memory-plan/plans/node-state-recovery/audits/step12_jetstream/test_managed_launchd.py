@@ -40,6 +40,24 @@ def wait_for(check, seconds=10):
 
 
 class StopWatchPreflight(unittest.TestCase):
+    def test_interrupted_restore_reinstates_override_and_propagates_interrupt(self):
+        state = {'disabled': True}
+        events = []
+        def enable():
+            state['disabled'] = False
+            raise KeyboardInterrupt()
+        service = SimpleNamespace(label='ai.openclaw.gateway',
+            enable_after_hold=enable, status=lambda domain='gui': {'loaded': False, 'running': False},
+            disabled=lambda: state['disabled'],
+            disable_unloaded_for_hold=lambda: state.update(disabled=True),
+            bootstrap=lambda: self.fail('bootstrap reached'))
+        prior = {'class': 'daemon', 'loaded': True}
+        journal = SimpleNamespace(begin_override_clear=lambda unit: events.append(unit))
+        with self.assertRaises(KeyboardInterrupt):
+            restore_disabled_daemon(service, journal, 'gateway', prior, lambda _: False)
+        self.assertEqual(events, ['gateway'])
+        self.assertTrue(state['disabled'])
+
     def test_persistent_idle_timer_refuses_a_start_during_disable(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-owned-idle-race-') as directory:
             root = pathlib.Path(directory)

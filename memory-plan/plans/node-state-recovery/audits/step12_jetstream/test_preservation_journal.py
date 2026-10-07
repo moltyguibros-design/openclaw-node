@@ -1332,7 +1332,7 @@ class JournalTests(unittest.TestCase):
                     lambda: current['gateway'].update(loaded=False, running=False, disabled=True),
                     listener_stop_evidence, hold=hold)
                 journal.append('override-clear-intent', unit='gateway')
-                journal.append('restoration-failed', unit='gateway', reason='readiness')
+                self.assertEqual(journal.records[-1]['event'], 'override-clear-intent')
             with Journal(self.root, node_lock=self.node_lock) as reopened:
                 hold = SimpleNamespace(journal=reopened,
                     prepare=lambda *_: self.fail('hold prepared'))
