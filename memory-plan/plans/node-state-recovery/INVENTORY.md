@@ -2072,3 +2072,15 @@ Production per-unit readiness measurements and a process-proven failed-restart
 reconciliation remain open; the non-listener full-node stop guard stays closed.
 No production VM, service or NATS history changed; step 1.2 stays
 [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 13:35 EDT: D118 closes a verified installed-plist drift
+gap in full-node recovery. A stopped unit whose currently captured plist path
+or hash differs from the baseline now refuses before hold preparation, state
+write or any restore, even if the observe facade reports stale baseline
+identity. A disposable negative demonstrates both mismatches; the journal
+suite passes 145 tests. D23's best-effort restoration after an inventory
+capture failure remains, as does the deploy-listener success fence. The
+full-node hold driver, production readiness budgets, failed-restart process
+reconciliation, stopped-VM capture, four-history acceptance and verified
+resumption remain open. No production VM, service or NATS history changed;
+step 1.2 stays [A]/v1.2-pre.

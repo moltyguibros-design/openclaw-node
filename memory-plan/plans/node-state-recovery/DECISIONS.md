@@ -2375,3 +2375,30 @@ launder a child that detached before binding. No post-failure re-fence receipt
 or production recovery driver is authorized by this change. The full-node
 non-listener stop guard remains closed, and no production VM, service, or NATS
 history changed. Step 1.2 remains [A]/v1.2-pre.
+
+## D118 — Refuse a stopped unit's verified installed-plist drift before recovery (2026-10-07 13:35 EDT)
+
+D23 deliberately permits best-effort restoration of known units when the
+entrypoint inventory cannot be captured, while withholding the deploy listener
+and a success receipt. That behavior must not turn a *verified* change to a
+stopped unit's installed plist into authorization to restart it. The initial
+entrypoint check recorded such a mismatch but kept restoring units if the
+`observe` adapter reported the saved identity. An owned negative demonstrated
+the gateway restore callback running under that contradiction.
+
+Before hold preparation, state writes or restoration, `check_stopped()` now
+compares each pending stopped unit's currently captured installed plist path
+and hash with its baseline entry. An observed mismatch refuses the recovery
+without a new journal row. A capture exception leaves D23's best-effort path
+intact; the independent observed-unit identity and final entrypoint checks
+still apply. A disposable regression changes first the gateway plist hash,
+then its path with the original hash, and requires both to refuse before any
+restore. The full journal suite passes 145 tests. Claude independently
+challenged the distinction between a capture failure and verified drift and
+confirmed that blocking all restores on every inventory error would violate
+D23's abort path.
+
+This is one preflight binding, not a production full-node recovery driver or
+a continuous inventory watch. The non-listener full-node stop guard remains
+closed. No production VM, service or NATS history changed; step 1.2 remains
+[A]/v1.2-pre.

@@ -1079,7 +1079,18 @@ class Journal:
                     unproven = unproven_stopped_unit()
                     require(unproven is None,
                             'stopped unit override was cleared without verified recovery: ' + str(unproven))
+                    installed = None
+                    if stopped:
+                        try:
+                            installed = capture_entrypoint_inventory(UNITS)['installed']
+                        except Exception:
+                            pass
                     for unit in stopped:
+                        if installed is not None:
+                            label = 'ai.openclaw.' + unit
+                            require(isinstance(installed, dict)
+                                    and installed.get(label) == self.entrypoint_inventory['installed'][label],
+                                    'stopped unit installed plist changed before verified recovery: ' + unit)
                         actual = observe(unit, self.prior[unit])
                         require(stopped_state_ok(unit, actual),
                                 'stopped unit state changed before verified recovery: ' + unit)
