@@ -1081,10 +1081,12 @@ class Journal:
                             'stopped unit override was cleared without verified recovery: ' + str(unproven))
                     installed = None
                     if stopped:
-                        try:
-                            installed = capture_entrypoint_inventory(UNITS)['installed']
-                        except Exception:
-                            pass
+                        for _ in range(2):
+                            try:
+                                installed = capture_entrypoint_inventory(UNITS)['installed']
+                                break
+                            except Exception:
+                                continue
                     for unit in stopped:
                         if installed is not None:
                             label = 'ai.openclaw.' + unit

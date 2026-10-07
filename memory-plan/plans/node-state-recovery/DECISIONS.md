@@ -2402,3 +2402,23 @@ This is one preflight binding, not a production full-node recovery driver or
 a continuous inventory watch. The non-listener full-node stop guard remains
 closed. No production VM, service or NATS history changed; step 1.2 remains
 [A]/v1.2-pre.
+
+## D119 — Recheck a transient entrypoint capture failure before best-effort recovery (2026-10-07 15:26 EDT)
+
+Claude's D118 review found that the added preflight treated every capture
+exception as unavailable evidence. The inventory itself raises if an installed
+plist changes between its two reads, so a concurrent rewrite could be
+classified as a diagnostic failure and allow a stale observe adapter to
+restore the changed unit. The stopped-unit preflight now attempts one more
+complete inventory capture after an exception. A successful retry must still
+match every stopped unit's baseline plist path and hash; only two failed
+captures preserve D23's best-effort abort path.
+
+The owned regression makes the first capture refuse and the second report a
+changed gateway hash. It requires refusal before hold preparation, state
+write or restore. A separate negative pins D23 when both attempts fail with
+stopped units present: known gateway restoration proceeds, the deploy listener
+stays fenced, and recovery remains uncertified. The preservation journal suite
+passes 146 tests. This narrows a preflight race; a plist change after the
+second preflight still needs a per-unit restore-time binding. No production
+VM, service or NATS history changed; step 1.2 remains [A]/v1.2-pre.

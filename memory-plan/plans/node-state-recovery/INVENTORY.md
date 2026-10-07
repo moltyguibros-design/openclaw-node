@@ -2084,3 +2084,15 @@ full-node hold driver, production readiness budgets, failed-restart process
 reconciliation, stopped-VM capture, four-history acceptance and verified
 resumption remain open. No production VM, service or NATS history changed;
 step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 15:26 EDT: D119 rechecks the full entrypoint inventory
+once when its first read fails, so a transient concurrent plist rewrite that
+settles as changed cannot masquerade as unavailable evidence. An owned
+negative refuses on a changed gateway hash in the second capture before any
+recovery write or restore. Another pins D23's fallback after two capture
+failures with stopped units: known gateway restoration proceeds, the deploy
+listener remains fenced and no success is claimed. The journal suite passes
+146 tests. A later plist rewrite between preflight and a unit's restart and
+the stopped-owner reconciliation remain open, as do the complete hold,
+capture, four-history acceptance and verified resumption. No production VM,
+service or NATS history changed; step 1.2 stays [A]/v1.2-pre.
