@@ -1,5 +1,6 @@
 import ctypes
 import hashlib
+import math
 import os
 import pathlib
 import plistlib
@@ -273,10 +274,12 @@ class Launchd:
         require(not self.disabled(), 'managed unit remains disabled')
 
 
-def restore_disabled_daemon(service, journal, unit, prior, ready, timeout=5):
+def restore_disabled_daemon(service, journal, unit, prior, ready, *, timeout):
     require(prior['class'] == 'daemon' and prior['loaded']
             and service.label == 'ai.openclaw.' + unit and callable(ready),
             'disabled daemon restoration is not bound to its saved owner')
+    require(type(timeout) in (int, float) and math.isfinite(timeout) and timeout > 0,
+            'disabled daemon restoration needs a finite readiness budget')
     journal.begin_override_clear(unit)
     try:
         service.enable_after_hold()

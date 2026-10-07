@@ -2358,3 +2358,20 @@ as its last row and proves a reopened recovery refuses before state writes.
 This does not provide process reconciliation for a running disabled owner.
 The full-node non-listener stop guard remains closed, and no production VM,
 service, or NATS history changed. Step 1.2 remains [A]/v1.2-pre.
+
+## D117 — Require an explicit daemon readiness budget before clearing its override (2026-10-07 11:26 EDT)
+
+Claude's D114 review found that the restore adapter's five-second default
+could turn a slow but healthy daemon into a terminal recovery failure after
+its disabled override had been cleared. The adapter now requires a finite,
+positive, explicitly named `timeout` before it writes `override-clear-intent`
+or enables the label. Owned fixture calls provide their own deadlines; a
+negative verifies that omission and invalid values refuse before the journal
+or launchd is touched. This removes a silent default, not the need to measure
+production readiness for every unit and prove its bound owner and stop path.
+
+Claude's D115–D116 review confirmed that late StopWatch binding alone could
+launder a child that detached before binding. No post-failure re-fence receipt
+or production recovery driver is authorized by this change. The full-node
+non-listener stop guard remains closed, and no production VM, service, or NATS
+history changed. Step 1.2 remains [A]/v1.2-pre.

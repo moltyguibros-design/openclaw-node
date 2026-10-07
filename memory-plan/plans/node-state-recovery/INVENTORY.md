@@ -2064,3 +2064,11 @@ launchd suite passes 49 tests with one domain skip. Running-owner
 reconciliation, the full-node hold and all later capture and acceptance gates
 remain open. No production VM, service or NATS history changed; step 1.2
 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 11:26 EDT: D117 removes the implicit five-second
+daemon readiness deadline. Each owned adapter call now supplies an explicit
+finite positive budget before any override-clear intent or launchd action.
+Production per-unit readiness measurements and a process-proven failed-restart
+reconciliation remain open; the non-listener full-node stop guard stays closed.
+No production VM, service or NATS history changed; step 1.2 stays
+[A]/v1.2-pre.

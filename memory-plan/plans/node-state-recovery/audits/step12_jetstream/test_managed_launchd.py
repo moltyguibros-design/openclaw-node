@@ -40,6 +40,17 @@ def wait_for(check, seconds=10):
 
 
 class StopWatchPreflight(unittest.TestCase):
+    def test_daemon_restore_requires_explicit_readiness_budget(self):
+        journal = SimpleNamespace(begin_override_clear=lambda _: self.fail('intent reached'))
+        service = SimpleNamespace(label='ai.openclaw.gateway')
+        prior = {'class': 'daemon', 'loaded': True}
+        with self.assertRaises(TypeError):
+            restore_disabled_daemon(service, journal, 'gateway', prior, lambda _: True)
+        for timeout in (0, -1, float('inf'), float('nan')):
+            with self.subTest(timeout=timeout), self.assertRaisesRegex(Refused, 'finite readiness budget'):
+                restore_disabled_daemon(service, journal, 'gateway', prior,
+                                        lambda _: True, timeout=timeout)
+
     def test_interrupted_restore_reinstates_override_and_propagates_interrupt(self):
         state = {'disabled': True}
         events = []
@@ -54,7 +65,7 @@ class StopWatchPreflight(unittest.TestCase):
         prior = {'class': 'daemon', 'loaded': True}
         journal = SimpleNamespace(begin_override_clear=lambda unit: events.append(unit))
         with self.assertRaises(KeyboardInterrupt):
-            restore_disabled_daemon(service, journal, 'gateway', prior, lambda _: False)
+            restore_disabled_daemon(service, journal, 'gateway', prior, lambda _: False, timeout=5)
         self.assertEqual(events, ['gateway'])
         self.assertTrue(state['disabled'])
 
@@ -430,7 +441,7 @@ os.execv('/bin/sleep',['sleep','30'])
             return (self.ready.exists()
                     and json.loads(self.ready.read_text())['pid'] == binding['status']['pid'])
         journal = SimpleNamespace(begin_override_clear=begin_override_clear)
-        restored = restore_disabled_daemon(self.service, journal, unit, prior, ready)
+        restored = restore_disabled_daemon(self.service, journal, unit, prior, ready, timeout=10)
         self.assertEqual(calls, [unit])
         self.assertNotEqual(restored['status']['pid'], original['status']['pid'])
         self.assertTrue(self.service.status()['running'])
@@ -500,7 +511,7 @@ os.execv('/bin/sleep',['sleep','30'])
         with self.assertRaisesRegex(Refused, 'disabled override restored; owner running=False'):
             restore_disabled_daemon(self.service,
                 SimpleNamespace(begin_override_clear=lambda name: events.append(name)),
-                unit, prior, lambda _: False)
+                unit, prior, lambda _: False, timeout=10)
         self.assertEqual(events, [unit])
         self.assertFalse(self.service.status()['loaded'])
         self.assertTrue(self.service.disabled())

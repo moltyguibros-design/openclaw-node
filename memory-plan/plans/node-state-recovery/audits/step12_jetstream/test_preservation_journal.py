@@ -1381,7 +1381,7 @@ class JournalTests(unittest.TestCase):
                             raise Refused('owned enable failure')
                         service = SimpleNamespace(label='ai.openclaw.gateway',
                                                   enable_after_hold=enable_after_hold)
-                        restore_disabled_daemon(service, journal, unit, wanted, lambda _: True)
+                        restore_disabled_daemon(service, journal, unit, wanted, lambda _: True, timeout=5)
                     current[unit] = copy.deepcopy(wanted)
                 result = journal.recover(restore,
                     lambda unit, _: {**current[unit], 'verified': True},
@@ -1494,7 +1494,7 @@ class JournalTests(unittest.TestCase):
                         enable_after_hold=lambda: state.update(disabled=False),
                         bootstrap=lambda: state.update(loaded=True, running=True),
                         bind=lambda *_: {'status': status()})
-                    restore_disabled_daemon(service, journal, unit, wanted, lambda _: True)
+                    restore_disabled_daemon(service, journal, unit, wanted, lambda _: True, timeout=5)
                 result = journal.recover(restore,
                     lambda unit, _: {**current[unit], 'verified': True},
                     lambda: {'verified': True}, hold=hold,
