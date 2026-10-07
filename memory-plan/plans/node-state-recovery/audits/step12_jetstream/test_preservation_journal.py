@@ -1384,6 +1384,8 @@ class JournalTests(unittest.TestCase):
                     deploy_fence=lambda: {'verified': True})
                 self.assertFalse(result['restored'])
                 self.assertEqual(restored, ['gateway'])
+                self.assertFalse(any(error['unit'] == 'workplan-viewer'
+                                     for error in result['errors']))
                 self.assertFalse(any(row['event'] == 'restoration-intent'
                                      and row.get('unit') == 'workplan-viewer' for row in journal.records))
 

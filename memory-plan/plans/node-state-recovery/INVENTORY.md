@@ -1990,8 +1990,22 @@ run's preflight could refuse. The exception path now stops the loop when any
 stopped unit has an unresolved override-clear intent. A second negative
 records an intent for another stopped unit during a successful callback and
 refuses the next restore. Both fail on D109 and pass with the fix; 140 focused
-journal tests pass. Claude's
-exact-head D109 adversarial review is pending. This does not supply the
+journal tests pass. Claude's exact-head D109 adversarial review is pending.
+This does not supply the
 enable-capable adapter or a detached-process census; full-node hold, capture,
 four-history acceptance and verified resumption remain open. No production
 VM, service or NATS store changed; step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 22:45 EDT: Claude's D109 review independently
+reproduced the same-run failure, and its D110 review confirmed that the
+all-stopped loop gate closes it without an unintended refusal. The review
+found one untested clause: removing the exception-path immediate stop still
+left the 140-test suite green. D111's added assertion makes that mutant fail
+and the actual code pass. A synchronous re-fence is still terminal to this
+journal because no validated re-fence receipt clears the intent; the future
+adapter must supply that receipt and remain scoped to its current unit.
+Exact-head macOS CI passes the 140 journal and 43 launchd tests. Root and
+Mission Control CI fail after passing their tests, at dependency audits;
+Node 22 is canceled by fail-fast. Full-node hold, stopped-VM capture,
+four-history acceptance and verified resumption remain open. No production
+VM, service or NATS history changed; step 1.2 stays [A]/v1.2-pre.

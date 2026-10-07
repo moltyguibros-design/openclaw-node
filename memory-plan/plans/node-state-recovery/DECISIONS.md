@@ -2210,3 +2210,26 @@ exist. It does not establish a new process-tree stop proof or authorize
 production restoration. The full-node hold, stopped-VM capture, isolated
 four-history acceptance and verified resumption remain open. No production
 VM, service or NATS history changed; step 1.2 remains [A]/v1.2-pre.
+
+## D111 — Pin immediate refusal and name the re-entry limit (2026-10-06 22:45 EDT)
+
+Claude's read-only review at D110 found that removing its exception-path
+recheck still left the two new tests green: the next unit's global gate
+refused before its restore, but the loop had not stopped immediately. The
+failed-restore negative now also requires no error row for that next unit.
+Removing the exception-path recheck makes this assertion fail; the actual
+code passes. Claude found no unintended refusal, and exact-head macOS CI ran
+the 140-test journal suite and 43-test launchd suite successfully.
+
+An `override-clear-intent` followed by a synchronous, proven re-fence remains
+terminal in the current journal: only `recovery-verified` clears the gate,
+and no validated re-fence receipt exists. An enable-capable adapter must not
+be wired until it can durably validate and record a new stop proof, or a
+never-spawned proof, and the gate accepts that specific receipt. Otherwise
+the journal requires operator reconciliation after a failed restore. The
+planned adapter must act on only its current unit; if it can clear another
+unit's override mid-turn or after that unit's turn, additional checks are
+required before further restores and final hold release. Those cross-unit
+callback windows are outside the present adapter contract, not accepted
+production evidence. The VM, services and NATS stores remain untouched;
+step 1.2 stays [A]/v1.2-pre.
