@@ -374,9 +374,14 @@ os.execv('/bin/sleep',['sleep','30'])
                        capture_output=True, check=True, timeout=10)
         self.assertFalse(self.service.status()['loaded'])
         self.assertTrue(process_exists(child))
+        self.hold_override_attempted = True
+        self.service.disable_unloaded_for_hold()
+        self.assertTrue(self.service.disabled())
+        self.assertFalse(self.service.status()['loaded'])
+        self.assertTrue(process_exists(child))
         self.proofs.append({'test': self._testMethodName, 'child': child,
                             'prebind_tree_excluded_child': True,
-                            'unloaded_with_surviving_child': True})
+                            'disabled_unloaded_with_surviving_child': True})
 
     def test_wrong_argv_refuses_before_service_stop(self):
         self.launch()
