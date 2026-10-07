@@ -2429,6 +2429,59 @@ class JournalTests(unittest.TestCase):
                 self.assertFalse(any(row['event'] == 'listener-release-verified'
                                      for row in journal.records))
 
+    def test_listener_own_late_capture_outage_never_releases_it(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        failures = {'count': 0}
+        def entrypoints(_):
+            if failures['count']:
+                failures['count'] -= 1
+                raise Refused('owned capture unavailable')
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            for domain in ('gui', 'user'):
+                result['overrides'][domain] = {
+                    'ai.openclaw.' + unit: True if state['disabled'] else None
+                    for unit, state in current.items()}
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None, complete=lambda *_: self.fail('hold opened'))
+                anchor_hold(journal, hold)
+                for unit in ('mesh-deploy-listener', 'gateway'):
+                    journal.mutate(unit, 'disable-and-unload',
+                        lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
+                        listener_stop_evidence, hold=hold)
+                restored = []
+                def restore(unit, wanted):
+                    restored.append(unit)
+                    current[unit] = copy.deepcopy(wanted)
+                    if unit == 'gateway':
+                        failures['count'] = 2
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: {'verified': True})
+                self.assertEqual(failures['count'], 0)
+                self.assertEqual(restored, ['gateway'])
+                self.assertFalse(result['restored'])
+                self.assertIn({'unit': 'entrypoints', 'reason': 'installed binding unavailable',
+                               'detail': 'mesh-deploy-listener'}, result['errors'])
+                listener_error = next(error for error in result['errors']
+                                      if error['unit'] == 'mesh-deploy-listener')
+                self.assertIn('cannot release without installed binding', listener_error['detail'])
+                self.assertFalse(any(row['event'] == 'listener-release-verified'
+                                     for row in journal.records))
+                self.assertFalse(any(row['event'] == 'restoration-intent'
+                                     and row.get('unit') == 'mesh-deploy-listener'
+                                     for row in journal.records))
+                self.assertFalse(current['mesh-deploy-listener']['running'])
+
     def test_full_inventory_covers_gateway_viewer_and_installed_unloaded_tick(self):
         self.assertTrue({'gateway', 'workplan-viewer', 'federation-tick'} <= UNITS)
         prior = copy.deepcopy(PRIOR)

@@ -2117,3 +2117,13 @@ stay fenced. Two owned transient-outage negatives pass, and the journal suite
 passes 149 tests. Full-node hold, stopped-VM capture, four-history acceptance
 and verified resumption remain open. No production VM, service or NATS history
 changed; step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 18:00 EDT: Claude's D121 review confirmed the outage
+latch and best-effort behavior but found its listener-specific release guard
+was untested. An owned negative now makes the listener's own two late
+inventory captures fail after gateway restoration. It requires no listener
+release receipt, restoration intent, or running listener, and records both
+the entrypoint outage and listener refusal. The journal suite passes 150
+tests. Complete full-node hold, stopped-VM capture, four-history acceptance
+and verified resumption remain open; production VM, services and NATS stores
+remain untouched.
