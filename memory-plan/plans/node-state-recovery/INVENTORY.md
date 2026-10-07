@@ -2009,3 +2009,13 @@ Mission Control CI fail after passing their tests, at dependency audits;
 Node 22 is canceled by fail-fast. Full-node hold, stopped-VM capture,
 four-history acceptance and verified resumption remain open. No production
 VM, service or NATS history changed; step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 01:20 EDT: D112's owned macOS launchd regression shows
+that an owner can spawn a detached child before binding; after bootout the
+label is unloaded but the child remains alive. The owned suite passes 44 tests
+with one explicit domain skip, and plan lint passes. This removes D111's proposed
+`never-spawned` receipt based on unloaded observations. An attempted bootstrap
+without a bound owner remains unproven and must keep the D109 fence closed.
+The enable-capable adapter and complete hold, capture, four-history acceptance
+and verified resumption are still open. No production VM, service or NATS
+history changed; step 1.2 stays [A]/v1.2-pre.

@@ -212,9 +212,12 @@ process.umask(0o077);
  const nc=await connect({servers:process.env.OWNED_NATS_URL,token:process.env.OWNED_TOKEN,name:process.env.OWNED_NAME,maxReconnectAttempts:0});
  const listener=net.createServer();await new Promise(r=>listener.listen(0,'127.0.0.1',r));
  let child;
- if(['survivor','child','orphan','exec-child'].includes(process.env.OWNED_MODE)){
+ if(['survivor','child','orphan','exec-child','daemonize'].includes(process.env.OWNED_MODE)){
   if(process.env.OWNED_MODE==='orphan') {
    const launcher=cp.spawn(process.execPath,['-e',"require('node:child_process').spawn(process.execPath,[process.env.OWNED_CHILD],{stdio:'ignore',env:process.env}).unref()"],{stdio:'ignore',env:process.env});
+   await new Promise(r=>launcher.on('exit',r));
+  } else if(process.env.OWNED_MODE==='daemonize') {
+   const launcher=cp.spawn(process.execPath,['-e',"require('node:child_process').spawn(process.execPath,[process.env.OWNED_CHILD],{detached:true,stdio:'ignore',env:process.env}).unref()"],{detached:true,stdio:'ignore',env:process.env});
    await new Promise(r=>launcher.on('exit',r));
   } else if(process.env.OWNED_MODE==='exec-child') {
    child=cp.spawn(process.env.OWNED_PYTHON,[process.env.OWNED_EXEC_CHILD],{stdio:'ignore',env:process.env});child.unref();
@@ -362,6 +365,18 @@ os.execv('/bin/sleep',['sleep','30'])
         self.assertTrue(process_exists(self.details['child']))
         self.proofs.append({'test': self._testMethodName, 'exits': watch.events,
                             'survivingChild': self.details['child'], 'refused': True})
+
+    def test_unloaded_label_does_not_prove_no_process_was_spawned(self):
+        binding = self.launch('daemonize')
+        child = self.details['child']
+        self.assertNotIn(child, binding['tree'])
+        subprocess.run(['/bin/launchctl', 'bootout', self.service.target],
+                       capture_output=True, check=True, timeout=10)
+        self.assertFalse(self.service.status()['loaded'])
+        self.assertTrue(process_exists(child))
+        self.proofs.append({'test': self._testMethodName, 'child': child,
+                            'prebind_tree_excluded_child': True,
+                            'unloaded_with_surviving_child': True})
 
     def test_wrong_argv_refuses_before_service_stop(self):
         self.launch()

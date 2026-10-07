@@ -2233,3 +2233,24 @@ required before further restores and final hold release. Those cross-unit
 callback windows are outside the present adapter contract, not accepted
 production evidence. The VM, services and NATS stores remain untouched;
 step 1.2 stays [A]/v1.2-pre.
+
+## D112 — An unloaded launchd label is not a never-spawned proof (2026-10-07 01:20 EDT)
+
+D111 left a possible `never-spawned` re-fence receipt for a failed bootstrap.
+An actual owned macOS launchd negative disproves the proposed shortcut:
+bootstrap successfully started an owner that launched a detached child before
+the owner could be bound. The child escaped the owner's process tree. A later
+`bootout` left the label unloaded while the child remained alive. The new
+managed-launchd test retains this state as a regression fixture. The owned
+suite passes 44 tests with one explicit cross-domain skip; plan lint passes.
+
+An unloaded post-bootstrap observation, even paired with a clean pre-bootstrap
+observation or a process census taken later, cannot certify that no process
+started or wrote in between. Do not issue a `never-spawned` receipt from these
+observations. An enable-capable recovery adapter must treat any attempted
+bootstrap whose owner was not bound as unproven, retain the D109 override-clear
+fence, and refuse further restoration. A bound owner and a verified persistent
+stop still need a complete survivor/connection proof before a re-fence receipt
+can be admitted. The existing production refusal for full-node non-listener
+stops remains in place. No production service, VM or NATS history changed;
+step 1.2 remains [A]/v1.2-pre.
