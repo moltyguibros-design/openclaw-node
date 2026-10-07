@@ -2244,7 +2244,9 @@ escaped the bound process tree. A later `bootout` followed by
 `disable_unloaded_for_hold()` left the label unloaded and disabled while the
 child remained alive. The new managed-launchd test retains this state as a
 regression fixture. On the operator checkout, the owned suite passes 44 tests
-with one explicit cross-domain skip and plan lint passes.
+with one explicit cross-domain skip and plan lint passes. A further owned run
+observed the disabled override in both GUI and user domains while the detached
+child was still alive; the persistent override is not a process-absence proof.
 
 The test does not reproduce a failed `bootstrap()` call. Such a failure would
 need separate proof that launchd never spawned a process; this adapter has no

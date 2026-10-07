@@ -378,6 +378,10 @@ os.execv('/bin/sleep',['sleep','30'])
         self.service.disable_unloaded_for_hold()
         self.assertTrue(self.service.disabled())
         self.assertFalse(self.service.status()['loaded'])
+        user_overrides = subprocess.run(['/bin/launchctl', 'print-disabled',
+                                         'user/' + str(os.getuid())], capture_output=True,
+                                        text=True, check=True, timeout=10).stdout
+        self.assertIn('"' + self.name + '" => disabled', user_overrides)
         self.assertTrue(process_exists(child))
         self.proofs.append({'test': self._testMethodName, 'child': child,
                             'prebind_tree_excluded_child': True,

@@ -2018,6 +2018,8 @@ the operator checkout. The test uses a successful bootstrap; it invalidates
 the unloaded/disabled evidence proposed for D111's `never-spawned` receipt,
 not a failed-bootstrap behavior itself. An attempted bootstrap without a bound
 owner remains unproven and must keep the D109 fence closed.
+An owned follow-up confirmed the disabled override appears in the user domain
+as well as GUI while the detached child remains alive; the focused test passes.
 The enable-capable adapter and complete hold, capture, four-history acceptance
 and verified resumption are still open. No production VM, service or NATS
 history changed; step 1.2 stays [A]/v1.2-pre.
