@@ -2288,3 +2288,37 @@ a started process requiring operator reconciliation; detached and transient
 writers, timer/on-demand restores, reboot hold, and deploy listener release
 remain gates. The production VM, services and four NATS histories were not
 changed; step 1.2 remains [A]/v1.2-pre.
+
+## D114 — Restore a failed daemon's disabled override without issuing a stop receipt (2026-10-07 07:28 EDT)
+
+Claude's read-only review of D113 found a physical side effect beyond the
+unproven journal state: a bootstrap refusal could leave an installed agent
+enabled and unloaded, making it eligible for launch at the next login. A
+readiness refusal could leave the new owner running. The journal correctly
+refuses further recovery in either case, but it does not itself restore the
+launchd override.
+
+`restore_disabled_daemon()` now makes a best-effort physical correction after
+any failed enable, bootstrap, bind or readiness check. If the label remains
+exclusively in the GUI domain, it disables the loaded or unloaded label and
+observes the override. The original refusal also reports whether this
+correction was verified and whether the owner remains running. It never
+bootouts an unbound process and never writes a re-fence receipt. A bound
+running owner remains an operator-reconciliation case, as do failures to
+verify the override. Neither an unloaded-and-disabled state nor a disabled
+but-running state proves process or writer absence.
+
+Owned macOS negatives cover failed bootstrap, failed readiness, and an owner
+that exits after spawning a detached child before binding. The last case now
+pins the loaded, not-running, one-run label with a live child and a restored
+override. Claude also found that three journal preconditions were untested;
+new negatives require one intent per restoration, refuse an already recovered
+unit, and refuse timers and NATS members. The valid-prior contract already
+forbids an unloaded daemon, making that subcondition redundant in a normally
+opened journal. The managed-launchd suite passes 48 tests with one domain
+skip, the journal suite 144, and plan lint is conformant on the operator
+checkout.
+
+No automatic process compensation or survivor census exists. The full-node
+non-listener stop guard remains closed, and no production VM, service or NATS
+history changed. Step 1.2 remains [A]/v1.2-pre.

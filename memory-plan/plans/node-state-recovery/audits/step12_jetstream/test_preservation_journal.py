@@ -1401,6 +1401,58 @@ class JournalTests(unittest.TestCase):
                 self.assertFalse(any(row['event'] == 'restoration-intent'
                                      and row.get('unit') == 'workplan-viewer' for row in journal.records))
 
+    def test_override_clear_intent_can_only_follow_its_restoration_once(self):
+        prior = full_node_inventory()
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=full_entrypoint_evidence(prior)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                stop = journal.append('intent', unit='gateway', action='disable-and-unload')
+                journal.append('verified', unit='gateway', intent=stop['sequence'],
+                               evidence=listener_stop_evidence())
+                journal.append('restoration-intent', unit='gateway', action='restore-prior')
+                journal.restoring_unit = 'gateway'
+                journal.begin_override_clear('gateway')
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'immediately follow'):
+                    journal.begin_override_clear('gateway')
+                self.assertEqual(len(journal.records), before)
+
+    def test_override_clear_refuses_a_previously_recovered_unit(self):
+        prior = full_node_inventory()
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=full_entrypoint_evidence(prior)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                stop = journal.append('intent', unit='gateway', action='disable-and-unload')
+                journal.append('verified', unit='gateway', intent=stop['sequence'],
+                               evidence=listener_stop_evidence())
+                journal.append('recovery-verified', unit='gateway', evidence={'verified': True})
+                journal.append('restoration-intent', unit='gateway', action='restore-prior')
+                journal.restoring_unit = 'gateway'
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'lacks a verified persistent stop'):
+                    journal.begin_override_clear('gateway')
+                self.assertEqual(len(journal.records), before)
+
+    def test_override_clear_refuses_timers_and_nats_members(self):
+        prior = full_node_inventory()
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=full_entrypoint_evidence(prior)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                for unit, evidence in (('observer', timer_stop_evidence('observer')),
+                                       ('nats', listener_stop_evidence())):
+                    stop = journal.append('intent', unit=unit, action='disable-and-unload')
+                    journal.append('verified', unit=unit, intent=stop['sequence'],
+                                   evidence=evidence)
+                    journal.append('restoration-intent', unit=unit, action='restore-prior')
+                    journal.restoring_unit = unit
+                    before = len(journal.records)
+                    with self.assertRaisesRegex(Refused, 'outside the current daemon restoration'):
+                        journal.begin_override_clear(unit)
+                    self.assertEqual(len(journal.records), before)
+
     def test_full_scope_disabled_daemon_restore_verifies_after_journaled_enable(self):
         prior = full_node_inventory()
         current = copy.deepcopy(prior)

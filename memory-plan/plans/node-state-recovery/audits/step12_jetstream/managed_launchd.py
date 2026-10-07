@@ -278,28 +278,44 @@ def restore_disabled_daemon(service, journal, unit, prior, ready, timeout=5):
             and service.label == 'ai.openclaw.' + unit and callable(ready),
             'disabled daemon restoration is not bound to its saved owner')
     journal.begin_override_clear(unit)
-    service.enable_after_hold()
-    service.bootstrap()
-    end = time.monotonic() + timeout
-    binding = None
-    while time.monotonic() < end:
-        require(not service.status('user')['loaded'], 'restored owner appeared in another domain')
-        if service.status()['running']:
-            identity = prior['identity']
-            binding = service.bind(identity['argv'], identity['argv'][0],
-                                   identity['working_directory'], identity['files'])
-            break
-        time.sleep(.05)
-    require(binding is not None, 'restored daemon owner was not bound')
-    while time.monotonic() < end:
-        require(service.status() == binding['status'],
-                'restored daemon owner changed before readiness')
-        if ready(binding):
+    try:
+        service.enable_after_hold()
+        service.bootstrap()
+        end = time.monotonic() + timeout
+        binding = None
+        while time.monotonic() < end:
+            require(not service.status('user')['loaded'], 'restored owner appeared in another domain')
+            if service.status()['running']:
+                identity = prior['identity']
+                binding = service.bind(identity['argv'], identity['argv'][0],
+                                       identity['working_directory'], identity['files'])
+                break
+            time.sleep(.05)
+        require(binding is not None, 'restored daemon owner was not bound')
+        while time.monotonic() < end:
             require(service.status() == binding['status'],
-                    'restored daemon owner changed during readiness')
-            return binding
-        time.sleep(.05)
-    raise Refused('restored daemon did not reach readiness: ' + unit)
+                    'restored daemon owner changed before readiness')
+            if ready(binding):
+                require(service.status() == binding['status'],
+                        'restored daemon owner changed during readiness')
+                return binding
+            time.sleep(.05)
+        raise Refused('restored daemon did not reach readiness: ' + unit)
+    except Exception as error:
+        try:
+            gui, user = service.status(), service.status('user')
+            require(not user['loaded'], 'restored daemon is loaded in another domain')
+            if not service.disabled():
+                if gui['loaded']:
+                    service.disable_for_hold()
+                else:
+                    service.disable_unloaded_for_hold()
+            require(service.disabled(), 'restored daemon override remains clear')
+            state = service.status()
+            physical = 'disabled override restored; owner running=' + str(state['running'])
+        except Exception as fence_error:
+            physical = 'disabled override unverified: ' + str(fence_error)
+        raise Refused(str(error) + '; ' + physical) from error
 
 
 class StopWatch:

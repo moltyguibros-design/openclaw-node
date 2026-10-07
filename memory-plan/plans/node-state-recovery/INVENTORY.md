@@ -2032,3 +2032,18 @@ under D109/D110; no automatic re-fence receipt exists. The non-listener
 production stop guard remains closed. Full-node hold, stopped-VM capture, four
 real-history acceptance, and verified service resumption remain open; no
 production VM, service or NATS history changed. Step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 07:28 EDT: Claude's D113 adversarial review found
+that a failed bootstrap could leave an installed agent enabled for the next
+login even though journal recovery is terminal. D114 now restores the
+disabled override best-effort after any failed enable, bootstrap, bind or
+readiness check, while refusing to certify process absence or issue a stop
+receipt. Owned macOS negatives cover failed bootstrap, failed readiness, and
+an unbound owner that exited after spawning a surviving detached child. The
+owned suite passes 48 tests with one domain skip. Three new journal negatives
+pin the one-intent, previously-recovered, and timer/NATS exclusions; its
+suite passes 144 tests. Plan lint is conformant on the operator checkout.
+Automatic process compensation, a survivor census, a full-node hold driver,
+stopped-VM capture, four-history acceptance and verified service resumption
+remain open. No production VM, service or NATS history changed; step 1.2
+stays [A]/v1.2-pre.

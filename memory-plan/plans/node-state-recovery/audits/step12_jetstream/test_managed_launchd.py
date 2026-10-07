@@ -457,8 +457,57 @@ os.execv('/bin/sleep',['sleep','30'])
         child = json.loads(child_ready.read_text())['pid']
         self.assertTrue(process_exists(child))
         self.assertEqual(events, [unit])
+        state = self.service.status()
+        self.assertTrue(state['loaded'])
+        self.assertFalse(state['running'])
+        self.assertEqual(state['runs'], 1)
+        self.assertTrue(self.service.disabled())
         self.proofs.append({'test': self._testMethodName,
-                            'unbound_owner_refused': True, 'child_alive': child})
+                            'unbound_owner_refused': True, 'child_alive': child,
+                            'unloaded_override_restored': True})
+
+    def test_disabled_daemon_restore_reinstates_override_after_failed_bootstrap(self):
+        self.launch(run_at_load=False)
+        subprocess.run(['/bin/launchctl', 'bootout', self.service.target],
+                       capture_output=True, check=True, timeout=10)
+        wait_for(lambda: not self.service.status()['loaded'])
+        self.hold_override_attempted = True
+        self.service.disable_unloaded_for_hold()
+        self.plist.write_bytes(b'not a plist')
+        unit = self.name.removeprefix('ai.openclaw.')
+        events = []
+        prior = {'class': 'daemon', 'loaded': True, 'identity': {
+            'argv': [self.node, str(self.script)], 'working_directory': str(self.directory),
+            'files': {}}}
+        with self.assertRaisesRegex(Refused, 'disabled override restored; owner running=False'):
+            restore_disabled_daemon(self.service,
+                SimpleNamespace(begin_override_clear=lambda name: events.append(name)),
+                unit, prior, lambda _: False)
+        self.assertEqual(events, [unit])
+        self.assertFalse(self.service.status()['loaded'])
+        self.assertTrue(self.service.disabled())
+
+    def test_disabled_daemon_restore_reinstates_override_after_readiness_failure(self):
+        original = self.launch()
+        with StopWatch(self.service, original, [self.log, self.err], 'mesh-task-daemon',
+                       require_disabled=True) as watch:
+            self.hold_override_attempted = True
+            self.service.disable_for_hold()
+            watch.apply()
+            self.assertTrue(watch.verify(self.connection_closed, self.listener_absent)['verified'])
+        self.ready.unlink()
+        prior = {'class': 'daemon', 'loaded': True, 'identity': {
+            'argv': original['argv'], 'working_directory': original['cwd'],
+            'files': {path: item['sha256'] for path, item in original['identity']['files'].items()}}}
+        unit = self.name.removeprefix('ai.openclaw.')
+        events = []
+        with self.assertRaisesRegex(Refused, 'disabled override restored; owner running=True'):
+            restore_disabled_daemon(self.service,
+                SimpleNamespace(begin_override_clear=lambda name: events.append(name)),
+                unit, prior, lambda _: False, timeout=.5)
+        self.assertEqual(events, [unit])
+        self.assertTrue(self.service.status()['running'])
+        self.assertTrue(self.service.disabled())
 
     def test_wrong_argv_refuses_before_service_stop(self):
         self.launch()
