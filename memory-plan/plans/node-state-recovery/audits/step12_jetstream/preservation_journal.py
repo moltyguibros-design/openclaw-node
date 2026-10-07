@@ -1053,6 +1053,7 @@ class Journal:
         held = 'execution_hold' in self.prior['scheduler-heartbeat']
         require((hold is not None) == held and (not held or hold.journal is self),
                 'baselined execution hold requires its journal recovery facade')
+        binding_unavailable = False
         if self.scope == FULL_NODE_SCOPE:
             stopped = {}
             for row in self.records:
@@ -1082,11 +1083,14 @@ class Journal:
                         continue
                 return None
             def check_stopped():
+                nonlocal binding_unavailable
                 with nats_legacy_restore_guard():
                     unproven = unproven_stopped_unit()
                     require(unproven is None,
                             'stopped unit override was cleared without verified recovery: ' + str(unproven))
                     installed = capture_installed() if stopped else None
+                    if stopped and installed is None:
+                        binding_unavailable = True
                     for unit in stopped:
                         if installed is not None:
                             label = 'ai.openclaw.' + unit
@@ -1103,7 +1107,8 @@ class Journal:
                 hold.prepare(observe, final_check)
         if self.scope == FULL_NODE_SCOPE:
             check_stopped()
-        errors = []
+        errors = ([{'unit': 'entrypoints', 'reason': 'installed binding unavailable'}]
+                  if binding_unavailable else [])
         diagnostics = diagnostics or (lambda row: print(json.dumps(row), file=sys.stderr, flush=True))
         def record(event, **data):
             try:
@@ -1226,7 +1231,18 @@ class Journal:
                             'actual service state is incomplete')
                     require(actual.get('identity') == prior['identity'], 'immutable service identity changed')
                     record('recovery-observed', unit=unit, evidence=actual)
+                    if self.scope == FULL_NODE_SCOPE and unit in stopped:
+                        installed = capture_installed()
+                        if installed is None:
+                            errors.append({'unit': 'entrypoints', 'reason': 'installed binding unavailable',
+                                           'detail': unit})
+                        else:
+                            label = 'ai.openclaw.' + unit
+                            require(isinstance(installed, dict)
+                                    and installed.get(label) == self.entrypoint_inventory['installed'][label],
+                                    'stopped unit installed plist changed before verified recovery: ' + unit)
                     if self.scope == FULL_NODE_SCOPE and unit == 'mesh-deploy-listener':
+                        require(not errors, 'deploy listener cannot release without installed binding')
                         require(not (actual['loaded'] or actual['running']) or listener['loaded'] or listener['running'],
                                 'deploy listener started outside its release gate')
                         require(matches(actual, prior) or not actual['loaded'] and not actual['running'],
@@ -1266,13 +1282,6 @@ class Journal:
                             'on-demand worker is running; operator handoff required')
                     if held:
                         hold.before_restore()
-                    if self.scope == FULL_NODE_SCOPE and unit in stopped:
-                        installed = capture_installed()
-                        if installed is not None:
-                            label = 'ai.openclaw.' + unit
-                            require(isinstance(installed, dict)
-                                    and installed.get(label) == self.entrypoint_inventory['installed'][label],
-                                    'stopped unit installed plist changed before verified recovery: ' + unit)
                     record('restoration-intent', unit=unit, action='restore-prior')
                     if precommit is not None:
                         precommit()

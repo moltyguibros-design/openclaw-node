@@ -2107,3 +2107,13 @@ intact, but a sustained writer and the read-to-bootstrap interval remain
 residuals. The full-node hold, stopped-VM capture, four-history acceptance and
 verified resumption remain open. No production VM, service or NATS history
 changed; step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 17:50 EDT: Claude's D120 review found that two failed
+per-unit inventory captures could be forgotten if a later capture succeeded,
+allowing a certified restart with no installed-plist evidence at its moment.
+D121 latches both preflight and per-unit outages as recovery errors: known
+units still restore best-effort, but the deploy listener and success receipt
+stay fenced. Two owned transient-outage negatives pass, and the journal suite
+passes 149 tests. Full-node hold, stopped-VM capture, four-history acceptance
+and verified resumption remain open. No production VM, service or NATS history
+changed; step 1.2 stays [A]/v1.2-pre.

@@ -2450,3 +2450,26 @@ still exhaust both inventory attempts, and only daemon restores using this
 adapter get its physical hash precheck. The full-node hold driver and later
 capture, history acceptance and service-resumption gates remain open. No
 production VM, service or NATS history changed; step 1.2 remains [A]/v1.2-pre.
+
+## D121 — Keep certification closed after a stopped-unit inventory outage (2026-10-07 17:50 EDT)
+
+Claude's exact-head D120 review found an overclaim in D120's two-failure
+fallback: if both late inventory captures failed and a later final capture
+succeeded, the journal could restore the unit, release the deploy listener and
+certify despite having no installed-plist observation at the restart. The same
+gap existed when both attempts failed in a stopped-unit preflight but later
+captures recovered. D23 permits best-effort restoration of known units in an
+abort; it does not certify an unobserved restart.
+
+Recovery now latches a preflight outage as an entrypoint error and records a
+late outage as an entrypoint error for that unit. In both cases, known units
+may still restore, while the listener remains fenced and `restored` is false.
+The late check runs before the listener's release evidence, so its own outage
+cannot produce a listener-release receipt. Owned negatives exhaust exactly
+two captures before either gateway restoration or the first preflight, let
+later inventory reads succeed, and require the gateway's best-effort restore
+without certification. The journal suite passes 149 tests.
+
+The physical daemon adapter still checks saved plist bytes before enable;
+the read-to-bootstrap interval and complete full-node hold remain open. No
+production VM, service or NATS history changed; step 1.2 remains [A]/v1.2-pre.
