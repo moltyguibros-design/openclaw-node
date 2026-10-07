@@ -1970,3 +1970,15 @@ re-enable then bootstrap succeeded. The managed-launchd suite passes
 this yet, so a complete full-node hold and recovery adapter remain open;
 no production service, VM or NATS history changed. Step 1.2 stays
 [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 21:20 EDT: D109 makes full-node journal recovery refuse
+an `override-clear-intent` left without a later verified recovery, even if
+launchd again reports the unit unloaded and disabled. The reopened-journal
+negative refuses before hold preparation, service restoration, or state write;
+the journal suite passes 138 tests. Claude identified the underlying detached
+child false-accept in the proposed adapter: bare `bootout` plus re-disable is
+not a stop proof. An enable-capable adapter still needs a journaled pre-enable
+intent, new process-tree watch, verified compensation, and an answer for
+children detached before binding. Full-node hold, stopped-VM capture, all
+four real-history restores, acceptance and verified resumption remain open;
+no production service, VM or NATS history changed. Step 1.2 stays [A]/v1.2-pre.

@@ -1308,6 +1308,46 @@ class JournalTests(unittest.TestCase):
                         deploy_fence=lambda: self.fail('deploy fence ran'))
                 self.assertEqual(len(journal.records), before)
 
+    def test_full_scope_refuses_re_fenced_restart_without_process_proof(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None)
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True),
+                    listener_stop_evidence, hold=hold)
+                journal.mutate('gateway', 'disable-and-unload',
+                    lambda: current['gateway'].update(loaded=False, running=False, disabled=True),
+                    listener_stop_evidence, hold=hold)
+                journal.append('override-clear-intent', unit='gateway')
+                journal.append('restoration-failed', unit='gateway', reason='readiness')
+            with Journal(self.root, node_lock=self.node_lock) as reopened:
+                hold = SimpleNamespace(journal=reopened,
+                    prepare=lambda *_: self.fail('hold prepared'))
+                before = len(reopened.records)
+                before_state = copy.deepcopy(reopened.active)
+                with self.assertRaisesRegex(Refused,
+                                            'stopped unit override was cleared without verified recovery: gateway'):
+                    reopened.recover(lambda *_: self.fail('restore ran'),
+                        lambda unit, _: ({**current[unit], 'verified': True}
+                                         if unit != 'gateway' else self.fail('gateway observation ran')),
+                        lambda: self.fail('final check ran'), hold=hold,
+                        deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertEqual(len(reopened.records), before)
+                self.assertEqual(reopened.active, before_state)
+
     def test_full_scope_refuses_gateway_restart_during_recovery_loop(self):
         prior = full_node_inventory()
         current = copy.deepcopy(prior)

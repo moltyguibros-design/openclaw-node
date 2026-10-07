@@ -2171,3 +2171,24 @@ callback invokes it, and a crash between enable and re-fencing still needs
 a boot-time controller. The current full-node non-listener production stop
 refusal remains. No production service, VM or NATS history changed; step 1.2
 stays [A]/v1.2-pre.
+
+## D109 — Refuse recovery after an unproven override clear (2026-10-06 21:20 EDT)
+
+Claude's adversarial review of the next recovery adapter exposed a false
+acceptance: bare `bootout` followed by a disabled override can make launchd
+report an unloaded, stopped job while a detached child keeps writing. The
+original stop proof does not cover a process tree started after that stop.
+Full-node recovery now treats an `override-clear-intent` after a stop as
+unproven until a later `recovery-verified` receipt. It refuses before hold
+preparation or any state write, even when launchd again reports unloaded and
+disabled, and rechecks the journal before each unit. An owned reopen test
+records the interrupted restoration and confirms this refusal. The focused
+journal suite passes 138 tests.
+
+This does not enable restoration or certify a compensating stop. A future
+adapter must journal the intent before enabling, bind the new process tree,
+stop and verify it with the persistent watch on failure, and account for
+children detached before binding. Bare `bootout` is not an admissible
+compensation. The full-node hold, production stop/capture, four real-history
+restores, acceptance and verified resumption remain open. No production VM,
+service or NATS history changed; step 1.2 remains [A]/v1.2-pre.
