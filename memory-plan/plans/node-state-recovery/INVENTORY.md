@@ -2127,3 +2127,13 @@ the entrypoint outage and listener refusal. The journal suite passes 150
 tests. Complete full-node hold, stopped-VM capture, four-history acceptance
 and verified resumption remain open; production VM, services and NATS stores
 remain untouched.
+
+Checkpoint 2026-10-07 19:36 EDT: D122 reorients the next implementation to
+the missing 23-unit baseline producer and an owned composition of the first
+hold intents and same-boot abort. Further refinements to the existing daemon
+restore adapter do not supply that missing entry point. The full-node stop
+guard stays closed, and no production listener window is authorized by the
+owned fixture. The disposable four-history JetStream suite passed at
+d816897e, including its corruption and omission negatives; all owned servers
+stopped. The production hold, capture, four-history acceptance and verified
+resumption remain open; no live VM, service or NATS store was touched.

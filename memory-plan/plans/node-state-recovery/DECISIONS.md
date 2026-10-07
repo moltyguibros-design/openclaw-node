@@ -2473,3 +2473,35 @@ without certification. The journal suite passes 149 tests.
 The physical daemon adapter still checks saved plist bytes before enable;
 the read-to-bootstrap interval and complete full-node hold remain open. No
 production VM, service or NATS history changed; step 1.2 remains [A]/v1.2-pre.
+
+## D122 — Reorient step 1.2 to the full-node hold entry point (2026-10-07 19:36 EDT)
+
+The current full-node journal has no production producer for its 23-unit
+`prior` inventory and no caller that composes the execution hold with even
+the first persistent stop. The timer controller builds a five-unit prior;
+the 23-job recapture files use a different identity schema. `StopWatch.mutate`
+still refuses persistent full-node stops outside the deploy listener, and
+the timer's complete spawn-evidence callback exists only in owned fixtures.
+These are earlier prerequisites than further hardening of the same-boot
+daemon restoration adapter. Claude independently reviewed this dependency
+order at d816897e; the code and plan were rechecked here.
+
+The next bounded implementation is a read-only producer of the full-node
+baseline from installed launchd state and pinned static identities, followed
+by an owned macOS composition of journal open, execution-hold close,
+persistent deploy-listener stop, same-boot abort, verified listener-last
+restoration and resolution. Its negative must keep the listener fenced when
+deploy release is unsafe. This fixture is an integration prerequisite, not a
+full-node hold certificate: it must not certify the other jobs or authorize
+stopping any production service. Only after that composition works should
+class-specific persistent stops, the timer spawn witness, continuous and
+detached-process coverage, the boot-hold decision and the disposable UTM
+rehearsal be integrated into one complete shutdown gate. The live VM and
+production services remain untouched until that gate is proven.
+
+The owned four-history JetStream fixture was rerun at this head with
+`test_recovery.mjs`: it passed, including omitted R1, swapped-master,
+removed-block and flipped-payload negatives, and stopped every server it
+started. This is disposable mechanism evidence, not production acceptance.
+Step 1.2 remains [A]/v1.2-pre; stopped-VM capture, isolated restores of the
+actual histories, acceptance and verified service resumption remain open.
