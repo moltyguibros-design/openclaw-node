@@ -1268,6 +1268,7 @@ class Journal:
                     record('recovery-verified', unit=unit, evidence=evidence)
             except Exception as error:
                 errors.append({'unit': unit, 'reason': type(error).__name__,
+                               'detail': str(error),
                                **({'after_commit': committed} if committed else {})})
                 if self.scope == FULL_NODE_SCOPE:
                     unsafe_restart = unsafe_restart or unproven_stopped_unit() is not None

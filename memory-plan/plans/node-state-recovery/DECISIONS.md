@@ -2322,3 +2322,23 @@ checkout.
 No automatic process compensation or survivor census exists. The full-node
 non-listener stop guard remains closed, and no production VM, service or NATS
 history changed. Step 1.2 remains [A]/v1.2-pre.
+
+## D115 — Retain failed daemon restore diagnostics (2026-10-07 07:40 EDT)
+
+Claude's read-only review of D114 confirmed the disabled-override correction
+does not create an acceptance path, but found that recovery stored only the
+exception type. The physical outcome reported by the adapter was lost from
+`recovery-finished`. Recovery now records the exception detail for a failed
+unit, as it already does for entrypoint and listener-release failures. A
+full-node facade negative requires both the original enable failure and the
+unverified override to survive in the returned and durable error records.
+
+The review also confirmed a remaining operational gap: a readiness failure
+can leave a running owner with the override disabled. The current journal
+refuses another restore, while the normal persistent-stop path refuses an
+already-disabled label and the journal refuses a new mutation after recovery
+starts. An operator has no journaled, process-proven reconciliation path for
+that state. No production adapter may use this restart path until that path,
+its survivor proof, and measured per-unit readiness budgets are in place.
+The full-node non-listener stop guard remains closed; no production VM,
+service, or NATS history changed. Step 1.2 remains [A]/v1.2-pre.

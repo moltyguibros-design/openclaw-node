@@ -1388,6 +1388,12 @@ class JournalTests(unittest.TestCase):
                     lambda: {'verified': True}, hold=hold,
                     deploy_fence=lambda: {'verified': True})
                 self.assertFalse(result['restored'])
+                gateway_error = next(error for error in result['errors']
+                                     if error['unit'] == 'gateway')
+                self.assertIn('owned enable failure', gateway_error['detail'])
+                self.assertIn('disabled override unverified', gateway_error['detail'])
+                self.assertEqual(journal.records[-1]['event'], 'recovery-finished')
+                self.assertIn(gateway_error, journal.records[-1]['errors'])
                 self.assertEqual(restored, ['gateway'])
                 clear = next(row for row in journal.records
                              if row['event'] == 'override-clear-intent')
@@ -2718,7 +2724,10 @@ with legacy_journal(root,prior,boot='boot-a',node_lock=node_lock) as journal:
                 lambda: {'verified': True})
             self.assertFalse(result['restored'])
             self.assertEqual(restored, [])
-            self.assertIn({'unit': 'mesh-agent', 'reason': 'Refused'}, result['errors'])
+            self.assertTrue(any(error['unit'] == 'mesh-agent'
+                                and error['reason'] == 'Refused'
+                                and 'on-demand worker is running' in error['detail']
+                                for error in result['errors']))
             self.assertFalse(any(row['event'] == 'restoration-intent' and row.get('unit') == 'mesh-agent'
                                  for row in journal.records))
 
