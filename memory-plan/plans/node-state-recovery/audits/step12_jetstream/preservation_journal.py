@@ -1040,6 +1040,8 @@ class Journal:
                                if row.get('unit') == unit
                                and row['event'] in ('override-clear-intent', 'recovery-verified')), None)
                 return latest is not None and latest['event'] == 'override-clear-intent'
+            def unproven_stopped_unit():
+                return next((unit for unit in stopped if override_clear_unproven(unit)), None)
             def stopped_state_ok(unit, actual):
                 return (isinstance(actual, dict)
                         and all(isinstance(actual.get(key), bool)
@@ -1049,9 +1051,10 @@ class Journal:
                         and (stopped[unit] != 'disable-and-unload' or actual['disabled']))
             def check_stopped():
                 with nats_legacy_restore_guard():
+                    unproven = unproven_stopped_unit()
+                    require(unproven is None,
+                            'stopped unit override was cleared without verified recovery: ' + str(unproven))
                     for unit in stopped:
-                        require(not override_clear_unproven(unit),
-                                'stopped unit override was cleared without verified recovery: ' + unit)
                         actual = observe(unit, self.prior[unit])
                         require(stopped_state_ok(unit, actual),
                                 'stopped unit state changed before verified recovery: ' + unit)
@@ -1167,10 +1170,11 @@ class Journal:
                               self.scope == FULL_NODE_SCOPE and unit == 'mesh-deploy-listener')
                          else contextlib.nullcontext())
                 with guard as precommit:
-                    if self.scope == FULL_NODE_SCOPE and unit in stopped:
-                        unsafe_restart = override_clear_unproven(unit)
+                    if self.scope == FULL_NODE_SCOPE:
+                        unproven = unproven_stopped_unit()
+                        unsafe_restart = unproven is not None
                         require(not unsafe_restart,
-                                'stopped unit override was cleared without verified recovery: ' + unit)
+                                'stopped unit override was cleared without verified recovery: ' + str(unproven))
                     try:
                         actual = observe(unit, prior)
                     except Exception:
@@ -1236,6 +1240,8 @@ class Journal:
             except Exception as error:
                 errors.append({'unit': unit, 'reason': type(error).__name__,
                                **({'after_commit': committed} if committed else {})})
+                if self.scope == FULL_NODE_SCOPE:
+                    unsafe_restart = unsafe_restart or unproven_stopped_unit() is not None
                 if unsafe_restart:
                     break
                 if held and self.write_failed:

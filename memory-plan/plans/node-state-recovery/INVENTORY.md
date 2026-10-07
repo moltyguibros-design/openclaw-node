@@ -1982,3 +1982,16 @@ intent, new process-tree watch, verified compensation, and an answer for
 children detached before binding. Full-node hold, stopped-VM capture, all
 four real-history restores, acceptance and verified resumption remain open;
 no production service, VM or NATS history changed. Step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 22:25 EDT: D110 closes a same-run gap in D109. An owned
+restore callback recorded an `override-clear-intent` for the stopped gateway
+and failed; recovery then restored the stopped workplan viewer before the next
+run's preflight could refuse. The exception path now stops the loop when any
+stopped unit has an unresolved override-clear intent. A second negative
+records an intent for another stopped unit during a successful callback and
+refuses the next restore. Both fail on D109 and pass with the fix; 140 focused
+journal tests pass. Claude's
+exact-head D109 adversarial review is pending. This does not supply the
+enable-capable adapter or a detached-process census; full-node hold, capture,
+four-history acceptance and verified resumption remain open. No production
+VM, service or NATS store changed; step 1.2 stays [A]/v1.2-pre.

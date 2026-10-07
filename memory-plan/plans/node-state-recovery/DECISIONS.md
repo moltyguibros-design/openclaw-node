@@ -2192,3 +2192,21 @@ children detached before binding. Bare `bootout` is not an admissible
 compensation. The full-node hold, production stop/capture, four real-history
 restores, acceptance and verified resumption remain open. No production VM,
 service or NATS history changed; step 1.2 remains [A]/v1.2-pre.
+
+## D110 — Stop the same recovery run after an override-clear failure (2026-10-06 22:25 EDT)
+
+D109 refused a later reopened recovery, but its per-unit check ran before the
+restore callback. An owned negative made the callback journal an
+`override-clear-intent` for the stopped gateway and then fail. Recovery still
+restored the stopped workplan viewer in that same run. The exception path now
+checks all stopped units for an unresolved override-clear intent and stops the
+restore loop immediately. A separate owned case makes one callback clear a
+different stopped unit's override, then return successfully; the next unit
+must refuse before another restore. Both negatives fail on D109 and pass here;
+the focused journal suite passes 140 tests.
+
+The journal rule is a fail-closed safeguard for an adapter that does not yet
+exist. It does not establish a new process-tree stop proof or authorize
+production restoration. The full-node hold, stopped-VM capture, isolated
+four-history acceptance and verified resumption remain open. No production
+VM, service or NATS history changed; step 1.2 remains [A]/v1.2-pre.
