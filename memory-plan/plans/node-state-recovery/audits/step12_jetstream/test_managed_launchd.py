@@ -15,7 +15,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from managed_launchd import Launchd, StopWatch, process_exists, process_tree, unload_idle_timer
+from managed_launchd import (Launchd, StopWatch, process_exists, process_tree,
+                             restore_disabled_daemon, unload_idle_timer)
 from legacy_fixture import legacy_journal
 from preservation_checks import Refused, http_json
 from preservation_journal import Journal
@@ -212,11 +213,11 @@ process.umask(0o077);
  const nc=await connect({servers:process.env.OWNED_NATS_URL,token:process.env.OWNED_TOKEN,name:process.env.OWNED_NAME,maxReconnectAttempts:0});
  const listener=net.createServer();await new Promise(r=>listener.listen(0,'127.0.0.1',r));
  let child;
- if(['survivor','child','orphan','exec-child','daemonize'].includes(process.env.OWNED_MODE)){
+ if(['survivor','child','orphan','exec-child','daemonize','daemonize-exit'].includes(process.env.OWNED_MODE)){
   if(process.env.OWNED_MODE==='orphan') {
    const launcher=cp.spawn(process.execPath,['-e',"require('node:child_process').spawn(process.execPath,[process.env.OWNED_CHILD],{stdio:'ignore',env:process.env}).unref()"],{stdio:'ignore',env:process.env});
    await new Promise(r=>launcher.on('exit',r));
-  } else if(process.env.OWNED_MODE==='daemonize') {
+  } else if(['daemonize','daemonize-exit'].includes(process.env.OWNED_MODE)) {
    const launcher=cp.spawn(process.execPath,['-e',"require('node:child_process').spawn(process.execPath,[process.env.OWNED_CHILD],{detached:true,stdio:'ignore',env:process.env}).unref()"],{detached:true,stdio:'ignore',env:process.env});
    await new Promise(r=>launcher.on('exit',r));
   } else if(process.env.OWNED_MODE==='exec-child') {
@@ -226,6 +227,7 @@ process.umask(0o077);
   }
   while(!fs.existsSync(process.env.OWNED_CHILD_READY))await new Promise(r=>setTimeout(r,10));
   if(!child)child={pid:JSON.parse(fs.readFileSync(process.env.OWNED_CHILD_READY)).pid};
+  if(process.env.OWNED_MODE==='daemonize-exit')process.exit(0);
  }
  fs.writeFileSync(process.env.OWNED_READY+'.pending',JSON.stringify({pid:process.pid,cid:nc.info.client_id,serverId:nc.info.server_id,port:listener.address().port,child:child?.pid}));fs.renameSync(process.env.OWNED_READY+'.pending',process.env.OWNED_READY);
  console.log('owned fixture ready');
@@ -372,7 +374,7 @@ os.execv('/bin/sleep',['sleep','30'])
         self.assertNotIn(child, binding['tree'])
         subprocess.run(['/bin/launchctl', 'bootout', self.service.target],
                        capture_output=True, check=True, timeout=10)
-        self.assertFalse(self.service.status()['loaded'])
+        wait_for(lambda: not self.service.status()['loaded'])
         self.assertTrue(process_exists(child))
         self.hold_override_attempted = True
         self.service.disable_unloaded_for_hold()
@@ -386,6 +388,77 @@ os.execv('/bin/sleep',['sleep','30'])
         self.proofs.append({'test': self._testMethodName, 'child': child,
                             'prebind_tree_excluded_child': True,
                             'disabled_unloaded_with_surviving_child': True})
+
+    def test_disabled_daemon_restore_journals_before_enable_and_binds_new_owner(self):
+        original = self.launch()
+        with StopWatch(self.service, original, [self.log, self.err], 'mesh-task-daemon',
+                       require_disabled=True) as watch:
+            self.hold_override_attempted = True
+            self.service.disable_for_hold()
+            watch.apply()
+            self.assertTrue(watch.verify(self.connection_closed, self.listener_absent)['verified'])
+        self.ready.unlink()
+        prior = {'class': 'daemon', 'loaded': True, 'identity': {
+            'argv': original['argv'], 'working_directory': original['cwd'],
+            'files': {path: item['sha256'] for path, item in original['identity']['files'].items()}}}
+        calls = []
+        unit = self.name.removeprefix('ai.openclaw.')
+        def begin_override_clear(name):
+            self.assertEqual(name, unit)
+            self.assertTrue(self.service.disabled())
+            self.assertFalse(self.service.status()['loaded'])
+            calls.append(name)
+        def ready(binding):
+            return (self.ready.exists()
+                    and json.loads(self.ready.read_text())['pid'] == binding['status']['pid'])
+        journal = SimpleNamespace(begin_override_clear=begin_override_clear)
+        restored = restore_disabled_daemon(self.service, journal, unit, prior, ready)
+        self.assertEqual(calls, [unit])
+        self.assertNotEqual(restored['status']['pid'], original['status']['pid'])
+        self.assertTrue(self.service.status()['running'])
+        self.assertFalse(self.service.disabled())
+        self.proofs.append({'test': self._testMethodName, 'intent_before_enable': True,
+                            'new_owner_bound': True})
+
+    def test_disabled_daemon_restore_keeps_unbound_exit_terminal(self):
+        self.launch('daemonize-exit', run_at_load=False)
+        subprocess.run(['/bin/launchctl', 'bootout', self.service.target],
+                       capture_output=True, check=True, timeout=10)
+        wait_for(lambda: not self.service.status()['loaded'])
+        plist = plistlib.loads(self.plist.read_bytes())
+        plist['RunAtLoad'] = True
+        self.plist.write_bytes(plistlib.dumps(plist))
+        self.hold_override_attempted = True
+        self.service.disable_unloaded_for_hold()
+        unit = self.name.removeprefix('ai.openclaw.')
+        events = []
+        journal = SimpleNamespace(begin_override_clear=lambda name: events.append(name))
+        prior = {'class': 'daemon', 'loaded': True, 'identity': {
+            'argv': [self.node, str(self.script)], 'working_directory': str(self.directory),
+            'files': {}}}
+        child_ready = self.directory / 'child-ready.json'
+        original_bootstrap = self.service.bootstrap
+        original_status = self.service.status
+        def bootstrap():
+            original_bootstrap()
+            def after_spawn(domain='gui'):
+                if domain == 'gui':
+                    wait_for(lambda: child_ready.exists() and not original_status()['running'])
+                return original_status(domain)
+            self.service.status = after_spawn
+        self.service.bootstrap = bootstrap
+        try:
+            with self.assertRaisesRegex(Refused, 'restored daemon owner was not bound'):
+                restore_disabled_daemon(self.service, journal, unit, prior,
+                                        lambda _: False, timeout=.5)
+        finally:
+            self.service.bootstrap = original_bootstrap
+            self.service.status = original_status
+        child = json.loads(child_ready.read_text())['pid']
+        self.assertTrue(process_exists(child))
+        self.assertEqual(events, [unit])
+        self.proofs.append({'test': self._testMethodName,
+                            'unbound_owner_refused': True, 'child_alive': child})
 
     def test_wrong_argv_refuses_before_service_stop(self):
         self.launch()

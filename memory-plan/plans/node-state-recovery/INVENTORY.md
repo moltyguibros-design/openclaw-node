@@ -2023,3 +2023,12 @@ as well as GUI while the detached child remains alive; the focused test passes.
 The enable-capable adapter and complete hold, capture, four-history acceptance
 and verified resumption are still open. No production VM, service or NATS
 history changed; step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 05:29 EDT: D113 adds an intent-first, bound-owner restore
+primitive for a stopped daemon and validates the full-node journal transition.
+An owned macOS stop/restore, the 46-test managed-launchd suite (one skip), and
+141 journal tests pass. Any failed enable/start/bind/readiness remains terminal
+under D109/D110; no automatic re-fence receipt exists. The non-listener
+production stop guard remains closed. Full-node hold, stopped-VM capture, four
+real-history acceptance, and verified service resumption remain open; no
+production VM, service or NATS history changed. Step 1.2 stays [A]/v1.2-pre.

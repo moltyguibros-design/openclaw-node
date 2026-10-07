@@ -398,6 +398,7 @@ class Journal:
         self.write_failed = False
         self.receipt_writable = True
         self.sealed = False
+        self.restoring_unit = None
         created = not self.root.exists()
         self.reopened = not created
         node_lock = pathlib.Path(node_lock) if node_lock is not None else pathlib.Path.home() / '.openclaw/preservation/node.lock'
@@ -914,6 +915,30 @@ class Journal:
                 or (kind in ('timer', 'on-demand', 'known-broken')
                     and self.idle_stop_proven(unit, evidence)))
 
+    def begin_override_clear(self, unit):
+        require(self.scope == FULL_NODE_SCOPE and unit in self.prior
+                and self.restoring_unit == unit
+                and self.prior[unit]['class'] == 'daemon' and self.prior[unit]['loaded']
+                and unit not in NATS_TRANSFER_UNITS,
+                'override clear is outside the current daemon restoration')
+        restore = self.records[-1]
+        require(restore['event'] == 'restoration-intent' and restore['unit'] == unit,
+                'override clear must immediately follow its restoration intent')
+        stop = next((row for row in reversed(self.records)
+                     if row['event'] == 'intent' and row.get('unit') == unit
+                     and row.get('action') == 'disable-and-unload'), None)
+        require(stop is not None and stop['sequence'] < restore['sequence']
+                and not any(row['event'] == 'recovery-verified' and row.get('unit') == unit
+                            for row in self.records[stop['sequence'] + 1:])
+                and any(row['event'] == 'verified'
+                and row.get('intent') == stop['sequence']
+                and row.get('unit') == unit
+                and self.full_node_stop_proven(unit, row.get('evidence'))
+                for row in self.records[stop['sequence'] + 1:]),
+                'override clear lacks a verified persistent stop')
+        return self.append('override-clear-intent', unit=unit,
+                           restoration_intent=restore['sequence'], stop_intent=stop['sequence'])
+
     def mutate(self, unit, action, apply, verify, failure_evidence=None, intent_fields=None, hold=None):
         require(self.scope != TIMER_SCOPE or unit == 'scheduler-heartbeat'
                 and action == 'close-execution-hold' and not any(r['event'] == 'intent' for r in self.records)
@@ -1232,7 +1257,11 @@ class Journal:
                     if precommit is not None:
                         precommit()
                         committed = 'restore'
-                    restore(unit, prior)
+                    self.restoring_unit = unit
+                    try:
+                        restore(unit, prior)
+                    finally:
+                        self.restoring_unit = None
                     if held:
                         hold.check_closed()
                     evidence = verify()

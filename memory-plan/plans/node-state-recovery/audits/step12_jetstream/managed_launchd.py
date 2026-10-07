@@ -273,6 +273,35 @@ class Launchd:
         require(not self.disabled(), 'managed unit remains disabled')
 
 
+def restore_disabled_daemon(service, journal, unit, prior, ready, timeout=5):
+    require(prior['class'] == 'daemon' and prior['loaded']
+            and service.label == 'ai.openclaw.' + unit and callable(ready),
+            'disabled daemon restoration is not bound to its saved owner')
+    journal.begin_override_clear(unit)
+    service.enable_after_hold()
+    service.bootstrap()
+    end = time.monotonic() + timeout
+    binding = None
+    while time.monotonic() < end:
+        require(not service.status('user')['loaded'], 'restored owner appeared in another domain')
+        if service.status()['running']:
+            identity = prior['identity']
+            binding = service.bind(identity['argv'], identity['argv'][0],
+                                   identity['working_directory'], identity['files'])
+            break
+        time.sleep(.05)
+    require(binding is not None, 'restored daemon owner was not bound')
+    while time.monotonic() < end:
+        require(service.status() == binding['status'],
+                'restored daemon owner changed before readiness')
+        if ready(binding):
+            require(service.status() == binding['status'],
+                    'restored daemon owner changed during readiness')
+            return binding
+        time.sleep(.05)
+    raise Refused('restored daemon did not reach readiness: ' + unit)
+
+
 class StopWatch:
     def __init__(self, service, binding, paths, completion_service, allowed_signals=(),
                  startup_segment=None, bus_client_names=None, process_contracts=None,

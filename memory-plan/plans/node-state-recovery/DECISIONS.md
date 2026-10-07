@@ -2259,3 +2259,32 @@ restoration. A bound owner and a verified persistent stop still need a survivor
 and connection proof before a re-fence receipt can be admitted. The existing
 production refusal for full-node non-listener stops remains in place. No
 production service, VM or NATS history changed; step 1.2 remains [A]/v1.2-pre.
+
+## D113 — Journal the daemon override clear before enabling (2026-10-07 05:29 EDT)
+
+A daemon-class restore can now begin through `restore_disabled_daemon()`. Its
+full-node journal method requires the current recovery callback, the current
+unit's latest restoration intent, and a verified persistent stop before it
+durably records `override-clear-intent`. Only then does the adapter enable and
+bootstrap that owned label. It binds the new owner to the saved executable,
+argv, working directory, environment and file identity, and requires the same
+process generation before and after readiness. The recovery loop alone records
+`recovery-verified` after its independent observation.
+
+There is deliberately no automatic re-fence receipt: an enable, bootstrap,
+bind or readiness failure leaves the override-clear intent unproven. D109/D110
+then stop this run and refuse a later recovery, even if launchd looks unloaded
+and disabled. An owned macOS stop/restore proves intent-before-enable and a new
+bound owner; full-node journal facade controls prove the successful receipt
+order and the terminal failed-enable path. The managed-launchd suite passes 46
+tests with one cross-domain skip; the journal suite passes 141 tests. An added
+owned negative forces observation after a daemon has forked a detached child
+and exited before binding; the adapter refuses with no success receipt.
+
+This is a success-path primitive, not an all-job recovery driver or a safe
+automatic compensation after failure. `StopWatch.mutate()` still refuses
+production full-node non-listener persistent stops. A failed restore can leave
+a started process requiring operator reconciliation; detached and transient
+writers, timer/on-demand restores, reboot hold, and deploy listener release
+remain gates. The production VM, services and four NATS histories were not
+changed; step 1.2 remains [A]/v1.2-pre.

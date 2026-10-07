@@ -16,7 +16,7 @@ from unittest.mock import patch
 from preservation_journal import CommittedRefusal, FULL_NODE_SCOPE, Journal, NATS_TRANSFER_UNITS, Refused, TIMER_SCOPE, TIMER_UNITS, UNITS, encoded, matches, valid_record
 import preservation_journal
 from preservation_checks import TAILSCALE_BINARY, TAILSCALE_LABEL, TAILSCALE_PLIST, TAILSCALE_WRAPPER
-from managed_launchd import StopWatch
+from managed_launchd import StopWatch, restore_disabled_daemon
 from legacy_fixture import legacy_journal
 
 
@@ -1375,8 +1375,13 @@ class JournalTests(unittest.TestCase):
                 def restore(unit, wanted):
                     restored.append(unit)
                     if unit == 'gateway':
-                        journal.append('override-clear-intent', unit=unit)
-                        raise Refused('owned readiness failure')
+                        with self.assertRaisesRegex(Refused, 'outside the current daemon restoration'):
+                            journal.begin_override_clear('workplan-viewer')
+                        def enable_after_hold():
+                            raise Refused('owned enable failure')
+                        service = SimpleNamespace(label='ai.openclaw.gateway',
+                                                  enable_after_hold=enable_after_hold)
+                        restore_disabled_daemon(service, journal, unit, wanted, lambda _: True)
                     current[unit] = copy.deepcopy(wanted)
                 result = journal.recover(restore,
                     lambda unit, _: {**current[unit], 'verified': True},
@@ -1384,10 +1389,62 @@ class JournalTests(unittest.TestCase):
                     deploy_fence=lambda: {'verified': True})
                 self.assertFalse(result['restored'])
                 self.assertEqual(restored, ['gateway'])
+                clear = next(row for row in journal.records
+                             if row['event'] == 'override-clear-intent')
+                self.assertEqual(clear['unit'], 'gateway')
+                self.assertEqual(journal.records[clear['restoration_intent']]['event'],
+                                 'restoration-intent')
+                self.assertEqual(journal.records[clear['stop_intent']]['action'],
+                                 'disable-and-unload')
                 self.assertFalse(any(error['unit'] == 'workplan-viewer'
                                      for error in result['errors']))
                 self.assertFalse(any(row['event'] == 'restoration-intent'
                                      and row.get('unit') == 'workplan-viewer' for row in journal.records))
+
+    def test_full_scope_disabled_daemon_restore_verifies_after_journaled_enable(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None, complete=lambda *_: {'verified': True})
+                anchor_hold(journal, hold)
+                for unit in ('mesh-deploy-listener', 'gateway'):
+                    journal.mutate(unit, 'disable-and-unload',
+                        lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
+                        listener_stop_evidence, hold=hold)
+                def restore(unit, wanted):
+                    if unit != 'gateway':
+                        current[unit] = copy.deepcopy(wanted)
+                        return
+                    state = current[unit]
+                    def status(domain='gui'):
+                        return ({'loaded': False} if domain == 'user' else
+                                {'loaded': state['loaded'], 'running': state['running'], 'pid': 410})
+                    service = SimpleNamespace(label='ai.openclaw.gateway', status=status,
+                        enable_after_hold=lambda: state.update(disabled=False),
+                        bootstrap=lambda: state.update(loaded=True, running=True),
+                        bind=lambda *_: {'status': status()})
+                    restore_disabled_daemon(service, journal, unit, wanted, lambda _: True)
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: {'verified': True})
+                self.assertTrue(result['restored'])
+                events = [row['event'] for row in journal.records if row.get('unit') == 'gateway']
+                self.assertLess(events.index('restoration-intent'), events.index('override-clear-intent'))
+                self.assertLess(events.index('override-clear-intent'), events.index('recovery-verified'))
 
     def test_full_scope_stops_when_another_unit_loses_its_stop_proof(self):
         prior = full_node_inventory()
