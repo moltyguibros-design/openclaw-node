@@ -2422,3 +2422,31 @@ stays fenced, and recovery remains uncertified. The preservation journal suite
 passes 146 tests. This narrows a preflight race; a plist change after the
 second preflight still needs a per-unit restore-time binding. No production
 VM, service or NATS history changed; step 1.2 remains [A]/v1.2-pre.
+
+## D120 — Bind each stopped-unit restart to its saved installed plist (2026-10-07 17:29 EDT)
+
+The two full-node recovery preflights precede the per-unit restore loop. A
+stopped unit's installed plist could change while an earlier service was being
+restored; an observe adapter that returned the saved identity would then let
+the journal record a restoration intent and call its restore callback. Before
+that intent, recovery now recaptures the installed entry for the stopped unit,
+retrying once after a capture exception as in D119. A verified path or hash
+mismatch refuses that unit before its intent or callback and keeps the deploy
+listener fenced. Two failed captures retain D23's best-effort recovery of
+known units without certification.
+
+The enable-capable `restore_disabled_daemon` adapter separately reads the
+installed plist as a bounded regular file and requires its hash to match the
+saved identity before recording `override-clear-intent` or clearing the
+launchd override. An owned test changes the file and proves neither action is
+reached. Another changes the gateway's captured hash while memory-daemon is
+restored, makes the first late capture fail, and proves the retry refuses the
+gateway before its restoration intent. The journal suite passes 147 tests and
+the managed-launchd suite passes 51, with one explicit domain skip.
+
+This narrows the restart window; it does not make the plist immutable between
+the adapter's read and launchctl bootstrap. A sustained concurrent writer can
+still exhaust both inventory attempts, and only daemon restores using this
+adapter get its physical hash precheck. The full-node hold driver and later
+capture, history acceptance and service-resumption gates remain open. No
+production VM, service or NATS history changed; step 1.2 remains [A]/v1.2-pre.

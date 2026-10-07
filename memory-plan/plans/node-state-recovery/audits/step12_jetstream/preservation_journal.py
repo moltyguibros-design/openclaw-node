@@ -1074,19 +1074,19 @@ class Journal:
                         and actual.get('identity') == self.prior[unit]['identity']
                         and not actual['loaded'] and not actual['running']
                         and (stopped[unit] != 'disable-and-unload' or actual['disabled']))
+            def capture_installed():
+                for _ in range(2):
+                    try:
+                        return capture_entrypoint_inventory(UNITS)['installed']
+                    except Exception:
+                        continue
+                return None
             def check_stopped():
                 with nats_legacy_restore_guard():
                     unproven = unproven_stopped_unit()
                     require(unproven is None,
                             'stopped unit override was cleared without verified recovery: ' + str(unproven))
-                    installed = None
-                    if stopped:
-                        for _ in range(2):
-                            try:
-                                installed = capture_entrypoint_inventory(UNITS)['installed']
-                                break
-                            except Exception:
-                                continue
+                    installed = capture_installed() if stopped else None
                     for unit in stopped:
                         if installed is not None:
                             label = 'ai.openclaw.' + unit
@@ -1266,6 +1266,13 @@ class Journal:
                             'on-demand worker is running; operator handoff required')
                     if held:
                         hold.before_restore()
+                    if self.scope == FULL_NODE_SCOPE and unit in stopped:
+                        installed = capture_installed()
+                        if installed is not None:
+                            label = 'ai.openclaw.' + unit
+                            require(isinstance(installed, dict)
+                                    and installed.get(label) == self.entrypoint_inventory['installed'][label],
+                                    'stopped unit installed plist changed before verified recovery: ' + unit)
                     record('restoration-intent', unit=unit, action='restore-prior')
                     if precommit is not None:
                         precommit()

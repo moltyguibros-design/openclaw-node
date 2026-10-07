@@ -52,22 +52,38 @@ class StopWatchPreflight(unittest.TestCase):
                                         lambda _: True, timeout=timeout)
 
     def test_interrupted_restore_reinstates_override_and_propagates_interrupt(self):
+        plist = pathlib.Path(tempfile.mkdtemp(prefix='openclaw-owned-restore-')) / 'gateway.plist'
+        self.addCleanup(shutil.rmtree, plist.parent)
+        plist.write_bytes(b'owned plist')
         state = {'disabled': True}
         events = []
         def enable():
             state['disabled'] = False
             raise KeyboardInterrupt()
-        service = SimpleNamespace(label='ai.openclaw.gateway',
+        service = SimpleNamespace(label='ai.openclaw.gateway', plist=plist,
             enable_after_hold=enable, status=lambda domain='gui': {'loaded': False, 'running': False},
             disabled=lambda: state['disabled'],
             disable_unloaded_for_hold=lambda: state.update(disabled=True),
             bootstrap=lambda: self.fail('bootstrap reached'))
-        prior = {'class': 'daemon', 'loaded': True}
+        prior = {'class': 'daemon', 'loaded': True,
+                 'identity': {'plist_sha256': hashlib.sha256(plist.read_bytes()).hexdigest()}}
         journal = SimpleNamespace(begin_override_clear=lambda unit: events.append(unit))
         with self.assertRaises(KeyboardInterrupt):
             restore_disabled_daemon(service, journal, 'gateway', prior, lambda _: False, timeout=5)
         self.assertEqual(events, ['gateway'])
         self.assertTrue(state['disabled'])
+
+    def test_disabled_daemon_restore_refuses_changed_plist_before_intent(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-owned-restore-') as directory:
+            plist = pathlib.Path(directory) / 'gateway.plist'
+            plist.write_bytes(b'changed plist')
+            service = SimpleNamespace(label='ai.openclaw.gateway', plist=plist)
+            prior = {'class': 'daemon', 'loaded': True,
+                     'identity': {'plist_sha256': hashlib.sha256(b'original plist').hexdigest()}}
+            journal = SimpleNamespace(begin_override_clear=lambda _: self.fail('intent reached'))
+            with self.assertRaisesRegex(Refused, 'disabled daemon plist changed before restoration'):
+                restore_disabled_daemon(service, journal, 'gateway', prior,
+                                        lambda _: True, timeout=5)
 
     def test_persistent_idle_timer_refuses_a_start_during_disable(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-owned-idle-race-') as directory:
@@ -428,6 +444,7 @@ os.execv('/bin/sleep',['sleep','30'])
             self.assertTrue(watch.verify(self.connection_closed, self.listener_absent)['verified'])
         self.ready.unlink()
         prior = {'class': 'daemon', 'loaded': True, 'identity': {
+            'plist_sha256': hashlib.sha256(self.plist.read_bytes()).hexdigest(),
             'argv': original['argv'], 'working_directory': original['cwd'],
             'files': {path: item['sha256'] for path, item in original['identity']['files'].items()}}}
         calls = []
@@ -463,6 +480,7 @@ os.execv('/bin/sleep',['sleep','30'])
         events = []
         journal = SimpleNamespace(begin_override_clear=lambda name: events.append(name))
         prior = {'class': 'daemon', 'loaded': True, 'identity': {
+            'plist_sha256': hashlib.sha256(self.plist.read_bytes()).hexdigest(),
             'argv': [self.node, str(self.script)], 'working_directory': str(self.directory),
             'files': {}}}
         child_ready = self.directory / 'child-ready.json'
@@ -506,6 +524,7 @@ os.execv('/bin/sleep',['sleep','30'])
         unit = self.name.removeprefix('ai.openclaw.')
         events = []
         prior = {'class': 'daemon', 'loaded': True, 'identity': {
+            'plist_sha256': hashlib.sha256(self.plist.read_bytes()).hexdigest(),
             'argv': [self.node, str(self.script)], 'working_directory': str(self.directory),
             'files': {}}}
         with self.assertRaisesRegex(Refused, 'disabled override restored; owner running=False'):
@@ -526,6 +545,7 @@ os.execv('/bin/sleep',['sleep','30'])
             self.assertTrue(watch.verify(self.connection_closed, self.listener_absent)['verified'])
         self.ready.unlink()
         prior = {'class': 'daemon', 'loaded': True, 'identity': {
+            'plist_sha256': hashlib.sha256(self.plist.read_bytes()).hexdigest(),
             'argv': original['argv'], 'working_directory': original['cwd'],
             'files': {path: item['sha256'] for path, item in original['identity']['files'].items()}}}
         unit = self.name.removeprefix('ai.openclaw.')

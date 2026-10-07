@@ -2096,3 +2096,14 @@ listener remains fenced and no success is claimed. The journal suite passes
 the stopped-owner reconciliation remain open, as do the complete hold,
 capture, four-history acceptance and verified resumption. No production VM,
 service or NATS history changed; step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 17:29 EDT: D120 adds a per-unit installed-plist recapture
+before a stopped unit's restoration intent and a physical plist-hash check
+before the daemon adapter clears its override. A late gateway drift introduced
+while memory-daemon restores, including one transient capture failure, now
+refuses that gateway before its restore callback. Owned tests pass: 147 journal,
+51 managed launchd (one domain skip). D23's two-failure best-effort path stays
+intact, but a sustained writer and the read-to-bootstrap interval remain
+residuals. The full-node hold, stopped-VM capture, four-history acceptance and
+verified resumption remain open. No production VM, service or NATS history
+changed; step 1.2 stays [A]/v1.2-pre.

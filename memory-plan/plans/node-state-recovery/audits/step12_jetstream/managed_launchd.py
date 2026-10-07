@@ -11,7 +11,7 @@ import subprocess
 import time
 
 from preservation_checks import Refused, require, verify_completion, verify_timer_idle
-from preservation_journal import FULL_NODE_SCOPE
+from preservation_journal import FULL_NODE_SCOPE, regular_content
 
 
 EXIT_FLAGS = 0x84000000
@@ -280,6 +280,8 @@ def restore_disabled_daemon(service, journal, unit, prior, ready, *, timeout):
             'disabled daemon restoration is not bound to its saved owner')
     require(type(timeout) in (int, float) and math.isfinite(timeout) and timeout > 0,
             'disabled daemon restoration needs a finite readiness budget')
+    require(regular_content(service.plist, 1 << 20) == prior['identity']['plist_sha256'],
+            'disabled daemon plist changed before restoration: ' + unit)
     journal.begin_override_clear(unit)
     try:
         service.enable_after_hold()

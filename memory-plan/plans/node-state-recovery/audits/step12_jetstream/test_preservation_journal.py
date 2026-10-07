@@ -1,5 +1,6 @@
 import copy
 import errno
+import hashlib
 import json
 import os
 import pathlib
@@ -1350,6 +1351,9 @@ class JournalTests(unittest.TestCase):
 
     def test_full_scope_stops_after_override_clear_and_restore_failure(self):
         prior = full_node_inventory()
+        gateway_plist = pathlib.Path(self.temp.name) / 'gateway.plist'
+        gateway_plist.write_bytes(b'owned gateway plist')
+        prior['gateway']['identity']['plist_sha256'] = hashlib.sha256(gateway_plist.read_bytes()).hexdigest()
         current = copy.deepcopy(prior)
         baseline = full_entrypoint_evidence(prior)
         def entrypoints(_):
@@ -1379,7 +1383,7 @@ class JournalTests(unittest.TestCase):
                             journal.begin_override_clear('workplan-viewer')
                         def enable_after_hold():
                             raise Refused('owned enable failure')
-                        service = SimpleNamespace(label='ai.openclaw.gateway',
+                        service = SimpleNamespace(label='ai.openclaw.gateway', plist=gateway_plist,
                                                   enable_after_hold=enable_after_hold)
                         restore_disabled_daemon(service, journal, unit, wanted, lambda _: True, timeout=5)
                     current[unit] = copy.deepcopy(wanted)
@@ -1461,6 +1465,9 @@ class JournalTests(unittest.TestCase):
 
     def test_full_scope_disabled_daemon_restore_verifies_after_journaled_enable(self):
         prior = full_node_inventory()
+        gateway_plist = pathlib.Path(self.temp.name) / 'gateway.plist'
+        gateway_plist.write_bytes(b'owned gateway plist')
+        prior['gateway']['identity']['plist_sha256'] = hashlib.sha256(gateway_plist.read_bytes()).hexdigest()
         current = copy.deepcopy(prior)
         baseline = full_entrypoint_evidence(prior)
         def entrypoints(_):
@@ -1490,7 +1497,7 @@ class JournalTests(unittest.TestCase):
                     def status(domain='gui'):
                         return ({'loaded': False} if domain == 'user' else
                                 {'loaded': state['loaded'], 'running': state['running'], 'pid': 410})
-                    service = SimpleNamespace(label='ai.openclaw.gateway', status=status,
+                    service = SimpleNamespace(label='ai.openclaw.gateway', plist=gateway_plist, status=status,
                         enable_after_hold=lambda: state.update(disabled=False),
                         bootstrap=lambda: state.update(loaded=True, running=True),
                         bind=lambda *_: {'status': status()})
@@ -2279,6 +2286,57 @@ class JournalTests(unittest.TestCase):
                 self.assertFalse(current['mesh-deploy-listener']['running'])
                 self.assertFalse(any(row['event'] == 'listener-release-verified'
                                      for row in journal.records))
+
+    def test_late_stopped_unit_plist_drift_refuses_that_restoration_before_intent(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        late_failures = {'count': 0}
+        def entrypoints(_):
+            if late_failures['count']:
+                late_failures['count'] -= 1
+                raise Refused('installed entrypoint changed during preflight')
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            for domain in ('gui', 'user'):
+                result['overrides'][domain] = {
+                    'ai.openclaw.' + unit: True if state['disabled'] else None
+                    for unit, state in current.items()}
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None, complete=lambda *_: self.fail('hold opened'))
+                anchor_hold(journal, hold)
+                for unit in ('mesh-deploy-listener', 'gateway', 'memory-daemon'):
+                    journal.mutate(unit, 'disable-and-unload',
+                        lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
+                        listener_stop_evidence, hold=hold)
+                restored = []
+                def restore(unit, wanted):
+                    restored.append(unit)
+                    current[unit] = copy.deepcopy(wanted)
+                    if unit == 'memory-daemon':
+                        baseline['installed']['ai.openclaw.gateway']['sha256'] = '2' * 64
+                        late_failures['count'] = 1
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertFalse(result['restored'])
+                self.assertEqual(late_failures['count'], 0)
+                self.assertEqual(restored, ['memory-daemon'])
+                gateway_error = next(error for error in result['errors']
+                                     if error['unit'] == 'gateway')
+                self.assertIn('stopped unit installed plist changed', gateway_error['detail'])
+                self.assertFalse(any(row['event'] == 'restoration-intent'
+                                     and row.get('unit') == 'gateway' for row in journal.records))
+                self.assertFalse(any(row['event'] == 'listener-release-verified'
+                                     for row in journal.records))
+                self.assertFalse(current['mesh-deploy-listener']['running'])
 
     def test_full_inventory_covers_gateway_viewer_and_installed_unloaded_tick(self):
         self.assertTrue({'gateway', 'workplan-viewer', 'federation-tick'} <= UNITS)
