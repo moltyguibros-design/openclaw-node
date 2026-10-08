@@ -452,8 +452,16 @@ def capture_entrypoint_inventory(expected):
     domains = ('gui/' + str(os.getuid()), 'user/' + str(os.getuid()), 'system')
     listings = [subprocess.check_output(['/bin/launchctl', 'print', domain],
                 text=True, timeout=10) for domain in domains]
-    loaded = [loaded_entrypoints(listing, domain, roots)
-              for listing, domain in zip(listings, domains)]
+    try:
+        loaded = [loaded_entrypoints(listing, domain, roots)
+                  for listing, domain in zip(listings, domains)]
+    except Refused as error:
+        if not str(error).startswith('loaded launchd service cannot be inspected: '):
+            raise
+        listings = [subprocess.check_output(['/bin/launchctl', 'print', domain],
+                    text=True, timeout=10) for domain in domains]
+        loaded = [loaded_entrypoints(listing, domain, roots)
+                  for listing, domain in zip(listings, domains)]
     expected_labels = {'ai.openclaw.' + unit for unit in expected}
     override_output = [subprocess.check_output(['/bin/launchctl', 'print-disabled', domain],
                        text=True, timeout=10) for domain in domains]

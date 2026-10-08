@@ -17,7 +17,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from preservation_checks import (
-    QuietWindow, Refused, STOP_ORDER, capture, verify_admissions,
+    QuietWindow, Refused, STOP_ORDER, capture, capture_entrypoint_inventory, verify_admissions,
     TAILSCALE_BINARY, TAILSCALE_LABEL, TAILSCALE_WRAPPER,
     disabled_entrypoint_artifacts, disabled_overrides, http_json, installed_entrypoints,
     loaded_entrypoints, verify_completion,
@@ -44,6 +44,36 @@ class Gates(unittest.TestCase):
         self.refused(lambda: disabled_overrides(
             '"ai.openclaw.nats-1" => true\n"ai.openclaw.nats-1" => false\n', labels))
         self.refused(lambda: disabled_overrides('"ai.openclaw.nats-1" => maybe\n', labels))
+
+    def test_entrypoint_capture_retries_one_disappearing_launchd_service(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-entrypoint-race-') as directory:
+            root = pathlib.Path(directory)
+            plist = root / 'ai.openclaw.gateway.plist'
+            plist.write_bytes(plistlib.dumps({'Label': 'ai.openclaw.gateway',
+                                               'ProgramArguments': ['/owned/gateway']}))
+            installed = {'ai.openclaw.gateway': str(plist)}
+            failure = Refused('loaded launchd service cannot be inspected: com.apple.mdworker.shared')
+            with (patch('preservation_checks.installed_entrypoints', return_value=installed),
+                  patch('preservation_checks.disabled_entrypoint_artifacts', return_value={}),
+                  patch('preservation_checks.production_entrypoint_roots', return_value=[root]),
+                  patch('preservation_checks.subprocess.check_output',
+                        return_value='services = {\n}\n'),
+                  patch('preservation_checks.loaded_entrypoints',
+                        side_effect=[failure, {'ai.openclaw.gateway'}, set(), set()]) as loaded):
+                evidence = capture_entrypoint_inventory({'gateway'})
+            self.assertTrue(evidence['verified'])
+            self.assertEqual(evidence['loaded']['gui'], ['ai.openclaw.gateway'])
+            self.assertEqual(loaded.call_count, 4)
+            with (patch('preservation_checks.installed_entrypoints', return_value=installed),
+                  patch('preservation_checks.disabled_entrypoint_artifacts', return_value={}),
+                  patch('preservation_checks.production_entrypoint_roots', return_value=[root]),
+                  patch('preservation_checks.subprocess.check_output',
+                        return_value='services = {\n}\n'),
+                  patch('preservation_checks.loaded_entrypoints',
+                        side_effect=[failure, failure]) as loaded):
+                with self.assertRaisesRegex(Refused, 'com.apple.mdworker.shared'):
+                    capture_entrypoint_inventory({'gateway'})
+            self.assertEqual(loaded.call_count, 2)
 
     def test_only_exact_tailscale_system_job_can_be_excluded(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-entrypoints-owned-') as root:
