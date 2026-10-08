@@ -256,7 +256,7 @@ class FullNodeBaseline(unittest.TestCase):
 
 
 class OwnedFullNodeInventory(unittest.TestCase):
-    def exercise_native_entrypoint_capture(self, release):
+    def exercise_native_entrypoint_capture(self, release, bridge_failure=False):
         labels = {'ai.openclaw.' + unit for unit in UNITS}
         uid = str(os.getuid())
         for folder in (pathlib.Path.home() / 'Library/LaunchAgents',
@@ -568,12 +568,13 @@ process.on('SIGTERM',()=>{
                                         self.assertTrue(service.disabled())
                                         bridge_ready.unlink()
                                         def ready(owner):
-                                            return (bridge_ready.exists()
+                                            return (not bridge_failure and bridge_ready.exists()
                                                 and json.loads(bridge_ready.read_text())['pid']
                                                 == owner['status']['pid']
                                                 and bridge_log.read_text().count('Bridge ready.') >= 2)
                                         restarted = restore_disabled_daemon(
-                                            bridge_service, journal, unit, saved, ready, timeout=10)
+                                            bridge_service, journal, unit, saved, ready,
+                                            timeout=.3 if bridge_failure else 10)
                                         self.assertNotEqual(restarted['status']['pid'],
                                                             bridge_binding['status']['pid'])
                                         new_bridge_bus_connection, _ = bridge_bus_server.accept()
@@ -595,6 +596,24 @@ process.on('SIGTERM',()=>{
                                         self.addCleanup(new_bus_connection.close)
                                 result = hold.recover(restore, observe, physical,
                                                       deploy_fence=deploy_fence)
+                                if bridge_failure:
+                                    self.assertFalse(result['restored'], result)
+                                    self.assertEqual(fence_checks, [])
+                                    self.assertTrue(bridge_service.disabled())
+                                    self.assertFalse(service.status()['loaded'])
+                                    self.assertTrue(service.disabled())
+                                    self.assertIsNotNone(gate.marker())
+                                    self.assertTrue(any(error['unit'] == 'mesh-bridge'
+                                                        and 'did not reach readiness' in error['detail']
+                                                        for error in result['errors']), result)
+                                    rows = [(row['event'], row.get('unit'))
+                                            for row in journal.records]
+                                    self.assertNotIn(('listener-release-verified', None), rows)
+                                    self.assertNotIn(('restoration-intent', 'mesh-deploy-listener'), rows)
+                                    with self.assertRaisesRegex(Refused,
+                                            'unrestored node cannot be sealed'):
+                                        journal.resolve()
+                                    return
                                 self.assertTrue(result['restored'], result)
                                 self.assertEqual(fence_checks, [True])
                                 self.assertTrue(bridge_service.status()['running'])
@@ -666,6 +685,12 @@ process.on('SIGTERM',()=>{
                          '23-label inventory fixture runs only on a dedicated macOS CI runner')
     def test_native_entrypoint_capture_restores_listener_after_release(self):
         self.exercise_native_entrypoint_capture(True)
+
+    @unittest.skipUnless(sys.platform == 'darwin'
+                         and os.environ.get('OPENCLAW_CI_FULL_NODE_INVENTORY_FIXTURE') == '1',
+                         '23-label inventory fixture runs only on a dedicated macOS CI runner')
+    def test_native_entrypoint_capture_keeps_listener_fenced_after_bridge_failure(self):
+        self.exercise_native_entrypoint_capture(True, bridge_failure=True)
 
 
 if __name__ == '__main__':

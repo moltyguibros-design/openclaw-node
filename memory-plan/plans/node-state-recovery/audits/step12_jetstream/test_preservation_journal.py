@@ -1411,6 +1411,81 @@ class JournalTests(unittest.TestCase):
                 self.assertFalse(any(row['event'] == 'restoration-intent'
                                      and row.get('unit') == 'workplan-viewer' for row in journal.records))
 
+    def test_failed_daemon_readiness_keeps_listener_fenced_and_retry_unproven(self):
+        prior = full_node_inventory()
+        bridge_plist = pathlib.Path(self.temp.name) / 'bridge.plist'
+        bridge_plist.write_bytes(b'owned bridge plist')
+        prior['mesh-bridge']['identity']['plist_sha256'] = hashlib.sha256(
+            bridge_plist.read_bytes()).hexdigest()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None)
+                anchor_hold(journal, hold)
+                for unit in ('mesh-deploy-listener', 'mesh-bridge'):
+                    journal.mutate(unit, 'disable-and-unload',
+                        lambda unit=unit: current[unit].update(loaded=False, running=False,
+                                                               disabled=True),
+                        listener_stop_evidence, hold=hold)
+                restored = []
+                def restore(unit, wanted):
+                    restored.append(unit)
+                    self.assertEqual(unit, 'mesh-bridge')
+                    state = current[unit]
+                    def status(domain='gui'):
+                        return ({'loaded': False} if domain == 'user' else
+                                {'loaded': state['loaded'], 'running': state['running'], 'pid': 410})
+                    service = SimpleNamespace(label='ai.openclaw.mesh-bridge', plist=bridge_plist,
+                        status=status, disabled=lambda: state['disabled'],
+                        enable_after_hold=lambda: state.update(disabled=False),
+                        bootstrap=lambda: state.update(loaded=True, running=True),
+                        bind=lambda *_: {'status': status()},
+                        disable_for_hold=lambda: state.update(disabled=True))
+                    restore_disabled_daemon(service, journal, unit, wanted,
+                                            lambda _: False, timeout=.1)
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: self.fail('listener fence reached'))
+                self.assertFalse(result['restored'])
+                self.assertEqual(restored, ['mesh-bridge'])
+                self.assertTrue(current['mesh-bridge']['running'])
+                self.assertTrue(current['mesh-bridge']['disabled'])
+                self.assertFalse(current['mesh-deploy-listener']['loaded'])
+                self.assertTrue(current['mesh-deploy-listener']['disabled'])
+                self.assertTrue(any(error['unit'] == 'mesh-bridge' and
+                                    'did not reach readiness' in error['detail']
+                                    for error in result['errors']), result)
+                self.assertFalse(any(row['event'] == 'restoration-intent'
+                                     and row.get('unit') == 'mesh-deploy-listener'
+                                     for row in journal.records))
+                with self.assertRaisesRegex(Refused, 'unrestored node cannot be sealed'):
+                    journal.resolve()
+            current['mesh-bridge'].update(loaded=False, running=False)
+            with Journal(self.root, node_lock=self.node_lock) as reopened:
+                hold = SimpleNamespace(journal=reopened,
+                    prepare=lambda *_: self.fail('hold prepared'))
+                before = len(reopened.records)
+                with self.assertRaisesRegex(Refused,
+                        'stopped unit override was cleared without verified recovery: mesh-bridge'):
+                    reopened.recover(lambda *_: self.fail('restore ran'),
+                        lambda unit, _: {**current[unit], 'verified': True},
+                        lambda: self.fail('final check ran'), hold=hold,
+                        deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertEqual(len(reopened.records), before)
+
     def test_override_clear_intent_can_only_follow_its_restoration_once(self):
         prior = full_node_inventory()
         with patch('preservation_journal.capture_entrypoint_inventory',
