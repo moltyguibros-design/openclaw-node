@@ -2243,3 +2243,13 @@ new PID's ready file and second startup marker; the restore callback requires
 the deploy fence to have run while the gate remains closed, and the success
 path re-reads GUI and user overrides after release. These assertions await
 macOS CI. They do not change the production hold or VM status.
+
+Checkpoint 2026-10-08 05:56 EDT: D131's tighter listener readiness and
+release checks passed on the dedicated macOS CI job at `00d4080a`. Both
+fixed-label owned tests passed; managed launchd ran 53 tests with one skip,
+and the journal, baseline, hold and restore-only suites passed. The durable
+owned listener recovery and hold-reopen receipts now depend on live fixture
+readiness. The other 22 jobs, actual production readiness, unpatched
+entrypoint capture and real deploy fence remain open, as do stopped-VM
+capture, all four real-history acceptances and verified resumption. The
+production VM, services and NATS stores were untouched.

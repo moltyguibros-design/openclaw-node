@@ -2706,3 +2706,27 @@ and full-node stop/recover composition without a mocked entrypoint capture,
 then the remaining shutdown and reboot gates. The overall workflow remains
 red at dependency audit gates unrelated to this fixture. No production
 service, VM or NATS store was stopped or changed.
+
+## D131 — Bind owned listener recovery receipts to the restarted owner's readiness (2026-10-08 05:56 EDT)
+
+Claude's adversarial review of D130 distinguished the adapter's real,
+in-memory ready-file check from the journal observer's unconditional
+`verified` bit. The owned fixture now reports the listener verified only
+when launchd shows a running owner, the fresh ready file names that PID,
+and the log contains the second startup marker. The adapter's bounded
+readiness predicate requires the same marker. The restore callback asserts
+the deploy fence was checked while the execution gate remained closed, and
+the success path reads GUI and user overrides after restoration to require
+that neither still disables the listener. These observations flow into the
+durable `recovery-verified` and hold-reopen readiness receipts. The
+refused-release branch still keeps the listener and gate fenced.
+
+The macOS CI job at `00d4080a` passed both fixed-label owned tests. Managed
+launchd ran 53 tests with one skip, with journal 150, baseline 16, hold 46
+and restore-only 30 also passing. The ready file and log marker belong to
+the owned fixture; production listener readiness, the other 22 jobs, the
+real deploy fence and final physical checks are not covered. The complete
+full-node hold, stopped-VM capture, isolated acceptance of all four real
+NATS histories and verified production resumption remain open. The overall
+workflow is still red at unrelated dependency audit gates. No production
+service, VM or NATS store was stopped or changed.
