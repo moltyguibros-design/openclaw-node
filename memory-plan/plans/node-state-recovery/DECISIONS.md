@@ -2552,3 +2552,35 @@ the program binary and every argv element that resolves to a regular file;
 `static_identity` hashes those automatically. This is a fail-closed input
 gap, not permission to adapt the old map or relax equality. No live node,
 service, VM or NATS store was contacted in this review or these tests.
+
+## D125 — Prepare a current candidate map and prove baseline-to-journal handoff in an owned fixture (2026-10-07 23:33 EDT)
+
+`FULL_NODE_BASELINE_CANDIDATE_20261007.json` is a **candidate**, not an
+approved baseline or a journal receipt. Its map is named `proposed_units` to
+avoid accidental use as an approved recapture's `units`. A read-only
+observation of the host's installed launchd inventory, 23 plist and
+direct-file identities, service status, and disabled overrides produced it.
+The inventory and each status and
+identity were checked again before writing the report. It records only the
+managed entrypoint summary and its full-observation digest, rather than the
+large unrelated `print-disabled` listing. Against the October 2 map, only
+memory-daemon and node-watch changed plist or direct-file pins; their new
+plist and entry hashes match the October 3 recaptures. The candidate's
+classes, observed states and entrypoint inventory pass the journal's prior
+and entrypoint validators. The real execution-hold gate was **not** validated,
+and this candidate must not be treated as permission to open a production
+journal or stop a service. Pin approval and a fresh observation are still
+required at the actual window.
+
+The read-only producer was also run against this candidate's proposed map
+and the live launchd/files with an explicitly synthetic gate descriptor. It
+accepted all 23 static pins and observed service states. That probe did not validate or
+publish the real execution hold and did not open a journal.
+
+Two owned tests now compose D123's producer with `Journal(...,
+scope=FULL_NODE_SCOPE)`: the returned prior opens a durable owned journal,
+while a changed launchd inventory between producer and journal refuses before
+a node receipt is written. This proves the schema handoff, not a continuous
+watch or a completed full-node hold. The baseline suite has 12 tests. The
+live observation was read-only; the production VM, services and NATS histories
+were not stopped or restarted.

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from full_node_baseline import capture_full_node_prior
-from preservation_journal import Refused, TIMER_UNITS, UNITS
+from preservation_journal import FULL_NODE_SCOPE, Journal, Refused, TIMER_UNITS, UNITS
 
 
 class FullNodeBaseline(unittest.TestCase):
@@ -76,6 +76,30 @@ class FullNodeBaseline(unittest.TestCase):
         self.assertEqual(set(prior['scheduler-heartbeat']['execution_hold']['cohort']), TIMER_UNITS)
         self.assertEqual(prior['gateway']['identity']['files'][str(self.binary.resolve())],
                          self.approved['gateway']['direct_file_hashes'][str(self.binary)])
+
+    def test_captured_prior_opens_owned_full_node_journal(self):
+        prior, entrypoints = self.capture()
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=copy.deepcopy(entrypoints)):
+            journal = Journal(self.root / 'journals' / 'window', prior,
+                              boot='owned-boot', node_lock=self.root / 'node.lock',
+                              scope=FULL_NODE_SCOPE)
+        self.addCleanup(journal.close)
+        self.assertEqual(journal.scope, FULL_NODE_SCOPE)
+        self.assertEqual(journal.records[0]['prior'], prior)
+        self.assertEqual(journal.records[0]['entrypoint_inventory'], entrypoints)
+
+    def test_journal_refuses_inventory_drift_after_prior_capture(self):
+        prior, entrypoints = self.capture()
+        changed = copy.deepcopy(entrypoints)
+        changed['loaded']['gui'].remove('ai.openclaw.gateway')
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=changed):
+            with self.assertRaisesRegex(Refused, 'loaded entrypoints differ'):
+                Journal(self.root / 'journals' / 'window', prior,
+                        boot='owned-boot', node_lock=self.root / 'node.lock',
+                        scope=FULL_NODE_SCOPE)
+        self.assertFalse((self.root / 'node.lock.state.json').exists())
 
     def test_missing_unit_refuses_before_inventory_read(self):
         del self.approved['gateway']

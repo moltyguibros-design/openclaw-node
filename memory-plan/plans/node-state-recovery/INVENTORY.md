@@ -2153,3 +2153,11 @@ launchd inventory, and an idle unit declared daemon. The October 2 approved
 recaptures; those later records do not carry a complete `units` map. A fresh
 approved 23-unit map remains a prerequisite before production baseline
 capture. No production service or VM was touched.
+
+Checkpoint 2026-10-07 23:33 EDT: D125 retains a current, unapproved 23-unit
+candidate map from two consistent read-only launchd/file observations. Only
+memory-daemon and node-watch differ from the October 2 map, matching the
+October 3 recaptures. An owned producer-to-journal test opens a full-node
+journal; a negative refuses inventory drift before a node receipt. The real
+gate and complete hold remain unproven. No production service or VM was
+stopped or restarted; all four NATS histories remain untouched.
