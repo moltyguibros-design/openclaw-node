@@ -735,7 +735,7 @@ os.execv('/bin/sleep',['sleep','30'])
                     for domain in ('gui', 'user'):
                         observed['overrides'][domain][label] = True
                 return observed
-            baseline_entrypoints = capture(UNITS)
+            baseline_entrypoints = capture(None)
             with (patch('full_node_baseline.capture_full_node_prior',
                         return_value=(prior, baseline_entrypoints)),
                   patch('preservation_journal.capture_entrypoint_inventory',
