@@ -459,6 +459,13 @@ process.on('SIGTERM',()=>{
                                 with socket.socket() as probe:
                                     probe.settimeout(.2)
                                     return probe.connect_ex(('127.0.0.1', bridge_details['port'])) != 0
+                            def bridge_listener_present():
+                                if not bridge_ready.exists():
+                                    return False
+                                current = json.loads(bridge_ready.read_text())
+                                with socket.socket() as probe:
+                                    probe.settimeout(.2)
+                                    return probe.connect_ex(('127.0.0.1', current['port'])) == 0
                             self.assertFalse(connection_closed())
                             self.assertFalse(listener_absent())
                             self.assertFalse(bridge_connection_closed())
@@ -538,7 +545,7 @@ process.on('SIGTERM',()=>{
                                     if bridge_service.status()['running']:
                                         bridge_ok = (observe('mesh-bridge', prior['mesh-bridge'])['verified']
                                                      and new_bus_alive(new_bridge_bus_connection)
-                                                     and not bridge_listener_absent())
+                                                     and bridge_listener_present())
                                     else:
                                         bridge_ok = (bridge_service.disabled()
                                                      and bridge_proof['connections_closed']
