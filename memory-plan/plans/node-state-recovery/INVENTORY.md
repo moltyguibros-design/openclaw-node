@@ -2234,3 +2234,12 @@ unpatched 23-job composition, stopped-VM capture, acceptance of all four real
 NATS histories and verified production resumption remain open. The overall
 workflow is red at separate dependency audit gates. No live VM, service or
 NATS store was stopped or changed.
+
+Checkpoint 2026-10-08 05:48 EDT: Claude's adversarial review of `fd081f10`
+found that the adapter's fresh ready-file check was real but the journal's
+`recovery-verified` and hold-reopen readiness bits were supplied by an
+unconditional test observer. The owned listener observer now requires the
+new PID's ready file and second startup marker; the restore callback requires
+the deploy fence to have run while the gate remains closed, and the success
+path re-reads GUI and user overrides after release. These assertions await
+macOS CI. They do not change the production hold or VM status.

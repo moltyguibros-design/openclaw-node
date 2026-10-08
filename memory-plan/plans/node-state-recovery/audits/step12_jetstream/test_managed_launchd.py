@@ -763,12 +763,16 @@ os.execv('/bin/sleep',['sleep','30'])
                         self.assertTrue(journal.listener_fenced())
                         def observe(unit, saved):
                             actual = copy.deepcopy(saved)
+                            verified = True
                             if unit == 'mesh-deploy-listener':
                                 status = service.status()
                                 actual.update(loaded=status['loaded'], running=status['running'],
                                               disabled=service.disabled(),
                                               identity=static_identity(self.plist, files))
-                            return {**actual, 'verified': True}
+                                verified = (status['running'] and self.ready.exists()
+                                            and json.loads(self.ready.read_text())['pid'] == status['pid']
+                                            and self.log.read_text().count('═══ Ready ═══') >= 2)
+                            return {**actual, 'verified': verified}
                         fence_checks, restored = [], []
                         def deploy_fence():
                             fence_checks.append(True)
@@ -776,11 +780,14 @@ os.execv('/bin/sleep',['sleep','30'])
                         def restore(unit, saved):
                             self.assertTrue(release)
                             self.assertEqual(unit, 'mesh-deploy-listener')
+                            self.assertEqual(fence_checks, [True])
+                            self.assertIsNotNone(gate.marker())
                             self.ready.unlink()
                             def ready(owner):
                                 return (self.ready.exists()
                                         and json.loads(self.ready.read_text())['pid']
-                                        == owner['status']['pid'])
+                                        == owner['status']['pid']
+                                        and self.log.read_text().count('═══ Ready ═══') >= 2)
                             restored.append(restore_disabled_daemon(service, journal, unit,
                                                                       saved, ready, timeout=10))
                         result = hold.recover(restore if release else
@@ -794,6 +801,9 @@ os.execv('/bin/sleep',['sleep','30'])
                             self.assertNotEqual(restored[0]['status']['pid'], binding['status']['pid'])
                             self.assertTrue(service.status()['running'])
                             self.assertFalse(service.disabled())
+                            released_entrypoints = capture(None)
+                            self.assertIsNot(released_entrypoints['overrides']['gui'][label], True)
+                            self.assertIsNot(released_entrypoints['overrides']['user'][label], True)
                             self.assertIsNone(gate.marker())
                             rows = [(row['event'], row.get('unit')) for row in journal.records]
                             self.assertLess(rows.index(('listener-release-verified', None)),
