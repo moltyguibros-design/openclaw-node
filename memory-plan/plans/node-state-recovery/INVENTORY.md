@@ -2223,3 +2223,14 @@ override-clear receipts in order, a new process owner, gate reopening and
 journal resolution. Dedicated macOS CI has not yet run this twin; it is not
 production recovery evidence. The complete 23-job hold and four-history
 acceptance remain open, with no live VM or service change.
+
+Checkpoint 2026-10-08 05:43 EDT: D130's owned success and refusal twins both
+passed in the macOS CI job at `fd081f10`. The managed-launchd suite ran 53
+tests with one skip; the baseline, journal, hold and restore-only suites also
+passed. This proves the listener's native stop, verified-release ordering,
+new bound process and gate reopen for an owned fixture. The other 22 jobs,
+deploy fence, physical readiness and most inventory remain synthetic. The
+unpatched 23-job composition, stopped-VM capture, acceptance of all four real
+NATS histories and verified production resumption remain open. The overall
+workflow is red at separate dependency audit gates. No live VM, service or
+NATS store was stopped or changed.

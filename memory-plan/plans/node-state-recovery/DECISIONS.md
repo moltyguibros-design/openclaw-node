@@ -2679,3 +2679,30 @@ restore using live readiness and dynamic identity/override observations,
 then an unpatched full inventory fixture. The overall workflow remains red
 at pre-existing dependency audit gates. No production service, VM or NATS
 store was stopped or changed.
+
+## D130 — Prove owned listener restart follows a verified release (2026-10-08 05:43 EDT)
+
+The D129 fixed-label fixture now has a success twin. After the native gate
+closes and `StopWatch` proves the owned listener stopped with its disabled
+override, recovery requires a verified deploy-fence result before invoking
+`restore_disabled_daemon`. That adapter records `override-clear-intent`,
+enables and bootstraps launchd, binds the new process, and waits up to ten
+seconds for a fresh ready file bearing the bound PID. The observer recomputes
+the listener's static identity and current launchd status. The entrypoint
+capture rehashes the plist and reads GUI, user and system overrides on each
+call. The test requires the listener release, restoration intent,
+override-clear intent and recovery verification in order, a different owner
+PID, the gate reopened, and a resolvable journal. The refused-release twin
+still requires an unloaded disabled listener and closed gate.
+
+The macOS CI job at `fd081f10` passed both owned listener tests. It ran 53
+managed-launchd tests with one skip, alongside 150 journal, 16 baseline, 46
+hold and 30 restore-only tests. This is process and launchd evidence for one
+owned listener's two recovery branches. The deploy-fence response, other 22
+unit states, final physical readiness and much of the entrypoint inventory
+are synthetic; the test does not authorize a production hold, VM stop,
+history acceptance or service resumption. Next is an owned 23-job inventory
+and full-node stop/recover composition without a mocked entrypoint capture,
+then the remaining shutdown and reboot gates. The overall workflow remains
+red at dependency audit gates unrelated to this fixture. No production
+service, VM or NATS store was stopped or changed.
