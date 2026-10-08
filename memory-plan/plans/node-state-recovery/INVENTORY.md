@@ -2175,7 +2175,17 @@ Checkpoint 2026-10-08 01:32 EDT: D127 binds the read-only 23-unit producer's
 exact launchd inventory to full-node journal creation. Valid inventory drift
 between the producer and journal now refuses before a node receipt, and a new
 baseline cannot reopen an existing window. The baseline suite passes 16 owned
-tests; the combined suites pass 210. This
-does not provide the continuous full-node hold or prove boot-time absence.
+tests; the combined suites pass 210. This does not provide the continuous
+full-node hold or prove boot-time absence.
 The owned listener composition, stopped-VM capture, four real-history
 acceptance and verified resumption remain open; no live service or VM changed.
+
+Checkpoint 2026-10-08 03:34 EDT: D128 composes a native owned execution gate
+and full-node journal through the first two intents and same-boot recovery.
+An unsafe deploy-fence result keeps the listener and gate closed with no
+listener restoration intent. The producer, launchd inventory, stop proof and
+readiness are synthetic in this fixture; actual 23-job/process evidence and
+the complete shutdown gate remain open. Hold suite 46 tests passed; the
+combined baseline, journal and hold suites passed 212 before the final
+assertion refinement, which passed in the focused two-test rerun. No live
+service, VM or NATS store was stopped or changed.

@@ -2625,7 +2625,29 @@ reopen guard gives an earlier refusal; the existing baseline rule already
 refused replacement. Owned negatives cover valid-but-changed inventory,
 including a system-domain override on an enabled unit, and attempted reopening.
 The baseline suite passes 16 tests and the baseline, journal and hold suites
-pass 210 tests. Plan lint is
-conformant. This closes only the point-in-time handoff; a continuous process
+pass 210 tests. Plan lint is conformant. This closes only the point-in-time handoff; a continuous process
 watch and complete full-node hold remain missing. No production service, VM
 or NATS store was changed.
+
+## D128 — Compose the native execution hold with listener-first recovery in an owned journal (2026-10-08 03:34 EDT)
+
+A new macOS-owned fixture opens a full-node journal through
+`open_full_node_journal`, closes and drains the real execution gate as its
+first intent, records the deploy listener's persistent stop as its second,
+and exercises same-boot recovery. With a verified deploy fence, the listener
+gets the only restoration intent, after its release check, and the gate
+reopens before resolution. With the deploy fence refused, no listener
+restoration intent is recorded, its synthetic loaded state stays false with
+the disabled override true, and the owned gate stays closed. The native gate
+and journal are real; the 23-unit producer result, launchd inventory,
+listener stop evidence and service readiness are synthetic. The fixture
+therefore proves sequencing and fail-closed control flow, not process exit,
+actual 23-job coverage or a production hold. The hold suite passes 46 tests;
+the combined baseline, journal and hold suites passed 212 tests before two
+final assertions were added, and those two focused tests passed afterward.
+
+The next bounded slice is the same composition with owned launchd process
+evidence and an unpatched entrypoint capture. Until that and the remaining
+full-node shutdown gates pass, the live VM and production services stay up.
+Stopped-VM capture, isolated acceptance of all four real histories, and
+verified service resumption remain open.
