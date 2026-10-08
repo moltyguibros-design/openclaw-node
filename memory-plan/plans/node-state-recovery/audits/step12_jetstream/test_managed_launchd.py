@@ -1,3 +1,4 @@
+import copy
 import json
 import hashlib
 import os
@@ -17,10 +18,14 @@ from unittest.mock import patch
 
 from managed_launchd import (Launchd, StopWatch, process_exists, process_tree,
                              restore_disabled_daemon, unload_idle_timer)
+from full_node_baseline import open_full_node_journal
+from journal_hold import JournaledHold, describe
 from legacy_fixture import legacy_journal
 from preservation_checks import Refused, http_json
-from preservation_journal import Journal
-from test_preservation_journal import inventory
+from preservation_journal import Journal, TIMER_UNITS, static_identity
+from test_journal_hold import gate_module, gated_identity
+from test_preservation_journal import (full_entrypoint_evidence, full_node_inventory,
+                                       inventory)
 
 
 def free_port():
@@ -276,8 +281,9 @@ process.umask(0o077);
  }
  fs.writeFileSync(process.env.OWNED_READY+'.pending',JSON.stringify({pid:process.pid,cid:nc.info.client_id,serverId:nc.info.server_id,port:listener.address().port,child:child?.pid}));fs.renameSync(process.env.OWNED_READY+'.pending',process.env.OWNED_READY);
  console.log('owned fixture ready');
+ if(process.env.OWNED_MODE==='listener')console.log('═══ Ready ═══');
  setInterval(()=>{if(fs.existsSync(process.env.OWNED_FORK)){fs.unlinkSync(process.env.OWNED_FORK);cp.spawn(process.execPath,['-e','setTimeout(()=>process.exit(0),100)'],{stdio:'ignore'});}},10);
- process.on('SIGTERM',async()=>{if(process.env.OWNED_MODE==='hang')return;await nc.close();await new Promise(r=>listener.close(r));console.log('Shutdown complete.');process.exit(process.env.OWNED_MODE==='crash'?2:0);});
+ process.on('SIGTERM',async()=>{if(process.env.OWNED_MODE==='hang')return;await nc.close();await new Promise(r=>listener.close(r));console.log(process.env.OWNED_MODE==='listener'?'SIGTERM — shutting down':'Shutdown complete.');process.exit(process.env.OWNED_MODE==='crash'?2:0);});
 })().catch(()=>process.exit(1));
 ''')
         cls.child = cls.root / 'child.cjs'
@@ -679,6 +685,112 @@ os.execv('/bin/sleep',['sleep','30'])
         wait_for(lambda: self.ready.exists() and self.service.status()['running'])
         self.proofs.append({'test': self._testMethodName, 'stop': proof,
                             'disabled_after_bootout': True, 'restarted_after_enable': True})
+
+    @unittest.skipUnless(sys.platform == 'darwin'
+                         and os.environ.get('OPENCLAW_CI_FULL_NODE_LISTENER_FIXTURE') == '1',
+                         'fixed-label listener fixture runs only on a dedicated macOS CI runner')
+    def test_full_node_owned_listener_stop_keeps_refused_release_fenced(self):
+        label = 'ai.openclaw.mesh-deploy-listener'
+        for folder in (pathlib.Path.home() / 'Library/LaunchAgents',
+                       pathlib.Path('/Library/LaunchAgents'), pathlib.Path('/Library/LaunchDaemons')):
+            self.assertFalse((folder / (label + '.plist')).exists())
+        service = Launchd(label, self.plist)
+        self.assertFalse(service.status()['loaded'])
+        self.assertFalse(service.disabled())
+        for domain in ('user/' + str(os.getuid()), 'system'):
+            result = subprocess.run(['/bin/launchctl', 'print', domain + '/' + label],
+                                    capture_output=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+        self.name = label
+        self.service = service
+        binding = self.launch(mode='listener')
+        wait_for(lambda: '═══ Ready ═══' in self.log.read_text())
+        gate_root = self.directory / 'gate'
+        pins = gate_module.initialize(gate_root)
+        writer_lock = self.directory / 'writer.lock'
+        writer_lock.write_bytes(b'owned writer lock')
+        writer_lock.chmod(0o644)
+        with (patch('preservation_journal.NATS_WRITER_MARKER',
+                    self.directory / 'writer-handoff.json'),
+              patch('preservation_journal.NATS_LEGACY_LOCK', writer_lock),
+              patch('preservation_journal.NATS_ROOT_UID', os.getuid()),
+              gate_module.Gate(gate_root, pins) as gate):
+            prior = full_node_inventory()
+            for unit in TIMER_UNITS:
+                prior[unit]['identity'] = gated_identity(unit, gate_root, pins)
+            prior['scheduler-heartbeat']['execution_hold'] = describe(gate, sorted(TIMER_UNITS))
+            files = {str(path): hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+                     for path in (self.node, self.script)}
+            prior['mesh-deploy-listener']['identity'] = static_identity(self.plist, files)
+            entrypoints = full_entrypoint_evidence(prior)
+            entrypoints['installed'][label] = {
+                'path': str(self.plist),
+                'sha256': hashlib.sha256(self.plist.read_bytes()).hexdigest()}
+            def capture(_):
+                observed = copy.deepcopy(entrypoints)
+                status = service.status()
+                if not status['loaded']:
+                    observed['loaded']['gui'].remove(label)
+                if service.disabled():
+                    for domain in ('gui', 'user'):
+                        observed['overrides'][domain][label] = True
+                return observed
+            baseline_entrypoints = capture(UNITS)
+            with (patch('full_node_baseline.capture_full_node_prior',
+                        return_value=(prior, baseline_entrypoints)),
+                  patch('preservation_journal.capture_entrypoint_inventory',
+                        side_effect=capture)):
+                with open_full_node_journal(self.directory / 'journals' / 'window', gate, {},
+                                            boot='owned-boot',
+                                            node_lock=self.directory / 'node.lock') as journal:
+                    fast = lambda: {'verified': True,
+                                    'baseline_sha256': journal.records[0]['sha256']}
+                    hold = JournaledHold(journal, gate, fast)
+                    try:
+                        hold.close_and_drain()
+                        self.hold_override_attempted = True
+                        with StopWatch(service, binding, [self.log, self.err],
+                                       'mesh-deploy-listener',
+                                       startup_segment=self.log.read_text(),
+                                       require_disabled=True) as watch:
+                            proof = watch.mutate(journal, 'mesh-deploy-listener',
+                                                 self.connection_closed,
+                                                 self.listener_absent, hold=hold)
+                        self.assertTrue(Journal.managed_stop_proven(proof))
+                        self.assertEqual(proof['termination'], {'exit': 0})
+                        self.assertFalse(service.status()['loaded'])
+                        self.assertTrue(service.disabled())
+                        self.assertTrue(journal.listener_fenced())
+                        def observe(unit, saved):
+                            actual = copy.deepcopy(saved)
+                            if unit == 'mesh-deploy-listener':
+                                status = service.status()
+                                actual.update(loaded=status['loaded'], running=status['running'],
+                                              disabled=service.disabled())
+                            return {**actual, 'verified': True}
+                        fence_checks = []
+                        def refuse_deploy_fence():
+                            fence_checks.append(True)
+                            return {'verified': False}
+                        result = hold.recover(lambda *_: self.fail('listener released without fence'),
+                                              observe, lambda: {'verified': True},
+                                              deploy_fence=refuse_deploy_fence)
+                        self.assertFalse(result['restored'], result)
+                        self.assertEqual(fence_checks, [True])
+                        self.assertTrue(any(error['unit'] == 'mesh-deploy-listener'
+                                            and 'deploy listener fence was not verified'
+                                            in error['detail'] for error in result['errors']), result)
+                        self.assertIsNotNone(gate.marker())
+                        self.assertFalse(any(row['event'] == 'restoration-intent'
+                                             and row.get('unit') == 'mesh-deploy-listener'
+                                             for row in journal.records))
+                        refused = subprocess.run(['/bin/launchctl', 'bootstrap',
+                                                  'gui/' + str(os.getuid()), str(self.plist)],
+                                                 capture_output=True, timeout=10)
+                        self.assertNotEqual(refused.returncode, 0)
+                        self.assertFalse(service.status()['loaded'])
+                    finally:
+                        hold.close()
 
     def test_owned_nats_persistent_stop_has_transfer_termination_shape(self):
         port, monitor = free_port(), free_port()

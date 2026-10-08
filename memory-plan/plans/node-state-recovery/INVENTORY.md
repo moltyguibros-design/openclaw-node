@@ -2189,3 +2189,14 @@ the complete shutdown gate remain open. Hold suite 46 tests passed; the
 combined baseline, journal and hold suites passed 212 before the final
 assertion refinement, which passed in the focused two-test rerun. No live
 service, VM or NATS store was stopped or changed.
+
+Checkpoint 2026-10-08 03:53 EDT: A dedicated macOS CI fixture is prepared to
+exercise the exact deploy-listener label with an owned process, native
+launchd, execution gate and full-node journal. It first refuses to bind if
+that label has an installed plist, a loaded service in any checked domain,
+or a GUI disable override. The real managed persistent stop must prove the
+owned process exited; an unsafe deploy-fence result must leave the listener
+unloaded and disabled, with the gate closed and a direct bootstrap refused.
+The local managed-launchd suite passed 52 tests with two CI-only skips. The
+fixed-label fixture itself remains unverified until the dedicated macOS CI
+job runs. No production service, VM or NATS store was touched.

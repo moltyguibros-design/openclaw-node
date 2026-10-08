@@ -2629,7 +2629,7 @@ pass 210 tests. Plan lint is conformant. This closes only the point-in-time hand
 watch and complete full-node hold remain missing. No production service, VM
 or NATS store was changed.
 
-## D128 — Compose the native execution hold with listener-first recovery in an owned journal (2026-10-08 03:34 EDT)
+## D128 — Compose the native execution hold with listener release in an owned journal (2026-10-08 03:34 EDT)
 
 A new macOS-owned fixture opens a full-node journal through
 `open_full_node_journal`, closes and drains the real execution gate as its

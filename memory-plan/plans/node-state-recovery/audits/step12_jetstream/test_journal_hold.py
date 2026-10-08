@@ -798,12 +798,13 @@ class FullNodeHoldComposition(unittest.TestCase):
                                 self.assertFalse(any(row['event'] == 'restoration-intent'
                                                      and row.get('unit') == 'mesh-deploy-listener'
                                                      for row in journal.records))
-                                with self.assertRaises(Exception):
+                                with self.assertRaisesRegex(preservation_journal.Refused,
+                                                            'unrestored node cannot be sealed'):
                                     journal.resolve()
                         finally:
                             hold.close()
 
-    def test_listener_restores_last_after_owned_hold(self):
+    def test_listener_release_precedes_only_restore_after_owned_hold(self):
         self.exercise(True)
 
     def test_failed_release_keeps_listener_and_gate_fenced(self):
