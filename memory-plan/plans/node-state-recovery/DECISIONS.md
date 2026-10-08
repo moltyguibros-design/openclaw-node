@@ -2854,3 +2854,44 @@ the production pin map or deploy fence, the readiness of the other 22 actual
 services, UTM shutdown, stopped-VM capture, acceptance of all four real NATS
 histories, or production resumption. No live service, VM or NATS store was
 stopped or changed; step 1.2 remains [A]/v1.2-pre.
+
+## D136 — Admit persistent daemon-class stops after the listener fence (2026-10-08 16:08 EDT)
+
+`StopWatch.mutate` now admits a persistent full-node stop beyond the deploy
+listener only when the journal's saved class is `daemon` and the unit is
+outside the NATS transfer set. The listener-first journal rule, original
+execution hold, disabled override, bound process exit, connection and port
+closure, completion marker, and class-specific `full_node_stop_proven` check
+remain required. Timers, on-demand and known-broken units, the held member,
+and NATS members remain outside this adapter. The success-side restoration
+adapter records `override-clear-intent` immediately before enable; a failure
+leaves the unit unproven and prevents later restores or a retry.
+
+The dedicated macOS 23-label fixture now persistently stops an owned
+`mesh-bridge` after the listener fence. Its Node stub has a private TCP bus
+connection, listener port, atomic ready record and production completion
+marker. The fixture refuses a bridge stop before the listener without adding
+an intent, observes disabled overrides in both per-uid domains, and restores
+the bridge before listener release through a new bound owner and private
+connection. A separate native readiness-failure twin keeps the listener
+disabled, the gate closed and resolution refused; a Linux journal negative
+also proves a reopened recovery refuses the unproven override clear.
+
+The first release attempts at `b9335a58` and `f1a90bdd` passed the bridge
+stop and restore but the fixture's release check probed the old ephemeral
+bridge port. `de3de11d` probes the new ready-file port only when the bridge
+is running, retaining the original port for stopped-instance absence.
+Exact-head macOS job 113510989748 passed all 19 baseline tests without
+skips, 151 journal tests, 46 hold tests and 54 managed-launchd tests with
+one explicit skip. `e69159da` adds native assertions that the failed owner
+remains running and a second recovery refuses before writing; its exact-head
+macOS run is pending. The overall workflow remains red at separate root and
+Mission Control dependency audit gates.
+
+Only one of the ten newly eligible plain daemon labels has an owned
+stop/release proof. The other 21 labels in the native fixture are inert.
+This is neither a complete no-writer hold nor approval of the production
+pin map. Timer spawn coverage, NATS transfer, detached-process census, boot
+hold, UTM rehearsal, stopped-VM capture, all four real-history acceptance
+and production resumption remain open. No live service, VM or NATS store was
+stopped or changed; step 1.2 remains [A]/v1.2-pre.

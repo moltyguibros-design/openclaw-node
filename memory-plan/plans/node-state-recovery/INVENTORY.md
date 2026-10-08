@@ -2303,3 +2303,20 @@ hold or real NATS acceptance. Production pin approval, all-job and detached
 writer coverage, UTM shutdown gate, stopped-VM capture, four real-history
 acceptance and verified resumption remain open. No live service, VM or NATS
 store changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-08 16:08 EDT: D136 opens the class-bound persistent stop
+path for non-NATS daemon units after the listener fence. The native 23-label
+fixture now stops and restores an owned mesh-bridge before listener release,
+using kernel exit evidence, a real disabled override, a private connection,
+completion marker, new owner and live port. A pre-listener stop refuses before
+intent, and a failed bridge readiness leaves the listener disabled and the
+execution gate closed. Exact-head `de3de11d` macOS job 113510989748 passed
+19 baseline tests without skips, 151 journal tests, 46 hold tests and 54
+managed-launchd tests with one explicit skip. Stronger native retry and
+running-owner assertions at `e69159da` await exact-head CI. The overall
+workflow remains red at separate dependency audit gates. This is one owned
+daemon proof with 21 inert stubs, not the production no-writer hold. The
+approved production pin map, remaining class stops, timer spawn witness,
+detached-process census, boot/UTM gates, stopped capture, four real-history
+acceptance and verified service resumption remain open. No live service, VM
+or NATS store changed; 1.2 remains [A]/v1.2-pre.
