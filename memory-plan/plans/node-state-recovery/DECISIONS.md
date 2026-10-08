@@ -2822,3 +2822,35 @@ node no-writer interval, production pin map, UTM shutdown gate, stopped-VM
 capture, four real-history acceptance or verified resumption is proven. The
 overall workflow remains red at separate dependency audit gates. No live
 service, VM or NATS store was changed; step 1.2 remains [A]/v1.2-pre.
+
+## D135 — Exercise owned listener release after the native 23-job stop (2026-10-08 13:59 EDT)
+
+The dedicated macOS fixture now takes the unpatched 23-label launchd baseline,
+closes the native execution gate, persistently stops its owned deploy listener,
+and recovers that listener through the full-node journal on the same boot. The
+recovery twin reads all 23 actual launchd states and installed identities. It
+requires the closed gate and a listener fence before restore, a new bound owner
+with an atomically published ready record and second startup marker, a new
+private bus connection, final physical readiness, a live fast check at gate
+reopen, ordered listener-release and override-clear receipts, and a resolved
+journal. The other 22 jobs are inert owned stubs. The deploy-fence and physical
+checks are owned fixture callbacks; the socket is not NATS.
+
+The first release runs at `f9046bad` and `8ebcfde2` failed before restore
+because the fixture re-peeked a dead TCP socket long after `StopWatch` had
+already proven normal EOF. The stopped-state physical check now uses that
+verified stop receipt and still checks the disabled override and absent port;
+the first EOF check remains strict. Exact-head `2a09385f` passed the release
+twin and the entire macOS job. The ready file became atomic at `b126270b`;
+the final gate-reopen check became live at `99af7732`. Exact-head macOS job
+113456011934 passed all 18 baseline tests without skips, 150 journal tests,
+46 hold tests, and 53 managed-launchd tests with one explicit skip. The overall
+workflow remains red at separate root and Mission Control dependency audits;
+the Node 22 job was canceled by fail-fast.
+
+This establishes a same-boot owned listener release after a native 23-job
+baseline and one managed stop. It does not prove a complete no-writer hold,
+the production pin map or deploy fence, the readiness of the other 22 actual
+services, UTM shutdown, stopped-VM capture, acceptance of all four real NATS
+histories, or production resumption. No live service, VM or NATS store was
+stopped or changed; step 1.2 remains [A]/v1.2-pre.

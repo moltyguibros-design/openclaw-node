@@ -474,6 +474,9 @@ process.on('SIGTERM',()=>{
                                     nonlocal new_bus_connection
                                     self.assertEqual(unit, 'mesh-deploy-listener')
                                     self.assertEqual(fence_checks, [True])
+                                    self.assertEqual(gate.marker(),
+                                        {key: journal.records[1]['hold'][key]
+                                         for key in ('window', 'reason')})
                                     listener_ready.unlink()
                                     def ready(owner):
                                         return (listener_ready.exists()
@@ -500,7 +503,19 @@ process.on('SIGTERM',()=>{
                                                 rows.index(('override-clear-intent', 'mesh-deploy-listener')))
                                 self.assertLess(rows.index(('override-clear-intent', 'mesh-deploy-listener')),
                                                 rows.index(('recovery-verified', 'mesh-deploy-listener')))
+                                self.assertLess(rows.index(('recovery-verified', 'mesh-deploy-listener')),
+                                                rows.index(('final-state-verified', None)))
+                                self.assertLess(rows.index(('final-state-verified', None)),
+                                                rows.index(('hold-reopen-ready', None)))
+                                self.assertLess(rows.index(('hold-reopen-ready', None)),
+                                                rows.index(('hold-opened', None)))
+                                self.assertLess(rows.index(('hold-opened', None)),
+                                                rows.index(('recovery-finished', None)))
+                                self.assertFalse(any(row['event'] == 'failed' for row in journal.records))
+                                self.assertFalse(next(row for row in journal.records
+                                    if row['event'] == 'hold-opened')['restored_only'])
                                 self.assertTrue(journal.resolve())
+                                self.assertEqual(journal.records[-1]['event'], 'resolved')
                             else:
                                 stopped = subprocess.run(['/bin/launchctl', 'bootout',
                                                           'gui/' + uid + '/ai.openclaw.gateway'],

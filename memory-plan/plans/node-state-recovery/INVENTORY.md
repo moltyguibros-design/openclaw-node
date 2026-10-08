@@ -2289,3 +2289,17 @@ NATS connection, the other 22 owners are inert, and the production pin map,
 full no-writer hold, UTM shutdown gate, stopped-VM capture, four real-history
 acceptance and verified service resumption remain open. No live service, VM
 or NATS store changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-08 14:00 EDT: D135 adds a same-boot native 23-label
+owned recovery twin. After the unpatched baseline, gate closure and persistent
+listener stop, the full-node journal requires an owned deploy fence, restores
+the listener with a new bound owner and ready receipt, checks a new private
+connection and physical readiness, rechecks live state at gate reopen, then
+resolves. Exact-head `99af7732` macOS CI passed 18/18 baseline tests, 150
+journal, 46 hold and 53 managed-launchd tests (one explicit skip). The overall
+workflow still fails at separate dependency audit gates. This is an owned
+fixture with 22 inert jobs and a private socket, not a production no-writer
+hold or real NATS acceptance. Production pin approval, all-job and detached
+writer coverage, UTM shutdown gate, stopped-VM capture, four real-history
+acceptance and verified resumption remain open. No live service, VM or NATS
+store changed; 1.2 remains [A]/v1.2-pre.
