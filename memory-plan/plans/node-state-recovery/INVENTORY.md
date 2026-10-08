@@ -2265,3 +2265,15 @@ full 23-job stop, continuous and detached-process coverage, production pin
 approval, shutdown/reboot gates, stopped-VM capture, four actual-history
 acceptance and verified resumption remain open. No production service, VM or
 NATS store was changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-08 09:53 EDT: D133 closed the native execution gate after
+the unpatched owned 23-job baseline. The forward observer, marker-to-intent
+and receipt bindings, and journal order passed on macOS CI at `ad5ff90c`;
+booting out the owned gateway inside the window made the live forward
+inventory refuse. The 17-test baseline suite had no skip, and the 46 hold
+and 53 managed-launchd tests passed (one domain skip). Timer stubs never ran
+and the other daemon owners were not stopped, so this is gate composition,
+not a full-node hold. Production pin approval, all-job and detached-writer
+coverage, UTM shutdown gate, stopped-VM capture, four actual-history
+acceptance and verified resumption remain open. No production service, VM or
+NATS store changed; 1.2 remains [A]/v1.2-pre.

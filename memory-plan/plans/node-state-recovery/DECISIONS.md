@@ -2764,3 +2764,29 @@ writers. The production direct-file candidate remains unapproved and the
 actual 23-job hold, shutdown gate, disposable UTM rehearsal, stopped-VM
 capture, four-history acceptance and verified resumption remain open.
 No production service, VM or NATS store changed; step 1.2 remains [A]/v1.2-pre.
+
+## D133 — Close the native execution gate after an owned 23-job baseline (2026-10-08 09:53 EDT)
+
+The dedicated macOS fixture now calls `JournaledHold.close_and_drain()` after
+the unpatched 23-label launchd baseline and journal open. It requires the
+original native forward observer, a closed marker matching the hold intent,
+the published receipt matching the observer, and baseline → intent →
+hold-published → verified journal order. After closure it boots out only its
+owned gateway and requires `check_entrypoints(forward=True)` to refuse the
+changed loaded set. Claude's read-only review of the first head identified
+that negative as the missing decisive check; it found no false acceptance in
+the closure or failure cleanup.
+
+Exact-head `ad5ff90c` macOS CI job 113343411215 passed the 17-test baseline
+suite with no skip, 46 hold tests, and 53 managed-launchd tests with one
+explicit skip. The overall workflow remains red at existing root and Mission
+Control dependency audit gates; the Node 22 job was canceled by fail-fast.
+The five owned timer stubs never execute, so the drain has no foreground
+contender in this fixture. The daemon owners remain running until the owned
+gateway negative, and no full-node stop, continuous no-writer interval or
+UTM shutdown gate is proven. Next compose a native persistent listener stop
+with this exact 23-job baseline, then cover the remaining jobs and detached
+writers before any production stop. The approved production pin map,
+stopped-VM capture, four real-history acceptance and verified resumption
+remain open. No production service, VM or NATS store changed; step 1.2 stays
+[A]/v1.2-pre.
