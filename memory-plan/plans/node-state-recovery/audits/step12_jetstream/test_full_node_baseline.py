@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 from full_node_baseline import capture_full_node_prior, open_full_node_journal
 from journal_hold import JournaledHold
-from managed_launchd import Launchd, StopWatch
+from managed_launchd import Launchd, StopWatch, restore_disabled_daemon
 from preservation_checks import disabled_overrides
 from preservation_journal import (FULL_NODE_SCOPE, Journal, Refused, TIMER_UNITS,
                                   UNITS, static_identity, valid_entrypoint_inventory)
@@ -256,10 +256,7 @@ class FullNodeBaseline(unittest.TestCase):
 
 
 class OwnedFullNodeInventory(unittest.TestCase):
-    @unittest.skipUnless(sys.platform == 'darwin'
-                         and os.environ.get('OPENCLAW_CI_FULL_NODE_INVENTORY_FIXTURE') == '1',
-                         '23-label inventory fixture runs only on a dedicated macOS CI runner')
-    def test_native_entrypoint_capture_opens_the_full_node_journal(self):
+    def exercise_native_entrypoint_capture(self, release):
         labels = {'ai.openclaw.' + unit for unit in UNITS}
         uid = str(os.getuid())
         for folder in (pathlib.Path.home() / 'Library/LaunchAgents',
@@ -426,18 +423,93 @@ process.on('SIGTERM',()=>{
                             self.assertTrue(journal.listener_fenced())
                             self.assertFalse(service.status()['loaded'])
                             self.assertTrue(service.disabled())
-                            stopped = subprocess.run(['/bin/launchctl', 'bootout',
-                                                      'gui/' + uid + '/ai.openclaw.gateway'],
-                                                     capture_output=True, timeout=10)
-                            self.assertEqual(stopped.returncode, 0, stopped.stderr)
-                            deadline = time.monotonic() + 10
-                            while services['gateway'].status()['loaded']:
-                                self.assertLess(time.monotonic(), deadline,
-                                                'owned gateway did not unload')
-                                time.sleep(.05)
-                            with self.assertRaisesRegex(Refused,
-                                    'full-node loaded jobs changed inside the forward window'):
-                                journal.check_entrypoints(forward=True)
+                            if release:
+                                new_bus_connection = None
+                                def new_bus_alive():
+                                    if new_bus_connection is None:
+                                        return False
+                                    new_bus_connection.settimeout(.2)
+                                    try:
+                                        return new_bus_connection.recv(1, socket.MSG_PEEK) != b''
+                                    except socket.timeout:
+                                        return True
+                                def observe(unit, saved):
+                                    current = services[unit].status()
+                                    actual = {**saved, 'loaded': current['loaded'],
+                                              'running': current['running'],
+                                              'disabled': services[unit].disabled(),
+                                              'identity': static_identity(services[unit].plist)}
+                                    if unit == 'mesh-deploy-listener':
+                                        actual['verified'] = (current['running']
+                                            and listener_ready.exists()
+                                            and json.loads(listener_ready.read_text())['pid'] == current['pid']
+                                            and listener_log.read_text().count('═══ Ready ═══') >= 2)
+                                    else:
+                                        actual['verified'] = all(actual[key] == saved[key]
+                                            for key in ('loaded', 'running', 'disabled', 'identity'))
+                                    return actual
+                                def physical():
+                                    others = all(observe(unit, prior[unit])['verified']
+                                                 for unit in UNITS if unit != 'mesh-deploy-listener')
+                                    listener_running = service.status()['running']
+                                    if listener_running:
+                                        listener_ok = (observe('mesh-deploy-listener',
+                                                              prior['mesh-deploy-listener'])['verified']
+                                                       and new_bus_alive())
+                                    else:
+                                        listener_ok = (service.disabled() and connection_closed()
+                                                       and listener_absent())
+                                    return {'verified': others and listener_ok}
+                                fence_checks = []
+                                def deploy_fence():
+                                    checked = (gate.marker() is not None and service.disabled()
+                                               and not service.status()['loaded'])
+                                    fence_checks.append(checked)
+                                    return {'verified': checked}
+                                def restore(unit, saved):
+                                    nonlocal new_bus_connection
+                                    self.assertEqual(unit, 'mesh-deploy-listener')
+                                    self.assertEqual(fence_checks, [True])
+                                    listener_ready.unlink()
+                                    def ready(owner):
+                                        return (listener_ready.exists()
+                                            and json.loads(listener_ready.read_text())['pid']
+                                            == owner['status']['pid']
+                                            and listener_log.read_text().count('═══ Ready ═══') >= 2)
+                                    restarted = restore_disabled_daemon(service, journal, unit,
+                                                                         saved, ready, timeout=10)
+                                    self.assertNotEqual(restarted['status']['pid'],
+                                                        binding['status']['pid'])
+                                    new_bus_connection, _ = bus_server.accept()
+                                    self.addCleanup(new_bus_connection.close)
+                                result = hold.recover(restore, observe, physical,
+                                                      deploy_fence=deploy_fence)
+                                self.assertTrue(result['restored'], result)
+                                self.assertEqual(fence_checks, [True])
+                                self.assertTrue(service.status()['running'])
+                                self.assertFalse(service.disabled())
+                                self.assertIsNone(gate.marker())
+                                rows = [(row['event'], row.get('unit')) for row in journal.records]
+                                self.assertLess(rows.index(('listener-release-verified', None)),
+                                                rows.index(('restoration-intent', 'mesh-deploy-listener')))
+                                self.assertLess(rows.index(('restoration-intent', 'mesh-deploy-listener')),
+                                                rows.index(('override-clear-intent', 'mesh-deploy-listener')))
+                                self.assertLess(rows.index(('override-clear-intent', 'mesh-deploy-listener')),
+                                                rows.index(('recovery-verified', 'mesh-deploy-listener')))
+                                self.assertTrue(journal.resolve())
+                            else:
+                                stopped = subprocess.run(['/bin/launchctl', 'bootout',
+                                                          'gui/' + uid + '/ai.openclaw.gateway'],
+                                                         capture_output=True, timeout=10)
+                                self.assertEqual(stopped.returncode, 0, stopped.stderr)
+                                deadline = time.monotonic() + 10
+                                while services['gateway'].status()['loaded']:
+                                    self.assertLess(time.monotonic(), deadline,
+                                                    'owned gateway did not unload')
+                                    time.sleep(.05)
+                                with self.assertRaisesRegex(Refused,
+                                        'full-node loaded jobs changed inside the forward window'):
+                                    journal.check_entrypoints(forward=True)
                         finally:
                             hold.close()
             finally:
@@ -451,6 +523,18 @@ process.on('SIGTERM',()=>{
                 for unit in services:
                     self.assertFalse(services[unit].status()['loaded'])
                     self.assertFalse(services[unit].disabled())
+
+    @unittest.skipUnless(sys.platform == 'darwin'
+                         and os.environ.get('OPENCLAW_CI_FULL_NODE_INVENTORY_FIXTURE') == '1',
+                         '23-label inventory fixture runs only on a dedicated macOS CI runner')
+    def test_native_entrypoint_capture_refuses_forward_drift(self):
+        self.exercise_native_entrypoint_capture(False)
+
+    @unittest.skipUnless(sys.platform == 'darwin'
+                         and os.environ.get('OPENCLAW_CI_FULL_NODE_INVENTORY_FIXTURE') == '1',
+                         '23-label inventory fixture runs only on a dedicated macOS CI runner')
+    def test_native_entrypoint_capture_restores_listener_after_release(self):
+        self.exercise_native_entrypoint_capture(True)
 
 
 if __name__ == '__main__':
