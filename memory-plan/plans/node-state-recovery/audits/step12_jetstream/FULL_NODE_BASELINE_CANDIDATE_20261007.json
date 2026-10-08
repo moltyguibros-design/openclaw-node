@@ -430,6 +430,18 @@
     "relation": "observed after candidate capture; boot began before its observation window",
     "subsequent_baseline_recheck": "refused when observer service changed during the two-pass read"
   },
+  "subsequent_static_drift": {
+    "observed_at_utc": "2026-10-08T21:35:30+00:00",
+    "scope": "read-only recheck; original proposed map remains unapproved and unchanged",
+    "inventory": "23 installed, 21 GUI-loaded, none user/system-loaded; loaded set, roots and exclusion match the candidate",
+    "plist_drift": ["workplan-viewer"],
+    "old_plist_sha256": "6d2c46a7b599e9b5f5c4a0cee4cbd839c46783dac617ad78f611ac74fedf1324",
+    "current_plist_sha256": "f18ffd0163aac0ba56324fff35a8f0928d8121a7ccb0f5fa595fb1f923d43caa",
+    "current_entry_sha256": "f4c1bc5ed640bf7412e3f65f0689777b414abfb6f6ead4a18f48e486585fd7f9",
+    "direct_file_hashes_from_original_map": "59 original pins still hash-match; the new viewer entry is not in that map",
+    "producer_result": "Refused installed plist differs from approved record: workplan-viewer",
+    "meaning": "a fresh full-node recapture and explicit pin approval are required before a production journal"
+  },
   "type": "full-node-baseline-candidate",
   "validation": {
     "execution_hold_gate_descriptor": false,

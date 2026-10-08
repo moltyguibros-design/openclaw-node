@@ -2320,3 +2320,13 @@ approved production pin map, remaining class stops, timer spawn witness,
 detached-process census, boot/UTM gates, stopped capture, four real-history
 acceptance and verified service resumption remain open. No live service, VM
 or NATS store changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-08 17:35 EDT: D137's read-only inventory still finds 23
+installed jobs and the same 21 GUI-loaded labels, but the installed
+`workplan-viewer` plist now points to a different release. The October 7
+unapproved map's original direct files still hash-match, while its viewer
+plist pin is stale and it omits the new entry file. The unmodified baseline
+producer refused that map with `installed plist differs from approved record:
+workplan-viewer`. A fresh recapture and approval are prerequisites to any
+production full-node journal. No service, VM or NATS history changed in this
+read-only check; step 1.2 remains [A]/v1.2-pre.

@@ -2895,3 +2895,21 @@ pin map. Timer spawn coverage, NATS transfer, detached-process census, boot
 hold, UTM rehearsal, stopped-VM capture, all four real-history acceptance
 and production resumption remain open. No live service, VM or NATS store was
 stopped or changed; step 1.2 remains [A]/v1.2-pre.
+
+## D137 — Refuse the stale full-node candidate after viewer deployment (2026-10-08 17:35 EDT)
+
+A read-only recheck found the same 23 installed jobs, 21 GUI-loaded jobs,
+entrypoint roots and excluded helper as the October 7 unapproved candidate.
+All 59 paths in that candidate's direct-file map still hash-match, but the
+installed `workplan-viewer` plist now points to a new release entry. Its
+plist SHA-256 is `f18ffd01…`, not the candidate's `6d2c46a7…`, and the new
+entry file is absent from the candidate's map. Running the unmodified
+baseline producer against the old map refused on the viewer's installed
+plist before it could produce a prior. The current viewer was observed
+running under launchd; no service operation was issued by this check.
+
+The October 7 map remains unapproved and is now demonstrably stale. A new
+point-in-time recapture, review of the viewer release's file dependencies,
+and explicit approval are required before a production full-node journal.
+The full hold and shutdown gates remain open; no VM, production service or
+NATS store was stopped or restarted for this observation.
