@@ -4,6 +4,7 @@ import json
 import os
 import pathlib
 import plistlib
+import shutil
 import socket
 import subprocess
 import sys
@@ -290,30 +291,27 @@ class OwnedFullNodeInventory(unittest.TestCase):
             entry.write_text('raise SystemExit(78)\n')
             manifest.write_text('{"owned":true}\n')
             manifest_hash = hashlib.sha256(manifest.read_bytes()).hexdigest()
-            listener_script = root / 'listener.py'
+            listener_script = root / 'listener.cjs'
             listener_ready = root / 'listener-ready.json'
             listener_log = root / 'listener.log'
             listener_err = root / 'listener.err'
             listener_log.touch(mode=0o600)
             listener_err.touch(mode=0o600)
             listener_script.write_text('''
-import json, os, pathlib, signal, socket
-bus = socket.create_connection(('127.0.0.1', int(os.environ['OWNED_BUS_PORT'])))
-listener = socket.socket()
-listener.bind(('127.0.0.1', 0))
-listener.listen()
-ready = pathlib.Path(os.environ['OWNED_READY'])
-ready.write_text(json.dumps({'pid': os.getpid(), 'port': listener.getsockname()[1]}))
-print('═══ Ready ═══', flush=True)
-def stop(_signal, _frame):
-    bus.close()
-    listener.close()
-    print('SIGTERM — shutting down', flush=True)
-    raise SystemExit(0)
-signal.signal(signal.SIGTERM, stop)
-while True:
-    signal.pause()
+const fs=require('node:fs'),net=require('node:net');
+const bus=net.connect(Number(process.env.OWNED_BUS_PORT),'127.0.0.1');
+const listener=net.createServer();
+bus.once('connect',()=>listener.listen(0,'127.0.0.1',()=>{
+ fs.writeFileSync(process.env.OWNED_READY,JSON.stringify({pid:process.pid,port:listener.address().port}));
+ console.log('═══ Ready ═══');
+}));
+process.on('SIGTERM',()=>{
+ bus.end();
+ listener.close(()=>{console.log('SIGTERM — shutting down');process.exit(0);});
+});
 ''')
+            node = shutil.which('node')
+            self.assertIsNotNone(node)
             bus_server = socket.socket()
             bus_server.bind(('127.0.0.1', 0))
             bus_server.listen()
@@ -332,7 +330,7 @@ while True:
                     argv = (['/usr/bin/python3', '-I', '-S', str(entry), str(manifest),
                              manifest_hash, label, str(gate_root), pins['lock'], pins['root'],
                              '--', '/bin/sleep', '900'] if kind == 'timer' else
-                            [sys.executable, '-u', '-I', '-S', str(listener_script)]
+                            [node, str(listener_script)]
                             if unit == 'mesh-deploy-listener' else
                             ['/bin/sleep', '900'])
                     plist = agents / (label + '.plist')
