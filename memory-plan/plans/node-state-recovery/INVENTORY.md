@@ -2253,3 +2253,15 @@ readiness. The other 22 jobs, actual production readiness, unpatched
 entrypoint capture and real deploy fence remain open, as do stopped-VM
 capture, all four real-history acceptances and verified resumption. The
 production VM, services and NATS stores were untouched.
+
+Checkpoint 2026-10-08 07:58 EDT: D132's dedicated macOS fixture opened a
+full-node journal from a native 23-label launchd capture and validated the
+five timers' gated argv shapes. Exact-head `a86febbb` passed the 17-test
+baseline suite and the 53-test managed-launchd suite with one skip. Earlier
+CI runs exposed disappearing neutral Apple services during launchd listing;
+the current scan rechecks their absence and still refuses an uninspectable
+managed or present label. This is an owned point-in-time baseline only. The
+full 23-job stop, continuous and detached-process coverage, production pin
+approval, shutdown/reboot gates, stopped-VM capture, four actual-history
+acceptance and verified resumption remain open. No production service, VM or
+NATS store was changed; 1.2 remains [A]/v1.2-pre.

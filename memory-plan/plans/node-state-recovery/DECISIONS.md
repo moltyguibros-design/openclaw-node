@@ -2730,3 +2730,37 @@ full-node hold, stopped-VM capture, isolated acceptance of all four real
 NATS histories and verified production resumption remain open. The overall
 workflow is still red at unrelated dependency audit gates. No production
 service, VM or NATS store was stopped or changed.
+
+## D132 — Exercise the native 23-job baseline on an owned macOS runner (2026-10-08 07:58 EDT)
+
+An owned fixture installs the exact 23 labels under a temporary HOME on a
+dedicated macOS CI runner. Twenty-one jobs are GUI-loaded, with the required
+daemon owners running and five timers plus the on-demand unit idle; member 1
+and federation-tick remain unloaded with disabled overrides. The fixture
+passes a private gate and direct-file map to the unpatched full-node baseline
+producer and journal opener. Actual launchd inventory, status, overrides and
+installed plist bytes feed the durable prior. `JournaledHold` accepts the five
+gated timer argv identities. The fixture uses inert sleep owners and never
+starts a NATS server, closes the gate or stops a managed job.
+The approved map is derived from those owned plists, so this run does not
+independently test its pin mismatch refusal; D123's negatives cover that.
+Timer validation here checks argv shape, not timer execution or gate behavior.
+
+The first two macOS runs refused while short-lived Apple `mdworker` labels
+disappeared between a domain listing and per-label inspection. The inventory
+now re-reads that domain before excluding a neutral label whose inspection
+failed; it still refuses a managed OpenClaw label, a neutral label that
+remains listed, or an unreadable replacement listing. An owned negative pins
+those three cases. At exact head `a86febbb`, the macOS job passed the new
+17-test baseline suite, the 53-test managed-launchd suite with one skip, and
+the journal/hold checks. The overall workflow remains red at existing root
+and Mission Control dependency audits.
+
+This establishes an owned, point-in-time 23-job baseline and journal handoff,
+not a continuous no-writer interval or a full-node stop. A neutral job that
+vanishes during capture is outside the returned snapshot; the later complete
+hold still needs continuous launchd and process evidence, including detached
+writers. The production direct-file candidate remains unapproved and the
+actual 23-job hold, shutdown gate, disposable UTM rehearsal, stopped-VM
+capture, four-history acceptance and verified resumption remain open.
+No production service, VM or NATS store changed; step 1.2 remains [A]/v1.2-pre.
