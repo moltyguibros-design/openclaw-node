@@ -384,7 +384,9 @@ process.on('SIGTERM',()=>{
                         self.assertEqual(evidence['loaded']['user'], [])
                         self.assertEqual(evidence['loaded']['system'], [])
                         self.assertEqual(sum(prior[unit]['running'] for unit in UNITS), len(running))
-                        hold = JournaledHold(journal, gate, lambda: {'verified': True})
+                        hold = JournaledHold(journal, gate,
+                            lambda: {'verified': True,
+                                     'baseline_sha256': journal.records[0]['sha256']})
                         try:
                             hold.close_and_drain()
                             closed = hold.check_forward()
