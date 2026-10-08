@@ -459,7 +459,7 @@ process.on('SIGTERM',()=>{
                                                               prior['mesh-deploy-listener'])['verified']
                                                        and new_bus_alive())
                                     else:
-                                        listener_ok = (service.disabled() and connection_closed()
+                                        listener_ok = (service.disabled() and proof['connections_closed']
                                                        and listener_absent())
                                     return {'verified': others and listener_ok}
                                 fence_checks = []
