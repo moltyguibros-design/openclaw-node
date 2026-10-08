@@ -89,6 +89,14 @@ class FullNodeBaseline(unittest.TestCase):
         with self.assertRaisesRegex(Refused, 'approved direct files differ'):
             self.capture()
 
+    def test_aliased_approved_direct_file_refuses(self):
+        alias = self.root / 'owned-binary-alias'
+        alias.symlink_to(self.binary)
+        self.approved['gateway']['direct_file_hashes'][str(alias)] = (
+            self.approved['gateway']['direct_file_hashes'][str(self.binary)])
+        with self.assertRaisesRegex(Refused, 'approved direct-file paths alias'):
+            self.capture()
+
     def test_installed_plist_drift_refuses(self):
         self.entrypoints['installed']['ai.openclaw.gateway']['sha256'] = '0' * 64
         with self.assertRaisesRegex(Refused, 'installed plist differs'):
@@ -99,6 +107,17 @@ class FullNodeBaseline(unittest.TestCase):
         changed['loaded']['gui'].remove('ai.openclaw.gateway')
         with self.assertRaisesRegex(Refused, 'changed during baseline'):
             self.capture([self.entrypoints, changed])
+
+    def test_inventory_omits_running_daemon_refuses(self):
+        self.entrypoints['loaded']['gui'].remove('ai.openclaw.gateway')
+        with self.assertRaisesRegex(Refused, 'loaded entrypoints differ'):
+            self.capture()
+
+    def test_idle_daemon_refuses_prior(self):
+        self.states['ai.openclaw.gateway']['running'] = False
+        self.states['ai.openclaw.gateway']['pid'] = None
+        with self.assertRaisesRegex(Refused, 'baseline does not match'):
+            self.capture()
 
     def test_daemon_generation_change_refuses(self):
         calls = {'gateway': 0}

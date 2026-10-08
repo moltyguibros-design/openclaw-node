@@ -2145,3 +2145,11 @@ and hold suites pass 201 tests; plan lint is conformant. No full-node journal
 has been opened or service stopped with this producer. The owned listener
 composition, complete persistent hold, stopped-VM capture, acceptance of
 all four real histories and verified resumption remain open.
+
+Checkpoint 2026-10-07 21:42 EDT: D124 pins three more fail-closed baseline
+checks with owned negatives: direct-file alias, running unit omitted from
+launchd inventory, and an idle unit declared daemon. The October 2 approved
+23-unit map is stale for memory-daemon and node-watch after the October 3
+recaptures; those later records do not carry a complete `units` map. A fresh
+approved 23-unit map remains a prerequisite before production baseline
+capture. No production service or VM was touched.

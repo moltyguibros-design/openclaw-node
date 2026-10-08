@@ -2532,3 +2532,23 @@ a complete hold certificate or permission to stop the production VM or any
 service. The production controller, root/user and detached-process census,
 timer spawn witness, host UTM rehearsal, stopped-VM capture, four real-history
 acceptance and verified resumption remain open. Step 1.2 stays [A]/v1.2-pre.
+
+## D124 — Pin the baseline producer's three remaining refusal contracts and recapture its input (2026-10-07 21:42 EDT)
+
+Adversarial review of D123 at `a1fb350d` confirmed the producer is read-only
+and its 23-unit input schema matches
+`POST_RETIREMENT_BASELINE_RECAPTURE_20261002.json`. Three decisive owned
+negatives now pin rejection of aliased direct-file paths, an inventory that
+omits a running daemon, and an idle daemon declared as a required running
+member. They exercise the alias check, `valid_entrypoint_inventory`, and
+`valid_prior` respectively. The baseline test suite now has ten tests.
+
+The October 2 map cannot serve as a current production input: the October 3
+memory-daemon and node-watch recaptures record changed installed plists and
+entry files, but neither provides a replacement 23-unit `units` map. A fresh,
+operator-approved 23-unit direct-file and plist recapture is required before
+calling the producer on the node. The approved direct-file map must include
+the program binary and every argv element that resolves to a regular file;
+`static_identity` hashes those automatically. This is a fail-closed input
+gap, not permission to adapt the old map or relax equality. No live node,
+service, VM or NATS store was contacted in this review or these tests.
