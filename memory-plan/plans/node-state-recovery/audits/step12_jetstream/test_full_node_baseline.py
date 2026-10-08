@@ -581,7 +581,7 @@ process.on('SIGTERM',()=>{
                                                 and bridge_log.read_text().count('Bridge ready.') >= 2)
                                         restarted = restore_disabled_daemon(
                                             bridge_service, journal, unit, saved, ready,
-                                            timeout=.3 if bridge_failure else 10)
+                                            timeout=2 if bridge_failure else 10)
                                         self.assertNotEqual(restarted['status']['pid'],
                                                             bridge_binding['status']['pid'])
                                         new_bridge_bus_connection, _ = bridge_bus_server.accept()
@@ -606,6 +606,7 @@ process.on('SIGTERM',()=>{
                                 if bridge_failure:
                                     self.assertFalse(result['restored'], result)
                                     self.assertEqual(fence_checks, [])
+                                    self.assertTrue(bridge_service.status()['running'])
                                     self.assertTrue(bridge_service.disabled())
                                     self.assertFalse(service.status()['loaded'])
                                     self.assertTrue(service.disabled())
@@ -620,6 +621,13 @@ process.on('SIGTERM',()=>{
                                     with self.assertRaisesRegex(Refused,
                                             'unrestored node cannot be sealed'):
                                         journal.resolve()
+                                    before_retry = len(journal.records)
+                                    with self.assertRaisesRegex(Refused,
+                                            'cleared without verified recovery: mesh-bridge'):
+                                        hold.recover(lambda *_: self.fail('retry restored a service'),
+                                                     observe, physical,
+                                                     deploy_fence=lambda: self.fail('retry released listener'))
+                                    self.assertEqual(len(journal.records), before_retry)
                                     return
                                 self.assertTrue(result['restored'], result)
                                 self.assertEqual(fence_checks, [True])
