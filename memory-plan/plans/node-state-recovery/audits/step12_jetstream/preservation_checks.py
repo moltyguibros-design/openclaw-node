@@ -360,7 +360,8 @@ def loaded_entrypoints(domain_text, domain, protected_roots, inspect=None):
     require(match is not None, 'launchd domain lacks a services inventory')
     roots = tuple({pathlib.Path(root).resolve(strict=False) for root in protected_roots})
     inspect = inspect or (lambda label: subprocess.check_output(
-        ['/bin/launchctl', 'print', domain + '/' + label], text=True, timeout=10))
+        ['/bin/launchctl', 'print', domain + '/' + label], text=True,
+        stderr=subprocess.PIPE, timeout=10))
     labels = set()
     for line in match[1].splitlines():
         fields = line.split()
@@ -370,6 +371,17 @@ def loaded_entrypoints(domain_text, domain, protected_roots, inspect=None):
         try:
             details = inspect(label)
         except (OSError, subprocess.SubprocessError) as error:
+            if not label.startswith(('ai.openclaw.', 'com.openclaw.')):
+                try:
+                    current = subprocess.check_output(['/bin/launchctl', 'print', domain],
+                                                      text=True, timeout=10)
+                except (OSError, subprocess.SubprocessError):
+                    current = ''
+                present = re.search(r'^\s*services = \{\n(.*?)^\s*\}', current, re.M | re.S)
+                if present is not None and not any(
+                        len(fields) >= 3 and fields[-1] == label
+                        for fields in (line.split() for line in present[1].splitlines())):
+                    continue
             raise Refused('loaded launchd service cannot be inspected: ' + label) from error
         values = []
         fields = {}
@@ -452,16 +464,8 @@ def capture_entrypoint_inventory(expected):
     domains = ('gui/' + str(os.getuid()), 'user/' + str(os.getuid()), 'system')
     listings = [subprocess.check_output(['/bin/launchctl', 'print', domain],
                 text=True, timeout=10) for domain in domains]
-    try:
-        loaded = [loaded_entrypoints(listing, domain, roots)
-                  for listing, domain in zip(listings, domains)]
-    except Refused as error:
-        if not str(error).startswith('loaded launchd service cannot be inspected: '):
-            raise
-        listings = [subprocess.check_output(['/bin/launchctl', 'print', domain],
-                    text=True, timeout=10) for domain in domains]
-        loaded = [loaded_entrypoints(listing, domain, roots)
-                  for listing, domain in zip(listings, domains)]
+    loaded = [loaded_entrypoints(listing, domain, roots)
+              for listing, domain in zip(listings, domains)]
     expected_labels = {'ai.openclaw.' + unit for unit in expected}
     override_output = [subprocess.check_output(['/bin/launchctl', 'print-disabled', domain],
                        text=True, timeout=10) for domain in domains]
