@@ -1,8 +1,10 @@
 import copy
 import hashlib
+import json
 import os
 import pathlib
 import plistlib
+import socket
 import subprocess
 import sys
 import tempfile
@@ -13,7 +15,7 @@ from unittest.mock import patch
 
 from full_node_baseline import capture_full_node_prior, open_full_node_journal
 from journal_hold import JournaledHold
-from managed_launchd import Launchd
+from managed_launchd import Launchd, StopWatch
 from preservation_checks import disabled_overrides
 from preservation_journal import (FULL_NODE_SCOPE, Journal, Refused, TIMER_UNITS,
                                   UNITS, static_identity, valid_entrypoint_inventory)
@@ -288,6 +290,35 @@ class OwnedFullNodeInventory(unittest.TestCase):
             entry.write_text('raise SystemExit(78)\n')
             manifest.write_text('{"owned":true}\n')
             manifest_hash = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            listener_script = root / 'listener.py'
+            listener_ready = root / 'listener-ready.json'
+            listener_log = root / 'listener.log'
+            listener_err = root / 'listener.err'
+            listener_log.touch(mode=0o600)
+            listener_err.touch(mode=0o600)
+            listener_script.write_text('''
+import json, os, pathlib, signal, socket
+bus = socket.create_connection(('127.0.0.1', int(os.environ['OWNED_BUS_PORT'])))
+listener = socket.socket()
+listener.bind(('127.0.0.1', 0))
+listener.listen()
+ready = pathlib.Path(os.environ['OWNED_READY'])
+ready.write_text(json.dumps({'pid': os.getpid(), 'port': listener.getsockname()[1]}))
+print('═══ Ready ═══', flush=True)
+def stop(_signal, _frame):
+    bus.close()
+    listener.close()
+    print('SIGTERM — shutting down', flush=True)
+    raise SystemExit(0)
+signal.signal(signal.SIGTERM, stop)
+while True:
+    signal.pause()
+''')
+            bus_server = socket.socket()
+            bus_server.bind(('127.0.0.1', 0))
+            bus_server.listen()
+            bus_server.settimeout(20)
+            self.addCleanup(bus_server.close)
             services = {}
             approved = {}
             try:
@@ -301,13 +332,22 @@ class OwnedFullNodeInventory(unittest.TestCase):
                     argv = (['/usr/bin/python3', '-I', '-S', str(entry), str(manifest),
                              manifest_hash, label, str(gate_root), pins['lock'], pins['root'],
                              '--', '/bin/sleep', '900'] if kind == 'timer' else
+                            [sys.executable, '-u', '-I', '-S', str(listener_script)]
+                            if unit == 'mesh-deploy-listener' else
                             ['/bin/sleep', '900'])
                     plist = agents / (label + '.plist')
-                    plist.write_bytes(plistlib.dumps({
+                    config = {
                         'Label': label, 'ProgramArguments': argv,
                         'WorkingDirectory': str(root),
                         'RunAtLoad': kind in ('daemon', 'known-broken'),
-                        'KeepAlive': False}))
+                        'KeepAlive': False}
+                    if unit == 'mesh-deploy-listener':
+                        config.update({'EnvironmentVariables': {
+                            'OWNED_BUS_PORT': str(bus_server.getsockname()[1]),
+                            'OWNED_READY': str(listener_ready)},
+                            'ExitTimeOut': 5, 'StandardOutPath': str(listener_log),
+                            'StandardErrorPath': str(listener_err)})
+                    plist.write_bytes(plistlib.dumps(config))
                     identity = static_identity(plist)
                     approved[unit] = {'class': kind,
                         'plist': {'path': str(plist), 'sha256': identity['plist_sha256']},
@@ -323,6 +363,12 @@ class OwnedFullNodeInventory(unittest.TestCase):
                 while not all(services[unit].status()['running'] for unit in running):
                     self.assertLess(time.monotonic(), deadline, 'owned daemons did not start')
                     time.sleep(.05)
+                bus_connection, _ = bus_server.accept()
+                self.addCleanup(bus_connection.close)
+                while not listener_ready.exists() or '═══ Ready ═══' not in listener_log.read_text():
+                    self.assertLess(time.monotonic(), deadline, 'owned listener did not become ready')
+                    time.sleep(.05)
+                listener_details = json.loads(listener_ready.read_text())
                 writer_lock = root / 'writer.lock'
                 writer_lock.write_bytes(b'owned writer lock')
                 writer_lock.chmod(0o644)
@@ -355,6 +401,31 @@ class OwnedFullNodeInventory(unittest.TestCase):
                             self.assertEqual(journal.records[2]['receipt'], closed['receipt'])
                             self.assertEqual([row['event'] for row in journal.records[:4]],
                                              ['baseline', 'intent', 'hold-published', 'verified'])
+                            service = services['mesh-deploy-listener']
+                            identity = prior['mesh-deploy-listener']['identity']
+                            binding = service.bind(identity['argv'], identity['argv'][0],
+                                                   identity['working_directory'])
+                            self.assertEqual(binding['status']['pid'], listener_details['pid'])
+                            def connection_closed():
+                                bus_connection.settimeout(.2)
+                                try:
+                                    return bus_connection.recv(1, socket.MSG_PEEK) == b''
+                                except socket.timeout:
+                                    return False
+                            def listener_absent():
+                                with socket.socket() as probe:
+                                    probe.settimeout(.2)
+                                    return probe.connect_ex(('127.0.0.1', listener_details['port'])) != 0
+                            with StopWatch(service, binding, [listener_log, listener_err],
+                                           'mesh-deploy-listener',
+                                           startup_segment=listener_log.read_text(),
+                                           require_disabled=True) as watch:
+                                proof = watch.mutate(journal, 'mesh-deploy-listener',
+                                                     connection_closed, listener_absent, hold=hold)
+                            self.assertTrue(Journal.managed_stop_proven(proof))
+                            self.assertTrue(journal.listener_fenced())
+                            self.assertFalse(service.status()['loaded'])
+                            self.assertTrue(service.disabled())
                             stopped = subprocess.run(['/bin/launchctl', 'bootout',
                                                       'gui/' + uid + '/ai.openclaw.gateway'],
                                                      capture_output=True, timeout=10)
