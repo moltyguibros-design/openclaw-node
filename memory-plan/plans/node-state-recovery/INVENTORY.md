@@ -2161,3 +2161,12 @@ October 3 recaptures. An owned producer-to-journal test opens a full-node
 journal; a negative refuses inventory drift before a node receipt. The real
 gate and complete hold remain unproven. No production service or VM was
 stopped or restarted; all four NATS histories remain untouched.
+
+Checkpoint 2026-10-07 23:46 EDT: D126 records the guest's current boot at
+2026-10-04 10:57:20 EDT. It followed the October 3 recaptures; no evidence
+explains its cause or certifies transient process absence. Current member-1
+and federation-tick overrides remain disabled, but D62's boot-hold gate stays
+open. A subsequent read-only baseline recheck refused on an `observer` timer
+status change, so D125's candidate remains point-in-time and unapproved.
+The previous checkpoint's "histories remain untouched" meant no mutation by
+this agent; it did not certify continuity across that boot.

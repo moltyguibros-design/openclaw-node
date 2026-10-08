@@ -2584,3 +2584,25 @@ a node receipt is written. This proves the schema handoff, not a continuous
 watch or a completed full-node hold. The baseline suite has 12 tests. The
 live observation was read-only; the production VM, services and NATS histories
 were not stopped or restarted.
+
+## D126 — Bind the candidate to the observed guest boot without certifying a boot hold (2026-10-07 23:46 EDT)
+
+Read-only `kern.boottime` and the hashed `kern.bootsessionuuid` place the
+current guest boot at 2026-10-04 10:57:20 EDT, after the October 3
+recaptures and before D125's candidate observation. The current launchd
+inventory has 23 installed jobs and 21 loaded in the GUI domain; member 1
+and federation-tick are unloaded with disabled overrides in GUI and user.
+The October 4 boot's cause and its transient launch/process history are not
+recorded. Present-state overrides do **not** prove D62's continuous boot hold
+or the required no-writer interval, and this prior reboot cannot substitute
+for the disposable UTM rehearsal or authorize a production stop.
+
+A later read-only call to the two-pass baseline producer refused because the
+`observer` timer's service status changed during capture. This is the
+intended fail-closed behavior for a transient timer run. It also means the
+current candidate must be rechecked at the actual window, not treated as a
+durable live baseline. The candidate now records the subsequent boot
+observation and that refusal without changing its `unapproved` status. No
+service or VM was stopped or restarted in this investigation.
+The earlier D125 checkpoint's "histories remain untouched" referred only to
+this agent's actions; continuity across the October 4 boot is unproven.

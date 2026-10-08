@@ -423,6 +423,13 @@
     }
   },
   "source_previous_sha256": "6b574a510c5dbe1bee3bce718a6d6f873cbf2739dd0b07d611336316fa00d550",
+  "subsequent_boot_observation": {
+    "booted_at_utc": "2026-10-04T14:57:20+00:00",
+    "bootsession_sha256": "4a54eeeed6107946c70b94437c0dad18a1ab130a3d53691cd1fd440d48e84d73",
+    "observed_at_utc": "2026-10-08T03:46:09.475981+00:00",
+    "relation": "observed after candidate capture; boot began before its observation window",
+    "subsequent_baseline_recheck": "refused when observer service changed during the two-pass read"
+  },
   "type": "full-node-baseline-candidate",
   "validation": {
     "execution_hold_gate_descriptor": false,
