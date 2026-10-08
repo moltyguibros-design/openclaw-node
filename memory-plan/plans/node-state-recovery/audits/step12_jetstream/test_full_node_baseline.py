@@ -299,7 +299,8 @@ const fs=require('node:fs'),net=require('node:net');
 const bus=net.connect(Number(process.env.OWNED_BUS_PORT),'127.0.0.1');
 const listener=net.createServer(connection=>connection.destroy());
 bus.once('connect',()=>listener.listen(0,'127.0.0.1',()=>{
- fs.writeFileSync(process.env.OWNED_READY,JSON.stringify({pid:process.pid,port:listener.address().port}));
+ fs.writeFileSync(process.env.OWNED_READY+'.pending',JSON.stringify({pid:process.pid,port:listener.address().port}));
+ fs.renameSync(process.env.OWNED_READY+'.pending',process.env.OWNED_READY);
  console.log('═══ Ready ═══');
 }));
 process.on('SIGTERM',()=>{
