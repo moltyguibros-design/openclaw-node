@@ -11,7 +11,7 @@ import subprocess
 import time
 
 from preservation_checks import Refused, require, verify_completion, verify_timer_idle
-from preservation_journal import FULL_NODE_SCOPE, regular_content
+from preservation_journal import FULL_NODE_SCOPE, NATS_TRANSFER_UNITS, regular_content
 
 
 EXIT_FLAGS = 0x84000000
@@ -544,8 +544,10 @@ class StopWatch:
                     'managed stop owner differs from journal unit')
             require(unit != 'mesh-deploy-listener' or self.require_disabled,
                     'deploy listener requires a persistent managed stop')
-            require(unit == 'mesh-deploy-listener' or not self.require_disabled,
-                    'other full-node units lack an enable-capable recovery adapter')
+            require(unit == 'mesh-deploy-listener' or not self.require_disabled
+                    or (unit not in NATS_TRANSFER_UNITS
+                        and journal.prior.get(unit, {}).get('class') == 'daemon'),
+                    'persistent full-node stop lacks a daemon recovery adapter')
         self.ready_for_intent()
         if self.require_disabled:
             require(hold is not None and hold.journal is journal,

@@ -208,15 +208,27 @@ class StopWatchPreflight(unittest.TestCase):
                              lambda: True, lambda: True)
 
     def test_full_node_stop_refuses_unrestorable_override_or_plain_listener(self):
-        journal = SimpleNamespace(scope='full-node')
+        journal = SimpleNamespace(scope='full-node', prior=full_node_inventory())
         for unit, persistent, expected in (
                 ('mesh-deploy-listener', False, 'deploy listener requires'),
-                ('gateway', True, 'other full-node units lack')):
+                ('observer', True, 'lacks a daemon recovery adapter'),
+                ('mesh-agent', True, 'lacks a daemon recovery adapter'),
+                ('mesh-tool-discord', True, 'lacks a daemon recovery adapter'),
+                ('nats', True, 'lacks a daemon recovery adapter'),
+                ('nats-1', True, 'lacks a daemon recovery adapter')):
             watch = SimpleNamespace(service=SimpleNamespace(label='ai.openclaw.' + unit),
                                     require_disabled=persistent,
                                     ready_for_intent=lambda: self.fail('stop watch reached'))
             with self.subTest(unit=unit), self.assertRaisesRegex(Refused, expected):
                 StopWatch.mutate(watch, journal, unit, lambda: True, lambda: True)
+
+    def test_full_node_daemon_stop_reaches_its_bound_watch(self):
+        journal = SimpleNamespace(scope='full-node', prior=full_node_inventory())
+        watch = SimpleNamespace(service=SimpleNamespace(label='ai.openclaw.mesh-bridge'),
+                                require_disabled=True,
+                                ready_for_intent=lambda: self.fail('bound watch reached'))
+        with self.assertRaisesRegex(AssertionError, 'bound watch reached'):
+            StopWatch.mutate(watch, journal, 'mesh-bridge', lambda: True, lambda: True)
 
     def test_persistent_stop_refuses_a_preexisting_override_before_intent(self):
         journal = SimpleNamespace(scope='full-node')

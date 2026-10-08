@@ -308,6 +308,15 @@ process.on('SIGTERM',()=>{
  listener.close(()=>{console.log('SIGTERM — shutting down');process.exit(0);});
 });
 ''')
+            bridge_script = root / 'bridge.cjs'
+            bridge_script.write_text(listener_script.read_text()
+                .replace('═══ Ready ═══', 'Bridge ready.')
+                .replace('SIGTERM — shutting down', 'Bridge stopped.'))
+            bridge_ready = root / 'bridge-ready.json'
+            bridge_log = root / 'bridge.log'
+            bridge_err = root / 'bridge.err'
+            bridge_log.touch(mode=0o600)
+            bridge_err.touch(mode=0o600)
             node = shutil.which('node')
             self.assertIsNotNone(node)
             bus_server = socket.socket()
@@ -315,6 +324,11 @@ process.on('SIGTERM',()=>{
             bus_server.listen()
             bus_server.settimeout(20)
             self.addCleanup(bus_server.close)
+            bridge_bus_server = socket.socket()
+            bridge_bus_server.bind(('127.0.0.1', 0))
+            bridge_bus_server.listen()
+            bridge_bus_server.settimeout(20)
+            self.addCleanup(bridge_bus_server.close)
             services = {}
             approved = {}
             try:
@@ -330,6 +344,8 @@ process.on('SIGTERM',()=>{
                              '--', '/bin/sleep', '900'] if kind == 'timer' else
                             [node, str(listener_script)]
                             if unit == 'mesh-deploy-listener' else
+                            [node, str(bridge_script)]
+                            if unit == 'mesh-bridge' else
                             ['/bin/sleep', '900'])
                     plist = agents / (label + '.plist')
                     config = {
@@ -343,6 +359,12 @@ process.on('SIGTERM',()=>{
                             'OWNED_READY': str(listener_ready)},
                             'ExitTimeOut': 5, 'StandardOutPath': str(listener_log),
                             'StandardErrorPath': str(listener_err)})
+                    if unit == 'mesh-bridge':
+                        config.update({'EnvironmentVariables': {
+                            'OWNED_BUS_PORT': str(bridge_bus_server.getsockname()[1]),
+                            'OWNED_READY': str(bridge_ready)},
+                            'ExitTimeOut': 5, 'StandardOutPath': str(bridge_log),
+                            'StandardErrorPath': str(bridge_err)})
                     plist.write_bytes(plistlib.dumps(config))
                     identity = static_identity(plist)
                     approved[unit] = {'class': kind,
@@ -361,10 +383,16 @@ process.on('SIGTERM',()=>{
                     time.sleep(.05)
                 bus_connection, _ = bus_server.accept()
                 self.addCleanup(bus_connection.close)
+                bridge_bus_connection, _ = bridge_bus_server.accept()
+                self.addCleanup(bridge_bus_connection.close)
                 while not listener_ready.exists() or '═══ Ready ═══' not in listener_log.read_text():
                     self.assertLess(time.monotonic(), deadline, 'owned listener did not become ready')
                     time.sleep(.05)
+                while not bridge_ready.exists() or 'Bridge ready.' not in bridge_log.read_text():
+                    self.assertLess(time.monotonic(), deadline, 'owned bridge did not become ready')
+                    time.sleep(.05)
                 listener_details = json.loads(listener_ready.read_text())
+                bridge_details = json.loads(bridge_ready.read_text())
                 writer_lock = root / 'writer.lock'
                 writer_lock.write_bytes(b'owned writer lock')
                 writer_lock.chmod(0o644)
@@ -415,8 +443,38 @@ process.on('SIGTERM',()=>{
                                 with socket.socket() as probe:
                                     probe.settimeout(.2)
                                     return probe.connect_ex(('127.0.0.1', listener_details['port'])) != 0
+                            bridge_service = services['mesh-bridge']
+                            bridge_identity = prior['mesh-bridge']['identity']
+                            bridge_binding = bridge_service.bind(
+                                bridge_identity['argv'], bridge_identity['argv'][0],
+                                bridge_identity['working_directory'])
+                            self.assertEqual(bridge_binding['status']['pid'], bridge_details['pid'])
+                            def bridge_connection_closed():
+                                bridge_bus_connection.settimeout(.2)
+                                try:
+                                    return bridge_bus_connection.recv(1, socket.MSG_PEEK) == b''
+                                except socket.timeout:
+                                    return False
+                            def bridge_listener_absent():
+                                with socket.socket() as probe:
+                                    probe.settimeout(.2)
+                                    return probe.connect_ex(('127.0.0.1', bridge_details['port'])) != 0
                             self.assertFalse(connection_closed())
                             self.assertFalse(listener_absent())
+                            self.assertFalse(bridge_connection_closed())
+                            self.assertFalse(bridge_listener_absent())
+                            before_bridge = len(journal.records)
+                            with StopWatch(bridge_service, bridge_binding,
+                                           [bridge_log, bridge_err], 'mesh-bridge',
+                                           require_disabled=True) as watch:
+                                with self.assertRaisesRegex(Refused,
+                                        'deploy listener must be verifiably disabled'):
+                                    watch.mutate(journal, 'mesh-bridge',
+                                                 bridge_connection_closed,
+                                                 bridge_listener_absent, hold=hold)
+                            self.assertEqual(len(journal.records), before_bridge)
+                            self.assertTrue(bridge_service.status()['running'])
+                            self.assertFalse(bridge_service.disabled())
                             with StopWatch(service, binding, [listener_log, listener_err],
                                            'mesh-deploy-listener',
                                            startup_segment=listener_log.read_text(),
@@ -427,14 +485,30 @@ process.on('SIGTERM',()=>{
                             self.assertTrue(journal.listener_fenced())
                             self.assertFalse(service.status()['loaded'])
                             self.assertTrue(service.disabled())
+                            with StopWatch(bridge_service, bridge_binding,
+                                           [bridge_log, bridge_err], 'mesh-bridge',
+                                           require_disabled=True) as watch:
+                                bridge_proof = watch.mutate(journal, 'mesh-bridge',
+                                                            bridge_connection_closed,
+                                                            bridge_listener_absent, hold=hold)
+                            self.assertTrue(Journal.managed_stop_proven(bridge_proof))
+                            self.assertTrue(journal.full_node_stop_proven('mesh-bridge', bridge_proof))
+                            self.assertEqual(bridge_proof['termination'], {'exit': 0})
+                            self.assertIs(bridge_proof['entrypoint_overrides']['gui'][
+                                'ai.openclaw.mesh-bridge'], True)
+                            self.assertIs(bridge_proof['entrypoint_overrides']['user'][
+                                'ai.openclaw.mesh-bridge'], True)
+                            self.assertFalse(bridge_service.status()['loaded'])
+                            self.assertTrue(bridge_service.disabled())
                             if release:
                                 new_bus_connection = None
-                                def new_bus_alive():
-                                    if new_bus_connection is None:
+                                new_bridge_bus_connection = None
+                                def new_bus_alive(connection):
+                                    if connection is None:
                                         return False
-                                    new_bus_connection.settimeout(.2)
+                                    connection.settimeout(.2)
                                     try:
-                                        return new_bus_connection.recv(1, socket.MSG_PEEK) != b''
+                                        return connection.recv(1, socket.MSG_PEEK) != b''
                                     except socket.timeout:
                                         return True
                                 def observe(unit, saved):
@@ -448,22 +522,36 @@ process.on('SIGTERM',()=>{
                                             and listener_ready.exists()
                                             and json.loads(listener_ready.read_text())['pid'] == current['pid']
                                             and listener_log.read_text().count('═══ Ready ═══') >= 2)
+                                    elif unit == 'mesh-bridge':
+                                        actual['verified'] = (current['running']
+                                            and bridge_ready.exists()
+                                            and json.loads(bridge_ready.read_text())['pid'] == current['pid']
+                                            and bridge_log.read_text().count('Bridge ready.') >= 2)
                                     else:
                                         actual['verified'] = all(actual[key] == saved[key]
                                             for key in ('loaded', 'running', 'disabled', 'identity'))
                                     return actual
                                 def physical():
                                     others = all(observe(unit, prior[unit])['verified']
-                                                 for unit in UNITS if unit != 'mesh-deploy-listener')
+                                                 for unit in UNITS
+                                                 if unit not in ('mesh-deploy-listener', 'mesh-bridge'))
+                                    if bridge_service.status()['running']:
+                                        bridge_ok = (observe('mesh-bridge', prior['mesh-bridge'])['verified']
+                                                     and new_bus_alive(new_bridge_bus_connection)
+                                                     and not bridge_listener_absent())
+                                    else:
+                                        bridge_ok = (bridge_service.disabled()
+                                                     and bridge_proof['connections_closed']
+                                                     and bridge_listener_absent())
                                     listener_running = service.status()['running']
                                     if listener_running:
                                         listener_ok = (observe('mesh-deploy-listener',
                                                               prior['mesh-deploy-listener'])['verified']
-                                                       and new_bus_alive())
+                                                       and new_bus_alive(new_bus_connection))
                                     else:
                                         listener_ok = (service.disabled() and proof['connections_closed']
                                                        and listener_absent())
-                                    return {'verified': others and listener_ok}
+                                    return {'verified': others and bridge_ok and listener_ok}
                                 fence_checks = []
                                 def deploy_fence():
                                     checked = (gate.marker() is not None and service.disabled()
@@ -471,32 +559,56 @@ process.on('SIGTERM',()=>{
                                     fence_checks.append(checked)
                                     return {'verified': checked}
                                 def restore(unit, saved):
-                                    nonlocal new_bus_connection
-                                    self.assertEqual(unit, 'mesh-deploy-listener')
-                                    self.assertEqual(fence_checks, [True])
+                                    nonlocal new_bus_connection, new_bridge_bus_connection
                                     self.assertEqual(gate.marker(),
                                         {key: journal.records[1]['hold'][key]
                                          for key in ('window', 'reason')})
-                                    listener_ready.unlink()
-                                    def ready(owner):
-                                        return (listener_ready.exists()
-                                            and json.loads(listener_ready.read_text())['pid']
-                                            == owner['status']['pid']
-                                            and listener_log.read_text().count('═══ Ready ═══') >= 2)
-                                    restarted = restore_disabled_daemon(service, journal, unit,
-                                                                         saved, ready, timeout=10)
-                                    self.assertNotEqual(restarted['status']['pid'],
-                                                        binding['status']['pid'])
-                                    new_bus_connection, _ = bus_server.accept()
-                                    self.addCleanup(new_bus_connection.close)
+                                    if unit == 'mesh-bridge':
+                                        self.assertEqual(fence_checks, [])
+                                        self.assertTrue(service.disabled())
+                                        bridge_ready.unlink()
+                                        def ready(owner):
+                                            return (bridge_ready.exists()
+                                                and json.loads(bridge_ready.read_text())['pid']
+                                                == owner['status']['pid']
+                                                and bridge_log.read_text().count('Bridge ready.') >= 2)
+                                        restarted = restore_disabled_daemon(
+                                            bridge_service, journal, unit, saved, ready, timeout=10)
+                                        self.assertNotEqual(restarted['status']['pid'],
+                                                            bridge_binding['status']['pid'])
+                                        new_bridge_bus_connection, _ = bridge_bus_server.accept()
+                                        self.addCleanup(new_bridge_bus_connection.close)
+                                    else:
+                                        self.assertEqual(unit, 'mesh-deploy-listener')
+                                        self.assertEqual(fence_checks, [True])
+                                        listener_ready.unlink()
+                                        def ready(owner):
+                                            return (listener_ready.exists()
+                                                and json.loads(listener_ready.read_text())['pid']
+                                                == owner['status']['pid']
+                                                and listener_log.read_text().count('═══ Ready ═══') >= 2)
+                                        restarted = restore_disabled_daemon(service, journal, unit,
+                                                                             saved, ready, timeout=10)
+                                        self.assertNotEqual(restarted['status']['pid'],
+                                                            binding['status']['pid'])
+                                        new_bus_connection, _ = bus_server.accept()
+                                        self.addCleanup(new_bus_connection.close)
                                 result = hold.recover(restore, observe, physical,
                                                       deploy_fence=deploy_fence)
                                 self.assertTrue(result['restored'], result)
                                 self.assertEqual(fence_checks, [True])
+                                self.assertTrue(bridge_service.status()['running'])
+                                self.assertFalse(bridge_service.disabled())
                                 self.assertTrue(service.status()['running'])
                                 self.assertFalse(service.disabled())
                                 self.assertIsNone(gate.marker())
                                 rows = [(row['event'], row.get('unit')) for row in journal.records]
+                                self.assertLess(rows.index(('restoration-intent', 'mesh-bridge')),
+                                                rows.index(('override-clear-intent', 'mesh-bridge')))
+                                self.assertLess(rows.index(('override-clear-intent', 'mesh-bridge')),
+                                                rows.index(('recovery-verified', 'mesh-bridge')))
+                                self.assertLess(rows.index(('recovery-verified', 'mesh-bridge')),
+                                                rows.index(('listener-release-verified', None)))
                                 self.assertLess(rows.index(('listener-release-verified', None)),
                                                 rows.index(('restoration-intent', 'mesh-deploy-listener')))
                                 self.assertLess(rows.index(('restoration-intent', 'mesh-deploy-listener')),
