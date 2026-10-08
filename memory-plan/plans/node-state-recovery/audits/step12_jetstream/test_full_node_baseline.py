@@ -350,9 +350,23 @@ class OwnedFullNodeInventory(unittest.TestCase):
                             self.assertTrue(closed['verified'])
                             self.assertTrue(closed['kernel_file_watch'])
                             self.assertTrue(closed['path_watch']['kernel_path_watch'])
-                            self.assertIsNotNone(gate.marker())
+                            self.assertEqual(gate.marker(), {key: journal.records[1]['hold'][key]
+                                                             for key in ('window', 'reason')})
+                            self.assertEqual(journal.records[2]['receipt'], closed['receipt'])
                             self.assertEqual([row['event'] for row in journal.records[:4]],
                                              ['baseline', 'intent', 'hold-published', 'verified'])
+                            stopped = subprocess.run(['/bin/launchctl', 'bootout',
+                                                      'gui/' + uid + '/ai.openclaw.gateway'],
+                                                     capture_output=True, timeout=10)
+                            self.assertEqual(stopped.returncode, 0, stopped.stderr)
+                            deadline = time.monotonic() + 10
+                            while services['gateway'].status()['loaded']:
+                                self.assertLess(time.monotonic(), deadline,
+                                                'owned gateway did not unload')
+                                time.sleep(.05)
+                            with self.assertRaisesRegex(Refused,
+                                    'full-node loaded jobs changed inside the forward window'):
+                                journal.check_entrypoints(forward=True)
                         finally:
                             hold.close()
             finally:
