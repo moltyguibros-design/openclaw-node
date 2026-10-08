@@ -390,7 +390,8 @@ def valid_entrypoint_inventory(evidence, prior):
 
 
 class Journal:
-    def __init__(self, root, prior=None, boot=None, node_lock=None, scope=None):
+    def __init__(self, root, prior=None, boot=None, node_lock=None, scope=None,
+                 expected_entrypoints=None):
         self.root = pathlib.Path(root)
         self.boot = boot if boot is not None else boot_identity()
         self.lock = None
@@ -401,6 +402,8 @@ class Journal:
         self.restoring_unit = None
         created = not self.root.exists()
         self.reopened = not created
+        require(created or expected_entrypoints is None,
+                'captured full-node inventory cannot reopen an existing journal')
         node_lock = pathlib.Path(node_lock) if node_lock is not None else pathlib.Path.home() / '.openclaw/preservation/node.lock'
         node_lock.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         info = node_lock.parent.lstat()
@@ -476,7 +479,7 @@ class Journal:
                             rows = self._read(other)
                             require(rows and rows[-1]['event'] in TERMINAL,
                                     'unindexed journal requires manual resolution')
-            self._open(created, prior, scope)
+            self._open(created, prior, scope, expected_entrypoints)
         except BaseException:
             self.close()
             raise
@@ -497,7 +500,7 @@ class Journal:
             handle.close()
             raise
 
-    def _open(self, created, prior, scope):
+    def _open(self, created, prior, scope, expected_entrypoints):
         if created:
             require(scope in (TIMER_SCOPE, FULL_NODE_SCOPE),
                     'new journal requires an explicit protected scope')
@@ -506,6 +509,9 @@ class Journal:
             entrypoints = capture_entrypoint_inventory(UNITS) if scope == FULL_NODE_SCOPE else None
             if scope == FULL_NODE_SCOPE:
                 valid_entrypoint_inventory(entrypoints, prior)
+                if expected_entrypoints is not None:
+                    require(entrypoints == expected_entrypoints,
+                            'full-node entrypoint inventory changed after baseline capture')
             predecessor = ({'root': self.active['journal_root'], 'head': self.active['head']}
                            if self.active is not None else None)
             self.records = []

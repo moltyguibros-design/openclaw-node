@@ -7,8 +7,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from full_node_baseline import capture_full_node_prior
-from preservation_journal import FULL_NODE_SCOPE, Journal, Refused, TIMER_UNITS, UNITS
+from full_node_baseline import capture_full_node_prior, open_full_node_journal
+from preservation_journal import (FULL_NODE_SCOPE, Journal, Refused, TIMER_UNITS,
+                                  UNITS, valid_entrypoint_inventory)
 
 
 class FullNodeBaseline(unittest.TestCase):
@@ -79,11 +80,13 @@ class FullNodeBaseline(unittest.TestCase):
 
     def test_captured_prior_opens_owned_full_node_journal(self):
         prior, entrypoints = self.capture()
-        with patch('preservation_journal.capture_entrypoint_inventory',
-                   return_value=copy.deepcopy(entrypoints)):
-            journal = Journal(self.root / 'journals' / 'window', prior,
-                              boot='owned-boot', node_lock=self.root / 'node.lock',
-                              scope=FULL_NODE_SCOPE)
+        with (patch('full_node_baseline.capture_full_node_prior',
+                    return_value=(prior, entrypoints)),
+              patch('preservation_journal.capture_entrypoint_inventory',
+                    return_value=copy.deepcopy(entrypoints))):
+            journal = open_full_node_journal(self.root / 'journals' / 'window',
+                                             self.gate, self.approved, boot='owned-boot',
+                                             node_lock=self.root / 'node.lock')
         self.addCleanup(journal.close)
         self.assertEqual(journal.scope, FULL_NODE_SCOPE)
         self.assertEqual(journal.records[0]['prior'], prior)
@@ -100,6 +103,52 @@ class FullNodeBaseline(unittest.TestCase):
                         boot='owned-boot', node_lock=self.root / 'node.lock',
                         scope=FULL_NODE_SCOPE)
         self.assertFalse((self.root / 'node.lock.state.json').exists())
+
+    def test_entrypoint_change_still_valid_against_prior_refuses_handoff(self):
+        prior, entrypoints = self.capture()
+        changed = copy.deepcopy(entrypoints)
+        changed['roots'].append(str(self.root / 'new-root'))
+        valid_entrypoint_inventory(changed, prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=changed):
+            with self.assertRaisesRegex(Refused, 'changed after baseline capture'):
+                Journal(self.root / 'journals' / 'window', prior,
+                        boot='owned-boot', node_lock=self.root / 'node.lock',
+                        scope=FULL_NODE_SCOPE, expected_entrypoints=entrypoints)
+        self.assertFalse((self.root / 'node.lock.state.json').exists())
+
+    def test_owned_entrypoint_refuses_valid_inventory_drift(self):
+        prior, entrypoints = self.capture()
+        changed = copy.deepcopy(self.entrypoints)
+        changed['roots'].append(str(self.root / 'new-root'))
+        with (patch('full_node_baseline.capture_full_node_prior',
+                    return_value=(prior, entrypoints)),
+              patch('preservation_journal.capture_entrypoint_inventory',
+                    return_value=changed),
+              self.assertRaisesRegex(Refused, 'changed after baseline capture')):
+            open_full_node_journal(self.root / 'journals' / 'window', self.gate,
+                                   self.approved, boot='owned-boot',
+                                   node_lock=self.root / 'node.lock')
+        self.assertFalse((self.root / 'node.lock.state.json').exists())
+
+    def test_captured_entrypoints_cannot_reopen_an_existing_window(self):
+        prior, entrypoints = self.capture()
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=copy.deepcopy(entrypoints)):
+            journal = Journal(self.root / 'journals' / 'window', prior,
+                              boot='owned-boot', node_lock=self.root / 'node.lock',
+                              scope=FULL_NODE_SCOPE, expected_entrypoints=entrypoints)
+        original = copy.deepcopy(journal.records)
+        journal.close()
+        with (patch('full_node_baseline.capture_full_node_prior',
+                    return_value=(prior, entrypoints)),
+              self.assertRaisesRegex(Refused, 'cannot reopen')):
+            open_full_node_journal(self.root / 'journals' / 'window', self.gate,
+                                   self.approved, boot='owned-boot',
+                                   node_lock=self.root / 'node.lock')
+        with Journal(self.root / 'journals' / 'window', boot='owned-boot',
+                     node_lock=self.root / 'node.lock') as reopened:
+            self.assertEqual(reopened.records, original)
 
     def test_missing_unit_refuses_before_inventory_read(self):
         del self.approved['gateway']

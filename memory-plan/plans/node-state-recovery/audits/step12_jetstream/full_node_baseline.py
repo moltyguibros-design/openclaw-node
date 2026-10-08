@@ -4,7 +4,7 @@ import re
 from journal_hold import describe
 from managed_launchd import Launchd
 from preservation_checks import capture_entrypoint_inventory, require
-from preservation_journal import (FULL_NODE_SCOPE, TIMER_UNITS, UNITS, static_identity,
+from preservation_journal import (FULL_NODE_SCOPE, TIMER_UNITS, UNITS, Journal, static_identity,
                                   valid_entrypoint_inventory, valid_prior)
 
 
@@ -58,3 +58,9 @@ def capture_full_node_prior(gate, approved):
         require(static_identity(plist, files) == prior[unit]['identity'],
                 'full-node direct files changed during baseline: ' + unit)
     return prior, entrypoints
+
+
+def open_full_node_journal(root, gate, approved, *, boot=None, node_lock=None):
+    prior, entrypoints = capture_full_node_prior(gate, approved)
+    return Journal(root, prior, boot=boot, node_lock=node_lock, scope=FULL_NODE_SCOPE,
+                   expected_entrypoints=entrypoints)

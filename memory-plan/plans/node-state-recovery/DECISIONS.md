@@ -2606,3 +2606,24 @@ observation and that refusal without changing its `unapproved` status. No
 service or VM was stopped or restarted in this investigation.
 The earlier D125 checkpoint's "histories remain untouched" referred only to
 this agent's actions; continuity across the October 4 boot is unproven.
+
+## D127 — Bind journal creation to the baseline producer's exact entrypoint inventory (2026-10-08 01:32 EDT)
+
+The D125 handoff negative changed the loaded labels, which the journal's
+`valid_entrypoint_inventory` already refused. A different inventory could
+still satisfy that validator against the same prior: for example, the set of
+scanned launchd roots could change between the producer's two observations
+and journal creation. The journal would then record an inventory that was
+never part of the producer's stable observation.
+
+`open_full_node_journal()` now composes the producer and journal creation with
+the exact returned entrypoint inventory. The journal compares its own capture
+with that value before writing a node receipt and refuses if they differ. It
+also refuses using a newly captured inventory to reopen an existing journal;
+restoration must reopen the durable original record without a new prior.
+Owned negatives cover valid-but-changed inventory and attempted reopening.
+The baseline suite passes 15 tests and the baseline, journal and hold suites
+pass 209 tests. Plan lint is
+conformant. This closes only the point-in-time handoff; a continuous process
+watch and complete full-node hold remain missing. No production service, VM
+or NATS store was changed.
