@@ -2620,10 +2620,12 @@ never part of the producer's stable observation.
 the exact returned entrypoint inventory. The journal compares its own capture
 with that value before writing a node receipt and refuses if they differ. It
 also refuses using a newly captured inventory to reopen an existing journal;
-restoration must reopen the durable original record without a new prior.
-Owned negatives cover valid-but-changed inventory and attempted reopening.
-The baseline suite passes 15 tests and the baseline, journal and hold suites
-pass 209 tests. Plan lint is
+restoration must reopen the durable original record without a new prior. The
+reopen guard gives an earlier refusal; the existing baseline rule already
+refused replacement. Owned negatives cover valid-but-changed inventory,
+including a system-domain override on an enabled unit, and attempted reopening.
+The baseline suite passes 16 tests and the baseline, journal and hold suites
+pass 210 tests. Plan lint is
 conformant. This closes only the point-in-time handoff; a continuous process
 watch and complete full-node hold remain missing. No production service, VM
 or NATS store was changed.

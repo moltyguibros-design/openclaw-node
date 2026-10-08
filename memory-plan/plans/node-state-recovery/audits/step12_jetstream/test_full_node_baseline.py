@@ -80,8 +80,12 @@ class FullNodeBaseline(unittest.TestCase):
 
     def test_captured_prior_opens_owned_full_node_journal(self):
         prior, entrypoints = self.capture()
-        with (patch('full_node_baseline.capture_full_node_prior',
-                    return_value=(prior, entrypoints)),
+        def service(label, plist):
+            return SimpleNamespace(status=lambda: copy.deepcopy(self.states[label]),
+                                   disabled=lambda: self.states[label]['disabled'])
+        with (patch('full_node_baseline.capture_entrypoint_inventory',
+                    side_effect=[copy.deepcopy(entrypoints), copy.deepcopy(entrypoints)]),
+              patch('full_node_baseline.Launchd', side_effect=service),
               patch('preservation_journal.capture_entrypoint_inventory',
                     return_value=copy.deepcopy(entrypoints))):
             journal = open_full_node_journal(self.root / 'journals' / 'window',
@@ -129,6 +133,19 @@ class FullNodeBaseline(unittest.TestCase):
             open_full_node_journal(self.root / 'journals' / 'window', self.gate,
                                    self.approved, boot='owned-boot',
                                    node_lock=self.root / 'node.lock')
+        self.assertFalse((self.root / 'node.lock.state.json').exists())
+
+    def test_changed_enabled_override_refuses_handoff(self):
+        prior, entrypoints = self.capture()
+        changed = copy.deepcopy(entrypoints)
+        changed['overrides']['system']['ai.openclaw.gateway'] = True
+        valid_entrypoint_inventory(changed, prior)
+        with (patch('preservation_journal.capture_entrypoint_inventory',
+                    return_value=changed),
+              self.assertRaisesRegex(Refused, 'changed after baseline capture')):
+            Journal(self.root / 'journals' / 'window', prior,
+                    boot='owned-boot', node_lock=self.root / 'node.lock',
+                    scope=FULL_NODE_SCOPE, expected_entrypoints=entrypoints)
         self.assertFalse((self.root / 'node.lock.state.json').exists())
 
     def test_captured_entrypoints_cannot_reopen_an_existing_window(self):
