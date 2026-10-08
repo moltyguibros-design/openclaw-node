@@ -2651,3 +2651,31 @@ evidence and an unpatched entrypoint capture. Until that and the remaining
 full-node shutdown gates pass, the live VM and production services stay up.
 Stopped-VM capture, isolated acceptance of all four real histories, and
 verified service resumption remain open.
+
+## D129 — Require native listener stop proof before a refused release (2026-10-08 04:09 EDT)
+
+The dedicated macOS CI fixture runs an owned process under the exact deploy
+listener label only after checking that no plist for the label is installed,
+the label is unloaded in GUI, user and system domains, and its GUI override
+is clear. It closes the native execution gate, records a full-node journal,
+then uses `StopWatch.mutate` to persistently stop that owned listener. The
+stop proof includes the bound process's kernel exit, normal termination,
+connection closure and listener-port absence; launchd is then unloaded and
+disabled. A refused deploy-fence result is reached exactly once and leaves
+no listener restoration intent, keeps the gate closed, and makes a direct
+launchd bootstrap fail. The owned test's teardown removes its override.
+
+The first CI run at `bfdc4b2f` failed before journal open on an unused
+`UNITS` argument in the fixture. The one-line correction at `7f4578a9`
+passed the macOS job: journal 150, baseline 16, hold 46, restore-only 30,
+managed launchd 52 tests with one skip; the new listener test is `ok`.
+Claude's read-only adversarial review of the first head found the missing
+name and no other safety issue in the preflight or refusal assertions. This
+proves one owned listener stop and refused release. The other 22 unit states,
+entrypoint capture, readiness and deploy-fence input are still synthetic;
+there is no success-path owned restore, complete 23-job hold or continuous
+process census. The next bounded slice is a successful owned listener
+restore using live readiness and dynamic identity/override observations,
+then an unpatched full inventory fixture. The overall workflow remains red
+at pre-existing dependency audit gates. No production service, VM or NATS
+store was stopped or changed.

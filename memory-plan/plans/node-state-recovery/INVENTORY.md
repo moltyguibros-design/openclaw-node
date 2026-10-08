@@ -2200,3 +2200,16 @@ unloaded and disabled, with the gate closed and a direct bootstrap refused.
 The local managed-launchd suite passed 52 tests with two CI-only skips. The
 fixed-label fixture itself remains unverified until the dedicated macOS CI
 job runs. No production service, VM or NATS store was touched.
+
+Checkpoint 2026-10-08 04:09 EDT: D129's fixed-label owned listener fixture
+passed in the macOS CI job at `7f4578a9`: managed launchd 52 tests with one
+skip, plus journal 150, baseline 16, hold 46 and restore-only 30. An initial
+CI run exposed an undefined fixture name before journal open; the one-line
+repair was rerun successfully. The real owned listener's bound process exit,
+closed connection and port, unloaded disabled launchd state, refused deploy
+release and closed execution gate are now observed. The other 22 units and
+the entrypoint capture remain synthetic; successful owned listener release,
+continuous 23-job coverage, stopped-VM capture, four real-history acceptance
+and verified resumption remain open. The overall CI workflow still fails its
+unrelated dependency audit gates. No production service, VM or NATS store
+was stopped or changed.
