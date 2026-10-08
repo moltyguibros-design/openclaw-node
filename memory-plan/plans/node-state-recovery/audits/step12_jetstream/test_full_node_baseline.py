@@ -344,7 +344,17 @@ class OwnedFullNodeInventory(unittest.TestCase):
                         self.assertEqual(evidence['loaded']['system'], [])
                         self.assertEqual(sum(prior[unit]['running'] for unit in UNITS), len(running))
                         hold = JournaledHold(journal, gate, lambda: {'verified': True})
-                        hold.close()
+                        try:
+                            hold.close_and_drain()
+                            closed = hold.check_forward()
+                            self.assertTrue(closed['verified'])
+                            self.assertTrue(closed['kernel_file_watch'])
+                            self.assertTrue(closed['path_watch']['kernel_path_watch'])
+                            self.assertIsNotNone(gate.marker())
+                            self.assertEqual([row['event'] for row in journal.records[:4]],
+                                             ['baseline', 'intent', 'hold-published', 'verified'])
+                        finally:
+                            hold.close()
             finally:
                 for service in services.values():
                     if service.status()['loaded']:
