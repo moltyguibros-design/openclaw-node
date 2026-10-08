@@ -21,7 +21,7 @@ from managed_launchd import (Launchd, StopWatch, process_exists, process_tree,
 from full_node_baseline import open_full_node_journal
 from journal_hold import JournaledHold, describe
 from legacy_fixture import legacy_journal
-from preservation_checks import Refused, http_json
+from preservation_checks import Refused, disabled_overrides, http_json
 from preservation_journal import Journal, TIMER_UNITS, static_identity
 from test_journal_hold import gate_module, gated_identity
 from test_preservation_journal import (full_entrypoint_evidence, full_node_inventory,
@@ -686,10 +686,7 @@ os.execv('/bin/sleep',['sleep','30'])
         self.proofs.append({'test': self._testMethodName, 'stop': proof,
                             'disabled_after_bootout': True, 'restarted_after_enable': True})
 
-    @unittest.skipUnless(sys.platform == 'darwin'
-                         and os.environ.get('OPENCLAW_CI_FULL_NODE_LISTENER_FIXTURE') == '1',
-                         'fixed-label listener fixture runs only on a dedicated macOS CI runner')
-    def test_full_node_owned_listener_stop_keeps_refused_release_fenced(self):
+    def exercise_full_node_owned_listener(self, release):
         label = 'ai.openclaw.mesh-deploy-listener'
         for folder in (pathlib.Path.home() / 'Library/LaunchAgents',
                        pathlib.Path('/Library/LaunchAgents'), pathlib.Path('/Library/LaunchDaemons')):
@@ -731,9 +728,12 @@ os.execv('/bin/sleep',['sleep','30'])
                 status = service.status()
                 if not status['loaded']:
                     observed['loaded']['gui'].remove(label)
-                if service.disabled():
-                    for domain in ('gui', 'user'):
-                        observed['overrides'][domain][label] = True
+                observed['installed'][label]['sha256'] = hashlib.sha256(self.plist.read_bytes()).hexdigest()
+                for name, domain in (('gui', 'gui/' + str(os.getuid())),
+                                     ('user', 'user/' + str(os.getuid())), ('system', 'system')):
+                    raw = subprocess.check_output(['/bin/launchctl', 'print-disabled', domain],
+                                                  text=True, timeout=10)
+                    observed['overrides'][name][label] = disabled_overrides(raw, {label})[label]
                 return observed
             baseline_entrypoints = capture(None)
             with (patch('full_node_baseline.capture_full_node_prior',
@@ -766,31 +766,71 @@ os.execv('/bin/sleep',['sleep','30'])
                             if unit == 'mesh-deploy-listener':
                                 status = service.status()
                                 actual.update(loaded=status['loaded'], running=status['running'],
-                                              disabled=service.disabled())
+                                              disabled=service.disabled(),
+                                              identity=static_identity(self.plist, files))
                             return {**actual, 'verified': True}
-                        fence_checks = []
-                        def refuse_deploy_fence():
+                        fence_checks, restored = [], []
+                        def deploy_fence():
                             fence_checks.append(True)
-                            return {'verified': False}
-                        result = hold.recover(lambda *_: self.fail('listener released without fence'),
+                            return {'verified': release}
+                        def restore(unit, saved):
+                            self.assertTrue(release)
+                            self.assertEqual(unit, 'mesh-deploy-listener')
+                            self.ready.unlink()
+                            def ready(owner):
+                                return (self.ready.exists()
+                                        and json.loads(self.ready.read_text())['pid']
+                                        == owner['status']['pid'])
+                            restored.append(restore_disabled_daemon(service, journal, unit,
+                                                                      saved, ready, timeout=10))
+                        result = hold.recover(restore if release else
+                                              lambda *_: self.fail('listener released without fence'),
                                               observe, lambda: {'verified': True},
-                                              deploy_fence=refuse_deploy_fence)
-                        self.assertFalse(result['restored'], result)
+                                              deploy_fence=deploy_fence)
                         self.assertEqual(fence_checks, [True])
-                        self.assertTrue(any(error['unit'] == 'mesh-deploy-listener'
-                                            and 'deploy listener fence was not verified'
-                                            in error['detail'] for error in result['errors']), result)
-                        self.assertIsNotNone(gate.marker())
-                        self.assertFalse(any(row['event'] == 'restoration-intent'
-                                             and row.get('unit') == 'mesh-deploy-listener'
-                                             for row in journal.records))
-                        refused = subprocess.run(['/bin/launchctl', 'bootstrap',
-                                                  'gui/' + str(os.getuid()), str(self.plist)],
-                                                 capture_output=True, timeout=10)
-                        self.assertNotEqual(refused.returncode, 0)
-                        self.assertFalse(service.status()['loaded'])
+                        if release:
+                            self.assertTrue(result['restored'], result)
+                            self.assertEqual(len(restored), 1)
+                            self.assertNotEqual(restored[0]['status']['pid'], binding['status']['pid'])
+                            self.assertTrue(service.status()['running'])
+                            self.assertFalse(service.disabled())
+                            self.assertIsNone(gate.marker())
+                            rows = [(row['event'], row.get('unit')) for row in journal.records]
+                            self.assertLess(rows.index(('listener-release-verified', None)),
+                                            rows.index(('restoration-intent', 'mesh-deploy-listener')))
+                            self.assertLess(rows.index(('restoration-intent', 'mesh-deploy-listener')),
+                                            rows.index(('override-clear-intent', 'mesh-deploy-listener')))
+                            self.assertLess(rows.index(('override-clear-intent', 'mesh-deploy-listener')),
+                                            rows.index(('recovery-verified', 'mesh-deploy-listener')))
+                            self.assertTrue(journal.resolve())
+                        else:
+                            self.assertFalse(result['restored'], result)
+                            self.assertTrue(any(error['unit'] == 'mesh-deploy-listener'
+                                                and 'deploy listener fence was not verified'
+                                                in error['detail'] for error in result['errors']), result)
+                            self.assertIsNotNone(gate.marker())
+                            self.assertFalse(any(row['event'] == 'restoration-intent'
+                                                 and row.get('unit') == 'mesh-deploy-listener'
+                                                 for row in journal.records))
+                            refused = subprocess.run(['/bin/launchctl', 'bootstrap',
+                                                      'gui/' + str(os.getuid()), str(self.plist)],
+                                                     capture_output=True, timeout=10)
+                            self.assertNotEqual(refused.returncode, 0)
+                            self.assertFalse(service.status()['loaded'])
                     finally:
                         hold.close()
+
+    @unittest.skipUnless(sys.platform == 'darwin'
+                         and os.environ.get('OPENCLAW_CI_FULL_NODE_LISTENER_FIXTURE') == '1',
+                         'fixed-label listener fixture runs only on a dedicated macOS CI runner')
+    def test_full_node_owned_listener_stop_keeps_refused_release_fenced(self):
+        self.exercise_full_node_owned_listener(False)
+
+    @unittest.skipUnless(sys.platform == 'darwin'
+                         and os.environ.get('OPENCLAW_CI_FULL_NODE_LISTENER_FIXTURE') == '1',
+                         'fixed-label listener fixture runs only on a dedicated macOS CI runner')
+    def test_full_node_owned_listener_restores_after_verified_release(self):
+        self.exercise_full_node_owned_listener(True)
 
     def test_owned_nats_persistent_stop_has_transfer_termination_shape(self):
         port, monitor = free_port(), free_port()

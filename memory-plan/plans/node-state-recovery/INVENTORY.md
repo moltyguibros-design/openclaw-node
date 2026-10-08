@@ -2213,3 +2213,13 @@ continuous 23-job coverage, stopped-VM capture, four real-history acceptance
 and verified resumption remain open. The overall CI workflow still fails its
 unrelated dependency audit gates. No production service, VM or NATS store
 was stopped or changed.
+
+Checkpoint 2026-10-08 05:32 EDT: An owned success-path twin now uses the
+existing disabled-daemon restore adapter after a verified listener release.
+The owned inventory observer reads current GUI/user/system overrides and
+rehashes the listener plist on each capture; readiness and identity are
+recomputed for the restarted process. It requires release, restoration and
+override-clear receipts in order, a new process owner, gate reopening and
+journal resolution. Dedicated macOS CI has not yet run this twin; it is not
+production recovery evidence. The complete 23-job hold and four-history
+acceptance remain open, with no live VM or service change.
