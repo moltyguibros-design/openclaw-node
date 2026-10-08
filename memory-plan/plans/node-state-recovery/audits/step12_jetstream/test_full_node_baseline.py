@@ -300,7 +300,7 @@ class OwnedFullNodeInventory(unittest.TestCase):
             listener_script.write_text('''
 const fs=require('node:fs'),net=require('node:net');
 const bus=net.connect(Number(process.env.OWNED_BUS_PORT),'127.0.0.1');
-const listener=net.createServer();
+const listener=net.createServer(connection=>connection.destroy());
 bus.once('connect',()=>listener.listen(0,'127.0.0.1',()=>{
  fs.writeFileSync(process.env.OWNED_READY,JSON.stringify({pid:process.pid,port:listener.address().port}));
  console.log('═══ Ready ═══');
@@ -414,6 +414,8 @@ process.on('SIGTERM',()=>{
                                 with socket.socket() as probe:
                                     probe.settimeout(.2)
                                     return probe.connect_ex(('127.0.0.1', listener_details['port'])) != 0
+                            self.assertFalse(connection_closed())
+                            self.assertFalse(listener_absent())
                             with StopWatch(service, binding, [listener_log, listener_err],
                                            'mesh-deploy-listener',
                                            startup_segment=listener_log.read_text(),
