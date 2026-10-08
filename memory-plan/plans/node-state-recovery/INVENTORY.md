@@ -2277,3 +2277,15 @@ not a full-node hold. Production pin approval, all-job and detached-writer
 coverage, UTM shutdown gate, stopped-VM capture, four actual-history
 acceptance and verified resumption remain open. No production service, VM or
 NATS store changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-08 11:56 EDT: D134 composes the unpatched owned 23-job
+baseline and native execution gate with a kernel-backed persistent stop of
+the owned deploy listener. Exact-head `8f999e2c` macOS CI passed the 17-test
+baseline suite without skips, plus 46 hold and 53 managed-launchd tests (one
+domain skip). The `c952653d` addition requires the loopback connection and
+listener port to be live before the stop; Claude found no code-level false
+pass or hang, but exact-head macOS CI is still queued. The socket is not a
+NATS connection, the other 22 owners are inert, and the production pin map,
+full no-writer hold, UTM shutdown gate, stopped-VM capture, four real-history
+acceptance and verified service resumption remain open. No live service, VM
+or NATS store changed; 1.2 remains [A]/v1.2-pre.

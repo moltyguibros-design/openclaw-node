@@ -2790,3 +2790,35 @@ writers before any production stop. The approved production pin map,
 stopped-VM capture, four real-history acceptance and verified resumption
 remain open. No production service, VM or NATS store changed; step 1.2 stays
 [A]/v1.2-pre.
+
+## D134 — Compose an owned listener stop with the native 23-job window (2026-10-08 11:56 EDT)
+
+The dedicated macOS fixture now replaces its inert deploy-listener owner
+with an owned Node process. It connects to a private loopback socket, opens a
+private listener port, writes a ready record and emits the normal startup and
+SIGTERM completion markers. After the unpatched 23-label baseline and native
+execution-gate closure, the fixture binds that process and calls the existing
+`StopWatch.mutate` persistent stop under the same full-node journal and hold.
+It requires a kernel-backed owner exit, normal completion, closed socket,
+absent port, unloaded and disabled launchd state, a verified stop receipt and
+`listener_fenced()`. The later owned gateway bootout still has to trip the
+forward entrypoint observer. Pre-stop controls now require the private socket
+and port to be live so their disappearance is not vacuous.
+
+The first exact-head macOS run at `e6ca32c4` failed before the stop because
+Apple's framework Python changed argv during launch. The listener was changed
+to the same Node owner pattern already exercised by the managed-launchd
+fixture. The macOS job 113400310401 at `8f999e2c` then passed the 17-test
+baseline suite without skips, along with the 46-test hold and 53-test
+managed-launchd suites (one domain skip). Claude independently identified
+the Python failure and reviewed the socket controls at `c952653d`, finding
+no code-level false pass or hang. The exact-head macOS job for `c952653d`
+is queued as of this checkpoint, so those added controls are not yet runtime
+verified.
+
+This composes native inventory, gate and one persistent stop for an owned
+fixture. Its socket is not NATS; the other 22 owners are inert, and no full
+node no-writer interval, production pin map, UTM shutdown gate, stopped-VM
+capture, four real-history acceptance or verified resumption is proven. The
+overall workflow remains red at separate dependency audit gates. No live
+service, VM or NATS store was changed; step 1.2 remains [A]/v1.2-pre.
