@@ -2137,3 +2137,11 @@ owned fixture. The disposable four-history JetStream suite passed at
 d816897e, including its corruption and omission negatives; all owned servers
 stopped. The production hold, capture, four-history acceptance and verified
 resumption remain open; no live VM, service or NATS store was touched.
+
+Checkpoint 2026-10-07 21:29 EDT: D123 adds a read-only producer for the
+full-node journal's 23-unit prior from an approved direct-file map and two
+consistent launchd/identity observations. The combined baseline, journal
+and hold suites pass 201 tests; plan lint is conformant. No full-node journal
+has been opened or service stopped with this producer. The owned listener
+composition, complete persistent hold, stopped-VM capture, acceptance of
+all four real histories and verified resumption remain open.

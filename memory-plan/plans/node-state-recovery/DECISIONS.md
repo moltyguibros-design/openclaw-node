@@ -2505,3 +2505,30 @@ removed-block and flipped-payload negatives, and stopped every server it
 started. This is disposable mechanism evidence, not production acceptance.
 Step 1.2 remains [A]/v1.2-pre; stopped-VM capture, isolated restores of the
 actual histories, acceptance and verified service resumption remain open.
+
+## D123 — Produce a read-only 23-unit full-node baseline from approved direct pins (2026-10-07 21:29 EDT)
+
+`full_node_baseline.capture_full_node_prior()` now consumes the `units` map of
+an approved 23-unit recapture: each unit's class, installed plist path/hash
+and direct-file path/hash map. It captures the actual launchd entrypoint
+inventory, hashes the installed plist and direct files through
+`static_identity`, reads each label's live status and disabled override, and
+constructs the journal's exact `prior` schema. It obtains the five-timer
+execution-hold descriptor from the real gate, then requires `valid_prior` and
+`valid_entrypoint_inventory`. A second inventory and status/identity pass
+refuses observed drift during capture. It does not open a journal, set an
+override, stop a service, or contact NATS.
+
+Seven owned tests cover all 23 classes and labels, omitted units, altered
+approved file hashes, installed plist drift, a changed second inventory,
+a daemon generation change and a direct-file rewrite during capture. The
+combined baseline, preservation-journal and hold suites pass 201 tests.
+Plan lint remains conformant.
+
+This producer still needs an operator-approved, current direct-file map and
+an owned composition with a full-node journal. A returned baseline is only
+a point-in-time observation. It is not a continuous launchd/process watch,
+a complete hold certificate or permission to stop the production VM or any
+service. The production controller, root/user and detached-process census,
+timer spawn witness, host UTM rehearsal, stopped-VM capture, four real-history
+acceptance and verified resumption remain open. Step 1.2 stays [A]/v1.2-pre.
