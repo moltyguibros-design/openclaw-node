@@ -168,7 +168,7 @@ jobs:
           /usr/bin/python3 test/test_nats_root_journal.py
           /usr/bin/python3 test/test_nats_user_transfer.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_journal.py
-          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_full_node_baseline.py
+          OPENCLAW_CI_FULL_NODE_INVENTORY_FIXTURE=1 /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_full_node_baseline.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_asif_extract.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_image_immutable.py

@@ -1,15 +1,23 @@
 import copy
 import hashlib
+import os
 import pathlib
 import plistlib
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from full_node_baseline import capture_full_node_prior, open_full_node_journal
+from journal_hold import JournaledHold
+from managed_launchd import Launchd
+from preservation_checks import disabled_overrides
 from preservation_journal import (FULL_NODE_SCOPE, Journal, Refused, TIMER_UNITS,
-                                  UNITS, valid_entrypoint_inventory)
+                                  UNITS, static_identity, valid_entrypoint_inventory)
+from test_journal_hold import gate_module
 
 
 class FullNodeBaseline(unittest.TestCase):
@@ -242,6 +250,112 @@ class FullNodeBaseline(unittest.TestCase):
               patch('full_node_baseline.Launchd', side_effect=service)):
             with self.assertRaisesRegex(Refused, 'direct files changed during baseline'):
                 capture_full_node_prior(self.gate, self.approved)
+
+
+class OwnedFullNodeInventory(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'darwin'
+                         and os.environ.get('OPENCLAW_CI_FULL_NODE_INVENTORY_FIXTURE') == '1',
+                         '23-label inventory fixture runs only on a dedicated macOS CI runner')
+    def test_native_entrypoint_capture_opens_the_full_node_journal(self):
+        labels = {'ai.openclaw.' + unit for unit in UNITS}
+        uid = str(os.getuid())
+        for folder in (pathlib.Path.home() / 'Library/LaunchAgents',
+                       pathlib.Path('/Library/LaunchAgents'), pathlib.Path('/Library/LaunchDaemons')):
+            self.assertFalse(any((folder / (label + '.plist')).exists() for label in labels))
+        for unit in UNITS:
+            label = 'ai.openclaw.' + unit
+            service = Launchd(label, '/dev/null')
+            self.assertFalse(service.status()['loaded'])
+            self.assertFalse(service.status('user')['loaded'])
+            system = subprocess.run(['/bin/launchctl', 'print', 'system/' + label],
+                                    capture_output=True, timeout=10)
+            self.assertNotEqual(system.returncode, 0)
+        for domain in ('gui/' + uid, 'user/' + uid, 'system'):
+            output = subprocess.check_output(['/bin/launchctl', 'print-disabled', domain],
+                                             text=True, timeout=10)
+            self.assertFalse(any(value is True for value in
+                                 disabled_overrides(output, labels).values()))
+
+        with tempfile.TemporaryDirectory(prefix='openclaw-owned-full-inventory-') as directory:
+            root = pathlib.Path(directory).resolve()
+            home = root / 'home'
+            agents = home / 'Library/LaunchAgents'
+            agents.mkdir(parents=True)
+            gate_root = root / 'gate'
+            pins = gate_module.initialize(gate_root)
+            entry = root / 'timer-entry.py'
+            manifest = root / 'timer-entry-manifest.json'
+            entry.write_text('raise SystemExit(78)\n')
+            manifest.write_text('{"owned":true}\n')
+            manifest_hash = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            services = {}
+            approved = {}
+            try:
+                for unit in sorted(UNITS):
+                    label = 'ai.openclaw.' + unit
+                    kind = ('held' if unit == 'nats-1' else
+                            'unloaded' if unit == 'federation-tick' else
+                            'on-demand' if unit == 'mesh-agent' else
+                            'known-broken' if unit == 'mesh-tool-discord' else
+                            'timer' if unit in TIMER_UNITS else 'daemon')
+                    argv = (['/usr/bin/python3', '-I', '-S', str(entry), str(manifest),
+                             manifest_hash, label, str(gate_root), pins['lock'], pins['root'],
+                             '--', '/bin/sleep', '900'] if kind == 'timer' else
+                            ['/bin/sleep', '900'])
+                    plist = agents / (label + '.plist')
+                    plist.write_bytes(plistlib.dumps({
+                        'Label': label, 'ProgramArguments': argv,
+                        'WorkingDirectory': str(root),
+                        'RunAtLoad': kind in ('daemon', 'known-broken'),
+                        'KeepAlive': False}))
+                    identity = static_identity(plist)
+                    approved[unit] = {'class': kind,
+                        'plist': {'path': str(plist), 'sha256': identity['plist_sha256']},
+                        'direct_file_hashes': identity['files']}
+                    services[unit] = Launchd(label, plist)
+                    if kind in ('held', 'unloaded'):
+                        services[unit].disable_unloaded_for_hold()
+                    else:
+                        services[unit].bootstrap()
+                deadline = time.monotonic() + 20
+                running = {unit for unit in UNITS if approved[unit]['class'] in
+                           ('daemon', 'known-broken')}
+                while not all(services[unit].status()['running'] for unit in running):
+                    self.assertLess(time.monotonic(), deadline, 'owned daemons did not start')
+                    time.sleep(.05)
+                writer_lock = root / 'writer.lock'
+                writer_lock.write_bytes(b'owned writer lock')
+                writer_lock.chmod(0o644)
+                with (patch.dict(os.environ, {'HOME': str(home)}),
+                      patch('preservation_journal.NATS_WRITER_MARKER', root / 'writer-handoff.json'),
+                      patch('preservation_journal.NATS_LEGACY_LOCK', writer_lock),
+                      patch('preservation_journal.NATS_ROOT_UID', os.getuid()),
+                      gate_module.Gate(gate_root, pins) as gate):
+                    with open_full_node_journal(root / 'journals' / 'window', gate, approved,
+                                                boot='owned-boot', node_lock=root / 'node.lock') as journal:
+                        prior = journal.prior
+                        evidence = journal.records[0]['entrypoint_inventory']
+                        self.assertEqual(set(prior), UNITS)
+                        self.assertEqual(set(evidence['installed']), labels)
+                        self.assertEqual(set(evidence['loaded']['gui']),
+                                         labels - {'ai.openclaw.nats-1',
+                                                   'ai.openclaw.federation-tick'})
+                        self.assertEqual(evidence['loaded']['user'], [])
+                        self.assertEqual(evidence['loaded']['system'], [])
+                        self.assertEqual(sum(prior[unit]['running'] for unit in UNITS), len(running))
+                        hold = JournaledHold(journal, gate, lambda: {'verified': True})
+                        hold.close()
+            finally:
+                for service in services.values():
+                    if service.status()['loaded']:
+                        subprocess.run(['/bin/launchctl', 'bootout', 'gui/' + uid + '/' +
+                                        service.label], capture_output=True, timeout=10)
+                    if service.disabled():
+                        subprocess.run(['/bin/launchctl', 'enable', 'gui/' + uid + '/' +
+                                        service.label], capture_output=True, timeout=10)
+                for unit in services:
+                    self.assertFalse(services[unit].status()['loaded'])
+                    self.assertFalse(services[unit].disabled())
 
 
 if __name__ == '__main__':
