@@ -9,6 +9,7 @@ jobs:
   unit-tests:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         # package.json engines.node is >=22; 20 kept for lower-bound breadth.
         # 18 dropped — EOL (2025-04) + below the floor; it only stayed green

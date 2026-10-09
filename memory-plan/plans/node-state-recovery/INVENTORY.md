@@ -2422,3 +2422,11 @@ rows, and all four actual Python/Node digests agree in the disposable test.
 Nine host tests pass. These remain owned mechanism checks with synthetic NATS
 receipt provenance. Full production hold, capture, four-history acceptance
 and verified resumption are open at 1.2[A]/v1.2-pre; no live state changed.
+
+Checkpoint 2026-10-09 19:46 EDT: D146 disables matrix fail-fast so the Node 22
+recovery fixture, root tests and audit can finish even when Node 20's separate
+dependency audit fails. Exact-head D145 macOS CI passed; its Node 22 fixture
+step passed but the job was canceled before a complete result. The workflow
+parses with `fail-fast: false`; new exact-head CI remains to run. This does not
+approve the production baseline or close the full hold, stopped capture,
+four-history acceptance or resumption gates. No live state changed.

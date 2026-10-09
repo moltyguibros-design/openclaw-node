@@ -3119,3 +3119,16 @@ extraction chain. Exact-head D143 CI ran the NATS fixture green as a step in
 the Node 22 job, but fail-fast later canceled that job; the macOS job passed
 and the overall workflow failed at separate dependency audits. No production
 VM, service or NATS store changed.
+
+## D146 — Let both Node matrix jobs finish independently (2026-10-09 19:46 EDT)
+
+The exact-head D145 workflow passed its native macOS job and reached a green
+JetStream recovery-fixture step on Node 22, but the Node 20 dependency audit
+failure canceled the Node 22 job before its remaining tests and audit finished.
+The unit-test matrix now sets `fail-fast: false`, so one version's failure
+cannot erase the other version's complete result. The high-severity dependency
+audits remain enforced in both jobs; this changes only cancellation behavior.
+The workflow parses with that value set to false, and the diff is clean. The
+next exact-head run must establish the complete Node 22 result. This is CI
+evidence plumbing, not a production history or no-writer acceptance. No live
+VM, service or NATS store changed.
