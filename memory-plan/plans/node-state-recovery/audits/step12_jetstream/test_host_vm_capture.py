@@ -492,6 +492,33 @@ class HostCaptureTest(unittest.TestCase):
             self.assertEqual(match['masters'][role]['sha256'], hashlib.sha256(
                 json.dumps(guest_rows[role], ensure_ascii=False,
                            separators=(',', ':')).encode()).hexdigest())
+        original_freeze = stopped_tree_match.freeze
+        for name, input_path in (
+                ('guest', guest_output / 'manifest.json'),
+                ('capture', output / 'CAPTURE.json'),
+                ('extract', output / 'extracted-stores' / 'manifest.json'),
+                ('guard', output / 'GUARD.json')):
+            original_bytes = input_path.read_bytes()
+            changed = False
+            def mutate_after_validation(root):
+                nonlocal changed
+                original_freeze(root)
+                if not changed:
+                    input_path.write_bytes(original_bytes + b' ')
+                    changed = True
+            refused = self.root / f'changed-{name}-during-match'
+            try:
+                with mock.patch.object(stopped_tree_match, 'freeze',
+                                       side_effect=mutate_after_validation):
+                    with self.assertRaisesRegex(RuntimeError,
+                                                'input receipts changed during match'):
+                        host_match(guest_output / 'manifest.json',
+                                   output / 'extracted-stores', refused)
+                self.assertTrue(changed)
+                self.assertTrue((refused / 'FAILED.json').exists())
+                self.assertFalse((refused / 'MATCH.json').exists())
+            finally:
+                input_path.write_bytes(original_bytes)
         swapped_match = self.root / 'swapped-guest-match'
         with self.assertRaisesRegex(RuntimeError, 'guest store specification differs'):
             host_match(swapped_guest / 'manifest.json', output / 'extracted-stores', swapped_match)

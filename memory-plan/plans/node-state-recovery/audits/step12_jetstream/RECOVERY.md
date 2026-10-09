@@ -101,6 +101,10 @@ host after ASIF extraction, compares the guest manifest, extraction manifest
 and rehashed host files exactly, then makes the extracted trees read-only.
 Its `MATCH.json` records the canonical frozen path and content digest for each
 role, so the isolated probe can reject a plan that relabels a master.
+Before publishing that receipt, `match` rechecks the guest, capture,
+extraction and guard JSON against the exact bytes it parsed and hashes those
+validated bytes. The eventual acceptance controller must still revalidate
+the chain after the match completes.
 The host capture receipt pins the exact store-specification bytes; `match`
 requires the guest manifest's specification hash to agree and its declared
 scope and timestamp to precede the host image guard. Both sides must use the

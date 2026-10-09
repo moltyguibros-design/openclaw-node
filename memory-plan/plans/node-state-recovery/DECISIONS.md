@@ -3068,3 +3068,21 @@ host-match fixture pass. The test receipts are synthetic and prove only this
 binding mechanism. Production acceptance still must establish the actual
 `MATCH.json` capture/extraction provenance and all other hold, host, and
 historical gates. No production VM, service, or NATS store was changed.
+
+## D144 — Keep the matched receipt inputs stable through host comparison (2026-10-09 17:52 EDT)
+
+`host_match` previously parsed the guest, capture, extraction and guard JSON
+files, then hashed some of them only when publishing `MATCH.json`. A rewrite
+between validation and publication could make the published digest describe
+bytes that were never checked. It now retains the exact input bytes it parsed,
+requires all four files to remain byte-identical after the frozen-tree checks,
+and publishes digests of those validated bytes. The disposable ASIF fixture
+mutates each input in turn after validation; all four cases refuse with
+`FAILED.json` and no `MATCH.json`. The nine host capture tests pass on macOS.
+
+This is a same-process consistency check, not guest-origin attestation or an
+atomic guarantee against a rewrite after the final check. The production
+acceptance controller still has to revalidate the capture/extraction chain.
+Exact-head D143 macOS CI passed its 28 native baseline tests and nine host
+capture tests; the overall workflow failed at separate root and Mission
+Control dependency audits. No production VM, service or NATS store changed.

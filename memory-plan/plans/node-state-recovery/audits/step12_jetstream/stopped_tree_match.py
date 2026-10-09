@@ -132,7 +132,8 @@ def host_match(guest_path, extracted, output):
     private_parent(extracted)
     private_parent(extracted.parent)
     private_parent(output.parent)
-    guest = json.loads(guest_path.read_text())
+    guest_bytes = guest_path.read_bytes()
+    guest = json.loads(guest_bytes)
     manifest_path = extracted / 'manifest.json'
     capture_path = extracted.parent / 'CAPTURE.json'
     guard_path = extracted.parent / 'GUARD.json'
@@ -141,9 +142,12 @@ def host_match(guest_path, extracted, output):
     private_file(capture_path)
     private_file(guard_path)
     private_file(image_path)
-    host = json.loads(manifest_path.read_text())
-    capture = json.loads(capture_path.read_text())
-    guard = json.loads(guard_path.read_text())
+    host_bytes = manifest_path.read_bytes()
+    capture_bytes = capture_path.read_bytes()
+    guard_bytes = guard_path.read_bytes()
+    host = json.loads(host_bytes)
+    capture = json.loads(capture_bytes)
+    guard = json.loads(guard_bytes)
     new_output(output)
     try:
         require(capture['scope'] == CAPTURE_SCOPE
@@ -192,11 +196,16 @@ def host_match(guest_path, extracted, output):
                 'path': str(root.resolve(strict=True)),
                 'sha256': hashlib.sha256(json.dumps(rows, ensure_ascii=False,
                     separators=(',', ':')).encode()).hexdigest()}
+        require(guest_path.read_bytes() == guest_bytes
+                and manifest_path.read_bytes() == host_bytes
+                and capture_path.read_bytes() == capture_bytes
+                and guard_path.read_bytes() == guard_bytes,
+                'stopped-tree input receipts changed during match')
         result = {'scope': 'content match and read-only mode; not historical master acceptance',
                   'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                  'guest_manifest_sha256': sha256(guest_path),
-                  'capture_sha256': sha256(capture_path),
-                  'extraction_manifest_sha256': sha256(manifest_path),
+                  'guest_manifest_sha256': hashlib.sha256(guest_bytes).hexdigest(),
+                  'capture_sha256': hashlib.sha256(capture_bytes).hexdigest(),
+                  'extraction_manifest_sha256': hashlib.sha256(host_bytes).hexdigest(),
                   'image_sha256': host['image_sha256'],
                   'data_volume_uuid': guest['data_volume_uuid'], 'matched': matched,
                   'masters': masters}

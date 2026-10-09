@@ -2398,3 +2398,13 @@ disposable ASIF host-match test pass. This is mechanism evidence with synthetic
 role receipts; production MATCH provenance, all four real-history acceptance,
 the full-node hold, capture and verified resumption remain open at 1.2[A]/
 v1.2-pre. No production VM, service or NATS store was changed.
+
+Checkpoint 2026-10-09 17:52 EDT: D144 keeps the four small input receipts
+byte-stable while `host_match` compares and freezes the extracted trees.
+Disposable ASIF negatives rewrite each of guest, capture, extraction and guard
+JSON after validation; all four now refuse without a `MATCH.json`, and the
+nine host tests pass. Exact-head D143 macOS CI passed its native baseline and
+host suites, while root and Mission Control dependency audits kept the overall
+workflow red. This does not attest guest origin, close the production hold,
+capture the live stopped VM, or accept and resume the four actual histories.
+No live service, VM or NATS store changed; 1.2 remains [A]/v1.2-pre.
