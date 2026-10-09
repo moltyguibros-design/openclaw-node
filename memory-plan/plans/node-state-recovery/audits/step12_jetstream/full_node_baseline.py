@@ -43,7 +43,10 @@ def capture_full_node_prior(gate, approved):
         service = Launchd(label, installed['path'])
         status = service.status()
         disabled = service.disabled()
-        observations[unit] = (service, status, disabled, installed['path'], tuple(expected))
+        loaded_entry = service.configuration(include_logs=False) if status['loaded'] else None
+        require(loaded_entry is None or loaded_entry == {'path': plist, 'arguments': identity['argv']},
+                'loaded job differs from approved plist: ' + unit)
+        observations[unit] = (service, status, disabled, installed['path'], tuple(expected), loaded_entry)
         prior[unit] = {'class': saved['class'], 'loaded': status['loaded'],
                        'running': status['running'], 'disabled': disabled,
                        'identity': identity}
@@ -52,9 +55,11 @@ def capture_full_node_prior(gate, approved):
     valid_entrypoint_inventory(entrypoints, prior)
     require(capture_entrypoint_inventory(UNITS) == entrypoints,
             'full-node entrypoint inventory changed during baseline')
-    for unit, (service, status, disabled, plist, files) in observations.items():
+    for unit, (service, status, disabled, plist, files, loaded_entry) in observations.items():
         require(service.status() == status and service.disabled() == disabled,
                 'full-node service changed during baseline: ' + unit)
+        require((service.configuration(include_logs=False) if status['loaded'] else None) == loaded_entry,
+                'full-node loaded job changed during baseline: ' + unit)
         require(static_identity(plist, files) == prior[unit]['identity'],
                 'full-node direct files changed during baseline: ' + unit)
     return prior, entrypoints

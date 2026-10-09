@@ -2913,3 +2913,28 @@ point-in-time recapture, review of the viewer release's file dependencies,
 and explicit approval are required before a production full-node journal.
 The full hold and shutdown gates remain open; no VM, production service or
 NATS store was stopped or restarted for this observation.
+
+## D138 — Bind the full-node baseline to launchd's loaded entry (2026-10-08 21:42 EDT)
+
+The full-node prior producer previously checked installed plist bytes and
+launchd loaded/running state separately. A plist rewritten after bootstrap
+could therefore supply approved arguments that differed from the job launchd
+still had loaded. The producer now reads each loaded job's launchd path and
+arguments, requires them to equal the approved plist, and repeats that read
+after the inventory handoff. It refuses before journal creation if either
+observation differs. The loaded-entry read omits log-path requirements so the
+23-label fixture's inert stubs and other jobs without configured logs remain
+observable. The existing managed stop still performs its separate running
+owner binding.
+
+Owned negatives cover mismatched loaded arguments and a change between the
+two reads. The baseline suite passes 22 tests with four dedicated-runner
+skips; the adjacent managed-launchd, journal and hold suites pass 251 tests
+with three skips. A read-only check of the live workplan-viewer found its
+loaded path and arguments match its installed plist. A dedicated macOS CI
+negative now rewrites one fixture plist after bootstrap and requires the
+producer to refuse; its exact-head run is pending. This is loaded-entry
+provenance, not proof that every running owner or detached writer is held.
+The approved production map, complete hold, stopped capture, four-history
+acceptance and resumption remain open. No live service, VM or NATS store was
+stopped or restarted.

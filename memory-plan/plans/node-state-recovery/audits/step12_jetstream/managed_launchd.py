@@ -220,7 +220,7 @@ class Launchd:
                 'executable': executable, 'cwd': process_cwd(pid), 'identity': identity,
                 'logs': loaded['logs']}
 
-    def configuration(self):
+    def configuration(self, include_logs=True):
         text = command(['/bin/launchctl', 'print', self.target])
         def field(name):
             match = re.search(r'^\s*' + re.escape(name) + r' = (.+)$', text, re.M)
@@ -228,10 +228,12 @@ class Launchd:
             return match[1]
         arguments = re.search(r'^\s*arguments = \{\n(.*?)^\s*\}', text, re.M | re.S)
         require(arguments is not None, 'loaded job lacks arguments')
-        return {'path': str(pathlib.Path(field('path')).resolve(strict=True)),
-                'arguments': [line.strip() for line in arguments[1].splitlines()],
-                'logs': sorted({str(pathlib.Path(field(name)).resolve(strict=True))
-                                for name in ('stdout path', 'stderr path')})}
+        entry = {'path': str(pathlib.Path(field('path')).resolve(strict=True)),
+                 'arguments': [line.strip() for line in arguments[1].splitlines()]}
+        if include_logs:
+            entry['logs'] = sorted({str(pathlib.Path(field(name)).resolve(strict=True))
+                                    for name in ('stdout path', 'stderr path')})
+        return entry
 
     def bootstrap(self):
         require(not self.status()['loaded'], 'refusing to bootstrap an existing owner')

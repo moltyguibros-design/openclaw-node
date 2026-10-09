@@ -2330,3 +2330,12 @@ producer refused that map with `installed plist differs from approved record:
 workplan-viewer`. A fresh recapture and approval are prerequisites to any
 production full-node journal. No service, VM or NATS history changed in this
 read-only check; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-08 21:42 EDT: D138 makes the full-node baseline refuse a
+loaded launchd path or argv that differs from the approved installed plist,
+including drift between its two observations. Owned baseline and adjacent
+hold/journal suites pass; the native 23-label negative awaits dedicated macOS
+CI. The October 7 production map remains stale and unapproved. Complete
+no-writer hold, stopped-VM capture, all four real-history acceptance and
+verified resumption remain open; 1.2 remains [A]/v1.2-pre. No production
+service, VM or NATS store was stopped or restarted.
