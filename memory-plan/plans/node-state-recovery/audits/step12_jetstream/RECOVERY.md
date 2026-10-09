@@ -45,9 +45,11 @@ server `name`, an absolute, owner-read-only `master` store directory, its
 `take_cold_baseline.mjs`. The digest is SHA-256 of the JSON serialization of
 the sorted `hashTree(master)` entries. The plan also names the private
 `matchReceipt` emitted by `stopped_tree_match.py`. Before starting a server,
-the probe binds each master path and digest to that receipt's frozen role:
+the probe binds each master path, digest and baseline monitor's guest store
+directory to that receipt's frozen role:
 standalone, held member1, and serving member2/member3 in plan order. Swapping
-two paths and their digests in the plan while retaining their roles refuses.
+two paths and their digests, or swapping their names and baselines, while
+retaining their roles refuses.
 The eventual acceptance controller must verify the receipt against its capture
 and extraction chain; this probe does not attest the receipt's origin. The tool
 requires four distinct masters, copies each into a private working directory,
@@ -100,7 +102,11 @@ private specification after managed NATS stop. Its `match` action runs on the
 host after ASIF extraction, compares the guest manifest, extraction manifest
 and rehashed host files exactly, then makes the extracted trees read-only.
 Its `MATCH.json` records the canonical frozen path and content digest for each
-role, so the isolated probe can reject a plan that relabels a master.
+role and that role's canonical guest store path, so the isolated probe can
+reject a plan that relabels a master or its server name. The content digest
+comes from freshly enumerated frozen host rows, with the same field order as
+the Node probe's `hashTree`; the disposable ASIF fixture checks equality of
+all four cross-language digests.
 Before publishing that receipt, `match` rechecks the guest, capture,
 extraction and guard JSON against the exact bytes it parsed and hashes those
 validated bytes. The eventual acceptance controller must still revalidate

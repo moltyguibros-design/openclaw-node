@@ -485,13 +485,31 @@ class HostCaptureTest(unittest.TestCase):
         host_match(guest_output / 'manifest.json', output / 'extracted-stores', matched)
         self.assertTrue((matched / 'MATCH.json').exists())
         match = json.loads((matched / 'MATCH.json').read_text())
-        guest_rows = json.loads((guest_output / 'manifest.json').read_text())['stores']
+        guest_manifest = json.loads((guest_output / 'manifest.json').read_text())
+        guest_rows = guest_manifest['stores']
         for role in ('standalone', 'member1', 'member2', 'member3'):
             self.assertEqual(match['masters'][role]['path'],
                              str((output / 'extracted-stores' / role).resolve()))
+            self.assertEqual(match['masters'][role]['guest_path'],
+                             guest_manifest['store_paths'][role])
             self.assertEqual(match['masters'][role]['sha256'], hashlib.sha256(
-                json.dumps(guest_rows[role], ensure_ascii=False,
+                json.dumps(stopped_tree_match.entries(output / 'extracted-stores' / role),
+                           ensure_ascii=False,
                            separators=(',', ':')).encode()).hexdigest())
+        node = shutil.which('node')
+        self.assertIsNotNone(node)
+        script = ('import { hashTree } from ' + json.dumps((HERE / 'recovery.mjs').as_uri())
+                  + '; import { createHash } from "node:crypto"; '
+                  + 'console.log(JSON.stringify(process.argv.slice(1).map(dir => { '
+                  + 'const rows = hashTree(dir); return { rows, sha256: '
+                  + 'createHash("sha256").update(JSON.stringify(rows)).digest("hex") }; })));')
+        roles = ('standalone', 'member1', 'member2', 'member3')
+        node_results = json.loads(subprocess.check_output([node, '--input-type=module', '-e',
+            script, *(str(output / 'extracted-stores' / role) for role in roles)]))
+        self.assertEqual([result['rows'] for result in node_results],
+                         [guest_rows[role] for role in roles])
+        node_digests = [result['sha256'] for result in node_results]
+        self.assertEqual(node_digests, [match['masters'][role]['sha256'] for role in roles])
         original_freeze = stopped_tree_match.freeze
         for name, input_path in (
                 ('guest', guest_output / 'manifest.json'),

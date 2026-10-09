@@ -83,9 +83,11 @@ def guest_capture(spec_path, output, root=pathlib.Path('/')):
     new_output(output)
     try:
         stores = {}
+        store_paths = {}
         for row in spec['stores']:
             source = declared_path(root, row['relative_path'])
             stores[row['role']] = entries(source)
+            store_paths[row['role']] = str(source.resolve(strict=True))
             require(any(item['type'] == 'file' for item in stores[row['role']]),
                     f'empty stopped store: {row["role"]}')
         require(sha256(spec_path) == spec_sha256,
@@ -93,7 +95,8 @@ def guest_capture(spec_path, output, root=pathlib.Path('/')):
         result = {'scope': 'guest stopped-tree content observation; writer exclusion external',
                   'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                   'data_volume_uuid': spec['data_volume_uuid'],
-                  'spec_sha256': spec_sha256, 'stores': stores}
+                  'spec_sha256': spec_sha256, 'stores': stores,
+                  'store_paths': store_paths}
         write_json(output / 'manifest.json', result)
         return result
     except Exception as error:
@@ -174,6 +177,12 @@ def host_match(guest_path, extracted, output):
         require(set(guest['stores']) == ROLES and set(host['stores']) == ROLES
                 and guest['data_volume_uuid'] == host['data_volume_uuid'],
                 'guest and host store roles or Data volume differ')
+        store_paths = guest.get('store_paths')
+        require(isinstance(store_paths, dict) and set(store_paths) == ROLES
+                and all(isinstance(value, str) and pathlib.Path(value).is_absolute()
+                        for value in store_paths.values())
+                and len(set(store_paths.values())) == 4,
+                'guest store paths are absent or ambiguous')
         matched = {}
         for role in sorted(ROLES):
             root = extracted / role
@@ -184,16 +193,19 @@ def host_match(guest_path, extracted, output):
             matched[role] = {'entries': len(actual),
                              'files': sum(row['type'] == 'file' for row in actual),
                              'bytes': sum(row.get('size', 0) for row in actual)}
+        frozen_rows = {}
         for role in sorted(ROLES):
             freeze(extracted / role)
-            require(entries(extracted / role) == guest['stores'][role],
+            frozen_rows[role] = entries(extracted / role)
+            require(frozen_rows[role] == guest['stores'][role],
                     f'frozen host tree changed: {role}')
         masters = {}
         for role in sorted(ROLES):
             root = extracted / role
-            rows = guest['stores'][role]
+            rows = frozen_rows[role]
             masters[role] = {
                 'path': str(root.resolve(strict=True)),
+                'guest_path': store_paths[role],
                 'sha256': hashlib.sha256(json.dumps(rows, ensure_ascii=False,
                     separators=(',', ':')).encode()).hexdigest()}
         require(guest_path.read_bytes() == guest_bytes

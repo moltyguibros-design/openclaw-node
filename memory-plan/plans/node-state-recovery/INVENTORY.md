@@ -2408,3 +2408,17 @@ host suites, while root and Mission Control dependency audits kept the overall
 workflow red. This does not attest guest origin, close the production hold,
 capture the live stopped VM, or accept and resume the four actual histories.
 No live service, VM or NATS store changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-09 18:09 EDT: Claude reproduced a remaining D143 false
+accept: exchanging the two serving names and baselines while leaving master
+paths, hashes and the role receipt fixed still passed the isolated probe. D145
+records each role's canonical guest store path in the stopped-tree match and
+requires the corresponding baseline monitor `storeDir` to agree before any
+working copy. The new owned negative first passed incorrectly and now refuses;
+the full NATS fixture passes with all servers stopped. A real ASIF integration
+check also found that Python's sorted manifest JSON field order produced a
+digest unlike Node's tree hash; matching now hashes freshly enumerated frozen
+rows, and all four actual Python/Node digests agree in the disposable test.
+Nine host tests pass. These remain owned mechanism checks with synthetic NATS
+receipt provenance. Full production hold, capture, four-history acceptance
+and verified resumption are open at 1.2[A]/v1.2-pre; no live state changed.

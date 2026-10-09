@@ -320,7 +320,9 @@ try {
   ];
   for (const [role, extractedRole] of roleBindings) {
     const saved = match.masters[extractedRole];
-    assert.deepEqual(Object.keys(saved).sort(), ['path', 'sha256']);
+    assert.deepEqual(Object.keys(saved).sort(), ['guest_path', 'path', 'sha256']);
+    assert.equal(baselines.get(role.name).serverInfo.storeDir, saved.guest_path,
+      `cold master guest path differs from baseline: ${role.name}`);
     assert.equal(fs.realpathSync(role.master), saved.path,
       `cold master role differs from stopped-tree match: ${role.name}`);
     assert.equal(role.masterSha256, saved.sha256,

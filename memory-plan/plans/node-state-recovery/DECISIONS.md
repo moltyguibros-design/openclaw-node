@@ -3086,3 +3086,36 @@ acceptance controller still has to revalidate the capture/extraction chain.
 Exact-head D143 macOS CI passed its 28 native baseline tests and nine host
 capture tests; the overall workflow failed at separate root and Mission
 Control dependency audits. No production VM, service or NATS store changed.
+
+## D145 — Bind cold-baseline names to guest store paths (2026-10-09 18:09 EDT)
+
+Claude's read-only review of exact head `db329d11` reproduced a second D143
+false accept on owned NATS 2.12.6: swapping the two survivors' names and
+baseline paths while retaining their master paths, digests and fixed receipt
+still produced a success report. The baseline name check compared two fields
+from the same edited plan; `MATCH.json` had no independent guest path. A local
+copy of that negative failed against the old probe with “Missing expected
+rejection.” `guest_capture` now records the canonical guest store path per
+role, `host_match` carries it into each frozen master's receipt row, and the
+probe requires the baseline monitor's `storeDir` to match that role path before
+copying or booting a working server. The owned name-plus-baseline swap now
+refuses before any working copy, and the full NATS fixture passes with all
+owned servers stopped. The original path-only and path-plus-digest swaps still
+refuse.
+
+The real disposable ASIF test exposed another D143 limitation while checking
+that chain: `guest_capture` writes sorted JSON keys, so hashing its reloaded
+row objects produced a different digest from the probe's Node `hashTree()`
+serialization even when their tree contents matched. `host_match` now hashes
+its freshly enumerated frozen host rows, preserving the same field order as
+`hashTree`. The fixture requires all four Python and Node row lists and
+digests to agree; its nine tests pass. This was a false refusal of any genuine
+match receipt, not a corruption acceptance.
+
+The fixture's receipt is still synthetic, and the production store-spec role
+mapping and guest origin are unproven. The probe checks a receipt named by the
+caller; the eventual acceptance controller must validate its capture and
+extraction chain. Exact-head D143 CI ran the NATS fixture green as a step in
+the Node 22 job, but fail-fast later canceled that job; the macOS job passed
+and the overall workflow failed at separate dependency audits. No production
+VM, service or NATS store changed.

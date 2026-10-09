@@ -657,7 +657,9 @@ try {
       capture_sha256: '0'.repeat(64), extraction_manifest_sha256: '0'.repeat(64),
       matched: Object.fromEntries(Object.keys(bindings).map(role => [role, {}])),
       masters: Object.fromEntries(Object.entries(bindings).map(([role, item]) =>
-        [role, { path: fs.realpathSync(item.master), sha256: item.masterSha256 }])),
+        [role, { path: fs.realpathSync(item.master),
+          guest_path: JSON.parse(fs.readFileSync(item.baseline)).serverInfo.storeDir,
+          sha256: item.masterSha256 }])),
     });
   }
   treePlan.matchReceipt = path.join(root, 'owned-match.json');
@@ -738,6 +740,19 @@ try {
   assert.match(JSON.parse(fs.readFileSync(path.join(swappedWithHashesTarget, 'FAILED.json'))).error,
     /cold master role differs from stopped-tree match/);
   assert(!fs.readdirSync(swappedWithHashesTarget).some(name => name.startsWith('working-')));
+  const swappedNames = structuredClone(treePlan);
+  for (const field of ['name', 'baseline']) {
+    [swappedNames.cluster.members[0][field], swappedNames.cluster.members[1][field]] =
+      [swappedNames.cluster.members[1][field], swappedNames.cluster.members[0][field]];
+  }
+  const swappedNamesFile = path.join(root, 'swapped-name-and-baseline-plan.json');
+  jsonPrivate(swappedNamesFile, swappedNames);
+  const swappedNamesTarget = path.join(root, 'swapped-name-and-baseline-probe');
+  await assert.rejects(run(process.execPath,
+    [coldTreeProbe, swappedNamesFile, swappedNamesTarget], { stdio: 'ignore' }));
+  assert.match(JSON.parse(fs.readFileSync(path.join(swappedNamesTarget, 'FAILED.json'))).error,
+    /cold master guest path differs from baseline/);
+  assert(!fs.readdirSync(swappedNamesTarget).some(name => name.startsWith('working-')));
   const servingMaster = treePlan.cluster.members[0].master;
   const removedMaster = path.join(root, 'master-removed-blocks');
   copyCold(servingMaster, removedMaster);
@@ -789,7 +804,7 @@ try {
   assert(!fs.existsSync(path.join(staleProbe, 'probe.json')));
   assert.deepEqual(hashTree(cold), coldHashes);
   for (let i = 0; i < 3; i++) assert.deepEqual(hashTree(masters[i]), hashes[i]);
-  results.coldTreeProbe = { standaloneLast: coldSource.content.last, heldLast: offlineColdSource.content.last, offlineClusterAssignment: true, mastersUnchanged: true, staleArchiveBaselineRejected: true, overlappingTargetRejected: true, omittedR1Rejected: true, omittedR1PlanRejected: true, swappedMastersRejected: true, swappedMasterAndHashRejected: true, removedBlocksRejectedBeforeQuorum: true, flippedPayloadRejectedUnderForcedLeader: true };
+  results.coldTreeProbe = { standaloneLast: coldSource.content.last, heldLast: offlineColdSource.content.last, offlineClusterAssignment: true, mastersUnchanged: true, staleArchiveBaselineRejected: true, overlappingTargetRejected: true, omittedR1Rejected: true, omittedR1PlanRejected: true, swappedMastersRejected: true, swappedMasterAndHashRejected: true, swappedNamesAndBaselinesRejected: true, removedBlocksRejectedBeforeQuorum: true, flippedPayloadRejectedUnderForcedLeader: true };
   passed = true;
 } catch (err) {
   jsonPrivate(path.join(root, 'FAILED.json'), { at: new Date().toISOString(), phase, error: err.message });
