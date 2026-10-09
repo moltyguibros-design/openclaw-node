@@ -2363,3 +2363,14 @@ on-demand/known-broken jobs, detached writers, UTM/boot controls, stopped
 capture, four-history acceptance and verified service resumption remain
 open at 1.2[A]/v1.2-pre. No production service, VM or NATS store was stopped
 or restarted.
+
+Checkpoint 2026-10-09 09:40 EDT: Exact-head `102d9c05` macOS CI passed all
+28 native baseline tests without skips, including the ten-daemon sweep.
+Claude's review found D140's claim about no later stop was untested because
+the negative returned immediately after the bad marker. D141 adds an actual
+memory-daemon stop attempt after that failed receipt and requires a
+zero-append restore-only refusal with its owner, connection and port still
+live. The marker refusal occurs after mesh-task-daemon physically stops, so
+manual reconciliation is required; it is not a safe no-op. The new negative
+awaits dedicated-runner CI. Full-node hold and later capture, history
+acceptance and resumption remain open at 1.2[A]/v1.2-pre.

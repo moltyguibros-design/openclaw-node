@@ -697,6 +697,8 @@ process.on('SIGTERM',()=>{
                                                 'normal completion marker missing or repeated'):
                                             watch.mutate(journal, unit, closed, absent, hold=hold)
                                         self.assertTrue(journal.listener_fenced())
+                                        self.assertFalse(daemon.status()['loaded'])
+                                        self.assertTrue(daemon.disabled())
                                         self.assertFalse(service.status()['loaded'])
                                         self.assertTrue(service.disabled())
                                         self.assertIsNotNone(gate.marker())
@@ -716,6 +718,27 @@ process.on('SIGTERM',()=>{
                                         with self.assertRaisesRegex(Refused,
                                                 'unrestored node cannot be sealed'):
                                             journal.resolve()
+                                        next_unit = 'memory-daemon'
+                                        next_stub = sweep_stubs[next_unit]
+                                        next_service = services[next_unit]
+                                        next_state = next_service.status()
+                                        next_identity = prior[next_unit]['identity']
+                                        next_binding = next_service.bind(
+                                            next_identity['argv'], next_identity['argv'][0],
+                                            next_identity['working_directory'])
+                                        next_rows = len(journal.records)
+                                        with StopWatch(next_service, next_binding,
+                                                       [next_stub['log'], next_stub['err']], next_unit,
+                                                       require_disabled=True) as next_watch:
+                                            with self.assertRaisesRegex(Refused,
+                                                    'interrupted preservation may only restore prior services'):
+                                                next_watch.mutate(journal, next_unit,
+                                                    lambda: False, lambda: False, hold=hold)
+                                        self.assertEqual(len(journal.records), next_rows)
+                                        self.assertEqual(next_service.status(), next_state)
+                                        self.assertFalse(next_service.disabled())
+                                        self.assertFalse(closed(next_stub['connection']))
+                                        self.assertFalse(absent(next_stub['details']['port']))
                                         return
                                     stub['proof'] = watch.mutate(journal, unit, closed, absent,
                                                                  hold=hold)

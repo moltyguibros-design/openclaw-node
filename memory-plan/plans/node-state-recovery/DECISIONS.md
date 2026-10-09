@@ -3001,3 +3001,24 @@ on-demand/known-broken paths, detached-process and host UTM/boot controls,
 stopped-VM capture, four real-history acceptance and verified production
 resumption remain open. No live service, VM or NATS store was stopped or
 restarted.
+
+## D141 — Prove a failed daemon receipt blocks the next stop (2026-10-09 09:40 EDT)
+
+Exact-head `102d9c05` macOS job 113762159028 passed all 28 native baseline
+tests without skips, including the strengthened missing-completion negative.
+Claude's read-only review found its claim that no later daemon stop occurs
+was vacuous: the fixture returned before attempting one. The fixture now
+binds the still-running memory-daemon stub after mesh-task-daemon's marker
+receipt is refused, attempts its persistent stop, and requires the journal's
+interrupted-preservation refusal before any new intent. It checks the
+memory-daemon PID/state, enabled override, bus connection and listener port
+remain live. This is the observable boundary needed before a driver may
+handle a failed stop by switching to restore-only work.
+
+The earlier phrase that the mesh-task-daemon "stop refuses" means receipt
+verification refuses after launchd has already stopped it. It ends unloaded
+and disabled with an unverified failed row; the journal cannot automatically
+restore it because override clear requires a verified stop. That path needs
+manual reconciliation, so the production driver must not assume a failed
+receipt is a harmless no-op. The new native test awaits exact-head CI. No
+production service, VM or NATS store changed; step 1.2 remains [A]/v1.2-pre.
