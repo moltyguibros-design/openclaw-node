@@ -703,10 +703,19 @@ process.on('SIGTERM',()=>{
                                         self.assertTrue(any(row['event'] == 'failed'
                                                             and row.get('unit') == unit
                                                             for row in journal.records))
+                                        self.assertFalse(any(row['event'] == 'verified'
+                                                             and row.get('unit') == unit
+                                                             for row in journal.records))
+                                        self.assertFalse(any(row['event'] in
+                                                             {'override-clear-intent', 'listener-release-verified'}
+                                                             for row in journal.records))
                                         self.assertFalse(any(row['event'] == 'intent'
                                                              and row.get('unit') in
                                                              {'memory-daemon', 'mesh-health-publisher'}
                                                              for row in journal.records))
+                                        with self.assertRaisesRegex(Refused,
+                                                'unrestored node cannot be sealed'):
+                                            journal.resolve()
                                         return
                                     stub['proof'] = watch.mutate(journal, unit, closed, absent,
                                                                  hold=hold)
