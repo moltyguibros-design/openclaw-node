@@ -2351,3 +2351,15 @@ gate is a daemon-class sweep after the listener fence; timers, NATS transfer,
 detached processes, UTM/boot controls, stopped capture, four-history
 acceptance and verified service resumption remain open at 1.2[A]/v1.2-pre.
 No production service, VM or NATS store was stopped or restarted.
+
+Checkpoint 2026-10-09 01:40 EDT: D140 extends the dedicated macOS fixture
+to persistently stop and restore all ten plain daemon-class units after the
+listener fence in one owned 23-label window. A bad mesh-task-daemon completion
+marker must refuse without further stops while the listener and gate remain
+fenced. The two new native tests await exact-head CI; local baseline tests
+pass 28 cases with seven dedicated-runner skips. This fixture is not a
+production no-writer hold: the approved pin map, timers, NATS transfer,
+on-demand/known-broken jobs, detached writers, UTM/boot controls, stopped
+capture, four-history acceptance and verified service resumption remain
+open at 1.2[A]/v1.2-pre. No production service, VM or NATS store was stopped
+or restarted.

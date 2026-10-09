@@ -2971,3 +2971,33 @@ restore of all ten plain daemon-class units after the listener fence. The
 timer spawn witness, NATS transfer, on-demand/known-broken paths, boot and
 UTM gates, stopped capture and real-history acceptance remain open. No live
 service, VM or NATS store was stopped or restarted.
+
+## D140 — Sweep the plain daemon class in one owned window (2026-10-09 01:40 EDT)
+
+Exact-head `1d8c5eec` macOS job 113661707158 passed all 26 native baseline
+tests without skips, including the stale loaded-environment negative. The
+overall workflow remained red only at separate dependency-audit gates.
+
+The dedicated-runner fixture now has a full plain-daemon sweep twin. In one
+23-label baseline and closed execution window, it starts owned Node processes
+for all nine plain daemon labels beyond the existing listener and bridge
+owners. Each new owner has its own private bus socket, listener port, ready
+file and log; the five marker-bearing units emit their required completion
+markers. After the listener fence, `StopWatch` binds and persistently stops
+the bridge and nine further daemons, proving kernel exits, connection and
+listener closure, disabled overrides and journal stop receipts. Same-boot
+recovery must restore the ten in `RESUME_ORDER`, bind new PIDs, observe fresh
+readiness and private connections, verify the deploy fence while the listener
+remains disabled, then release the listener and reopen the gate. A negative
+omits the mesh-task-daemon completion marker: its stop must refuse, leave the
+listener and gate fenced and record no later daemon stop intent. The fixture
+has no NATS server and does not cover timers or detached writers. Its two new
+native tests await exact-head macOS CI; local baseline tests pass 28 cases
+with seven dedicated-runner skips.
+
+This is an owned class-composition check, not a production full-node hold.
+The unapproved production pin map, timer spawn witness, NATS transfer, idle
+on-demand/known-broken paths, detached-process and host UTM/boot controls,
+stopped-VM capture, four real-history acceptance and verified production
+resumption remain open. No live service, VM or NATS store was stopped or
+restarted.

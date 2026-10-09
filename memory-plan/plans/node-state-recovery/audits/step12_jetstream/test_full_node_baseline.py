@@ -17,8 +17,8 @@ from unittest.mock import patch
 from full_node_baseline import capture_full_node_prior, open_full_node_journal
 from journal_hold import JournaledHold
 from managed_launchd import Launchd, StopWatch, restore_disabled_daemon
-from preservation_checks import disabled_overrides
-from preservation_journal import (FULL_NODE_SCOPE, Journal, Refused, TIMER_UNITS,
+from preservation_checks import RESUME_ORDER, STOP_ORDER, disabled_overrides
+from preservation_journal import (FULL_NODE_SCOPE, Journal, NATS_TRANSFER_UNITS, Refused, TIMER_UNITS,
                                   UNITS, static_identity, valid_entrypoint_inventory)
 from test_journal_hold import gate_module
 
@@ -350,7 +350,8 @@ class FullNodeBaseline(unittest.TestCase):
 
 class OwnedFullNodeInventory(unittest.TestCase):
     def exercise_native_entrypoint_capture(self, release, bridge_failure=False,
-                                           loaded_drift=None):
+                                           loaded_drift=None, daemon_sweep=False,
+                                           missing_completion=False):
         labels = {'ai.openclaw.' + unit for unit in UNITS}
         uid = str(os.getuid())
         for folder in (pathlib.Path.home() / 'Library/LaunchAgents',
@@ -423,6 +424,35 @@ process.on('SIGTERM',()=>{
             bridge_bus_server.listen()
             bridge_bus_server.settimeout(20)
             self.addCleanup(bridge_bus_server.close)
+            swept = {'workplan-viewer', 'gateway', 'health-watch', 'node-watch',
+                     'lane-watchdog', 'mission-control', 'mesh-task-daemon',
+                     'memory-daemon', 'mesh-health-publisher'} if daemon_sweep else set()
+            sweep_units = [unit for unit in STOP_ORDER if unit in swept]
+            completion = {'health-watch': '[health-watch] shutting down',
+                          'node-watch': '[node-watch] stopped',
+                          'lane-watchdog': 'Received SIGTERM, shutting down',
+                          'mesh-task-daemon': 'Shutdown complete.',
+                          'memory-daemon': 'Daemon stopped'}
+            sweep_stubs = {}
+            for unit in sweep_units:
+                script = root / (unit + '.cjs')
+                ready = root / (unit + '-ready.json')
+                log = root / (unit + '.log')
+                err = root / (unit + '.err')
+                log.touch(mode=0o600)
+                err.touch(mode=0o600)
+                script.write_text(listener_script.read_text()
+                    .replace('═══ Ready ═══', unit + ' ready.')
+                    .replace('SIGTERM — shutting down',
+                             'unverified shutdown' if unit == 'mesh-task-daemon' and missing_completion
+                             else completion.get(unit, unit + ' stopped.')))
+                server = socket.socket()
+                server.bind(('127.0.0.1', 0))
+                server.listen()
+                server.settimeout(20)
+                self.addCleanup(server.close)
+                sweep_stubs[unit] = {'script': script, 'ready': ready, 'log': log,
+                                     'err': err, 'server': server}
             services = {}
             approved = {}
             try:
@@ -440,6 +470,8 @@ process.on('SIGTERM',()=>{
                             if unit == 'mesh-deploy-listener' else
                             [node, str(bridge_script)]
                             if unit == 'mesh-bridge' else
+                            [node, str(sweep_stubs[unit]['script'])]
+                            if unit in swept else
                             ['/bin/sleep', '900'])
                     plist = agents / (label + '.plist')
                     config = {
@@ -459,6 +491,13 @@ process.on('SIGTERM',()=>{
                             'OWNED_READY': str(bridge_ready)},
                             'ExitTimeOut': 5, 'StandardOutPath': str(bridge_log),
                             'StandardErrorPath': str(bridge_err)})
+                    if unit in swept:
+                        stub = sweep_stubs[unit]
+                        config.update({'EnvironmentVariables': {
+                            'OWNED_BUS_PORT': str(stub['server'].getsockname()[1]),
+                            'OWNED_READY': str(stub['ready'])},
+                            'ExitTimeOut': 5, 'StandardOutPath': str(stub['log']),
+                            'StandardErrorPath': str(stub['err'])})
                     plist.write_bytes(plistlib.dumps(config))
                     identity = static_identity(plist)
                     approved[unit] = {'class': kind,
@@ -479,12 +518,22 @@ process.on('SIGTERM',()=>{
                 self.addCleanup(bus_connection.close)
                 bridge_bus_connection, _ = bridge_bus_server.accept()
                 self.addCleanup(bridge_bus_connection.close)
+                for unit in sweep_units:
+                    stub = sweep_stubs[unit]
+                    stub['connection'], _ = stub['server'].accept()
+                    self.addCleanup(stub['connection'].close)
                 while not listener_ready.exists() or '═══ Ready ═══' not in listener_log.read_text():
                     self.assertLess(time.monotonic(), deadline, 'owned listener did not become ready')
                     time.sleep(.05)
                 while not bridge_ready.exists() or 'Bridge ready.' not in bridge_log.read_text():
                     self.assertLess(time.monotonic(), deadline, 'owned bridge did not become ready')
                     time.sleep(.05)
+                for unit in sweep_units:
+                    stub = sweep_stubs[unit]
+                    while not stub['ready'].exists() or unit + ' ready.' not in stub['log'].read_text():
+                        self.assertLess(time.monotonic(), deadline, 'owned daemon did not become ready: ' + unit)
+                        time.sleep(.05)
+                    stub['details'] = json.loads(stub['ready'].read_text())
                 listener_details = json.loads(listener_ready.read_text())
                 bridge_details = json.loads(bridge_ready.read_text())
                 writer_lock = root / 'writer.lock'
@@ -621,6 +670,49 @@ process.on('SIGTERM',()=>{
                                 'ai.openclaw.mesh-bridge'], True)
                             self.assertFalse(bridge_service.status()['loaded'])
                             self.assertTrue(bridge_service.disabled())
+                            for unit in sweep_units:
+                                stub = sweep_stubs[unit]
+                                daemon = services[unit]
+                                saved_identity = prior[unit]['identity']
+                                bound = daemon.bind(saved_identity['argv'], saved_identity['argv'][0],
+                                                    saved_identity['working_directory'])
+                                self.assertEqual(bound['status']['pid'], stub['details']['pid'])
+                                stub['binding'] = bound
+                                def closed(connection=stub['connection']):
+                                    connection.settimeout(.2)
+                                    try:
+                                        return connection.recv(1, socket.MSG_PEEK) == b''
+                                    except socket.timeout:
+                                        return False
+                                def absent(port=stub['details']['port']):
+                                    with socket.socket() as probe:
+                                        probe.settimeout(.2)
+                                        return probe.connect_ex(('127.0.0.1', port)) != 0
+                                self.assertFalse(closed(), unit)
+                                self.assertFalse(absent(), unit)
+                                with StopWatch(daemon, bound, [stub['log'], stub['err']], unit,
+                                               require_disabled=True) as watch:
+                                    if unit == 'mesh-task-daemon' and missing_completion:
+                                        with self.assertRaisesRegex(Refused,
+                                                'normal completion marker missing or repeated'):
+                                            watch.mutate(journal, unit, closed, absent, hold=hold)
+                                        self.assertTrue(journal.listener_fenced())
+                                        self.assertFalse(service.status()['loaded'])
+                                        self.assertTrue(service.disabled())
+                                        self.assertIsNotNone(gate.marker())
+                                        self.assertTrue(any(row['event'] == 'failed'
+                                                            and row.get('unit') == unit
+                                                            for row in journal.records))
+                                        self.assertFalse(any(row['event'] == 'intent'
+                                                             and row.get('unit') in
+                                                             {'memory-daemon', 'mesh-health-publisher'}
+                                                             for row in journal.records))
+                                        return
+                                    stub['proof'] = watch.mutate(journal, unit, closed, absent,
+                                                                 hold=hold)
+                                self.assertTrue(journal.full_node_stop_proven(unit, stub['proof']), unit)
+                                self.assertFalse(daemon.status()['loaded'], unit)
+                                self.assertTrue(daemon.disabled(), unit)
                             if release:
                                 new_bus_connection = None
                                 new_bridge_bus_connection = None
@@ -648,6 +740,12 @@ process.on('SIGTERM',()=>{
                                             and bridge_ready.exists()
                                             and json.loads(bridge_ready.read_text())['pid'] == current['pid']
                                             and bridge_log.read_text().count('Bridge ready.') >= 2)
+                                    elif unit in swept:
+                                        stub = sweep_stubs[unit]
+                                        actual['verified'] = (current['running']
+                                            and stub['ready'].exists()
+                                            and json.loads(stub['ready'].read_text())['pid'] == current['pid']
+                                            and stub['log'].read_text().count(unit + ' ready.') >= 2)
                                     else:
                                         actual['verified'] = all(actual[key] == saved[key]
                                             for key in ('loaded', 'running', 'disabled', 'identity'))
@@ -655,7 +753,26 @@ process.on('SIGTERM',()=>{
                                 def physical():
                                     others = all(observe(unit, prior[unit])['verified']
                                                  for unit in UNITS
-                                                 if unit not in ('mesh-deploy-listener', 'mesh-bridge'))
+                                                 if unit not in {'mesh-deploy-listener', 'mesh-bridge', *swept})
+                                    sweep_ok = True
+                                    for unit in sweep_units:
+                                        stub = sweep_stubs[unit]
+                                        daemon = services[unit]
+                                        if daemon.status()['running']:
+                                            current = json.loads(stub['ready'].read_text())
+                                            with socket.socket() as probe:
+                                                probe.settimeout(.2)
+                                                present = probe.connect_ex(('127.0.0.1', current['port'])) == 0
+                                            sweep_ok = (sweep_ok and observe(unit, prior[unit])['verified']
+                                                        and new_bus_alive(stub.get('new_connection'))
+                                                        and present)
+                                        else:
+                                            with socket.socket() as probe:
+                                                probe.settimeout(.2)
+                                                absent = probe.connect_ex(
+                                                    ('127.0.0.1', stub['details']['port'])) != 0
+                                            sweep_ok = (sweep_ok and daemon.disabled()
+                                                        and stub['proof']['connections_closed'] and absent)
                                     if bridge_service.status()['running']:
                                         bridge_ok = (observe('mesh-bridge', prior['mesh-bridge'])['verified']
                                                      and new_bus_alive(new_bridge_bus_connection)
@@ -672,7 +789,7 @@ process.on('SIGTERM',()=>{
                                     else:
                                         listener_ok = (service.disabled() and proof['connections_closed']
                                                        and listener_absent())
-                                    return {'verified': others and bridge_ok and listener_ok}
+                                    return {'verified': others and sweep_ok and bridge_ok and listener_ok}
                                 fence_checks = []
                                 def deploy_fence():
                                     checked = (gate.marker() is not None and service.disabled()
@@ -700,6 +817,22 @@ process.on('SIGTERM',()=>{
                                                             bridge_binding['status']['pid'])
                                         new_bridge_bus_connection, _ = bridge_bus_server.accept()
                                         self.addCleanup(new_bridge_bus_connection.close)
+                                    elif unit in swept:
+                                        self.assertEqual(fence_checks, [])
+                                        self.assertTrue(service.disabled())
+                                        stub = sweep_stubs[unit]
+                                        stub['ready'].unlink()
+                                        def ready(owner):
+                                            return (stub['ready'].exists()
+                                                and json.loads(stub['ready'].read_text())['pid']
+                                                == owner['status']['pid']
+                                                and stub['log'].read_text().count(unit + ' ready.') >= 2)
+                                        restarted = restore_disabled_daemon(
+                                            services[unit], journal, unit, saved, ready, timeout=10)
+                                        self.assertNotEqual(restarted['status']['pid'],
+                                                            stub['binding']['status']['pid'])
+                                        stub['new_connection'], _ = stub['server'].accept()
+                                        self.addCleanup(stub['new_connection'].close)
                                     else:
                                         self.assertEqual(unit, 'mesh-deploy-listener')
                                         self.assertEqual(fence_checks, [True])
@@ -747,10 +880,29 @@ process.on('SIGTERM',()=>{
                                 self.assertEqual(fence_checks, [True])
                                 self.assertTrue(bridge_service.status()['running'])
                                 self.assertFalse(bridge_service.disabled())
+                                for unit in sweep_units:
+                                    self.assertTrue(services[unit].status()['running'], unit)
+                                    self.assertFalse(services[unit].disabled(), unit)
                                 self.assertTrue(service.status()['running'])
                                 self.assertFalse(service.disabled())
                                 self.assertIsNone(gate.marker())
                                 rows = [(row['event'], row.get('unit')) for row in journal.records]
+                                if daemon_sweep:
+                                    expected = {unit for unit, saved in prior.items()
+                                                if saved['class'] == 'daemon'
+                                                and unit not in NATS_TRANSFER_UNITS
+                                                and unit != 'mesh-deploy-listener'}
+                                    self.assertEqual(expected, set(sweep_units) | {'mesh-bridge'})
+                                    self.assertEqual(len(expected), 10)
+                                    for unit in expected:
+                                        self.assertEqual(rows.count(('intent', unit)), 1, unit)
+                                        self.assertEqual(rows.count(('recovery-verified', unit)), 1, unit)
+                                        self.assertLess(rows.index(('recovery-verified', unit)),
+                                                        rows.index(('listener-release-verified', None)))
+                                    ordered = [unit for unit in RESUME_ORDER if unit in expected]
+                                    self.assertEqual(
+                                        [unit for event, unit in rows
+                                         if event == 'recovery-verified' and unit in expected], ordered)
                                 self.assertLess(rows.index(('restoration-intent', 'mesh-bridge')),
                                                 rows.index(('override-clear-intent', 'mesh-bridge')))
                                 self.assertLess(rows.index(('override-clear-intent', 'mesh-bridge')),
@@ -820,6 +972,19 @@ process.on('SIGTERM',()=>{
                          '23-label inventory fixture runs only on a dedicated macOS CI runner')
     def test_native_entrypoint_capture_keeps_listener_fenced_after_bridge_failure(self):
         self.exercise_native_entrypoint_capture(True, bridge_failure=True)
+
+    @unittest.skipUnless(sys.platform == 'darwin'
+                         and os.environ.get('OPENCLAW_CI_FULL_NODE_INVENTORY_FIXTURE') == '1',
+                         '23-label inventory fixture runs only on a dedicated macOS CI runner')
+    def test_native_entrypoint_capture_sweeps_plain_daemons(self):
+        self.exercise_native_entrypoint_capture(True, daemon_sweep=True)
+
+    @unittest.skipUnless(sys.platform == 'darwin'
+                         and os.environ.get('OPENCLAW_CI_FULL_NODE_INVENTORY_FIXTURE') == '1',
+                         '23-label inventory fixture runs only on a dedicated macOS CI runner')
+    def test_native_entrypoint_capture_refuses_daemon_without_completion(self):
+        self.exercise_native_entrypoint_capture(False, daemon_sweep=True,
+                                               missing_completion=True)
 
     @unittest.skipUnless(sys.platform == 'darwin'
                          and os.environ.get('OPENCLAW_CI_FULL_NODE_INVENTORY_FIXTURE') == '1',
