@@ -68,6 +68,14 @@ class FullNodeBaseline(unittest.TestCase):
             metadata={}, metadata_identity={}, metadata_sha='metadata-pin',
             paths=SimpleNamespace(evidence=lambda: {'paths': {}}))
 
+    def loaded_entry(self, plist):
+        source = pathlib.Path(plist)
+        config = plistlib.loads(source.read_bytes())
+        return {'path': str(source.resolve()), 'arguments': config['ProgramArguments'],
+                'program': str(pathlib.Path(config.get('Program', config['ProgramArguments'][0])).resolve()),
+                'working_directory': str(pathlib.Path(config.get('WorkingDirectory', '/')).resolve()),
+                'environment': config.get('EnvironmentVariables', {})}
+
     def capture(self, inventory=None, statuses=None):
         inventory = inventory or [self.entrypoints, self.entrypoints]
         statuses = statuses or self.states
@@ -75,8 +83,7 @@ class FullNodeBaseline(unittest.TestCase):
             return SimpleNamespace(status=lambda label=label: copy.deepcopy(statuses[label]),
                                    disabled=lambda label=label: statuses[label]['disabled'],
                                    configuration=lambda include_logs=False, plist=plist:
-                                       {'path': str(pathlib.Path(plist).resolve()),
-                                        'arguments': [str(self.binary)]})
+                                       self.loaded_entry(plist))
         with (patch('full_node_baseline.capture_entrypoint_inventory',
                     side_effect=[copy.deepcopy(value) for value in inventory]),
               patch('full_node_baseline.Launchd', side_effect=service)):
@@ -97,9 +104,7 @@ class FullNodeBaseline(unittest.TestCase):
         def service(label, plist):
             return SimpleNamespace(status=lambda: copy.deepcopy(self.states[label]),
                                    disabled=lambda: self.states[label]['disabled'],
-                                   configuration=lambda include_logs=False:
-                                       {'path': str(pathlib.Path(plist).resolve()),
-                                        'arguments': [str(self.binary)]})
+                                   configuration=lambda include_logs=False: self.loaded_entry(plist))
         with (patch('full_node_baseline.capture_entrypoint_inventory',
                     side_effect=[copy.deepcopy(entrypoints), copy.deepcopy(entrypoints)]),
               patch('full_node_baseline.Launchd', side_effect=service),
@@ -211,28 +216,75 @@ class FullNodeBaseline(unittest.TestCase):
 
     def test_loaded_arguments_differ_from_approved_plist_refuses(self):
         def service(label, plist):
-            arguments = ['/bin/other'] if label == 'ai.openclaw.gateway' else [str(self.binary)]
+            entry = self.loaded_entry(plist)
+            if label == 'ai.openclaw.gateway':
+                entry['arguments'] = ['/bin/other']
             return SimpleNamespace(status=lambda: copy.deepcopy(self.states[label]),
                                    disabled=lambda: self.states[label]['disabled'],
-                                   configuration=lambda include_logs=False:
-                                       {'path': str(pathlib.Path(plist).resolve()),
-                                        'arguments': arguments})
+                                   configuration=lambda include_logs=False: entry)
         with (patch('full_node_baseline.capture_entrypoint_inventory',
                     return_value=copy.deepcopy(self.entrypoints)),
               patch('full_node_baseline.Launchd', side_effect=service),
               self.assertRaisesRegex(Refused, 'loaded job differs from approved plist: gateway')):
             capture_full_node_prior(self.gate, self.approved)
 
+    def test_loaded_path_differ_from_approved_plist_refuses(self):
+        def service(label, plist):
+            entry = self.loaded_entry(plist)
+            if label == 'ai.openclaw.gateway':
+                entry['path'] = str(self.root / 'stale.plist')
+            return SimpleNamespace(status=lambda: copy.deepcopy(self.states[label]),
+                                   disabled=lambda: self.states[label]['disabled'],
+                                   configuration=lambda include_logs=False: entry)
+        with (patch('full_node_baseline.capture_entrypoint_inventory',
+                    return_value=copy.deepcopy(self.entrypoints)),
+              patch('full_node_baseline.Launchd', side_effect=service),
+              self.assertRaisesRegex(Refused, 'loaded job differs from approved plist: gateway')):
+            capture_full_node_prior(self.gate, self.approved)
+
+    def test_loaded_environment_differ_from_approved_plist_refuses(self):
+        def service(label, plist):
+            entry = self.loaded_entry(plist)
+            if label == 'ai.openclaw.gateway':
+                entry['environment'] = {'STALE': 'value'}
+            return SimpleNamespace(status=lambda: copy.deepcopy(self.states[label]),
+                                   disabled=lambda: self.states[label]['disabled'],
+                                   configuration=lambda include_logs=False: entry)
+        with (patch('full_node_baseline.capture_entrypoint_inventory',
+                    return_value=copy.deepcopy(self.entrypoints)),
+              patch('full_node_baseline.Launchd', side_effect=service),
+              self.assertRaisesRegex(Refused, 'loaded job differs from approved plist: gateway')):
+            capture_full_node_prior(self.gate, self.approved)
+
+    def test_loaded_program_or_directory_drift_refuses(self):
+        for field, value in (('program', '/bin/other'),
+                             ('working_directory', str(self.root / 'other'))):
+            with self.subTest(field=field):
+                def service(label, plist):
+                    entry = self.loaded_entry(plist)
+                    if label == 'ai.openclaw.gateway':
+                        entry[field] = value
+                    return SimpleNamespace(status=lambda: copy.deepcopy(self.states[label]),
+                                           disabled=lambda: self.states[label]['disabled'],
+                                           configuration=lambda include_logs=False: entry)
+                with (patch('full_node_baseline.capture_entrypoint_inventory',
+                            return_value=copy.deepcopy(self.entrypoints)),
+                      patch('full_node_baseline.Launchd', side_effect=service),
+                      self.assertRaisesRegex(Refused,
+                          'loaded job differs from approved plist: gateway')):
+                    capture_full_node_prior(self.gate, self.approved)
+
     def test_loaded_configuration_change_during_baseline_refuses(self):
         calls = 0
         def service(label, plist):
             def configuration(include_logs=False):
                 nonlocal calls
+                entry = self.loaded_entry(plist)
                 if label == 'ai.openclaw.gateway':
                     calls += 1
-                return {'path': str(pathlib.Path(plist).resolve()),
-                        'arguments': ['/bin/other'] if label == 'ai.openclaw.gateway' and calls == 2
-                        else [str(self.binary)]}
+                    if calls == 2:
+                        entry['arguments'] = ['/bin/other']
+                return entry
             return SimpleNamespace(status=lambda: copy.deepcopy(self.states[label]),
                                    disabled=lambda: self.states[label]['disabled'],
                                    configuration=configuration)
@@ -271,9 +323,7 @@ class FullNodeBaseline(unittest.TestCase):
                 return value
             return SimpleNamespace(status=status,
                                    disabled=lambda: self.states[label]['disabled'],
-                                   configuration=lambda include_logs=False:
-                                       {'path': str(pathlib.Path(plist).resolve()),
-                                        'arguments': [str(self.binary)]})
+                                   configuration=lambda include_logs=False: self.loaded_entry(plist))
         with (patch('full_node_baseline.capture_entrypoint_inventory',
                     side_effect=[copy.deepcopy(self.entrypoints)] * 2),
               patch('full_node_baseline.Launchd', side_effect=service)):
@@ -291,9 +341,7 @@ class FullNodeBaseline(unittest.TestCase):
         def service(label, plist):
             return SimpleNamespace(status=lambda: copy.deepcopy(self.states[label]),
                                    disabled=lambda: self.states[label]['disabled'],
-                                   configuration=lambda include_logs=False:
-                                       {'path': str(pathlib.Path(plist).resolve()),
-                                        'arguments': [str(self.binary)]})
+                                   configuration=lambda include_logs=False: self.loaded_entry(plist))
         with (patch('full_node_baseline.capture_entrypoint_inventory', side_effect=inventory),
               patch('full_node_baseline.Launchd', side_effect=service)):
             with self.assertRaisesRegex(Refused, 'direct files changed during baseline'):
@@ -302,7 +350,7 @@ class FullNodeBaseline(unittest.TestCase):
 
 class OwnedFullNodeInventory(unittest.TestCase):
     def exercise_native_entrypoint_capture(self, release, bridge_failure=False,
-                                           loaded_drift=False):
+                                           loaded_drift=None):
         labels = {'ai.openclaw.' + unit for unit in UNITS}
         uid = str(os.getuid())
         for folder in (pathlib.Path.home() / 'Library/LaunchAgents',
@@ -443,12 +491,18 @@ process.on('SIGTERM',()=>{
                 writer_lock.write_bytes(b'owned writer lock')
                 writer_lock.chmod(0o644)
                 if loaded_drift:
-                    gateway_plist = agents / 'ai.openclaw.gateway.plist'
-                    gateway_config = plistlib.loads(gateway_plist.read_bytes())
-                    gateway_config['ProgramArguments'][-1] = '901'
-                    gateway_plist.write_bytes(plistlib.dumps(gateway_config))
-                    gateway_identity = static_identity(gateway_plist)
-                    approved['gateway']['plist']['sha256'] = gateway_identity['plist_sha256']
+                    drift_unit = ('gateway' if loaded_drift == 'arguments'
+                                  else 'mesh-deploy-listener')
+                    drift_plist = agents / ('ai.openclaw.' + drift_unit + '.plist')
+                    drift_config = plistlib.loads(drift_plist.read_bytes())
+                    if loaded_drift == 'arguments':
+                        drift_config['ProgramArguments'][-1] = '901'
+                    else:
+                        self.assertEqual(loaded_drift, 'environment')
+                        drift_config['EnvironmentVariables']['OWNED_READY'] = str(root / 'stale-ready')
+                    drift_plist.write_bytes(plistlib.dumps(drift_config))
+                    drift_identity = static_identity(drift_plist)
+                    approved[drift_unit]['plist']['sha256'] = drift_identity['plist_sha256']
                 with (patch.dict(os.environ, {'HOME': str(home)}),
                       patch('preservation_journal.NATS_WRITER_MARKER', root / 'writer-handoff.json'),
                       patch('preservation_journal.NATS_LEGACY_LOCK', writer_lock),
@@ -456,7 +510,7 @@ process.on('SIGTERM',()=>{
                       gate_module.Gate(gate_root, pins) as gate):
                     if loaded_drift:
                         with self.assertRaisesRegex(Refused,
-                                'loaded job differs from approved plist: gateway'):
+                                'loaded job differs from approved plist: ' + drift_unit):
                             open_full_node_journal(root / 'journals' / 'window', gate, approved,
                                                    boot='owned-boot', node_lock=root / 'node.lock')
                         self.assertFalse((root / 'node.lock.state.json').exists())
@@ -771,7 +825,13 @@ process.on('SIGTERM',()=>{
                          and os.environ.get('OPENCLAW_CI_FULL_NODE_INVENTORY_FIXTURE') == '1',
                          '23-label inventory fixture runs only on a dedicated macOS CI runner')
     def test_native_entrypoint_capture_refuses_loaded_plist_drift(self):
-        self.exercise_native_entrypoint_capture(False, loaded_drift=True)
+        self.exercise_native_entrypoint_capture(False, loaded_drift='arguments')
+
+    @unittest.skipUnless(sys.platform == 'darwin'
+                         and os.environ.get('OPENCLAW_CI_FULL_NODE_INVENTORY_FIXTURE') == '1',
+                         '23-label inventory fixture runs only on a dedicated macOS CI runner')
+    def test_native_entrypoint_capture_refuses_loaded_environment_drift(self):
+        self.exercise_native_entrypoint_capture(False, loaded_drift='environment')
 
 
 if __name__ == '__main__':

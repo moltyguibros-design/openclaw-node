@@ -2938,3 +2938,36 @@ provenance, not proof that every running owner or detached writer is held.
 The approved production map, complete hold, stopped capture, four-history
 acceptance and resumption remain open. No live service, VM or NATS store was
 stopped or restarted.
+
+## D139 — Reject stale loaded execution context in the full-node prior (2026-10-08 23:50 EDT)
+
+Exact-head `4d653afe` macOS job 113629378165 passed 22 baseline tests without
+skips, including the native rewritten-argument negative. Claude's read-only
+adversarial review found the remaining loaded-entry gap: a plist rewritten
+after bootstrap could retain the same path and arguments while changing its
+`Program`, working directory or environment. A daemon's later process bind
+would refuse before its stop, but an idle timer or on-demand job has no bound
+owner and could enter the full-node prior with a false execution context.
+
+The baseline now also compares launchd's loaded program, working directory
+and declared job environment against the installed plist. It refuses extra
+job environment keys except launchd's `OSLogRateLimit` and
+`XPC_SERVICE_NAME`, and repeats the complete loaded configuration read after
+the inventory handoff. Owned negatives cover a stale loaded path, program,
+directory, extra environment key, and an argument change between the two
+reads. A new dedicated-runner twin rewrites the listener's environment after
+bootstrap while approving the new plist hash; it must refuse before a node
+receipt. That native twin awaits exact-head CI. Local baseline tests pass 26
+cases with five dedicated-runner skips, and managed-launchd tests pass 54
+with three skips. A read-only scan found all 21 currently GUI-loaded jobs'
+programs, directories and declared environment values matched their installed
+plists. No environment values were retained in the journal or printed by the
+scan.
+
+This closes the identified loaded-config false accept in the prior producer;
+it is not a complete running-process or detached-writer census. Claude
+identified the next bounded native gate as a same-window stop and ordered
+restore of all ten plain daemon-class units after the listener fence. The
+timer spawn witness, NATS transfer, on-demand/known-broken paths, boot and
+UTM gates, stopped capture and real-history acceptance remain open. No live
+service, VM or NATS store was stopped or restarted.

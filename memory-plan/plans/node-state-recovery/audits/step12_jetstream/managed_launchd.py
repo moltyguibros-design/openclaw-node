@@ -233,6 +233,19 @@ class Launchd:
         if include_logs:
             entry['logs'] = sorted({str(pathlib.Path(field(name)).resolve(strict=True))
                                     for name in ('stdout path', 'stderr path')})
+        else:
+            directory = re.search(r'^\s*working directory = (.+)$', text, re.M)
+            sections = re.findall(r'^\s*environment = \{\n(.*?)^\s*\}', text, re.M | re.S)
+            require(len(sections) <= 1, 'loaded job environment is ambiguous')
+            environment = {}
+            for line in sections[0].splitlines() if sections else ():
+                match = re.fullmatch(r'\s*([A-Za-z_][A-Za-z0-9_]*) => (.*)', line)
+                require(match is not None and match[1] not in environment,
+                        'loaded job environment is ambiguous')
+                environment[match[1]] = match[2]
+            entry.update({'program': str(pathlib.Path(field('program')).resolve(strict=True)),
+                          'working_directory': str(pathlib.Path(directory[1] if directory else '/').resolve(strict=True)),
+                          'environment': environment})
         return entry
 
     def bootstrap(self):

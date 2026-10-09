@@ -2339,3 +2339,15 @@ CI. The October 7 production map remains stale and unapproved. Complete
 no-writer hold, stopped-VM capture, all four real-history acceptance and
 verified resumption remain open; 1.2 remains [A]/v1.2-pre. No production
 service, VM or NATS store was stopped or restarted.
+
+Checkpoint 2026-10-08 23:50 EDT: D139 extends the two-pass full-node
+baseline comparison to launchd's loaded program, working directory and job
+environment after Claude identified a stale-config false accept for idle
+jobs. Exact-head D138 macOS CI passed its 22-test native baseline suite;
+D139's owned negatives and read-only check of all 21 loaded jobs pass, while
+its native environment-drift twin awaits CI. The approved pin map and
+complete 23-job no-writer hold are still absent. The next bounded owned
+gate is a daemon-class sweep after the listener fence; timers, NATS transfer,
+detached processes, UTM/boot controls, stopped capture, four-history
+acceptance and verified service resumption remain open at 1.2[A]/v1.2-pre.
+No production service, VM or NATS store was stopped or restarted.

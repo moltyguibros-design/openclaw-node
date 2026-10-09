@@ -1,10 +1,11 @@
 import pathlib
+import plistlib
 import re
 
 from journal_hold import describe
 from managed_launchd import Launchd
 from preservation_checks import capture_entrypoint_inventory, require
-from preservation_journal import (FULL_NODE_SCOPE, TIMER_UNITS, UNITS, Journal, static_identity,
+from preservation_journal import (FULL_NODE_SCOPE, TIMER_UNITS, UNITS, Journal, regular_content, static_identity,
                                   valid_entrypoint_inventory, valid_prior)
 
 
@@ -44,8 +45,22 @@ def capture_full_node_prior(gate, approved):
         status = service.status()
         disabled = service.disabled()
         loaded_entry = service.configuration(include_logs=False) if status['loaded'] else None
-        require(loaded_entry is None or loaded_entry == {'path': plist, 'arguments': identity['argv']},
-                'loaded job differs from approved plist: ' + unit)
+        config = plistlib.loads(regular_content(plist, 1 << 20, keep_bytes=True))
+        declared_environment = config.get('EnvironmentVariables', {})
+        program = config.get('Program', identity['argv'][0])
+        expected_entry = {'path': plist, 'arguments': identity['argv'],
+                          'program': str(pathlib.Path(program).resolve(strict=True)),
+                          'working_directory': identity['working_directory'],
+                          'environment': declared_environment}
+        if loaded_entry is not None:
+            observed_environment = loaded_entry['environment']
+            observed_entry = {**loaded_entry, 'environment': {
+                name: value for name, value in observed_environment.items()
+                if name in declared_environment}}
+            require(observed_entry == expected_entry
+                    and set(observed_environment) - set(declared_environment)
+                    <= {'OSLogRateLimit', 'XPC_SERVICE_NAME'},
+                    'loaded job differs from approved plist: ' + unit)
         observations[unit] = (service, status, disabled, installed['path'], tuple(expected), loaded_entry)
         prior[unit] = {'class': saved['class'], 'loaded': status['loaded'],
                        'running': status['running'], 'disabled': disabled,
