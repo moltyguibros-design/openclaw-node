@@ -2374,3 +2374,15 @@ live. The marker refusal occurs after mesh-task-daemon physically stops, so
 manual reconciliation is required; it is not a safe no-op. The new negative
 awaits dedicated-runner CI. Full-node hold and later capture, history
 acceptance and resumption remain open at 1.2[A]/v1.2-pre.
+
+Checkpoint 2026-10-09 13:44 EDT: D142 recaptured an unapproved 23-job
+production baseline proposal after the viewer release changed. The read-only
+producer twice observed the same installed inventory and direct-file
+identities; 21 managed jobs were GUI-loaded and none were loaded in user or
+system. Only workplan-viewer's proposed plist, PID and direct-file pins differ
+from the October 7 proposal. Seven viewer startup files are now pinned. The
+execution-hold descriptor was synthetic, so this is neither a production
+journal nor a full-node hold or shutdown certificate. Exact pin approval,
+the real gate, continuous no-writer and boot/UTM checks, stopped capture,
+four-history acceptance and verified resumption remain open at 1.2[A]/
+v1.2-pre. No live service, VM or NATS store was stopped or changed.

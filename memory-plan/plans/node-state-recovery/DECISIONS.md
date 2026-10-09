@@ -3022,3 +3022,25 @@ restore it because override clear requires a verified stop. That path needs
 manual reconciliation, so the production driver must not assume a failed
 receipt is a harmless no-op. The new native test awaits exact-head CI. No
 production service, VM or NATS store changed; step 1.2 remains [A]/v1.2-pre.
+
+## D142 — Recapture the changed production viewer without opening a hold (2026-10-09 13:44 EDT)
+
+The October 7 full-node candidate is stale because the installed workplan
+viewer now points to a different release. A fresh read-only producer pass on
+the running guest accepted 23 installed jobs and 21 GUI-loaded jobs, with no
+user/system-loaded managed labels. The two inventory and static-identity
+observations agreed during the 11.7-second capture. The only unit whose
+proposed record changed was workplan-viewer: its installed plist, process PID,
+and direct-file pins. The new proposal pins its entry, both local imports,
+both previously loaded client assets, and the two new overview assets. All
+other proposed class, state, plist and direct-file records matched the prior
+candidate. `FULL_NODE_BASELINE_CANDIDATE_20261009.json` retains the evidence
+as an unapproved proposal.
+
+The producer used a synthetic, open execution-hold descriptor solely to
+validate the prior and entrypoint contracts; it did not validate or close the
+real gate, open a journal, or prove continuous absence of writers. The map is
+point-in-time and can go stale again. Approval of exact pins, a genuine gate,
+the complete persistent hold and process census, boot and host controls, and
+the stopped-VM/history/resumption gates remain separate prerequisites. No
+production job, VM, NATS server or store was stopped or changed.
