@@ -2386,3 +2386,15 @@ journal nor a full-node hold or shutdown certificate. Exact pin approval,
 the real gate, continuous no-writer and boot/UTM checks, stopped capture,
 four-history acceptance and verified resumption remain open at 1.2[A]/
 v1.2-pre. No live service, VM or NATS store was stopped or changed.
+
+Checkpoint 2026-10-09 15:53 EDT: D143 found and closed a coupled
+path-and-digest swap false accept in the isolated cold-master probe. The
+previous test swapped paths alone and refused at the expected hash mismatch;
+an owned two-path/two-digest swap instead passed. `MATCH.json` now binds each
+frozen extraction role's path and digest, and the probe checks that independent
+receipt before starting any working server. The decisive owned negative now
+refuses before copying either swapped master. The NATS 2.12.6 fixture and
+disposable ASIF host-match test pass. This is mechanism evidence with synthetic
+role receipts; production MATCH provenance, all four real-history acceptance,
+the full-node hold, capture and verified resumption remain open at 1.2[A]/
+v1.2-pre. No production VM, service or NATS store was changed.

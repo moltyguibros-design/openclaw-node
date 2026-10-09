@@ -300,6 +300,32 @@ try {
     const row = baselines.get(plan.held.name).streams.find(row => row.stream === stream);
     assert(row?.snapshot && row.snapshot.config.num_replicas === 1);
   }
+  assert(path.isAbsolute(plan.matchReceipt), 'stopped-tree match receipt is required');
+  privateRegular(plan.matchReceipt);
+  const matchBytes = fs.readFileSync(plan.matchReceipt);
+  const matchSha256 = createHash('sha256').update(matchBytes).digest('hex');
+  const match = JSON.parse(matchBytes);
+  assert.equal(match.scope, 'content match and read-only mode; not historical master acceptance');
+  assert.match(match.capture_sha256, /^[0-9a-f]{64}$/);
+  assert.match(match.extraction_manifest_sha256, /^[0-9a-f]{64}$/);
+  assert.deepEqual(Object.keys(match.matched || {}).sort(),
+    ['member1', 'member2', 'member3', 'standalone']);
+  assert.deepEqual(Object.keys(match.masters || {}).sort(),
+    ['member1', 'member2', 'member3', 'standalone']);
+  const roleBindings = [
+    [plan.standalone, 'standalone'],
+    [plan.cluster.members[0], 'member2'],
+    [plan.cluster.members[1], 'member3'],
+    [plan.held, 'member1'],
+  ];
+  for (const [role, extractedRole] of roleBindings) {
+    const saved = match.masters[extractedRole];
+    assert.deepEqual(Object.keys(saved).sort(), ['path', 'sha256']);
+    assert.equal(fs.realpathSync(role.master), saved.path,
+      `cold master role differs from stopped-tree match: ${role.name}`);
+    assert.equal(role.masterSha256, saved.sha256,
+      `cold master digest differs from stopped-tree match: ${role.name}`);
+  }
   const hashes = new Map(roles.map(role => [role.name, treeHash(role.master)]));
   for (const role of roles) assert.equal(hashes.get(role.name), role.masterSha256,
     `cold master differs from its recorded extraction: ${role.name}`);
@@ -381,7 +407,9 @@ try {
   assert.deepEqual(rejoinedRows, heldRows);
   for (const item of members) assert.equal((await monitor(item.http, 'connz?limit=100')).total, 1);
   for (const role of roles) assert.equal(treeHash(role.master), hashes.get(role.name), `cold master changed: ${role.name}`);
-  report = { scope: 'isolated direct-store mechanism probe; not host provenance or production acceptance', at: new Date().toISOString(), binary: binaryReal, binarySha256, roles: roles.map(role => ({ role: role.name, masterSha256: hashes.get(role.name) })), standalone: standaloneRows, held: heldRows, cluster: clusterRows, memberLocal, memberReads, offlineBeforeRejoin: [...plan.cluster.offline], rejoined: rejoinedRows };
+  assert.equal(createHash('sha256').update(fs.readFileSync(plan.matchReceipt)).digest('hex'), matchSha256,
+    'stopped-tree match receipt changed during probe');
+  report = { scope: 'isolated direct-store mechanism probe; not host provenance or production acceptance', at: new Date().toISOString(), binary: binaryReal, binarySha256, matchSha256, roles: roles.map(role => ({ role: role.name, masterSha256: hashes.get(role.name) })), standalone: standaloneRows, held: heldRows, cluster: clusterRows, memberLocal, memberReads, offlineBeforeRejoin: [...plan.cluster.offline], rejoined: rejoinedRows };
 } catch (err) { failure = err; }
 
 for (const nc of connections) {

@@ -484,6 +484,14 @@ class HostCaptureTest(unittest.TestCase):
         matched = self.root / 'matched'
         host_match(guest_output / 'manifest.json', output / 'extracted-stores', matched)
         self.assertTrue((matched / 'MATCH.json').exists())
+        match = json.loads((matched / 'MATCH.json').read_text())
+        guest_rows = json.loads((guest_output / 'manifest.json').read_text())['stores']
+        for role in ('standalone', 'member1', 'member2', 'member3'):
+            self.assertEqual(match['masters'][role]['path'],
+                             str((output / 'extracted-stores' / role).resolve()))
+            self.assertEqual(match['masters'][role]['sha256'], hashlib.sha256(
+                json.dumps(guest_rows[role], ensure_ascii=False,
+                           separators=(',', ':')).encode()).hexdigest())
         swapped_match = self.root / 'swapped-guest-match'
         with self.assertRaisesRegex(RuntimeError, 'guest store specification differs'):
             host_match(swapped_guest / 'manifest.json', output / 'extracted-stores', swapped_match)

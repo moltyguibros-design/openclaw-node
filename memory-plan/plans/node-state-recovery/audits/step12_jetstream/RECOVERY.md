@@ -43,8 +43,13 @@ and a separate `held` role with its `streams`. Each role supplies the original
 server `name`, an absolute, owner-read-only `master` store directory, its
 `masterSha256` digest, and the absolute private `baseline` manifest from
 `take_cold_baseline.mjs`. The digest is SHA-256 of the JSON serialization of
-the sorted `hashTree(master)` entries; derive it from the role's MATCH-verified
-extraction tree, never from a master path selected in the plan. The tool
+the sorted `hashTree(master)` entries. The plan also names the private
+`matchReceipt` emitted by `stopped_tree_match.py`. Before starting a server,
+the probe binds each master path and digest to that receipt's frozen role:
+standalone, held member1, and serving member2/member3 in plan order. Swapping
+two paths and their digests in the plan while retaining their roles refuses.
+The eventual acceptance controller must verify the receipt against its capture
+and extraction chain; this probe does not attest the receipt's origin. The tool
 requires four distinct masters, copies each into a private working directory,
 and boots only those working copies on isolated loopback ports. It reads the
 standalone and held R1 histories without routing. Before the survivors form a
@@ -94,6 +99,8 @@ isolated production restore and resumption are still required.
 private specification after managed NATS stop. Its `match` action runs on the
 host after ASIF extraction, compares the guest manifest, extraction manifest
 and rehashed host files exactly, then makes the extracted trees read-only.
+Its `MATCH.json` records the canonical frozen path and content digest for each
+role, so the isolated probe can reject a plan that relabels a master.
 The host capture receipt pins the exact store-specification bytes; `match`
 requires the guest manifest's specification hash to agree and its declared
 scope and timestamp to precede the host image guard. Both sides must use the

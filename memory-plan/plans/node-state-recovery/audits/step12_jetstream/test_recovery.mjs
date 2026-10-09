@@ -645,6 +645,23 @@ try {
     cluster: { name: 'recovery-fixture', offline: ['OFFLINE_R1', 'SECOND_R1'], members: survivors.map((member, index) => ({ name: member.name, master: masters[members.indexOf(member)], masterSha256: masterDigest(masters[members.indexOf(member)]), baseline: path.join(index === 0 ? survivorBaseline : secondSurvivorBaseline, 'manifest.json') })) },
     held: { name: owner.name, master: masters[oi], masterSha256: masterDigest(masters[oi]), baseline: path.join(heldBaseline, 'manifest.json'), streams: ['OFFLINE_R1', 'SECOND_R1'] }
   };
+  function ownedMatch(file, plan) {
+    const bindings = {
+      standalone: plan.standalone,
+      member1: plan.held,
+      member2: plan.cluster.members[0],
+      member3: plan.cluster.members[1],
+    };
+    jsonPrivate(file, {
+      scope: 'content match and read-only mode; not historical master acceptance',
+      capture_sha256: '0'.repeat(64), extraction_manifest_sha256: '0'.repeat(64),
+      matched: Object.fromEntries(Object.keys(bindings).map(role => [role, {}])),
+      masters: Object.fromEntries(Object.entries(bindings).map(([role, item]) =>
+        [role, { path: fs.realpathSync(item.master), sha256: item.masterSha256 }])),
+    });
+  }
+  treePlan.matchReceipt = path.join(root, 'owned-match.json');
+  ownedMatch(treePlan.matchReceipt, treePlan);
   const treePlanFile = path.join(root, 'cold-tree-plan.json');
   jsonPrivate(treePlanFile, treePlan);
   const masterAlias = path.join(root, 'cold-master-alias');
@@ -685,6 +702,8 @@ try {
     throw error;
   }
   const treeReport = JSON.parse(fs.readFileSync(path.join(treeProbe, 'probe.json')));
+  assert.equal(treeReport.matchSha256,
+    createHash('sha256').update(fs.readFileSync(treePlan.matchReceipt)).digest('hex'));
   assert.equal(treeReport.standalone.find(row => row.stream === 'HISTORY').last, coldSource.content.last);
   assert.equal(treeReport.held.find(row => row.stream === 'OFFLINE_R1').last, offlineColdSource.content.last);
   assert.equal(treeReport.held.find(row => row.stream === 'SECOND_R1').last, 0);
@@ -704,8 +723,21 @@ try {
   const swappedTarget = path.join(root, 'swapped-master-probe');
   await assert.rejects(run(process.execPath, [coldTreeProbe, swappedPlanFile, swappedTarget], { stdio: 'ignore' }));
   assert.match(JSON.parse(fs.readFileSync(path.join(swappedTarget, 'FAILED.json'))).error,
-    /cold master differs from its recorded extraction/);
+    /cold master role differs from stopped-tree match/);
   assert(!fs.readdirSync(swappedTarget).some(name => name.startsWith('working-')));
+  const swappedWithHashes = structuredClone(treePlan);
+  for (const field of ['master', 'masterSha256']) {
+    [swappedWithHashes.cluster.members[0][field], swappedWithHashes.cluster.members[1][field]] =
+      [swappedWithHashes.cluster.members[1][field], swappedWithHashes.cluster.members[0][field]];
+  }
+  const swappedWithHashesFile = path.join(root, 'swapped-master-and-hash-plan.json');
+  jsonPrivate(swappedWithHashesFile, swappedWithHashes);
+  const swappedWithHashesTarget = path.join(root, 'swapped-master-and-hash-probe');
+  await assert.rejects(run(process.execPath,
+    [coldTreeProbe, swappedWithHashesFile, swappedWithHashesTarget], { stdio: 'ignore' }));
+  assert.match(JSON.parse(fs.readFileSync(path.join(swappedWithHashesTarget, 'FAILED.json'))).error,
+    /cold master role differs from stopped-tree match/);
+  assert(!fs.readdirSync(swappedWithHashesTarget).some(name => name.startsWith('working-')));
   const servingMaster = treePlan.cluster.members[0].master;
   const removedMaster = path.join(root, 'master-removed-blocks');
   copyCold(servingMaster, removedMaster);
@@ -717,6 +749,8 @@ try {
   const removedPlan = structuredClone(treePlan);
   removedPlan.cluster.members[0].master = removedMaster;
   removedPlan.cluster.members[0].masterSha256 = masterDigest(removedMaster);
+  removedPlan.matchReceipt = path.join(root, 'removed-blocks-owned-match.json');
+  ownedMatch(removedPlan.matchReceipt, removedPlan);
   const removedPlanFile = path.join(root, 'removed-blocks-plan.json');
   jsonPrivate(removedPlanFile, removedPlan);
   const removedTarget = path.join(root, 'removed-blocks-probe');
@@ -735,6 +769,8 @@ try {
   const flippedPlan = structuredClone(treePlan);
   flippedPlan.cluster.members[0].master = flippedMaster;
   flippedPlan.cluster.members[0].masterSha256 = masterDigest(flippedMaster);
+  flippedPlan.matchReceipt = path.join(root, 'flipped-payload-owned-match.json');
+  ownedMatch(flippedPlan.matchReceipt, flippedPlan);
   const flippedPlanFile = path.join(root, 'flipped-payload-plan.json');
   jsonPrivate(flippedPlanFile, flippedPlan);
   const flippedTarget = path.join(root, 'flipped-payload-probe');
@@ -753,7 +789,7 @@ try {
   assert(!fs.existsSync(path.join(staleProbe, 'probe.json')));
   assert.deepEqual(hashTree(cold), coldHashes);
   for (let i = 0; i < 3; i++) assert.deepEqual(hashTree(masters[i]), hashes[i]);
-  results.coldTreeProbe = { standaloneLast: coldSource.content.last, heldLast: offlineColdSource.content.last, offlineClusterAssignment: true, mastersUnchanged: true, staleArchiveBaselineRejected: true, overlappingTargetRejected: true, omittedR1Rejected: true, omittedR1PlanRejected: true, swappedMastersRejected: true, removedBlocksRejectedBeforeQuorum: true, flippedPayloadRejectedUnderForcedLeader: true };
+  results.coldTreeProbe = { standaloneLast: coldSource.content.last, heldLast: offlineColdSource.content.last, offlineClusterAssignment: true, mastersUnchanged: true, staleArchiveBaselineRejected: true, overlappingTargetRejected: true, omittedR1Rejected: true, omittedR1PlanRejected: true, swappedMastersRejected: true, swappedMasterAndHashRejected: true, removedBlocksRejectedBeforeQuorum: true, flippedPayloadRejectedUnderForcedLeader: true };
   passed = true;
 } catch (err) {
   jsonPrivate(path.join(root, 'FAILED.json'), { at: new Date().toISOString(), phase, error: err.message });

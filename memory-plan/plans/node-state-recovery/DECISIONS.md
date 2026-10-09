@@ -3044,3 +3044,27 @@ point-in-time and can go stale again. Approval of exact pins, a genuine gate,
 the complete persistent hold and process census, boot and host controls, and
 the stopped-VM/history/resumption gates remain separate prerequisites. No
 production job, VM, NATS server or store was stopped or changed.
+
+## D143 — Bind cold masters to the stopped-tree match roles (2026-10-09 15:53 EDT)
+
+An adversarial owned NATS 2.12.6 run exposed a false accept in the isolated
+four-history probe. The existing swapped-master negative changed only the two
+plan paths, leaving their digests in place, so it refused at the hash check.
+When both paths and digests were swapped, the unmodified probe wrote a success
+report even though the serving histories had been assigned to the wrong
+roles. The two masters' replicated stream content matched, and restarting
+each under its planned server name did not reveal the exchange.
+
+`stopped_tree_match.py` now records each frozen extraction role's canonical
+path and content digest in `MATCH.json`. The probe requires that private
+receipt and binds standalone, held member1, and serving member2/member3 in
+plan order before any isolated server starts. It rechecks the receipt hash
+after the probe. The owned negative swaps both serving paths and digests while
+keeping the independent role receipt fixed; it now refuses before copying or
+booting a working server. The existing removed-block and flipped-payload
+negatives use separate owned role receipts, so they still reach their local
+state and forced-leader checks. The full NATS fixture and disposable ASIF
+host-match fixture pass. The test receipts are synthetic and prove only this
+binding mechanism. Production acceptance still must establish the actual
+`MATCH.json` capture/extraction provenance and all other hold, host, and
+historical gates. No production VM, service, or NATS store was changed.

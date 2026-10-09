@@ -184,13 +184,22 @@ def host_match(guest_path, extracted, output):
             freeze(extracted / role)
             require(entries(extracted / role) == guest['stores'][role],
                     f'frozen host tree changed: {role}')
+        masters = {}
+        for role in sorted(ROLES):
+            root = extracted / role
+            rows = guest['stores'][role]
+            masters[role] = {
+                'path': str(root.resolve(strict=True)),
+                'sha256': hashlib.sha256(json.dumps(rows, ensure_ascii=False,
+                    separators=(',', ':')).encode()).hexdigest()}
         result = {'scope': 'content match and read-only mode; not historical master acceptance',
                   'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                   'guest_manifest_sha256': sha256(guest_path),
                   'capture_sha256': sha256(capture_path),
                   'extraction_manifest_sha256': sha256(manifest_path),
                   'image_sha256': host['image_sha256'],
-                  'data_volume_uuid': guest['data_volume_uuid'], 'matched': matched}
+                  'data_volume_uuid': guest['data_volume_uuid'], 'matched': matched,
+                  'masters': masters}
         write_json(output / 'MATCH.json', result)
         return result
     except Exception as error:
