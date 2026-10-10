@@ -2470,3 +2470,11 @@ macOS CI job passed and both Linux jobs reached their root tests; only the
 separate dependency audits failed. The new control still needs exact-head CI.
 The original timer spawn/writer proof and full-node driver remain open, so
 production hold and VM shutdown are still refused. No live state changed.
+
+Checkpoint 2026-10-10 17:58 EDT: D151's owned gate negative demonstrates
+that a payload can leave a detached child after closing the inherited lock
+descriptor. The actual gate drain then completes while that child is waiting,
+and the child writes only after the drain. All 47 execution-hold tests pass.
+A closed marker and flock drain therefore cannot substitute for the missing
+timer spawn/writer witness; the full-node no-writer hold remains unproven.
+No production service, VM or NATS history changed.

@@ -3218,3 +3218,22 @@ The 58 managed-launchd tests pass locally with three existing skips. At
 both Linux jobs reached their root tests and failed only at the separate
 dependency audit gate, which PR #226 addresses. CI for this new control is
 pending. No production service, VM or NATS store changed.
+
+## D151 — A drained timer gate cannot certify detached writers (2026-10-10 17:58 EDT)
+
+The proposed shortcut for the five gated timers was to treat a closed gate
+and successful flock drain as complete spawn/writer evidence. An owned
+negative now runs a foreground payload through the actual `service_gate.Gate`
+wrapper. The payload starts a detached child with the inherited lock file
+descriptor closed, then exits. The child publishes that it is waiting.
+`close_and_drain` then succeeds with the closed marker present; only after
+the drain does the child write its sentinel. No production process or store
+was involved.
+
+The gate still excludes new wrapper payloads while its marker remains intact,
+but its flock drain cannot prove that an already-started payload left no
+detached writer. A timer stop receipt must not claim `coverage_complete` or
+empty `spawns` from marker and lock evidence alone. The full-node hold needs
+independent process/writer coverage for this case, or a narrower verified
+contract that excludes it. This preserves the current fail-closed refusal;
+no production VM, service or NATS store changed.

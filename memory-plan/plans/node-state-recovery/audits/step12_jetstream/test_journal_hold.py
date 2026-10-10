@@ -669,6 +669,48 @@ with Journal(root,boot='owned-boot',node_lock=node_lock) as journal:
         self.reopen_controller()
         self.assert_resolved_only()
 
+    def test_gate_drain_does_not_certify_a_detached_writer(self):
+        ready = self.root / 'detached-ready'
+        release = self.root / 'detached-release'
+        written = self.root / 'detached-write'
+        source = '''
+import pathlib,subprocess,sys
+ready,release,written=map(pathlib.Path,sys.argv[1:])
+child=''' + repr('''
+import pathlib,sys,time
+ready,release,written=map(pathlib.Path,sys.argv[1:])
+ready.write_text('detached and waiting')
+end=time.monotonic()+15
+while time.monotonic()<end:
+    if release.exists():
+        written.write_text('after drain')
+        break
+    time.sleep(.01)
+''') + '''
+subprocess.Popen([sys.executable,'-c',child,str(ready),str(release),str(written)],
+    close_fds=True,start_new_session=True,stdin=subprocess.DEVNULL,
+    stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+'''
+        wrapper = subprocess.Popen([sys.executable, '-I', '-S', str(SOURCE), 'run',
+            str(self.gate_root), '--lock', self.pin['lock'], '--root-pin',
+            self.pin['root'], '--', sys.executable, '-c', source,
+            str(ready), str(release), str(written)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.children.append(wrapper)
+        end = time.monotonic() + 10
+        while not ready.exists() and time.monotonic() < end:
+            time.sleep(.01)
+        self.assertEqual(ready.read_text(), 'detached and waiting')
+        self.assertEqual(wrapper.wait(timeout=5), 0)
+        self.gate.close_and_drain('owned-window', 'detached-writer-negative', 1)
+        self.assertIsNotNone(self.gate.marker())
+        self.assertFalse(written.exists())
+        release.touch(mode=0o600)
+        end = time.monotonic() + 10
+        while not written.exists() and time.monotonic() < end:
+            time.sleep(.01)
+        self.assertEqual(written.read_text(), 'after drain')
+
 
 @unittest.skipUnless(sys.platform == 'darwin', 'timer recovery requires the native gate observer')
 class TimerScopeReopenTests(unittest.TestCase):
