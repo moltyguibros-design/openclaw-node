@@ -2441,3 +2441,13 @@ fixture is corrected and its 22 tests pass locally, with rerun CI pending.
 This does not complete the full-node
 no-writer hold or authorize VM shutdown. Capture, four-history acceptance and
 verified resumption remain open at 1.2[A]/v1.2-pre; no live state changed.
+
+Checkpoint 2026-10-10 01:44 EDT: D148 closes the separate root-reader gap
+Claude found in D147. Root admission now checks each managed-stop receipt's
+label against its listener or NATS row, and a rehashed cross-member negative
+refuses. The 23 root-transfer tests pass locally. At the preceding f9de96ba
+head, macOS native baseline, host capture, hold and managed-launchd suites
+passed; Node 22's isolated JetStream fixture and both Node root test suites
+passed. Dependency audits alone kept that workflow red. New exact-head CI
+is pending. The full production no-writer hold and shutdown gates remain
+unproven; no service or VM was stopped, and 1.2 stays [A]/v1.2-pre.

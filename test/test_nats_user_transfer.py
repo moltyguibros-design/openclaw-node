@@ -224,6 +224,8 @@ class UserTransferTest(unittest.TestCase):
         changes += [('bootout', {'returncode': 1, 'timed_out': False}),
                     ('bootout', {'returncode': 0, 'timed_out': True}),
                     ('verified', False),
+                    ('unit_label', None),
+                    ('unit_label', 'ai.openclaw.mesh-bridge'),
                     ('execution_hold', {'watch_session_id': 'other-session'}),
                     ('entrypoint_loaded', {'gui': ['ai.openclaw.mesh-deploy-listener'],
                                            'user': [], 'system': []}),
@@ -278,6 +280,22 @@ class UserTransferTest(unittest.TestCase):
                     with patch.object(module, 'boot_identity', return_value='boot-a'):
                         with self.assertRaisesRegex(module.Refused, 'NATS stop receipt is absent'):
                             altered._validate()
+
+    def test_root_refuses_nats_receipt_from_another_member(self):
+        fixture, journal, transaction, _ = self.prepared()
+        journal.close()
+        rows = copy.deepcopy(journal.records)
+        nats = next(row for row in rows if row['event'] == 'verified'
+                    and row.get('unit') == 'nats-2')
+        nats['evidence']['unit_label'] = 'ai.openclaw.nats-3'
+        for index, row in enumerate(rows):
+            row['previous'] = rows[index - 1]['sha256'] if index else None
+            row['sha256'] = hashlib.sha256(module.encoded(
+                {key: value for key, value in row.items() if key != 'sha256'})).hexdigest()
+            (fixture.root / f'{index:06d}.json').write_bytes(module.encoded(row))
+        with patch.object(module, 'boot_identity', return_value='boot-a'):
+            with self.assertRaisesRegex(module.Refused, 'NATS stop receipt is absent: nats-2'):
+                module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
     def test_root_refuses_held_member_override_loss_in_nats_receipt(self):
         fixture, journal, transaction, _ = self.prepared()

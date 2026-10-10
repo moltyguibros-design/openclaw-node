@@ -399,6 +399,7 @@ class UserTransfer:
         require(listener.get('unit') == 'mesh-deploy-listener'
                 and listener.get('action') == 'disable-and-unload'
                 and isinstance(stop, dict) and stop.get('verified') is True
+                and stop.get('unit_label') == 'ai.openclaw.mesh-deploy-listener'
                 and all(stop.get(key) is True for key in LISTENER_STOP_FIELDS)
                 and isinstance(stop.get('bootout'), dict)
                 and stop['bootout'].get('returncode') == 0
@@ -450,6 +451,7 @@ class UserTransfer:
                             and self.records[row['intent']]['sequence'] > listener['sequence']
                             and isinstance(row.get('evidence'), dict)
                             and row['evidence'].get('verified') is True
+                            and row['evidence'].get('unit_label') == 'ai.openclaw.' + unit
                             and all(row['evidence'].get(key) is True
                                     for key in LISTENER_STOP_FIELDS)
                             and isinstance(row['evidence'].get('bootout'), dict)

@@ -3157,3 +3157,27 @@ receipts against accidental cross-unit reuse, not against a caller forging a
 label or a writer that escaped the bound process tree. A production driver,
 full-node no-writer proof, stopped-VM capture and four-history acceptance are
 still open. No live VM, service or NATS store changed.
+
+## D148 — Require unit-bound stop evidence at root admission (2026-10-10 01:44 EDT)
+
+Claude's read-only review of D147 found that the root-side `UserTransfer`
+reader independently validates the user journal but still accepted listener
+and NATS stop receipts without checking their `unit_label`. Its row-unit
+check did not bind a receipt's process evidence to that row. A journal written
+through the current `Journal.mutate` now refuses such a swap, but the root
+reader must treat the user journal as untrusted input. The reader now requires
+the listener label and each serving NATS member's own label before root-side
+admission. A durable negative rewrites an otherwise valid nats-2 receipt to
+carry the nats-3 label, rehashes the whole journal chain, and requires root
+admission to refuse. The negative failed against the parent reader because
+it admitted the swapped receipt, then passed with D148. Wrong and missing
+listener labels also refuse. The 23 root-transfer tests pass locally.
+
+Exact-head CI for the preceding `f9de96ba` passed the macOS job, including
+the 28-case native baseline, nine host-capture cases, 46 hold cases and 54
+managed-launchd cases. Both Node versions passed root unit tests; Node 22
+also passed the JetStream fixture. The workflow remains red solely at the
+root and Mission Control high-severity dependency audits. D148's own
+exact-head CI remains to run. The full-node hold, production capture,
+four-history acceptance and verified resumption remain open; no production
+VM, service or NATS store changed.
