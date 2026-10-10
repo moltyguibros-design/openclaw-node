@@ -2461,3 +2461,12 @@ pass locally, including two actual owned Mac timer controls; the new journal
 reopen negative also passes. This does not provide the still-absent production
 timer spawn/writer witness or a full-node driver. Exact-head CI remains to run;
 1.2 remains [A]/v1.2-pre. No live service, VM or NATS store changed.
+
+Checkpoint 2026-10-10 15:58 EDT: D150 adds an actual owned `RunAtLoad`
+restoration control. Its short-lived second invocation exits under a
+disposable closed marker without writing the payload; 58 managed-launchd
+tests pass locally with three existing skips. At D149's 7628e5b8 head, the
+macOS CI job passed and both Linux jobs reached their root tests; only the
+separate dependency audits failed. The new control still needs exact-head CI.
+The original timer spawn/writer proof and full-node driver remain open, so
+production hold and VM shutdown are still refused. No live state changed.

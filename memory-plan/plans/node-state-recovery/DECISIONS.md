@@ -3200,3 +3200,21 @@ timers still lack the spawn/writer evidence needed for the original full-node
 stop, and the helper does not release the execution gate. Two owned native
 timer controls and the journal refusal cases pass; exact-head CI remains to
 run. No production service, VM or NATS store changed.
+
+## D150 — Exercise timer restore with a RunAtLoad owner (2026-10-10 15:58 EDT)
+
+D149's native restore controls used idle jobs with `RunAtLoad` disabled. An
+additional owned launchd control now boots a short-lived timer with
+`RunAtLoad` enabled, observes its first payload, persistently unloads it,
+sets a disposable closed marker, then restores through the journaled helper.
+The second invocation exits with code 0, reaches idle readiness, and does not
+write the payload. It also shows launchd's `runs` count is not a cumulative
+readiness signal across bootstrap; the control instead witnesses the second
+invocation with an owned attempt file and exit status. This tests restore
+timing, not the production execution gate or spawn coverage.
+
+The 58 managed-launchd tests pass locally with three existing skips. At
+7628e5b8, the native macOS CI job passed, including the prior D149 controls;
+both Linux jobs reached their root tests and failed only at the separate
+dependency audit gate, which PR #226 addresses. CI for this new control is
+pending. No production service, VM or NATS store changed.

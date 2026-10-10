@@ -688,6 +688,52 @@ os.execv('/bin/sleep',['sleep','30'])
         self.assertTrue(self.service.status()['loaded'])
         self.assertTrue(self.service.disabled())
 
+    def test_run_at_load_timer_restores_idle_under_closed_marker(self):
+        script = self.directory / 'timer.py'
+        marker = self.directory / 'closed'
+        payload = self.directory / 'payload'
+        attempt = self.directory / 'attempt'
+        script.write_text('''
+import pathlib, sys
+directory = pathlib.Path(sys.argv[1])
+marker = directory / 'closed'
+(directory / 'attempt').write_text('started')
+if not marker.exists():
+    (directory / 'payload').write_text('executed')
+''')
+        self.plist.write_bytes(plistlib.dumps({
+            'Label': self.name,
+            'ProgramArguments': [sys.executable, str(script), str(self.directory)],
+            'WorkingDirectory': str(self.directory),
+            'RunAtLoad': True, 'KeepAlive': False,
+            'StandardOutPath': str(self.log), 'StandardErrorPath': str(self.err)}))
+        self.service.bootstrap()
+        wait_for(lambda: payload.exists() and self.service.status()['loaded']
+                 and not self.service.status()['running'])
+        prior = {'class': 'timer', 'loaded': True, 'running': False,
+                 'identity': static_identity(self.plist, [script])}
+        self.hold_override_attempted = True
+        apply, verify = unload_idle_timer(self.service, [self.log, self.err],
+            spawn_evidence=lambda: {'label': self.service.label,
+                                    'coverage_complete': True, 'spawns': []},
+            require_disabled=True)
+        apply()
+        self.assertTrue(verify()['verified'])
+        marker.touch(mode=0o600)
+        payload.unlink()
+        attempt.unlink()
+        events = []
+        unit = self.name.removeprefix('ai.openclaw.')
+        restored = restore_disabled_timer(self.service,
+            SimpleNamespace(begin_override_clear=lambda name: events.append(name)),
+            unit, prior, lambda status: attempt.exists()
+            and status.get('last_exit_code') == 0, timeout=10)
+        self.assertEqual(events, [unit])
+        self.assertTrue(restored['loaded'])
+        self.assertFalse(restored['running'])
+        self.assertFalse(payload.exists())
+        self.assertFalse(self.service.disabled())
+
     def test_unloaded_job_can_be_refenced_after_interrupted_enable(self):
         self.launch(run_at_load=False)
         self.hold_override_attempted = True
