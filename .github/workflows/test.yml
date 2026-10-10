@@ -9,6 +9,7 @@ jobs:
   unit-tests:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         # package.json engines.node is >=22; 20 kept for lower-bound breadth.
         # 18 dropped — EOL (2025-04) + below the floor; it only stayed green
@@ -94,6 +95,7 @@ jobs:
           node memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_recovery.mjs /tmp/nats-cli/nats-0.3.1-linux-amd64/nats /usr/local/bin/nats-server
           NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_checks.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_journal.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_full_node_baseline.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_managed_launchd.py
           NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_cluster.py
       - name: Root unit tests
@@ -144,6 +146,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install owned launchd fixture dependencies
+        run: |
+          case "$(uname -m)" in
+            arm64) nats_arch=arm64; nats_sha=b9b287b786e83e783702214d516042f6397f7c1c4916985c6ec5e6d9d490151c ;;
+            x86_64) nats_arch=amd64; nats_sha=d7bc326ebbaf0a032ae1b03b99e4d863d9320ad010f37a22b2e8306ab3272ca0 ;;
+            *) exit 1 ;;
+          esac
+          nats_fixture_dir="$(mktemp -d)"
+          curl -fL --retry 3 --output "$nats_fixture_dir/nats.tar.gz" \
+            "https://github.com/nats-io/nats-server/releases/download/v2.12.6/nats-server-v2.12.6-darwin-${nats_arch}.tar.gz"
+          printf '%s  %s\n' "$nats_sha" "$nats_fixture_dir/nats.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$nats_fixture_dir/nats.tar.gz" -C "$nats_fixture_dir"
+          echo "$nats_fixture_dir/nats-server-v2.12.6-darwin-${nats_arch}" >> "$GITHUB_PATH"
+          npm ci --ignore-scripts --no-audit --no-fund
       - name: Verify macOS descriptor and subprocess lock behavior
         env:
           PYTHONDONTWRITEBYTECODE: "1"
@@ -153,6 +169,12 @@ jobs:
           /usr/bin/python3 test/test_nats_root_journal.py
           /usr/bin/python3 test/test_nats_user_transfer.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_journal.py
+          OPENCLAW_CI_FULL_NODE_INVENTORY_FIXTURE=1 /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_full_node_baseline.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_asif_extract.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_image_immutable.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_reconcile.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_release_verify.py
           PYTHONPATH="$PWD/memory-plan/plans/node-state-recovery/audits/step12_jetstream" /usr/bin/python3 -m unittest -q \
             test_preservation_checks.Gates.test_only_exact_tailscale_system_job_can_be_excluded \
             test_preservation_checks.Gates.test_tailscale_exclusion_refuses_loaded_activity_and_plist_triggers \
@@ -160,6 +182,8 @@ jobs:
             test_preservation_checks.Gates.test_excluded_root_file_rejects_unprivileged_owner
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_journal_hold.py
           PYTHONPATH="$PWD/memory-plan/plans/node-state-recovery/audits/step12_jetstream" /usr/bin/python3 -m unittest -q test_restore_only
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_disabled.py
+          OPENCLAW_CI_FULL_NODE_LISTENER_FIXTURE=1 /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_managed_launchd.py
           /usr/bin/python3 test/test_nats_root_admission.py
           /usr/bin/python3 test/test_nats_root_decline.py
           /usr/bin/python3 test/test_nats_macos_proc.py

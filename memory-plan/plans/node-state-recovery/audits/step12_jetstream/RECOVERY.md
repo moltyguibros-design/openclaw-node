@@ -15,6 +15,171 @@ selected contexts. `test_recovery.mjs` creates and gracefully stops owned server
 on fresh loopback ports outside the production port set. It keeps private
 fixture evidence in its reported temporary directory.
 
+`take_cold_baseline.mjs` records a direct, read-only pre-stop stream capture,
+including the connected server identity, exact content digests and consumer
+positions. It requires a new private directory and an explicit list of known
+offline assignments. Changed or duplicate inventory, an undeclared offline
+stream, a supposedly offline stream that responds, or failed authentication
+produces a private `FAILED.json` and no success manifest. Its sequential
+captures and final state/consumer recheck are not a common quiet point.
+The caller also supplies the expected server name, server ID, cluster name
+(`-` for standalone), and that server's loopback monitor URL. The connection
+and monitor must agree on identity before any stream is read. The manifest
+records the monitor's physical JetStream store directory. A production plan
+builder must check it against the role's path in the stopped-tree extraction
+specification; the baseline tool does not make that comparison. Pin the
+expected identity from the managed unit/config/process in the current
+preflight; deriving it only from whichever server answers the ambiguous
+client port would defeat the check.
+Production use requires the separate writer hold and final comparison against
+extracted cold-store restores; this tool alone never certifies a master or a
+stopped VM.
+
+`probe_cold_trees.mjs` is the isolated direct-store comparison after a copy has
+already been extracted and frozen. Its private JSON plan names the pinned
+`binary` and `binarySha256`, one `standalone` role, two
+`cluster.members`, the `cluster.name` and `cluster.offline` stream names,
+and a separate `held` role with its `streams`. Each role supplies the original
+server `name`, an absolute, owner-read-only `master` store directory, its
+`masterSha256` digest, and the absolute private `baseline` manifest from
+`take_cold_baseline.mjs`. The digest is SHA-256 of the JSON serialization of
+the sorted `hashTree(master)` entries. The plan also names the private
+`matchReceipt` emitted by `stopped_tree_match.py`. Before starting a server,
+the probe binds each master path, digest and baseline monitor's guest store
+directory to that receipt's frozen role:
+standalone, held member1, and serving member2/member3 in plan order. Swapping
+two paths and their digests, or swapping their names and baselines, while
+retaining their roles refuses.
+The eventual acceptance controller must verify the receipt against its capture
+and extraction chain; this probe does not attest the receipt's origin. The tool
+requires four distinct masters, copies each into a private working directory,
+and boots only those working copies on isolated loopback ports. It reads the
+standalone and held R1 histories without routing. Before the survivors form a
+quorum, it checks each one alone through its local monitor. After they join,
+it verifies the held streams remain offline, forces each survivor to lead each
+replicated active stream, and compares content under an unchanged leader epoch.
+Consumer positions are still read from each consumer's own leader. It
+then joins a second working copy of held R1 to verify the recovered streams.
+It compares stream content, configuration, state
+and consumers, rehashes every master, and writes private `probe.json` only on
+success. A mismatch writes `FAILED.json` and refuses. This tests the local
+restore mechanism; a host provenance receipt and production acceptance are
+separate gates.
+
+`host_asif_extract.py` is a host-side read-only extraction mechanism for an
+already copied ASIF image. Its owner-private JSON specification pins the image
+SHA-256, the guest Data volume UUID, and four distinct guest-relative store
+paths. It attaches the supplied image read-only, requires the matching
+unencrypted Data volume mounted read-only, copies regular owner-owned files
+into four private trees, checks every copied file and the image hash again,
+ejects the image, then writes `manifest.json`. A mismatch writes `FAILED.json`
+without a success manifest. This tool does not stop a VM or prove that the
+image came from a powered-off guest; a separate typed host receipt and guest
+stop evidence must supply that provenance before production use. Its macOS
+synthetic ASIF fixture tests the extraction and wrong-volume refusal.
+
+`host_vm_capture.py` is a host-side candidate capture worker. Production entry
+currently refuses before creating an attempt because a bound acceptance or
+abort controller does not yet exist. Its eventual production output parent
+must be the owner-private, persistent host
+`~/Library/Application Support/OpenClawRecovery` directory; disposable
+fixtures have a separate guarded mode. In that mode it waits for an
+external guest shutdown, uses two sampled stopped/no-holder observations,
+calls `clonefile(2)` without fallback, hashes source and clone, runs the
+extractor and rechecks the stopped state and a 20 GiB free-space floor. Host
+preflight records the owned `Data/vmstate` file identity (or its absence), and
+capture refuses any sampled change from the initial running observation
+through extraction; that change could indicate a suspend instead of a clean
+shutdown. An unchanged stale `vmstate` is not proof of a cold boot, so the
+later start decision must still exclude resume. The
+worker never issues a stop or
+restart. Its `CAPTURE.json` is not a historical acceptance receipt: the clean
+guest shutdown, uninterrupted host exclusion, guest-to-host store comparison,
+isolated production restore and resumption are still required.
+
+`stopped_tree_match.py capture` records the four guest store trees under a
+private specification after managed NATS stop. Its `match` action runs on the
+host after ASIF extraction, compares the guest manifest, extraction manifest
+and rehashed host files exactly, then makes the extracted trees read-only.
+Its `MATCH.json` records the canonical frozen path and content digest for each
+role and that role's canonical guest store path, so the isolated probe can
+reject a plan that relabels a master or its server name. The content digest
+comes from freshly enumerated frozen host rows, with the same field order as
+the Node probe's `hashTree`; the disposable ASIF fixture checks equality of
+all four cross-language digests.
+Before publishing that receipt, `match` rechecks the guest, capture,
+extraction and guard JSON against the exact bytes it parsed and hashes those
+validated bytes. The eventual acceptance controller must still revalidate
+the chain after the match completes.
+The host capture receipt pins the exact store-specification bytes; `match`
+requires the guest manifest's specification hash to agree and its declared
+scope and timestamp to precede the host image guard. Both sides must use the
+same owner-private store specification. Each producer parses and hashes one
+read of that file and refuses a later observed rewrite. A clock difference
+between guest and host can cause a pre-guard timestamp refusal; the failure
+receipt records both timestamps for diagnosis. This binds the four role paths
+in the content comparison but does not attest which machine produced the guest
+manifest: a stale or host-generated manifest with matching content can still
+pass. `MATCH.json` is a content result only; it is neither guest-origin or
+writer-exclusion proof nor isolated restoration acceptance.
+
+`host_clone_dispose.py` refuses disposal of a completed capture after checking
+the armed and capture receipts, source image identity, full source/clone hashes
+and open holders. It leaves the clone intact with `FAILED.json`: there is no
+bound acceptance or explicit abort decision yet, and removing the clone would
+make `stopped_tree_match.py match` impossible. Its `cleanup-failed` action still
+removes an orphaned clone from an attempt with private `ARMED.json` and
+`FAILED.json` but no `CAPTURE.json`. It binds the failed attempt to the same
+source-image file identity and refuses a clone still held open or listed as an
+attached disk image. That failed-capture cleanup rechecks the stopped state
+after unlinking and issues a receipt that does not authorize boot. A production
+controller must hold UTM down continuously and decide acceptance or abort
+before any completed-capture clone disposal or VM start. The new capture
+receipt scope makes older staged disposal and reconciliation tools refuse a
+new completed receipt. Retiring those staged packages remains a separate
+production gate, since an old tool can act before receipt publication.
+
+`host_image_immutable.py` is an isolated, pinned `UF_IMMUTABLE` file-flag
+operation for disposable host-image guard tests. It verifies a literal,
+owner-owned, singly linked image file by device, inode and size before changing
+the flag through its open descriptor, and verifies the same inode afterward.
+It is not wired into capture, disposal or boot. An existing writable descriptor
+can still write after the flag is set, and the owner can clear it; this flag
+does not prove continuous writer exclusion. A real disposable UTM start refusal
+and crash-safe clone-first reconciliation are required before considering it
+for production.
+
+`host_vm_reconcile.py` is a stopped-VM recovery mechanism for an interrupted
+guarded clone attempt without `CAPTURE.json`. It binds the private arm and
+initial preflight records and a durable `GUARD_INTENT.json` written before the
+flag operation to a fresh source-image preflight. A completed capture is
+rehash-checked but then refused with `OPERATOR_REQUIRED.json` before clone
+removal or source unlock, pending a bound acceptance or explicit abort decision.
+For an interrupted attempt it removes only the fixed clone after checking its
+inode, holders and disk attachment. It scans sibling recovery directories for
+another fixed clone or completed `CAPTURE.json` before clearing the source's
+immutable flag. Its `BOOTABLE.json` says only
+that the original image is writable again, no clone remains and UTM was
+sampled stopped; it does not start the VM or accept masters. A mismatch writes
+`OPERATOR_REQUIRED.json` and does not blindly unlock. This tool is tested on
+disposable images but is not yet wired into the production capture/boot path.
+After a successful `BOOTABLE` receipt, a repeat run refuses any newly guarded
+source or recreated clone rather than using the old intent to clear it.
+Its source identity pin may refuse after a host reboot if the image's device
+number changes, requiring an explicit operator recovery instead of a guessed
+replacement identity.
+
+`host_vm_preflight.py` checks the pinned UTM package, configuration and
+controller binary from the host account's Remote Login context. It asks a
+short-lived job in the logged-in GUI domain for UTM's power state, then
+compares it with open image holders. It writes a private, fsynced preflight
+record or failure record. This is read-only and does not authorize shutdown:
+the started-state result is just an identity check. A host capture controller
+must obtain fresh stopped-state observations after the guest exits and maintain
+the no-holder window throughout image copying and extraction.
+The GUI helper publishes its status by atomic rename after writing and syncing
+the JSON; readers never accept the temporary or partly written file.
+
 Run the driver with an existing token supplied through its process environment,
 never argv, URLs, tracing or a public transcript:
 
@@ -30,6 +195,20 @@ value directly into the child environment. No shell command substitution or
 printout. Unexpected offline streams or changed inventory refuse acceptance.
 The manifest records snapshot-time metadata plus before/after observations;
 these are separate points and must not be claimed simultaneous.
+
+The direct pre-stop capture uses the same private token delivery and URL rule:
+
+```
+NATS_TOKEN=<loaded privately> node take_cold_baseline.mjs \
+  nats://127.0.0.1:<port> <expected-server-name> <expected-server-id> \
+  <expected-cluster-or-> <new-private-absolute-dir> \
+  <comma-separated-known-offline-streams-or-empty> \
+  http://127.0.0.1:<monitor-port>
+```
+
+Keep its manifest private. Record the source server identity and each stream's
+offline assignment in the later host receipt; never combine same-named streams
+from the standalone and cluster into one inventory.
 
 For an isolated R3 stream restored to a standalone fixture, use the explicit
 `--replicas=1` override and record this replica policy delta. CLI 0.3.1's

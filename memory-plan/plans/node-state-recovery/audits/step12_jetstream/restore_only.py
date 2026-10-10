@@ -120,12 +120,7 @@ class OwnedLaunchdAdapter:
         return Launchd(self.label(unit), self.plist(unit))
 
     def disabled(self, unit):
-        result = subprocess.run(['/bin/launchctl', 'print-disabled', 'gui/' + str(os.getuid())],
-                                capture_output=True, text=True, check=True, timeout=3).stdout
-        values = re.findall(r'^\s*"' + re.escape(self.label(unit)) + r'" => ([^\n]+)$', result, re.M)
-        require(len(values) <= 1 and all(value in ('enabled', 'disabled') for value in values),
-                'owned disabled override is ambiguous')
-        return values == ['disabled']
+        return self.service(unit).disabled()
 
     def identity(self, unit, prior):
         path = self.plist(unit)

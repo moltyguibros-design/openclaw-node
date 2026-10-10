@@ -76,6 +76,8 @@ export async function digest(nc, stream, first, last) {
 }
 
 export function consumerState(info) {
+  assert(typeof info.name === 'string' && info.name.length > 0,
+    `consumer list contains an unavailable consumer: ${info.config?.durable_name || 'unnamed'}`);
   return {
     name: info.name, config: info.config,
     delivered: { consumer_seq: info.delivered.consumer_seq, stream_seq: info.delivered.stream_seq },
@@ -85,12 +87,31 @@ export function consumerState(info) {
   };
 }
 
+export async function listConsumerStates(nc, stream) {
+  const consumers = [];
+  let total;
+  for (let offset = 0;;) {
+    const page = await api(nc, `$JS.API.CONSUMER.LIST.${stream}`, { offset });
+    assert(Number.isSafeInteger(page.total) && page.total >= 0, 'consumer inventory has no valid total');
+    if (total === undefined) total = page.total;
+    else assert.equal(page.total, total, 'consumer inventory changed during pagination');
+    assert(!page.missing?.length, `consumer inventory reports unavailable: ${page.missing?.join(',')}`);
+    const rows = page.consumers || [];
+    assert(Array.isArray(rows), 'consumer inventory has invalid rows');
+    consumers.push(...rows.map(consumerState));
+    offset += rows.length;
+    assert(offset <= total, 'consumer inventory exceeds its total');
+    if (offset === total) break;
+    assert(rows.length > 0, 'consumer inventory is incomplete');
+  }
+  assert.equal(new Set(consumers.map(consumer => consumer.name)).size, consumers.length,
+    'duplicate consumer in inventory');
+  return consumers.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export async function capture(nc, stream) {
   const before = await api(nc, `$JS.API.STREAM.INFO.${stream}`, { deleted_details: true });
-  const jsm = await nc.jetstreamManager();
-  const consumers = [];
-  for await (const c of jsm.consumers.list(stream)) consumers.push(consumerState(c));
-  consumers.sort((a, b) => a.name.localeCompare(b.name));
+  const consumers = await listConsumerStates(nc, stream);
   const content = await digest(nc, stream, before.state.first_seq || 1, before.state.last_seq);
   const after = await api(nc, `$JS.API.STREAM.INFO.${stream}`, { deleted_details: true });
   for (const key of ['messages', 'first_seq', 'last_seq', 'bytes', 'num_deleted']) assert.equal(after.state[key], before.state[key], `stream changed during capture: ${key}`);

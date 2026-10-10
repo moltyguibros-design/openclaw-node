@@ -23,6 +23,8 @@ TIMER_SCOPE = 'timer-commissioning'
 FULL_NODE_SCOPE = 'full-node'
 TERMINAL = ('sealed', 'resolved')
 NATS_TRANSFER_UNITS = ('nats', 'nats-2', 'nats-3', 'nats-1')
+LISTENER_STOP_FIELDS = ('unit_unloaded', 'descendants_absent',
+                        'disabled_override_verified', 'connections_closed', 'listeners_absent')
 NATS_WRITER_MARKER = pathlib.Path('/private/var/db/openclaw-nats/writer-handoff.json')
 NATS_ROOT_OUTCOMES = pathlib.Path('/private/var/db/openclaw-nats-outcomes')
 NATS_ROOT_UID = 0
@@ -337,7 +339,7 @@ def valid_prior(prior, scope=None):
 def valid_entrypoint_inventory(evidence, prior):
     require(isinstance(evidence, dict) and evidence.get('verified') is True
             and set(evidence) == {'verified', 'installed', 'loaded', 'roots',
-                                  'disabled_artifacts', 'excluded'},
+                                  'disabled_artifacts', 'excluded', 'overrides'},
             'full-node entrypoint inventory is absent')
     installed = evidence['installed']
     loaded = evidence['loaded']
@@ -350,6 +352,21 @@ def valid_entrypoint_inventory(evidence, prior):
             and all(isinstance(value, list) and len(value) == len(set(value))
                     for value in loaded.values()),
             'full-node loaded entrypoints are incomplete')
+    labels = {'ai.openclaw.' + unit for unit in UNITS}
+    overrides = evidence['overrides']
+    require(isinstance(overrides, dict) and set(overrides) == {'gui', 'user', 'system'}
+            and all(isinstance(values, dict) and labels <= set(values)
+                    and all(label.startswith(('ai.openclaw.', 'com.openclaw.'))
+                            and (value is None or isinstance(value, bool))
+                            for label, value in values.items())
+                    for values in overrides.values()),
+            'full-node disabled overrides are incomplete')
+    require(all((overrides['gui']['ai.openclaw.' + unit] is True
+                 and overrides['user']['ai.openclaw.' + unit] is True
+                 and overrides['system']['ai.openclaw.' + unit] is not False)
+                if state['disabled'] else overrides['gui']['ai.openclaw.' + unit] is not True
+                for unit, state in prior.items()),
+            'full-node disabled overrides differ from the baseline')
     expected_loaded = {'ai.openclaw.' + unit for unit, state in prior.items() if state['loaded']}
     require(set().union(*map(set, loaded.values())) == expected_loaded
             and sum(map(len, loaded.values())) == len(expected_loaded),
@@ -373,7 +390,8 @@ def valid_entrypoint_inventory(evidence, prior):
 
 
 class Journal:
-    def __init__(self, root, prior=None, boot=None, node_lock=None, scope=None):
+    def __init__(self, root, prior=None, boot=None, node_lock=None, scope=None,
+                 expected_entrypoints=None):
         self.root = pathlib.Path(root)
         self.boot = boot if boot is not None else boot_identity()
         self.lock = None
@@ -381,8 +399,11 @@ class Journal:
         self.write_failed = False
         self.receipt_writable = True
         self.sealed = False
+        self.restoring_unit = None
         created = not self.root.exists()
         self.reopened = not created
+        require(created or expected_entrypoints is None,
+                'captured full-node inventory cannot reopen an existing journal')
         node_lock = pathlib.Path(node_lock) if node_lock is not None else pathlib.Path.home() / '.openclaw/preservation/node.lock'
         node_lock.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         info = node_lock.parent.lstat()
@@ -458,7 +479,7 @@ class Journal:
                             rows = self._read(other)
                             require(rows and rows[-1]['event'] in TERMINAL,
                                     'unindexed journal requires manual resolution')
-            self._open(created, prior, scope)
+            self._open(created, prior, scope, expected_entrypoints)
         except BaseException:
             self.close()
             raise
@@ -479,7 +500,7 @@ class Journal:
             handle.close()
             raise
 
-    def _open(self, created, prior, scope):
+    def _open(self, created, prior, scope, expected_entrypoints):
         if created:
             require(scope in (TIMER_SCOPE, FULL_NODE_SCOPE),
                     'new journal requires an explicit protected scope')
@@ -488,6 +509,9 @@ class Journal:
             entrypoints = capture_entrypoint_inventory(UNITS) if scope == FULL_NODE_SCOPE else None
             if scope == FULL_NODE_SCOPE:
                 valid_entrypoint_inventory(entrypoints, prior)
+                if expected_entrypoints is not None:
+                    require(entrypoints == expected_entrypoints,
+                            'full-node entrypoint inventory changed after baseline capture')
             predecessor = ({'root': self.active['journal_root'], 'head': self.active['head']}
                            if self.active is not None else None)
             self.records = []
@@ -542,7 +566,8 @@ class Journal:
         self.scope = self.records[0].get('scope')
         self.entrypoint_inventory = self.records[0].get('entrypoint_inventory')
 
-    def check_entrypoints(self, final=False, forward=False, expected_loaded=None):
+    def check_entrypoints(self, final=False, forward=False, expected_loaded=None,
+                          expected_overrides=None, newly_disabled=None):
         if self.scope != FULL_NODE_SCOPE:
             return None
         current = capture_entrypoint_inventory(UNITS)
@@ -573,8 +598,29 @@ class Journal:
             expected = expected_loaded if expected_loaded is not None else previous
             require(current['loaded'] == expected,
                     'full-node loaded jobs changed inside the forward window')
+            previous_overrides = next((row['evidence']['entrypoint_overrides']
+                                       for row in reversed(self.records)
+                                       if row['event'] == 'verified'
+                                       and 'entrypoint_overrides' in row.get('evidence', {})),
+                                      saved['overrides'])
+            expected = expected_overrides if expected_overrides is not None else previous_overrides
+            if newly_disabled is None:
+                require(current['overrides'] == expected,
+                        'full-node launchd disabled overrides changed inside the forward window')
+            else:
+                require(current['overrides']['gui'][newly_disabled] is True
+                        and current['overrides']['user'][newly_disabled] is True
+                        and current['overrides']['system'][newly_disabled] is not False
+                        and all({label: value for label, value in current['overrides'][domain].items()
+                                 if label != newly_disabled}
+                                == {label: value for label, value in expected[domain].items()
+                                    if label != newly_disabled}
+                                and (current['overrides'][domain][newly_disabled]
+                                     in (expected[domain][newly_disabled], True))
+                                for domain in ('gui', 'user', 'system')),
+                        'full-node launchd disabled overrides changed inside the forward window')
         if final:
-            require(current['loaded'] == saved['loaded'],
+            require(current['loaded'] == (expected_loaded if expected_loaded is not None else saved['loaded']),
                     'full-node loaded entrypoints were not restored')
         return current
 
@@ -705,14 +751,20 @@ class Journal:
         if not rows:
             return None
         row = rows[0]
+        last_overrides = next((entry['evidence']['entrypoint_overrides']
+                               for entry in reversed(self.records[:row['sequence']])
+                               if entry['event'] == 'verified'
+                               and 'entrypoint_overrides' in entry.get('evidence', {})), None)
         require(set(row) == {'sequence', 'previous', 'event', 'boot', 'at', 'root_transaction',
                              'units', 'baseline_sha256', 'observations', 'hold_sha256',
-                             'hold_evidence', 'sha256'}
+                             'hold_evidence', 'entrypoint_overrides', 'sha256'}
                 and row['units'] == list(NATS_TRANSFER_UNITS)
                 and row['baseline_sha256'] == self.records[0]['sha256']
                 and isinstance(row['observations'], dict)
                 and set(row['observations']) == set(NATS_TRANSFER_UNITS)
                 and isinstance(row['hold_evidence'], dict)
+                and isinstance(row['entrypoint_overrides'], dict)
+                and row['entrypoint_overrides'] == last_overrides
                 and re.fullmatch(r'[0-9a-f]{64}', str(row['hold_sha256']))
                 and hashlib.sha256(encoded(row['hold_evidence'])).hexdigest() == row['hold_sha256'],
                 'NATS transfer record is incomplete')
@@ -770,6 +822,7 @@ class Journal:
         except (TypeError, ValueError) as error:
             raise Refused('NATS transfer transaction is invalid') from error
         self.require_forward()
+        require(self.listener_fenced(), 'deploy listener must be verifiably disabled before NATS transfer')
         require(self.nats_transfer_open() is None, 'NATS transfer already exists')
         require_no_nats_marker()
         entrypoints = self.check_entrypoints(forward=True)
@@ -791,16 +844,18 @@ class Journal:
                 require(not actual['loaded'] and not actual['running'],
                         'legacy NATS writer is still active: ' + unit)
                 require(any(row['event'] == 'verified' and row.get('unit') == unit
-                            and row.get('action') in ('unload', 'disable-and-unload')
+                            and row.get('action') == 'disable-and-unload'
+                            and self.managed_stop_proven(unit, row.get('evidence'))
                             for row in self.records),
-                        'legacy NATS stop has no verified journal receipt: ' + unit)
+                        'legacy NATS stop has no verified persistent journal receipt: ' + unit)
             observations[unit] = actual
         require_no_nats_marker()
         hold.check_forward()
-        self.check_entrypoints(forward=True)
+        final_entrypoints = self.check_entrypoints(forward=True)
         return self.append('nats-transfer-intent', root_transaction=root_transaction,
                            units=list(NATS_TRANSFER_UNITS), baseline_sha256=self.records[0]['sha256'],
                            observations=observations,
+                           entrypoint_overrides=final_entrypoints['overrides'],
                            hold_sha256=hashlib.sha256(encoded(hold_evidence)).hexdigest(),
                            hold_evidence=hold_evidence)
 
@@ -819,6 +874,80 @@ class Journal:
         require(not self.pending_intents() and not list(self.root.glob('.pending-*')),
                 'incomplete durable intent may only restore prior services')
 
+    def listener_fenced(self):
+        intents = [row for row in self.records if row['event'] == 'intent']
+        if (len(intents) < 2
+                or intents[0].get('unit') != 'scheduler-heartbeat'
+                or intents[0].get('action') != 'close-execution-hold'
+                or intents[1].get('unit') != 'mesh-deploy-listener'
+                or intents[1].get('action') != 'disable-and-unload'
+                or sum(row.get('unit') == 'mesh-deploy-listener' for row in intents) != 1
+                or not any(row['event'] == 'verified' and row.get('intent') == intents[0]['sequence']
+                           for row in self.records)):
+            return False
+        return any(row['event'] == 'verified' and row['sequence'] > intents[1]['sequence']
+                   and row.get('intent') == intents[1]['sequence']
+                   and self.managed_stop_proven('mesh-deploy-listener', row.get('evidence'))
+                   for row in self.records)
+
+    @staticmethod
+    def managed_stop_proven(unit, evidence):
+        return (isinstance(evidence, dict)
+                and evidence.get('verified') is True
+                and evidence.get('unit_label') == 'ai.openclaw.' + unit
+                and all(evidence.get(key) is True for key in LISTENER_STOP_FIELDS)
+                and isinstance(evidence.get('bootout'), dict)
+                and evidence['bootout'].get('returncode') == 0
+                and evidence['bootout'].get('timed_out') is False
+                and evidence.get('termination') in ({'signal': 15}, {'exit': 0}))
+
+    @staticmethod
+    def idle_stop_proven(unit, evidence):
+        spawn = evidence.get('spawn_evidence') if isinstance(evidence, dict) else None
+        prior = evidence.get('prior') if isinstance(evidence, dict) else None
+        return (isinstance(evidence, dict) and evidence.get('verified') is True
+                and evidence.get('unloaded') is True
+                and evidence.get('logs_unchanged') is True
+                and evidence.get('disabled_override_verified') is True
+                and isinstance(prior, dict) and prior.get('loaded') is True
+                and prior.get('running') is False
+                and isinstance(spawn, dict)
+                and spawn.get('label') == 'ai.openclaw.' + unit
+                and spawn.get('coverage_complete') is True
+                and spawn.get('spawns') == [])
+
+    def full_node_stop_proven(self, unit, evidence):
+        kind = self.prior[unit]['class']
+        return ((kind in ('daemon', 'on-demand', 'known-broken')
+                 and self.managed_stop_proven(unit, evidence))
+                or (kind in ('timer', 'on-demand', 'known-broken')
+                    and self.idle_stop_proven(unit, evidence)))
+
+    def begin_override_clear(self, unit):
+        require(self.scope == FULL_NODE_SCOPE and unit in self.prior
+                and self.restoring_unit == unit
+                and self.prior[unit]['class'] in ('daemon', 'timer') and self.prior[unit]['loaded']
+                and (self.prior[unit]['class'] != 'timer' or not self.prior[unit]['running'])
+                and unit not in NATS_TRANSFER_UNITS,
+                'override clear is outside the current persistent restoration')
+        restore = self.records[-1]
+        require(restore['event'] == 'restoration-intent' and restore['unit'] == unit,
+                'override clear must immediately follow its restoration intent')
+        stop = next((row for row in reversed(self.records)
+                     if row['event'] == 'intent' and row.get('unit') == unit
+                     and row.get('action') == 'disable-and-unload'), None)
+        require(stop is not None and stop['sequence'] < restore['sequence']
+                and not any(row['event'] == 'recovery-verified' and row.get('unit') == unit
+                            for row in self.records[stop['sequence'] + 1:])
+                and any(row['event'] == 'verified'
+                and row.get('intent') == stop['sequence']
+                and row.get('unit') == unit
+                and self.full_node_stop_proven(unit, row.get('evidence'))
+                for row in self.records[stop['sequence'] + 1:]),
+                'override clear lacks a verified persistent stop')
+        return self.append('override-clear-intent', unit=unit,
+                           restoration_intent=restore['sequence'], stop_intent=stop['sequence'])
+
     def mutate(self, unit, action, apply, verify, failure_evidence=None, intent_fields=None, hold=None):
         require(self.scope != TIMER_SCOPE or unit == 'scheduler-heartbeat'
                 and action == 'close-execution-hold' and not any(r['event'] == 'intent' for r in self.records)
@@ -835,12 +964,31 @@ class Journal:
                 'baselined execution hold requires its forward facade')
         if held:
             hold.check_forward()
+        if self.scope == FULL_NODE_SCOPE:
+            intents = [row for row in self.records if row['event'] == 'intent']
+            if unit == 'scheduler-heartbeat' and action == 'close-execution-hold':
+                require(not intents, 'execution hold must be the first full-node intent')
+            elif unit == 'mesh-deploy-listener':
+                require(action == 'disable-and-unload' and len(intents) == 1
+                        and intents[0].get('unit') == 'scheduler-heartbeat'
+                        and intents[0].get('action') == 'close-execution-hold'
+                        and any(row['event'] == 'verified' and row.get('intent') == intents[0]['sequence']
+                                for row in self.records),
+                        'deploy listener must follow the verified execution hold')
+            else:
+                require(action == 'disable-and-unload',
+                        'full-node stop requires a persistent disabled override')
+                require(self.listener_fenced(),
+                        'deploy listener must be verifiably disabled before other full-node work')
         fields = intent_fields or {}
         require(isinstance(fields, dict) and not set(fields) & {'unit', 'action'},
                 'intent fields cannot replace the mutation owner')
         intent = self.append('intent', unit=unit, action=action, **fields)
+        rejected_evidence = None
+        failure_stage = 'apply'
         try:
             apply()
+            failure_stage = 'pre-verify'
             if held:
                 hold.check_forward()
             expected = next((row['evidence']['entrypoint_loaded'] for row in reversed(self.records)
@@ -850,25 +998,56 @@ class Journal:
             if self.scope == FULL_NODE_SCOPE and action in ('stop', 'unload', 'disable-and-unload'):
                 expected = {domain: sorted(set(labels) - {'ai.openclaw.' + unit})
                             for domain, labels in expected.items()}
-            before_verify = self.check_entrypoints(forward=True, expected_loaded=expected)
+            newly_disabled = ('ai.openclaw.' + unit if self.scope == FULL_NODE_SCOPE
+                              and action == 'disable-and-unload' else None)
+            before_verify = self.check_entrypoints(forward=True, expected_loaded=expected,
+                                                   newly_disabled=newly_disabled)
+            failure_stage = 'verify-callback'
             evidence = verify()
+            failure_stage = 'evidence-serialization'
+            if isinstance(evidence, dict):
+                rejected_evidence = json.loads(encoded(evidence))
+            failure_stage = 'verified-evidence'
             require(isinstance(evidence, dict) and evidence.get('verified') is True,
                     'mutation lacks verified evidence')
+            failure_stage = 'persistent-stop-proof'
+            if self.scope == FULL_NODE_SCOPE and action == 'disable-and-unload':
+                if unit == 'mesh-deploy-listener':
+                    require(self.full_node_stop_proven(unit, evidence),
+                            'deploy listener stop lacks persistent unload and process proof')
+                elif unit in NATS_TRANSFER_UNITS:
+                    require(self.full_node_stop_proven(unit, evidence),
+                            'NATS stop lacks persistent unload and process proof: ' + unit)
+                else:
+                    require(self.full_node_stop_proven(unit, evidence),
+                            'full-node stop lacks class-specific persistent proof: ' + unit)
+            failure_stage = 'entrypoint-postcheck'
             if self.scope == FULL_NODE_SCOPE:
-                after_verify = self.check_entrypoints(forward=True, expected_loaded=expected)
+                after_verify = self.check_entrypoints(forward=True, expected_loaded=expected,
+                                                      expected_overrides=before_verify['overrides'])
                 require(after_verify['loaded'] == before_verify['loaded'],
                         'full-node job changed during mutation verification')
-                evidence = {**evidence, 'entrypoint_loaded': after_verify['loaded']}
+                evidence = {**evidence, 'entrypoint_loaded': after_verify['loaded'],
+                            'entrypoint_overrides': after_verify['overrides']}
             self.append('verified', intent=intent['sequence'], unit=unit, action=action, evidence=evidence)
             return evidence
         except Exception as error:
             if not self.write_failed:
-                detail = {} if failure_evidence is None else {'evidence': failure_evidence(error)}
+                detail = {'failure_stage': failure_stage}
+                if failure_evidence is not None:
+                    try:
+                        detail['evidence'] = json.loads(encoded(failure_evidence(error)))
+                    except Exception as inspection_error:
+                        detail['failure_evidence_error'] = type(inspection_error).__name__
+                if rejected_evidence is not None:
+                    detail['rejected_evidence'] = rejected_evidence
                 self.append('failed', intent=intent['sequence'], unit=unit, action=action,
                             error_type=type(error).__name__, **detail)
             raise
 
-    def recover(self, restore, observe, final_check, diagnostics=None, hold=None):
+    def recover(self, restore, observe, final_check, diagnostics=None, hold=None, deploy_fence=None):
+        require(self.scope != FULL_NODE_SCOPE or self.boot == self.records[0]['boot'],
+                'full-node reboot recovery requires a verified boot hold decision')
         require(self.nats_transfer_open() is None, 'NATS transfer is open; await a root outcome')
         nats_guarded = self.scope == FULL_NODE_SCOPE or (self.scope is None and any(
             self.prior[unit]['class'] != 'absent' for unit in NATS_TRANSFER_UNITS))
@@ -878,14 +1057,67 @@ class Journal:
                 'recovery requires the node lock')
         require(not self.sealed, 'sealed journal cannot restore services')
         require(callable(final_check), 'recovery requires final physical ownership checks')
+        require(self.scope != FULL_NODE_SCOPE or callable(deploy_fence),
+                'full-node recovery requires a deploy listener fence')
         held = 'execution_hold' in self.prior['scheduler-heartbeat']
         require((hold is not None) == held and (not held or hold.journal is self),
                 'baselined execution hold requires its journal recovery facade')
+        binding_unavailable = False
+        if self.scope == FULL_NODE_SCOPE:
+            stopped = {}
+            for row in self.records:
+                if row['event'] == 'intent' and row.get('action') in ('stop', 'unload', 'disable-and-unload'):
+                    stopped[row['unit']] = row['action']
+                elif row['event'] == 'recovery-verified' and row.get('unit') in stopped:
+                    del stopped[row['unit']]
+            def override_clear_unproven(unit):
+                latest = next((row for row in reversed(self.records)
+                               if row.get('unit') == unit
+                               and row['event'] in ('override-clear-intent', 'recovery-verified')), None)
+                return latest is not None and latest['event'] == 'override-clear-intent'
+            def unproven_stopped_unit():
+                return next((unit for unit in stopped if override_clear_unproven(unit)), None)
+            def stopped_state_ok(unit, actual):
+                return (isinstance(actual, dict)
+                        and all(isinstance(actual.get(key), bool)
+                                for key in ('loaded', 'running', 'disabled'))
+                        and actual.get('identity') == self.prior[unit]['identity']
+                        and not actual['loaded'] and not actual['running']
+                        and (stopped[unit] != 'disable-and-unload' or actual['disabled']))
+            def capture_installed():
+                for _ in range(2):
+                    try:
+                        return capture_entrypoint_inventory(UNITS)['installed']
+                    except Exception:
+                        continue
+                return None
+            def check_stopped():
+                nonlocal binding_unavailable
+                with nats_legacy_restore_guard():
+                    unproven = unproven_stopped_unit()
+                    require(unproven is None,
+                            'stopped unit override was cleared without verified recovery: ' + str(unproven))
+                    installed = capture_installed() if stopped else None
+                    if stopped and installed is None:
+                        binding_unavailable = True
+                    for unit in stopped:
+                        if installed is not None:
+                            label = 'ai.openclaw.' + unit
+                            require(isinstance(installed, dict)
+                                    and installed.get(label) == self.entrypoint_inventory['installed'][label],
+                                    'stopped unit installed plist changed before verified recovery: ' + unit)
+                        actual = observe(unit, self.prior[unit])
+                        require(stopped_state_ok(unit, actual),
+                                'stopped unit state changed before verified recovery: ' + unit)
+            check_stopped()
         if held:
             guard = nats_legacy_restore_guard() if nats_guarded else contextlib.nullcontext()
             with guard:
                 hold.prepare(observe, final_check)
-        errors = []
+        if self.scope == FULL_NODE_SCOPE:
+            check_stopped()
+        errors = ([{'unit': 'entrypoints', 'reason': 'installed binding unavailable'}]
+                  if binding_unavailable else [])
         diagnostics = diagnostics or (lambda row: print(json.dumps(row), file=sys.stderr, flush=True))
         def record(event, **data):
             try:
@@ -927,8 +1159,52 @@ class Journal:
         except Exception as error:
             errors.append({'unit': 'entrypoints', 'reason': type(error).__name__,
                            'detail': str(error)})
+        def check_held_units():
+            for unit in (u for u in self.prior if u not in RESUME_ORDER and not (held and self.write_failed)):
+                try:
+                    require(unit in ('nats-1', 'federation-tick'), 'unknown unit needs manual restoration')
+                    guard = (nats_legacy_restore_guard() if nats_guarded
+                             and unit in NATS_TRANSFER_UNITS else contextlib.nullcontext())
+                    with guard:
+                        actual = observe(unit, self.prior[unit])
+                        require(matches(actual, self.prior[unit]) and actual.get('verified') is True
+                                and actual.get('identity') == self.prior[unit]['identity'],
+                                'non-running installed unit or member-1 hold changed')
+                        record('held-unit-verified' if unit == 'nats-1' else 'unloaded-unit-verified',
+                               unit=unit, evidence=actual)
+                except Exception as error:
+                    errors.append({'unit': unit, 'reason': type(error).__name__})
+        held_errors_before = len(errors)
+        if self.scope == FULL_NODE_SCOPE:
+            check_held_units()
+            try:
+                listener = observe('mesh-deploy-listener', self.prior['mesh-deploy-listener'])
+                require(all(isinstance(listener.get(key), bool) for key in ('loaded', 'running', 'disabled'))
+                        and listener.get('identity') == self.prior['mesh-deploy-listener']['identity'],
+                        'deploy listener preflight is incomplete')
+                latest_intent = max((row['sequence'] for row in self.records
+                                     if row['event'] == 'intent'
+                                     and row.get('unit') == 'mesh-deploy-listener'), default=0)
+                latest_restored = max((row['sequence'] for row in self.records
+                                       if row['event'] in ('recovery-verified', 'already-restored')
+                                       and row.get('unit') == 'mesh-deploy-listener'), default=0)
+                require(not (latest_intent > latest_restored
+                             and (listener['loaded'] or listener['running'])),
+                        'deploy listener is running without verified restoration; stop it before retry')
+            except Exception as error:
+                errors.append({'unit': 'mesh-deploy-listener', 'reason': type(error).__name__,
+                               'detail': str(error)})
+        held_preflight_failed = len(errors) != held_errors_before
         buses_ready = True
+        unsafe_restart = False
         for unit in (u for u in RESUME_ORDER if u in self.prior):
+            if held_preflight_failed:
+                break
+            if self.scope == FULL_NODE_SCOPE and unit == 'mesh-deploy-listener':
+                check_held_units()
+                if errors:
+                    errors.append({'unit': unit, 'reason': 'prior restoration was not verified'})
+                    continue
             if not unit.startswith('nats') and not buses_ready:
                 errors.append({'unit': unit, 'reason': 'bus recovery was not verified'})
                 continue
@@ -942,13 +1218,68 @@ class Journal:
             committed = None
             try:
                 guard = (nats_legacy_restore_guard() if nats_guarded
-                         and unit in NATS_TRANSFER_UNITS else contextlib.nullcontext())
+                         and (unit in NATS_TRANSFER_UNITS or
+                              self.scope == FULL_NODE_SCOPE and unit == 'mesh-deploy-listener')
+                         else contextlib.nullcontext())
                 with guard as precommit:
-                    actual = observe(unit, prior)
+                    if self.scope == FULL_NODE_SCOPE:
+                        unproven = unproven_stopped_unit()
+                        unsafe_restart = unproven is not None
+                        require(not unsafe_restart,
+                                'stopped unit override was cleared without verified recovery: ' + str(unproven))
+                    try:
+                        actual = observe(unit, prior)
+                    except Exception:
+                        unsafe_restart = self.scope == FULL_NODE_SCOPE and unit in stopped
+                        raise
+                    if self.scope == FULL_NODE_SCOPE and unit in stopped:
+                        unsafe_restart = not stopped_state_ok(unit, actual)
+                        require(not unsafe_restart,
+                                'stopped unit state changed before verified recovery: ' + unit)
                     require(all(isinstance(actual.get(k), bool) for k in ('loaded', 'running', 'disabled')),
                             'actual service state is incomplete')
                     require(actual.get('identity') == prior['identity'], 'immutable service identity changed')
                     record('recovery-observed', unit=unit, evidence=actual)
+                    if self.scope == FULL_NODE_SCOPE and unit in stopped:
+                        installed = capture_installed()
+                        if installed is None:
+                            errors.append({'unit': 'entrypoints', 'reason': 'installed binding unavailable',
+                                           'detail': unit})
+                        else:
+                            label = 'ai.openclaw.' + unit
+                            require(isinstance(installed, dict)
+                                    and installed.get(label) == self.entrypoint_inventory['installed'][label],
+                                    'stopped unit installed plist changed before verified recovery: ' + unit)
+                    if self.scope == FULL_NODE_SCOPE and unit == 'mesh-deploy-listener':
+                        require(not errors, 'deploy listener cannot release without installed binding')
+                        require(not (actual['loaded'] or actual['running']) or listener['loaded'] or listener['running'],
+                                'deploy listener started outside its release gate')
+                        require(matches(actual, prior) or not actual['loaded'] and not actual['running'],
+                                'deploy listener is partly restored')
+                        services = {}
+                        for other, saved in self.prior.items():
+                            if other == unit:
+                                continue
+                            observed = observe(other, saved)
+                            require(observed.get('identity') == saved['identity']
+                                    and matches(observed, saved) and observed.get('verified') is True,
+                                    'service readiness changed before deploy listener release: ' + other)
+                            services[other] = observed
+                        physical = final_check()
+                        require(isinstance(physical, dict) and physical.get('verified') is True,
+                                'final physical ownership changed before deploy listener release')
+                        expected = {domain: sorted(set(labels) - {'ai.openclaw.mesh-deploy-listener'})
+                                    for domain, labels in self.entrypoint_inventory['loaded'].items()}
+                        if actual['loaded']:
+                            expected = self.entrypoint_inventory['loaded']
+                        entrypoints = self.check_entrypoints(final=True, expected_loaded=expected)
+                        fence = deploy_fence()
+                        require(isinstance(fence, dict) and fence.get('verified') is True,
+                                'deploy listener fence was not verified')
+                        record('listener-release-verified', evidence={
+                            'services': services, 'physical': physical,
+                            'entrypoints': entrypoints, 'deploy_fence': fence,
+                            'already_running': actual['running']})
                     if matches(actual, prior):
                         require(actual.get('verified') is True, 'existing service readiness was not verified')
                         record('already-restored', unit=unit, evidence=actual)
@@ -964,32 +1295,28 @@ class Journal:
                     if precommit is not None:
                         precommit()
                         committed = 'restore'
-                    restore(unit, prior)
+                    self.restoring_unit = unit
+                    try:
+                        restore(unit, prior)
+                    finally:
+                        self.restoring_unit = None
                     if held:
                         hold.check_closed()
                     evidence = verify()
                     record('recovery-verified', unit=unit, evidence=evidence)
             except Exception as error:
                 errors.append({'unit': unit, 'reason': type(error).__name__,
+                               'detail': str(error),
                                **({'after_commit': committed} if committed else {})})
+                if self.scope == FULL_NODE_SCOPE:
+                    unsafe_restart = unsafe_restart or unproven_stopped_unit() is not None
+                if unsafe_restart:
+                    break
                 if held and self.write_failed:
                     break
                 if unit.startswith('nats'):
                     buses_ready = False
-        for unit in (u for u in self.prior if u not in RESUME_ORDER and not (held and self.write_failed)):
-            try:
-                require(unit in ('nats-1', 'federation-tick'), 'unknown unit needs manual restoration')
-                guard = (nats_legacy_restore_guard() if nats_guarded
-                         and unit in NATS_TRANSFER_UNITS else contextlib.nullcontext())
-                with guard:
-                    actual = observe(unit, self.prior[unit])
-                    require(matches(actual, self.prior[unit]) and actual.get('verified') is True
-                            and actual.get('identity') == self.prior[unit]['identity'],
-                            'non-running installed unit or member-1 hold changed')
-                    record('held-unit-verified' if unit == 'nats-1' else 'unloaded-unit-verified',
-                           unit=unit, evidence=actual)
-            except Exception as error:
-                errors.append({'unit': unit, 'reason': type(error).__name__})
+        check_held_units()
         try:
             guard = nats_legacy_restore_guard() if nats_guarded else contextlib.nullcontext()
             with guard:

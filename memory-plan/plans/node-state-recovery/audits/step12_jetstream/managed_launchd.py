@@ -1,5 +1,6 @@
 import ctypes
 import hashlib
+import math
 import os
 import pathlib
 import plistlib
@@ -10,6 +11,7 @@ import subprocess
 import time
 
 from preservation_checks import Refused, require, verify_completion, verify_timer_idle
+from preservation_journal import FULL_NODE_SCOPE, NATS_TRANSFER_UNITS, regular_content, static_identity
 
 
 EXIT_FLAGS = 0x84000000
@@ -134,13 +136,15 @@ def process_tree(owner, group=None):
         rows[pid] = {'parent': parent, 'group': process_group}
     require(owner in rows or group is not None, 'service owner disappeared')
     group = rows[owner]['group'] if group is None else group
-    descendants = {owner} if owner in rows else set()
+    descendants = ({owner} if owner in rows else set()) | {
+        pid for pid, row in rows.items() if row['group'] == group}
     while True:
-        found = {pid for pid, row in rows.items() if row['parent'] in descendants}
+        groups = {rows[pid]['group'] for pid in descendants}
+        found = {pid for pid, row in rows.items()
+                 if row['parent'] in descendants or row['group'] in groups}
         if found <= descendants:
             break
         descendants |= found
-    descendants |= {pid for pid, row in rows.items() if row['group'] == group}
     return {pid: rows[pid] for pid in descendants}
 
 
@@ -175,7 +179,7 @@ class Launchd:
 
     def status(self, domain='gui'):
         target = domain + '/' + str(os.getuid()) + '/' + self.label
-        result = subprocess.run(['/bin/launchctl', 'print', target], capture_output=True, text=True)
+        result = subprocess.run(['/bin/launchctl', 'print', target], capture_output=True, text=True, timeout=10)
         if result.returncode:
             require(result.returncode == 113 and 'Could not find service' in result.stderr,
                     'managed unit inspection failed')
@@ -216,7 +220,7 @@ class Launchd:
                 'executable': executable, 'cwd': process_cwd(pid), 'identity': identity,
                 'logs': loaded['logs']}
 
-    def configuration(self):
+    def configuration(self, include_logs=True):
         text = command(['/bin/launchctl', 'print', self.target])
         def field(name):
             match = re.search(r'^\s*' + re.escape(name) + r' = (.+)$', text, re.M)
@@ -224,24 +228,181 @@ class Launchd:
             return match[1]
         arguments = re.search(r'^\s*arguments = \{\n(.*?)^\s*\}', text, re.M | re.S)
         require(arguments is not None, 'loaded job lacks arguments')
-        return {'path': str(pathlib.Path(field('path')).resolve(strict=True)),
-                'arguments': [line.strip() for line in arguments[1].splitlines()],
-                'logs': sorted({str(pathlib.Path(field(name)).resolve(strict=True))
-                                for name in ('stdout path', 'stderr path')})}
+        entry = {'path': str(pathlib.Path(field('path')).resolve(strict=True)),
+                 'arguments': [line.strip() for line in arguments[1].splitlines()]}
+        if include_logs:
+            entry['logs'] = sorted({str(pathlib.Path(field(name)).resolve(strict=True))
+                                    for name in ('stdout path', 'stderr path')})
+        else:
+            directory = re.search(r'^\s*working directory = (.+)$', text, re.M)
+            sections = re.findall(r'^\s*environment = \{\n(.*?)^\s*\}', text, re.M | re.S)
+            require(len(sections) <= 1, 'loaded job environment is ambiguous')
+            environment = {}
+            for line in sections[0].splitlines() if sections else ():
+                match = re.fullmatch(r'\s*([A-Za-z_][A-Za-z0-9_]*) => (.*)', line)
+                require(match is not None and match[1] not in environment,
+                        'loaded job environment is ambiguous')
+                environment[match[1]] = match[2]
+            entry.update({'program': str(pathlib.Path(field('program')).resolve(strict=True)),
+                          'working_directory': str(pathlib.Path(directory[1] if directory else '/').resolve(strict=True)),
+                          'environment': environment})
+        return entry
 
     def bootstrap(self):
         require(not self.status()['loaded'], 'refusing to bootstrap an existing owner')
         require(not self.status('user')['loaded'], 'refusing to bootstrap an owner in another domain')
+        require(not self.disabled(), 'refusing to bootstrap a disabled managed unit')
         command(['/bin/launchctl', 'bootstrap', 'gui/' + str(os.getuid()), str(self.plist)])
 
     def kickstart(self):
         require(self.status()['loaded'] and not self.status()['running'], 'refusing to restart an existing owner')
+        require(not self.disabled(), 'refusing to kickstart a disabled managed unit')
         command(['/bin/launchctl', 'kickstart', self.target])
+
+    def disabled(self):
+        result = command(['/bin/launchctl', 'print-disabled', 'gui/' + str(os.getuid())])
+        values = re.findall(r'^\s*"' + re.escape(self.label) + r'" => ([^\n]+)$', result, re.M)
+        require(len(values) <= 1 and all(value in ('enabled', 'disabled') for value in values),
+                'managed disabled override is ambiguous')
+        return values == ['disabled']
+
+    def disable_for_hold(self):
+        require(self.status()['loaded'] and not self.status('user')['loaded'],
+                'managed unit is not exclusively loaded in the GUI domain')
+        require(not self.disabled(), 'managed unit is already disabled')
+        command(['/bin/launchctl', 'disable', self.target])
+        require(self.disabled(), 'managed unit was not disabled')
+
+    def disable_unloaded_for_hold(self):
+        require(not self.status()['loaded'] and not self.status('user')['loaded'],
+                'managed unit is loaded while restoring its disabled override')
+        require(not self.disabled(), 'managed unit is already disabled')
+        command(['/bin/launchctl', 'disable', self.target])
+        require(not self.status()['loaded'] and not self.status('user')['loaded'] and self.disabled(),
+                'managed unit did not remain unloaded and disabled')
+
+    def enable_after_hold(self):
+        require(not self.status()['loaded'] and not self.status('user')['loaded'],
+                'managed unit is still loaded')
+        require(self.disabled(), 'managed unit was not disabled')
+        command(['/bin/launchctl', 'enable', self.target])
+        require(not self.disabled(), 'managed unit remains disabled')
+
+
+def restore_disabled_daemon(service, journal, unit, prior, ready, *, timeout):
+    require(prior['class'] == 'daemon' and prior['loaded']
+            and service.label == 'ai.openclaw.' + unit and callable(ready),
+            'disabled daemon restoration is not bound to its saved owner')
+    require(type(timeout) in (int, float) and math.isfinite(timeout) and timeout > 0,
+            'disabled daemon restoration needs a finite readiness budget')
+    require(regular_content(service.plist, 1 << 20) == prior['identity']['plist_sha256'],
+            'disabled daemon plist changed before restoration: ' + unit)
+    journal.begin_override_clear(unit)
+    try:
+        service.enable_after_hold()
+        service.bootstrap()
+        end = time.monotonic() + timeout
+        binding = None
+        while time.monotonic() < end:
+            require(not service.status('user')['loaded'], 'restored owner appeared in another domain')
+            if service.status()['running']:
+                identity = prior['identity']
+                binding = service.bind(identity['argv'], identity['argv'][0],
+                                       identity['working_directory'], identity['files'])
+                break
+            time.sleep(.05)
+        require(binding is not None, 'restored daemon owner was not bound')
+        while time.monotonic() < end:
+            require(service.status() == binding['status'],
+                    'restored daemon owner changed before readiness')
+            if ready(binding):
+                require(service.status() == binding['status'],
+                        'restored daemon owner changed during readiness')
+                return binding
+            time.sleep(.05)
+        raise Refused('restored daemon did not reach readiness: ' + unit)
+    except BaseException as error:
+        try:
+            gui, user = service.status(), service.status('user')
+            require(not user['loaded'], 'restored daemon is loaded in another domain')
+            if not service.disabled():
+                if gui['loaded']:
+                    service.disable_for_hold()
+                else:
+                    service.disable_unloaded_for_hold()
+            require(service.disabled(), 'restored daemon override remains clear')
+            state = service.status()
+            physical = 'disabled override restored; owner running=' + str(state['running'])
+        except Exception as fence_error:
+            physical = 'disabled override unverified: ' + str(fence_error)
+        if not isinstance(error, Exception):
+            raise
+        raise Refused(str(error) + '; ' + physical) from error
+
+
+def restore_disabled_timer(service, journal, unit, prior, ready, *, timeout):
+    require(prior['class'] == 'timer' and prior['loaded'] and not prior['running']
+            and service.label == 'ai.openclaw.' + unit and callable(ready),
+            'disabled timer restoration is not bound to its saved idle owner')
+    require(type(timeout) in (int, float) and math.isfinite(timeout) and timeout > 0,
+            'disabled timer restoration needs a finite readiness budget')
+    identity = prior['identity']
+    require(static_identity(service.plist, identity['files'], identity['dependencies']) == identity,
+            'disabled timer identity changed before restoration: ' + unit)
+    journal.begin_override_clear(unit)
+    try:
+        service.enable_after_hold()
+        service.bootstrap()
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            require(not service.status('user')['loaded'],
+                    'restored timer appeared in another domain')
+            status = service.status()
+            if status['loaded'] and not status['running']:
+                require(static_identity(service.plist, identity['files'], identity['dependencies']) == identity,
+                        'restored timer identity changed')
+                loaded = service.configuration(include_logs=False)
+                plist = plistlib.loads(regular_content(service.plist, 1 << 20, keep_bytes=True))
+                declared = plist.get('EnvironmentVariables', {})
+                require(loaded['path'] == str(service.plist.resolve(strict=True))
+                        and loaded['arguments'] == identity['argv']
+                        and loaded['program'] == str(pathlib.Path(
+                            plist.get('Program', identity['argv'][0])).resolve(strict=True))
+                        and loaded['working_directory'] == identity['working_directory']
+                        and {name: value for name, value in loaded['environment'].items()
+                             if name in declared} == declared
+                        and set(loaded['environment']) - set(declared)
+                        <= {'OSLogRateLimit', 'XPC_SERVICE_NAME'},
+                        'restored timer loaded configuration differs from approved plist')
+                if ready(status):
+                    require(service.status() == status and not service.disabled(),
+                            'restored timer changed during readiness')
+                    return status
+            time.sleep(.05)
+        raise Refused('restored timer did not reach idle readiness: ' + unit)
+    except BaseException as error:
+        try:
+            gui, user = service.status(), service.status('user')
+            require(not user['loaded'], 'restored timer is loaded in another domain')
+            if not service.disabled():
+                if gui['loaded']:
+                    service.disable_for_hold()
+                else:
+                    service.disable_unloaded_for_hold()
+            require(service.disabled(), 'restored timer override remains clear')
+            state = service.status()
+            physical = 'disabled override restored; owner loaded=' + str(state['loaded'])
+        except Exception as fence_error:
+            physical = 'disabled override unverified: ' + str(fence_error)
+        if not isinstance(error, Exception):
+            raise
+        raise Refused(str(error) + '; ' + physical) from error
 
 
 class StopWatch:
     def __init__(self, service, binding, paths, completion_service, allowed_signals=(),
-                 startup_segment=None, bus_client_names=None, process_contracts=None):
+                 startup_segment=None, bus_client_names=None, process_contracts=None,
+                 require_disabled=False):
         self.service = service
         self.binding = binding
         require(sorted({str(pathlib.Path(path).resolve(strict=True)) for path in paths}) == binding['logs'],
@@ -263,9 +424,10 @@ class StopWatch:
         self.lifecycle = []
         self.kernel_events = []
         self.bootout = None
+        self.require_disabled = require_disabled
         self.file_handles = {}
         self.prepared = False
-        self.group = binding['tree'][owner]['group']
+        self.groups = {row['group'] for row in binding['tree'].values()}
         require(isinstance(binding['status'].get('exit_timeout'), int) and binding['status']['exit_timeout'] > 0,
                 'loaded finite exit timeout unavailable')
         self.queue = select.kqueue()
@@ -378,8 +540,10 @@ class StopWatch:
                     'deploy listener has a child; wait for deployment to finish')
         for pid in self.events:
             self.normal_exit(pid)
-        require(set(process_tree(self.binding['status']['pid']))
-                == set(self.binding['tree']) - set(self.events),
+        current_tree = process_tree(self.binding['status']['pid'])
+        expected = set(self.binding['tree']) - set(self.events)
+        require(set(current_tree) == expected and all(
+            current_tree[pid]['group'] == self.binding['tree'][pid]['group'] for pid in expected),
                 'process descendants or group changed before signal')
 
     def normal_exit(self, pid):
@@ -395,6 +559,8 @@ class StopWatch:
         self.ready_for_intent()
         self.drain()
         self.unchanged_lifecycle()
+        if self.require_disabled:
+            require(self.service.disabled(), 'persistent hold requires a disabled managed unit before bootout')
         started = time.monotonic()
         result = subprocess.Popen(['/bin/launchctl', 'bootout', self.service.target],
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -419,11 +585,14 @@ class StopWatch:
         require(not self.service.status()['loaded'], 'managed service remains loaded')
         require(self.bootout is not None and not self.bootout['timed_out'] and self.bootout['returncode'] == 0,
                 'bootout did not complete successfully; exit evidence retained')
+        if self.require_disabled:
+            require(self.service.disabled(), 'managed unit lost its disabled override after bootout')
         self.unchanged_lifecycle()
         for pid, event in self.events.items():
             require(not process_exists(pid), 'service or descendant survives')
             self.normal_exit(pid)
-        require(not process_tree(self.binding['status']['pid'], self.group), 'former process group survives')
+        require(not any(process_tree(self.binding['status']['pid'], group)
+                        for group in self.groups), 'former process group survives')
         require(connection_check() is True, 'former bus connection is not normally closed')
         require(listener_check() is True, 'former process listener survives')
         owner_status = self.events[self.binding['status']['pid']]['wait_status']
@@ -432,18 +601,52 @@ class StopWatch:
         verify_completion(self.completion_service, segment, [], [],
                           startup_segment=self.startup_segment, termination=termination,
                           bus_client_names=self.bus_client_names)
-        return {'verified': True, 'owner': self.binding['status']['pid'],
+        return {'verified': True, 'unit_label': self.service.label,
+                'owner': self.binding['status']['pid'],
                 'exit_flags_requested': EXIT_FLAGS,
                 'exits': {str(pid): event for pid, event in self.events.items()},
                 'lifecycle': self.lifecycle, 'kernel_events': self.kernel_events,
                 'bootout': self.bootout,
                 'process_contracts': {str(pid): contract for pid, contract in self.contracts.items()},
                 'unit_unloaded': True, 'descendants_absent': True,
+                'disabled_override_verified': self.require_disabled,
                 'connections_closed': True, 'listeners_absent': True,
                 'log_offsets': self.offsets, 'termination': termination}
 
-    def mutate(self, journal, unit, connection_check, listener_check):
+    def mutate(self, journal, unit, connection_check, listener_check, hold=None):
+        if journal.scope == FULL_NODE_SCOPE:
+            require(self.service.label == 'ai.openclaw.' + unit,
+                    'managed stop owner differs from journal unit')
+            require(unit != 'mesh-deploy-listener' or self.require_disabled,
+                    'deploy listener requires a persistent managed stop')
+            require(unit == 'mesh-deploy-listener' or not self.require_disabled
+                    or (unit not in NATS_TRANSFER_UNITS
+                        and journal.prior.get(unit, {}).get('class') == 'daemon'),
+                    'persistent full-node stop lacks a daemon recovery adapter')
         self.ready_for_intent()
+        if self.require_disabled:
+            require(hold is not None and hold.journal is journal,
+                    'persistent stop requires the original execution hold')
+            require(not self.service.disabled(), 'managed unit was disabled before its stop intent')
+            def apply():
+                self.ready_for_intent()
+                self.service.disable_for_hold()
+                self.apply()
+            def failed(error):
+                evidence = self.failure_evidence(error)
+                try:
+                    evidence['disabled_override_observed'] = self.service.disabled()
+                except Exception as inspection_error:
+                    evidence['disabled_override_inspection_error'] = type(inspection_error).__name__
+                return evidence
+            return hold.mutate(unit, 'disable-and-unload', apply,
+                               lambda: self.verify(connection_check, listener_check),
+                               failure_evidence=failed)
+        if hold is not None:
+            require(hold.journal is journal, 'held stop requires the original execution hold')
+            return hold.mutate(unit, 'unload', self.apply,
+                               lambda: self.verify(connection_check, listener_check),
+                               failure_evidence=self.failure_evidence)
         return journal.mutate(unit, 'stop', self.apply,
                               lambda: self.verify(connection_check, listener_check),
                               failure_evidence=self.failure_evidence)
@@ -463,7 +666,7 @@ class StopWatch:
         self.close()
 
 
-def unload_idle_timer(service, paths, spawn_evidence=None):
+def unload_idle_timer(service, paths, spawn_evidence=None, require_disabled=False):
     before = service.status()
     require(before['loaded'] and not before['running'], 'timer is not idle')
     loaded = service.configuration()
@@ -475,14 +678,19 @@ def unload_idle_timer(service, paths, spawn_evidence=None):
     def apply():
         current = service.status()
         require(current == before, 'timer started before unload')
+        if require_disabled:
+            service.disable_for_hold()
+            require(service.status() == before, 'timer started while establishing its disabled override')
         command(['/bin/launchctl', 'bootout', service.target])
     def verify():
         after = service.status()
         verify_timer_idle(before, after['loaded'], offsets, log_offsets(paths))
+        if require_disabled:
+            require(service.disabled(), 'timer lost its disabled override after bootout')
         require(spawn_evidence is not None, 'timer spawn-race evidence is absent; idle observations alone are insufficient')
         evidence = spawn_evidence()
         require(evidence['label'] == service.label and evidence['coverage_complete'] is True
                 and evidence['spawns'] == [], 'timer spawned during unload or spawn evidence is incomplete')
         return {'verified': True, 'prior': before, 'unloaded': True, 'logs_unchanged': True,
-                'spawn_evidence': evidence}
+                'spawn_evidence': evidence, 'disabled_override_verified': require_disabled}
     return apply, verify

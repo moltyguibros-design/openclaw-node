@@ -950,3 +950,1523 @@ dependencies, and neither this repair nor the recapture certifies physical
 writer absence, three healthy cold masters or a NATS cutover. Step 1.2
 remains [A]/v1.2-pre; see the post-vault-watcher artifact in
 step12_jetstream.
+
+Checkpoint 2026-10-03 13:23 EDT: draft PR #224 records a candidate
+powered-off-VM route for historical JetStream snapshots, with three serving
+cold masters and the separately held member-1 history kept distinct. Claude
+found no blocker in the candidate at 407d20b, and its four exact-head checks
+passed. The branch now includes the post-vault-watcher baseline from main;
+the host UTM package path and host-side execution path remain unverified.
+A typed host receipt, historical acceptance manifest, treatment of the
+pre-power-off writer gap, three extracted and isolated-restored cold masters,
+and verified service resumption still remain. No live NATS service, store or
+VM was changed. Step 1.2 stays [A]/v1.2-pre; neither the full-node Journal
+nor the cold masters are sealed.
+
+Checkpoint 2026-10-03 13:48 EDT: the owned JetStream fixture now separates
+online-archive evidence from direct cold-store evidence with a deliberately
+late message and consumer acknowledgement. Standalone archive sequence 12
+differs from its cold clone at 13; the fixture's held R1 earlier capture is 7
+and its separate single-member cold clone is 8. The fixture passed on the
+installed NATS CLI/server, with only working copies booted and all owned
+servers stopped. This is synthetic evidence only. The actual host VM image,
+three serving cold masters, acceptance engine/receipt, writer-gap contract
+and truthful production resumption remain open at 1.2 [A]/v1.2-pre. See
+step12_jetstream/COLD_STORE_ARCHIVE_DIVERGENCE_FIXTURE.json.
+
+Checkpoint 2026-10-03 14:07 EDT: an owned direct-baseline driver now captures
+server identity, complete reachable stream digests and consumer positions in
+private manifests, with explicit offline assignments. The owned fixture
+passed final standalone/cluster captures and rejected false-offline,
+undeclared-offline and failed-auth cases; all owned servers stopped. This is
+synthetic pre-stop evidence, not an accepted production baseline or common
+quiet point. The host's powered-off UTM backing artifact and execution path,
+three serving cold masters, host receipt, writer-gap decision, isolated
+restores and service resumption remain open. Step 1.2 stays [A]/v1.2-pre;
+see step12_jetstream/COLD_BASELINE_FIXTURE.json.
+
+Checkpoint 2026-10-03 14:46 EDT: an owned isolated direct-store probe boots
+working copies of four frozen distinct store trees, checks standalone content,
+held R1 in isolation, the two survivors' offline assignment and R1 after
+rejoin, then rehashes every master. The owned fixture passed and a deliberately
+stale archive baseline refused with no success report; all test servers
+stopped. This is synthetic restore-mechanism evidence only. Host-side stopped
+VM access, three real serving cold masters, the typed host receipt, protected
+writer-gap decision and truthful production resumption remain open; 1.2 stays
+[A]/v1.2-pre. See step12_jetstream/COLD_TREE_PROBE_FIXTURE.json.
+
+Checkpoint 2026-10-03 15:04 EDT: the direct pre-stop JetStream capture now
+requires a pinned server name, ID and cluster, refusing a wrong listener
+owner before any stream read. Owned controls for wrong name, ID and cluster
+all produced private failure records without success manifests; the complete
+four-tree fixture still passed and all test servers stopped. The expected
+identity must come from independent managed-service and monitor preflight,
+not the ambiguous 4222 endpoint alone. This closes one port-flip capture
+hazard, not the production writer-gap, host image, three serving cold masters
+or resumption; 1.2 stays [A]/v1.2-pre. See
+step12_jetstream/COLD_BASELINE_IDENTITY_FIXTURE.json.
+
+Checkpoint 2026-10-04 11:51 EDT: SSH access to the Mac host established the
+UTM 4.7.5 package candidate, its single 211 GB writable image, auxiliary
+storage and stale vmstate. The running virtualization process still owns the
+image. The local APFS volume has only 115.7 GB free; a disposable same-volume
+clone control passed, but no real image was copied. UTM control refuses SSH
+sessions, so a host-GUI power handoff and durable host copy/receipt are still
+required. This is read-only production discovery plus a disposable synthetic
+clone test, not a stopped-VM or cold-master observation. Step 1.2 remains
+[A]/v1.2-pre; see step12_jetstream/STOPPED_VM_COLD_MASTER_CANDIDATE.md.
+
+Checkpoint 2026-10-04 12:08 EDT: the host's logged-in launchd domain ran a
+one-shot UTM status query and identified the pinned guest as started; ordinary
+SSH UTM control still refuses. The installed stop verb defaults to a forced
+power-off and requires `--request` for a guest shutdown request. A disposable
+ASIF image was cloned, attached and mounted read-only on the host, with its
+marker recovered exactly; no real UTM image was copied or mounted. Guest
+FileVault is off and the four NATS store trees total about 107 MB, suggesting
+an ephemeral COW image clone could be discarded before guest restart after
+extracting masters. A durable host handoff, capacity floor, clean shutdown,
+typed receipt, production extraction, three isolated restores and truthful
+resumption remain unimplemented. Step 1.2 stays [A]/v1.2-pre.
+
+The bounded host ASIF extractor and its macOS fixture now copy all four
+declared store trees from an owner-private read-only clone and refuse a wrong
+Data-volume UUID or image hash. This is a tested source component, not a host
+power controller or production extraction. The plan's live and restoration
+gates above remain open; see step12_jetstream/HOST_ASIF_EXTRACT_FIXTURE.json.
+
+Checkpoint 2026-10-04: the host's isolated four-store JetStream fixture passed
+with all owned test servers stopped and original synthetic masters unchanged.
+The ASIF extractor now also refuses traversal and symlink entries, restricts
+new file modes and records detach failure before success. Guest and host Mac
+fixtures pass; exact-head CI for the preceding extractor commit passed 4/4.
+These are mechanism results only. No production VM stop or cold master exists.
+
+The host read-only preflight now checks UTM package/config/image identity and
+combines the SSH account's package access with a one-shot GUI UTM status query.
+It reported the pinned VM `started` with one image holder; a wrong config hash
+failed closed. It does not control guest shutdown or certify a cold-copy
+window; see step12_jetstream/HOST_VM_PREFLIGHT_FIXTURE.json.
+
+The host capture worker now passes a disposable VM-shaped ASIF rehearsal on
+guest and host, including a detached host execution and a no-shutdown refusal.
+It uses clonefile directly because `cp -c` may fall back to a full copy. It
+does not stop the production guest and its sampled stopped-state capture is
+not a cold-master acceptance; see step12_jetstream/HOST_CAPTURE_FIXTURE.json.
+
+Guest-to-host stopped-store content matching now passes the integrated
+four-store disposable fixture on both Macs, and a changed extracted file
+refuses. The guest source hash still needs the real managed writer hold; the
+actual three serving histories and held R1 have not been copied or restored.
+See step12_jetstream/HOST_STOPPED_TREE_MATCH_FIXTURE.json.
+
+The host's persistent owner-only recovery directory now exists on the VM
+image's device. No production image or store has been copied into it.
+The host's pinned 0600 VM and four-store specifications pass a fresh read-only
+preflight there; UTM is still `started` with one disk holder. See
+step12_jetstream/HOST_PREPARED_SPECS.json.
+
+The next exact-head CI run exposed an intermittent `TIMEOUT` while the owned
+two-member cold-restore cluster answered its initial stream-name query. The
+same fixture failed once and passed on subsequent local runs; the restore
+still refuses a missing or changed stream. The initial name query now retries
+only request timeouts within a bounded interval, and failure records identify
+which cluster-read phase refused. No production bus or VM was changed.
+
+At 2026-10-04 13:28 EDT, the four Python host preservation tools were copied
+as owner-private, hash-checked regular files into the host's persistent
+recovery directory. Running the staged preflight reported the pinned VM
+`started` with one image holder and unchanged config/controller hashes. This
+is preparation, not a shutdown, image capture or master acceptance; see
+step12_jetstream/HOST_STAGED_TOOLS_20261004.json.
+
+The host's persistent isolated restore runtime now has byte-matched Node
+24.13.0, NATS CLI 0.3.1, NATS server 2.12.6, the current recovery scripts and
+all 212 required dependency files. An owned four-history fixture run from that
+directory passed with every test server stopped, unchanged masters and stale
+baseline refusal. This is synthetic restore capability, not a real cold-master
+test; see step12_jetstream/HOST_ISOLATED_RUNTIME_20261004.json.
+
+The separately pinned release verifier refused that host package until the
+dependency root was made owner-only, then verified all nine top-level files
+and 212 dependencies. A wrong manifest pin refused with no success receipt;
+owned mutation controls cover changed code, changed dependency, readable
+directory and an extra symlink. The original failed receipt remains. This
+integrity gate does not attest any VM power state or real history; see
+step12_jetstream/HOST_RUNTIME_VERIFY_20261004.json.
+
+At 2026-10-04 13:57 EDT, the stopped-tree matcher was bound to the private
+host capture receipt and the exact cloned image. Guest and host disposable
+ASIF fixtures pass, including a changed-receipt refusal. The updated tools
+were staged as owner-private, hash-checked regular files on the host; the
+isolated restore runtime still verifies against its separate pinned manifest.
+The production VM remains started. No actual image or history was copied,
+restored or accepted; the full-node hold, shutdown provenance and service
+resumption gates remain open at 1.2 [A]/v1.2-pre. See
+step12_jetstream/HOST_CAPTURE_BINDING_20261004.json.
+
+Checkpoint 2026-10-04 15:52 EDT: Claude's read-only adversarial review of
+PR #224 at 1133b83b found no blocker in the mechanism-only host capture and
+matching delta, but identified retained same-volume clone lifetime as the
+next safety-critical production gate. A disposable Mac fixture now refuses
+clone disposal while the VM is reported running and removes the clone with a
+private receipt only after a fresh stopped/no-holder preflight and full image
+hashes. Absolute-path and hardlink extraction refusals are also covered.
+Claude's read-only delta review at dcebda81 found no code blocker and confirmed
+that a continuous host restart interlock and failed-capture cleanup remain
+required. CI at that head failed only when the disposable ASIF fixture's
+immediate eject returned "Volume failed to eject" after hardlink creation; the
+fixture now makes bounded retries for that exact transient result. Exact-head
+macOS, Node 20 and Mission Control CI checks for the retry passed. The Node 22
+job failed in an unrelated mesh-agent lifecycle fixture because two independent
+free-port requests returned the same port; its failed job is rerunning. The
+seven reviewed host files were staged as an
+inactive owner-private package and verified by manifest hash; see
+step12_jetstream/HOST_STAGED_DISPOSAL_20261004.json. This work does not prevent
+an independent UTM restart, clean up an incomplete capture, accept real
+stores, or authorize a production VM stop. 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-04 16:10 EDT: the host disposal tool now has a separate
+failed-capture cleanup action. An owned ASIF fixture induced a capture failure
+after clone creation, proved cleanup refuses while that clone is attached,
+then ejected and removed the orphan with the original image intact. The
+action requires the failed/armed records, the same source-image file identity,
+no clone holder or disk-image attachment, and stopped/no-holder observations
+before and after unlink. This is a disposable mechanism test, not a production
+boot interlock or master acceptance. Exact-head CI and adversarial review of
+this delta remain pending; 1.2 stays [A]/v1.2-pre.
+
+At 2026-10-04 16:17 EDT, the updated host package's seven files verified
+against source-manifest SHA-256 d8efb760c9ae97e61c27e1033d6e1f46fad18e24809b1f0d3a376690f2346451.
+The disposable failed-capture fixture passed on both Macs, Claude's read-only
+ad581126 review found no blocker, and exact-head CI run 37231113880 passed
+all four jobs. The previous Node 22 duplicate-port failure also cleared on
+rerun. These results cover mechanism and staging only. No production VM stop,
+clone or real-store restore occurred; the continuous UTM hold, boot interlock,
+historical master acceptance and truthful service resumption remain open at
+1.2 [A]/v1.2-pre. See step12_jetstream/HOST_FAILED_CLEANUP_20261004.json.
+
+At 2026-10-04 16:29 EDT, disposable guest/host probes showed that `uchg`
+blocks a new writable open and survives `clonefile`, but an existing writable
+descriptor can still write after the flag is set. A read-only attach of an
+immutable synthetic ASIF clone passed on the guest. The host has no external
+volume mounted with room for the full image. Claude's adversarial design review
+identified stranded immutability as an availability hazard. Before this guard
+enters the production capture path, a disposable UTM start/refusal/recovery
+test and idempotent clone-first boot reconciliation are required. No source
+flag was applied to the production VM; 1.2 remains [A]/v1.2-pre. See
+step12_jetstream/HOST_UCHG_DESIGN_PROBE_20261004.json.
+
+The isolated `host_image_immutable.py` primitive and macOS fixture now verify
+the flag operation by open file identity, refusal of wrong inode and symlink,
+the pre-existing writable-descriptor bypass, inherited clone flag, read-only
+attach, clone-only unlock and eventual source unlock. The fixture passed on
+both guest and Mac host with disposable ASIF files. The primitive is not
+connected to the production capture or boot path; UTM-level behavior and
+crash reconciliation remain the next safety work.
+
+At 2026-10-04 16:39 EDT, exact-head CI run 37232577479 passed all four jobs
+at 09f5b8da, and Claude's read-only delta review found no blocker in the
+isolated primitive. The Mac host's disposable fixture also passed, then its
+temporary test files were removed. No production hold was acquired. See
+step12_jetstream/HOST_IMMUTABLE_PRIMITIVE_20261004.json.
+
+The next host slice is specified in
+step12_jetstream/HOST_BOOT_GUARD_DESIGN_20261004.md: prove real disposable UTM
+start/refusal, then implement crash-safe clone-first reconciliation. Clearing
+the source flag yields only a bootable disk; the separate VM start decision
+still needs accepted histories or an explicitly designed abort path. Neither
+production controller exists yet.
+
+A disposable crash-reconciliation mechanism now recovers from an immutable
+source plus an orphan clone, refuses an attached clone, another sibling clone
+or a changed completed-capture source, and yields only a scoped `BOOTABLE`
+receipt. Its guest and Mac-host fixtures pass. A repeated preflight in that
+fixture exposed a GUI status publication race; `host_vm_preflight.py` now
+publishes that JSON by atomic rename, with a deterministic regression check.
+These tools remain disconnected from the production VM and do not authorize
+its start. Real UTM behavior and the full-node hold remain open.
+
+The inactive guard candidate now writes a durable intent bound to the armed
+attempt and stopped image identity before applying the source flag. The
+reconciler refuses a missing or mismatched intent, so an old arm receipt alone
+cannot clear an unrelated guarded image. Disposable guest and Mac-host
+regressions cover that refusal and a complete guard/reconcile cycle. This
+does not establish a continuous production no-start bracket or cold-master
+acceptance; step 1.2 remains [A]/v1.2-pre.
+
+Claude's exact f95414ab guard-intent review found no blocker and pointed out
+that a prior successful `BOOTABLE` receipt should not allow a later flag to
+be cleared by reusing that old intent. The reconciler now permits an
+idempotent repeat only if the source is still unguarded and the clone absent;
+a re-guarded source refuses. Guest and Mac-host fixtures pass, all four
+exact-head CI jobs pass at 15b384df (run 37234974722), and Claude's narrow
+delta review found no blocker. Ten source files are staged on the host in an
+inactive 0700/0600, hash-verified package; no production VM or service was
+changed. See step12_jetstream/HOST_GUARD_INTENT_20261004.json. This remains
+a disposable source candidate at 1.2 [A]/v1.2-pre.
+
+The inactive host capture candidate now refuses a sampled `Data/vmstate`
+identity change between its running arm observation and stopped extraction.
+Two focused regressions and the synthetic ASIF capture pass locally; the
+host's current stale vmstate was inspected read-only. This narrows accidental
+suspend acceptance but does not prove a clean shutdown or cold restart.
+All four exact-head CI jobs passed at d85caa20 (run 37236853002), and
+Claude's read-only delta review found no blocker. The exact ten-file source
+package is staged inactive and hash-verified on the host; a fresh read-only
+preflight still reports the VM started with one image holder and the stale
+vmstate present. Real UTM clean-shutdown behavior could still make the
+candidate refuse, so a disposable VM rehearsal remains required. No
+production hold, VM stop, clone or history acceptance occurred. See
+step12_jetstream/HOST_VMSTATE_GATE_20261004.json. Step 1.2 remains
+[A]/v1.2-pre.
+
+Checkpoint 2026-10-04 21:36 EDT: the retained member-1 R1 tree was
+self-consistent with its co-located 128-entry manifest (82 files, 6,346,296
+bytes). Every entry was owner-owned, read-only and immutable at observation.
+The manifest SHA-256 was pinned here for the first time; without an
+independent September 28 pin, continuity since the reported freeze is not
+proven. Member 1 was disabled and unloaded. The 23 installed job hashes
+matched the post-vault-watcher structural baseline, with 21 GUI jobs loaded
+and one approved system exclusion. This is not a new common recovery point
+or acceptance of the three serving histories. No live VM, service or NATS
+store changed; 1.2 remains [A]/v1.2-pre. See
+step12_jetstream/HELD_R1_RECHECK_20261004.json.
+
+An owned synthetic ASIF regression now opens a writable image descriptor
+between the guard's initial stopped/no-holder observation and its flag change.
+The post-guard observation refuses without a GUARD receipt, and reconciliation
+refuses while the holder remains before restoring bootability after it closes.
+The local macOS fixture passes; the interrupted host fixture has no result.
+Real UTM start/refusal behavior and the full-node hold remain unproven. No
+production VM or service changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-04 23:25 EDT: the host reconciler now validates any
+`GUARD.json` against its durable intent and records `guard_completed` in the
+scoped `BOOTABLE` receipt. Recovery after an aborted guard records false; a
+completed guard records true. The holder-present negative now asserts that
+the source remains immutable and `OPERATOR_REQUIRED.json` exists. The local
+macOS reconciliation fixture passes (2/2), and plan-lint remains conformant.
+`BOOTABLE` still means disk bootability only; no VM start controller, real
+UTM rehearsal, full-node hold, cold-master acceptance or service resumption
+is claimed. No production state changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-04 23:33 EDT: Claude's read-only full-node review found
+that no production 23-unit hold driver exists, and the planned post-capture
+guest boot would allow bootout-only jobs to restart before recovery can enforce
+dependency or deploy-listener order. D62 records the persistent-hold and
+explicit acceptance-or-abort requirement for this planned reboot. The review
+also identified detached-process, other launch-path and host UTM autostart
+gaps; none is certified by the current point-in-time scans. Claude's review
+of the `guard_completed` receipt found no false-acceptance blocker but did
+find that a partial `GUARD.json` write could strand an immutable image. The
+guard now publishes that receipt atomically, and the macOS interrupted-write
+regression recovers a bootable source with `guard_completed:false`. The local
+reconciliation fixture passes (2/2). This is still a disposable mechanism;
+no production hold, VM stop, cold master, history acceptance or resumption
+occurred. Step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-04 23:39 EDT: Claude accepted the atomic guard receipt
+code and blocked D62's first draft because it inverted the stopped-VM order.
+D62 now keeps the original guest off through host-side isolated restore,
+historical acceptance and freeze, or until an explicit failed-capture abort
+after host cleanup. It requires the boot-time job/process check before
+`Journal.recover()` can label an owner `already-restored`; gated timer starts
+are not silently exempted. The guard now refuses pre-existing receipt artifacts
+before changing the image flag, and BOOTABLE publishes atomically as well.
+Local macOS reconciliation tests pass (2/2), including partial guard and
+BOOTABLE receipt writes. No production VM or service changed; full-node hold,
+real UTM rehearsal, real-history acceptance and resumption remain open at
+1.2 [A]/v1.2-pre.
+
+Checkpoint 2026-10-04 23:46 EDT: Claude's re-review found no blocker in the
+guard/BOOTABLE crash fixes or corrected D62. It exposed a separate existing
+strand point: a partial final `CAPTURE.json` would stop clone cleanup and
+source unlocking. The capture worker now publishes that receipt atomically;
+a partial temporary receipt is ignored by reconciliation after fresh stopped,
+no-holder and source-identity checks. Local macOS capture tests pass (4/4)
+and reconciliation tests pass (2/2), including the partial-capture recovery.
+D62 now distinguishes expected Tailscale helper execution under D60 from
+cohort auto-start and includes failed-acceptance aborts. Production capture
+ordering, full-node hold, real UTM rehearsal, cold masters and runtime
+resumption remain unproven; 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-04 23:59 EDT: the inactive capture candidate now requires
+a matching completed image guard before creating the clone, rechecks the
+guarded source and receipt hash through extraction, and records the guard hash
+in its capture receipt; the guest/host matcher rechecks that hash. The
+disposable ASIF capture exposed that `clonefile`
+inherits the immutable flag; the worker now clears it on the verified clone
+only, and failed-capture cleanup can remove an interrupted immutable clone.
+The Mac fixture exercises guarded capture, disposal and reconciliation,
+and a missing-guard negative refuses before cloning. This is sampled guard
+binding, not a continuous no-writer claim. No production VM or service has
+changed; full-node hold, UTM rehearsal, historical acceptance and resumption
+remain open at 1.2 [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 00:19 EDT: the capture wait now requires the guard to
+have been observed during a stopped/no-holder sample, then takes a fresh
+pre-clone preflight. Successful clone disposal now uses the same open-holder
+and disk-attachment refusal as failed-capture cleanup and reconciliation.
+The disposable ASIF fixture attaches the completed clone read-only, confirms
+disposal refuses with the clone intact, ejects it, then completes disposal.
+The local host test group passes (9/9). This remains a sampled, disposable
+mechanism; no production VM or service changed, and 1.2 remains
+[A]/v1.2-pre.
+
+Checkpoint 2026-10-05 00:27 EDT: Claude's read-only review of 9ca5e89d
+found no new false-acceptance path but confirmed that completed-clone disposal
+could unlink an attached image. The attached-clone refusal landed at
+396e4950, whose four CI jobs passed. A disposable host probe showed that
+`hdiutil info` retains an attachment's original path even after external
+unlink. Reconciliation now checks for that attachment before unlocking the
+source, including when the clone path is gone. A transient pre-intent guard
+failure can be retried in a fresh preflight directory; post-intent failure
+still requires reconciliation. The host fixture pins both cases and passes
+9/9 locally. This does not establish a complete abort controller or permit
+production VM shutdown; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 00:48 EDT: a disposable macOS probe showed user-level
+`lsof` reports no holder for either a read-only or writable `hdiutil`
+attachment of an ASIF image. Host preflight now refuses an attached source
+image before guard, capture or reconciliation can treat it as stopped and
+idle. The fixture refuses a writable source attachment before guard and a
+read-only source attachment before reconciliation unlock.
+The guard also refuses a capture directory already marked failed or complete;
+its intent now publishes atomically under the armed receipt lock before
+changing the flag. A deliberately interrupted intent write leaves no final
+intent or immutable source, and a retry succeeds. The local host group passes
+9/9. These disposable checks do not prove continuous exclusion or authorize
+production shutdown; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 01:04 EDT: Claude's review of `658982fe` found that the
+armed receipt lock ended after intent publication. A paused guard could then
+allow reconciliation to issue `BOOTABLE`, resume, and flag the source again.
+The guard now holds that lock through its immutable flag and `GUARD.json`
+receipt; reconciliation holds the same lock through `BOOTABLE` or
+`OPERATOR_REQUIRED`. A disposable macOS concurrency fixture pauses the guard
+after intent publication and checks reconciliation cannot enter preflight or
+issue `BOOTABLE` until the guard finishes; it then records
+`guard_completed:true` and an unflagged source. The local host group passes
+10/10. Capture-worker terminal writes and active extraction are not yet
+serialized against reconciliation. This does not authorize production VM
+shutdown; the full-node hold, UTM rehearsal, historical acceptance and
+resumption remain open at 1.2 [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 01:25 EDT: Claude found no blocker in the same-attempt
+guard/reconcile serialization at `e465b9c8`, but identified by inspection
+that an active capture paused before cloning could race reconciliation and
+leave a false `BOOTABLE` claim. The capture worker now holds an attempt-local activity lock
+from before arming through its terminal-write attempt; reconciliation
+refuses that lock non-blockingly before touching the image. Capture also
+serializes its terminal write with guard publication on `ARMED.json`. The
+disposable fixtures pin lock ownership during the worker's shutdown wait,
+reconcile refusal while capture is paused immediately before cloning, and
+terminal failure waiting for the armed lock. The local host group passes
+12/12. The prior exact-head CI's macOS job
+first hit an unrelated `mesh-agent` restore-only timeout, then passed on a
+failed-job rerun with all four checks green. Sibling attempts, a killed worker
+without a terminal receipt, the full-node hold and real UTM rehearsal remain
+unproven; no production VM or service changed. Step 1.2 remains
+[A]/v1.2-pre.
+
+Checkpoint 2026-10-05 01:40 EDT: Claude found no same-attempt false
+`BOOTABLE` path or deadlock in `23825654`; all four exact-head CI jobs passed.
+The review clarified that a killed capture worker releases its activity lock
+without a terminal receipt. The guard now probes that lock without waiting
+before publishing intent and refuses when the lock is free; the disposable
+fixture checks that refusal leaves no intent or image flag and that a live lock still
+permits a guarded attempt. A second test case releases the worker lock after
+preflight and confirms the guard's final probe refuses before intent or flag.
+The local host group passes 12/12. No source-wide exclusion, no-intent abort receipt,
+real UTM rehearsal, full-node hold or production stop is claimed. Step 1.2
+remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 02:22 EDT: the GUI launchd adapter now has a disabled
+override probe and separate disable/re-enable methods. Re-enable refuses while
+the job is still loaded. The owned macOS fixture arms its process watch, disables
+its disposable job, observes a normal stop, confirms the disabled override
+survives bootout, then re-enables and restarts the same job. The restore-only
+prototype uses the same override inspection. This is a per-job primitive,
+not a production 23-job hold or a reboot-persistence test. Root/user jobs,
+detached processes, other launch paths, host UTM autostart, continuous
+exclusion and the D62 boot decision remain open. No production service or VM
+was changed; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 02:38 EDT: Claude's exact-head review of `04f654b3`
+found no production-code blocker but showed that the stop path did not require
+the override, the fixture had not tried a blocked restart, and CI skipped the
+macOS-only test. The opt-in managed stop now refuses bootout unless the GUI
+override is disabled and rechecks it after bootout. Managed bootstrap and
+kickstart refuse a disabled label. The owned fixture checks the stop proof and
+refused restart; a small dependency-free macOS CI fixture tests the same
+disable/bootout/re-enable sequence. The launchd override covers only the GUI
+domain and that head did not prove reboot persistence or a direct launchctl
+restart refusal. The test label is stable now, but
+earlier local runs left three random test-label entries and the stable label
+marked `enabled` in the host launchd override database; no production label
+was disabled. The full-node hold remains open at 1.2 [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 02:44 EDT: Claude found that the refused-restart
+assertion at `2df27167` was self-checking: `Launchd.bootstrap()` refused
+before launchctl could be asked. The macOS fixture now also calls
+`launchctl bootstrap` directly while the owned GUI label is disabled. On the
+operator host it returned nonzero, left the job unloaded, and did not recreate
+its ready marker during a one-second observation. The wrapper refusal remains
+a separate check. The two owned fixtures use distinct stable labels and
+recover a stale disabled override for their own label at setup if it is
+unloaded. This proves one
+direct GUI-domain bootstrap refusal on this host, not legacy `load`, other
+domains or reboot persistence. No production service or VM changed; 1.2
+remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 03:02 EDT: the direct launchctl fixture now waits a
+second after owned-job bootout before testing disabled bootstrap, then uses
+the same raw bootstrap command immediately after re-enabling the label. The
+disabled attempt returned nonzero with no loaded job or ready marker; the
+enabled attempt loaded and ran the owned job. This controls for a transient
+post-bootout refusal in the previous test. The dedicated macOS fixture passes
+locally (1/1), and plan-lint is conformant (14 pass, one existing idle-step
+warning). CI and Claude review of this exact revision remain pending. This
+remains one GUI-domain job; no production hold, other-domain restart exclusion,
+reboot persistence, or production VM change is claimed. Step 1.2 stays
+[A]/v1.2-pre.
+
+Checkpoint 2026-10-05 03:16 EDT: D64 closes one false-restoration path while
+the D62 boot controller is absent. A full-node journal reopened in another
+boot now refuses `recover()` before observing or restoring a service, so a
+login auto-start cannot be labeled `already-restored` by that API. The owned
+journal suite passes 97/97 locally, including the new no-callback/no-record
+reboot assertion. The actual persistent 23-job hold, boot decision, detached
+process census, safe service order and real-history acceptance remain open;
+this refusal does not make the node operational. No production service or VM
+was changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 03:29 EDT: D65 makes the isolated four-history probe
+reject an output directory that physically overlaps any cold master before
+creating that directory, including an absent path under a symlinked ancestor.
+The disposable NATS fixture passed with the new alias regression; it also
+verified the target was not created and the master tree hash stayed unchanged.
+This closes a probe path-isolation defect, not the remaining full-node hold,
+real-history capture/restore, historical acceptance, or boot/resumption gates.
+No production history or service was changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 05:31 EDT: D66 closes the isolated probe's omitted-R1
+set check. It now requires `held.streams`, the two serving baselines' offline
+assignments and the held baseline's R1 snapshots to identify the same streams
+before starting servers. The disposable four-history fixture passes, including
+a negative held-baseline mutation refused at validation with its master hash
+unchanged. Claude's other findings on per-member replica validation, offline
+consumer positions and recovery ordering remain under review; this is not
+production history acceptance. No production service or history was changed;
+1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 05:39 EDT: D67 fixes the owned launchd stop census
+missing descendants of orphaned members of the owner's process group. The
+four-process negative regression passes, and the disposable macOS launchd
+suite passes 26 tests (one existing skip). This does not cover arbitrary
+detached writers, root/user agents, or the absent full-node hold driver. No
+production service was stopped; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 05:47 EDT: D68 moves full-node checks of the held
+member-1 and federation jobs ahead of all service restoration; a mismatch
+produces no restoration intent. A prior service or entrypoint error also
+withholds the deploy listener while preserving D23's restoration of safe known
+units. The two negative regressions and full journal suite pass 99/99; the
+hold suite still passes 43/43. Continuous member-1 exclusion, a deploy fence
+and a clean-path pre-listener final check remain open, as do the other step
+1.2 acceptance and resumption gates. No production service was changed;
+1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 06:59 EDT: D69 closes the D66 test gap found by
+Claude. The disposable cluster now has two genuinely offline R1 streams on
+the held member. An otherwise valid plan that omits the second held stream
+refuses at validation before any probe server starts; the master hash remains
+unchanged. The positive four-history fixture passes and all owned servers
+stop. Per-member replica validation, offline consumer positions, a deploy
+fence and full-node hold are still open. No production store or service was
+changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 07:10 EDT: D70 makes a cold baseline refuse an
+unavailable R1 consumer on an otherwise available R3 stream. In a disposable
+three-member NATS 2.12.6 cluster, a durable acknowledged a message before its
+single consumer replica's owner stopped. A survivor then returned an empty-name
+placeholder with `missing` naming that consumer. `take_cold_baseline` now
+failed without a success manifest; after the owned member restarted and the
+temporary stream was removed, the full four-history fixture still passed and
+all owned processes stopped. This addresses the observed consumer-position
+false acceptance, not per-member replica verification, independent consumer
+inventory, or any production hold/restore gate. No production history or
+service changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 07:31 EDT: D71 follows Claude's process-tree review.
+The owned launchd census now closes over children and every discovered
+process group, and the watcher refuses a pre-signal group change or a
+survivor in any group recorded at bind. Synthetic orphaned-group negatives
+exclude an unrelated session, and the full owned macOS suite passes 29 tests
+with one existing skip. This is still only the bound service tree; a wholly
+detached group, root/user jobs, host autostart and reboot persistence require
+the missing full-node hold. No production service changed; 1.2 remains
+[A]/v1.2-pre.
+
+Checkpoint 2026-10-05 07:41 EDT: D72 closes a second consumer-inventory false
+acceptance found in Claude's review. An owned NATS 2.12.6 cluster returns an
+R2 durable in `CONSUMER.LIST.missing` with zero consumer rows after its leader
+stops, even though the R3 stream remains online. The shared raw paginated
+lister now refuses that response, plus D70's empty-name R1 placeholder, in
+baseline, snapshot and capture paths. One owned loopback run with an
+acknowledged R2 durable produced the missing-only response and a failed cold
+baseline with no success manifest. Subsequent real runs timed out on the list
+request, so the repeatable regression injects the exact raw response into the
+shared lister. The real R1 placeholder and positive four-history fixture still
+pass with all test servers stopped. Per-member replica
+validation and independent expected-consumer inventory remain open, along
+with the full-node hold, VM and resumption gates. No production history or
+service changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 07:54 EDT: D73 restores the post-loop observation of
+held `nats-1` and `federation-tick` during full-node recovery while retaining
+D68's pre-loop check. In a disposable journal, either job changing as
+`nats-2` restores now produces a named error, no restored result and no
+execution-hold release. The 100-test journal suite passes. These are two
+samples, not a continuous exclusion proof; the complete production hold and
+restart barriers remain open. No production job changed; 1.2 remains
+[A]/v1.2-pre.
+
+Checkpoint 2026-10-05 08:09 EDT: D74 corrects the D72 fixture limit. Claude's
+three disposable R2 trials showed that NATS takes about four seconds to
+report the missing consumer; our one-second fixture requests caused the
+apparent nondeterminism. The fixture now uses the normal ten-second request,
+retries transient post-leader-loss 503, and again requires the real missing-only
+response and an acknowledged consumer position. Cold baseline and snapshot
+commands both refuse with the consumer named and no success manifest, then
+the positive four-history probe passes and all owned servers stop. This is
+owned test evidence only. Serving-member replica verification, the physical
+hold and production acceptance remain open; 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 08:32 EDT: Claude's exact-head review confirmed that
+reverting the snapshot consumer lister makes the owned R2 fixture accept a
+missing consumer, while the unchanged fixture refuses with the required
+message and no manifest. The fixture now also waits for stream information
+after observing the missing-consumer response, so a stream leadership delay
+cannot become a different failure. CI at the previous head found an unrelated
+task-daemon test collision: two separately sampled ephemeral ports were
+identical. The fixture now resamples its monitor port until distinct; all
+seven task-daemon lifecycle tests pass locally. CI for this correction remains
+required. No production history or service changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 09:13 EDT: D75 makes completed-capture disposal and
+reconciliation refuse before clone deletion or source unlock until a bound
+acceptance or explicit abort decision exists. The owned host tests pass 9/9;
+their completed-capture negatives retain the clone and immutable source while
+interrupted-guard and failed-capture cleanup remain tested. This is source and
+disposable-fixture evidence only. The acceptance/abort and boot controllers,
+full-node hold, real UTM start/refusal rehearsal and real-history restores
+remain open. No production VM, service or NATS store changed; 1.2 stays
+[A]/v1.2-pre.
+
+Checkpoint 2026-10-05 09:30 EDT: Claude challenged D75 against staged host
+tool copies, a vanished sibling clone and the missing terminal decision. The
+new receipt scope makes old staged tools refuse after publication; reconcile
+also refuses a sibling completed receipt with no clone. Production capture
+entry now refuses before creating an attempt until an acceptance/abort
+controller exists. Retiring old staged packages, proving the full-node hold,
+real UTM guard behavior, terminal decisions and isolated real-history restores
+remain open. No production VM, service or NATS store changed; 1.2 stays
+[A]/v1.2-pre.
+
+Checkpoint 2026-10-05 11:50 EDT: D76 bounds `Launchd.status()` inspection
+at ten seconds, matching other managed commands, so a hung `launchctl print`
+fails the stop/recovery path instead of waiting indefinitely. The owned
+preflight tests pass with a timeout negative. This is a local liveness guard;
+the persistent full-node hold, deployment fence, stopped-VM decision path,
+four-history acceptance and verified resumption remain open. No production
+job, VM or NATS store changed; 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 12:13 EDT: D77 moves the deploy listener's release
+behind the second held-unit check, a fresh check of the other 22 services,
+physical ownership and loaded jobs, and a required deploy-fence callback.
+The release evidence is durable before any listener restore; an unexpected
+restart after this journal stopped the listener now refuses. The owned
+journal suite passes 106 tests, including late failure and clean release
+cases. The actual deploy-marker and pending-work fence, forward stop-order
+enforcement, persistent full-node hold, stopped-VM decision controller and
+real-history acceptance remain open. No production service, VM or NATS store
+changed; 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 12:29 EDT: Claude found that D77's listener release
+was using a no-op per-unit guard. D78 includes the listener in the NATS
+legacy lock interval. The owned clean-path test now proves an independent
+exclusive writer cannot take that lock during either the deploy-fence
+decision or the listener restore. The journal suite passes 106 tests.
+Production deploy-fence logic, full-node hold and all capture/acceptance
+gates remain open. No production service, VM or NATS store changed; 1.2 stays
+[A]/v1.2-pre.
+
+Checkpoint 2026-10-05 12:40 EDT: D79 closes Claude's crash-after-release
+gap: a release row without a later listener recovery-verified or
+already-restored row cannot authorize a listener found running on a later
+attempt. The owned negative refuses before the fence or any restore. Tests
+for late service and listener drift now use call counts so recovery cannot
+swallow a test assertion and appear to pass. The journal suite passes
+107 tests. This does not supply the production deploy fence, persistent
+hold, stopped-VM decision controller, four-history acceptance or verified
+service resumption. No production service, VM or NATS store changed;
+1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 13:05 EDT: Claude's exact-head review found no new
+journal release blocker, but a missing test of the listener's NATS commit
+point. D80's owned negative creates a root handoff marker during the deploy
+fence and requires the precommit check to prevent any listener restore. A
+partial-start test documents the conservative retry: an unverified running
+listener must be stopped before recovery can restart it. The production
+adapter must refuse an already-running listener, and the full-node hold,
+deploy fence, stopped-VM decision, real-history acceptance and resumption
+remain open. No production service, VM or NATS store changed; 1.2 stays
+[A]/v1.2-pre.
+
+Checkpoint 2026-10-05 14:06 EDT: D81 makes a verified execution-hold anchor
+and persistently disabled deploy-listener stop precede every other full-node
+mutation and the NATS-transfer intent. The listener receipt is matched to its
+own durable intent and checked for bootout, normal exit, disabled override and
+absent process/network remnants. The journal suite passes 113 tests and the
+hold suite 43; the restore-only loaded-daemon test passed in isolation after
+one full-suite final-readiness failure, and the full suite passed on rerun
+(30/30). The production full-node controller,
+real macOS hold rehearsal, deploy fence, VM stop/capture and four-history
+acceptance remain open. No production service, VM or NATS store changed; 1.2
+stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 14:14 EDT: the first D81 CI run found an older root
+transfer fixture still stopping NATS before the listener. Both its simulated
+and native-hold paths now stage a listener stop first; the 10 root-admission
+fixture tests pass locally. The native path uses owned simulated stop evidence,
+so it does not prove the production process stop. CI rerun remains required;
+step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 14:30 EDT: D82 closes Claude's independent root-admission
+gap: root now refuses a transfer journal without a listener-first,
+persistently disabled stop receipt bound to the original hold session. Owned
+negative fixtures omit the listener, move it after NATS, insert a NATS intent
+before listener verification, corrupt each proof field, or change the original
+hold certificate. Root transfer 15, root
+admission 7, root decline 22 and journal 114 tests pass locally. This remains
+fixture evidence; production transfer, full-node hold, real-history restore,
+capture decisions and service resumption remain open. No production service,
+VM or NATS store changed; 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 14:44 EDT: D83 refuses a forged listener completion
+recorded before its own stop intent at both user and root boundaries. Owned
+negatives retain a valid journal hash chain while reversing those rows, and
+corrupt the root session, loaded-set, verified and bootout proof in turn.
+The journal suite passes 115 tests, root transfer 16, root admission 7 and
+root decline 22; plan lint is conformant.
+Production hold, real listener stop, VM capture, four-history acceptance and
+service resumption remain open. No production service, VM or NATS store
+changed; 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 15:52 EDT: D84 connects a persistent managed stop to
+the journaled execution hold: a disposable launchd job is disabled only
+after its durable `disable-and-unload` intent, and its normal exit, absent
+connections/listeners and lasting override are verified before the receipt.
+A forced post-disable failure leaves a durable failed row and the override
+still disabled; full-node label mismatches refuse before any intent. The
+owned macOS managed-stop suite passes 36 tests with one domain skip; the
+adjacent journal/hold suites pass 158 tests. macOS CI now includes the owned
+suite, with exact-head results pending. The native hold plus real listener
+integration, enable-capable recovery for all 23 jobs, continuous exclusion,
+deploy fence, stopped-VM decision, real-history acceptance and verified
+resumption remain open. No production service, VM or history changed;
+1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 16:07 EDT: D85 adds Claude's missing post-intent
+readiness negative, a foreign-held-unload refusal and an actual
+`StopWatch.mutate()` composition against a full-node journal with simulated
+launchd. The owned macOS stop suite passes 38 tests with one domain skip;
+the journal suite passes 116. macOS CI now uses a SHA-256-checked NATS 2.12.6
+release artifact; exact-head CI is pending. This is fixture and source
+evidence, not a native hold plus real production listener stop. The complete
+writer/VM hold, four-history restore and acceptance, and verified resumption
+remain open. No production service, VM or NATS store changed; 1.2 remains
+[A]/v1.2-pre.
+
+Checkpoint 2026-10-05 17:45 EDT: D86 binds the owned native launchd stop
+receipt to the full-node journal listener proof predicate. The macOS owned
+suite passes 38 tests with one domain skip, and plan lint is conformant.
+The earlier D85 CI run had three jobs canceled before runner acquisition;
+the failed jobs were rerun and all four passed on the same head, including
+116 journal and 38 managed-stop tests on macOS with the pinned NATS download.
+D86 exact-head CI remains pending. This adds fixture evidence, not a
+production full-node hold or service resumption. No production service, VM or
+NATS history changed;
+1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 19:55 EDT: D87 refuses a scoped execution hold when
+any baselined timer bypasses the staged gate command or saved pins. An owned
+ungated-observer negative refuses before gate closure; 44 native-hold and 116
+journal tests pass locally. D86 exact-head CI passed all four jobs. The
+complete continuous writer/VM hold, stopped-VM capture, real four-history
+acceptance and verified service resumption remain open. No production
+service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 19:57 EDT: D87's first exact-head macOS CI job
+found an older root-transfer fixture with ungated timer argv. The fixture
+now uses the owned gated-timer identity for its full timer cohort; all 16
+root-transfer tests pass locally. The CI refusal was in test setup, before
+any production action. Exact-head CI for the fixture repair remains pending.
+No production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 21:51 EDT: D88 adds a three-domain launchd disabled-
+override census to full-node baseline and every forward journal check. An
+owned disposable listener re-enable without reload now refuses before the
+next mutation; member-1 and unrelated-override negatives also refuse.
+Owned macOS launchd showed that its GUI and user override views move
+together. The focused preservation and owned launchd suites passed: 183
+tests, one skipped; the NATS-transfer negative refuses before a durable
+transfer intent. Exact-head CI remains pending for D88.
+This only samples a fence. Persistent stops and restore for the remaining
+jobs, detached and other launch paths, continuous watch, reboot rehearsal,
+host decision controller, four cold-history acceptance and verified
+resumption remain open. No production service, VM or NATS history changed;
+1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 22:04 EDT: D88's first exact-head CI exposed a stale
+root-transfer schema and fixture: the root reader refused the new override
+inventory, and its owned listener-stop fixture did not simulate disabling the
+override. The root reader now validates baseline and listener-stop override
+evidence; all 16 root-transfer tests pass locally on macOS. The independent
+Mission Control shipped-dependency audit found a new high-severity
+`source-map-js` advisory; its lockfile now pins 1.2.2, and the high-severity
+audit gate passes locally. Exact-head CI for these repairs is pending. No
+production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 22:13 EDT: The next exact-head CI passed Mission
+Control and the repaired root-transfer fixtures. The Node 20 job then failed
+at the root dependency audit on a new critical `proxy-addr` advisory; Node 22
+was cancelled by the matrix fail-fast. The root lockfile now pins 2.0.8.
+An owned `npm ci --ignore-scripts` and the high-severity root audit pass
+locally; seven moderate findings remain below the configured gate. Exact-head
+CI for this lockfile repair is pending. No production service, VM or NATS
+history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 22:22 EDT: Exact-head CI for the lockfile repair
+passed all four jobs. Claude's independent read-only review of D88 found
+that the root transfer reader did not compare the listener's disabled
+override proof with subsequent verified stop receipts. The root reader now
+checks every later receipt; both journal and reader require a newly stopped
+listener disabled in GUI and user views. Owned negatives for missing GUI or
+user disable, explicit system enable, and later held-member override loss
+refuse. The preservation suite passed 125 tests, root-transfer suite passed
+17, and plan lint is conformant (14 pass, one longstanding warning). Exact-
+head CI for this final receipt-continuity change remains pending. No
+production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 22:40 EDT: Exact-head CI for d539c1a1 passed all
+four jobs. Claude's second read-only adversarial review found that the root
+reader's override walk started after the listener receipt, and that the
+missing-GUI tests also left the user view unset. The reader now walks every
+verified receipt from the baseline, rejects extra pre-listener receipts,
+and binds the final override map in the NATS transfer intent. Isolated
+user-only-disable negatives now protect both GUI checks. Local root-transfer
+tests pass 20/20; the preservation and hold suites pass 170/170. Exact-head
+CI for these final changes remains pending. No production service, VM or
+NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 22:58 EDT: D89 adds an opt-in persistent idle-timer
+stop: disable before bootout, refuse if the timer starts during disable,
+and require the override to survive verification. Owned macOS controls
+showed a delayed direct bootstrap refusal, re-enable and restoration,
+and refusal of a lost override. The managed-launchd suite passed 41 tests
+with one domain skip; plan lint is conformant (14 pass, one warning).
+Exact-head CI for this change remains pending. This does not supply the
+full-node journal driver, production spawn watch, enable-capable restore,
+or the reboot and host gates. No production service, VM or NATS history
+changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 23:09 EDT: Claude's read-only challenge found that a
+stopped job found running at recovery could be accepted as already
+restored. D90 now refuses any full-node stopped unit without a later
+`recovery-verified` receipt if it has reappeared loaded or running, before
+hold preparation or any restoration write. An owned restarted-NATS negative
+and three listener-restart cases pass; the complete preservation suite
+passes 127 tests. The separate boot-time hold decision, persistent stops
+for the remaining jobs, enable-capable restore, continuous watch, and host
+capture gates are still open. Exact-head CI for D89–D90 is pending. No
+production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 23:28 EDT: D91 refuses a plain `unload` as a
+full-node stop before applying it or recording a new intent, and both sides
+of the NATS user-to-root handoff now require persistent serving-member stop
+receipts. The disposable plain-unload journal and root-reader negatives pass;
+focused suites pass 128 preservation, 44 hold, and 21 root-transfer tests.
+This is an action-level guard, not per-class stop proof or an all-21-job
+certificate. The production persistent-stop restriction and post-reboot
+recovery refusal remain. Exact-head CI for D91 is pending. No production
+service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-05 23:53 EDT: Exact-head CI for D91 passed all four
+jobs. Claude's read-only D89–D90 challenge then reproduced a gateway restart
+after D90's preflight that recovery accepted as already restored. D92 adds a
+second preflight after hold preparation and a per-unit check during recovery;
+owned prepare-time and later-loop restart negatives pass, along with 130
+preservation and 44 hold tests. The check is sampled, and an ambiguous
+failed restore or failed idle-timer stop still needs a controlled retry
+procedure. Exact-head CI for D92 is pending. No production service, VM or
+NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 00:12 EDT: D92's exact-head CI passed all four jobs
+after a failed macOS owned-service readiness wait passed on rerun. Claude's
+independent D92 challenge found that an observation exception at a stopped
+unit's restore turn let later units restore. D93 now aborts that loop and
+requires a persistent stop's disabled override to remain set, including
+while the job is unloaded. Owned negatives cover the lost override and an
+unobservable gateway with a later stopped viewer; the hold-preparation
+negative also checks the node receipt. The preservation and hold suites
+pass 176 tests; plan lint is conformant (14 pass, one warning). The all-job
+certificate, continuous watch, restart-safe adapter, disposable reboot,
+host capture and four-history acceptance remain open. No production
+service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 00:23 EDT: D93 exact-head CI passed all four jobs.
+Claude then found the two later-loop regressions lacked the hold facade's
+restore hooks, so they could pass without reaching the later viewer. D94
+supplies those hooks. Both pristine tests pass; removing the recovery-abort
+branch in a disposable copy now fails both because the viewer is restored.
+The focused suites pass 176 tests and plan lint is conformant (14 pass,
+one warning). Exact-head CI for D94 remains pending. No
+production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 00:27 EDT: Claude's D93 review independently
+confirmed the override and unobservable-unit refusals, and identified an
+enable-then-fail retry that D93 now fences while the job is unloaded. D95
+retains that refusal until a journaled re-disable/retry path exists; an
+intent alone cannot distinguish the journal's enable from an outside one.
+The first macOS CI failure at D92 was an owned launchctl command timeout,
+not a proven readiness-loop timeout. D94 exact-head CI remains pending.
+No production service, VM or NATS history changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 00:44 EDT: D94 exact-head CI passed all four jobs on
+rerun. D95 CI again failed in the isolated JetStream fixture while the
+Node 20 job was cancelled by fail-fast; the test's broad phase label and
+silenced child hid the cause. The fixture now labels its cluster baseline
+step and surfaces only that owned child's saved error if it fails. The
+unchanged fixture passed twice locally against NATS server 2.12.6 and CLI
+0.3.1, with all owned servers stopped. Exact-head CI for the diagnostic
+change remains pending. No production service, VM or NATS history changed;
+1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 01:04 EDT: D96 makes both the full-node user journal
+and independent root reader refuse serving NATS stop receipts lacking the
+managed unload/process/connection/override proof already required for the
+deploy listener. Focused preservation, root-transfer and owned launchd tests
+pass (133, 88, and 41 with one domain skip). This is a source-only safeguard;
+the other jobs' per-class proof, all-job hold certificate, reboot rehearsal,
+host capture, isolated real-history acceptance and verified resumption remain
+open. No production service, VM or NATS history changed; 1.2 remains
+[A]/v1.2-pre.
+
+Checkpoint 2026-10-06 01:15 EDT: Claude's read-only D96 review found an
+untested user transfer guard and a root negative that could refuse before the
+NATS predicate in a root-run environment. D97 now gives the root validator a
+positive control and challenges all three serving member receipts; a hand-
+appended weak `nats-2` receipt tests the user transfer guard. Focused suites
+pass (134 preservation, 22 user-to-root). D96 exact-head CI passed four jobs.
+The fields remain user-writable and root physical NATS/store-holder admission
+is not wired; no full-node certificate, real NATS persistent-stop proof,
+disposable reboot or production capture is claimed. Step 1.2 stays [A].
+
+Checkpoint 2026-10-06 02:56 EDT: D98's owned macOS launchd control stopped
+a real nats-server 2.12.6 JetStream process with the persistent `StopWatch`
+path. The kernel exit status was 0, the normal NATS log marker appeared, the
+job unloaded with its override still disabled, and D96's managed-stop
+predicate accepted the receipt. This observes the real-server termination
+shape only: no client-drain proof, journaled full-node NATS stop, all-job
+certificate, root physical census, disposable reboot, production capture,
+four-history acceptance or verified resumption follows from it. No live
+service, VM or production NATS history changed; step 1.2 remains [A].
+
+Checkpoint 2026-10-06 03:10 EDT: Claude's read-only D98 challenge confirmed
+the owned real-server stop and exact-head four-job CI pass, but found the
+specific version and exit-0 claims were not asserted. D99 pins both using
+`/varz.version`, the termination field and kernel wait status. The focused
+owned macOS test passes locally. Normal fixture teardown re-enables the
+throwaway label; retained temporary artifacts and crash-only override
+residue are documented. Full-node journal composition and physical root
+admission are still unproved. No production service, VM or history changed;
+step 1.2 remains [A].
+
+Checkpoint 2026-10-06 05:09 EDT: D100 requires class-specific persistent
+stop evidence for every loaded full-node job, rather than only the deploy
+listener and NATS servers. The owned journal fixture exercises all 21 loaded
+jobs and negative receipt shapes. This is still a user-journal shape gate,
+not an all-job hold certificate or root physical observation. The production
+non-listener stop and timer spawn-evidence paths remain closed, and no live
+service, VM or NATS history changed; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 05:22 EDT: Claude’s read-only D100 review at
+d4e63130 found no new receipt-predicate false acceptance or refusal; all
+four exact-head CI jobs passed. D101 pins four idle-receipt clauses and
+records that direct journal callers can bypass the current adapter guard,
+all loaded-idle classes lack a production spawn-evidence producer, and
+failed rows do not retain rejected receipts. No production service, VM or
+history changed; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 09:00 EDT: D102 retains a rejected serializable
+stop receipt in the durable failure row, separately from adapter failure
+evidence. The full-node negative and 180 journal/hold tests pass. This
+improves restoration forensics but does not certify an all-job hold or
+physical absence. No production service, VM or history changed; step 1.2
+remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 09:12 EDT: Claude's D102 review found the unverified
+and unserializable candidate cases unpinned, and a diagnostic callback
+could still mask the stop failure. D103 records a fixed failure stage,
+retains the original failure when diagnostics raise, and verifies both
+negative candidates after journal reopen. The full hold, shutdown and
+four-history acceptance gates remain open; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 15:16 EDT: D104's disposable NATS 2.12.6 fixture
+refuses swapped serving masters, removed follower message blocks and a
+same-length flipped payload after the isolated probe's role digest,
+member-local and forced-leader checks. The baseline records a monitor-bound
+physical store path for later role binding. These are mechanism controls;
+the plan digest must still be derived from a trusted MATCH extraction role,
+and the guest path must match that server's pre-stop monitor path. The
+full-node hold, stopped-VM capture, three serving cold masters, four real
+history restores, acceptance and verified resumption remain open. No live
+service or VM changed; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 15:37 EDT: Claude independently verified D104's three
+mechanism refusals on owned NATS 2.12.6 servers and found no blocker in that
+delta. D105 adds an unchanged leader-epoch check across each replicated stream
+read and records the serving leader in the probe report. The Node 22 owned
+fixture passes with all servers stopped. Provenance binding, expired-stream
+treatment, full-node hold and the production stop/capture/restore/resume chain
+remain open; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 16:49 EDT: D106 binds the guest stopped-tree manifest
+and host capture receipt to byte-identical four-path store specifications,
+with guest scope and pre-guard timestamp checks. The disposable macOS ASIF
+fixture refuses a swapped guest role path and two malformed guest claims;
+the host capture suite passes eight tests. Guest-origin attestation, full-node
+hold, production capture, four real-history restores, acceptance and verified
+resumption remain open. No production VM or service changed; step 1.2 stays
+[A]/v1.2-pre.
+
+Checkpoint 2026-10-06 17:01 EDT: Claude found no D106 static-binding blocker
+and independently reproduced the digest, scope and time refusals. D107 binds
+each producer's parsed store roles to the same bytes it hashes, refuses an
+observed guest-side spec rewrite, and adds a digest-only ASIF negative. Scope,
+declaration and clock-order failures now have distinct diagnostics. Guest
+origin, clock synchronization, full-node hold, production capture, four
+real-history restores, acceptance and resumption remain open. No production
+VM or service changed; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 17:20 EDT: D108 adds a narrowly scoped launchd
+compensation primitive for an unloaded job whose disabled override was
+cleared during a failed restoration. An actual owned macOS job was
+re-fenced after an interrupted enable: direct bootstrap refused, while
+re-enable then bootstrap succeeded. The managed-launchd suite passes
+43 tests with one explicit domain skip. No journal restore callback uses
+this yet, so a complete full-node hold and recovery adapter remain open;
+no production service, VM or NATS history changed. Step 1.2 stays
+[A]/v1.2-pre.
+
+Checkpoint 2026-10-06 21:20 EDT: D109 makes full-node journal recovery refuse
+an `override-clear-intent` left without a later verified recovery, even if
+launchd again reports the unit unloaded and disabled. The reopened-journal
+negative refuses before hold preparation, service restoration, or state write;
+the journal suite passes 138 tests. Claude identified the underlying detached
+child false-accept in the proposed adapter: bare `bootout` plus re-disable is
+not a stop proof. An enable-capable adapter still needs a journaled pre-enable
+intent, new process-tree watch, verified compensation, and an answer for
+children detached before binding. Full-node hold, stopped-VM capture, all
+four real-history restores, acceptance and verified resumption remain open;
+no production service, VM or NATS history changed. Step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 22:25 EDT: D110 closes a same-run gap in D109. An owned
+restore callback recorded an `override-clear-intent` for the stopped gateway
+and failed; recovery then restored the stopped workplan viewer before the next
+run's preflight could refuse. The exception path now stops the loop when any
+stopped unit has an unresolved override-clear intent. A second negative
+records an intent for another stopped unit during a successful callback and
+refuses the next restore. Both fail on D109 and pass with the fix; 140 focused
+journal tests pass. Claude's exact-head D109 adversarial review is pending.
+This does not supply the
+enable-capable adapter or a detached-process census; full-node hold, capture,
+four-history acceptance and verified resumption remain open. No production
+VM, service or NATS store changed; step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-06 22:45 EDT: Claude's D109 review independently
+reproduced the same-run failure, and its D110 review confirmed that the
+all-stopped loop gate closes it without an unintended refusal. The review
+found one untested clause: removing the exception-path immediate stop still
+left the 140-test suite green. D111's added assertion makes that mutant fail
+and the actual code pass. A synchronous re-fence is still terminal to this
+journal because no validated re-fence receipt clears the intent; the future
+adapter must supply that receipt and remain scoped to its current unit.
+Exact-head macOS CI passes the 140 journal and 43 launchd tests. Root and
+Mission Control CI fail after passing their tests, at dependency audits;
+Node 22 is canceled by fail-fast. Full-node hold, stopped-VM capture,
+four-history acceptance and verified resumption remain open. No production
+VM, service or NATS history changed; step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 01:20 EDT: D112's owned macOS launchd regression shows
+that an owner can spawn a detached child before binding; after bootout the
+label can be unloaded and disabled while the child remains alive. The owned
+suite passes 44 tests with one explicit domain skip, and plan lint passes on
+the operator checkout. The test uses a successful bootstrap; it invalidates
+the unloaded/disabled evidence proposed for D111's `never-spawned` receipt,
+not a failed-bootstrap behavior itself. An attempted bootstrap without a bound
+owner remains unproven and must keep the D109 fence closed.
+An owned follow-up confirmed the disabled override appears in the user domain
+as well as GUI while the detached child remains alive; the focused test passes.
+The enable-capable adapter and complete hold, capture, four-history acceptance
+and verified resumption are still open. No production VM, service or NATS
+history changed; step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 05:29 EDT: D113 adds an intent-first, bound-owner restore
+primitive for a stopped daemon and validates the full-node journal transition.
+An owned macOS stop/restore, the 46-test managed-launchd suite (one skip), and
+141 journal tests pass. Any failed enable/start/bind/readiness remains terminal
+under D109/D110; no automatic re-fence receipt exists. The non-listener
+production stop guard remains closed. Full-node hold, stopped-VM capture, four
+real-history acceptance, and verified service resumption remain open; no
+production VM, service or NATS history changed. Step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 07:28 EDT: Claude's D113 adversarial review found
+that a failed bootstrap could leave an installed agent enabled for the next
+login even though journal recovery is terminal. D114 now restores the
+disabled override best-effort after any failed enable, bootstrap, bind or
+readiness check, while refusing to certify process absence or issue a stop
+receipt. Owned macOS negatives cover failed bootstrap, failed readiness, and
+an unbound owner that exited after spawning a surviving detached child. The
+owned suite passes 48 tests with one domain skip. Three new journal negatives
+pin the one-intent, previously-recovered, and timer/NATS exclusions; its
+suite passes 144 tests. Plan lint is conformant on the operator checkout.
+Automatic process compensation, a survivor census, a full-node hold driver,
+stopped-VM capture, four-history acceptance and verified service resumption
+remain open. No production VM, service or NATS history changed; step 1.2
+stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 07:40 EDT: D115 retains the failed daemon restoration's
+physical outcome in the durable recovery error instead of recording only its
+exception type. Claude's D114 review confirmed no new false acceptance, but
+identified the still-unimplemented reconciliation of a running, disabled
+owner and the need to measure readiness budgets before production use. The
+full-node non-listener stop guard remains closed. No production VM, service
+or NATS history changed; step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 09:22 EDT: D116 closes the interrupted-enable path
+Claude found in D114's physical correction. `KeyboardInterrupt` now attempts
+to restore the disabled override and still propagates; an owned preflight
+negative and an intent-only reopened-journal negative pass. The full managed
+launchd suite passes 49 tests with one domain skip. Running-owner
+reconciliation, the full-node hold and all later capture and acceptance gates
+remain open. No production VM, service or NATS history changed; step 1.2
+stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 11:26 EDT: D117 removes the implicit five-second
+daemon readiness deadline. Each owned adapter call now supplies an explicit
+finite positive budget before any override-clear intent or launchd action.
+Production per-unit readiness measurements and a process-proven failed-restart
+reconciliation remain open; the non-listener full-node stop guard stays closed.
+No production VM, service or NATS history changed; step 1.2 stays
+[A]/v1.2-pre.
+
+Checkpoint 2026-10-07 13:35 EDT: D118 closes a verified installed-plist drift
+gap in full-node recovery. A stopped unit whose currently captured plist path
+or hash differs from the baseline now refuses before hold preparation, state
+write or any restore, even if the observe facade reports stale baseline
+identity. A disposable negative demonstrates both mismatches; the journal
+suite passes 145 tests. D23's best-effort restoration after an inventory
+capture failure remains, as does the deploy-listener success fence. The
+full-node hold driver, production readiness budgets, failed-restart process
+reconciliation, stopped-VM capture, four-history acceptance and verified
+resumption remain open. No production VM, service or NATS history changed;
+step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 15:26 EDT: D119 rechecks the full entrypoint inventory
+once when its first read fails, so a transient concurrent plist rewrite that
+settles as changed cannot masquerade as unavailable evidence. An owned
+negative refuses on a changed gateway hash in the second capture before any
+recovery write or restore. Another pins D23's fallback after two capture
+failures with stopped units: known gateway restoration proceeds, the deploy
+listener remains fenced and no success is claimed. The journal suite passes
+146 tests. A later plist rewrite between preflight and a unit's restart and
+the stopped-owner reconciliation remain open, as do the complete hold,
+capture, four-history acceptance and verified resumption. No production VM,
+service or NATS history changed; step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 17:29 EDT: D120 adds a per-unit installed-plist recapture
+before a stopped unit's restoration intent and a physical plist-hash check
+before the daemon adapter clears its override. A late gateway drift introduced
+while memory-daemon restores, including one transient capture failure, now
+refuses that gateway before its restore callback. Owned tests pass: 147 journal,
+51 managed launchd (one domain skip). D23's two-failure best-effort path stays
+intact, but a sustained writer and the read-to-bootstrap interval remain
+residuals. The full-node hold, stopped-VM capture, four-history acceptance and
+verified resumption remain open. No production VM, service or NATS history
+changed; step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 17:50 EDT: Claude's D120 review found that two failed
+per-unit inventory captures could be forgotten if a later capture succeeded,
+allowing a certified restart with no installed-plist evidence at its moment.
+D121 latches both preflight and per-unit outages as recovery errors: known
+units still restore best-effort, but the deploy listener and success receipt
+stay fenced. Two owned transient-outage negatives pass, and the journal suite
+passes 149 tests. Full-node hold, stopped-VM capture, four-history acceptance
+and verified resumption remain open. No production VM, service or NATS history
+changed; step 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-07 18:00 EDT: Claude's D121 review confirmed the outage
+latch and best-effort behavior but found its listener-specific release guard
+was untested. An owned negative now makes the listener's own two late
+inventory captures fail after gateway restoration. It requires no listener
+release receipt, restoration intent, or running listener, and records both
+the entrypoint outage and listener refusal. The journal suite passes 150
+tests. Complete full-node hold, stopped-VM capture, four-history acceptance
+and verified resumption remain open; production VM, services and NATS stores
+remain untouched.
+
+Checkpoint 2026-10-07 19:36 EDT: D122 reorients the next implementation to
+the missing 23-unit baseline producer and an owned composition of the first
+hold intents and same-boot abort. Further refinements to the existing daemon
+restore adapter do not supply that missing entry point. The full-node stop
+guard stays closed, and no production listener window is authorized by the
+owned fixture. The disposable four-history JetStream suite passed at
+d816897e, including its corruption and omission negatives; all owned servers
+stopped. The production hold, capture, four-history acceptance and verified
+resumption remain open; no live VM, service or NATS store was touched.
+
+Checkpoint 2026-10-07 21:29 EDT: D123 adds a read-only producer for the
+full-node journal's 23-unit prior from an approved direct-file map and two
+consistent launchd/identity observations. The combined baseline, journal
+and hold suites pass 201 tests; plan lint is conformant. No full-node journal
+has been opened or service stopped with this producer. The owned listener
+composition, complete persistent hold, stopped-VM capture, acceptance of
+all four real histories and verified resumption remain open.
+
+Checkpoint 2026-10-07 21:42 EDT: D124 pins three more fail-closed baseline
+checks with owned negatives: direct-file alias, running unit omitted from
+launchd inventory, and an idle unit declared daemon. The October 2 approved
+23-unit map is stale for memory-daemon and node-watch after the October 3
+recaptures; those later records do not carry a complete `units` map. A fresh
+approved 23-unit map remains a prerequisite before production baseline
+capture. No production service or VM was touched.
+
+Checkpoint 2026-10-07 23:33 EDT: D125 retains a current, unapproved 23-unit
+candidate map from two consistent read-only launchd/file observations. Only
+memory-daemon and node-watch differ from the October 2 map, matching the
+October 3 recaptures. An owned producer-to-journal test opens a full-node
+journal; a negative refuses inventory drift before a node receipt. The real
+gate and complete hold remain unproven. No production service or VM was
+stopped or restarted; all four NATS histories remain untouched.
+
+Checkpoint 2026-10-07 23:46 EDT: D126 records the guest's current boot at
+2026-10-04 10:57:20 EDT. It followed the October 3 recaptures; no evidence
+explains its cause or certifies transient process absence. Current member-1
+and federation-tick overrides remain disabled, but D62's boot-hold gate stays
+open. A subsequent read-only baseline recheck refused on an `observer` timer
+status change, so D125's candidate remains point-in-time and unapproved.
+The previous checkpoint's "histories remain untouched" meant no mutation by
+this agent; it did not certify continuity across that boot.
+
+Checkpoint 2026-10-08 01:32 EDT: D127 binds the read-only 23-unit producer's
+exact launchd inventory to full-node journal creation. Valid inventory drift
+between the producer and journal now refuses before a node receipt, and a new
+baseline cannot reopen an existing window. The baseline suite passes 16 owned
+tests; the combined suites pass 210. This does not provide the continuous
+full-node hold or prove boot-time absence.
+The owned listener composition, stopped-VM capture, four real-history
+acceptance and verified resumption remain open; no live service or VM changed.
+
+Checkpoint 2026-10-08 03:34 EDT: D128 composes a native owned execution gate
+and full-node journal through the first two intents and same-boot recovery.
+An unsafe deploy-fence result keeps the listener and gate closed with no
+listener restoration intent. The producer, launchd inventory, stop proof and
+readiness are synthetic in this fixture; actual 23-job/process evidence and
+the complete shutdown gate remain open. Hold suite 46 tests passed; the
+combined baseline, journal and hold suites passed 212 before the final
+assertion refinement, which passed in the focused two-test rerun. No live
+service, VM or NATS store was stopped or changed.
+
+Checkpoint 2026-10-08 03:53 EDT: A dedicated macOS CI fixture is prepared to
+exercise the exact deploy-listener label with an owned process, native
+launchd, execution gate and full-node journal. It first refuses to bind if
+that label has an installed plist, a loaded service in any checked domain,
+or a GUI disable override. The real managed persistent stop must prove the
+owned process exited; an unsafe deploy-fence result must leave the listener
+unloaded and disabled, with the gate closed and a direct bootstrap refused.
+The local managed-launchd suite passed 52 tests with two CI-only skips. The
+fixed-label fixture itself remains unverified until the dedicated macOS CI
+job runs. No production service, VM or NATS store was touched.
+
+Checkpoint 2026-10-08 04:09 EDT: D129's fixed-label owned listener fixture
+passed in the macOS CI job at `7f4578a9`: managed launchd 52 tests with one
+skip, plus journal 150, baseline 16, hold 46 and restore-only 30. An initial
+CI run exposed an undefined fixture name before journal open; the one-line
+repair was rerun successfully. The real owned listener's bound process exit,
+closed connection and port, unloaded disabled launchd state, refused deploy
+release and closed execution gate are now observed. The other 22 units and
+the entrypoint capture remain synthetic; successful owned listener release,
+continuous 23-job coverage, stopped-VM capture, four real-history acceptance
+and verified resumption remain open. The overall CI workflow still fails its
+unrelated dependency audit gates. No production service, VM or NATS store
+was stopped or changed.
+
+Checkpoint 2026-10-08 05:32 EDT: An owned success-path twin now uses the
+existing disabled-daemon restore adapter after a verified listener release.
+The owned inventory observer reads current GUI/user/system overrides and
+rehashes the listener plist on each capture; readiness and identity are
+recomputed for the restarted process. It requires release, restoration and
+override-clear receipts in order, a new process owner, gate reopening and
+journal resolution. Dedicated macOS CI has not yet run this twin; it is not
+production recovery evidence. The complete 23-job hold and four-history
+acceptance remain open, with no live VM or service change.
+
+Checkpoint 2026-10-08 05:43 EDT: D130's owned success and refusal twins both
+passed in the macOS CI job at `fd081f10`. The managed-launchd suite ran 53
+tests with one skip; the baseline, journal, hold and restore-only suites also
+passed. This proves the listener's native stop, verified-release ordering,
+new bound process and gate reopen for an owned fixture. The other 22 jobs,
+deploy fence, physical readiness and most inventory remain synthetic. The
+unpatched 23-job composition, stopped-VM capture, acceptance of all four real
+NATS histories and verified production resumption remain open. The overall
+workflow is red at separate dependency audit gates. No live VM, service or
+NATS store was stopped or changed.
+
+Checkpoint 2026-10-08 05:48 EDT: Claude's adversarial review of `fd081f10`
+found that the adapter's fresh ready-file check was real but the journal's
+`recovery-verified` and hold-reopen readiness bits were supplied by an
+unconditional test observer. The owned listener observer now requires the
+new PID's ready file and second startup marker; the restore callback requires
+the deploy fence to have run while the gate remains closed, and the success
+path re-reads GUI and user overrides after release. These assertions await
+macOS CI. They do not change the production hold or VM status.
+
+Checkpoint 2026-10-08 05:56 EDT: D131's tighter listener readiness and
+release checks passed on the dedicated macOS CI job at `00d4080a`. Both
+fixed-label owned tests passed; managed launchd ran 53 tests with one skip,
+and the journal, baseline, hold and restore-only suites passed. The durable
+owned listener recovery and hold-reopen receipts now depend on live fixture
+readiness. The other 22 jobs, actual production readiness, unpatched
+entrypoint capture and real deploy fence remain open, as do stopped-VM
+capture, all four real-history acceptances and verified resumption. The
+production VM, services and NATS stores were untouched.
+
+Checkpoint 2026-10-08 07:58 EDT: D132's dedicated macOS fixture opened a
+full-node journal from a native 23-label launchd capture and validated the
+five timers' gated argv shapes. Exact-head `a86febbb` passed the 17-test
+baseline suite and the 53-test managed-launchd suite with one skip. Earlier
+CI runs exposed disappearing neutral Apple services during launchd listing;
+the current scan rechecks their absence and still refuses an uninspectable
+managed or present label. This is an owned point-in-time baseline only. The
+full 23-job stop, continuous and detached-process coverage, production pin
+approval, shutdown/reboot gates, stopped-VM capture, four actual-history
+acceptance and verified resumption remain open. No production service, VM or
+NATS store was changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-08 09:53 EDT: D133 closed the native execution gate after
+the unpatched owned 23-job baseline. The forward observer, marker-to-intent
+and receipt bindings, and journal order passed on macOS CI at `ad5ff90c`;
+booting out the owned gateway inside the window made the live forward
+inventory refuse. The 17-test baseline suite had no skip, and the 46 hold
+and 53 managed-launchd tests passed (one domain skip). Timer stubs never ran
+and the other daemon owners were not stopped, so this is gate composition,
+not a full-node hold. Production pin approval, all-job and detached-writer
+coverage, UTM shutdown gate, stopped-VM capture, four actual-history
+acceptance and verified resumption remain open. No production service, VM or
+NATS store changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-08 11:56 EDT: D134 composes the unpatched owned 23-job
+baseline and native execution gate with a kernel-backed persistent stop of
+the owned deploy listener. Exact-head `8f999e2c` macOS CI passed the 17-test
+baseline suite without skips, plus 46 hold and 53 managed-launchd tests (one
+domain skip). The `c952653d` addition requires the loopback connection and
+listener port to be live before the stop; Claude found no code-level false
+pass or hang, but exact-head macOS CI is still queued. The socket is not a
+NATS connection, the other 22 owners are inert, and the production pin map,
+full no-writer hold, UTM shutdown gate, stopped-VM capture, four real-history
+acceptance and verified service resumption remain open. No live service, VM
+or NATS store changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-08 14:00 EDT: D135 adds a same-boot native 23-label
+owned recovery twin. After the unpatched baseline, gate closure and persistent
+listener stop, the full-node journal requires an owned deploy fence, restores
+the listener with a new bound owner and ready receipt, checks a new private
+connection and physical readiness, rechecks live state at gate reopen, then
+resolves. Exact-head `99af7732` macOS CI passed 18/18 baseline tests, 150
+journal, 46 hold and 53 managed-launchd tests (one explicit skip). The overall
+workflow still fails at separate dependency audit gates. This is an owned
+fixture with 22 inert jobs and a private socket, not a production no-writer
+hold or real NATS acceptance. Production pin approval, all-job and detached
+writer coverage, UTM shutdown gate, stopped-VM capture, four real-history
+acceptance and verified resumption remain open. No live service, VM or NATS
+store changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-08 16:08 EDT: D136 opens the class-bound persistent stop
+path for non-NATS daemon units after the listener fence. The native 23-label
+fixture now stops and restores an owned mesh-bridge before listener release,
+using kernel exit evidence, a real disabled override, a private connection,
+completion marker, new owner and live port. A pre-listener stop refuses before
+intent, and a failed bridge readiness leaves the listener disabled and the
+execution gate closed. Exact-head `de3de11d` macOS job 113510989748 passed
+19 baseline tests without skips, 151 journal tests, 46 hold tests and 54
+managed-launchd tests with one explicit skip. Stronger native retry and
+running-owner assertions at `e69159da` await exact-head CI. The overall
+workflow remains red at separate dependency audit gates. This is one owned
+daemon proof with 21 inert stubs, not the production no-writer hold. The
+approved production pin map, remaining class stops, timer spawn witness,
+detached-process census, boot/UTM gates, stopped capture, four real-history
+acceptance and verified service resumption remain open. No live service, VM
+or NATS store changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-08 17:35 EDT: D137's read-only inventory still finds 23
+installed jobs and the same 21 GUI-loaded labels, but the installed
+`workplan-viewer` plist now points to a different release. The October 7
+unapproved map's original direct files still hash-match, while its viewer
+plist pin is stale and it omits the new entry file. The unmodified baseline
+producer refused that map with `installed plist differs from approved record:
+workplan-viewer`. A fresh recapture and approval are prerequisites to any
+production full-node journal. No service, VM or NATS history changed in this
+read-only check; step 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-08 21:42 EDT: D138 makes the full-node baseline refuse a
+loaded launchd path or argv that differs from the approved installed plist,
+including drift between its two observations. Owned baseline and adjacent
+hold/journal suites pass; the native 23-label negative awaits dedicated macOS
+CI. The October 7 production map remains stale and unapproved. Complete
+no-writer hold, stopped-VM capture, all four real-history acceptance and
+verified resumption remain open; 1.2 remains [A]/v1.2-pre. No production
+service, VM or NATS store was stopped or restarted.
+
+Checkpoint 2026-10-08 23:50 EDT: D139 extends the two-pass full-node
+baseline comparison to launchd's loaded program, working directory and job
+environment after Claude identified a stale-config false accept for idle
+jobs. Exact-head D138 macOS CI passed its 22-test native baseline suite;
+D139's owned negatives and read-only check of all 21 loaded jobs pass, while
+its native environment-drift twin awaits CI. The approved pin map and
+complete 23-job no-writer hold are still absent. The next bounded owned
+gate is a daemon-class sweep after the listener fence; timers, NATS transfer,
+detached processes, UTM/boot controls, stopped capture, four-history
+acceptance and verified service resumption remain open at 1.2[A]/v1.2-pre.
+No production service, VM or NATS store was stopped or restarted.
+
+Checkpoint 2026-10-09 01:40 EDT: D140 extends the dedicated macOS fixture
+to persistently stop and restore all ten plain daemon-class units after the
+listener fence in one owned 23-label window. A bad mesh-task-daemon completion
+marker must refuse without further stops while the listener and gate remain
+fenced. The two new native tests await exact-head CI; local baseline tests
+pass 28 cases with seven dedicated-runner skips. This fixture is not a
+production no-writer hold: the approved pin map, timers, NATS transfer,
+on-demand/known-broken jobs, detached writers, UTM/boot controls, stopped
+capture, four-history acceptance and verified service resumption remain
+open at 1.2[A]/v1.2-pre. No production service, VM or NATS store was stopped
+or restarted.
+
+Checkpoint 2026-10-09 09:40 EDT: Exact-head `102d9c05` macOS CI passed all
+28 native baseline tests without skips, including the ten-daemon sweep.
+Claude's review found D140's claim about no later stop was untested because
+the negative returned immediately after the bad marker. D141 adds an actual
+memory-daemon stop attempt after that failed receipt and requires a
+zero-append restore-only refusal with its owner, connection and port still
+live. The marker refusal occurs after mesh-task-daemon physically stops, so
+manual reconciliation is required; it is not a safe no-op. The new negative
+awaits dedicated-runner CI. Full-node hold and later capture, history
+acceptance and resumption remain open at 1.2[A]/v1.2-pre.
+
+Checkpoint 2026-10-09 13:44 EDT: D142 recaptured an unapproved 23-job
+production baseline proposal after the viewer release changed. The read-only
+producer twice observed the same installed inventory and direct-file
+identities; 21 managed jobs were GUI-loaded and none were loaded in user or
+system. Only workplan-viewer's proposed plist, PID and direct-file pins differ
+from the October 7 proposal. Seven viewer startup files are now pinned. The
+execution-hold descriptor was synthetic, so this is neither a production
+journal nor a full-node hold or shutdown certificate. Exact pin approval,
+the real gate, continuous no-writer and boot/UTM checks, stopped capture,
+four-history acceptance and verified resumption remain open at 1.2[A]/
+v1.2-pre. No live service, VM or NATS store was stopped or changed.
+
+Checkpoint 2026-10-09 15:53 EDT: D143 found and closed a coupled
+path-and-digest swap false accept in the isolated cold-master probe. The
+previous test swapped paths alone and refused at the expected hash mismatch;
+an owned two-path/two-digest swap instead passed. `MATCH.json` now binds each
+frozen extraction role's path and digest, and the probe checks that independent
+receipt before starting any working server. The decisive owned negative now
+refuses before copying either swapped master. The NATS 2.12.6 fixture and
+disposable ASIF host-match test pass. This is mechanism evidence with synthetic
+role receipts; production MATCH provenance, all four real-history acceptance,
+the full-node hold, capture and verified resumption remain open at 1.2[A]/
+v1.2-pre. No production VM, service or NATS store was changed.
+
+Checkpoint 2026-10-09 17:52 EDT: D144 keeps the four small input receipts
+byte-stable while `host_match` compares and freezes the extracted trees.
+Disposable ASIF negatives rewrite each of guest, capture, extraction and guard
+JSON after validation; all four now refuse without a `MATCH.json`, and the
+nine host tests pass. Exact-head D143 macOS CI passed its native baseline and
+host suites, while root and Mission Control dependency audits kept the overall
+workflow red. This does not attest guest origin, close the production hold,
+capture the live stopped VM, or accept and resume the four actual histories.
+No live service, VM or NATS store changed; 1.2 remains [A]/v1.2-pre.
+
+Checkpoint 2026-10-09 18:09 EDT: Claude reproduced a remaining D143 false
+accept: exchanging the two serving names and baselines while leaving master
+paths, hashes and the role receipt fixed still passed the isolated probe. D145
+records each role's canonical guest store path in the stopped-tree match and
+requires the corresponding baseline monitor `storeDir` to agree before any
+working copy. The new owned negative first passed incorrectly and now refuses;
+the full NATS fixture passes with all servers stopped. A real ASIF integration
+check also found that Python's sorted manifest JSON field order produced a
+digest unlike Node's tree hash; matching now hashes freshly enumerated frozen
+rows, and all four actual Python/Node digests agree in the disposable test.
+Nine host tests pass. These remain owned mechanism checks with synthetic NATS
+receipt provenance. Full production hold, capture, four-history acceptance
+and verified resumption are open at 1.2[A]/v1.2-pre; no live state changed.
+
+Checkpoint 2026-10-09 19:46 EDT: D146 disables matrix fail-fast so the Node 22
+recovery fixture, root tests and audit can finish even when Node 20's separate
+dependency audit fails. Exact-head D145 macOS CI passed; its Node 22 fixture
+step passed but the job was canceled before a complete result. The workflow
+parses with `fail-fast: false`; new exact-head CI remains to run. This does not
+approve the production baseline or close the full hold, stopped capture,
+four-history acceptance or resumption gates. No live state changed.
+
+Checkpoint 2026-10-09 23:52 EDT: D147 makes a managed-stop receipt name the
+unit whose process tree and connection checks it proves. An owned gateway
+stop with a mesh-bridge receipt now refuses and records no verified gateway
+stop. Journal and managed-launchd suites pass locally; the 23-label native
+fixture still needs dedicated macOS CI. The first exact-head CI exposed a
+separate root-transfer fixture using listener-labelled receipts for NATS; that
+fixture is corrected and its 22 tests pass locally, with rerun CI pending.
+This does not complete the full-node
+no-writer hold or authorize VM shutdown. Capture, four-history acceptance and
+verified resumption remain open at 1.2[A]/v1.2-pre; no live state changed.
+
+Checkpoint 2026-10-10 01:44 EDT: D148 closes the separate root-reader gap
+Claude found in D147. Root admission now checks each managed-stop receipt's
+label against its listener or NATS row, and a rehashed cross-member negative
+refuses. The 23 root-transfer tests pass locally. At the preceding f9de96ba
+head, macOS native baseline, host capture, hold and managed-launchd suites
+passed; Node 22's isolated JetStream fixture and both Node root test suites
+passed. Dependency audits alone kept that workflow red. New exact-head CI
+is pending. The full production no-writer hold and shutdown gates remain
+unproven; no service or VM was stopped, and 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-10 13:57 EDT: D149 adds a journaled, bounded resumption
+primitive for a timer whose own persistent stop was already proven. The helper
+checks saved identity and loaded configuration, requires idle readiness, and
+reinstates the disabled override on failure; an interrupted override-clear
+intent poisons later recovery. The 154 journal and 57 managed-launchd tests
+pass locally, including two actual owned Mac timer controls; the new journal
+reopen negative also passes. This does not provide the still-absent production
+timer spawn/writer witness or a full-node driver. Exact-head CI remains to run;
+1.2 remains [A]/v1.2-pre. No live service, VM or NATS store changed.
+
+Checkpoint 2026-10-10 15:58 EDT: D150 adds an actual owned `RunAtLoad`
+restoration control. Its short-lived second invocation exits under a
+disposable closed marker without writing the payload; 58 managed-launchd
+tests pass locally with three existing skips. At D149's 7628e5b8 head, the
+macOS CI job passed and both Linux jobs reached their root tests; only the
+separate dependency audits failed. The new control still needs exact-head CI.
+The original timer spawn/writer proof and full-node driver remain open, so
+production hold and VM shutdown are still refused. No live state changed.

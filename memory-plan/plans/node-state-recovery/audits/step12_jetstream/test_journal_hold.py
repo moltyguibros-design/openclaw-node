@@ -12,9 +12,12 @@ import unittest
 from unittest.mock import patch
 
 from journal_hold import ANCHOR, JournaledHold, describe
+from full_node_baseline import open_full_node_journal
 from legacy_fixture import legacy_journal
 from preservation_journal import FULL_NODE_SCOPE, Journal, TIMER_SCOPE, TIMER_UNITS, UNITS, matches
 import preservation_journal
+from test_preservation_journal import (fence_listener, full_entrypoint_evidence,
+                                       full_node_inventory, listener_stop_evidence)
 
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -34,6 +37,18 @@ def inventory():
                        'running': unit != ANCHOR, 'disabled': False, 'identity': identity}
     prior['nats-1'] = {**prior['nats'], 'class': 'held', 'loaded': False, 'running': False, 'disabled': True}
     return copy.deepcopy(prior)
+
+
+def gated_identity(unit, gate_root, pins):
+    entry = gate_root.parent / 'timer-entry.py'
+    manifest = gate_root.parent / 'timer-entry-manifest.json'
+    digest = '2' * 64
+    return {'plist_sha256': '0' * 64,
+            'argv': ['/usr/bin/python3', '-I', '-S', str(entry), str(manifest), digest,
+                     'ai.openclaw.' + unit, str(gate_root), pins['lock'],
+                     pins['root'], '--', '/owned/' + unit],
+            'files': {str(entry): '1' * 64, str(manifest): digest},
+            'dependencies': {}, 'working_directory': '/'}
 
 
 class HoldTests(unittest.TestCase):
@@ -60,6 +75,7 @@ class HoldTests(unittest.TestCase):
         self.gate = gate_module.Gate(self.gate_root, self.pin)
         self.prior = inventory()
         self.prior[ANCHOR]['execution_hold'] = describe(self.gate, [ANCHOR])
+        self.prior[ANCHOR]['identity'] = gated_identity(ANCHOR, self.gate_root, self.pin)
         self.current = copy.deepcopy(self.prior)
         self.physical = True
         self.calls = []
@@ -147,10 +163,7 @@ class HoldTests(unittest.TestCase):
                 for unit in TIMER_UNITS:
                     prior[unit] = {'class': 'timer', 'loaded': True, 'running': False,
                                    'disabled': False,
-                                   'identity': {'plist_sha256': '0' * 64,
-                                                'argv': ['/owned/' + unit],
-                                                'files': {'/owned/' + unit: '1' * 64},
-                                                'dependencies': {}, 'working_directory': '/'}}
+                                   'identity': gated_identity(unit, gate_root, pins)}
                 prior[ANCHOR]['execution_hold'] = describe(gate, sorted(TIMER_UNITS))
                 baseline = root / 'journals' / 'timer'
                 with Journal(baseline, prior, boot='owned-boot', node_lock=root / 'node.lock',
@@ -181,6 +194,30 @@ class HoldTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, 'original closed observer'):
             self.hold.mutate('mesh-agent', 'copy', lambda: self.fail('must not run'), lambda: {'verified': True})
         self.assertEqual(len(self.journal.records), 1)
+
+    def test_timer_scope_refuses_ungated_entry_before_close(self):
+        changes = {
+            'ungated': lambda argv: ['/owned/observer'],
+            'wrong-label': lambda argv: [*argv[:6], 'ai.openclaw.other', *argv[7:]],
+            'wrong-pin': lambda argv: [*argv[:8], 'wrong-lock-pin', *argv[9:]],
+            'wrong-manifest': lambda argv: [*argv[:5], '0' * 64, *argv[6:]],
+        }
+        for case, change in changes.items():
+            with self.subTest(case=case):
+                prior = {unit: {'class': 'timer', 'loaded': True, 'running': False,
+                                'disabled': False,
+                                'identity': gated_identity(unit, self.gate_root, self.pin)}
+                         for unit in TIMER_UNITS}
+                prior[ANCHOR]['execution_hold'] = describe(self.gate, sorted(TIMER_UNITS))
+                argv = prior['observer']['identity']['argv']
+                prior['observer']['identity']['argv'] = change(argv)
+                isolated = self.root / case
+                isolated.mkdir(mode=0o700)
+                with Journal(isolated / 'journals/window', prior, boot='owned-boot',
+                             node_lock=isolated / 'node.lock', scope=TIMER_SCOPE) as journal:
+                    with self.assertRaisesRegex(Exception, 'timer entry is ungated: observer'):
+                        JournaledHold(journal, self.gate, self.fast)
+                    self.assertIsNone(self.gate.marker())
 
     @unittest.skipUnless(sys.platform == 'darwin', 'continuous native observer is a Mac acceptance contract')
     def test_full_scope_hold_completion_does_not_certify_without_process_watch(self):
@@ -646,9 +683,7 @@ class TimerScopeReopenTests(unittest.TestCase):
             for unit in TIMER_UNITS:
                 prior[unit] = {'class': 'timer', 'loaded': True, 'running': False,
                                'disabled': False,
-                               'identity': {'plist_sha256': '0' * 64, 'argv': ['/owned/' + unit],
-                                            'files': {'/owned/' + unit: '1' * 64},
-                                            'dependencies': {}, 'working_directory': '/'}}
+                               'identity': gated_identity(unit, gate_root, pins)}
             with gate_module.Gate(gate_root, pins) as gate:
                 prior[ANCHOR]['execution_hold'] = describe(gate, sorted(TIMER_UNITS))
                 with Journal(journal_root, prior, boot='owned-boot', node_lock=node_lock,
@@ -688,6 +723,92 @@ class TimerScopeReopenTests(unittest.TestCase):
 
     def test_missing_marker_gets_protective_restore_only_close(self):
         self.exercise(True)
+
+
+@unittest.skipUnless(sys.platform == 'darwin', 'full-node hold composition requires the native gate observer')
+class FullNodeHoldComposition(unittest.TestCase):
+    def exercise(self, release):
+        with tempfile.TemporaryDirectory(prefix='openclaw-full-hold-owned-') as place:
+            root = pathlib.Path(place).resolve()
+            writer_lock = root / 'writer.lock'
+            writer_lock.write_bytes(b'owned writer lock')
+            writer_lock.chmod(0o644)
+            gate_root = root / 'gate'
+            pins = gate_module.initialize(gate_root)
+            with (patch.object(preservation_journal, 'NATS_WRITER_MARKER', root / 'writer-handoff.json'),
+                  patch.object(preservation_journal, 'NATS_LEGACY_LOCK', writer_lock),
+                  patch.object(preservation_journal, 'NATS_ROOT_UID', os.getuid()),
+                  gate_module.Gate(gate_root, pins) as gate):
+                prior = full_node_inventory()
+                for unit in TIMER_UNITS:
+                    prior[unit]['identity'] = gated_identity(unit, gate_root, pins)
+                prior[ANCHOR]['execution_hold'] = describe(gate, sorted(TIMER_UNITS))
+                current = copy.deepcopy(prior)
+                entrypoints = full_entrypoint_evidence(prior)
+                def inventory(_):
+                    return copy.deepcopy(entrypoints)
+                with (patch('full_node_baseline.capture_full_node_prior',
+                            return_value=(prior, copy.deepcopy(entrypoints))),
+                      patch('preservation_journal.capture_entrypoint_inventory',
+                            side_effect=inventory)):
+                    with open_full_node_journal(root / 'journals' / 'window', gate, {},
+                                                boot='owned-boot',
+                                                node_lock=root / 'node.lock') as journal:
+                        fast = lambda: {'verified': True,
+                                        'baseline_sha256': journal.records[0]['sha256']}
+                        hold = JournaledHold(journal, gate, fast)
+                        try:
+                            hold.close_and_drain()
+                            def stop():
+                                fence_listener(entrypoints)
+                                current['mesh-deploy-listener'].update(loaded=False,
+                                                                       running=False, disabled=True)
+                            hold.mutate('mesh-deploy-listener', 'disable-and-unload',
+                                        stop, listener_stop_evidence)
+                            self.assertIsNotNone(gate.marker())
+                            self.assertTrue(journal.listener_fenced())
+                            def observe(unit, saved):
+                                return {**copy.deepcopy(current[unit]), 'verified': True}
+                            calls = []
+                            def restore(unit, saved):
+                                self.assertEqual(unit, 'mesh-deploy-listener')
+                                calls.append(unit)
+                                current[unit] = copy.deepcopy(saved)
+                                label = 'ai.openclaw.' + unit
+                                entrypoints['loaded']['gui'].append(label)
+                                entrypoints['loaded']['gui'].sort()
+                                for domain in ('gui', 'user'):
+                                    entrypoints['overrides'][domain][label] = None
+                            result = hold.recover(restore, observe, lambda: {'verified': True},
+                                                  deploy_fence=lambda: {'verified': release})
+                            if release:
+                                self.assertTrue(result['restored'], result)
+                                self.assertEqual(calls, ['mesh-deploy-listener'])
+                                events = [row['event'] for row in journal.records]
+                                self.assertLess(events.index('listener-release-verified'),
+                                                events.index('restoration-intent'))
+                                self.assertIsNone(gate.marker())
+                                self.assertTrue(journal.resolve())
+                            else:
+                                self.assertFalse(result['restored'], result)
+                                self.assertEqual(calls, [])
+                                self.assertIsNotNone(gate.marker())
+                                self.assertFalse(current['mesh-deploy-listener']['loaded'])
+                                self.assertTrue(current['mesh-deploy-listener']['disabled'])
+                                self.assertFalse(any(row['event'] == 'restoration-intent'
+                                                     and row.get('unit') == 'mesh-deploy-listener'
+                                                     for row in journal.records))
+                                with self.assertRaisesRegex(preservation_journal.Refused,
+                                                            'unrestored node cannot be sealed'):
+                                    journal.resolve()
+                        finally:
+                            hold.close()
+
+    def test_listener_release_precedes_only_restore_after_owned_hold(self):
+        self.exercise(True)
+
+    def test_failed_release_keeps_listener_and_gate_fenced(self):
+        self.exercise(False)
 
 
 if __name__ == '__main__':

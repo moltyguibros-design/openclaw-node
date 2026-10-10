@@ -1,5 +1,6 @@
 import copy
 import errno
+import hashlib
 import json
 import os
 import pathlib
@@ -16,6 +17,7 @@ from unittest.mock import patch
 from preservation_journal import CommittedRefusal, FULL_NODE_SCOPE, Journal, NATS_TRANSFER_UNITS, Refused, TIMER_SCOPE, TIMER_UNITS, UNITS, encoded, matches, valid_record
 import preservation_journal
 from preservation_checks import TAILSCALE_BINARY, TAILSCALE_LABEL, TAILSCALE_PLIST, TAILSCALE_WRAPPER
+from managed_launchd import StopWatch, restore_disabled_daemon
 from legacy_fixture import legacy_journal
 
 
@@ -64,6 +66,12 @@ def full_node_inventory():
 
 
 def full_entrypoint_evidence(prior):
+    overrides = {domain: {'ai.openclaw.' + unit: None for unit in prior}
+                 for domain in ('gui', 'user', 'system')}
+    for unit, state in prior.items():
+        if state['disabled']:
+            overrides['gui']['ai.openclaw.' + unit] = True
+            overrides['user']['ai.openclaw.' + unit] = True
     return {'verified': True,
             'installed': {'ai.openclaw.' + unit: {
                 'path': '/owned/' + unit + '.plist',
@@ -71,7 +79,40 @@ def full_entrypoint_evidence(prior):
                 for unit, state in prior.items()},
             'loaded': {'gui': sorted('ai.openclaw.' + unit for unit, state in prior.items()
                                    if state['loaded']), 'user': [], 'system': []},
-            'roots': ['/owned'], 'disabled_artifacts': {}, 'excluded': {}}
+            'roots': ['/owned'], 'disabled_artifacts': {}, 'excluded': {},
+            'overrides': overrides}
+
+
+def fence_unit(entrypoints, unit):
+    label = 'ai.openclaw.' + unit
+    entrypoints['loaded']['gui'].remove(label)
+    entrypoints['overrides']['gui'][label] = True
+    entrypoints['overrides']['user'][label] = True
+
+
+def fence_listener(entrypoints):
+    fence_unit(entrypoints, 'mesh-deploy-listener')
+
+
+def listener_stop_evidence(unit='mesh-deploy-listener'):
+    return {'verified': True, 'unit_label': 'ai.openclaw.' + unit,
+            'unit_unloaded': True, 'descendants_absent': True,
+            'disabled_override_verified': True, 'connections_closed': True,
+            'listeners_absent': True, 'bootout': {'returncode': 0, 'timed_out': False},
+            'termination': {'signal': 15}}
+
+
+def timer_stop_evidence(unit):
+    return {'verified': True, 'prior': {'loaded': True, 'running': False},
+            'unloaded': True, 'logs_unchanged': True,
+            'disabled_override_verified': True,
+            'spawn_evidence': {'label': 'ai.openclaw.' + unit,
+                               'coverage_complete': True, 'spawns': []}}
+
+
+def anchor_hold(journal, hold):
+    journal.mutate('scheduler-heartbeat', 'close-execution-hold',
+                   lambda: None, lambda: {'verified': True}, hold=hold)
 
 
 def tailscale_record():
@@ -110,7 +151,7 @@ class JournalTests(unittest.TestCase):
             return legacy_journal(root or self.root, prior, boot=boot, node_lock=self.node_lock)
         return Journal(root or self.root, boot=boot, node_lock=self.node_lock)
 
-    def prepared_nats_transfer(self, excluded=None):
+    def prepared_nats_transfer(self, excluded=None, weak_unit=None):
         prior = full_node_inventory()
         loaded = full_entrypoint_evidence(prior)
         loaded['excluded'] = copy.deepcopy(excluded or {})
@@ -126,14 +167,28 @@ class JournalTests(unittest.TestCase):
                           scope=FULL_NODE_SCOPE)
         self.addCleanup(journal.close)
         hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+        anchor_hold(journal, hold)
+        journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                       lambda: fence_listener(loaded),
+                       listener_stop_evidence, hold=hold)
         for unit in ('nats', 'nats-2', 'nats-3'):
-            journal.mutate(unit, 'unload',
-                           lambda unit=unit: loaded['loaded']['gui'].remove('ai.openclaw.' + unit),
-                           lambda: {'verified': True}, hold=hold)
+            if unit == weak_unit:
+                intent = journal.append('intent', unit=unit, action='disable-and-unload')
+                fence_unit(loaded, unit)
+                journal.append('verified', intent=intent['sequence'], unit=unit,
+                               action='disable-and-unload', evidence={
+                                   'verified': True,
+                                   'entrypoint_loaded': copy.deepcopy(loaded['loaded']),
+                                   'entrypoint_overrides': copy.deepcopy(loaded['overrides'])})
+            else:
+                journal.mutate(unit, 'disable-and-unload',
+                               lambda unit=unit: fence_unit(loaded, unit),
+                               lambda unit=unit: listener_stop_evidence(unit), hold=hold)
         def observe(unit, saved):
             if unit == 'nats-1':
                 return {**saved, 'verified': True}
-            return {**saved, 'loaded': False, 'running': False, 'verified': True}
+            return {**saved, 'loaded': False, 'running': False,
+                    'disabled': unit in ('nats', 'nats-2', 'nats-3'), 'verified': True}
         return journal, hold, observe, marker
 
     def publish_nats_return(self, journal, transfer, **changes):
@@ -175,6 +230,16 @@ class JournalTests(unittest.TestCase):
             with self.assertRaisesRegex(Refused, 'transfer is open'):
                 reopened.append('recovery-started')
 
+    def test_nats_transfer_refuses_cleared_listener_override_before_intent(self):
+        journal, hold, observe, _ = self.prepared_nats_transfer()
+        current = journal.check_entrypoints(forward=True)
+        current['overrides']['gui']['ai.openclaw.mesh-deploy-listener'] = False
+        before = len(journal.records)
+        with patch('preservation_journal.capture_entrypoint_inventory', return_value=current):
+            with self.assertRaisesRegex(Refused, 'disabled overrides changed'):
+                journal.transfer_nats(str(uuid.uuid4()), hold, observe)
+        self.assertEqual(len(journal.records), before)
+
     def test_nats_transfer_refuses_marker_and_uncertified_unit(self):
         journal, hold, observe, marker = self.prepared_nats_transfer()
         before = len(journal.records)
@@ -186,6 +251,36 @@ class JournalTests(unittest.TestCase):
             journal.transfer_nats(str(uuid.uuid4()), hold,
                                   lambda unit, saved: {**observe(unit, saved), 'running': unit == 'nats'})
         self.assertEqual(len(journal.records), before)
+
+    def test_nats_transfer_refuses_weak_preexisting_stop_receipt(self):
+        journal, hold, observe, _ = self.prepared_nats_transfer(weak_unit='nats-2')
+        before = len(journal.records)
+        with self.assertRaisesRegex(Refused, 'no verified persistent journal receipt: nats-2'):
+            journal.transfer_nats(str(uuid.uuid4()), hold, observe)
+        self.assertEqual(len(journal.records), before)
+
+    def test_nats_transfer_refuses_receipts_without_listener_fence(self):
+        prior = full_node_inventory()
+        loaded = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(loaded)), patch(
+                   'preservation_journal.NATS_WRITER_MARKER', self.parent / 'writer-handoff.json'):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                for unit in ('nats', 'nats-2', 'nats-3'):
+                    loaded['loaded']['gui'].remove('ai.openclaw.' + unit)
+                    journal.append('verified', intent=100 + len(journal.records), unit=unit,
+                                   action='unload', evidence={'verified': True,
+                                   'entrypoint_loaded': copy.deepcopy(loaded['loaded'])})
+                def observe(unit, saved):
+                    return {**saved, 'loaded': False, 'running': False, 'verified': True} \
+                        if unit != 'nats-1' else {**saved, 'verified': True}
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'listener must be verifiably disabled'):
+                    journal.transfer_nats(str(uuid.uuid4()), hold, observe)
+                self.assertEqual(len(journal.records), before)
 
     def test_nats_return_requires_bound_root_receipt_and_forces_restore_only(self):
         journal, hold, observe, marker = self.prepared_nats_transfer()
@@ -425,6 +520,455 @@ class JournalTests(unittest.TestCase):
                         scope=FULL_NODE_SCOPE)
         self.assertFalse(self.root.exists())
 
+    def test_full_scope_requires_held_overrides_in_both_user_views(self):
+        prior = full_node_inventory()
+        evidence = full_entrypoint_evidence(prior)
+        evidence['overrides']['user']['ai.openclaw.nats-1'] = False
+        with patch('preservation_journal.capture_entrypoint_inventory', return_value=evidence):
+            with self.assertRaisesRegex(Refused, 'disabled overrides differ'):
+                Journal(self.root, prior, node_lock=self.node_lock, scope=FULL_NODE_SCOPE)
+        self.assertFalse(self.root.exists())
+
+    def test_full_scope_refuses_explicit_system_enable_of_held_member(self):
+        prior = full_node_inventory()
+        evidence = full_entrypoint_evidence(prior)
+        evidence['overrides']['system']['ai.openclaw.nats-1'] = False
+        with patch('preservation_journal.capture_entrypoint_inventory', return_value=evidence):
+            with self.assertRaisesRegex(Refused, 'disabled overrides differ'):
+                Journal(self.root, prior, node_lock=self.node_lock, scope=FULL_NODE_SCOPE)
+        self.assertFalse(self.root.exists())
+
+    def test_full_scope_listener_stop_precedes_other_forward_mutations(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        calls = []
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                with self.assertRaisesRegex(Refused, 'listener must follow the verified execution hold'):
+                    journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                                   lambda: calls.append('early-listener'), listener_stop_evidence, hold=hold)
+                journal.mutate('scheduler-heartbeat', 'close-execution-hold',
+                               lambda: calls.append('hold'), lambda: {'verified': True}, hold=hold)
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'listener must be verifiably disabled'):
+                    journal.mutate('nats', 'disable-and-unload', lambda: calls.append('nats'),
+                                   lambda: {'verified': True}, hold=hold)
+                self.assertEqual(len(journal.records), before)
+                self.assertEqual(calls, ['hold'])
+                with self.assertRaisesRegex(Refused, 'listener must be verifiably disabled'):
+                    journal.mutate('scheduler-heartbeat', 'disable-and-unload',
+                                   lambda: calls.append('early-timer'), lambda: {'verified': True}, hold=hold)
+                with self.assertRaisesRegex(Refused, 'listener must follow'):
+                    journal.mutate('mesh-deploy-listener', 'stop', lambda: calls.append('listener'),
+                                   listener_stop_evidence, hold=hold)
+                self.assertEqual(len(journal.records), before)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fence_listener(current),
+                               listener_stop_evidence, hold=hold)
+                with self.assertRaisesRegex(Refused, 'listener must follow'):
+                    journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                                   lambda: calls.append('second-listener'), listener_stop_evidence, hold=hold)
+                journal.mutate('nats', 'disable-and-unload',
+                               lambda: fence_unit(current, 'nats'),
+                               lambda: calls.append('nats') or listener_stop_evidence('nats'), hold=hold)
+                self.assertEqual(calls, ['hold', 'nats'])
+                verified = [(row['unit'], row['action']) for row in journal.records
+                            if row['event'] == 'verified']
+                self.assertEqual(verified, [('scheduler-heartbeat', 'close-execution-hold'),
+                                            ('mesh-deploy-listener', 'disable-and-unload'),
+                                            ('nats', 'disable-and-unload')])
+
+    def test_full_scope_refuses_a_plain_unload_after_listener_hold(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fence_listener(current), listener_stop_evidence, hold=hold)
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'persistent disabled override'):
+                    journal.mutate('nats', 'unload',
+                                   lambda: self.fail('plain unload ran'),
+                                   lambda: {'verified': True}, hold=hold)
+                self.assertEqual(len(journal.records), before)
+
+    def test_managed_stop_composes_with_full_node_listener_journal(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        disabled = {'value': False}
+        steps = []
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                hold.mutate = lambda unit, action, apply, verify, failure_evidence: journal.mutate(
+                    unit, action, apply, verify, failure_evidence=failure_evidence, hold=hold)
+                anchor_hold(journal, hold)
+                def disable():
+                    self.assertEqual(journal.records[-1]['event'], 'intent')
+                    self.assertEqual(journal.records[-1]['action'], 'disable-and-unload')
+                    disabled['value'] = True
+                    steps.append('disable')
+                def bootout():
+                    self.assertTrue(disabled['value'])
+                    fence_listener(current)
+                    steps.append('bootout')
+                watch = SimpleNamespace(
+                    service=SimpleNamespace(label='ai.openclaw.mesh-deploy-listener',
+                                            disabled=lambda: disabled['value'], disable_for_hold=disable),
+                    require_disabled=True, ready_for_intent=lambda: None, apply=bootout,
+                    verify=lambda *_: listener_stop_evidence(), failure_evidence=lambda error: {})
+                evidence = StopWatch.mutate(watch, journal, 'mesh-deploy-listener',
+                                            lambda: True, lambda: True, hold=hold)
+                self.assertTrue(evidence['disabled_override_verified'])
+                self.assertTrue(journal.listener_fenced())
+                self.assertEqual(steps, ['disable', 'bootout'])
+
+    def test_full_scope_refuses_reenabled_listener_without_reload(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fence_listener(current), listener_stop_evidence, hold=hold)
+                current['overrides']['gui']['ai.openclaw.mesh-deploy-listener'] = False
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'disabled overrides changed'):
+                    journal.mutate('workplan-viewer', 'disable-and-unload',
+                                   lambda: self.fail('viewer stop ran'),
+                                   lambda: {'verified': True}, hold=hold)
+                self.assertEqual(len(journal.records), before)
+
+    def test_full_scope_refuses_held_member_override_loss(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fence_listener(current), listener_stop_evidence, hold=hold)
+                current['overrides']['user']['ai.openclaw.nats-1'] = False
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'disabled overrides changed'):
+                    journal.mutate('workplan-viewer', 'disable-and-unload',
+                                   lambda: self.fail('viewer stop ran'),
+                                   lambda: {'verified': True}, hold=hold)
+                self.assertEqual(len(journal.records), before)
+
+    def test_full_scope_refuses_unrelated_override_change(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fence_listener(current), listener_stop_evidence, hold=hold)
+                current['overrides']['gui']['ai.openclaw.gateway'] = True
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'disabled overrides changed'):
+                    journal.mutate('workplan-viewer', 'disable-and-unload',
+                                   lambda: self.fail('viewer stop ran'),
+                                   lambda: {'verified': True}, hold=hold)
+                self.assertEqual(len(journal.records), before)
+
+    def test_full_scope_refuses_foreign_enabled_listener_override(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                def apply():
+                    fence_listener(current)
+                    current['overrides']['system']['ai.openclaw.mesh-deploy-listener'] = False
+                with self.assertRaisesRegex(Refused, 'disabled overrides changed'):
+                    journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                                   apply, listener_stop_evidence, hold=hold)
+                self.assertFalse(journal.listener_fenced())
+
+    def test_full_scope_listener_stop_requires_persistent_process_proof(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                with self.assertRaisesRegex(Refused, 'lacks persistent unload and process proof'):
+                    journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                                   lambda: fence_listener(current),
+                                   lambda: {'verified': True}, hold=hold)
+                self.assertFalse(any(row['event'] == 'verified'
+                                     and row.get('unit') == 'mesh-deploy-listener'
+                                     for row in journal.records))
+                with self.assertRaisesRegex(Refused, 'may only restore prior services'):
+                    journal.mutate('nats', 'disable-and-unload', lambda: None,
+                                   lambda: {'verified': True}, hold=hold)
+
+    def test_full_scope_nats_stop_requires_persistent_process_proof(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fence_listener(current), listener_stop_evidence, hold=hold)
+                with self.assertRaisesRegex(Refused, 'NATS stop lacks persistent unload and process proof'):
+                    journal.mutate('nats', 'disable-and-unload',
+                                   lambda: fence_unit(current, 'nats'),
+                                   lambda: {'verified': True}, hold=hold)
+                self.assertFalse(any(row['event'] == 'verified' and row.get('unit') == 'nats'
+                                     for row in journal.records))
+
+    def test_full_scope_requires_class_specific_stop_proof(self):
+        prior = full_node_inventory()
+        journal = Journal.__new__(Journal)
+        journal.prior = prior
+        self.assertTrue(journal.full_node_stop_proven('gateway', listener_stop_evidence('gateway')))
+        self.assertFalse(journal.full_node_stop_proven('gateway', listener_stop_evidence('mesh-bridge')))
+        self.assertTrue(journal.full_node_stop_proven('observer', timer_stop_evidence('observer')))
+        for unit in ('mesh-agent', 'mesh-tool-discord'):
+            self.assertTrue(journal.full_node_stop_proven(unit, listener_stop_evidence(unit)))
+            self.assertTrue(journal.full_node_stop_proven(unit, timer_stop_evidence(unit)))
+            self.assertFalse(journal.full_node_stop_proven(unit, {'verified': True}))
+        self.assertFalse(journal.full_node_stop_proven('gateway', timer_stop_evidence('gateway')))
+        self.assertFalse(journal.full_node_stop_proven('observer', listener_stop_evidence()))
+        for change in ({'verified': False},
+                       {'unloaded': False},
+                       {'logs_unchanged': False},
+                       {'disabled_override_verified': False},
+                       {'prior': {'loaded': False, 'running': False}},
+                       {'prior': {'loaded': True, 'running': True}},
+                       {'spawn_evidence': {'label': 'ai.openclaw.observer',
+                                           'coverage_complete': False, 'spawns': []}},
+                       {'spawn_evidence': {'label': 'ai.openclaw.gateway',
+                                           'coverage_complete': True, 'spawns': []}},
+                       {'spawn_evidence': {'label': 'ai.openclaw.observer',
+                                           'coverage_complete': True, 'spawns': [123]}}):
+            self.assertFalse(journal.full_node_stop_proven(
+                'observer', {**timer_stop_evidence('observer'), **change}))
+
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fence_listener(current), listener_stop_evidence, hold=hold)
+                with self.assertRaisesRegex(Refused, 'class-specific persistent proof: gateway'):
+                    journal.mutate('gateway', 'disable-and-unload',
+                                   lambda: fence_unit(current, 'gateway'),
+                                   lambda: {'verified': True},
+                                   failure_evidence=lambda _: {'diagnostic': 'owned'}, hold=hold)
+                self.assertEqual([row['event'] for row in journal.records[-2:]], ['intent', 'failed'])
+                self.assertEqual(journal.records[-1]['rejected_evidence'], {'verified': True})
+                self.assertEqual(journal.records[-1]['evidence'], {'diagnostic': 'owned'})
+                self.assertEqual(journal.records[-1]['failure_stage'], 'persistent-stop-proof')
+                receipt = self.root / f"{journal.records[-1]['sequence']:06d}.json"
+                self.assertEqual(valid_record(json.loads(receipt.read_bytes()))['rejected_evidence'],
+                                 {'verified': True})
+                with self.assertRaisesRegex(Refused, 'may only restore prior services'):
+                    journal.mutate('observer', 'disable-and-unload',
+                                   lambda: self.fail('stop ran'),
+                                   lambda: timer_stop_evidence('observer'), hold=hold)
+
+    def test_full_scope_rejects_another_units_stop_receipt(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fence_listener(current), listener_stop_evidence, hold=hold)
+                with self.assertRaisesRegex(Refused, 'class-specific persistent proof: gateway'):
+                    journal.mutate('gateway', 'disable-and-unload',
+                                   lambda: fence_unit(current, 'gateway'),
+                                   lambda: listener_stop_evidence('mesh-bridge'), hold=hold)
+                self.assertFalse(any(row['event'] == 'verified' and row.get('unit') == 'gateway'
+                                     for row in journal.records))
+
+    def test_full_scope_accepts_class_proofs_for_every_loaded_job(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                units = ['mesh-deploy-listener'] + [unit for unit in preservation_journal.RESUME_ORDER
+                                                    if unit != 'mesh-deploy-listener']
+                for unit in units:
+                    evidence = (timer_stop_evidence(unit) if prior[unit]['class'] in
+                                ('timer', 'on-demand', 'known-broken') else listener_stop_evidence(unit))
+                    journal.mutate(unit, 'disable-and-unload',
+                                   lambda unit=unit: fence_unit(current, unit),
+                                   lambda evidence=evidence: evidence, hold=hold)
+                stopped = [row['unit'] for row in journal.records
+                           if row['event'] == 'verified' and row.get('action') == 'disable-and-unload']
+                self.assertEqual(stopped, units)
+
+    def test_full_scope_listener_stop_rejects_incomplete_exit_proof(self):
+        cases = [(key, {key: None}) for key in (
+            'unit_unloaded', 'descendants_absent', 'disabled_override_verified',
+            'connections_closed', 'listeners_absent')]
+        cases += [
+                ('override', {'disabled_override_verified': False}),
+                ('bootout', {'bootout': {'returncode': 1, 'timed_out': False}}),
+                ('timeout', {'bootout': {'returncode': 0, 'timed_out': True}}),
+                ('termination', {'termination': {'signal': 9}})]
+        for name, change in cases:
+            with self.subTest(name=name):
+                prior = full_node_inventory()
+                current = full_entrypoint_evidence(prior)
+                case_dir = self.parent / ('listener-' + name)
+                case_dir.mkdir(mode=0o700)
+                journals = case_dir / 'journals'
+                journals.mkdir(mode=0o700)
+                with patch('preservation_journal.capture_entrypoint_inventory',
+                           side_effect=lambda _: copy.deepcopy(current)):
+                    with Journal(journals / 'journal', prior, node_lock=case_dir / 'node.lock',
+                                 scope=FULL_NODE_SCOPE) as journal:
+                        hold = SimpleNamespace(journal=journal,
+                                               check_forward=lambda: {'verified': True})
+                        anchor_hold(journal, hold)
+                        evidence = {**listener_stop_evidence(), **change}
+                        with self.assertRaisesRegex(Refused, 'lacks persistent unload and process proof'):
+                            journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                                lambda: fence_listener(current),
+                                lambda: evidence, hold=hold)
+                        self.assertFalse(journal.listener_fenced())
+
+    def test_full_scope_listener_stop_requires_gui_disabled_override(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                with self.assertRaisesRegex(Refused, 'disabled overrides changed'):
+                    journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                                   lambda: current['loaded']['gui'].remove(
+                                       'ai.openclaw.mesh-deploy-listener'),
+                                   listener_stop_evidence, hold=hold)
+                self.assertFalse(journal.listener_fenced())
+
+    def test_full_scope_listener_stop_requires_user_disabled_override(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                def gui_only_stop():
+                    current['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener')
+                    current['overrides']['gui']['ai.openclaw.mesh-deploy-listener'] = True
+                with self.assertRaisesRegex(Refused, 'disabled overrides changed'):
+                    journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                                   gui_only_stop, listener_stop_evidence, hold=hold)
+                self.assertFalse(journal.listener_fenced())
+
+    def test_full_scope_listener_stop_requires_gui_override_when_user_disabled(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                def user_only_stop():
+                    current['loaded']['gui'].remove('ai.openclaw.mesh-deploy-listener')
+                    current['overrides']['user']['ai.openclaw.mesh-deploy-listener'] = True
+                with self.assertRaisesRegex(Refused, 'disabled overrides changed'):
+                    journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                                   user_only_stop, listener_stop_evidence, hold=hold)
+                self.assertFalse(journal.listener_fenced())
+
+    def test_full_scope_rechecks_durable_listener_proof_before_nats(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        calls = []
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                intent = journal.append('intent', unit='mesh-deploy-listener',
+                                        action='disable-and-unload')
+                fence_listener(current)
+                proof = listener_stop_evidence()
+                del proof['connections_closed']
+                journal.append('verified', intent=intent['sequence'], unit='mesh-deploy-listener',
+                               action='disable-and-unload', evidence={**proof,
+                               'entrypoint_loaded': copy.deepcopy(current['loaded']),
+                               'entrypoint_overrides': copy.deepcopy(current['overrides'])})
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'listener must be verifiably disabled'):
+                    journal.mutate('nats', 'disable-and-unload', lambda: calls.append('nats'),
+                                   lambda: {'verified': True}, hold=hold)
+                self.assertEqual(len(journal.records), before)
+                self.assertEqual(calls, [])
+
+    def test_full_scope_listener_proof_before_its_intent_refuses(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                fence_listener(current)
+                future_intent = len(journal.records) + 1
+                journal.append('verified', intent=future_intent,
+                               unit='mesh-deploy-listener', action='disable-and-unload',
+                               evidence={**listener_stop_evidence(),
+                               'entrypoint_loaded': copy.deepcopy(current['loaded']),
+                               'entrypoint_overrides': copy.deepcopy(current['overrides'])})
+                intent = journal.append('intent', unit='mesh-deploy-listener',
+                                        action='disable-and-unload')
+                self.assertEqual(intent['sequence'], future_intent)
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'listener must be verifiably disabled'):
+                    journal.mutate('nats', 'disable-and-unload', lambda: self.fail('NATS unload ran'),
+                                   lambda: {'verified': True}, hold=hold)
+                self.assertEqual(len(journal.records), before)
+
     def test_full_scope_rechecks_entrypoints_but_restores_known_units_after_drift(self):
         prior = full_node_inventory()
         with patch('preservation_journal.capture_entrypoint_inventory',
@@ -449,11 +993,975 @@ class JournalTests(unittest.TestCase):
                         check_closed=lambda: None)
                     result = journal.recover(restore,
                         lambda unit, _: {**current[unit], 'verified': True},
-                        lambda: {'verified': True}, hold=hold)
+                        lambda: {'verified': True}, hold=hold,
+                        deploy_fence=lambda: {'verified': True})
                 self.assertIn('gateway', restored)
                 self.assertFalse(result['restored'])
                 self.assertIn('entrypoints', [row['unit'] for row in result['errors']])
                 self.assertEqual(journal.records[-1]['event'], 'recovery-finished')
+
+    def test_full_scope_refuses_all_restores_when_member_one_hold_changed(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        current['nats-1'].update(loaded=True, running=True, disabled=False)
+        current['nats-2'].update(loaded=False, running=False)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=full_entrypoint_evidence(prior)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, prepare=lambda *_: None)
+                result = journal.recover(lambda *_: self.fail('restore preceded member-1 check'),
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: {'verified': True})
+                self.assertFalse(result['restored'])
+                self.assertIn('nats-1', [row['unit'] for row in result['errors']])
+                self.assertFalse(any(row['event'] == 'restoration-intent' for row in journal.records))
+
+    def test_full_scope_refuses_held_unit_changed_during_restoration(self):
+        for held_unit in ('nats-1', 'federation-tick'):
+            with self.subTest(held_unit=held_unit):
+                prior = full_node_inventory()
+                current = copy.deepcopy(prior)
+                current['nats-2'].update(loaded=False, running=False)
+                current['mesh-deploy-listener'].update(loaded=False, running=False)
+                restored = []
+                def restore(unit, wanted):
+                    restored.append(unit)
+                    current[unit] = copy.deepcopy(wanted)
+                    if unit == 'nats-2':
+                        current[held_unit].update(loaded=True, running=True, disabled=False)
+                case_root = pathlib.Path(self.temp.name) / ('case-' + held_unit)
+                with patch('preservation_journal.capture_entrypoint_inventory',
+                           return_value=full_entrypoint_evidence(prior)):
+                    with Journal(case_root / 'journals' / 'journal', prior,
+                                 node_lock=case_root / 'node.lock',
+                                 scope=FULL_NODE_SCOPE) as journal:
+                        hold = SimpleNamespace(journal=journal, prepare=lambda *_: None,
+                            before_restore=lambda: None, check_closed=lambda: None,
+                            complete=lambda *_: self.fail('hold reopened after held unit changed'))
+                        result = journal.recover(restore,
+                            lambda unit, _: {**current[unit], 'verified': True},
+                            lambda: {'verified': True}, hold=hold,
+                            deploy_fence=lambda: {'verified': True})
+                        self.assertEqual(restored, ['nats-2'])
+                        self.assertFalse(result['restored'])
+                        self.assertIn(held_unit, [row['unit'] for row in result['errors']])
+                        self.assertFalse(any(row['event'] == 'execution-hold-restored'
+                                             for row in journal.records))
+
+    def test_full_scope_does_not_release_deploy_listener_after_gateway_failure(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        for unit in ('gateway', 'mesh-deploy-listener'):
+            current[unit].update(loaded=False, running=False)
+        restored = []
+        def restore(unit, wanted):
+            restored.append(unit)
+            if unit == 'gateway':
+                raise Refused('gateway restoration failed')
+            current[unit] = copy.deepcopy(wanted)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=full_entrypoint_evidence(prior)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, prepare=lambda *_: None,
+                    before_restore=lambda: None, check_closed=lambda: None)
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: {'verified': True})
+                self.assertEqual(restored, ['gateway'])
+                self.assertFalse(result['restored'])
+                self.assertIn('mesh-deploy-listener', [row['unit'] for row in result['errors']])
+
+    def test_full_scope_listener_release_requires_final_state_and_deploy_fence(self):
+        for failed_gate in ('final-state', 'deploy-fence'):
+            with self.subTest(failed_gate=failed_gate):
+                prior = full_node_inventory()
+                current = copy.deepcopy(prior)
+                baseline = full_entrypoint_evidence(prior)
+                def entrypoints(_):
+                    result = copy.deepcopy(baseline)
+                    result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                                     if state['loaded'])
+                    return result
+                root = pathlib.Path(self.temp.name) / ('listener-' + failed_gate)
+                with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+                    with Journal(root / 'journals' / 'journal', prior,
+                                 node_lock=root / 'node.lock', scope=FULL_NODE_SCOPE) as journal:
+                        current['mesh-deploy-listener'].update(loaded=False, running=False)
+                        restored = []
+                        fence_calls = []
+                        complete_calls = []
+                        hold = SimpleNamespace(journal=journal, prepare=lambda *_: None,
+                            before_restore=lambda: None, check_closed=lambda: None,
+                            complete=lambda *_: complete_calls.append(True) or {'verified': True})
+                        def restore(unit, wanted):
+                            restored.append(unit)
+                            current[unit] = copy.deepcopy(wanted)
+                        def fence():
+                            fence_calls.append(True)
+                            return {'verified': failed_gate != 'deploy-fence'}
+                        result = journal.recover(restore,
+                            lambda unit, _: {**current[unit], 'verified': True},
+                            lambda: {'verified': failed_gate != 'final-state'},
+                            hold=hold, deploy_fence=fence)
+                        self.assertFalse(result['restored'])
+                        self.assertEqual(restored, [])
+                        self.assertEqual(fence_calls, [] if failed_gate == 'final-state' else [True])
+                        self.assertEqual(complete_calls, [])
+                        self.assertFalse(any(row['event'] == 'listener-release-verified'
+                                             for row in journal.records))
+                        self.assertFalse(any(row['event'] == 'execution-hold-restored'
+                                             for row in journal.records))
+
+    def test_full_scope_listener_release_is_durable_before_restore(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                current['mesh-deploy-listener'].update(loaded=False, running=False)
+                restored = []
+                script = ('import fcntl,os,sys; '
+                          'fd=os.open(sys.argv[1],os.O_RDONLY); '
+                          'fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)')
+                def assert_guarded():
+                    probe = subprocess.run([sys.executable, '-c', script, str(self.nats_lock)],
+                                           capture_output=True, text=True, timeout=5)
+                    self.assertNotEqual(probe.returncode, 0)
+                    self.assertIn('BlockingIOError', probe.stderr)
+                hold = SimpleNamespace(journal=journal, prepare=lambda *_: None,
+                    before_restore=lambda: None, check_closed=lambda: None,
+                    complete=lambda *_: {'verified': True})
+                def restore(unit, wanted):
+                    self.assertEqual(unit, 'mesh-deploy-listener')
+                    self.assertTrue(any(row['event'] == 'listener-release-verified'
+                                        for row in journal.records))
+                    assert_guarded()
+                    restored.append(unit)
+                    current[unit] = copy.deepcopy(wanted)
+                def fence():
+                    assert_guarded()
+                    return {'verified': True}
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=fence)
+                self.assertTrue(result['restored'], result)
+                self.assertEqual(restored, ['mesh-deploy-listener'])
+                rows = [(row['event'], row.get('unit')) for row in journal.records]
+                self.assertLess(rows.index(('listener-release-verified', None)),
+                                rows.index(('restoration-intent', 'mesh-deploy-listener')))
+
+    def test_full_scope_listener_precommit_refuses_new_root_marker(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                current['mesh-deploy-listener'].update(loaded=False, running=False)
+                restored = []
+                hold = SimpleNamespace(journal=journal, prepare=lambda *_: None,
+                    before_restore=lambda: None, check_closed=lambda: None,
+                    complete=lambda *_: {'verified': True})
+                def fence():
+                    self.nats_marker.write_text('owned root marker')
+                    return {'verified': True}
+                result = journal.recover(lambda unit, _: restored.append(unit),
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold, deploy_fence=fence)
+                self.assertFalse(result['restored'])
+                self.assertEqual(restored, [])
+                self.assertTrue(any(row['event'] == 'listener-release-verified'
+                                    for row in journal.records))
+                self.assertFalse(any(row['event'] == 'recovery-verified'
+                                     and row.get('unit') == 'mesh-deploy-listener'
+                                     for row in journal.records))
+
+    def test_full_scope_listener_release_write_failure_prevents_restore(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                current['mesh-deploy-listener'].update(loaded=False, running=False)
+                restored = []
+                hold = SimpleNamespace(journal=journal, prepare=lambda *_: None,
+                    before_restore=lambda: None, check_closed=lambda: None)
+                original = journal.append
+                def append(event, **data):
+                    if event == 'listener-release-verified':
+                        raise OSError('owned receipt write failure')
+                    return original(event, **data)
+                with patch.object(journal, 'append', side_effect=append):
+                    with self.assertRaises(Refused):
+                        journal.recover(lambda unit, _: restored.append(unit),
+                            lambda unit, _: {**current[unit], 'verified': True},
+                            lambda: {'verified': True}, hold=hold,
+                            deploy_fence=lambda: {'verified': True})
+                self.assertEqual(restored, [])
+                self.assertFalse(any(row['event'] == 'restoration-intent'
+                                     and row.get('unit') == 'mesh-deploy-listener'
+                                     for row in journal.records))
+
+    def test_full_scope_refuses_restarted_nats_before_any_restore(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: self.fail('hold preparation ran'))
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True),
+                    listener_stop_evidence, hold=hold)
+                journal.mutate('nats', 'disable-and-unload',
+                    lambda: current['nats'].update(loaded=False, running=False, disabled=True),
+                    lambda: listener_stop_evidence('nats'), hold=hold)
+                current['nats'] = copy.deepcopy(prior['nats'])
+                before = len(journal.records)
+                restored = []
+                with self.assertRaisesRegex(Refused, 'stopped unit state changed before verified recovery: nats'):
+                    journal.recover(lambda unit, _: restored.append(unit),
+                        lambda unit, _: {**current[unit], 'verified': True},
+                        lambda: {'verified': True}, hold=hold,
+                        deploy_fence=lambda: {'verified': True})
+                self.assertEqual(restored, [])
+                self.assertEqual(len(journal.records), before)
+
+    def test_full_scope_refuses_gateway_restart_during_hold_prepare(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: current['gateway'].update(loaded=True, running=True, disabled=False))
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True),
+                    listener_stop_evidence, hold=hold)
+                journal.mutate('gateway', 'disable-and-unload',
+                    lambda: current['gateway'].update(loaded=False, running=False, disabled=True),
+                    lambda: listener_stop_evidence('gateway'), hold=hold)
+                before = len(journal.records)
+                before_state = copy.deepcopy(journal.active)
+                with self.assertRaisesRegex(Refused, 'stopped unit state changed before verified recovery: gateway'):
+                    journal.recover(lambda *_: self.fail('restore ran'),
+                        lambda unit, _: {**current[unit], 'verified': True},
+                        lambda: self.fail('final check ran'), hold=hold,
+                        deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertEqual(len(journal.records), before)
+                self.assertEqual(journal.active, before_state)
+
+    def test_full_scope_refuses_cleared_stop_override_before_recovery(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: self.fail('hold prepared'))
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True),
+                    listener_stop_evidence, hold=hold)
+                journal.mutate('gateway', 'disable-and-unload',
+                    lambda: current['gateway'].update(loaded=False, running=False, disabled=True),
+                    lambda: listener_stop_evidence('gateway'), hold=hold)
+                current['gateway']['disabled'] = False
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'stopped unit state changed before verified recovery: gateway'):
+                    journal.recover(lambda *_: self.fail('restore ran'),
+                        lambda unit, _: {**current[unit], 'verified': True},
+                        lambda: self.fail('final check ran'), hold=hold,
+                        deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertEqual(len(journal.records), before)
+
+    def test_full_scope_refuses_re_fenced_restart_without_process_proof(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None)
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True),
+                    listener_stop_evidence, hold=hold)
+                journal.mutate('gateway', 'disable-and-unload',
+                    lambda: current['gateway'].update(loaded=False, running=False, disabled=True),
+                    lambda: listener_stop_evidence('gateway'), hold=hold)
+                journal.append('override-clear-intent', unit='gateway')
+                self.assertEqual(journal.records[-1]['event'], 'override-clear-intent')
+            with Journal(self.root, node_lock=self.node_lock) as reopened:
+                hold = SimpleNamespace(journal=reopened,
+                    prepare=lambda *_: self.fail('hold prepared'))
+                before = len(reopened.records)
+                before_state = copy.deepcopy(reopened.active)
+                with self.assertRaisesRegex(Refused,
+                                            'stopped unit override was cleared without verified recovery: gateway'):
+                    reopened.recover(lambda *_: self.fail('restore ran'),
+                        lambda unit, _: ({**current[unit], 'verified': True}
+                                         if unit != 'gateway' else self.fail('gateway observation ran')),
+                        lambda: self.fail('final check ran'), hold=hold,
+                        deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertEqual(len(reopened.records), before)
+                self.assertEqual(reopened.active, before_state)
+
+    def test_full_scope_stops_after_override_clear_and_restore_failure(self):
+        prior = full_node_inventory()
+        gateway_plist = pathlib.Path(self.temp.name) / 'gateway.plist'
+        gateway_plist.write_bytes(b'owned gateway plist')
+        prior['gateway']['identity']['plist_sha256'] = hashlib.sha256(gateway_plist.read_bytes()).hexdigest()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None)
+                anchor_hold(journal, hold)
+                for unit in ('mesh-deploy-listener', 'gateway', 'workplan-viewer'):
+                    journal.mutate(unit, 'disable-and-unload',
+                        lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
+                restored = []
+                def restore(unit, wanted):
+                    restored.append(unit)
+                    if unit == 'gateway':
+                        with self.assertRaisesRegex(Refused, 'outside the current persistent restoration'):
+                            journal.begin_override_clear('workplan-viewer')
+                        def enable_after_hold():
+                            raise Refused('owned enable failure')
+                        service = SimpleNamespace(label='ai.openclaw.gateway', plist=gateway_plist,
+                                                  enable_after_hold=enable_after_hold)
+                        restore_disabled_daemon(service, journal, unit, wanted, lambda _: True, timeout=5)
+                    current[unit] = copy.deepcopy(wanted)
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: {'verified': True})
+                self.assertFalse(result['restored'])
+                gateway_error = next(error for error in result['errors']
+                                     if error['unit'] == 'gateway')
+                self.assertIn('owned enable failure', gateway_error['detail'])
+                self.assertIn('disabled override unverified', gateway_error['detail'])
+                self.assertEqual(journal.records[-1]['event'], 'recovery-finished')
+                self.assertIn(gateway_error, journal.records[-1]['errors'])
+                self.assertEqual(restored, ['gateway'])
+                clear = next(row for row in journal.records
+                             if row['event'] == 'override-clear-intent')
+                self.assertEqual(clear['unit'], 'gateway')
+                self.assertEqual(journal.records[clear['restoration_intent']]['event'],
+                                 'restoration-intent')
+                self.assertEqual(journal.records[clear['stop_intent']]['action'],
+                                 'disable-and-unload')
+                self.assertFalse(any(error['unit'] == 'workplan-viewer'
+                                     for error in result['errors']))
+                self.assertFalse(any(row['event'] == 'restoration-intent'
+                                     and row.get('unit') == 'workplan-viewer' for row in journal.records))
+
+    def test_failed_daemon_readiness_keeps_listener_fenced_and_retry_unproven(self):
+        prior = full_node_inventory()
+        bridge_plist = pathlib.Path(self.temp.name) / 'bridge.plist'
+        bridge_plist.write_bytes(b'owned bridge plist')
+        prior['mesh-bridge']['identity']['plist_sha256'] = hashlib.sha256(
+            bridge_plist.read_bytes()).hexdigest()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None)
+                anchor_hold(journal, hold)
+                for unit in ('mesh-deploy-listener', 'mesh-bridge'):
+                    journal.mutate(unit, 'disable-and-unload',
+                        lambda unit=unit: current[unit].update(loaded=False, running=False,
+                                                               disabled=True),
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
+                restored = []
+                def restore(unit, wanted):
+                    restored.append(unit)
+                    self.assertEqual(unit, 'mesh-bridge')
+                    state = current[unit]
+                    def status(domain='gui'):
+                        return ({'loaded': False} if domain == 'user' else
+                                {'loaded': state['loaded'], 'running': state['running'], 'pid': 410})
+                    service = SimpleNamespace(label='ai.openclaw.mesh-bridge', plist=bridge_plist,
+                        status=status, disabled=lambda: state['disabled'],
+                        enable_after_hold=lambda: state.update(disabled=False),
+                        bootstrap=lambda: state.update(loaded=True, running=True),
+                        bind=lambda *_: {'status': status()},
+                        disable_for_hold=lambda: state.update(disabled=True))
+                    restore_disabled_daemon(service, journal, unit, wanted,
+                                            lambda _: False, timeout=.1)
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: self.fail('listener fence reached'))
+                self.assertFalse(result['restored'])
+                self.assertEqual(restored, ['mesh-bridge'])
+                self.assertTrue(current['mesh-bridge']['running'])
+                self.assertTrue(current['mesh-bridge']['disabled'])
+                self.assertFalse(current['mesh-deploy-listener']['loaded'])
+                self.assertTrue(current['mesh-deploy-listener']['disabled'])
+                self.assertTrue(any(error['unit'] == 'mesh-bridge' and
+                                    'did not reach readiness' in error['detail']
+                                    for error in result['errors']), result)
+                self.assertFalse(any(row['event'] == 'restoration-intent'
+                                     and row.get('unit') == 'mesh-deploy-listener'
+                                     for row in journal.records))
+                with self.assertRaisesRegex(Refused, 'unrestored node cannot be sealed'):
+                    journal.resolve()
+            current['mesh-bridge'].update(loaded=False, running=False)
+            with Journal(self.root, node_lock=self.node_lock) as reopened:
+                hold = SimpleNamespace(journal=reopened,
+                    prepare=lambda *_: self.fail('hold prepared'))
+                before = len(reopened.records)
+                with self.assertRaisesRegex(Refused,
+                        'stopped unit override was cleared without verified recovery: mesh-bridge'):
+                    reopened.recover(lambda *_: self.fail('restore ran'),
+                        lambda unit, _: {**current[unit], 'verified': True},
+                        lambda: self.fail('final check ran'), hold=hold,
+                        deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertEqual(len(reopened.records), before)
+
+    def test_override_clear_intent_can_only_follow_its_restoration_once(self):
+        prior = full_node_inventory()
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=full_entrypoint_evidence(prior)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                stop = journal.append('intent', unit='gateway', action='disable-and-unload')
+                journal.append('verified', unit='gateway', intent=stop['sequence'],
+                               evidence=listener_stop_evidence('gateway'))
+                journal.append('restoration-intent', unit='gateway', action='restore-prior')
+                journal.restoring_unit = 'gateway'
+                journal.begin_override_clear('gateway')
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'immediately follow'):
+                    journal.begin_override_clear('gateway')
+                self.assertEqual(len(journal.records), before)
+
+    def test_override_clear_refuses_a_previously_recovered_unit(self):
+        prior = full_node_inventory()
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=full_entrypoint_evidence(prior)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                stop = journal.append('intent', unit='gateway', action='disable-and-unload')
+                journal.append('verified', unit='gateway', intent=stop['sequence'],
+                               evidence=listener_stop_evidence('gateway'))
+                journal.append('recovery-verified', unit='gateway', evidence={'verified': True})
+                journal.append('restoration-intent', unit='gateway', action='restore-prior')
+                journal.restoring_unit = 'gateway'
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'lacks a verified persistent stop'):
+                    journal.begin_override_clear('gateway')
+                self.assertEqual(len(journal.records), before)
+
+    def test_override_clear_requires_verified_timer_stop_and_refuses_nats_members(self):
+        prior = full_node_inventory()
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=full_entrypoint_evidence(prior)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                for unit, evidence in (('observer', timer_stop_evidence('observer')),
+                                       ('nats', listener_stop_evidence('nats'))):
+                    stop = journal.append('intent', unit=unit, action='disable-and-unload')
+                    journal.append('verified', unit=unit, intent=stop['sequence'],
+                                   evidence=evidence)
+                    journal.append('restoration-intent', unit=unit, action='restore-prior')
+                    journal.restoring_unit = unit
+                    before = len(journal.records)
+                    if unit == 'observer':
+                        record = journal.begin_override_clear(unit)
+                        self.assertEqual(record['stop_intent'], stop['sequence'])
+                    else:
+                        with self.assertRaisesRegex(Refused, 'outside the current persistent restoration'):
+                            journal.begin_override_clear(unit)
+                        self.assertEqual(len(journal.records), before)
+
+    def test_override_clear_refuses_timer_without_spawn_proof(self):
+        prior = full_node_inventory()
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=full_entrypoint_evidence(prior)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                stop = journal.append('intent', unit='observer', action='disable-and-unload')
+                evidence = timer_stop_evidence('observer')
+                evidence['spawn_evidence']['coverage_complete'] = False
+                journal.append('verified', unit='observer', intent=stop['sequence'], evidence=evidence)
+                journal.append('restoration-intent', unit='observer', action='restore-prior')
+                journal.restoring_unit = 'observer'
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'lacks a verified persistent stop'):
+                    journal.begin_override_clear('observer')
+                self.assertEqual(len(journal.records), before)
+
+    def test_timer_override_clear_without_recovery_poisoned_on_reopen(self):
+        prior = full_node_inventory()
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=full_entrypoint_evidence(prior)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                stop = journal.append('intent', unit='observer', action='disable-and-unload')
+                journal.append('verified', unit='observer', intent=stop['sequence'],
+                               evidence=timer_stop_evidence('observer'))
+                journal.append('restoration-intent', unit='observer', action='restore-prior')
+                journal.restoring_unit = 'observer'
+                journal.begin_override_clear('observer')
+            with Journal(self.root, node_lock=self.node_lock) as reopened:
+                hold = SimpleNamespace(journal=reopened,
+                    prepare=lambda *_: self.fail('hold prepared'))
+                before = len(reopened.records)
+                with self.assertRaisesRegex(Refused,
+                        'stopped unit override was cleared without verified recovery: observer'):
+                    reopened.recover(lambda *_: self.fail('restore ran'),
+                        lambda *_: self.fail('observe ran'), lambda: self.fail('final check ran'),
+                        hold=hold, deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertEqual(len(reopened.records), before)
+
+    def test_full_scope_disabled_daemon_restore_verifies_after_journaled_enable(self):
+        prior = full_node_inventory()
+        gateway_plist = pathlib.Path(self.temp.name) / 'gateway.plist'
+        gateway_plist.write_bytes(b'owned gateway plist')
+        prior['gateway']['identity']['plist_sha256'] = hashlib.sha256(gateway_plist.read_bytes()).hexdigest()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None, complete=lambda *_: {'verified': True})
+                anchor_hold(journal, hold)
+                for unit in ('mesh-deploy-listener', 'gateway'):
+                    journal.mutate(unit, 'disable-and-unload',
+                        lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
+                def restore(unit, wanted):
+                    if unit != 'gateway':
+                        current[unit] = copy.deepcopy(wanted)
+                        return
+                    state = current[unit]
+                    def status(domain='gui'):
+                        return ({'loaded': False} if domain == 'user' else
+                                {'loaded': state['loaded'], 'running': state['running'], 'pid': 410})
+                    service = SimpleNamespace(label='ai.openclaw.gateway', plist=gateway_plist, status=status,
+                        enable_after_hold=lambda: state.update(disabled=False),
+                        bootstrap=lambda: state.update(loaded=True, running=True),
+                        bind=lambda *_: {'status': status()})
+                    restore_disabled_daemon(service, journal, unit, wanted, lambda _: True, timeout=5)
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: {'verified': True})
+                self.assertTrue(result['restored'])
+                events = [row['event'] for row in journal.records if row.get('unit') == 'gateway']
+                self.assertLess(events.index('restoration-intent'), events.index('override-clear-intent'))
+                self.assertLess(events.index('override-clear-intent'), events.index('recovery-verified'))
+
+    def test_full_scope_stops_when_another_unit_loses_its_stop_proof(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None)
+                anchor_hold(journal, hold)
+                for unit in ('mesh-deploy-listener', 'memory-daemon', 'mission-control', 'gateway'):
+                    journal.mutate(unit, 'disable-and-unload',
+                        lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
+                restored = []
+                def restore(unit, wanted):
+                    restored.append(unit)
+                    if unit == 'memory-daemon':
+                        journal.append('override-clear-intent', unit='gateway')
+                    current[unit] = copy.deepcopy(wanted)
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: {'verified': True})
+                self.assertFalse(result['restored'])
+                self.assertEqual(restored, ['memory-daemon'])
+                self.assertFalse(any(row['event'] == 'restoration-intent'
+                                     and row.get('unit') == 'mission-control' for row in journal.records))
+
+    def test_full_scope_refuses_gateway_restart_during_recovery_loop(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None, complete=lambda *_: self.fail('hold reopened'))
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True),
+                    listener_stop_evidence, hold=hold)
+                journal.mutate('gateway', 'disable-and-unload',
+                    lambda: current['gateway'].update(loaded=False, running=False, disabled=True),
+                    lambda: listener_stop_evidence('gateway'), hold=hold)
+                journal.mutate('workplan-viewer', 'disable-and-unload',
+                    lambda: current['workplan-viewer'].update(loaded=False, running=False, disabled=True),
+                    lambda: listener_stop_evidence('workplan-viewer'), hold=hold)
+                def observe(unit, _):
+                    if unit == 'health-watch':
+                        current['gateway'] = copy.deepcopy(prior['gateway'])
+                    return {**current[unit], 'verified': True}
+                restored = []
+                result = journal.recover(lambda unit, _: restored.append(unit), observe,
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertFalse(result['restored'])
+                self.assertIn('gateway', [row['unit'] for row in result['errors']])
+                self.assertEqual(restored, [])
+                self.assertFalse(any(row['event'] == 'already-restored'
+                                     and row.get('unit') == 'gateway' for row in journal.records))
+
+    def test_full_scope_stops_recovery_when_a_stopped_unit_becomes_unobservable(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None, complete=lambda *_: self.fail('hold reopened'))
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True),
+                    listener_stop_evidence, hold=hold)
+                for unit in ('gateway', 'workplan-viewer'):
+                    journal.mutate(unit, 'disable-and-unload',
+                        lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
+                def observe(unit, _):
+                    if unit == 'health-watch':
+                        current['gateway']['unobservable'] = True
+                    if unit == 'gateway' and current[unit].get('unobservable'):
+                        raise Refused('owned job became unobservable')
+                    return {**current[unit], 'verified': True}
+                restored = []
+                result = journal.recover(lambda unit, _: restored.append(unit), observe,
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertFalse(result['restored'])
+                self.assertIn('gateway', [row['unit'] for row in result['errors']])
+                self.assertNotIn('workplan-viewer', restored)
+
+    def test_full_scope_refuses_listener_restart_before_release(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, complete=lambda *_: self.fail('hold reopened'))
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True),
+                    listener_stop_evidence, hold=hold)
+                current['mesh-deploy-listener'] = copy.deepcopy(prior['mesh-deploy-listener'])
+                restored = []
+                fence_calls = []
+                def fence():
+                    fence_calls.append(True)
+                    return {'verified': True}
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'stopped unit state changed before verified recovery'):
+                    journal.recover(lambda unit, _: restored.append(unit),
+                        lambda unit, _: {**current[unit], 'verified': True},
+                        lambda: {'verified': True}, hold=hold,
+                        deploy_fence=fence)
+                self.assertEqual(restored, [])
+                self.assertEqual(fence_calls, [])
+                self.assertEqual(len(journal.records), before)
+                self.assertFalse(any(row['event'] == 'listener-release-verified'
+                                     for row in journal.records))
+
+    def test_full_scope_refuses_listener_restart_after_unfinished_release(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None, complete=lambda *_: {'verified': True})
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True),
+                    listener_stop_evidence, hold=hold)
+                journal.append('listener-release-verified', evidence={'verified': True})
+                current['mesh-deploy-listener'] = copy.deepcopy(prior['mesh-deploy-listener'])
+                restored = []
+                fence_calls = []
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'stopped unit state changed before verified recovery'):
+                    journal.recover(lambda unit, _: restored.append(unit),
+                        lambda unit, _: {**current[unit], 'verified': True},
+                        lambda: {'verified': True}, hold=hold,
+                        deploy_fence=lambda: fence_calls.append(True) or {'verified': True})
+                self.assertEqual(restored, [])
+                self.assertEqual(fence_calls, [])
+                self.assertEqual(len(journal.records), before)
+                self.assertFalse(any(row['event'] == 'already-restored'
+                                     and row.get('unit') == 'mesh-deploy-listener'
+                                     for row in journal.records))
+
+    def test_full_scope_listener_started_but_unverified_requires_stop_before_retry(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                starts = []
+                fence_calls = []
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None,
+                    before_restore=lambda: None, check_closed=lambda: None,
+                    complete=lambda *_: {'verified': True})
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                    lambda: current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True),
+                    listener_stop_evidence, hold=hold)
+                def fence():
+                    fence_calls.append(True)
+                    return {'verified': True}
+                def restore(unit, wanted):
+                    starts.append(unit)
+                    current[unit] = copy.deepcopy(wanted)
+                    if len(starts) == 1:
+                        raise TimeoutError('owned readiness timeout after start')
+                def recover():
+                    return journal.recover(restore,
+                        lambda unit, _: {**current[unit], 'verified': True},
+                        lambda: {'verified': True}, hold=hold, deploy_fence=fence)
+                first = recover()
+                self.assertFalse(first['restored'])
+                self.assertEqual(starts, ['mesh-deploy-listener'])
+                with self.assertRaisesRegex(Refused, 'stopped unit state changed before verified recovery'):
+                    recover()
+                self.assertEqual(starts, ['mesh-deploy-listener'])
+                self.assertEqual(fence_calls, [True])
+                current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True)
+                third = recover()
+                self.assertTrue(third['restored'], third)
+                self.assertEqual(starts, ['mesh-deploy-listener', 'mesh-deploy-listener'])
+                self.assertEqual(fence_calls, [True, True])
+
+    def test_full_scope_refuses_listener_release_after_late_service_or_job_drift(self):
+        for drift in ('service', 'extra-job', 'missing-job', 'listener-start'):
+            with self.subTest(drift=drift):
+                prior = full_node_inventory()
+                current = copy.deepcopy(prior)
+                baseline = full_entrypoint_evidence(prior)
+                releasing = []
+                def entrypoints(_):
+                    result = copy.deepcopy(baseline)
+                    result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                                     if state['loaded'])
+                    if releasing and drift == 'extra-job':
+                        result['loaded']['gui'].append('ai.openclaw.foreign')
+                    if releasing and drift == 'missing-job':
+                        result['loaded']['gui'].remove('ai.openclaw.gateway')
+                    return result
+                root = pathlib.Path(self.temp.name) / ('listener-drift-' + drift)
+                with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+                    with Journal(root / 'journals' / 'journal', prior,
+                                 node_lock=root / 'node.lock', scope=FULL_NODE_SCOPE) as journal:
+                        current['mesh-deploy-listener'].update(loaded=False, running=False)
+                        restored = []
+                        fence_calls = []
+                        complete_calls = []
+                        listener_observations = []
+                        def observe(unit, _):
+                            if unit == 'mesh-deploy-listener':
+                                listener_observations.append(True)
+                                if len(listener_observations) == 2:
+                                    releasing.append(True)
+                                    if drift == 'service':
+                                        current['gateway']['running'] = False
+                                    if drift == 'listener-start':
+                                        current['mesh-deploy-listener'] = copy.deepcopy(prior['mesh-deploy-listener'])
+                            return {**current[unit], 'verified': True}
+                        hold = SimpleNamespace(journal=journal, prepare=lambda *_: None,
+                            before_restore=lambda: None, check_closed=lambda: None,
+                            complete=lambda *_: complete_calls.append(True) or {'verified': True})
+                        def fence():
+                            fence_calls.append(True)
+                            return {'verified': True}
+                        result = journal.recover(lambda unit, _: restored.append(unit), observe,
+                            lambda: {'verified': True}, hold=hold,
+                            deploy_fence=fence)
+                        self.assertFalse(result['restored'])
+                        self.assertEqual(restored, [])
+                        self.assertEqual(fence_calls, [])
+                        self.assertEqual(complete_calls, [])
+                        self.assertFalse(any(row['event'] == 'listener-release-verified'
+                                             for row in journal.records))
+
+    def test_full_scope_requires_deploy_fence_before_recovery_records(self):
+        prior = full_node_inventory()
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=full_entrypoint_evidence(prior)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'deploy listener fence'):
+                    journal.recover(lambda *_: self.fail('restoration entered'),
+                        lambda *_: self.fail('observation entered'),
+                        lambda: self.fail('final check entered'),
+                        hold=SimpleNamespace(journal=journal))
+                self.assertEqual(len(journal.records), before)
 
     def test_full_scope_recovery_refuses_root_marker_without_transfer(self):
         prior = full_node_inventory()
@@ -501,7 +2009,8 @@ class JournalTests(unittest.TestCase):
                     before = len(journal.records)
                     with self.assertRaisesRegex(Refused, 'exclusive exclusion'):
                         journal.recover(lambda unit, _: restored.append(unit),
-                                        observe, final_check, hold=hold)
+                                        observe, final_check, hold=hold,
+                                        deploy_fence=lambda: {'verified': True})
                     self.assertEqual(len(journal.records), before)
                     self.assertEqual(restored, [])
                     self.assertEqual(observed, [])
@@ -539,7 +2048,8 @@ class JournalTests(unittest.TestCase):
                                        complete=complete)
                 result = journal.recover(lambda *_: self.fail('already restored'),
                     lambda unit, _: {**prior[unit], 'verified': True},
-                    lambda: {'verified': True}, hold=hold)
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: {'verified': True})
                 self.assertTrue(result['restored'])
                 self.nats_marker.write_text('{}')
                 with self.assertRaisesRegex(Refused, 'marker already exists'):
@@ -561,16 +2071,20 @@ class JournalTests(unittest.TestCase):
                     journal.check_entrypoints()
                 current = copy.deepcopy(baseline)
                 hold = SimpleNamespace(journal=journal, check_forward=lambda: None)
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fence_listener(current),
+                               listener_stop_evidence, hold=hold)
                 def stop_viewer():
-                    current['loaded']['gui'].remove('ai.openclaw.workplan-viewer')
-                journal.mutate('workplan-viewer', 'stop', stop_viewer,
-                               lambda: {'verified': True}, hold=hold)
+                    fence_unit(current, 'workplan-viewer')
+                journal.mutate('workplan-viewer', 'disable-and-unload', stop_viewer,
+                               lambda: listener_stop_evidence('workplan-viewer'), hold=hold)
                 self.assertEqual(journal.records[-1]['evidence']['entrypoint_loaded'],
                                  current['loaded'])
                 def unload_timer():
-                    current['loaded']['gui'].remove('ai.openclaw.consolidation-scheduler')
-                journal.mutate('consolidation-scheduler', 'unload', unload_timer,
-                               lambda: {'verified': True}, hold=hold)
+                    fence_unit(current, 'consolidation-scheduler')
+                journal.mutate('consolidation-scheduler', 'disable-and-unload', unload_timer,
+                               lambda: timer_stop_evidence('consolidation-scheduler'), hold=hold)
                 self.assertEqual(journal.records[-1]['evidence']['entrypoint_loaded'],
                                  current['loaded'])
                 current = copy.deepcopy(baseline)
@@ -588,7 +2102,8 @@ class JournalTests(unittest.TestCase):
                     complete=lambda *_: {'verified': True})
                 result = journal.recover(lambda *_: self.fail('already restored'),
                     lambda unit, _: {**prior[unit], 'verified': True},
-                    lambda: {'verified': True}, hold=hold)
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: {'verified': True})
                 self.assertTrue(result['restored'])
                 with self.assertRaisesRegex(Refused, 'continuous launchd and process watch'):
                     journal.seal()
@@ -680,7 +2195,7 @@ class JournalTests(unittest.TestCase):
         with self.assertRaisesRegex(Refused, 'not approved'):
             preservation_journal.valid_entrypoint_inventory(malformed, prior)
 
-    def test_excluded_job_reanchors_for_restore_only_after_reboot_or_app_update(self):
+    def test_full_node_reboot_refuses_recovery_before_boot_hold_decision(self):
         prior = full_node_inventory()
         baseline = full_entrypoint_evidence(prior)
         baseline['excluded'] = tailscale_record()
@@ -694,45 +2209,53 @@ class JournalTests(unittest.TestCase):
             current['excluded'][TAILSCALE_LABEL]['launchd']['runs'] = 2
             current['excluded'][TAILSCALE_LABEL]['boot'] = '7' * 64
             with Journal(self.root, boot='7' * 64, node_lock=self.node_lock) as reopened:
-                hold = SimpleNamespace(journal=reopened, prepare=lambda *_: None,
-                    complete=lambda *_: {'verified': True})
                 with self.assertRaisesRegex(Refused, 'excluded system job changed'):
                     reopened.check_entrypoints()
-                result = reopened.recover(lambda *_: self.fail('already restored'),
-                    lambda unit, _: {**prior[unit], 'verified': True},
-                    lambda: {'verified': True}, hold=hold)
-                self.assertTrue(result['restored'])
-                self.assertEqual(reopened.records[-1]['event'], 'recovery-finished')
-                self.assertFalse(next(row for row in reopened.records
-                    if row['event'] == 'recovery-started')['excluded_unchanged_since_baseline'])
-                self.assertEqual(reopened.check_entrypoints(final=True)['excluded'],
-                                 current['excluded'])
-                reopened.resolve()
+                before = len(reopened.records)
+                with self.assertRaisesRegex(Refused, 'boot hold decision'):
+                    reopened.recover(lambda *_: self.fail('restoration entered'),
+                        lambda *_: self.fail('observation entered'),
+                        lambda: self.fail('final check entered'))
+                self.assertEqual(len(reopened.records), before)
+                with self.assertRaisesRegex(Refused, 'unrestored node'):
+                    reopened.resolve()
 
     def test_excluded_job_run_during_nats_transfer_is_durably_reported(self):
         journal, hold, observe, _ = self.prepared_nats_transfer(tailscale_record())
         transfer = journal.transfer_nats(str(uuid.uuid4()), hold, observe)
         self.publish_nats_return(journal, transfer)
+        states = copy.deepcopy(journal.prior)
+        for unit in ('nats', 'nats-2', 'nats-3', 'mesh-deploy-listener'):
+            states[unit].update(loaded=False, running=False, disabled=True)
         current = copy.deepcopy(journal.entrypoint_inventory)
-        current['loaded']['gui'] = sorted(set(current['loaded']['gui']) -
-            {'ai.openclaw.nats', 'ai.openclaw.nats-2', 'ai.openclaw.nats-3'})
         current['excluded'][TAILSCALE_LABEL]['launchd']['runs'] = 2
+        def entrypoints(_):
+            result = copy.deepcopy(current)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in states.items()
+                                             if state['loaded'])
+            for domain in ('gui', 'user'):
+                result['overrides'][domain] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                               for unit, state in states.items()}
+            return result
+        def restore(unit, wanted):
+            states[unit] = copy.deepcopy(wanted)
+        def observe_current(unit, _):
+            return {**states[unit], 'verified': True}
         with patch('preservation_journal.capture_entrypoint_inventory',
-                   side_effect=lambda _: copy.deepcopy(current)):
+                   side_effect=entrypoints):
             closed = journal.complete_nats_outcome()
             self.assertEqual(closed['outcome'], 'returned')
             recovery_hold = SimpleNamespace(journal=journal, prepare=lambda *_: None,
+                before_restore=lambda: None, check_closed=lambda: None,
                 complete=lambda *_: {'verified': True})
-            def final_check():
-                current['loaded'] = copy.deepcopy(journal.entrypoint_inventory['loaded'])
-                return {'verified': True}
-            failed = journal.recover(lambda *_: self.fail('already restored'),
-                lambda unit, _: {**journal.prior[unit], 'verified': True},
-                lambda: {'verified': False}, hold=recovery_hold)
+            failed = journal.recover(restore, observe_current,
+                lambda: {'verified': False}, hold=recovery_hold,
+                deploy_fence=lambda: {'verified': True})
             self.assertFalse(failed['restored'])
-            result = journal.recover(lambda *_: self.fail('already restored'),
-                lambda unit, _: {**journal.prior[unit], 'verified': True},
-                final_check, hold=recovery_hold)
+            self.assertFalse(states['mesh-deploy-listener']['running'])
+            result = journal.recover(restore, observe_current,
+                lambda: {'verified': True}, hold=recovery_hold,
+                deploy_fence=lambda: {'verified': True})
             self.assertTrue(result['restored'], result)
             started = [row for row in journal.records if row['event'] == 'recovery-started']
             self.assertEqual([row['excluded_unchanged_since_baseline'] for row in started],
@@ -757,14 +2280,16 @@ class JournalTests(unittest.TestCase):
                     return {'verified': True}
                 result = journal.recover(lambda *_: self.fail('already restored'),
                     lambda unit, _: {**prior[unit], 'verified': True},
-                    final_check, hold=hold)
+                    final_check, hold=hold,
+                    deploy_fence=lambda: {'verified': True})
                 self.assertFalse(result['restored'])
                 self.assertIn('final-state', [row['unit'] for row in result['errors']])
                 with self.assertRaisesRegex(Refused, 'unrestored node'):
                     journal.resolve()
                 retried = journal.recover(lambda *_: self.fail('already restored'),
                     lambda unit, _: {**prior[unit], 'verified': True},
-                    lambda: {'verified': True}, hold=hold)
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: {'verified': True})
                 self.assertTrue(retried['restored'])
                 started = [row for row in journal.records if row['event'] == 'recovery-started']
                 self.assertEqual([row['excluded_unchanged_since_baseline'] for row in started],
@@ -784,9 +2309,317 @@ class JournalTests(unittest.TestCase):
                     complete=lambda *_: {'verified': True})
                 result = journal.recover(lambda *_: self.fail('already restored'),
                     lambda unit, _: {**prior[unit], 'verified': True},
-                    lambda: {'verified': True}, hold=hold)
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: {'verified': True})
                 self.assertFalse(result['restored'])
                 self.assertIn('entrypoints', [row['unit'] for row in result['errors']])
+
+    def test_stopped_unit_installed_plist_drift_refuses_before_recovery(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        entrypoints = full_entrypoint_evidence(prior)
+        transient = {'failures': 0}
+        def capture(_):
+            if transient['failures']:
+                transient['failures'] -= 1
+                raise Refused('installed entrypoint changed during preflight')
+            result = copy.deepcopy(entrypoints)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                              if state['loaded'])
+            for domain in ('gui', 'user'):
+                result['overrides'][domain] = {
+                    'ai.openclaw.' + unit: True if state['disabled'] else None
+                    for unit, state in current.items()}
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=capture):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: self.fail('hold prepared'), before_restore=lambda: None,
+                    check_closed=lambda: None, complete=lambda *_: self.fail('hold opened'))
+                anchor_hold(journal, hold)
+                for unit in ('mesh-deploy-listener', 'gateway'):
+                    journal.mutate(unit, 'disable-and-unload',
+                        lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
+                entrypoints['installed']['ai.openclaw.gateway']['sha256'] = '1' * 64
+                restored = []
+                before = len(journal.records)
+                before_state = copy.deepcopy(journal.active)
+                with self.assertRaisesRegex(Refused,
+                                            'stopped unit installed plist changed before verified recovery: gateway'):
+                    journal.recover(lambda unit, _: restored.append(unit),
+                        lambda unit, _: {**current[unit], 'verified': True},
+                        lambda: self.fail('final check ran'), hold=hold,
+                        deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertEqual(restored, [])
+                self.assertEqual(len(journal.records), before)
+                self.assertEqual(journal.active, before_state)
+                entrypoints['installed']['ai.openclaw.gateway'] = {
+                    'path': full_entrypoint_evidence(prior)['installed']['ai.openclaw.gateway']['path'],
+                    'sha256': '2' * 64}
+                transient['failures'] = 1
+                with self.assertRaisesRegex(Refused,
+                                            'stopped unit installed plist changed before verified recovery: gateway'):
+                    journal.recover(lambda unit, _: restored.append(unit),
+                        lambda unit, _: {**current[unit], 'verified': True},
+                        lambda: self.fail('final check ran'), hold=hold,
+                        deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertEqual(transient['failures'], 0)
+                self.assertEqual(restored, [])
+                self.assertEqual(len(journal.records), before)
+                self.assertEqual(journal.active, before_state)
+                self.assertFalse(current['mesh-deploy-listener']['running'])
+                entrypoints['installed']['ai.openclaw.gateway'] = {
+                    'path': '/other/gateway.plist',
+                    'sha256': prior['gateway']['identity']['plist_sha256']}
+                with self.assertRaisesRegex(Refused,
+                                            'stopped unit installed plist changed before verified recovery: gateway'):
+                    journal.recover(lambda unit, _: restored.append(unit),
+                        lambda unit, _: {**current[unit], 'verified': True},
+                        lambda: self.fail('final check ran'), hold=hold,
+                        deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertEqual(restored, [])
+                self.assertEqual(len(journal.records), before)
+                self.assertEqual(journal.active, before_state)
+
+    def test_capture_failure_with_stopped_units_restores_known_units_but_not_listener(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        capture_available = {'value': True}
+        def capture(_):
+            if not capture_available['value']:
+                raise Refused('owned entrypoint capture unavailable')
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                              if state['loaded'])
+            for domain in ('gui', 'user'):
+                result['overrides'][domain] = {
+                    'ai.openclaw.' + unit: True if state['disabled'] else None
+                    for unit, state in current.items()}
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=capture):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None, complete=lambda *_: self.fail('hold opened'))
+                anchor_hold(journal, hold)
+                for unit in ('mesh-deploy-listener', 'gateway'):
+                    journal.mutate(unit, 'disable-and-unload',
+                        lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
+                capture_available['value'] = False
+                restored = []
+                def restore(unit, wanted):
+                    restored.append(unit)
+                    current[unit] = copy.deepcopy(wanted)
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertFalse(result['restored'])
+                self.assertIn('entrypoints', [error['unit'] for error in result['errors']])
+                self.assertEqual(restored, ['gateway'])
+                self.assertFalse(current['mesh-deploy-listener']['running'])
+                self.assertFalse(any(row['event'] == 'listener-release-verified'
+                                     for row in journal.records))
+
+    def test_late_stopped_unit_plist_drift_refuses_that_restoration_before_intent(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        late_failures = {'count': 0}
+        def entrypoints(_):
+            if late_failures['count']:
+                late_failures['count'] -= 1
+                raise Refused('installed entrypoint changed during preflight')
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            for domain in ('gui', 'user'):
+                result['overrides'][domain] = {
+                    'ai.openclaw.' + unit: True if state['disabled'] else None
+                    for unit, state in current.items()}
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None, complete=lambda *_: self.fail('hold opened'))
+                anchor_hold(journal, hold)
+                for unit in ('mesh-deploy-listener', 'gateway', 'memory-daemon'):
+                    journal.mutate(unit, 'disable-and-unload',
+                        lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
+                restored = []
+                def restore(unit, wanted):
+                    restored.append(unit)
+                    current[unit] = copy.deepcopy(wanted)
+                    if unit == 'memory-daemon':
+                        baseline['installed']['ai.openclaw.gateway']['sha256'] = '2' * 64
+                        late_failures['count'] = 1
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertFalse(result['restored'])
+                self.assertEqual(late_failures['count'], 0)
+                self.assertEqual(restored, ['memory-daemon'])
+                gateway_error = next(error for error in result['errors']
+                                     if error['unit'] == 'gateway')
+                self.assertIn('stopped unit installed plist changed', gateway_error['detail'])
+                self.assertFalse(any(row['event'] == 'restoration-intent'
+                                     and row.get('unit') == 'gateway' for row in journal.records))
+                self.assertFalse(any(row['event'] == 'listener-release-verified'
+                                     for row in journal.records))
+                self.assertFalse(current['mesh-deploy-listener']['running'])
+
+    def test_two_late_capture_failures_restore_known_unit_without_releasing_listener(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        failures = {'count': 0}
+        def entrypoints(_):
+            if failures['count']:
+                failures['count'] -= 1
+                raise Refused('owned capture unavailable')
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            for domain in ('gui', 'user'):
+                result['overrides'][domain] = {
+                    'ai.openclaw.' + unit: True if state['disabled'] else None
+                    for unit, state in current.items()}
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None, complete=lambda *_: self.fail('hold opened'))
+                anchor_hold(journal, hold)
+                for unit in ('mesh-deploy-listener', 'gateway', 'memory-daemon'):
+                    journal.mutate(unit, 'disable-and-unload',
+                        lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
+                restored = []
+                def restore(unit, wanted):
+                    restored.append(unit)
+                    current[unit] = copy.deepcopy(wanted)
+                    if unit == 'memory-daemon':
+                        failures['count'] = 2
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertEqual(failures['count'], 0)
+                self.assertEqual(restored, ['memory-daemon', 'gateway'])
+                self.assertFalse(result['restored'])
+                self.assertIn({'unit': 'entrypoints', 'reason': 'installed binding unavailable',
+                               'detail': 'gateway'}, result['errors'])
+                self.assertFalse(any(row['event'] == 'listener-release-verified'
+                                     for row in journal.records))
+
+    def test_two_preflight_capture_failures_prevent_certification_after_retry_recovers(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        failures = {'count': 0}
+        def entrypoints(_):
+            if failures['count']:
+                failures['count'] -= 1
+                raise Refused('owned capture unavailable')
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            for domain in ('gui', 'user'):
+                result['overrides'][domain] = {
+                    'ai.openclaw.' + unit: True if state['disabled'] else None
+                    for unit, state in current.items()}
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None, complete=lambda *_: self.fail('hold opened'))
+                anchor_hold(journal, hold)
+                for unit in ('mesh-deploy-listener', 'gateway'):
+                    journal.mutate(unit, 'disable-and-unload',
+                        lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
+                failures['count'] = 2
+                restored = []
+                def restore(unit, wanted):
+                    restored.append(unit)
+                    current[unit] = copy.deepcopy(wanted)
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertEqual(failures['count'], 0)
+                self.assertEqual(restored, ['gateway'])
+                self.assertFalse(result['restored'])
+                self.assertIn({'unit': 'entrypoints', 'reason': 'installed binding unavailable'},
+                              result['errors'])
+                self.assertFalse(any(row['event'] == 'listener-release-verified'
+                                     for row in journal.records))
+
+    def test_listener_own_late_capture_outage_never_releases_it(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        baseline = full_entrypoint_evidence(prior)
+        failures = {'count': 0}
+        def entrypoints(_):
+            if failures['count']:
+                failures['count'] -= 1
+                raise Refused('owned capture unavailable')
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            for domain in ('gui', 'user'):
+                result['overrides'][domain] = {
+                    'ai.openclaw.' + unit: True if state['disabled'] else None
+                    for unit, state in current.items()}
+            return result
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None, complete=lambda *_: self.fail('hold opened'))
+                anchor_hold(journal, hold)
+                for unit in ('mesh-deploy-listener', 'gateway'):
+                    journal.mutate(unit, 'disable-and-unload',
+                        lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
+                restored = []
+                def restore(unit, wanted):
+                    restored.append(unit)
+                    current[unit] = copy.deepcopy(wanted)
+                    if unit == 'gateway':
+                        failures['count'] = 2
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: {'verified': True})
+                self.assertEqual(failures['count'], 0)
+                self.assertEqual(restored, ['gateway'])
+                self.assertFalse(result['restored'])
+                self.assertIn({'unit': 'entrypoints', 'reason': 'installed binding unavailable',
+                               'detail': 'mesh-deploy-listener'}, result['errors'])
+                listener_error = next(error for error in result['errors']
+                                      if error['unit'] == 'mesh-deploy-listener')
+                self.assertIn('cannot release without installed binding', listener_error['detail'])
+                self.assertFalse(any(row['event'] == 'listener-release-verified'
+                                     for row in journal.records))
+                self.assertFalse(any(row['event'] == 'restoration-intent'
+                                     and row.get('unit') == 'mesh-deploy-listener'
+                                     for row in journal.records))
+                self.assertFalse(current['mesh-deploy-listener']['running'])
 
     def test_full_inventory_covers_gateway_viewer_and_installed_unloaded_tick(self):
         self.assertTrue({'gateway', 'workplan-viewer', 'federation-tick'} <= UNITS)
@@ -938,6 +2771,39 @@ class JournalTests(unittest.TestCase):
             self.assertEqual(reopened.records[-1]['error_type'], 'Refused')
             with self.assertRaisesRegex(Refused, 'reopened'):
                 reopened.require_forward()
+
+    def test_rejected_receipt_and_diagnostic_failure_remain_durable(self):
+        def broken_diagnostic(_):
+            raise RuntimeError('diagnostic failed')
+        for name, candidate in (
+                ('unverified', {'verified': False, 'observed': 'owned'}),
+                ('unserializable', {'verified': True, 'observed': {1}})):
+            with self.subTest(name=name):
+                case_dir = pathlib.Path(self.temp.name) / name
+                case_dir.mkdir(mode=0o700)
+                root = case_dir / 'journals' / 'journal'
+                node_lock = case_dir / 'node.lock'
+                with legacy_journal(root, PRIOR, boot='boot-a', node_lock=node_lock) as journal:
+                    expected_error = Refused if name == 'unverified' else TypeError
+                    with self.assertRaises(expected_error):
+                        journal.mutate('mesh-agent', 'stop', lambda: None,
+                                       lambda: candidate,
+                                       failure_evidence=broken_diagnostic)
+                    failed = journal.records[-1]
+                    self.assertEqual(failed['event'], 'failed')
+                    self.assertEqual(failed['failure_evidence_error'], 'RuntimeError')
+                    if name == 'unverified':
+                        self.assertEqual(failed['rejected_evidence'], candidate)
+                        self.assertEqual(failed['failure_stage'], 'verified-evidence')
+                    else:
+                        self.assertNotIn('rejected_evidence', failed)
+                        self.assertEqual(failed['error_type'], 'TypeError')
+                        self.assertEqual(failed['failure_stage'], 'evidence-serialization')
+                with Journal(root, boot='boot-a', node_lock=node_lock) as reopened:
+                    self.assertEqual(reopened.records[-1], failed)
+                    self.assertEqual(len(reopened.pending_intents()), 1)
+                    with self.assertRaisesRegex(Refused, 'only restore'):
+                        reopened.require_forward()
 
     def test_non_string_dictionary_keys_refuse_before_writing_a_poisoned_record(self):
         with self.journal(PRIOR) as journal:
@@ -1311,7 +3177,10 @@ with legacy_journal(root,prior,boot='boot-a',node_lock=node_lock) as journal:
                 lambda: {'verified': True})
             self.assertFalse(result['restored'])
             self.assertEqual(restored, [])
-            self.assertIn({'unit': 'mesh-agent', 'reason': 'Refused'}, result['errors'])
+            self.assertTrue(any(error['unit'] == 'mesh-agent'
+                                and error['reason'] == 'Refused'
+                                and 'on-demand worker is running' in error['detail']
+                                for error in result['errors']))
             self.assertFalse(any(row['event'] == 'restoration-intent' and row.get('unit') == 'mesh-agent'
                                  for row in journal.records))
 

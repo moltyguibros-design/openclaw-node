@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-04",
+  "scope": "disposable file probes on guest and Mac host; read-only host volume inventory; no production VM or image change",
+  "guest_and_host_observations": {
+    "user_immutable_blocks_new_writable_open": true,
+    "clonefile_inherits_user_immutable": true,
+    "existing_writable_descriptor_can_still_write_after_flag_set": true,
+    "read_only_attach_of_immutable_disposable_asif_clone": "passed on guest Mac",
+    "source_and_clone_flags_cleared_before_disposable_cleanup": true
+  },
+  "host_storage": "no external volume mounted; Data volume has about 97.2 GiB available, below the 211.1 GB apparent VM image size",
+  "adversarial_review": "Claude design review: uchg is a same-user-clearable mitigation for accidental new starts, not continuous writer exclusion; a crash can strand the source image unbootable; require crash-safe reconciliation and a real disposable UTM start refusal/recovery test before any production use",
+  "decision": "Do not add uchg to the production capture yet. Prove behavior with a disposable UTM VM, design an idempotent clone-first recovery and boot interlock, and retain the full-node stop and real-store acceptance gates.",
+  "production_state": "VM remains running; no host flag, stop, clone, extraction, disposal or master acceptance"
+}

@@ -1,4 +1,5 @@
 import copy
+import pathlib
 import secrets
 
 from preservation_checks import require
@@ -58,6 +59,22 @@ class JournaledHold:
                 and self.gate.metadata_sha == self.saved['metadata_sha256']
                 and self.gate.paths.evidence()['paths'] == self.saved['paths'],
                 'execution hold immutable baseline changed; pin recapture is forbidden')
+        if self.journal.scope in (TIMER_SCOPE, FULL_NODE_SCOPE):
+            for unit in self.saved['cohort']:
+                identity = self.journal.prior[unit]['identity']
+                argv = identity['argv']
+                entry = pathlib.Path(argv[3]) if len(argv) > 3 else pathlib.Path('')
+                manifest = pathlib.Path(argv[4]) if len(argv) > 4 else pathlib.Path('')
+                require(len(argv) >= 12
+                        and argv[:3] == ['/usr/bin/python3', '-I', '-S']
+                        and entry.name == 'timer-entry.py'
+                        and manifest == entry.with_name('timer-entry-manifest.json')
+                        and entry.parent == pathlib.Path(self.saved['root']).parent
+                        and argv[5] == identity['files'].get(str(manifest))
+                        and str(entry) in identity['files']
+                        and argv[6:11] == ['ai.openclaw.' + unit, self.saved['root'],
+                                           self.saved['pins']['lock'], self.saved['pins']['root'], '--'],
+                        'execution hold timer entry is ungated: ' + unit)
 
     def intents(self):
         rows = [row for row in self.journal.records if row['event'] == 'intent' and 'hold' in row]
@@ -251,8 +268,9 @@ class JournaledHold:
                 'history_certified': not self.restore_only
                                      and self.journal.scope not in (TIMER_SCOPE, FULL_NODE_SCOPE)}
 
-    def recover(self, restore, observe, final_check, diagnostics=None):
-        return self.journal.recover(restore, observe, final_check, diagnostics, hold=self)
+    def recover(self, restore, observe, final_check, diagnostics=None, deploy_fence=None):
+        return self.journal.recover(restore, observe, final_check, diagnostics, hold=self,
+                                    deploy_fence=deploy_fence)
 
     def close(self):
         if self.guard is not None:
