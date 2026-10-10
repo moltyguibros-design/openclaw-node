@@ -2451,3 +2451,13 @@ passed; Node 22's isolated JetStream fixture and both Node root test suites
 passed. Dependency audits alone kept that workflow red. New exact-head CI
 is pending. The full production no-writer hold and shutdown gates remain
 unproven; no service or VM was stopped, and 1.2 stays [A]/v1.2-pre.
+
+Checkpoint 2026-10-10 13:57 EDT: D149 adds a journaled, bounded resumption
+primitive for a timer whose own persistent stop was already proven. The helper
+checks saved identity and loaded configuration, requires idle readiness, and
+reinstates the disabled override on failure; an interrupted override-clear
+intent poisons later recovery. The 154 journal and 57 managed-launchd tests
+pass locally, including two actual owned Mac timer controls; the new journal
+reopen negative also passes. This does not provide the still-absent production
+timer spawn/writer witness or a full-node driver. Exact-head CI remains to run;
+1.2 remains [A]/v1.2-pre. No live service, VM or NATS store changed.

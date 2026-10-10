@@ -926,9 +926,10 @@ class Journal:
     def begin_override_clear(self, unit):
         require(self.scope == FULL_NODE_SCOPE and unit in self.prior
                 and self.restoring_unit == unit
-                and self.prior[unit]['class'] == 'daemon' and self.prior[unit]['loaded']
+                and self.prior[unit]['class'] in ('daemon', 'timer') and self.prior[unit]['loaded']
+                and (self.prior[unit]['class'] != 'timer' or not self.prior[unit]['running'])
                 and unit not in NATS_TRANSFER_UNITS,
-                'override clear is outside the current daemon restoration')
+                'override clear is outside the current persistent restoration')
         restore = self.records[-1]
         require(restore['event'] == 'restoration-intent' and restore['unit'] == unit,
                 'override clear must immediately follow its restoration intent')

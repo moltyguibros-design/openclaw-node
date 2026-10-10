@@ -1399,7 +1399,7 @@ class JournalTests(unittest.TestCase):
                 def restore(unit, wanted):
                     restored.append(unit)
                     if unit == 'gateway':
-                        with self.assertRaisesRegex(Refused, 'outside the current daemon restoration'):
+                        with self.assertRaisesRegex(Refused, 'outside the current persistent restoration'):
                             journal.begin_override_clear('workplan-viewer')
                         def enable_after_hold():
                             raise Refused('owned enable failure')
@@ -1540,7 +1540,7 @@ class JournalTests(unittest.TestCase):
                     journal.begin_override_clear('gateway')
                 self.assertEqual(len(journal.records), before)
 
-    def test_override_clear_refuses_timers_and_nats_members(self):
+    def test_override_clear_requires_verified_timer_stop_and_refuses_nats_members(self):
         prior = full_node_inventory()
         with patch('preservation_journal.capture_entrypoint_inventory',
                    return_value=full_entrypoint_evidence(prior)):
@@ -1554,9 +1554,53 @@ class JournalTests(unittest.TestCase):
                     journal.append('restoration-intent', unit=unit, action='restore-prior')
                     journal.restoring_unit = unit
                     before = len(journal.records)
-                    with self.assertRaisesRegex(Refused, 'outside the current daemon restoration'):
-                        journal.begin_override_clear(unit)
-                    self.assertEqual(len(journal.records), before)
+                    if unit == 'observer':
+                        record = journal.begin_override_clear(unit)
+                        self.assertEqual(record['stop_intent'], stop['sequence'])
+                    else:
+                        with self.assertRaisesRegex(Refused, 'outside the current persistent restoration'):
+                            journal.begin_override_clear(unit)
+                        self.assertEqual(len(journal.records), before)
+
+    def test_override_clear_refuses_timer_without_spawn_proof(self):
+        prior = full_node_inventory()
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=full_entrypoint_evidence(prior)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                stop = journal.append('intent', unit='observer', action='disable-and-unload')
+                evidence = timer_stop_evidence('observer')
+                evidence['spawn_evidence']['coverage_complete'] = False
+                journal.append('verified', unit='observer', intent=stop['sequence'], evidence=evidence)
+                journal.append('restoration-intent', unit='observer', action='restore-prior')
+                journal.restoring_unit = 'observer'
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'lacks a verified persistent stop'):
+                    journal.begin_override_clear('observer')
+                self.assertEqual(len(journal.records), before)
+
+    def test_timer_override_clear_without_recovery_poisoned_on_reopen(self):
+        prior = full_node_inventory()
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=full_entrypoint_evidence(prior)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                stop = journal.append('intent', unit='observer', action='disable-and-unload')
+                journal.append('verified', unit='observer', intent=stop['sequence'],
+                               evidence=timer_stop_evidence('observer'))
+                journal.append('restoration-intent', unit='observer', action='restore-prior')
+                journal.restoring_unit = 'observer'
+                journal.begin_override_clear('observer')
+            with Journal(self.root, node_lock=self.node_lock) as reopened:
+                hold = SimpleNamespace(journal=reopened,
+                    prepare=lambda *_: self.fail('hold prepared'))
+                before = len(reopened.records)
+                with self.assertRaisesRegex(Refused,
+                        'stopped unit override was cleared without verified recovery: observer'):
+                    reopened.recover(lambda *_: self.fail('restore ran'),
+                        lambda *_: self.fail('observe ran'), lambda: self.fail('final check ran'),
+                        hold=hold, deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertEqual(len(reopened.records), before)
 
     def test_full_scope_disabled_daemon_restore_verifies_after_journaled_enable(self):
         prior = full_node_inventory()

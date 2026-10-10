@@ -3181,3 +3181,22 @@ root and Mission Control high-severity dependency audits. D148's own
 exact-head CI remains to run. The full-node hold, production capture,
 four-history acceptance and verified resumption remain open; no production
 VM, service or NATS store changed.
+
+## D149 — Journal a bounded restore for verified idle timers (2026-10-10 13:57 EDT)
+
+A full-node timer stopped with a persistent disabled override had no restore
+primitive that wrote an intent before clearing the override. The journal now
+permits `begin_override_clear` for a loaded, previously idle timer only after
+its own verified `disable-and-unload` receipt. The restore helper rechecks the
+saved direct-file identity before that intent, enables and bootstraps the
+timer, then requires an idle GUI-domain job with the approved loaded
+configuration and a bounded caller readiness check. On any failure it restores
+the disabled override when possible. The override-clear intent remains in the
+journal, so a later recovery refuses without verified recovery even if launchd
+looks fenced again.
+
+This is a resumption primitive, not a timer stop certificate. Production
+timers still lack the spawn/writer evidence needed for the original full-node
+stop, and the helper does not release the execution gate. Two owned native
+timer controls and the journal refusal cases pass; exact-head CI remains to
+run. No production service, VM or NATS store changed.

@@ -11,7 +11,7 @@ import subprocess
 import time
 
 from preservation_checks import Refused, require, verify_completion, verify_timer_idle
-from preservation_journal import FULL_NODE_SCOPE, NATS_TRANSFER_UNITS, regular_content
+from preservation_journal import FULL_NODE_SCOPE, NATS_TRANSFER_UNITS, regular_content, static_identity
 
 
 EXIT_FLAGS = 0x84000000
@@ -333,6 +333,65 @@ def restore_disabled_daemon(service, journal, unit, prior, ready, *, timeout):
             require(service.disabled(), 'restored daemon override remains clear')
             state = service.status()
             physical = 'disabled override restored; owner running=' + str(state['running'])
+        except Exception as fence_error:
+            physical = 'disabled override unverified: ' + str(fence_error)
+        if not isinstance(error, Exception):
+            raise
+        raise Refused(str(error) + '; ' + physical) from error
+
+
+def restore_disabled_timer(service, journal, unit, prior, ready, *, timeout):
+    require(prior['class'] == 'timer' and prior['loaded'] and not prior['running']
+            and service.label == 'ai.openclaw.' + unit and callable(ready),
+            'disabled timer restoration is not bound to its saved idle owner')
+    require(type(timeout) in (int, float) and math.isfinite(timeout) and timeout > 0,
+            'disabled timer restoration needs a finite readiness budget')
+    identity = prior['identity']
+    require(static_identity(service.plist, identity['files'], identity['dependencies']) == identity,
+            'disabled timer identity changed before restoration: ' + unit)
+    journal.begin_override_clear(unit)
+    try:
+        service.enable_after_hold()
+        service.bootstrap()
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            require(not service.status('user')['loaded'],
+                    'restored timer appeared in another domain')
+            status = service.status()
+            if status['loaded'] and not status['running']:
+                require(static_identity(service.plist, identity['files'], identity['dependencies']) == identity,
+                        'restored timer identity changed')
+                loaded = service.configuration(include_logs=False)
+                plist = plistlib.loads(regular_content(service.plist, 1 << 20, keep_bytes=True))
+                declared = plist.get('EnvironmentVariables', {})
+                require(loaded['path'] == str(service.plist.resolve(strict=True))
+                        and loaded['arguments'] == identity['argv']
+                        and loaded['program'] == str(pathlib.Path(
+                            plist.get('Program', identity['argv'][0])).resolve(strict=True))
+                        and loaded['working_directory'] == identity['working_directory']
+                        and {name: value for name, value in loaded['environment'].items()
+                             if name in declared} == declared
+                        and set(loaded['environment']) - set(declared)
+                        <= {'OSLogRateLimit', 'XPC_SERVICE_NAME'},
+                        'restored timer loaded configuration differs from approved plist')
+                if ready(status):
+                    require(service.status() == status and not service.disabled(),
+                            'restored timer changed during readiness')
+                    return status
+            time.sleep(.05)
+        raise Refused('restored timer did not reach idle readiness: ' + unit)
+    except BaseException as error:
+        try:
+            gui, user = service.status(), service.status('user')
+            require(not user['loaded'], 'restored timer is loaded in another domain')
+            if not service.disabled():
+                if gui['loaded']:
+                    service.disable_for_hold()
+                else:
+                    service.disable_unloaded_for_hold()
+            require(service.disabled(), 'restored timer override remains clear')
+            state = service.status()
+            physical = 'disabled override restored; owner loaded=' + str(state['loaded'])
         except Exception as fence_error:
             physical = 'disabled override unverified: ' + str(fence_error)
         if not isinstance(error, Exception):

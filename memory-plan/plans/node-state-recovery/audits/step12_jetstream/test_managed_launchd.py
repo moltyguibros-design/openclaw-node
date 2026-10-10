@@ -17,7 +17,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from managed_launchd import (Launchd, StopWatch, process_exists, process_tree,
-                             restore_disabled_daemon, unload_idle_timer)
+                             restore_disabled_daemon, restore_disabled_timer, unload_idle_timer)
 from full_node_baseline import open_full_node_journal
 from journal_hold import JournaledHold, describe
 from legacy_fixture import legacy_journal
@@ -89,6 +89,23 @@ class StopWatchPreflight(unittest.TestCase):
             with self.assertRaisesRegex(Refused, 'disabled daemon plist changed before restoration'):
                 restore_disabled_daemon(service, journal, 'gateway', prior,
                                         lambda _: True, timeout=5)
+
+    def test_disabled_timer_restore_refuses_changed_identity_before_intent(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-owned-timer-restore-') as directory:
+            root = pathlib.Path(directory)
+            script = root / 'timer.sh'
+            script.write_text('original')
+            plist = root / 'timer.plist'
+            plist.write_bytes(plistlib.dumps({'Label': 'ai.openclaw.observer',
+                'ProgramArguments': ['/bin/sh', str(script)], 'WorkingDirectory': directory}))
+            prior = {'class': 'timer', 'loaded': True, 'running': False,
+                     'identity': static_identity(plist, [script])}
+            script.write_text('changed')
+            service = SimpleNamespace(label='ai.openclaw.observer', plist=plist)
+            journal = SimpleNamespace(begin_override_clear=lambda _: self.fail('intent reached'))
+            with self.assertRaisesRegex(Refused, 'disabled timer identity changed before restoration'):
+                restore_disabled_timer(service, journal, 'observer', prior,
+                                       lambda _: True, timeout=5)
 
     def test_persistent_idle_timer_refuses_a_start_during_disable(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-owned-idle-race-') as directory:
@@ -628,6 +645,48 @@ os.execv('/bin/sleep',['sleep','30'])
         with self.assertRaisesRegex(Refused, 'lost its disabled override'):
             verify()
         self.assertFalse(self.service.status()['loaded'])
+
+    def test_disabled_idle_timer_restores_only_after_journal_intent(self):
+        self.launch(run_at_load=False)
+        identity = static_identity(self.plist, [self.script])
+        prior = {'class': 'timer', 'loaded': True, 'running': False, 'identity': identity}
+        self.hold_override_attempted = True
+        apply, verify = unload_idle_timer(self.service, [self.log, self.err],
+            spawn_evidence=lambda: {'label': self.service.label,
+                                    'coverage_complete': True, 'spawns': []},
+            require_disabled=True)
+        apply()
+        self.assertTrue(verify()['verified'])
+        events = []
+        unit = self.name.removeprefix('ai.openclaw.')
+        status = restore_disabled_timer(self.service,
+            SimpleNamespace(begin_override_clear=lambda name: events.append(name)),
+            unit, prior, lambda observed: observed['loaded'] and not observed['running'], timeout=5)
+        self.assertEqual(events, [unit])
+        self.assertTrue(status['loaded'])
+        self.assertFalse(status['running'])
+        self.assertFalse(self.service.disabled())
+
+    def test_disabled_idle_timer_failed_readiness_restores_override(self):
+        self.launch(run_at_load=False)
+        identity = static_identity(self.plist, [self.script])
+        prior = {'class': 'timer', 'loaded': True, 'running': False, 'identity': identity}
+        self.hold_override_attempted = True
+        apply, verify = unload_idle_timer(self.service, [self.log, self.err],
+            spawn_evidence=lambda: {'label': self.service.label,
+                                    'coverage_complete': True, 'spawns': []},
+            require_disabled=True)
+        apply()
+        self.assertTrue(verify()['verified'])
+        events = []
+        unit = self.name.removeprefix('ai.openclaw.')
+        with self.assertRaisesRegex(Refused, 'restored timer did not reach idle readiness'):
+            restore_disabled_timer(self.service,
+                SimpleNamespace(begin_override_clear=lambda name: events.append(name)),
+                unit, prior, lambda _: False, timeout=.3)
+        self.assertEqual(events, [unit])
+        self.assertTrue(self.service.status()['loaded'])
+        self.assertTrue(self.service.disabled())
 
     def test_unloaded_job_can_be_refenced_after_interrupted_enable(self):
         self.launch(run_at_load=False)
