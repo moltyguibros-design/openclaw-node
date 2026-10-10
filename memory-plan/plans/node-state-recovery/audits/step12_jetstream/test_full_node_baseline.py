@@ -651,7 +651,7 @@ process.on('SIGTERM',()=>{
                                            require_disabled=True) as watch:
                                 proof = watch.mutate(journal, 'mesh-deploy-listener',
                                                      connection_closed, listener_absent, hold=hold)
-                            self.assertTrue(Journal.managed_stop_proven(proof))
+                            self.assertTrue(Journal.managed_stop_proven('mesh-deploy-listener', proof))
                             self.assertTrue(journal.listener_fenced())
                             self.assertFalse(service.status()['loaded'])
                             self.assertTrue(service.disabled())
@@ -661,7 +661,7 @@ process.on('SIGTERM',()=>{
                                 bridge_proof = watch.mutate(journal, 'mesh-bridge',
                                                             bridge_connection_closed,
                                                             bridge_listener_absent, hold=hold)
-                            self.assertTrue(Journal.managed_stop_proven(bridge_proof))
+                            self.assertTrue(Journal.managed_stop_proven('mesh-bridge', bridge_proof))
                             self.assertTrue(journal.full_node_stop_proven('mesh-bridge', bridge_proof))
                             self.assertEqual(bridge_proof['termination'], {'exit': 0})
                             self.assertIs(bridge_proof['entrypoint_overrides']['gui'][

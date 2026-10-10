@@ -542,7 +542,8 @@ class StopWatch:
         verify_completion(self.completion_service, segment, [], [],
                           startup_segment=self.startup_segment, termination=termination,
                           bus_client_names=self.bus_client_names)
-        return {'verified': True, 'owner': self.binding['status']['pid'],
+        return {'verified': True, 'unit_label': self.service.label,
+                'owner': self.binding['status']['pid'],
                 'exit_flags_requested': EXIT_FLAGS,
                 'exits': {str(pid): event for pid, event in self.events.items()},
                 'lifecycle': self.lifecycle, 'kernel_events': self.kernel_events,

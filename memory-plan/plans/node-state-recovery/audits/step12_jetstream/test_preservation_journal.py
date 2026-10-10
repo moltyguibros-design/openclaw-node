@@ -94,8 +94,9 @@ def fence_listener(entrypoints):
     fence_unit(entrypoints, 'mesh-deploy-listener')
 
 
-def listener_stop_evidence():
-    return {'verified': True, 'unit_unloaded': True, 'descendants_absent': True,
+def listener_stop_evidence(unit='mesh-deploy-listener'):
+    return {'verified': True, 'unit_label': 'ai.openclaw.' + unit,
+            'unit_unloaded': True, 'descendants_absent': True,
             'disabled_override_verified': True, 'connections_closed': True,
             'listeners_absent': True, 'bootout': {'returncode': 0, 'timed_out': False},
             'termination': {'signal': 15}}
@@ -182,7 +183,7 @@ class JournalTests(unittest.TestCase):
             else:
                 journal.mutate(unit, 'disable-and-unload',
                                lambda unit=unit: fence_unit(loaded, unit),
-                               listener_stop_evidence, hold=hold)
+                               lambda unit=unit: listener_stop_evidence(unit), hold=hold)
         def observe(unit, saved):
             if unit == 'nats-1':
                 return {**saved, 'verified': True}
@@ -572,7 +573,7 @@ class JournalTests(unittest.TestCase):
                                    lambda: calls.append('second-listener'), listener_stop_evidence, hold=hold)
                 journal.mutate('nats', 'disable-and-unload',
                                lambda: fence_unit(current, 'nats'),
-                               lambda: calls.append('nats') or listener_stop_evidence(), hold=hold)
+                               lambda: calls.append('nats') or listener_stop_evidence('nats'), hold=hold)
                 self.assertEqual(calls, ['hold', 'nats'])
                 verified = [(row['unit'], row['action']) for row in journal.records
                             if row['event'] == 'verified']
@@ -747,10 +748,11 @@ class JournalTests(unittest.TestCase):
         prior = full_node_inventory()
         journal = Journal.__new__(Journal)
         journal.prior = prior
-        self.assertTrue(journal.full_node_stop_proven('gateway', listener_stop_evidence()))
+        self.assertTrue(journal.full_node_stop_proven('gateway', listener_stop_evidence('gateway')))
+        self.assertFalse(journal.full_node_stop_proven('gateway', listener_stop_evidence('mesh-bridge')))
         self.assertTrue(journal.full_node_stop_proven('observer', timer_stop_evidence('observer')))
         for unit in ('mesh-agent', 'mesh-tool-discord'):
-            self.assertTrue(journal.full_node_stop_proven(unit, listener_stop_evidence()))
+            self.assertTrue(journal.full_node_stop_proven(unit, listener_stop_evidence(unit)))
             self.assertTrue(journal.full_node_stop_proven(unit, timer_stop_evidence(unit)))
             self.assertFalse(journal.full_node_stop_proven(unit, {'verified': True}))
         self.assertFalse(journal.full_node_stop_proven('gateway', timer_stop_evidence('gateway')))
@@ -796,6 +798,24 @@ class JournalTests(unittest.TestCase):
                                    lambda: self.fail('stop ran'),
                                    lambda: timer_stop_evidence('observer'), hold=hold)
 
+    def test_full_scope_rejects_another_units_stop_receipt(self):
+        prior = full_node_inventory()
+        current = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(current)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fence_listener(current), listener_stop_evidence, hold=hold)
+                with self.assertRaisesRegex(Refused, 'class-specific persistent proof: gateway'):
+                    journal.mutate('gateway', 'disable-and-unload',
+                                   lambda: fence_unit(current, 'gateway'),
+                                   lambda: listener_stop_evidence('mesh-bridge'), hold=hold)
+                self.assertFalse(any(row['event'] == 'verified' and row.get('unit') == 'gateway'
+                                     for row in journal.records))
+
     def test_full_scope_accepts_class_proofs_for_every_loaded_job(self):
         prior = full_node_inventory()
         current = full_entrypoint_evidence(prior)
@@ -809,7 +829,7 @@ class JournalTests(unittest.TestCase):
                                                     if unit != 'mesh-deploy-listener']
                 for unit in units:
                     evidence = (timer_stop_evidence(unit) if prior[unit]['class'] in
-                                ('timer', 'on-demand', 'known-broken') else listener_stop_evidence())
+                                ('timer', 'on-demand', 'known-broken') else listener_stop_evidence(unit))
                     journal.mutate(unit, 'disable-and-unload',
                                    lambda unit=unit: fence_unit(current, unit),
                                    lambda evidence=evidence: evidence, hold=hold)
@@ -1230,7 +1250,7 @@ class JournalTests(unittest.TestCase):
                     listener_stop_evidence, hold=hold)
                 journal.mutate('nats', 'disable-and-unload',
                     lambda: current['nats'].update(loaded=False, running=False, disabled=True),
-                    listener_stop_evidence, hold=hold)
+                    lambda: listener_stop_evidence('nats'), hold=hold)
                 current['nats'] = copy.deepcopy(prior['nats'])
                 before = len(journal.records)
                 restored = []
@@ -1265,7 +1285,7 @@ class JournalTests(unittest.TestCase):
                     listener_stop_evidence, hold=hold)
                 journal.mutate('gateway', 'disable-and-unload',
                     lambda: current['gateway'].update(loaded=False, running=False, disabled=True),
-                    listener_stop_evidence, hold=hold)
+                    lambda: listener_stop_evidence('gateway'), hold=hold)
                 before = len(journal.records)
                 before_state = copy.deepcopy(journal.active)
                 with self.assertRaisesRegex(Refused, 'stopped unit state changed before verified recovery: gateway'):
@@ -1299,7 +1319,7 @@ class JournalTests(unittest.TestCase):
                     listener_stop_evidence, hold=hold)
                 journal.mutate('gateway', 'disable-and-unload',
                     lambda: current['gateway'].update(loaded=False, running=False, disabled=True),
-                    listener_stop_evidence, hold=hold)
+                    lambda: listener_stop_evidence('gateway'), hold=hold)
                 current['gateway']['disabled'] = False
                 before = len(journal.records)
                 with self.assertRaisesRegex(Refused, 'stopped unit state changed before verified recovery: gateway'):
@@ -1331,7 +1351,7 @@ class JournalTests(unittest.TestCase):
                     listener_stop_evidence, hold=hold)
                 journal.mutate('gateway', 'disable-and-unload',
                     lambda: current['gateway'].update(loaded=False, running=False, disabled=True),
-                    listener_stop_evidence, hold=hold)
+                    lambda: listener_stop_evidence('gateway'), hold=hold)
                 journal.append('override-clear-intent', unit='gateway')
                 self.assertEqual(journal.records[-1]['event'], 'override-clear-intent')
             with Journal(self.root, node_lock=self.node_lock) as reopened:
@@ -1374,7 +1394,7 @@ class JournalTests(unittest.TestCase):
                 for unit in ('mesh-deploy-listener', 'gateway', 'workplan-viewer'):
                     journal.mutate(unit, 'disable-and-unload',
                         lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
-                        listener_stop_evidence, hold=hold)
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
                 restored = []
                 def restore(unit, wanted):
                     restored.append(unit)
@@ -1438,7 +1458,7 @@ class JournalTests(unittest.TestCase):
                     journal.mutate(unit, 'disable-and-unload',
                         lambda unit=unit: current[unit].update(loaded=False, running=False,
                                                                disabled=True),
-                        listener_stop_evidence, hold=hold)
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
                 restored = []
                 def restore(unit, wanted):
                     restored.append(unit)
@@ -1494,7 +1514,7 @@ class JournalTests(unittest.TestCase):
                          scope=FULL_NODE_SCOPE) as journal:
                 stop = journal.append('intent', unit='gateway', action='disable-and-unload')
                 journal.append('verified', unit='gateway', intent=stop['sequence'],
-                               evidence=listener_stop_evidence())
+                               evidence=listener_stop_evidence('gateway'))
                 journal.append('restoration-intent', unit='gateway', action='restore-prior')
                 journal.restoring_unit = 'gateway'
                 journal.begin_override_clear('gateway')
@@ -1511,7 +1531,7 @@ class JournalTests(unittest.TestCase):
                          scope=FULL_NODE_SCOPE) as journal:
                 stop = journal.append('intent', unit='gateway', action='disable-and-unload')
                 journal.append('verified', unit='gateway', intent=stop['sequence'],
-                               evidence=listener_stop_evidence())
+                               evidence=listener_stop_evidence('gateway'))
                 journal.append('recovery-verified', unit='gateway', evidence={'verified': True})
                 journal.append('restoration-intent', unit='gateway', action='restore-prior')
                 journal.restoring_unit = 'gateway'
@@ -1527,7 +1547,7 @@ class JournalTests(unittest.TestCase):
             with Journal(self.root, prior, node_lock=self.node_lock,
                          scope=FULL_NODE_SCOPE) as journal:
                 for unit, evidence in (('observer', timer_stop_evidence('observer')),
-                                       ('nats', listener_stop_evidence())):
+                                       ('nats', listener_stop_evidence('nats'))):
                     stop = journal.append('intent', unit=unit, action='disable-and-unload')
                     journal.append('verified', unit=unit, intent=stop['sequence'],
                                    evidence=evidence)
@@ -1563,7 +1583,7 @@ class JournalTests(unittest.TestCase):
                 for unit in ('mesh-deploy-listener', 'gateway'):
                     journal.mutate(unit, 'disable-and-unload',
                         lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
-                        listener_stop_evidence, hold=hold)
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
                 def restore(unit, wanted):
                     if unit != 'gateway':
                         current[unit] = copy.deepcopy(wanted)
@@ -1608,7 +1628,7 @@ class JournalTests(unittest.TestCase):
                 for unit in ('mesh-deploy-listener', 'memory-daemon', 'mission-control', 'gateway'):
                     journal.mutate(unit, 'disable-and-unload',
                         lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
-                        listener_stop_evidence, hold=hold)
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
                 restored = []
                 def restore(unit, wanted):
                     restored.append(unit)
@@ -1648,10 +1668,10 @@ class JournalTests(unittest.TestCase):
                     listener_stop_evidence, hold=hold)
                 journal.mutate('gateway', 'disable-and-unload',
                     lambda: current['gateway'].update(loaded=False, running=False, disabled=True),
-                    listener_stop_evidence, hold=hold)
+                    lambda: listener_stop_evidence('gateway'), hold=hold)
                 journal.mutate('workplan-viewer', 'disable-and-unload',
                     lambda: current['workplan-viewer'].update(loaded=False, running=False, disabled=True),
-                    listener_stop_evidence, hold=hold)
+                    lambda: listener_stop_evidence('workplan-viewer'), hold=hold)
                 def observe(unit, _):
                     if unit == 'health-watch':
                         current['gateway'] = copy.deepcopy(prior['gateway'])
@@ -1691,7 +1711,7 @@ class JournalTests(unittest.TestCase):
                 for unit in ('gateway', 'workplan-viewer'):
                     journal.mutate(unit, 'disable-and-unload',
                         lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
-                        listener_stop_evidence, hold=hold)
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
                 def observe(unit, _):
                     if unit == 'health-watch':
                         current['gateway']['unobservable'] = True
@@ -2014,7 +2034,7 @@ class JournalTests(unittest.TestCase):
                 def stop_viewer():
                     fence_unit(current, 'workplan-viewer')
                 journal.mutate('workplan-viewer', 'disable-and-unload', stop_viewer,
-                               listener_stop_evidence, hold=hold)
+                               lambda: listener_stop_evidence('workplan-viewer'), hold=hold)
                 self.assertEqual(journal.records[-1]['evidence']['entrypoint_loaded'],
                                  current['loaded'])
                 def unload_timer():
@@ -2277,7 +2297,7 @@ class JournalTests(unittest.TestCase):
                 for unit in ('mesh-deploy-listener', 'gateway'):
                     journal.mutate(unit, 'disable-and-unload',
                         lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
-                        listener_stop_evidence, hold=hold)
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
                 entrypoints['installed']['ai.openclaw.gateway']['sha256'] = '1' * 64
                 restored = []
                 before = len(journal.records)
@@ -2345,7 +2365,7 @@ class JournalTests(unittest.TestCase):
                 for unit in ('mesh-deploy-listener', 'gateway'):
                     journal.mutate(unit, 'disable-and-unload',
                         lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
-                        listener_stop_evidence, hold=hold)
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
                 capture_available['value'] = False
                 restored = []
                 def restore(unit, wanted):
@@ -2389,7 +2409,7 @@ class JournalTests(unittest.TestCase):
                 for unit in ('mesh-deploy-listener', 'gateway', 'memory-daemon'):
                     journal.mutate(unit, 'disable-and-unload',
                         lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
-                        listener_stop_evidence, hold=hold)
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
                 restored = []
                 def restore(unit, wanted):
                     restored.append(unit)
@@ -2440,7 +2460,7 @@ class JournalTests(unittest.TestCase):
                 for unit in ('mesh-deploy-listener', 'gateway', 'memory-daemon'):
                     journal.mutate(unit, 'disable-and-unload',
                         lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
-                        listener_stop_evidence, hold=hold)
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
                 restored = []
                 def restore(unit, wanted):
                     restored.append(unit)
@@ -2486,7 +2506,7 @@ class JournalTests(unittest.TestCase):
                 for unit in ('mesh-deploy-listener', 'gateway'):
                     journal.mutate(unit, 'disable-and-unload',
                         lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
-                        listener_stop_evidence, hold=hold)
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
                 failures['count'] = 2
                 restored = []
                 def restore(unit, wanted):
@@ -2531,7 +2551,7 @@ class JournalTests(unittest.TestCase):
                 for unit in ('mesh-deploy-listener', 'gateway'):
                     journal.mutate(unit, 'disable-and-unload',
                         lambda unit=unit: current[unit].update(loaded=False, running=False, disabled=True),
-                        listener_stop_evidence, hold=hold)
+                        lambda unit=unit: listener_stop_evidence(unit), hold=hold)
                 restored = []
                 def restore(unit, wanted):
                     restored.append(unit)

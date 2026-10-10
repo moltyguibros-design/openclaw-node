@@ -3132,3 +3132,23 @@ The workflow parses with that value set to false, and the diff is clean. The
 next exact-head run must establish the complete Node 22 result. This is CI
 evidence plumbing, not a production history or no-writer acceptance. No live
 VM, service or NATS store changed.
+
+## D147 — Bind managed stop receipts to their unit (2026-10-09 23:52 EDT)
+
+The full-node journal required a managed-stop receipt's process and bootout
+flags but did not require the receipt to name the unit being stopped. A
+callback could therefore return a valid receipt from another service after
+the target became unloaded and disabled; the journal would record the target
+as proven stopped without its own descendant or connection proof. The same
+predicate is used at the listener fence and NATS-transfer checks.
+
+`StopWatch.verify` now records the service label in its evidence, and every
+managed-stop predicate compares it with the journal unit. Missing or different
+labels refuse. An owned journal negative fences `gateway` but supplies a
+`mesh-bridge` receipt; it now records a failed intent and no verified gateway
+stop. The 152 journal tests, 54 managed-launchd tests and 28 local baseline
+tests pass; seven dedicated-CI baseline cases are skipped locally. This binds
+receipts against accidental cross-unit reuse, not against a caller forging a
+label or a writer that escaped the bound process tree. A production driver,
+full-node no-writer proof, stopped-VM capture and four-history acceptance are
+still open. No live VM, service or NATS store changed.

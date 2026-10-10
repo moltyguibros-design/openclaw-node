@@ -2430,3 +2430,11 @@ step passed but the job was canceled before a complete result. The workflow
 parses with `fail-fast: false`; new exact-head CI remains to run. This does not
 approve the production baseline or close the full hold, stopped capture,
 four-history acceptance or resumption gates. No live state changed.
+
+Checkpoint 2026-10-09 23:52 EDT: D147 makes a managed-stop receipt name the
+unit whose process tree and connection checks it proves. An owned gateway
+stop with a mesh-bridge receipt now refuses and records no verified gateway
+stop. Journal and managed-launchd suites pass locally; the 23-label native
+fixture still needs dedicated macOS CI. This does not complete the full-node
+no-writer hold or authorize VM shutdown. Capture, four-history acceptance and
+verified resumption remain open at 1.2[A]/v1.2-pre; no live state changed.

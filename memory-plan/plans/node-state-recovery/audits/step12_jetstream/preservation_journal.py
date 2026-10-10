@@ -845,7 +845,7 @@ class Journal:
                         'legacy NATS writer is still active: ' + unit)
                 require(any(row['event'] == 'verified' and row.get('unit') == unit
                             and row.get('action') == 'disable-and-unload'
-                            and self.managed_stop_proven(row.get('evidence'))
+                            and self.managed_stop_proven(unit, row.get('evidence'))
                             for row in self.records),
                         'legacy NATS stop has no verified persistent journal receipt: ' + unit)
             observations[unit] = actual
@@ -887,12 +887,14 @@ class Journal:
             return False
         return any(row['event'] == 'verified' and row['sequence'] > intents[1]['sequence']
                    and row.get('intent') == intents[1]['sequence']
-                   and self.managed_stop_proven(row.get('evidence')) for row in self.records)
+                   and self.managed_stop_proven('mesh-deploy-listener', row.get('evidence'))
+                   for row in self.records)
 
     @staticmethod
-    def managed_stop_proven(evidence):
+    def managed_stop_proven(unit, evidence):
         return (isinstance(evidence, dict)
                 and evidence.get('verified') is True
+                and evidence.get('unit_label') == 'ai.openclaw.' + unit
                 and all(evidence.get(key) is True for key in LISTENER_STOP_FIELDS)
                 and isinstance(evidence.get('bootout'), dict)
                 and evidence['bootout'].get('returncode') == 0
@@ -917,7 +919,7 @@ class Journal:
     def full_node_stop_proven(self, unit, evidence):
         kind = self.prior[unit]['class']
         return ((kind in ('daemon', 'on-demand', 'known-broken')
-                 and self.managed_stop_proven(evidence))
+                 and self.managed_stop_proven(unit, evidence))
                 or (kind in ('timer', 'on-demand', 'known-broken')
                     and self.idle_stop_proven(unit, evidence)))
 
