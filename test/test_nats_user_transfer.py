@@ -98,14 +98,14 @@ class UserTransferTest(unittest.TestCase):
                 fixture_module.fence_unit(loaded, unit)
                 journal.append('verified', intent=intent['sequence'], unit=unit,
                                action='disable-and-unload', evidence={
-                                   **fixture_module.listener_stop_evidence(),
+                                   **fixture_module.listener_stop_evidence(unit),
                                    'execution_hold': certificate,
                                    'entrypoint_loaded': copy.deepcopy(loaded['loaded']),
                                    'entrypoint_overrides': copy.deepcopy(loaded['overrides'])})
             else:
                 journal.mutate(unit, 'disable-and-unload',
                                lambda unit=unit: fixture_module.fence_unit(loaded, unit),
-                               lambda: {**fixture_module.listener_stop_evidence(),
+                               lambda unit=unit: {**fixture_module.listener_stop_evidence(unit),
                                         'execution_hold': certificate}, hold=hold)
         def observe(unit, saved):
             if unit == 'nats-1':
@@ -486,7 +486,7 @@ class UserTransferTest(unittest.TestCase):
                         for unit in ('nats', 'nats-2', 'nats-3'):
                             hold.mutate(unit, 'disable-and-unload',
                                 lambda unit=unit: fixture_module.fence_unit(loaded, unit),
-                                fixture_module.listener_stop_evidence)
+                                lambda unit=unit: fixture_module.listener_stop_evidence(unit))
                         transaction = str(uuid.uuid4())
                         transfer = journal.transfer_nats(transaction, hold,
                             lambda unit, saved: {**saved, 'verified': True,

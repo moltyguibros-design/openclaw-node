@@ -2435,6 +2435,9 @@ Checkpoint 2026-10-09 23:52 EDT: D147 makes a managed-stop receipt name the
 unit whose process tree and connection checks it proves. An owned gateway
 stop with a mesh-bridge receipt now refuses and records no verified gateway
 stop. Journal and managed-launchd suites pass locally; the 23-label native
-fixture still needs dedicated macOS CI. This does not complete the full-node
+fixture still needs dedicated macOS CI. The first exact-head CI exposed a
+separate root-transfer fixture using listener-labelled receipts for NATS; that
+fixture is corrected and its 22 tests pass locally, with rerun CI pending.
+This does not complete the full-node
 no-writer hold or authorize VM shutdown. Capture, four-history acceptance and
 verified resumption remain open at 1.2[A]/v1.2-pre; no live state changed.

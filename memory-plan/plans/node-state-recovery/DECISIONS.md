@@ -3146,8 +3146,13 @@ predicate is used at the listener fence and NATS-transfer checks.
 managed-stop predicate compares it with the journal unit. Missing or different
 labels refuse. An owned journal negative fences `gateway` but supplies a
 `mesh-bridge` receipt; it now records a failed intent and no verified gateway
-stop. The 152 journal tests, 54 managed-launchd tests and 28 local baseline
-tests pass; seven dedicated-CI baseline cases are skipped locally. This binds
+stop. The 152 journal tests, 54 managed-launchd tests, 46 execution-hold tests,
+22 root-transfer tests and 28 local baseline tests pass; seven dedicated-CI
+baseline cases are skipped locally. The first exact-head CI run exposed an
+imported root-transfer fixture still supplying a listener-labelled receipt
+for NATS stops. Its Linux and macOS jobs failed before the longer recovery
+suites; the fixture now supplies each NATS unit's own label, and exact-head CI
+must be rerun. This binds
 receipts against accidental cross-unit reuse, not against a caller forging a
 label or a writer that escaped the bound process tree. A production driver,
 full-node no-writer proof, stopped-VM capture and four-history acceptance are
