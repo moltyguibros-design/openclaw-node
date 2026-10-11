@@ -3269,3 +3269,21 @@ directions, and the 60 managed-launchd tests pass locally with three
 dedicated-runner skips. The complete 23-label native sweep needs a green
 exact-head macOS CI run before this slice is credited. Other CI failures at
 `87aa6cae` were the separate dependency audits addressed by PR #226.
+
+## D154 — Observe the guest Data volume before accepting a stopped-tree manifest (2026-10-11 06:05 EDT)
+
+The guest stopped-tree manifest previously copied `data_volume_uuid` from the
+caller-supplied store specification. It could therefore name a Data volume
+without observing the volume that held the four walked stores. `guest_capture`
+now resolves the first store's mounted disk through `df`, reads that disk's
+`diskutil` identity, requires its Data volume UUID to match the specification,
+and requires the other three stores to share the same device. It rechecks the
+volume and device after walking. An owned ASIF fixture with a deliberately
+wrong UUID refuses before writing a manifest; all nine host-capture tests pass
+locally.
+
+This binds the manifest's volume field to an observed mounted volume. It does
+not establish that the manifest was produced inside the production guest or
+that the VM was writer-free; the full-node hold, host guard and capture chain
+remain separate admission requirements. No production service, VM or NATS
+store changed.

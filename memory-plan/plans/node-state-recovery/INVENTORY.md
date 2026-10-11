@@ -2507,3 +2507,12 @@ This certifies an owned class path, not a production no-writer hold. The
 approved pin map, idle classes and timer witness, NATS transfer, detached
 writers, UTM/boot gates, capture, four-history acceptance and runtime
 resumption remain open. No production service, VM or NATS store changed.
+
+Checkpoint 2026-10-11 06:05 EDT: D154 grounds the guest stopped-tree
+manifest's Data volume UUID in the mounted disk observed while walking the
+four stores, instead of copying it from the caller's specification. The owned
+ASIF wrong-UUID negative refuses without a manifest; all nine host-capture
+tests pass locally. This does not prove guest origin, writer exclusion or a
+production capture. Full-node hold, shutdown, four-history acceptance and
+verified resumption remain open at 1.2[A]/v1.2-pre. No production service, VM
+or NATS store changed.

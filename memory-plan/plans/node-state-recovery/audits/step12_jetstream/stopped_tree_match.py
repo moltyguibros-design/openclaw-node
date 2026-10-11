@@ -6,8 +6,10 @@ import hashlib
 import json
 import os
 import pathlib
+import plistlib
 import re
 import stat
+import subprocess
 import sys
 
 from host_asif_extract import declared_path, private_parent, require, write_json
@@ -69,6 +71,21 @@ def store_spec(path):
     return value, hashlib.sha256(contents).hexdigest()
 
 
+def data_volume_uuid(path):
+    mounted = subprocess.run(['/bin/df', '-P', str(path)], capture_output=True,
+                             text=True, timeout=10, check=True).stdout.splitlines()
+    require(len(mounted) == 2, 'guest store volume mount is ambiguous')
+    fields = mounted[1].split(maxsplit=5)
+    require(len(fields) == 6 and fields[0].startswith('/dev/'),
+            'guest store is not on a disk volume')
+    info = plistlib.loads(subprocess.run(['/usr/sbin/diskutil', 'info', '-plist', fields[0]],
+                                        capture_output=True, timeout=10, check=True).stdout)
+    require(info.get('VolumeName') == 'Data' and info.get('MountPoint') == fields[5]
+            and isinstance(info.get('VolumeUUID'), str),
+            'guest store is not on the observed Data volume')
+    return info['VolumeUUID']
+
+
 def new_output(output):
     private_parent(output.parent)
     require(not os.path.lexists(output), 'stopped-tree output exists')
@@ -84,12 +101,25 @@ def guest_capture(spec_path, output, root=pathlib.Path('/')):
     try:
         stores = {}
         store_paths = {}
+        device = None
+        first_source = None
         for row in spec['stores']:
             source = declared_path(root, row['relative_path'])
+            if device is None:
+                require(data_volume_uuid(source) == spec['data_volume_uuid'],
+                        'guest store Data volume UUID differs from specification')
+                device = source.stat().st_dev
+                first_source = source
+            else:
+                require(source.stat().st_dev == device,
+                        'guest stores span multiple volumes')
             stores[row['role']] = entries(source)
             store_paths[row['role']] = str(source.resolve(strict=True))
             require(any(item['type'] == 'file' for item in stores[row['role']]),
                     f'empty stopped store: {row["role"]}')
+        require(data_volume_uuid(first_source) == spec['data_volume_uuid']
+                and all(pathlib.Path(path).stat().st_dev == device for path in store_paths.values()),
+                'guest store Data volume changed during capture')
         require(sha256(spec_path) == spec_sha256,
                 'store specification changed during guest capture')
         result = {'scope': 'guest stopped-tree content observation; writer exclusion external',

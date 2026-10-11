@@ -62,7 +62,8 @@ class VmstateGateTest(unittest.TestCase):
                     spec.write_text(json.dumps(swapped))
                 return result
             output = root / 'guest-output'
-            with mock.patch.object(stopped_tree_match, 'entries', side_effect=rewrite_after_first_tree):
+            with mock.patch.object(stopped_tree_match, 'data_volume_uuid', return_value='A' * 36), \
+                    mock.patch.object(stopped_tree_match, 'entries', side_effect=rewrite_after_first_tree):
                 with self.assertRaisesRegex(RuntimeError, 'store specification changed'):
                     guest_capture(spec, output, root)
             self.assertTrue((output / 'FAILED.json').exists())
@@ -394,6 +395,15 @@ class HostCaptureTest(unittest.TestCase):
         store_spec.chmod(0o600)
         guest_output = self.root / 'guest-stopped'
         guest_capture(store_spec, guest_output, mount)
+        wrong_volume_spec = self.root / 'wrong-guest-volume.json'
+        wrong_volume = json.loads(store_spec.read_text())
+        wrong_volume['data_volume_uuid'] = '0' * 36
+        wrong_volume_spec.write_text(json.dumps(wrong_volume))
+        wrong_volume_spec.chmod(0o600)
+        wrong_volume_output = self.root / 'wrong-guest-volume'
+        with self.assertRaisesRegex(RuntimeError, 'guest store Data volume UUID differs'):
+            guest_capture(wrong_volume_spec, wrong_volume_output, mount)
+        self.assertFalse((wrong_volume_output / 'manifest.json').exists())
         swapped_spec = json.loads(store_spec.read_text())
         swapped_spec['stores'][1]['relative_path'], swapped_spec['stores'][2]['relative_path'] = (
             swapped_spec['stores'][2]['relative_path'], swapped_spec['stores'][1]['relative_path'])

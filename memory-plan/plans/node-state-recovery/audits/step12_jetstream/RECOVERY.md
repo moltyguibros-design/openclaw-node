@@ -98,7 +98,9 @@ guest shutdown, uninterrupted host exclusion, guest-to-host store comparison,
 isolated production restore and resumption are still required.
 
 `stopped_tree_match.py capture` records the four guest store trees under a
-private specification after managed NATS stop. Its `match` action runs on the
+private specification after managed NATS stop. It observes the mounted Data
+volume UUID through `diskutil`, requires all four trees on that volume, and
+rechecks the mount after walking them. Its `match` action runs on the
 host after ASIF extraction, compares the guest manifest, extraction manifest
 and rehashed host files exactly, then makes the extracted trees read-only.
 Its `MATCH.json` records the canonical frozen path and content digest for each
