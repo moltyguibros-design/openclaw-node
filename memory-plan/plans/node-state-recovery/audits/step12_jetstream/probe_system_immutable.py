@@ -96,13 +96,24 @@ def main():
                 raise RuntimeError('system immutable flag did not stick')
             user_clear = subprocess.run(['/usr/bin/chflags', 'noschg', str(target)],
                                         capture_output=True)
+            flag_after_user_clear = bool(target.lstat().st_flags & stat.SF_IMMUTABLE)
+            try:
+                new_descriptor = os.open(target, os.O_WRONLY)
+            except OSError as error:
+                new_open = {'outcome': 'refused', 'errno': error.errno}
+            else:
+                os.close(new_descriptor)
+                new_open = {'outcome': 'opened'}
             descriptor = command(child, 'descriptor')
             mapping = command(child, 'mapping') if child.poll() is None else {
                 'command': 'mapping', 'outcome': 'writer-exited'}
             observed = {'status': 'stimulated', 'securelevel': securelevel,
                         'system_flag_set': flagged,
                         'user_clear_refused': user_clear.returncode != 0,
+                        'system_flag_after_user_clear': flag_after_user_clear,
+                        'new_writable_open': new_open,
                         'descriptor': descriptor, 'mapping': mapping,
+                        'system_flag_after_writes': bool(target.lstat().st_flags & stat.SF_IMMUTABLE),
                         'writer_exit': child.poll(),
                         'content_after': target.read_bytes().decode('ascii')}
         finally:
