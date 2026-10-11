@@ -3255,3 +3255,17 @@ fresh owner binding, readiness, and listener-last release. Local journal and
 managed-launchd suites pass; the native fixture awaits exact-head macOS CI.
 This does not supply the timer spawn/writer witness, a full-node driver, or
 permission to stop the production VM or services.
+
+## D153 — Admit the running known-broken class at the stop preflight (2026-10-10 21:56 EDT)
+
+Exact-head `87aa6cae` macOS CI exposed a missing precondition in D152: both
+owned 23-label sweeps refused `mesh-tool-discord` before its stop intent because
+`StopWatch.mutate` still admitted persistent stops only for plain daemons.
+The local journal and restore tests did not exercise that native gate. Extend
+the preflight to admit a `known-broken` unit only when its saved owner was
+running, matching the D152 restore adapter. An idle known-broken unit and
+NATS members still refuse this path. The new preflight control covers both
+directions, and the 60 managed-launchd tests pass locally with three
+dedicated-runner skips. The complete 23-label native sweep needs a green
+exact-head macOS CI run before this slice is credited. Other CI failures at
+`87aa6cae` were the separate dependency audits addressed by PR #226.

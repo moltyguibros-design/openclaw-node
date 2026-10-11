@@ -2488,3 +2488,12 @@ known-broken jobs, five timer spawn/writer proofs, NATS transfer, detached
 writers, the complete driver, UTM/boot gates, capture, four-history acceptance
 and runtime resumption remain open. No production service, VM or NATS history
 changed.
+
+Checkpoint 2026-10-10 21:56 EDT: Exact-head D152 macOS CI found that the
+running known-broken stub was still refused by the stop preflight, before
+the new restore path could be exercised. D153 admits only a previously
+running known-broken job there; the idle case and NATS members still refuse.
+The 60 local managed-launchd tests pass with three dedicated-runner skips;
+the native 23-label sweep awaits new exact-head CI. The full-node no-writer
+hold, stopped capture, all four real-history acceptance and resumption remain
+unproven. No production service, VM or NATS store changed.

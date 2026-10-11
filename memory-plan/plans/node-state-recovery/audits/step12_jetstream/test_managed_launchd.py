@@ -238,7 +238,6 @@ class StopWatchPreflight(unittest.TestCase):
                 ('mesh-deploy-listener', False, 'deploy listener requires'),
                 ('observer', True, 'lacks a daemon recovery adapter'),
                 ('mesh-agent', True, 'lacks a daemon recovery adapter'),
-                ('mesh-tool-discord', True, 'lacks a daemon recovery adapter'),
                 ('nats', True, 'lacks a daemon recovery adapter'),
                 ('nats-1', True, 'lacks a daemon recovery adapter')):
             watch = SimpleNamespace(service=SimpleNamespace(label='ai.openclaw.' + unit),
@@ -246,6 +245,17 @@ class StopWatchPreflight(unittest.TestCase):
                                     ready_for_intent=lambda: self.fail('stop watch reached'))
             with self.subTest(unit=unit), self.assertRaisesRegex(Refused, expected):
                 StopWatch.mutate(watch, journal, unit, lambda: True, lambda: True)
+
+    def test_known_broken_persistent_stop_requires_a_running_baseline(self):
+        journal = SimpleNamespace(scope='full-node', prior=full_node_inventory())
+        watch = SimpleNamespace(service=SimpleNamespace(label='ai.openclaw.mesh-tool-discord'),
+                                require_disabled=True,
+                                ready_for_intent=lambda: self.fail('bound watch reached'))
+        with self.assertRaisesRegex(AssertionError, 'bound watch reached'):
+            StopWatch.mutate(watch, journal, 'mesh-tool-discord', lambda: True, lambda: True)
+        journal.prior['mesh-tool-discord']['running'] = False
+        with self.assertRaisesRegex(Refused, 'lacks a daemon recovery adapter'):
+            StopWatch.mutate(watch, journal, 'mesh-tool-discord', lambda: True, lambda: True)
 
     def test_full_node_daemon_stop_reaches_its_bound_watch(self):
         journal = SimpleNamespace(scope='full-node', prior=full_node_inventory())

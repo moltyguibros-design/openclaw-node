@@ -622,7 +622,9 @@ class StopWatch:
                     'deploy listener requires a persistent managed stop')
             require(unit == 'mesh-deploy-listener' or not self.require_disabled
                     or (unit not in NATS_TRANSFER_UNITS
-                        and journal.prior.get(unit, {}).get('class') == 'daemon'),
+                        and (journal.prior.get(unit, {}).get('class') == 'daemon'
+                             or journal.prior.get(unit, {}).get('class') == 'known-broken'
+                             and journal.prior[unit]['running'])),
                     'persistent full-node stop lacks a daemon recovery adapter')
         self.ready_for_intent()
         if self.require_disabled:
