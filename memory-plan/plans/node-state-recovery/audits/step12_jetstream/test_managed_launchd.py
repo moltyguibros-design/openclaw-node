@@ -626,6 +626,20 @@ os.execv('/bin/sleep',['sleep','30'])
         self.assertFalse(self.service.status()['loaded'])
         self.assertEqual(self.log.stat().st_size, 0)
 
+    def test_disabled_loaded_idle_job_still_accepts_kickstart(self):
+        self.launch(run_at_load=False)
+        self.assertFalse(self.service.status()['running'])
+        self.hold_override_attempted = True
+        self.service.disable_for_hold()
+        direct = subprocess.run(['/bin/launchctl', 'kickstart', self.service.target],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(direct.returncode, 0, direct.stderr)
+        wait_for(self.ready.exists)
+        self.assertTrue(self.service.status()['running'])
+        self.assertTrue(self.service.disabled())
+        self.proofs.append({'test': self._testMethodName, 'kickstart_rc': direct.returncode,
+                            'running_while_disabled': True})
+
     def test_idle_timer_persistent_stop_refuses_direct_restart_until_release(self):
         self.launch(run_at_load=False)
         apply, verify = unload_idle_timer(

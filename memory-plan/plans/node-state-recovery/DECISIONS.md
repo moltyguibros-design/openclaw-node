@@ -3305,3 +3305,21 @@ and all nine host-capture tests pass locally. This checks consistency between
 the two declared inputs; it still does not attest that the guest manifest
 originated inside the production VM. No production service, VM or NATS store
 changed.
+
+## D156 — A disabled loaded idle job can still be kickstarted (2026-10-11 12:05 EDT)
+
+An owned native launchd control loads an idle `RunAtLoad=false` job, applies
+its GUI disabled override, then invokes `launchctl kickstart` directly. The
+command succeeds, the owner reaches readiness, and launchd reports it running
+while the override remains disabled. The test uses a fresh label and an owned
+loopback NATS server and cleans up both. The disabled override excludes a later
+bootstrap after bootout, but it is not a spawn fence for a job that remains
+loaded during the disable-to-bootout interval.
+
+Keep the idle stop's independent continuous spawn witness mandatory. For
+on-demand and idle known-broken jobs, a future driver must arm that witness
+before the first hold mutation, reject any spawn through unload and disabled
+verification, and account for any writer already detached from the job. The
+current `unload_idle_timer` refusal when its witness is absent remains correct.
+This owned control does not close the full-node hold or permit a production
+service or VM stop.

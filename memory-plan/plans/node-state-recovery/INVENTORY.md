@@ -2525,3 +2525,12 @@ the same negative refuses without a match receipt. All nine host-capture
 tests pass locally. Guest origin, full-node hold, actual capture, all four
 history acceptance and verified resumption remain open at 1.2[A]/v1.2-pre.
 No production service, VM or NATS store changed.
+
+Checkpoint 2026-10-11 12:05 EDT: D156's owned launchd control proves that a
+loaded idle job accepts a direct kickstart and runs while its disabled
+override remains set. An override alone cannot cover the interval before
+bootout; continuous spawn and detached-writer evidence remains necessary for
+idle on-demand, idle known-broken and timer stops. The native control passes
+locally. Full-node hold, stopped capture, all four real-history acceptance
+and verified resumption remain open at 1.2[A]/v1.2-pre. No production
+service, VM or NATS store changed.
