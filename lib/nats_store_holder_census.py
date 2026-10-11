@@ -89,6 +89,8 @@ def _observe(user_home):
                         'start_usec': process['start_usec'],
                         'reference': reference, 'fd': entry.get('fd'),
                         'inode': entry['inode'], 'unlinked': entry['links'] == 0,
+                        'writable': entry.get('writable'),
+                        'may_be_writable': entry.get('may_be_writable'),
                         'match': 'inode' if by_inode else 'path'})
                     matched = True
             if not matched and entry['links'] == 0 and entry['device'] in devices:

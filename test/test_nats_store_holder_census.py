@@ -29,7 +29,8 @@ class HolderCensusTest(unittest.TestCase):
                     return {'uid': 501, 'start_sec': 100,
                             'start_usec': 200, 'cwd': None, 'mappings': [], 'vnodes': [
                         {'fd': 3, 'device': linked_info.st_dev,
-                         'inode': linked_info.st_ino, 'links': 1, 'path': str(linked)},
+                         'inode': linked_info.st_ino, 'links': 1, 'path': str(linked),
+                         'writable': True},
                         {'fd': 4, 'device': linked_info.st_dev,
                          'inode': linked_info.st_ino + 1000000, 'links': 0,
                          'path': str((roots[1] / 'deleted').resolve())},
@@ -44,6 +45,7 @@ class HolderCensusTest(unittest.TestCase):
                     patch.object(census.proc, 'vnode_snapshot', side_effect=process):
                 report = census._observe(home)
             self.assertEqual(report['stores']['ai.openclaw.nats']['holders'][0]['pid'], 10)
+            self.assertTrue(report['stores']['ai.openclaw.nats']['holders'][0]['writable'])
             self.assertEqual(report['stores']['ai.openclaw.nats-1']['holders'][0]['match'],
                              'path')
             self.assertTrue(report['stores']['ai.openclaw.nats-1']['holders'][0]['unlinked'])
@@ -124,7 +126,8 @@ class HolderCensusTest(unittest.TestCase):
             process = {'pid': 10, 'uid': 501, 'start_sec': 100,
                        'start_usec': 200, 'vnodes': [], 'cwd': None,
                        'mappings': [{'device': info.st_dev, 'inode': info.st_ino,
-                                     'links': info.st_nlink, 'path': str(mapped)}]}
+                                     'links': info.st_nlink, 'path': str(mapped),
+                                     'writable': True, 'may_be_writable': True}]}
             with patch.object(census.proc, 'list_pids', return_value=[10]), \
                     patch.object(census.proc, 'vnode_snapshot', return_value=process):
                 report = census._observe(home)
@@ -132,6 +135,8 @@ class HolderCensusTest(unittest.TestCase):
             self.assertEqual(len(holders), 1)
             self.assertEqual(holders[0]['reference'], 'mmap')
             self.assertIsNone(holders[0]['fd'])
+            self.assertTrue(holders[0]['writable'])
+            self.assertTrue(holders[0]['may_be_writable'])
 
     @unittest.skipUnless(sys.platform == 'darwin', 'macOS process API')
     def test_unlinked_live_mapping_is_attributed_to_store(self):
@@ -150,6 +155,8 @@ class HolderCensusTest(unittest.TestCase):
                 holders = report['stores']['ai.openclaw.nats']['holders']
                 self.assertTrue(any(holder['reference'] == 'mmap' and
                                     holder['unlinked'] for holder in holders))
+                self.assertTrue(all(holder['writable'] is False for holder in holders
+                                    if holder['reference'] == 'mmap'))
             finally:
                 mapping.close()
 
