@@ -2548,9 +2548,12 @@ Checkpoint 2026-10-11 17:25 EDT: D158 refreshed two separate private online
 archives from the still-running standalone and routed cluster buses. Both
 manifests rehash, and all 11 reachable streams restored on two isolated
 loopback servers with 80,884 non-expiring messages accepted. Direct content
-digests matched for all nine non-expiring streams, though the standalone
-baseline refused its final recheck twice on transient consumer counts; its
-partial reads are retained as corroboration only. Both owned restore servers
+digests matched for all nine non-expiring streams; the committed verifier
+rechecks their complete content objects against hashed private receipts. The
+standalone baseline refused its final recheck twice with consumer-count
+assertion diffs of unproven cause; its partial reads are corroboration only.
+The two expiring health streams restored and expired without a direct message
+byte comparison. Both owned restore servers
 stopped and the three production NATS PIDs did not change. The cluster's two
 offline streams are explicitly recorded, not archived. The held member-1
 master remains separate. This strengthens online rollback evidence but is
