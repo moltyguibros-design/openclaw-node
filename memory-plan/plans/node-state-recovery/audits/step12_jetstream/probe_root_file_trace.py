@@ -23,7 +23,8 @@ for command in sys.stdin:
         os.fsync(descriptor)
     elif command == 'mapping\n':
         mapping[0:1] = b'M'
-        mapping.flush()
+    elif command == 'control-end\n':
+        os.stat(sys.argv[4])
     print(command.strip(), flush=True)
 '''
 
@@ -47,12 +48,14 @@ def main():
         root = pathlib.Path(root)
         descriptor = root / 'preexisting-descriptor.bin'
         mapped = root / 'preexisting-mapping.bin'
-        control = root / 'trace-control.marker'
+        control = root / 'trace-control-start.marker'
+        control_end = root / 'trace-control-end.marker'
         descriptor.write_bytes(b'0000')
         mapped.write_bytes(b'0000')
         control.write_bytes(b'control')
+        control_end.write_bytes(b'control')
         child = subprocess.Popen(['/usr/bin/python3', '-c', CHILD,
-                                  str(descriptor), str(mapped), str(control)],
+                                  str(descriptor), str(mapped), str(control), str(control_end)],
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE, text=True)
         try:
@@ -64,7 +67,7 @@ def main():
             try:
                 time.sleep(1)
                 last_ack = 'ready'
-                for command in ('control', 'descriptor', 'mapping'):
+                for command in ('control', 'descriptor', 'mapping', 'control-end'):
                     try:
                         child.stdin.write(command + '\n')
                         child.stdin.flush()
@@ -82,19 +85,24 @@ def main():
             lines = output.splitlines()
             write_lines = [line for line in lines if re.search(r'\b(?:p?write|writev|msync)\b', line, re.I)]
             control_seen = any(control.name in line for line in lines)
+            control_end_seen = any(control_end.name in line for line in lines)
             child.stdin.close()
             child.wait(timeout=5)
-            result(status=('stimulated' if control_seen and last_ack == 'mapping' and child.returncode == 0
+            result(status=('stimulated' if control_seen and control_end_seen
+                            and last_ack == 'control-end' and child.returncode == 0
                             else 'inconclusive')
                    if tracer.returncode == 0 else 'tracer-refused',
                    tracer_exit=tracer.returncode,
                    last_writer_ack=last_ack,
                    writer_exit=child.returncode,
                    control_path_seen=control_seen,
+                   control_end_path_seen=control_end_seen,
                    descriptor_path_seen=any(descriptor.name in line for line in write_lines),
-                   mapping_path_seen=any(mapped.name in line for line in write_lines),
-                   write_event_lines=len(write_lines),
-                   unnamed_write_event_lines=sum(not any(name in line for name in
+                   mapping_path_seen_in_writer_filtered_trace=any(mapped.name in line for line in write_lines),
+                   mapping_flush_called=False,
+                   kernel_writeback_included=False,
+                   writer_process_write_lines=len(write_lines),
+                   unnamed_write_lines_including_pipe_acks=sum(not any(name in line for name in
                        (descriptor.name, mapped.name)) for line in write_lines),
                    overrun_reported='buffer overrun' in (output + errors).lower())
         finally:
