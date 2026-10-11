@@ -290,9 +290,10 @@ class Launchd:
 
 
 def restore_disabled_daemon(service, journal, unit, prior, ready, *, timeout):
-    require(prior['class'] == 'daemon' and prior['loaded']
+    require((prior['class'] == 'daemon'
+             or prior['class'] == 'known-broken' and prior['running']) and prior['loaded']
             and service.label == 'ai.openclaw.' + unit and callable(ready),
-            'disabled daemon restoration is not bound to its saved owner')
+            'disabled running-job restoration is not bound to its saved owner')
     require(type(timeout) in (int, float) and math.isfinite(timeout) and timeout > 0,
             'disabled daemon restoration needs a finite readiness budget')
     require(regular_content(service.plist, 1 << 20) == prior['identity']['plist_sha256'],

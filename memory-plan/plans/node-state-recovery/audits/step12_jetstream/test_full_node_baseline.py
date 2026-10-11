@@ -426,7 +426,8 @@ process.on('SIGTERM',()=>{
             self.addCleanup(bridge_bus_server.close)
             swept = {'workplan-viewer', 'gateway', 'health-watch', 'node-watch',
                      'lane-watchdog', 'mission-control', 'mesh-task-daemon',
-                     'memory-daemon', 'mesh-health-publisher'} if daemon_sweep else set()
+                     'memory-daemon', 'mesh-health-publisher',
+                     'mesh-tool-discord'} if daemon_sweep else set()
             sweep_units = [unit for unit in STOP_ORDER if unit in swept]
             completion = {'health-watch': '[health-watch] shutting down',
                           'node-watch': '[node-watch] stopped',
@@ -921,11 +922,11 @@ process.on('SIGTERM',()=>{
                                 rows = [(row['event'], row.get('unit')) for row in journal.records]
                                 if daemon_sweep:
                                     expected = {unit for unit, saved in prior.items()
-                                                if saved['class'] == 'daemon'
+                                                if saved['class'] in ('daemon', 'known-broken')
                                                 and unit not in NATS_TRANSFER_UNITS
                                                 and unit != 'mesh-deploy-listener'}
                                     self.assertEqual(expected, set(sweep_units) | {'mesh-bridge'})
-                                    self.assertEqual(len(expected), 10)
+                                    self.assertEqual(len(expected), 11)
                                     for unit in expected:
                                         self.assertEqual(rows.count(('intent', unit)), 1, unit)
                                         self.assertEqual(rows.count(('recovery-verified', unit)), 1, unit)
@@ -1008,7 +1009,7 @@ process.on('SIGTERM',()=>{
     @unittest.skipUnless(sys.platform == 'darwin'
                          and os.environ.get('OPENCLAW_CI_FULL_NODE_INVENTORY_FIXTURE') == '1',
                          '23-label inventory fixture runs only on a dedicated macOS CI runner')
-    def test_native_entrypoint_capture_sweeps_plain_daemons(self):
+    def test_native_entrypoint_capture_sweeps_running_non_nats_jobs(self):
         self.exercise_native_entrypoint_capture(True, daemon_sweep=True)
 
     @unittest.skipUnless(sys.platform == 'darwin'

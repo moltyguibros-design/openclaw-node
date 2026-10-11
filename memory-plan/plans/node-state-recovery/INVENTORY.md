@@ -2478,3 +2478,13 @@ and the child writes only after the drain. All 47 execution-hold tests pass.
 A closed marker and flock drain therefore cannot substitute for the missing
 timer spawn/writer witness; the full-node no-writer hold remains unproven.
 No production service, VM or NATS history changed.
+
+Checkpoint 2026-10-10 20:01 EDT: D152 extends the bounded, journaled
+running-owner restore to a previously running `known-broken` job. The owned
+23-label fixture now includes `mesh-tool-discord` in its stop and restore
+sweep, with fresh owner and listener-last checks. Local managed-launchd and
+journal tests pass; the native sweep awaits exact-head CI. Idle on-demand and
+known-broken jobs, five timer spawn/writer proofs, NATS transfer, detached
+writers, the complete driver, UTM/boot gates, capture, four-history acceptance
+and runtime resumption remain open. No production service, VM or NATS history
+changed.

@@ -3237,3 +3237,21 @@ empty `spawns` from marker and lock evidence alone. The full-node hold needs
 independent process/writer coverage for this case, or a narrower verified
 contract that excludes it. This preserves the current fail-closed refusal;
 no production VM, service or NATS store changed.
+
+## D152 — Restore a previously running known-broken job with bound evidence (2026-10-10 20:01 EDT)
+
+The owned 23-label window already treats `mesh-tool-discord` as a loaded,
+running `known-broken` job and accepts a managed persistent stop for it, but
+`begin_override_clear` and the restore adapter admitted only plain daemons.
+That would strand this job after a verified stop. Extend the existing bounded
+running-owner restore to this class only when the saved owner was running;
+the journal still requires its verified persistent-stop receipt before
+clearing the disabled override. An idle known-broken job remains outside this
+adapter and needs an independently proven idle-stop path.
+
+The dedicated owned 23-label fixture now stops and restores the running
+known-broken stub alongside the ten plain daemons, checking journal order,
+fresh owner binding, readiness, and listener-last release. Local journal and
+managed-launchd suites pass; the native fixture awaits exact-head macOS CI.
+This does not supply the timer spawn/writer witness, a full-node driver, or
+permission to stop the production VM or services.

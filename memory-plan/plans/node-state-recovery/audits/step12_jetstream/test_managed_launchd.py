@@ -90,6 +90,14 @@ class StopWatchPreflight(unittest.TestCase):
                 restore_disabled_daemon(service, journal, 'gateway', prior,
                                         lambda _: True, timeout=5)
 
+    def test_known_broken_restore_requires_a_previously_running_owner(self):
+        journal = SimpleNamespace(begin_override_clear=lambda _: self.fail('intent reached'))
+        service = SimpleNamespace(label='ai.openclaw.mesh-tool-discord')
+        prior = {'class': 'known-broken', 'loaded': True, 'running': False}
+        with self.assertRaisesRegex(Refused, 'not bound to its saved owner'):
+            restore_disabled_daemon(service, journal, 'mesh-tool-discord', prior,
+                                    lambda _: True, timeout=5)
+
     def test_disabled_timer_restore_refuses_changed_identity_before_intent(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-owned-timer-restore-') as directory:
             root = pathlib.Path(directory)
