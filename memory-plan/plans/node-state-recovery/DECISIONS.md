@@ -3362,7 +3362,8 @@ captured state and durable positions, with the time-limited health stream
 treated separately. A later direct message read matched the restored content
 digests for all nine non-expiring streams. The cluster direct baseline completed;
 the standalone baseline refused twice at its final recheck because transient
-`consumer_count` values changed. Its six partial content reads corroborate
+`consumer_count` values changed in the retained assertion diffs. Their cause
+is unproven. Its six partial content reads corroborate
 the byte comparison but are not a successful stable baseline. Both refused
 receipts are retained. The private restore receipt says both owned servers
 stopped and the archives remained unchanged; no archive or restore failure
@@ -3370,6 +3371,15 @@ receipt exists.
 
 The three serving NATS launchd PIDs were unchanged before and after. See
 `ONLINE_ARCHIVE_REFRESH_20261011.json` for receipt hashes and scope.
+The exact private restore runner was copied byte-for-byte into the audit as
+`ONLINE_RESTORE_RUNNER_20261011.mjs`; the evidence pins its hash, both owned
+server IDs and loopback ports, and the direct-baseline tool. The content
+comparison used the complete direct and restored content objects for each
+of the nine non-expiring streams. The archive producer itself pins only a
+loopback URL, not the answering server ID; the subsequent identity-checked
+direct comparison corroborates those nine source histories but does not
+bind the two expiring health-stream archives. The copied runner is an audit
+artifact with this worktree's absolute import path, not a production driver.
 
 These are two sequential online points, not a shared no-writer recovery point.
 The two offline cluster streams, the separately held member-1 store, and each

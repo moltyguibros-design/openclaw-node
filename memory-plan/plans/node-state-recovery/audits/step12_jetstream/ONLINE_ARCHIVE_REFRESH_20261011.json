@@ -4,7 +4,9 @@
   "private_root": "/Users/moltymac/.openclaw/backups/node-readiness/jetstream-20261011-online-1",
   "source_tool_sha256": {
     "recovery.mjs": "b83c242732731edfc65e37571fa21f5044a4eabfceb27fd783d2d9da05aaeab6",
-    "take_snapshots.mjs": "b652b489a188fd788623316d4fbd8ba9c9134fccd658adfb1efca3d5e90da22d"
+    "take_snapshots.mjs": "b652b489a188fd788623316d4fbd8ba9c9134fccd658adfb1efca3d5e90da22d",
+    "take_cold_baseline.mjs": "7f89c92b903f0cd28f3d884e77607a860c183d9a6a1b092dfbf50d0f065a56fa",
+    "ONLINE_RESTORE_RUNNER_20261011.mjs": "4b2f41d55e6bb631dc57650d332983edbf7669eb60c3f20630e600469e01e76a"
   },
   "standalone": {
     "manifest_sha256": "214d84c27356d64193a4c342a8777196c3e0cd00224e1f3a5794bf34ff06b058",
@@ -27,6 +29,10 @@
     "private_directory_modes": "0700",
     "private_manifest_and_acceptance_modes": "0600",
     "isolated_restore_acceptance_sha256": "bbdd1d904aeca7ddd5540496536b01987a53d39bd833c21484dae62a5fcd2630",
+    "isolated_servers": [
+      {"role": "standalone", "name": "recovery-standalone", "server_id": "NDMCMM3TQJBX32YQEXKAJ5LEMHOVSZFMYDKIZFP7H3UYIIBBAB6TRTOU", "client": "127.0.0.1:56943", "monitor": "127.0.0.1:56944", "config_sha256": "3358cd8ccba78dac3c624e326668d717e98b4ee9015ca7f33bf6e9e628e0761c", "normal_exit_markers": 1},
+      {"role": "cluster", "name": "recovery-cluster", "server_id": "NAKMXIG3DIIAOI6HMJBLHPXDBXOAK2DKS3W553VYPFAWELL7PSV5X3XN", "client": "127.0.0.1:57207", "monitor": "127.0.0.1:57208", "config_sha256": "e9cf680d6084637e9081f28e80d1edccab74a21615aed76b56efa3772c3328f1", "normal_exit_markers": 1}
+    ],
     "isolated_streams_restored": 11,
     "non_expiring_messages_restored": 80884,
     "owned_servers_stopped": true,
@@ -37,9 +43,12 @@
   "direct_read_comparison": {
     "cluster_manifest_sha256": "ac3b0d124b0321088618f3689ef4ecfeef57d1ff85b76e983efb2c062cf4bd2d",
     "standalone_failed_sha256": ["cc5f57ace2b2e01b8689e999665f9c40c80a1a7d9367a4038691328644487339", "e3612980642a76aec56099bf4f85fe296b8e2df419e052a3f16ba7f9e15a13d2"],
-    "standalone_refusal": "Transient consumer_count changes at final recheck; no standalone direct baseline manifest was published",
+    "standalone_refusal": "The first assertion diff shows consumer_count 1 to 0 on KV_GRAPPE_REGISTRY; the retry diff shows a consumer_count change on KV_MESH_COLLAB. The cause of those changes is unproven. No standalone direct baseline manifest was published.",
+    "standalone_read_windows_utc": ["2026-10-11T21:23:08.266Z to 21:23:11.420Z", "2026-10-11T21:23:57.679Z to 21:24:02.654Z"],
+    "cluster_read_window_utc": "2026-10-11T21:24:02.810Z to 21:24:13.163Z",
+    "comparison_method": "For each non-expiring stream, compare the full direct-read content object (first, last, messages, payloadBytes, holes, sha256) to the isolated restore receipt's full content object; no range truncation or prefix comparison.",
     "non_expiring_streams_with_matching_direct_and_restored_content_digests": 9,
     "scope": "The six standalone content observations came from a refused partial baseline; they corroborate message bytes but do not certify a stable standalone baseline. The three cluster observations came from a completed baseline."
   },
-  "limits": "The two archives were taken in sequence from running buses. They omit the two offline cluster streams, do not copy any serving cold store, and do not prove a full-node no-writer interval, guest shutdown, stopped-VM capture, four-store recovery or service resumption."
+  "limits": "The archive producer recorded server URLs, not source server IDs; the later identity-checked full-range direct reads bind the nine non-expiring payload comparisons to their source servers, but do not similarly bind the two expiring health streams. The two archives were taken in sequence from running buses. They omit the two offline cluster streams, do not copy any serving cold store, and do not prove a full-node no-writer interval, guest shutdown, stopped-VM capture, four-store recovery or service resumption."
 }
