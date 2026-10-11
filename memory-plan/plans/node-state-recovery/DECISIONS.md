@@ -3453,6 +3453,9 @@ write-protection aggregation tests pass locally. A separate owned child
 retained the fileport after closing its descriptor; the parent process read
 that child's fileport, matching inode and write flag, through the same
 `vnode_snapshot` path the census uses.
+The dedicated macOS CI job
+[`114606174342`](https://github.com/moltyguibros-design/openclaw-node/actions/runs/38185286161/job/114606174342)
+passed at exact head `c135e912`, independently of the long launchd suite.
 
 This is evidence plumbing, not a full-node no-writer certificate. It is a
 readable-process point-in-time scan, not one instant across the host; the

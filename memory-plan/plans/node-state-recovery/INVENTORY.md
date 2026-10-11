@@ -2589,9 +2589,9 @@ Checkpoint 2026-10-11 19:36 EDT: D161 closes one census blind spot: an owned
 macOS process retained a writable vnode fileport after closing its descriptor,
 and the process/store-holder snapshots now enumerate and classify that handle.
 The native self and child-process fileport controls, holder-report test, and
-deterministic mapping aggregation tests pass locally. This remains a
-readable-process, sequential
-sample, not a continuous full-node writer boundary. Unreadable/root processes,
+deterministic mapping aggregation tests pass locally and in the dedicated
+macOS CI job 114606174342 at `c135e912`. This remains a readable-process,
+sequential sample, not a continuous full-node writer boundary. Unreadable/root processes,
 in-flight handles, detached writers, boot/UTM control and the stale 23-job pin
 map still prevent production hold or VM shutdown. Stopped capture,
 four-history acceptance and verified resumption remain open at
