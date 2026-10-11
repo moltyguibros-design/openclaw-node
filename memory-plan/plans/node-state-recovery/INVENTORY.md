@@ -2497,3 +2497,13 @@ The 60 local managed-launchd tests pass with three dedicated-runner skips;
 the native 23-label sweep awaits new exact-head CI. The full-node no-writer
 hold, stopped capture, all four real-history acceptance and resumption remain
 unproven. No production service, VM or NATS store changed.
+
+Checkpoint 2026-10-10 23:59 EDT: Exact-head `e1517d19` macOS CI passed all
+28 full-node baseline tests, including the owned running known-broken stop
+and restore sweep, and all 60 managed-launchd tests. Both Linux jobs reached
+their root tests; their only failures, and Mission Control's, were the
+separate high-severity dependency audits covered by still-open PR #226.
+This certifies an owned class path, not a production no-writer hold. The
+approved pin map, idle classes and timer witness, NATS transfer, detached
+writers, UTM/boot gates, capture, four-history acceptance and runtime
+resumption remain open. No production service, VM or NATS store changed.
