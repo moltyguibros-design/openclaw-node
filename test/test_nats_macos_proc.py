@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import stat
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -83,6 +84,47 @@ class MacProcessTest(unittest.TestCase):
             finally:
                 task = ctypes.c_uint32.in_dll(library, 'mach_task_self_').value
                 self.assertEqual(library.mach_port_deallocate(task, port.value), 0)
+
+    def test_other_process_fileport_survives_descriptor_close(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'child-fileport'
+            path.write_bytes(b'owned')
+            child = '''import ctypes, os, sys
+library = ctypes.CDLL('/usr/lib/libSystem.B.dylib')
+library.fileport_makeport.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_uint32)]
+library.fileport_makeport.restype = ctypes.c_int
+fd = os.open(sys.argv[1], os.O_RDWR)
+port = ctypes.c_uint32()
+result = library.fileport_makeport(fd, ctypes.byref(port))
+os.close(fd)
+if result: raise RuntimeError('fileport_makeport failed')
+print('ready', flush=True)
+sys.stdin.read()
+'''
+            process = subprocess.Popen([sys.executable, '-c', child, str(path)],
+                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE, text=True)
+            try:
+                self.assertEqual(process.stdout.readline().strip(), 'ready',
+                                 process.stderr.read() if process.poll() is not None else '')
+                observed = proc.vnode_snapshot(process.pid)
+                matches = [entry for entry in observed['fileports']
+                           if (entry['device'], entry['inode']) ==
+                           (path.stat().st_dev, path.stat().st_ino)]
+                self.assertEqual(len(matches), 1)
+                self.assertTrue(matches[0]['writable'])
+                self.assertFalse(any((entry['device'], entry['inode']) ==
+                                     (path.stat().st_dev, path.stat().st_ino)
+                                     for entry in observed['vnodes']))
+            finally:
+                process.stdin.close()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                process.stdout.close()
+                process.stderr.close()
 
     def test_unlinked_open_file_remains_visible_by_inode(self):
         with tempfile.TemporaryDirectory() as root:

@@ -3449,7 +3449,10 @@ The former census would miss this retained write handle. The process snapshot
 now lists vnode fileports and refuses an unobservable or changing list; the
 store-holder census includes matching fileports as a distinct reference type.
 The owned macOS control, a holder-report integration test and deterministic
-write-protection aggregation tests pass locally.
+write-protection aggregation tests pass locally. A separate owned child
+retained the fileport after closing its descriptor; the parent process read
+that child's fileport, matching inode and write flag, through the same
+`vnode_snapshot` path the census uses.
 
 This is evidence plumbing, not a full-node no-writer certificate. It is a
 readable-process point-in-time scan, not one instant across the host; the
