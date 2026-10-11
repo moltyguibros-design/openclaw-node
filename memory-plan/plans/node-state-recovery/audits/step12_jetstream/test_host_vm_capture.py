@@ -553,6 +553,15 @@ class HostCaptureTest(unittest.TestCase):
         self.assertTrue((swapped_match / 'FAILED.json').exists())
         self.assertFalse((swapped_match / 'MATCH.json').exists())
         original_guest = json.loads((guest_output / 'manifest.json').read_text())
+        relabeled_guest = json.loads(json.dumps(original_guest))
+        relabeled_guest['store_paths']['member2'], relabeled_guest['store_paths']['member3'] = (
+            relabeled_guest['store_paths']['member3'], relabeled_guest['store_paths']['member2'])
+        relabeled_guest_path = self.root / 'relabeled-guest.json'
+        write_record(relabeled_guest_path, relabeled_guest)
+        relabeled_match = self.root / 'relabeled-guest-match'
+        with self.assertRaisesRegex(RuntimeError, 'guest store role path differs'):
+            host_match(relabeled_guest_path, output / 'extracted-stores', relabeled_match)
+        self.assertFalse((relabeled_match / 'MATCH.json').exists())
         for label, changes, refusal in (
                 ('wrong-guest-scope', {'scope': 'host-generated content observation'},
                  'guest stopped-tree scope differs'),

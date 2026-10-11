@@ -105,7 +105,9 @@ host after ASIF extraction, compares the guest manifest, extraction manifest
 and rehashed host files exactly, then makes the extracted trees read-only.
 Its `MATCH.json` records the canonical frozen path and content digest for each
 role and that role's canonical guest store path, so the isolated probe can
-reject a plan that relabels a master or its server name. The content digest
+reject a plan that relabels a master or its server name. The match also
+checks each guest role path against the relative path carried by the host
+capture receipt from the pinned store specification. The content digest
 comes from freshly enumerated frozen host rows, with the same field order as
 the Node probe's `hashTree`; the disposable ASIF fixture checks equality of
 all four cross-language digests.

@@ -235,6 +235,8 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
             'vmstate_at_final_check': after_extract['vmstate'],
             'data_volume_uuid': stores['data_volume_uuid'],
             'store_spec_sha256': store_spec_sha256,
+            'store_relative_paths': {row['role']: row['relative_path']
+                                     for row in stores['stores']},
             'extraction_manifest_sha256': file_hash(output / 'extracted-stores' / 'manifest.json'),
             'store_roles': sorted(extracted['stores']),
             'vm_state_at_final_check': 'stopped',

@@ -126,7 +126,9 @@ def guest_capture(spec_path, output, root=pathlib.Path('/')):
                   'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                   'data_volume_uuid': spec['data_volume_uuid'],
                   'spec_sha256': spec_sha256, 'stores': stores,
-                  'store_paths': store_paths}
+                  'store_paths': store_paths,
+                  'store_relative_paths': {row['role']: row['relative_path']
+                                           for row in spec['stores']}}
         write_json(output / 'manifest.json', result)
         return result
     except Exception as error:
@@ -213,6 +215,16 @@ def host_match(guest_path, extracted, output):
                         for value in store_paths.values())
                 and len(set(store_paths.values())) == 4,
                 'guest store paths are absent or ambiguous')
+        relative_paths = capture.get('store_relative_paths')
+        require(isinstance(relative_paths, dict) and set(relative_paths) == ROLES
+                and guest.get('store_relative_paths') == relative_paths,
+                'guest store role paths differ from host specification')
+        for role in ROLES:
+            relative = pathlib.PurePosixPath(relative_paths[role]).parts
+            absolute = pathlib.PurePosixPath(store_paths[role]).parts
+            require(relative and len(absolute) >= len(relative)
+                    and absolute[-len(relative):] == relative,
+                    f'guest store role path differs: {role}')
         matched = {}
         for role in sorted(ROLES):
             root = extracted / role

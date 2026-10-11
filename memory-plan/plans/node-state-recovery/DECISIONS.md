@@ -3287,3 +3287,21 @@ not establish that the manifest was produced inside the production guest or
 that the VM was writer-free; the full-node hold, host guard and capture chain
 remain separate admission requirements. No production service, VM or NATS
 store changed.
+
+## D155 — Bind MATCH guest role paths to the host store specification (2026-10-11 10:04 EDT)
+
+An owned ASIF negative exchanged only the member-2 and member-3 absolute
+`store_paths` in the guest manifest. The old `host_match` still wrote
+`MATCH.json`: it compared the four content trees but copied those path claims
+into each master's role receipt without checking them against the host's store
+specification. A later probe uses that receipt to bind server names to
+masters, so the mismatch was a false acceptance of role-path evidence.
+
+The host capture receipt and guest manifest now each carry the specification's
+four role-relative paths. `host_match` requires the two maps to agree and
+requires each canonical guest path to end with its declared role path before
+publishing `MATCH.json`. The same negative now refuses with no match receipt,
+and all nine host-capture tests pass locally. This checks consistency between
+the two declared inputs; it still does not attest that the guest manifest
+originated inside the production VM. No production service, VM or NATS store
+changed.

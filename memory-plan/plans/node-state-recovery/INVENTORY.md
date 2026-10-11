@@ -2516,3 +2516,12 @@ tests pass locally. This does not prove guest origin, writer exclusion or a
 production capture. Full-node hold, shutdown, four-history acceptance and
 verified resumption remain open at 1.2[A]/v1.2-pre. No production service, VM
 or NATS store changed.
+
+Checkpoint 2026-10-11 10:04 EDT: D155 closes an owned role-path false
+accept in stopped-tree matching. Exchanging only the guest manifest's
+member-2 and member-3 absolute paths previously produced `MATCH.json`;
+the host capture receipt now carries the pinned role-relative paths, and
+the same negative refuses without a match receipt. All nine host-capture
+tests pass locally. Guest origin, full-node hold, actual capture, all four
+history acceptance and verified resumption remain open at 1.2[A]/v1.2-pre.
+No production service, VM or NATS store changed.
