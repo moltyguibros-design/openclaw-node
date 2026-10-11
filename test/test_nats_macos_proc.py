@@ -55,6 +55,35 @@ class MacProcessTest(unittest.TestCase):
                 finally:
                     os.close(fd)
 
+    def test_closed_descriptor_fileport_remains_writable_and_visible(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'fileport-store-file'
+            path.write_bytes(b'owned')
+            library = ctypes.CDLL('/usr/lib/libSystem.B.dylib')
+            library.fileport_makeport.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_uint32)]
+            library.fileport_makeport.restype = ctypes.c_int
+            library.mach_port_deallocate.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+            library.mach_port_deallocate.restype = ctypes.c_int
+            port = ctypes.c_uint32()
+            fd = os.open(path, os.O_RDWR)
+            try:
+                self.assertEqual(library.fileport_makeport(fd, ctypes.byref(port)), 0)
+            finally:
+                os.close(fd)
+            try:
+                self.assertIn((port.value, proc.PROX_FDTYPE_VNODE),
+                              proc.fileports(os.getpid()))
+                observed = proc.vnode_fileport(os.getpid(), port.value)
+                info = path.stat()
+                self.assertEqual((observed['device'], observed['inode']),
+                                 (info.st_dev, info.st_ino))
+                self.assertTrue(observed['writable'])
+                self.assertTrue(observed['openflags'] & proc.PROC_FILE_WRITE)
+                self.assertIn(observed, proc.vnode_snapshot(os.getpid())['fileports'])
+            finally:
+                task = ctypes.c_uint32.in_dll(library, 'mach_task_self_').value
+                self.assertEqual(library.mach_port_deallocate(task, port.value), 0)
+
     def test_unlinked_open_file_remains_visible_by_inode(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'unlinked-store-file'
@@ -199,6 +228,32 @@ class RegionContractTest(unittest.TestCase):
                 return proc.REGION_PATH_SIZE
         with self.assertRaisesRegex(Refused, 'identity is unobservable'):
             proc.mapped_vnodes(123, Library())
+
+    def test_region_write_access_is_aggregated_in_either_order(self):
+        class Library:
+            def __init__(self, protections):
+                self.protections = protections
+
+            def proc_pidinfo(self, _pid, _flavor, address, buffer, _size):
+                index = address // 4096 - 1 if address else 0
+                if index >= len(self.protections):
+                    ctypes.set_errno(errno.EINVAL)
+                    return 0
+                base = (index + 1) * 4096
+                struct.pack_into('<II', buffer, 0, self.protections[index], 2)
+                struct.pack_into('<I', buffer, 60, 1)
+                struct.pack_into('<QQ', buffer, 80, base, 4096)
+                struct.pack_into('<IHHQ', buffer, 96, 1, stat.S_IFREG, 1, 42)
+                ctypes.memmove(ctypes.addressof(buffer) + proc.REGION_PATH_OFFSET,
+                               b'/tmp/owned\0', 11)
+                return proc.REGION_PATH_SIZE
+
+        for protections in ((2, 0), (0, 2)):
+            with self.subTest(protections=protections):
+                observed = proc.mapped_vnodes(123, Library(protections))
+                self.assertEqual(len(observed), 1)
+                self.assertTrue(observed[0]['writable'])
+                self.assertTrue(observed[0]['may_be_writable'])
 
 if __name__ == '__main__':
     unittest.main()

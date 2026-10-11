@@ -3438,3 +3438,22 @@ starts. That design and a production rehearsal remain unproven. The one-time
 CI job is removed after recording this negative; the probe remains for audit.
 No production process, store, service or VM was changed. Step 1.2 remains
 `[A]/v1.2-pre`.
+
+## D161 — Include retained vnode fileports in the holder census (2026-10-11 19:36 EDT)
+
+The macOS process API exposes fileports separately from ordinary file
+descriptors. An owned native control made a fileport from a writable descriptor,
+closed the descriptor, and observed the same file's device, inode and write
+flag through `proc_pidfileportinfo` and the process's `PROC_PIDLISTFILEPORTS`.
+The former census would miss this retained write handle. The process snapshot
+now lists vnode fileports and refuses an unobservable or changing list; the
+store-holder census includes matching fileports as a distinct reference type.
+The owned macOS control, a holder-report integration test and deterministic
+write-protection aggregation tests pass locally.
+
+This is evidence plumbing, not a full-node no-writer certificate. It is a
+readable-process point-in-time scan, not one instant across the host; the
+production same-user scan has unreadable PIDs, and process root, in-flight
+handles, unbound detached writers, root writes and boot starts are not closed.
+No production process, store, service or VM was changed. The four NATS
+histories remain separate, and step 1.2 remains `[A]/v1.2-pre`.

@@ -8,8 +8,10 @@ from nats_root_lock import Refused
 
 
 PROC_PIDLISTFDS = 1
+PROC_PIDLISTFILEPORTS = 14
 PROC_PIDTBSDINFO = 3
 PROC_PIDFDVNODEPATHINFO = 2
+PROC_PIDFILEPORTVNODEPATHINFO = 2
 PROC_PIDREGIONPATHINFO = 8
 PROC_PIDVNODEPATHINFO = 9
 PROX_FDTYPE_VNODE = 1
@@ -36,6 +38,9 @@ def _library():
     library.proc_pidfdinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                        ctypes.c_void_p, ctypes.c_int]
     library.proc_pidfdinfo.restype = ctypes.c_int
+    library.proc_pidfileportinfo.argtypes = [ctypes.c_int, ctypes.c_uint32,
+                                             ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+    library.proc_pidfileportinfo.restype = ctypes.c_int
     library.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
     library.proc_pidpath.restype = ctypes.c_int
     return library
@@ -131,6 +136,32 @@ def file_descriptors(pid, nfiles, library=None):
     raise Refused('process descriptor list is too large')
 
 
+def fileports(pid, library=None):
+    library = library or _library()
+    capacity = 128
+    while capacity <= 65536:
+        buffer = ctypes.create_string_buffer(capacity * 8)
+        ctypes.set_errno(0)
+        actual = library.proc_pidinfo(pid, PROC_PIDLISTFILEPORTS, 0, buffer, len(buffer))
+        if actual < 0 or actual % 8 or (actual == 0 and ctypes.get_errno()):
+            raise Refused('process fileports are unobservable')
+        if actual < len(buffer):
+            return [struct.unpack_from('<II', buffer.raw, offset)
+                    for offset in range(0, actual, 8)]
+        capacity *= 2
+    raise Refused('process fileport list is too large')
+
+
+def _vnode_record(raw):
+    openflags = struct.unpack_from('<I', raw)[0]
+    device, mode, links, inode = struct.unpack_from('<IHHQ', raw, 24)
+    path = raw[-1024:].split(b'\0', 1)[0].decode(errors='replace')
+    return {'device': device, 'inode': inode,
+            'mode': mode, 'links': links, 'path': path,
+            'openflags': openflags,
+            'writable': bool(openflags & PROC_FILE_WRITE) if openflags & 3 else None}
+
+
 def vnode_descriptor(pid, fd, library=None):
     library = library or _library()
     buffer = ctypes.create_string_buffer(VNODE_PATH_SIZE)
@@ -138,13 +169,17 @@ def vnode_descriptor(pid, fd, library=None):
                                     buffer, VNODE_PATH_SIZE)
     if actual != VNODE_PATH_SIZE:
         raise Refused('process file identity is unobservable')
-    openflags = struct.unpack_from('<I', buffer.raw)[0]
-    device, mode, links, inode = struct.unpack_from('<IHHQ', buffer.raw, 24)
-    path = buffer.raw[-1024:].split(b'\0', 1)[0].decode(errors='replace')
-    return {'fd': fd, 'device': device, 'inode': inode,
-            'mode': mode, 'links': links, 'path': path,
-            'openflags': openflags,
-            'writable': bool(openflags & PROC_FILE_WRITE) if openflags & 3 else None}
+    return {'fd': fd, **_vnode_record(buffer.raw)}
+
+
+def vnode_fileport(pid, port, library=None):
+    library = library or _library()
+    buffer = ctypes.create_string_buffer(VNODE_PATH_SIZE)
+    actual = library.proc_pidfileportinfo(pid, port, PROC_PIDFILEPORTVNODEPATHINFO,
+                                          buffer, VNODE_PATH_SIZE)
+    if actual != VNODE_PATH_SIZE:
+        raise Refused('process fileport identity is unobservable')
+    return {'fileport': port, **_vnode_record(buffer.raw)}
 
 
 def working_directory(pid, library=None):
@@ -213,13 +248,16 @@ def snapshot(pid, library=None):
     vnodes = [vnode_descriptor(pid, fd, library)
               for fd, kind in file_descriptors(pid, before['nfiles'], library)
               if kind == PROX_FDTYPE_VNODE]
+    ports_before = fileports(pid, library)
+    ports = [vnode_fileport(pid, port, library)
+             for port, kind in ports_before if kind == PROX_FDTYPE_VNODE]
     cwd = working_directory(pid, library)
     mappings = mapped_vnodes(pid, library)
     after = bsd_info(pid, library)
-    if before != after:
+    if before != after or fileports(pid, library) != ports_before:
         raise Refused('process changed during census')
     return {**before, 'executable': path, 'arguments': argv,
-            'vnodes': vnodes, 'cwd': cwd, 'mappings': mappings}
+            'vnodes': vnodes, 'fileports': ports, 'cwd': cwd, 'mappings': mappings}
 
 
 def vnode_snapshot(pid, library=None):
@@ -228,8 +266,12 @@ def vnode_snapshot(pid, library=None):
     vnodes = [vnode_descriptor(pid, fd, library)
               for fd, kind in file_descriptors(pid, before['nfiles'], library)
               if kind == PROX_FDTYPE_VNODE]
+    ports_before = fileports(pid, library)
+    ports = [vnode_fileport(pid, port, library)
+             for port, kind in ports_before if kind == PROX_FDTYPE_VNODE]
     cwd = working_directory(pid, library)
     mappings = mapped_vnodes(pid, library)
-    if before != bsd_info(pid, library):
+    if before != bsd_info(pid, library) or fileports(pid, library) != ports_before:
         raise Refused('process changed during census')
-    return {**before, 'vnodes': vnodes, 'cwd': cwd, 'mappings': mappings}
+    return {**before, 'vnodes': vnodes, 'fileports': ports,
+            'cwd': cwd, 'mappings': mappings}

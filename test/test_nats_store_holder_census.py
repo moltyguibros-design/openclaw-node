@@ -90,7 +90,7 @@ class HolderCensusTest(unittest.TestCase):
             self.assertEqual(report['exited_pids'], [11])
             self.assertEqual(report['unreadable_pids'], [12])
             self.assertEqual(calls, {10: 2, 11: 2, 12: 2})
-            self.assertIn('open vnode file descriptors, mapped files and working directory',
+            self.assertIn('open vnode file descriptors, vnode fileports, mapped files and working directory',
                           report['coverage']['reference_types'])
 
     def test_working_directory_inside_store_is_reported(self):
@@ -137,6 +137,29 @@ class HolderCensusTest(unittest.TestCase):
             self.assertIsNone(holders[0]['fd'])
             self.assertTrue(holders[0]['writable'])
             self.assertTrue(holders[0]['may_be_writable'])
+
+    def test_closed_fd_fileport_inside_store_is_reported(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            for suffix in census.SUFFIXES:
+                (home / '.openclaw' / 'nats' / ('jetstream' + suffix)).mkdir(parents=True)
+            block = home / '.openclaw' / 'nats' / 'jetstream' / 'block'
+            block.write_bytes(b'owned')
+            info = block.stat()
+            process = {'uid': 501, 'start_sec': 100, 'start_usec': 200,
+                       'vnodes': [], 'mappings': [], 'cwd': None,
+                       'fileports': [{'fileport': 42, 'device': info.st_dev,
+                                      'inode': info.st_ino, 'links': info.st_nlink,
+                                      'path': str(block), 'writable': True}]}
+            with patch.object(census.proc, 'list_pids', return_value=[10]), \
+                    patch.object(census.proc, 'vnode_snapshot', return_value=process):
+                report = census._observe(home)
+            holders = report['stores']['ai.openclaw.nats']['holders']
+            self.assertEqual(len(holders), 1)
+            self.assertEqual(holders[0]['reference'], 'fileport')
+            self.assertEqual(holders[0]['fileport'], 42)
+            self.assertIsNone(holders[0]['fd'])
+            self.assertTrue(holders[0]['writable'])
 
     @unittest.skipUnless(sys.platform == 'darwin', 'macOS process API')
     def test_unlinked_live_mapping_is_attributed_to_store(self):
