@@ -2561,3 +2561,15 @@ not a common quiet point or a cold copy of the four stores. Full-node no-writer
 hold, host shutdown gate, stopped-VM capture, four-role acceptance and verified
 resumption remain open at 1.2[A]/v1.2-pre. No topology or production service
 changed. See `step12_jetstream/ONLINE_ARCHIVE_REFRESH_20261011.json`.
+
+Checkpoint 2026-10-11 19:00 EDT: D159's isolated root trace probe on a
+disposable macOS CI writer observed controls bracketing a descriptor write and
+a shared-mapping change, but its matching write-call lines did not name the
+file opened before tracing. The PID filter did not observe kernel write-back.
+The one-time job succeeded and its sanitized result is retained in
+`step12_jetstream/ROOT_TRACE_CHARACTERIZATION_20261011.json`; the scoped
+`fs_usage` approach is insufficient for a full-node no-writer certificate.
+The installed workplan-viewer plist also differs from the unapproved 23-job
+candidate. A proven writer boundary and fresh approved pin map remain before
+any production hold or VM shutdown. Stopped capture, four-history acceptance
+and verified resumption remain open at 1.2[A]/v1.2-pre. No live state changed.

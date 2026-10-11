@@ -3394,3 +3394,26 @@ serving member's cold store still require the full-node hold, stopped-VM
 capture and four-role isolated acceptance. This refresh does not authorize a
 topology change, production stop or VM shutdown. Step 1.2 remains
 `[A]/v1.2-pre`.
+
+## D159 — A scoped root fs_usage trace cannot certify the full-node writer boundary (2026-10-11 19:00 EDT)
+
+An isolated macOS CI job ran `fs_usage` with root privileges against an owned
+writer process and disposable files. The writer opened a descriptor and a
+writable shared mapping before tracing began. During tracing it acknowledged a
+write through the descriptor and a mapping change. Distinct file-path controls
+were visible before and after those actions, and the tracer exited normally.
+No matching write-call line named the pre-opened file. The PID filter excluded
+kernel write-back, so the mapping result cannot establish where or under which
+process later page-out occurred. Pipe acknowledgements also contributed to the
+unnamed-write count. The exact sanitized result, runner identity, script hash
+and job link are in `audits/step12_jetstream/ROOT_TRACE_CHARACTERIZATION_20261011.json`.
+
+This is a negative for using a scoped `fs_usage` trace as the full-node
+no-writer certificate. It is not a proof that every possible root observer
+fails: a system-wide observer with descriptor and mapping census, loss
+detection, and explicit root-writer handling still needs its own owned test.
+The characterization script is retained, but its one-time CI job is removed
+after recording the result rather than repeating it on every CI run.
+No production process, store, service or VM was changed. The unapproved
+23-job pin candidate also differs from the installed workplan-viewer plist;
+it cannot authorize a hold. Step 1.2 remains `[A]/v1.2-pre`.
