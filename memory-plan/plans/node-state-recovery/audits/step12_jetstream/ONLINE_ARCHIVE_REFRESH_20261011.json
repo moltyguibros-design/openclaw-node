@@ -8,11 +8,18 @@
     "take_cold_baseline.mjs": "7f89c92b903f0cd28f3d884e77607a860c183d9a6a1b092dfbf50d0f065a56fa",
     "ONLINE_RESTORE_RUNNER_20261011.mjs": "4b2f41d55e6bb631dc57650d332983edbf7669eb60c3f20630e600469e01e76a"
   },
+  "post_run_binary_observation": {
+    "scope": "Hashes and mtimes observed after the restore; the files predate the run, but no binary hash was captured during the run",
+    "nats_cli": {"path": "/opt/homebrew/Cellar/nats/0.3.1/bin/nats", "sha256": "6be41e7097aac6278c3b9e4f394fc1536996608e921aa14fceae1bf0e800da0f", "mtime_utc": "2026-01-28T09:06:14+00:00"},
+    "nats_server": {"path": "/opt/homebrew/Cellar/nats-server/2.12.6/bin/nats-server", "sha256": "c3a71e72f6fc5dd008988f34b57fd2ab1fe69ab18d409f0a0aeebc51160e76e1", "mtime_utc": "2026-03-24T15:08:07+00:00"}
+  },
+  "post_run_import_observation": {"path": "/Users/moltymac/.codex/worktrees/nats-root-observer/openclaw-nodedev/memory-plan/plans/node-state-recovery/audits/step12_jetstream/recovery.mjs", "sha256": "b83c242732731edfc65e37571fa21f5044a4eabfceb27fd783d2d9da05aaeab6", "mtime_utc": "2026-10-05T11:35:58.459148+00:00", "scope": "Observed after the run; the file predates the run, but the runner did not assert its hash at execution"},
   "standalone": {
     "manifest_sha256": "214d84c27356d64193a4c342a8777196c3e0cd00224e1f3a5794bf34ff06b058",
     "started_at_utc": "2026-10-11T21:15:13.150Z",
     "finished_at_utc": "2026-10-11T21:15:14.183Z",
     "stream_count": 7,
+    "streams": ["KV_GRAPPE_REGISTRY", "KV_GRAPPE_REGISTRY_TEST", "KV_MESH_COLLAB", "KV_MESH_NODE_HEALTH", "KV_MESH_PLANS", "KV_MESH_TASKS", "local-events-daedalus"],
     "offline": [],
     "local_events_daedalus_messages": 24286
   },
@@ -21,6 +28,7 @@
     "started_at_utc": "2026-10-11T21:15:14.284Z",
     "finished_at_utc": "2026-10-11T21:15:15.813Z",
     "stream_count": 6,
+    "streams": ["KV_MESH_COLLAB", "KV_MESH_NODE_HEALTH", "KV_MESH_PLANS", "KV_MESH_TASKS", "OPENCLAW_SHARED", "local-events-moltymacs-virtual-machine"],
     "offline": ["KV_MESH_COLLAB", "KV_MESH_PLANS"],
     "local_events_current_node_messages": 55173
   },
@@ -37,10 +45,16 @@
     "non_expiring_messages_restored": 80884,
     "owned_servers_stopped": true,
     "archives_unchanged_after_restore": true,
-    "archive_or_restore_failed_receipts": 0,
+    "archive_failed_receipts": 0,
+    "restore_runner_failure_receipts": "not implemented; completion is established by the success acceptance and normal server exit markers",
     "serving_nats_pids_before_and_after": {"nats": 735, "nats-2": 747, "nats-3": 719}
   },
   "direct_read_comparison": {
+    "verifier": "verify_online_restore_20261011.py",
+    "verifier_sha256": "affcdc9d70ca5296f2529d3b50a38de8208bdec8551e507b82289cd0221bfdb8",
+    "verifier_result": {"content_objects_matched": 9, "standalone": ["KV_GRAPPE_REGISTRY", "KV_GRAPPE_REGISTRY_TEST", "KV_MESH_COLLAB", "KV_MESH_PLANS", "KV_MESH_TASKS", "local-events-daedalus"], "cluster": ["KV_MESH_TASKS", "OPENCLAW_SHARED", "local-events-moltymacs-virtual-machine"]},
+    "expected_server_arguments": {"standalone": {"name": "openclaw-nats-moltymacs-virtual-machine", "id": "NA3XSMGHZUCV67HKLNPY2TKEYMSH6GAMFXZ2TGBRSPN3BFQY27SYMJNQ", "cluster": "-"}, "cluster": {"name": "openclaw-nats-2", "id": "NBF7ZCLJ5JF6GBDTFVLWWJYY2NGH4CKR42U7MCQKGBGJDFV4P7LKLT6Q", "cluster": "openclaw-cluster"}},
+    "expected_identity_origin": "Expected names and store paths match the installed nats.conf and nats-2.conf. Server IDs were supplied as expected arguments and checked against each baseline's serverInfo; their prior provenance is not pinned by this refresh. No archive-time source ID was captured.",
     "cluster_manifest_sha256": "ac3b0d124b0321088618f3689ef4ecfeef57d1ff85b76e983efb2c062cf4bd2d",
     "standalone_failed_sha256": ["cc5f57ace2b2e01b8689e999665f9c40c80a1a7d9367a4038691328644487339", "e3612980642a76aec56099bf4f85fe296b8e2df419e052a3f16ba7f9e15a13d2"],
     "standalone_refusal": "The first assertion diff shows consumer_count 1 to 0 on KV_GRAPPE_REGISTRY; the retry diff shows a consumer_count change on KV_MESH_COLLAB. The cause of those changes is unproven. No standalone direct baseline manifest was published.",
@@ -50,5 +64,5 @@
     "non_expiring_streams_with_matching_direct_and_restored_content_digests": 9,
     "scope": "The six standalone content observations came from a refused partial baseline; they corroborate message bytes but do not certify a stable standalone baseline. The three cluster observations came from a completed baseline."
   },
-  "limits": "The archive producer recorded server URLs, not source server IDs; the later identity-checked full-range direct reads bind the nine non-expiring payload comparisons to their source servers, but do not similarly bind the two expiring health streams. The two archives were taken in sequence from running buses. They omit the two offline cluster streams, do not copy any serving cold store, and do not prove a full-node no-writer interval, guest shutdown, stopped-VM capture, four-store recovery or service resumption."
+  "limits": "The archive producer recorded server URLs, not source server IDs; the later identity-checked full-range direct reads bind the nine non-expiring payload comparisons to their source servers. The two expiring health archives were restored, reached the archived last sequence and configuration, then expired; their message bytes were not compared with any source read. The two archives were taken in sequence from running buses. They omit the two offline cluster streams, do not copy any serving cold store, and do not prove a full-node no-writer interval, guest shutdown, stopped-VM capture, four-store recovery or service resumption."
 }

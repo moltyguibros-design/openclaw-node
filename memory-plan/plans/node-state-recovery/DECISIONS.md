@@ -3359,15 +3359,18 @@ configuration.
 Eleven reachable archives restored on two owned loopback servers outside the
 production port set. The isolated check accepted 80,884 non-expiring messages,
 captured state and durable positions, with the time-limited health stream
-treated separately. A later direct message read matched the restored content
+treated separately: each health archive restored with its archived last
+sequence and configuration, then expired; its message bytes were not compared
+with a direct source read. A later direct message read matched the restored content
 digests for all nine non-expiring streams. The cluster direct baseline completed;
 the standalone baseline refused twice at its final recheck because transient
 `consumer_count` values changed in the retained assertion diffs. Their cause
 is unproven. Its six partial content reads corroborate
 the byte comparison but are not a successful stable baseline. Both refused
 receipts are retained. The private restore receipt says both owned servers
-stopped and the archives remained unchanged; no archive or restore failure
-receipt exists.
+stopped and the archives remained unchanged. The restore runner writes no
+failure receipt; this run is evidenced by its success receipt and normal
+server exit markers. No archive failure receipt was produced.
 
 The three serving NATS launchd PIDs were unchanged before and after. See
 `ONLINE_ARCHIVE_REFRESH_20261011.json` for receipt hashes and scope.
@@ -3375,11 +3378,15 @@ The exact private restore runner was copied byte-for-byte into the audit as
 `ONLINE_RESTORE_RUNNER_20261011.mjs`; the evidence pins its hash, both owned
 server IDs and loopback ports, and the direct-baseline tool. The content
 comparison used the complete direct and restored content objects for each
-of the nine non-expiring streams. The archive producer itself pins only a
+of the nine non-expiring streams. The committed
+`verify_online_restore_20261011.py` rechecks those nine objects against the
+hashed private receipts. The evidence lists the source stream names and the
+expected direct-read server identities. The archive producer itself pins only a
 loopback URL, not the answering server ID; the subsequent identity-checked
 direct comparison corroborates those nine source histories but does not
 bind the two expiring health-stream archives. The copied runner is an audit
 artifact with this worktree's absolute import path, not a production driver.
+The NATS binary hashes were observed after the run, not pinned at execution.
 
 These are two sequential online points, not a shared no-writer recovery point.
 The two offline cluster streams, the separately held member-1 store, and each
