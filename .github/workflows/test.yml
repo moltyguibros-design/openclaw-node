@@ -203,6 +203,16 @@ jobs:
           /usr/bin/python3 test/test_nats_live_census.py
           /usr/bin/python3 test/test_nats_store_holder_census.py
 
+  root-holder-coverage-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Characterize privileged holder coverage on owned stores
+        timeout-minutes: 5
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: sudo -E /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_root_holder_coverage.py
+
   mission-control-tests:
     runs-on: ubuntu-latest
     steps:
