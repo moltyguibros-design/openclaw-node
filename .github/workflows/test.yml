@@ -191,6 +191,18 @@ jobs:
           /usr/bin/python3 test/test_nats_store_holder_census.py
           node --test test/nats-legacy-lock.test.mjs
 
+  macos-process-census:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native process and store-holder census
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          /usr/bin/python3 test/test_nats_macos_proc.py
+          /usr/bin/python3 test/test_nats_live_census.py
+          /usr/bin/python3 test/test_nats_store_holder_census.py
+
   mission-control-tests:
     runs-on: ubuntu-latest
     steps:
