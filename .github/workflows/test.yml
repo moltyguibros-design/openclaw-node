@@ -160,6 +160,12 @@ jobs:
           tar -xzf "$nats_fixture_dir/nats.tar.gz" -C "$nats_fixture_dir"
           echo "$nats_fixture_dir/nats-server-v2.12.6-darwin-${nats_arch}" >> "$GITHUB_PATH"
           npm ci --ignore-scripts --no-audit --no-fund
+      - name: Characterize root file tracing on owned CI files (report only)
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_root_file_trace.py
       - name: Verify macOS descriptor and subprocess lock behavior
         env:
           PYTHONDONTWRITEBYTECODE: "1"
