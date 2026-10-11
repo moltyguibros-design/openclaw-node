@@ -3417,3 +3417,24 @@ after recording the result rather than repeating it on every CI run.
 No production process, store, service or VM was changed. The unapproved
 23-job pin candidate also differs from the installed workplan-viewer plist;
 it cannot authorize a hold. Step 1.2 remains `[A]/v1.2-pre`.
+
+## D160 — System immutability does not revoke pre-existing write handles (2026-10-11 19:10 EDT)
+
+An owned macOS CI control created a disposable APFS image and opened one file
+for writing and shared mapping before root set `SF_IMMUTABLE`. The runner's
+securelevel was 0. The flag was visible and remained set; an ordinary user
+could neither clear it nor open a new writable descriptor (`EPERM`). Yet the
+already-open descriptor and shared mapping each wrote, and a read before root
+cleared the flag returned `DM00` instead of `0000`. Root then cleared the flag
+and ejected the image. The exact job, source hash and sanitized result are in
+`audits/step12_jetstream/SYSTEM_FLAG_CHARACTERIZATION_20261011.json`.
+
+This proves the system flag is an open-time fence on this owned APFS setup,
+not revocation of existing writable handles. It cannot close D151's detached
+writer or D157's point-in-time census gap by itself. A future hold design
+would need a root-capable, complete descriptor and writable-mapping census
+after fencing, plus continuous treatment of new root writers and boot/UTM
+starts. That design and a production rehearsal remain unproven. The one-time
+CI job is removed after recording this negative; the probe remains for audit.
+No production process, store, service or VM was changed. Step 1.2 remains
+`[A]/v1.2-pre`.

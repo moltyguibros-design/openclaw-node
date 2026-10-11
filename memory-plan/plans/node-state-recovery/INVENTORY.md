@@ -2573,3 +2573,14 @@ The installed workplan-viewer plist also differs from the unapproved 23-job
 candidate. A proven writer boundary and fresh approved pin map remain before
 any production hold or VM shutdown. Stopped capture, four-history acceptance
 and verified resumption remain open at 1.2[A]/v1.2-pre. No live state changed.
+
+Checkpoint 2026-10-11 19:10 EDT: D160's disposable APFS CI control shows
+that root-set `SF_IMMUTABLE` persisted and refused a fresh user writable open,
+but a descriptor and shared mapping opened before the flag still changed the
+file from `0000` to `DM00`. Root cleared the flag and ejected the image. The
+one-time evidence is retained in
+`step12_jetstream/SYSTEM_FLAG_CHARACTERIZATION_20261011.json`. The flag alone
+cannot supply the missing continuous writer boundary. A complete root-level
+holder/mapping census, root-writer and boot controls, fresh 23-job pin approval,
+stopped capture, four-history acceptance and verified resumption remain open
+at 1.2[A]/v1.2-pre. No production state changed.
