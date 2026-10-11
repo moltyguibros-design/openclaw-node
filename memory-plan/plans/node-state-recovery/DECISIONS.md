@@ -3343,3 +3343,37 @@ owned immutable-store fence for the missing full-node spawn/writer witness or
 use it to authorize production hold, VM shutdown, capture, acceptance or
 resumption. The four NATS histories remain separate, and step 1.2 stays
 `[A]/v1.2-pre` pending an independently proven no-writer boundary.
+
+## D158 — Refresh separate online archives without changing the split topology (2026-10-11 17:25 EDT)
+
+The live standalone bus and the routed cluster still serve under their
+existing launchd owners. The pinned `take_snapshots.mjs` and NATS CLI 0.3.1
+took new, separate owner-private online archives at 17:15 EDT. The standalone
+manifest names seven reachable streams, including 24,286 messages in
+`local-events-daedalus`. The cluster manifest names six streams, with
+`KV_MESH_COLLAB` and `KV_MESH_PLANS` explicitly offline, and records 55,173
+messages in `local-events-moltymacs-virtual-machine`. Both manifest file
+lists rehash exactly. This run changed no stream assignment or service
+configuration.
+
+Eleven reachable archives restored on two owned loopback servers outside the
+production port set. The isolated check accepted 80,884 non-expiring messages,
+captured state and durable positions, with the time-limited health stream
+treated separately. A later direct message read matched the restored content
+digests for all nine non-expiring streams. The cluster direct baseline completed;
+the standalone baseline refused twice at its final recheck because transient
+`consumer_count` values changed. Its six partial content reads corroborate
+the byte comparison but are not a successful stable baseline. Both refused
+receipts are retained. The private restore receipt says both owned servers
+stopped and the archives remained unchanged; no archive or restore failure
+receipt exists.
+
+The three serving NATS launchd PIDs were unchanged before and after. See
+`ONLINE_ARCHIVE_REFRESH_20261011.json` for receipt hashes and scope.
+
+These are two sequential online points, not a shared no-writer recovery point.
+The two offline cluster streams, the separately held member-1 store, and each
+serving member's cold store still require the full-node hold, stopped-VM
+capture and four-role isolated acceptance. This refresh does not authorize a
+topology change, production stop or VM shutdown. Step 1.2 remains
+`[A]/v1.2-pre`.

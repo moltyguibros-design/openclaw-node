@@ -291,3 +291,16 @@ recapture changed only the node-watch plist and preserved both host-Ollama
 settings. See `audits/step12_jetstream/POST_VAULT_WATCHER_BASELINE_RECAPTURE_20261003.json`.
 `net.stream` and `fed.grappe.members` remain BROKEN; recovery 1.2 remains
 active without physical writer exclusion or healthy cold masters.
+
+2026-10-11 17:25 EDT — Separate current online archives of the standalone and
+cluster buses are private and verified. Eleven reachable streams restored on
+two isolated loopback servers; 80,884 non-expiring messages, captured state and
+durable positions passed, and the owned servers stopped. Direct message digests
+matched for the nine non-expiring streams; the cluster direct baseline completed
+while the standalone baseline refused its final transient-consumer recheck, so
+its partial message reads are corroboration only. The two offline cluster
+streams were recorded but cannot be archived while their sole
+owner remains held. The three production NATS PIDs stayed unchanged. This is
+online rollback evidence only: the member-1 master, three serving cold masters,
+common no-writer interval and full-node recovery remain unaccepted. See
+`audits/step12_jetstream/ONLINE_ARCHIVE_REFRESH_20261011.json`.

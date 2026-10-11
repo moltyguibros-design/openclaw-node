@@ -2543,3 +2543,18 @@ locally. An immutable-store fence plus a point-in-time holder census is not a
 continuous no-writer proof. The missing full-node writer boundary, stopped
 capture, four-history acceptance and verified resumption remain open at
 1.2[A]/v1.2-pre. No production service, VM or NATS store changed.
+
+Checkpoint 2026-10-11 17:25 EDT: D158 refreshed two separate private online
+archives from the still-running standalone and routed cluster buses. Both
+manifests rehash, and all 11 reachable streams restored on two isolated
+loopback servers with 80,884 non-expiring messages accepted. Direct content
+digests matched for all nine non-expiring streams, though the standalone
+baseline refused its final recheck twice on transient consumer counts; its
+partial reads are retained as corroboration only. Both owned restore servers
+stopped and the three production NATS PIDs did not change. The cluster's two
+offline streams are explicitly recorded, not archived. The held member-1
+master remains separate. This strengthens online rollback evidence but is
+not a common quiet point or a cold copy of the four stores. Full-node no-writer
+hold, host shutdown gate, stopped-VM capture, four-role acceptance and verified
+resumption remain open at 1.2[A]/v1.2-pre. No topology or production service
+changed. See `step12_jetstream/ONLINE_ARCHIVE_REFRESH_20261011.json`.

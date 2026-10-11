@@ -1,0 +1,45 @@
+{
+  "scope": "Two separate live online archives and isolated restores; no common quiet point or cold-store acceptance",
+  "observed_at": "2026-10-11 17:25 EDT",
+  "private_root": "/Users/moltymac/.openclaw/backups/node-readiness/jetstream-20261011-online-1",
+  "source_tool_sha256": {
+    "recovery.mjs": "b83c242732731edfc65e37571fa21f5044a4eabfceb27fd783d2d9da05aaeab6",
+    "take_snapshots.mjs": "b652b489a188fd788623316d4fbd8ba9c9134fccd658adfb1efca3d5e90da22d"
+  },
+  "standalone": {
+    "manifest_sha256": "214d84c27356d64193a4c342a8777196c3e0cd00224e1f3a5794bf34ff06b058",
+    "started_at_utc": "2026-10-11T21:15:13.150Z",
+    "finished_at_utc": "2026-10-11T21:15:14.183Z",
+    "stream_count": 7,
+    "offline": [],
+    "local_events_daedalus_messages": 24286
+  },
+  "cluster": {
+    "manifest_sha256": "a69f6402ceb647416cb285c0087b0b1316d217517fd99e8c8ebe71a76f5594a2",
+    "started_at_utc": "2026-10-11T21:15:14.284Z",
+    "finished_at_utc": "2026-10-11T21:15:15.813Z",
+    "stream_count": 6,
+    "offline": ["KV_MESH_COLLAB", "KV_MESH_PLANS"],
+    "local_events_current_node_messages": 55173
+  },
+  "checks": {
+    "archive_file_hashes_match_manifests": true,
+    "private_directory_modes": "0700",
+    "private_manifest_and_acceptance_modes": "0600",
+    "isolated_restore_acceptance_sha256": "bbdd1d904aeca7ddd5540496536b01987a53d39bd833c21484dae62a5fcd2630",
+    "isolated_streams_restored": 11,
+    "non_expiring_messages_restored": 80884,
+    "owned_servers_stopped": true,
+    "archives_unchanged_after_restore": true,
+    "archive_or_restore_failed_receipts": 0,
+    "serving_nats_pids_before_and_after": {"nats": 735, "nats-2": 747, "nats-3": 719}
+  },
+  "direct_read_comparison": {
+    "cluster_manifest_sha256": "ac3b0d124b0321088618f3689ef4ecfeef57d1ff85b76e983efb2c062cf4bd2d",
+    "standalone_failed_sha256": ["cc5f57ace2b2e01b8689e999665f9c40c80a1a7d9367a4038691328644487339", "e3612980642a76aec56099bf4f85fe296b8e2df419e052a3f16ba7f9e15a13d2"],
+    "standalone_refusal": "Transient consumer_count changes at final recheck; no standalone direct baseline manifest was published",
+    "non_expiring_streams_with_matching_direct_and_restored_content_digests": 9,
+    "scope": "The six standalone content observations came from a refused partial baseline; they corroborate message bytes but do not certify a stable standalone baseline. The three cluster observations came from a completed baseline."
+  },
+  "limits": "The two archives were taken in sequence from running buses. They omit the two offline cluster streams, do not copy any serving cold store, and do not prove a full-node no-writer interval, guest shutdown, stopped-VM capture, four-store recovery or service resumption."
+}
