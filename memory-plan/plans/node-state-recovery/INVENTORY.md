@@ -2596,3 +2596,14 @@ in-flight handles, detached writers, boot/UTM control and the stale 23-job pin
 map still prevent production hold or VM shutdown. Stopped capture,
 four-history acceptance and verified resumption remain open at
 1.2[A]/v1.2-pre. No production state changed.
+
+Checkpoint 2026-10-11 19:52 EDT: D162's one-time root macOS CI probe
+detected the test-owned writable fileport after its descriptor closed, but
+39 PIDs remained unreadable after retry and the process list changed during
+the scan. The exact job and sanitized result are retained in
+`step12_jetstream/ROOT_HOLDER_COVERAGE_20261011.json`; the one-time job was
+removed. This root snapshot cannot certify a complete or continuous
+no-writer interval. A different proven physical exclusion or observer
+contract, stable approved 23-job pins, the guest hold, host boot/UTM gate,
+stopped capture, four-history acceptance and service resumption remain open
+at 1.2[A]/v1.2-pre. No production state changed.

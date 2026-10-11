@@ -3463,3 +3463,24 @@ production same-user scan has unreadable PIDs, and process root, in-flight
 handles, unbound detached writers, root writes and boot starts are not closed.
 No production process, store, service or VM was changed. The four NATS
 histories remain separate, and step 1.2 remains `[A]/v1.2-pre`.
+
+## D162 — Root census on an owned runner still has unreadable processes (2026-10-11 19:52 EDT)
+
+A one-time isolated macOS CI job ran the current store-holder census as root
+against four disposable store directories. Its owned child closed the original
+write descriptor but retained a writable vnode fileport. The census found
+that holder, so the D161 fileport path works across processes under root.
+After its retry, 39 PIDs were still unreadable; one failed PID had exited,
+and the before/after process lists differed. The sanitized result, probe
+hash and exact job are in
+`audits/step12_jetstream/ROOT_HOLDER_COVERAGE_20261011.json`.
+
+The counts do not identify why each process was unreadable or establish
+whether any held a NATS store. They do establish that this root snapshot
+cannot certify complete process coverage even on the owned runner. It also
+is not a single instant or a continuous interval. A full-node writer proof
+must use a different physical exclusion or observer contract, and prove that
+contract on owned resources before production use. The diagnostic script is
+retained and its one-time CI job removed. No production process, store,
+service or VM was changed; the four histories remain separate and step 1.2
+stays `[A]/v1.2-pre`.
