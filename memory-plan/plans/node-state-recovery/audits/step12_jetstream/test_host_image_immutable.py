@@ -11,6 +11,7 @@ import unittest
 
 from host_image_immutable import change_immutable
 from host_vm_capture import clone_only
+from stopped_tree_match import entries
 
 
 def run(*args):
@@ -22,6 +23,43 @@ def run(*args):
 
 @unittest.skipUnless(sys.platform == 'darwin', 'requires macOS APFS file flags')
 class HostImageImmutableTest(unittest.TestCase):
+    def test_same_user_can_replay_flags_and_tree_digest_after_a_write(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-owned-store-flag-') as parent:
+            root = pathlib.Path(parent)
+            store = root / 'store'
+            store.mkdir()
+            block = store / 'block'
+            block.write_bytes(b'original bytes')
+            before = entries(store)
+            attempt = root / 'attempt'
+            os.chflags(block, block.stat().st_flags | stat.UF_IMMUTABLE)
+            os.chflags(store, store.stat().st_flags | stat.UF_IMMUTABLE)
+            child = '''
+import os, pathlib, stat, sys
+store, block, attempt = map(pathlib.Path, sys.argv[1:])
+original = block.read_bytes()
+os.chflags(store, store.stat().st_flags & ~stat.UF_IMMUTABLE)
+os.chflags(block, block.stat().st_flags & ~stat.UF_IMMUTABLE)
+block.write_bytes(b'transient write')
+attempt.write_bytes(block.read_bytes())
+block.write_bytes(original)
+os.chflags(block, block.stat().st_flags | stat.UF_IMMUTABLE)
+os.chflags(store, store.stat().st_flags | stat.UF_IMMUTABLE)
+'''
+            try:
+                result = subprocess.run([sys.executable, '-c', child, str(store), str(block),
+                                         str(attempt)], capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(attempt.read_bytes(), b'transient write')
+                self.assertTrue(block.stat().st_flags & stat.UF_IMMUTABLE)
+                self.assertTrue(store.stat().st_flags & stat.UF_IMMUTABLE)
+                self.assertEqual(entries(store), before)
+            finally:
+                if store.exists() and store.stat().st_flags & stat.UF_IMMUTABLE:
+                    os.chflags(store, store.stat().st_flags & ~stat.UF_IMMUTABLE)
+                if block.exists() and block.stat().st_flags & stat.UF_IMMUTABLE:
+                    os.chflags(block, block.stat().st_flags & ~stat.UF_IMMUTABLE)
+
     def test_disposable_asif_flag_lifecycle(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-image-flag-') as parent:
             root = pathlib.Path(parent).resolve()

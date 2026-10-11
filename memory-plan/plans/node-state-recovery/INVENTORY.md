@@ -2534,3 +2534,12 @@ idle on-demand, idle known-broken and timer stops. The native control passes
 locally. Full-node hold, stopped capture, all four real-history acceptance
 and verified resumption remain open at 1.2[A]/v1.2-pre. No production
 service, VM or NATS store changed.
+
+Checkpoint 2026-10-11 13:21 EDT: D157's owned macOS negative proves that a
+same-user process can clear `UF_IMMUTABLE` on a store directory and file,
+write, restore the original content, and reapply the flags. The final flags
+and tree digest match the pre-write values; both native host-image tests pass
+locally. An immutable-store fence plus a point-in-time holder census is not a
+continuous no-writer proof. The missing full-node writer boundary, stopped
+capture, four-history acceptance and verified resumption remain open at
+1.2[A]/v1.2-pre. No production service, VM or NATS store changed.

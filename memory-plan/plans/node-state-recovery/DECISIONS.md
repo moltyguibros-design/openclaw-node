@@ -3323,3 +3323,23 @@ verification, and account for any writer already detached from the job. The
 current `unload_idle_timer` refusal when its witness is absent remains correct.
 This owned control does not close the full-node hold or permit a production
 service or VM stop.
+
+## D157 — Immutable flags and a tree digest cannot certify continuous writer exclusion (2026-10-11 13:21 EDT)
+
+An owned macOS control sets `UF_IMMUTABLE` on a disposable store directory and
+file, then starts a separate same-user process. That process clears both flags,
+writes transient bytes, restores the original bytes, and reapplies both flags.
+The control confirms the transient bytes were written while the final flags
+and `stopped_tree_match.entries` match the values from before the write. Both
+native host-image tests pass locally. No production store, service or VM was
+contacted.
+
+Thus a post-hoc flag check and content digest can establish the final tree
+state, but cannot prove that no writer ran during the interval. A point-in-time
+open-descriptor census does not close this path: the process can open only
+after that census and clear its same-user flags. Other-user and root processes
+are outside the existing unprivileged census as well. Do not substitute an
+owned immutable-store fence for the missing full-node spawn/writer witness or
+use it to authorize production hold, VM shutdown, capture, acceptance or
+resumption. The four NATS histories remain separate, and step 1.2 stays
+`[A]/v1.2-pre` pending an independently proven no-writer boundary.
