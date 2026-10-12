@@ -169,7 +169,8 @@ async function waitExactNames(nc, expected) {
       await exactNames(nc, expected, 2000);
       return;
     } catch (err) {
-      if (err.code !== 'TIMEOUT' || performance.now() >= deadline) throw err;
+      if ((err.code !== 'TIMEOUT' && !(err.api?.code === 503 && err.api?.err_code === 10008))
+          || performance.now() >= deadline) throw err;
       await new Promise(resolve => setTimeout(resolve, 200));
     }
   }
