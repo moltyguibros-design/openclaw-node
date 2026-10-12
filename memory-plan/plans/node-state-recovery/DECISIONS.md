@@ -3484,3 +3484,29 @@ contract on owned resources before production use. The diagnostic script is
 retained and its one-time CI job removed. No production process, store,
 service or VM was changed; the four histories remain separate and step 1.2
 stays `[A]/v1.2-pre`.
+
+## D163 — A retained Mach memory entry defeats the descriptor and mapping census (2026-10-11 20:01 EDT)
+
+An owned macOS child opened a disposable file for shared writable mapping,
+created a writable Mach named memory entry from that mapping, then unmapped and
+closed the original descriptor. Before the child remapped the entry,
+`vnode_snapshot` found no matching descriptor, fileport or mapping, and the
+store-holder census listed no holder for that child. The parent then set
+`UF_IMMUTABLE`; a new writable open was refused. The child remapped its retained
+entry, wrote and synchronized a byte, and the parent read `M000` while the
+immutable flag was still set. The independent macOS CI job succeeded at
+`e171b4cf`; the exact sanitized result, source hashes and job are retained in
+`audits/step12_jetstream/MACH_MEMORY_ENTRY_CHARACTERIZATION_20261011.json`.
+
+This owned negative shows that the current descriptor, fileport and mapping
+scan can report no reference while a process retains a path to modify the
+file. It also shows that the user immutable flag did not revoke this existing
+memory entry. The same-user census had unreadable PIDs; that count is not the
+separate root-probe result and is not the cause of this child's false negative.
+This experiment does not prove whether a root observer could enumerate Mach
+memory-entry rights or provide continuous coverage. Treat the current census
+as a diagnostic, not a full-node no-writer certificate. A different physical
+exclusion or observer contract must be demonstrated on owned resources before
+production hold. The probe source remains; its one-time CI job is removed.
+No production process, store, service or VM was changed. All four NATS
+histories remain separate and step 1.2 remains `[A]/v1.2-pre`.

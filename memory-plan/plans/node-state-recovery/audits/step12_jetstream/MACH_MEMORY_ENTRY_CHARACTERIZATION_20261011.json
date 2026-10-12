@@ -1,0 +1,22 @@
+{
+  "type": "owned-mach-memory-entry-characterization",
+  "head": "e171b4cfcff1d61e0a72df8db1a71fbf4e09bb90",
+  "job": "https://github.com/moltyguibros-design/openclaw-node/actions/runs/38186271921/job/114609150335",
+  "job_conclusion": "success",
+  "probe_python_sha256": "204ccfeb145e81a01f14635e098e78e1c30b4876dc942f83097fe5d5fd0a8f69",
+  "probe_child_c_sha256": "beef015c61eaf4dcdabbf688122be5bdee41e511749b2f80bbffc2d96de7f381",
+  "observed": {
+    "status": "stimulated",
+    "snapshot_references_to_file": 0,
+    "census_holders_for_child": 0,
+    "new_writable_open_refused": true,
+    "remap_outcome": "wrote",
+    "child_exit": 0,
+    "child_error": "",
+    "content_prefix_after": "M000",
+    "immutable_flag_after": true,
+    "census_unreadable_pid_count": 268
+  },
+  "scope": "ephemeral macOS CI runner; disposable file under one of four owned store directories; same-user observer and child",
+  "limits": "The zero-reference and zero-holder observations are for the owned child before remapping, not a complete host census. The unreadable PID count is from a same-user scan, not the separate root probe. This demonstrates a false-negative handle class and that UF_IMMUTABLE did not revoke it; it does not establish whether a root observer could enumerate Mach memory-entry rights or certify a continuous no-writer interval. No production state was touched."
+}

@@ -2607,3 +2607,17 @@ no-writer interval. A different proven physical exclusion or observer
 contract, stable approved 23-job pins, the guest hold, host boot/UTM gate,
 stopped capture, four-history acceptance and service resumption remain open
 at 1.2[A]/v1.2-pre. No production state changed.
+
+Checkpoint 2026-10-11 20:01 EDT: D163's disposable macOS control retained a
+writable Mach memory entry after closing its descriptor and unmapping its
+file. The current `vnode_snapshot` and store-holder census reported no
+reference or holder for that child. After the parent set `UF_IMMUTABLE`, a new
+writable open failed, but remapping the retained entry changed `0000` to
+`M000` with the flag still set. Independent macOS CI job 114609150335 passed
+at `e171b4cf`; its sanitized result is in
+`step12_jetstream/MACH_MEMORY_ENTRY_CHARACTERIZATION_20261011.json` and the
+one-time job was removed. The current process census cannot certify the
+full-node no-writer boundary. A different proven exclusion or observer
+contract, stable approved 23-job pins, the guest hold, host boot/UTM gate,
+stopped capture, four-history acceptance and verified service resumption
+remain open at 1.2[A]/v1.2-pre. No production state changed.
