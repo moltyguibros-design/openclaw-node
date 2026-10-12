@@ -3568,3 +3568,29 @@ approved 23-job pins, host boot gate, stopped-VM capture, four-history
 acceptance and verified resumption remain open at 1.2 `[A]/v1.2-pre`.
 No production process, store, service or VM was changed, and all four NATS
 histories remain separate.
+
+## D166 — Contrast retained-entry unmount refusal with a live no-entry child (2026-10-11 21:55 EDT)
+
+Claude's read-only D165 challenge found that the first probe lacked a live
+child with no retained entry, did not capture the refusal text, and had two
+cleanup failure paths. The revised probe first starts a child that opens and
+closes the same file, remains alive, and permits normal unmount of the owned
+APFS image. It then reattaches that image and starts the D163 retained-entry
+child: normal unmount refuses while mounted, the child remaps and writes, and
+normal unmount succeeds after exit. Detach and read-only reattach show `M000`.
+The probe records both tool outputs, bounds the child response, kills a child
+that does not terminate promptly, and leaves its private directory intact if
+an attached image cannot be detached. Local and independent short macOS CI
+runs agreed; the exact result, source hash and job are in
+`audits/step12_jetstream/OWNED_UNMOUNT_CONTROL_20261011.json`.
+
+This contrast supports, but does not conclusively prove, that the retained
+entry caused refusal. `diskutil` reported only "failed to unmount", without
+an errno or `EBUSY` reason, and the arms ran sequentially. It tests one hidden
+reference class on a disposable, unmountable volume. The guest system/Data
+volume remains mounted while the VM runs, so this does not solve the live
+full-node no-writer hold. It may inform stopped-image capture checks after a
+separately proven shutdown and boot gate. The one-time CI invocation was
+removed. All production hold, capture, acceptance and resumption gates remain
+open at 1.2 `[A]/v1.2-pre`; the four NATS histories remain separate and no
+production state changed.

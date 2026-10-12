@@ -2657,3 +2657,16 @@ a full-node no-writer hold. The one-time CI invocation is removed. Approved
 23-job pins, guest hold, host boot/UTM gate, stopped capture, four-history
 acceptance and verified resumption remain open at 1.2[A]/v1.2-pre. No
 production state changed.
+
+Checkpoint 2026-10-11 21:55 EDT: D166 adds Claude's missing live-child control
+to the owned APFS unmount probe. Normal unmount succeeded with a child that
+opened and closed the file but retained no entry; it refused with the
+retained-entry child, then succeeded after that child exited. The image was
+detached and read-only reattached with `M000` visible. Local and dedicated
+macOS CI runs passed at `9eb685be`; exact sanitized evidence is in
+`step12_jetstream/OWNED_UNMOUNT_CONTROL_20261011.json`. The generic diskutil
+error and sequential arms prevent a complete attribution or all-writer proof.
+The one-time CI invocation is removed. This helps reason about unmountable
+owned volumes after a stop, not the live guest system/Data volume. Full-node
+hold, boot/UTM gate, stopped capture, four-history acceptance and verified
+resumption remain open at 1.2[A]/v1.2-pre. No production state changed.
