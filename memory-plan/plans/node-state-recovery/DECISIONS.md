@@ -3619,3 +3619,25 @@ establish four physical source roles and trustworthy guest origin as well as
 the existing content and path checks. The pending hold-boundary choice remains
 open; no production process, VM, service, store or topology changed, and step
 1.2 remains `[A]/v1.2-pre`.
+
+## D168 — Use the stopped-VM boundary for design and owned tests (2026-10-12 18:02 EDT)
+
+The operator answered “GO” after reviewing the two choices in
+`audits/step12_jetstream/HOLD_BOUNDARY_DECISION_CANDIDATE_20261012.md` and the
+recommended revised boundary. We select that boundary **for design and owned
+tests only**. Pre-stop checks will establish fail-closed application
+quiescence, without claiming complete physical writer exclusion on the mounted
+Data volume. Definitive physical no-writer proof belongs after a clean
+whole-VM shutdown under an active host boot guard. This replaces the impossible
+pre-stop proof requirement as a design target; it does not weaken the need to
+preserve and independently restore-check the standalone NATS store and all
+three cluster-member physical histories before any topology change.
+
+This decision does **not** authorize stopping or restarting a production
+service, stopping the live VM, changing NATS topology, or entering a production
+window. A separate, fresh, explicit go/no-go for the exact attended window is
+required after the installed 23-job pins, writer-provenance audit, disposable
+UTM boot-guard rehearsal, owned controller, four-history preservation path,
+and reviewed abort/resumption runbook pass. The heartbeat may prepare and
+warn, but must not initiate the live stop. Step 1.2 remains `[A]/v1.2-pre`,
+and the node is not accepted as operational.
