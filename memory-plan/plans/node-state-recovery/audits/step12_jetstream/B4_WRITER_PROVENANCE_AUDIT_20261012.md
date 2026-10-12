@@ -8,16 +8,17 @@ stores, including held `nats-1`, remain the preservation subjects.
 
 ## Scope and method
 
-`B4_INSTALLED_ENTRYPOINTS_20261012.json` records the currently installed
-plist bytes, program and absolute argument-file paths/hashes, argv hash,
+`B4_INSTALLED_ENTRYPOINTS_20261012.json` records freshly read installed
+plist hashes, program and absolute argument-file paths/hashes, argv hash,
 environment **keys only**, working directory, output paths, and every
 launchd activation key checked. It contains no environment values or token.
 The 23 labels are exactly the 23 proposed in
 `FULL_NODE_BASELINE_CANDIDATE_20261009.json`; a read-only scan found 23
 `ai.openclaw.*.plist` files under the home LaunchAgents directory, zero
 extra labels and zero missing labels. All direct argument files named in the
-October 9 candidate still exist. This does not validate the old hashes or
-approve that candidate: the viewer's installed release already changed.
+October 9 candidate still exist. The new hashes are October 12 observations;
+they do not approve the older candidate as window-entry pins. The viewer's
+installed plist alone differs from the October 9 candidate.
 
 The observed activation keys are `RunAtLoad`, `KeepAlive`, `StartInterval`
 and `StartCalendarInterval`. None of the 23 plists declares `Sockets`,
@@ -26,9 +27,12 @@ and `StartCalendarInterval`. None of the 23 plists declares `Sockets`,
 `launchctl kickstart`, launchd's `KeepAlive` respawn, or a child spawned by a
 running parent. `mesh-agent` has `KeepAlive=false` and `RunAtLoad=false`,
 so its on-demand activation is an external caller, not a plist socket event.
-Installed location is not proof of current loaded domain; the JSON labels
-the October 9 candidate's GUI domain separately. All domains require a fresh
-read at window entry.
+Installed location is not proof of loaded domain. The JSON separates the
+October 9 candidate's GUI-domain field from a fresh read-only `launchctl
+print` of the GUI, user and system domains. At this observation, 21 of the
+23 labels were loaded in GUI, none in user, and neither held `nats-1` nor
+`federation-tick` was loaded. These states still require a fresh window-entry
+check.
 
 ## Declared cohort
 
@@ -64,6 +68,12 @@ by the hold controller. The JSON gives exact paths and hashes for every row.
 | `transcript-archive` | `RunAtLoad`, 3600 s | Gated shell timer copies transcripts with `rsync` and appends an archive log. |
 | `workplan-viewer` | `KeepAlive`, `RunAtLoad` | Writes plan/config files, spawns tick commands, and offers launchd controls; currently installed release differs from the October 9 candidate. |
 
+The four installed NATS configs declare distinct `store_dir` paths:
+`nats` → `~/.openclaw/nats/jetstream`, `nats-1` → `jetstream-1`,
+`nats-2` → `jetstream-2`, and `nats-3` → `jetstream-3` under the same parent.
+This is a configuration/path observation, not proof of independent historical
+origin or an accepted cold copy.
+
 Direct source examples: installed `mesh-agent.js` uses `spawn(... detached:
 true)` for its LLM provider around line 1007; installed `memory-daemon.mjs`
 starts the knowledge-index child around line 1095 and other subprocesses
@@ -73,6 +83,29 @@ line 2029. The five timers all delegate through the installed
 `timer-entry.py` and manifest; the wrapper rejects work under its closed gate
 but does not erase already spawned work. These are concrete reasons that
 hashing plist argv and stopping only the parent PID is insufficient.
+
+## In-cohort re-entry edges
+
+The installed `mesh-deploy-listener.js` receives a NATS deploy trigger and
+executes `bin/mesh-deploy.js --local` from its configured repository
+(`mesh-deploy-listener.js:85–171`). That script's `mesh-daemons` and
+`shared-lib` components include `ai.openclaw.mesh-agent` among services to
+restart (`bin/mesh-deploy.js:202–203,241–242`); its macOS restart path runs
+`launchctl unload` then `load` (`:783–795`). A hold must fence the listener
+and drain an in-flight deploy before unloading mesh-agent or other affected
+jobs. The installed workplan viewer also exposes authenticated plan-automation
+load, unload and kickstart routes (`workplan-viewer.mjs:1959–2008`); a hold
+must fence that control surface before relying on a stopped plan tick. The
+exact target labels read by that route require current plan-config binding;
+this audit does not infer that a particular tick was fired.
+
+Out-of-cohort operator/deploy CLIs also contain launchd restart paths, for
+example `bin/openclaw-stack.mjs:156` and `bin/openclaw-restart.sh:93`.
+Their presence is not evidence of an active writer, but a login session
+could invoke them until the approved window closes that access. The held
+`federation-tick` plist embeds `workspace-bin/federation-tick.sh` in a shell
+command; that delegate is not an absolute argument file in the JSON. B5 must
+pin and inspect it before treating that job as controlled.
 
 ## Hold-design consequences and unresolved writers
 
@@ -86,13 +119,22 @@ re-entry routes. Its owned negative must force a start between disable and
 bootout and require refusal. It must not infer safety from a disabled override
 while the job is loaded.
 
+The fresh installed-plist scan found no `ai.openclaw.*` job in
+`/Library/LaunchAgents` or `/Library/LaunchDaemons`. It found one
+`com.openclaw.*` system daemon: `com.openclaw.tailscale-up`, loaded in the
+system domain. Its installed plist invokes `/usr/local/bin/tailscale up`,
+with no environment values, delegate script or declared NATS-store path;
+the plist SHA is in the JSON. It is a network helper, not a **declared**
+direct writer of the four NATS stores. No current OpenClaw-labeled
+root-domain NATS writer was found. The root-writer migration document is a
+future design, not a current installed job. This bounded statement does not
+exclude other root processes or external clients.
+
 The static cohort scan cannot enumerate an SSH/login-shell writer, a
 crash-orphaned child, host-side filesystem access, another user's/system's
-service, or a retained Mach writable memory entry. The excluded
-`com.openclaw.tailscale-up` system label and any future root-domain NATS
-writer require separate domain inspection; they are not among the 23 user
-plists. A fresh all-domain inventory, process/holder census, current source
-pins, and four-store path/volume match belong at the approved window entry.
+service, or a retained Mach writable memory entry. A fresh all-domain
+inventory, process/holder census, current source pins, and four-store
+path/volume match belong at the approved window entry.
 The census is diagnostic, not complete physical exclusion (D164). Under
 D168, only the clean stopped-VM plus active host boot guard can establish the
 definitive physical no-writer boundary. Any failure before that point aborts

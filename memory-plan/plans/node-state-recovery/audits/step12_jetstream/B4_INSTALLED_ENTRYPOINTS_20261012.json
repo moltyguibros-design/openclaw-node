@@ -1,4 +1,54 @@
 {
+  "current_domain_observation": {
+    "installed_other_domain_labels": {
+      "system": [
+        "com.openclaw.tailscale-up"
+      ],
+      "user": []
+    },
+    "loaded_labels": {
+      "gui": [
+        "ai.openclaw.consolidation-scheduler",
+        "ai.openclaw.gateway",
+        "ai.openclaw.health-watch",
+        "ai.openclaw.lane-watchdog",
+        "ai.openclaw.log-rotate",
+        "ai.openclaw.memory-daemon",
+        "ai.openclaw.mesh-agent",
+        "ai.openclaw.mesh-bridge",
+        "ai.openclaw.mesh-deploy-listener",
+        "ai.openclaw.mesh-health-publisher",
+        "ai.openclaw.mesh-task-daemon",
+        "ai.openclaw.mesh-tool-discord",
+        "ai.openclaw.mission-control",
+        "ai.openclaw.nats",
+        "ai.openclaw.nats-2",
+        "ai.openclaw.nats-3",
+        "ai.openclaw.node-watch",
+        "ai.openclaw.observer",
+        "ai.openclaw.scheduler-heartbeat",
+        "ai.openclaw.transcript-archive",
+        "ai.openclaw.workplan-viewer"
+      ],
+      "system": [
+        "com.openclaw.tailscale-up"
+      ],
+      "user": []
+    },
+    "method": "read-only installed-plist scan and launchctl print for gui, user, system; OpenClaw label prefixes only",
+    "observed_at": "2026-10-12T18:24:10-04:00",
+    "system_label_classification": {
+      "com.openclaw.tailscale-up": {
+        "direct_declared_nats_store_writer": false,
+        "environment_keys": [],
+        "limit": "Tailscale network helper from declared argv; this does not exclude other root or out-of-cohort writers",
+        "plist_path": "/Library/LaunchDaemons/com.openclaw.tailscale-up.plist",
+        "plist_sha256": "82b9a9f2b8e926ea00bd08ba107687a3801fe798df6b3ba4f18ae8a6f500714d",
+        "program": "/usr/local/bin/tailscale",
+        "subcommand": "up"
+      }
+    }
+  },
   "observed_at": "2026-10-12T18:06:17-04:00",
   "scope": "23 installed ai.openclaw LaunchAgents only; not a no-writer certificate or current window pins",
   "source_candidate": "memory-plan/plans/node-state-recovery/audits/step12_jetstream/FULL_NODE_BASELINE_CANDIDATE_20261009.json",
