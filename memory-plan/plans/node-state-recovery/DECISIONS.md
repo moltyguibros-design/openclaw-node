@@ -3667,3 +3667,29 @@ B5 remains open for the complete owned controller, host boot-guard rehearsal,
 abort/resumption path and reviewed production runbook. B6 remains a separate
 exact-window release; no production process, VM, service, store or topology
 changed, and all four NATS histories remain separate.
+
+## D170 — Root independently rejects incomplete non-NATS stop cohorts (2026-10-12 19:35 EDT)
+
+Claude's read-only adversarial review of D169 found a root-admission false
+accept: a user-owned transfer journal could omit all 17 non-listener,
+prior-loaded non-NATS stops while still passing the privileged reader. The
+owned negative reproduced that acceptance against the original reader. Root
+admission now derives the required cohort from the baseline and requires each
+job's unique stop intent and bound class-specific verified receipt before the
+first serving NATS stop intent. It checks the original hold session, unloaded
+label and disabled overrides on each receipt, and rejects any later verified
+snapshot that shows a cohort label loaded. The separately checked listener
+remains part of the loaded-label fence. The user-side transfer writer also
+rechecks the complete fence immediately before publishing its transfer intent.
+
+A second owned negative places the observer stop after the first NATS intent:
+root refuses even though the job is stopped by transfer time. The positive
+full-cohort transfer remains accepted. The idle proof now binds its reported
+prior loaded/running state to the baseline, so a running known-broken job
+cannot use an idle receipt. The 155 preservation-journal and 25 user-transfer
+tests pass on macOS Python 3.9.6; plan-lint reports 14 PASS, one known idle-step
+WARN and zero FAIL. These checks validate journal order and evidence fields,
+not the physical absence of detached or external writers, and they do not
+turn user-controlled evidence into an independent machine attestation. B5,
+B6 and the production boundary remain open. No production VM, service, NATS
+store or topology changed; all four histories remain separate.

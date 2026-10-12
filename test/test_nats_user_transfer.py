@@ -51,7 +51,7 @@ class UserTransferTest(unittest.TestCase):
                     module.valid_baseline({**baseline, **change})
 
     def prepared(self, extra_event=None, boot='boot-a', missing_listener=False,
-                 late_listener=False):
+                 late_listener=False, bypass_non_nats=False, late_non_nats=None):
         fixture = fixture_module.JournalTests('test_nats_transfer_freezes_user_journal_before_root_outcome')
         fixture.setUp()
         self.addCleanup(fixture.tearDown)
@@ -92,9 +92,12 @@ class UserTransferTest(unittest.TestCase):
                            lambda: fixture_module.fence_listener(loaded),
                            lambda: {**fixture_module.listener_stop_evidence(),
                                     'execution_hold': certificate}, hold=hold)
-            fixture_module.stop_non_nats(journal, prior, loaded, hold)
+            if not bypass_non_nats:
+                fixture_module.stop_non_nats(journal, prior, loaded, hold,
+                    units=tuple(unit for unit in fixture_module.STOP_ORDER[1:]
+                                if unit != late_non_nats))
         for unit in ('nats', 'nats-2', 'nats-3'):
-            if missing_listener:
+            if missing_listener or bypass_non_nats or late_non_nats:
                 intent = journal.append('intent', unit=unit, action='disable-and-unload')
                 fixture_module.fence_unit(loaded, unit)
                 journal.append('verified', intent=intent['sequence'], unit=unit,
@@ -108,6 +111,9 @@ class UserTransferTest(unittest.TestCase):
                                lambda unit=unit: fixture_module.fence_unit(loaded, unit),
                                lambda unit=unit: {**fixture_module.listener_stop_evidence(unit),
                                         'execution_hold': certificate}, hold=hold)
+        if late_non_nats:
+            fixture_module.stop_non_nats(journal, prior, loaded, hold,
+                                         units=(late_non_nats,))
         def observe(unit, saved):
             if unit == 'nats-1':
                 return {**saved, 'verified': True}
@@ -136,7 +142,11 @@ class UserTransferTest(unittest.TestCase):
                 hold_sha256=hashlib.sha256(module.encoded(certificate)).hexdigest(),
                 hold_evidence=certificate)
         else:
-            transfer = journal.transfer_nats(transaction, hold, observe)
+            if bypass_non_nats:
+                with patch.object(journal, 'non_nats_fenced', return_value=True):
+                    transfer = journal.transfer_nats(transaction, hold, observe)
+            else:
+                transfer = journal.transfer_nats(transaction, hold, observe)
         return fixture, journal, transaction, transfer
 
     def test_root_refuses_transfer_without_listener_stop_receipt(self):
@@ -166,6 +176,22 @@ class UserTransferTest(unittest.TestCase):
         journal.close()
         with patch.object(module, 'boot_identity', return_value='boot-a'):
             with self.assertRaisesRegex(module.Refused, 'listener stop intent is absent or out of order'):
+                module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
+
+    def test_root_refuses_nats_transfer_before_non_nats_stops(self):
+        fixture, journal, transaction, _ = self.prepared(bypass_non_nats=True)
+        journal.close()
+        with patch.object(module, 'boot_identity', return_value='boot-a'):
+            with self.assertRaisesRegex(module.Refused,
+                    'user transfer lacks complete non-NATS stop fence'):
+                module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
+
+    def test_root_refuses_a_non_nats_stop_after_nats_intent(self):
+        fixture, journal, transaction, _ = self.prepared(late_non_nats='observer')
+        journal.close()
+        with patch.object(module, 'boot_identity', return_value='boot-a'):
+            with self.assertRaisesRegex(module.Refused,
+                    'user transfer lacks complete non-NATS stop fence: observer'):
                 module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
     def test_root_refuses_nats_intent_before_listener_stop_proof(self):
@@ -504,7 +530,8 @@ class UserTransferTest(unittest.TestCase):
                             fixture_module.listener_stop_evidence)
                         for unit in fixture_module.STOP_ORDER[1:]:
                             evidence = (fixture_module.timer_stop_evidence(unit) if prior[unit]['class'] in
-                                        ('timer', 'on-demand', 'known-broken') else
+                                        ('timer', 'on-demand') or prior[unit]['class'] == 'known-broken'
+                                        and not prior[unit]['running'] else
                                         fixture_module.listener_stop_evidence(unit))
                             hold.mutate(unit, 'disable-and-unload',
                                 lambda unit=unit: fixture_module.fence_unit(loaded, unit),

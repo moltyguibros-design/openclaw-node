@@ -429,6 +429,75 @@ class UserTransfer:
                          if label != 'ai.openclaw.mesh-deploy-listener'}
                         for domain in ('gui', 'user', 'system')),
                 'user transfer listener stop proof differs')
+        serving_intents = [row for row in intents if row.get('unit') in NATS[:-1]]
+        require(serving_intents, 'user transfer lacks serving NATS stop intents')
+        first_nats = min(row['sequence'] for row in serving_intents)
+        required = {unit for unit, state in baseline['prior'].items()
+                    if state['loaded'] and unit not in NATS
+                    and unit != 'mesh-deploy-listener'}
+        for unit in required:
+            label = 'ai.openclaw.' + unit
+            stops = [row for row in intents if row.get('unit') == unit
+                     and row.get('action') == 'disable-and-unload']
+            require(len(stops) == 1 and listener['sequence'] <= stops[0]['sequence'] < first_nats,
+                    'user transfer lacks complete non-NATS stop fence: ' + unit)
+            receipts = [row for row in self.records[:-1]
+                        if row['event'] == 'verified'
+                        and row.get('intent') == stops[0]['sequence']]
+            require(len(receipts) == 1
+                    and stops[0]['sequence'] < receipts[0]['sequence'] < first_nats
+                    and receipts[0].get('unit') == unit
+                    and receipts[0].get('action') == 'disable-and-unload',
+                    'user transfer lacks complete non-NATS stop fence: ' + unit)
+            proof = receipts[0].get('evidence')
+            kind = baseline['prior'][unit]['class']
+            managed = (kind in ('daemon', 'on-demand', 'known-broken')
+                       and isinstance(proof, dict) and proof.get('verified') is True
+                       and proof.get('unit_label') == label
+                       and all(proof.get(key) is True for key in LISTENER_STOP_FIELDS)
+                       and isinstance(proof.get('bootout'), dict)
+                       and proof['bootout'].get('returncode') == 0
+                       and proof['bootout'].get('timed_out') is False
+                       and proof.get('termination') in ({'signal': 15}, {'exit': 0}))
+            idle = (kind in ('timer', 'on-demand', 'known-broken')
+                    and isinstance(proof, dict) and proof.get('verified') is True
+                    and proof.get('unloaded') is True
+                    and proof.get('logs_unchanged') is True
+                    and proof.get('disabled_override_verified') is True
+                    and isinstance(proof.get('prior'), dict)
+                    and proof['prior'].get('loaded') == baseline['prior'][unit]['loaded']
+                    and proof['prior'].get('running') == baseline['prior'][unit]['running']
+                    and proof['prior']['loaded'] is True
+                    and proof['prior']['running'] is False
+                    and isinstance(proof.get('spawn_evidence'), dict)
+                    and proof['spawn_evidence'].get('label') == label
+                    and proof['spawn_evidence'].get('coverage_complete') is True
+                    and proof['spawn_evidence'].get('spawns') == [])
+            require((managed or idle)
+                    and isinstance(proof.get('execution_hold'), dict)
+                    and proof['execution_hold'].get('watch_session_id') == original['watch_session_id']
+                    and isinstance(proof.get('entrypoint_loaded'), dict)
+                    and set(proof['entrypoint_loaded']) == {'gui', 'user', 'system'}
+                    and all(isinstance(items, list) and label not in items
+                            for items in proof['entrypoint_loaded'].values())
+                    and isinstance(proof.get('entrypoint_overrides'), dict)
+                    and set(proof['entrypoint_overrides']) == {'gui', 'user', 'system'}
+                    and all(isinstance(values, dict)
+                            for values in proof['entrypoint_overrides'].values())
+                    and proof['entrypoint_overrides']['gui'].get(label) is True
+                    and proof['entrypoint_overrides']['user'].get(label) is True
+                    and proof['entrypoint_overrides']['system'].get(label) is not False,
+                    'user transfer lacks complete non-NATS stop fence: ' + unit)
+        labels = {'ai.openclaw.' + unit for unit in required | {'mesh-deploy-listener'}}
+        for row in self.records[first_nats:-1]:
+            if row['event'] != 'verified':
+                continue
+            proof = row.get('evidence')
+            loaded = proof.get('entrypoint_loaded') if isinstance(proof, dict) else None
+            require(isinstance(loaded, dict) and set(loaded) == {'gui', 'user', 'system'}
+                    and all(isinstance(items, list) and not labels.intersection(items)
+                            for items in loaded.values()),
+                    'user transfer lacks complete non-NATS stop fence')
         for unit in NATS:
             actual = transfer['observations'][unit]
             prior = baseline['prior'][unit]

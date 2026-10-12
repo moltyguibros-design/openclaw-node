@@ -118,7 +118,9 @@ def anchor_hold(journal, hold):
 def stop_non_nats(journal, prior, entrypoints, hold, units=STOP_ORDER[1:]):
     for unit in units:
         evidence = (timer_stop_evidence(unit) if prior[unit]['class'] in
-                    ('timer', 'on-demand', 'known-broken') else listener_stop_evidence(unit))
+                    ('timer', 'on-demand') or prior[unit]['class'] == 'known-broken'
+                    and not prior[unit]['running'] else listener_stop_evidence(unit))
+        evidence = {**evidence, 'execution_hold': hold.check_forward()}
         journal.mutate(unit, 'disable-and-unload',
                        lambda unit=unit: fence_unit(entrypoints, unit),
                        lambda evidence=evidence: evidence, hold=hold)
@@ -806,7 +808,8 @@ class JournalTests(unittest.TestCase):
         self.assertTrue(journal.full_node_stop_proven('observer', timer_stop_evidence('observer')))
         for unit in ('mesh-agent', 'mesh-tool-discord'):
             self.assertTrue(journal.full_node_stop_proven(unit, listener_stop_evidence(unit)))
-            self.assertTrue(journal.full_node_stop_proven(unit, timer_stop_evidence(unit)))
+            self.assertEqual(journal.full_node_stop_proven(unit, timer_stop_evidence(unit)),
+                             not prior[unit]['running'])
             self.assertFalse(journal.full_node_stop_proven(unit, {'verified': True}))
         self.assertFalse(journal.full_node_stop_proven('gateway', timer_stop_evidence('gateway')))
         self.assertFalse(journal.full_node_stop_proven('observer', listener_stop_evidence()))
@@ -881,7 +884,8 @@ class JournalTests(unittest.TestCase):
                 units = list(STOP_ORDER) + [unit for unit in NATS_TRANSFER_UNITS if unit != 'nats-1']
                 for unit in units:
                     evidence = (timer_stop_evidence(unit) if prior[unit]['class'] in
-                                ('timer', 'on-demand', 'known-broken') else listener_stop_evidence(unit))
+                                ('timer', 'on-demand') or prior[unit]['class'] == 'known-broken'
+                                and not prior[unit]['running'] else listener_stop_evidence(unit))
                     journal.mutate(unit, 'disable-and-unload',
                                    lambda unit=unit: fence_unit(current, unit),
                                    lambda evidence=evidence: evidence, hold=hold)
@@ -1302,7 +1306,8 @@ class JournalTests(unittest.TestCase):
                     listener_stop_evidence, hold=hold)
                 for unit in STOP_ORDER[1:]:
                     evidence = (timer_stop_evidence(unit) if prior[unit]['class'] in
-                                ('timer', 'on-demand', 'known-broken') else listener_stop_evidence(unit))
+                                ('timer', 'on-demand') or prior[unit]['class'] == 'known-broken'
+                                and not prior[unit]['running'] else listener_stop_evidence(unit))
                     journal.mutate(unit, 'disable-and-unload',
                                    lambda unit=unit: current[unit].update(
                                        loaded=False, running=False, disabled=True),

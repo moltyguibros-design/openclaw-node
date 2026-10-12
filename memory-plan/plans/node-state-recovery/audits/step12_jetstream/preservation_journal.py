@@ -852,6 +852,8 @@ class Journal:
         require_no_nats_marker()
         hold.check_forward()
         final_entrypoints = self.check_entrypoints(forward=True)
+        require(self.non_nats_fenced(final_entrypoints),
+                'all prior-loaded non-NATS jobs require verified persistent stops before transfer')
         return self.append('nats-transfer-intent', root_transaction=root_transaction,
                            units=list(NATS_TRANSFER_UNITS), baseline_sha256=self.records[0]['sha256'],
                            observations=observations,
@@ -944,7 +946,9 @@ class Journal:
         return ((kind in ('daemon', 'on-demand', 'known-broken')
                  and self.managed_stop_proven(unit, evidence))
                 or (kind in ('timer', 'on-demand', 'known-broken')
-                    and self.idle_stop_proven(unit, evidence)))
+                    and self.idle_stop_proven(unit, evidence)
+                    and evidence['prior']['loaded'] == self.prior[unit]['loaded']
+                    and evidence['prior']['running'] == self.prior[unit]['running']))
 
     def begin_override_clear(self, unit):
         require(self.scope == FULL_NODE_SCOPE and unit in self.prior
