@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 from preservation_journal import CommittedRefusal, FULL_NODE_SCOPE, Journal, NATS_TRANSFER_UNITS, Refused, TIMER_SCOPE, TIMER_UNITS, UNITS, encoded, matches, valid_record
 import preservation_journal
-from preservation_checks import TAILSCALE_BINARY, TAILSCALE_LABEL, TAILSCALE_PLIST, TAILSCALE_WRAPPER
+from preservation_checks import STOP_ORDER, TAILSCALE_BINARY, TAILSCALE_LABEL, TAILSCALE_PLIST, TAILSCALE_WRAPPER
 from managed_launchd import StopWatch, restore_disabled_daemon
 from legacy_fixture import legacy_journal
 
@@ -115,6 +115,15 @@ def anchor_hold(journal, hold):
                    lambda: None, lambda: {'verified': True}, hold=hold)
 
 
+def stop_non_nats(journal, prior, entrypoints, hold, units=STOP_ORDER[1:]):
+    for unit in units:
+        evidence = (timer_stop_evidence(unit) if prior[unit]['class'] in
+                    ('timer', 'on-demand', 'known-broken') else listener_stop_evidence(unit))
+        journal.mutate(unit, 'disable-and-unload',
+                       lambda unit=unit: fence_unit(entrypoints, unit),
+                       lambda evidence=evidence: evidence, hold=hold)
+
+
 def tailscale_record():
     return {TAILSCALE_LABEL: {
         'plist': {'path': str(TAILSCALE_PLIST), 'sha256': '2' * 64},
@@ -171,6 +180,7 @@ class JournalTests(unittest.TestCase):
         journal.mutate('mesh-deploy-listener', 'disable-and-unload',
                        lambda: fence_listener(loaded),
                        listener_stop_evidence, hold=hold)
+        stop_non_nats(journal, prior, loaded, hold)
         for unit in ('nats', 'nats-2', 'nats-3'):
             if unit == weak_unit:
                 intent = journal.append('intent', unit=unit, action='disable-and-unload')
@@ -571,6 +581,7 @@ class JournalTests(unittest.TestCase):
                 with self.assertRaisesRegex(Refused, 'listener must follow'):
                     journal.mutate('mesh-deploy-listener', 'disable-and-unload',
                                    lambda: calls.append('second-listener'), listener_stop_evidence, hold=hold)
+                stop_non_nats(journal, prior, current, hold)
                 journal.mutate('nats', 'disable-and-unload',
                                lambda: fence_unit(current, 'nats'),
                                lambda: calls.append('nats') or listener_stop_evidence('nats'), hold=hold)
@@ -578,7 +589,7 @@ class JournalTests(unittest.TestCase):
                 verified = [(row['unit'], row['action']) for row in journal.records
                             if row['event'] == 'verified']
                 self.assertEqual(verified, [('scheduler-heartbeat', 'close-execution-hold'),
-                                            ('mesh-deploy-listener', 'disable-and-unload'),
+                                            *[(unit, 'disable-and-unload') for unit in STOP_ORDER],
                                             ('nats', 'disable-and-unload')])
 
     def test_full_scope_refuses_a_plain_unload_after_listener_hold(self):
@@ -737,12 +748,54 @@ class JournalTests(unittest.TestCase):
                 anchor_hold(journal, hold)
                 journal.mutate('mesh-deploy-listener', 'disable-and-unload',
                                lambda: fence_listener(current), listener_stop_evidence, hold=hold)
+                stop_non_nats(journal, prior, current, hold)
                 with self.assertRaisesRegex(Refused, 'NATS stop lacks persistent unload and process proof'):
                     journal.mutate('nats', 'disable-and-unload',
                                    lambda: fence_unit(current, 'nats'),
                                    lambda: {'verified': True}, hold=hold)
                 self.assertFalse(any(row['event'] == 'verified' and row.get('unit') == 'nats'
                                      for row in journal.records))
+
+    def test_nats_stop_waits_for_every_prior_loaded_non_nats_job(self):
+        self.assertEqual(set(STOP_ORDER),
+                         UNITS - set(NATS_TRANSFER_UNITS) - {'federation-tick'})
+        for missing in ('observer', 'mesh-agent'):
+            with self.subTest(missing=missing):
+                prior = full_node_inventory()
+                current = full_entrypoint_evidence(prior)
+                domain = pathlib.Path(self.temp.name) / missing
+                domain.mkdir(mode=0o700)
+                (domain / 'journals').mkdir(mode=0o700)
+                root = domain / 'journals' / 'journal'
+                with patch('preservation_journal.capture_entrypoint_inventory',
+                           side_effect=lambda _: copy.deepcopy(current)):
+                    with Journal(root, prior,
+                                 node_lock=domain / 'node.lock',
+                                 scope=FULL_NODE_SCOPE) as journal:
+                        hold = SimpleNamespace(journal=journal,
+                                               check_forward=lambda: {'verified': True})
+                        anchor_hold(journal, hold)
+                        journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                                       lambda: fence_listener(current),
+                                       listener_stop_evidence, hold=hold)
+                        stop_non_nats(journal, prior, current, hold,
+                                      [unit for unit in STOP_ORDER[1:] if unit != missing])
+                        before = len(journal.records)
+                        applied = []
+                        with self.assertRaisesRegex(Refused,
+                                'all prior-loaded non-NATS jobs require verified persistent stops'):
+                            journal.mutate('nats', 'disable-and-unload',
+                                           lambda: applied.append('nats'),
+                                           lambda: listener_stop_evidence('nats'), hold=hold)
+                        self.assertEqual(applied, [])
+                        self.assertEqual(len(journal.records), before)
+                        stop_non_nats(journal, prior, current, hold, [missing])
+                        journal.mutate('nats', 'disable-and-unload',
+                                       lambda: fence_unit(current, 'nats'),
+                                       lambda: listener_stop_evidence('nats'), hold=hold)
+                        self.assertTrue(any(row['event'] == 'verified'
+                                            and row.get('unit') == 'nats'
+                                            for row in journal.records))
 
     def test_full_scope_requires_class_specific_stop_proof(self):
         prior = full_node_inventory()
@@ -825,8 +878,7 @@ class JournalTests(unittest.TestCase):
                          scope=FULL_NODE_SCOPE) as journal:
                 hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
                 anchor_hold(journal, hold)
-                units = ['mesh-deploy-listener'] + [unit for unit in preservation_journal.RESUME_ORDER
-                                                    if unit != 'mesh-deploy-listener']
+                units = list(STOP_ORDER) + [unit for unit in NATS_TRANSFER_UNITS if unit != 'nats-1']
                 for unit in units:
                     evidence = (timer_stop_evidence(unit) if prior[unit]['class'] in
                                 ('timer', 'on-demand', 'known-broken') else listener_stop_evidence(unit))
@@ -1248,6 +1300,13 @@ class JournalTests(unittest.TestCase):
                 journal.mutate('mesh-deploy-listener', 'disable-and-unload',
                     lambda: current['mesh-deploy-listener'].update(loaded=False, running=False, disabled=True),
                     listener_stop_evidence, hold=hold)
+                for unit in STOP_ORDER[1:]:
+                    evidence = (timer_stop_evidence(unit) if prior[unit]['class'] in
+                                ('timer', 'on-demand', 'known-broken') else listener_stop_evidence(unit))
+                    journal.mutate(unit, 'disable-and-unload',
+                                   lambda unit=unit: current[unit].update(
+                                       loaded=False, running=False, disabled=True),
+                                   lambda evidence=evidence: evidence, hold=hold)
                 journal.mutate('nats', 'disable-and-unload',
                     lambda: current['nats'].update(loaded=False, running=False, disabled=True),
                     lambda: listener_stop_evidence('nats'), hold=hold)
@@ -2225,7 +2284,7 @@ class JournalTests(unittest.TestCase):
         transfer = journal.transfer_nats(str(uuid.uuid4()), hold, observe)
         self.publish_nats_return(journal, transfer)
         states = copy.deepcopy(journal.prior)
-        for unit in ('nats', 'nats-2', 'nats-3', 'mesh-deploy-listener'):
+        for unit in (*STOP_ORDER, 'nats', 'nats-2', 'nats-3'):
             states[unit].update(loaded=False, running=False, disabled=True)
         current = copy.deepcopy(journal.entrypoint_inventory)
         current['excluded'][TAILSCALE_LABEL]['launchd']['runs'] = 2

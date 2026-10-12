@@ -890,6 +890,29 @@ class Journal:
                    and self.managed_stop_proven('mesh-deploy-listener', row.get('evidence'))
                    for row in self.records)
 
+    def non_nats_fenced(self, entrypoints):
+        required = {unit for unit, state in self.prior.items()
+                    if state['loaded'] and unit not in NATS_TRANSFER_UNITS}
+        loaded = {label for labels in entrypoints['loaded'].values() for label in labels}
+        for unit in required:
+            label = 'ai.openclaw.' + unit
+            if (label in loaded
+                    or entrypoints['overrides']['gui'].get(label) is not True
+                    or entrypoints['overrides']['user'].get(label) is not True
+                    or entrypoints['overrides']['system'].get(label) is False):
+                return False
+            intents = [row for row in self.records if row['event'] == 'intent'
+                       and row.get('unit') == unit
+                       and row.get('action') == 'disable-and-unload']
+            if len(intents) != 1 or not any(
+                    row['event'] == 'verified' and row['sequence'] > intents[0]['sequence']
+                    and row.get('intent') == intents[0]['sequence']
+                    and row.get('unit') == unit and row.get('action') == 'disable-and-unload'
+                    and self.full_node_stop_proven(unit, row.get('evidence'))
+                    for row in self.records):
+                return False
+        return True
+
     @staticmethod
     def managed_stop_proven(unit, evidence):
         return (isinstance(evidence, dict)
@@ -982,6 +1005,10 @@ class Journal:
                         'full-node stop requires a persistent disabled override')
                 require(self.listener_fenced(),
                         'deploy listener must be verifiably disabled before other full-node work')
+                if unit in NATS_TRANSFER_UNITS:
+                    require(self.non_nats_fenced(self.check_entrypoints(forward=True)),
+                            'all prior-loaded non-NATS jobs require verified persistent stops before NATS: '
+                            + unit)
         fields = intent_fields or {}
         require(isinstance(fields, dict) and not set(fields) & {'unit', 'action'},
                 'intent fields cannot replace the mutation owner')

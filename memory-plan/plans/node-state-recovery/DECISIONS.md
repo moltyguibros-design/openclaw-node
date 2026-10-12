@@ -3641,3 +3641,29 @@ UTM boot-guard rehearsal, owned controller, four-history preservation path,
 and reviewed abort/resumption runbook pass. The heartbeat may prepare and
 warn, but must not initiate the live stop. Step 1.2 remains `[A]/v1.2-pre`,
 and the node is not accepted as operational.
+
+## D169 — Require the non-NATS stop cohort before each serving NATS stop (2026-10-12 19:16 EDT)
+
+The full-node journal previously permitted a serving NATS member to stop after
+only the execution hold and deploy-listener fence, while other installed jobs
+could remain loaded. Every serving NATS `disable-and-unload` now checks the
+baseline-derived prior-loaded non-NATS set for one class-specific verified
+persistent stop receipt per job and current unload plus disabled overrides.
+The check runs before writing the NATS stop intent or invoking its stop action.
+The installed cohort's `STOP_ORDER` remains the intended sweep order; an owned
+test pins its equality with the 18 non-NATS, non-held installed units, while
+the runtime gate derives completeness from the journal baseline to fail closed
+if the cohort changes. Claude's adversarial pass rejected an earlier proposed
+NATS-monitor receipt that lacked an anchored server identity and could accept
+coherently fabricated caller captures; this smaller ordering gate does not use
+those receipts.
+
+The owned negative leaves either a timer or the on-demand mesh agent loaded:
+both refuse before NATS stop intent and application; stopping the missing job
+then allows the next owned NATS stop. The 155 journal and 23 user-transfer tests
+pass on macOS Python 3.9.6. This proves an ordering precondition for the
+managed cohort, not absence of detached, external, or physical store writers.
+B5 remains open for the complete owned controller, host boot-guard rehearsal,
+abort/resumption path and reviewed production runbook. B6 remains a separate
+exact-window release; no production process, VM, service, store or topology
+changed, and all four NATS histories remain separate.

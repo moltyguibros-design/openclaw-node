@@ -92,6 +92,7 @@ class UserTransferTest(unittest.TestCase):
                            lambda: fixture_module.fence_listener(loaded),
                            lambda: {**fixture_module.listener_stop_evidence(),
                                     'execution_hold': certificate}, hold=hold)
+            fixture_module.stop_non_nats(journal, prior, loaded, hold)
         for unit in ('nats', 'nats-2', 'nats-3'):
             if missing_listener:
                 intent = journal.append('intent', unit=unit, action='disable-and-unload')
@@ -176,7 +177,7 @@ class UserTransferTest(unittest.TestCase):
                               and row.get('unit') == 'mesh-deploy-listener')
         nats_index = next(index for index, row in enumerate(rows)
                           if row['event'] == 'intent' and row.get('unit') == 'nats')
-        self.assertEqual(nats_index, listener_index + 1)
+        self.assertGreater(nats_index, listener_index)
         rows[listener_index], rows[nats_index] = rows[nats_index], rows[listener_index]
         nats_verified = next(row for row in rows if row['event'] == 'verified'
                              and row.get('unit') == 'nats')
@@ -188,7 +189,7 @@ class UserTransferTest(unittest.TestCase):
                 {key: value for key, value in row.items() if key != 'sha256'})).hexdigest()
             (fixture.root / f'{index:06d}.json').write_bytes(module.encoded(row))
         with patch.object(module, 'boot_identity', return_value='boot-a'):
-            with self.assertRaisesRegex(module.Refused, 'service intent precedes listener stop proof'):
+            with self.assertRaisesRegex(module.Refused, 'unexpected pre-listener receipt'):
                 module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
     def test_root_refuses_listener_proof_before_its_intent(self):
@@ -501,6 +502,13 @@ class UserTransferTest(unittest.TestCase):
                         hold.mutate('mesh-deploy-listener', 'disable-and-unload',
                             lambda: fixture_module.fence_listener(loaded),
                             fixture_module.listener_stop_evidence)
+                        for unit in fixture_module.STOP_ORDER[1:]:
+                            evidence = (fixture_module.timer_stop_evidence(unit) if prior[unit]['class'] in
+                                        ('timer', 'on-demand', 'known-broken') else
+                                        fixture_module.listener_stop_evidence(unit))
+                            hold.mutate(unit, 'disable-and-unload',
+                                lambda unit=unit: fixture_module.fence_unit(loaded, unit),
+                                lambda evidence=evidence: evidence)
                         for unit in ('nats', 'nats-2', 'nats-3'):
                             hold.mutate(unit, 'disable-and-unload',
                                 lambda unit=unit: fixture_module.fence_unit(loaded, unit),
