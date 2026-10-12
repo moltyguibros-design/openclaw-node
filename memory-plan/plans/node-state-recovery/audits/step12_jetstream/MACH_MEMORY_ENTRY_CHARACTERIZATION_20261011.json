@@ -18,5 +18,26 @@
     "census_unreadable_pid_count": 268
   },
   "scope": "ephemeral macOS CI runner; disposable file under one of four owned store directories; same-user observer and child",
-  "limits": "The zero-reference and zero-holder observations are for the owned child before remapping, not a complete host census. The unreadable PID count is from a same-user scan, not the separate root probe. This demonstrates a false-negative handle class and that UF_IMMUTABLE did not revoke it; it does not establish whether a root observer could enumerate Mach memory-entry rights or certify a continuous no-writer interval. No production state was touched."
+  "limits": "The zero-reference and zero-holder observations are for the owned child before remapping, not a complete host census. The unreadable PID count is from a same-user scan, not the separate root probe. This demonstrates a false-negative handle class and that UF_IMMUTABLE did not revoke it; it does not establish whether a root observer could enumerate Mach memory-entry rights or certify a continuous no-writer interval. A fresh read after child exit proves the shared VM object changed, not durable media persistence. No production state was touched.",
+  "readability_followup": {
+    "head": "9cf49deb12ff81f1c5624aec94200f5bf57ada8a",
+    "job": "https://github.com/moltyguibros-design/openclaw-node/actions/runs/38187050218/job/114611521197",
+    "job_conclusion": "success",
+    "probe_python_sha256": "8607651c394a2106f1871b1bfe6563e05e152c1531774f77a3cfd750f2eb9f51",
+    "observed": {
+      "status": "stimulated",
+      "snapshot_references_to_file": 0,
+      "census_holders_for_child": 0,
+      "child_readable_in_census": true,
+      "child_identity_stable": true,
+      "new_writable_open_refused": true,
+      "remap_outcome": "wrote",
+      "child_exit": 0,
+      "child_error": "",
+      "content_prefix_after": "M000",
+      "immutable_flag_after": true,
+      "census_unreadable_pid_count": 248
+    },
+    "scope": "same-user macOS CI observation of the owned child; the child was witnessed during the census despite other unreadable PIDs"
+  }
 }

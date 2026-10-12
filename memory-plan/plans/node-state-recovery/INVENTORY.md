@@ -2632,3 +2632,16 @@ short macOS process-census CI job now runs it. The parent's fresh read occurs
 after child exit but does not establish physical media durability. The
 full-node no-writer hold and all later gates remain open at 1.2[A]/v1.2-pre;
 no production state changed.
+
+Checkpoint 2026-10-11 20:12 EDT: D164 closes the readability confound in the
+owned D163 control. The first workflow edit accidentally placed the stronger
+probe in the long legacy macOS job, so the short job at `adb62a54` did not
+exercise it. The corrected short job 114611521197 passed at `9cf49deb` and
+logged a successful census read of the owned child with stable identity,
+zero file references and holders, a refused fresh open, and a successful
+retained-entry write. The updated sanitized evidence is in
+`step12_jetstream/MACH_MEMORY_ENTRY_CHARACTERIZATION_20261011.json`. This
+confirms a hidden handle for that readable child, but not a whole-host or
+continuous no-writer boundary. The guest hold, stable approved 23-job pins,
+host boot/UTM gate, stopped capture, four-history acceptance and resumption
+remain open at 1.2[A]/v1.2-pre. No production state changed.

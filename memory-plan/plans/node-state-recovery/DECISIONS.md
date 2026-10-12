@@ -3519,3 +3519,29 @@ unreadable/exited lists. The probe also fails if the expected refusal or write
 does not occur; its first CI result is to be recorded separately.
 No production process, store, service or VM was changed. All four NATS
 histories remain separate and step 1.2 remains `[A]/v1.2-pre`.
+
+## D164 — Prove the hidden holder was readable in the actual census (2026-10-11 20:12 EDT)
+
+Claude's read-only D163 challenge identified a confound: the initial probe
+reported zero holders but did not assert that the separate census successfully
+read its child. The probe now witnesses the census's real `vnode_snapshot` call
+for the child, requires its start identity unchanged, requires it absent from
+the unreadable and exited lists, and fails unless the fresh-open refusal and
+post-flag remap/write both occur. A local owned run passed. The first workflow
+edit put this strengthened probe in the long legacy macOS job by mistake; the
+short dedicated job at `adb62a54` therefore did not run it. It was moved to
+the short job at `9cf49deb`, and exact-head job
+[`114611521197`](https://github.com/moltyguibros-design/openclaw-node/actions/runs/38187050218/job/114611521197)
+passed all three census suites and the strengthened probe. Its result has
+`child_readable_in_census:true`, stable identity, zero child references and
+holders, new writable open refused, and `M000` after remapping. The sanitized
+result and new script hash are appended under `readability_followup` in the
+D163 evidence file. Other PIDs being unreadable are no longer a confound for
+this owned child's false negative. The result still does not establish durable
+media persistence or whole-host and continuous coverage.
+
+The diagnostic cannot authorize a full-node hold. A demonstrably complete
+physical exclusion or different observer contract, stable approved 23-job
+pins, guest hold and host boot/UTM gates must precede production shutdown.
+No production process, store, service or VM was changed, and all four NATS
+histories remain separate at step 1.2 `[A]/v1.2-pre`.
