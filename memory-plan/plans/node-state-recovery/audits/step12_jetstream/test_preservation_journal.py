@@ -120,7 +120,6 @@ def stop_non_nats(journal, prior, entrypoints, hold, units=STOP_ORDER[1:]):
         evidence = (timer_stop_evidence(unit) if prior[unit]['class'] in
                     ('timer', 'on-demand') or prior[unit]['class'] == 'known-broken'
                     and not prior[unit]['running'] else listener_stop_evidence(unit))
-        evidence = {**evidence, 'execution_hold': hold.check_forward()}
         journal.mutate(unit, 'disable-and-unload',
                        lambda unit=unit: fence_unit(entrypoints, unit),
                        lambda evidence=evidence: evidence, hold=hold)

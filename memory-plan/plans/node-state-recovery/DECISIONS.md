@@ -3693,3 +3693,32 @@ not the physical absence of detached or external writers, and they do not
 turn user-controlled evidence into an independent machine attestation. B5,
 B6 and the production boundary remain open. No production VM, service, NATS
 store or topology changed; all four histories remain separate.
+
+## D171 — Bind full-node stop receipts to the original live hold at write time (2026-10-12 19:53 EDT)
+
+Claude's adversarial follow-up on D170 reproduced a late root refusal: direct
+`Journal.mutate(..., hold=hold)` could persist every cohort and NATS stop and
+publish a transfer intent with a missing or stale `execution_hold` field. Root
+then refused after all serving NATS members were already stopped. The intended
+production `JournaledHold.mutate` wrapper supplied the field, but the journal's
+public mutation path and owned fixtures did not require it.
+
+The full-node journal now records the certificate returned by its current hold
+on every verified `disable-and-unload` receipt. When the original hold has a
+native watch session, a missing current certificate or a certificate from a
+different session refuses the stop; a callback's conflicting session claim is
+also refused instead of silently trusted. Before each serving NATS intent,
+`non_nats_fenced` checks that the listener and all prior-loaded non-NATS stop
+receipts name the original session. Synthetic legacy fixtures with no native
+session remain mechanism tests, not root-admissible production evidence.
+
+Owned negatives refuse a missing certificate and a stale callback claim at
+the first affected non-NATS stop. Root also refuses tampered cohort hold,
+label, idle baseline, override, duplicate intent and later loaded-snapshot
+evidence; the previously unpinned service-before-listener-intent condition now
+has a negative. The normal direct-journal fixture binds all 21 stop receipts
+to the original session and is admitted by root. The 155 journal and 30
+user-transfer tests pass on macOS Python 3.9.6. These are ordering and
+evidence-continuity checks, not physical writer exclusion. B5 and B6 remain
+open; no production VM, service, store or topology changed, and all four NATS
+histories remain separate.

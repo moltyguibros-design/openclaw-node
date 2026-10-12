@@ -51,7 +51,8 @@ class UserTransferTest(unittest.TestCase):
                     module.valid_baseline({**baseline, **change})
 
     def prepared(self, extra_event=None, boot='boot-a', missing_listener=False,
-                 late_listener=False, bypass_non_nats=False, late_non_nats=None):
+                 late_listener=False, bypass_non_nats=False, late_non_nats=None,
+                 stale_stop_claim=False, missing_stop_certificate=False):
         fixture = fixture_module.JournalTests('test_nats_transfer_freezes_user_journal_before_root_outcome')
         fixture.setUp()
         self.addCleanup(fixture.tearDown)
@@ -90,8 +91,18 @@ class UserTransferTest(unittest.TestCase):
         if not missing_listener:
             journal.mutate('mesh-deploy-listener', 'disable-and-unload',
                            lambda: fixture_module.fence_listener(loaded),
-                           lambda: {**fixture_module.listener_stop_evidence(),
-                                    'execution_hold': certificate}, hold=hold)
+                           fixture_module.listener_stop_evidence, hold=hold)
+            if stale_stop_claim:
+                journal.mutate('observer', 'disable-and-unload',
+                    lambda: fixture_module.fence_unit(loaded, 'observer'),
+                    lambda: {**fixture_module.timer_stop_evidence('observer'),
+                             'execution_hold': {'watch_session_id': 'stale-session'}},
+                    hold=hold)
+            if missing_stop_certificate:
+                hold.check_forward = lambda: None
+                journal.mutate('observer', 'disable-and-unload',
+                    lambda: fixture_module.fence_unit(loaded, 'observer'),
+                    lambda: fixture_module.timer_stop_evidence('observer'), hold=hold)
             if not bypass_non_nats:
                 fixture_module.stop_non_nats(journal, prior, loaded, hold,
                     units=tuple(unit for unit in fixture_module.STOP_ORDER[1:]
@@ -109,8 +120,8 @@ class UserTransferTest(unittest.TestCase):
             else:
                 journal.mutate(unit, 'disable-and-unload',
                                lambda unit=unit: fixture_module.fence_unit(loaded, unit),
-                               lambda unit=unit: {**fixture_module.listener_stop_evidence(unit),
-                                        'execution_hold': certificate}, hold=hold)
+                               lambda unit=unit: fixture_module.listener_stop_evidence(unit),
+                               hold=hold)
         if late_non_nats:
             fixture_module.stop_non_nats(journal, prior, loaded, hold,
                                          units=(late_non_nats,))
@@ -194,6 +205,62 @@ class UserTransferTest(unittest.TestCase):
                     'user transfer lacks complete non-NATS stop fence: observer'):
                 module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
+    def test_user_stop_rejects_stale_hold_claim_before_nats(self):
+        with self.assertRaisesRegex(fixture_module.Refused,
+                                    'stop proof names a different execution hold session'):
+            self.prepared(stale_stop_claim=True)
+
+    def test_user_stop_rejects_missing_hold_certificate_before_nats(self):
+        with self.assertRaisesRegex(fixture_module.Refused,
+                                    'stop lost the original execution hold session'):
+            self.prepared(missing_stop_certificate=True)
+
+    def test_journal_binds_direct_stop_receipts_to_original_hold(self):
+        _, journal, _, _ = self.prepared()
+        stop_rows = [row for row in journal.records if row['event'] == 'verified'
+                     and row.get('action') == 'disable-and-unload']
+        self.assertEqual(len(stop_rows), 21)
+        self.assertTrue(all(row['evidence']['execution_hold']['watch_session_id']
+                            == 'owned-session' for row in stop_rows))
+
+    def test_root_refuses_tampered_non_nats_stop_proofs(self):
+        _, journal, transaction, _ = self.prepared()
+        for name in ('wrong-hold', 'wrong-label', 'idle-prior', 'missing-override',
+                     'later-loaded-snapshot', 'duplicate-stop-intent'):
+            with self.subTest(name=name):
+                reader = object.__new__(module.UserTransfer)
+                reader.records = copy.deepcopy(journal.records)
+                reader.transaction = transaction
+                reader.prior_boot = False
+                reader.decline_only = False
+                gateway = next(row for row in reader.records if row['event'] == 'verified'
+                               and row.get('unit') == 'gateway')
+                observer = next(row for row in reader.records if row['event'] == 'verified'
+                                and row.get('unit') == 'observer')
+                gateway['evidence'] = copy.deepcopy(gateway['evidence'])
+                observer['evidence'] = copy.deepcopy(observer['evidence'])
+                if name == 'wrong-hold':
+                    gateway['evidence']['execution_hold']['watch_session_id'] = 'stale-session'
+                elif name == 'wrong-label':
+                    gateway['evidence']['unit_label'] = 'ai.openclaw.mesh-bridge'
+                elif name == 'idle-prior':
+                    observer['evidence']['prior']['running'] = True
+                elif name == 'missing-override':
+                    gateway['evidence']['entrypoint_overrides']['gui']['ai.openclaw.gateway'] = False
+                elif name == 'later-loaded-snapshot':
+                    nats = next(row for row in reader.records if row['event'] == 'verified'
+                                and row.get('unit') == 'nats')
+                    nats['evidence'] = copy.deepcopy(nats['evidence'])
+                    nats['evidence']['entrypoint_loaded']['gui'].append('ai.openclaw.observer')
+                else:
+                    mesh_intent = next(row for row in reader.records if row['event'] == 'intent'
+                                       and row.get('unit') == 'mesh-agent')
+                    mesh_intent['unit'] = 'gateway'
+                with patch.object(module, 'boot_identity', return_value='boot-a'):
+                    with self.assertRaisesRegex(module.Refused,
+                                                'user transfer lacks complete non-NATS stop fence'):
+                        reader._validate()
+
     def test_root_refuses_nats_intent_before_listener_stop_proof(self):
         fixture, journal, transaction, _ = self.prepared()
         journal.close()
@@ -213,9 +280,38 @@ class UserTransferTest(unittest.TestCase):
             row['previous'] = rows[index - 1]['sha256'] if index else None
             row['sha256'] = hashlib.sha256(module.encoded(
                 {key: value for key, value in row.items() if key != 'sha256'})).hexdigest()
-            (fixture.root / f'{index:06d}.json').write_bytes(module.encoded(row))
+            path = fixture.root / f'{index:06d}.json'
+            path.write_bytes(module.encoded(row))
+            path.chmod(0o600)
         with patch.object(module, 'boot_identity', return_value='boot-a'):
             with self.assertRaisesRegex(module.Refused, 'unexpected pre-listener receipt'):
+                module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
+
+    def test_root_refuses_service_intent_before_listener_stop_proof(self):
+        fixture, journal, transaction, _ = self.prepared()
+        journal.close()
+        rows = copy.deepcopy(journal.records)
+        insert_at = next(index for index, row in enumerate(rows)
+                         if row['event'] == 'verified'
+                         and row.get('unit') == 'mesh-deploy-listener')
+        extra = copy.deepcopy(next(row for row in rows
+                                   if row['event'] == 'intent'
+                                   and row.get('unit') == 'observer'))
+        rows.insert(insert_at, extra)
+        for index, row in enumerate(rows):
+            if (index != insert_at and isinstance(row.get('intent'), int)
+                    and row['intent'] >= insert_at):
+                row['intent'] += 1
+            row['sequence'] = index
+            row['previous'] = rows[index - 1]['sha256'] if index else None
+            row['sha256'] = hashlib.sha256(module.encoded(
+                {key: value for key, value in row.items() if key != 'sha256'})).hexdigest()
+            path = fixture.root / f'{index:06d}.json'
+            path.write_bytes(module.encoded(row))
+            path.chmod(0o600)
+        with patch.object(module, 'boot_identity', return_value='boot-a'):
+            with self.assertRaisesRegex(module.Refused,
+                    'service intent precedes listener stop proof'):
                 module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
     def test_root_refuses_listener_proof_before_its_intent(self):

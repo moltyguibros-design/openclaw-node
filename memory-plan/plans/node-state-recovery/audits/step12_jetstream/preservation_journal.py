@@ -896,6 +896,11 @@ class Journal:
         required = {unit for unit, state in self.prior.items()
                     if state['loaded'] and unit not in NATS_TRANSFER_UNITS}
         loaded = {label for labels in entrypoints['loaded'].values() for label in labels}
+        original = next((row.get('evidence') for row in self.records
+                         if row['event'] == 'verified'
+                         and row.get('unit') == 'scheduler-heartbeat'
+                         and row.get('action') == 'close-execution-hold'), None)
+        session = original.get('watch_session_id') if isinstance(original, dict) else None
         for unit in required:
             label = 'ai.openclaw.' + unit
             if (label in loaded
@@ -911,6 +916,8 @@ class Journal:
                     and row.get('intent') == intents[0]['sequence']
                     and row.get('unit') == unit and row.get('action') == 'disable-and-unload'
                     and self.full_node_stop_proven(unit, row.get('evidence'))
+                    and (not session or isinstance(row['evidence'].get('execution_hold'), dict)
+                         and row['evidence']['execution_hold'].get('watch_session_id') == session)
                     for row in self.records):
                 return False
         return True
@@ -1043,6 +1050,25 @@ class Journal:
             failure_stage = 'verified-evidence'
             require(isinstance(evidence, dict) and evidence.get('verified') is True,
                     'mutation lacks verified evidence')
+            if held and self.scope == FULL_NODE_SCOPE and action == 'disable-and-unload':
+                certificate = hold.check_forward()
+                original = next(row['evidence'] for row in self.records
+                                if row['event'] == 'verified'
+                                and row.get('unit') == 'scheduler-heartbeat'
+                                and row.get('action') == 'close-execution-hold')
+                if original.get('watch_session_id'):
+                    require(isinstance(certificate, dict),
+                            'stop lost the original execution hold session')
+                if isinstance(certificate, dict):
+                    require(certificate.get('verified') is True
+                            and certificate.get('watch_session_id') == original.get('watch_session_id'),
+                            'stop lost the original execution hold session')
+                    if 'execution_hold' in evidence:
+                        claimed = evidence['execution_hold']
+                        require(isinstance(claimed, dict)
+                                and claimed.get('watch_session_id') == certificate.get('watch_session_id'),
+                                'stop proof names a different execution hold session')
+                    evidence = {**evidence, 'execution_hold': certificate}
             failure_stage = 'persistent-stop-proof'
             if self.scope == FULL_NODE_SCOPE and action == 'disable-and-unload':
                 if unit == 'mesh-deploy-listener':
