@@ -3504,7 +3504,8 @@ file. It also shows that the user immutable flag did not revoke this existing
 memory entry. The same-user census had unreadable PIDs; that count is not the
 separate root-probe result and is not the cause of this child's false negative.
 This experiment does not prove whether a root observer could enumerate Mach
-memory-entry rights or provide continuous coverage. Treat the current census
+memory-entry rights or provide continuous coverage. The census coverage field
+now names unmapped Mach memory entries as excluded. Treat the current census
 as a diagnostic, not a full-node no-writer certificate. A different physical
 exclusion or observer contract must be demonstrated on owned resources before
 production hold. The probe source remains; its one-time CI job is removed.

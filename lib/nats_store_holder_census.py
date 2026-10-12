@@ -118,7 +118,7 @@ def _observe(user_home):
                          'single_instant': False,
                          'process_identity': 'PID and start time stable within each snapshot, not across the full scan',
                          'physical_absence_certified': False,
-                         'reference_types': 'open vnode file descriptors, vnode fileports, mapped files and working directory; excludes process root and in-flight descriptors',
+                         'reference_types': 'open vnode file descriptors, vnode fileports, mapped files and working directory; excludes process root, unmapped Mach memory entries and in-flight transferred rights',
                          'path_matching': 'lexical kernel paths; linked paths require a fresh identity match; alternate firmlink or case spelling may be unattributed'},
             'unreadable_pids': unreadable,
             'exited_pids': exited,
