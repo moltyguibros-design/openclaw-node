@@ -65,6 +65,13 @@ and consumers, rehashes every master, and writes private `probe.json` only on
 success. A mismatch writes `FAILED.json` and refuses. This tests the local
 restore mechanism; a host provenance receipt and production acceptance are
 separate gates.
+An owned macOS serving-member substitution exited successfully even with the
+target member's original baseline: a frozen copy of the other serving master
+was given a new path and a matching synthetic fixture receipt. The probe
+therefore does not establish that serving masters came from independent
+physical stores. See `OWNED_DUPLICATE_SERVING_MASTER_20261012.md`. The
+production guest/host content match would reject a substitution made after an
+accurate guest manifest, but cannot establish the guest manifest's origin.
 
 `host_asif_extract.py` is a host-side read-only extraction mechanism for an
 already copied ASIF image. Its owner-private JSON specification pins the image

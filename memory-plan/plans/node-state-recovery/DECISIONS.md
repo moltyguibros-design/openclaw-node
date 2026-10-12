@@ -3594,3 +3594,28 @@ separately proven shutdown and boot gate. The one-time CI invocation was
 removed. All production hold, capture, acceptance and resumption gates remain
 open at 1.2 `[A]/v1.2-pre`; the four NATS histories remain separate and no
 production state changed.
+
+## D167 — A successful cold probe does not prove serving-master origin (2026-10-12 06:47 EDT)
+
+An owned macOS run at PR #224 head `516a58ec` copied one serving member's
+frozen JetStream master into a new path for the other serving member, retained
+the latter's original baseline, and regenerated the fixture's synthetic match
+receipt and plan for the substituted bytes. The unmodified cold probe exited 0
+and wrote `probe.json`; the normal four-history fixture passed afterward and
+all owned servers stopped. The exact experiment patch, versions, hashes,
+outcome and scope limits are in
+`audits/step12_jetstream/OWNED_DUPLICATE_SERVING_MASTER_20261012.md` and its
+paired JSON and patch files.
+
+The probe remains a mechanism test, not a source-independence or historical
+acceptance certificate. Production `host_match` compares each extracted role
+against the guest's observed bytes and would reject a post-guest-capture copy
+with an unchanged guest manifest. This experiment used a synthetic receipt and
+does not contradict that comparison. A copy already present before guest
+capture or a forged guest origin remains a separate provenance problem. Do
+not promote unique whole-tree digests into an origin gate; inequality cannot
+prove independent source history. The reviewed acceptance boundary must
+establish four physical source roles and trustworthy guest origin as well as
+the existing content and path checks. The pending hold-boundary choice remains
+open; no production process, VM, service, store or topology changed, and step
+1.2 remains `[A]/v1.2-pre`.
