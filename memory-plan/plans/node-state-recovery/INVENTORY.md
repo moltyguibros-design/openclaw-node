@@ -2621,3 +2621,14 @@ full-node no-writer boundary. A different proven exclusion or observer
 contract, stable approved 23-job pins, the guest hold, host boot/UTM gate,
 stopped capture, four-history acceptance and verified service resumption
 remain open at 1.2[A]/v1.2-pre. No production state changed.
+
+Checkpoint 2026-10-11 20:08 EDT: Claude's read-only challenge to D163 found
+that the first owned probe did not assert the separate census had read the
+child. The strengthened probe now requires a successful census snapshot of
+that child with stable start identity, zero matching references, absence from
+the unreadable/exited lists, a refused new writable open, and a successful
+post-flag remap/write. It passed locally on owned temporary files; the
+short macOS process-census CI job now runs it. The parent's fresh read occurs
+after child exit but does not establish physical media durability. The
+full-node no-writer hold and all later gates remain open at 1.2[A]/v1.2-pre;
+no production state changed.

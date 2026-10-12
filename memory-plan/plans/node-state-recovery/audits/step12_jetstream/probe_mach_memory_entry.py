@@ -5,6 +5,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from unittest.mock import patch
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[5] / 'lib'))
@@ -37,9 +38,26 @@ def main():
             references = [entry for key in ('vnodes', 'fileports', 'mappings')
                           for entry in process[key]
                           if (entry['device'], entry['inode']) == identity]
-            report = census.observe(home)
+            original_snapshot = census.proc.vnode_snapshot
+            child_census_reads = []
+            def witnessed_snapshot(pid):
+                observed = original_snapshot(pid)
+                if pid == child.pid:
+                    child_census_reads.append(observed)
+                return observed
+            with patch.object(census.proc, 'vnode_snapshot', side_effect=witnessed_snapshot):
+                report = census.observe(home)
             holders = [row for row in report['stores']['ai.openclaw.nats']['holders']
                        if row['pid'] == child.pid]
+            if not child_census_reads or child.pid in (report['unreadable_pids'] +
+                                                       report['exited_pids']):
+                raise RuntimeError('census did not read the owned child')
+            child_identity_stable = all(
+                (row['start_sec'], row['start_usec']) ==
+                (process['start_sec'], process['start_usec'])
+                for row in child_census_reads)
+            if not child_identity_stable or references or holders:
+                raise RuntimeError('owned child census was not reference-free')
             os.chflags(block, stat.UF_IMMUTABLE)
             flagged = True
             refused = False
@@ -53,16 +71,24 @@ def main():
             child.stdin.flush()
             outcome = child.stdout.readline().strip()
             child.wait(timeout=5)
+            content = block.read_bytes()[:4].decode()
+            flag_after = bool(block.stat().st_flags & stat.UF_IMMUTABLE)
+            error = child.stderr.read().strip()
+            if not (refused and outcome == 'wrote' and child.returncode == 0
+                    and content == 'M000' and flag_after):
+                raise RuntimeError('memory-entry write control failed: ' + error)
             print(json.dumps({
                 'status': 'stimulated',
                 'snapshot_references_to_file': len(references),
                 'census_holders_for_child': len(holders),
+                'child_readable_in_census': True,
+                'child_identity_stable': child_identity_stable,
                 'new_writable_open_refused': refused,
                 'remap_outcome': outcome,
                 'child_exit': child.returncode,
-                'child_error': child.stderr.read().strip(),
-                'content_prefix_after': block.read_bytes()[:4].decode(),
-                'immutable_flag_after': bool(block.stat().st_flags & stat.UF_IMMUTABLE),
+                'child_error': error,
+                'content_prefix_after': content,
+                'immutable_flag_after': flag_after,
                 'census_unreadable_pid_count': len(report['unreadable_pids'])},
                 sort_keys=True))
         finally:

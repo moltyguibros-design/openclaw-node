@@ -3497,6 +3497,8 @@ entry, wrote and synchronized a byte, and the parent read `M000` while the
 immutable flag was still set. The independent macOS CI job succeeded at
 `e171b4cf`; the exact sanitized result, source hashes and job are retained in
 `audits/step12_jetstream/MACH_MEMORY_ENTRY_CHARACTERIZATION_20261011.json`.
+The read occurred after the child had unmapped and exited. It proves a change
+to the shared VM object visible to a fresh read, not durable media persistence.
 
 This owned negative shows that the current descriptor, fileport and mapping
 scan can report no reference while a process retains a path to modify the
@@ -3509,5 +3511,11 @@ now names unmapped Mach memory entries as excluded. Treat the current census
 as a diagnostic, not a full-node no-writer certificate. A different physical
 exclusion or observer contract must be demonstrated on owned resources before
 production hold. The probe source remains; its one-time CI job is removed.
+An adversarial follow-up found that the original probe did not assert the
+child was actually read by the separate census. The retained macOS census job
+now reruns the probe with a wrapper that records a successful child snapshot,
+checks the process start identity and requires the child absent from the
+unreadable/exited lists. The probe also fails if the expected refusal or write
+does not occur; its first CI result is to be recorded separately.
 No production process, store, service or VM was changed. All four NATS
 histories remain separate and step 1.2 remains `[A]/v1.2-pre`.
