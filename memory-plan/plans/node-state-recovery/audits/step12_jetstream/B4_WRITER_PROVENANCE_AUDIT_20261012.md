@@ -84,6 +84,16 @@ line 2029. The five timers all delegate through the installed
 but does not erase already spawned work. These are concrete reasons that
 hashing plist argv and stopping only the parent PID is insufficient.
 
+Line references in this audit describe the installed copies read on October
+12, not the potentially different lines in this PR. The installed
+`mesh-deploy-listener.js` SHA-256 is `30b3bf275a32baa7939066c9c62c971a4d985b506436d20556150e3eea011f78`;
+its plist's configured repository points to `bin/mesh-deploy.js` with SHA-256
+`4794cf77e8de03ff0a21d8cec624c4f312acb1ee472e201d6074c27afb459da4`.
+The installed `workplan-viewer.mjs` SHA-256 is
+`2505624dd45f9f3cb5f83e072958b9ccd5ba101a11f588888ee7d77fa94a0e39`.
+These are design-time observations; B3 must re-pin each deployed source at
+window entry before relying on its fence.
+
 ## In-cohort re-entry edges
 
 The installed `mesh-deploy-listener.js` receives a NATS deploy trigger and
