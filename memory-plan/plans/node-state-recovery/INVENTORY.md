@@ -2645,3 +2645,15 @@ confirms a hidden handle for that readable child, but not a whole-host or
 continuous no-writer boundary. The guest hold, stable approved 23-job pins,
 host boot/UTM gate, stopped capture, four-history acceptance and resumption
 remain open at 1.2[A]/v1.2-pre. No production state changed.
+
+Checkpoint 2026-10-11 21:49 EDT: D165's disposable APFS image refused normal
+unmount while an owned child retained a writable Mach memory entry; the child
+could still write, and after it exited the same image unmounted normally and
+read-only reattachment showed `M000`. Local and short macOS CI controls passed
+at `5c360c22`; the sanitized result is in
+`step12_jetstream/OWNED_UNMOUNT_MEMORY_ENTRY_20261011.json`. This characterizes
+an owned unmount boundary, not a way to unmount the live guest Data volume or
+a full-node no-writer hold. The one-time CI invocation is removed. Approved
+23-job pins, guest hold, host boot/UTM gate, stopped capture, four-history
+acceptance and verified resumption remain open at 1.2[A]/v1.2-pre. No
+production state changed.

@@ -3545,3 +3545,26 @@ physical exclusion or different observer contract, stable approved 23-job
 pins, guest hold and host boot/UTM gates must precede production shutdown.
 No production process, store, service or VM was changed, and all four NATS
 histories remain separate at step 1.2 `[A]/v1.2-pre`.
+
+## D165 — Ordinary APFS unmount refuses a retained memory entry on an owned image (2026-10-11 21:49 EDT)
+
+The D163 child was run against a file on a disposable APFS sparse image.
+While it retained a writable Mach memory entry after closing its descriptor
+and unmapping, normal `diskutil unmount` returned 1 and the volume stayed
+mounted. The child then remapped the entry and wrote `M`. After child exit,
+normal unmount returned 0; the same image was detached and reattached
+read-only, and a fresh read showed `M000`. The local run and the short macOS
+CI job at `5c360c22` produced the same result. The exact source hashes,
+sanitized output and job are in
+`audits/step12_jetstream/OWNED_UNMOUNT_MEMORY_ENTRY_20261011.json`.
+
+This is an owned physical-boundary characterization, not a production hold
+receipt. The probe did not capture `diskutil`'s refusal reason, and it cannot
+show that the live guest's system/Data volume can be unmounted. It does not
+exclude writers on other volumes, make UTM boot-safe, or prove a clean VM
+shutdown. The one-time CI invocation was removed after recording the result;
+the probe remains reproducible. The guest full-node no-writer hold, stable
+approved 23-job pins, host boot gate, stopped-VM capture, four-history
+acceptance and verified resumption remain open at 1.2 `[A]/v1.2-pre`.
+No production process, store, service or VM was changed, and all four NATS
+histories remain separate.
