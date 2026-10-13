@@ -75,6 +75,20 @@ floor plus a measured production-image growth margin, and memory must leave
 the running production guest's measured reserve. This is a forecast,
 not B6 permission.
 
+**B5-macOS-access warning (2026-10-13 00:20 EDT):** a read-only host-shell
+check found about 42 GiB free on the Data volume, 64 GiB physical memory with
+45% reported free, and only the production UTM bundle plus the Alpine guard
+rehearsal bundle. No macOS installer appeared in `/Applications` or the host
+account's top-level Downloads directory. The production ASIF is about 211 GB;
+no test-machine disk or memory budget has been approved. Owner: Codex finishes
+the independent checkpoint, conditional re-pin and abort source/tests and
+calculates a resource budget without changing the host. Before destructive
+macOS rehearsal, the operator must designate an existing macOS machine as
+disposable, or decide a fixed disk/memory budget and capacity source for a
+new isolated guest. This blocks the D62 rehearsal and B5 closure, not owned
+source work. A heartbeat warning is required; a thread warning is not a
+verified ChatGPT Dot receipt.
+
 The next two gates after a hold are **stopped-VM capture of all four physical
 NATS stores** and **isolated, real-history restoration/acceptance**. Their
 fixtures are useful only when bound to authentic guest/host origin and the
