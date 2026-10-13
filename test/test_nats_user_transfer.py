@@ -54,7 +54,8 @@ class UserTransferTest(unittest.TestCase):
                  late_listener=False, bypass_non_nats=False, late_non_nats=None,
                  stale_stop_claim=False, missing_stop_certificate=False,
                  different_live_session=False, invalid_live_certificate=None,
-                 invalid_nats_receipt=None, invalid_transfer_hold=None):
+                 invalid_nats_receipt=None, invalid_transfer_hold=None,
+                 invalid_anchor=None, invalid_listener_receipt=None):
         fixture = fixture_module.JournalTests('test_nats_transfer_freezes_user_journal_before_root_outcome')
         fixture.setUp()
         self.addCleanup(fixture.tearDown)
@@ -85,15 +86,31 @@ class UserTransferTest(unittest.TestCase):
         journal.append('hold-published', intent=intent['sequence'],
                        receipt={'marker': {'window': fields['window'], 'reason': fields['reason']}},
                        adopted_for_restoration=False)
+        anchor_certificate = certificate
+        if invalid_anchor is not None:
+            field, value = invalid_anchor
+            anchor_certificate = {**certificate, field: value}
         journal.append('verified', intent=intent['sequence'], unit='scheduler-heartbeat',
                        action='close-execution-hold',
-                       evidence={**certificate,
+                       evidence={**anchor_certificate,
                                  'entrypoint_loaded': copy.deepcopy(loaded['loaded']),
                                  'entrypoint_overrides': copy.deepcopy(loaded['overrides'])})
         if not missing_listener:
-            journal.mutate('mesh-deploy-listener', 'disable-and-unload',
-                           lambda: fixture_module.fence_listener(loaded),
-                           fixture_module.listener_stop_evidence, hold=hold)
+            if invalid_listener_receipt is not None:
+                field, value = invalid_listener_receipt
+                intent = journal.append('intent', unit='mesh-deploy-listener',
+                                        action='disable-and-unload')
+                fixture_module.fence_listener(loaded)
+                journal.append('verified', intent=intent['sequence'],
+                    unit='mesh-deploy-listener', action='disable-and-unload',
+                    evidence={**fixture_module.listener_stop_evidence(),
+                              'execution_hold': {**certificate, field: value},
+                              'entrypoint_loaded': copy.deepcopy(loaded['loaded']),
+                              'entrypoint_overrides': copy.deepcopy(loaded['overrides'])})
+            else:
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fixture_module.fence_listener(loaded),
+                               fixture_module.listener_stop_evidence, hold=hold)
             if stale_stop_claim:
                 journal.mutate('observer', 'disable-and-unload',
                     lambda: fixture_module.fence_unit(loaded, 'observer'),
@@ -328,6 +345,25 @@ class UserTransferTest(unittest.TestCase):
                         fixture_module.Refused,
                         'NATS transfer live hold differs from the original execution hold'):
                     self.prepared(invalid_transfer_hold=(field, value))
+
+    def test_user_transfer_rechecks_original_hold_certificate(self):
+        for field, value in (
+            ('verified', False),
+            ('restoration_only', True),
+            ('kernel_file_watch', False),
+            ('path_watch', {'kernel_path_watch': False}),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(
+                        fixture_module.Refused,
+                        'NATS transfer original hold certificate differs'):
+                    self.prepared(invalid_anchor=(field, value))
+
+    def test_listener_hold_is_fenced_before_serving_nats_stop(self):
+        with self.assertRaisesRegex(
+                fixture_module.Refused,
+                'all prior-loaded non-NATS jobs require verified persistent stops before NATS: nats'):
+            self.prepared(invalid_listener_receipt=('verified', False))
 
     def test_root_refuses_unverified_stop_hold_for_each_role(self):
         fixture, journal, transaction, _ = self.prepared()

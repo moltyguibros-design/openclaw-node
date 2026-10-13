@@ -3956,3 +3956,22 @@ Forging the journal after a transfer intent remains root's responsibility.
 These checks do not establish a physical no-writer boundary, enable the
 production-disabled root transfer, or close B5/step 1.2. No production VM,
 service, NATS store or topology changed; four histories remain separate.
+
+## D179 — Pin listener inclusion and original anchor flags (2026-10-13 07:53 EDT)
+
+Claude's exact-head review of D178 found no material failure, but identified
+two unpinned pre-intent assumptions. The user fence counts the prior-loaded
+deploy listener as a non-NATS job; excluding it would let a forged listener
+receipt reach transfer. Separately, `transfer_nats()` checked the original
+anchor session but not its own live-watch flags, so a forged anchor could
+publish an intent that root then refused. Neither is reachable through the
+honest `JournaledHold` facade, and production root transfer is disabled.
+
+The session-bound transfer gate now checks the original anchor's full hold
+certificate before intent publication. A valid-chain forged-listener test
+pins the implicit non-NATS inclusion before the first serving-NATS stop. Four
+forged-anchor cases and a listener-exclusion mutation fail by missing their
+expected refusals. Sessionless synthetic fixtures keep their prior behavior;
+root still rejects such journals. This is structural evidence continuity,
+not physical writer exclusion, and B5/step 1.2 remain open. No production
+VM, service, NATS store or topology changed; four histories remain separate.

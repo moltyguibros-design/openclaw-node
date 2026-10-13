@@ -843,6 +843,8 @@ class Journal:
                          and row.get('action') == 'close-execution-hold'), None)
         session = original.get('watch_session_id') if isinstance(original, dict) else None
         if session:
+            require(valid_execution_hold(original, session),
+                    'NATS transfer original hold certificate differs')
             require(valid_execution_hold(hold_evidence, session),
                     'NATS transfer live hold differs from the original execution hold')
         names = {'ai.openclaw.' + unit for unit in NATS_TRANSFER_UNITS}
