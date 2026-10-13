@@ -51,6 +51,50 @@ def active_capture_lock(capture_dir):
 
 @unittest.skipUnless(sys.platform == 'darwin', 'requires macOS ASIF and GUI launchd')
 class HostReconcileTest(unittest.TestCase):
+    def test_reconcile_reports_held_arm_lock_without_waiting_for_guard(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-host-reconcile-lock-') as temporary:
+            root = pathlib.Path(temporary).resolve()
+            root.chmod(0o700)
+            capture_dir = root / 'capture'
+            capture_dir.mkdir(mode=0o700)
+            spec = root / 'host.json'
+            spec.write_text(json.dumps({
+                'package': str(root / 'Owned.utm'), 'name': 'Owned',
+                'uuid': '00000000-0000-0000-0000-000000000002',
+                'image_name': 'image.asif', 'config_sha256': '0' * 64,
+                'utmctl': '/tmp/unused', 'utmctl_sha256': '0' * 64,
+            }))
+            spec.chmod(0o600)
+            inactive_capture_lock(capture_dir)
+            armed = capture_dir / 'ARMED.json'
+            write_record(armed, {'scope': 'owned lock test'})
+            holder = os.open(armed, os.O_RDONLY)
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            finished = threading.Event()
+            errors = []
+
+            def run_reconcile():
+                try:
+                    reconcile(spec, capture_dir, capture_dir / 'held-lock', fixture=True)
+                except Exception as error:
+                    errors.append(error)
+                finally:
+                    finished.set()
+
+            worker = threading.Thread(target=run_reconcile)
+            worker.start()
+            try:
+                self.assertTrue(finished.wait(2), 'reconcile waited on a held guard lock')
+            finally:
+                fcntl.flock(holder, fcntl.LOCK_UN)
+                os.close(holder)
+                worker.join(timeout=5)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(len(errors), 1)
+            self.assertIn('arm lock is held', str(errors[0]))
+            receipt = json.loads((capture_dir / 'held-lock' / 'OPERATOR_REQUIRED.json').read_text())
+            self.assertIn('arm lock is held', receipt['error'])
+
     def test_gui_status_is_published_only_after_json_is_complete(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-status-atomic-') as parent:
             root = pathlib.Path(parent)
@@ -397,7 +441,11 @@ class HostReconcileTest(unittest.TestCase):
                 self.assertTrue(reconcile_ready.wait(10))
                 self.assertFalse(reconcile_preflight.wait(1))
                 self.assertFalse((serialized / 'concurrent' / 'BOOTABLE.json').exists())
-                self.assertTrue(second_worker.is_alive())
+                second_worker.join(timeout=5)
+                self.assertFalse(second_worker.is_alive())
+                self.assertEqual(len(errors), 1)
+                self.assertIn('arm lock is held', str(errors[0]))
+                self.assertTrue((serialized / 'concurrent' / 'OPERATOR_REQUIRED.json').exists())
             finally:
                 if capture_fd is not None:
                     os.close(capture_fd)
@@ -405,9 +453,10 @@ class HostReconcileTest(unittest.TestCase):
                 first_worker.join(timeout=10)
                 if second_worker.ident is not None:
                     second_worker.join(timeout=10)
-            self.assertFalse(errors, errors)
             self.assertFalse(first_worker.is_alive())
             self.assertFalse(second_worker.is_alive())
+            self.assertEqual(len(errors), 1)
+            result.update(reconcile(spec, serialized, serialized / 'after-stalled-guard', fixture=True))
             self.assertTrue(result['guard_completed'])
             self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
 

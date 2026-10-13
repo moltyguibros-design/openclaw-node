@@ -82,7 +82,10 @@ def reconcile(host_spec, capture_dir, output, fixture=False):
         except BlockingIOError as error:
             raise RuntimeError('capture worker is still active') from error
         armed_fd = os.open(capture_dir / 'ARMED.json', os.O_RDONLY | os.O_NOFOLLOW)
-        fcntl.flock(armed_fd, fcntl.LOCK_EX)
+        try:
+            fcntl.flock(armed_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError('arm lock is held by a guard or capture worker') from error
         armed = private_record(capture_dir / 'ARMED.json')
         initial = private_record(capture_dir / 'before-shutdown/preflight.json')
         require(armed['scope'] == 'waiting for external guest shutdown; no stop request issued'
