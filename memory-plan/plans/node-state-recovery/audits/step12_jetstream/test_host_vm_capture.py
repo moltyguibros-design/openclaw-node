@@ -615,7 +615,7 @@ class VmstateGateTest(unittest.TestCase):
                       'host_boot_session': 'boot',
                       'image_device': 1, 'image_inode': 2, 'image_size': 3,
                       'vmstate': None, 'holders_consistent': True,
-                      'image_holders': [42]}
+                      'image_holders': [42], 'image': str(root / 'owned.asif')}
             stopped = dict(before, state='stopped', image_holders=[])
             output = root / 'capture'
             observations = 0
