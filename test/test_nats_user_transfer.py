@@ -52,7 +52,8 @@ class UserTransferTest(unittest.TestCase):
 
     def prepared(self, extra_event=None, boot='boot-a', missing_listener=False,
                  late_listener=False, bypass_non_nats=False, late_non_nats=None,
-                 stale_stop_claim=False, missing_stop_certificate=False):
+                 stale_stop_claim=False, missing_stop_certificate=False,
+                 different_live_session=False):
         fixture = fixture_module.JournalTests('test_nats_transfer_freezes_user_journal_before_root_outcome')
         fixture.setUp()
         self.addCleanup(fixture.tearDown)
@@ -100,6 +101,12 @@ class UserTransferTest(unittest.TestCase):
                     hold=hold)
             if missing_stop_certificate:
                 hold.check_forward = lambda: None
+                journal.mutate('observer', 'disable-and-unload',
+                    lambda: fixture_module.fence_unit(loaded, 'observer'),
+                    lambda: fixture_module.timer_stop_evidence('observer'), hold=hold)
+            if different_live_session:
+                hold.check_forward = lambda: {**certificate,
+                                              'watch_session_id': 'stale-session'}
                 journal.mutate('observer', 'disable-and-unload',
                     lambda: fixture_module.fence_unit(loaded, 'observer'),
                     lambda: fixture_module.timer_stop_evidence('observer'), hold=hold)
@@ -215,6 +222,11 @@ class UserTransferTest(unittest.TestCase):
                                     'stop lost the original execution hold session'):
             self.prepared(missing_stop_certificate=True)
 
+    def test_user_stop_rejects_a_different_live_hold_session_before_nats(self):
+        with self.assertRaisesRegex(fixture_module.Refused,
+                                    'stop lost the original execution hold session'):
+            self.prepared(different_live_session=True)
+
     def test_journal_binds_direct_stop_receipts_to_original_hold(self):
         _, journal, _, _ = self.prepared()
         stop_rows = [row for row in journal.records if row['event'] == 'verified'
@@ -222,6 +234,19 @@ class UserTransferTest(unittest.TestCase):
         self.assertEqual(len(stop_rows), 21)
         self.assertTrue(all(row['evidence']['execution_hold']['watch_session_id']
                             == 'owned-session' for row in stop_rows))
+
+    def test_non_nats_fence_rejects_a_stale_stop_session(self):
+        _, journal, _, _ = self.prepared()
+        last = next(row for row in reversed(journal.records)
+                    if row['event'] == 'verified' and row.get('unit') == 'nats-3')
+        entrypoints = {'loaded': last['evidence']['entrypoint_loaded'],
+                       'overrides': last['evidence']['entrypoint_overrides']}
+        self.assertTrue(journal.non_nats_fenced(entrypoints))
+        observer = next(row for row in journal.records if row['event'] == 'verified'
+                        and row.get('unit') == 'observer')
+        observer['evidence'] = {**observer['evidence'],
+                                'execution_hold': {'watch_session_id': 'stale-session'}}
+        self.assertFalse(journal.non_nats_fenced(entrypoints))
 
     def test_root_refuses_tampered_non_nats_stop_proofs(self):
         _, journal, transaction, _ = self.prepared()
