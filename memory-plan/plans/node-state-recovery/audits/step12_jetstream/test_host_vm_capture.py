@@ -286,7 +286,7 @@ class VmstateGateTest(unittest.TestCase):
             self.assertFalse((output / 'CAPTURE.json').exists())
             self.assertFalse((output / 'powered-off-image.asif').exists())
 
-    def test_observed_restart_after_stop_refuses_before_clone(self):
+    def scripted_capture(self, states, expected, clone_expected):
         with tempfile.TemporaryDirectory(prefix='openclaw-host-restart-gate-') as temporary:
             root = pathlib.Path(temporary).resolve()
             root.chmod(0o700)
@@ -308,20 +308,50 @@ class VmstateGateTest(unittest.TestCase):
             store_spec.chmod(0o600)
             before = {'state': 'started', 'vm_uuid': '00000000-0000-0000-0000-000000000002',
                       'host_boot_session': 'boot', 'image_device': 1,
-                      'image_inode': 2, 'image_size': 3, 'vmstate': None}
-            stopped = dict(before, state='stopped', holders_consistent=True)
-            restarted = dict(before, holders_consistent=True)
+                      'image_inode': 2, 'image_size': 3, 'vmstate': None,
+                      'image': str(root / 'image')}
             output = root / 'capture'
-            with mock.patch.object(host_vm_capture, 'preflight',
-                                   side_effect=[before, stopped, restarted]), \
+            samples = iter([before] + [dict(before, **state) for state in states])
+
+            def observed(*args, **kwargs):
+                sample = next(samples)
+                if sample['state'] == 'stopped' and sample['holders_consistent']:
+                    (output / 'GUARD.json').touch()
+                return sample
+
+            with mock.patch.object(host_vm_capture, 'preflight', side_effect=observed), \
                     mock.patch.object(host_vm_capture.time, 'sleep'), \
-                    mock.patch.object(host_vm_capture, 'clone_only') as clone:
-                with self.assertRaisesRegex(RuntimeError,
-                                            'VM restarted after a stopped observation'):
-                    capture(host_spec, store_spec, output, 1, fixture=True)
-            clone.assert_not_called()
+                    mock.patch.object(host_vm_capture, 'guarded_source',
+                                      return_value='owned-guard'), \
+                    mock.patch.object(host_vm_capture.shutil, 'disk_usage',
+                                      return_value=mock.Mock(free=30 * 1024 ** 3)), \
+                    mock.patch.object(host_vm_capture, 'clone_only',
+                                      side_effect=RuntimeError('clone boundary reached')) as clone:
+                with self.assertRaisesRegex(RuntimeError, expected):
+                    capture(host_spec, store_spec, output, 3, fixture=True)
+            self.assertEqual(clone.called, clone_expected)
             self.assertTrue((output / 'FAILED.json').exists())
             self.assertFalse((output / 'CAPTURE.json').exists())
+
+    def test_observed_restart_after_stop_refuses_before_clone(self):
+        clean = {'state': 'stopped', 'holders_consistent': True, 'image_holders': []}
+        running = {'state': 'started', 'holders_consistent': True, 'image_holders': [123]}
+        self.scripted_capture([clean, running, clean, clean, clean],
+                              'VM restarted after a stopped observation', False)
+
+    def test_holder_reappearing_after_clean_stop_refuses_before_clone(self):
+        clean = {'state': 'stopped', 'holders_consistent': True, 'image_holders': []}
+        reopened = {'state': 'stopped', 'holders_consistent': False,
+                    'image_holders': [123]}
+        self.scripted_capture([clean, reopened, clean, clean, clean],
+                              'image holder reappeared after clean stop: \\[123\\]', False)
+
+    def test_holder_during_initial_stop_transition_is_allowed(self):
+        clean = {'state': 'stopped', 'holders_consistent': True, 'image_holders': []}
+        transitional = {'state': 'stopped', 'holders_consistent': False,
+                        'image_holders': [123]}
+        self.scripted_capture([transitional, clean, clean, clean],
+                              'clone boundary reached', True)
 
     def test_stopped_vm_without_guard_refuses_before_clone(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-vmstate-gate-') as temporary:

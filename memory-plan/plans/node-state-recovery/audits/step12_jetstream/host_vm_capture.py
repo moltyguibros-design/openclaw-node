@@ -158,6 +158,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         sequence = 0
         stopped_count = 0
         saw_stopped = False
+        clean_stopped = False
         guard_observed = False
         while time.monotonic() < deadline:
             observation = preflight(host_spec_path, output / f'power-{sequence:04d}',
@@ -167,11 +168,15 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
             if observation['state'] == 'stopped':
                 saw_stopped = True
                 if observation['holders_consistent']:
+                    clean_stopped = True
                     stopped_count += 1
                     if stopped_count >= 2 and os.path.lexists(output / 'GUARD.json'):
                         guard_observed = True
                         break
                 else:
+                    require(not clean_stopped,
+                            'image holder reappeared after clean stop: '
+                            + repr(observation['image_holders']))
                     stopped_count = 0
             else:
                 require(not saw_stopped, 'VM restarted after a stopped observation')
