@@ -24,6 +24,10 @@ must remain separate until each history has an accepted preservation path.
 | B8 | **Four-store capture and isolated acceptance closed.** No three healthy cold masters have been accepted. | Bind host capture and restore tools to the four declared physical paths and volume, then restore the copies on isolated servers. | Four separately hashed path/volume/window-bound copies faithfully reproduce the observed bytes; offline streams, counts, sequences and expiring-stream treatment match. This does **not** prove historical independence of the four members; that needs deployment-time provenance outside this capture. | Step 1.2 closure and any topology change. |
 | B9 | **Verified resumption closed.** A successful fixture cannot establish live recovery. | Follow the reviewed restore order, check all previously active services and writer routes, and record failures or success without claiming operational status early. | The 23-job prior state, NATS identities and routes, application health and retained histories match the approved acceptance contract; then step 1.2 may close. | Coordinated point 1.3 and a truthful operational claim. |
 
+The host `ACKED.json` is its own receipt; the guest's receipt and shutdown
+choice are not yet bound to the frozen journal or stopped ASIF. That is B5 work,
+alongside the root outcome and abort controller.
+
 The next two gates after a hold are **stopped-VM capture of all four physical
 NATS stores** and **isolated, real-history restoration/acceptance**. Their
 fixtures are useful only when bound to authentic guest/host origin and the

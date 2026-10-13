@@ -3735,9 +3735,12 @@ The owned host capture now arms with a random nonce. While it observes the
 original VM started with one image holder, a separate host tool commits the
 four-store guest manifest under the arm lock. It then publishes the commitment,
 observes the VM still started with the same holder and source identity, and
-durably writes `ACKED.json`. The guest must receive that acknowledgement before
-shutdown. A first stopped observation or host guard without a valid commitment
-and acknowledgement refuses before cloning or guarding. The capture receipt
+durably writes `ACKED.json`. This proves a host started-state sample after the
+commitment was durable; it does not prove the guest received the acknowledgement
+or chose to shut down afterward. The future guest controller must record that
+receipt in evidence the stopped image carries. A first stopped observation or
+host guard without a valid commitment and acknowledgement refuses before
+cloning or guarding. The capture receipt
 pins both hashes, and the host matcher uses only the committed manifest. Clock
 timestamps are informational. Per-attempt preflight directories allow a retry
 before publication; a failed post-publication acknowledgement remains a
@@ -3746,8 +3749,10 @@ fail-closed window abort.
 Claude's exact-head review found a non-ASCII manifest false refusal, a
 one-shot retry gap and two weak negatives. The serializer now matches the guest
 writer. Owned tests cover a Unicode store filename, retry after a failed
-preflight, stop between publication and acknowledgement, a decisive early-stop
-clone sentinel, and guard refusal before intent. The macOS owned host-capture
+preflight, stop or holder change between publication and acknowledgement, a
+decisive early-stop clone sentinel, forged acknowledgement identity, a
+post-commit byte change and regenerated manifest, and guard refusal before
+intent. The macOS owned host-capture
 and reconcile suites pass. This is a temporal and byte-continuity component,
 not a B5 close: the manifest still lacks durable full-node journal and root
 outcome binding, and the stopped ASIF does not yet supply those frozen records.

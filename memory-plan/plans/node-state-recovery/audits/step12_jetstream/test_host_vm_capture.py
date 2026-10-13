@@ -111,6 +111,24 @@ class VmstateGateTest(unittest.TestCase):
             self.assertFalse((capture_dir / 'ACKED.json').exists())
             with self.assertRaisesRegex(RuntimeError, 'ACKED.json'):
                 require_committed(capture_dir)
+            pid_capture = root / 'pid-change-capture'
+            pid_capture.mkdir(mode=0o700)
+            (pid_capture / 'before-shutdown').mkdir(mode=0o700)
+            write_record(pid_capture / 'before-shutdown' / 'preflight.json', prior)
+            write_record(pid_capture / 'ARMED.json',
+                         json.loads((capture_dir / 'ARMED.json').read_text()))
+            pid_active = os.open(pid_capture / 'CAPTURE_ACTIVE.lock',
+                                 os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
+            fcntl.flock(pid_active, fcntl.LOCK_EX)
+            try:
+                with mock.patch('host_guest_commit.preflight', side_effect=[
+                        started, dict(started, image_holders=[43])]):
+                    with self.assertRaisesRegex(RuntimeError,
+                                                'before guest acknowledgement'):
+                        commit(root / 'host.json', spec, pid_capture, claim)
+            finally:
+                os.close(pid_active)
+            self.assertFalse((pid_capture / 'ACKED.json').exists())
 
     @unittest.skipUnless(sys.platform == 'darwin', 'macOS image guard requires st_flags')
     def test_guard_holds_arm_lock_through_source_image_access(self):
@@ -798,6 +816,25 @@ class HostCaptureTest(unittest.TestCase):
         (guest_output / 'manifest.json').unlink()
         write_record(guest_output / 'manifest.json', observed)
         commit(spec, store_spec, output, guest_output / 'manifest.json')
+        ack_path = output / 'ACKED.json'
+        valid_ack = json.loads(ack_path.read_text())
+        started = valid_ack['started_sample']
+        for label, change in (
+                ('holder', {'image_holders': [started['image_holders'][0] + 1]}),
+                ('vm', {'vm_uuid': 'ffffffff-ffff-ffff-ffff-ffffffffffff'}),
+                ('boot', {'host_boot_session': 'different-boot'}),
+                ('image', {'image_inode': started['image_inode'] + 1}),
+                ('vmstate', {'vmstate': {'changed': True}})):
+            with self.subTest(ack_identity=label):
+                changed = json.loads(json.dumps(valid_ack))
+                changed['started_sample'].update(change)
+                ack_path.unlink()
+                write_record(ack_path, changed)
+                with self.assertRaisesRegex(RuntimeError,
+                                            'post-commit started acknowledgement'):
+                    require_committed(output)
+                ack_path.unlink()
+                write_record(ack_path, valid_ack)
         with (output / 'CAPTURE_ACTIVE.lock').open('rb') as active:
             with self.assertRaises(BlockingIOError):
                 fcntl.flock(active, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -832,6 +869,22 @@ class HostCaptureTest(unittest.TestCase):
         for role in ('standalone', 'member1', 'member2', 'member3'):
             self.assertEqual((output / 'extracted-stores' / role / 'stream.dat').read_text(),
                              'owned-' + role)
+        changed_store = output / 'extracted-stores' / 'member2' / 'stream.dat'
+        original_store = changed_store.read_bytes()
+        changed_store.write_bytes(b'post-commit-write')
+        with self.assertRaisesRegex(RuntimeError,
+                                    'guest, extraction manifest and host tree differ: member2'):
+            host_match(guest_output / 'manifest.json', output / 'extracted-stores',
+                       self.root / 'post-commit-byte-change')
+        updated_guest = json.loads((guest_output / 'manifest.json').read_text())
+        updated_guest['stores']['member2'] = stopped_tree_match.entries(
+            output / 'extracted-stores' / 'member2')
+        updated_path = self.root / 'post-commit-updated-guest.json'
+        write_record(updated_path, updated_guest)
+        with self.assertRaisesRegex(RuntimeError, 'running-VM commitment'):
+            host_match(updated_path, output / 'extracted-stores',
+                       self.root / 'post-commit-updated-guest-match')
+        changed_store.write_bytes(original_store)
         matched = self.root / 'matched'
         host_match(guest_output / 'manifest.json', output / 'extracted-stores', matched)
         self.assertTrue((matched / 'MATCH.json').exists())

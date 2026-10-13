@@ -165,7 +165,7 @@ def commit(host_spec, store_spec, capture_dir, guest_manifest):
                      after['image_size'], after['vmstate']) ==
                 (sample['image_device'], sample['image_inode'],
                  sample['image_size'], sample['vmstate']),
-                'VM stopped or source changed before guest acknowledgement')
+                'VM stopped, holder or source changed before guest acknowledgement')
         write_record(capture_dir / 'ACKED.json', {
             'scope': 'guest manifest acknowledged while VM remained started',
             'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
