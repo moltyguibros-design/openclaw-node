@@ -16,6 +16,7 @@ import unittest
 from unittest import mock
 
 import host_vm_capture
+import host_vm_guard
 import stopped_tree_match
 from stopped_tree_match import guest_capture, host_match
 from host_clone_dispose import cleanup_failed, dispose
@@ -38,6 +39,89 @@ def run(*args):
 
 
 class VmstateGateTest(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'darwin', 'macOS image guard requires st_flags')
+    def test_guard_holds_arm_lock_through_source_image_access(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-host-capture-lock-') as temporary:
+            root = pathlib.Path(temporary).resolve()
+            root.chmod(0o700)
+            capture_dir = root / 'capture'
+            capture_dir.mkdir(mode=0o700)
+            source = root / 'source.asif'
+            source.write_bytes(b'owned image')
+            info = source.stat()
+            host = root / 'host.json'
+            host.write_text(json.dumps({
+                'package': str(root / 'Owned.utm'), 'name': 'Owned',
+                'uuid': host_vm_capture.FIXTURE_UUID,
+                'image_name': source.name, 'config_sha256': '0' * 64,
+                'utmctl': '/tmp/unused', 'utmctl_sha256': '0' * 64,
+            }))
+            host.chmod(0o600)
+            baseline = {
+                'vm_uuid': host_vm_capture.FIXTURE_UUID, 'host_boot_session': 'boot',
+                'image_device': info.st_dev, 'image_inode': info.st_ino,
+                'image_size': info.st_size, 'image': str(source), 'state': 'stopped',
+                'holders_consistent': True,
+            }
+            write_record(capture_dir / 'ARMED.json', {
+                'scope': 'waiting for external guest shutdown; no stop request issued',
+                'vm_uuid': baseline['vm_uuid'],
+                'host_boot_session': baseline['host_boot_session'],
+                'image_device': info.st_dev, 'image_inode': info.st_ino,
+            })
+            before = capture_dir / 'before-shutdown'
+            before.mkdir()
+            write_record(before / 'preflight.json', baseline)
+            entered, release, sampled = threading.Event(), threading.Event(), threading.Event()
+            guard_errors = []
+            sample_errors = []
+
+            def source_access(*args):
+                with source.open('rb'):
+                    entered.set()
+                    if not release.wait(5):
+                        raise RuntimeError('guard source access was not released')
+
+            def sample(*args, **kwargs):
+                sampled.set()
+                return baseline
+
+            def run_guard():
+                try:
+                    guard(host, capture_dir, fixture=True)
+                except Exception as error:
+                    guard_errors.append(error)
+
+            def run_sample():
+                try:
+                    host_vm_capture.capture_preflight(host, capture_dir,
+                                                      capture_dir / 'sample')
+                except Exception as error:
+                    sample_errors.append(error)
+
+            with mock.patch.object(host_vm_guard, 'preflight', return_value=baseline), \
+                    mock.patch.object(host_vm_guard, 'require_active_capture'), \
+                    mock.patch.object(host_vm_guard, 'change_immutable', side_effect=source_access), \
+                    mock.patch.object(host_vm_capture, 'preflight', side_effect=sample):
+                guarding = threading.Thread(target=run_guard)
+                sampling = threading.Thread(target=run_sample)
+                guarding.start()
+                try:
+                    self.assertTrue(entered.wait(5))
+                    sampling.start()
+                    self.assertFalse(sampled.wait(0.2))
+                finally:
+                    release.set()
+                    guarding.join(timeout=5)
+                    if sampling.ident is not None:
+                        sampling.join(timeout=5)
+            self.assertFalse(guarding.is_alive())
+            self.assertFalse(sampling.is_alive())
+            self.assertTrue(sampled.is_set())
+            self.assertFalse(sample_errors)
+            self.assertEqual(len(guard_errors), 1)
+            self.assertIn('VM or source changed after image guard', str(guard_errors[0]))
+
     def test_guard_lock_delays_capture_status_sample(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-host-guard-sample-') as temporary:
             root = pathlib.Path(temporary).resolve()
