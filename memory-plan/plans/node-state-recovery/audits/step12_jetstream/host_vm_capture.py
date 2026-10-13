@@ -157,18 +157,24 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         observation = None
         sequence = 0
         stopped_count = 0
+        saw_stopped = False
         guard_observed = False
         while time.monotonic() < deadline:
             observation = preflight(host_spec_path, output / f'power-{sequence:04d}',
                                     allow_transition=True)
             require(same_host_image(first, observation),
                     'host boot, VM image or vmstate identity changed while waiting')
-            if observation['state'] == 'stopped' and observation['holders_consistent']:
-                stopped_count += 1
-                if stopped_count >= 2 and os.path.lexists(output / 'GUARD.json'):
-                    guard_observed = True
-                    break
+            if observation['state'] == 'stopped':
+                saw_stopped = True
+                if observation['holders_consistent']:
+                    stopped_count += 1
+                    if stopped_count >= 2 and os.path.lexists(output / 'GUARD.json'):
+                        guard_observed = True
+                        break
+                else:
+                    stopped_count = 0
             else:
+                require(not saw_stopped, 'VM restarted after a stopped observation')
                 stopped_count = 0
             sequence += 1
             time.sleep(2)

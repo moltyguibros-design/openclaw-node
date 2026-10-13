@@ -286,6 +286,43 @@ class VmstateGateTest(unittest.TestCase):
             self.assertFalse((output / 'CAPTURE.json').exists())
             self.assertFalse((output / 'powered-off-image.asif').exists())
 
+    def test_observed_restart_after_stop_refuses_before_clone(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-host-restart-gate-') as temporary:
+            root = pathlib.Path(temporary).resolve()
+            root.chmod(0o700)
+            host_spec = root / 'host.json'
+            host_spec.write_text(json.dumps({
+                'package': str(root / 'Owned.utm'), 'name': 'Owned',
+                'uuid': '00000000-0000-0000-0000-000000000002',
+                'image_name': '00000000-0000-0000-0000-000000000001.img',
+                'config_sha256': '0' * 64, 'utmctl': '/tmp/unused',
+                'utmctl_sha256': '0' * 64,
+            }))
+            host_spec.chmod(0o600)
+            store_spec = root / 'stores.json'
+            store_spec.write_text(json.dumps({
+                'data_volume_uuid': '00000000-0000-0000-0000-000000000003',
+                'stores': [{'role': role, 'relative_path': role}
+                           for role in ('standalone', 'member1', 'member2', 'member3')],
+            }))
+            store_spec.chmod(0o600)
+            before = {'state': 'started', 'vm_uuid': '00000000-0000-0000-0000-000000000002',
+                      'host_boot_session': 'boot', 'image_device': 1,
+                      'image_inode': 2, 'image_size': 3, 'vmstate': None}
+            stopped = dict(before, state='stopped', holders_consistent=True)
+            restarted = dict(before, holders_consistent=True)
+            output = root / 'capture'
+            with mock.patch.object(host_vm_capture, 'preflight',
+                                   side_effect=[before, stopped, restarted]), \
+                    mock.patch.object(host_vm_capture.time, 'sleep'), \
+                    mock.patch.object(host_vm_capture, 'clone_only') as clone:
+                with self.assertRaisesRegex(RuntimeError,
+                                            'VM restarted after a stopped observation'):
+                    capture(host_spec, store_spec, output, 1, fixture=True)
+            clone.assert_not_called()
+            self.assertTrue((output / 'FAILED.json').exists())
+            self.assertFalse((output / 'CAPTURE.json').exists())
+
     def test_stopped_vm_without_guard_refuses_before_clone(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-vmstate-gate-') as temporary:
             root = pathlib.Path(temporary).resolve()
