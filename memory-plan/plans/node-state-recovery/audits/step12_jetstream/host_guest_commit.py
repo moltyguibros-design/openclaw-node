@@ -62,7 +62,7 @@ def require_committed(capture_dir):
     after = ack.get('started_sample')
     require(set(ack) == {'scope', 'at_utc', 'commit_sha256', 'manifest_sha256',
                          'started_sample'}
-            and ack['scope'] == 'guest manifest acknowledged while VM remained started'
+            and ack['scope'] == 'host sampled VM started after guest manifest commitment'
             and ack['commit_sha256'] == hashlib.sha256(committed_bytes).hexdigest()
             and ack['manifest_sha256'] == committed['manifest_sha256']
             and isinstance(after, dict) and after.get('state') == 'started'
@@ -74,7 +74,7 @@ def require_committed(capture_dir):
                  after.get('image_size'), after.get('vmstate')) ==
             (sample.get('image_device'), sample.get('image_inode'),
              sample.get('image_size'), sample.get('vmstate')),
-            'guest manifest lacks a post-commit started acknowledgement')
+            'guest manifest lacks a matching post-commit host sample')
     return committed
 
 
@@ -165,9 +165,9 @@ def commit(host_spec, store_spec, capture_dir, guest_manifest):
                      after['image_size'], after['vmstate']) ==
                 (sample['image_device'], sample['image_inode'],
                  sample['image_size'], sample['vmstate']),
-                'VM stopped, holder or source changed before guest acknowledgement')
+                'VM stopped, holder or source changed before post-commit host sample')
         write_record(capture_dir / 'ACKED.json', {
-            'scope': 'guest manifest acknowledged while VM remained started',
+            'scope': 'host sampled VM started after guest manifest commitment',
             'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'commit_sha256': hashlib.sha256(
                 private_bytes(capture_dir / 'COMMITTED.json')).hexdigest(),

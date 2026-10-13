@@ -103,7 +103,7 @@ class VmstateGateTest(unittest.TestCase):
                 with mock.patch('host_guest_commit.preflight',
                                 side_effect=[started, stopped]):
                     with self.assertRaisesRegex(RuntimeError,
-                                                'before guest acknowledgement'):
+                                                'before post-commit host sample'):
                         commit(root / 'host.json', spec, capture_dir, claim)
             finally:
                 os.close(active)
@@ -124,7 +124,7 @@ class VmstateGateTest(unittest.TestCase):
                 with mock.patch('host_guest_commit.preflight', side_effect=[
                         started, dict(started, image_holders=[43])]):
                     with self.assertRaisesRegex(RuntimeError,
-                                                'before guest acknowledgement'):
+                                                'before post-commit host sample'):
                         commit(root / 'host.json', spec, pid_capture, claim)
             finally:
                 os.close(pid_active)
@@ -824,17 +824,34 @@ class HostCaptureTest(unittest.TestCase):
                 ('vm', {'vm_uuid': 'ffffffff-ffff-ffff-ffff-ffffffffffff'}),
                 ('boot', {'host_boot_session': 'different-boot'}),
                 ('image', {'image_inode': started['image_inode'] + 1}),
-                ('vmstate', {'vmstate': {'changed': True}})):
+                ('image-device', {'image_device': started['image_device'] + 1}),
+                ('image-size', {'image_size': started['image_size'] + 1}),
+                ('vmstate', {'vmstate': {'changed': True}}),
+                ('state', {'state': 'stopped'}),
+                ('holders-consistent', {'holders_consistent': False})):
             with self.subTest(ack_identity=label):
                 changed = json.loads(json.dumps(valid_ack))
                 changed['started_sample'].update(change)
                 ack_path.unlink()
                 write_record(ack_path, changed)
                 with self.assertRaisesRegex(RuntimeError,
-                                            'post-commit started acknowledgement'):
+                                            'matching post-commit host sample'):
                     require_committed(output)
                 ack_path.unlink()
                 write_record(ack_path, valid_ack)
+        changed_ack = dict(valid_ack, manifest_sha256='0' * 64)
+        ack_path.unlink()
+        write_record(ack_path, changed_ack)
+        with self.assertRaisesRegex(RuntimeError, 'matching post-commit host sample'):
+            require_committed(output)
+        ack_path.unlink()
+        write_record(ack_path, valid_ack)
+        ack_path.unlink()
+        write_record(ack_path, dict(valid_ack, scope='wrong scope'))
+        with self.assertRaisesRegex(RuntimeError, 'matching post-commit host sample'):
+            require_committed(output)
+        ack_path.unlink()
+        write_record(ack_path, valid_ack)
         with (output / 'CAPTURE_ACTIVE.lock').open('rb') as active:
             with self.assertRaises(BlockingIOError):
                 fcntl.flock(active, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -871,7 +888,23 @@ class HostCaptureTest(unittest.TestCase):
                              'owned-' + role)
         changed_store = output / 'extracted-stores' / 'member2' / 'stream.dat'
         original_store = changed_store.read_bytes()
+        extract_path = output / 'extracted-stores' / 'manifest.json'
+        original_extract = extract_path.read_bytes()
+        capture_path = output / 'CAPTURE.json'
+        original_capture = capture_path.read_bytes()
         changed_store.write_bytes(b'post-commit-write')
+        changed_extract = json.loads(original_extract)
+        changed_rows = changed_extract['stores']['member2']
+        changed_file = next(row for row in changed_rows if row['path'] == 'stream.dat')
+        changed_file['size'] = changed_store.stat().st_size
+        changed_file['sha256'] = hashlib.sha256(changed_store.read_bytes()).hexdigest()
+        extract_path.unlink()
+        write_record(extract_path, changed_extract)
+        changed_capture = json.loads(original_capture)
+        changed_capture['extraction_manifest_sha256'] = hashlib.sha256(
+            extract_path.read_bytes()).hexdigest()
+        capture_path.unlink()
+        write_record(capture_path, changed_capture)
         with self.assertRaisesRegex(RuntimeError,
                                     'guest, extraction manifest and host tree differ: member2'):
             host_match(guest_output / 'manifest.json', output / 'extracted-stores',
@@ -885,6 +918,8 @@ class HostCaptureTest(unittest.TestCase):
             host_match(updated_path, output / 'extracted-stores',
                        self.root / 'post-commit-updated-guest-match')
         changed_store.write_bytes(original_store)
+        extract_path.write_bytes(original_extract)
+        capture_path.write_bytes(original_capture)
         matched = self.root / 'matched'
         host_match(guest_output / 'manifest.json', output / 'extracted-stores', matched)
         self.assertTrue((matched / 'MATCH.json').exists())
@@ -994,7 +1029,7 @@ class HostCaptureTest(unittest.TestCase):
         committed_path = output / 'COMMITTED.json'
         committed_bytes = committed_path.read_bytes()
         committed_path.write_bytes(committed_bytes + b' ')
-        with self.assertRaisesRegex(RuntimeError, 'post-commit started acknowledgement'):
+        with self.assertRaisesRegex(RuntimeError, 'matching post-commit host sample'):
             host_match(guest_output / 'manifest.json', output / 'extracted-stores',
                        self.root / 'changed-guest-commit')
         committed_path.write_bytes(committed_bytes)
