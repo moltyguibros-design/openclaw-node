@@ -3801,3 +3801,47 @@ open. This decision permits no live service or VM stop, topology change or
 claim that the node is operational; B6 still needs a fresh exact-window
 operator release. Preserve the standalone and all three member histories
 separately throughout.
+
+## D174 — Correct checkpoint proof and planned reboot contract (2026-10-13 00:04 EDT)
+
+Claude's read-only adversarial review of D173 at `66e4c2bd` confirmed that
+developing a checkpoint without root transfer is within D168's design and
+owned-test choice. It found that D173's proof wording and reboot sketch were
+too broad. This decision narrows them; D62 and D64 remain governing.
+
+The user-owned `capture-ready` journal is application-quiescence evidence,
+not byte-continuity or physical writer-exclusion evidence. Host commitment,
+ACK and capture receipts must bind frozen store bytes to the committed
+manifest. A stopped VM under active host boot denial excludes writes from
+power-off onward. The interval between the last NATS stop and the manifest
+still rests on user-owned quiescence evidence. Four isolated restores prove
+restorability and consistency, not authorship or historical independence.
+
+The original guest must stay powered off while B8 extracts, restores,
+accepts and freezes all four histories. The host boot guard stays applied
+until a durable host ACCEPTED decision after B8 or an explicit ABORT decision
+after host cleanup. Before any gate reopens, the guest binds that decision.
+Before `Journal.recover()`, a controller must compare **all** boot-time
+OpenClaw jobs and processes against the recorded hold, refuse unexpected
+starts, and freshly check stopped units and persistent overrides. A
+stop-receipt-only cross-boot admission is insufficient. Failure remains held
+for an explicit manual restoration route.
+
+The execution hold currently pins a transient filesystem device number in
+its durable identity. Consistent with D42's earlier rule, B5 must replace
+that field with a durable file/volume binding and test an owned APFS image
+detach/reattach. This avoids making device-number stability an artificial
+macOS reboot dependency. D62 still requires a disposable macOS rehearsal of
+the actual disable/unload/re-enable, login-start, process-census and hold-
+reattach behavior; B2's Alpine VM cannot supply that evidence. Codex may
+inspect existing isolated machines, installer availability and host capacity
+read-only. A new macOS VM requires an operator decision on its disk budget
+after this assessment, an unchanged production VM state and image holder, and
+free space above the 20 GiB capture floor plus a measured production-image
+growth margin. Codex must never quit or restart UTM or the host, change the
+production VM's configuration or use its disk for rehearsal.
+
+B5's owned fixture results cannot substitute for the macOS reboot rehearsal.
+B6's separate exact-window release must name D173's user-owned pre-stop
+evidence limit, D62's ACCEPTED-or-ABORT pre-boot rule, and the manual restore
+fallback. D174 authorizes no live service or VM stop and no topology change.
