@@ -842,6 +842,9 @@ class Journal:
                          and row.get('unit') == 'scheduler-heartbeat'
                          and row.get('action') == 'close-execution-hold'), None)
         session = original.get('watch_session_id') if isinstance(original, dict) else None
+        if session:
+            require(valid_execution_hold(hold_evidence, session),
+                    'NATS transfer live hold differs from the original execution hold')
         names = {'ai.openclaw.' + unit for unit in NATS_TRANSFER_UNITS}
         require(not any(names & set(labels) for labels in entrypoints['loaded'].values()),
                 'legacy NATS job is still loaded')
@@ -858,13 +861,16 @@ class Journal:
             else:
                 require(not actual['loaded'] and not actual['running'],
                         'legacy NATS writer is still active: ' + unit)
-                require(any(row['event'] == 'verified' and row.get('unit') == unit
-                            and row.get('action') == 'disable-and-unload'
-                            and self.managed_stop_proven(unit, row.get('evidence'))
-                            and (not session or valid_execution_hold(
-                                row['evidence'].get('execution_hold'), session))
-                            for row in self.records),
+                proofs = [row.get('evidence') for row in self.records
+                          if row['event'] == 'verified' and row.get('unit') == unit
+                          and row.get('action') == 'disable-and-unload']
+                proven = [proof for proof in proofs if self.managed_stop_proven(unit, proof)]
+                require(proven,
                         'legacy NATS stop has no verified persistent journal receipt: ' + unit)
+                if session:
+                    require(any(valid_execution_hold(
+                        proof.get('execution_hold'), session) for proof in proven),
+                        'legacy NATS stop lost the original execution hold: ' + unit)
             observations[unit] = actual
         require_no_nats_marker()
         hold.check_forward()

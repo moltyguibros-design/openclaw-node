@@ -3936,3 +3936,23 @@ session; deleting the new recheck makes all five cases fail by missing their
 expected refusal. This does not prove physical writer exclusion or close B5.
 Step 1.2 remains open, no production VM, service, store or topology changed,
 and all four NATS histories remain separate.
+
+## D178 — Pair transfer receipt recheck with live hold validation (2026-10-13 07:41 EDT)
+
+Claude independently reproduced D177 at `da26f9aa` and tested the guarded
+receipt check against the honest path and sessionless synthetic fixtures. It
+also found that `transfer_nats()` could publish an intent under a synthetic
+non-facade hold whose live certificate disagreed with the original anchor;
+root would refuse that transfer. The production `JournaledHold` facade
+rejects such a certificate, so this is the same structural continuity class,
+not a demonstrated honest-path failure.
+
+The session-bound transfer gate now validates both the live hold evidence and
+each serving-NATS receipt against the original anchor before publishing.
+Distinct refusal messages pin the two checks. Owned negatives cover all four
+flags and a stale session, including a forged `nats-3` receipt. A sessionless
+anchor retains the prior synthetic-fixture behavior; root still rejects it.
+Forging the journal after a transfer intent remains root's responsibility.
+These checks do not establish a physical no-writer boundary, enable the
+production-disabled root transfer, or close B5/step 1.2. No production VM,
+service, NATS store or topology changed; four histories remain separate.

@@ -54,7 +54,7 @@ class UserTransferTest(unittest.TestCase):
                  late_listener=False, bypass_non_nats=False, late_non_nats=None,
                  stale_stop_claim=False, missing_stop_certificate=False,
                  different_live_session=False, invalid_live_certificate=None,
-                 invalid_nats_receipt=None):
+                 invalid_nats_receipt=None, invalid_transfer_hold=None):
         fixture = fixture_module.JournalTests('test_nats_transfer_freezes_user_journal_before_root_outcome')
         fixture.setUp()
         self.addCleanup(fixture.tearDown)
@@ -127,12 +127,12 @@ class UserTransferTest(unittest.TestCase):
                                 if unit != late_non_nats))
         for unit in ('nats', 'nats-2', 'nats-3'):
             if (missing_listener or bypass_non_nats or late_non_nats
-                    or (invalid_nats_receipt is not None and unit == 'nats')):
+                    or (invalid_nats_receipt is not None and unit == invalid_nats_receipt[0])):
                 intent = journal.append('intent', unit=unit, action='disable-and-unload')
                 fixture_module.fence_unit(loaded, unit)
                 receipt_certificate = certificate
-                if invalid_nats_receipt is not None and unit == 'nats':
-                    field, value = invalid_nats_receipt
+                if invalid_nats_receipt is not None and unit == invalid_nats_receipt[0]:
+                    _, field, value = invalid_nats_receipt
                     receipt_certificate = {**certificate, field: value}
                 journal.append('verified', intent=intent['sequence'], unit=unit,
                                action='disable-and-unload', evidence={
@@ -148,6 +148,9 @@ class UserTransferTest(unittest.TestCase):
         if late_non_nats:
             fixture_module.stop_non_nats(journal, prior, loaded, hold,
                                          units=(late_non_nats,))
+        if invalid_transfer_hold is not None:
+            field, value = invalid_transfer_hold
+            hold.check_forward = lambda: {**certificate, field: value}
         def observe(unit, saved):
             if unit == 'nats-1':
                 return {**saved, 'verified': True}
@@ -298,6 +301,21 @@ class UserTransferTest(unittest.TestCase):
         observer['evidence']['execution_hold'] = original
 
     def test_user_transfer_rechecks_serving_nats_stop_hold(self):
+        for unit, field, value in (
+            ('nats', 'verified', False),
+            ('nats', 'restoration_only', True),
+            ('nats', 'kernel_file_watch', False),
+            ('nats', 'path_watch', {'kernel_path_watch': False}),
+            ('nats', 'watch_session_id', 'stale-session'),
+            ('nats-3', 'verified', False),
+        ):
+            with self.subTest(unit=unit, field=field):
+                with self.assertRaisesRegex(
+                        fixture_module.Refused,
+                        'legacy NATS stop lost the original execution hold: ' + unit):
+                    self.prepared(invalid_nats_receipt=(unit, field, value))
+
+    def test_user_transfer_rechecks_live_hold_certificate(self):
         for field, value in (
             ('verified', False),
             ('restoration_only', True),
@@ -308,8 +326,8 @@ class UserTransferTest(unittest.TestCase):
             with self.subTest(field=field):
                 with self.assertRaisesRegex(
                         fixture_module.Refused,
-                        'legacy NATS stop has no verified persistent journal receipt: nats'):
-                    self.prepared(invalid_nats_receipt=(field, value))
+                        'NATS transfer live hold differs from the original execution hold'):
+                    self.prepared(invalid_transfer_hold=(field, value))
 
     def test_root_refuses_unverified_stop_hold_for_each_role(self):
         fixture, journal, transaction, _ = self.prepared()
