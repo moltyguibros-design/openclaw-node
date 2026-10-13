@@ -837,6 +837,11 @@ class Journal:
         require_no_nats_marker()
         entrypoints = self.check_entrypoints(forward=True)
         hold_evidence = hold.check_forward()
+        original = next((row.get('evidence') for row in self.records
+                         if row['event'] == 'verified'
+                         and row.get('unit') == 'scheduler-heartbeat'
+                         and row.get('action') == 'close-execution-hold'), None)
+        session = original.get('watch_session_id') if isinstance(original, dict) else None
         names = {'ai.openclaw.' + unit for unit in NATS_TRANSFER_UNITS}
         require(not any(names & set(labels) for labels in entrypoints['loaded'].values()),
                 'legacy NATS job is still loaded')
@@ -856,6 +861,8 @@ class Journal:
                 require(any(row['event'] == 'verified' and row.get('unit') == unit
                             and row.get('action') == 'disable-and-unload'
                             and self.managed_stop_proven(unit, row.get('evidence'))
+                            and (not session or valid_execution_hold(
+                                row['evidence'].get('execution_hold'), session))
                             for row in self.records),
                         'legacy NATS stop has no verified persistent journal receipt: ' + unit)
             observations[unit] = actual

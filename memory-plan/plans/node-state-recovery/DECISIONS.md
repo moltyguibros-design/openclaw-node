@@ -3918,3 +3918,21 @@ transfer still rejects them. These are structural evidence checks, not a
 physical writer boundary or permission to run the production-disabled root
 transfer. B5 and step 1.2 remain open; no production VM, service, store or
 topology changed, and all four NATS histories remain separate.
+
+## D177 — Recheck serving NATS receipt holds before transfer intent (2026-10-13 07:34 EDT)
+
+After D176, a forged serving-NATS stop receipt with the original session but
+`verified: false` still passed the user-side `transfer_nats()` recheck, which
+used only the managed-stop fields. An owned probe rechained the full on-disk
+journal: the user side wrote `nats-transfer-intent`, then root refused that
+receipt. The honest `Journal.mutate()` path stamps a valid certificate, so
+this is a structural forged-journal divergence, not a demonstrated live
+production stop. Production root transfer remains disabled.
+
+For each serving-NATS receipt, `transfer_nats()` now checks the full live
+certificate against the original hold session before writing the transfer
+intent. A five-case user-side negative covers the four hold flags and a stale
+session; deleting the new recheck makes all five cases fail by missing their
+expected refusal. This does not prove physical writer exclusion or close B5.
+Step 1.2 remains open, no production VM, service, store or topology changed,
+and all four NATS histories remain separate.

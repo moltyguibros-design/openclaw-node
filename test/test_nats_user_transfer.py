@@ -53,7 +53,8 @@ class UserTransferTest(unittest.TestCase):
     def prepared(self, extra_event=None, boot='boot-a', missing_listener=False,
                  late_listener=False, bypass_non_nats=False, late_non_nats=None,
                  stale_stop_claim=False, missing_stop_certificate=False,
-                 different_live_session=False, invalid_live_certificate=None):
+                 different_live_session=False, invalid_live_certificate=None,
+                 invalid_nats_receipt=None):
         fixture = fixture_module.JournalTests('test_nats_transfer_freezes_user_journal_before_root_outcome')
         fixture.setUp()
         self.addCleanup(fixture.tearDown)
@@ -99,17 +100,20 @@ class UserTransferTest(unittest.TestCase):
                     lambda: {**fixture_module.timer_stop_evidence('observer'),
                              'execution_hold': {'watch_session_id': 'stale-session'}},
                     hold=hold)
+                return
             if missing_stop_certificate:
                 hold.check_forward = lambda: None
                 journal.mutate('observer', 'disable-and-unload',
                     lambda: fixture_module.fence_unit(loaded, 'observer'),
                     lambda: fixture_module.timer_stop_evidence('observer'), hold=hold)
+                return
             if different_live_session:
                 hold.check_forward = lambda: {**certificate,
                                               'watch_session_id': 'stale-session'}
                 journal.mutate('observer', 'disable-and-unload',
                     lambda: fixture_module.fence_unit(loaded, 'observer'),
                     lambda: fixture_module.timer_stop_evidence('observer'), hold=hold)
+                return
             if invalid_live_certificate is not None:
                 field, value = invalid_live_certificate
                 hold.check_forward = lambda: {**certificate, field: value}
@@ -122,13 +126,18 @@ class UserTransferTest(unittest.TestCase):
                     units=tuple(unit for unit in fixture_module.STOP_ORDER[1:]
                                 if unit != late_non_nats))
         for unit in ('nats', 'nats-2', 'nats-3'):
-            if missing_listener or bypass_non_nats or late_non_nats:
+            if (missing_listener or bypass_non_nats or late_non_nats
+                    or (invalid_nats_receipt is not None and unit == 'nats')):
                 intent = journal.append('intent', unit=unit, action='disable-and-unload')
                 fixture_module.fence_unit(loaded, unit)
+                receipt_certificate = certificate
+                if invalid_nats_receipt is not None and unit == 'nats':
+                    field, value = invalid_nats_receipt
+                    receipt_certificate = {**certificate, field: value}
                 journal.append('verified', intent=intent['sequence'], unit=unit,
                                action='disable-and-unload', evidence={
                                    **fixture_module.listener_stop_evidence(unit),
-                                   'execution_hold': certificate,
+                                   'execution_hold': receipt_certificate,
                                    'entrypoint_loaded': copy.deepcopy(loaded['loaded']),
                                    'entrypoint_overrides': copy.deepcopy(loaded['overrides'])})
             else:
@@ -287,6 +296,20 @@ class UserTransferTest(unittest.TestCase):
                 observer['evidence']['execution_hold'] = {**original, field: value}
                 self.assertFalse(journal.non_nats_fenced(entrypoints))
         observer['evidence']['execution_hold'] = original
+
+    def test_user_transfer_rechecks_serving_nats_stop_hold(self):
+        for field, value in (
+            ('verified', False),
+            ('restoration_only', True),
+            ('kernel_file_watch', False),
+            ('path_watch', {'kernel_path_watch': False}),
+            ('watch_session_id', 'stale-session'),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(
+                        fixture_module.Refused,
+                        'legacy NATS stop has no verified persistent journal receipt: nats'):
+                    self.prepared(invalid_nats_receipt=(field, value))
 
     def test_root_refuses_unverified_stop_hold_for_each_role(self):
         fixture, journal, transaction, _ = self.prepared()
