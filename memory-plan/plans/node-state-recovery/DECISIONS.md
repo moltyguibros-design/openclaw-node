@@ -3845,3 +3845,53 @@ B5's owned fixture results cannot substitute for the macOS reboot rehearsal.
 B6's separate exact-window release must name D173's user-owned pre-stop
 evidence limit, D62's ACCEPTED-or-ABORT pre-boot rule, and the manual restore
 fallback. D174 authorizes no live service or VM stop and no topology change.
+
+## D175 — Conditionally re-pin installed timer gates after an authorized boot (2026-10-13 00:17 EDT)
+
+Claude's code-traced challenge of D174 found that its “replace the durable
+device field” instruction missed the five production timer plists and their
+manifest. Their installed gate pins encode `device:inode:ctime_ns` for the
+lock and `device:inode` for the root; each timer checks those pins before a
+run. The full-node baseline and restore-only driver also bind them. A source-
+only change or an owned APFS reattach test would not update the node. An
+ordinary guest reboot that changes the Data volume's device number can make
+all five timers exit 78. This pre-existing risk is now an explicit B5 warning.
+
+No pre-B6 timer reinstall is permitted. Re-pinning would reload production
+jobs, contrary to the no-stop rule; re-pinning after the full-node hold but
+before shutdown would change the frozen installed identities and cannot know
+the post-boot device. B5 instead develops and tests a conditional, journaled,
+value-only re-pin in the restore-only controller. It runs **only if the device
+number changed**, after D62/D64 reboot admission and before constructing the
+post-boot gate or restoring any timer. The same gate objects must be bound by
+stable inode, birthtime, lock ctime, metadata nonce/hash, volume UUID and
+path-chain evidence. Keep same-boot descriptor and path mapping checks on
+`st_dev`; changing the installed pin format is separate future work.
+
+The re-pin records old and new gate pins, then changes only the manifest's
+`gate_pins` and the five plists' manifest hash and pin arguments. It records
+the byte hashes and field-level diff in the journal before any timer loads.
+The restore-only checks may accept exactly this recorded migration for the
+five timers and no other code, plist, job or field. Owned negatives must
+reject a changed inode, birthtime or nonce, an extra field, a non-timer job,
+pre-admission or same-boot migration, and a second migration. The disposable
+macOS rehearsal must exercise the complete sequence across reboot on owned
+timer copies; an owned APFS detach/reattach exercises the device change.
+
+B3 pins the current installed bytes before a window and records the allowed
+conditional migration form; it does not pre-install new pins. B6's fresh
+window release must explicitly include the conditional post-admission,
+pre-restoration timer re-pin. B9 checks the migration rows and live gate
+identity when applicable, then observes one successful gated run of each
+timer at exit code 0 and records the new installed hashes for later windows.
+No production service, VM or NATS history was changed by this decision.
+
+D174's process wording is also bounded: the reboot controller compares all
+OpenClaw launchd jobs and every process running as the OpenClaw user or
+executing from the production entrypoint roots; an unreadable or
+unattributable process in that scope refuses. D162–D164 prevent treating this
+as a complete physical process census. An existing macOS machine cannot be
+used for destructive rehearsal until the operator designates that exact
+machine disposable. Running any second macOS guest on the production host
+needs an operator disk-and-memory budget and the production-VM checks, even
+if that guest already exists.
