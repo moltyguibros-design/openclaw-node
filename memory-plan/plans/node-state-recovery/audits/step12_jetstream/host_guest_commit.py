@@ -10,6 +10,7 @@ import pathlib
 import re
 import stat
 import sys
+import uuid
 
 from host_vm_preflight import preflight, require, write_record
 
@@ -28,15 +29,16 @@ def private_bytes(path):
 
 
 def encoded(value):
-    return (json.dumps(value, sort_keys=True, separators=(',', ':'),
-                       ensure_ascii=False) + '\n').encode()
+    return (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode()
 
 
 def require_committed(capture_dir):
     capture_dir = pathlib.Path(capture_dir)
     armed_bytes = private_bytes(capture_dir / 'ARMED.json')
     armed = json.loads(armed_bytes)
-    committed = json.loads(private_bytes(capture_dir / 'COMMITTED.json'))
+    committed_bytes = private_bytes(capture_dir / 'COMMITTED.json')
+    committed = json.loads(committed_bytes)
+    ack = json.loads(private_bytes(capture_dir / 'ACKED.json'))
     nonce = armed.get('capture_nonce')
     manifest = committed.get('manifest')
     require(isinstance(nonce, str) and re.fullmatch(r'[0-9a-f]{64}', nonce)
@@ -57,6 +59,22 @@ def require_committed(capture_dir):
             and (sample.get('image_device'), sample.get('image_inode')) ==
             (armed.get('image_device'), armed.get('image_inode')),
             'guest commitment lacks a matching started host sample')
+    after = ack.get('started_sample')
+    require(set(ack) == {'scope', 'at_utc', 'commit_sha256', 'manifest_sha256',
+                         'started_sample'}
+            and ack['scope'] == 'guest manifest acknowledged while VM remained started'
+            and ack['commit_sha256'] == hashlib.sha256(committed_bytes).hexdigest()
+            and ack['manifest_sha256'] == committed['manifest_sha256']
+            and isinstance(after, dict) and after.get('state') == 'started'
+            and after.get('holders_consistent') is True
+            and after.get('image_holders') == sample['image_holders']
+            and after.get('vm_uuid') == sample['vm_uuid']
+            and after.get('host_boot_session') == sample['host_boot_session']
+            and (after.get('image_device'), after.get('image_inode'),
+                 after.get('image_size'), after.get('vmstate')) ==
+            (sample.get('image_device'), sample.get('image_inode'),
+             sample.get('image_size'), sample.get('vmstate')),
+            'guest manifest lacks a post-commit started acknowledgement')
     return committed
 
 
@@ -79,7 +97,7 @@ def commit(host_spec, store_spec, capture_dir, guest_manifest):
                 and re.fullmatch(r'[0-9a-f]{64}', armed['capture_nonce']),
                 'host capture is not armed with a nonce')
         require(not any(os.path.lexists(capture_dir / name) for name in
-                        ('COMMITTED.json', 'GUARD_INTENT.json', 'GUARD.json',
+                        ('COMMITTED.json', 'ACKED.json', 'GUARD_INTENT.json', 'GUARD.json',
                          'FAILED.json', 'CAPTURE.json')),
                 'capture has already committed or ended')
         with (capture_dir / 'CAPTURE_ACTIVE.lock').open('rb') as active:
@@ -118,7 +136,7 @@ def commit(host_spec, store_spec, capture_dir, guest_manifest):
                 {row['role']: row['relative_path'] for row in spec['stores']},
                 'guest manifest does not bind this arm and four-store specification')
         before = json.loads(private_bytes(capture_dir / 'before-shutdown' / 'preflight.json'))
-        sample = preflight(host_spec, capture_dir / 'commit-preflight')
+        sample = preflight(host_spec, capture_dir / ('commit-preflight-' + uuid.uuid4().hex))
         require(sample['state'] == 'started' and sample['holders_consistent']
                 and len(sample['image_holders']) == 1
                 and sample['vm_uuid'] == armed['vm_uuid'] == before['vm_uuid']
@@ -137,6 +155,24 @@ def commit(host_spec, store_spec, capture_dir, guest_manifest):
                   'manifest_sha256': hashlib.sha256(raw).hexdigest(),
                   'manifest': manifest, 'started_sample': sample}
         write_record(capture_dir / 'COMMITTED.json', result)
+        after = preflight(host_spec, capture_dir / 'commit-ack-preflight',
+                          allow_transition=True)
+        require(after['state'] == 'started' and after['holders_consistent']
+                and after['image_holders'] == sample['image_holders']
+                and after['vm_uuid'] == sample['vm_uuid']
+                and after['host_boot_session'] == sample['host_boot_session']
+                and (after['image_device'], after['image_inode'],
+                     after['image_size'], after['vmstate']) ==
+                (sample['image_device'], sample['image_inode'],
+                 sample['image_size'], sample['vmstate']),
+                'VM stopped or source changed before guest acknowledgement')
+        write_record(capture_dir / 'ACKED.json', {
+            'scope': 'guest manifest acknowledged while VM remained started',
+            'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'commit_sha256': hashlib.sha256(
+                private_bytes(capture_dir / 'COMMITTED.json')).hexdigest(),
+            'manifest_sha256': result['manifest_sha256'], 'started_sample': after,
+        })
         return require_committed(capture_dir)
 
 

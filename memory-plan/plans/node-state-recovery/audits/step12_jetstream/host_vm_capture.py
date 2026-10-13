@@ -253,6 +253,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
             'source_image_sha256': source_sha, 'clone_image_sha256': clone_sha,
             'guard_receipt_sha256': guard_sha,
             'guest_commit_sha256': file_hash(output / 'COMMITTED.json'),
+            'guest_ack_sha256': file_hash(output / 'ACKED.json'),
             'source_size': first['image_size'], 'clone_size': clone_info.st_size,
             'vmstate_at_arm': first['vmstate'],
             'vmstate_at_final_check': after_extract['vmstate'],

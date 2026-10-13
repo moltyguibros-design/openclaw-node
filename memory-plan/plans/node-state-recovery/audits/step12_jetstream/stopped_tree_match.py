@@ -186,6 +186,7 @@ def host_match(guest_path, extracted, output):
     host_bytes = manifest_path.read_bytes()
     capture_bytes = capture_path.read_bytes()
     guard_bytes = guard_path.read_bytes()
+    ack_bytes = (extracted.parent / 'ACKED.json').read_bytes()
     host = json.loads(host_bytes)
     capture = json.loads(capture_bytes)
     guard = json.loads(guard_bytes)
@@ -200,6 +201,7 @@ def host_match(guest_path, extracted, output):
                 and capture['source_image_sha256'] == capture['clone_image_sha256']
                 and capture['guard_receipt_sha256'] == sha256(guard_path)
                 and capture['guest_commit_sha256'] == sha256(extracted.parent / 'COMMITTED.json')
+                and capture['guest_ack_sha256'] == sha256(extracted.parent / 'ACKED.json')
                 and capture['clone_image_sha256'] == host['image_sha256']
                 and capture['extraction_manifest_sha256'] == sha256(manifest_path)
                 and capture['data_volume_uuid'] == host['data_volume_uuid']
@@ -257,6 +259,7 @@ def host_match(guest_path, extracted, output):
                     separators=(',', ':')).encode()).hexdigest()}
         require(guest_path.read_bytes() == guest_bytes
                 and require_committed(extracted.parent) == committed
+                and (extracted.parent / 'ACKED.json').read_bytes() == ack_bytes
                 and manifest_path.read_bytes() == host_bytes
                 and capture_path.read_bytes() == capture_bytes
                 and guard_path.read_bytes() == guard_bytes,

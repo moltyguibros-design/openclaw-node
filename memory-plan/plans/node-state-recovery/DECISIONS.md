@@ -3722,3 +3722,35 @@ user-transfer tests pass on macOS Python 3.9.6. These are ordering and
 evidence-continuity checks, not physical writer exclusion. B5 and B6 remain
 open; no production VM, service, store or topology changed, and all four NATS
 histories remain separate.
+
+## D172 — Require a host-acknowledged guest store commitment before cold capture (2026-10-12 22:44 EDT)
+
+Claude's adversarial review of the B5 host matcher reproduced acceptance of a
+stale guest store manifest and of a manifest regenerated after a later store
+write. A separate guest/host timestamp comparison falsely refused a correct
+manifest when the guest clock was ahead. These cases meant byte agreement alone
+did not bind a store observation to the recovery window.
+
+The owned host capture now arms with a random nonce. While it observes the
+original VM started with one image holder, a separate host tool commits the
+four-store guest manifest under the arm lock. It then publishes the commitment,
+observes the VM still started with the same holder and source identity, and
+durably writes `ACKED.json`. The guest must receive that acknowledgement before
+shutdown. A first stopped observation or host guard without a valid commitment
+and acknowledgement refuses before cloning or guarding. The capture receipt
+pins both hashes, and the host matcher uses only the committed manifest. Clock
+timestamps are informational. Per-attempt preflight directories allow a retry
+before publication; a failed post-publication acknowledgement remains a
+fail-closed window abort.
+
+Claude's exact-head review found a non-ASCII manifest false refusal, a
+one-shot retry gap and two weak negatives. The serializer now matches the guest
+writer. Owned tests cover a Unicode store filename, retry after a failed
+preflight, stop between publication and acknowledgement, a decisive early-stop
+clone sentinel, and guard refusal before intent. The macOS owned host-capture
+and reconcile suites pass. This is a temporal and byte-continuity component,
+not a B5 close: the manifest still lacks durable full-node journal and root
+outcome binding, and the stopped ASIF does not yet supply those frozen records.
+Physical writer exclusion and complete abort/restore remain unproven. The
+production capture path stays disabled. No production VM or service was stopped
+or restarted, and all four NATS histories remain separate.

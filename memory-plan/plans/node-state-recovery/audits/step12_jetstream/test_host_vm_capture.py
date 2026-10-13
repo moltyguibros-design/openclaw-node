@@ -18,7 +18,7 @@ from unittest import mock
 import host_vm_capture
 import host_vm_guard
 import stopped_tree_match
-from host_guest_commit import commit
+from host_guest_commit import commit, require_committed
 from stopped_tree_match import guest_capture, host_match
 from host_clone_dispose import cleanup_failed, dispose
 from host_vm_capture import capture, clone_only, publish_capture_record
@@ -82,13 +82,35 @@ class VmstateGateTest(unittest.TestCase):
                              os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
             fcntl.flock(active, fcntl.LOCK_EX)
             try:
+                def failed_preflight(_, destination):
+                    pathlib.Path(destination).mkdir()
+                    raise RuntimeError('temporary host status failure')
                 with mock.patch('host_guest_commit.preflight',
-                                return_value=dict(prior, state='stopped')):
+                                side_effect=failed_preflight):
+                    with self.assertRaisesRegex(RuntimeError,
+                                                'temporary host status failure'):
+                        commit(root / 'host.json', spec, capture_dir, claim)
+                def retry_preflight(_, destination):
+                    self.assertFalse(pathlib.Path(destination).exists())
+                    return dict(prior, state='stopped')
+                with mock.patch('host_guest_commit.preflight',
+                                side_effect=retry_preflight):
                     with self.assertRaisesRegex(RuntimeError, 'original running VM'):
+                        commit(root / 'host.json', spec, capture_dir, claim)
+                started = dict(prior, holders_consistent=True, image_holders=[42])
+                stopped = dict(prior, state='stopped', holders_consistent=True,
+                               image_holders=[])
+                with mock.patch('host_guest_commit.preflight',
+                                side_effect=[started, stopped]):
+                    with self.assertRaisesRegex(RuntimeError,
+                                                'before guest acknowledgement'):
                         commit(root / 'host.json', spec, capture_dir, claim)
             finally:
                 os.close(active)
-            self.assertFalse((capture_dir / 'COMMITTED.json').exists())
+            self.assertTrue((capture_dir / 'COMMITTED.json').exists())
+            self.assertFalse((capture_dir / 'ACKED.json').exists())
+            with self.assertRaisesRegex(RuntimeError, 'ACKED.json'):
+                require_committed(capture_dir)
 
     @unittest.skipUnless(sys.platform == 'darwin', 'macOS image guard requires st_flags')
     def test_guard_holds_arm_lock_through_source_image_access(self):
@@ -123,6 +145,14 @@ class VmstateGateTest(unittest.TestCase):
             before = capture_dir / 'before-shutdown'
             before.mkdir()
             write_record(before / 'preflight.json', baseline)
+            with mock.patch.object(host_vm_guard, 'require_active_capture'), \
+                    mock.patch.object(host_vm_guard, 'preflight', return_value=baseline), \
+                    mock.patch.object(host_vm_guard, 'change_immutable',
+                                      side_effect=RuntimeError('guard boundary reached')) as mutate:
+                with self.assertRaisesRegex(RuntimeError, 'commitment input is missing'):
+                    guard(host, capture_dir, fixture=True)
+            mutate.assert_not_called()
+            self.assertFalse((capture_dir / 'GUARD_INTENT.json').exists())
             entered, release, sampled = threading.Event(), threading.Event(), threading.Event()
             guard_errors = []
             sample_errors = []
@@ -581,12 +611,30 @@ class VmstateGateTest(unittest.TestCase):
                 'stores': [{'role': role, 'relative_path': role}
                            for role in ('standalone', 'member1', 'member2', 'member3')],
             })
-            before = {'state': 'started', 'host_boot_session': 'boot',
+            before = {'state': 'started', 'vm_uuid': host_vm_capture.FIXTURE_UUID,
+                      'host_boot_session': 'boot',
                       'image_device': 1, 'image_inode': 2, 'image_size': 3,
-                      'vmstate': None}
+                      'vmstate': None, 'holders_consistent': True,
+                      'image_holders': [42]}
+            stopped = dict(before, state='stopped', image_holders=[])
             output = root / 'capture'
-            with mock.patch.object(host_vm_capture, 'preflight', side_effect=[before, dict(before, state='stopped')]), \
-                    mock.patch.object(host_vm_capture, 'clone_only') as clone:
+            observations = 0
+            def observed(*args, **kwargs):
+                nonlocal observations
+                observations += 1
+                if observations == 1:
+                    return before
+                if observations == 2:
+                    write_record(output / 'GUARD.json', {'fixture': True})
+                return stopped
+
+            with mock.patch.object(host_vm_capture, 'preflight', side_effect=observed), \
+                    mock.patch.object(host_vm_capture.time, 'sleep'), \
+                    mock.patch.object(host_vm_capture, 'guarded_source', return_value='guard'), \
+                    mock.patch.object(host_vm_capture.shutil, 'disk_usage',
+                                      return_value=mock.Mock(free=30 * 1024 ** 3)), \
+                    mock.patch.object(host_vm_capture, 'clone_only',
+                                      side_effect=RuntimeError('clone boundary reached')) as clone:
                 with self.assertRaisesRegex(RuntimeError, 'commitment input is missing'):
                     capture(host, stores, output, 1, fixture=True)
             clone.assert_not_called()
@@ -662,6 +710,8 @@ class HostCaptureTest(unittest.TestCase):
             location = mount / relative
             location.mkdir(parents=True)
             (location / 'stream.dat').write_text('owned-' + role)
+            if role == 'member2':
+                (location / 'données.dat').write_text('owned-unicode')
             stores.append({'role': role, 'relative_path': relative})
         store_spec = self.root / 'store-spec.json'
         store_spec.write_text(json.dumps({'data_volume_uuid': volume_info['VolumeUUID'],
@@ -773,6 +823,8 @@ class HostCaptureTest(unittest.TestCase):
                          hashlib.sha256((output / 'GUARD.json').read_bytes()).hexdigest())
         self.assertEqual(result['guest_commit_sha256'],
                          hashlib.sha256((output / 'COMMITTED.json').read_bytes()).hexdigest())
+        self.assertEqual(result['guest_ack_sha256'],
+                         hashlib.sha256((output / 'ACKED.json').read_bytes()).hexdigest())
         self.assertEqual(result['store_spec_sha256'],
                          hashlib.sha256(store_spec.read_bytes()).hexdigest())
         self.assertEqual(result['vmstate_at_arm']['size'], len(b'old suspend state'))
@@ -814,7 +866,8 @@ class HostCaptureTest(unittest.TestCase):
                 ('guest', guest_output / 'manifest.json'),
                 ('capture', output / 'CAPTURE.json'),
                 ('extract', output / 'extracted-stores' / 'manifest.json'),
-                ('guard', output / 'GUARD.json')):
+                ('guard', output / 'GUARD.json'),
+                ('ack', output / 'ACKED.json')):
             original_bytes = input_path.read_bytes()
             changed = False
             def mutate_after_validation(root):
@@ -888,10 +941,17 @@ class HostCaptureTest(unittest.TestCase):
         committed_path = output / 'COMMITTED.json'
         committed_bytes = committed_path.read_bytes()
         committed_path.write_bytes(committed_bytes + b' ')
-        with self.assertRaisesRegex(RuntimeError, 'capture receipt'):
+        with self.assertRaisesRegex(RuntimeError, 'post-commit started acknowledgement'):
             host_match(guest_output / 'manifest.json', output / 'extracted-stores',
                        self.root / 'changed-guest-commit')
         committed_path.write_bytes(committed_bytes)
+        ack_path = output / 'ACKED.json'
+        ack_bytes = ack_path.read_bytes()
+        ack_path.write_bytes(ack_bytes + b' ')
+        with self.assertRaisesRegex(RuntimeError, 'capture receipt'):
+            host_match(guest_output / 'manifest.json', output / 'extracted-stores',
+                       self.root / 'changed-guest-ack')
+        ack_path.write_bytes(ack_bytes)
         original_guard_receipt = guard_receipt.read_bytes()
         guard_receipt.write_bytes(original_guard_receipt + b' ')
         with self.assertRaisesRegex(RuntimeError, 'capture receipt'):
