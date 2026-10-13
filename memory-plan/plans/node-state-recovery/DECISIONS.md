@@ -3759,3 +3759,45 @@ outcome binding, and the stopped ASIF does not yet supply those frozen records.
 Physical writer exclusion and complete abort/restore remain unproven. The
 production capture path stays disabled. No production VM or service was stopped
 or restarted, and all four NATS histories remain separate.
+
+## D173 — Develop a capture checkpoint without root NATS transfer (2026-10-12 23:44 EDT)
+
+Claude's read-only adversarial review of PR #224 at `598013c3` found that B5's
+next action described an impossible pre-shutdown state. `Journal.close()` only
+releases locks, full-node `seal()` is refused, and `resolve()` requires verified
+service restoration. The nearest transfer terminal is `nats-transfer-closed`,
+but guest transfer and root decline/publish refuse production use. More
+seriously, an owned forged-journal probe with no execution hold or stop
+receipts was rejected by root admission yet accepted by root decline, which
+published `declined`. A decline receipt therefore cannot be treated as a hold
+certificate. Root transfer also creates an open-intent crash state that cannot
+abort without the disabled root path.
+
+D168 selected a stopped-whole-VM preservation boundary, not a root handoff
+before capture. For **design and owned tests only**, B5 will instead develop a
+restore-only `capture-ready` journal checkpoint after the managed full-node
+cohort and all three serving NATS members have class-specific stopped receipts
+bound to the original execution hold; the fourth, already-held member remains
+separate and disabled. The checkpoint will bind the host arm nonce and the
+four-store guest manifest to an exact journal head. A host verifier must read
+that user-owned journal from the stopped ASIF and recheck its chain, cohort,
+session, boot, nonce and terminal state. These records attest application
+quiescence and byte continuity, not physical writer exclusion. The latter is
+proved only at the clean stopped-VM boundary under active host boot denial,
+followed by four separate isolated real-history restores. Protected root
+migration remains a later, separately reviewed operation.
+
+The same review found a second B5 blocker: `Journal.recover()` refuses a
+full-node journal after the necessary VM reboot, and the execution hold pins
+filesystem identities whose stability across a macOS guest reboot is
+unverified. A planned-reboot, restore-only admission must be designed and
+tested with fresh stopped-unit and persistent-override observations, including
+an owned disposable macOS VM identity/reattach test. B2's existing disposable
+VM runs Alpine, so this macOS test needs a separately verified non-production
+macOS UTM VM and disk; the production `moltMacOS` VM must not be used. Failure
+must leave the node held for an explicit manual restoration route. Until that route, host
+record extraction and the abort/resumption controller pass, B5 and B6 remain
+open. This decision permits no live service or VM stop, topology change or
+claim that the node is operational; B6 still needs a fresh exact-window
+operator release. Preserve the standalone and all three member histories
+separately throughout.
