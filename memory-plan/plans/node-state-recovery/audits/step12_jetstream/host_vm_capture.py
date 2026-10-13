@@ -11,12 +11,14 @@ import hashlib
 import json
 import os
 import pathlib
+import secrets
 import shutil
 import stat
 import sys
 import time
 
 from host_asif_extract import extract
+from host_guest_commit import require_committed
 from host_image_immutable import change_immutable
 from host_vm_preflight import owned_directory, preflight, require, write_record
 
@@ -156,6 +158,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         write_record(output / 'ARMED.json', {
             'scope': 'waiting for external guest shutdown; no stop request issued',
             'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'capture_nonce': secrets.token_hex(32),
             'vm_uuid': host['uuid'], 'host_boot_session': first['host_boot_session'],
             'image_device': first['image_device'], 'image_inode': first['image_inode'],
         })
@@ -174,6 +177,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
                     'host boot, VM image or vmstate identity changed while waiting')
             if observation['state'] == 'stopped':
                 saw_stopped = True
+                require_committed(output)
                 if observation['holders_consistent']:
                     clean_stopped = True
                     stopped_count += 1
@@ -248,6 +252,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
             'vm_uuid': host['uuid'], 'host_boot_session': first['host_boot_session'],
             'source_image_sha256': source_sha, 'clone_image_sha256': clone_sha,
             'guard_receipt_sha256': guard_sha,
+            'guest_commit_sha256': file_hash(output / 'COMMITTED.json'),
             'source_size': first['image_size'], 'clone_size': clone_info.st_size,
             'vmstate_at_arm': first['vmstate'],
             'vmstate_at_final_check': after_extract['vmstate'],

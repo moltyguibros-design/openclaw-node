@@ -13,6 +13,7 @@ import subprocess
 import sys
 
 from host_asif_extract import declared_path, private_parent, require, write_json
+from host_guest_commit import require_committed
 from host_vm_capture import CAPTURE_SCOPE
 
 
@@ -92,11 +93,14 @@ def new_output(output):
     output.mkdir(mode=0o700)
 
 
-def guest_capture(spec_path, output, root=pathlib.Path('/')):
+def guest_capture(spec_path, output, root=pathlib.Path('/'), capture_nonce=None):
     os.umask(0o077)
     spec_path = pathlib.Path(spec_path)
     output = pathlib.Path(output)
     spec, spec_sha256 = store_spec(spec_path)
+    require(capture_nonce is None or isinstance(capture_nonce, str)
+            and re.fullmatch(r'[0-9a-f]{64}', capture_nonce),
+            'guest capture nonce is invalid')
     new_output(output)
     try:
         stores = {}
@@ -129,6 +133,8 @@ def guest_capture(spec_path, output, root=pathlib.Path('/')):
                   'store_paths': store_paths,
                   'store_relative_paths': {row['role']: row['relative_path']
                                            for row in spec['stores']}}
+        if capture_nonce is not None:
+            result['capture_nonce'] = capture_nonce
         write_json(output / 'manifest.json', result)
         return result
     except Exception as error:
@@ -185,10 +191,15 @@ def host_match(guest_path, extracted, output):
     guard = json.loads(guard_bytes)
     new_output(output)
     try:
+        committed = require_committed(extracted.parent)
+        require(committed['manifest_sha256'] == hashlib.sha256(guest_bytes).hexdigest()
+                and committed['manifest'] == guest,
+                'guest manifest differs from the running-VM commitment')
         require(capture['scope'] == CAPTURE_SCOPE
                 and capture['vm_state_at_final_check'] == 'stopped'
                 and capture['source_image_sha256'] == capture['clone_image_sha256']
                 and capture['guard_receipt_sha256'] == sha256(guard_path)
+                and capture['guest_commit_sha256'] == sha256(extracted.parent / 'COMMITTED.json')
                 and capture['clone_image_sha256'] == host['image_sha256']
                 and capture['extraction_manifest_sha256'] == sha256(manifest_path)
                 and capture['data_volume_uuid'] == host['data_volume_uuid']
@@ -196,16 +207,10 @@ def host_match(guest_path, extracted, output):
                 and capture['clone_size'] == image_path.stat().st_size
                 and sha256(image_path) == capture['clone_image_sha256'],
                 'capture receipt, cloned image and extracted stores differ')
-        guest_at = datetime.datetime.fromisoformat(guest['at_utc'])
-        guard_at = datetime.datetime.fromisoformat(guard['guarded_at_utc'])
         require(guest['scope'] == 'guest stopped-tree content observation; writer exclusion external',
                 'guest stopped-tree scope differs')
         require(guest['spec_sha256'] == capture['store_spec_sha256'],
                 'guest store specification differs from host capture')
-        require(guest_at.tzinfo is not None and guard_at.tzinfo is not None,
-                'guest or host guard timestamp lacks timezone')
-        require(guest_at < guard_at,
-                f'guest capture is not before host guard: guest={guest_at.isoformat()} guard={guard_at.isoformat()}')
         require(set(guest['stores']) == ROLES and set(host['stores']) == ROLES
                 and guest['data_volume_uuid'] == host['data_volume_uuid'],
                 'guest and host store roles or Data volume differ')
@@ -251,6 +256,7 @@ def host_match(guest_path, extracted, output):
                 'sha256': hashlib.sha256(json.dumps(rows, ensure_ascii=False,
                     separators=(',', ':')).encode()).hexdigest()}
         require(guest_path.read_bytes() == guest_bytes
+                and require_committed(extracted.parent) == committed
                 and manifest_path.read_bytes() == host_bytes
                 and capture_path.read_bytes() == capture_bytes
                 and guard_path.read_bytes() == guard_bytes,
@@ -271,9 +277,9 @@ def host_match(guest_path, extracted, output):
 
 
 if __name__ == '__main__':
-    require(len(sys.argv) in (4, 5), 'usage: stopped_tree_match.py capture SPEC OUTPUT | match GUEST EXTRACTED OUTPUT')
-    if sys.argv[1] == 'capture' and len(sys.argv) == 4:
-        guest_capture(sys.argv[2], sys.argv[3])
+    require(len(sys.argv) in (4, 5), 'usage: stopped_tree_match.py capture SPEC OUTPUT [NONCE] | match GUEST EXTRACTED OUTPUT')
+    if sys.argv[1] == 'capture' and len(sys.argv) in (4, 5):
+        guest_capture(sys.argv[2], sys.argv[3], capture_nonce=(sys.argv[4] if len(sys.argv) == 5 else None))
     elif sys.argv[1] == 'match' and len(sys.argv) == 5:
         host_match(sys.argv[2], sys.argv[3], sys.argv[4])
     else:

@@ -138,6 +138,9 @@ class HostReconcileTest(unittest.TestCase):
                 host_vm_preflight.write_record = original
 
     def test_attached_and_other_clone_refuse_then_bootable(self):
+        committed = patch.object(host_vm_guard, 'require_committed')
+        committed.start()
+        self.addCleanup(committed.stop)
         root = pathlib.Path(tempfile.mkdtemp(prefix='openclaw-host-reconcile-')).resolve()
         os.chmod(root, 0o700)
         disk = None

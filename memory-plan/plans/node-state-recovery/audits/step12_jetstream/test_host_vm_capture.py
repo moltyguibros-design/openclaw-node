@@ -18,6 +18,7 @@ from unittest import mock
 import host_vm_capture
 import host_vm_guard
 import stopped_tree_match
+from host_guest_commit import commit
 from stopped_tree_match import guest_capture, host_match
 from host_clone_dispose import cleanup_failed, dispose
 from host_vm_capture import capture, clone_only, publish_capture_record
@@ -39,6 +40,56 @@ def run(*args):
 
 
 class VmstateGateTest(unittest.TestCase):
+    def test_host_commit_refuses_a_vm_already_stopped(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-late-guest-commit-') as temporary:
+            root = pathlib.Path(temporary).resolve()
+            root.chmod(0o700)
+            capture_dir = root / 'capture'
+            capture_dir.mkdir(mode=0o700)
+            (capture_dir / 'before-shutdown').mkdir(mode=0o700)
+            nonce = 'a' * 64
+            vm_uuid = host_vm_capture.FIXTURE_UUID
+            prior = {'state': 'started', 'vm_uuid': vm_uuid,
+                     'host_boot_session': 'boot', 'image_device': 1,
+                     'image_inode': 2, 'image_size': 3, 'vmstate': None}
+            write_record(capture_dir / 'before-shutdown' / 'preflight.json', prior)
+            write_record(capture_dir / 'ARMED.json', {
+                'scope': 'waiting for external guest shutdown; no stop request issued',
+                'capture_nonce': nonce, 'vm_uuid': vm_uuid,
+                'host_boot_session': 'boot', 'image_device': 1, 'image_inode': 2,
+            })
+            spec = root / 'stores.json'
+            spec_data = {'data_volume_uuid': '0' * 36,
+                         'stores': [{'role': role, 'relative_path': role}
+                                    for role in ('standalone', 'member1', 'member2', 'member3')]}
+            write_record(spec, spec_data)
+            claim = root / 'guest.json'
+            write_record(claim, {
+                'scope': 'guest stopped-tree content observation; writer exclusion external',
+                'at_utc': '2020-01-01T00:00:00+00:00',
+                'capture_nonce': nonce,
+                'spec_sha256': hashlib.sha256(spec.read_bytes()).hexdigest(),
+                'data_volume_uuid': spec_data['data_volume_uuid'],
+                'stores': {row['role']: [{'path': 'stream.dat', 'type': 'file',
+                                          'size': 1, 'sha256': '0' * 64}]
+                           for row in spec_data['stores']},
+                'store_paths': {row['role']: str(root / row['relative_path'])
+                                for row in spec_data['stores']},
+                'store_relative_paths': {row['role']: row['relative_path']
+                                         for row in spec_data['stores']},
+            })
+            active = os.open(capture_dir / 'CAPTURE_ACTIVE.lock',
+                             os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
+            fcntl.flock(active, fcntl.LOCK_EX)
+            try:
+                with mock.patch('host_guest_commit.preflight',
+                                return_value=dict(prior, state='stopped')):
+                    with self.assertRaisesRegex(RuntimeError, 'original running VM'):
+                        commit(root / 'host.json', spec, capture_dir, claim)
+            finally:
+                os.close(active)
+            self.assertFalse((capture_dir / 'COMMITTED.json').exists())
+
     @unittest.skipUnless(sys.platform == 'darwin', 'macOS image guard requires st_flags')
     def test_guard_holds_arm_lock_through_source_image_access(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-host-capture-lock-') as temporary:
@@ -101,6 +152,7 @@ class VmstateGateTest(unittest.TestCase):
 
             with mock.patch.object(host_vm_guard, 'preflight', return_value=baseline), \
                     mock.patch.object(host_vm_guard, 'require_active_capture'), \
+                    mock.patch.object(host_vm_guard, 'require_committed'), \
                     mock.patch.object(host_vm_guard, 'change_immutable', side_effect=source_access), \
                     mock.patch.object(host_vm_capture, 'preflight', side_effect=sample):
                 guarding = threading.Thread(target=run_guard)
@@ -267,6 +319,7 @@ class VmstateGateTest(unittest.TestCase):
                     errors.append(error)
 
             with mock.patch.object(host_vm_capture, 'preflight', observed_preflight), \
+                    mock.patch.object(host_vm_capture, 'require_committed'), \
                     mock.patch.object(host_vm_capture, 'guarded_source', return_value='guard-hash'), \
                     mock.patch.object(host_vm_capture, 'clone_only', paused_clone), \
                     mock.patch.object(host_vm_capture.shutil, 'disk_usage',
@@ -442,6 +495,7 @@ class VmstateGateTest(unittest.TestCase):
                 return sample
 
             with mock.patch.object(host_vm_capture, 'preflight', side_effect=observed), \
+                    mock.patch.object(host_vm_capture, 'require_committed'), \
                     mock.patch.object(host_vm_capture.time, 'sleep'), \
                     mock.patch.object(host_vm_capture, 'guarded_source',
                                       return_value='owned-guard'), \
@@ -501,9 +555,40 @@ class VmstateGateTest(unittest.TestCase):
             stopped = dict(before, state='stopped', holders_consistent=True)
             output = root / 'capture'
             with mock.patch('host_vm_capture.preflight', side_effect=[before, stopped]), \
+                    mock.patch.object(host_vm_capture, 'require_committed'), \
                     mock.patch('host_vm_capture.clone_only') as clone:
                 with self.assertRaisesRegex(RuntimeError, 'completed image guard'):
                     capture(host_spec, store_spec, output, 1, fixture=True)
+            clone.assert_not_called()
+            self.assertTrue((output / 'FAILED.json').exists())
+            self.assertFalse((output / 'CAPTURE.json').exists())
+
+    def test_stopped_vm_before_guest_commit_refuses_before_clone(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-no-guest-commit-') as temporary:
+            root = pathlib.Path(temporary).resolve()
+            root.chmod(0o700)
+            host = root / 'host.json'
+            write_record(host, {
+                'package': str(root / 'Owned.utm'), 'name': 'Owned',
+                'uuid': host_vm_capture.FIXTURE_UUID,
+                'image_name': '00000000-0000-0000-0000-000000000001.img',
+                'config_sha256': '0' * 64, 'utmctl': '/tmp/unused',
+                'utmctl_sha256': '0' * 64,
+            })
+            stores = root / 'stores.json'
+            write_record(stores, {
+                'data_volume_uuid': '0' * 36,
+                'stores': [{'role': role, 'relative_path': role}
+                           for role in ('standalone', 'member1', 'member2', 'member3')],
+            })
+            before = {'state': 'started', 'host_boot_session': 'boot',
+                      'image_device': 1, 'image_inode': 2, 'image_size': 3,
+                      'vmstate': None}
+            output = root / 'capture'
+            with mock.patch.object(host_vm_capture, 'preflight', side_effect=[before, dict(before, state='stopped')]), \
+                    mock.patch.object(host_vm_capture, 'clone_only') as clone:
+                with self.assertRaisesRegex(RuntimeError, 'commitment input is missing'):
+                    capture(host, stores, output, 1, fixture=True)
             clone.assert_not_called()
             self.assertTrue((output / 'FAILED.json').exists())
             self.assertFalse((output / 'CAPTURE.json').exists())
@@ -650,6 +735,19 @@ class HostCaptureTest(unittest.TestCase):
                 raise AssertionError(worker.stderr.read().decode())
             time.sleep(0.1)
         self.assertTrue((output / 'ARMED.json').exists())
+        nonce = json.loads((output / 'ARMED.json').read_text())['capture_nonce']
+        stale = json.loads((guest_output / 'manifest.json').read_text())
+        stale['capture_nonce'] = '0' * 64 if nonce != '0' * 64 else '1' * 64
+        stale_path = self.root / 'stale-arm-claim.json'
+        write_record(stale_path, stale)
+        with self.assertRaisesRegex(RuntimeError, 'does not bind this arm'):
+            commit(spec, store_spec, output, stale_path)
+        self.assertFalse((output / 'COMMITTED.json').exists())
+        observed = json.loads((guest_output / 'manifest.json').read_text())
+        observed['capture_nonce'] = nonce
+        (guest_output / 'manifest.json').unlink()
+        write_record(guest_output / 'manifest.json', observed)
+        commit(spec, store_spec, output, guest_output / 'manifest.json')
         with (output / 'CAPTURE_ACTIVE.lock').open('rb') as active:
             with self.assertRaises(BlockingIOError):
                 fcntl.flock(active, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -673,6 +771,8 @@ class HostCaptureTest(unittest.TestCase):
         self.assertEqual(result['vmstate_at_arm'], result['vmstate_at_final_check'])
         self.assertEqual(result['guard_receipt_sha256'],
                          hashlib.sha256((output / 'GUARD.json').read_bytes()).hexdigest())
+        self.assertEqual(result['guest_commit_sha256'],
+                         hashlib.sha256((output / 'COMMITTED.json').read_bytes()).hexdigest())
         self.assertEqual(result['store_spec_sha256'],
                          hashlib.sha256(store_spec.read_bytes()).hexdigest())
         self.assertEqual(result['vmstate_at_arm']['size'], len(b'old suspend state'))
@@ -737,11 +837,26 @@ class HostCaptureTest(unittest.TestCase):
             finally:
                 input_path.write_bytes(original_bytes)
         swapped_match = self.root / 'swapped-guest-match'
-        with self.assertRaisesRegex(RuntimeError, 'guest store specification differs'):
+        with self.assertRaisesRegex(RuntimeError, 'running-VM commitment'):
             host_match(swapped_guest / 'manifest.json', output / 'extracted-stores', swapped_match)
         self.assertTrue((swapped_match / 'FAILED.json').exists())
         self.assertFalse((swapped_match / 'MATCH.json').exists())
+        def match_claimed(candidate, destination):
+            data = candidate.read_bytes()
+            claim = {'manifest_sha256': hashlib.sha256(data).hexdigest(),
+                     'manifest': json.loads(data)}
+            with mock.patch.object(stopped_tree_match, 'require_committed', return_value=claim):
+                return host_match(candidate, output / 'extracted-stores', destination)
+        with self.assertRaisesRegex(RuntimeError, 'guest store specification differs'):
+            match_claimed(swapped_guest / 'manifest.json', self.root / 'swapped-spec-check')
         original_guest = json.loads((guest_output / 'manifest.json').read_text())
+        regenerated = json.loads(json.dumps(original_guest))
+        regenerated['stores']['member2'][0]['sha256'] = '0' * 64
+        regenerated_path = self.root / 'post-commit-regenerated.json'
+        write_record(regenerated_path, regenerated)
+        with self.assertRaisesRegex(RuntimeError, 'running-VM commitment'):
+            host_match(regenerated_path, output / 'extracted-stores',
+                       self.root / 'post-commit-regenerated-match')
         relabeled_guest = json.loads(json.dumps(original_guest))
         relabeled_guest['store_paths']['member2'], relabeled_guest['store_paths']['member3'] = (
             relabeled_guest['store_paths']['member3'], relabeled_guest['store_paths']['member2'])
@@ -749,23 +864,34 @@ class HostCaptureTest(unittest.TestCase):
         write_record(relabeled_guest_path, relabeled_guest)
         relabeled_match = self.root / 'relabeled-guest-match'
         with self.assertRaisesRegex(RuntimeError, 'guest store role path differs'):
-            host_match(relabeled_guest_path, output / 'extracted-stores', relabeled_match)
+            match_claimed(relabeled_guest_path, relabeled_match)
         self.assertFalse((relabeled_match / 'MATCH.json').exists())
         for label, changes, refusal in (
                 ('wrong-guest-scope', {'scope': 'host-generated content observation'},
                  'guest stopped-tree scope differs'),
                 ('wrong-guest-spec', {'spec_sha256': 'f' * 64},
-                 'guest store specification differs'),
-                ('late-guest-capture', {'at_utc': json.loads((output / 'GUARD.json').read_text())['guarded_at_utc']},
-                 'guest capture is not before host guard')):
+                 'guest store specification differs')):
             candidate = self.root / f'{label}.json'
             write_record(candidate, dict(original_guest, **changes))
             refused = self.root / f'{label}-match'
             with self.assertRaisesRegex(RuntimeError, refusal):
-                host_match(candidate, output / 'extracted-stores', refused)
+                match_claimed(candidate, refused)
             self.assertTrue((refused / 'FAILED.json').exists())
             self.assertFalse((refused / 'MATCH.json').exists())
+        for name, moment in (('old', '2020-01-01T00:00:00+00:00'),
+                             ('ahead', '2030-01-01T00:00:00+00:00')):
+            candidate = self.root / f'{name}-clock.json'
+            write_record(candidate, dict(original_guest, at_utc=moment))
+            result = match_claimed(candidate, self.root / f'{name}-clock-match')
+            self.assertEqual(set(result['masters']), {'standalone', 'member1', 'member2', 'member3'})
         guard_receipt = output / 'GUARD.json'
+        committed_path = output / 'COMMITTED.json'
+        committed_bytes = committed_path.read_bytes()
+        committed_path.write_bytes(committed_bytes + b' ')
+        with self.assertRaisesRegex(RuntimeError, 'capture receipt'):
+            host_match(guest_output / 'manifest.json', output / 'extracted-stores',
+                       self.root / 'changed-guest-commit')
+        committed_path.write_bytes(committed_bytes)
         original_guard_receipt = guard_receipt.read_bytes()
         guard_receipt.write_bytes(original_guard_receipt + b' ')
         with self.assertRaisesRegex(RuntimeError, 'capture receipt'):
@@ -891,6 +1017,14 @@ class HostCaptureTest(unittest.TestCase):
                 raise AssertionError(failed_worker.stderr.read().decode())
             time.sleep(0.1)
         self.assertTrue((failed_capture / 'ARMED.json').exists())
+        failed_nonce = json.loads((failed_capture / 'ARMED.json').read_text())['capture_nonce']
+        wrong_claim = dict(original_guest,
+                           capture_nonce=failed_nonce,
+                           spec_sha256=hashlib.sha256(wrong_store_spec.read_bytes()).hexdigest(),
+                           data_volume_uuid='00000000-0000-0000-0000-000000000000')
+        wrong_claim_path = self.root / 'wrong-volume-claim.json'
+        write_record(wrong_claim_path, wrong_claim)
+        commit(spec, wrong_store_spec, failed_capture, wrong_claim_path)
         third_holder.terminate()
         third_holder.wait(timeout=5)
         state.write_text('stopped\n')

@@ -12,6 +12,7 @@ import uuid
 from host_clone_dispose import private_record
 from host_image_immutable import change_immutable
 from host_vm_capture import FIXTURE_UUID, HOST_SPEC_FIELDS, fsync_parent, pinned_spec
+from host_guest_commit import require_committed
 from host_vm_preflight import owned_directory, preflight, require, write_record
 
 
@@ -81,6 +82,7 @@ def guard_locked(host_spec, capture_dir):
                     ('FAILED.json', 'CAPTURE.json')),
             'capture attempt already ended')
     require_active_capture(capture_dir)
+    require_committed(capture_dir)
     armed = private_record(capture_dir / 'ARMED.json')
     initial = private_record(capture_dir / 'before-shutdown/preflight.json')
     require(armed['scope'] == 'waiting for external guest shutdown; no stop request issued'
