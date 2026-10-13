@@ -38,6 +38,44 @@ def run(*args):
 
 
 class VmstateGateTest(unittest.TestCase):
+    def test_guard_lock_delays_capture_status_sample(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-host-guard-sample-') as temporary:
+            root = pathlib.Path(temporary).resolve()
+            armed = root / 'ARMED.json'
+            armed.write_text('{}')
+            holder = os.open(armed, os.O_RDONLY)
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            sampled = threading.Event()
+            finished = threading.Event()
+            errors = []
+
+            def observe(*args, **kwargs):
+                sampled.set()
+                return {'state': 'stopped'}
+
+            def worker():
+                try:
+                    host_vm_capture.capture_preflight(root / 'host.json', root,
+                                                      root / 'sample')
+                except Exception as error:
+                    errors.append(error)
+                finally:
+                    finished.set()
+
+            thread = threading.Thread(target=worker)
+            try:
+                with mock.patch.object(host_vm_capture, 'preflight', side_effect=observe):
+                    thread.start()
+                    self.assertFalse(sampled.wait(0.2))
+                    fcntl.flock(holder, fcntl.LOCK_UN)
+                    self.assertTrue(sampled.wait(5))
+                    self.assertTrue(finished.wait(5))
+                self.assertFalse(errors)
+            finally:
+                fcntl.flock(holder, fcntl.LOCK_UN)
+                os.close(holder)
+                thread.join(timeout=5)
+
     def test_guest_capture_refuses_store_spec_rewrite_during_walk(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-guest-spec-rewrite-') as temporary:
             root = pathlib.Path(temporary).resolve()

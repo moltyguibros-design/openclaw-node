@@ -79,6 +79,12 @@ def same_host_image(before, after):
             and after['vmstate'] == before['vmstate'])
 
 
+def capture_preflight(host_spec, capture_dir, destination, **options):
+    with (capture_dir / 'ARMED.json').open('rb') as armed:
+        fcntl.flock(armed, fcntl.LOCK_SH)
+        return preflight(host_spec, destination, **options)
+
+
 def guarded_source(output, initial, observed):
     intent_path = output / 'GUARD_INTENT.json'
     receipt_path = output / 'GUARD.json'
@@ -161,8 +167,9 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         clean_stopped = False
         guard_observed = False
         while time.monotonic() < deadline:
-            observation = preflight(host_spec_path, output / f'power-{sequence:04d}',
-                                    allow_transition=True)
+            observation = capture_preflight(host_spec_path, output,
+                                            output / f'power-{sequence:04d}',
+                                            allow_transition=True)
             require(same_host_image(first, observation),
                     'host boot, VM image or vmstate identity changed while waiting')
             if observation['state'] == 'stopped':
@@ -186,7 +193,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         require(guard_observed and observation is not None and observation['state'] == 'stopped'
                 and observation['holders_consistent'] and os.path.lexists(output / 'GUARD.json'),
                 'VM did not stop with a completed image guard before the capture deadline')
-        observation = preflight(host_spec_path, output / 'before-clone')
+        observation = capture_preflight(host_spec_path, output, output / 'before-clone')
         require(observation['state'] == 'stopped' and observation['holders_consistent']
                 and same_host_image(first, observation),
                 'VM restarted or source identity changed before clone')
@@ -206,7 +213,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         with open(clone, 'rb') as handle:
             os.fsync(handle.fileno())
         fsync_parent(output)
-        after_clone = preflight(host_spec_path, output / 'after-clone')
+        after_clone = capture_preflight(host_spec_path, output, output / 'after-clone')
         require(after_clone['state'] == 'stopped' and same_host_image(first, after_clone),
                 'VM restarted or host, image or vmstate identity changed during clone')
         require(guarded_source(output, first, after_clone) == guard_sha,
@@ -216,7 +223,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         source_sha = file_hash(source)
         clone_sha = file_hash(clone)
         require(source_sha == clone_sha, 'source and clone hashes differ')
-        after_hash = preflight(host_spec_path, output / 'after-hash')
+        after_hash = capture_preflight(host_spec_path, output, output / 'after-hash')
         require(after_hash['state'] == 'stopped' and same_host_image(first, after_hash),
                 'VM restarted or host, image or vmstate identity changed during image hashing')
         require(guarded_source(output, first, after_hash) == guard_sha,
@@ -225,7 +232,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         spec_out = output / 'extraction-spec.json'
         write_record(spec_out, extraction_spec)
         extracted = extract(clone, spec_out, output / 'extracted-stores')
-        after_extract = preflight(host_spec_path, output / 'after-extract')
+        after_extract = capture_preflight(host_spec_path, output, output / 'after-extract')
         require(after_extract['state'] == 'stopped' and same_host_image(first, after_extract)
                 and file_hash(source) == source_sha and file_hash(clone) == clone_sha,
                 'VM restarted or host, image or vmstate changed during extraction')
