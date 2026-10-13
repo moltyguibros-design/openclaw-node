@@ -3895,3 +3895,26 @@ used for destructive rehearsal until the operator designates that exact
 machine disposable. Running any second macOS guest on the production host
 needs an operator disk-and-memory budget and the production-VM checks, even
 if that guest already exists.
+
+## D176 — Validate each stop receipt's hold certificate before root transfer (2026-10-13 07:07 EDT)
+
+Claude's read-only adversarial review of `82167507` confirmed that D171's R3
+and R4 root negatives are decisive, then found a separate evidence-continuity
+gap. Root transfer checked the original and transfer hold certificates fully,
+but checked each listener, non-NATS and NATS stop receipt's `execution_hold`
+only by session ID. A forged receipt with the correct session and
+`verified: false` passed the root reader. The user-side non-NATS fence also
+accepted it. `Journal.mutate()` refused a false live certificate, but no owned
+negative pinned that sole check.
+
+Root admission and the session-bound user fence now require every stop
+receipt's certificate to retain `verified: true`, `restoration_only: false`,
+the kernel file/path watch flags and the original session. Direct stop mutation
+checks the same live certificate before persisting the receipt. Owned tests
+tamper each receipt class and each flag; a separate user-side negative pins
+refusal of a matching-session but unverified live certificate. Synthetic
+sessionless journal fixtures remain usable for older isolated controls; root
+transfer still rejects them. These are structural evidence checks, not a
+physical writer boundary or permission to run the production-disabled root
+transfer. B5 and step 1.2 remain open; no production VM, service, store or
+topology changed, and all four NATS histories remain separate.

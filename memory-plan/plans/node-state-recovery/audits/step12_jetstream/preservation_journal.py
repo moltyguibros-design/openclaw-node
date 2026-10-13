@@ -35,6 +35,16 @@ class CommittedRefusal(Exception):
     pass
 
 
+def valid_execution_hold(certificate, session):
+    return (isinstance(certificate, dict)
+            and certificate.get('verified') is True
+            and certificate.get('restoration_only') is False
+            and certificate.get('kernel_file_watch') is True
+            and isinstance(certificate.get('path_watch'), dict)
+            and certificate['path_watch'].get('kernel_path_watch') is True
+            and certificate.get('watch_session_id') == session)
+
+
 def require_no_nats_marker():
     try:
         NATS_WRITER_MARKER.lstat()
@@ -916,8 +926,8 @@ class Journal:
                     and row.get('intent') == intents[0]['sequence']
                     and row.get('unit') == unit and row.get('action') == 'disable-and-unload'
                     and self.full_node_stop_proven(unit, row.get('evidence'))
-                    and (not session or isinstance(row['evidence'].get('execution_hold'), dict)
-                         and row['evidence']['execution_hold'].get('watch_session_id') == session)
+                    and (not session or valid_execution_hold(
+                        row['evidence'].get('execution_hold'), session))
                     for row in self.records):
                 return False
         return True
@@ -1057,7 +1067,7 @@ class Journal:
                                 and row.get('unit') == 'scheduler-heartbeat'
                                 and row.get('action') == 'close-execution-hold')
                 if original.get('watch_session_id'):
-                    require(isinstance(certificate, dict),
+                    require(valid_execution_hold(certificate, original['watch_session_id']),
                             'stop lost the original execution hold session')
                 if isinstance(certificate, dict):
                     require(certificate.get('verified') is True

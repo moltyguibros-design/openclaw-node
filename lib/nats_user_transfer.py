@@ -34,6 +34,17 @@ def require(condition, message):
         raise Refused(message)
 
 
+def valid_stop_hold(proof, session):
+    certificate = proof.get('execution_hold') if isinstance(proof, dict) else None
+    return (isinstance(certificate, dict)
+            and certificate.get('verified') is True
+            and certificate.get('restoration_only') is False
+            and certificate.get('kernel_file_watch') is True
+            and isinstance(certificate.get('path_watch'), dict)
+            and certificate['path_watch'].get('kernel_path_watch') is True
+            and certificate.get('watch_session_id') == session)
+
+
 def directory(path, uid):
     info = path.lstat()
     require(stat.S_ISDIR(info.st_mode) and info.st_uid == uid
@@ -405,8 +416,7 @@ class UserTransfer:
                 and stop['bootout'].get('returncode') == 0
                 and stop['bootout'].get('timed_out') is False
                 and stop.get('termination') in ({'signal': 15}, {'exit': 0})
-                and isinstance(stop.get('execution_hold'), dict)
-                and stop['execution_hold'].get('watch_session_id') == original['watch_session_id']
+                and valid_stop_hold(stop, original['watch_session_id'])
                 and isinstance(stop.get('entrypoint_loaded'), dict)
                 and set(stop['entrypoint_loaded']) == {'gui', 'user', 'system'}
                 and all('ai.openclaw.mesh-deploy-listener' not in labels
@@ -474,8 +484,7 @@ class UserTransfer:
                     and proof['spawn_evidence'].get('coverage_complete') is True
                     and proof['spawn_evidence'].get('spawns') == [])
             require((managed or idle)
-                    and isinstance(proof.get('execution_hold'), dict)
-                    and proof['execution_hold'].get('watch_session_id') == original['watch_session_id']
+                    and valid_stop_hold(proof, original['watch_session_id'])
                     and isinstance(proof.get('entrypoint_loaded'), dict)
                     and set(proof['entrypoint_loaded']) == {'gui', 'user', 'system'}
                     and all(isinstance(items, list) and label not in items
@@ -527,9 +536,7 @@ class UserTransfer:
                             and row['evidence']['bootout'].get('returncode') == 0
                             and row['evidence']['bootout'].get('timed_out') is False
                             and row['evidence'].get('termination') in ({'signal': 15}, {'exit': 0})
-                            and isinstance(row['evidence'].get('execution_hold'), dict)
-                            and row['evidence']['execution_hold'].get('watch_session_id') ==
-                            original['watch_session_id']
+                            and valid_stop_hold(row['evidence'], original['watch_session_id'])
                             for row in self.records[:-1]),
                         'user transfer NATS stop receipt is absent: ' + unit)
         previous_overrides = baseline['entrypoint_inventory']['overrides']

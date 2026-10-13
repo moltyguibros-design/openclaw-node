@@ -53,7 +53,7 @@ class UserTransferTest(unittest.TestCase):
     def prepared(self, extra_event=None, boot='boot-a', missing_listener=False,
                  late_listener=False, bypass_non_nats=False, late_non_nats=None,
                  stale_stop_claim=False, missing_stop_certificate=False,
-                 different_live_session=False):
+                 different_live_session=False, unverified_live_certificate=False):
         fixture = fixture_module.JournalTests('test_nats_transfer_freezes_user_journal_before_root_outcome')
         fixture.setUp()
         self.addCleanup(fixture.tearDown)
@@ -107,6 +107,11 @@ class UserTransferTest(unittest.TestCase):
             if different_live_session:
                 hold.check_forward = lambda: {**certificate,
                                               'watch_session_id': 'stale-session'}
+                journal.mutate('observer', 'disable-and-unload',
+                    lambda: fixture_module.fence_unit(loaded, 'observer'),
+                    lambda: fixture_module.timer_stop_evidence('observer'), hold=hold)
+            if unverified_live_certificate:
+                hold.check_forward = lambda: {**certificate, 'verified': False}
                 journal.mutate('observer', 'disable-and-unload',
                     lambda: fixture_module.fence_unit(loaded, 'observer'),
                     lambda: fixture_module.timer_stop_evidence('observer'), hold=hold)
@@ -227,6 +232,11 @@ class UserTransferTest(unittest.TestCase):
                                     'stop lost the original execution hold session'):
             self.prepared(different_live_session=True)
 
+    def test_user_stop_rejects_an_unverified_live_hold_before_nats(self):
+        with self.assertRaisesRegex(fixture_module.Refused,
+                                    'stop lost the original execution hold session'):
+            self.prepared(unverified_live_certificate=True)
+
     def test_journal_binds_direct_stop_receipts_to_original_hold(self):
         _, journal, _, _ = self.prepared()
         stop_rows = [row for row in journal.records if row['event'] == 'verified'
@@ -247,6 +257,70 @@ class UserTransferTest(unittest.TestCase):
         observer['evidence'] = {**observer['evidence'],
                                 'execution_hold': {'watch_session_id': 'stale-session'}}
         self.assertFalse(journal.non_nats_fenced(entrypoints))
+
+    def test_non_nats_fence_rejects_an_unverified_stop_hold(self):
+        _, journal, _, _ = self.prepared()
+        last = next(row for row in reversed(journal.records)
+                    if row['event'] == 'verified' and row.get('unit') == 'nats-3')
+        entrypoints = {'loaded': last['evidence']['entrypoint_loaded'],
+                       'overrides': last['evidence']['entrypoint_overrides']}
+        self.assertTrue(journal.non_nats_fenced(entrypoints))
+        observer = next(row for row in journal.records if row['event'] == 'verified'
+                        and row.get('unit') == 'observer')
+        observer['evidence']['execution_hold'] = {
+            **observer['evidence']['execution_hold'], 'verified': False}
+        self.assertFalse(journal.non_nats_fenced(entrypoints))
+
+    def test_root_refuses_unverified_stop_hold_for_each_role(self):
+        fixture, journal, transaction, _ = self.prepared()
+        for unit, message in (
+            ('mesh-deploy-listener', 'user transfer listener stop proof differs'),
+            ('observer', 'user transfer lacks complete non-NATS stop fence: observer'),
+            ('nats', 'user transfer NATS stop receipt is absent: nats'),
+        ):
+            for field, value in (
+                ('verified', False),
+                ('restoration_only', True),
+                ('kernel_file_watch', False),
+                ('path_watch', {'kernel_path_watch': False}),
+            ):
+                with self.subTest(unit=unit, field=field):
+                    reader = object.__new__(module.UserTransfer)
+                    reader.records = copy.deepcopy(journal.records)
+                    reader.transaction = transaction
+                    reader.prior_boot = False
+                    reader.decline_only = False
+                    reader.node_lock = fixture.node_lock
+                    reader.journal_root = fixture.root
+                    reader.uid = os.getuid()
+                    receipt = next(row for row in reader.records if row['event'] == 'verified'
+                                   and row.get('unit') == unit
+                                   and row.get('action') == 'disable-and-unload')
+                    receipt['evidence']['execution_hold'] = {
+                        **receipt['evidence']['execution_hold'], field: value}
+                    with patch.object(module, 'boot_identity', return_value='boot-a'):
+                        with self.assertRaisesRegex(module.Refused, message):
+                            reader._validate()
+
+    def test_root_refuses_rechained_unverified_stop_hold(self):
+        fixture, journal, transaction, _ = self.prepared()
+        journal.close()
+        rows = copy.deepcopy(journal.records)
+        observer = next(row for row in rows if row['event'] == 'verified'
+                        and row.get('unit') == 'observer')
+        observer['evidence']['execution_hold'] = {
+            **observer['evidence']['execution_hold'], 'verified': False}
+        for index, row in enumerate(rows):
+            row['previous'] = rows[index - 1]['sha256'] if index else None
+            row['sha256'] = hashlib.sha256(module.encoded(
+                {key: value for key, value in row.items() if key != 'sha256'})).hexdigest()
+            path = fixture.root / f'{index:06d}.json'
+            path.write_bytes(module.encoded(row))
+            path.chmod(0o600)
+        with patch.object(module, 'boot_identity', return_value='boot-a'):
+            with self.assertRaisesRegex(module.Refused,
+                                        'user transfer lacks complete non-NATS stop fence: observer'):
+                module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
     def test_root_refuses_tampered_non_nats_stop_proofs(self):
         _, journal, transaction, _ = self.prepared()
