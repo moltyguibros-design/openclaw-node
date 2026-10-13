@@ -250,8 +250,8 @@ class UserTransferTest(unittest.TestCase):
 
     def test_root_refuses_tampered_non_nats_stop_proofs(self):
         _, journal, transaction, _ = self.prepared()
-        for name in ('wrong-hold', 'wrong-label', 'idle-prior', 'missing-override',
-                     'later-loaded-snapshot', 'duplicate-stop-intent'):
+        for name in ('wrong-hold', 'wrong-label', 'known-broken-idle',
+                     'missing-override', 'later-loaded-snapshot'):
             with self.subTest(name=name):
                 reader = object.__new__(module.UserTransfer)
                 reader.records = copy.deepcopy(journal.records)
@@ -260,16 +260,20 @@ class UserTransferTest(unittest.TestCase):
                 reader.decline_only = False
                 gateway = next(row for row in reader.records if row['event'] == 'verified'
                                and row.get('unit') == 'gateway')
-                observer = next(row for row in reader.records if row['event'] == 'verified'
-                                and row.get('unit') == 'observer')
                 gateway['evidence'] = copy.deepcopy(gateway['evidence'])
-                observer['evidence'] = copy.deepcopy(observer['evidence'])
                 if name == 'wrong-hold':
                     gateway['evidence']['execution_hold']['watch_session_id'] = 'stale-session'
                 elif name == 'wrong-label':
                     gateway['evidence']['unit_label'] = 'ai.openclaw.mesh-bridge'
-                elif name == 'idle-prior':
-                    observer['evidence']['prior']['running'] = True
+                elif name == 'known-broken-idle':
+                    broken = next(row for row in reader.records if row['event'] == 'verified'
+                                  and row.get('unit') == 'mesh-tool-discord')
+                    prior_proof = broken['evidence']
+                    broken['evidence'] = {
+                        **fixture_module.timer_stop_evidence('mesh-tool-discord'),
+                        'execution_hold': prior_proof['execution_hold'],
+                        'entrypoint_loaded': prior_proof['entrypoint_loaded'],
+                        'entrypoint_overrides': prior_proof['entrypoint_overrides']}
                 elif name == 'missing-override':
                     gateway['evidence']['entrypoint_overrides']['gui']['ai.openclaw.gateway'] = False
                 elif name == 'later-loaded-snapshot':
@@ -277,14 +281,36 @@ class UserTransferTest(unittest.TestCase):
                                 and row.get('unit') == 'nats')
                     nats['evidence'] = copy.deepcopy(nats['evidence'])
                     nats['evidence']['entrypoint_loaded']['gui'].append('ai.openclaw.observer')
-                else:
-                    mesh_intent = next(row for row in reader.records if row['event'] == 'intent'
-                                       and row.get('unit') == 'mesh-agent')
-                    mesh_intent['unit'] = 'gateway'
                 with patch.object(module, 'boot_identity', return_value='boot-a'):
                     with self.assertRaisesRegex(module.Refused,
                                                 'user transfer lacks complete non-NATS stop fence'):
                         reader._validate()
+
+    def test_root_refuses_duplicate_bound_gateway_stop(self):
+        _, journal, transaction, _ = self.prepared()
+        reader = object.__new__(module.UserTransfer)
+        reader.records = copy.deepcopy(journal.records)
+        reader.transaction = transaction
+        reader.prior_boot = False
+        reader.decline_only = False
+        original_intent = next(row for row in reader.records if row['event'] == 'intent'
+                               and row.get('unit') == 'gateway')
+        original_receipt = next(row for row in reader.records if row['event'] == 'verified'
+                                and row.get('unit') == 'gateway')
+        insert_at = original_receipt['sequence'] + 1
+        duplicate_intent = copy.deepcopy(original_intent)
+        duplicate_receipt = copy.deepcopy(original_receipt)
+        reader.records[insert_at:insert_at] = [duplicate_intent, duplicate_receipt]
+        for index, row in enumerate(reader.records):
+            if (row is not duplicate_intent and row is not duplicate_receipt
+                    and isinstance(row.get('intent'), int) and row['intent'] >= insert_at):
+                row['intent'] += 2
+            row['sequence'] = index
+        duplicate_receipt['intent'] = insert_at
+        with patch.object(module, 'boot_identity', return_value='boot-a'):
+            with self.assertRaisesRegex(module.Refused,
+                                        'user transfer lacks complete non-NATS stop fence: gateway'):
+                reader._validate()
 
     def test_root_refuses_nats_intent_before_listener_stop_proof(self):
         fixture, journal, transaction, _ = self.prepared()
