@@ -304,3 +304,14 @@ owner remains held. The three production NATS PIDs stayed unchanged. This is
 online rollback evidence only: the member-1 master, three serving cold masters,
 common no-writer interval and full-node recovery remain unaccepted. See
 `audits/step12_jetstream/ONLINE_ARCHIVE_REFRESH_20261011.json`.
+
+2026-10-12 20:30 EDT — A host-side disposable Apple-backend UTM VM with a
+separate ASIF disk started and stopped normally. With `UF_IMMUTABLE` on that
+stopped image, UTM refused to start it and remained stopped; after the flag
+was cleared on the same inode, it started and stopped normally. The production
+`moltMacOS` VM stayed started and its distinct disk was untouched. The refused
+`utmctl start` still returned process exit code zero, so a boot controller
+must inspect the resulting UTM state and error. B2's disposable rehearsal is
+complete; the B5 controller and its owned tests, full-node hold, four-store
+capture and real-history acceptance remain open. See
+`audits/step12_jetstream/B2_UTM_GUARD_REHEARSAL_20261012.json`.
