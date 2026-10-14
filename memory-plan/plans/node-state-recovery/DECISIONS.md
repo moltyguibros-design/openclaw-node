@@ -3975,3 +3975,9 @@ expected refusals. Sessionless synthetic fixtures keep their prior behavior;
 root still rejects such journals. This is structural evidence continuity,
 not physical writer exclusion, and B5/step 1.2 remain open. No production
 VM, service, NATS store or topology changed; four histories remain separate.
+
+## D180 — Classify an undetermined managed kickstart (2026-10-13)
+
+Exact-head macOS CI at 69970bb6 timed out a launchctl kickstart in an owned restoration test. The cause remains undetermined. Killing the client does not establish whether launchd applied the action. The managed kickstart now always raises UndeterminedLaunchdAction after a command timeout, with the original timeout budget and one bounded one-second status observation, or only the observation error type. It never accepts or retries based on that sample. Precondition timeouts and nonzero command exits keep their original classification.
+
+Five direct tests and a checksum-verified Claude fixture run against the actual local diff pin classification, durable journal propagation, closed gate/unresolved receipt, forwarded budgets and fresh-observation retry without another kickstart. Claude found no defect in the described revision; review of the published head and exact-head CI remain required. This is diagnostic evidence only: baseline already failed closed; the real launchd cause and B5 checkpoint/abort/reboot work are not resolved. D64 is unchanged, four histories stay separate, and no production state changed.

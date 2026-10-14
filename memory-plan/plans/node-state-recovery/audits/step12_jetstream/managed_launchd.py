@@ -18,6 +18,10 @@ EXIT_FLAGS = 0x84000000
 CHANGE_FLAGS = 0x60000000
 
 
+class UndeterminedLaunchdAction(Exception):
+    pass
+
+
 def command(argv, timeout=10):
     result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     require(result.returncode == 0, 'inspection or managed action failed: ' + pathlib.Path(argv[0]).name)
@@ -177,9 +181,9 @@ class Launchd:
         self.target = 'gui/' + str(os.getuid()) + '/' + label
         self.plist = pathlib.Path(plist)
 
-    def status(self, domain='gui'):
+    def status(self, domain='gui', *, timeout=10):
         target = domain + '/' + str(os.getuid()) + '/' + self.label
-        result = subprocess.run(['/bin/launchctl', 'print', target], capture_output=True, text=True, timeout=10)
+        result = subprocess.run(['/bin/launchctl', 'print', target], capture_output=True, text=True, timeout=timeout)
         if result.returncode:
             require(result.returncode == 113 and 'Could not find service' in result.stderr,
                     'managed unit inspection failed')
@@ -257,7 +261,17 @@ class Launchd:
     def kickstart(self):
         require(self.status()['loaded'] and not self.status()['running'], 'refusing to restart an existing owner')
         require(not self.disabled(), 'refusing to kickstart a disabled managed unit')
-        command(['/bin/launchctl', 'kickstart', self.target])
+        try:
+            command(['/bin/launchctl', 'kickstart', self.target])
+        except subprocess.TimeoutExpired as error:
+            try:
+                observed = self.status(timeout=1)
+                detail = 'loaded={}, running={}, pid={}'.format(
+                    observed['loaded'], observed['running'], observed['pid'])
+            except Exception as inspection:
+                detail = 'observation unavailable: ' + type(inspection).__name__
+            raise UndeterminedLaunchdAction(
+                f'kickstart timed out after {error.timeout}s; effect undetermined; observed after timeout: ' + detail) from error
 
     def disabled(self):
         result = command(['/bin/launchctl', 'print-disabled', 'gui/' + str(os.getuid())])
