@@ -99,6 +99,7 @@ jobs:
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_managed_launchd.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_timeout.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_applied_timeout.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_nats_identity.py
           NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_cluster.py
       - name: Root unit tests
         # npm test (not bare node --test): the pretest hook builds the
@@ -185,6 +186,7 @@ jobs:
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_journal_hold.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_timeout.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_applied_timeout.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_nats_identity.py
           PYTHONPATH="$PWD/memory-plan/plans/node-state-recovery/audits/step12_jetstream" /usr/bin/python3 -m unittest -q test_restore_only
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_disabled.py
           OPENCLAW_CI_FULL_NODE_LISTENER_FIXTURE=1 /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_managed_launchd.py

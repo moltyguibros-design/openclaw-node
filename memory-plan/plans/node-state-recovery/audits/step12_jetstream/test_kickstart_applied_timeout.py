@@ -14,6 +14,7 @@ import pathlib
 import plistlib
 import secrets
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -33,6 +34,84 @@ from preservation_journal import UNITS, static_identity  # noqa: E402
 SOURCE = HERE.parents[4] / 'workspace-bin/service_gate.py'
 REAL_RUN = subprocess.run
 PREFIX = 'kickstart timed out after 10s; effect undetermined; observed after timeout: '
+READY_SECONDS = 10
+# Child prelude: isolated interpreter, owned import path, phase marks, and an on-demand stack dump.
+PRELUDE = '''import faulthandler, signal, sys, time
+faulthandler.register(signal.SIGUSR1, all_threads=True)
+START = time.monotonic()
+def phase(name):
+    print('%s %.3f' % (name, time.monotonic() - START), flush=True)
+sys.path.insert(0, sys.argv[1])
+phase('started')
+'''
+# test_restore_only.interrupt('after-receipt'): published closed hold, controller then killed.
+CONTROLLER = '''import importlib.util, pathlib
+from preservation_journal import Journal
+from journal_hold import JournaledHold, ANCHOR
+phase('imported')
+root, gate_root, lock, ready, source = map(pathlib.Path, sys.argv[2:7])
+spec = importlib.util.spec_from_file_location('gate', source)
+gate_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gate_module)
+with Journal(root, node_lock=lock) as journal:
+    phase('journal')
+    with gate_module.Gate(gate_root, journal.prior[ANCHOR]['execution_hold']['pins']) as gate:
+        phase('gate')
+        hold = JournaledHold(journal, gate, lambda: {'verified': False})
+        fields = hold._fields(False)
+        intent = journal.append('intent', unit=ANCHOR, action='owned-close', **fields)
+        phase('intent')
+        def published(receipt):
+            phase('published')
+            hold._published(intent, receipt)
+        guard = gate.close_for_restoration(fields['hold']['window'], fields['hold']['reason'], 2,
+                                           on_publication=published)
+        phase('drained')
+        guard.close()
+        ready.touch()
+        phase('ready')
+        time.sleep(60)
+'''
+
+
+def reap(child):
+    # Popen.send_signal re-polls first, so an already-exited child is never signalled.
+    if child.poll() is None:
+        child.kill()
+    if child.stdout.closed:
+        return b'', b''
+    return child.communicate(timeout=5)
+
+
+def start_until_ready(test, source, args, ready, seconds=READY_SECONDS):
+    started = time.monotonic()
+    child = subprocess.Popen([sys.executable, '-I', '-S', '-c', PRELUDE + source, str(HERE), *map(str, args)],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    test.controller = child
+    test.addCleanup(reap, child)
+    while not ready.exists() and child.poll() is None and time.monotonic() < started + seconds:
+        time.sleep(.03)
+    if ready.exists():
+        return child
+    exited = child.poll()
+    elapsed = time.monotonic() - started
+    stdout = stderr = b''
+    if exited is None:
+        # The request kills a child that has not yet registered the dump handler; keep what it wrote.
+        child.send_signal(signal.SIGUSR1)
+        try:
+            stdout, stderr = child.communicate(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
+    rest = reap(child)
+    stdout, stderr = stdout + rest[0], stderr + rest[1]
+    if exited is None:
+        state = 'still running at deadline; stack requested; stack: %s; reaped with %d' % (
+            'present' if b'most recent call first' in stderr else 'absent', child.returncode)
+    else:
+        state = 'exited %d' % exited
+    test.fail('owned controller not ready after %.2fs (%s); phases: %s; stderr: %s' % (
+        elapsed, state, stdout.decode(errors='replace').split() or 'none', stderr.decode(errors='replace')[-6000:]))
 
 
 class FakeLaunchd:
@@ -100,10 +179,12 @@ class AppliedKickstartTimeout(unittest.TestCase):
         # Same owned layout and interrupted hold as test_restore_only.RestoreOnlyOwned, minus launchd.
         self.root = pathlib.Path(tempfile.gettempdir()).resolve() / ('openclaw-owned-recovery-' + secrets.token_hex(8))
         self.root.mkdir(mode=0o700)
+        self.addCleanup(shutil.rmtree, self.root)  # cleanups also run when setUp fails
         (self.root / 'plists').mkdir(mode=0o700)
         gate_root = self.root / 'gate'
         pin = restore_only.gate_module.initialize(gate_root)
         self.gate = restore_only.gate_module.Gate(gate_root, pin)
+        self.addCleanup(self.gate.close)
         self.journal_root = self.root / 'preservation/journals/owned'
         node_lock = self.root / 'preservation/node.lock'
         for name, source in (('owned_recovery_service.cjs', HERE / 'owned_recovery_service.cjs'),
@@ -145,39 +226,10 @@ class AppliedKickstartTimeout(unittest.TestCase):
         self.interrupt(gate_root, node_lock)
         self.sim.jobs[self.label['mesh-agent']]['pid'] = None   # loaded, stopped owned daemon
 
-    def tearDown(self):
-        self.gate.close()
-        shutil.rmtree(self.root)
-
     def interrupt(self, gate_root, node_lock):
-        # test_restore_only.interrupt('after-receipt'): published closed hold, controller killed.
         ready = self.root / 'controller-ready'
-        child = subprocess.Popen([sys.executable, '-c', '''
-import importlib.util, pathlib, sys, time
-from preservation_journal import Journal
-from journal_hold import JournaledHold, ANCHOR
-root, gate_root, lock, ready, source = map(pathlib.Path, sys.argv[1:6])
-spec = importlib.util.spec_from_file_location('gate', source)
-gate_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(gate_module)
-with Journal(root, node_lock=lock) as journal:
-    with gate_module.Gate(gate_root, journal.prior[ANCHOR]['execution_hold']['pins']) as gate:
-        hold = JournaledHold(journal, gate, lambda: {'verified': False})
-        fields = hold._fields(False)
-        intent = journal.append('intent', unit=ANCHOR, action='owned-close', **fields)
-        guard = gate.close_for_restoration(fields['hold']['window'], fields['hold']['reason'], 2,
-                                           on_publication=lambda receipt: hold._published(intent, receipt))
-        guard.close()
-        ready.touch()
-        time.sleep(60)
-''', str(self.journal_root), str(gate_root), str(node_lock), str(ready), str(SOURCE)],
-            cwd=HERE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        end = time.monotonic() + 10
-        while not ready.exists() and child.poll() is None and time.monotonic() < end:
-            time.sleep(.03)
-        child.kill()
-        _, stderr = child.communicate(timeout=5)
-        self.assertTrue(ready.exists(), stderr.decode())
+        child = start_until_ready(self, CONTROLLER, (self.journal_root, gate_root, node_lock, ready, SOURCE), ready)
+        reap(child)
         ready.unlink()
 
     def recover(self):
@@ -255,6 +307,74 @@ with Journal(root, node_lock=lock) as journal:
         self.assertTrue(any(r['event'] == 'already-restored' and r.get('unit') == 'mesh-agent' for r in new))
         self.assertFalse(any(r['event'] == 'restoration-intent' and r.get('unit') == 'mesh-agent' for r in new))
         self.assertFalse(any(verb == 'kickstart' for verb, _, _ in self.sim.log))
+
+
+class ControllerReadiness(unittest.TestCase):
+    """The readiness helper keeps the evidence a deadline failure needs, and setUp failures still clean up."""
+
+    def ready_path(self):
+        root = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root)
+        return root / 'ready'
+
+    def test_running_child_at_deadline_reports_phase_and_stack_then_is_reaped(self):
+        with self.assertRaises(AssertionError) as caught:
+            start_until_ready(self, "phase('blocking')\ntime.sleep(30)\n", (), self.ready_path(), seconds=1)
+        message = str(caught.exception)
+        self.assertIn('still running at deadline; stack requested; stack: present; reaped with -9', message)
+        self.assertIn("'blocking'", message)
+        self.assertIn('most recent call first', message)
+        self.assertIsNotNone(self.controller.returncode)
+
+    def test_stall_before_dump_handler_reports_absent_stack_and_signal_exit(self):
+        with patch(__name__ + '.PRELUDE', 'import time\ntime.sleep(30)\n' + PRELUDE):
+            with self.assertRaises(AssertionError) as caught:
+                start_until_ready(self, "phase('unreached')\n", (), self.ready_path(), seconds=1)
+        message = str(caught.exception)
+        self.assertIn('stack requested; stack: absent; reaped with %d' % -signal.SIGUSR1, message)
+        self.assertIn('phases: none', message)
+
+    def test_output_is_kept_when_the_stack_request_ends_the_child(self):
+        source = "phase('blocking')\nsignal.signal(signal.SIGUSR1, signal.SIG_DFL)\ntime.sleep(30)\n"
+        with self.assertRaises(AssertionError) as caught:
+            start_until_ready(self, source, (), self.ready_path(), seconds=1)
+        message = str(caught.exception)
+        self.assertIn('stack: absent; reaped with %d' % -signal.SIGUSR1, message)
+        self.assertIn("'blocking'", message)
+
+    def test_child_that_exits_reports_status_and_original_error_without_signal(self):
+        with self.assertRaises(AssertionError) as caught:
+            start_until_ready(self, "raise RuntimeError('owned controller failure')\n", (), self.ready_path())
+        message = str(caught.exception)
+        self.assertIn('exited 1', message)
+        self.assertIn('RuntimeError: owned controller failure', message)
+        self.assertNotIn('most recent call first', message)
+
+    def test_child_reaches_ready_and_is_reaped_by_cleanup(self):
+        ready = self.ready_path()
+        child = start_until_ready(self, "pathlib = __import__('pathlib')\npathlib.Path(sys.argv[2]).touch()\ntime.sleep(30)\n",
+                                  (ready,), ready)
+        self.assertIsNone(child.poll())
+        self.doCleanups()
+        self.assertIsNotNone(child.returncode)
+
+    def test_controller_is_isolated_from_inherited_python_environment(self):
+        ready = self.ready_path()
+        hook = ready.parent / 'sitecustomize.py'
+        hook.write_text('raise SystemExit("inherited site hook ran")\n')
+        with patch.dict(os.environ, {'PYTHONPATH': str(ready.parent)}):
+            start_until_ready(self, "pathlib = __import__('pathlib')\npathlib.Path(sys.argv[2]).touch()\n", (ready,), ready)
+
+    def test_fixture_setup_failure_still_closes_gate_and_removes_owned_tree(self):
+        case = AppliedKickstartTimeout('test_applied_timeout_refuses_durably_then_retry_observes_without_second_kickstart')
+        result = unittest.TestResult()
+        with patch(__name__ + '.CONTROLLER', "raise RuntimeError('owned setup failure')\n"):
+            case.run(result)
+        self.assertEqual(len(result.failures), 1, result.errors)
+        self.assertIn('owned setup failure', result.failures[0][1])
+        self.assertEqual(case.gate.handles, [])
+        self.assertFalse(case.root.exists())
+        self.assertIsNotNone(case.controller.returncode)
 
 
 if __name__ == '__main__':
