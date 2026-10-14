@@ -112,8 +112,10 @@ passed; exact-head CI run `38503126157` failed in the existing real-launchd
 kickstart test, with all new reader/fixture tests passing. The diagnostic
 observed a running owner after timeout and retained closed/unresolved
 recovery. Claude found two bounded defects: bare quotes in parser scalars
-and startup assumptions in two owned one-second controls; local corrections
-are under verification. The launchctl blocking cause remains undetermined. The owned readiness failure is also unexplained; the
+and startup assumptions in two owned one-second controls; D183 fixes were published at `f9b4c37a`, whose required macOS check
+also failed on the same kickstart test while all new tests passed. D184
+corrections now use child-written markers to avoid hiding lost output;
+source review and new exact-head CI remain required. The launchctl blocking cause remains undetermined. The owned readiness failure is also unexplained; the
 fixture now preserves phase/stack/exit evidence and cleans up on failed setup
 without extending its ten-second deadline. Exact-head green CI and reviewed
 source remain required; neither clears B5's missing checkpoint, abort/restore

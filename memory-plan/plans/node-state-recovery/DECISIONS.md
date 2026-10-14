@@ -3997,3 +3997,9 @@ Claude supplied the corrected fixture at SHA256 844413c1f79f0b90567efbfd2d914dc0
 ## D183 — Refuse bare quotes and pin slow fixture startup (2026-10-14 00:53 EDT)
 
 Claude exact-head review at 433248c8 found that a bare trailing quote was retained by the pure reader while NATS terminates that token; role binding still refused it. Refuse quote characters inside bare scalars and pin the refusal. Two owned readiness controls incorrectly assumed interpreter startup within one second; retain their deadlines and assert either observed started-phase evidence or the explicit early-start shape. A 1.5-second injected startup delay exercises both controls. These changes do not explain the real-launchd kickstart CI failure, which recurred with a running owner observed after timeout while the gate and receipt remained closed/unresolved. No production code path or service state changes.
+
+## D184 — Independent readiness-control branch evidence (2026-10-14 02:53 EDT)
+
+Claude found the D183 slow-start branch could conceal discarded controller output: missing phases selected the early-start assertions even after the child had reached its blocking phase. Each control now has a separate child-written marker and branches on that file, not on the output being tested. Injected slow startup retains the original deadlines and reaches the marker-absent branch. A local output-discard mutant is killed by the marker-present assertion requiring the blocking phase. Add the missing bare double-quote refusal case.
+
+Required CI at f9b4c37a again failed the real-launchd kickstart test while all added tests passed; the diagnostic first observed no running owner, then final-state verification observed one. The client-blocking cause is still undetermined and recovery stayed partial/closed/unresolved. These control corrections do not claim to fix that cause or complete B5. No production state changed.

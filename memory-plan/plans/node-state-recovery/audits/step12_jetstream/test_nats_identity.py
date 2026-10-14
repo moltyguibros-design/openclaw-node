@@ -148,6 +148,7 @@ jetstream { # } closing brace inside a comment
             'route with path': (base.replace(b'nats-route://127.0.0.1:6210', b'nats-route://127.0.0.1:6210/x'), 'comment marker'),
             'secret on malformed line': (base.replace(b'"openclaw", password: "', b'"openclaw", password: ').replace(secret + b'"', secret + b';'), 'separator'),
             'bare store quote': (base.replace(b'\"' + STORES['nats-3'].encode() + b'\"', STORES['nats-3'].encode() + b"'"), 'quote'),
+            'bare store double quote': (base.replace(b'\"' + STORES['nats-3'].encode() + b'\"', STORES['nats-3'].encode() + b'"'), 'quote'),
             'relative store': (base.replace(STORES['nats-3'].encode(), b'jetstream-3'), 'normalized absolute'),
             'non-normal store': (base.replace(STORES['nats-3'].encode(), STORES['nats-3'].encode() + b'/../jetstream-3'), 'normalized absolute'),
             'cluster without name': (base.replace(b'name: openclaw-cluster', b''), 'one name'),

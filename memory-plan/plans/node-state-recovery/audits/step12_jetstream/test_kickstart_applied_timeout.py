@@ -318,10 +318,13 @@ class ControllerReadiness(unittest.TestCase):
         return root / 'ready'
 
     def test_running_child_at_deadline_reports_phase_and_stack_then_is_reaped(self):
+        ready = self.ready_path()
+        marker = ready.with_name('blocking')
         with self.assertRaises(AssertionError) as caught:
-            start_until_ready(self, "phase('blocking')\ntime.sleep(30)\n", (), self.ready_path(), seconds=1)
+            start_until_ready(self, "phase('blocking')\nopen(sys.argv[2], 'w').close()\ntime.sleep(30)\n",
+                              (marker,), ready, seconds=1)
         message = str(caught.exception)
-        if "'started'" in message:
+        if marker.exists():
             self.assertIn('still running at deadline; stack requested; stack: present; reaped with -9', message)
             self.assertIn("'blocking'", message)
             self.assertIn('most recent call first', message)
@@ -339,12 +342,14 @@ class ControllerReadiness(unittest.TestCase):
         self.assertIn('phases: none', message)
 
     def test_output_is_kept_when_the_stack_request_ends_the_child(self):
-        source = "phase('blocking')\nsignal.signal(signal.SIGUSR1, signal.SIG_DFL)\ntime.sleep(30)\n"
+        ready = self.ready_path()
+        marker = ready.with_name('blocking')
+        source = "phase('blocking')\nopen(sys.argv[2], 'w').close()\nsignal.signal(signal.SIGUSR1, signal.SIG_DFL)\ntime.sleep(30)\n"
         with self.assertRaises(AssertionError) as caught:
-            start_until_ready(self, source, (), self.ready_path(), seconds=1)
+            start_until_ready(self, source, (marker,), ready, seconds=1)
         message = str(caught.exception)
         self.assertIn('stack: absent; reaped with %d' % -signal.SIGUSR1, message)
-        if "'started'" in message:
+        if marker.exists():
             self.assertIn("'blocking'", message)
         else:
             self.assertIn('phases: none', message)
