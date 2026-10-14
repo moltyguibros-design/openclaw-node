@@ -95,14 +95,29 @@ fixtures are useful only when bound to authentic guest/host origin and the
 actual four source roles; synthetic receipts do not close them. Verified
 resumption must follow acceptance, not precede it.
 
-**B5 source-merge warning:** the high-severity dependency fixes from PR #226
-are integrated into draft PR #224. The previous head's workflow was 5/5 green.
-At `66e4c2bd`, Node 22 `unit-tests` failed in owned cluster stream creation
-with `no suitable peers for placement, peer offline` after 155 journal tests
-passed. At later head `b395d74c`, four jobs have passed, including Node 22;
-the macOS legacy job is still running. Treat exact-head CI as pending until
-that job completes; D175 also needs its own run. Green CI alone
-will not close the checkpoint, full-node abort/restore or physical boundary.
+**B5 source validation — 2026-10-13 22:53 EDT:** draft PR #224 now carries
+D180's undetermined-kickstart diagnostic and D181's pure literal NATS identity
+reader plus D182's owned-controller failure evidence. The reader is not wired
+into capture: checkpoint publication, host checkpoint digest commitment and
+frozen-ASIF journal/config verification are still absent. It accepts the four
+installed configs in a bounded read-only syntax check at their unchanged
+baseline hashes; this is not a B3 window pin, NATS live interpretation proof,
+origin attestation or physical writer exclusion. Member1 remains baseline-held
+plus checkpoint-observed evidence, never an invented in-window stop receipt.
+
+At parent `b453b180`, run `38500119800` passed all five jobs, and Claude's
+actual-head code review found no defect. The earlier launchctl timeout cause
+remains undetermined. At current head `433248c8`, 49 owned/mocked local tests
+passed; exact-head CI run `38503126157` failed in the existing real-launchd
+kickstart test, with all new reader/fixture tests passing. The diagnostic
+observed a running owner after timeout and retained closed/unresolved
+recovery. Claude found two bounded defects: bare quotes in parser scalars
+and startup assumptions in two owned one-second controls; local corrections
+are under verification. The launchctl blocking cause remains undetermined. The owned readiness failure is also unexplained; the
+fixture now preserves phase/stack/exit evidence and cleans up on failed setup
+without extending its ten-second deadline. Exact-head green CI and reviewed
+source remain required; neither clears B5's missing checkpoint, abort/restore
+controller or disposable-macOS rehearsal. B6 remains closed.
 
 ## Heartbeat decision rule
 

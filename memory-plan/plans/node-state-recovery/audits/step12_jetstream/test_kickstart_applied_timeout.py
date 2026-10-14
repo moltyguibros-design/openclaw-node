@@ -321,9 +321,13 @@ class ControllerReadiness(unittest.TestCase):
         with self.assertRaises(AssertionError) as caught:
             start_until_ready(self, "phase('blocking')\ntime.sleep(30)\n", (), self.ready_path(), seconds=1)
         message = str(caught.exception)
-        self.assertIn('still running at deadline; stack requested; stack: present; reaped with -9', message)
-        self.assertIn("'blocking'", message)
-        self.assertIn('most recent call first', message)
+        if "'started'" in message:
+            self.assertIn('still running at deadline; stack requested; stack: present; reaped with -9', message)
+            self.assertIn("'blocking'", message)
+            self.assertIn('most recent call first', message)
+        else:
+            self.assertIn('stack: absent; reaped with %d' % -signal.SIGUSR1, message)
+            self.assertIn('phases: none', message)
         self.assertIsNotNone(self.controller.returncode)
 
     def test_stall_before_dump_handler_reports_absent_stack_and_signal_exit(self):
@@ -340,7 +344,16 @@ class ControllerReadiness(unittest.TestCase):
             start_until_ready(self, source, (), self.ready_path(), seconds=1)
         message = str(caught.exception)
         self.assertIn('stack: absent; reaped with %d' % -signal.SIGUSR1, message)
-        self.assertIn("'blocking'", message)
+        if "'started'" in message:
+            self.assertIn("'blocking'", message)
+        else:
+            self.assertIn('phases: none', message)
+
+    def test_deadline_controls_accept_slow_interpreter_start(self):
+        for name in ('test_running_child_at_deadline_reports_phase_and_stack_then_is_reaped',
+                     'test_output_is_kept_when_the_stack_request_ends_the_child'):
+            with self.subTest(control=name), patch(__name__ + '.PRELUDE', 'import time\ntime.sleep(1.5)\n' + PRELUDE):
+                getattr(self, name)()
 
     def test_child_that_exits_reports_status_and_original_error_without_signal(self):
         with self.assertRaises(AssertionError) as caught:

@@ -76,8 +76,8 @@ class _Reader:
             value = self.text[start:self.at]
             if not value:
                 self.fail('missing value')
-            if any(c in value for c in '#;()') or '//' in value and not URL.fullmatch(value):
-                self.fail('separator, block or comment marker inside a bare value')
+            if any(c in value for c in "#;()'\"") or '//' in value and not URL.fullmatch(value):
+                self.fail('separator, quote, block or comment marker inside a bare value')
         if '\\' in value or not value.isascii():
             self.fail('escaped or non-ASCII value')
         return ('scalar', value, quoted)
