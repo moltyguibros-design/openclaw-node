@@ -3,12 +3,12 @@ import pathlib
 import secrets
 
 from preservation_checks import require
-from preservation_journal import FULL_NODE_SCOPE, TIMER_SCOPE, TIMER_UNITS, matches, valid_record
+from preservation_journal import FULL_NODE_SCOPE, HOLD_REASON, TIMER_SCOPE, TIMER_UNITS, matches, valid_record
 
 
 ANCHOR = 'scheduler-heartbeat'
 TIMERS = TIMER_UNITS
-REASON = 'preservation execution hold'
+REASON = HOLD_REASON
 
 
 def describe(gate, cohort):

@@ -107,6 +107,39 @@ def gui_status_helper(utmctl, vm_uuid, output):
         os.close(fd)
 
 
+LAUNCHCTL = '/bin/launchctl'
+
+
+def launchctl_attempt(*args):
+    """One bounded launchctl call kept as evidence; it never raises, so it cannot mask an error."""
+    attempt = {'argv': list(args), 'returncode': None, 'timed_out': False, 'stdout': '', 'stderr': ''}
+    try:
+        done = subprocess.run([LAUNCHCTL, *args], capture_output=True, timeout=15)
+    except subprocess.TimeoutExpired:
+        return {**attempt, 'timed_out': True}
+    except OSError as error:
+        return {**attempt, 'stderr': str(error)[:300]}
+    return {**attempt, 'returncode': done.returncode,
+            'stdout': done.stdout.decode(errors='replace').strip()[:300],
+            'stderr': done.stderr.decode(errors='replace').strip()[:300]}
+
+
+def remove_disposable_agent(service):
+    """Boot out only this preflight's own label; returns the cleanup evidence.
+
+    Only a bootout that succeeded removed the agent (`booted_out`). When it failed or timed out,
+    `launchctl print` of the same label is kept as evidence: `absent_at_print` is true only for an
+    answered 113 "Could not find service" (as managed_launchd reads absence). It describes that
+    moment and never makes the unsuccessful bootout a success.
+    """
+    bootout = launchctl_attempt('bootout', service)
+    if bootout['returncode'] == 0:
+        return {'bootout': bootout, 'booted_out': True}
+    listed = launchctl_attempt('print', service)
+    return {'bootout': bootout, 'booted_out': False, 'print': listed,
+            'absent_at_print': listed['returncode'] == 113 and 'Could not find service' in listed['stderr']}
+
+
 def gui_utm_status(utmctl, vm_uuid, output):
     label = 'ai.openclaw.host-preflight.' + uuid.uuid4().hex
     status_path = output / 'utm-status.json'
@@ -121,15 +154,28 @@ def gui_utm_status(utmctl, vm_uuid, output):
     }))
     os.chmod(agent, 0o600)
     target = 'gui/' + str(os.getuid())
-    run('/bin/launchctl', 'bootstrap', target, str(agent))
+    service = target + '/' + label
+    cleanup = output / 'utm-status-cleanup.json'
     try:
+        run(LAUNCHCTL, 'bootstrap', target, str(agent))
         deadline = time.monotonic() + 20
         while not status_path.exists() and time.monotonic() < deadline:
             time.sleep(0.1)
         require(status_path.exists(), 'GUI UTM status helper timed out')
         status = json.loads(status_path.read_text())
-    finally:
-        run('/bin/launchctl', 'bootout', target + '/' + label)
+    except BaseException as error:
+        # The bootstrap may have applied even though it failed or timed out. Boot out only this
+        # label, keep the evidence beside the sample, and re-raise the original failure as is.
+        evidence = remove_disposable_agent(service)
+        try:
+            write_record(cleanup, {'label': label, 'primary_error': repr(error)[:300], **evidence})
+        except OSError:
+            pass
+        raise
+    evidence = remove_disposable_agent(service)
+    if not evidence['booted_out']:
+        write_record(cleanup, {'label': label, 'primary_error': None, **evidence})
+    require(evidence['booted_out'], 'GUI UTM status agent bootout did not succeed: ' + label)
     require(status['returncode'] == 0 and not status['stderr']
             and status['stdout'] in ('started', 'stopped'),
             'GUI UTM status was not a clear power state')

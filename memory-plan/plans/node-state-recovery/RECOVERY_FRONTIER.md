@@ -12,6 +12,46 @@ must remain separate until each history has an accepted preservation path.
 
 ## Critical path and advance warnings
 
+### 2026-10-15 00:58 EDT — uncommitted B5 checkpoint verification
+
+The v2 artifact from `c1a9df4b` and incremental D187 artifact from
+`7d66baad` are applied locally, with SHA-256 respectively
+`990501c5a03d2fc0a81899496914ec468ad66e0a1dcdbcf4cc7ccabbc476cecd` and
+`b1abe4a3340a44fcfdac35e28b92199930df0f8d5243ade4ad17805121b2c727`.
+The owned worker fixture now resolves its temporary parent before creation;
+production's literal-path validation is unchanged. All 34 native macOS
+host-checkpoint and real-hold facade tests pass (15.706 s), including all
+13 CapturePin cases (7.795 s separately). The earlier combined 50-test run
+failed those path cases before this correction and the native cold-extract
+test still failed its completed-image-guard deadline. That deadline cause
+is undetermined and is under bounded Claude review; no timeout was widened.
+An earlier 186-test regression had 185 passes and one cold-extract failure
+before ARMED appeared. No source-readiness or exact-head CI claim follows:
+the changes remain uncommitted, B5/1.2 open, B6 closed, D64 unchanged,
+production capture disabled, and the four histories separate.
+
+Native follow-up: another 53 owned checkpoint/reader/timeout tests pass
+(34.692 s). The checksum-verified `b1efbf48` diagnostic patch reproduced
+the cold-extract failure: worker spawn +0.00 s, initial sample +0.06 s,
+plist setup 0.02 s, no helper status or preflight stamp by the ARMED
+assertion at +15.03 s (test 21.748 s total). This narrows that occurrence
+to initial GUI helper/bootstrap work, not the later capture window.
+Source inspection confirms bootstrap runs outside `gui_utm_status`'s
+cleanup and a bootout error can replace the primary error. Codex/Claude
+are preparing bounded diagnostics and a separately tested cleanup fix;
+no deadline, acceptance rule or production setting has changed.
+
+2026-10-15 11:03 EDT: the helper-snapshot native cold-extract run passed
+(54.612 s), so the earlier startup stall is not explained or classified
+as a flake. D188 strict cleanup artifact `d95253c3` was hash-verified
+(`546792c05a9cae3a6498372b3d54d484d7c8c95313e18929e039e69172b58090`)
+and applied: its 13 owned fake-launchctl tests pass natively (13.531 s).
+Unsuccessful success-path bootout still refuses even if a later print
+reports absence; primary failures retain their identity and cleanup evidence.
+Late bootstrap after cleanup remains an explicit limit. Plan lint remains
+14 PASS / 1 existing WARN / 0 FAIL. Publication is for exact-head CI and
+review only, not source readiness or B5 closure. Production remains untouched.
+
 | ID | Gate and present state | Owner and exact unblock action | Evidence required to clear | First downstream operation held |
 |---|---|---|---|---|
 | B1 | **Cleared for design only by D168.** The operator's “GO” selected the revised stopped-VM physical boundary in the reviewed candidate. A complete no-writer proof is not claimed on the live mounted Data volume. | Codex designs and tests only on owned resources. This decision gives no authority to stop or restart a production service or the VM. | D168 records the chosen boundary and its limits. B6 remains a separate, fresh, exact-window release. | Boundary design B5; never B7 directly. |

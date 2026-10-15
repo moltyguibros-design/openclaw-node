@@ -18,7 +18,7 @@ import sys
 import time
 
 from host_asif_extract import extract
-from host_guest_commit import require_committed
+from host_guest_commit import CAPTURE_PINS, require_committed
 from host_image_immutable import change_immutable
 from host_vm_preflight import owned_directory, preflight, require, write_record
 
@@ -61,6 +61,30 @@ def publish_capture_record(output, result):
     write_record(temporary, result)
     os.replace(temporary, output / 'CAPTURE.json')
     fsync_parent(output)
+
+
+def publish_pinned_capture(output, result, stopped_checkpoint):
+    """Publish CAPTURE.json pinning the exact COMMITTED, ACKED and CHECKPOINT bytes.
+
+    commit_checkpoint() needs a running VM, so only the checkpoint commitment first seen once the
+    VM stopped may be pinned; host_match and the frozen verifier consume it through these pins.
+    """
+    with (output / 'ARMED.json').open('rb') as armed:
+        fcntl.flock(armed, fcntl.LOCK_EX)
+        pinned = {key: (output / name).read_bytes() for key, name in CAPTURE_PINS.items()}
+        digests = {key: hashlib.sha256(raw).hexdigest() for key, raw in pinned.items()}
+        checkpoint = require_committed(output)['checkpoint']
+        # The validated checkpoint records the COMMITTED and ACKED digests, so equal digests bind
+        # those pins byte for byte to what require_committed() just accepted. CHECKPOINT itself
+        # must parse to that commitment and still hold the pinned bytes once it was accepted.
+        require(checkpoint == json.loads(pinned['guest_checkpoint_sha256']) == stopped_checkpoint
+                and (output / 'CHECKPOINT.json').read_bytes() == pinned['guest_checkpoint_sha256']
+                and checkpoint['commit_sha256'] == digests['guest_commit_sha256']
+                and checkpoint['ack_sha256'] == digests['guest_ack_sha256'],
+                'guest capture commitment changed after the VM stopped')
+        result = {**result, **digests}
+        publish_capture_record(output, result)
+    return result
 
 
 def clone_only(source, target):
@@ -169,6 +193,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         saw_stopped = False
         clean_stopped = False
         guard_observed = False
+        stopped_checkpoint = None
         while time.monotonic() < deadline:
             observation = capture_preflight(host_spec_path, output,
                                             output / f'power-{sequence:04d}',
@@ -177,7 +202,9 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
                     'host boot, VM image or vmstate identity changed while waiting')
             if observation['state'] == 'stopped':
                 saw_stopped = True
-                require_committed(output)
+                committed = require_committed(output)
+                if stopped_checkpoint is None:
+                    stopped_checkpoint = committed['checkpoint']
                 if observation['holders_consistent']:
                     clean_stopped = True
                     stopped_count += 1
@@ -252,8 +279,6 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
             'vm_uuid': host['uuid'], 'host_boot_session': first['host_boot_session'],
             'source_image_sha256': source_sha, 'clone_image_sha256': clone_sha,
             'guard_receipt_sha256': guard_sha,
-            'guest_commit_sha256': file_hash(output / 'COMMITTED.json'),
-            'guest_ack_sha256': file_hash(output / 'ACKED.json'),
             'source_size': first['image_size'], 'clone_size': clone_info.st_size,
             'vmstate_at_arm': first['vmstate'],
             'vmstate_at_final_check': after_extract['vmstate'],
@@ -265,10 +290,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
             'store_roles': sorted(extracted['stores']),
             'vm_state_at_final_check': 'stopped',
         }
-        with (output / 'ARMED.json').open('rb') as armed:
-            fcntl.flock(armed, fcntl.LOCK_EX)
-            publish_capture_record(output, result)
-        return result
+        return publish_pinned_capture(output, result, stopped_checkpoint)
     except Exception as error:
         if os.path.lexists(output / 'ARMED.json'):
             with (output / 'ARMED.json').open('rb') as armed:
