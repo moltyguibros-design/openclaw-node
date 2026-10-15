@@ -1,0 +1,122 @@
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py
+index 60b85fa..e74e13e 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py
+@@ -1,4 +1,5 @@
+ #!/usr/bin/env python3
++import datetime
+ import hashlib
+ import fcntl
+ import json
+@@ -40,6 +41,55 @@ def run(*args):
+     return result.stdout
+ 
+ 
++def capture_timeline(capture_dir, marks, window):
++    """Diagnostic text for a failed native capture; it changes no timing, deadline or assertion.
++
++    Read-only: built from the test's wall-clock marks and the records every real preflight already
++    leaves in its sample directory. Phases per sample: setup (directory created until the GUI
++    status agent's plist: hdiutil info and hashing), helper (plist until the helper's status
++    stamp: launchctl bootstrap, spawn, utmctl), observe (status until the preflight stamp: bootout
++    and lsof), tail (until preflight.json or FAILED.json: sysctl and the write).
++    """
++    def when(text):
++        return datetime.datetime.fromisoformat(text).timestamp()
++
++    def read(path):
++        try:
++            return json.loads(path.read_text())
++        except (OSError, ValueError):
++            return {}
++
++    origin = marks[0][1]
++    rows = [(at, 'mark %s' % label) for label, at in marks]
++    armed = read(capture_dir / 'ARMED.json')
++    if 'at_utc' in armed:
++        rows.append((when(armed['at_utc']), 'ARMED; worker deadline at +%.2fs' % (when(armed['at_utc']) + window - origin)))
++    failed = read(capture_dir / 'FAILED.json')
++    if failed:
++        rows.append(((capture_dir / 'FAILED.json').stat().st_mtime, 'capture FAILED: %s' % failed.get('error')))
++    for sample in (capture_dir.iterdir() if capture_dir.is_dir() else ()):
++        plist, status = sample / 'utm-status.plist', sample / 'utm-status.json'
++        record, refused = sample / 'preflight.json', sample / 'FAILED.json'
++        if not sample.is_dir() or not any(path.exists() for path in (plist, record, refused)):
++            continue
++        # Only known points are timed: without st_birthtime (not macOS) the start is unknown, and a
++        # refused sample has no preflight stamp, so its span runs from the helper to FAILED.json.
++        points = [('setup', getattr(sample.stat(), 'st_birthtime', None)),
++                  ('helper', plist.stat().st_mtime if plist.exists() else None),
++                  ('observe', when(read(status)['at_utc']) if 'at_utc' in read(status) else None),
++                  ('tail', when(read(record)['at_utc']) if 'at_utc' in read(record) else None),
++                  ('end', (record if record.exists() else refused).stat().st_mtime
++                   if record.exists() or refused.exists() else None)]
++        known = [(name, at) for name, at in points if at is not None]
++        phases = ' '.join('%s=%.2f' % (name, after - at) for (name, at), (_, after) in zip(known, known[1:]))
++        seen = read(record)
++        outcome = ('%s holders=%s' % (seen.get('state'), seen.get('image_holders')) if seen
++                   else 'FAILED: %s' % read(refused).get('error'))
++        rows.append((known[0][1], '%-44s %s %s' % (sample.name, phases, outcome)))
++    return '\ncapture timeline (seconds from worker spawn):\n' + '\n'.join(
++        '%+8.2f %s' % (at - origin, text) for at, text in sorted(rows))
++
++
+ class VmstateGateTest(unittest.TestCase):
+     def test_host_commit_refuses_a_vm_already_stopped(self):
+         with tempfile.TemporaryDirectory(prefix='openclaw-late-guest-commit-') as temporary:
+@@ -797,13 +847,15 @@ class HostCaptureTest(unittest.TestCase):
+         worker = subprocess.Popen([sys.executable, str(CAPTURE), str(spec), str(store_spec),
+                                    str(output), '20', '--fixture'], stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.PIPE)
++        marks = [('worker spawned', time.time())]
+         self.processes.append(worker)
+         deadline = time.monotonic() + 15
+         while not (output / 'ARMED.json').exists() and time.monotonic() < deadline:
+             if worker.poll() is not None:
+-                raise AssertionError(worker.stderr.read().decode())
++                raise AssertionError(worker.stderr.read().decode() + capture_timeline(output, marks, 20))
+             time.sleep(0.1)
+-        self.assertTrue((output / 'ARMED.json').exists())
++        marks.append(('arm wait ended', time.time()))
++        self.assertTrue((output / 'ARMED.json').exists(), capture_timeline(output, marks, 20))
+         nonce = json.loads((output / 'ARMED.json').read_text())['capture_nonce']
+         stale = json.loads((guest_output / 'manifest.json').read_text())
+         stale['capture_nonce'] = '0' * 64 if nonce != '0' * 64 else '1' * 64
+@@ -817,10 +869,13 @@ class HostCaptureTest(unittest.TestCase):
+         observed['journal_head'] = 'b' * 64
+         (guest_output / 'manifest.json').unlink()
+         write_record(guest_output / 'manifest.json', observed)
++        marks.append(('stale claim refused', time.time()))
+         committed = commit(spec, store_spec, output, guest_output / 'manifest.json')
++        marks.append(('manifest committed', time.time()))
+         # The guard below needs the separately committed capture-ready digest (D186).
+         write_checkpoint_record(self.root / 'guest-checkpoint.json', committed)
+         commit_checkpoint(spec, output, self.root / 'guest-checkpoint.json')
++        marks.append(('checkpoint committed', time.time()))
+         ack_path = output / 'ACKED.json'
+         valid_ack = json.loads(ack_path.read_text())
+         started = valid_ack['started_sample']
+@@ -860,16 +915,22 @@ class HostCaptureTest(unittest.TestCase):
+         with (output / 'CAPTURE_ACTIVE.lock').open('rb') as active:
+             with self.assertRaises(BlockingIOError):
+                 fcntl.flock(active, fcntl.LOCK_EX | fcntl.LOCK_NB)
++        marks.append(('ack checks done', time.time()))
+         holder.terminate()
+         holder.wait(timeout=5)
++        marks.append(('holder terminated', time.time()))
+         with self.assertRaisesRegex(RuntimeError, 'holder|disagree'):
+             guard(spec, output, fixture=True)
+         self.assertFalse((output / 'GUARD_INTENT.json').exists())
+         self.assertFalse(source.lstat().st_flags & stat.UF_IMMUTABLE)
++        marks.append(('running guard refused', time.time()))
+         state.write_text('stopped\n')
++        marks.append(('external stop', time.time()))
+         guard(spec, output, fixture=True)
++        marks.append(('guard completed', time.time()))
+         _, stderr = worker.communicate(timeout=30)
+-        self.assertEqual(worker.returncode, 0, stderr.decode())
++        marks.append(('worker exited', time.time()))
++        self.assertEqual(worker.returncode, 0, stderr.decode() + capture_timeline(output, marks, 20))
+         with (output / 'CAPTURE_ACTIVE.lock').open('rb') as active:
+             fcntl.flock(active, fcntl.LOCK_EX | fcntl.LOCK_NB)
+         result = json.loads((output / 'CAPTURE.json').read_text())
