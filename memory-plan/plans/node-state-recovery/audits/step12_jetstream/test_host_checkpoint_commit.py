@@ -577,6 +577,16 @@ class CapturePin(HostCheckpoint):
             with self.assertRaisesRegex(RuntimeError, 'does not pin this checkpoint commitment'):
                 self.frozen(rows)
 
+    def test_match_refuses_commitment_swapped_only_during_validation(self):
+        _, error, flow = self.captured()
+        self.assertIsNone(error)
+        forged = copy.deepcopy(require_committed(self.capture))
+        forged['checkpoint']['checkpoint_sha256'] = 'e' * 64
+        with mock.patch.object(stopped_tree_match, 'require_committed', return_value=forged):
+            with self.assertRaisesRegex(RuntimeError, 'differs from the pinned capture record'):
+                self.match(flow, 'validation-swap')
+        self.assertFalse((self.temp / 'matches' / 'validation-swap' / 'MATCH.json').exists())
+
     def test_substituted_checkpoint_after_match_refuses_frozen_verification(self):
         _, error, flow = self.captured()
         self.assertIsNone(error)

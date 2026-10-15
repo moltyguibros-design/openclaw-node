@@ -186,3 +186,7 @@ The heartbeat's `NOTIFY` output is a Codex task notification. Delivery to
 ChatGPT Dot has **not** been verified. Do not claim a Dot warning was sent
 until the user confirms that this task's notification reaches Dot or a
 supported connector is configured and tested.
+
+## 2026-10-15 17:04 EDT — D189 publication evidence
+
+586f66b7 passed all five jobs in CI run 38756995285. Claude then found a matcher read race; the local correction ties the consumed commitment to the exact pinned objects. All 14 capture-pin tests pass, and removing that comparison makes the new race test fail for accepting the forgery. Added 13 decisive predicate tests pass; all 28 local source mutants are killed, with full unmutated suite and designated controls passing. D189 records the remaining pre-stop same-uid rewrite and protected acceptance-root gaps. Earlier uncommitted notes are historical; D185–D188 are published. D189 still requires its own exact-head CI/review. No B3/B4 probes, production changes or B5 closure. Next: frozen-image extraction and serving-NATS producer/recovery adapter; planned-boot/abort, timer migration and disposable macOS rehearsal remain open before B6.

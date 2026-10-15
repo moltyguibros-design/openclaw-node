@@ -216,6 +216,9 @@ def host_match(guest_path, extracted, output):
                 and sha256(image_path) == capture['clone_image_sha256'],
                 'capture receipt, cloned image and extracted stores differ')
         committed = require_committed(extracted.parent)
+        require(committed == {**json.loads(committed_bytes),
+                              'checkpoint': json.loads(checkpoint_bytes)},
+                'capture commitment differs from the pinned capture record')
         require(committed['manifest_sha256'] == hashlib.sha256(guest_bytes).hexdigest()
                 and committed['manifest'] == guest,
                 'guest manifest differs from the running-VM commitment')
