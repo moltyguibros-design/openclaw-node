@@ -1,0 +1,141 @@
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py
+index e74e13e..642e2b6 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py
+@@ -84,12 +84,108 @@ def capture_timeline(capture_dir, marks, window):
+         phases = ' '.join('%s=%.2f' % (name, after - at) for (name, at), (_, after) in zip(known, known[1:]))
+         seen = read(record)
+         outcome = ('%s holders=%s' % (seen.get('state'), seen.get('image_holders')) if seen
+-                   else 'FAILED: %s' % read(refused).get('error'))
++                   else 'FAILED: %s' % read(refused).get('error') if refused.exists()
++                   else 'in progress (no preflight.json or FAILED.json yet)')
+         rows.append((known[0][1], '%-44s %s %s' % (sample.name, phases, outcome)))
+     return '\ncapture timeline (seconds from worker spawn):\n' + '\n'.join(
+         '%+8.2f %s' % (at - origin, text) for at, text in sorted(rows))
+ 
+ 
++LAUNCHCTL = '/bin/launchctl'
++PRINTED = ('state', 'pid', 'runs', 'last exit code', 'last exit reason', 'last terminating signal',
++           'spawn type', 'job state', 'immediate reason')
++
++
++def helper_snapshot(capture_dir, worker_pid):
++    """Read-only native snapshot of every unfinished GUI status sample; diagnostic only.
++
++    It runs only on a failure path and changes no timing or verdict. Each command is bounded
++    to 5 s and only reads: `ps`, and `launchctl print` of the sample's own disposable label.
++    The facts separate where the helper contract stopped:
++    - a live `launchctl bootstrap` child of the worker: bootstrap has not returned;
++    - no client, no helper process and no utm-status.out/.err (launchd creates them when it
++      spawns the job): bootstrap returned but the job was not spawned (see launchctl print);
++    - utm-status.out/.err present, no helper process, no status: the helper ran and exited
++      without a status (see its err text and last exit code);
++    - a live helper process with a child: the helper is blocked in utmctl (or its child);
++      a live helper without a child: helper startup or its status write.
++    """
++    def bounded(*command):
++        try:
++            done = subprocess.run(command, capture_output=True, text=True, timeout=5)
++        except subprocess.TimeoutExpired:
++            return None, 'timed out after 5 s'
++        except OSError as error:
++            return None, 'unavailable: %s' % error
++        return done.returncode, (done.stdout + done.stderr).strip()
++
++    _, table = bounded('/bin/ps', '-A', '-o', 'pid=,ppid=,stat=,etime=,command=')
++    processes = {}
++    for line in (table or '').splitlines():
++        fields = line.split(None, 4)
++        if len(fields) == 5 and fields[0].isdigit() and fields[1].isdigit():
++            processes[int(fields[0])] = (int(fields[1]), ' '.join(fields[2:]))
++
++    def descendants(root):
++        found, frontier = [], [root]
++        while frontier:
++            parent = frontier.pop()
++            for pid, (ppid, text) in sorted(processes.items()):
++                if ppid == parent:
++                    found.append('%d %s' % (pid, text[:200]))
++                    frontier.append(pid)
++        return found
++
++    lines = ['native helper snapshot (read-only, worker pid %s):' % worker_pid]
++    client = [row for row in descendants(worker_pid) if 'launchctl' in row and 'bootstrap' in row]
++    lines += ['  worker descendants: %s' % (descendants(worker_pid) or 'none')]
++    unfinished = [sample for sample in (sorted(capture_dir.iterdir()) if capture_dir.is_dir() else ())
++                  if (sample / 'utm-status.plist').exists() and not (sample / 'preflight.json').exists()
++                  and not (sample / 'FAILED.json').exists()]
++    for sample in unfinished:
++        try:
++            label = plistlib.loads((sample / 'utm-status.plist').read_bytes())['Label']
++        except (OSError, ValueError, KeyError) as error:
++            label = 'unreadable (%s)' % error
++        status_path = str(sample / 'utm-status.json')
++        spawned = [name for name in ('utm-status.out', 'utm-status.err') if (sample / name).exists()]
++        files = ', '.join('%s %dB' % (item.name, item.stat().st_size) for item in sorted(sample.iterdir()))
++        code, printed = bounded(LAUNCHCTL, 'print', 'gui/%d/%s' % (os.getuid(), label))
++        kept = [row.strip() for row in printed.splitlines()
++                if row.strip().split(' = ')[0] in PRINTED] if code == 0 else [printed[:300]]
++        helpers = [pid for pid, (_, text) in processes.items()
++                   if '--utm-status-helper' in text and status_path in text]
++        children = [row for pid in helpers for row in descendants(pid)]
++        if client:
++            reading = 'bootstrap has not returned (live launchctl bootstrap client)'
++        elif (sample / 'utm-status.json').exists():
++            reading = 'helper status written: the worker is past it (bootout, lsof or sysctl; see descendants)'
++        elif helpers and children:
++            reading = 'helper running with a child: blocked in utmctl or its child'
++        elif helpers:
++            reading = 'helper running without a child: helper startup or status write'
++        elif spawned:
++            reading = 'helper spawned and exited without a status: see err text and last exit code'
++        else:
++            reading = 'bootstrap returned but the job was not spawned: see launchctl print'
++        if code is None:
++            reading += '; launchctl print did not answer, so launchd itself was not responding'
++        # The worker's bootstrap client is killed by its own 15 s timeout, counted from the plist.
++        age = time.time() - (sample / 'utm-status.plist').stat().st_mtime
++        if not client and age >= 14.5:
++            reading += ('; plist is %.2fs old, so an absent bootstrap client is inconclusive '
++                        '(the client may have just hit its 15 s timeout)' % age)
++        err = (sample / 'utm-status.err').read_text(errors='replace')[:300] if 'utm-status.err' in spawned else ''
++        lines += ['  %s label=%s' % (sample.name, label), '    files: %s' % files,
++                  '    launchctl print (exit %s): %s' % (code, '; '.join(kept) or 'no listed fields'),
++                  '    helper: %s' % (['%d %s' % (pid, processes[pid][1][:200]) for pid in helpers] or 'none'),
++                  '    helper children: %s' % (children or 'none'),
++                  '    helper err: %r' % err, '    reading: %s' % reading]
++    if not unfinished:
++        lines.append('  no unfinished GUI status sample')
++    return '\n' + '\n'.join(lines)
++
++
+ class VmstateGateTest(unittest.TestCase):
+     def test_host_commit_refuses_a_vm_already_stopped(self):
+         with tempfile.TemporaryDirectory(prefix='openclaw-late-guest-commit-') as temporary:
+@@ -852,10 +948,13 @@ class HostCaptureTest(unittest.TestCase):
+         deadline = time.monotonic() + 15
+         while not (output / 'ARMED.json').exists() and time.monotonic() < deadline:
+             if worker.poll() is not None:
+-                raise AssertionError(worker.stderr.read().decode() + capture_timeline(output, marks, 20))
++                raise AssertionError(worker.stderr.read().decode() + capture_timeline(output, marks, 20)
++                                     + helper_snapshot(output, worker.pid))
+             time.sleep(0.1)
+         marks.append(('arm wait ended', time.time()))
+-        self.assertTrue((output / 'ARMED.json').exists(), capture_timeline(output, marks, 20))
++        if not (output / 'ARMED.json').exists():
++            self.fail('ARMED.json absent' + capture_timeline(output, marks, 20)
++                      + helper_snapshot(output, worker.pid))
+         nonce = json.loads((output / 'ARMED.json').read_text())['capture_nonce']
+         stale = json.loads((guest_output / 'manifest.json').read_text())
+         stale['capture_nonce'] = '0' * 64 if nonce != '0' * 64 else '1' * 64
+@@ -930,7 +1029,9 @@ class HostCaptureTest(unittest.TestCase):
+         marks.append(('guard completed', time.time()))
+         _, stderr = worker.communicate(timeout=30)
+         marks.append(('worker exited', time.time()))
+-        self.assertEqual(worker.returncode, 0, stderr.decode() + capture_timeline(output, marks, 20))
++        if worker.returncode != 0:
++            self.fail('worker exited %s: %s' % (worker.returncode, stderr.decode())
++                      + capture_timeline(output, marks, 20) + helper_snapshot(output, worker.pid))
+         with (output / 'CAPTURE_ACTIVE.lock').open('rb') as active:
+             fcntl.flock(active, fcntl.LOCK_EX | fcntl.LOCK_NB)
+         result = json.loads((output / 'CAPTURE.json').read_text())
