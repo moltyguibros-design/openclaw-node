@@ -1,0 +1,1677 @@
+diff --git a/.github/workflows/test.yml b/.github/workflows/test.yml
+index 0a3761e..3352bac 100644
+--- a/.github/workflows/test.yml
++++ b/.github/workflows/test.yml
+@@ -103,6 +103,7 @@ jobs:
+           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py
+           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py
+           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
++          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
+           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_preflight_status.py
+           NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_cluster.py
+       - name: Root unit tests
+@@ -195,6 +196,7 @@ jobs:
+           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint_facade.py
+           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py
+           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
++          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
+           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_preflight_status.py
+           PYTHONPATH="$PWD/memory-plan/plans/node-state-recovery/audits/step12_jetstream" /usr/bin/python3 -m unittest -q test_restore_only
+           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_disabled.py
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_journal_mount.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_journal_mount.py
+new file mode 100644
+index 0000000..eb02fe7
+--- /dev/null
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_journal_mount.py
+@@ -0,0 +1,360 @@
++#!/usr/bin/env python3
++"""Owned-only read-only ASIF mount of a published fixture capture's clone for the journal reader (B5).
++
++The clone of a published owned fixture capture is attached read-only without mounting, and its one
++Data volume is mounted read-only at a fresh private mount point. Before verify_stopped_journal()
++reads anything, the mount must be read-only, nodev, nosuid and noexec, and must honour ownership.
++The arm lock is held throughout. Before the attach and again after the eject, the CAPTURE.json
++pins and their commitment, the fixture VM, the clone's identity (device, inode, size, mtime, ctime,
++flags) and hash and the Data volume UUID are checked and must be equal. The exclusive receipt
++lists the metadata of every file the reader actually read.
++
++Production refuses: no host-pinned B3 table or protected acceptance root exists, and this tool
++claims neither. The table is the caller's and is never read from the image. Command outputs,
++statfs layout and flags and the diskutil/hdiutil plist keys used here are as documented, not yet
++observed natively; the CI-only probe_asif_mount_ownership.py must confirm them first.
++
++Every failure keeps its primary exception. Cleanup (unmount, eject, absence check, mount point
++removal) runs on every path, records each attempt and never raises; FAILED.json carries the
++primary error with the cleanup evidence. An attach or mount that failed or timed out may still
++have applied, so cleanup finds the clone's attachments in hdiutil's inventory and the mount
++through statfs, never from the failed command's own output.
++
++Follow-up, deliberately not done here: host_asif_extract.extract() keeps its own attach and mount
++for the store extraction. Moving it onto these primitives would bound its commands (they have no
++timeout), keep its primary error (it merges cleanup errors into one) and verify the mount's
++ownership and nodev/nosuid/noexec flags (it checks only WritableVolume and the mount point).
++"""
++import ctypes
++import datetime
++import fcntl
++import hashlib
++import json
++import os
++import pathlib
++import plistlib
++import re
++import stat
++import subprocess
++import sys
++import time
++
++from host_guest_commit import private_bytes, require_captured, require_committed
++from host_vm_capture import CAPTURE_SCOPE, FIXTURE_UUID
++from host_vm_preflight import owned_directory, require, write_record
++from stopped_journal_inputs import verify_stopped_journal
++
++DISKUTIL = '/usr/sbin/diskutil'
++HDIUTIL = '/usr/bin/hdiutil'
++CLONE = 'powered-off-image.asif'
++PRODUCTION_PARENT = pathlib.Path.home() / 'Library/Application Support/OpenClawRecovery'
++TIMEOUT = 60
++EJECT_ATTEMPTS = 3
++EJECT_PAUSE = 1.0
++MOUNT_OPTIONS = 'nobrowse,nodev,nosuid,noexec,owners'
++# sys/mount.h
++MNT_RDONLY = 0x00000001
++MNT_NOEXEC = 0x00000004
++MNT_NOSUID = 0x00000008
++MNT_NODEV = 0x00000010
++MNT_IGNORE_OWNERSHIP = 0x00200000
++REQUIRED_FLAGS = (('read-only', MNT_RDONLY), ('nodev', MNT_NODEV), ('nosuid', MNT_NOSUID),
++                  ('noexec', MNT_NOEXEC))
++SCOPE = ('owned read-only clone mount for the frozen journal reader; not stopped-ASIF acceptance; '
++         'B3 host-pinned table and protected acceptance root external')
++DISK = re.compile(r'/dev/disk[0-9]+')
++
++
++def attempt(*argv, timeout=TIMEOUT):
++    """One bounded command; never raises, so it cannot mask an error."""
++    row = {'argv': list(argv), 'returncode': None, 'timed_out': False, 'stdout': b'', 'stderr': ''}
++    try:
++        done = subprocess.run(argv, capture_output=True, timeout=timeout)
++    except subprocess.TimeoutExpired:
++        return {**row, 'timed_out': True}
++    except OSError as error:
++        return {**row, 'stderr': str(error)[:300]}
++    return {**row, 'returncode': done.returncode, 'stdout': done.stdout,
++            'stderr': done.stderr.decode(errors='replace')[:300]}
++
++
++def evidence(row):
++    """A command attempt as recorded: its output by digest, never its bytes."""
++    return {**{key: value for key, value in row.items() if key != 'stdout'},
++            'stdout_sha256': hashlib.sha256(row['stdout']).hexdigest()}
++
++
++def plist_of(row, what):
++    require(row['returncode'] == 0 and not row['timed_out'], what + ' failed or timed out')
++    try:
++        value = plistlib.loads(row['stdout'])
++    except Exception as error:
++        raise RuntimeError(what + ' output is not a plist') from error
++    require(isinstance(value, dict), what + ' output is not a plist dictionary')
++    return value
++
++
++class _Statfs(ctypes.Structure):
++    # The 64-bit-inode struct statfs of macOS sys/mount.h.
++    _fields_ = [('f_bsize', ctypes.c_uint32), ('f_iosize', ctypes.c_int32),
++                ('f_blocks', ctypes.c_uint64), ('f_bfree', ctypes.c_uint64),
++                ('f_bavail', ctypes.c_uint64), ('f_files', ctypes.c_uint64),
++                ('f_ffree', ctypes.c_uint64), ('f_fsid', ctypes.c_int32 * 2),
++                ('f_owner', ctypes.c_uint32), ('f_type', ctypes.c_uint32),
++                ('f_flags', ctypes.c_uint32), ('f_fssubtype', ctypes.c_uint32),
++                ('f_fstypename', ctypes.c_char * 16), ('f_mntonname', ctypes.c_char * 1024),
++                ('f_mntfromname', ctypes.c_char * 1024), ('f_flags_ext', ctypes.c_uint32),
++                ('f_reserved', ctypes.c_uint32 * 7)]
++
++
++def statfs(path):
++    """The mount that contains `path`: its flags, filesystem type and both mount names."""
++    require(sys.platform == 'darwin', 'mount verification requires macOS statfs')
++    libc = ctypes.CDLL(None, use_errno=True)
++    try:
++        call = libc['statfs$INODE64']
++    except AttributeError:
++        call = libc.statfs
++    call.argtypes = [ctypes.c_char_p, ctypes.POINTER(_Statfs)]
++    value = _Statfs()
++    if call(os.fsencode(path), ctypes.byref(value)) != 0:
++        error = ctypes.get_errno()
++        raise OSError(error, os.strerror(error), str(path))
++    return {'flags': value.f_flags, 'fstypename': os.fsdecode(value.f_fstypename),
++            'mntonname': os.fsdecode(value.f_mntonname), 'mntfromname': os.fsdecode(value.f_mntfromname)}
++
++
++def attachments(clone):
++    """Every hdiutil attachment of this clone file, found by path or by identity."""
++    info = plist_of(attempt(HDIUTIL, 'info', '-plist'), 'attached image inventory')
++    found = []
++    for image in info.get('images', []):
++        path = pathlib.Path(image.get('image-path', ''))
++        if path == clone or os.path.lexists(path) and os.path.samefile(path, clone):
++            found.append(image)
++    return found
++
++
++def clone_identity(path, capture):
++    """The clone's owned single-link identity and sha256, as the capture record pins them."""
++    info = path.lstat()
++    require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and info.st_nlink == 1
++            and stat.S_IMODE(info.st_mode) == 0o600 and info.st_size == capture.get('clone_size'),
++            'clone is not the owned single-link 0600 image of the recorded size')
++    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
++    try:
++        opened = os.fstat(fd)
++        digest = hashlib.sha256()
++        while chunk := os.read(fd, 1 << 20):
++            digest.update(chunk)
++        after = os.fstat(fd)
++    finally:
++        os.close(fd)
++    require((opened.st_dev, opened.st_ino) == (info.st_dev, info.st_ino)
++            and (after.st_size, after.st_mtime_ns) == (info.st_size, info.st_mtime_ns),
++            'clone changed while it was hashed')
++    require(digest.hexdigest() == capture.get('clone_image_sha256'), 'clone hash differs from the capture record')
++    # ctime is compared too: a rename-away-and-back keeps inode, mtime and bytes but not ctime. If
++    # probe_asif_mount_ownership.py shows a read-only attach itself changes it, that is a refusal
++    # until a reviewed relaxation, never a silent one.
++    return {'device': info.st_dev, 'inode': info.st_ino, 'size': info.st_size,
++            'mtime_ns': info.st_mtime_ns, 'ctime_ns': info.st_ctime_ns,
++            'flags': getattr(info, 'st_flags', 0), 'sha256': digest.hexdigest()}
++
++
++def capture_inputs(capture_dir):
++    """The pinned capture, its commitment and the clone, as one value compared before and after."""
++    require(not os.path.lexists(capture_dir / 'FAILED.json'), 'capture failed; its clone is not mounted')
++    raw = private_bytes(capture_dir / 'CAPTURE.json')
++    pinned = require_captured(capture_dir)
++    commitment = require_committed(capture_dir)
++    require(commitment == {**json.loads(pinned['COMMITTED.json']),
++                           'checkpoint': json.loads(pinned['CHECKPOINT.json'])},
++            'capture commitment differs from the pinned capture record')
++    capture = json.loads(raw)
++    require(capture.get('scope') == CAPTURE_SCOPE and capture.get('vm_state_at_final_check') == 'stopped',
++            'capture record is not a completed stopped-VM capture')
++    require(capture.get('vm_uuid') == FIXTURE_UUID, 'capture is not of the owned fixture VM')
++    require(isinstance(capture.get('data_volume_uuid'), str) and capture['data_volume_uuid'],
++            'capture record names no Data volume')
++    return {'capture_sha256': hashlib.sha256(raw).hexdigest(), 'commitment': commitment,
++            'data_volume_uuid': capture['data_volume_uuid'],
++            'clone': clone_identity(capture_dir / CLONE, capture)}
++
++
++def data_volume(entities, uuid):
++    """The attached image's one unencrypted, unmounted APFS volume named Data with the pinned UUID."""
++    found = []
++    for entity in entities:
++        if entity.get('content-hint') != 'Apple_APFS_Volume':
++            continue
++        info = plist_of(attempt(DISKUTIL, 'info', '-plist', entity.get('dev-entry', '')), 'volume information')
++        if info.get('VolumeUUID') == uuid:
++            found.append((entity['dev-entry'], info))
++    require(len(found) == 1, 'pinned Data volume UUID is not on the attached clone exactly once')
++    volume, info = found[0]
++    require(info.get('VolumeName') == 'Data', 'pinned volume is not named Data')
++    require(info.get('Encryption') is False, 'pinned Data volume is encrypted')
++    require(not info.get('MountPoint'), 'pinned Data volume is already mounted')
++    return volume
++
++
++def verify_mount(mount, volume, uuid):
++    """The private mount point holds this Data volume read-only, nodev, nosuid, noexec, owners honoured."""
++    info = plist_of(attempt(DISKUTIL, 'info', '-plist', volume), 'mounted volume information')
++    require(info.get('WritableVolume') is False, 'Data volume is writable')
++    require(info.get('MountPoint') and pathlib.Path(info['MountPoint']) == mount,
++            'Data volume is not mounted at the private mount point')
++    require(info.get('VolumeUUID') == uuid, 'mounted volume UUID differs')
++    require(info.get('GlobalPermissionsEnabled') is True, 'Data volume ownership is not enabled')
++    found = statfs(mount)
++    require(found['mntonname'] == str(mount), 'private mount point is not a mount')
++    require(found['mntfromname'] == volume, 'private mount point holds another device')
++    require(found['fstypename'] == 'apfs', 'mounted filesystem is not APFS')
++    missing = [name for name, bit in REQUIRED_FLAGS if not found['flags'] & bit]
++    require(not missing, 'mount is not ' + ', '.join(missing))
++    require(not found['flags'] & MNT_IGNORE_OWNERSHIP, 'mount ignores ownership')
++    return {'diskutil': {key: info.get(key) for key in ('WritableVolume', 'MountPoint', 'VolumeUUID',
++                                                        'GlobalPermissionsEnabled', 'DeviceNode')},
++            'statfs': found}
++
++
++def release(clone, mount, attached, known=()):
++    """Unmount, eject the clone's attachments, confirm absence, remove the mount point; never raises.
++
++    Nothing is ejected unless this run attempted the attach (`attached`): any attachment of the
++    clone before that was refused, not made here, and is not this run's to eject. `known` is the
++    attach result's disk, ejected if the inventory itself cannot be read.
++    """
++    steps = []
++
++    def step(name, call):
++        try:
++            result = call()
++        except Exception as error:
++            steps.append({'step': name, 'error': repr(error)[:300]})
++            return None
++        steps.append({'step': name, 'result': result})
++        return result
++
++    def mounted():
++        return os.path.lexists(mount) and statfs(mount)['mntonname'] == str(mount)
++
++    # An unknown mount state (statfs failed) is unmounted too: unmounting nothing only fails.
++    if step('mounted before cleanup', mounted) is not False:
++        step('unmount', lambda: evidence(attempt(DISKUTIL, 'unmount', str(mount))))
++    rows = step('attachments before eject', lambda: [image.get('system-entities', [{}])[0].get('dev-entry')
++                                                     for image in attachments(clone)])
++    for disk in (rows if rows is not None else list(known)) if attached else ():
++        for _ in range(EJECT_ATTEMPTS):
++            ejected = step('eject ' + str(disk), lambda: evidence(attempt(DISKUTIL, 'eject', str(disk))))
++            if ejected and ejected['returncode'] == 0:
++                break
++            time.sleep(EJECT_PAUSE)
++    remaining = step('attachments after eject', lambda: len(attachments(clone)))
++    still = step('mounted after eject', mounted)
++    if os.path.lexists(mount):
++        step('remove mount point', lambda: os.rmdir(mount))
++    return {'steps': steps, 'clean': (remaining == 0 or not attached) and still is False
++            and not os.path.lexists(mount)}
++
++
++def record_failure(output, stage, error, cleanup):
++    """FAILED.json for the primary error and its cleanup; never raises, so it cannot replace it."""
++    try:
++        write_record(output / 'FAILED.json', {'stage': stage, 'primary_error': repr(error)[:300],
++                                              'cleanup': cleanup})
++    except Exception:
++        pass
++
++
++def read_journal_inputs(capture_dir, output, *, table, fixture=False):
++    """Mount the fixture capture's clone read-only, read its journal inputs, release, receipt."""
++    os.umask(0o077)
++    require(fixture, 'production journal mount requires a host-pinned B3 table and a protected acceptance root')
++    capture_dir = pathlib.Path(capture_dir)
++    output = pathlib.Path(output)
++    owned_directory(capture_dir)
++    require(capture_dir.parent != PRODUCTION_PARENT, 'production capture directory refused')
++    require(output.parent == capture_dir, 'journal mount output must be a child of the capture directory')
++    output.mkdir(mode=0o700)
++    try:
++        armed = (capture_dir / 'ARMED.json').open('rb')
++    except OSError as error:
++        record_failure(output, 'lock', error, None)
++        raise
++    with armed:
++        try:
++            fcntl.flock(armed, fcntl.LOCK_EX | fcntl.LOCK_NB)
++        except BlockingIOError as error:
++            record_failure(output, 'lock', error, None)
++            raise RuntimeError('capture is busy: another holder has the arm lock') from error
++        return locked_read(capture_dir, output, table)
++
++
++def locked_read(capture_dir, output, table):
++    clone = capture_dir / CLONE
++    mount = output / 'mount'
++    stage = 'inputs'
++    attach_attempted, known = False, []
++    try:
++        before = capture_inputs(capture_dir)
++        stage = 'inventory'
++        require(not attachments(clone), 'clone is already attached')
++        stage = 'attach'
++        attach_attempted = True
++        attached = attempt(DISKUTIL, 'image', 'attach', '--plist', '--readOnly', '--noMount', str(clone))
++        entities = plist_of(attached, 'read-only attach').get('system-entities') or [{}]
++        known = [entities[0].get('dev-entry')] if DISK.fullmatch(str(entities[0].get('dev-entry'))) else []
++        rows = attachments(clone)
++        require(len(rows) == 1 and rows[0].get('writeable') is False,
++                'clone is not attached exactly once read-only')
++        disk = rows[0].get('system-entities', [{}])[0].get('dev-entry')
++        require(isinstance(disk, str) and DISK.fullmatch(disk) and entities[0].get('dev-entry') == disk,
++                'attached clone disk differs from the attach result')
++        stage = 'volume'
++        volume = data_volume(entities, before['data_volume_uuid'])
++        stage = 'mount'
++        mount.mkdir(mode=0o700)
++        done = attempt(DISKUTIL, 'mount', 'readOnly', '-mountOptions', MOUNT_OPTIONS,
++                       '-mountPoint', str(mount), volume)
++        require(done['returncode'] == 0 and not done['timed_out'], 'read-only mount failed or timed out')
++        stage = 'verify'
++        verified = verify_mount(mount, volume, before['data_volume_uuid'])
++        stage = 'read'
++        summary = verify_stopped_journal(capture_dir, mount, table=table)
++    except BaseException as error:
++        record_failure(output, stage, error, release(clone, mount, attach_attempted, known))
++        raise
++    cleanup = release(clone, mount, attach_attempted, known)
++    try:
++        stage = 'release'
++        require(cleanup['clean'], 'journal mount cleanup did not complete')
++        stage = 'after eject'
++        after = capture_inputs(capture_dir)
++        require(after == before, 'capture pins, commitment, clone or volume changed while mounted')
++        receipt = {
++            'scope': SCOPE, 'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
++            'capture_sha256': before['capture_sha256'],
++            'checkpoint_sha256': before['commitment']['checkpoint']['checkpoint_sha256'],
++            'clone_before': before['clone'], 'clone_after': after['clone'],
++            'attach': {'disk': disk, 'command': evidence(attached),
++                       'entities': [{key: entity.get(key) for key in ('dev-entry', 'content-hint')}
++                                    for entity in entities]},
++            'volume': volume, 'data_volume_uuid': before['data_volume_uuid'],
++            'mount': {'point': str(mount), 'options': MOUNT_OPTIONS, 'command': evidence(done), **verified},
++            'reader': {key: summary[key] for key in ('window', 'lineage', 'checkpoint_sha256', 'pre_head',
++                                                     'session', 'config_modes')},
++            'read': summary['read'], 'cleanup': cleanup}
++        write_record(output / 'JOURNAL_INPUTS.json', receipt)
++    except BaseException as error:
++        record_failure(output, stage, error, cleanup)
++        raise
++    return receipt
++
++
++if __name__ == '__main__':
++    require(len(sys.argv) in (4, 5) and sys.argv[4:] in ([], ['--fixture']),
++            'usage: host_journal_mount.py CAPTURE_DIR OUTPUT TABLE_JSON [--fixture]')
++    read_journal_inputs(sys.argv[1], sys.argv[2], table=json.loads(private_bytes(pathlib.Path(sys.argv[3]))),
++                        fixture=sys.argv[4:] == ['--fixture'])
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py
+new file mode 100644
+index 0000000..2ab3557
+--- /dev/null
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py
+@@ -0,0 +1,269 @@
++#!/usr/bin/env python3
++"""CI-only macOS probe: what a read-only ASIF mount really reports, and whether it honours owners.
++
++host_journal_mount.py relies on facts documented but never observed natively: the hdiutil
++inventory's `writeable` row, the diskutil WritableVolume / MountPoint / VolumeUUID /
++GlobalPermissionsEnabled / Encryption keys, the statfs layout and flags, that `diskutil mount
++readOnly -mountOptions nobrowse,nodev,nosuid,noexec,owners` sets them, and that a read-only attach
++leaves the image bytes unchanged. This probe observes them on a disposable runner only.
++
++It creates its own fresh ASIF with one APFS volume named Data in a new private directory, mounts
++it read-write at a private point, enables ownership, writes a user file and a decisive root-owned
++0600 file (`sudo -n chown 0:0`), and ejects. It then mounts the image read-only three ways: the
++wrapper's exact options, plain readOnly, and the wrapper's options again after ownership was
++disabled. For each it records the attach and inventory rows, both diskutil views, the statfs flags,
++the owner and mode the mount reports for both files, whether the runner user can read the root
++file, and the wrapper's own verify_mount() verdict. The image's sha256, times and xattr names are
++recorded before and after every read-only mount. It touches no image, volume or VM it did not
++create, ejects whatever of its own image is still attached, and removes its directory only once
++nothing of it is attached or mounted. The JSON report is written exclusively to the named path.
++
++Guards, all required, checked before any command: macOS, CI=true and GITHUB_ACTIONS=true (both set
++by GitHub Actions), OPENCLAW_OWNERSHIP_PROBE=1, the --ci-owned-probe flag, a new output path in an
++existing directory, then passwordless sudo.
++
++It is deliberately not wired into CI. To run it, add a step to a macOS job and upload the report:
++
++    OPENCLAW_OWNERSHIP_PROBE=1 /usr/bin/python3 \\
++      memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py \\
++      --ci-owned-probe "$RUNNER_TEMP/asif-mount-ownership.json"
++
++Exit 0 means the probe completed and cleaned up, not that the wrapper's assumptions hold; that
++is read from the report.
++"""
++import datetime
++import hashlib
++import json
++import os
++import pathlib
++import shutil
++import sys
++import tempfile
++
++sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
++
++import host_journal_mount as wrapper  # noqa: E402
++from host_journal_mount import DISKUTIL, MOUNT_OPTIONS, attachments, attempt, evidence  # noqa: E402
++from host_vm_preflight import require, write_record  # noqa: E402
++
++SUDO = '/usr/bin/sudo'
++SCOPE = ('CI-only owned ASIF read-only mount ownership probe; a disposable image it created; '
++         'not stopped-ASIF acceptance and no production volume')
++KEYS = ('WritableVolume', 'MountPoint', 'VolumeUUID', 'VolumeName', 'Encryption', 'DeviceNode',
++        'GlobalPermissionsEnabled', 'FilesystemType')
++# sys/mount.h MNT_* bits, for a readable report; unknown bits are kept as a hex remainder.
++FLAG_NAMES = (('rdonly', 0x1), ('synchronous', 0x2), ('noexec', 0x4), ('nosuid', 0x8),
++              ('nodev', 0x10), ('union', 0x20), ('async', 0x40), ('cprotect', 0x80),
++              ('exported', 0x100), ('removable', 0x200), ('quarantine', 0x400), ('local', 0x1000),
++              ('quota', 0x2000), ('rootfs', 0x4000), ('dovolfs', 0x8000),
++              ('dontbrowse', 0x100000), ('ignore_ownership', 0x200000), ('automounted', 0x400000),
++              ('journaled', 0x800000), ('nouserxattr', 0x1000000), ('defwrite', 0x2000000),
++              ('multilabel', 0x4000000), ('nofollow', 0x8000000), ('noatime', 0x10000000),
++              ('snapshot', 0x40000000), ('strictatime', 0x80000000))
++VARIANTS = (('wrapper-options', MOUNT_OPTIONS, False), ('plain-readonly', None, False),
++            ('wrapper-options-ownership-disabled', MOUNT_OPTIONS, True))
++
++
++def flag_names(flags):
++    names = [name for name, bit in FLAG_NAMES if flags & bit]
++    rest = flags & ~sum(bit for _, bit in FLAG_NAMES)
++    return names + (['0x%x' % rest] if rest else [])
++
++
++def guard(argv, environ, platform=sys.platform):
++    """The probe's output path, once every guard holds; nothing runs before the last one."""
++    require(platform == 'darwin', 'the ownership probe runs only on macOS')
++    require(environ.get('CI') == 'true' and environ.get('GITHUB_ACTIONS') == 'true',
++            'the ownership probe runs only on a GitHub Actions runner')
++    require(environ.get('OPENCLAW_OWNERSHIP_PROBE') == '1', 'OPENCLAW_OWNERSHIP_PROBE=1 is required')
++    require(len(argv) == 2 and argv[0] == '--ci-owned-probe',
++            'usage: probe_asif_mount_ownership.py --ci-owned-probe OUTPUT_JSON')
++    output = pathlib.Path(argv[1])
++    require(output.is_absolute() and not os.path.lexists(output) and output.parent.is_dir(),
++            'probe output must be a new file in an existing directory')
++    sudo = attempt(SUDO, '-n', '/usr/bin/true')
++    require(sudo['returncode'] == 0 and not sudo['timed_out'], 'passwordless sudo is required')
++    return output
++
++
++def checked(row, what):
++    require(row['returncode'] == 0 and not row['timed_out'], what + ' failed: ' + row['stderr'])
++    return row
++
++
++def image_state(image):
++    raw = image.read_bytes()
++    info = image.lstat()
++    names = attempt('/usr/bin/xattr', str(image))
++    return {'sha256': hashlib.sha256(raw).hexdigest(), 'size': info.st_size, 'inode': info.st_ino,
++            'mtime_ns': info.st_mtime_ns, 'ctime_ns': info.st_ctime_ns,
++            'xattrs': names['stdout'].decode(errors='replace').split()}
++
++
++def attach(image, *flags):
++    row = checked(attempt(DISKUTIL, 'image', 'attach', '--plist', *flags, '--noMount', str(image)), 'attach')
++    entities = wrapper.plist_of(row, 'attach').get('system-entities') or []
++    data = []
++    for entity in entities:
++        if entity.get('content-hint') == 'Apple_APFS_Volume':
++            info = wrapper.plist_of(attempt(DISKUTIL, 'info', '-plist', entity['dev-entry']), 'info')
++            if info.get('VolumeName') == 'Data':
++                data.append((entity['dev-entry'], info))
++    require(len(data) == 1, 'the probe image does not hold exactly one Data volume')
++    return {'command': evidence(row), 'entities': entities, 'volume': data[0][0],
++            'info': {key: data[0][1].get(key) for key in KEYS},
++            'inventory': [{'keys': sorted(image_row), 'writeable': image_row.get('writeable'),
++                           'image-path': image_row.get('image-path')} for image_row in attachments(image)]}
++
++
++def info_of(volume):
++    found = wrapper.plist_of(attempt(DISKUTIL, 'info', '-plist', volume), 'info')
++    return {key: found.get(key) for key in KEYS}
++
++
++def mount_at(point, volume, *options):
++    point.mkdir(mode=0o700)
++    return checked(attempt(DISKUTIL, 'mount', *options, '-mountPoint', str(point), volume), 'mount')
++
++
++def release(image, points):
++    """Unmount every probe mount point, eject the image's own attachments; never raises."""
++    rows, errors, remaining, still = [], [], None, None
++
++    def mounted(point):
++        return os.path.lexists(point) and wrapper.statfs(point)['mntonname'] == str(point)
++
++    for point in points:
++        try:
++            if mounted(point):
++                rows.append(evidence(attempt(DISKUTIL, 'unmount', str(point))))
++        except Exception as error:
++            errors.append(repr(error)[:300])
++    try:
++        for disk in [row['system-entities'][0]['dev-entry'] for row in attachments(image)]:
++            for _ in range(wrapper.EJECT_ATTEMPTS):
++                rows.append(evidence(attempt(DISKUTIL, 'eject', disk)))
++                if rows[-1]['returncode'] == 0:
++                    break
++        remaining = len(attachments(image))
++    except Exception as error:
++        errors.append(repr(error)[:300])
++    try:
++        still = [str(point) for point in points if mounted(point)]
++    except Exception as error:
++        errors.append(repr(error)[:300])
++    return {'steps': rows, 'errors': errors, 'remaining': remaining, 'mounted': still,
++            'clean': not errors and remaining == 0 and still == []}
++
++
++def write_phase(image, temp, report):
++    attached = attach(image)
++    point = temp / 'write'
++    report['write'] = {'attach': attached}
++    try:
++        mount_at(point, attached['volume'])
++        report['write']['before_enable'] = {'info': info_of(attached['volume']),
++                                            'statfs_flags': flag_names(wrapper.statfs(point)['flags'])}
++        checked(attempt(SUDO, '-n', DISKUTIL, 'enableOwnership', str(point)), 'enableOwnership')
++        user, root = point / 'user.txt', point / 'root.txt'
++        user.write_bytes(b'owned user file\n')
++        root.write_bytes(b'decisive root-owned file\n')
++        os.chmod(user, 0o600)
++        os.chmod(root, 0o600)
++        checked(attempt(SUDO, '-n', '/usr/sbin/chown', '0:0', str(root)), 'chown root')
++        report['write']['after_enable'] = {
++            'info': info_of(attached['volume']),
++            'statfs_flags': flag_names(wrapper.statfs(point)['flags']),
++            'files': {path.name: {'uid': path.lstat().st_uid, 'gid': path.lstat().st_gid,
++                                  'mode': oct(path.lstat().st_mode & 0o7777)} for path in (user, root)}}
++    finally:
++        report['write']['release'] = release(image, [point])
++    require(report['write']['release']['clean'], 'write phase did not release the probe image')
++    point.rmdir()
++
++
++def disable_ownership(image, temp, report):
++    attached = attach(image)
++    point = temp / 'disable'
++    try:
++        mount_at(point, attached['volume'])
++        checked(attempt(SUDO, '-n', DISKUTIL, 'disableOwnership', str(point)), 'disableOwnership')
++        report['disable'] = {'info': info_of(attached['volume'])}
++    finally:
++        report.setdefault('disable', {})['release'] = release(image, [point])
++    require(report['disable']['release']['clean'], 'disable phase did not release the probe image')
++    point.rmdir()
++
++
++def read_only_variant(image, temp, name, options):
++    row = {'image_before': image_state(image)}
++    attached = attach(image, '--readOnly')
++    row['attach'] = attached
++    point = temp / name
++    try:
++        flags = ['-mountOptions', options] if options else []
++        row['mount'] = evidence(mount_at(point, attached['volume'], 'readOnly', *flags))
++        row['info'] = info_of(attached['volume'])
++        found = wrapper.statfs(point)
++        row['statfs'] = {**found, 'flag_names': flag_names(found['flags'])}
++        row['files'] = {}
++        for file in ('user.txt', 'root.txt'):
++            info = (point / file).lstat()
++            try:
++                (point / file).read_bytes()
++                readable = True
++            except PermissionError:
++                readable = False
++            row['files'][file] = {'uid': info.st_uid, 'gid': info.st_gid,
++                                  'mode': oct(info.st_mode & 0o7777), 'readable_by_runner': readable}
++        try:
++            wrapper.verify_mount(point, attached['volume'], attached['info']['VolumeUUID'])
++            row['verify_mount'] = 'accepted'
++        except Exception as error:
++            row['verify_mount'] = 'refused: ' + str(error)
++    finally:
++        row['release'] = release(image, [point])
++    require(row['release']['clean'], name + ' did not release the probe image')
++    point.rmdir()
++    row['image_after'] = image_state(image)
++    return row
++
++
++def run(output):
++    temp = pathlib.Path(tempfile.mkdtemp(prefix='openclaw-asif-ownership-',
++                                         dir=os.environ.get('RUNNER_TEMP'))).resolve()
++    image = temp / 'probe.asif'
++    points = [temp / name for name in ('write', 'disable', *(variant for variant, _, _ in VARIANTS))]
++    report = {'scope': SCOPE, 'started_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
++              'runner_uid': os.getuid(), 'mount_options': MOUNT_OPTIONS,
++              'os': attempt('/usr/bin/sw_vers')['stdout'].decode(errors='replace'),
++              'variants': {}, 'completed': False}
++    try:
++        checked(attempt(DISKUTIL, 'image', 'create', 'blank', '--format', 'ASIF', '--size', '64m',
++                        '--fs', 'APFS', '--volumeName', 'Data', str(image)), 'create')
++        os.chmod(image, 0o600)
++        report['created'] = image_state(image)
++        write_phase(image, temp, report)
++        for name, options, disabled in VARIANTS:
++            if disabled and 'disable' not in report:
++                disable_ownership(image, temp, report)
++            report['variants'][name] = read_only_variant(image, temp, name, options)
++        report['completed'] = True
++    except Exception as error:
++        report['error'] = repr(error)[:500]
++    finally:
++        report['cleanup'] = release(image, points)
++        if report['cleanup']['clean']:
++            shutil.rmtree(temp)
++        report['cleanup']['removed'] = not os.path.lexists(temp)
++    # Plist values reach the report as-is; anything JSON cannot hold is kept as its repr.
++    write_record(output, json.loads(json.dumps(report, default=repr)))
++    return 0 if report['completed'] and report['cleanup']['clean'] and report['cleanup']['removed'] else 1
++
++
++def main(argv, environ):
++    return run(guard(argv, environ))
++
++
++if __name__ == '__main__':
++    sys.exit(main(sys.argv[1:], os.environ))
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_journal_inputs.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_journal_inputs.py
+index 2461f88..e8ea806 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_journal_inputs.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_journal_inputs.py
+@@ -115,7 +115,8 @@ def content(path, mode, budget):
+ 
+     The entry is checked before it is opened, so a link, FIFO or device node in the guest image is
+     never opened; the opened file must then be that same inode. `budget` holds the files and bytes
+-    the whole read may still take; a file beyond the file bound is not even inspected.
++    the whole read may still take, a file beyond the file bound is not even inspected, and the
++    metadata of every file actually read is appended to its `read` list.
+     """
+     budget['files'] -= 1
+     require(budget['files'] >= 0, 'stopped image reads exceed their file bound at: ' + path.name)
+@@ -136,6 +137,9 @@ def content(path, mode, budget):
+     require(len(raw) <= LIMIT, 'stopped image file exceeds its size bound: ' + path.name)
+     budget['bytes'] -= len(raw)
+     require(budget['bytes'] >= 0, 'stopped image reads exceed their total bound at: ' + path.name)
++    budget['read'].append({'path': str(path), 'size': len(raw), 'mode': stat.S_IMODE(info.st_mode),
++                           'uid': info.st_uid, 'nlink': info.st_nlink, 'device': info.st_dev,
++                           'inode': info.st_ino, 'sha256': hashlib.sha256(raw).hexdigest()})
+     return raw, info
+ 
+ 
+@@ -209,14 +213,15 @@ def lineage(windows, window, parent):
+ 
+ 
+ def read_inputs(root, commitment):
+-    """The committed window's records, lineage, config bytes and modes, baseline binary and home.
++    """The committed window's records, lineage, config bytes and modes, baseline binary and home,
++    and `read`: the metadata of every file read, its path relative to `root`, in read order.
+ 
+     `commitment` is the pinned require_committed() result. Reads only below `root`, at paths
+     fixed by the committed home, and returns no pin table.
+     """
+     root = pathlib.Path(root)
+     home = committed_home(commitment['manifest'])
+-    budget = {'files': MAX_FILES, 'bytes': MAX_TOTAL}
++    budget = {'files': MAX_FILES, 'bytes': MAX_TOTAL, 'read': []}
+     try:
+         require(root.resolve(strict=True) == root, 'stopped image root is not a literal absolute path')
+         preservation = directory(root, home + PRESERVATION)
+@@ -262,7 +267,9 @@ def read_inputs(root, commitment):
+         raise Refused('journal baseline lacks the NATS argv') from error
+     require(len(binaries) == 1, 'NATS units name different binaries in the journal baseline')
+     return {'home': home, 'window': window, 'lineage': ancestry, 'records': records,
+-            'configs': configs, 'config_modes': modes, 'binary': binaries.pop()}
++            'configs': configs, 'config_modes': modes, 'binary': binaries.pop(),
++            'read': [{**row, 'path': str(pathlib.Path(row['path']).relative_to(root))}
++                     for row in budget['read']]}
+ 
+ 
+ def verify_stopped_journal(capture_dir, root, *, table):
+@@ -283,4 +290,4 @@ def verify_stopped_journal(capture_dir, root, *, table):
+                                        configs=found['configs'], binary=found['binary'],
+                                        home=found['home'])
+     return {**summary, 'window': found['window'], 'lineage': found['lineage'],
+-            'config_modes': found['config_modes']}
++            'config_modes': found['config_modes'], 'read': found['read']}
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
+new file mode 100644
+index 0000000..8114ef5
+--- /dev/null
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
+@@ -0,0 +1,906 @@
++"""Owned tests for the read-only journal mount wrapper (B5), against a scripted host.
++
++diskutil, hdiutil and statfs are one scripted fake (FakeHost) that keeps its own attachment and
++mount state, so an attach or mount that failed or timed out can still have applied, the case
++cleanup must find through the inventory and statfs rather than the failed command's output. The
++capture directory, its pins and commitment are the real host records (StoppedImage); the clone is
++an owned stand-in file whose size and sha256 the real pinned publication records. The fake mount
++is a copy of the owned stopped Data root, so the real reader runs on it. Nothing is attached or
++mounted, no VM is touched, and the CI-only ownership probe is exercised through its guards only.
++"""
++import copy
++import errno
++import fcntl
++import hashlib
++import json
++import os
++import pathlib
++import plistlib
++import runpy
++import shutil
++import stat
++import sys
++import tempfile
++import time
++import unittest
++from unittest import mock
++
++sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
++
++import host_journal_mount as wrapper  # noqa: E402
++import host_vm_capture  # noqa: E402
++import probe_asif_mount_ownership as probe  # noqa: E402
++import stopped_journal_inputs  # noqa: E402
++import test_capture_checkpoint as guest  # noqa: E402
++import test_stopped_journal_inputs as fixture  # noqa: E402
++from host_guest_commit import require_committed  # noqa: E402
++from host_journal_mount import DISKUTIL, HDIUTIL  # noqa: E402
++from host_vm_capture import CAPTURE_SCOPE, FIXTURE_UUID  # noqa: E402
++from preservation_journal import Refused, encoded  # noqa: E402
++
++UUID = '5E3C8A1D-6B7F-4D2E-9A40-0C1B2D3E4F50'
++OTHER = '0A1B2C3D-0000-4000-8000-000000000001'
++DISK, CONTAINER = '/dev/disk7', '/dev/disk8'
++DATA = CONTAINER + 's2'
++FLAGS = (wrapper.MNT_RDONLY | wrapper.MNT_NODEV | wrapper.MNT_NOSUID | wrapper.MNT_NOEXEC
++         | 0x00100000)  # MNT_DONTBROWSE, from nobrowse
++FOREIGN = {'image-path': '/Users/someone-else/foreign.dmg', 'writeable': True,
++           'system-entities': [{'dev-entry': '/dev/disk4', 'content-hint': 'GUID_partition_scheme'}]}
++
++
++def sha(raw):
++    return hashlib.sha256(raw).hexdigest()
++
++
++class FakeHost:
++    """diskutil, hdiutil and statfs as one scripted host with its own attach and mount state."""
++
++    def __init__(self, test):
++        self.clone = test.capture / wrapper.CLONE
++        self.image = test.data
++        self.log = []
++        self.reads = []
++        self.during_read = []
++        self.attached = []
++        self.mounted = None
++        self.attach = 'ok'
++        self.disk = DISK
++        self.attach_disk = DISK
++        self.attach_rows = 1
++        self.writeable = False
++        self.inventory_fails = set()
++        self.inventories = 0
++        self.volumes = [
++            {'dev-entry': CONTAINER + 's1', 'content-hint': 'Apple_APFS_Volume',
++             'info': {'VolumeUUID': OTHER, 'VolumeName': 'Macintosh HD', 'Encryption': False}},
++            {'dev-entry': DATA, 'content-hint': 'Apple_APFS_Volume',
++             'info': {'VolumeUUID': UUID, 'VolumeName': 'Data', 'Encryption': False}},
++            {'dev-entry': CONTAINER + 's3', 'content-hint': 'Apple_APFS_Volume',
++             'info': {'VolumeUUID': '0A1B2C3D-0000-4000-8000-000000000003', 'VolumeName': 'Preboot',
++                      'Encryption': False}}]
++        self.info_fails = set()
++        self.mount = 'ok'
++        self.mounted_info = {}
++        self.statfs_changes = {}
++        self.statfs_fails = False
++        self.unmount_busy = False
++        self.eject_failures = 0
++        self.real_reader = stopped_journal_inputs.verify_stopped_journal
++
++    def entities(self, disk):
++        return ([{'dev-entry': disk, 'content-hint': 'GUID_partition_scheme'},
++                 {'dev-entry': disk + 's1', 'content-hint': 'Apple_APFS'},
++                 {'dev-entry': CONTAINER, 'content-hint': 'EF57347C-0000-11AA-AA11-00306543ECAC'}]
++                + [{key: volume[key] for key in ('dev-entry', 'content-hint')} for volume in self.volumes])
++
++    def attempt(self, *argv, timeout=wrapper.TIMEOUT):
++        self.log.append(list(argv))
++        row = {'argv': list(argv), 'returncode': 0, 'timed_out': False, 'stdout': b'', 'stderr': ''}
++        failed = {**row, 'returncode': 1, 'stderr': 'scripted failure'}
++        timed_out = {**row, 'returncode': None, 'timed_out': True}
++        if argv == (HDIUTIL, 'info', '-plist'):
++            self.inventories += 1
++            if self.inventories - 1 in self.inventory_fails:
++                return failed
++            images = [{'image-path': item['path'], 'writeable': item['writeable'],
++                       'system-entities': self.entities(item['disk'])} for item in self.attached]
++            return {**row, 'stdout': plistlib.dumps({'images': images + [FOREIGN]})}
++        if argv[:3] == (DISKUTIL, 'image', 'attach'):
++            if self.attach == 'fail':
++                return failed
++            for index in range(self.attach_rows):
++                self.attached.append({'path': str(self.clone), 'writeable': self.writeable,
++                                      'disk': self.disk if index == 0 else '/dev/disk%d' % (9 + index)})
++            out = plistlib.dumps({'system-entities': self.entities(self.attach_disk)})
++            return {'ok': {**row, 'stdout': out}, 'timeout-applied': timed_out,
++                    'fail-applied': {**failed, 'stdout': out},
++                    'garbage': {**row, 'stdout': b'not a plist'}}[self.attach]
++        if argv[:3] == (DISKUTIL, 'info', '-plist'):
++            volume = next((item for item in self.volumes if item['dev-entry'] == argv[3]), None)
++            if volume is None or not self.attached or argv[3] in self.info_fails:
++                return failed
++            info = {'DeviceNode': argv[3], 'WritableVolume': False, 'GlobalPermissionsEnabled': True,
++                    'MountPoint': '', **volume['info']}
++            if self.mounted and self.mounted[1] == argv[3]:
++                info = {**info, 'MountPoint': self.mounted[0], **self.mounted_info}
++            return {**row, 'stdout': plistlib.dumps({key: value for key, value in info.items()
++                                                     if value is not None})}
++        if argv[:2] == (DISKUTIL, 'mount'):
++            if self.mount == 'fail':
++                return failed
++            shutil.copytree(self.image, argv[-2], symlinks=True, dirs_exist_ok=True)
++            self.mounted = (argv[-2], argv[-1])
++            return timed_out if self.mount == 'timeout-applied' else row
++        if argv[:2] == (DISKUTIL, 'unmount'):
++            if self.unmount_busy or not self.mounted or self.mounted[0] != argv[2]:
++                return failed
++            for path in pathlib.Path(argv[2]).iterdir():
++                shutil.rmtree(path) if path.is_dir() and not path.is_symlink() else path.unlink()
++            self.mounted = None
++            return row
++        if argv[:2] == (DISKUTIL, 'eject'):
++            if self.mounted or self.eject_failures:
++                self.eject_failures = max(0, self.eject_failures - 1)
++                return failed
++            kept = [item for item in self.attached if item['disk'] != argv[2]]
++            if len(kept) == len(self.attached):
++                return failed
++            self.attached = kept
++            return row
++        raise AssertionError('unscripted command: %r' % (argv,))
++
++    def statfs(self, path):
++        if self.statfs_fails:
++            raise OSError(errno.EIO, 'scripted statfs failure', str(path))
++        if self.mounted and str(path) == self.mounted[0]:
++            changes, self.statfs_changes = self.statfs_changes, {}
++            return {'flags': FLAGS, 'fstypename': 'apfs', 'mntonname': self.mounted[0],
++                    'mntfromname': self.mounted[1], **changes}
++        return {'flags': 0x00005000, 'fstypename': 'apfs', 'mntonname': '/', 'mntfromname': '/dev/disk3s1s1'}
++
++    def reader(self, capture_dir, root, *, table):
++        self.reads.append(str(root))
++        for hook in self.during_read:
++            hook()
++        return self.real_reader(capture_dir, root, table=table)
++
++
++class MountCase(fixture.StoppedImage):
++    def setUp(self):
++        super().setUp()
++        self.clone_bytes = b'owned stand-in for the powered-off ASIF clone\n' * 64
++        fixture.host.write_private(self.capture / wrapper.CLONE, self.clone_bytes)
++        # read_journal_inputs() sets the owner-private umask a capture worker runs under.
++        umask = os.umask(0o077)
++        os.umask(umask)
++        self.addCleanup(os.umask, umask)
++        self.publish_clone()
++        self.output = self.capture / 'journal-read'
++        self.fake = FakeHost(self)
++        for name, value in (('attempt', lambda *argv, **options: self.fake.attempt(*argv, **options)),
++                            ('statfs', lambda path: self.fake.statfs(path)),
++                            ('verify_stopped_journal', lambda *args, **options: self.fake.reader(*args, **options)),
++                            ('EJECT_PAUSE', 0)):
++            patcher = mock.patch.object(wrapper, name, value)
++            patcher.start()
++            self.addCleanup(patcher.stop)
++
++    def publish_clone(self, **changes):
++        """The worker's real pinned publication, with the clone and volume fields this wrapper reads."""
++        host_vm_capture.publish_pinned_capture(self.capture, {
++            'scope': CAPTURE_SCOPE, 'vm_state_at_final_check': 'stopped', 'vm_uuid': FIXTURE_UUID,
++            'clone_image_sha256': sha(self.clone_bytes), 'clone_size': len(self.clone_bytes),
++            'data_volume_uuid': UUID, **changes}, require_committed(self.capture)['checkpoint'])
++
++    def run_mount(self, output=None, table=None, fixture_flag=True):
++        try:
++            return wrapper.read_journal_inputs(self.capture, output or self.output,
++                                               table=self.table if table is None else table,
++                                               fixture=fixture_flag), None
++        except BaseException as error:
++            return None, error
++
++    def failed(self, output=None):
++        path = (output or self.output) / 'FAILED.json'
++        self.assertEqual(stat.S_IMODE(path.lstat().st_mode), 0o600)
++        return json.loads(path.read_bytes())
++
++    def calls(self, *prefix):
++        return [argv for argv in self.fake.log if tuple(argv[:len(prefix)]) == prefix]
++
++    def refused(self, pattern, stage, point_left=False):
++        """A refusal with its primary error kept, FAILED.json at `stage`, no receipt and no mount point."""
++        receipt, error = self.run_mount()
++        self.assertIsNone(receipt)
++        self.assertRegex(str(error), pattern)
++        failed = self.failed()
++        self.assertEqual((failed['stage'], failed['primary_error']), (stage, repr(error)[:300]))
++        self.assertFalse(os.path.lexists(self.output / 'JOURNAL_INPUTS.json'))
++        self.assertEqual(os.path.lexists(self.output / 'mount'), point_left)
++        return error, failed
++
++    def released(self, failed, ejected=(DISK,)):
++        """Cleanup ejected exactly `ejected`, left nothing of the clone attached or mounted."""
++        self.assertEqual([argv[2] for argv in self.calls(DISKUTIL, 'eject')], list(ejected))
++        self.assertEqual((self.fake.attached, self.fake.mounted), ([], None))
++        self.assertTrue(failed['cleanup']['clean'], failed['cleanup'])
++
++    def unattached(self, pattern, stage):
++        """Refused before any attach: nothing attached, nothing ejected, the reader never ran."""
++        error, failed = self.refused(pattern, stage)
++        self.assertEqual(self.calls(DISKUTIL, 'image', 'attach'), [])
++        self.released(failed, ejected=())
++        self.assertEqual(self.fake.reads, [])
++        return error, failed
++
++    def reset(self):
++        """A fresh fake and output for the next subtest of one setUp."""
++        self.fake = FakeHost(self)
++        self.output = self.capture / ('journal-read-%d' % len(list(self.capture.glob('journal-read*'))))
++
++
++class Mounted(MountCase):
++    def test_reader_runs_only_on_the_verified_read_only_mount_and_the_receipt_lists_what_it_read(self):
++        capture_before = {path.name: path.read_bytes() for path in self.capture.iterdir() if path.is_file()}
++        seen = {}
++
++        def during():
++            seen['mounted'] = self.fake.mounted
++            seen['verified'] = list(self.fake.log)
++            with (self.capture / 'ARMED.json').open('rb') as other:
++                with self.assertRaises(BlockingIOError):
++                    fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
++            seen['locked'] = True
++
++        self.fake.during_read.append(during)
++        receipt, error = self.run_mount()
++        self.assertIsNone(error)
++        point = str(self.output / 'mount')
++        attach = [DISKUTIL, 'image', 'attach', '--plist', '--readOnly', '--noMount', str(self.fake.clone)]
++        mount = [DISKUTIL, 'mount', 'readOnly', '-mountOptions', 'nobrowse,nodev,nosuid,noexec,owners',
++                 '-mountPoint', point, DATA]
++        inventory = [HDIUTIL, 'info', '-plist']
++        info = [[DISKUTIL, 'info', '-plist', volume['dev-entry']] for volume in self.fake.volumes]
++        before_read = [inventory, attach, inventory, *info, mount, [DISKUTIL, 'info', '-plist', DATA]]
++        self.assertEqual(seen, {'mounted': (point, DATA), 'verified': before_read, 'locked': True})
++        self.assertEqual(self.fake.log, before_read + [[DISKUTIL, 'unmount', point], inventory,
++                                                       [DISKUTIL, 'eject', DISK], inventory])
++        self.assertEqual(self.fake.reads, [point])
++        self.assertEqual((self.fake.attached, self.fake.mounted), ([], None))
++        self.assertFalse(os.path.lexists(point))
++        self.assertFalse(os.path.lexists(self.output / 'FAILED.json'))
++        written = self.output / 'JOURNAL_INPUTS.json'
++        self.assertEqual(stat.S_IMODE(written.lstat().st_mode), 0o600)
++        self.assertEqual(json.loads(written.read_bytes()), receipt)
++        self.assertEqual(set(receipt), {'scope', 'at_utc', 'capture_sha256', 'checkpoint_sha256', 'clone_before',
++                                        'clone_after', 'attach', 'volume', 'data_volume_uuid', 'mount', 'reader',
++                                        'read', 'cleanup'})
++        self.assertEqual(receipt['scope'], wrapper.SCOPE)
++        self.assertEqual(receipt['capture_sha256'], sha((self.capture / 'CAPTURE.json').read_bytes()))
++        self.assertEqual(receipt['checkpoint_sha256'], self.commitment['checkpoint']['checkpoint_sha256'])
++        self.assertEqual(receipt['reader']['checkpoint_sha256'], self.record['sha256'])
++        clone = self.fake.clone.lstat()
++        self.assertEqual({key: receipt['clone_before'][key] for key in ('device', 'inode', 'size', 'sha256')},
++                         {'device': clone.st_dev, 'inode': clone.st_ino, 'size': len(self.clone_bytes),
++                          'sha256': sha(self.clone_bytes)})
++        self.assertEqual(receipt['clone_after'], receipt['clone_before'])
++        self.assertEqual(receipt['attach']['disk'], DISK)
++        self.assertEqual(receipt['attach']['entities'], self.fake.entities(DISK))
++        self.assertNotIn('stdout', receipt['attach']['command'])
++        self.assertEqual(receipt['attach']['command']['stdout_sha256'],
++                         sha(plistlib.dumps({'system-entities': self.fake.entities(DISK)})))
++        self.assertEqual((receipt['volume'], receipt['data_volume_uuid']), (DATA, UUID))
++        self.assertEqual(receipt['mount'], {
++            'point': point, 'options': 'nobrowse,nodev,nosuid,noexec,owners',
++            'command': {'argv': mount, 'returncode': 0, 'timed_out': False, 'stderr': '',
++                        'stdout_sha256': sha(b'')},
++            'diskutil': {'WritableVolume': False, 'MountPoint': point, 'VolumeUUID': UUID,
++                         'GlobalPermissionsEnabled': True, 'DeviceNode': DATA},
++            'statfs': {'flags': FLAGS, 'fstypename': 'apfs', 'mntonname': point, 'mntfromname': DATA}})
++        self.assertEqual(receipt['reader'], {
++            'window': 'window-1', 'lineage': ['window-1'], 'checkpoint_sha256': self.record['sha256'],
++            'pre_head': self.commitment['manifest']['journal_head'], 'session': guest.SESSION,
++            'config_modes': {path: 0o600 for path in self.configs}})
++        files = {str(path.relative_to(self.data)): path for path in self.data.rglob('*')
++                 if stat.S_ISREG(path.lstat().st_mode)}
++        self.assertEqual(sorted(row['path'] for row in receipt['read']), sorted(files))
++        for row in receipt['read']:
++            info = files[row['path']].lstat()
++            self.assertEqual({key: row[key] for key in ('size', 'mode', 'uid', 'nlink', 'sha256')},
++                             {'size': info.st_size, 'mode': stat.S_IMODE(info.st_mode), 'uid': info.st_uid,
++                              'nlink': 1, 'sha256': sha(files[row['path']].read_bytes())})
++        self.assertEqual([step['step'] for step in receipt['cleanup']['steps']],
++                         ['mounted before cleanup', 'unmount', 'attachments before eject', 'eject ' + DISK,
++                          'attachments after eject', 'mounted after eject', 'remove mount point'])
++        self.assertTrue(receipt['cleanup']['clean'])
++        self.assertEqual({path.name: path.read_bytes() for path in self.capture.iterdir() if path.is_file()},
++                         capture_before)
++        with (self.capture / 'ARMED.json').open('rb') as other:
++            fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
++
++    def test_ejects_are_retried_within_their_bound(self):
++        self.fake.eject_failures = wrapper.EJECT_ATTEMPTS - 1
++        receipt, error = self.run_mount()
++        self.assertIsNone(error)
++        self.assertEqual(len(self.calls(DISKUTIL, 'eject')), wrapper.EJECT_ATTEMPTS)
++        self.assertTrue(receipt['cleanup']['clean'])
++
++
++class EntryRefusals(MountCase):
++    def test_production_entrypoint_refuses_before_anything_runs(self):
++        receipt, error = self.run_mount(fixture_flag=False)
++        self.assertIsNone(receipt)
++        self.assertRegex(str(error), '^production journal mount requires a host-pinned B3 table and a '
++                                     'protected acceptance root$')
++        self.assertEqual(self.fake.log, [])
++        self.assertFalse(os.path.lexists(self.output))
++
++    def test_cli_runs_only_as_the_fixture_and_its_usage_is_exact(self):
++        table = self.temp / 'table.json'
++        fixture.host.write_private(table, encoded(self.table))
++        for argv, pattern in (([str(table)], '^production journal mount requires'),
++                              ([str(table), '--production'], '^usage: '),
++                              ([str(table), '--fixture', '--fixture'], '^usage: '),
++                              ([], '^usage: ')):
++            with self.subTest(argv), mock.patch.object(sys, 'argv', ['host_journal_mount.py', str(self.capture),
++                                                                    str(self.output), *argv]), \
++                    mock.patch('subprocess.run', side_effect=AssertionError('command run')):
++                with self.assertRaisesRegex(RuntimeError, pattern):
++                    runpy.run_path(wrapper.__file__, run_name='__main__')
++            self.assertFalse(os.path.lexists(self.output))
++
++    def test_production_capture_parent_is_refused(self):
++        with mock.patch.object(wrapper, 'PRODUCTION_PARENT', self.capture.parent):
++            receipt, error = self.run_mount()
++        self.assertRegex(str(error), '^production capture directory refused$')
++        self.assertEqual((self.fake.log, os.path.lexists(self.output)), ([], False))
++
++    def test_capture_directory_and_output_are_owned_and_fresh(self):
++        os.chmod(self.capture, 0o750)
++        _, error = self.run_mount()
++        self.assertRegex(str(error), '^expected owner-private literal directory: ')
++        os.chmod(self.capture, 0o700)
++        elsewhere = self.temp.resolve() / 'elsewhere'
++        _, error = self.run_mount(output=elsewhere)
++        self.assertRegex(str(error), '^journal mount output must be a child of the capture directory$')
++        self.assertFalse(os.path.lexists(elsewhere))
++        self.output.mkdir(mode=0o700)
++        _, error = self.run_mount()
++        self.assertIsInstance(error, FileExistsError)
++        self.assertEqual((self.fake.log, list(self.output.iterdir())), ([], []))
++
++    def test_arm_lock_holder_refuses_before_any_command(self):
++        with (self.capture / 'ARMED.json').open('rb') as holder:
++            fcntl.flock(holder, fcntl.LOCK_SH)
++            _, error = self.run_mount()
++        self.assertRegex(str(error), '^capture is busy: another holder has the arm lock$')
++        self.assertIsInstance(error.__cause__, BlockingIOError)
++        self.assertEqual({key: value for key, value in self.failed().items() if key != 'primary_error'},
++                         {'stage': 'lock', 'cleanup': None})
++        self.assertEqual(self.fake.log, [])
++        self.reset()
++        (self.capture / 'ARMED.json').unlink()
++        _, error = self.run_mount()
++        self.assertIsInstance(error, FileNotFoundError)
++        self.assertEqual((self.failed()['stage'], self.fake.log), ('lock', []))
++
++
++class InputRefusals(MountCase):
++    def test_a_failed_capture_is_never_attached(self):
++        fixture.host.write_private(self.capture / 'FAILED.json', b'{}\n')
++        self.unattached('^capture failed; its clone is not mounted$', 'inputs')
++
++    def test_capture_pins_and_commitment_hold_before_the_attach(self):
++        capture = self.capture / 'CAPTURE.json'
++        raw = capture.read_bytes()
++        with self.subTest('pin'):
++            self.rewrite('CAPTURE.json', guest_commit_sha256='0' * 64)
++            self.unattached('^capture record does not pin this checkpoint commitment$', 'inputs')
++        with self.subTest('mode'):
++            self.reset()
++            self.replace(capture, raw)
++            os.chmod(capture, 0o640)
++            self.unattached('^guest commitment input is not owner-private: ', 'inputs')
++        with self.subTest('commitment'):
++            self.reset()
++            os.chmod(capture, 0o600)
++            committed = require_committed(self.capture)
++            with mock.patch.object(wrapper, 'require_committed', return_value={
++                    **committed, 'checkpoint': {**committed['checkpoint'], 'journal_head': '0' * 64}}):
++                self.unattached('^capture commitment differs from the pinned capture record$', 'inputs')
++
++    def test_capture_record_must_be_a_stopped_fixture_capture_naming_its_volume(self):
++        for changes, pattern in (({'scope': 'other'}, 'capture record is not a completed stopped-VM capture'),
++                                 ({'vm_state_at_final_check': 'started'},
++                                  'capture record is not a completed stopped-VM capture'),
++                                 ({'vm_uuid': '00000000-0000-0000-0000-000000000003'},
++                                  'capture is not of the owned fixture VM'),
++                                 ({'data_volume_uuid': ''}, 'capture record names no Data volume'),
++                                 ({'data_volume_uuid': None}, 'capture record names no Data volume')):
++            with self.subTest(changes):
++                self.reset()
++                self.publish_clone(**changes)
++                self.unattached('^' + pattern + '$', 'inputs')
++
++    def test_clone_must_be_the_owned_single_link_image_of_the_pinned_size_and_hash(self):
++        clone = self.fake.clone
++        shape = '^clone is not the owned single-link 0600 image of the recorded size$'
++        with self.subTest('mode'):
++            os.chmod(clone, 0o640)
++            self.unattached(shape, 'inputs')
++            os.chmod(clone, 0o600)
++        with self.subTest('second link'):
++            self.reset()
++            os.link(clone, self.temp / 'second-link')
++            self.unattached(shape, 'inputs')
++            os.unlink(self.temp / 'second-link')
++        with self.subTest('symlink'):
++            self.reset()
++            moved = self.temp / 'moved.asif'
++            os.rename(clone, moved)
++            os.symlink(moved, clone)
++            self.unattached(shape, 'inputs')
++            os.unlink(clone)
++            os.rename(moved, clone)
++        with self.subTest('size'):
++            self.reset()
++            self.publish_clone(clone_size=len(self.clone_bytes) + 1)
++            self.unattached(shape, 'inputs')
++        with self.subTest('pinned hash'):
++            self.reset()
++            self.publish_clone(clone_image_sha256='0' * 64)
++            self.unattached('^clone hash differs from the capture record$', 'inputs')
++        with self.subTest('bytes'):
++            self.reset()
++            self.publish_clone()
++            self.replace(clone, self.clone_bytes[:-1] + b'X')
++            self.unattached('^clone hash differs from the capture record$', 'inputs')
++        with self.subTest('missing'):
++            self.reset()
++            clone.unlink()
++            error, _ = self.unattached('No such file or directory', 'inputs')
++            self.assertIsInstance(error, FileNotFoundError)
++
++    def test_clone_must_not_change_or_be_swapped_while_it_is_hashed(self):
++        clone = self.fake.clone
++        real_read, real_open = os.read, os.open
++        grown = []
++
++        def growing(fd, size):
++            # Grow once, after the first chunk was read, as a concurrent writer would.
++            chunk = real_read(fd, size)
++            if not grown:
++                grown.append(True)
++                with open(clone, 'ab') as handle:
++                    handle.write(b'+')
++            return chunk
++
++        def swapping(path, flags, *args, **kwargs):
++            if pathlib.Path(path) == clone:
++                # Same bytes, size and mtime under a new inode: only the inode check refuses it.
++                info = clone.lstat()
++                fixture.host.write_private(self.temp / 'swap.asif', self.clone_bytes)
++                os.utime(self.temp / 'swap.asif', ns=(info.st_atime_ns, info.st_mtime_ns))
++                os.replace(self.temp / 'swap.asif', clone)
++            return real_open(path, flags, *args, **kwargs)
++
++        for name, target, side_effect in (('grown', 'read', growing), ('swapped', 'open', swapping)):
++            with self.subTest(name):
++                self.reset()
++                grown.clear()
++                fixture.host.write_private(self.temp / 'fresh.asif', self.clone_bytes)
++                os.replace(self.temp / 'fresh.asif', clone)
++                with mock.patch.object(wrapper.os, target, side_effect=side_effect):
++                    self.unattached('^clone changed while it was hashed$', 'inputs')
++
++    @unittest.skipUnless(os.getuid() == 0, 'giving the clone to another owner needs root')
++    def test_a_clone_owned_by_another_user_is_refused(self):
++        os.chown(self.fake.clone, 65534, -1)
++        self.unattached('^clone is not the owned single-link 0600 image of the recorded size$', 'inputs')
++
++    def test_a_clone_already_attached_by_path_or_identity_is_refused_and_left_attached(self):
++        alias = self.temp / 'alias.asif'
++        os.symlink(self.fake.clone, alias)
++        for path in (self.fake.clone, alias):
++            with self.subTest(str(path)):
++                self.reset()
++                self.fake.attached = [{'path': str(path), 'writeable': False, 'disk': '/dev/disk5'}]
++                error, failed = self.refused('^clone is already attached$', 'inventory')
++                self.assertEqual((self.calls(DISKUTIL, 'image', 'attach'), self.calls(DISKUTIL, 'eject')), ([], []))
++                self.assertEqual(self.fake.attached, [{'path': str(path), 'writeable': False, 'disk': '/dev/disk5'}])
++                self.assertTrue(failed['cleanup']['clean'])
++
++    def test_an_unreadable_inventory_refuses_before_the_attach(self):
++        self.fake.inventory_fails = {0}
++        self.unattached('^attached image inventory failed or timed out$', 'inventory')
++
++
++class Attach(MountCase):
++    def test_an_attach_that_failed_or_timed_out_after_it_applied_is_ejected_from_the_inventory(self):
++        for mode in ('timeout-applied', 'fail-applied'):
++            with self.subTest(mode):
++                self.reset()
++                self.fake.attach = mode
++                _, failed = self.refused('^read-only attach failed or timed out$', 'attach')
++                self.released(failed)
++                self.assertEqual((self.calls(DISKUTIL, 'mount'), self.fake.reads), ([], []))
++
++    def test_an_attach_that_did_not_apply_ejects_nothing(self):
++        self.fake.attach = 'fail'
++        _, failed = self.refused('^read-only attach failed or timed out$', 'attach')
++        self.released(failed, ejected=())
++
++    def test_attach_output_that_is_not_a_plist_is_refused_and_ejected(self):
++        self.fake.attach = 'garbage'
++        _, failed = self.refused('^read-only attach output is not a plist$', 'attach')
++        self.released(failed)
++
++    def test_the_clone_must_be_attached_exactly_once_read_only(self):
++        with self.subTest('writeable'):
++            self.fake.writeable = True
++            _, failed = self.refused('^clone is not attached exactly once read-only$', 'attach')
++            self.released(failed)
++        with self.subTest('twice'):
++            self.reset()
++            self.fake.attach_rows = 2
++            _, failed = self.refused('^clone is not attached exactly once read-only$', 'attach')
++            self.released(failed, ejected=(DISK, '/dev/disk10'))
++
++    def test_the_attach_result_must_name_the_inventory_disk_and_cleanup_trusts_the_inventory(self):
++        self.fake.attach_disk = '/dev/disk9'
++        _, failed = self.refused('^attached clone disk differs from the attach result$', 'attach')
++        self.released(failed)
++
++    def test_the_attached_disk_must_be_a_whole_dev_disk_node(self):
++        self.fake.disk = self.fake.attach_disk = 'disk7'
++        _, failed = self.refused('^attached clone disk differs from the attach result$', 'attach')
++        self.released(failed, ejected=('disk7',))
++
++    def test_an_inventory_lost_after_the_attach_ejects_the_attach_result_disk(self):
++        self.fake.inventory_fails = {1, 2, 3}
++        _, failed = self.refused('^attached image inventory failed or timed out$', 'attach')
++        self.assertEqual([argv[2] for argv in self.calls(DISKUTIL, 'eject')], [DISK])
++        self.assertEqual(self.fake.attached, [])
++        self.assertFalse(failed['cleanup']['clean'])
++
++
++class Volume(MountCase):
++    def test_the_pinned_uuid_must_name_one_unencrypted_unmounted_apfs_volume_named_data(self):
++        cases = ((lambda data: data['info'].update(VolumeUUID=OTHER),
++                  'pinned Data volume UUID is not on the attached clone exactly once'),
++                 (lambda data: self.fake.volumes[0]['info'].update(VolumeUUID=UUID),
++                  'pinned Data volume UUID is not on the attached clone exactly once'),
++                 (lambda data: data.update({'content-hint': 'Apple_APFS'}),
++                  'pinned Data volume UUID is not on the attached clone exactly once'),
++                 (lambda data: data['info'].update(VolumeName='Macintosh HD - Data'),
++                  'pinned volume is not named Data'),
++                 (lambda data: data['info'].update(Encryption=True), 'pinned Data volume is encrypted'),
++                 (lambda data: data['info'].pop('Encryption'), 'pinned Data volume is encrypted'),
++                 (lambda data: data['info'].update(MountPoint='/Volumes/Data'),
++                  'pinned Data volume is already mounted'),
++                 (lambda data: self.fake.info_fails.add(DATA), 'volume information failed or timed out'))
++        for index, (change, pattern) in enumerate(cases):
++            with self.subTest(index):
++                self.reset()
++                change(self.fake.volumes[1])
++                _, failed = self.refused('^' + pattern + '$', 'volume')
++                self.released(failed)
++                self.assertEqual((self.calls(DISKUTIL, 'mount'), self.fake.reads), ([], []))
++
++
++class Mount(MountCase):
++    def test_a_failed_mount_is_refused_and_released(self):
++        self.fake.mount = 'fail'
++        _, failed = self.refused('^read-only mount failed or timed out$', 'mount')
++        self.released(failed)
++        self.assertEqual((self.calls(DISKUTIL, 'unmount'), self.fake.reads), ([], []))
++
++    def test_a_mount_that_timed_out_after_it_applied_is_found_by_statfs_and_unmounted(self):
++        self.fake.mount = 'timeout-applied'
++        _, failed = self.refused('^read-only mount failed or timed out$', 'mount')
++        self.released(failed)
++        self.assertEqual(self.calls(DISKUTIL, 'unmount'), [[DISKUTIL, 'unmount', str(self.output / 'mount')]])
++        self.assertEqual(self.fake.reads, [])
++
++
++class Verify(MountCase):
++    def test_the_reader_runs_only_on_a_read_only_nodev_nosuid_noexec_mount_honouring_owners(self):
++        every = wrapper.MNT_RDONLY | wrapper.MNT_NODEV | wrapper.MNT_NOSUID | wrapper.MNT_NOEXEC
++        cases = (({'WritableVolume': True}, {}, 'Data volume is writable'),
++                 ({'WritableVolume': None}, {}, 'Data volume is writable'),
++                 ({'MountPoint': '/Volumes/Data'}, {}, 'Data volume is not mounted at the private mount point'),
++                 ({'MountPoint': None}, {}, 'Data volume is not mounted at the private mount point'),
++                 ({'VolumeUUID': OTHER}, {}, 'mounted volume UUID differs'),
++                 ({'GlobalPermissionsEnabled': False}, {}, 'Data volume ownership is not enabled'),
++                 ({'GlobalPermissionsEnabled': None}, {}, 'Data volume ownership is not enabled'),
++                 ({}, {'mntonname': '/'}, 'private mount point is not a mount'),
++                 ({}, {'mntfromname': CONTAINER + 's1'}, 'private mount point holds another device'),
++                 ({}, {'fstypename': 'hfs'}, 'mounted filesystem is not APFS'),
++                 ({}, {'flags': FLAGS & ~wrapper.MNT_RDONLY}, 'mount is not read-only'),
++                 ({}, {'flags': FLAGS & ~wrapper.MNT_NODEV}, 'mount is not nodev'),
++                 ({}, {'flags': FLAGS & ~wrapper.MNT_NOSUID}, 'mount is not nosuid'),
++                 ({}, {'flags': FLAGS & ~wrapper.MNT_NOEXEC}, 'mount is not noexec'),
++                 ({}, {'flags': FLAGS & ~every}, 'mount is not read-only, nodev, nosuid, noexec'),
++                 ({}, {'flags': FLAGS | wrapper.MNT_IGNORE_OWNERSHIP}, 'mount ignores ownership'))
++        for info, found, pattern in cases:
++            with self.subTest(pattern, info=info, found=found):
++                self.reset()
++                self.fake.mounted_info, self.fake.statfs_changes = info, found
++                _, failed = self.refused('^' + pattern + '$', 'verify')
++                self.released(failed)
++                self.assertEqual(self.fake.reads, [])
++                self.assertEqual(len(self.calls(DISKUTIL, 'unmount')), 1)
++        with self.subTest('mounted volume information'):
++            self.reset()
++            original = self.fake.attempt
++
++            def lost(*argv, **options):
++                if argv[:2] == (DISKUTIL, 'info') and self.fake.mounted:
++                    self.fake.log.append(list(argv))
++                    return {'argv': list(argv), 'returncode': None, 'timed_out': True, 'stdout': b'', 'stderr': ''}
++                return original(*argv, **options)
++
++            self.fake.attempt = lost
++            _, failed = self.refused('^mounted volume information failed or timed out$', 'verify')
++            self.released(failed)
++            self.assertEqual(self.fake.reads, [])
++
++
++
++class RealStatfs(unittest.TestCase):
++    """The unscripted statfs: macOS only; there, a read-only syscall on the runner's own root."""
++
++    def test_statfs_is_macos_only_and_decodes_the_sealed_root(self):
++        if sys.platform != 'darwin':
++            with self.assertRaisesRegex(RuntimeError, '^mount verification requires macOS statfs$'):
++                wrapper.statfs('/')
++            return
++        found = wrapper.statfs('/')
++        # The sealed system volume is mounted read-only at /, so name, type and flag layout all show.
++        self.assertEqual((found['mntonname'], found['fstypename']), ('/', 'apfs'))
++        self.assertTrue(found['mntfromname'].startswith('/dev/disk'))
++        self.assertTrue(found['flags'] & wrapper.MNT_RDONLY)
++        with self.assertRaises(FileNotFoundError):
++            wrapper.statfs('/nonexistent-' + os.urandom(8).hex())
++
++
++class Reader(MountCase):
++    def test_a_reader_failure_keeps_its_primary_error_and_releases(self):
++        sentinel = RuntimeError('sentinel reader failure')
++
++        def fail():
++            raise sentinel
++
++        self.fake.during_read.append(fail)
++        error, failed = self.refused('^sentinel reader failure$', 'read')
++        self.assertIs(error, sentinel)
++        self.released(failed)
++        self.assertEqual(len(self.calls(DISKUTIL, 'unmount')), 1)
++
++    def test_an_interrupt_during_the_read_is_released_and_reraised(self):
++        self.fake.during_read.append(lambda: (_ for _ in ()).throw(KeyboardInterrupt()))
++        error, failed = self.refused('^$', 'read')
++        self.assertIsInstance(error, KeyboardInterrupt)
++        self.released(failed)
++
++    def test_the_real_reader_refuses_a_forged_image_on_the_mount(self):
++        image = self.image()
++        fixture.host.write_private(fixture.preservation(image) / 'extra', b'{}')
++        self.fake.image = image
++        error, failed = self.refused('preservation directory holds a pending, corrupt-receipt or unknown entry',
++                                     'read')
++        self.assertIsInstance(error, Refused)
++        self.released(failed)
++
++    def test_the_caller_table_decides_the_identities(self):
++        table = copy.deepcopy(self.table)
++        table['member2']['config_sha256'] = '0' * 64
++        receipt, error = self.run_mount(table=table)
++        self.assertIsInstance(error, Refused)
++        self.assertRegex(str(error), 'nats-2: baseline config hash differs from the window pin')
++        self.released(self.failed())
++
++
++class Cleanup(MountCase):
++    def test_a_cleanup_failure_never_replaces_the_primary_error(self):
++        sentinel = RuntimeError('sentinel reader failure')
++
++        def fail():
++            self.fake.unmount_busy = True
++            raise sentinel
++
++        self.fake.during_read.append(fail)
++        _, error = self.run_mount()
++        self.assertIs(error, sentinel)
++        cleanup = self.failed()['cleanup']
++        self.assertFalse(cleanup['clean'])
++        steps = {step['step']: step for step in cleanup['steps']}
++        self.assertEqual(steps['unmount']['result']['returncode'], 1)
++        self.assertEqual(len(self.calls(DISKUTIL, 'eject')), wrapper.EJECT_ATTEMPTS)
++        self.assertEqual((steps['attachments after eject']['result'], steps['mounted after eject']['result']),
++                         (1, True))
++        self.assertIn('error', steps['remove mount point'])
++        self.assertEqual(len(self.fake.attached), 1)
++
++    def test_an_unknown_mount_state_is_still_unmounted_and_recorded(self):
++        sentinel = RuntimeError('sentinel reader failure')
++
++        def fail():
++            self.fake.statfs_fails = True
++            raise sentinel
++
++        self.fake.during_read.append(fail)
++        _, error = self.run_mount()
++        self.assertIs(error, sentinel)
++        cleanup = self.failed()['cleanup']
++        self.assertFalse(cleanup['clean'])
++        self.assertIn('scripted statfs failure', cleanup['steps'][0]['error'])
++        self.assertEqual(self.calls(DISKUTIL, 'unmount'), [[DISKUTIL, 'unmount', str(self.output / 'mount')]])
++        self.assertEqual((self.fake.attached, self.fake.mounted), ([], None))
++
++    def test_a_failing_evidence_write_never_replaces_the_primary_error(self):
++        sentinel = RuntimeError('sentinel reader failure')
++        self.fake.during_read.append(lambda: (_ for _ in ()).throw(sentinel))
++        real = wrapper.write_record
++
++        def broken(path, value):
++            if path.name == 'FAILED.json':
++                raise TypeError('scripted evidence write failure')
++            return real(path, value)
++
++        with mock.patch.object(wrapper, 'write_record', broken):
++            _, error = self.run_mount()
++        self.assertIs(error, sentinel)
++        self.assertEqual((self.fake.attached, self.fake.mounted), ([], None))
++
++    def test_incomplete_cleanup_after_a_good_read_writes_no_receipt(self):
++        for name, script in (('unmount busy', lambda: setattr(self.fake, 'unmount_busy', True)),
++                             ('eject refused', lambda: setattr(self.fake, 'eject_failures', wrapper.EJECT_ATTEMPTS))):
++            with self.subTest(name):
++                self.reset()
++                self.fake.during_read.append(script)
++                _, failed = self.refused('^journal mount cleanup did not complete$', 'release',
++                                         point_left=name == 'unmount busy')
++                self.assertFalse(failed['cleanup']['clean'])
++                self.assertEqual(len(self.calls(DISKUTIL, 'eject')), wrapper.EJECT_ATTEMPTS)
++                self.assertEqual(len(self.fake.reads), 1)
++
++
++class AfterEject(MountCase):
++    def rename_changes_ctime(self):
++        probe_file = self.temp / 'ctime-premise'
++        fixture.host.write_private(probe_file, b'premise')
++        before = probe_file.lstat().st_ctime_ns
++        time.sleep(0.05)
++        os.rename(probe_file, self.temp / 'ctime-premise-aside')
++        os.rename(self.temp / 'ctime-premise-aside', probe_file)
++        changed = probe_file.lstat().st_ctime_ns != before
++        probe_file.unlink()
++        return changed
++
++    def check(self, change, pattern):
++        self.fake.during_read.append(change)
++        _, failed = self.refused('^' + pattern + '$', 'after eject')
++        self.assertTrue(failed['cleanup']['clean'])
++        self.assertEqual(len(self.fake.reads), 1)
++
++    def test_a_clone_rewritten_while_mounted_is_refused(self):
++        self.check(lambda: self.replace(self.fake.clone, self.clone_bytes[:-1] + b'X'),
++                   'clone hash differs from the capture record')
++
++    def test_a_clone_touched_replaced_or_renamed_back_while_mounted_is_refused(self):
++        def touched():
++            info = self.fake.clone.lstat()
++            os.utime(self.fake.clone, ns=(info.st_atime_ns, info.st_mtime_ns + 10 ** 9))
++
++        def replaced():
++            fixture.host.write_private(self.temp / 'same-bytes.asif', self.clone_bytes)
++            os.replace(self.temp / 'same-bytes.asif', self.fake.clone)
++
++        def renamed_back():
++            # Inode, mtime and bytes survive a rename away and back; only ctime records it.
++            time.sleep(0.05)
++            os.rename(self.fake.clone, self.temp / 'aside.asif')
++            os.rename(self.temp / 'aside.asif', self.fake.clone)
++
++        def chmodded():
++            time.sleep(0.05)
++            os.chmod(self.fake.clone, 0o600)
++
++        for name, change in (('touched', touched), ('replaced', replaced), ('renamed back', renamed_back),
++                             ('metadata only', chmodded)):
++            with self.subTest(name):
++                if name == 'renamed back' and not self.rename_changes_ctime():
++                    self.skipTest('this filesystem keeps ctime across a rename; inode and hash still bind')
++                self.reset()
++                self.check(change, 'capture pins, commitment, clone or volume changed while mounted')
++
++    def test_a_capture_republished_or_failed_while_mounted_is_refused(self):
++        with self.subTest('republished'):
++            # A same-uid rewrite: the real publisher would block on the arm lock this run holds.
++            self.check(lambda: self.rewrite('CAPTURE.json', data_volume_uuid=OTHER),
++                       'capture pins, commitment, clone or volume changed while mounted')
++        with self.subTest('failed'):
++            self.reset()
++            self.publish_clone()
++            self.check(lambda: fixture.host.write_private(self.capture / 'FAILED.json', b'{}\n'),
++                       'capture failed; its clone is not mounted')
++
++    def test_the_receipt_is_exclusive(self):
++        planted = self.output / 'JOURNAL_INPUTS.json'
++        self.fake.during_read.append(lambda: fixture.host.write_private(planted, b'planted\n'))
++        receipt, error = self.run_mount()
++        self.assertIsInstance(error, FileExistsError)
++        self.assertEqual(self.failed()['stage'], 'after eject')
++        self.assertEqual(planted.read_bytes(), b'planted\n')
++
++
++class ProbeGuards(unittest.TestCase):
++    """The CI-only probe refuses everywhere else before running anything; it never runs here."""
++
++    ENVIRON = {'CI': 'true', 'GITHUB_ACTIONS': 'true', 'OPENCLAW_OWNERSHIP_PROBE': '1'}
++
++    def setUp(self):
++        temp = pathlib.Path(tempfile.mkdtemp(prefix='openclaw-probe-guard-')).resolve()
++        self.addCleanup(shutil.rmtree, temp)
++        self.output = temp / 'report.json'
++        self.argv = ['--ci-owned-probe', str(self.output)]
++
++    def refuses(self, pattern, argv=None, environ=None, platform='darwin', sudo=0):
++        sudo_row = {'argv': [], 'returncode': sudo, 'timed_out': False, 'stdout': b'', 'stderr': ''}
++        with mock.patch.object(probe, 'attempt', return_value=sudo_row) as attempt, \
++                mock.patch('subprocess.run', side_effect=AssertionError('command run')), \
++                mock.patch.object(probe, 'run', side_effect=AssertionError('probe ran')):
++            with self.assertRaisesRegex(RuntimeError, pattern):
++                probe.guard(self.argv if argv is None else argv,
++                            self.ENVIRON if environ is None else environ, platform)
++        self.assertFalse(os.path.lexists(self.output))
++        return attempt
++
++    def test_every_guard_refuses_before_any_command(self):
++        for environ, pattern in (({**self.ENVIRON, 'CI': ''}, 'only on a GitHub Actions runner'),
++                                 ({**self.ENVIRON, 'GITHUB_ACTIONS': 'false'}, 'only on a GitHub Actions runner'),
++                                 ({key: value for key, value in self.ENVIRON.items()
++                                   if key != 'OPENCLAW_OWNERSHIP_PROBE'}, 'OPENCLAW_OWNERSHIP_PROBE=1 is required')):
++            with self.subTest(pattern, environ=environ):
++                self.assertFalse(self.refuses(pattern, environ=environ).called)
++        with self.subTest('platform'):
++            self.assertFalse(self.refuses('^the ownership probe runs only on macOS$', platform='linux').called)
++        for argv in ([], [str(self.output)], ['--ci-owned-probe'], ['--probe', str(self.output)],
++                     self.argv + ['extra']):
++            with self.subTest(argv=argv):
++                self.assertFalse(self.refuses('^usage: ', argv=argv).called)
++        self.output.write_bytes(b'')
++        for argv in (self.argv, ['--ci-owned-probe', 'relative.json'],
++                     ['--ci-owned-probe', str(self.output.parent / 'missing' / 'report.json')]):
++            with self.subTest(argv=argv):
++                with mock.patch('subprocess.run', side_effect=AssertionError('command run')):
++                    with self.assertRaisesRegex(RuntimeError, '^probe output must be a new file in an existing '):
++                        probe.guard(argv, self.ENVIRON, 'darwin')
++        self.output.unlink()
++        with self.subTest('sudo'):
++            attempt = self.refuses('^passwordless sudo is required$', sudo=1)
++            attempt.assert_called_once_with('/usr/bin/sudo', '-n', '/usr/bin/true')
++
++    def test_the_guarded_path_is_returned_only_when_every_guard_holds(self):
++        sudo_row = {'argv': [], 'returncode': 0, 'timed_out': False, 'stdout': b'', 'stderr': ''}
++        with mock.patch.object(probe, 'attempt', return_value=sudo_row):
++            self.assertEqual(probe.guard(self.argv, self.ENVIRON, 'darwin'), self.output)
++
++    def test_main_on_this_host_refuses_without_running(self):
++        if sys.platform == 'darwin':
++            self.skipTest('the platform guard is the one this test exercises')
++        with mock.patch('subprocess.run', side_effect=AssertionError('command run')):
++            with self.assertRaisesRegex(RuntimeError, '^the ownership probe runs only on macOS$'):
++                probe.main(self.argv, self.ENVIRON)
++        self.assertFalse(os.path.lexists(self.output))
++
++    def test_flag_names_decode_the_wrapper_flags(self):
++        self.assertEqual(probe.flag_names(FLAGS), ['rdonly', 'noexec', 'nosuid', 'nodev', 'dontbrowse'])
++        self.assertEqual(probe.flag_names(wrapper.MNT_IGNORE_OWNERSHIP | 0x10000000 | 0x800),
++                         ['ignore_ownership', 'noatime', '0x800'])
++        self.assertEqual(probe.MOUNT_OPTIONS, wrapper.MOUNT_OPTIONS)
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
+index 9f2ba21..886268f 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
+@@ -160,7 +160,8 @@ class Authentic(StoppedImage):
+         with mock.patch('os.open', spy), mock.patch.object(
+                 preservation_journal.Journal, '__init__', side_effect=AssertionError('Journal constructed')):
+             found = self.read()
+-        self.assertEqual(set(found), {'home', 'window', 'lineage', 'records', 'configs', 'config_modes', 'binary'})
++        self.assertEqual(set(found), {'home', 'window', 'lineage', 'records', 'configs', 'config_modes', 'binary',
++                                      'read'})
+         self.assertEqual((found['home'], found['window'], found['lineage']), (HOME, 'window-1', ['window-1']))
+         self.assertEqual(found['config_modes'], {path: 0o600 for path in self.configs})
+         self.assertEqual(found['records'], self.records)
+@@ -181,8 +182,30 @@ class Authentic(StoppedImage):
+         self.assertEqual(summary['checkpoint_sha256'], self.record['sha256'])
+         self.assertEqual(summary['pre_head'], self.commitment['manifest']['journal_head'])
+         self.assertEqual(summary['session'], guest.SESSION)
++        self.assertEqual(summary['read'], read_inputs(self.data, self.commitment)['read'])
+         self.assertEqual(snapshot(self.data), before)
+ 
++    def test_read_lists_the_metadata_of_every_file_actually_read_relative_to_the_root(self):
++        found = self.read()
++        files = {str(path.relative_to(self.data)): path for path in self.data.rglob('*')
++                 if stat.S_ISREG(path.lstat().st_mode)}
++        # The fixture holds nothing the reader skips, so every regular file is read exactly once.
++        self.assertEqual(sorted(row['path'] for row in found['read']), sorted(files))
++        for row in found['read']:
++            info = files[row['path']].lstat()
++            self.assertEqual(row, {'path': row['path'], 'size': info.st_size, 'mode': stat.S_IMODE(info.st_mode),
++                                   'uid': info.st_uid, 'nlink': info.st_nlink, 'device': info.st_dev,
++                                   'inode': info.st_ino,
++                                   'sha256': hashlib.sha256(files[row['path']].read_bytes()).hexdigest()})
++        # Retirement evidence is read (it counts toward the bounds) but never parsed.
++        image = self.image()
++        for name in stopped_journal_inputs.EVIDENCE:
++            host.write_private(preservation(image) / name, b'not json')
++        listed = [row['path'] for row in self.read(image)['read']]
++        self.assertEqual([path for path in listed if path.rsplit('/', 1)[-1] in stopped_journal_inputs.EVIDENCE],
++                         [str(preservation(image).relative_to(image) / name)
++                          for name in sorted(stopped_journal_inputs.EVIDENCE)])
++
+     def test_finished_ancestor_windows_and_finder_metadata_are_accepted(self):
+         image = self.image()
+         first = self.finished()
