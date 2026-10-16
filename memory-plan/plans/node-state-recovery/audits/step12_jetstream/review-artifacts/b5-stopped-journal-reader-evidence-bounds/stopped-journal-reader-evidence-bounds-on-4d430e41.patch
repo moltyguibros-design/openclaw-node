@@ -1,0 +1,233 @@
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_journal_inputs.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_journal_inputs.py
+index 1575f87..a825ea2 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_journal_inputs.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_journal_inputs.py
+@@ -10,16 +10,29 @@ it is read: each path component and file is checked before use, which is no lock
+ Journal files, locks and directories must carry the owner, single link and 0600/0700 modes
+ Journal gives them; lock files are present and empty, as Journal's O_CREAT open leaves them.
+ Config modes are recorded, not constrained; their owner and single link are. Every directory
+-listing, file and the total read are bounded. Nothing is created, locked or written, and
++listing, every file, the number of files and the bytes read in all are bounded: parsed JSON can
++take about 22 times its raw bytes (measured with crafted records), so the 16 MiB total keeps the
++heap under about 0.4 GiB. Nothing is created, locked or written, and
+ preservation_journal.Journal is never constructed: its constructor creates and locks
+ ~/.openclaw/preservation of whatever host runs it, and its recovery path writes.
+ 
++The policy is fail-closed: anything not named here refuses, even where the guest Journal itself
++tolerates it, such as a .pending- file (a write that failed before its rename), a
++.corrupt-receipt- file (a corrupt receipt set aside), an unknown entry or a window outside the
++lineage. Journal never deletes those leftovers, so one blocks every later capture until the
++operator resolves it. The only other preservation entries allowed are the three legacy-agent
++retirement records of 2026-10-02 (LEGACY_AGENT_RETIREMENT_RUNBOOK.md): checked as owner-private
++single-link files and counted against the bounds, never interpreted.
++
+ Every path is fixed by the one home all four committed store paths already name. The journal
+ window is the unique direct child of the fixed journal parent whose last record carries the
+ committed checkpoint digest; every other window must be its finished ancestor through the
+ baseline predecessor links Journal writes. The node receipt is consistency evidence only, never
+ the selector. The B3 pin table is the caller's: it is never read from the image or rebuilt from
+-the checkpoint's identities. The NATS binary is the one the journal baseline names for all four
++the checkpoint's identities. Its check is only as strong as its host provenance: a table rebuilt
++from the image (the checkpoint's own identities, or the baseline hashes with the image's configs)
++verifies, so the caller must pass B3's pre-window pin from a host-held record, a gate that is the
++caller's and still open. The NATS binary is the one the journal baseline names for all four
+ units; no pin binds it beyond that. Selection trusts the pinned commitment, so D189's residuals
+ stand unchanged: a same-uid pre-stop CHECKPOINT rewrite and recommit, or a coordinated CAPTURE
+ rewrite, selects whatever window matches the rewritten digest.
+@@ -43,10 +56,15 @@ RECORD = re.compile(r'\d{6}\.json')
+ PRESERVATION = '/.openclaw/preservation'
+ PRESERVATION_ENTRIES = frozenset(('journals', 'node.lock', 'node.lock.state.json'))
+ RECEIPT_KEYS = frozenset(('journal_root', 'baseline', 'status', 'phase', 'holder'))
+-# Entries per directory (so windows, and records per window) and bytes read in all. A full-node
+-# window is about a hundred records of at most tens of KiB, so both leave wide headroom.
++# The node's read-only preservation census found exactly these beside the Journal entries.
++EVIDENCE = frozenset(('legacy-agent-retirement-evidence-20261002.json',
++                      'legacy-agent-retirement-post-20261002.json',
++                      'legacy-agent-retirement-pre-20261002.json'))
++# Entries per directory, files and bytes read in all. A full-node window is about a hundred
++# records of at most tens of KiB, so each leaves wide headroom.
+ MAX_ENTRIES = 1024
+-MAX_TOTAL = 256 << 20
++MAX_FILES = 4096
++MAX_TOTAL = 16 << 20
+ 
+ 
+ def committed_home(manifest):
+@@ -96,9 +114,11 @@ def content(path, mode, budget):
+     """Exact bytes and lstat of one owned, single-link regular file of at most LIMIT bytes.
+ 
+     The entry is checked before it is opened, so a link, FIFO or device node in the guest image is
+-    never opened; the opened file must then be that same inode. `budget` is the one-item list of
+-    bytes the whole read may still take.
++    never opened; the opened file must then be that same inode. `budget` holds the files and bytes
++    the whole read may still take; a file beyond the file bound is not even inspected.
+     """
++    budget['files'] -= 1
++    require(budget['files'] >= 0, 'stopped image reads exceed their file bound at: ' + path.name)
+     info = path.lstat()
+     require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and owned(info, mode),
+             'stopped image file is not an owned single-link regular file: ' + path.name)
+@@ -114,8 +134,8 @@ def content(path, mode, budget):
+     finally:
+         os.close(fd)
+     require(len(raw) <= LIMIT, 'stopped image file exceeds its size bound: ' + path.name)
+-    budget[0] -= len(raw)
+-    require(budget[0] >= 0, 'stopped image reads exceed their total bound at: ' + path.name)
++    budget['bytes'] -= len(raw)
++    require(budget['bytes'] >= 0, 'stopped image reads exceed their total bound at: ' + path.name)
+     return raw, info
+ 
+ 
+@@ -196,14 +216,17 @@ def read_inputs(root, commitment):
+     """
+     root = pathlib.Path(root)
+     home = committed_home(commitment['manifest'])
+-    budget = [MAX_TOTAL]
++    budget = {'files': MAX_FILES, 'bytes': MAX_TOTAL}
+     try:
+         require(root.resolve(strict=True) == root, 'stopped image root is not a literal absolute path')
+         preservation = directory(root, home + PRESERVATION)
+         private_dir(preservation)
+         # Presence is the reads' own: the lock and receipt below, the journal parent after them.
+-        require(set(names(preservation)) <= PRESERVATION_ENTRIES,
++        entries = set(names(preservation))
++        require(entries <= PRESERVATION_ENTRIES | EVIDENCE,
+                 'preservation directory holds a pending, corrupt-receipt or unknown entry')
++        for name in sorted(entries & EVIDENCE):
++            content(preservation / name, 0o600, budget)
+         lock(preservation / 'node.lock', budget)
+         journals = preservation / 'journals'
+         private_dir(journals)
+@@ -247,6 +270,8 @@ def verify_stopped_journal(capture_dir, root, *, table):
+ 
+     The CAPTURE.json pins come first (D189): only the pinned commitment's digest selects a window,
+     and verify_frozen_checkpoint() then rechecks the pins, the commitment and every record.
++    `table` must be B3's pre-window pin from a host-held record; one rebuilt from the image
++    verifies, so its provenance is the caller's gate.
+     """
+     pinned = require_captured(capture_dir)
+     commitment = require_committed(capture_dir)
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
+index 0209efe..9f2ba21 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
+@@ -195,6 +195,16 @@ class Authentic(StoppedImage):
+         found = self.read(image, commitment)
+         self.assertEqual((found['window'], found['lineage']), ('window-1', ['window-1', 'window-b', 'window-a']))
+ 
++    def test_the_three_retirement_evidence_records_are_checked_and_ignored(self):
++        image = self.image()
++        for name in stopped_journal_inputs.EVIDENCE:
++            # Never interpreted: these bytes are not even JSON.
++            host.write_private(preservation(image) / name, b'owned stand-in, not JSON')
++        found = self.read(image)
++        self.assertEqual((found['window'], found['lineage']), ('window-1', ['window-1']))
++        self.assertEqual(found['records'], self.records)
++        self.assertEqual(found['configs'], self.configs)
++
+     def test_config_modes_are_recorded_not_constrained(self):
+         image = self.image()
+         config_file(image, 'nats-2').chmod(0o644)
+@@ -267,7 +277,11 @@ class Refusals(StoppedImage):
+             self.rejects('not owner-private: preservation')
+ 
+     def test_preservation_holds_only_its_receipt_lock_and_journals(self):
+-        for name in ('.pending-' + 'a' * 32, '.corrupt-receipt-' + 'b' * 32, 'extra'):
++        # The three retirement records are allowed by exact name only (see the Authentic test).
++        for name in ('.pending-' + 'a' * 32, '.corrupt-receipt-' + 'b' * 32, 'extra',
++                     'legacy-agent-retirement-evidence-20261003.json',
++                     'legacy-agent-retirement-evidence-20261002.json.bak',
++                     'Legacy-agent-retirement-pre-20261002.json'):
+             with self.subTest(name):
+                 image = self.image()
+                 host.write_private(preservation(image) / name, b'{}')
+@@ -277,6 +291,58 @@ class Refusals(StoppedImage):
+             (preservation(image) / 'node.lock.state.json').unlink()
+             self.rejects('absent or unreadable', image)
+ 
++    def test_evidence_records_are_owner_private_single_link_files_within_the_bounds(self):
++        name = 'legacy-agent-retirement-pre-20261002.json'
++
++        def plain(path):
++            host.write_private(path, b'{"owned": true}')
++
++        def readable(path):
++            plain(path)
++            path.chmod(0o644)
++
++        def hardlinked(path):
++            plain(path)
++            os.link(path, self.temp / ('outside-' + secrets.token_hex(4)))
++
++        def symlinked(path):
++            target = self.temp / ('outside-' + secrets.token_hex(4))
++            plain(target)
++            path.symlink_to(target)
++
++        def fifo(path):
++            os.mkfifo(path, 0o600)
++
++        def directory(path):
++            path.mkdir(mode=0o700)
++
++        for label, forge in (('readable by others', readable), ('hard link', hardlinked),
++                             ('symlink', symlinked), ('fifo', fifo), ('directory', directory)):
++            with self.subTest(label):
++                image = self.image()
++                forge(preservation(image) / name)
++                self.rejects('not an owned single-link regular file: ' + re.escape(name), image)
++        with self.subTest('oversized'):
++            image = self.image()
++            host.write_private(preservation(image) / name, b'#' * (LIMIT + 1))
++            self.rejects('exceeds its size bound: ' + re.escape(name), image)
++        image = self.image()
++        files = sum(1 for path in image.rglob('*') if path.is_file())
++        size = sum(path.stat().st_size for path in image.rglob('*') if path.is_file())
++        for evidence in stopped_journal_inputs.EVIDENCE:
++            host.write_private(preservation(image) / evidence, b'{"owned": "evidence bytes"}')
++        extra = 3 * len(b'{"owned": "evidence bytes"}')
++        for label, patched, value, accepted in (('bytes', 'MAX_TOTAL', size, False),
++                                                ('bytes', 'MAX_TOTAL', size + extra, True),
++                                                ('files', 'MAX_FILES', files, False),
++                                                ('files', 'MAX_FILES', files + 3, True)):
++            with self.subTest('evidence counted against the %s bound' % label, value=value):
++                with mock.patch.object(stopped_journal_inputs, patched, value):
++                    if accepted:
++                        self.assertEqual(self.read(image)['window'], 'window-1')
++                    else:
++                        self.rejects('stopped image reads exceed their (total|file) bound at: ', image)
++
+     def test_lock_files_are_present_empty_owner_private_files(self):
+         def written(path):
+             self.replace(path, b'written')
+@@ -489,7 +555,8 @@ class Refusals(StoppedImage):
+         self.assertTrue(swapped)
+ 
+     def test_directory_entries_and_total_reads_are_bounded(self):
+-        self.assertEqual((stopped_journal_inputs.MAX_ENTRIES, stopped_journal_inputs.MAX_TOTAL), (1024, 256 << 20))
++        self.assertEqual((stopped_journal_inputs.MAX_ENTRIES, stopped_journal_inputs.MAX_FILES,
++                          stopped_journal_inputs.MAX_TOTAL), (1024, 4096, 16 << 20))
+         # The committed window lists its records and lock: one more entry than records.
+         with mock.patch.object(stopped_journal_inputs, 'MAX_ENTRIES', len(self.records)):
+             self.rejects('stopped image directory holds too many entries: window-1')
+@@ -501,6 +568,20 @@ class Refusals(StoppedImage):
+             self.rejects('stopped image reads exceed their total bound at: ')
+         with mock.patch.object(stopped_journal_inputs, 'MAX_TOTAL', total):
+             self.assertEqual(self.read()['window'], 'window-1')
++        # Every regular file is read once, and the one beyond the file bound is never opened.
++        files = sum(1 for path in self.data.rglob('*') if path.is_file())
++        opened = []
++        real_open = os.open
++
++        def spy(path, flags, *args, **kwargs):
++            opened.append(path)
++            return real_open(path, flags, *args, **kwargs)
++
++        with mock.patch.object(stopped_journal_inputs, 'MAX_FILES', files - 1), mock.patch('os.open', spy):
++            self.rejects('stopped image reads exceed their file bound at: ')
++        self.assertEqual(len(opened), files - 1)
++        with mock.patch.object(stopped_journal_inputs, 'MAX_FILES', files):
++            self.assertEqual(self.read()['window'], 'window-1')
+ 
+     def test_baseline_must_name_one_binary_for_all_four_units(self):
+         image = self.image()
