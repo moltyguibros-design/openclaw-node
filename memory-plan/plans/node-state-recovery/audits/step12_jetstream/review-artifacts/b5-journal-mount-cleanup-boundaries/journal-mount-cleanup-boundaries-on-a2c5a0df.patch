@@ -1,0 +1,1314 @@
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_journal_mount.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_journal_mount.py
+index eb02fe7..868ebc3 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_journal_mount.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_journal_mount.py
+@@ -3,22 +3,41 @@
+ 
+ The clone of a published owned fixture capture is attached read-only without mounting, and its one
+ Data volume is mounted read-only at a fresh private mount point. Before verify_stopped_journal()
+-reads anything, the mount must be read-only, nodev, nosuid and noexec, and must honour ownership.
+-The arm lock is held throughout. Before the attach and again after the eject, the CAPTURE.json
+-pins and their commitment, the fixture VM, the clone's identity (device, inode, size, mtime, ctime,
+-flags) and hash and the Data volume UUID are checked and must be equal. The exclusive receipt
+-lists the metadata of every file the reader actually read.
++reads anything, the mount must be read-only, nodev, nosuid and noexec, and must honour ownership;
++after it, every file it read must be on that mount, it must have verified the pinned commitment,
++and the mount must verify unchanged. CAPTURE_ACTIVE.lock and the ARMED.json arm lock are both held
++exclusively throughout, so no capture worker still runs and no guard, commit or reconcile acts.
++Before the attach and again after the eject, the CAPTURE.json pins and their commitment, the
++fixture VM, the locked arm record, the clone's identity (device, inode, size, mtime, ctime, flags)
++and hash and the Data volume UUID are checked and must be equal. The receipt lists the metadata of
++every file the reader actually read; it is published whole and exclusively, or not at all.
+ 
+ Production refuses: no host-pinned B3 table or protected acceptance root exists, and this tool
+-claims neither. The table is the caller's and is never read from the image. Command outputs,
+-statfs layout and flags and the diskutil/hdiutil plist keys used here are as documented, not yet
+-observed natively; the CI-only probe_asif_mount_ownership.py must confirm them first.
++claims neither. Only a capture of the owned fixture VM (named by the capture record and by the
++host's own pinned started sample), inside an owner-private fixture parent (the native fixture
++capture's or the owned tests'), is mounted; that check is positive, so no HOME override or deeper
++path reaches the durable recovery directory. The table is the caller's and is never read from the
++image. Command outputs, statfs layout and flags and the diskutil/hdiutil plist keys used here are
++as documented, not yet observed natively; the CI-only probe_asif_mount_ownership.py must confirm
++them first.
+ 
+ Every failure keeps its primary exception. Cleanup (unmount, eject, absence check, mount point
+ removal) runs on every path, records each attempt and never raises; FAILED.json carries the
+ primary error with the cleanup evidence. An attach or mount that failed or timed out may still
+ have applied, so cleanup finds the clone's attachments in hdiutil's inventory and the mount
+-through statfs, never from the failed command's own output.
++through statfs, never from the failed command's own output; and since that inventory may be
++incomplete, the attach result's own disk must also be gone before the run counts as clean. A
++retried eject first re-reads the inventory, so a number freed by a timed-out eject that applied is
++never ejected for another image. The mount point is removed only once statfs confirmed it is no
++longer a mount and it is a plain empty directory.
++
++An interrupt (KeyboardInterrupt, SystemExit) that arrives during cleanup stops the cleanup where
++it arrived, so cleanup stays bounded and never swallows it into further steps; it is recorded
++and the run is not clean. After a primary error that error is still the one raised, with the
++interrupt in its FAILED.json evidence; after a successful read the interrupt itself is raised,
++with FAILED.json, and no receipt is written. Python delivers an interrupt between bytecodes, so
++one landing in the few bytecodes around the cleanup call can still lose FAILED.json; the next
++run's inventory check refuses an attachment any lost cleanup left behind.
+ 
+ Follow-up, deliberately not done here: host_asif_extract.extract() keeps its own attach and mount
+ for the store extraction. Moving it onto these primitives would bound its commands (they have no
+@@ -40,14 +59,18 @@ import sys
+ import time
+ 
+ from host_guest_commit import private_bytes, require_captured, require_committed
+-from host_vm_capture import CAPTURE_SCOPE, FIXTURE_UUID
++from host_vm_capture import CAPTURE_SCOPE, FIXTURE_UUID, fsync_parent
+ from host_vm_preflight import owned_directory, require, write_record
+ from stopped_journal_inputs import verify_stopped_journal
+ 
+ DISKUTIL = '/usr/sbin/diskutil'
+ HDIUTIL = '/usr/bin/hdiutil'
+ CLONE = 'powered-off-image.asif'
+-PRODUCTION_PARENT = pathlib.Path.home() / 'Library/Application Support/OpenClawRecovery'
++FIXTURE_PARENTS = ('openclaw-host-capture-', 'openclaw-capture-owned-')
++PRODUCTION_REFUSAL = 'production journal mount requires a host-pinned B3 table and a protected acceptance root'
++LOCKS = (('CAPTURE_ACTIVE.lock', 'capture worker is still active'),
++         ('ARMED.json', 'capture is busy: another holder has the arm lock'))
++OUTPUT_NAME = re.compile(r'journal-read(-[0-9A-Za-z]+)?')
+ TIMEOUT = 60
+ EJECT_ATTEMPTS = 3
+ EJECT_PAUSE = 1.0
+@@ -69,7 +92,8 @@ def attempt(*argv, timeout=TIMEOUT):
+     """One bounded command; never raises, so it cannot mask an error."""
+     row = {'argv': list(argv), 'returncode': None, 'timed_out': False, 'stdout': b'', 'stderr': ''}
+     try:
+-        done = subprocess.run(argv, capture_output=True, timeout=timeout)
++        # No stdin: an image passphrase prompt would otherwise wait out the whole timeout.
++        done = subprocess.run(argv, capture_output=True, timeout=timeout, stdin=subprocess.DEVNULL)
+     except subprocess.TimeoutExpired:
+         return {**row, 'timed_out': True}
+     except OSError as error:
+@@ -163,7 +187,7 @@ def clone_identity(path, capture):
+ 
+ 
+ def capture_inputs(capture_dir):
+-    """The pinned capture, its commitment and the clone, as one value compared before and after."""
++    """The pinned capture, its commitment, the arm record and the clone, compared before and after."""
+     require(not os.path.lexists(capture_dir / 'FAILED.json'), 'capture failed; its clone is not mounted')
+     raw = private_bytes(capture_dir / 'CAPTURE.json')
+     pinned = require_captured(capture_dir)
+@@ -171,14 +195,18 @@ def capture_inputs(capture_dir):
+     require(commitment == {**json.loads(pinned['COMMITTED.json']),
+                            'checkpoint': json.loads(pinned['CHECKPOINT.json'])},
+             'capture commitment differs from the pinned capture record')
++    # require_captured() checked the pins against its own read: it must have read these bytes.
++    require(private_bytes(capture_dir / 'CAPTURE.json') == raw, 'capture record changed while it was read')
+     capture = json.loads(raw)
+     require(capture.get('scope') == CAPTURE_SCOPE and capture.get('vm_state_at_final_check') == 'stopped',
+             'capture record is not a completed stopped-VM capture')
+-    require(capture.get('vm_uuid') == FIXTURE_UUID, 'capture is not of the owned fixture VM')
++    require(capture.get('vm_uuid') == FIXTURE_UUID == commitment['started_sample'].get('vm_uuid'),
++            'capture is not of the owned fixture VM')
+     require(isinstance(capture.get('data_volume_uuid'), str) and capture['data_volume_uuid'],
+             'capture record names no Data volume')
++    armed = (capture_dir / 'ARMED.json').lstat()
+     return {'capture_sha256': hashlib.sha256(raw).hexdigest(), 'commitment': commitment,
+-            'data_volume_uuid': capture['data_volume_uuid'],
++            'data_volume_uuid': capture['data_volume_uuid'], 'arm_record': [armed.st_dev, armed.st_ino],
+             'clone': clone_identity(capture_dir / CLONE, capture)}
+ 
+ 
+@@ -219,12 +247,24 @@ def verify_mount(mount, volume, uuid):
+             'statfs': found}
+ 
+ 
+-def release(clone, mount, attached, known=()):
+-    """Unmount, eject the clone's attachments, confirm absence, remove the mount point; never raises.
++def remove_mount_point(mount):
++    """rmdir the private mount point, once it is a plain directory with nothing in it."""
++    require(stat.S_ISDIR(mount.lstat().st_mode), 'mount point is not a directory')
++    with os.scandir(mount) as entries:
++        require(next(entries, None) is None, 'mount point is not empty')
++    os.rmdir(mount)
++    return 'removed'
++
+ 
+-    Nothing is ejected unless this run attempted the attach (`attached`): any attachment of the
+-    clone before that was refused, not made here, and is not this run's to eject. `known` is the
+-    attach result's disk, ejected if the inventory itself cannot be read.
++def release(clone, mount, attached, known=()):
++    """Unmount, eject the clone's attachments, confirm absence, remove the mount point.
++
++    Returns the cleanup evidence and the interrupt that stopped it (or None); never raises. A
++    step's error is recorded and the next step still runs. Nothing is ejected unless this run
++    attempted the attach (`attached`): any attachment of the clone before that was refused, not
++    made here, and is not this run's to eject. `known` is the attach result's disk: ejected if
++    the inventory itself cannot be read, and in every case required gone (diskutil no longer
++    knows it) for the run to be clean. A still-mounted or unreadable mount point is kept.
+     """
+     steps = []
+ 
+@@ -240,65 +280,141 @@ def release(clone, mount, attached, known=()):
+     def mounted():
+         return os.path.lexists(mount) and statfs(mount)['mntonname'] == str(mount)
+ 
+-    # An unknown mount state (statfs failed) is unmounted too: unmounting nothing only fails.
+-    if step('mounted before cleanup', mounted) is not False:
+-        step('unmount', lambda: evidence(attempt(DISKUTIL, 'unmount', str(mount))))
+-    rows = step('attachments before eject', lambda: [image.get('system-entities', [{}])[0].get('dev-entry')
+-                                                     for image in attachments(clone)])
+-    for disk in (rows if rows is not None else list(known)) if attached else ():
+-        for _ in range(EJECT_ATTEMPTS):
+-            ejected = step('eject ' + str(disk), lambda: evidence(attempt(DISKUTIL, 'eject', str(disk))))
+-            if ejected and ejected['returncode'] == 0:
+-                break
+-            time.sleep(EJECT_PAUSE)
+-    remaining = step('attachments after eject', lambda: len(attachments(clone)))
+-    still = step('mounted after eject', mounted)
+-    if os.path.lexists(mount):
+-        step('remove mount point', lambda: os.rmdir(mount))
+-    return {'steps': steps, 'clean': (remaining == 0 or not attached) and still is False
+-            and not os.path.lexists(mount)}
++    def clone_disks():
++        return [image.get('system-entities', [{}])[0].get('dev-entry') for image in attachments(clone)]
++
++    try:
++        # An unknown mount state (statfs failed) is unmounted too: unmounting nothing only fails.
++        if step('mounted before cleanup', mounted) is not False:
++            step('unmount', lambda: evidence(attempt(DISKUTIL, 'unmount', str(mount))))
++        rows = step('attachments before eject', clone_disks)
++        for disk in (rows if rows is not None else list(known)) if attached else ():
++            for tries in range(EJECT_ATTEMPTS):
++                if tries:
++                    time.sleep(EJECT_PAUSE)
++                    # A timed-out eject may have applied and freed the number for another image.
++                    if disk not in (step('attachments before eject retry', clone_disks) or ()):
++                        break
++                ejected = step('eject ' + str(disk), lambda: evidence(attempt(DISKUTIL, 'eject', str(disk))))
++                if ejected and ejected['returncode'] == 0:
++                    break
++        remaining = step('attachments after eject', lambda: len(attachments(clone)))
++        gone = [step('attach result disk after eject', lambda: evidence(attempt(DISKUTIL, 'info', '-plist', disk)))
++                for disk in (known if attached else ())]
++        still = step('mounted after eject', mounted)
++        if still is False and os.path.lexists(mount):
++            step('remove mount point', lambda: remove_mount_point(mount))
++        elif os.path.lexists(mount):
++            steps.append({'step': 'remove mount point', 'kept': 'still mounted or mount state unreadable'})
++    except BaseException as interrupt:
++        # step() records every Exception, so only an interrupt gets here: stop, record, return it.
++        steps.append({'step': 'interrupted', 'error': repr(interrupt)[:300]})
++        return {'steps': steps, 'clean': False}, interrupt
++    return {'steps': steps, 'clean': (remaining == 0 or not attached)
++            and all(row is not None and row['returncode'] not in (0, None) for row in gone)
++            and still is False and not os.path.lexists(mount)}, None
++
++
++def publish_receipt(output, receipt):
++    """JOURNAL_INPUTS.json whole or not at all: written aside, linked in exclusively, then synced.
++
++    A failure after the link removes it again, so a receipt never stands beside FAILED.json.
++    """
++    final, aside = output / 'JOURNAL_INPUTS.json', output / 'JOURNAL_INPUTS.json.partial'
++    require(not os.path.lexists(aside), 'receipt staging file already exists')
++    linked = False
++    try:
++        write_record(aside, receipt)
++        os.link(aside, final)
++        linked = True
++        os.unlink(aside)
++        fsync_parent(output)
++    except BaseException:
++        for path in (final, aside) if linked else (aside,):
++            try:
++                os.unlink(path)
++            except OSError:
++                pass
++        raise
+ 
+ 
+ def record_failure(output, stage, error, cleanup):
+-    """FAILED.json for the primary error and its cleanup; never raises, so it cannot replace it."""
++    """FAILED.json for the primary error and its cleanup; never raises, so it cannot replace it.
++
++    An interrupt while writing it is dropped too: the error being recorded is raised right after.
++    """
+     try:
+         write_record(output / 'FAILED.json', {'stage': stage, 'primary_error': repr(error)[:300],
+                                               'cleanup': cleanup})
+-    except Exception:
++    except BaseException:
+         pass
+ 
+ 
++def capture_locks(capture_dir):
++    """CAPTURE_ACTIVE.lock, then ARMED.json, each locked exclusively without waiting.
++
++    Each is opened without following a link or blocking on a FIFO and must be an owner-private
++    regular file. The order is the reconcile tool's, and neither lock is waited for.
++    """
++    held = []
++    try:
++        for name, busy in LOCKS:
++            held.append(os.open(capture_dir / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK))
++            info = os.fstat(held[-1])
++            require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and info.st_nlink == 1
++                    and stat.S_IMODE(info.st_mode) == 0o600, name + ' is not an owner-private lock file')
++            try:
++                fcntl.flock(held[-1], fcntl.LOCK_EX | fcntl.LOCK_NB)
++            except BlockingIOError as error:
++                raise RuntimeError(busy) from error
++    except BaseException:
++        for fd in held:
++            os.close(fd)
++        raise
++    return held
++
++
+ def read_journal_inputs(capture_dir, output, *, table, fixture=False):
+     """Mount the fixture capture's clone read-only, read its journal inputs, release, receipt."""
+-    os.umask(0o077)
+-    require(fixture, 'production journal mount requires a host-pinned B3 table and a protected acceptance root')
++    require(fixture, PRODUCTION_REFUSAL)
+     capture_dir = pathlib.Path(capture_dir)
+     output = pathlib.Path(output)
++    owned_directory(capture_dir.parent)
+     owned_directory(capture_dir)
+-    require(capture_dir.parent != PRODUCTION_PARENT, 'production capture directory refused')
++    require(capture_dir.parent.name.startswith(FIXTURE_PARENTS),
++            'journal mount requires an owned fixture capture parent')
+     require(output.parent == capture_dir, 'journal mount output must be a child of the capture directory')
+-    output.mkdir(mode=0o700)
++    # A fixed name, so the output can never take a capture record's name (FAILED.json, ...).
++    require(OUTPUT_NAME.fullmatch(output.name), 'journal mount output must be named journal-read[-NAME]')
++    # The capture worker's owner-private umask, for this run only.
++    previous = os.umask(0o077)
+     try:
+-        armed = (capture_dir / 'ARMED.json').open('rb')
+-    except OSError as error:
+-        record_failure(output, 'lock', error, None)
+-        raise
+-    with armed:
++        output.mkdir(mode=0o700)
++        fsync_parent(capture_dir)
+         try:
+-            fcntl.flock(armed, fcntl.LOCK_EX | fcntl.LOCK_NB)
+-        except BlockingIOError as error:
++            locks = capture_locks(capture_dir)
++        except BaseException as error:
+             record_failure(output, 'lock', error, None)
+-            raise RuntimeError('capture is busy: another holder has the arm lock') from error
+-        return locked_read(capture_dir, output, table)
++            raise
++        try:
++            return locked_read(capture_dir, output, table, locks[-1])
++        finally:
++            for fd in locks:
++                os.close(fd)
++    finally:
++        os.umask(previous)
+ 
+ 
+-def locked_read(capture_dir, output, table):
++def locked_read(capture_dir, output, table, armed):
+     clone = capture_dir / CLONE
+     mount = output / 'mount'
+     stage = 'inputs'
+     attach_attempted, known = False, []
+     try:
+         before = capture_inputs(capture_dir)
++        locked = os.fstat(armed)
++        require([locked.st_dev, locked.st_ino] == before['arm_record'],
++                'the locked ARMED.json is not the capture arm record')
+         stage = 'inventory'
+         require(not attachments(clone), 'clone is already attached')
+         stage = 'attach'
+@@ -321,14 +437,28 @@ def locked_read(capture_dir, output, table):
+         require(done['returncode'] == 0 and not done['timed_out'], 'read-only mount failed or timed out')
+         stage = 'verify'
+         verified = verify_mount(mount, volume, before['data_volume_uuid'])
++        device = os.stat(mount).st_dev
+         stage = 'read'
+         summary = verify_stopped_journal(capture_dir, mount, table=table)
++        # What the reader returned is bound to what was mounted and committed.
++        require(summary['read'] and all(row['device'] == device for row in summary['read']),
++                'the reader read outside the verified mount')
++        require(summary['checkpoint_sha256'] == before['commitment']['checkpoint']['checkpoint_sha256']
++                and summary['pre_head'] == before['commitment']['manifest']['journal_head'],
++                'the reader verified another commitment')
++        stage = 'reverify'
++        require(verify_mount(mount, volume, before['data_volume_uuid']) == verified
++                and os.stat(mount).st_dev == device, 'the mount changed while it was read')
+     except BaseException as error:
+-        record_failure(output, stage, error, release(clone, mount, attach_attempted, known))
++        # The primary error is raised; an interrupt that stopped this cleanup is its evidence.
++        cleanup, _ = release(clone, mount, attach_attempted, known)
++        record_failure(output, stage, error, cleanup)
+         raise
+-    cleanup = release(clone, mount, attach_attempted, known)
++    cleanup, interrupt = release(clone, mount, attach_attempted, known)
+     try:
+         stage = 'release'
++        if interrupt is not None:
++            raise interrupt
+         require(cleanup['clean'], 'journal mount cleanup did not complete')
+         stage = 'after eject'
+         after = capture_inputs(capture_dir)
+@@ -342,11 +472,13 @@ def locked_read(capture_dir, output, table):
+                        'entities': [{key: entity.get(key) for key in ('dev-entry', 'content-hint')}
+                                     for entity in entities]},
+             'volume': volume, 'data_volume_uuid': before['data_volume_uuid'],
+-            'mount': {'point': str(mount), 'options': MOUNT_OPTIONS, 'command': evidence(done), **verified},
++            'mount': {'point': str(mount), 'options': MOUNT_OPTIONS, 'command': evidence(done), 'device': device,
++                      **verified},
+             'reader': {key: summary[key] for key in ('window', 'lineage', 'checkpoint_sha256', 'pre_head',
+                                                      'session', 'config_modes')},
+             'read': summary['read'], 'cleanup': cleanup}
+-        write_record(output / 'JOURNAL_INPUTS.json', receipt)
++        stage = 'receipt'
++        publish_receipt(output, receipt)
+     except BaseException as error:
+         record_failure(output, stage, error, cleanup)
+         raise
+@@ -356,5 +488,7 @@ def locked_read(capture_dir, output, table):
+ if __name__ == '__main__':
+     require(len(sys.argv) in (4, 5) and sys.argv[4:] in ([], ['--fixture']),
+             'usage: host_journal_mount.py CAPTURE_DIR OUTPUT TABLE_JSON [--fixture]')
++    # Refused before the table is even read.
++    require(sys.argv[4:] == ['--fixture'], PRODUCTION_REFUSAL)
+     read_journal_inputs(sys.argv[1], sys.argv[2], table=json.loads(private_bytes(pathlib.Path(sys.argv[3]))),
+-                        fixture=sys.argv[4:] == ['--fixture'])
++                        fixture=True)
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py
+index 2ab3557..e1ffdf8 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py
+@@ -13,10 +13,12 @@ it read-write at a private point, enables ownership, writes a user file and a de
+ wrapper's exact options, plain readOnly, and the wrapper's options again after ownership was
+ disabled. For each it records the attach and inventory rows, both diskutil views, the statfs flags,
+ the owner and mode the mount reports for both files, whether the runner user can read the root
+-file, and the wrapper's own verify_mount() verdict. The image's sha256, times and xattr names are
+-recorded before and after every read-only mount. It touches no image, volume or VM it did not
+-create, ejects whatever of its own image is still attached, and removes its directory only once
+-nothing of it is attached or mounted. The JSON report is written exclusively to the named path.
++file, and the wrapper's own verify_mount() verdict. The image's sha256, times, flags and xattr
++names are recorded before and after every read-only mount, and every inventory row with its
++system entities, so the wrapper's inventory-to-attach binding can be checked. It touches no image,
++volume or VM it did not create; cleanup ejects what the inventory lists of its image and every
++disk its own attaches returned, requires those disks gone, and only then removes its directory.
++The JSON report is written exclusively to the named path, also when the probe is interrupted.
+ 
+ Guards, all required, checked before any command: macOS, CI=true and GITHUB_ACTIONS=true (both set
+ by GitHub Actions), OPENCLAW_OWNERSHIP_PROBE=1, the --ci-owned-probe flag, a new output path in an
+@@ -96,13 +98,15 @@ def image_state(image):
+     info = image.lstat()
+     names = attempt('/usr/bin/xattr', str(image))
+     return {'sha256': hashlib.sha256(raw).hexdigest(), 'size': info.st_size, 'inode': info.st_ino,
+-            'mtime_ns': info.st_mtime_ns, 'ctime_ns': info.st_ctime_ns,
++            'mtime_ns': info.st_mtime_ns, 'ctime_ns': info.st_ctime_ns, 'flags': getattr(info, 'st_flags', 0),
+             'xattrs': names['stdout'].decode(errors='replace').split()}
+ 
+ 
+-def attach(image, *flags):
++def attach(image, disks, *flags):
+     row = checked(attempt(DISKUTIL, 'image', 'attach', '--plist', *flags, '--noMount', str(image)), 'attach')
+     entities = wrapper.plist_of(row, 'attach').get('system-entities') or []
++    # Cleanup ejects this disk even if the inventory does not list it.
++    disks.extend(entity['dev-entry'] for entity in entities[:1] if entity.get('dev-entry'))
+     data = []
+     for entity in entities:
+         if entity.get('content-hint') == 'Apple_APFS_Volume':
+@@ -113,7 +117,8 @@ def attach(image, *flags):
+     return {'command': evidence(row), 'entities': entities, 'volume': data[0][0],
+             'info': {key: data[0][1].get(key) for key in KEYS},
+             'inventory': [{'keys': sorted(image_row), 'writeable': image_row.get('writeable'),
+-                           'image-path': image_row.get('image-path')} for image_row in attachments(image)]}
++                           'image-path': image_row.get('image-path'),
++                           'system-entities': image_row.get('system-entities')} for image_row in attachments(image)]}
+ 
+ 
+ def info_of(volume):
+@@ -126,9 +131,13 @@ def mount_at(point, volume, *options):
+     return checked(attempt(DISKUTIL, 'mount', *options, '-mountPoint', str(point), volume), 'mount')
+ 
+ 
+-def release(image, points):
+-    """Unmount every probe mount point, eject the image's own attachments; never raises."""
+-    rows, errors, remaining, still = [], [], None, None
++def release(image, points, disks):
++    """Unmount the probe's mount points, eject its image's disks, require them gone; never raises.
++
++    `disks` are the disks the probe's own attaches returned: ejected too when the inventory misses
++    them, and each must be unknown to diskutil afterwards.
++    """
++    rows, errors, remaining, still, gone = [], [], None, None, []
+ 
+     def mounted(point):
+         return os.path.lexists(point) and wrapper.statfs(point)['mntonname'] == str(point)
+@@ -140,24 +149,29 @@ def release(image, points):
+         except Exception as error:
+             errors.append(repr(error)[:300])
+     try:
+-        for disk in [row['system-entities'][0]['dev-entry'] for row in attachments(image)]:
++        listed = [row['system-entities'][0]['dev-entry'] for row in attachments(image)]
++        known = [disk for disk in dict.fromkeys(disks) if disk not in listed
++                 and attempt(DISKUTIL, 'info', '-plist', disk)['returncode'] == 0]
++        for disk in listed + known:
+             for _ in range(wrapper.EJECT_ATTEMPTS):
+                 rows.append(evidence(attempt(DISKUTIL, 'eject', disk)))
+                 if rows[-1]['returncode'] == 0:
+                     break
+         remaining = len(attachments(image))
++        gone = [attempt(DISKUTIL, 'info', '-plist', disk)['returncode'] not in (0, None)
++                for disk in dict.fromkeys(disks)]
+     except Exception as error:
+         errors.append(repr(error)[:300])
+     try:
+         still = [str(point) for point in points if mounted(point)]
+     except Exception as error:
+         errors.append(repr(error)[:300])
+-    return {'steps': rows, 'errors': errors, 'remaining': remaining, 'mounted': still,
+-            'clean': not errors and remaining == 0 and still == []}
++    return {'steps': rows, 'errors': errors, 'remaining': remaining, 'mounted': still, 'disks_gone': gone,
++            'clean': not errors and remaining == 0 and all(gone) and still == []}
+ 
+ 
+-def write_phase(image, temp, report):
+-    attached = attach(image)
++def write_phase(image, temp, report, disks):
++    attached = attach(image, disks)
+     point = temp / 'write'
+     report['write'] = {'attach': attached}
+     try:
+@@ -177,27 +191,30 @@ def write_phase(image, temp, report):
+             'files': {path.name: {'uid': path.lstat().st_uid, 'gid': path.lstat().st_gid,
+                                   'mode': oct(path.lstat().st_mode & 0o7777)} for path in (user, root)}}
+     finally:
+-        report['write']['release'] = release(image, [point])
++        report['write']['release'] = release(image, [point], disks)
+     require(report['write']['release']['clean'], 'write phase did not release the probe image')
++    # Confirmed gone: a later phase must never eject that number again for another image.
++    disks.clear()
+     point.rmdir()
+ 
+ 
+-def disable_ownership(image, temp, report):
+-    attached = attach(image)
++def disable_ownership(image, temp, report, disks):
++    attached = attach(image, disks)
+     point = temp / 'disable'
+     try:
+         mount_at(point, attached['volume'])
+         checked(attempt(SUDO, '-n', DISKUTIL, 'disableOwnership', str(point)), 'disableOwnership')
+         report['disable'] = {'info': info_of(attached['volume'])}
+     finally:
+-        report.setdefault('disable', {})['release'] = release(image, [point])
++        report.setdefault('disable', {})['release'] = release(image, [point], disks)
+     require(report['disable']['release']['clean'], 'disable phase did not release the probe image')
++    disks.clear()
+     point.rmdir()
+ 
+ 
+-def read_only_variant(image, temp, name, options):
++def read_only_variant(image, temp, name, options, disks):
+     row = {'image_before': image_state(image)}
+-    attached = attach(image, '--readOnly')
++    attached = attach(image, disks, '--readOnly')
+     row['attach'] = attached
+     point = temp / name
+     try:
+@@ -222,8 +239,9 @@ def read_only_variant(image, temp, name, options):
+         except Exception as error:
+             row['verify_mount'] = 'refused: ' + str(error)
+     finally:
+-        row['release'] = release(image, [point])
++        row['release'] = release(image, [point], disks)
+     require(row['release']['clean'], name + ' did not release the probe image')
++    disks.clear()
+     point.rmdir()
+     row['image_after'] = image_state(image)
+     return row
+@@ -234,6 +252,7 @@ def run(output):
+                                          dir=os.environ.get('RUNNER_TEMP'))).resolve()
+     image = temp / 'probe.asif'
+     points = [temp / name for name in ('write', 'disable', *(variant for variant, _, _ in VARIANTS))]
++    disks = []
+     report = {'scope': SCOPE, 'started_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+               'runner_uid': os.getuid(), 'mount_options': MOUNT_OPTIONS,
+               'os': attempt('/usr/bin/sw_vers')['stdout'].decode(errors='replace'),
+@@ -243,21 +262,25 @@ def run(output):
+                         '--fs', 'APFS', '--volumeName', 'Data', str(image)), 'create')
+         os.chmod(image, 0o600)
+         report['created'] = image_state(image)
+-        write_phase(image, temp, report)
++        write_phase(image, temp, report, disks)
+         for name, options, disabled in VARIANTS:
+             if disabled and 'disable' not in report:
+-                disable_ownership(image, temp, report)
+-            report['variants'][name] = read_only_variant(image, temp, name, options)
++                disable_ownership(image, temp, report, disks)
++            report['variants'][name] = read_only_variant(image, temp, name, options, disks)
+         report['completed'] = True
+     except Exception as error:
+         report['error'] = repr(error)[:500]
++    except BaseException as interrupt:
++        # Recorded, then raised again once the image is released and the report is written.
++        report['error'] = repr(interrupt)[:500]
++        raise
+     finally:
+-        report['cleanup'] = release(image, points)
++        report['cleanup'] = release(image, points, disks)
+         if report['cleanup']['clean']:
+             shutil.rmtree(temp)
+         report['cleanup']['removed'] = not os.path.lexists(temp)
+-    # Plist values reach the report as-is; anything JSON cannot hold is kept as its repr.
+-    write_record(output, json.loads(json.dumps(report, default=repr)))
++        # Plist values reach the report as-is; anything JSON cannot hold is kept as its repr.
++        write_record(output, json.loads(json.dumps(report, default=repr)))
+     return 0 if report['completed'] and report['cleanup']['clean'] and report['cleanup']['removed'] else 1
+ 
+ 
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
+index 8114ef5..9ede757 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
+@@ -19,6 +19,7 @@ import plistlib
+ import runpy
+ import shutil
+ import stat
++import subprocess
+ import sys
+ import tempfile
+ import time
+@@ -33,7 +34,7 @@ import probe_asif_mount_ownership as probe  # noqa: E402
+ import stopped_journal_inputs  # noqa: E402
+ import test_capture_checkpoint as guest  # noqa: E402
+ import test_stopped_journal_inputs as fixture  # noqa: E402
+-from host_guest_commit import require_committed  # noqa: E402
++from host_guest_commit import require_captured, require_committed  # noqa: E402
+ from host_journal_mount import DISKUTIL, HDIUTIL  # noqa: E402
+ from host_vm_capture import CAPTURE_SCOPE, FIXTURE_UUID  # noqa: E402
+ from preservation_journal import Refused, encoded  # noqa: E402
+@@ -44,6 +45,7 @@ DISK, CONTAINER = '/dev/disk7', '/dev/disk8'
+ DATA = CONTAINER + 's2'
+ FLAGS = (wrapper.MNT_RDONLY | wrapper.MNT_NODEV | wrapper.MNT_NOSUID | wrapper.MNT_NOEXEC
+          | 0x00100000)  # MNT_DONTBROWSE, from nobrowse
++KEPT = {'step': 'remove mount point', 'kept': 'still mounted or mount state unreadable'}
+ FOREIGN = {'image-path': '/Users/someone-else/foreign.dmg', 'writeable': True,
+            'system-entities': [{'dev-entry': '/dev/disk4', 'content-hint': 'GUID_partition_scheme'}]}
+ 
+@@ -70,6 +72,10 @@ class FakeHost:
+         self.writeable = False
+         self.inventory_fails = set()
+         self.inventories = 0
++        self.inventory_hides_clone = False
++        self.during_eject = []
++        self.eject_reused = False
++        self.summary_change = None
+         self.volumes = [
+             {'dev-entry': CONTAINER + 's1', 'content-hint': 'Apple_APFS_Volume',
+              'info': {'VolumeUUID': OTHER, 'VolumeName': 'Macintosh HD', 'Encryption': False}},
+@@ -84,7 +90,9 @@ class FakeHost:
+         self.statfs_changes = {}
+         self.statfs_fails = False
+         self.unmount_busy = False
++        self.unmount_leaves = None
+         self.eject_failures = 0
++        self.interrupt_on = self.interrupt = None
+         self.real_reader = stopped_journal_inputs.verify_stopped_journal
+ 
+     def entities(self, disk):
+@@ -95,6 +103,9 @@ class FakeHost:
+ 
+     def attempt(self, *argv, timeout=wrapper.TIMEOUT):
+         self.log.append(list(argv))
++        if self.interrupt_on and tuple(argv[:len(self.interrupt_on)]) == self.interrupt_on:
++            self.interrupt_on = None
++            raise self.interrupt
+         row = {'argv': list(argv), 'returncode': 0, 'timed_out': False, 'stdout': b'', 'stderr': ''}
+         failed = {**row, 'returncode': 1, 'stderr': 'scripted failure'}
+         timed_out = {**row, 'returncode': None, 'timed_out': True}
+@@ -103,7 +114,8 @@ class FakeHost:
+             if self.inventories - 1 in self.inventory_fails:
+                 return failed
+             images = [{'image-path': item['path'], 'writeable': item['writeable'],
+-                       'system-entities': self.entities(item['disk'])} for item in self.attached]
++                       'system-entities': self.entities(item['disk'])} for item in self.attached
++                      if not (self.inventory_hides_clone and item['path'] == str(self.clone))]
+             return {**row, 'stdout': plistlib.dumps({'images': images + [FOREIGN]})}
+         if argv[:3] == (DISKUTIL, 'image', 'attach'):
+             if self.attach == 'fail':
+@@ -115,6 +127,8 @@ class FakeHost:
+             return {'ok': {**row, 'stdout': out}, 'timeout-applied': timed_out,
+                     'fail-applied': {**failed, 'stdout': out},
+                     'garbage': {**row, 'stdout': b'not a plist'}}[self.attach]
++        if argv[:3] == (DISKUTIL, 'info', '-plist') and any(item['disk'] == argv[3] for item in self.attached):
++            return {**row, 'stdout': plistlib.dumps({'DeviceNode': argv[3], 'WholeDisk': True})}
+         if argv[:3] == (DISKUTIL, 'info', '-plist'):
+             volume = next((item for item in self.volumes if item['dev-entry'] == argv[3]), None)
+             if volume is None or not self.attached or argv[3] in self.info_fails:
+@@ -137,8 +151,24 @@ class FakeHost:
+             for path in pathlib.Path(argv[2]).iterdir():
+                 shutil.rmtree(path) if path.is_dir() and not path.is_symlink() else path.unlink()
+             self.mounted = None
++            # What a successful unmount may still leave at the mount point.
++            if self.unmount_leaves == 'residue':
++                (pathlib.Path(argv[2]) / 'residue').write_bytes(b'left behind\n')
++            elif self.unmount_leaves == 'symlink':
++                os.rename(argv[2], argv[2] + '-aside')
++                os.symlink(argv[2] + '-aside', argv[2])
++            elif self.unmount_leaves == 'unreadable':
++                self.statfs_fails = True
+             return row
+         if argv[:2] == (DISKUTIL, 'eject'):
++            for hook in self.during_eject:
++                hook()
++            if self.eject_reused:
++                # The eject applied, timed out, and another image took the freed disk number.
++                self.eject_reused = False
++                self.attached = [item for item in self.attached if item['disk'] != argv[2]]
++                self.attached.append({'path': '/Users/someone-else/other.dmg', 'writeable': True, 'disk': argv[2]})
++                return timed_out
+             if self.mounted or self.eject_failures:
+                 self.eject_failures = max(0, self.eject_failures - 1)
+                 return failed
+@@ -162,7 +192,8 @@ class FakeHost:
+         self.reads.append(str(root))
+         for hook in self.during_read:
+             hook()
+-        return self.real_reader(capture_dir, root, table=table)
++        summary = self.real_reader(capture_dir, root, table=table)
++        return self.summary_change(summary) if self.summary_change else summary
+ 
+ 
+ class MountCase(fixture.StoppedImage):
+@@ -170,6 +201,8 @@ class MountCase(fixture.StoppedImage):
+         super().setUp()
+         self.clone_bytes = b'owned stand-in for the powered-off ASIF clone\n' * 64
+         fixture.host.write_private(self.capture / wrapper.CLONE, self.clone_bytes)
++        # The capture worker has published and exited: its CAPTURE_ACTIVE.lock is free again.
++        fcntl.flock(self.active, fcntl.LOCK_UN)
+         # read_journal_inputs() sets the owner-private umask a capture worker runs under.
+         umask = os.umask(0o077)
+         os.umask(umask)
+@@ -205,6 +238,17 @@ class MountCase(fixture.StoppedImage):
+         self.assertEqual(stat.S_IMODE(path.lstat().st_mode), 0o600)
+         return json.loads(path.read_bytes())
+ 
++    def locks_held(self):
++        held = []
++        for name in ('CAPTURE_ACTIVE.lock', 'ARMED.json'):
++            with (self.capture / name).open('rb') as other:
++                try:
++                    fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
++                    held.append(False)
++                except BlockingIOError:
++                    held.append(True)
++        return held == [True, True]
++
+     def calls(self, *prefix):
+         return [argv for argv in self.fake.log if tuple(argv[:len(prefix)]) == prefix]
+ 
+@@ -247,14 +291,22 @@ class Mounted(MountCase):
+         def during():
+             seen['mounted'] = self.fake.mounted
+             seen['verified'] = list(self.fake.log)
+-            with (self.capture / 'ARMED.json').open('rb') as other:
+-                with self.assertRaises(BlockingIOError):
+-                    fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+-            seen['locked'] = True
++            seen['locked'] = self.locks_held()
++
++        real = wrapper.write_record
++
++        def staged(path, value):
++            if path.name == 'JOURNAL_INPUTS.json.partial':
++                seen['locked at receipt'] = self.locks_held()
++            return real(path, value)
+ 
+         self.fake.during_read.append(during)
+-        receipt, error = self.run_mount()
++        self.fake.during_eject.append(lambda: seen.setdefault('locked at eject', self.locks_held()))
++        os.umask(0o027)
++        with mock.patch.object(wrapper, 'write_record', staged):
++            receipt, error = self.run_mount()
+         self.assertIsNone(error)
++        self.assertEqual(os.umask(0o027), 0o027)
+         point = str(self.output / 'mount')
+         attach = [DISKUTIL, 'image', 'attach', '--plist', '--readOnly', '--noMount', str(self.fake.clone)]
+         mount = [DISKUTIL, 'mount', 'readOnly', '-mountOptions', 'nobrowse,nodev,nosuid,noexec,owners',
+@@ -262,9 +314,11 @@ class Mounted(MountCase):
+         inventory = [HDIUTIL, 'info', '-plist']
+         info = [[DISKUTIL, 'info', '-plist', volume['dev-entry']] for volume in self.fake.volumes]
+         before_read = [inventory, attach, inventory, *info, mount, [DISKUTIL, 'info', '-plist', DATA]]
+-        self.assertEqual(seen, {'mounted': (point, DATA), 'verified': before_read, 'locked': True})
+-        self.assertEqual(self.fake.log, before_read + [[DISKUTIL, 'unmount', point], inventory,
+-                                                       [DISKUTIL, 'eject', DISK], inventory])
++        self.assertEqual(seen, {'mounted': (point, DATA), 'verified': before_read, 'locked': True,
++                                'locked at eject': True, 'locked at receipt': True})
++        self.assertEqual(self.fake.log, before_read + [[DISKUTIL, 'info', '-plist', DATA], [DISKUTIL, 'unmount', point],
++                                                       inventory, [DISKUTIL, 'eject', DISK], inventory,
++                                                       [DISKUTIL, 'info', '-plist', DISK]])
+         self.assertEqual(self.fake.reads, [point])
+         self.assertEqual((self.fake.attached, self.fake.mounted), ([], None))
+         self.assertFalse(os.path.lexists(point))
+@@ -291,7 +345,7 @@ class Mounted(MountCase):
+                          sha(plistlib.dumps({'system-entities': self.fake.entities(DISK)})))
+         self.assertEqual((receipt['volume'], receipt['data_volume_uuid']), (DATA, UUID))
+         self.assertEqual(receipt['mount'], {
+-            'point': point, 'options': 'nobrowse,nodev,nosuid,noexec,owners',
++            'point': point, 'options': 'nobrowse,nodev,nosuid,noexec,owners', 'device': self.output.stat().st_dev,
+             'command': {'argv': mount, 'returncode': 0, 'timed_out': False, 'stderr': '',
+                         'stdout_sha256': sha(b'')},
+             'diskutil': {'WritableVolume': False, 'MountPoint': point, 'VolumeUUID': UUID,
+@@ -311,12 +365,13 @@ class Mounted(MountCase):
+                               'nlink': 1, 'sha256': sha(files[row['path']].read_bytes())})
+         self.assertEqual([step['step'] for step in receipt['cleanup']['steps']],
+                          ['mounted before cleanup', 'unmount', 'attachments before eject', 'eject ' + DISK,
+-                          'attachments after eject', 'mounted after eject', 'remove mount point'])
++                          'attachments after eject', 'attach result disk after eject', 'mounted after eject',
++                          'remove mount point'])
+         self.assertTrue(receipt['cleanup']['clean'])
+         self.assertEqual({path.name: path.read_bytes() for path in self.capture.iterdir() if path.is_file()},
+                          capture_before)
+-        with (self.capture / 'ARMED.json').open('rb') as other:
+-            fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
++        self.assertEqual(sorted(os.listdir(self.output)), ['JOURNAL_INPUTS.json'])
++        self.assertFalse(self.locks_held())
+ 
+     def test_ejects_are_retried_within_their_bound(self):
+         self.fake.eject_failures = wrapper.EJECT_ATTEMPTS - 1
+@@ -339,6 +394,7 @@ class EntryRefusals(MountCase):
+         table = self.temp / 'table.json'
+         fixture.host.write_private(table, encoded(self.table))
+         for argv, pattern in (([str(table)], '^production journal mount requires'),
++                              ([str(self.temp / 'missing-table.json')], '^production journal mount requires'),
+                               ([str(table), '--production'], '^usage: '),
+                               ([str(table), '--fixture', '--fixture'], '^usage: '),
+                               ([], '^usage: ')):
+@@ -349,21 +405,33 @@ class EntryRefusals(MountCase):
+                     runpy.run_path(wrapper.__file__, run_name='__main__')
+             self.assertFalse(os.path.lexists(self.output))
+ 
+-    def test_production_capture_parent_is_refused(self):
+-        with mock.patch.object(wrapper, 'PRODUCTION_PARENT', self.capture.parent):
+-            receipt, error = self.run_mount()
+-        self.assertRegex(str(error), '^production capture directory refused$')
++    def test_only_an_owned_fixture_parent_is_accepted(self):
++        with mock.patch.object(wrapper, 'FIXTURE_PARENTS', ('openclaw-host-capture-',)):
++            _, error = self.run_mount()
++        self.assertRegex(str(error), '^journal mount requires an owned fixture capture parent$')
+         self.assertEqual((self.fake.log, os.path.lexists(self.output)), ([], False))
++        # The durable recovery directory is never an owned fixture parent, wherever HOME points.
++        self.assertFalse('OpenClawRecovery'.startswith(wrapper.FIXTURE_PARENTS))
++        self.assertTrue(self.capture.parent.name.startswith(wrapper.FIXTURE_PARENTS))
+ 
+     def test_capture_directory_and_output_are_owned_and_fresh(self):
+-        os.chmod(self.capture, 0o750)
+-        _, error = self.run_mount()
+-        self.assertRegex(str(error), '^expected owner-private literal directory: ')
+-        os.chmod(self.capture, 0o700)
++        for path in (self.capture.parent, self.capture):
++            with self.subTest(str(path)):
++                os.chmod(path, 0o750)
++                _, error = self.run_mount()
++                os.chmod(path, 0o700)
++                self.assertRegex(str(error), '^expected owner-private literal directory: ' + str(path) + '$')
++                self.assertFalse(os.path.lexists(self.output))
+         elsewhere = self.temp.resolve() / 'elsewhere'
+         _, error = self.run_mount(output=elsewhere)
+         self.assertRegex(str(error), '^journal mount output must be a child of the capture directory$')
+         self.assertFalse(os.path.lexists(elsewhere))
++        for name in ('FAILED.json', 'CAPTURE.json.tmp', 'journal-read-', 'Journal-read', 'journal-read-.x'):
++            with self.subTest(name):
++                _, error = self.run_mount(output=self.capture / name)
++                self.assertRegex(str(error), r'^journal mount output must be named journal-read\[-NAME\]$')
++                self.assertFalse(os.path.lexists(self.capture / name))
++        self.assertEqual(self.fake.log, [])
+         self.output.mkdir(mode=0o700)
+         _, error = self.run_mount()
+         self.assertIsInstance(error, FileExistsError)
+@@ -384,6 +452,48 @@ class EntryRefusals(MountCase):
+         self.assertIsInstance(error, FileNotFoundError)
+         self.assertEqual((self.failed()['stage'], self.fake.log), ('lock', []))
+ 
++    def test_a_capture_worker_still_running_or_an_unsafe_worker_lock_refuses(self):
++        active = self.capture / 'CAPTURE_ACTIVE.lock'
++        with self.subTest('worker still active'):
++            fcntl.flock(self.active, fcntl.LOCK_EX)
++            _, error = self.run_mount()
++            fcntl.flock(self.active, fcntl.LOCK_UN)
++            self.assertRegex(str(error), '^capture worker is still active$')
++            self.assertEqual((self.failed()['stage'], self.fake.log), ('lock', []))
++        with self.subTest('not owner-private'):
++            self.reset()
++            os.chmod(active, 0o644)
++            _, error = self.run_mount()
++            os.chmod(active, 0o600)
++            self.assertRegex(str(error), '^CAPTURE_ACTIVE.lock is not an owner-private lock file$')
++            self.assertEqual((self.failed()['stage'], self.fake.log), ('lock', []))
++        with self.subTest('symlink'):
++            self.reset()
++            os.rename(active, self.temp / 'active-aside.lock')
++            os.symlink(self.temp / 'active-aside.lock', active)
++            _, error = self.run_mount()
++            self.assertEqual((type(error), error.errno), (OSError, errno.ELOOP))
++            self.assertEqual((self.failed()['stage'], self.fake.log), ('lock', []))
++
++    def test_the_arm_lock_is_a_regular_file_opened_without_following_or_blocking(self):
++        armed = self.capture / 'ARMED.json'
++        aside = self.temp / 'armed-aside.json'
++        os.rename(armed, aside)
++        with self.subTest('symlink'):
++            os.symlink(aside, armed)
++            _, error = self.run_mount()
++            self.assertIsInstance(error, OSError)
++            self.assertEqual(error.errno, errno.ELOOP)
++            self.assertEqual((self.failed()['stage'], self.fake.log), ('lock', []))
++            armed.unlink()
++        with self.subTest('fifo'):
++            self.reset()
++            # Without O_NONBLOCK this open would wait for a writer forever.
++            os.mkfifo(armed, 0o600)
++            _, error = self.run_mount()
++            self.assertRegex(str(error), '^ARMED.json is not an owner-private lock file$')
++            self.assertEqual((self.failed()['stage'], self.fake.log), ('lock', []))
++
+ 
+ class InputRefusals(MountCase):
+     def test_a_failed_capture_is_never_attached(self):
+@@ -493,10 +603,49 @@ class InputRefusals(MountCase):
+                 with mock.patch.object(wrapper.os, target, side_effect=side_effect):
+                     self.unattached('^clone changed while it was hashed$', 'inputs')
+ 
+-    @unittest.skipUnless(os.getuid() == 0, 'giving the clone to another owner needs root')
++    def test_the_capture_record_the_pins_were_checked_on_is_the_one_used(self):
++        rewritten = []
++
++        def rewriting(capture_dir):
++            if not rewritten:
++                rewritten.append(True)
++                self.rewrite('CAPTURE.json', note='rewritten between the two reads')
++            return require_captured(capture_dir)
++
++        with mock.patch.object(wrapper, 'require_captured', side_effect=rewriting):
++            self.unattached('^capture record changed while it was read$', 'inputs')
++
++    def test_the_hosts_own_started_sample_must_name_the_fixture_vm(self):
++        pinned = require_captured(self.capture)
++        committed = json.loads(pinned['COMMITTED.json'])
++        committed['started_sample'] = {**committed['started_sample'], 'vm_uuid': '00000000-0000-0000-0000-000000000003'}
++        forged = {**pinned, 'COMMITTED.json': encoded(committed)}
++        commitment = {**committed, 'checkpoint': json.loads(pinned['CHECKPOINT.json'])}
++        with mock.patch.object(wrapper, 'require_captured', return_value=forged), \
++                mock.patch.object(wrapper, 'require_committed', return_value=commitment):
++            self.unattached('^capture is not of the owned fixture VM$', 'inputs')
++
++    def test_the_locked_arm_record_must_be_the_capture_arm_record(self):
++        real = wrapper.capture_locks
++
++        def replaced_after_locking(capture_dir):
++            held = real(capture_dir)
++            armed = capture_dir / 'ARMED.json'
++            fixture.host.write_private(self.temp / 'same-arm.json', armed.read_bytes())
++            os.replace(self.temp / 'same-arm.json', armed)
++            return held
++
++        with mock.patch.object(wrapper, 'capture_locks', side_effect=replaced_after_locking):
++            self.unattached('^the locked ARMED.json is not the capture arm record$', 'inputs')
++
+     def test_a_clone_owned_by_another_user_is_refused(self):
+-        os.chown(self.fake.clone, 65534, -1)
+-        self.unattached('^clone is not the owned single-link 0600 image of the recorded size$', 'inputs')
++        # Seen from another uid, so it runs without root on every CI host.
++        capture = json.loads((self.capture / 'CAPTURE.json').read_bytes())
++        with mock.patch('os.getuid', return_value=os.getuid() + 1):
++            with self.assertRaisesRegex(RuntimeError,
++                                        '^clone is not the owned single-link 0600 image of the recorded size$'):
++                wrapper.clone_identity(self.fake.clone, capture)
++        self.assertEqual(wrapper.clone_identity(self.fake.clone, capture)['sha256'], sha(self.clone_bytes))
+ 
+     def test_a_clone_already_attached_by_path_or_identity_is_refused_and_left_attached(self):
+         alias = self.temp / 'alias.asif'
+@@ -525,6 +674,15 @@ class Attach(MountCase):
+                 self.released(failed)
+                 self.assertEqual((self.calls(DISKUTIL, 'mount'), self.fake.reads), ([], []))
+ 
++    def test_an_attachment_the_inventory_still_lists_is_never_clean(self):
++        # A timed-out attach gives no disk of its own, so the inventory alone shows what is left.
++        self.fake.attach, self.fake.eject_failures = 'timeout-applied', wrapper.EJECT_ATTEMPTS
++        _, failed = self.refused('^read-only attach failed or timed out$', 'attach')
++        steps = {step['step']: step for step in failed['cleanup']['steps']}
++        self.assertEqual(steps['attachments after eject']['result'], 1)
++        self.assertNotIn('attach result disk after eject', steps)
++        self.assertFalse(failed['cleanup']['clean'])
++
+     def test_an_attach_that_did_not_apply_ejects_nothing(self):
+         self.fake.attach = 'fail'
+         _, failed = self.refused('^read-only attach failed or timed out$', 'attach')
+@@ -692,6 +850,32 @@ class Reader(MountCase):
+         self.assertIsInstance(error, Refused)
+         self.released(failed)
+ 
++    def test_the_reader_result_is_bound_to_the_mount_and_the_commitment(self):
++        def rows(change):
++            return lambda summary: {**summary, 'read': change(summary['read'])}
++
++        cases = ((rows(lambda read: [{**read[0], 'device': read[0]['device'] + 1}] + read[1:]),
++                  'the reader read outside the verified mount'),
++                 (rows(lambda read: []), 'the reader read outside the verified mount'),
++                 (lambda summary: {**summary, 'checkpoint_sha256': '0' * 64}, 'the reader verified another commitment'),
++                 (lambda summary: {**summary, 'pre_head': '0' * 64}, 'the reader verified another commitment'))
++        for index, (change, pattern) in enumerate(cases):
++            with self.subTest(index):
++                self.reset()
++                self.fake.summary_change = change
++                _, failed = self.refused('^' + pattern + '$', 'read')
++                self.released(failed)
++
++    def test_the_mount_must_verify_unchanged_after_the_read(self):
++        for flags, pattern in ((FLAGS | wrapper.MNT_IGNORE_OWNERSHIP, 'mount ignores ownership'),
++                               (FLAGS | 0x00001000, 'the mount changed while it was read')):
++            with self.subTest(pattern):
++                self.reset()
++                self.fake.during_read.append(lambda flags=flags: self.fake.statfs_changes.update(flags=flags))
++                _, failed = self.refused('^' + pattern + '$', 'reverify')
++                self.released(failed)
++                self.assertEqual(len(self.fake.reads), 1)
++
+     def test_the_caller_table_decides_the_identities(self):
+         table = copy.deepcopy(self.table)
+         table['member2']['config_sha256'] = '0' * 64
+@@ -719,7 +903,7 @@ class Cleanup(MountCase):
+         self.assertEqual(len(self.calls(DISKUTIL, 'eject')), wrapper.EJECT_ATTEMPTS)
+         self.assertEqual((steps['attachments after eject']['result'], steps['mounted after eject']['result']),
+                          (1, True))
+-        self.assertIn('error', steps['remove mount point'])
++        self.assertEqual(steps['remove mount point'], KEPT)
+         self.assertEqual(len(self.fake.attached), 1)
+ 
+     def test_an_unknown_mount_state_is_still_unmounted_and_recorded(self):
+@@ -737,21 +921,138 @@ class Cleanup(MountCase):
+         self.assertIn('scripted statfs failure', cleanup['steps'][0]['error'])
+         self.assertEqual(self.calls(DISKUTIL, 'unmount'), [[DISKUTIL, 'unmount', str(self.output / 'mount')]])
+         self.assertEqual((self.fake.attached, self.fake.mounted), ([], None))
++        self.assertEqual(cleanup['steps'][-1], KEPT)
++        self.assertTrue(os.path.lexists(self.output / 'mount'))
++
++    def test_an_inventory_that_misses_the_attach_never_counts_as_clean(self):
++        self.fake.inventory_hides_clone = True
++        _, failed = self.refused('^clone is not attached exactly once read-only$', 'attach')
++        self.assertEqual(self.calls(DISKUTIL, 'eject'), [])
++        gone = [step for step in failed['cleanup']['steps'] if step['step'] == 'attach result disk after eject']
++        self.assertEqual([step['result']['returncode'] for step in gone], [0])
++        self.assertFalse(failed['cleanup']['clean'])
++        self.assertEqual([item['disk'] for item in self.fake.attached], [DISK])
++
++    def test_a_retried_eject_never_takes_a_reused_disk_number(self):
++        self.fake.eject_reused = True
++        _, failed = self.refused('^journal mount cleanup did not complete$', 'release')
++        self.assertEqual(self.calls(DISKUTIL, 'eject'), [[DISKUTIL, 'eject', DISK]])
++        self.assertEqual(self.fake.attached, [{'path': '/Users/someone-else/other.dmg', 'writeable': True,
++                                               'disk': DISK}])
++        self.assertIn('attachments before eject retry', [step['step'] for step in failed['cleanup']['steps']])
++        self.assertFalse(failed['cleanup']['clean'])
+ 
+-    def test_a_failing_evidence_write_never_replaces_the_primary_error(self):
++    def test_the_mount_point_is_removed_only_once_known_unmounted_and_empty(self):
+         sentinel = RuntimeError('sentinel reader failure')
+-        self.fake.during_read.append(lambda: (_ for _ in ()).throw(sentinel))
++        for name, leaves, outcome in (('still mounted', None, KEPT),
++                                      ('state unreadable', 'unreadable', KEPT),
++                                      ('not empty', 'residue', 'mount point is not empty'),
++                                      ('not a directory', 'symlink', 'mount point is not a directory')):
++            with self.subTest(name):
++                self.reset()
++                mount = self.output / 'mount'
++
++                def fail(leaves=leaves):
++                    self.fake.unmount_busy = leaves is None
++                    self.fake.unmount_leaves = leaves
++                    raise sentinel
++
++                self.fake.during_read.append(fail)
++                with mock.patch.object(wrapper.os, 'rmdir', wraps=os.rmdir) as rmdir:
++                    _, error = self.run_mount()
++                self.assertIs(error, sentinel)
++                self.assertEqual([call for call in rmdir.call_args_list
++                                  if call.args and pathlib.Path(call.args[0]) == mount], [])
++                cleanup = self.failed()['cleanup']
++                removal = [step for step in cleanup['steps'] if step['step'] == 'remove mount point']
++                if outcome == KEPT:
++                    self.assertEqual(removal, [KEPT])
++                else:
++                    self.assertEqual(len(removal), 1)
++                    self.assertIn(outcome, removal[0]['error'])
++                self.assertTrue(os.path.lexists(mount))
++                self.assertFalse(cleanup['clean'])
++                # Whatever the unmount left is kept as found, never deleted.
++                if leaves == 'residue':
++                    self.assertEqual((mount / 'residue').read_bytes(), b'left behind\n')
++                elif leaves == 'symlink':
++                    self.assertTrue(mount.is_symlink() and pathlib.Path(str(mount) + '-aside').is_dir())
++
++    def test_an_interrupt_stops_cleanup_after_a_failure_and_the_primary_error_is_raised(self):
++        for name, primary, where in (('at an eject', RuntimeError('sentinel reader failure'), 'eject'),
++                                     ('between ejects', RuntimeError('sentinel reader failure'), 'pause'),
++                                     ('after an interrupted read', KeyboardInterrupt('first'), 'eject'),
++                                     ('system exit', RuntimeError('sentinel reader failure'), 'exit')):
++            with self.subTest(name):
++                self.reset()
++                interrupt = SystemExit(3) if where == 'exit' else KeyboardInterrupt('during cleanup')
++
++                def fail(primary=primary):
++                    raise primary
++
++                self.fake.during_read.append(fail)
++                if where == 'pause':
++                    self.fake.eject_failures = 1
++                    pause = mock.patch.object(wrapper.time, 'sleep', side_effect=interrupt)
++                else:
++                    self.fake.interrupt_on, self.fake.interrupt = (DISKUTIL, 'eject'), interrupt
++                    pause = mock.patch.object(wrapper.time, 'sleep')
++                with pause:
++                    _, error = self.run_mount()
++                self.assertIs(error, primary)
++                failed = self.failed()
++                self.assertEqual((failed['stage'], failed['primary_error']), ('read', repr(primary)))
++                self.assertEqual(failed['cleanup'], {'steps': failed['cleanup']['steps'], 'clean': False})
++                self.assertEqual(failed['cleanup']['steps'][-1], {'step': 'interrupted', 'error': repr(interrupt)})
++                # Bounded: the interrupt stopped the cleanup; nothing ran after it.
++                self.assertEqual(self.fake.log[-1], [DISKUTIL, 'eject', DISK])
++                self.assertEqual(len(self.calls(DISKUTIL, 'eject')), 1)
++
++    def test_an_interrupt_during_cleanup_after_a_good_read_is_raised_with_its_evidence(self):
+         real = wrapper.write_record
+ 
+-        def broken(path, value):
++        def interrupted_write(path, value):
+             if path.name == 'FAILED.json':
+-                raise TypeError('scripted evidence write failure')
++                raise KeyboardInterrupt('during the evidence write')
+             return real(path, value)
+ 
+-        with mock.patch.object(wrapper, 'write_record', broken):
+-            _, error = self.run_mount()
+-        self.assertIs(error, sentinel)
+-        self.assertEqual((self.fake.attached, self.fake.mounted), ([], None))
++        for name in ('interrupt', 'system exit', 'second interrupt while recording'):
++            with self.subTest(name):
++                self.reset()
++                interrupt = SystemExit(3) if name == 'system exit' else KeyboardInterrupt('during cleanup')
++                self.fake.interrupt_on, self.fake.interrupt = (DISKUTIL, 'eject'), interrupt
++                if name.startswith('second'):
++                    with mock.patch.object(wrapper, 'write_record', interrupted_write):
++                        receipt, error = self.run_mount()
++                    self.assertFalse(os.path.lexists(self.output / 'FAILED.json'))
++                else:
++                    receipt, error = self.run_mount()
++                    failed = self.failed()
++                    self.assertEqual((failed['stage'], failed['primary_error']), ('release', repr(interrupt)))
++                    self.assertEqual(failed['cleanup']['steps'][-1],
++                                     {'step': 'interrupted', 'error': repr(interrupt)})
++                self.assertIsNone(receipt)
++                self.assertIs(error, interrupt)
++                self.assertFalse(os.path.lexists(self.output / 'JOURNAL_INPUTS.json'))
++                self.assertEqual((len(self.fake.reads), self.fake.log[-1]), (1, [DISKUTIL, 'eject', DISK]))
++
++    def test_a_failing_or_interrupted_evidence_write_never_replaces_the_primary_error(self):
++        sentinel = RuntimeError('sentinel reader failure')
++        real = wrapper.write_record
++        for failure in (TypeError('scripted evidence write failure'), KeyboardInterrupt('during the evidence write')):
++            with self.subTest(repr(failure)):
++                self.reset()
++                self.fake.during_read.append(lambda: (_ for _ in ()).throw(sentinel))
++
++                def broken(path, value, failure=failure):
++                    if path.name == 'FAILED.json':
++                        raise failure
++                    return real(path, value)
++
++                with mock.patch.object(wrapper, 'write_record', broken):
++                    _, error = self.run_mount()
++                self.assertIs(error, sentinel)
++                self.assertEqual((self.fake.attached, self.fake.mounted), ([], None))
+ 
+     def test_incomplete_cleanup_after_a_good_read_writes_no_receipt(self):
+         for name, script in (('unmount busy', lambda: setattr(self.fake, 'unmount_busy', True)),
+@@ -759,10 +1060,13 @@ class Cleanup(MountCase):
+             with self.subTest(name):
+                 self.reset()
+                 self.fake.during_read.append(script)
+-                _, failed = self.refused('^journal mount cleanup did not complete$', 'release',
+-                                         point_left=name == 'unmount busy')
++                with mock.patch.object(wrapper.time, 'sleep') as pause:
++                    _, failed = self.refused('^journal mount cleanup did not complete$', 'release',
++                                             point_left=name == 'unmount busy')
+                 self.assertFalse(failed['cleanup']['clean'])
+                 self.assertEqual(len(self.calls(DISKUTIL, 'eject')), wrapper.EJECT_ATTEMPTS)
++                # The pause falls only between attempts, never after the last one.
++                self.assertEqual(pause.call_args_list, [mock.call(wrapper.EJECT_PAUSE)] * (wrapper.EJECT_ATTEMPTS - 1))
+                 self.assertEqual(len(self.fake.reads), 1)
+ 
+ 
+@@ -804,7 +1108,9 @@ class AfterEject(MountCase):
+             os.rename(self.temp / 'aside.asif', self.fake.clone)
+ 
+         def chmodded():
++            # A real mode change and back: every filesystem records that as a status change.
+             time.sleep(0.05)
++            os.chmod(self.fake.clone, 0o640)
+             os.chmod(self.fake.clone, 0o600)
+ 
+         for name, change in (('touched', touched), ('replaced', replaced), ('renamed back', renamed_back),
+@@ -820,6 +1126,16 @@ class AfterEject(MountCase):
+             # A same-uid rewrite: the real publisher would block on the arm lock this run holds.
+             self.check(lambda: self.rewrite('CAPTURE.json', data_volume_uuid=OTHER),
+                        'capture pins, commitment, clone or volume changed while mounted')
++        with self.subTest('arm record replaced with the same bytes'):
++            self.reset()
++            self.publish_clone()
++
++            def replace_arm():
++                armed = self.capture / 'ARMED.json'
++                fixture.host.write_private(self.temp / 'same-arm.json', armed.read_bytes())
++                os.replace(self.temp / 'same-arm.json', armed)
++
++            self.check(replace_arm, 'capture pins, commitment, clone or volume changed while mounted')
+         with self.subTest('failed'):
+             self.reset()
+             self.publish_clone()
+@@ -831,8 +1147,96 @@ class AfterEject(MountCase):
+         self.fake.during_read.append(lambda: fixture.host.write_private(planted, b'planted\n'))
+         receipt, error = self.run_mount()
+         self.assertIsInstance(error, FileExistsError)
+-        self.assertEqual(self.failed()['stage'], 'after eject')
++        self.assertEqual(self.failed()['stage'], 'receipt')
+         self.assertEqual(planted.read_bytes(), b'planted\n')
++        self.assertFalse(os.path.lexists(self.output / 'JOURNAL_INPUTS.json.partial'))
++
++
++class Receipt(MountCase):
++    def test_the_receipt_is_published_whole_or_not_at_all(self):
++        planted = b'planted staging\n'
++        cases = (('a value JSON cannot hold', TypeError,
++                  lambda: self.fake.mounted_info.update(DeviceNode=b'not json')),
++                 ('a failed sync after the link', OSError, None),
++                 ('a staging file already there', RuntimeError,
++                  lambda: fixture.host.write_private(self.output / 'JOURNAL_INPUTS.json.partial', planted)))
++        real = wrapper.fsync_parent
++        for name, kind, before in cases:
++            with self.subTest(name):
++                self.reset()
++                if name == 'a value JSON cannot hold':
++                    before()
++                elif before:
++                    self.fake.during_read.append(before)
++
++                def failing_sync(path):
++                    if name == 'a failed sync after the link' and path == self.output:
++                        raise OSError(errno.EIO, 'scripted sync failure')
++                    return real(path)
++
++                with mock.patch.object(wrapper, 'fsync_parent', side_effect=failing_sync):
++                    receipt, error = self.run_mount()
++                self.assertIsNone(receipt)
++                self.assertIsInstance(error, kind)
++                self.assertEqual(self.failed()['stage'], 'receipt')
++                self.assertFalse(os.path.lexists(self.output / 'JOURNAL_INPUTS.json'))
++                staging = self.output / 'JOURNAL_INPUTS.json.partial'
++                if name == 'a staging file already there':
++                    self.assertEqual(staging.read_bytes(), planted)
++                else:
++                    self.assertFalse(os.path.lexists(staging))
++
++
++class Attempt(unittest.TestCase):
++    def test_every_command_is_bounded_and_reads_no_stdin(self):
++        done = subprocess.CompletedProcess(['x'], 0, b'out', b'err')
++        with mock.patch('subprocess.run', return_value=done) as run:
++            row = wrapper.attempt(DISKUTIL, 'list')
++        run.assert_called_once_with((DISKUTIL, 'list'), capture_output=True, timeout=wrapper.TIMEOUT,
++                                    stdin=subprocess.DEVNULL)
++        self.assertEqual(row, {'argv': [DISKUTIL, 'list'], 'returncode': 0, 'timed_out': False,
++                               'stdout': b'out', 'stderr': 'err'})
++        with mock.patch('subprocess.run', side_effect=subprocess.TimeoutExpired('x', 1)):
++            self.assertEqual(wrapper.attempt(DISKUTIL, 'list'), {'argv': [DISKUTIL, 'list'], 'returncode': None,
++                                                                 'timed_out': True, 'stdout': b'', 'stderr': ''})
++        with mock.patch('subprocess.run', side_effect=FileNotFoundError(errno.ENOENT, 'no such tool')):
++            row = wrapper.attempt(DISKUTIL, 'list')
++        self.assertEqual((row['returncode'], row['timed_out'], 'no such tool' in row['stderr']), (None, False, True))
++
++
++class ProbeRelease(unittest.TestCase):
++    """The probe's cleanup, scripted: its own attach disks are ejected and confirmed gone even when the
++    inventory does not list them."""
++
++    def release(self, eject_works):
++        present, commands = {'/dev/disk7'}, []
++
++        def scripted(*argv, **options):
++            commands.append(list(argv))
++            row = {'argv': list(argv), 'returncode': 0, 'timed_out': False, 'stdout': b'', 'stderr': ''}
++            if argv[:2] == (DISKUTIL, 'eject'):
++                if not eject_works:
++                    return {**row, 'returncode': 1}
++                present.discard(argv[2])
++            if argv[:3] == (DISKUTIL, 'info', '-plist'):
++                return {**row, 'returncode': 0 if argv[3] in present else 1}
++            return row
++
++        with mock.patch.object(probe, 'attempt', side_effect=scripted), \
++                mock.patch.object(probe, 'attachments', return_value=[]), \
++                mock.patch('subprocess.run', side_effect=AssertionError('command run')):
++            found = probe.release(pathlib.Path('/nonexistent/probe.asif'), [], ['/dev/disk7', '/dev/disk7'])
++        return found, commands
++
++    def test_an_inventory_blind_to_its_own_attach_is_still_ejected_and_confirmed_gone(self):
++        found, commands = self.release(eject_works=True)
++        self.assertEqual(commands, [[DISKUTIL, 'info', '-plist', '/dev/disk7'], [DISKUTIL, 'eject', '/dev/disk7'],
++                                    [DISKUTIL, 'info', '-plist', '/dev/disk7']])
++        self.assertEqual((found['disks_gone'], found['clean']), ([True], True))
++        found, commands = self.release(eject_works=False)
++        self.assertEqual([argv for argv in commands if argv[:2] == [DISKUTIL, 'eject']],
++                         [[DISKUTIL, 'eject', '/dev/disk7']] * wrapper.EJECT_ATTEMPTS)
++        self.assertEqual((found['disks_gone'], found['clean']), ([False], False))
+ 
+ 
+ class ProbeGuards(unittest.TestCase):
+@@ -849,8 +1253,7 @@ class ProbeGuards(unittest.TestCase):
+     def refuses(self, pattern, argv=None, environ=None, platform='darwin', sudo=0):
+         sudo_row = {'argv': [], 'returncode': sudo, 'timed_out': False, 'stdout': b'', 'stderr': ''}
+         with mock.patch.object(probe, 'attempt', return_value=sudo_row) as attempt, \
+-                mock.patch('subprocess.run', side_effect=AssertionError('command run')), \
+-                mock.patch.object(probe, 'run', side_effect=AssertionError('probe ran')):
++                mock.patch('subprocess.run', side_effect=AssertionError('command run')):
+             with self.assertRaisesRegex(RuntimeError, pattern):
+                 probe.guard(self.argv if argv is None else argv,
+                             self.ENVIRON if environ is None else environ, platform)
+@@ -895,6 +1298,29 @@ class ProbeGuards(unittest.TestCase):
+                 probe.main(self.argv, self.ENVIRON)
+         self.assertFalse(os.path.lexists(self.output))
+ 
++    def test_an_interrupted_probe_still_releases_writes_its_report_and_reraises(self):
++        interrupt = KeyboardInterrupt('during create')
++        commands = []
++
++        def scripted(*argv, **options):
++            commands.append(list(argv))
++            if argv[:3] == (wrapper.DISKUTIL, 'image', 'create'):
++                raise interrupt
++            return {'argv': list(argv), 'returncode': 0, 'timed_out': False, 'stdout': b'macOS', 'stderr': ''}
++
++        released = {'steps': [], 'errors': [], 'remaining': 0, 'mounted': [], 'clean': True}
++        with mock.patch.object(probe, 'attempt', side_effect=scripted), \
++                mock.patch.object(probe, 'release', return_value=released) as release, \
++                mock.patch('subprocess.run', side_effect=AssertionError('command run')):
++            with self.assertRaises(KeyboardInterrupt) as raised:
++                probe.run(self.output)
++        self.assertIs(raised.exception, interrupt)
++        self.assertEqual([argv[:3] for argv in commands], [['/usr/bin/sw_vers'], [wrapper.DISKUTIL, 'image', 'create']])
++        release.assert_called_once()
++        report = json.loads(self.output.read_bytes())
++        self.assertEqual((report['completed'], report['error'], report['cleanup']['removed']),
++                         (False, repr(interrupt), True))
++
+     def test_flag_names_decode_the_wrapper_flags(self):
+         self.assertEqual(probe.flag_names(FLAGS), ['rdonly', 'noexec', 'nosuid', 'nodev', 'dontbrowse'])
+         self.assertEqual(probe.flag_names(wrapper.MNT_IGNORE_OWNERSHIP | 0x10000000 | 0x800),
