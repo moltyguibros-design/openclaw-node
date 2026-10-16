@@ -190,3 +190,7 @@ supported connector is configured and tested.
 ## 2026-10-15 17:04 EDT — D189 publication evidence
 
 586f66b7 passed all five jobs in CI run 38756995285. Claude then found a matcher read race; the local correction ties the consumed commitment to the exact pinned objects. All 14 capture-pin tests pass, and removing that comparison makes the new race test fail for accepting the forgery. Added 13 decisive predicate tests pass; all 28 local source mutants are killed, with full unmutated suite and designated controls passing. D189 records the remaining pre-stop same-uid rewrite and protected acceptance-root gaps. Earlier uncommitted notes are historical; D185–D188 are published. D189 still requires its own exact-head CI/review. No B3/B4 probes, production changes or B5 closure. Next: frozen-image extraction and serving-NATS producer/recovery adapter; planned-boot/abort, timer migration and disposable macOS rehearsal remain open before B6.
+
+## 2026-10-16 11:33 EDT — bounded reader publication
+
+60c5df17 passed all five CI jobs(run38878713529). D191 adds only the pure/unmounted journal/config reader and its CI tests:29native tests pass and42mutants are killed. Fresh preservation metadata census reconciles the exact three retirement-evidence files; no production files changed. Native mounted-image ownership/read-only/copy validation and B3host-table provenance remain open, along with serving-NATS producer/adapter and plannedboot/abort/timer migration/macOS rehearsal. B3/B4 were not repeated. D191 needs its own exact-head CI/review; B5open,B6closed.
