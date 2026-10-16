@@ -19,7 +19,7 @@ from unittest import mock
 import host_vm_capture
 import host_vm_guard
 import stopped_tree_match
-from host_guest_commit import commit, commit_checkpoint, require_committed
+from host_guest_commit import commit, commit_checkpoint, encoded, require_committed
 from stopped_tree_match import guest_capture, host_match
 from host_clone_dispose import cleanup_failed, dispose
 from host_vm_capture import capture, clone_only, publish_capture_record
@@ -934,10 +934,11 @@ class HostCaptureTest(unittest.TestCase):
         self.assertNotEqual(refused_path.returncode, 0)
         self.assertFalse(unsafe.exists())
         holder = subprocess.Popen([sys.executable, '-c',
-                                   'import sys,time; f=open(sys.argv[1],"rb"); time.sleep(30)',
+                                   'import sys; f=open(sys.argv[1],"rb"); sys.stdin.buffer.read()',
                                    str(source)], stdout=subprocess.DEVNULL,
-                                  stderr=subprocess.DEVNULL)
+                                  stderr=subprocess.DEVNULL, stdin=subprocess.PIPE)
         self.processes.append(holder)
+        self.addCleanup(holder.stdin.close)
         time.sleep(0.2)
         output = self.root / 'capture'
         worker = subprocess.Popen([sys.executable, str(CAPTURE), str(spec), str(store_spec),
@@ -1157,11 +1158,35 @@ class HostCaptureTest(unittest.TestCase):
         self.assertFalse((swapped_match / 'MATCH.json').exists())
         def match_claimed(candidate, destination):
             data = candidate.read_bytes()
-            claim = {'manifest_sha256': hashlib.sha256(data).hexdigest(),
-                     'manifest': json.loads(data),
-                     'checkpoint': require_committed(output)['checkpoint']}
-            with mock.patch.object(stopped_tree_match, 'require_committed', return_value=claim):
+            names = ('COMMITTED.json', 'ACKED.json', 'CHECKPOINT.json', 'CAPTURE.json')
+            original = {name: (output / name).read_bytes() for name in names}
+            records = {name: json.loads(raw) for name, raw in original.items()}
+            manifest_sha = hashlib.sha256(data).hexdigest()
+            records['COMMITTED.json'].update(manifest=json.loads(data), manifest_sha256=manifest_sha)
+            def raw(name):
+                return encoded(records[name])
+            records['ACKED.json'].update(commit_sha256=hashlib.sha256(raw('COMMITTED.json')).hexdigest(),
+                                         manifest_sha256=manifest_sha)
+            records['CHECKPOINT.json'].update(
+                commit_sha256=hashlib.sha256(raw('COMMITTED.json')).hexdigest(),
+                ack_sha256=hashlib.sha256(raw('ACKED.json')).hexdigest(),
+                manifest_sha256=manifest_sha)
+            for key, name in (('guest_commit_sha256', 'COMMITTED.json'),
+                              ('guest_ack_sha256', 'ACKED.json'),
+                              ('guest_checkpoint_sha256', 'CHECKPOINT.json')):
+                records['CAPTURE.json'][key] = hashlib.sha256(raw(name)).hexdigest()
+            try:
+                for name in names:
+                    (output / name).write_bytes(raw(name))
+                require_committed(output)
                 return host_match(candidate, output / 'extracted-stores', destination)
+            finally:
+                for name, value in original.items():
+                    (output / name).write_bytes(value)
+        swapped_claim = json.loads((swapped_guest / 'manifest.json').read_bytes())
+        swapped_claim.update(capture_nonce=nonce, journal_head=guest_manifest['journal_head'])
+        (swapped_guest / 'manifest.json').unlink()
+        write_record(swapped_guest / 'manifest.json', swapped_claim)
         with self.assertRaisesRegex(RuntimeError, 'guest store specification differs'):
             match_claimed(swapped_guest / 'manifest.json', self.root / 'swapped-spec-check')
         original_guest = json.loads((guest_output / 'manifest.json').read_text())
@@ -1260,10 +1285,11 @@ class HostCaptureTest(unittest.TestCase):
 
         state.write_text('started\n')
         second_holder = subprocess.Popen([sys.executable, '-c',
-                                          'import sys,time; f=open(sys.argv[1],"rb"); time.sleep(30)',
+                                          'import sys; f=open(sys.argv[1],"rb"); sys.stdin.buffer.read()',
                                           str(source)], stdout=subprocess.DEVNULL,
-                                         stderr=subprocess.DEVNULL)
+                                         stderr=subprocess.DEVNULL, stdin=subprocess.PIPE)
         self.processes.append(second_holder)
+        self.addCleanup(second_holder.stdin.close)
         time.sleep(0.2)
         refused = self.root / 'no-shutdown'
         no_stop = subprocess.run([sys.executable, str(CAPTURE), str(spec), str(store_spec),
@@ -1333,10 +1359,11 @@ class HostCaptureTest(unittest.TestCase):
         wrong_store_spec.chmod(0o600)
         state.write_text('started\n')
         third_holder = subprocess.Popen([sys.executable, '-c',
-                                         'import sys,time; f=open(sys.argv[1],"rb"); time.sleep(30)',
+                                         'import sys; f=open(sys.argv[1],"rb"); sys.stdin.buffer.read()',
                                          str(source)], stdout=subprocess.DEVNULL,
-                                        stderr=subprocess.DEVNULL)
+                                        stderr=subprocess.DEVNULL, stdin=subprocess.PIPE)
         self.processes.append(third_holder)
+        self.addCleanup(third_holder.stdin.close)
         time.sleep(0.2)
         failed_capture = self.root / 'failed-capture'
         failed_worker = subprocess.Popen([sys.executable, str(CAPTURE), str(spec),
