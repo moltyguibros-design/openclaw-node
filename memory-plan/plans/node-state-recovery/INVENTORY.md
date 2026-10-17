@@ -2709,7 +2709,7 @@ Checkpoint 2026-10-15: D189 matcher read-race correction and 13 decisive predica
 
 Checkpoint 2026-10-16: D191 bounded stopped-journal/config reader implemented and owned-tested:29native tests and42intended-reason mutation kills. Mount ownership/read-only ASIF wrapper, input-copy receipt, B3host-pin provenance, protected acceptance root and reboot rehearsal remain open. This is not stopped-ASIF runtime acceptance.
 
-- [ ] B5-owned-journal-mount source: publish the fixture-only mount wrapper and exact-read receipt after correcting B5-probe-cleanup; source publication is separate from native mount verification and never closes the extraction gate.
+- [x] B5-owned-journal-mount source: 151bb3bd passes all five exact-head jobs (39011578564); Claude Messages85/89 find no material defect. Scripted positives/refusals, 46 reader and 3 focused eject-rule mutants are verified. The native probe is unwired at that verified source head; this source milestone does not close extraction or B5.
 
 > **B5-owned-journal-mount — Goal:** a reviewed, tested fixture-only mount wrapper supplies the frozen verifier with a receipt of its exact read inputs.
 > **Needs:** D185–D191 at 5b6c84af; finished owned capture; supplied role table; both capture locks; corrected CI-only probe cleanup.
@@ -2763,3 +2763,22 @@ only, B1 authorization) and then native ASIF characterization on an isolated
 CI-created image after source readiness. Disposable macOS reboot access is
 still separate; B3/B4 were not recaptured, B6–B9 stay closed and the node
 is not accepted as operational.
+
+
+2026-10-17 04:45 EDT — D194: B5-owned-journal-mount source is verified at
+151bb3bdbcdf0bd09c7d15e6f0679832edae6a3d: all five exact-head jobs pass
+(39011578564), including mount71 and reader30; Claude Messages85/89 report
+no material defect. The CI-owned kickstart completed at exit0 in9.026776584s
+without changing its10s limit. Earlier failures remain unexplained, and no
+runtime recovery rule changes. B5-native-ASIF-mount now gets a separate
+GitHub-hosted macOS job using only the existing guarded probe and a newly
+created64MiB image, with unconditional report retention. This workflow
+revision needs its own Claude review/CI. Probe exit0 alone never clears the
+gate: inspect ownership/root0600 denial, exact flags/UUID/inventory, image
+hash/ctime/xattrs and confirmed cleanup. No local mount or VM operation.
+Next two gates: native ASIF characterization (CI-only owned resources under
+B1), then owned stopped-ASIF reader integration (reviewed adapter, native
+positive/refusal fixture and exact-head CI). Disposable macOS reboot access
+remains separately operator-owned; B3/B4 stay just-in-time/bounded and were
+not recaptured. B1 design only, B2 Alpine mechanism only, B5/1.2 open,
+B6–B9 closed, D64 unchanged and the node not operationally accepted.

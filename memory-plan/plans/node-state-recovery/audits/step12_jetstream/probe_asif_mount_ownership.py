@@ -32,7 +32,7 @@ Guards, all required, checked before any command: macOS, CI=true and GITHUB_ACTI
 by GitHub Actions), OPENCLAW_OWNERSHIP_PROBE=1, the --ci-owned-probe flag, a new output path in an
 existing directory, then passwordless sudo.
 
-It is deliberately not wired into CI. To run it, add a step to a macOS job and upload the report:
+The isolated asif-mount-ownership-macos CI job invokes this probe and uploads its report:
 
     OPENCLAW_OWNERSHIP_PROBE=1 /usr/bin/python3 \\
       memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py \\

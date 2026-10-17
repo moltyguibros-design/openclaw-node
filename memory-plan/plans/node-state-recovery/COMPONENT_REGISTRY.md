@@ -315,3 +315,22 @@ must inspect the resulting UTM state and error. B2's disposable rehearsal is
 complete; the B5 controller and its owned tests, full-node hold, four-store
 capture and real-history acceptance remain open. See
 `audits/step12_jetstream/B2_UTM_GUARD_REHEARSAL_20261012.json`.
+
+
+2026-10-17 04:45 EDT — D194: B5-owned-journal-mount source is verified at
+151bb3bdbcdf0bd09c7d15e6f0679832edae6a3d: all five exact-head jobs pass
+(39011578564), including mount71 and reader30; Claude Messages85/89 report
+no material defect. The CI-owned kickstart completed at exit0 in9.026776584s
+without changing its10s limit. Earlier failures remain unexplained, and no
+runtime recovery rule changes. B5-native-ASIF-mount now gets a separate
+GitHub-hosted macOS job using only the existing guarded probe and a newly
+created64MiB image, with unconditional report retention. This workflow
+revision needs its own Claude review/CI. Probe exit0 alone never clears the
+gate: inspect ownership/root0600 denial, exact flags/UUID/inventory, image
+hash/ctime/xattrs and confirmed cleanup. No local mount or VM operation.
+Next two gates: native ASIF characterization (CI-only owned resources under
+B1), then owned stopped-ASIF reader integration (reviewed adapter, native
+positive/refusal fixture and exact-head CI). Disposable macOS reboot access
+remains separately operator-owned; B3/B4 stay just-in-time/bounded and were
+not recaptured. B1 design only, B2 Alpine mechanism only, B5/1.2 open,
+B6–B9 closed, D64 unchanged and the node not operationally accepted.

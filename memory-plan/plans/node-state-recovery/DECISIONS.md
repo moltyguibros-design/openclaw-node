@@ -4162,3 +4162,39 @@ rerun, timeout widening or harmless-flake claim follows. Native ASIF facts,
 protected provenance, serving-NATS producer/adapter, D62/D175 rehearsal and
 manual abort/resumption remain open. B5/1.2 open, B6 closed, D64 unchanged,
 four histories separate and all production services/VM/timers unchanged.
+
+
+## D194 — 2026-10-17 04:45 EDT: native ASIF observations on an isolated CI runner
+
+Exact 151bb3bdbcdf0bd09c7d15e6f0679832edae6a3d is green in all five
+39011578564 jobs. Claude Message89 finds no material defect; Message85
+reviewed the unchanged journal mount/probe implementation. This clears the
+bounded B5-owned-journal-mount source gate, not B5 or stopped-ASIF extraction.
+The existing owned-kickstart case completed at exit0 in9.026776584s against
+the original10s deadline. That observation does not attribute earlier CI
+failures. Claude's non-serializable diagnostic context counterexample is
+unreachable through the current JSON-only caller; no unrelated hardening is
+added here.
+
+B5-native-ASIF-mount may now execute the already-reviewed CI-only probe in
+its own GitHub-hosted macOS job. All guards remain: macOS, CI=true,
+GITHUB_ACTIONS=true, opt-in, explicit flag, new output path and sudo-n. The
+probe creates its own64MiB ASIF and private mount points; no local host or
+production image is involved. The workflow always attempts to retain the
+JSON report, with a missing report failing retention. The15-minute job bound
+can interrupt cleanup and lose a report; neither timeout nor a missing or
+partial report can establish cleanup or clear the gate.
+
+Exit0 means completion and cleanup, not acceptance of any assumption. Read
+the report for actual readonly/nodev/nosuid/noexec/ownership flags, exact
+volume/inventory binding, the root-owned0600 unreadable negative, image
+bytes/identity/ctime/xattrs before/after and confirmed removal. Any failed
+assumption stays a refusal until a reviewed correction; no implementation
+condition is relaxed to make the probe green. The D192 sequential inventory
+and same-uid limits persist. This change only wires the probe and corrects
+its unwired docstring. Claude review and exact-head CI govern these bytes.
+After characterization, owned stopped-ASIF reader integration still needs
+reviewed wiring, native positive/refusal evidence and exact-head CI. It is
+separate from D62 macOS reboot rehearsal and the operator's machine/resource
+decision. Production capture is disabled; B3/B4 were not repeated, B5/1.2
+stay open, B6–B9 closed and all four histories separate.

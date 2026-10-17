@@ -302,3 +302,26 @@ only, B1 authorization) and then native ASIF characterization on an isolated
 CI-created image after source readiness. Disposable macOS reboot access is
 still separate; B3/B4 were not recaptured, B6–B9 stay closed and the node
 is not accepted as operational.
+
+2026-10-17 04:45 EDT — B5-native-ASIF-mount preflight. Exact source
+151bb3bdbcdf0bd09c7d15e6f0679832edae6a3d has all five checks green in
+39011578564; Claude Message89 finds no material defect, following Message85's
+review of the unchanged mount/probe source. The native owned kickstart trace
+completed at exit 0 in 9.026776584 s against the original 10 s limit. This
+does not explain the earlier timeouts. The current JSON-only caller cannot
+reach Claude's hypothetical non-serializable diagnostic context; record that
+limit without broadening this change into diagnostic hardening.
+
+The independently executable next gate is native ASIF mount characterization.
+Needs: the reviewed probe and cleanup, a separate GitHub-hosted macOS runner,
+all existing CI-only guards, and a fresh 64 MiB image created by the probe.
+File deltas: add one isolated job and unconditional report upload to
+.github/workflows/test.yml; correct the probe's now-obsolete unwired docstring;
+record D194 and the verified source milestone in the plan ledgers. No mount,
+capture or recovery implementation changes. Verify: inspect the uploaded
+report's actual ownership, root-0600 denial, flags, identities/ctime/xattrs
+and cleanup, not merely job exit 0; any failed assumption stays a refusal.
+Claude review and exact-head CI remain required for this workflow revision.
+No local disk image or VM operation is part of this gate. After it, the owned
+stopped-ASIF reader integration needs reviewed wiring and a native fixture;
+D62 reboot rehearsal still needs separately designated macOS access.
