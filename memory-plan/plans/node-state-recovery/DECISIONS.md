@@ -4603,3 +4603,65 @@ unmutated6-test ReaderRun control passes. CI runs it before native disk operatio
 Python AST/workflow YAML parse and diff checks pass. Full current-head CI and Claude
 review of this correction remain pending. The earlier raw native report stays bound to
 its actual6286 source; it is not relabelled as evidence of this retention revision.
+
+
+## D205 — 2026-10-17 14:01 EDT: verify the owned native frozen-journal reader
+
+B5-owned-stopped-ASIF-reader is verified at e120e78de80ab635a7c8750dac7ef0b10b871309.
+Claude Message116 independently closes R1/R2 with no material defect:91 tests pass as a
+non-root user, the6-control mutation baseline and all4 committed image/pin/head/retention
+mutants pass their intended verdicts; its additional report-write and retention mutants
+are killed too. Exact source CI39053730664 has all8 checks green. This is the
+source whose complete native reader and mutation job117457344212 passed; merge
+2ff7d39f2d4d9af13017f7dd85f439c8c143d402, artifact12108338805. Superseded
+cf347343/6286b89c/b2155b3c full workflows were canceled after their completed native
+observations were retained; none is relabelled as all-green.
+
+B5_OWNED_STOPPED_ASIF_READER_REVIEWED_REPORT_20261017.json is the raw stopped-asif-reader.json
+from that reviewed-source artifact, SHA256 e02ab65672edc4019ace4b9c1c24b7bedd5b9df2ed2790eaa35306fff126e01d.
+The intact readonly wrapper read54 owned journal/config/lock/receipt files from one
+verified APFS device, matched the pinned checkpoint and pre-head and published its receipt.
+Corrupt-chain, pending, unknown-entry and changed-config each raise their intended Refused
+at stage read without a success receipt. All5 readonly intervals preserve image hash,
+inode, size, mtime, ctime, flags and xattr names; seed and reader cleanup each explicitly
+confirm the known attached disk absent. Seed roots are0:0/0755; final inventory/mounts empty
+and owned directory removed. Full macOS job117457344183 also completes the91-case module;
+its full job log SHA256 is 0c378efeb0d659f68ab40f6c21f1d5658295c86d8cecb6853c92b1bd6d15ef88.
+
+The failed-image upload step is skipped in this successful native run. Its retention
+condition/report and interrupted/partial failures are exercised by scripted controls and
+mutation, not an intentionally failed native ASIF upload. This is a synthetic checkpoint
+fixture with synthetic host power/hold/stop observations and runner UID501, no VM or NATS
+server, no guest UID parity or capture authenticity proof. Reseeding/clone re-publication
+occurs outside each readonly interval. Journal evidence remains user-owned quiescence;
+there is no physical exclusion claim between last NATS stop and manifest. This does not
+prove B8 restorability of real histories or authorship/historical independence.
+
+Next two execution forecasts: B5-D62-admission uses B1-authorized source/owned fixtures
+to bind a durable ACCEPTED-after-B8 or ABORT-after-host-cleanup decision before any gate
+opens, compare the complete required OpenClaw launchd/process scope before Journal.recover,
+then verify stopped units/overrides and a fail-closed manual route. It needs the existing
+host guard/commitment and recorded hold, a reviewed admission design, decisive negatives,
+Claude and exact-head CI. B5-D175-owned-repin follows only after that admission exists;
+it needs five owned timer definitions/manifest plus stable volume/lock/path identities,
+conditional journaled value-only device re-pin before postboot gate construction, strict
+non-timer/extra-field/changed-inode-birthtime-nonce/premature/repeated negatives and owned
+APFS detach/reattach evidence, Claude and exact-head CI. These source forecasts do not
+close the separate disposable-macOS reboot/launchd/login/process/hold-reattach rehearsal.
+The operator still designates an exact disposable machine or decides a measured disk/RAM
+budget and capacity source after Codex's proposal; no provisioning permission is inferred.
+
+B1 design-only and historical B2/B4 mechanism/design evidence remain bounded; B3 remains
+JIT and was not recaptured. Serving-NATS producer/adapter, protected host provenance,
+D62/abort/manual resumption, D175 and actual macOS rehearsal remain open. B5/step1.2 stay
+open at v1.2-pre; B6–B9 closed, D64 unchanged and production capture refused. The four
+physical histories remain separate. No production service, VM, image or installed timer
+was operated. This receipt changes no executable/workflow; later heads need their own CI.
+
+D205 forecast precision: D62 retains host boot denial until the durable decision and
+binds it before any guest gate reopens. The pre-recover comparison covers all OpenClaw
+launchd jobs and every process as its user or executing from production entrypoint roots;
+unexpected/unreadable observations refuse, and this is not a complete physical census.
+D175 changes values only if the device changed, after admission and before gate
+construction, preserving same-boot descriptor/path mapping checks. These are the existing
+D62/D174/D175 constraints, not new production authorization.

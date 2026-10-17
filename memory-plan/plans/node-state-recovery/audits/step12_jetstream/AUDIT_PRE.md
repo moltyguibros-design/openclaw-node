@@ -708,3 +708,28 @@ workflow uploads a failed owned image; success still removes its own directory. 
 ownership-run behavior and all production/runtime sources stay unchanged. Local91 tests
 pass (one platform skip), the6-control mutation baseline passes and all4 mutants die at
 their intended assertions. Native corrected-source and exact-head CI/review still pending.
+
+
+### 2026-10-17 14:01 EDT — B5-owned-stopped-ASIF-reader verified (D205)
+
+Verified source e120e78d / exact CI39053730664: all8 checks green; Claude116
+closes R1/R2 with no material defect. Native job117457344212 verifies54 intact file reads,
+4 intended read-stage refusals,5 stable readonly image intervals and nonvacuous seed/read
+disk absence, with final directory removed. The reviewed raw report is retained under
+step12_jetstream; its SHA256 starts e02ab656. All91 controls and4 intended guard mutants
+pass. Failed native upload itself was not exercised; scripted retention/interrupt controls
+are explicit. Synthetic fixture evidence only: no VM capture, guest UID parity, physical
+pre-stop exclusion or B8 acceptance.
+Next B5-D62-admission needs reviewed host-decision/scoped-observation/manual-fallback
+source and owned tests; B5-D175-owned-repin then needs that admission and strict5-timer
+value-only migration with owned APFS reattach negatives. Both need Claude/exact-head CI.
+Actual reboot rehearsal still needs separate operator-designated disposable macOS access
+or a measured fixed resource decision. B3/B4 not repeated; B5/1.2 open, B6–B9 closed,
+D64 and production capture refusal unchanged. No production operation occurred.
+
+D205 post-verification ledger: promised complete locked reader/frozen verifier — yes;
+intact and4 intended refusals — yes; unchanged readonly image metadata/hash and known-disk
+cleanup — yes; R1 outer/partial/interrupt controls and R2 retention — yes, native upload
+not exercised; Claude and exact source CI — yes. Feeds: native integration prerequisite
+for D62/D175 source/owned work; not B8 histories. Carry-forwards: T1/T2/T3, default-throttle
+policy and all production/reboot/host-provenance requirements remain tracked and open.

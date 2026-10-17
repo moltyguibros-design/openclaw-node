@@ -3053,7 +3053,7 @@ production capture disabled and all four histories separate. No live service,
 VM, production image or installed timer was changed.
 
 
-- [A] B5-owned-stopped-ASIF-reader: exercise the complete owned readonly mount/locked journal reader/frozen verifier on a fresh CI-only ASIF.
+- [x] B5-owned-stopped-ASIF-reader: complete native locked reader/frozen verifier verified at e120e78d, CI39053730664 all8 green, Claude116; D205 retains proof and limits.
 
 > **B5-owned-stopped-ASIF-reader — Goal:** verify the frozen owned checkpoint through the complete native wrapper, rather than only shared mount/device helpers.
 > **Needs:** D203 verified source at1e915d8a; D185/D187 checkpoint/commitment/CAPTURE fixture; native ownership/device assumptions and known-disk cleanup; isolated CI-owned image, no production VM/disk.
@@ -3089,3 +3089,21 @@ and cleanup/interrupt outcomes; failed native reader runs retain their own image
 CI diagnostic artifact. Local91 tests pass (one skip); all4 committed guard mutants die
 for intended assertions. This corrected revision still needs Claude and exact-head CI;
 B5-owned-stopped-ASIF-reader is not yet closed. No production operation occurred.
+
+
+### 2026-10-17 14:01 EDT — B5-owned-stopped-ASIF-reader verified (D205)
+
+Verified source e120e78d / exact CI39053730664: all8 checks green; Claude116
+closes R1/R2 with no material defect. Native job117457344212 verifies54 intact file reads,
+4 intended read-stage refusals,5 stable readonly image intervals and nonvacuous seed/read
+disk absence, with final directory removed. The reviewed raw report is retained under
+step12_jetstream; its SHA256 starts e02ab656. All91 controls and4 intended guard mutants
+pass. Failed native upload itself was not exercised; scripted retention/interrupt controls
+are explicit. Synthetic fixture evidence only: no VM capture, guest UID parity, physical
+pre-stop exclusion or B8 acceptance.
+Next B5-D62-admission needs reviewed host-decision/scoped-observation/manual-fallback
+source and owned tests; B5-D175-owned-repin then needs that admission and strict5-timer
+value-only migration with owned APFS reattach negatives. Both need Claude/exact-head CI.
+Actual reboot rehearsal still needs separate operator-designated disposable macOS access
+or a measured fixed resource decision. B3/B4 not repeated; B5/1.2 open, B6–B9 closed,
+D64 and production capture refusal unchanged. No production operation occurred.
