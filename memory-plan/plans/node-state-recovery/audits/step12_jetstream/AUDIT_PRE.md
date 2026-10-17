@@ -733,3 +733,25 @@ cleanup — yes; R1 outer/partial/interrupt controls and R2 retention — yes, n
 not exercised; Claude and exact source CI — yes. Feeds: native integration prerequisite
 for D62/D175 source/owned work; not B8 histories. Carry-forwards: T1/T2/T3, default-throttle
 policy and all production/reboot/host-provenance requirements remain tracked and open.
+
+
+## 2026-10-17 17:13 EDT — terminal ABORT micro re-orient and bounded delta
+
+- Block1/step1.2 remains active at v1.2-pre; production preservation is held.
+- D209 verified nonterminal clone cleanup under sampled source denial, final1f7dc5b7 CI green8/8.
+- This slice binds a terminal owned ABORT to that cleanup and strictly verifies it.
+- It feeds a separately checked source release, then guest admission/manual restoration.
+- No flag change, guest gate, production operation, ACCEPTED producer or D64 relaxation.
+- Yes: D62 requires a durable decision before future release; file presence is insufficient.
+
+Claude148's six design corrections govern: native preflight write-set allow-list, exactly
+one root ABORT exception in conflict checks, forward-bound cleanup sample bytes, caller-held
+locks and a caller-supplied fresh observation for the read-only verifier, exported exact
+key sets and canonical bytes. A completed fixed decision subtree is also required after
+post-publication checks; a visible ABORT without COMPLETE or beside FAILED/temp refuses.
+A metadata touch to the guarded source or a host reboot/device change makes the attempt
+manual; no exception is added. Same-user coordinated rewrites remain D189's limit.
+§6 deltas for this slice: host_clone_dispose.py, preflight file-name constant only,
+test_host_terminal_abort.py, mutate_host_terminal_abort.py, workflow registration and
+four plan ledgers. Tests use existing real checkpoint/cleanup producers with scripted
+host/flags; no local disk image, launchd, UTM or production operation is permitted.

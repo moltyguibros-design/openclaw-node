@@ -13,6 +13,7 @@ between observations (D189); an unlink swap is detected by the retained inode's 
 count, not prevented atomically. Neither unlink nor a cleanup receipt destroys bytes.
 """
 
+import contextlib
 import datetime
 import json
 import hashlib
@@ -23,12 +24,14 @@ import stat
 import subprocess
 import sys
 
+from host_guest_commit import encoded, require_captured, require_committed
 from host_image_immutable import change_immutable
 from preservation_journal import ARM_SCOPE
 from host_vm_capture import (CAPTURE_SCOPE, FIXTURE_UUID, HOST_SPEC_FIELDS, file_hash,
                              fsync_parent, guarded_source, pinned_spec, same_host_image)
 from host_journal_mount import capture_inputs, capture_locks, clone_identity, record_failure
-from host_vm_preflight import no_disk_attachment, owned_directory, preflight, require, write_record
+from host_vm_preflight import (PREFLIGHT_FILES, no_disk_attachment, owned_directory,
+                               preflight, require, write_record)
 
 
 def private_record(path):
@@ -170,6 +173,23 @@ ABORT_INPUTS = ('ARMED.json', 'COMMITTED.json', 'ACKED.json', 'CHECKPOINT.json',
                 'GUARD_INTENT.json', 'GUARD.json', 'before-shutdown/preflight.json',
                 'after-guard/preflight.json')
 TERMINALS = ('ABORT.json', 'ACCEPTED.json', 'BOOTABLE.json', 'DECISION.json')
+CLEANUP_INTENT_KEYS = frozenset({'scope', 'at_utc', 'reason', 'capture_nonce', 'journal_head',
+    'checkpoint_sha256', 'input_sha256', 'vm_uuid', 'host_boot_session', 'source', 'clone'})
+CLEANUP_KEYS = frozenset({'scope', 'at_utc', 'intent_sha256', 'capture_nonce', 'checkpoint_sha256',
+    'clone_absent', 'source', 'vm_uuid', 'host_boot_session', 'vm_state_at_final_check'})
+ABORT_KEYS = frozenset({'scope', 'decision', 'at_utc', 'reason', 'capture_nonce', 'arm_sha256',
+    'journal_head', 'checkpoint_sha256', 'capture_sha256', 'cleanup_intent_sha256', 'cleanup_sha256',
+    'input_sha256', 'cleanup_sample_sha256', 'decision_sample_sha256', 'vm_uuid',
+    'host_boot_session', 'source'})
+COMPLETE_KEYS = frozenset({'scope', 'abort_sha256', 'after_sample_sha256'})
+ABORT_SCOPE = ('owned cleanup-bound ABORT decision; user-owned evidence without protected provenance; '
+               'denial sampled only; grants no source release, guest admission or boot')
+ABORT_COMPLETE_SCOPE = 'owned ABORT post-publication checks completed; no release or guest admission'
+IMAGE_KEYS = frozenset({'device', 'inode', 'size', 'mtime_ns', 'ctime_ns', 'flags', 'sha256'})
+SAMPLE_KEYS = frozenset({'scope', 'at_utc', 'host_boot_session', 'package', 'config_sha256',
+    'vm_uuid', 'utmctl_sha256', 'state', 'state_observed_at_utc', 'image', 'image_size',
+    'image_device', 'image_inode', 'vmstate', 'image_holders', 'holders_consistent', 'free_bytes'})
+
 
 
 def cleanup_bytes(path, directory_fd=None):
@@ -398,8 +418,276 @@ def abort_cleanup(host_spec, capture_dir, reason, fixture=False):
         os.umask(previous)
 
 
+def hashes(pins):
+    return {name: hashlib.sha256(raw).hexdigest() for name, raw in pins.items()}
+
+
+def exact_record(raw, keys):
+    value = json.loads(raw)
+    require(isinstance(value, dict) and set(value) == keys and encoded(value) == raw,
+            'abort record schema or canonical bytes differ')
+    return value
+
+
+def sample_files(directory):
+    owned_directory(directory)
+    names = {child.name for child in directory.iterdir()}
+    require('preflight.json' in names and names <= PREFLIGHT_FILES,
+            'abort sample has missing, failed, temporary or unknown evidence')
+    pins = {name: cleanup_bytes(directory / name) for name in sorted(names)}
+    if 'utm-status-cleanup.json' in pins:
+        status = json.loads(pins['utm-status-cleanup.json'])
+        require(status.get('primary_error') is None and status.get('booted_out') is True,
+                'abort sample has unsuccessful helper cleanup')
+    return pins
+
+
+def sample_binding(observed, initial, host):
+    require(isinstance(observed, dict) and set(observed) == SAMPLE_KEYS
+            and observed['state'] == 'stopped' and observed['holders_consistent'] is True
+            and observed['image_holders'] == [] and same_host_image(initial, observed)
+            and observed['vm_uuid'] == initial['vm_uuid'] == host['uuid'] == FIXTURE_UUID
+            and observed['image'] == initial['image'] == str(pathlib.Path(host['package']) / 'Data' / host['image_name'])
+            and all(observed[key] == initial[key] == host[key]
+                    for key in ('package', 'config_sha256', 'utmctl_sha256')),
+            'abort sample differs from the original stopped host/source binding')
+
+
+@contextlib.contextmanager
+def abort_context(host_spec, capture_dir, fixture):
+    require(fixture, 'production terminal abort requires a verified host boot decision controller')
+    host_spec, capture_dir = pathlib.Path(host_spec), pathlib.Path(capture_dir)
+    owned_directory(capture_dir.parent)
+    owned_directory(capture_dir)
+    host = pinned_spec(host_spec, HOST_SPEC_FIELDS)
+    package = pathlib.Path(host['package'])
+    require(capture_dir.parent.name.startswith(('openclaw-host-capture-', 'openclaw-host-reconcile-'))
+            and host['uuid'] == FIXTURE_UUID and package.is_absolute()
+            and package.resolve() == package and package.parent == capture_dir.parent,
+            'terminal abort requires the owned fixture VM package and parent')
+    directory_fd = os.open(capture_dir, os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY)
+    locks = []
+    previous = os.umask(0o077)
+    try:
+        locks = capture_locks(capture_dir, directory_fd=directory_fd)
+        yield host_spec, capture_dir, directory_fd, locks
+    finally:
+        for fd in (*locks, directory_fd):
+            os.close(fd)
+        os.umask(previous)
+
+
+def abort_conflicts(capture_dir, expected_abort=None):
+    for child in capture_dir.iterdir():
+        require(not child.is_symlink(), 'capture contains a symlink')
+        if child.name in TERMINALS:
+            require(child.name == 'ABORT.json' and expected_abort is not None
+                    and cleanup_bytes(child) == expected_abort,
+                    'abort conflicts with a terminal or release record')
+        require(child.name not in {name + '.tmp' for name in TERMINALS},
+                'abort has a temporary terminal record')
+        if child.is_dir():
+            require(not any(os.path.lexists(child / name) for name in
+                            (*TERMINALS, *(name + '.tmp' for name in TERMINALS))),
+                    'abort conflicts with a nested terminal or release record')
+
+
+def abort_binding(host_spec, capture_dir, directory_fd, locks, observed):
+    pins = abort_pins(host_spec, capture_dir, locks, directory_fd)
+    require(not os.path.lexists(capture_dir / 'FAILED.json')
+            and not any(os.path.lexists(capture_dir / (name + '.tmp')) for name in
+                        ('ABORT_CLEANUP_INTENT.json', 'ABORT_CLEANUP.json')),
+            'abort capture or cleanup has failure or temporary evidence')
+    intent_raw = cleanup_bytes('ABORT_CLEANUP_INTENT.json', directory_fd)
+    cleanup_raw = cleanup_bytes('ABORT_CLEANUP.json', directory_fd)
+    intent = exact_record(intent_raw, CLEANUP_INTENT_KEYS)
+    cleaned = exact_record(cleanup_raw, CLEANUP_KEYS)
+    require(intent['scope'] == cleaned['scope'] == ABORT_CLEANUP_SCOPE
+            and cleaned['intent_sha256'] == hashlib.sha256(intent_raw).hexdigest()
+            and intent['input_sha256'] == hashes(pins)
+            and cleaned['clone_absent'] is True and cleaned['vm_state_at_final_check'] == 'stopped'
+            and isinstance(intent['reason'], str) and 1 <= len(intent['reason']) <= 300
+            and intent['reason'].isprintable(), 'abort cleanup receipt binding differs')
+    pinned = require_captured(capture_dir)
+    commitment = require_committed(capture_dir)
+    require(pinned == {name: pins[name] for name in pinned}
+            and commitment == {**json.loads(pins['COMMITTED.json']),
+                               'checkpoint': json.loads(pins['CHECKPOINT.json'])},
+            'abort consumed commitment differs from the pinned bytes')
+    capture, initial, armed, host = (json.loads(pins[name]) for name in
+        ('CAPTURE.json', 'before-shutdown/preflight.json', 'ARMED.json', 'host_spec'))
+    require(armed.get('scope') == ARM_SCOPE and initial['state'] == 'started'
+            and all(initial[key] == commitment['started_sample'][key] for key in
+                ('vm_uuid', 'host_boot_session', 'image_device', 'image_inode', 'image_size', 'vmstate'))
+            and capture.get('scope') == CAPTURE_SCOPE
+            and capture.get('vm_state_at_final_check') == 'stopped'
+            and capture['vm_uuid'] == initial['vm_uuid'] == intent['vm_uuid'] == cleaned['vm_uuid']
+            and capture['host_boot_session'] == initial['host_boot_session'] == intent['host_boot_session'] == cleaned['host_boot_session']
+            and capture['source_size'] == capture['clone_size'] == initial['image_size']
+            and capture['vmstate_at_arm'] == capture['vmstate_at_final_check'] == initial['vmstate']
+            and capture['source_image_sha256'] == capture['clone_image_sha256']
+            and capture['data_volume_uuid'] == commitment['manifest']['data_volume_uuid']
+            and capture['store_spec_sha256'] == commitment['manifest']['spec_sha256']
+            and capture['store_relative_paths'] == commitment['manifest']['store_relative_paths']
+            and capture['store_roles'] == sorted(commitment['manifest']['stores'])
+            and intent['capture_nonce'] == cleaned['capture_nonce'] == commitment['capture_nonce']
+            and intent['checkpoint_sha256'] == cleaned['checkpoint_sha256'] == commitment['checkpoint']['checkpoint_sha256']
+            and intent['journal_head'] == commitment['checkpoint']['journal_head'],
+            'abort original arm, checkpoint or capture binding differs')
+    output = capture_dir / 'abort-cleanup'
+    owned_directory(output)
+    require({child.name for child in output.iterdir()} == {'before', 'before-remove', 'after'},
+            'abort cleanup has failed, partial or unknown evidence')
+    samples = {}
+    for name in ('before', 'before-remove', 'after'):
+        raw = sample_files(output / name)
+        sample_binding(json.loads(raw['preflight.json']), initial, host)
+        samples.update({name + '/' + key: value for key, value in raw.items()})
+    sample_binding(observed, initial, host)
+    require(capture['guard_receipt_sha256'] == guarded_source(capture_dir, initial, observed),
+            'abort guard differs from the capture record')
+    source = pathlib.Path(observed['image'])
+    require(source.resolve() == source, 'abort source path is redirected')
+    identity = clone_identity(source, {'clone_size': capture['source_size'],
+                                      'clone_image_sha256': capture['source_image_sha256']})
+    for value in (intent['source'], cleaned['source'], intent['clone']):
+        require(isinstance(value, dict) and set(value) == IMAGE_KEYS
+                and all(type(value[key]) is int and value[key] >= 0 for key in IMAGE_KEYS - {'sha256'}),
+                'abort image identity schema differs')
+    require(identity == intent['source'] == cleaned['source']
+            and intent['clone']['device'] == identity['device']
+            and intent['clone']['inode'] != identity['inode']
+            and intent['clone']['size'] == capture['clone_size']
+            and intent['clone']['sha256'] == capture['clone_image_sha256']
+            and not intent['clone']['flags'] & stat.UF_IMMUTABLE,
+            'abort source metadata/bytes or cleaned clone differs')
+    clone = capture_dir / 'powered-off-image.asif'
+    require(not os.path.lexists(clone), 'abort temporary clone reappeared')
+    no_disk_attachment(clone)
+    no_sibling_clone(capture_dir)
+    require(abort_pins(host_spec, capture_dir, locks, directory_fd) == pins
+            and cleanup_bytes('ABORT_CLEANUP_INTENT.json', directory_fd) == intent_raw
+            and cleanup_bytes('ABORT_CLEANUP.json', directory_fd) == cleanup_raw,
+            'abort cleanup inputs changed while consumed')
+    return {'pins': pins, 'intent': intent_raw, 'cleanup': cleanup_raw, 'samples': samples,
+            'source': identity, 'initial': initial, 'host': host, 'commitment': commitment}
+
+
+def abort_value(binding, before_samples, at_utc):
+    intent = json.loads(binding['intent'])
+    commitment = binding['commitment']
+    return {'scope': ABORT_SCOPE, 'decision': 'ABORT', 'at_utc': at_utc, 'reason': intent['reason'],
+            'capture_nonce': commitment['capture_nonce'], 'arm_sha256': commitment['arm_sha256'],
+            'journal_head': intent['journal_head'], 'checkpoint_sha256': intent['checkpoint_sha256'],
+            'capture_sha256': hashlib.sha256(binding['pins']['CAPTURE.json']).hexdigest(),
+            'cleanup_intent_sha256': hashlib.sha256(binding['intent']).hexdigest(),
+            'cleanup_sha256': hashlib.sha256(binding['cleanup']).hexdigest(),
+            'input_sha256': hashes(binding['pins']), 'cleanup_sample_sha256': hashes(binding['samples']),
+            'decision_sample_sha256': hashes(before_samples), 'vm_uuid': intent['vm_uuid'],
+            'host_boot_session': intent['host_boot_session'], 'source': binding['source']}
+
+
+def verify_abort(host_spec, capture_dir, observed, directory_fd, locks, *, fixture=False):
+    """Read-only precondition under caller-held EX locks and a fresh caller-supplied sample.
+
+    Returns evidence bytes, never permission. A future release caller must keep the locks,
+    ensure durable publication and freshly recheck before mutation. No provenance/continuity
+    guarantee against a same-uid rewrite is supplied (D189).
+    """
+    require(fixture, 'production terminal abort verification is disabled')
+    host_spec, capture_dir = pathlib.Path(host_spec), pathlib.Path(capture_dir)
+    host = pinned_spec(host_spec, HOST_SPEC_FIELDS)
+    require(capture_dir.parent.name.startswith(('openclaw-host-capture-', 'openclaw-host-reconcile-'))
+            and host['uuid'] == FIXTURE_UUID and pathlib.Path(host['package']).parent == capture_dir.parent,
+            'abort verifier requires the owned fixture boundary')
+    owned_directory(capture_dir.parent)
+    owned_directory(capture_dir)
+    raw = cleanup_bytes('ABORT.json', directory_fd)
+    receipt = exact_record(raw, ABORT_KEYS)
+    abort_conflicts(capture_dir, raw)
+    output = capture_dir / 'abort-decision'
+    owned_directory(output)
+    require({child.name for child in output.iterdir()} == {'before', 'after', 'COMPLETE.json'},
+            'abort decision has failed, partial or unknown evidence')
+    before, after = sample_files(output / 'before'), sample_files(output / 'after')
+    complete_raw = cleanup_bytes(output / 'COMPLETE.json')
+    complete = exact_record(complete_raw, COMPLETE_KEYS)
+    require(complete == {'scope': ABORT_COMPLETE_SCOPE, 'abort_sha256': hashlib.sha256(raw).hexdigest(),
+                         'after_sample_sha256': hashes(after)}, 'abort completion binding differs')
+    binding = abort_binding(host_spec, capture_dir, directory_fd, locks, observed)
+    for sample in (before, after):
+        sample_binding(json.loads(sample['preflight.json']), binding['initial'], binding['host'])
+    require(isinstance(receipt['at_utc'], str) and receipt['at_utc']
+            and receipt == abort_value(binding, before, receipt['at_utc']),
+            'abort decision string, scope, sample or original binding differs')
+    abort_conflicts(capture_dir, raw)
+    require(cleanup_bytes('ABORT.json', directory_fd) == raw
+            and cleanup_bytes(output / 'COMPLETE.json') == complete_raw
+            and sample_files(output / 'before') == before and sample_files(output / 'after') == after,
+            'abort decision changed during verification')
+    return {'abort': raw, 'intent': binding['intent'], 'cleanup': binding['cleanup'],
+            'complete': complete_raw, 'sha256': hashes({'abort': raw, 'intent': binding['intent'],
+                                                       'cleanup': binding['cleanup'], 'complete': complete_raw})}
+
+
+def terminal_abort(host_spec, capture_dir, fixture=False):
+    require(fixture, 'production terminal abort requires a verified host boot decision controller')
+    with abort_context(host_spec, capture_dir, fixture) as (host_spec, capture_dir, directory_fd, locks):
+        output = capture_dir / 'abort-decision'
+        require(not os.path.lexists(output), 'abort decision already attempted; manual handling required')
+        abort_conflicts(capture_dir)
+        output.mkdir(mode=0o700)
+        fsync_parent(capture_dir)
+        try:
+            before = preflight(host_spec, output / 'before')
+            binding = abort_binding(host_spec, capture_dir, directory_fd, locks, before)
+            before_samples = sample_files(output / 'before')
+            result = abort_value(binding, before_samples, datetime.datetime.now(datetime.timezone.utc).isoformat())
+            publish_abort_cleanup(directory_fd, 'ABORT.json', result)
+            raw = cleanup_bytes('ABORT.json', directory_fd)
+            require(exact_record(raw, ABORT_KEYS) == result, 'abort publication readback differs')
+            after = preflight(host_spec, output / 'after')
+            require(abort_binding(host_spec, capture_dir, directory_fd, locks, after) == binding,
+                    'abort bindings changed after publication')
+            abort_conflicts(capture_dir, raw)
+            decision_fd = os.open(output, os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY)
+            try:
+                publish_abort_cleanup(decision_fd, 'COMPLETE.json', {
+                    'scope': ABORT_COMPLETE_SCOPE, 'abort_sha256': hashlib.sha256(raw).hexdigest(),
+                    'after_sample_sha256': hashes(sample_files(output / 'after'))})
+            finally:
+                os.close(decision_fd)
+            verify_abort(host_spec, capture_dir, after, directory_fd, locks, fixture=True)
+            return result
+        except BaseException as error:
+            record_failure(output, 'terminal-abort', error, None)
+            raise
+
+
+def verify_abort_command(host_spec, capture_dir, output, fixture=False):
+    require(fixture, 'production terminal abort verification is disabled')
+    with abort_context(host_spec, capture_dir, fixture) as (host_spec, capture_dir, directory_fd, locks):
+        output = pathlib.Path(output)
+        require(output.parent == capture_dir and not os.path.lexists(output),
+                'abort verification output must be new inside the capture directory')
+        output.mkdir(mode=0o700)
+        fsync_parent(capture_dir)
+        try:
+            observed = preflight(host_spec, output / 'observed')
+            return verify_abort(host_spec, capture_dir, observed, directory_fd, locks, fixture=True)
+        except BaseException as error:
+            record_failure(output, 'verify-abort', error, None)
+            raise
+
+
 if __name__ == '__main__':
-    if len(sys.argv) in (5, 6) and sys.argv[1] == 'abort-cleanup':
+    if len(sys.argv) in (4, 5) and sys.argv[1] == 'terminal-abort':
+        require(len(sys.argv) == 4 or sys.argv[4] == '--fixture', 'invalid terminal abort option')
+        terminal_abort(sys.argv[2], sys.argv[3], len(sys.argv) == 5)
+    elif len(sys.argv) in (5, 6) and sys.argv[1] == 'verify-abort':
+        require(len(sys.argv) == 5 or sys.argv[5] == '--fixture', 'invalid abort verification option')
+        verify_abort_command(sys.argv[2], sys.argv[3], sys.argv[4], len(sys.argv) == 6)
+    elif len(sys.argv) in (5, 6) and sys.argv[1] == 'abort-cleanup':
         require(len(sys.argv) == 5 or sys.argv[5] == '--fixture', 'invalid abort cleanup option')
         abort_cleanup(sys.argv[2], sys.argv[3], sys.argv[4], len(sys.argv) == 6)
     elif len(sys.argv) in (5, 6) and sys.argv[1] == 'cleanup-failed':

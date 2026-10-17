@@ -4904,3 +4904,64 @@ remain. B1 authorizes source/owned fixtures for both gates; no new VM access is 
 for source work, and each needs decisive controls, Claude and exact-head CI. Actual
 macOS reboot/login/hold-reattach and D175 rehearsal still need an exact operator-designated
 disposable machine or a measured fixed disk/RAM/capacity decision. No VM is provisioned.
+
+
+## D210 — 2026-10-17 17:18 EDT: owned terminal ABORT after completed clone cleanup
+
+B5-D62-host-terminal-abort extends the existing disposal module, not a parallel
+controller. Entry-first production fences and the positive fixture boundary remain.
+Both exclusive locks and the capture directory descriptor bind the original arm,
+commitment, ACK, checkpoint, capture, guard and host-spec bytes to successful D209
+cleanup. Exact exported schemas and canonical bytes refuse extra fields, malformed
+receipts and partial/failed attempts. Original host boot/device/VM/image bindings
+remain strict; a source metadata touch or host reboot is manual, without an exception.
+
+Claude148's six corrections are incorporated: the native preflight write-set supplies
+the sample allow-list; only the matching root ABORT is permitted after publication;
+the cleanup's three sample trees are forward-pinned; the verifier takes the caller's
+locked descriptors and fresh observed sample without locking, writing or observing
+on its own; exported record key sets and explicit arm SHA bind the decision. The
+preflight module changes only by adding its filename constant, checked against its
+actual writer names. Native logs/status/plist/helper-cleanup files are allowed; FAILED,
+temporary or unknown entries refuse. An unsuccessful helper cleanup refuses.
+
+The producer samples before, validates cleanup, atomically publishes ABORT.json,
+samples after and rechecks unchanged evidence, then atomically publishes a minimal
+abort-decision/COMPLETE.json bound to ABORT bytes and the after sample. Claude150
+accepts this completion ordering. ABORT alone is insufficient: missing COMPLETE,
+FAILED (even beside complete visible records), temporary or unknown evidence refuses.
+Any failure/interrupt retains its primary error, keeps source denial and the single-use
+attempt for manual handling. A later consumer must itself establish durability under
+its locks before any separately checked release; no receipt proves that an earlier
+process returned after fsync. All denial observations are samples, not continuity.
+
+The read-only core verifier returns only evidence bytes/hashes under caller-held locks;
+the optional command wrapper obtains a new diagnostic sample. Neither grants source
+release, guest admission or boot. The terminal producer changes no flags and starts
+nothing. MATCH/JOURNAL_INPUTS and byte-only VERIFY do not become ACCEPTED; a real B8
+producer and protected provenance remain open. D189's same-user coordinated-rewrite
+limits remain; there is no physical exclusion or authorship claim from these files.
+
+Local owned terminal suite:27 tests pass94.927s, including real checkpoint/commit/ACK/
+cleanup producers and scripted host/flag controls. The initial22-test run had two test
+assertion failures because its deliberately planted conflicting ACCEPTED/BOOTABLE files
+were counted as newly produced files; the assertion now preserves that known baseline.
+No runtime refusal was relaxed. Mutants, bounded regressions, exact-head Claude and CI
+remain in progress; no source readiness or gate closure yet. A broader local regression
+invocation was interrupted in a regular-file cleanup fixture before its native image
+class could execute; the replacement explicitly selects the scripted VmstateGateTest.
+No local image, VM, UTM, production service or installed timer was operated.
+
+B1 remains source/owned only. B2 Alpine and B4 remain bounded historical mechanism/design
+inputs; B3 remains JIT and neither B3 nor B4 was repeated. B5/1.2 open at v1.2-pre,
+B6 has no attended-window authorization, B7–B9 held. D64 and production capture/reconcile
+refusals are unchanged; four histories remain separate. Next two source gates are a
+separately checked owned source release consuming this decision under locks, then guest
+decision binding/scoped launchd/process admission and manual restoration before D175.
+Each requires decisive owned controls, Claude and exact-head CI. Actual macOS reboot
+still needs exact operator-designated disposable access or a measured fixed disk/RAM/
+capacity decision; this source slice needs no new VM or production authorization.
+
+D210 local follow-up: committed mutant runner controls pass and all12 mutants are killed
+by their intended assertions with no runner errors. Plan lint14PASS/1existingWARN/0FAIL.
+The bounded regression and exact-head review/CI remain pending; no readiness claim.

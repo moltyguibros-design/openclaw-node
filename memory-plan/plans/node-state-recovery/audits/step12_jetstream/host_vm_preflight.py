@@ -107,6 +107,9 @@ def gui_status_helper(utmctl, vm_uuid, output):
         os.close(fd)
 
 
+PREFLIGHT_FILES = frozenset({'preflight.json', 'utm-status.json', 'utm-status.plist',
+                             'utm-status.out', 'utm-status.err', 'utm-status-cleanup.json'})
+
 LAUNCHCTL = '/bin/launchctl'
 
 

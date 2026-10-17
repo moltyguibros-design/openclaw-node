@@ -3281,3 +3281,33 @@ remain. B1 authorizes source/owned fixtures for both gates; no new VM access is 
 for source work, and each needs decisive controls, Claude and exact-head CI. Actual
 macOS reboot/login/hold-reattach and D175 rehearsal still need an exact operator-designated
 disposable machine or a measured fixed disk/RAM/capacity decision. No VM is provisioned.
+
+
+### 2026-10-17 17:13 EDT — B5-D62-host-terminal-abort preflight
+
+- [A] B5-D62-host-terminal-abort: produce and strictly consume an owned terminal ABORT
+  only after completed checkpoint-bound cleanup, retaining source denial. This slice never
+  releases a source, starts a VM, grants guest admission or relaxes production/D64 refusals.
+  Needs: D209 cleanup producers and exact-head green1f7dc5b7 CI39067153085, original
+  arm/commit/ACK/checkpoint/capture/guard bindings, owned files and both capture locks.
+  Feeds: separately checked source release, then guest decision binding/scoped admission
+  and manual restoration before D175. Verify: real owned cleanup producers, scripted
+  host/flags, strict schema/byte/sample bindings, partial-publication/failure/interrupt/
+  lock/identity/conflict negatives and decisive mutants, Claude and exact-head green CI.
+  Edits: existing host_clone_dispose.py; authoritative preflight sample-file constant;
+  owned terminal tests/mutant runner; CI registration; four plan ledgers and AUDIT_PRE.
+  Source readiness only: native ASIF flags, real acceptance and macOS reboot remain open.
+
+
+### 2026-10-17 17:18 EDT — terminal ABORT candidate (D210)
+
+Existing clone disposal now produces a fixture-only cleanup-bound ABORT and verifies
+canonical exact schemas, original capture/guard/host bindings and forward sample pins.
+A matching COMPLETE after post-publication checks is mandatory; visible ABORT beside
+FAILED/temp/partial evidence refuses. The core verifier reads under caller-held locks
+and caller-supplied fresh observations, returns bytes only, and changes no flags.27owned
+terminal tests pass94.927s; mutants/regressions/Claude/exact-head CI pending. This is not
+source readiness or release/admission. D64 and production refusals remain; B5/1.2open,
+B6–B9held, B3/B4 not repeated, four histories separate. Next: checked owned source release,
+then guest scoped admission/manual restoration before D175; actual macOS reboot remains
+operator-access/resource-gated. No production operation or local image/VM action.
