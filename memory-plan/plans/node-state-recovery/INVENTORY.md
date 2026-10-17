@@ -2869,3 +2869,21 @@ and root-owned-root native report, then integrated owned stopped-ASIF reader
 verification. Both are B1-owned-test work; D62 macOS reboot access remains
 separate. B3/B4 were not repeated, B5/1.2 open, B6–B9 closed, D64 unchanged;
 all production services/VM/timers and four histories untouched.
+
+
+2026-10-17 06:51 EDT — D198: native shared device binding observed at
+b1119e78 in39026337387/job117377947876 (artifact12097953565), exit0.
+B5_NATIVE_DEVICE_BINDING_REPORT_20261017.json retains raw bytes with SHA256
+efbd1656…1ae4cd6; the RUNTIME JSON records the interpretation. The seeded
+volume root is0:0/0755 after preparation and in all3 variants. Both exact-
+option variants honor owners, deny root0600 reads, preserve every recorded
+image identity field across their readonly cycle and confirm per-phase
+known-disk absence/cleanup. Plain readonly still refuses absent noexec.
+The shared whole/Data binding helpers ran natively; the complete wrapper's
+locked reader/capture flow did not. Guest uid parity, never-registered UUIDs,
+sibling/dirty guest volumes and pre-existing xattrs remain unproved.
+All-six exact-head CI and Claude review are pending; B5-native-device-binding
+stays open. Next that review/CI gate, then native owned stopped-ASIF journal
+reader integration, both within B1's owned-test authorization. D62 rehearsal
+access stays operator-owned and separate. B3/B4 were not repeated; B5/1.2
+open, B6–B9 closed, D64 unchanged and production untouched.

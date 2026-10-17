@@ -4303,3 +4303,29 @@ closure. Next integrated stopped-ASIF journal verification is separate.
 D62/D175, serving-NATS adapter, protected provenance and abort/manual resumption
 remain open. B3/B4 not repeated; B5/1.2 open, B6–B9 closed, D64 unchanged,
 production capture disabled and all four histories separate.
+
+
+## D198 — 2026-10-17 06:51 EDT: native shared bindings under a root-owned root
+
+The b1119e78 native job39026337387/117377947876 completed at exit0 and
+retained artifact12097953565. B5_NATIVE_DEVICE_BINDING_REPORT_20261017.json
+and its RUNTIME JSON preserve the raw report, SHA256 and interpretation.
+The probe now exercises the same whole-disk and Data binding helpers as
+the wrapper on actual bare diskutil entries and canonical nodes. In all3
+variants its root is0:0/0755. Both exact-option cases honor ownership and
+deny root0600 reads; plain readonly refuses noexec. Every readonly cycle
+keeps all recorded image bytes/identity/times/flags/empty xattr names equal,
+and every phase independently confirms known-disk absence and cleanup.
+The final known list is empty after settled(), not a second independent
+absence proof. Observations remain sequential, not physical exclusion.
+
+This removes the runner-owned-root limitation of the earlier native positive,
+not the remaining fixture-shape limits: fresh host-written single-volume ASIF,
+uid501 both sides, no pre-existing xattrs or dirty/sibling guest volumes.
+It does not execute the complete wrapper/locked journal reader or prove a
+stopped VM's actual history. All-six current-head CI and Claude review remain
+pending; no source-readiness or gate-closure claim. The next independent
+verification is owned stopped-ASIF journal reader integration after this
+source's review/CI. D62/D175 reboot/abort/manual resumption, protected roots
+and serving-NATS recovery remain open; production capture stays disabled,
+B6–B9 closed and all four histories separate.
