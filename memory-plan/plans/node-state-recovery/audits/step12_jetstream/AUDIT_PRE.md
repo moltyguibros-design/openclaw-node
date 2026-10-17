@@ -646,3 +646,39 @@ budget/capacity source. No local UTM VM was provisioned or operated; only the ow
 B3/B4 were not repeated; B5/1.2 remain open, B6–B9 closed, D64 unchanged,
 production capture disabled and all four histories separate. No live service,
 VM, production image or installed timer was changed.
+
+
+## B5-owned-stopped-ASIF-reader preflight — 2026-10-17 12:55 EDT
+
+Micro re-orient: Block1/step1.2 remains v1.2-pre; production preservation is closed.
+D203 verified the owned kickstart fixture; current68d45483 has all8 checks green.
+This slice supplies the missing complete native frozen-journal read on CI-owned ASIF.
+It feeds B5 byte binding, then D62/D175 admission/manual restoration; never B8 history acceptance.
+The checkpoint, pin publication, bounded reader, wrapper and private fixture all exist.
+This remains the next independently executable gate; no production operation is authorized.
+
+Needs checked against current source: StoppedImage builds the real Journal/capture_ready,
+commit/commit_checkpoint and pinned CAPTURE records with synthetic hold/VM observations;
+read_journal_inputs holds both real host locks and calls locked_read/verify_stopped_journal/
+verify_frozen_checkpoint. The native probe already owns its ASIF, mount options and
+inventory-bound cleanup. No BLOCKED.md; tree clean before this preflight.
+
+### File deltas / verification
+
+Extend probe_asif_mount_ownership.py with a separately guarded CI-only reader mode, reusing
+its native attach/release and the existing synthetic journal fixture. Bind the real fresh
+volume UUID before the manifest commitment, seed the owned tree while writable, restore
+root ownership, detach, then publish the fixture clone hash/size and read through the
+unmodified complete wrapper. Test intact, corrupt chain, pending, unknown entry and changed
+config bytes; each case retains before/after image metadata, receipt or exact primary refusal
+and nonvacuous known-disk cleanup. Native disk commands run only on an isolated CI runner.
+Portable controls in test_host_journal_mount.py cover fixture seeding, refusal oracle and
+reader-mode guards/dispatch; workflow retains the complete native report even on refusal.
+No runtime source, production plist, action budget, T1/T2/T3 or default-policy change.
+
+WIN: portable decisive controls pass; Claude adversarial review; native positive reaches
+the frozen verifier with matching host pins, every named negative refuses for its intended
+reason, every readonly cycle leaves image identity/bytes unchanged and disks absent, final
+owned directory removed; current exact-head CI all green. Native report is synthetic
+quiescence/mechanism evidence, not a VM capture, guest UID parity, physical writer proof or
+real-history acceptance. D64/production capture stay closed; B3/B4 are not repeated.

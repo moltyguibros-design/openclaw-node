@@ -1513,6 +1513,75 @@ class NativeDeviceBinding(unittest.TestCase):
         self.assertEqual(verified['statfs']['mntfromname'], volume)
 
 
+class ReaderProbe(MountCase):
+    def test_each_native_case_oracle_runs_the_real_locked_reader_and_only_intact_verifies(self):
+        for name, expected in probe.READER_CASES:
+            with self.subTest(name=name):
+                self.fake.image = self.image()
+                probe.change_reader_seed(self.fake.image, name)
+                row = {}
+                with mock.patch.object(stopped_journal_inputs, 'verify_frozen_checkpoint',
+                                       wraps=stopped_journal_inputs.verify_frozen_checkpoint) as frozen:
+                    probe.reader_case(self.capture, self.capture / ('journal-read-' + name.replace('-', '')),
+                                      self.table, expected, row)
+                self.assertEqual(frozen.call_count, int(name in ('intact', 'changed-config')))
+                if expected is None:
+                    self.assertEqual(row['receipt']['reader']['checkpoint_sha256'], self.record['sha256'])
+                else:
+                    self.assertRegex(row['refusal']['message'], expected)
+                    self.assertTrue(row['failure']['cleanup']['clean'])
+
+    def test_a_verifier_bypass_is_caught_by_the_changed_config_oracle(self):
+        authentic = self.fake.real_reader(self.capture, self.data, table=self.table)
+        self.fake.image = self.image()
+        probe.change_reader_seed(self.fake.image, 'changed-config')
+        with mock.patch.object(stopped_journal_inputs, 'verify_frozen_checkpoint', return_value=authentic):
+            with self.assertRaisesRegex(RuntimeError, '^reader accepted the damaged fixture$'):
+                probe.reader_case(self.capture, self.output, self.table,
+                                  dict(probe.READER_CASES)['changed-config'], {})
+
+    def test_an_unrelated_refusal_or_missing_known_disk_check_cannot_satisfy_the_oracle(self):
+        self.fake.mount = 'fail'
+        with self.assertRaisesRegex(RuntimeError, '^reader refused for another reason: '):
+            probe.reader_case(self.capture, self.output, self.table, 'unknown entry', {})
+        self.fake.mount = 'ok'
+        original = wrapper.release
+
+        def vacuous(*args):
+            cleanup, late = original(*args)
+            return {**cleanup, 'steps': [step for step in cleanup['steps']
+                                        if step['step'] != 'attach result disk after eject']}, late
+
+        with mock.patch.object(wrapper, 'release', side_effect=vacuous):
+            with self.assertRaisesRegex(RuntimeError, '^reader did not confirm its attached disk gone$'):
+                probe.reader_case(self.capture, self.capture / 'journal-read-vacuous', self.table, None, {})
+
+
+class ReaderSeed(unittest.TestCase):
+    def test_native_uuid_is_bound_before_commitment_and_no_fixture_patch_survives_seeding(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-capture-owned-seed-') as name:
+            temp = pathlib.Path(name).resolve()
+            capture, seed = temp / 'capture', temp / 'seed'
+            capture.mkdir(mode=0o700)
+            clone = capture / wrapper.CLONE
+            clone.write_bytes(b'owned clone must survive host fixture seeding')
+            writer = guest.preservation_journal.NATS_WRITER_MARKER
+            inventory = guest.preservation_journal.capture_entrypoint_inventory
+            seeded = probe.seed_reader_fixture(capture, seed, UUID)
+            self.assertEqual(clone.read_bytes(), b'owned clone must survive host fixture seeding')
+            self.assertEqual(guest.preservation_journal.NATS_WRITER_MARKER, writer)
+            self.assertIs(guest.preservation_journal.capture_entrypoint_inventory, inventory)
+            committed = require_committed(capture)
+            self.assertEqual(committed['manifest']['data_volume_uuid'], UUID)
+            summary = stopped_journal_inputs.verify_stopped_journal(capture, seed, table=seeded['table'])
+            self.assertEqual(summary['checkpoint_sha256'], seeded['checkpoint_sha256'])
+            self.assertEqual(summary['pre_head'], seeded['pre_head'])
+            self.assertEqual(summary['window'], 'window-1')
+            held = wrapper.capture_locks(capture)
+            for fd in held:
+                os.close(fd)
+
+
 class ProbeRun(unittest.TestCase):
     """run(): handled cleanup failures are reported, cleanup interrupts raised, removal errors recorded."""
 
@@ -1640,6 +1709,19 @@ class ProbeGuards(unittest.TestCase):
         sudo_row = {'argv': [], 'returncode': 0, 'timed_out': False, 'stdout': b'', 'stderr': ''}
         with mock.patch.object(probe, 'attempt', return_value=sudo_row):
             self.assertEqual(probe.guard(self.argv, self.ENVIRON, 'darwin'), self.output)
+
+    def test_reader_mode_has_the_same_guards_and_dispatches_only_after_them(self):
+        argv = ['--ci-owned-reader', str(self.output)]
+        sudo_row = {'returncode': 0, 'timed_out': False, 'stdout': b'', 'stderr': ''}
+        with mock.patch.object(probe, 'attempt', return_value=sudo_row), \
+                mock.patch.object(probe, 'reader_run', return_value=0) as reader, \
+                mock.patch.object(probe, 'run', side_effect=AssertionError('ownership mode run')), \
+                mock.patch.object(probe.sys, 'platform', 'darwin'):
+            with self.assertRaisesRegex(RuntimeError, 'only on a GitHub Actions runner'):
+                probe.main(argv, {})
+            reader.assert_not_called()
+            self.assertEqual(probe.main(argv, self.ENVIRON), 0)
+            reader.assert_called_once_with(self.output)
 
     def test_main_on_this_host_refuses_without_running(self):
         if sys.platform == 'darwin':

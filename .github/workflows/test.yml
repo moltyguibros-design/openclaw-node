@@ -247,12 +247,21 @@ jobs:
         run: |
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py \
             --ci-owned-probe "$RUNNER_TEMP/asif-mount-ownership.json"
+      - name: Verify the complete frozen-journal reader on a fresh CI-only ASIF
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          OPENCLAW_OWNERSHIP_PROBE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py \
+            --ci-owned-reader "$RUNNER_TEMP/stopped-asif-reader.json"
       - name: Retain native observations even when the probe refuses
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: asif-mount-ownership-${{ github.sha }}
-          path: ${{ runner.temp }}/asif-mount-ownership.json
+          path: |
+            ${{ runner.temp }}/asif-mount-ownership.json
+            ${{ runner.temp }}/stopped-asif-reader.json
           if-no-files-found: error
 
   kickstart-timing-macos:

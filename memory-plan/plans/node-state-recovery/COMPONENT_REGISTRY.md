@@ -497,3 +497,15 @@ budget/capacity source. No local UTM VM was provisioned or operated; only the ow
 B3/B4 were not repeated; B5/1.2 remain open, B6–B9 closed, D64 unchanged,
 production capture disabled and all four histories separate. No live service,
 VM, production image or installed timer was changed.
+
+
+### 2026-10-17 13:12 EDT — B5-owned-stopped-ASIF-reader candidate (D204)
+
+The CI-only ownership probe now has a separately guarded complete-reader mode. It seeds
+the existing synthetic checkpoint fixture with the actual fresh ASIF UUID before commitment,
+then tests intact/corrupt-chain/pending/unknown/changed-config cases through the real locked
+wrapper and frozen verifier. Each readonly interval must preserve the image identity/bytes
+and pins and confirm its attached disk gone. All85 portable mount/probe controls pass
+(one platform skip); Claude review, native report and current exact-head CI are pending. This is not
+a VM capture, guest UID parity, pre-stop writer proof or B8 acceptance. B5/1.2 remain open,
+B6–B9 closed, D64/production-capture refusal unchanged. Production was not touched.

@@ -3053,7 +3053,7 @@ production capture disabled and all four histories separate. No live service,
 VM, production image or installed timer was changed.
 
 
-- [ ] B5-owned-stopped-ASIF-reader: exercise the complete owned readonly mount/locked journal reader/frozen verifier on a fresh CI-only ASIF.
+- [A] B5-owned-stopped-ASIF-reader: exercise the complete owned readonly mount/locked journal reader/frozen verifier on a fresh CI-only ASIF.
 
 > **B5-owned-stopped-ASIF-reader — Goal:** verify the frozen owned checkpoint through the complete native wrapper, rather than only shared mount/device helpers.
 > **Needs:** D203 verified source at1e915d8a; D185/D187 checkpoint/commitment/CAPTURE fixture; native ownership/device assumptions and known-disk cleanup; isolated CI-owned image, no production VM/disk.
@@ -3070,3 +3070,15 @@ VM, production image or installed timer was changed.
 > **Needs:** retained D200/D201 default-arm reports, existing applied-timeout controls, D62 admission/host decision/manual controller design and disposable macOS access for its native rehearsal. Missing admission/access prevents starting that rehearsal.
 > **Feeds:** B5 resumption readiness and the B6 window runbook.
 > **Verify:** code/runtime: the default-budget collision stays partial/closed/unresolved; any later adoption/retry binds the accepted host decision and fresh scoped observations before reopening, with decisive negatives and reviewed manual fallback. Any runtime policy change needs its own Claude/exact-head CI and disposable native evidence; ownedThrottle1 cannot satisfy this contract.
+
+
+### 2026-10-17 13:12 EDT — B5-owned-stopped-ASIF-reader candidate (D204)
+
+The CI-only ownership probe now has a separately guarded complete-reader mode. It seeds
+the existing synthetic checkpoint fixture with the actual fresh ASIF UUID before commitment,
+then tests intact/corrupt-chain/pending/unknown/changed-config cases through the real locked
+wrapper and frozen verifier. Each readonly interval must preserve the image identity/bytes
+and pins and confirm its attached disk gone. All85 portable mount/probe controls pass
+(one platform skip); Claude review, native report and current exact-head CI are pending. This is not
+a VM capture, guest UID parity, pre-stop writer proof or B8 acceptance. B5/1.2 remain open,
+B6–B9 closed, D64/production-capture refusal unchanged. Production was not touched.

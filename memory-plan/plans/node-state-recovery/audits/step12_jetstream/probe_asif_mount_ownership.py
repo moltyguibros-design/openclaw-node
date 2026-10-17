@@ -40,12 +40,21 @@ The isolated asif-mount-ownership-macos CI job invokes this probe and uploads it
 
 Exit 0 means the probe completed and cleaned up, not that the wrapper's assumptions hold; that
 is read from the report.
+
+--ci-owned-reader instead seeds the existing synthetic checkpoint fixture on its own fresh ASIF
+and exercises the complete unmodified journal mount wrapper. Its host VM samples and hold/stop
+observations are synthetic; there is no VM or NATS server. The intact read must verify against
+the host pins, and corrupt-chain, pending, unknown-entry and changed-config cases must refuse
+for their named reasons. Each writable reseed is followed by a detach and a new fixture clone
+hash publication; only the subsequent read-only interval claims unchanged image bytes/identity.
+This is frozen-reader mechanism evidence, not a stopped-VM capture or history acceptance.
 """
 import datetime
 import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import sys
 import tempfile
@@ -73,6 +82,9 @@ FLAG_NAMES = (('rdonly', 0x1), ('synchronous', 0x2), ('noexec', 0x4), ('nosuid',
               ('snapshot', 0x40000000), ('strictatime', 0x80000000))
 VARIANTS = (('wrapper-options', MOUNT_OPTIONS, False), ('plain-readonly', None, False),
             ('wrapper-options-ownership-disabled', MOUNT_OPTIONS, True))
+READER_CASES = (('intact', None), ('corrupt-chain', 'journal chain differs'),
+                ('pending', 'unknown or pending entry'), ('unknown', 'unknown entry'),
+                ('changed-config', 'config bytes differ from the baseline hash'))
 
 
 def flag_names(flags):
@@ -87,8 +99,8 @@ def guard(argv, environ, platform=sys.platform):
     require(environ.get('CI') == 'true' and environ.get('GITHUB_ACTIONS') == 'true',
             'the ownership probe runs only on a GitHub Actions runner')
     require(environ.get('OPENCLAW_OWNERSHIP_PROBE') == '1', 'OPENCLAW_OWNERSHIP_PROBE=1 is required')
-    require(len(argv) == 2 and argv[0] == '--ci-owned-probe',
-            'usage: probe_asif_mount_ownership.py --ci-owned-probe OUTPUT_JSON')
+    require(len(argv) == 2 and argv[0] in ('--ci-owned-probe', '--ci-owned-reader'),
+            'usage: probe_asif_mount_ownership.py --ci-owned-probe|--ci-owned-reader OUTPUT_JSON')
     output = pathlib.Path(argv[1])
     require(output.is_absolute() and not os.path.lexists(output) and output.parent.is_dir(),
             'probe output must be a new file in an existing directory')
@@ -341,8 +353,171 @@ def run(output):
     return 0 if report['completed'] and report['cleanup']['clean'] and report['cleanup']['removed'] else 1
 
 
+def seed_reader_fixture(capture, seed, volume_uuid):
+    from test_stopped_journal_inputs import StoppedImage
+
+    class NativeVolumeFixture(StoppedImage):
+        def manifest(self, head=None, **changes):
+            return super().manifest(head, **{**changes, 'data_volume_uuid': volume_uuid})
+
+        def host_manifest(self, head=None, **changes):
+            spec = json.loads(self.spec.read_bytes())
+            self.spec.unlink()
+            write_record(self.spec, {**spec, 'data_volume_uuid': volume_uuid})
+            return super().host_manifest(head, **changes)
+
+    fixture = NativeVolumeFixture('runTest')
+    previous = os.umask(0o077)
+    try:
+        fixture.setUp()
+        shutil.copytree(fixture.data, seed)
+        shutil.copytree(fixture.capture, capture, dirs_exist_ok=True)
+        return {'table': fixture.table, 'checkpoint_sha256': fixture.record['sha256'],
+                'pre_head': fixture.commitment['manifest']['journal_head'],
+                'data_volume_uuid': volume_uuid}
+    finally:
+        fixture.doCleanups()
+        os.umask(previous)
+
+
+def change_reader_seed(root, case):
+    from preservation_journal import encoded
+    from test_stopped_journal_inputs import config_file, preservation, window_dir
+
+    if case == 'corrupt-chain':
+        path = window_dir(root) / '000000.json'
+        path.write_bytes(encoded({**json.loads(path.read_bytes()), 'at': 'owned-corruption'}))
+    elif case == 'pending':
+        path = window_dir(root) / '.pending-owned'
+        path.write_bytes(b'owned interrupted write')
+        path.chmod(0o600)
+    elif case == 'unknown':
+        path = preservation(root) / 'unknown-owned'
+        path.write_bytes(b'owned unexpected entry')
+        path.chmod(0o600)
+    elif case == 'changed-config':
+        path = config_file(root, 'nats')
+        path.write_bytes(path.read_bytes() + b'\n# owned changed config bytes\n')
+    else:
+        require(case == 'intact', 'unknown reader probe case')
+
+
+def reader_write_phase(image, temp, seed, capture, disks, case, row):
+    attached = attach(image, disks)
+    point = temp / 'reader-seed'
+    row['seed_attach'] = attached
+    try:
+        mount_at(point, attached['volume'])
+        checked(attempt(SUDO, '-n', DISKUTIL, 'enableOwnership', str(point)), 'enableOwnership')
+        checked(attempt(SUDO, '-n', '/usr/sbin/chown', '%s:%s' % (os.getuid(), os.getgid()), str(point)),
+                'chown fixture volume root')
+        if not seed.exists():
+            row['fixture'] = seed_reader_fixture(capture, seed, attached['info']['VolumeUUID'])
+        if (point / 'Users').exists():
+            shutil.rmtree(point / 'Users')
+        shutil.copytree(seed / 'Users', point / 'Users')
+        change_reader_seed(point, case)
+        checked(attempt(SUDO, '-n', '/usr/sbin/chown', '0:0', str(point)), 'restore fixture root owner')
+        info = point.lstat()
+        row['seed_root'] = {'uid': info.st_uid, 'gid': info.st_gid, 'mode': oct(info.st_mode & 0o7777)}
+        require(row['seed_root'] == {'uid': 0, 'gid': 0, 'mode': '0o755'},
+                'seed volume root is not root-owned 0755')
+    finally:
+        row['seed_release'], late = release(image, [point], disks)
+    settled(row['seed_release'], late, 'reader seed', disks)
+    point.rmdir()
+
+
+def reader_case(capture, output, table, expected, row):
+    from preservation_checks import Refused
+
+    try:
+        receipt = wrapper.read_journal_inputs(capture, output, table=table, fixture=True)
+    except Exception as error:
+        row['refusal'] = {'type': type(error).__name__, 'message': str(error)}
+        if expected is None:
+            raise
+        require(isinstance(error, Refused) and re.search(expected, str(error)),
+                'reader refused for another reason: ' + str(error))
+        row['failure'] = json.loads((output / 'FAILED.json').read_bytes())
+        require(row['failure']['stage'] == 'read' and not (output / 'JOURNAL_INPUTS.json').exists(),
+                'reader negative did not fail at read without a receipt')
+        cleanup = row['failure']['cleanup']
+    else:
+        row['receipt'] = receipt
+        require(expected is None, 'reader accepted the damaged fixture')
+        require(json.loads((output / 'JOURNAL_INPUTS.json').read_bytes()) == receipt
+                and not (output / 'FAILED.json').exists(), 'reader receipt publication differs')
+        cleanup = receipt['cleanup']
+    gone = [step['result'] for step in cleanup['steps'] if step['step'] == 'attach result disk after eject']
+    require(cleanup['clean'] and gone and all(value['returncode'] not in (0, None) for value in gone),
+            'reader did not confirm its attached disk gone')
+
+
+def reader_run(output):
+    from host_guest_commit import require_captured, require_committed
+    from host_vm_capture import CAPTURE_SCOPE, FIXTURE_UUID, publish_pinned_capture
+
+    temp = pathlib.Path(tempfile.mkdtemp(prefix='openclaw-capture-owned-reader-',
+                                         dir=os.environ.get('RUNNER_TEMP'))).resolve()
+    capture, seed = temp / 'capture', temp / 'seed'
+    capture.mkdir(mode=0o700)
+    image = capture / wrapper.CLONE
+    points = [temp / 'reader-seed', *(capture / ('journal-read-' + name.replace('-', '')) / 'mount' for name, _ in READER_CASES)]
+    disks = []
+    report = {'scope': 'CI-only synthetic frozen-journal reader on an owned ASIF; no VM or production volume',
+              'started_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              'runner_uid': os.getuid(), 'os': attempt('/usr/bin/sw_vers')['stdout'].decode(errors='replace'),
+              'cases': {}, 'completed': False}
+    interrupt = None
+    try:
+        checked(attempt(DISKUTIL, 'image', 'create', 'blank', '--format', 'ASIF', '--size', '64m',
+                        '--fs', 'APFS', '--volumeName', 'Data', str(image)), 'create')
+        image.chmod(0o600)
+        for name, expected in READER_CASES:
+            row = report['cases'][name] = {'expected_refusal': expected}
+            reader_write_phase(image, temp, seed, capture, disks, name, row)
+            if name == 'intact':
+                report['fixture'] = row.pop('fixture')
+            before = row['image_before'] = image_state(image)
+            publish_pinned_capture(capture, {
+                'scope': CAPTURE_SCOPE, 'vm_state_at_final_check': 'stopped', 'vm_uuid': FIXTURE_UUID,
+                'clone_image_sha256': before['sha256'], 'clone_size': before['size'],
+                'data_volume_uuid': report['fixture']['data_volume_uuid']},
+                require_committed(capture)['checkpoint'])
+            pins = require_captured(capture)
+            reader_case(capture, capture / ('journal-read-' + name.replace('-', '')), report['fixture']['table'], expected, row)
+            row['image_after'] = image_state(image)
+            require(row['image_after'] == before, 'reader changed image bytes or identity')
+            require(require_captured(capture) == pins, 'reader changed host commitment pins')
+            if expected is None:
+                require(all(row['receipt']['reader'][key] == report['fixture'][key]
+                            for key in ('checkpoint_sha256', 'pre_head')), 'reader verified another fixture')
+            row['completed'] = True
+        report['completed'] = True
+    except Exception as error:
+        report['error'] = repr(error)[:500]
+    except BaseException as error:
+        report['error'] = repr(error)[:500]
+        interrupt = error
+        raise
+    finally:
+        report['cleanup'], late = release(image, points, disks)
+        if report['cleanup']['clean']:
+            try:
+                shutil.rmtree(temp)
+            except OSError as error:
+                report['cleanup']['rmtree_error'] = repr(error)[:300]
+        report['cleanup']['removed'] = not os.path.lexists(temp)
+        write_record(output, json.loads(json.dumps(report, default=repr)))
+        if late is not None and interrupt is None:
+            raise late
+    return 0 if report['completed'] and report['cleanup']['clean'] and report['cleanup']['removed'] else 1
+
+
 def main(argv, environ):
-    return run(guard(argv, environ))
+    output = guard(argv, environ)
+    return (reader_run if argv[0] == '--ci-owned-reader' else run)(output)
 
 
 if __name__ == '__main__':

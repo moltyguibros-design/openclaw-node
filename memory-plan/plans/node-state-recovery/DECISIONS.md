@@ -4523,3 +4523,40 @@ budget/capacity source. No local UTM VM was provisioned or operated; only the ow
 B3/B4 were not repeated; B5/1.2 remain open, B6–B9 closed, D64 unchanged,
 production capture disabled and all four histories separate. No live service,
 VM, production image or installed timer was changed.
+
+
+## D204 — 2026-10-17 13:12 EDT: complete owned frozen-journal reader integration
+
+The next B5 slice extends the existing CI-only ASIF probe with --ci-owned-reader.
+All existing platform/CI/explicit-flag/new-output/sudo guards still precede disk commands.
+The fresh volume UUID is bound before the synthetic journal manifest, host commitment and
+checkpoint are produced by the existing StoppedImage fixture; its Journal, capture_ready,
+commit/commit_checkpoint and CAPTURE pin publication are real, but its hold/stop/VM
+observations are synthetic. Fixture patches are removed before native reading. No actual
+VM or NATS server is involved, and runner UID ownership is not guest UID parity evidence.
+
+Each case seeds the owned image while writable, restores its root to0:0/0755, detaches,
+then publishes its own clone hash/size before the complete unmodified read_journal_inputs
+lock/mount/reader/frozen-verifier path. Intact must verify matching heads; corrupt-chain,
+pending, unknown-entry and changed-config cases must refuse at read for their named
+reasons without a success receipt. Each readonly cycle checks image hash/size/inode/times/
+flags/xattr names unchanged, host commitment pins unchanged and nonvacuous attached-disk
+absence in cleanup. The outer probe removes only its own directory after inventory-bound
+cleanup. Reseeding and clone republishing are deliberate fixture mutations outside that
+readonly interval; this is not capture authenticity or physical writer proof.
+
+Portable controls exercise the case oracle through the scripted complete wrapper, catch
+a bypassed frozen verifier on changed config, reject unrelated refusals and vacuous disk
+absence, and verify UUID-bound seeding/unlocked copied host locks with no lingering fixture
+patches. The first run caught invalid hyphenated output suffixes; the fixture now uses the
+wrapper's existing alphanumeric suffix form, with no runtime relaxation. Native evidence,
+Claude review and exact-head green CI remain pending until their separate receipts.
+B5/1.2 remain open, B6–B9 closed, D64 unchanged and production capture disabled.
+B3/B4 were not repeated; all four histories remain separate. No local UTM, production
+image/service or installed timer was operated. D62/D175 admission/abort/manual restoration
+follows; actual macOS reboot rehearsal still needs the operator's separately designated
+disposable machine or approved measured resource decision.
+
+Local D204 verification: all85 mount/probe tests pass (one Linux-platform-only guard skip
+on macOS), including the new portable controls. Python AST/workflow YAML parse and plan
+lint14PASS/1existingWARN/0FAIL pass. Native reader and Claude/exact-head CI remain pending.
