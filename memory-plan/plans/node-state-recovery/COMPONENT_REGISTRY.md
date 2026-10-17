@@ -1,12 +1,13 @@
 # Node state recovery — registry
 
-2026-10-17 18:50 EDT — D212 corrected owned source-release candidate passes40
-controls and13intended mutants. A reproduced stale-observation gap is corrected by
-a final live pre-clear sample with exact guarded metadata/ctime and clone/attachment/
-sibling checks; COMPLETE binds that sample. Claude172 accepts the revised design,
-but corrected-source review and exact-head CI remain pending. Source row/B5/1.2
-open, B6–B9 held, production/D64 unchanged. No native whole pipeline or Mac reboot
-proof; next guest scoped admission/manual restoration, then D175 owned re-pin.
+2026-10-17 19:21 EDT — D213 verifies the owned ABORT source-release prerequisite at
+004b1ce5 / CI39076640535 all8 green, Claude174. Native117525047608 passes40release
+controls/13mutants and real owned-file barriers on read-only descriptors. The last live
+pre-clear observation and exact metadata/clone/attachment/sibling checks close the
+reproduced freshness gap. VM/flags remain scripted; no full native pipeline, guest
+admission, boot, real acceptance or Mac reboot claim. B5/1.2 open, B6–B9 held; D64,
+production and timers unchanged. Next guest scoped admission/manual then D175. Each
+new head, including this evidence-only receipt, needs its own green CI.
 
 ## Family 1: persisted application state
 

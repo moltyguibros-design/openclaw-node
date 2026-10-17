@@ -3338,7 +3338,7 @@ manual restoration before D175. Receipt head still needs exact-head CI.
 
 ### 2026-10-17 18:29 EDT — B5-D62-owned-source-release preflight
 
-- [A] B5-D62-owned-source-release: release an owned source only after re-established
+- [x] B5-D62-owned-source-release: release an owned source only after re-established
   durability and fresh verification of the completed cleanup-bound ABORT.
   Needs: reviewed D211 producer/consumer, c171c72c exact CI39073212715 all8 green,
   both capture EX locks, original host/source/checkpoint bindings and owned fixture files.
@@ -3427,3 +3427,16 @@ and the real owned-file barriers pass; current CI native behavior still must be 
 No source readiness, native whole pipeline, guest admission, boot, B8 acceptance or
 production recovery claim follows. B5/1.2 open, B6–B9 held, D64 and production fences
 unchanged; next guest scoped admission/manual, then D175. No production operation.
+
+
+### 2026-10-17 19:21 EDT — owned ABORT source release verified (D213)
+
+Closed source prerequisite only at004b1ce5 / CI39076640535 all8 green, Claude174 no
+required source finding; native117525047608 passes40controls24.107s and13intended
+mutants with real owned-file barriers on read-only descriptors. Native raw SHA256
+de0dc1d6a82c99f5556b494ce394bef4b1114c0c446ab8ae75872d4a3fad43d2; checkout mergec76523cb
+has identical step12/workflow blobs. VM/flags remain scripted; no full native pipeline,
+guest admission, boot, real B8 or Mac reboot proof. X6 optional final-transcript-rewrite
+negative and B5-CI-R3-placement remain tracked, alongside D189/helper no-op limits.
+Receipt head needs its own exact-head CI. B5/1.2 open, B6–B9 held, D64/production/timers
+unchanged. Next guest scoped admission/manual then D175; see D213 for exact contracts.

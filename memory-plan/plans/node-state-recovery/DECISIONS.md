@@ -5203,3 +5203,64 @@ and the real owned-file barriers pass; current CI native behavior still must be 
 No source readiness, native whole pipeline, guest admission, boot, B8 acceptance or
 production recovery claim follows. B5/1.2 open, B6–B9 held, D64 and production fences
 unchanged; next guest scoped admission/manual, then D175. No production operation.
+
+
+## D213 — 2026-10-17 19:21 EDT: verify the owned ABORT source-release checkpoint
+
+Source004b1ce5722f3935c82599100951e6e4145cedae passes all8 checks in exact CI39076640535.
+Native macOS117525047608 runs40 release controls in24.107s, plain OK, and all13
+intended release mutants; the real owned-file durability barrier accepts its read-only
+file descriptors on the runner. This supplies D212/Claude174's required native
+full_sync observation (F_FULLFSYNC where the native attribute exists), not a simulated
+power-loss proof.16capture30.417s,29terminal11.651s and15status14.127s are plain OK;
+all39 kills include the earlier12cleanup and14terminal mutants. The raw native log
+SHA256 is de0dc1d6a82c99f5556b494ce394bef4b1114c0c446ab8ae75872d4a3fad43d2. Native checkout merge
+c76523cbc17708c97455af7ab7f26a53c2624a89 has source004b as its second parent; fetched
+step12 and workflow blobs are identical. Linux117525047612 passes its JetStream/root
+steps,40release12.302s and13mutants; raw log SHA256
+c3d3b5f1014e44fb32b16d20392d8d613241ae7edc96e4af206170c45e773aa5.
+
+Claude174 independently reproduces40controls/13mutants and the regressions as uid65534,
+closes R1 and both precision points on this exact source, and finds no required source
+defect. Its five extra negatives kill removal of attachment/sibling/sample-binding/
+consumed-byte checks and pre-clear ctime equality. R2 was native observation only and
+is supplied by this completed job. Source c8aa's native117523256965 separately passed
+32controls/10mutants; its overall CI39076032148 failed unchanged R3 placement before
+Python and is never labelled green or relabelled40/13. Its retained raw native hash
+44527f724a594033acd2de149fb38bfd6e98d75bfa71d94a7b564deefa47507d stays distinct.
+B5-CI-R3-placement remains a separate follow-up despite the corrected run passing.
+
+B5-D62-owned-source-release closes only this owned source prerequisite. Both original
+EX locks, consumer-established transcript durability, canonical INTENT/COMPLETE, the
+last live pre-clear observation and strict guarded metadata/ctime, clone/attachment/
+sibling checks precede the one pinned clear. A post-clear rehash allows only the
+immutable bit removal and advanced ctime. Read-only verify_release returns evidence
+bytes under caller-held locks and a fresh caller sample, never admission or boot.
+A failed/partial attempt is single use and manual; once the flag call starts its state
+is uncertain on failure, with no automatic re-guard/retry. A visible receipt alone
+does not prove a prior process returned after fsync; future consumers need their own
+checked decision/durability contract.
+
+Explicit carry-forwards: D189's same-uid coordinated-rewrite/protected-provenance and
+sampled-denial limits; the helper's final same-uid no-op gap; X3 is an equivalent guard
+mutant, not a missing predicate. X6 is an optional coverage gap: the present final
+transcript equality guard has no dedicated zero-call negative rewriting a pinned
+record during before-clear preflight. It is not silently closed. Full native
+cleanup→terminal→release, actual VM hold/reboot/login behavior and real B8 ACCEPTED
+remain unproved. The release controls script VM/flags despite using actual owned
+files/flushes. No hardware-loss, authorship or pre-stop physical-exclusion claim.
+
+This receipt changes five Markdown files only and requires its own exact-head green
+CI before current-head readiness. B5/1.2 remain open at v1.2-pre, B6–B9 held; production
+capture/reconcile, D64 and installed timers are unchanged, B3/B4 not repeated and all
+four histories separate. No production or local native image/VM/launchd operation.
+
+Next two gates: guest host-decision binding/scoped admission/manual restoration before
+any gate opens and before Journal.recover, then D175 conditional journaled value-only
+re-pin of the five owned timer plists/manifest after admission and before gate creation.
+Admission compares all OpenClaw jobs plus every process as the OpenClaw UID or executing
+production entrypoint roots, refuses unreadable/unexpected scoped observations, then
+checks stopped units/overrides; this is not a complete physical census. Both source
+gates use B1 owned authorization, decisive negatives, Claude and exact-head CI. Actual
+APFS reattach and disposable-Mac reboot/migration still require their distinct evidence;
+Mac access needs an exact operator designation or a measured fixed resource decision.
