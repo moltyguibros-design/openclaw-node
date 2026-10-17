@@ -541,3 +541,5 @@ value-only migration with owned APFS reattach negatives. Both need Claude/exact-
 Actual reboot rehearsal still needs separate operator-designated disposable macOS access
 or a measured fixed resource decision. B3/B4 not repeated; B5/1.2 open, B6–B9 closed,
 D64 and production capture refusal unchanged. No production operation occurred.
+
+2026-10-17 15:16 EDT — D207 verifies the production release fence at e6543580 / all8 CI39059651789; native job117474802932 passes all7 reconcile tests, Linux all4 fence controls, Claude122 verifies both intended mutants. The test-only directory-mode refinement removes an order dependency; runtime/workflow bytes are unchanged. Host cleanup/terminal decisions, scoped boot admission/manual route, D175 and actual macOS reboot remain open. No production state changed.

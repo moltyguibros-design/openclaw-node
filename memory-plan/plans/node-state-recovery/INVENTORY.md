@@ -3110,14 +3110,11 @@ D64 and production capture refusal unchanged. No production operation occurred.
 
 ### 2026-10-17 14:46 EDT — B5-D62-release-fence preflight
 
-- [ ] B5-D62-release-fence: prevent the older incomplete-capture reconcile path from
-  unlocking a production source or publishing BOOTABLE without the missing D62 decision
-  controller. Needs: existing host guard/reconcile source, B1 source/owned-test authority;
-  no VM access. Verify: a scripted, otherwise viable incomplete capture refuses before
-  filesystem/output/lock/preflight/flag work; the owned fixture control still reconciles;
-  wrong fixture parent, VM UUID or package refuses. Run the tests on Linux and macOS,
-  demonstrate the release-fence mutant fails for the intended assertion, obtain Claude
-  review and exact-head green CI. This is a prerequisite refusal boundary, not an ABORT
-  producer, B8 acceptance, boot permission or D62 admission. Planned deltas: existing
-  host_vm_reconcile.py/test, CI test registration and these plan ledgers only. The separate
-  reviewed decision/cleanup design, scoped admission/manual route and D175 remain open.
+- [x] B5-D62-release-fence: production reconciliation refuses before filesystem/output,
+  lock, preflight or flag work. Verified runtime source e6543580, all8 CI39059651789
+  success; native job117474802932 includes all7 reconcile tests, Linux runs
+  the4 portable fence controls. Claude122 independently verifies the source and both
+  intended fence-removal failures with owned controls passing. The owned fixture route
+  retains its native mechanism. This is a refusal prerequisite, not an ABORT producer,
+  boot permission, B8 acceptance or D62 admission. D207 records the test-isolation
+  refinement and the unimplemented decision-design limits; B5/1.2 remain open.

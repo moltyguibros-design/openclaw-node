@@ -64,7 +64,11 @@ class ProductionReleaseFence(unittest.TestCase):
     def incomplete(self, root, production=False):
         capture = (root / 'Library/Application Support/OpenClawRecovery/window'
                    if production else root / 'capture')
-        capture.mkdir(mode=0o700, parents=True)
+        directory = root
+        for component in capture.relative_to(root).parts:
+            directory /= component
+            directory.mkdir(mode=0o700)
+            directory.chmod(0o700)
         source = root / 'owned-source.img'
         source.write_bytes(b'owned image stand-in')
         source.chmod(0o600)

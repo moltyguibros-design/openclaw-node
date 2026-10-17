@@ -4705,3 +4705,57 @@ Actual macOS reboot rehearsal still needs the operator-designated disposable mac
 an approved measured disk/RAM budget and capacity source; this source work needs neither.
 B3/B4 were not repeated. B1 stays design-only; B5/1.2 remain open at v1.2-pre, B6–B9
 closed, all four histories separate. No production service, VM, image or timer was operated.
+
+
+## D207 — 2026-10-17 15:16 EDT: verify the D62 release fence; keep decision design open
+
+Runtime source e6543580facd56e2bef11bfbf94f3c5dd7bb068f passes all8 checks in CI39059651789,
+including full native macOS job117474802932. Its log invokes the complete
+reconcile module and records all7 tests passing; Linux job117474803164 runs all4
+portable fence controls successfully. Native log SHA256 a259f0ffa9b7a984c7f3e164f71e869f5a3efa2e3036f88a4e879c97d15f0401.
+Claude Message122 independently checks the exact two-line runtime delta, all callers,
+CLI/default fixture dispatch and CI registration, runs the controls,
+and kills removal of the fence with exactly the two production assertion failures and
+both owned controls passing. Its Linux capture-gate run has14 passes and1 platform
+skip; Codex's local macOS run has15 passes. This corrects D206's overly broad portable
+wording without changing the runtime result. B5-D62-release-fence is verified only as
+this source refusal boundary; no decision controller or cross-boot admission is supplied.
+
+One test-only isolation refinement accompanies this receipt. Recursive mkdir assigned
+only the leaf's private mode, so a standalone counterexample under umask022 could fail
+at an intermediate directory check instead of reaching the old source release. The
+fixture now creates/chmods every component under its own temporary root to0700. Each
+of the4 controls passes independently with a fresh umask022; the deleted-fence mutant
+still fails each production assertion for its intended reason (viable case: no refusal
+raised), with both owned controls passing and no setup/runner errors. Runtime and
+workflow bytes are unchanged from the reviewed green source above. Every later head
+still needs exact-head green CI before source readiness; no production readiness follows.
+
+Claude120's future decision design was challenged and is not an implementation contract.
+Message124 corrected the terminal order; Message126 accepts the further limits: a
+nonterminal cleanup intent, checked host cleanup while guarded, then durable terminal
+ABORT, then a separately checked release. Two sampled immutable flags do not prove
+continuity against D189's same-user actor. Strict host boot/device/image bindings remain;
+there is no automatic host-reboot exception or reuse of D175's guest timer migration.
+Absent checkpoint, interrupted guard or missing active denial cannot become automatic
+BOOTABLE or guest admission. Those cases stay held for an explicitly reviewed manual
+route. Receipt schemas, partial-publication/retry policy, host/guest bindings and the
+manual route remain open design. ACCEPTED needs a real B8 acceptance producer;
+MATCH.json and owned probe acceptance.json cannot stand in for it.
+
+Next two execution forecasts: B5-D62-abort-cleanup design/source needs existing arm,
+commitment/checkpoint/capture and guard bindings, the corrected order, decisive crash/
+retry and refusal controls, Claude and exact-head CI, using B1-authorized owned resources
+only. B5-D62-guest-admission/manual route then needs that decision binding, all required
+OpenClaw launchd jobs and user/entrypoint-root processes compared before Journal.recover,
+unreadable/unexpected observations refused, then stopped units and persistent overrides.
+That scope is not a complete physical census. D175 follows admission and precedes gate
+construction, with its separate owned APFS and actual disposable-macOS reboot tests.
+No VM access is needed for the source work; actual reboot rehearsal still needs the
+operator-designated disposable machine or approved measured disk/RAM/capacity proposal.
+
+B1 remains design-only, B2/B4 bounded historical mechanism/design inputs, B3 JIT and not
+recaptured. B5/1.2 stay open at v1.2-pre, B6–B9 closed, production capture disabled and
+D64 unchanged. No production VM/service/image/timer was operated; all four histories
+remain separate. This source refusal does not establish pre-stop physical exclusion,
+real-history restoration/acceptance, timer resumption or node operational status.
