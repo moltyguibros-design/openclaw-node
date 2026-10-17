@@ -4566,3 +4566,22 @@ The new dispatch test initially patched sys.platform, which works on this macOS 
 but cannot change a Linux-bound default. Its test seam now calls the unchanged guard
 with explicit darwin while retaining every other guard. A focused run with the function
 default forced to linux passes. No probe/reader/runtime or native observed bytes change.
+
+D204 review follow-up: Claude's in-progress Message114 found that the outer reader_run
+image/pin/head oracles were not exercised portably, despite the native positive. Add
+ReaderRun controls for all cases and publication values, changed image identity, changed
+pins, each verified head, partial seed failure, unclean cleanup, failed removal and primary/
+cleanup interrupt precedence. All15 selected reader/seed/guard controls pass (one platform
+skip); removing each of the image, pin and head guards is killed by its intended0!=1
+assertion. No native probe or runtime bytes changed. Full suite now contains90 cases;
+its current-head CI and Claude's completed review remain pending.
+
+Retained B5_OWNED_STOPPED_ASIF_READER_REPORT_20261017.json is byte-identical to
+stopped-asif-reader.json in artifact12108516653, merge78acafdf3885ee9dea1398a26c42cdcebd1762d8,
+source6286b89c44100ad8be2103bb3f049e939dbe8185, run39052908309/job117454954721.
+SHA256 bfc984f22b78898bdeab3e21ad15811ef8e68ad6932f097444b9b814173a3b3c.
+The isolated native job passed both ownership and complete-reader steps. Intact read verified
+54 files on one readonly device; four named read-stage Refused results have no success
+receipt. All5 per-read image states match and known disks are absent after seed/read; final
+outer inventory/mounts empty and owned directory removed. Synthetic receipt/hold/VM claims
+remain bounded as above; this evidence cannot close D62, D175, B8 or production acceptance.

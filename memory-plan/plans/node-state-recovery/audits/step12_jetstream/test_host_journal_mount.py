@@ -1582,6 +1582,127 @@ class ReaderSeed(unittest.TestCase):
                 os.close(fd)
 
 
+class ReaderRun(unittest.TestCase):
+    """Only the outer CI orchestration is scripted; ReaderProbe covers its real reader oracle."""
+
+    def setUp(self):
+        self.temp = pathlib.Path(tempfile.mkdtemp(prefix='openclaw-reader-run-')).resolve()
+        self.addCleanup(shutil.rmtree, self.temp, True)
+        self.output = self.temp / 'report.json'
+        self.clean = {'clean': True, 'remaining': 0, 'disks_gone': [], 'mounted': [], 'steps': []}
+        self.fixture = {'table': {'host': 'synthetic'}, 'data_volume_uuid': UUID,
+                        'checkpoint_sha256': 'c' * 64, 'pre_head': 'd' * 64}
+
+    def run_reader(self, fault=None, phase_error=None, cleanup=None, rmtree=None):
+        read = []
+
+        def command(*argv, **options):
+            if argv[:3] == (DISKUTIL, 'image', 'create'):
+                pathlib.Path(argv[-1]).write_bytes(b'owned scripted image')
+            return {'returncode': 0, 'timed_out': False, 'stdout': b'scripted macOS', 'stderr': ''}
+
+        def seed(image, temp, seed, capture, disks, case, row):
+            row['seed_observation'] = case
+            if phase_error:
+                raise phase_error
+            if case == 'intact':
+                row['fixture'] = self.fixture
+
+        def reader(capture, output, table, expected, row):
+            read.append((output.name, table, expected))
+            row['receipt'] = {'reader': {key: self.fixture[key] for key in ('checkpoint_sha256', 'pre_head')}}
+            if fault in ('checkpoint_sha256', 'pre_head'):
+                row['receipt']['reader'][fault] = 'f' * 64
+
+        def state(image):
+            return {'sha256': '0' * 64, 'size': 20, 'ctime_ns': int(bool(read) and fault == 'image')}
+
+        def pins(capture):
+            return {'COMMITTED.json': b'changed' if read and fault == 'pins' else b'original'}
+
+        with mock.patch.dict(os.environ, {'RUNNER_TEMP': str(self.temp)}), \
+                mock.patch.object(probe, 'attempt', side_effect=command), \
+                mock.patch.object(probe, 'reader_write_phase', side_effect=seed), \
+                mock.patch.object(probe, 'reader_case', side_effect=reader), \
+                mock.patch.object(probe, 'image_state', side_effect=state), \
+                mock.patch('host_guest_commit.require_captured', side_effect=pins), \
+                mock.patch('host_guest_commit.require_committed', return_value={'checkpoint': {}}), \
+                mock.patch('host_vm_capture.publish_pinned_capture') as publish, \
+                mock.patch.object(probe, 'release', return_value=cleanup or (self.clean, None)), \
+                mock.patch.object(probe.shutil, 'rmtree', side_effect=rmtree or shutil.rmtree), \
+                mock.patch('subprocess.run', side_effect=AssertionError('native command run')):
+            code = probe.reader_run(self.output)
+        return code, read, publish.call_args_list
+
+    def report(self):
+        return json.loads(self.output.read_bytes())
+
+    def test_complete_reader_loop_checks_every_case_and_removes_only_its_directory(self):
+        code, read, published = self.run_reader()
+        self.assertEqual(code, 0)
+        self.assertEqual(read, [('journal-read-' + name.replace('-', ''), self.fixture['table'], expected)
+                                for name, expected in probe.READER_CASES])
+        self.assertEqual(len(published), len(probe.READER_CASES))
+        for call in published:
+            self.assertEqual(call.args[1]['data_volume_uuid'], UUID)
+            self.assertEqual(call.args[1]['clone_image_sha256'], '0' * 64)
+            self.assertEqual(call.args[1]['clone_size'], 20)
+        report = self.report()
+        self.assertTrue(report['completed'] and report['cleanup']['clean'] and report['cleanup']['removed'])
+        self.assertTrue(all(row['completed'] for row in report['cases'].values()))
+        self.assertEqual([path.name for path in self.temp.iterdir()], ['report.json'])
+
+    def test_changed_image_pins_or_either_verified_head_fail_the_outer_oracle(self):
+        for fault, expected in (('image', 'reader changed image bytes or identity'),
+                                ('pins', 'reader changed host commitment pins'),
+                                ('checkpoint_sha256', 'reader verified another fixture'),
+                                ('pre_head', 'reader verified another fixture')):
+            with self.subTest(fault=fault):
+                if self.output.exists():
+                    self.output.unlink()
+                code, read, _ = self.run_reader(fault=fault)
+                self.assertEqual(code, 1)
+                self.assertEqual(len(read), 1)
+                report = self.report()
+                self.assertFalse(report['completed'])
+                self.assertIn(expected, report['error'])
+                self.assertTrue(report['cleanup']['clean'] and report['cleanup']['removed'])
+                self.assertNotIn('completed', report['cases']['intact'])
+
+    def test_seed_failure_keeps_its_partial_observation_and_reports_cleanup(self):
+        code, read, _ = self.run_reader(phase_error=RuntimeError('owned seed failure'))
+        report = self.report()
+        self.assertEqual((code, read, report['completed']), (1, [], False))
+        self.assertEqual(report['cases']['intact']['seed_observation'], 'intact')
+        self.assertIn('owned seed failure', report['error'])
+        self.assertTrue(report['cleanup']['removed'])
+
+    def test_unclean_cleanup_or_failed_removal_cannot_report_success(self):
+        code, _, _ = self.run_reader(cleanup=({**self.clean, 'clean': False}, None))
+        self.assertEqual(code, 1)
+        self.assertFalse(self.report()['cleanup']['removed'])
+        self.output.unlink()
+        code, _, _ = self.run_reader(rmtree=OSError(errno.EBUSY, 'owned removal busy'))
+        self.assertEqual(code, 1)
+        self.assertIn('owned removal busy', self.report()['cleanup']['rmtree_error'])
+        self.assertFalse(self.report()['cleanup']['removed'])
+
+    def test_primary_interrupt_wins_and_cleanup_interrupt_after_success_is_raised(self):
+        first, late = KeyboardInterrupt('owned phase'), KeyboardInterrupt('owned cleanup')
+        for primary in (first, None):
+            with self.subTest(primary=primary):
+                if self.output.exists():
+                    self.output.unlink()
+                with self.assertRaises(KeyboardInterrupt) as raised:
+                    self.run_reader(phase_error=primary, cleanup=({**self.clean, 'clean': False}, late))
+                self.assertIs(raised.exception, primary or late)
+                report = self.report()
+                self.assertEqual(report['completed'], primary is None)
+                self.assertFalse(report['cleanup']['removed'])
+                if primary:
+                    self.assertEqual(report['error'], repr(primary))
+
+
 class ProbeRun(unittest.TestCase):
     """run(): handled cleanup failures are reported, cleanup interrupts raised, removal errors recorded."""
 

@@ -689,3 +689,12 @@ The new main-dispatch control must pass darwin explicitly to the real guard in i
 seam: changing sys.platform cannot alter the import-bound function default. Corrected the
 control and passed it with the real default forced to linux. This is the same reader
 integration verification slice; no native/probe/runtime guard relaxed.
+
+### D204 review verification extension
+
+Claude's reader_run assertion coverage gap is in this slice's verification contract.
+Add ReaderRun controls in the existing test module;15 selected cases pass with one platform
+skip, and image/pin/head removed-guard mutants die at the intended0!=1 assertion. Retain
+the raw native report named in D204 (54 reads, four intended negatives,5 stable readonly
+cycles and known-disk cleanups, final directory removed). Runtime/probe source unchanged.
+Completed Claude verdict and current-head all-green CI still required before closure.
