@@ -4585,3 +4585,21 @@ The isolated native job passed both ownership and complete-reader steps. Intact 
 receipt. All5 per-read image states match and known disks are absent after seed/read; final
 outer inventory/mounts empty and owned directory removed. Synthetic receipt/hold/VM claims
 remain bounded as above; this evidence cannot close D62, D175, B8 or production acceptance.
+
+D204 completed Claude Message114: no material reader-mode source defect and the6286
+portable seam is correct; R1 requires outer-loop negative coverage before closure. The
+new ReaderRun controls address R1, now including a second-case failure with the earlier
+completed row retained. R2 recommends keeping a failed owned image for diagnosis: the
+reader loop now removes only after completed plus clean, records its retained directory
+otherwise, and CI uploads only the failed CI-owned powered-off-image.asif as a diagnostic
+artifact. The older ownership-probe run() behavior is unchanged. This does not authorize
+reading, capturing or modifying any production image. A diagnostic failed fixture is not
+accepted recovery evidence.
+
+Local91 mount/probe tests pass in36.307s (one platform skip). The committed
+mutate_stopped_asif_reader.py runner kills removal of image identity, commitment pins,
+verified heads and failed-image-retention guards at their intended assertions; its
+unmutated6-test ReaderRun control passes. CI runs it before native disk operations.
+Python AST/workflow YAML parse and diff checks pass. Full current-head CI and Claude
+review of this correction remain pending. The earlier raw native report stays bound to
+its actual6286 source; it is not relabelled as evidence of this retention revision.

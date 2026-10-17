@@ -698,3 +698,13 @@ skip, and image/pin/head removed-guard mutants die at the intended0!=1 assertion
 the raw native report named in D204 (54 reads, four intended negatives,5 stable readonly
 cycles and known-disk cleanups, final directory removed). Runtime/probe source unchanged.
 Completed Claude verdict and current-head all-green CI still required before closure.
+
+### D204 review corrections and final verification outline
+
+Consume Claude114 R1 with ReaderRun negative/partial/cleanup controls; R2 keeps failed
+owned-reader images until diagnosis. Add mutate_stopped_asif_reader.py as a verification
+helper (4 intended guard kills) and run it in the existing isolated ASIF CI job. The
+workflow uploads a failed owned image; success still removes its own directory. Older
+ownership-run behavior and all production/runtime sources stay unchanged. Local91 tests
+pass (one platform skip), the6-control mutation baseline passes and all4 mutants die at
+their intended assertions. Native corrected-source and exact-head CI/review still pending.

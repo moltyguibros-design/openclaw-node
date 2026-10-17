@@ -47,6 +47,7 @@ observations are synthetic; there is no VM or NATS server. The intact read must 
 the host pins, and corrupt-chain, pending, unknown-entry and changed-config cases must refuse
 for their named reasons. Each writable reseed is followed by a detach and a new fixture clone
 hash publication; only the subsequent read-only interval claims unchanged image bytes/identity.
+Failed reader runs keep their owned image/directory for diagnosis after releasing its disks.
 This is frozen-reader mechanism evidence, not a stopped-VM capture or history acceptance.
 """
 import datetime
@@ -503,12 +504,14 @@ def reader_run(output):
         raise
     finally:
         report['cleanup'], late = release(image, points, disks)
-        if report['cleanup']['clean']:
+        if report['completed'] and report['cleanup']['clean']:
             try:
                 shutil.rmtree(temp)
             except OSError as error:
                 report['cleanup']['rmtree_error'] = repr(error)[:300]
         report['cleanup']['removed'] = not os.path.lexists(temp)
+        if not report['cleanup']['removed']:
+            report['cleanup']['retained_directory'] = str(temp)
         write_record(output, json.loads(json.dumps(report, default=repr)))
         if late is not None and interrupt is None:
             raise late

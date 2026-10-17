@@ -1610,6 +1610,8 @@ class ReaderRun(unittest.TestCase):
 
         def reader(capture, output, table, expected, row):
             read.append((output.name, table, expected))
+            if fault == 'second-case' and len(read) == 2:
+                raise RuntimeError('owned later read failure')
             row['receipt'] = {'reader': {key: self.fixture[key] for key in ('checkpoint_sha256', 'pre_head')}}
             if fault in ('checkpoint_sha256', 'pre_head'):
                 row['receipt']['reader'][fault] = 'f' * 64
@@ -1666,7 +1668,9 @@ class ReaderRun(unittest.TestCase):
                 report = self.report()
                 self.assertFalse(report['completed'])
                 self.assertIn(expected, report['error'])
-                self.assertTrue(report['cleanup']['clean'] and report['cleanup']['removed'])
+                self.assertTrue(report['cleanup']['clean'])
+                self.assertFalse(report['cleanup']['removed'])
+                self.assertTrue(pathlib.Path(report['cleanup']['retained_directory']).is_dir())
                 self.assertNotIn('completed', report['cases']['intact'])
 
     def test_seed_failure_keeps_its_partial_observation_and_reports_cleanup(self):
@@ -1675,7 +1679,19 @@ class ReaderRun(unittest.TestCase):
         self.assertEqual((code, read, report['completed']), (1, [], False))
         self.assertEqual(report['cases']['intact']['seed_observation'], 'intact')
         self.assertIn('owned seed failure', report['error'])
-        self.assertTrue(report['cleanup']['removed'])
+        self.assertFalse(report['cleanup']['removed'])
+
+    def test_later_case_failure_preserves_earlier_rows_and_retains_the_owned_image(self):
+        code, read, _ = self.run_reader(fault='second-case')
+        report = self.report()
+        self.assertEqual((code, len(read), report['completed']), (1, 2, False))
+        self.assertTrue(report['cases']['intact']['completed'])
+        self.assertEqual(report['cases']['corrupt-chain']['seed_observation'], 'corrupt-chain')
+        self.assertNotIn('completed', report['cases']['corrupt-chain'])
+        self.assertIn('owned later read failure', report['error'])
+        self.assertFalse(report['cleanup']['removed'])
+        retained = pathlib.Path(report['cleanup']['retained_directory'])
+        self.assertEqual((retained / 'capture' / wrapper.CLONE).read_bytes(), b'owned scripted image')
 
     def test_unclean_cleanup_or_failed_removal_cannot_report_success(self):
         code, _, _ = self.run_reader(cleanup=({**self.clean, 'clean': False}, None))

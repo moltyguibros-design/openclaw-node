@@ -509,3 +509,10 @@ and pins and confirm its attached disk gone. All85 portable mount/probe controls
 (one platform skip); Claude review, native report and current exact-head CI are pending. This is not
 a VM capture, guest UID parity, pre-stop writer proof or B8 acceptance. B5/1.2 remain open,
 B6–B9 closed, D64/production-capture refusal unchanged. Production was not touched.
+
+D204 review correction: Claude114 finds no reader-mode source defect but requires outer
+negative coverage. ReaderRun now covers image/pin/head changes, partial later-case failure
+and cleanup/interrupt outcomes; failed native reader runs retain their own image for a
+CI diagnostic artifact. Local91 tests pass (one skip); all4 committed guard mutants die
+for intended assertions. This corrected revision still needs Claude and exact-head CI;
+B5-owned-stopped-ASIF-reader is not yet closed. No production operation occurred.
