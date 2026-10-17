@@ -4560,3 +4560,9 @@ disposable machine or approved measured resource decision.
 Local D204 verification: all85 mount/probe tests pass (one Linux-platform-only guard skip
 on macOS), including the new portable controls. Python AST/workflow YAML parse and plan
 lint14PASS/1existingWARN/0FAIL pass. Native reader and Claude/exact-head CI remain pending.
+
+D204 portable correction: guard() binds sys.platform at import as its default argument.
+The new dispatch test initially patched sys.platform, which works on this macOS host
+but cannot change a Linux-bound default. Its test seam now calls the unchanged guard
+with explicit darwin while retaining every other guard. A focused run with the function
+default forced to linux passes. No probe/reader/runtime or native observed bytes change.

@@ -682,3 +682,10 @@ reason, every readonly cycle leaves image identity/bytes unchanged and disks abs
 owned directory removed; current exact-head CI all green. Native report is synthetic
 quiescence/mechanism evidence, not a VM capture, guest UID parity, physical writer proof or
 real-history acceptance. D64/production capture stay closed; B3/B4 are not repeated.
+
+### D204 mid-implementation finding — portable guard dispatch seam
+
+The new main-dispatch control must pass darwin explicitly to the real guard in its test
+seam: changing sys.platform cannot alter the import-bound function default. Corrected the
+control and passed it with the real default forced to linux. This is the same reader
+integration verification slice; no native/probe/runtime guard relaxed.

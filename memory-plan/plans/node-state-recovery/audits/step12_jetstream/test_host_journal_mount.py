@@ -1713,10 +1713,11 @@ class ProbeGuards(unittest.TestCase):
     def test_reader_mode_has_the_same_guards_and_dispatches_only_after_them(self):
         argv = ['--ci-owned-reader', str(self.output)]
         sudo_row = {'returncode': 0, 'timed_out': False, 'stdout': b'', 'stderr': ''}
+        native_guard = probe.guard
         with mock.patch.object(probe, 'attempt', return_value=sudo_row), \
                 mock.patch.object(probe, 'reader_run', return_value=0) as reader, \
                 mock.patch.object(probe, 'run', side_effect=AssertionError('ownership mode run')), \
-                mock.patch.object(probe.sys, 'platform', 'darwin'):
+                mock.patch.object(probe, 'guard', side_effect=lambda args, env: native_guard(args, env, 'darwin')):
             with self.assertRaisesRegex(RuntimeError, 'only on a GitHub Actions runner'):
                 probe.main(argv, {})
             reader.assert_not_called()
