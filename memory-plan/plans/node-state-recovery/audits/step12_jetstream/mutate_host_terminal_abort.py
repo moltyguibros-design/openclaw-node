@@ -7,6 +7,10 @@ import sys
 STEP = pathlib.Path(__file__).resolve().parent
 MODULE = 'test_host_terminal_abort.TerminalAbort.'
 MUTANTS = (
+    ('lock-cardinality',
+     'require(len(locks) == 2 and len(set(locks)) == 2,',
+     'require(True,',
+     'test_verifier_requires_exactly_two_distinct_lock_descriptors', 'RuntimeError not raised'),
     ('production-fence',
      "require(fixture, 'production terminal abort requires a verified host boot decision controller')",
      "require(True, 'production terminal abort requires a verified host boot decision controller')",
@@ -64,7 +68,7 @@ def main():
     print('unmutated terminal abort controls: all passed', flush=True)
     source = (STEP / 'host_clone_dispose.py').read_text()
     for name, old, new, test, assertion in MUTANTS:
-        if source.count(old) != (2 if name == 'production-fence' else 1):
+        if source.count(old) != (2 if name in ('production-fence', 'lock-cardinality') else 1):
             raise RuntimeError(name + ': mutation anchor differs')
         code = ('import host_clone_dispose as m; exec(compile(%r,m.__file__,"exec"),m.__dict__); '
                 'import unittest; r=unittest.TextTestRunner().run('
@@ -79,6 +83,29 @@ def main():
         if not killed:
             print(output)
             return 1
+    preflight = (STEP / 'host_vm_preflight.py').read_text()
+    old = "    for name in ('utm-status.out', 'utm-status.err'):\n        with os.fdopen(os.open(output / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,\n                               0o600), 'wb') as stream:\n            os.fchmod(stream.fileno(), 0o600)\n"
+    if preflight.count(old) != 1:
+        raise RuntimeError('private-stdio: mutation anchor differs')
+    test = 'test_host_vm_preflight_status.GuiStatusCleanup.test_stdio_is_private_before_bootstrap_and_survives_append_open'
+    control = subprocess.run([sys.executable, '-m', 'unittest', test], cwd=STEP,
+                             capture_output=True, text=True, timeout=120)
+    if control.returncode:
+        print(control.stdout + control.stderr)
+        return 1
+    code = ('import host_vm_preflight as m; exec(compile(%r,m.__file__,"exec"),m.__dict__); '
+            'import unittest; r=unittest.TextTestRunner().run('
+            'unittest.defaultTestLoader.loadTestsFromName(%r)); '
+            'raise SystemExit(not r.wasSuccessful())' % (preflight.replace(old, ''), test))
+    done = subprocess.run([sys.executable, '-c', code], cwd=STEP,
+                          capture_output=True, text=True, timeout=120)
+    output = done.stdout + done.stderr
+    killed = (done.returncode == 1 and 'FAIL: test_stdio_is_private_before_bootstrap' in output
+              and 'private stdio must exist before bootstrap' in output and 'ERROR:' not in output)
+    print('private-stdio: unmutated control passed; intended assertion killed=' + str(killed), flush=True)
+    if not killed:
+        print(output)
+        return 1
     return 0
 
 

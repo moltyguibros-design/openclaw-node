@@ -755,3 +755,19 @@ manual; no exception is added. Same-user coordinated rewrites remain D189's limi
 test_host_terminal_abort.py, mutate_host_terminal_abort.py, workflow registration and
 four plan ledgers. Tests use existing real checkpoint/cleanup producers with scripted
 host/flags; no local disk image, launchd, UTM or production operation is permitted.
+
+
+### D210 mid-implementation findings and re-orient — 2026-10-17 17:30 EDT
+
+The caller-lock cardinality counterexample and native log-mode assumption are two
+required corrections to the same terminal-decision input contract. Re-oriented at the
+consumer boundary: neither introduces source release, a new controller or guest recovery.
+The verifier must refuse incomplete lock lists; the strict reader must ingest its actual
+producer's files. The preflight writer change and native assertion are the named
+B5-terminal-native-stdio prerequisite within this source slice, not a production rollout.
+§6 delta correction: preflight now also pre-creates its two logs exclusively0600;
+test_host_vm_preflight_status.py models append-open and collisions, and the existing
+CI-only native HostCaptureTest checks sample_files against two real sample trees.
+Local proof29terminal/15status and14mutants is green; native proof and exact-head
+Claude/CI remain pending. Current B1 source/owned authorization covers these corrections;
+no local VM/image/launchd test or production resource operation is added.

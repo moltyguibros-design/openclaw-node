@@ -14,6 +14,7 @@ import os
 import pathlib
 import plistlib
 import subprocess
+import stat
 import sys
 import tempfile
 import time
@@ -40,6 +41,13 @@ def mode(name, default='ok'):
 
 def apply(agent):
     (loaded / agent['Label']).write_text('')
+    previous = os.umask(0o022)
+    try:
+        for key in ('StandardOutPath', 'StandardErrorPath'):
+            with open(agent[key], 'a') as stream:
+                stream.write('owned helper ' + key)
+    finally:
+        os.umask(previous)
     status = pathlib.Path(agent['ProgramArguments'][-1])
     helper = mode('helper', 'write')
     if helper == 'write':
@@ -183,6 +191,46 @@ class GuiStatusCleanup(unittest.TestCase):
         calls = self.cleanup_calls(output)
         self.assertEqual(self.loaded(), sorted(OTHERS))
         return calls
+
+    def test_stdio_is_private_before_bootstrap_and_survives_append_open(self):
+        output = self.sample()
+        original = host_vm_preflight.run
+        def checked(*args):
+            if args[1] == 'bootstrap':
+                for name in ('utm-status.out', 'utm-status.err'):
+                    path = output / name
+                    self.assertTrue(path.exists(), 'private stdio must exist before bootstrap')
+                    info = path.lstat()
+                    self.assertTrue(stat.S_ISREG(info.st_mode))
+                    self.assertEqual((info.st_uid, info.st_nlink, stat.S_IMODE(info.st_mode)), (os.getuid(), 1, 0o600))
+                    self.assertEqual(path.read_bytes(), b'')
+            return original(*args)
+        with mock.patch.object(host_vm_preflight, 'run', side_effect=checked):
+            self.assertEqual(self.status(output)['stdout'], 'started')
+        for name in ('utm-status.out', 'utm-status.err'):
+            path = output / name
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertIn('owned helper', path.read_text())
+        self.assert_only_own_label(output)
+
+    def test_stdio_collision_or_symlink_refuses_before_bootstrap(self):
+        for name in ('utm-status.out', 'utm-status.err'):
+            for link in (False, True):
+                with self.subTest(name=name, link=link):
+                    output = self.sample()
+                    target = self.temp / ('foreign-' + str(self.count))
+                    target.write_bytes(b'foreign log bytes')
+                    path = output / name
+                    if link:
+                        path.symlink_to(target)
+                    else:
+                        path.write_bytes(b'foreign log bytes')
+                    with self.assertRaises(FileExistsError):
+                        self.status(output)
+                    self.assertEqual(target.read_bytes(), b'foreign log bytes')
+                    self.assertEqual(path.read_bytes(), b'foreign log bytes')
+                    self.assertEqual((self.state / 'calls').read_text(), '')
+                    self.assertEqual(self.loaded(), sorted(OTHERS))
 
     def test_success_boots_out_its_own_label_without_cleanup_evidence(self):
         output = self.sample()

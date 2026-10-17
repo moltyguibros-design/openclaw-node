@@ -213,6 +213,8 @@ def cleanup_bytes(path, directory_fd=None):
 
 
 def abort_pins(host_spec, capture_dir, locks, directory_fd):
+    require(len(locks) == 2 and len(set(locks)) == 2,
+            'abort verification requires exactly two distinct lock descriptors')
     for name, fd in zip(('CAPTURE_ACTIVE.lock', 'ARMED.json'), locks):
         opened = os.fstat(fd)
         named = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
@@ -595,6 +597,8 @@ def verify_abort(host_spec, capture_dir, observed, directory_fd, locks, *, fixtu
     guarantee against a same-uid rewrite is supplied (D189).
     """
     require(fixture, 'production terminal abort verification is disabled')
+    require(len(locks) == 2 and len(set(locks)) == 2,
+            'abort verification requires exactly two distinct lock descriptors')
     host_spec, capture_dir = pathlib.Path(host_spec), pathlib.Path(capture_dir)
     host = pinned_spec(host_spec, HOST_SPEC_FIELDS)
     require(capture_dir.parent.name.startswith(('openclaw-host-capture-', 'openclaw-host-reconcile-'))
@@ -668,8 +672,9 @@ def verify_abort_command(host_spec, capture_dir, output, fixture=False):
     require(fixture, 'production terminal abort verification is disabled')
     with abort_context(host_spec, capture_dir, fixture) as (host_spec, capture_dir, directory_fd, locks):
         output = pathlib.Path(output)
-        require(output.parent == capture_dir and not os.path.lexists(output),
-                'abort verification output must be new inside the capture directory')
+        require(output.parent == capture_dir and output.name not in ('abort-cleanup', 'abort-decision')
+                and not os.path.lexists(output),
+                'abort verification output must be new and not a reserved attempt directory')
         output.mkdir(mode=0o700)
         fsync_parent(capture_dir)
         try:

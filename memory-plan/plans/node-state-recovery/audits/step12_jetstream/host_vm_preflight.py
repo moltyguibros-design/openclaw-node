@@ -146,6 +146,10 @@ def remove_disposable_agent(service):
 def gui_utm_status(utmctl, vm_uuid, output):
     label = 'ai.openclaw.host-preflight.' + uuid.uuid4().hex
     status_path = output / 'utm-status.json'
+    for name in ('utm-status.out', 'utm-status.err'):
+        with os.fdopen(os.open(output / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                               0o600), 'wb') as stream:
+            os.fchmod(stream.fileno(), 0o600)
     agent = output / 'utm-status.plist'
     agent.write_bytes(plistlib.dumps({
         'Label': label,

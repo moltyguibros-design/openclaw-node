@@ -3311,3 +3311,13 @@ source readiness or release/admission. D64 and production refusals remain; B5/1.
 B6–B9held, B3/B4 not repeated, four histories separate. Next: checked owned source release,
 then guest scoped admission/manual restoration before D175; actual macOS reboot remains
 operator-access/resource-gated. No production operation or local image/VM action.
+
+
+2026-10-17 17:30 EDT — D210 correction: two distinct descriptors are now required by
+both core verifier and shared pin reader; flock ownership remains the caller's duty.
+Shared preflight exclusively pre-creates both helper logs0600 before bootstrap, keeping
+the strict reader.29terminal tests,15status tests and14intended mutants pass locally.
+The existing CI native capture fixture now checks real sample ingestion and log modes;
+that assertion, corrected-head Claude and CI are pending. No native terminal pipeline,
+source release/admission or B5 closure. See D210 for unobserved old native mode and scope
+corrections; production, D64, installed timers and all four histories remain unchanged.

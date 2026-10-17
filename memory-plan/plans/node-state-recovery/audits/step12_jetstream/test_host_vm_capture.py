@@ -21,7 +21,7 @@ import host_vm_guard
 import stopped_tree_match
 from host_guest_commit import commit, commit_checkpoint, encoded, require_committed
 from stopped_tree_match import guest_capture, host_match
-from host_clone_dispose import cleanup_failed, dispose
+from host_clone_dispose import cleanup_failed, dispose, sample_files
 from host_vm_capture import capture, clone_only, publish_capture_record
 from host_vm_guard import guard
 from host_image_immutable import change_immutable
@@ -1035,6 +1035,12 @@ class HostCaptureTest(unittest.TestCase):
                       + capture_timeline(output, marks, 20) + helper_snapshot(output, worker.pid))
         with (output / 'CAPTURE_ACTIVE.lock').open('rb') as active:
             fcntl.flock(active, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        for name in ('before-shutdown', 'after-guard'):
+            native_sample = output / name
+            ingested = sample_files(native_sample)
+            self.assertTrue({'utm-status.out', 'utm-status.err'} <= set(ingested))
+            for log in ('utm-status.out', 'utm-status.err'):
+                self.assertEqual(stat.S_IMODE((native_sample / log).stat().st_mode), 0o600)
         result = json.loads((output / 'CAPTURE.json').read_text())
         self.assertEqual(result['vm_state_at_final_check'], 'stopped')
         self.assertNotEqual(result['scope'],

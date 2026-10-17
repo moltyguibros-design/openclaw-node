@@ -4965,3 +4965,44 @@ capacity decision; this source slice needs no new VM or production authorization
 D210 local follow-up: committed mutant runner controls pass and all12 mutants are killed
 by their intended assertions with no runner errors. Plan lint14PASS/1existingWARN/0FAIL.
 The bounded regression and exact-head review/CI remain pending; no readiness claim.
+
+
+2026-10-17 17:30 EDT — D210 append-only correction, candidate still not ready:
+Codex and Claude154 reproduce the verifier's missing/extra-lock gap at a15e9093:
+empty, one and three descriptors bypassed the two-name zip; duplicate descriptors
+already refused through mapping. Exactly two distinct descriptors are now required
+both at verifier entry and in shared abort_pins. The descriptor identities prove the
+opened names, not flock ownership; core callers must hold both EX locks. The producer
+and CLI wrapper acquire them. No lock-continuity or protected-origin proof is claimed.
+The focused counterexample fails before the correction and passes after it; its
+removal mutant fails for the intended missing-refusal assertion.
+
+Claude154 also identifies an unverified native log-mode assumption. No existing native
+sample logs were retained in the bounded owned-temp search, so no old native mode was
+observed or reproduced. Instead of relaxing the reader, the shared preflight writer
+now exclusively creates both stdout/stderr files with O_NOFOLLOW and fchmod0600 before
+plist creation/bootstrap. A collision, including a symlink, refuses before any agent
+operation. This supersedes D210's filename-constant-only delta: capture, guard, reconcile
+and cleanup share this writer. Claude156 accepts the fix. Fifteen fake-launchctl controls
+pass14.400s; two new cases check real private files before bootstrap, append-open under
+umask022 and collision/symlink refusal. The removal mutant fails at the intended assertion.
+The existing CI-only native capture fixture now passes its real before-shutdown and
+after-guard sample trees through sample_files and checks both log modes. That native
+assertion is still pending; parity alone proves names, not native mode ingestion.
+No local native image or launchd run was added.
+
+The verifier takes no new VM preflight sample itself; it does readonly attachment
+observations, source metadata and full-byte hashing. The earlier unqualified “without
+observing” wording is superseded. The cleanup reason is forwarded, with no separate
+operator statement. A hypothetical positive helper-cleanup record remains conservatively
+validated, but the current writer creates that file only on unsuccessful cleanup and
+then refuses; it is not a native success-path claim. The verification wrapper reserves
+both fixed attempt directory names, so it cannot pre-empt a future abort attempt.
+
+Current local proof:29terminal controls pass78.869s; designated controls pass and all14
+mutants die on their intended assertions, no runner errors. The prior145 bounded
+regressions pass98.633s with one expected skip, and all12 previous cleanup mutants pass
+their controls and die as intended. These are source/owned proofs, not native terminal
+pipeline, actual reboot, source release or guest admission. New exact-head Claude/CI,
+including the native private-file assertion, remain required. B5/1.2 open, B6–B9 held;
+D64/production refusals unchanged, B3/B4 not repeated, four histories separate.

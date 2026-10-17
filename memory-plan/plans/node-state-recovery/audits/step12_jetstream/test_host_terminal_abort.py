@@ -365,6 +365,25 @@ class TerminalAbort(unittest.TestCase):
             self.assertFalse((case.capture / 'abort-decision').exists())
             held(case)
 
+    def test_verifier_requires_exactly_two_distinct_lock_descriptors(self):
+        with prepared() as case:
+            produce(case)
+            with abort.abort_context(case.host, case.capture, True) as (host, cap, directory_fd, locks):
+                for supplied in ([], locks[:1], locks + locks[:1], [locks[0], locks[0]]):
+                    with self.subTest(count=len(supplied)), self.assertRaisesRegex(RuntimeError, 'exactly two distinct'):
+                        abort.verify_abort(host, cap, case.stopped, directory_fd, supplied, fixture=True)
+                    with self.subTest(shared_count=len(supplied)), self.assertRaisesRegex(RuntimeError, 'exactly two distinct'):
+                        abort.abort_pins(host, cap, supplied, directory_fd)
+            held(case)
+
+    def test_verification_wrapper_reserves_both_fixed_attempt_names(self):
+        with prepared() as case:
+            for name in ('abort-cleanup', 'abort-decision'):
+                with self.subTest(name=name), self.assertRaisesRegex(RuntimeError, 'reserved attempt'):
+                    abort.verify_abort_command(case.host, case.capture, case.capture / name, fixture=True)
+            self.assertFalse((case.capture / 'abort-decision').exists())
+            held(case)
+
     def test_failed_decision_marker_always_refuses(self):
         with prepared() as case:
             produce(case)
