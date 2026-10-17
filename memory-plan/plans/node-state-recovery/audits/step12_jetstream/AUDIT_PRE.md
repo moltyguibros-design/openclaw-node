@@ -532,3 +532,36 @@ Next a reviewed owned-fixture remedy justified by these observations, then
 exact-head CI before native stopped-ASIF reader integration. Both are B1
 source/owned work; D62/macOS access stays separate. B3/B4 not repeated,
 B5/1.2 open, B6–B9 closed, D64 unchanged, production untouched.
+
+
+2026-10-17 09:11 EDT — D201, B5-kickstart-cause-probe review and second CI report.
+Claude Message104 finds no material source defect at1695ce92 and independently
+passes19 controls plus3 real client classifiers. Runtime and old fixture bytes
+are unchanged. The review identifies measurement extensions before interpreting
+future anomalous/incomplete runs: second-start deadline anchoring, continuing
+other arms after a measured anomaly with verified cleanup, instruction-origin
+predictions/residual controls, and bounded logs on failure covering the run.
+These do not invalidate the7 completed D200 arms; no exact timer rule or
+historical full-suite cause is claimed. Codex corrected the review's prose:
+this implementation removes private files only after completed+clean and then
+writes the report. Lost reports cannot pass. Evidence interpretation review
+of7a8dcb64 is pending in Claude Message105; no fixture remedy is applied.
+
+The normal current-head CI39035129935, job117403289389, independently completed
+the unchanged7-arm probe at7a8dcb64 (mergefd9d06db). Artifact12102275128 is
+retained as B5_KICKSTART_TIMING_REPORT_REPEAT_20261017.json, SHA256
+e25d03de25d904e482f3e238ce4d16b11a24b5a1749872b5494860a400d3bccb.
+Default short/R3/R12/delayed-short client blocks are10.031/7.018/.008/9.017s;
+Throttle1 short/R3 are1.059/.007s;Throttle0 short is1.019s. The default-short
+client was alive at the post-timeout10.0036s sample and returned0 later.
+All7 trial bootouts and absence checks, final individual absences/readable
+GUI-domain/no-label checks and directory removal passed. Two separate CI
+reports support the bounded timing association; they are not a distribution,
+exact origin proof or production test. Full all-job CI remains pending, so
+source readiness and B5-native-device-binding closure remain held.
+Next gates: a reviewed owned-fixture-only remedy with unchanged runtime limits,
+then native owned stopped-ASIF reader integration. Both need Claude and exact-
+head green CI under B1. D62 disposable-macOS access remains a separate operator
+decision. B3/B4 were not repeated; B5/1.2 open, B6–B9 closed, D64 unchanged,
+production capture disabled and four physical histories separate. No live
+service, VM, production image or timer was changed.
