@@ -431,6 +431,118 @@ class AbortRelease(unittest.TestCase):
                     with self.subTest(supplied=supplied), self.assertRaisesRegex(RuntimeError, 'two distinct'):
                         release.verify_release(host, capture, case.stopped, directory_fd, supplied, fixture=True)
 
+    def test_new_holder_after_intent_must_refuse_before_clear(self):
+        with ready() as case:
+            publish = release.publish_release
+            def changed(fd, name, value):
+                publish(fd, name, value)
+                if name == 'INTENT.json':
+                    case.stopped['image_holders'] = [99999]
+                    case.stopped['holders_consistent'] = False
+            with mock.patch.object(release, 'publish_release', side_effect=changed):
+                with self.assertRaises(RuntimeError):
+                    run(case)
+            unattempted(case)
+
+    def test_last_live_sample_follows_full_hash_and_precedes_clear(self):
+        with ready() as case:
+            events = []
+            original_hash = abort.clone_identity
+            def hashed(*args, **kwargs):
+                events.append('full-hash')
+                return original_hash(*args, **kwargs)
+            def sample(spec, output):
+                if output.name == 'before-clear':
+                    events.append('last-live-sample')
+                return case.sample(spec, output)
+            def clear(*args):
+                events.append('clear')
+                case.clear(*args)
+            with mock.patch.object(abort, 'clone_identity', side_effect=hashed), \
+                 mock.patch.object(release, 'preflight', side_effect=sample), \
+                 mock.patch.object(release, 'change_immutable', side_effect=clear):
+                run(case)
+            self.assertIn('full-hash', events[:events.index('last-live-sample')])
+            self.assertEqual(events[events.index('last-live-sample'):events.index('clear') + 1],
+                             ['last-live-sample', 'clear'])
+
+    def test_new_host_state_after_intent_refuses_before_clear(self):
+        for key, value in (('state', 'started'), ('host_boot_session', 'reboot'), ('image_device', 0),
+                           ('config_sha256', 'f' * 64), ('vmstate', {'changed': True})):
+            with self.subTest(key=key), ready() as case:
+                publish = release.publish_release
+                def changed(fd, name, result):
+                    publish(fd, name, result)
+                    if name == 'INTENT.json':
+                        case.stopped[key] = value
+                with mock.patch.object(release, 'publish_release', side_effect=changed):
+                    with self.assertRaises(RuntimeError):
+                        run(case)
+                unattempted(case)
+
+    def test_last_live_observation_failure_refuses_before_clear(self):
+        with ready() as case:
+            def sample(spec, output):
+                if output.name == 'before-clear':
+                    raise OSError('source attachment or unreadable live observation')
+                return case.sample(spec, output)
+            with mock.patch.object(release, 'preflight', side_effect=sample):
+                with self.assertRaisesRegex(OSError, 'attachment or unreadable'):
+                    run(case)
+            unattempted(case)
+
+    def test_last_guarded_source_metadata_refuses_before_clear(self):
+        with ready() as case:
+            def sample(spec, output):
+                value = case.sample(spec, output)
+                if output.name == 'before-clear':
+                    stamp = case.source.stat().st_mtime_ns + 1000000
+                    os.utime(case.source, ns=(stamp, stamp))
+                return value
+            with mock.patch.object(release, 'preflight', side_effect=sample):
+                with self.assertRaises(RuntimeError):
+                    run(case)
+            unattempted(case)
+
+    def test_last_preclear_clone_attachment_or_sibling_refuses(self):
+        for fault in ('clone', 'attachment', 'sibling'):
+            with self.subTest(fault=fault), ready() as case:
+                def sample(spec, output):
+                    value = case.sample(spec, output)
+                    if output.name == 'before-clear':
+                        if fault == 'clone':
+                            case.clone.write_bytes(b'new clone')
+                        elif fault == 'attachment':
+                            case.patch(release, 'no_disk_attachment', side_effect=RuntimeError('clone attached at last check'))
+                        else:
+                            sibling = case.temp / 'late-sibling'
+                            sibling.mkdir(mode=0o700)
+                            (sibling / 'powered-off-image.asif').write_bytes(b'other')
+                    return value
+                with mock.patch.object(release, 'preflight', side_effect=sample):
+                    with self.assertRaises(RuntimeError):
+                        run(case)
+                unattempted(case)
+
+    def test_last_preclear_ctime_requires_equality(self):
+        with ready() as case:
+            def sample(spec, output):
+                value = case.sample(spec, output)
+                if output.name == 'before-clear':
+                    case.ctime_advance = 1
+                return value
+            with mock.patch.object(release, 'preflight', side_effect=sample):
+                with self.assertRaises(RuntimeError):
+                    run(case)
+            unattempted(case)
+
+    def test_verifier_binds_last_preclear_sample_bytes(self):
+        with ready() as case:
+            run(case)
+            replace(case.release_output / 'before-clear/preflight.json', at_utc='later rewritten evidence')
+            with self.assertRaisesRegex(RuntimeError, 'completion or released source binding'):
+                verify(case)
+
     def test_both_exclusive_locks_stay_held_at_clear(self):
         with ready() as case:
             def checked(path, identity, present):
@@ -457,7 +569,7 @@ class AbortRelease(unittest.TestCase):
             unattempted(case)
 
     def test_written_sample_must_equal_consumed_sample(self):
-        for name in ('verify', 'barrier', 'after'):
+        for name in ('verify', 'barrier', 'before-clear', 'after'):
             with self.subTest(name=name), ready() as case:
                 def sample(spec, output):
                     value = case.sample(spec, output)
@@ -479,7 +591,7 @@ class AbortRelease(unittest.TestCase):
                     case.clear(path, identity, present)
                     if fault == 'inode':
                         content = path.read_bytes()
-                        path.unlink()
+                        path.rename(case.temp / 'retained-original-source')
                         path.write_bytes(content)
                         path.chmod(0o600)
                     elif fault == 'mode':

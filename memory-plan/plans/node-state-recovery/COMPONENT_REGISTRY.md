@@ -1,11 +1,12 @@
 # Node state recovery — registry
 
-2026-10-17 18:40 EDT — D212 owned ABORT source-release candidate is implemented,
-with consumer-established barriers, one pinned clear, post-clear byte verification
-and a read-only release verifier. Ten decisive mutants pass; exact-source review/CI
-remain pending. B5/1.2 open; B6–B9 held. No guest admission, production release,
-native full terminal pipeline or Mac reboot proof. Next scoped guest admission/manual
-restoration, then D175 owned conditional timer re-pin.
+2026-10-17 18:50 EDT — D212 corrected owned source-release candidate passes40
+controls and13intended mutants. A reproduced stale-observation gap is corrected by
+a final live pre-clear sample with exact guarded metadata/ctime and clone/attachment/
+sibling checks; COMPLETE binds that sample. Claude172 accepts the revised design,
+but corrected-source review and exact-head CI remain pending. Source row/B5/1.2
+open, B6–B9 held, production/D64 unchanged. No native whole pipeline or Mac reboot
+proof; next guest scoped admission/manual restoration, then D175 owned re-pin.
 
 ## Family 1: persisted application state
 

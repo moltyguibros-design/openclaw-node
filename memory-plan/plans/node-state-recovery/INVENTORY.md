@@ -3392,3 +3392,38 @@ fixed disk/RAM/capacity decision; this gate provisions nothing.
 D212 pre-publication update: all32 owned release controls pass32.834s; all10 mutants
 are killed at their designated assertions.61bounded release/terminal/fence regressions
 pass88.299s. Review and exact-head CI are still pending. No source readiness claim.
+
+
+D212 correction in progress: add final before-clear live observation after durable
+INTENT and full hash verification, exact guarded metadata/ctime and clone/attachment/
+sibling checks, then the one pinned clear. COMPLETE binds the new sample; shared
+read-only verification consumes it. The c8aa current-source zero-call negative fails
+as intended, then passes after correction. Claude172 confirms required ordering and
+limits. Corrected full controls/mutants, source review and exact CI pending.
+
+Tracked separate follow-up B5-CI-R3-placement (Codex): unchanged isolated R3 creation
+failed before Python at c8aa CI39076032148, also seen at cef42140. Diagnose readiness
+and prove the fault in its own bounded unit; no unrelated fix or rerun habit here.
+All-green exact-head CI remains a source-readiness prerequisite, not waived.
+
+
+2026-10-17 18:50 EDT — D212 corrected candidate proof, still not source ready:
+All40 owned release controls pass48.522s. All13 mutants are killed at their intended
+assertions with unmutated controls and no test errors. The c8aa holder-at-INTENT
+negative fails with one flag call on old source and passes with zero calls after the
+new last observation. Pre-clear clone/attachment/sibling, exact ctime/metadata, host
+state/identity, unreadable observation and consumed-file parity negatives also pass.
+The positive asserts no whole-image rehash between the last live sample and clear;
+COMPLETE binds that sample and read-only verification refuses altered bytes. The
+ctime fixture preserves the old inode while replacing the path, avoiding inode reuse.
+The ordering mutant now moves the flag operation itself before INTENT; the old mutation
+produced a setup/file-read error after the new readback guard and was rejected by the
+runner. The sibling mutant anchor is now exact to its line/indent after a second
+clone-only check was added. Neither runner error was counted as a kill.
+
+Claude172 accepted the corrected design and named the final cheap checks; exact-source
+review and current-head CI remain pending. Local Python3.9.6/darwin exposes F_FULLFSYNC51
+and the real owned-file barriers pass; current CI native behavior still must be read.
+No source readiness, native whole pipeline, guest admission, boot, B8 acceptance or
+production recovery claim follows. B5/1.2 open, B6–B9 held, D64 and production fences
+unchanged; next guest scoped admission/manual, then D175. No production operation.

@@ -807,3 +807,20 @@ fault masking by a later independent sample barrier; the control now fails only 
 original evidence-table barrier and kills the intended missing-durability guard.
 Initial release fixture errors came from autospeccing an already mocked lstat; chaining
 the existing fixture's side-effect fixes test setup without changing runtime validation.
+
+
+D212 freshness re-orient: B5-release-freshness is an owned release prerequisite,
+with a decisive current-source zero-flag-call failure after an INTENT-time holder
+change. Correct within this same release contract: last live sample after the full
+rehash and durable INTENT, cheap original metadata/guard checks, no new hash afterward,
+COMPLETE pins the added before-clear sample and the core verifier consumes it. Fixed
+layout and schema parity tests change together. No guest source or production fence
+changes. The source row stays active pending corrected exact review/CI; the earlier
+Linux CI failed before these Python controls, not at this source finding.
+
+
+Claude172 confirms correction and precision points: exact pre-clear ctime, final
+clone/attachment/clone-only sibling absence and INTENT bytes. These are included with
+zero-call negatives. Optional same-uid flag-helper no-op gap remains D189, not closed.
+Unrelated finding B5-CI-R3-placement is tracked in INVENTORY for its own work unit:
+recurring unchanged NATS peer-offline10005 before Python; no fixture patch here.

@@ -1,4 +1,4 @@
-# Recovery frontier — 2026-10-17 17:58 EDT
+# Recovery frontier — 2026-10-17 18:50 EDT
 
 This is the Codex desktop heartbeat's short control surface for recovery step
 1.2. It does not change `INVENTORY.md`, `DECISIONS.md`, the no-stop rule, or
@@ -58,7 +58,7 @@ review only, not source readiness or B5 closure. Production remains untouched.
 | B2 | **Cleared for the disposable mechanism only.** Codex registered a separate Apple-backend UTM VM with its own ASIF disk and a verified Alpine ISO. It started and stopped normally; while `UF_IMMUTABLE` guarded that stopped disk, UTM refused its start and remained stopped; after unlock it started and stopped normally. The production VM stayed started throughout. | Codex carries this owned result into B5's host boot controller; no further VM creation is needed for B2's guard mechanism. B5's macOS reboot rehearsal has a separate access requirement. `utmctl start` exited 0 even on the refused attempt, so the controller must check the resulting state and error. | `audits/step12_jetstream/B2_UTM_GUARD_REHEARSAL_20261012.json` records distinct VM/disk identities, ASIF format, guard refusal, unlock recovery and final states. This is not a production boot-denial certificate. | B5 controller implementation and owned tests. |
 | B3 | **Just-in-time installation pins:** the October 9 candidate names `viewer-observed-20261008`; the installed viewer has since moved to `viewer-plan-task-links-autosave-20261011`. The 23-job candidate is unapproved and can drift again. | Codex resolves known structural drift now, but re-captures all 23 installed jobs and direct file hashes only immediately before an approved window. Repeating the capture before a window is scheduled does **not** count as progress. | Current installed identities and hashes match the reviewed baseline at window entry, including the five old timer pins and the exact conditional migration form. No pre-window timer reinstall. | B6 and B7. |
 | B4 | **Cleared as a bounded design input:** all 23 installed plists and direct launch files, activation keys, and current GUI/user/system OpenClaw-label observations are captured. Claude's adversarial review at `ac954055` found no remaining concrete false claim. This is not a no-writer certificate. | Codex carries the identified child, deploy, viewer, bus and file-writing routes into B5; transitive and out-of-cohort writers remain fail-closed uncertainties for the window-time census and stopped-VM boundary. Re-running this static capture alone is not progress. | `audits/step12_jetstream/B4_WRITER_PROVENANCE_AUDIT_20261012.md` and its JSON cover all 23 labels, classify the only observed system-domain OpenClaw label, name re-entry edges, and state residual uncertainty without claiming pre-stop physical exclusion. | Boundary design B5. |
-| B5 | **In progress, owned source only:** D211 verifies cleanup-bound terminal ABORT and strict consumption at00264a3c / CI39071272275 all8 green, Claude158. Native helper-file ingestion is observed in two capture fixture sample trees. The record grants no release, admission or boot. Full native terminal pipeline, serving-NATS adapter, protected provenance, checked source release, guest admission/manual restoration, D175, default-throttle policy and actual macOS reboot remain open. D64 and production refusals unchanged. | Codex builds the separately checked owned source release, then guest decision binding/scoped observations/manual restoration before D175. Operator separately designates an exact disposable Mac or decides a measured fixed disk/RAM/capacity proposal before actual reboot rehearsal. No pre-B6 installed timer mutation. | Reviewed final source, decisive negatives, exact-head green CI and owned APFS reattach; actual disposable-macOS reboot/launchd/login/process/hold-reattach/migration evidence remains required. Journal is quiescence only; no physical exclusion between last stop and manifest. | Per-window release B6. |
+| B5 | **In progress, owned source only:** D212 corrected release candidate passes40 controls/13 intended mutants, after reproducing and correcting a stale pre-clear observation. Claude172 accepts the revised design; exact-source review and CI remain pending. D211 terminal ABORT remains verified. Full native terminal/release pipeline, guest admission/manual restoration, D175, serving-NATS adapter, protected provenance and actual macOS reboot remain open. | Codex completes reviewed exact-head source proof, then guest decision binding/scoped observations/manual restoration before D175. Operator separately designates an exact disposable Mac or decides a measured fixed disk/RAM/capacity proposal. | Final source review and exact-head green CI; actual native pipeline, owned APFS reattach and disposable-macOS reboot/login/process/hold/migration evidence remain distinct requirements. | Per-window release B6. |
 | B6 | **Separate live-run release required.** B1's boundary choice and B5's design review never authorize a production stop. | Operator gives a fresh, explicit go/no-go for one exact attended window only after B2, B3 and B5 pass. The two-hour heartbeat may prepare and warn, but must never initiate the live stop. | Recorded window-specific authorization naming the reviewed runbook, current pins, host operator and abort contact; it explicitly names D173–D175's user-owned pre-stop evidence without root attestation, D62's ACCEPTED-or-ABORT pre-boot rule, the conditional post-admission/pre-restoration timer re-pin, and the manual-restoration fallback. Without it, B7 remains closed. | Live hold and shutdown B7. |
 | B7 | **Live full-node hold and shutdown closed.** No service or VM stop has occurred for this recovery. | Only in the attended, specifically authorized B6 window, execute the approved sequence and abort on any failed precondition. No single NATS member may be stopped as a rehearsal. | Application quiescence under the approved boundary, clean VM shutdown, active host boot denial and definitive physical no-writer proof at the boundary specified by B1. | Stopped-VM capture B8. |
 | B8 | **Four-store capture and isolated acceptance closed.** No three healthy cold masters have been accepted. | Bind host capture and restore tools to the four declared physical paths and volume, then restore the copies on isolated servers. | Four separately hashed path/volume/window-bound copies faithfully reproduce the observed bytes; offline streams, counts, sequences and expiring-stream treatment match. This does **not** prove historical independence of the four members; that needs deployment-time provenance outside this capture. | Step 1.2 closure and any topology change. |
@@ -803,3 +803,34 @@ fixed disk/RAM/capacity decision; this gate provisions nothing.
 D212 pre-publication update: all32 owned release controls pass32.834s; all10 mutants
 are killed at their designated assertions.61bounded release/terminal/fence regressions
 pass88.299s. Review and exact-head CI are still pending. No source readiness claim.
+
+
+D212 required correction B5-release-freshness: c8aa can clear once after an INTENT-time
+holder change before its after sample refuses. Owned reproduction only, no COMPLETE.
+Codex corrects the last live pre-clear observation and exact guarded metadata/clone/
+attachment/sibling checks, bound through COMPLETE; Claude172 confirms design. Corrected
+review/CI still required; source row open. CI39076032148 Linux failed earlier in the
+unchanged R3 placement fixture, tracked separately as B5-CI-R3-placement; no waiver.
+B5/1.2 open, production/D64 unchanged, next scoped guest admission/manual then D175.
+
+
+2026-10-17 18:50 EDT — D212 corrected candidate proof, still not source ready:
+All40 owned release controls pass48.522s. All13 mutants are killed at their intended
+assertions with unmutated controls and no test errors. The c8aa holder-at-INTENT
+negative fails with one flag call on old source and passes with zero calls after the
+new last observation. Pre-clear clone/attachment/sibling, exact ctime/metadata, host
+state/identity, unreadable observation and consumed-file parity negatives also pass.
+The positive asserts no whole-image rehash between the last live sample and clear;
+COMPLETE binds that sample and read-only verification refuses altered bytes. The
+ctime fixture preserves the old inode while replacing the path, avoiding inode reuse.
+The ordering mutant now moves the flag operation itself before INTENT; the old mutation
+produced a setup/file-read error after the new readback guard and was rejected by the
+runner. The sibling mutant anchor is now exact to its line/indent after a second
+clone-only check was added. Neither runner error was counted as a kill.
+
+Claude172 accepted the corrected design and named the final cheap checks; exact-source
+review and current-head CI remain pending. Local Python3.9.6/darwin exposes F_FULLFSYNC51
+and the real owned-file barriers pass; current CI native behavior still must be read.
+No source readiness, native whole pipeline, guest admission, boot, B8 acceptance or
+production recovery claim follows. B5/1.2 open, B6–B9 held, D64 and production fences
+unchanged; next guest scoped admission/manual, then D175. No production operation.

@@ -17,7 +17,7 @@ from host_guest_commit import encoded
 from host_journal_mount import clone_identity, record_failure
 from host_image_immutable import change_immutable
 from host_vm_guard import GUARD_SCOPE
-from host_vm_capture import FIXTURE_UUID, HOST_SPEC_FIELDS, file_hash, fsync_parent, pinned_spec
+from host_vm_capture import FIXTURE_UUID, HOST_SPEC_FIELDS, file_hash, fsync_parent, guarded_source, pinned_spec
 from host_vm_preflight import no_disk_attachment, owned_directory, preflight, require, write_record
 
 
@@ -204,7 +204,7 @@ def reconcile(host_spec, capture_dir, output, fixture=False):
 RELEASE_INTENT_KEYS = frozenset({'abort_sha256', 'complete_sha256', 'cleanup_sha256',
     'cleanup_intent_sha256', 'capture_nonce', 'arm_sha256', 'journal_head',
     'checkpoint_sha256', 'evidence_sha256', 'verify_sample_sha256', 'barrier_sample_sha256', 'source'})
-RELEASE_COMPLETE_KEYS = frozenset({'intent_sha256', 'abort_sha256', 'after_sample_sha256', 'source'})
+RELEASE_COMPLETE_KEYS = frozenset({'intent_sha256', 'abort_sha256', 'before_clear_sample_sha256', 'after_sample_sha256', 'source'})
 
 
 def full_sync(fd):
@@ -344,7 +344,7 @@ def release_binding(host_spec, capture_dir, directory_fd, locks, output, intent,
             'verify_sample_sha256': hashes(sample_files(output / 'verify')),
             'barrier_sample_sha256': hashes(sample_files(output / 'barrier'))},
             'release intent or evidence binding differs')
-    for name in ('verify', 'barrier'):
+    for name in ('verify', 'barrier', 'before-clear'):
         sample_binding(json.loads(sample_files(output / name)['preflight.json']), initial, host)
     clone = capture_dir / 'powered-off-image.asif'
     require(not os.path.lexists(clone), 'release temporary clone reappeared')
@@ -367,7 +367,7 @@ def verify_release(host_spec, capture_dir, observed, directory_fd, locks, *, fix
     owned_directory(capture_dir)
     output = capture_dir / 'abort-release'
     owned_directory(output)
-    require({p.name for p in output.iterdir()} == {'verify', 'barrier', 'after', 'INTENT.json', 'COMPLETE.json'},
+    require({p.name for p in output.iterdir()} == {'verify', 'barrier', 'before-clear', 'after', 'INTENT.json', 'COMPLETE.json'},
             'release is failed, partial, temporary or unknown; manual handling required')
     raw = cleanup_bytes(output / 'INTENT.json')
     intent = exact_record(raw, RELEASE_INTENT_KEYS)
@@ -375,16 +375,20 @@ def verify_release(host_spec, capture_dir, observed, directory_fd, locks, *, fix
     complete = exact_record(complete_raw, RELEASE_COMPLETE_KEYS)
     source = release_binding(host_spec, capture_dir, directory_fd, locks, output, intent, observed)
     after = sample_files(output / 'after')
+    before_clear = sample_files(output / 'before-clear')
     sample_binding(json.loads(after['preflight.json']),
                    json.loads(cleanup_bytes('before-shutdown/preflight.json', directory_fd)), host)
     require(complete == {'intent_sha256': hashlib.sha256(raw).hexdigest(),
-                         'abort_sha256': intent['abort_sha256'], 'after_sample_sha256': hashes(after), 'source': source},
+                         'abort_sha256': intent['abort_sha256'],
+                         'before_clear_sample_sha256': hashes(before_clear),
+                         'after_sample_sha256': hashes(after), 'source': source},
             'release completion or released source binding differs')
     require(cleanup_bytes(output / 'INTENT.json') == raw
             and cleanup_bytes(output / 'COMPLETE.json') == complete_raw
             and sample_files(output / 'after') == after
+            and sample_files(output / 'before-clear') == before_clear
             and release_binding(host_spec, capture_dir, directory_fd, locks, output, intent, observed) == source
-            and {p.name for p in output.iterdir()} == {'verify', 'barrier', 'after', 'INTENT.json', 'COMPLETE.json'},
+            and {p.name for p in output.iterdir()} == {'verify', 'barrier', 'before-clear', 'after', 'INTENT.json', 'COMPLETE.json'},
             'release records changed during verification')
     return {'intent': raw, 'complete': complete_raw, 'sha256': hashes({'intent': raw, 'complete': complete_raw})}
 
@@ -428,6 +432,27 @@ def release_aborted(host_spec, capture_dir, fixture=False):
                     'release evidence changed before the flag operation')
             source = pathlib.Path(before['image'])
             identity = receipt['source']
+            last = preflight(host_spec, output / 'before-clear')
+            before_clear_files = sample_files(output / 'before-clear')
+            require(json.loads(before_clear_files['preflight.json']) == last,
+                    'release before-clear sample differs from the consumed observation')
+            initial = json.loads(evidence[capture_dir / 'before-shutdown/preflight.json'])
+            sample_binding(last, initial, json.loads(evidence[host_spec]))
+            require(guarded_source(capture_dir, initial, last) ==
+                    json.loads(evidence[capture_dir / 'CAPTURE.json'])['guard_receipt_sha256'],
+                    'release last source guard differs')
+            current = source.lstat()
+            require(all(getattr(current, field) == identity[key] for key, field in
+                        (('device', 'st_dev'), ('inode', 'st_ino'), ('size', 'st_size'),
+                         ('mtime_ns', 'st_mtime_ns'), ('ctime_ns', 'st_ctime_ns'), ('flags', 'st_flags'))),
+                    'release last guarded source metadata differs')
+            require(release_evidence(host_spec, capture_dir, directory_fd, locks) == evidence
+                    and cleanup_bytes(output / 'INTENT.json') == raw,
+                    'release inputs changed after the last live observation')
+            clone = capture_dir / 'powered-off-image.asif'
+            require(not os.path.lexists(clone), 'release before-clear clone reappeared')
+            no_disk_attachment(clone)
+            no_sibling_clone(capture_dir)
             flag_attempted = True
             change_immutable(source, (identity['device'], identity['inode'], identity['size']), False)
             after = preflight(host_spec, output / 'after')
@@ -436,12 +461,15 @@ def release_aborted(host_spec, capture_dir, fixture=False):
             released = release_binding(host_spec, capture_dir, directory_fd, locks, output, intent, after)
             require(cleanup_bytes(output / 'INTENT.json') == raw, 'release intent changed after the flag operation')
             after_files = sample_files(output / 'after')
-            durable_evidence({output / 'after' / key: value for key, value in after_files.items()})
+            durable_evidence({**{output / 'before-clear' / key: value for key, value in before_clear_files.items()},
+                              **{output / 'after' / key: value for key, value in after_files.items()}})
             require(release_binding(host_spec, capture_dir, directory_fd, locks, output, intent, after) == released
-                    and sample_files(output / 'after') == after_files,
+                    and sample_files(output / 'after') == after_files
+                    and sample_files(output / 'before-clear') == before_clear_files,
                     'release bindings changed after the flag operation')
             publish_release(release_fd, 'COMPLETE.json', {'intent_sha256': hashlib.sha256(raw).hexdigest(),
-                'abort_sha256': intent['abort_sha256'], 'after_sample_sha256': hashes(after_files), 'source': released})
+                'abort_sha256': intent['abort_sha256'], 'before_clear_sample_sha256': hashes(before_clear_files),
+                'after_sample_sha256': hashes(after_files), 'source': released})
             return verify_release(host_spec, capture_dir, after, directory_fd, locks, fixture=True)
         except BaseException as error:
             record_failure(output, 'abort-source-release', error,

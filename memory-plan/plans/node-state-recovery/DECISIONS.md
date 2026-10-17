@@ -5140,3 +5140,66 @@ fixed disk/RAM/capacity decision; this gate provisions nothing.
 D212 pre-publication update: all32 owned release controls pass32.834s; all10 mutants
 are killed at their designated assertions.61bounded release/terminal/fence regressions
 pass88.299s. Review and exact-head CI are still pending. No source readiness claim.
+
+
+2026-10-17 18:45 EDT — D212 freshness correction, candidate not ready:
+An owned c8aa5846 reproduction changes the observed holder set immediately after INTENT
+publication. The saved barrier observation is reused through the final verification,
+so source clear occurs once before the post-clear sample refuses. A new negative fails
+at the intended zero-flag-call assertion. No live resource was used. This is a required
+release-order correction, not a reason to waive the guard or declare CI green.
+
+Re-oriented this gate after the mutation-test mask and this source finding: its one
+outcome remains a checked owned source release. Name the pre-clear freshness prerequisite
+B5-release-freshness; guest admission/D175 remain separate next gates. After durable
+INTENT and the expensive original re-verification, add a new before-clear live sample,
+compare consumed/written bytes, original host binding and cheap source metadata/flag/
+guard checks, then the one pinned clear. No further whole-image hash delays that last
+observation; the prior hash was under sampled guard with unchanged metadata, subject
+to D189's same-uid limit. COMPLETE now additionally binds before_clear_sample_sha256;
+the fixed layout includes before-clear, and the shared release binding checks that
+saved sample. INTENT cannot forward-bind later sample bytes. The before-clear and after
+sample files are synchronized before completion, and all pinned bytes are checked.
+The corrected schema/order is under Claude review and decisive new negatives.
+
+CI39076032148 at c8aa5846 failed Linux117523256747 in unchanged test_recovery.mjs at
+cluster-replicated-r3-create, NATS peer offline10005, before Python tests. It is not
+green; no retry or unrelated NATS fixture change has been made. Native is pending.
+
+
+D212 review172 independently reproduces the original32 controls and10mutants as uid65534
+and confirms the pre-clear defect and revised order/schema. Its two precision points
+are incorporated: pre-clear ctime equals the ABORT source exactly (only post-clear may
+advance), and the cheap last check also requires clone absence, attachment inventory,
+clone-only sibling absence and unchanged INTENT bytes. A no-op if another same-uid actor
+clears the flag in the final helper gap remains an explicit D189 limitation; it is not
+claimed as a consumer-performed clear or continuous exclusion. No new native control
+is claimed until the current-head CI job is observed.
+
+Separate follow-up B5-CI-R3-placement: the unchanged isolated test_recovery.mjs R3 fixture
+has failed at least twice today (cef42140 and c8aa5846) before Python collection with
+peer-offline10005. Owner Codex, future bounded fixture-readiness diagnosis and decisive
+fix in its own work unit; this release slice makes no NATS fixture change and does not
+use repeated retries as evidence. Current exact-head all-green CI remains mandatory.
+
+
+2026-10-17 18:50 EDT — D212 corrected candidate proof, still not source ready:
+All40 owned release controls pass48.522s. All13 mutants are killed at their intended
+assertions with unmutated controls and no test errors. The c8aa holder-at-INTENT
+negative fails with one flag call on old source and passes with zero calls after the
+new last observation. Pre-clear clone/attachment/sibling, exact ctime/metadata, host
+state/identity, unreadable observation and consumed-file parity negatives also pass.
+The positive asserts no whole-image rehash between the last live sample and clear;
+COMPLETE binds that sample and read-only verification refuses altered bytes. The
+ctime fixture preserves the old inode while replacing the path, avoiding inode reuse.
+The ordering mutant now moves the flag operation itself before INTENT; the old mutation
+produced a setup/file-read error after the new readback guard and was rejected by the
+runner. The sibling mutant anchor is now exact to its line/indent after a second
+clone-only check was added. Neither runner error was counted as a kill.
+
+Claude172 accepted the corrected design and named the final cheap checks; exact-source
+review and current-head CI remain pending. Local Python3.9.6/darwin exposes F_FULLFSYNC51
+and the real owned-file barriers pass; current CI native behavior still must be read.
+No source readiness, native whole pipeline, guest admission, boot, B8 acceptance or
+production recovery claim follows. B5/1.2 open, B6–B9 held, D64 and production fences
+unchanged; next guest scoped admission/manual, then D175. No production operation.
