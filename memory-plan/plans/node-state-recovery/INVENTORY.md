@@ -3285,7 +3285,7 @@ disposable machine or a measured fixed disk/RAM/capacity decision. No VM is prov
 
 ### 2026-10-17 17:13 EDT — B5-D62-host-terminal-abort preflight
 
-- [A] B5-D62-host-terminal-abort: produce and strictly consume an owned terminal ABORT
+- [x] B5-D62-host-terminal-abort: produce and strictly consume an owned terminal ABORT
   only after completed checkpoint-bound cleanup, retaining source denial. This slice never
   releases a source, starts a VM, grants guest admission or relaxes production/D64 refusals.
   Needs: D209 cleanup producers and exact-head green1f7dc5b7 CI39067153085, original
@@ -3321,3 +3321,16 @@ The existing CI native capture fixture now checks real sample ingestion and log 
 that assertion, corrected-head Claude and CI are pending. No native terminal pipeline,
 source release/admission or B5 closure. See D210 for unobserved old native mode and scope
 corrections; production, D64, installed timers and all four histories remain unchanged.
+
+
+### 2026-10-17 17:58 EDT — owned terminal ABORT source verified (D211)
+
+Verified source00264a3c / CI39071272275, all8 checks green; native117509228208 passes
+real before-shutdown/after-guard sample ingestion and private-log assertions,16capture,
+29terminal/15status controls and14intended mutants. Native log SHA2564ebd019ed8bdc493bad382baf8386c5185ccd8864a3634f0c2afe9e38ec1638c.
+Claude158 independently verifies controls/mutants as non-root, with no required finding.
+This closes only B5-D62-host-terminal-abort source: no release, guest admission or boot.
+Native terminal pipeline, protected provenance and actual macOS reboot remain open;
+D64/production refusals unchanged, B5/1.2open, B6–B9held, B3/B4 not repeated and four
+histories separate. Next: checked owned source release, then scoped guest admission/
+manual restoration before D175. Receipt head still needs exact-head CI.

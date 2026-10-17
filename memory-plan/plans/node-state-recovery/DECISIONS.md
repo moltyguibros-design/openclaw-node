@@ -5006,3 +5006,49 @@ their controls and die as intended. These are source/owned proofs, not native te
 pipeline, actual reboot, source release or guest admission. New exact-head Claude/CI,
 including the native private-file assertion, remain required. B5/1.2 open, B6–B9 held;
 D64/production refusals unchanged, B3/B4 not repeated, four histories separate.
+
+
+## D211 — 2026-10-17 17:58 EDT: verify the owned terminal ABORT source checkpoint
+
+Runtime source 00264a3c461076b175c04847727096d072ee8e58 passes exact CI39071272275, all8 checks success.
+Native macOS job117509228208 passes the complete16-test capture module, including the
+real before-shutdown and after-guard sample ingestion and private-log assertions;
+the29 terminal controls,15 helper-status controls and all14 intended mutants also pass.
+The terminal controls still use scripted VM/flag samples. Native raw job-log SHA256
+4ebd019ed8bdc493bad382baf8386c5185ccd8864a3634f0c2afe9e38ec1638c.
+CI checkout merge de6a66eb1e9eb35ccbbe6deb58231fa5ba0d1e90 has identical step12/workflow blobs to
+that source, checked against the fetched commit. Linux Node22 completes the full
+JetStream and root steps successfully; its terminal suite has29 passes and its runner
+kills all14 intended mutants. The superseded a15e run39070356368 is cancelled, not green.
+
+Claude158 independently reproduces29terminal/15status controls and all14 intended
+mutants as uid65534, plus the earlier cleanup/mount/capture/reconcile regressions,
+and finds no required source or claim defect. It confirms the two-descriptor check in
+both shared pins and verifier, explicit pre-created0600 logs, failure-before-bootstrap
+collisions, reserved directory names and the corrected D210 limits. Its review leaves
+native ingestion to this CI observation and does not claim a native terminal pipeline.
+
+B5-D62-host-terminal-abort closes only this owned source prerequisite. ABORT plus its
+completion record remains user-owned sampled evidence, not protected provenance,
+continuous denial, source release, guest admission, boot authority, real-history
+acceptance or operational recovery. The caller supplies a fresh observed VM sample and
+must own both EX flocks; file identities alone do not prove lock ownership. The cleanup
+reason is forwarded without a separate operator statement. Complete native cleanup-
+then-terminal behavior and macOS guest reboot remain unproved. This evidence receipt
+changes no runtime/workflow bytes and still needs its own exact-head green CI before
+source readiness. B5/1.2 remain open at v1.2-pre, B6–B9 held, production capture/reconcile
+refused and D64 unchanged; B3/B4 not repeated, four histories separate.
+
+Next two source gates: B5-D62-owned-source-release must consume verified ABORT/completion
+and successful cleanup under both locks, establish durable decision bytes, freshly
+recheck original stopped/guarded host and source before its own journaled release,
+and fail held/manual on every uncertain attempt. B5-D62-guest-admission/manual then
+binds the host decision before any gate opens, compares all OpenClaw launchd jobs and
+every process as the OpenClaw user or executing production entrypoint roots before
+Journal.recover, refuses unexpected/unreadable scoped observations, then checks stopped
+units/overrides and implements the manual route. This is not a physical process census.
+D175 follows admitted boot before gate construction; installed timers stay unchanged.
+B1 covers owned source/tests, not production operations. Actual macOS reboot/login/
+hold-reattach/D175 evidence still requires exact operator-designated disposable access
+or a measured fixed disk/RAM/capacity decision. No new VM, local image or production
+resource operation is performed by this receipt.
