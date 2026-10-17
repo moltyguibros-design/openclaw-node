@@ -358,3 +358,36 @@ records report/source/log hashes. New native CI and Claude review are pending;
 this corrects the source fixture rather than retrying unchanged code. Next
 native observations then owned reader integration remain held until their
 actual verification. B5/1.2 open, B6–B9 closed; no local mount or VM action.
+
+
+2026-10-17 04:56 EDT — D196, B5-native-ASIF-mount runtime observations:
+6f7e9371 run39018959320/job117356737655 completed the corrected probe at
+exit0. Artifact12096186192 is retained unchanged as
+B5_NATIVE_ASIF_COMPLETE_REPORT_20261017.json (SHA2567097f7d9…2e09f4);
+B5_NATIVE_ASIF_OBSERVATIONS_20261017.json records the interpretation.
+On one isolated macOS26.6.2 arm64 runner, both exact-option variants set
+readonly/nodev/nosuid/noexec and honored owners, including after the probe
+explicitly disabled ownership before reattach. Root0:0 mode0600 stayed
+unreadable to uid501; its own0600 file was readable. Plain readonly was
+correctly refused for absent noexec. Image bytes/inode/size/mtime/ctime/flags
+and empty xattr-name lists were identical before/after each readonly cycle.
+The intervening write/disable phases are not covered by that equality.
+Each phase independently confirmed its remembered disk gone, inventory0
+and no mount; final cleanup removed the directory. These are sequential
+observations, not physical exclusion or real-history acceptance.
+
+B5-native-device-binding is a new Codex-owned source blocker: actual attach
+IDs are bare while hdiutil/DeviceNode are /dev paths. The unchanged wrapper
+refuses attach equality before mount; replay of the native rows with all
+commands mocked also returns bare disk8s1 from data_volume and refuses
+verify_mount with 'private mount point holds another device'. The probe's
+canonical call is accepted, not the complete wrapper. Exact unblock: reviewed
+strict canonical whole-disk/Data identity binding with decisive mismatch and
+cleanup controls, then native owned reader integration. No check is relaxed
+here. Native facts are observed; the gate stays open for review/current-head
+CI and this binding correction. The next two gates are that owned source
+correction and integrated stopped-ASIF reader verification; both use only
+owned resources and require Claude plus exact-head green CI. D62 reboot
+rehearsal still requires separately designated macOS access. B3/B4 were not
+repeated; B5/1.2 open, B6–B9 closed, production capture disabled, node not
+operationally accepted. No local VM, service, image or timer changed.

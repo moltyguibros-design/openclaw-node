@@ -4231,3 +4231,35 @@ partial evidence). Source/log hashes are recorded. Publication is for new
 native CI and exact-head review, not source readiness or B5 closure. No local
 disk image or VM operation took place. B5/1.2 open, B6–B9 closed, D64 unchanged,
 four histories separate. Disposable-macOS reboot access remains independent.
+
+
+## D196 — 2026-10-17 04:56 EDT: bound native mount observations; keep device binding refused
+
+The corrected CI-only probe at6f7e9371 completed in39018959320/job117356737655,
+artifact12096186192, on one macOS26.6.2 arm64 runner. Its unchanged report
+and interpretation are B5_NATIVE_ASIF_COMPLETE_REPORT_20261017.json and
+B5_NATIVE_ASIF_OBSERVATIONS_20261017.json. The exact option variants honor
+owners, deny a root-owned0600 read to the runner and enforce readonly,
+nodev/nosuid/noexec, including after ownership was disabled before reattach.
+Plain readonly correctly refuses missing noexec. Every readonly cycle kept
+image bytes and recorded identity/times/flags/empty xattr names unchanged.
+Do not extend this to the intervening writable phases, arbitrary xattrs,
+other systems, reboot, production or real histories. Every phase confirmed
+nonvacuous remembered-disk absence after inventory-bound eject; final cleanup
+removed the private directory. Sequential inventory observations do not give
+concurrent physical exclusion.
+
+B5-native-device-binding remains a Codex-owned source blocker, not an
+operator permission request. The report's raw diskutil entries are bare
+(disk7/disk8s1); hdiutil and DeviceNode use /dev paths. The unchanged wrapper
+requires exact raw attach/inventory equality and refuses before mount. A
+separate replay with all commands mocked confirms data_volume returns bare
+disk8s1 and verify_mount refuses its source name. The probe's canonical call
+passing is not end-to-end journal wrapper acceptance. Next correct that
+strict binding without accepting different disks, partitions or paths, test
+mismatch/cleanup negatives, obtain Claude review and exact-head CI, and then
+run a native owned stopped-ASIF reader fixture. No wrapper condition changes
+in this evidence-only revision. Current-head full CI/review are still pending;
+no source-readiness claim. D62 reboot/hold-reattach and D175 timer migration
+remain distinct, including the separate macOS access decision. B5/1.2 open,
+B6–B9 closed, D64 unchanged and production capture disabled.
