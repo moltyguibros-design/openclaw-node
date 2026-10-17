@@ -48,6 +48,8 @@ def no_other_clone(root, current):
 
 
 def reconcile(host_spec, capture_dir, output, fixture=False):
+    require(fixture,
+            'production reconciliation requires a verified host boot decision controller')
     os.umask(0o077)
     host_spec = pathlib.Path(host_spec)
     capture_dir = pathlib.Path(capture_dir)

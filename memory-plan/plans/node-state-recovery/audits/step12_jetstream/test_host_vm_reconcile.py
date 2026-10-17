@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 from unittest.mock import patch
 
@@ -47,6 +48,124 @@ def active_capture_lock(capture_dir):
         yield
     finally:
         os.close(fd)
+
+
+class ProductionReleaseFence(unittest.TestCase):
+    def test_production_refuses_before_filesystem_or_process_observation(self):
+        with patch.object(host_vm_reconcile.os, 'umask') as mask, \
+                patch.object(host_vm_reconcile, 'owned_directory') as directory, \
+                patch.object(host_vm_reconcile, 'preflight') as sample, \
+                patch.object(host_vm_reconcile, 'change_immutable') as flags:
+            with self.assertRaisesRegex(RuntimeError, 'production reconciliation requires a verified host boot decision controller'):
+                reconcile('/not-read/host.json', '/not-read/capture', '/not-read/output')
+        for operation in (mask, directory, sample, flags):
+            operation.assert_not_called()
+
+    def incomplete(self, root, production=False):
+        capture = (root / 'Library/Application Support/OpenClawRecovery/window'
+                   if production else root / 'capture')
+        capture.mkdir(mode=0o700, parents=True)
+        source = root / 'owned-source.img'
+        source.write_bytes(b'owned image stand-in')
+        source.chmod(0o600)
+        info = source.stat()
+        observed = {'state': 'stopped', 'holders_consistent': True,
+                    'vm_uuid': '00000000-0000-0000-0000-000000000002',
+                    'host_boot_session': 'owned-boot', 'image': str(source),
+                    'image_device': info.st_dev, 'image_inode': info.st_ino,
+                    'image_size': info.st_size}
+        (capture / 'before-shutdown').mkdir(mode=0o700)
+        write_record(capture / 'before-shutdown/preflight.json', observed)
+        write_record(capture / 'ARMED.json', {
+            'scope': 'waiting for external guest shutdown; no stop request issued',
+            **{key: observed[key] for key in ('vm_uuid', 'host_boot_session',
+                                              'image_device', 'image_inode')}})
+        write_record(capture / 'GUARD_INTENT.json', {
+            'scope': GUARD_SCOPE, 'vm_uuid': observed['vm_uuid'],
+            'host_boot_session': observed['host_boot_session'],
+            'source_image': str(source), 'source_image_device': info.st_dev,
+            'source_image_inode': info.st_ino, 'source_image_size': info.st_size})
+        inactive_capture_lock(capture)
+        spec = root / 'host.json'
+        write_record(spec, {'package': str(root / 'Owned.utm'), 'name': 'Owned',
+                            'uuid': observed['vm_uuid'], 'image_name': source.name,
+                            'config_sha256': '0' * 64, 'utmctl': '/unused',
+                            'utmctl_sha256': '0' * 64})
+        return capture, source, spec, observed
+
+    def exercise(self, root, production):
+        capture, source, spec, observed = self.incomplete(root, production)
+        before = {path.relative_to(root): path.read_bytes()
+                  for path in root.rglob('*') if path.is_file()}
+        state = {'immutable': True}
+        original_lstat = pathlib.Path.lstat
+
+        def source_stat(path, *args, **kwargs):
+            if path == source:
+                return types.SimpleNamespace(st_mode=original_lstat(path).st_mode,
+                                             st_flags=stat.UF_IMMUTABLE if state['immutable'] else 0)
+            return original_lstat(path, *args, **kwargs)
+
+        def change_flags(path, identity, present):
+            self.assertEqual(path, source)
+            self.assertEqual(identity, tuple(observed[key] for key in
+                                            ('image_device', 'image_inode', 'image_size')))
+            state['immutable'] = present
+
+        with patch.object(pathlib.Path, 'home', return_value=root), \
+                patch.object(pathlib.Path, 'lstat', source_stat), \
+                patch.object(host_vm_reconcile, 'preflight', return_value=observed) as sample, \
+                patch.object(host_vm_reconcile, 'no_disk_attachment') as attachment, \
+                patch.object(host_vm_reconcile, 'change_immutable', side_effect=change_flags) as flags:
+            if production:
+                with self.assertRaisesRegex(RuntimeError, 'production reconciliation requires a verified host boot decision controller'):
+                    reconcile(spec, capture, capture / 'release')
+                for operation in (sample, attachment, flags):
+                    operation.assert_not_called()
+            else:
+                result = reconcile(spec, capture, capture / 'release', fixture=True)
+                self.assertTrue(result['clone_absent'])
+                self.assertFalse(result['guard_completed'])
+                self.assertFalse(result['capture_completed'])
+                self.assertFalse(result['source_immutable'])
+                self.assertEqual(flags.call_args.args[2], False)
+                self.assertEqual(sample.call_count, 3)
+        if production:
+            self.assertTrue(state['immutable'])
+            self.assertFalse((capture / 'release').exists())
+            self.assertEqual(before, {path.relative_to(root): path.read_bytes()
+                                     for path in root.rglob('*') if path.is_file()})
+        else:
+            self.assertFalse(state['immutable'])
+            self.assertEqual(json.loads((capture / 'release/BOOTABLE.json').read_bytes()), result)
+
+    def test_production_incomplete_capture_cannot_unlock_or_publish_bootable(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-release-fence-') as temporary:
+            self.exercise(pathlib.Path(temporary).resolve(), production=True)
+
+    def test_owned_incomplete_capture_control_still_reconciles(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-host-reconcile-control-') as temporary:
+            self.exercise(pathlib.Path(temporary).resolve(), production=False)
+
+    def test_fixture_cannot_admit_wrong_parent_vm_or_package(self):
+        for fault in ('parent', 'uuid', 'package'):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory(
+                    prefix='wrong-parent-' if fault == 'parent' else 'openclaw-host-reconcile-') as temporary:
+                root = pathlib.Path(temporary).resolve()
+                capture, _, spec, _ = self.incomplete(root)
+                declared = json.loads(spec.read_bytes())
+                if fault == 'uuid':
+                    declared['uuid'] = '11111111-1111-1111-1111-111111111111'
+                elif fault == 'package':
+                    declared['package'] = str(root / 'elsewhere/Owned.utm')
+                spec.write_text(json.dumps(declared))
+                with patch.object(host_vm_reconcile, 'preflight') as sample, \
+                        patch.object(host_vm_reconcile, 'change_immutable') as flags:
+                    with self.assertRaisesRegex(RuntimeError, 'fixture reconcile requires the owned test parent'):
+                        reconcile(spec, capture, capture / 'release', fixture=True)
+                sample.assert_not_called()
+                flags.assert_not_called()
+                self.assertFalse((capture / 'release').exists())
 
 
 @unittest.skipUnless(sys.platform == 'darwin', 'requires macOS ASIF and GUI launchd')

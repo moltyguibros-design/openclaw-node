@@ -4665,3 +4665,43 @@ unexpected/unreadable observations refuse, and this is not a complete physical c
 D175 changes values only if the device changed, after admission and before gate
 construction, preserving same-boot descriptor/path mapping checks. These are the existing
 D62/D174/D175 constraints, not new production authorization.
+
+## D206 — 2026-10-17 14:50 EDT: fence premature production image release
+
+Source tracing D62's next admission gate found an earlier release boundary that must be
+closed first. `host_vm_reconcile.reconcile()` refuses a completed CAPTURE, but its
+incomplete-capture path can remove the clone, clear the source image's immutable flag and
+publish BOOTABLE without an ACCEPTED or ABORT decision. Its BOOTABLE scope explicitly
+claims no acceptance; it is still a boot-denial release. Production capture is already
+disabled, so this is a latent tool path, not evidence that a production image was released.
+
+The independently executable prerequisite is B5-D62-release-fence. Reconciliation now
+refuses non-fixture invocation before umask, path/directory/output work, locks, preflight
+or flag changes. The existing fixture-only path keeps its owned parent, exact fixture VM
+UUID and package-parent checks and its existing native cleanup mechanism. This adds no
+decision producer, host guard release authority, boot operation or guest admission. D64
+and production capture refusal are unchanged. No new controller or parallel restore path
+is introduced. `change_immutable` remains a low-level operation, not a boot authority;
+direct manual flag changes are outside this command's guarantee.
+
+Four portable tests cover entry-first refusal, an otherwise viable incomplete capture,
+the unchanged successful fixture route and three fixture-boundary negatives. The viable
+case uses real private receipt/lock files but scripted VM samples, attachment observations
+and source flags; no native disk/VM operation. Against the old source both production
+assertions fail, with both owned controls passing. The candidate passes all4; deleting
+the entry refusal kills both production assertions with no runner errors and the owned
+controls still passing. All15 portable capture/guard controls pass. The new class is
+registered in Linux CI and runs with the existing full reconcile suite in macOS CI.
+Claude review and this source's exact-head green CI remain required before closing it.
+
+The next gates are reviewed host terminal-decision/cleanup production and then guest
+scoped boot admission/manual restoration; the separate D175 timer re-pin follows admitted
+boot and precedes gate construction. A JSON enum or legacy acceptance.json cannot supply
+B8 acceptance or protected provenance. Existing host arm/commitment/checkpoint/capture
+bindings must be consumed, boot denial retained through a durable ACCEPTED-after-B8 or
+ABORT-after-host-cleanup decision, and the guest must bind it before opening any gate.
+The full launchd/process comparison and stopped-unit/override checks precede recover.
+Actual macOS reboot rehearsal still needs the operator-designated disposable machine or
+an approved measured disk/RAM budget and capacity source; this source work needs neither.
+B3/B4 were not repeated. B1 stays design-only; B5/1.2 remain open at v1.2-pre, B6–B9
+closed, all four histories separate. No production service, VM, image or timer was operated.

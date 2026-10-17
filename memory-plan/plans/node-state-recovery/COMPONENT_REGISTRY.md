@@ -1,5 +1,12 @@
 # Node state recovery — registry
 
+2026-10-17 14:50 EDT — D206 source candidate fences the older incomplete-capture
+production reconciliation path before any observation or source-image release. Four
+portable controls pass, both production assertions kill removal of the fence, and15
+capture/guard controls pass. Native fixture regression, Claude and exact-head CI pending;
+this is not a terminal host decision or reboot admission. B5/1.2 remain open; production
+capture and cross-boot Journal recovery still refuse. No live state changed.
+
 ## Family 1: persisted application state
 
 ### SQLite application stores

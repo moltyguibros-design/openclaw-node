@@ -548,3 +548,18 @@ value-only migration with owned APFS reattach negatives. Both need Claude/exact-
 Actual reboot rehearsal still needs separate operator-designated disposable macOS access
 or a measured fixed resource decision. B3/B4 not repeated; B5/1.2 open, B6–B9 closed,
 D64 and production capture refusal unchanged. No production operation occurred.
+
+### 2026-10-17 14:50 EDT — B5-D62-release-fence candidate (D206)
+
+Before building decision admission, close the existing incomplete-capture reconcile
+release route: production invocation now refuses at entry, before any filesystem/output,
+lock, preflight or image-flag operation. Four scripted tests pass; the old source and a
+deleted-fence mutant both fail the two intended production assertions while the owned
+controls pass. Fifteen portable capture/guard controls pass. Native fixture regression,
+Claude and exact-head CI remain pending. This is a refusal prerequisite, not the missing
+ACCEPTED/ABORT producer or D62 admission. The next two gates need reviewed host decision/
+cleanup source using the arm/commitment/checkpoint/capture bindings, then guest scoped
+job/process admission and manual fallback; D175 follows admission. B1 provides source/
+owned-test authority, no new access needed; actual macOS reboot still needs separately
+designated disposable access/resource approval. No B3/B4 recapture or production change;
+B5/1.2 open, B6–B9 closed, D64 and production capture refusal unchanged.
