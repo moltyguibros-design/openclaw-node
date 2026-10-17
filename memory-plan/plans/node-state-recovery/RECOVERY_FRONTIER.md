@@ -237,3 +237,28 @@ are not claimed as final validation. Final Claude review and exact-head CI
 are pending; B5-owned-journal-mount source is not yet ready. The next gate
 is native owned ASIF characterization on an isolated CI runner; B5-macOS-
 access and the separate reboot rehearsal remain open, and B6 stays closed.
+
+
+2026-10-17 02:51 EDT — B5-exact-head-CI diagnostic, D193. Exact b694b342
+has four green CI jobs and the recurring macOS owned-kickstart failure
+(39005360286/117316604376); its new reader30/mount71 tests pass. Claude
+Message85 reports no material defect on that head. The ten-second timeout
+still leaves recovery partial, gate closed and receipt unresolved.
+
+Goal: distinguish the owned launchctl client's post-timeout state from
+service state, without changing any recovery rule. Needs: exact owned argv
+and temporary root, original D180 behavior and no production hook. Feeds:
+B5-exact-head-CI diagnosis/source readiness, then B5-native-ASIF-mount.
+Verify: six subprocess controls and three decisive mutations pass, a native
+owned restoration emits the exact-client trace, and the revised head receives
+Claude review and CI. The native control succeeded with a 9.008 s request;
+this is not a cause attribution for CI. Only a test helper, its tests, the
+existing owned test and scripted CI registration change. Action10s, post-
+timeout observation1s and parent20s limits are unchanged; no fixture throttle
+override or runtime code changes. All production state stays unchanged.
+
+The next two gates remain reviewed exact-head source CI (owned resources
+only, B1 authorization) and then native ASIF characterization on an isolated
+CI-created image after source readiness. Disposable macOS reboot access is
+still separate; B3/B4 were not recaptured, B6–B9 stay closed and the node
+is not accepted as operational.

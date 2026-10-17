@@ -4112,3 +4112,53 @@ green CI remain required before source readiness. Native mount, serving-NATS
 producer/adapter, protected B3/acceptance roots, planned-boot/abort, timer
 migration and disposable macOS reboot rehearsal remain open. D64 is unchanged,
 B5/1.2 remain open, B6 closed, four histories separate and production untouched.
+
+## D193 — 2026-10-17 02:51 EDT: observe the owned kickstart client without changing recovery
+
+Exact-head b694b342 CI 39005360286 has four green jobs but failed the
+macOS owned loaded/stopped daemon restoration test again. The reader's
+30 tests and mount wrapper's 71 tests (one platform skip) pass in that
+job. D180 still classifies the ten-second kickstart timeout as undetermined;
+the sampled owner was running, while the gate remained closed and the
+receipt unresolved. Claude Message 85 found no material defect on exact
+b694b342. Source readiness is still held by the red required check.
+
+Add a test-only Popen observer for the exact temporary mesh-agent kickstart
+argv, injected only into that owned test's restore child. It records the
+client's nonblocking poll, elapsed communicate time, output lengths and
+fixture timing/config context on timeout or completion, before preserving
+the original return or exception. It never supplies recovery evidence or
+changes admission. The command's ten-second timeout, one-second subsequent
+observation and outer twenty-second fixture timeout stay unchanged. No
+ThrottleInterval, launchctl flag, runtime module, installed plist, retry or
+acceptance rule changes. Diagnostic writes are best effort; their latency
+can affect the later observation, so a poll is explicitly after the timeout,
+not proof of client state at the exact deadline.
+
+Six owned subprocess controls distinguish a still-alive client from an
+already-exited client with descendant-held output without a startup race;
+output/result, non-target command and failed-report controls pass. Three
+restored-rule mutants lose the mandatory observation, collapse exited into
+alive, or swallow the timeout, and are killed for the intended assertions.
+An exclusive-create mutant was not counted: the current POSIX subprocess.run
+path waits after killing rather than calling communicate again, so that
+control would not exercise replacement. Do not inflate mutation counts.
+
+One native owned restoration case passes with a recorded 9.008 s kickstart
+against the unchanged ten-second limit. Its bootstrap-request age before
+SIGTERM was 0.301 s, stop wait 0.012 s and explicit ThrottleInterval absent.
+The local Apple launchd.plist manual documents a default ten-second spawn
+interval. This suggests a timing hypothesis but does not attribute the CI
+timeouts or prove a throttle boundary; the original running-owner sample
+cannot distinguish a blocked client from completed client/output lifetime.
+B5_OWNED_KICKSTART_TRACE_20261017.json records these limits and hashes.
+
+D192 claim clarification from the review: inventory binding is to the
+clone's image path, not exclusive proof that this run created each attachment.
+A same-uid concurrent attach of that same path can be ejected too. This
+remains within the declared sequential/same-uid limits, not physical exclusion.
+Final review and new exact-head CI govern this diagnostic revision; no blind
+rerun, timeout widening or harmless-flake claim follows. Native ASIF facts,
+protected provenance, serving-NATS producer/adapter, D62/D175 rehearsal and
+manual abort/resumption remain open. B5/1.2 open, B6 closed, D64 unchanged,
+four histories separate and all production services/VM/timers unchanged.
