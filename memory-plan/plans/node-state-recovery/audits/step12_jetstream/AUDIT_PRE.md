@@ -600,3 +600,49 @@ stopped-ASIF journal reader integration, then D62/D175 admission/resumption
 source under B1; actual macOS reboot still needs separate disposable access.
 B3/B4 not repeated, B5/1.2 open, B6–B9 closed, capture disabled, production
 untouched and all four histories separate.
+
+
+### Mid-Implementation Findings — 2026-10-17 10:59 EDT, Claude108
+
+No material regression on exact1e915d8a. All changed-source and preserved-runtime hashes were independently checked. Linux11/5/6/19 applied-timeout/launchd/trace/timing controls pass, managed-launchd61 with40 platform skips and restore-only31 with29 skips; guard-removal/type/expected-value mutants are killed. T3: Linux's documented anchor identity seam bypasses its exact plist policy, so two anchor mutants survive there; native timer-negative and native simulated anchor restore exercise those checks. T3 is tracked separately rather than expanded into this daemon remedy. Existing RunAtLoad/KeepAlive bool/int dictionary equivalence is unchanged and not fixed here.
+
+Focused native job117424417161 succeeds on PR-head1e915d8a/mergec013dd3d, with explicitThrottle1 and a completed0.004771s client under timeout10, resolved/open recovery and restored receipt; changed timer is refused before launchd. B5_OWNED_KICKSTART_FIXTURE_NATIVE_20261017.json retains the narrow result and its inherited-teardown/no-independent-process-absence limit. All-job CI remains the final source gate.
+
+
+2026-10-17 11:17 EDT — D203, owned restoration fixture source verified at1e915d8a.
+All8 exact-head jobs pass in39042421331; Claude Message108 finds no material
+regression and independently verifies preserved runtime hashes, portable
+controls, refusal-before-launchd and guard mutants. Focused native job
+117424417161 passes2 tests; full macOS job117424417172 passes the31-test
+restore-only module in104.459s and completes the remaining job. The focused/
+full stopped-daemon traces show explicit integerThrottle1, client rc0 and
+completed in.004771/.006608s under timeout10; both recover resolved/open with
+receipt restored. The timer-only policy negative passes, and the applied-
+timeout controls still preserve partial/closed/unresolved plus a fresh retry
+without another kickstart. The full run has no failed check. This source-only
+milestone is at the named verified head; this receipt changes no executable
+or workflow. Later heads still require their own checks.
+
+The retained native JSON binds source/merge/run/jobs and filtered observations,
+not an independent teardown/process-absence proof. It does not prove production
+default-throttle recovery, D62 reboot safety, physical writer exclusion or real
+history acceptance. B5-default-kickstart-policy remains open. T3 portable
+anchor-policy coverage is a separate nonblocking carry-forward; T1/T2 and
+future anomalous-probe measurement extensions are not expanded here.
+Shared device-binding sources/probe and the differentiated timing probe are
+unchanged from their reviewed/native-observed revisions; this green exact-
+head run clears their outstanding CI hold without repeating their artifacts.
+
+Next B5-owned-stopped-ASIF-reader uses B1-owned CI storage, a valid synthetic
+checkpoint/commitment/CAPTURE fixture, the complete locked reader/mount wrapper
+and frozen verifier, decisive corrupt/pending/unknown-entry refusals, unchanged
+image identity, cleanup evidence, Claude review and exact-head green CI. Then
+D62/D175 restore-only admission/resumption needs durable host ACCEPTED-or-ABORT
+binding, scoped launchd/process comparison before Journal.recover, fail-closed
+manual fallback and conditional value-only timer migration tested on owned
+APFS reattach. Actual reboot/launchd/login/hold-reattach still requires a
+separately designated disposable macOS machine or approved measured disk/RAM
+budget/capacity source. No local UTM VM was provisioned or operated; only the owned CI checks ran.
+B3/B4 were not repeated; B5/1.2 remain open, B6–B9 closed, D64 unchanged,
+production capture disabled and all four histories separate. No live service,
+VM, production image or installed timer was changed.

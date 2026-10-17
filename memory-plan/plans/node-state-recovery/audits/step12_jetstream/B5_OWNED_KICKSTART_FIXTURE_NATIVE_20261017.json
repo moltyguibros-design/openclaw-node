@@ -1,0 +1,179 @@
+{
+  "scope": "two focused native owned-fixture cases only; not default-throttle or production resumption acceptance",
+  "head": "1e915d8af8540c6a2d4a091bfba3a30cd7b8d7f3",
+  "run": 39042421331,
+  "job": 117424417161,
+  "job_url": "https://github.com/moltyguibros-design/openclaw-node/actions/runs/39042421331/job/117424417161",
+  "job_log_sha256": "c4b4b74e475901123ab42101f95c912f2f160c379980ce0f17d23b7217122779",
+  "native_trace": {
+    "gate": "open",
+    "outcome": "resolved",
+    "owned_kickstart_fixture": {
+      "client_pid": 1393,
+      "client_returncode_when_sampled": 0,
+      "context": {
+        "before_restore": {
+          "exit_timeout": 5,
+          "last_exit_code": 0,
+          "loaded": true,
+          "pid": null,
+          "running": false,
+          "runs": 1
+        },
+        "before_stop": {
+          "exit_timeout": 5,
+          "loaded": true,
+          "pid": 1335,
+          "running": true,
+          "runs": 1
+        },
+        "bootstrap_request_age_before_stop_s": 0.542873041,
+        "explicit_throttle_interval": 1,
+        "stop_wait_s": 0.01667170799999984
+      },
+      "elapsed_s": 0.00477099999999997,
+      "event": "completed",
+      "scope": "owned test client observation; no cause or deadline-state attribution",
+      "stderr_length": 0,
+      "stdout_length": 0,
+      "timeout_s": 10
+    },
+    "receipt_status": "restored"
+  },
+  "native_tests": {
+    "count": 2,
+    "elapsed_s": 5.247,
+    "changed_timer_refused_before_launchd": true
+  },
+  "portable_controls": {
+    "timeout": {
+      "tests": 5,
+      "elapsed_s": 0.003
+    },
+    "applied_timeout_readiness_policy": {
+      "tests": 11,
+      "elapsed_s": 8.512
+    },
+    "exact_comparison_mutant": "intended assertion killed with controls passing"
+  },
+  "full_exact_head_ci": {
+    "run": 39042421331,
+    "head": "1e915d8af8540c6a2d4a091bfba3a30cd7b8d7f3",
+    "conclusion": "success",
+    "checks": [
+      {
+        "name": "macos-process-census",
+        "id": 117424416968,
+        "conclusion": "success"
+      },
+      {
+        "name": "mission-control-tests",
+        "id": 117424417135,
+        "conclusion": "success"
+      },
+      {
+        "name": "unit-tests (22)",
+        "id": 117424417144,
+        "conclusion": "success"
+      },
+      {
+        "name": "kickstart-timing-macos",
+        "id": 117424417145,
+        "conclusion": "success"
+      },
+      {
+        "name": "asif-mount-ownership-macos",
+        "id": 117424417149,
+        "conclusion": "success"
+      },
+      {
+        "name": "owned-kickstart-fixture-macos",
+        "id": 117424417161,
+        "conclusion": "success"
+      },
+      {
+        "name": "legacy-writer-lock-macos",
+        "id": 117424417172,
+        "conclusion": "success"
+      },
+      {
+        "name": "unit-tests (20)",
+        "id": 117424417259,
+        "conclusion": "success"
+      }
+    ]
+  },
+  "claude_exact_head_review": {
+    "message": 108,
+    "verdict": "no material regression, no required correction",
+    "head": "1e915d8af8540c6a2d4a091bfba3a30cd7b8d7f3",
+    "independent_linux_verification": {
+      "applied_timeout": 11,
+      "launchd_timeout": 5,
+      "trace": 6,
+      "timing": 19,
+      "managed_launchd": {
+        "total": 61,
+        "platform_skips": 40
+      },
+      "restore_only": {
+        "total": 31,
+        "platform_skips": 29
+      }
+    },
+    "mutants": [
+      "committed equality removal killed at intended assertion",
+      "dropped integer-type clause killed by bool case",
+      "wrong expected throttle2 killed by positive and applied-timeout controls"
+    ],
+    "carry_forward": "T3 portable anchor identity seam bypasses exact policy; native tests exercise it; no new code required by review"
+  },
+  "limits": [
+    "job-level success and test trace are sequential owned observations, not physical exclusion",
+    "existing fixture teardown is inherited; this report does not independently certify every process absent",
+    "the daemon fixture has explicitThrottle1; production-default throttle policy remains open",
+    "no production service/VM/timer/image changed; B5 incomplete and B6 held"
+  ],
+  "merge": "c013dd3d76f7b4d1025fe05359b8b360f069b0b3",
+  "full_macos_suite": {
+    "job": 117424417172,
+    "tests": 31,
+    "elapsed_s": 104.459,
+    "native_trace": {
+      "gate": "open",
+      "outcome": "resolved",
+      "owned_kickstart_fixture": {
+        "client_pid": 96356,
+        "client_returncode_when_sampled": 0,
+        "context": {
+          "before_restore": {
+            "exit_timeout": 5,
+            "last_exit_code": 0,
+            "loaded": true,
+            "pid": null,
+            "running": false,
+            "runs": 1
+          },
+          "before_stop": {
+            "exit_timeout": 5,
+            "loaded": true,
+            "pid": 96294,
+            "running": true,
+            "runs": 1
+          },
+          "bootstrap_request_age_before_stop_s": 0.519768667000001,
+          "explicit_throttle_interval": 1,
+          "stop_wait_s": 0.01731516599999594
+        },
+        "elapsed_s": 0.00660770799999999,
+        "event": "completed",
+        "scope": "owned test client observation; no cause or deadline-state attribution",
+        "stderr_length": 0,
+        "stdout_length": 0,
+        "timeout_s": 10
+      },
+      "receipt_status": "restored"
+    },
+    "job_log_sha256": "466d85888c2eadd7814457d8c9fa4b46ecbc5edf31d641b2d5689fe15438aaf0"
+  }
+}

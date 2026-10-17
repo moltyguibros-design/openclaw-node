@@ -2841,7 +2841,7 @@ repeated; B5/1.2 open, B6–B9 closed, production capture disabled, node not
 operationally accepted. No local VM, service, image or timer changed.
 
 
-- [ ] B5-native-device-binding: bind the native bare attach identifiers to canonical image inventory/Data nodes without losing mandatory disk observations or cleanup refusals.
+- [x] B5-native-device-binding: bind the native bare attach identifiers to canonical image inventory/Data nodes without losing mandatory disk observations or cleanup refusals.
 
 > **B5-native-device-binding — Goal:** the owned wrapper accepts equivalent native spellings and refuses different/malformed devices; its probe validates the same binding under a root-owned volume root.
 > **Needs:** D196 raw native report; reviewed611127b9 with all6 CI jobs green; existing fixture-only wrapper/probe and cleanup.
@@ -2910,7 +2910,7 @@ Both are B1-owned work; no production service/VM or timer change. B3/B4 were
 not repeated, B5/1.2 open, B6–B9 closed, D64 unchanged, four histories separate.
 
 
-- [ ] B5-kickstart-cause-probe: measure the owned launchctl client's late return and job timing across seven fresh CI-only labels.
+- [x] B5-kickstart-cause-probe: measure the owned launchctl client's late return and job timing across seven fresh CI-only labels.
 
 > **B5-kickstart-cause-probe — Goal:** constrain the recurring owned kickstart timeout hypotheses using differentiated timing observations.
 > **Needs:** exact6912b7e7 failure trace, checked7d3e90a4 candidate, corrected probe cleanup, isolated macOS CI runner, all native opt-in guards.
@@ -2979,7 +2979,7 @@ service, VM, production image or timer was changed.
 
 2026-10-17 10:46 EDT — D202 begins B5-owned-kickstart-fixture after exact0d329038 CI6green/1red and Claude Message106's accepted bounded evidence plus required owned-adapter correction.
 
-- [ ] B5-owned-kickstart-fixture: require an explicit one-second throttle only on the owned temporary mesh-agent job and verify restoration without widening runtime budgets.
+- [x] B5-owned-kickstart-fixture: require an explicit one-second throttle only on the owned temporary mesh-agent job and verify restoration without widening runtime budgets.
 
 > **B5-owned-kickstart-fixture — Goal:** remove the observed default-throttle collision from the owned restoration test while retaining strict configuration refusal and timeout behavior.
 > **Needs:** D200/D201 differentiated native reports, Message106 review, exact0d329038 failure trace, existing owned adapter/native/simulated fixtures and portable timeout controls.
@@ -3007,3 +3007,66 @@ stopped-ASIF journal reader integration, then D62/D175 admission/resumption
 source under B1; actual macOS reboot still needs separate disposable access.
 B3/B4 not repeated, B5/1.2 open, B6–B9 closed, capture disabled, production
 untouched and all four histories separate.
+
+
+2026-10-17 10:59 EDT — Claude Message108 reports no material regression at1e915d8a, verifies isolation/refusal ordering and unchanged action budgets, and independently passes the portable controls and guard mutants. The focused macOS job117424417161 passes its2 native cases and portable controls in39042421331; the trace has explicitThrottle1, client rc0/completed in.004771s with timeout10, recovery resolved/open and receipt restored. Full all-job CI still pending; gate not closed yet.
+
+- [ ] B5-test-portable-anchor-policy (T3): cover the owned timer's exact configuration policy without the Linux /bin/sh identity seam; positive unchanged timer, unexpected daemon throttle and guard mutants must be exercised portably. Existing native timer-negative and simulated native anchor restore provide the current platform-specific coverage. Claude108 treats this as a nonblocking carry-forward.
+
+
+2026-10-17 11:17 EDT — D203, owned restoration fixture source verified at1e915d8a.
+All8 exact-head jobs pass in39042421331; Claude Message108 finds no material
+regression and independently verifies preserved runtime hashes, portable
+controls, refusal-before-launchd and guard mutants. Focused native job
+117424417161 passes2 tests; full macOS job117424417172 passes the31-test
+restore-only module in104.459s and completes the remaining job. The focused/
+full stopped-daemon traces show explicit integerThrottle1, client rc0 and
+completed in.004771/.006608s under timeout10; both recover resolved/open with
+receipt restored. The timer-only policy negative passes, and the applied-
+timeout controls still preserve partial/closed/unresolved plus a fresh retry
+without another kickstart. The full run has no failed check. This source-only
+milestone is at the named verified head; this receipt changes no executable
+or workflow. Later heads still require their own checks.
+
+The retained native JSON binds source/merge/run/jobs and filtered observations,
+not an independent teardown/process-absence proof. It does not prove production
+default-throttle recovery, D62 reboot safety, physical writer exclusion or real
+history acceptance. B5-default-kickstart-policy remains open. T3 portable
+anchor-policy coverage is a separate nonblocking carry-forward; T1/T2 and
+future anomalous-probe measurement extensions are not expanded here.
+Shared device-binding sources/probe and the differentiated timing probe are
+unchanged from their reviewed/native-observed revisions; this green exact-
+head run clears their outstanding CI hold without repeating their artifacts.
+
+Next B5-owned-stopped-ASIF-reader uses B1-owned CI storage, a valid synthetic
+checkpoint/commitment/CAPTURE fixture, the complete locked reader/mount wrapper
+and frozen verifier, decisive corrupt/pending/unknown-entry refusals, unchanged
+image identity, cleanup evidence, Claude review and exact-head green CI. Then
+D62/D175 restore-only admission/resumption needs durable host ACCEPTED-or-ABORT
+binding, scoped launchd/process comparison before Journal.recover, fail-closed
+manual fallback and conditional value-only timer migration tested on owned
+APFS reattach. Actual reboot/launchd/login/hold-reattach still requires a
+separately designated disposable macOS machine or approved measured disk/RAM
+budget/capacity source. No local UTM VM was provisioned or operated; only the owned CI checks ran.
+B3/B4 were not repeated; B5/1.2 remain open, B6–B9 closed, D64 unchanged,
+production capture disabled and all four histories separate. No live service,
+VM, production image or installed timer was changed.
+
+
+- [ ] B5-owned-stopped-ASIF-reader: exercise the complete owned readonly mount/locked journal reader/frozen verifier on a fresh CI-only ASIF.
+
+> **B5-owned-stopped-ASIF-reader — Goal:** verify the frozen owned checkpoint through the complete native wrapper, rather than only shared mount/device helpers.
+> **Needs:** D203 verified source at1e915d8a; D185/D187 checkpoint/commitment/CAPTURE fixture; native ownership/device assumptions and known-disk cleanup; isolated CI-owned image, no production VM/disk.
+> **Feeds:** B5 frozen-byte binding mechanism, then D62/D175 admission/abort/manual resumption work; never B8 real-history acceptance.
+> **Verify:** code/runtime: retained complete native owned positive through locked_read and verify_frozen_checkpoint with matching pins; corrupt/pending/unknown-entry refusals; readonly image identity and cleanup evidence; Claude review and exact-head green CI. Synthetic journal evidence remains user-owned quiescence only.
+
+
+> **B5-test-portable-anchor-policy — Goal:** enforce the owned timer's exact plist policy portably without bypassing it through the Linux identity seam.
+> **Needs:** Claude108 T3, existing owned adapter and current Linux /bin/sh seam, verified native anchor cases.
+> **Feeds:** cross-platform fixture policy regression coverage; not production acceptance.
+> **Verify:** code: unchanged timer positive, daemon-only throttle negative and both surviving anchor mutants killed without native launchd; retain native controls and Claude/exact-head CI.
+
+> **B5-default-kickstart-policy — Goal:** establish a reviewed fail-closed recovery/manual-restoration policy for a default-throttle action that crosses its budget.
+> **Needs:** retained D200/D201 default-arm reports, existing applied-timeout controls, D62 admission/host decision/manual controller design and disposable macOS access for its native rehearsal. Missing admission/access prevents starting that rehearsal.
+> **Feeds:** B5 resumption readiness and the B6 window runbook.
+> **Verify:** code/runtime: the default-budget collision stays partial/closed/unresolved; any later adoption/retry binds the accepted host decision and fresh scoped observations before reopening, with decisive negatives and reviewed manual fallback. Any runtime policy change needs its own Claude/exact-head CI and disposable native evidence; ownedThrottle1 cannot satisfy this contract.
