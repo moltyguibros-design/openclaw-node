@@ -1,0 +1,341 @@
+#!/usr/bin/env python3
+"""CI-only macOS probe: what a read-only ASIF mount really reports, and whether it honours owners.
+
+host_journal_mount.py relies on facts documented but never observed natively: the hdiutil
+inventory's `writeable` row, the diskutil WritableVolume / MountPoint / VolumeUUID /
+GlobalPermissionsEnabled / Encryption keys, the statfs layout and flags, that `diskutil mount
+readOnly -mountOptions nobrowse,nodev,nosuid,noexec,owners` sets them, and that a read-only attach
+leaves the image bytes unchanged. This probe observes them on a disposable runner only.
+
+It creates its own fresh ASIF with one APFS volume named Data in a new private directory, mounts
+it read-write at a private point, enables ownership, writes a user file and a decisive root-owned
+0600 file (`sudo -n chown 0:0`), and ejects. It then mounts the image read-only three ways: the
+wrapper's exact options, plain readOnly, and the wrapper's options again after ownership was
+disabled. For each it records the attach and inventory rows, both diskutil views, the statfs flags,
+the owner and mode the mount reports for both files, whether the runner user can read the root
+file, and the wrapper's own verify_mount() verdict. The image's sha256, times, flags and xattr
+names are recorded before and after every read-only mount, and every inventory row with its
+system entities, so the wrapper's inventory-to-attach binding can be checked. Intended operations
+are confined to its own image; inventory-to-eject observations are sequential, not atomic against
+concurrent disk replacement. Cleanup unmounts its own mount points, ejects the disks the
+inventory binds to its image (retried only while the inventory still binds them, after a pause),
+never ejects from a remembered disk number alone (an attach result is an absence check, not
+current identity proof), requires every disk its own attaches returned gone,
+and only then removes its directory; a removal failure is recorded. An interrupt during cleanup
+stops it where it arrived, is recorded, and is raised again once the report is written; a phase's
+own earlier interrupt is the one raised. The JSON report is written exclusively on handled
+error and cleanup-interrupt paths. An interrupt during directory removal or a report-write
+failure can still lose it. A missing report or nonzero exit cannot pass the native verification
+gate.
+
+Guards, all required, checked before any command: macOS, CI=true and GITHUB_ACTIONS=true (both set
+by GitHub Actions), OPENCLAW_OWNERSHIP_PROBE=1, the --ci-owned-probe flag, a new output path in an
+existing directory, then passwordless sudo.
+
+It is deliberately not wired into CI. To run it, add a step to a macOS job and upload the report:
+
+    OPENCLAW_OWNERSHIP_PROBE=1 /usr/bin/python3 \\
+      memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py \\
+      --ci-owned-probe "$RUNNER_TEMP/asif-mount-ownership.json"
+
+Exit 0 means the probe completed and cleaned up, not that the wrapper's assumptions hold; that
+is read from the report.
+"""
+import datetime
+import hashlib
+import json
+import os
+import pathlib
+import plistlib
+import shutil
+import sys
+import tempfile
+import time
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+import host_journal_mount as wrapper  # noqa: E402
+from host_journal_mount import DISKUTIL, MOUNT_OPTIONS, attachments, attempt, evidence  # noqa: E402
+from host_vm_preflight import require, write_record  # noqa: E402
+
+SUDO = '/usr/bin/sudo'
+SCOPE = ('CI-only owned ASIF read-only mount ownership probe; a disposable image it created; '
+         'not stopped-ASIF acceptance and no production volume')
+KEYS = ('WritableVolume', 'MountPoint', 'VolumeUUID', 'VolumeName', 'Encryption', 'DeviceNode',
+        'GlobalPermissionsEnabled', 'FilesystemType')
+# sys/mount.h MNT_* bits, for a readable report; unknown bits are kept as a hex remainder.
+FLAG_NAMES = (('rdonly', 0x1), ('synchronous', 0x2), ('noexec', 0x4), ('nosuid', 0x8),
+              ('nodev', 0x10), ('union', 0x20), ('async', 0x40), ('cprotect', 0x80),
+              ('exported', 0x100), ('removable', 0x200), ('quarantine', 0x400), ('local', 0x1000),
+              ('quota', 0x2000), ('rootfs', 0x4000), ('dovolfs', 0x8000),
+              ('dontbrowse', 0x100000), ('ignore_ownership', 0x200000), ('automounted', 0x400000),
+              ('journaled', 0x800000), ('nouserxattr', 0x1000000), ('defwrite', 0x2000000),
+              ('multilabel', 0x4000000), ('nofollow', 0x8000000), ('noatime', 0x10000000),
+              ('snapshot', 0x40000000), ('strictatime', 0x80000000))
+VARIANTS = (('wrapper-options', MOUNT_OPTIONS, False), ('plain-readonly', None, False),
+            ('wrapper-options-ownership-disabled', MOUNT_OPTIONS, True))
+
+
+def flag_names(flags):
+    names = [name for name, bit in FLAG_NAMES if flags & bit]
+    rest = flags & ~sum(bit for _, bit in FLAG_NAMES)
+    return names + (['0x%x' % rest] if rest else [])
+
+
+def guard(argv, environ, platform=sys.platform):
+    """The probe's output path, once every guard holds; nothing runs before the last one."""
+    require(platform == 'darwin', 'the ownership probe runs only on macOS')
+    require(environ.get('CI') == 'true' and environ.get('GITHUB_ACTIONS') == 'true',
+            'the ownership probe runs only on a GitHub Actions runner')
+    require(environ.get('OPENCLAW_OWNERSHIP_PROBE') == '1', 'OPENCLAW_OWNERSHIP_PROBE=1 is required')
+    require(len(argv) == 2 and argv[0] == '--ci-owned-probe',
+            'usage: probe_asif_mount_ownership.py --ci-owned-probe OUTPUT_JSON')
+    output = pathlib.Path(argv[1])
+    require(output.is_absolute() and not os.path.lexists(output) and output.parent.is_dir(),
+            'probe output must be a new file in an existing directory')
+    sudo = attempt(SUDO, '-n', '/usr/bin/true')
+    require(sudo['returncode'] == 0 and not sudo['timed_out'], 'passwordless sudo is required')
+    return output
+
+
+def checked(row, what):
+    require(row['returncode'] == 0 and not row['timed_out'], what + ' failed: ' + row['stderr'])
+    return row
+
+
+def image_state(image):
+    raw = image.read_bytes()
+    info = image.lstat()
+    names = attempt('/usr/bin/xattr', str(image))
+    return {'sha256': hashlib.sha256(raw).hexdigest(), 'size': info.st_size, 'inode': info.st_ino,
+            'mtime_ns': info.st_mtime_ns, 'ctime_ns': info.st_ctime_ns, 'flags': getattr(info, 'st_flags', 0),
+            'xattrs': names['stdout'].decode(errors='replace').split()}
+
+
+def attached_disk(row):
+    """The whole disk an attach output names, if its output parses at all; its status is not read."""
+    try:
+        entities = plistlib.loads(row['stdout']).get('system-entities') or [{}]
+        disk = entities[0].get('dev-entry')
+    except Exception:
+        return []
+    return [disk] if isinstance(disk, str) and wrapper.DISK.fullmatch(disk) else []
+
+
+def attach(image, disks, *flags):
+    row = attempt(DISKUTIL, 'image', 'attach', '--plist', *flags, '--noMount', str(image))
+    # Recorded before the status check: an attach that failed or timed out may still have applied.
+    disks.extend(attached_disk(row))
+    checked(row, 'attach')
+    entities = wrapper.plist_of(row, 'attach').get('system-entities') or []
+    data = []
+    for entity in entities:
+        if entity.get('content-hint') == 'Apple_APFS_Volume':
+            info = wrapper.plist_of(attempt(DISKUTIL, 'info', '-plist', entity['dev-entry']), 'info')
+            if info.get('VolumeName') == 'Data':
+                data.append((entity['dev-entry'], info))
+    require(len(data) == 1, 'the probe image does not hold exactly one Data volume')
+    return {'command': evidence(row), 'entities': entities, 'volume': data[0][0],
+            'info': {key: data[0][1].get(key) for key in KEYS},
+            'inventory': [{'keys': sorted(image_row), 'writeable': image_row.get('writeable'),
+                           'image-path': image_row.get('image-path'),
+                           'system-entities': image_row.get('system-entities')} for image_row in attachments(image)]}
+
+
+def info_of(volume):
+    found = wrapper.plist_of(attempt(DISKUTIL, 'info', '-plist', volume), 'info')
+    return {key: found.get(key) for key in KEYS}
+
+
+def mount_at(point, volume, *options):
+    point.mkdir(mode=0o700)
+    return checked(attempt(DISKUTIL, 'mount', *options, '-mountPoint', str(point), volume), 'mount')
+
+
+def release(image, points, disks):
+    """Unmount the probe's mount points, eject its image's disks, require them gone.
+
+    Returns the cleanup evidence and the interrupt that stopped it (or None); never raises. An
+    eject is retried, after a pause, only while the inventory still binds the disk to the image.
+    `disks` are the whole disks the probe's own attaches returned. Every one must be unknown to
+    diskutil afterwards, but a remembered number never authorizes an eject: cleanup may run
+    twice after a phase error, and that number may already belong to another image.
+    """
+    rows, errors, remaining, still, gone, listed = [], [], None, None, [], None
+
+    def recorded(call):
+        try:
+            return call()
+        except Exception as error:
+            errors.append(repr(error)[:300])
+            return None
+
+    def mounted(point):
+        return os.path.lexists(point) and wrapper.statfs(point)['mntonname'] == str(point)
+
+    def bound():
+        return [disk for disk in (row.get('system-entities', [{}])[0].get('dev-entry') for row in attachments(image))
+                if isinstance(disk, str)]
+
+    def gone_now(disk):
+        return attempt(DISKUTIL, 'info', '-plist', disk)['returncode'] not in (0, None)
+
+    try:
+        for point in points:
+            # An unknown mount state is unmounted too: unmounting nothing only fails.
+            if recorded(lambda: mounted(point)) is not False:
+                rows.append(evidence(attempt(DISKUTIL, 'unmount', str(point))))
+        listed = recorded(bound)
+        for disk in dict.fromkeys(listed or ()):
+            for tries in range(wrapper.EJECT_ATTEMPTS):
+                if tries:
+                    time.sleep(wrapper.EJECT_PAUSE)
+                    # A timed-out eject may have applied and freed the number for another image.
+                    if disk not in (recorded(bound) or ()):
+                        break
+                rows.append(evidence(attempt(DISKUTIL, 'eject', disk)))
+                if rows[-1]['returncode'] == 0:
+                    break
+        remaining = recorded(lambda: len(attachments(image)))
+        gone = [recorded(lambda: gone_now(disk)) for disk in dict.fromkeys(disks)]
+        still = recorded(lambda: [str(point) for point in points if mounted(point)])
+    except BaseException as interrupt:
+        rows.append({'interrupted': repr(interrupt)[:300]})
+        return {'steps': rows, 'errors': errors, 'listed': listed, 'clean': False}, interrupt
+    return {'steps': rows, 'errors': errors, 'listed': listed, 'remaining': remaining, 'mounted': still,
+            'disks_gone': gone, 'clean': not errors and remaining == 0 and all(gone) and still == []}, None
+
+
+def settled(record, late, what, disks):
+    """After a phase's own release: an interrupt that stopped it is raised, else it must be clean."""
+    if late is not None:
+        raise late
+    require(record['clean'], what + ' did not release the probe image')
+    # Confirmed gone: a later phase must never eject that number again for another image.
+    disks.clear()
+
+
+def write_phase(image, temp, report, disks):
+    attached = attach(image, disks)
+    point = temp / 'write'
+    report['write'] = {'attach': attached}
+    try:
+        mount_at(point, attached['volume'])
+        report['write']['before_enable'] = {'info': info_of(attached['volume']),
+                                            'statfs_flags': flag_names(wrapper.statfs(point)['flags'])}
+        checked(attempt(SUDO, '-n', DISKUTIL, 'enableOwnership', str(point)), 'enableOwnership')
+        user, root = point / 'user.txt', point / 'root.txt'
+        user.write_bytes(b'owned user file\n')
+        root.write_bytes(b'decisive root-owned file\n')
+        os.chmod(user, 0o600)
+        os.chmod(root, 0o600)
+        checked(attempt(SUDO, '-n', '/usr/sbin/chown', '0:0', str(root)), 'chown root')
+        report['write']['after_enable'] = {
+            'info': info_of(attached['volume']),
+            'statfs_flags': flag_names(wrapper.statfs(point)['flags']),
+            'files': {path.name: {'uid': path.lstat().st_uid, 'gid': path.lstat().st_gid,
+                                  'mode': oct(path.lstat().st_mode & 0o7777)} for path in (user, root)}}
+    finally:
+        report['write']['release'], late = release(image, [point], disks)
+    settled(report['write']['release'], late, 'write phase', disks)
+    point.rmdir()
+
+
+def disable_ownership(image, temp, report, disks):
+    attached = attach(image, disks)
+    point = temp / 'disable'
+    try:
+        mount_at(point, attached['volume'])
+        checked(attempt(SUDO, '-n', DISKUTIL, 'disableOwnership', str(point)), 'disableOwnership')
+        report['disable'] = {'info': info_of(attached['volume'])}
+    finally:
+        report.setdefault('disable', {})['release'], late = release(image, [point], disks)
+    settled(report['disable']['release'], late, 'disable phase', disks)
+    point.rmdir()
+
+
+def read_only_variant(image, temp, name, options, disks):
+    row = {'image_before': image_state(image)}
+    attached = attach(image, disks, '--readOnly')
+    row['attach'] = attached
+    point = temp / name
+    try:
+        flags = ['-mountOptions', options] if options else []
+        row['mount'] = evidence(mount_at(point, attached['volume'], 'readOnly', *flags))
+        row['info'] = info_of(attached['volume'])
+        found = wrapper.statfs(point)
+        row['statfs'] = {**found, 'flag_names': flag_names(found['flags'])}
+        row['files'] = {}
+        for file in ('user.txt', 'root.txt'):
+            info = (point / file).lstat()
+            try:
+                (point / file).read_bytes()
+                readable = True
+            except PermissionError:
+                readable = False
+            row['files'][file] = {'uid': info.st_uid, 'gid': info.st_gid,
+                                  'mode': oct(info.st_mode & 0o7777), 'readable_by_runner': readable}
+        try:
+            wrapper.verify_mount(point, attached['volume'], attached['info']['VolumeUUID'])
+            row['verify_mount'] = 'accepted'
+        except Exception as error:
+            row['verify_mount'] = 'refused: ' + str(error)
+    finally:
+        row['release'], late = release(image, [point], disks)
+    settled(row['release'], late, name, disks)
+    point.rmdir()
+    row['image_after'] = image_state(image)
+    return row
+
+
+def run(output):
+    temp = pathlib.Path(tempfile.mkdtemp(prefix='openclaw-asif-ownership-',
+                                         dir=os.environ.get('RUNNER_TEMP'))).resolve()
+    image = temp / 'probe.asif'
+    points = [temp / name for name in ('write', 'disable', *(variant for variant, _, _ in VARIANTS))]
+    disks = []
+    report = {'scope': SCOPE, 'started_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              'runner_uid': os.getuid(), 'mount_options': MOUNT_OPTIONS,
+              'os': attempt('/usr/bin/sw_vers')['stdout'].decode(errors='replace'),
+              'variants': {}, 'completed': False}
+    interrupt = None
+    try:
+        checked(attempt(DISKUTIL, 'image', 'create', 'blank', '--format', 'ASIF', '--size', '64m',
+                        '--fs', 'APFS', '--volumeName', 'Data', str(image)), 'create')
+        os.chmod(image, 0o600)
+        report['created'] = image_state(image)
+        write_phase(image, temp, report, disks)
+        for name, options, disabled in VARIANTS:
+            if disabled and 'disable' not in report:
+                disable_ownership(image, temp, report, disks)
+            report['variants'][name] = read_only_variant(image, temp, name, options, disks)
+        report['completed'] = True
+    except Exception as error:
+        report['error'] = repr(error)[:500]
+    except BaseException as error:
+        # Recorded, then raised again once the image is released and the report is written.
+        report['error'] = repr(error)[:500]
+        interrupt = error
+        raise
+    finally:
+        report['cleanup'], late = release(image, points, disks)
+        if report['cleanup']['clean']:
+            try:
+                shutil.rmtree(temp)
+            except OSError as error:
+                report['cleanup']['rmtree_error'] = repr(error)[:300]
+        report['cleanup']['removed'] = not os.path.lexists(temp)
+        # Plist values reach the report as-is; anything JSON cannot hold is kept as its repr.
+        write_record(output, json.loads(json.dumps(report, default=repr)))
+        # An interrupt that stopped this cleanup is raised; a phase's earlier one takes precedence.
+        if late is not None and interrupt is None:
+            raise late
+    return 0 if report['completed'] and report['cleanup']['clean'] and report['cleanup']['removed'] else 1
+
+
+def main(argv, environ):
+    return run(guard(argv, environ))
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:], os.environ))

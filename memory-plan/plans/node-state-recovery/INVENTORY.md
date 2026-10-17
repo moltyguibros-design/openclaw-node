@@ -2708,3 +2708,33 @@ Checkpoint 2026-10-15: D188 local, uncommitted cleanup fix, separate from the na
 Checkpoint 2026-10-15: D189 matcher read-race correction and 13 decisive predicate tests verified on owned macOS resources: 14 capture-pin tests pass, new matcher comparison removal mutant killed, all 28 predicate mutants killed with unmutated 37-test suite passing. Published D185–D188 source is at 586f66b7 with all five exact-head CI jobs green; earlier local/uncommitted notes describe their prepublication stage. D189 needs its own exact-head CI and review. Same-uid pre-stop commitment replacement and coordinated capture-record rewrite remain explicit unclosed acceptance-root limits. B5/1.2 open, B6 closed.
 
 Checkpoint 2026-10-16: D191 bounded stopped-journal/config reader implemented and owned-tested:29native tests and42intended-reason mutation kills. Mount ownership/read-only ASIF wrapper, input-copy receipt, B3host-pin provenance, protected acceptance root and reboot rehearsal remain open. This is not stopped-ASIF runtime acceptance.
+
+- [ ] B5-owned-journal-mount source: publish the fixture-only mount wrapper and exact-read receipt after correcting B5-probe-cleanup; source publication is separate from native mount verification and never closes the extraction gate.
+
+> **B5-owned-journal-mount — Goal:** a reviewed, tested fixture-only mount wrapper supplies the frozen verifier with a receipt of its exact read inputs.
+> **Needs:** D185–D191 at 5b6c84af; finished owned capture; supplied role table; both capture locks; corrected CI-only probe cleanup.
+> **Feeds:** B5-native-ASIF-mount and the stopped-ASIF checkpoint extraction adapter.
+> **Verify:** code: scripted positive and refusal controls pass, all designated one-rule mutations fail for the intended reason, Claude reviews the final bytes and exact-head CI is green. Production entry refuses before mounting; native probe remains unwired in this source slice.
+
+- [ ] B5-native-ASIF-mount: observe the wrapper's actual mount assumptions on a fresh image created only on an isolated macOS CI runner. Neither mocked commands nor an Alpine guest satisfy this gate.
+
+> **B5-native-ASIF-mount — Goal:** establish whether the exact read-only mount options preserve ownership and image identity on the owned ASIF.
+> **Needs:** reviewed B5-owned-journal-mount source and cleanup; isolated macOS runner with ASIF support and the explicit CI-only probe guards.
+> **Feeds:** the owned stopped-ASIF journal integration; not production acceptance or D62 reboot rehearsal.
+> **Verify:** runtime: retain a report of mount flags, diskutil/hdiutil identities, a root-owned 0600 negative read control, image bytes/ctime/xattrs before and after, and confirmed cleanup. Any unsupported assumption remains a refusal and needs reviewed correction; probe exit 0 alone does not pass this gate.
+
+Checkpoint 2026-10-17 00:48 EDT: the uncommitted wrapper's 60 native scripted tests pass (one Linux platform-guard skip), 30 reader tests pass and all 119 wrapper/probe mutations are killed. All 46 reader mutations are killed for the intended reason, with unmutated controls passing and no runner problems. A separately reproduced simulated applied-eject timeout exposed a probe cleanup gap those mutants do not cover: one foreign eject with clean reported. Claude confirms it plus partial-attach, inventory, interrupt/report and recursive-removal gaps. B5-probe-cleanup is Codex-owned and holds source publication/native execution until corrected and decisively tested. No native probe, disk mount or VM operation occurred. The published D191 head has all five exact-head jobs green (38930108319); this does not validate the uncommitted delta. B5/1.2 remain open, B6 closed, D64 unchanged.
+
+
+2026-10-17 01:10 EDT — D192 source candidate: the acf2e671 patch was
+checksum-verified (93548a7d…63356) and applied. A new direct counterexample
+then reproduced foreign eject on a second cleanup with a stale attach disk
+list. Codex removed remembered-number eject authority from wrapper and probe;
+missing/unreadable inventory now keeps cleanup uncertain. Final local checks:
+71 scripted tests OK (one Linux-only skip), 30 reader tests OK, 46 reader
+mutations and 3 focused eject-rule mutations killed with controls passing.
+No native mount/probe/VM action occurred. Broader candidate probe mutations
+are not claimed as final validation. Final Claude review and exact-head CI
+are pending; B5-owned-journal-mount source is not yet ready. The next gate
+is native owned ASIF characterization on an isolated CI runner; B5-macOS-
+access and the separate reboot rehearsal remain open, and B6 stays closed.

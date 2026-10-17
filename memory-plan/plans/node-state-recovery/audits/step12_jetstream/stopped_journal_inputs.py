@@ -115,7 +115,8 @@ def content(path, mode, budget):
 
     The entry is checked before it is opened, so a link, FIFO or device node in the guest image is
     never opened; the opened file must then be that same inode. `budget` holds the files and bytes
-    the whole read may still take; a file beyond the file bound is not even inspected.
+    the whole read may still take, a file beyond the file bound is not even inspected, and the
+    metadata of every file actually read is appended to its `read` list.
     """
     budget['files'] -= 1
     require(budget['files'] >= 0, 'stopped image reads exceed their file bound at: ' + path.name)
@@ -136,6 +137,9 @@ def content(path, mode, budget):
     require(len(raw) <= LIMIT, 'stopped image file exceeds its size bound: ' + path.name)
     budget['bytes'] -= len(raw)
     require(budget['bytes'] >= 0, 'stopped image reads exceed their total bound at: ' + path.name)
+    budget['read'].append({'path': str(path), 'size': len(raw), 'mode': stat.S_IMODE(info.st_mode),
+                           'uid': info.st_uid, 'nlink': info.st_nlink, 'device': info.st_dev,
+                           'inode': info.st_ino, 'sha256': hashlib.sha256(raw).hexdigest()})
     return raw, info
 
 
@@ -209,14 +213,15 @@ def lineage(windows, window, parent):
 
 
 def read_inputs(root, commitment):
-    """The committed window's records, lineage, config bytes and modes, baseline binary and home.
+    """The committed window's records, lineage, config bytes and modes, baseline binary and home,
+    and `read`: the metadata of every file read, its path relative to `root`, in read order.
 
     `commitment` is the pinned require_committed() result. Reads only below `root`, at paths
     fixed by the committed home, and returns no pin table.
     """
     root = pathlib.Path(root)
     home = committed_home(commitment['manifest'])
-    budget = {'files': MAX_FILES, 'bytes': MAX_TOTAL}
+    budget = {'files': MAX_FILES, 'bytes': MAX_TOTAL, 'read': []}
     try:
         require(root.resolve(strict=True) == root, 'stopped image root is not a literal absolute path')
         preservation = directory(root, home + PRESERVATION)
@@ -262,7 +267,9 @@ def read_inputs(root, commitment):
         raise Refused('journal baseline lacks the NATS argv') from error
     require(len(binaries) == 1, 'NATS units name different binaries in the journal baseline')
     return {'home': home, 'window': window, 'lineage': ancestry, 'records': records,
-            'configs': configs, 'config_modes': modes, 'binary': binaries.pop()}
+            'configs': configs, 'config_modes': modes, 'binary': binaries.pop(),
+            'read': [{**row, 'path': str(pathlib.Path(row['path']).relative_to(root))}
+                     for row in budget['read']]}
 
 
 def verify_stopped_journal(capture_dir, root, *, table):
@@ -283,4 +290,4 @@ def verify_stopped_journal(capture_dir, root, *, table):
                                        configs=found['configs'], binary=found['binary'],
                                        home=found['home'])
     return {**summary, 'window': found['window'], 'lineage': found['lineage'],
-            'config_modes': found['config_modes']}
+            'config_modes': found['config_modes'], 'read': found['read']}

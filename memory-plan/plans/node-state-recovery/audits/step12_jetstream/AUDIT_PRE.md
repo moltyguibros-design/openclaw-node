@@ -218,3 +218,62 @@ FOUNDATION_CHECKPOINT.md. Code/test bytes remain5fabf6e; only plan/evidence
 clarifications accompany integration. Fresh private Journal58/58 passes;
 exact integration CI/read-only re-review remain required before merge. Do
 not close1.2 or introduce production imports, controller, holds or timer wiring.
+
+### B5 owned journal-mount source slice — 2026-10-17 00:44 EDT
+
+The active slice feeds B5-stopped-ASIF checkpoint extraction: wrap the D191
+reader in an owned-fixture-only read-only ASIF mount and publish a receipt
+of exactly the inputs it read. It does not enable production capture or
+close B5. D168/D173/D174/D175 and the four separate histories remain binding.
+
+Needs: published checkpoint/commitment/reader source at 5b6c84af, a completed
+owned capture, caller-supplied role table and no active capture worker. File
+deltas: host_journal_mount.py, probe_asif_mount_ownership.py,
+test_host_journal_mount.py, reader read-metadata output and its tests, both
+scripted CI paths, and the plan/evidence ledgers. The probe stays unwired;
+native mount facts and the protected B3/acceptance roots are separate gates.
+
+Verify: scripted mount suite passes, every new boundary has a decisive
+negative, designated unmutated controls pass, one-rule mutations fail for
+their intended reason, Claude challenges the final bytes, then exact-head
+CI passes. Native ASIF ownership/flags/ctime behavior must be observed on
+an isolated CI runner before claiming mounted-image verification. These
+scripted checks never mount a volume or touch a VM. Source publication
+does not satisfy the disposable-macOS reboot rehearsal.
+
+Current local evidence: 60 scripted macOS tests OK (one Linux platform-guard
+skip), 30 reader tests OK, 119 wrapper/probe mutations killed with no runner
+problems. The updated 46 reader mutations are all killed for their intended reason
+with unmutated controls passing and no runner problems. The previous
+published head has all five checks green in CI run 38930108319; that says
+nothing about this uncommitted delta.
+
+Mid-implementation finding: the probe's cleanup repeats eject by disk
+number without re-binding it to its own image, unlike the wrapper's
+cleanup. A timed-out applied eject can release that number for another
+image. Claude is reviewing this and the probe's partial-attach, interrupt
+and recursive-removal boundaries before source publication or any native
+probe execution. No production VM, service, image or timer changed.
+
+The scripted counterexample is reproduced locally: the first eject times
+out after releasing the probe image, the simulated disk number is reused,
+and the probe issues one foreign eject and reports clean. All command and
+inventory functions were mocked; no disk command ran. Claude confirmed
+the retry defect and additional partial-attach, unreadable-inventory,
+interrupt/report and recursive-removal defects. The previously passing
+119 mutations do not cover these cases. Corrected source plus decisive
+tests is required before the CI-only probe can be published or executed.
+
+
+2026-10-17 01:10 EDT — D192 source candidate: the acf2e671 patch was
+checksum-verified (93548a7d…63356) and applied. A new direct counterexample
+then reproduced foreign eject on a second cleanup with a stale attach disk
+list. Codex removed remembered-number eject authority from wrapper and probe;
+missing/unreadable inventory now keeps cleanup uncertain. Final local checks:
+71 scripted tests OK (one Linux-only skip), 30 reader tests OK, 46 reader
+mutations and 3 focused eject-rule mutations killed with controls passing.
+No native mount/probe/VM action occurred. Broader candidate probe mutations
+are not claimed as final validation. Final Claude review and exact-head CI
+are pending; B5-owned-journal-mount source is not yet ready. The next gate
+is native owned ASIF characterization on an isolated CI runner; B5-macOS-
+access and the separate reboot rehearsal remain open, and B6 stays closed.

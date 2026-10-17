@@ -160,7 +160,8 @@ class Authentic(StoppedImage):
         with mock.patch('os.open', spy), mock.patch.object(
                 preservation_journal.Journal, '__init__', side_effect=AssertionError('Journal constructed')):
             found = self.read()
-        self.assertEqual(set(found), {'home', 'window', 'lineage', 'records', 'configs', 'config_modes', 'binary'})
+        self.assertEqual(set(found), {'home', 'window', 'lineage', 'records', 'configs', 'config_modes', 'binary',
+                                      'read'})
         self.assertEqual((found['home'], found['window'], found['lineage']), (HOME, 'window-1', ['window-1']))
         self.assertEqual(found['config_modes'], {path: 0o600 for path in self.configs})
         self.assertEqual(found['records'], self.records)
@@ -181,7 +182,29 @@ class Authentic(StoppedImage):
         self.assertEqual(summary['checkpoint_sha256'], self.record['sha256'])
         self.assertEqual(summary['pre_head'], self.commitment['manifest']['journal_head'])
         self.assertEqual(summary['session'], guest.SESSION)
+        self.assertEqual(summary['read'], read_inputs(self.data, self.commitment)['read'])
         self.assertEqual(snapshot(self.data), before)
+
+    def test_read_lists_the_metadata_of_every_file_actually_read_relative_to_the_root(self):
+        found = self.read()
+        files = {str(path.relative_to(self.data)): path for path in self.data.rglob('*')
+                 if stat.S_ISREG(path.lstat().st_mode)}
+        # The fixture holds nothing the reader skips, so every regular file is read exactly once.
+        self.assertEqual(sorted(row['path'] for row in found['read']), sorted(files))
+        for row in found['read']:
+            info = files[row['path']].lstat()
+            self.assertEqual(row, {'path': row['path'], 'size': info.st_size, 'mode': stat.S_IMODE(info.st_mode),
+                                   'uid': info.st_uid, 'nlink': info.st_nlink, 'device': info.st_dev,
+                                   'inode': info.st_ino,
+                                   'sha256': hashlib.sha256(files[row['path']].read_bytes()).hexdigest()})
+        # Retirement evidence is read (it counts toward the bounds) but never parsed.
+        image = self.image()
+        for name in stopped_journal_inputs.EVIDENCE:
+            host.write_private(preservation(image) / name, b'not json')
+        listed = [row['path'] for row in self.read(image)['read']]
+        self.assertEqual([path for path in listed if path.rsplit('/', 1)[-1] in stopped_journal_inputs.EVIDENCE],
+                         [str(preservation(image).relative_to(image) / name)
+                          for name in sorted(stopped_journal_inputs.EVIDENCE)])
 
     def test_finished_ancestor_windows_and_finder_metadata_are_accepted(self):
         image = self.image()

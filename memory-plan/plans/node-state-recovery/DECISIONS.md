@@ -4067,3 +4067,48 @@ Add stopped_journal_inputs.py as an unmounted reader, not a production capture e
 Fresh read-only local preservation metadata census found exactly three retirement-evidence files (evidence/pre/post-20261002), each uid501,0600,singlelink,regular; one timer window has23records,lastresolved,predecessor field present,no extra entries. Only those exact evidence names are tolerated, metadata checked and bytes budgeted, never interpreted. Pending, corrupt-receipt and unknown entries still refuse, even if Journal tolerates them; no production cleanup is authorized. Locks must exist and be empty. Inputs are bounded to1024entries per directory,4096files total,1MiB each and16MiB total; this bounds raw input, not Python heap amplification. Config modes are recorded but not constrained. A static read-only mounted root with ownership honored remains a required caller precondition.
 
 Evidence:29owned native tests pass28.789s;42one-rule source mutants killed for intended reasons, with unmutated suite and designated controls passing. The three artifact patches were checksum-verified from f027e58c,74d5719f,a193f8c7 before application. No native mount wrapper, copy manifest, host mount ownership probe, or protected acceptance root is delivered. D189 same-uid rewrite limits remain. Source readiness requires exact-head green CI and Claude review. B5/1.2open,B6closed,D64unchanged,production capture disabled.
+
+## D192 — 2026-10-17 01:10 EDT: owned journal mount and fail-closed disk cleanup
+
+The D191 reader now has a fixture-only read-only ASIF mount wrapper. Both
+capture locks are held; the capture-pinned commitment and stopped fixture
+identity are checked before attach and after eject. The private Data mount
+must report the pinned UUID, read-only/nodev/nosuid/noexec/ownership flags;
+every read input must belong to that device and the returned checkpoint must
+match the pinned commitment. Reverification and unchanged clone bytes/identity
+precede atomic publication of JOURNAL_INPUTS.json listing actual reads.
+Production entry still refuses before any mount or table read. No native
+mount result is claimed; the CI-only characterization probe remains unwired.
+
+Claude's first cleanup corrections still allowed a remembered disk number
+to authorize one eject without inventory binding. Codex reproduced a normal
+double-cleanup path: a phase's finally ejects its own disk, its primary error
+skips settled(), and run's finally reuses the stale list. If another image
+then takes that number, the second cleanup ejects it and reports clean. Both
+wrapper and probe now treat remembered attach results only as absence checks.
+An eject requires current image inventory binding; missing or unreadable
+binding leaves cleanup uncertain, keeps the image/directory and refuses a
+receipt. There is no force-unmount or remembered-number fallback. Sequential
+inventory checks do not provide atomic exclusion against concurrent device
+replacement, and the D189 same-uid provenance limitations remain.
+
+The wrapper preserves its primary failure and records cleanup; a cleanup
+interrupt stops further steps. The probe records handled cleanup interrupts
+and removal errors, but an interrupt during directory removal or failure to
+write the report can still lose that report. A missing report or nonzero
+exit cannot clear the native mount gate. The older store extractor is not
+converted to these primitives by this change. Its command bounds, ownership
+and mount flags remain a separately tracked integration requirement.
+
+Owned evidence: 71 native scripted tests pass (one Linux platform-guard
+skip), 30 reader tests pass, all 46 reader mutations and three focused eject
+rule mutations fail for their intended assertions with unmutated controls
+passing. The three patches were checksum-verified; the third was explicitly
+a candidate with its broader mutation run pending. Passing earlier 119
+mutations did not cover the double-cleanup counterexample and is not proof
+of the final probe. See B5_JOURNAL_MOUNT_SOURCE_EVIDENCE_20261017.json for
+source/log hashes and exact boundaries. Final Claude review and exact-head
+green CI remain required before source readiness. Native mount, serving-NATS
+producer/adapter, protected B3/acceptance roots, planned-boot/abort, timer
+migration and disposable macOS reboot rehearsal remain open. D64 is unchanged,
+B5/1.2 remain open, B6 closed, four histories separate and production untouched.
