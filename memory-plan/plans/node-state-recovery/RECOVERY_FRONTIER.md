@@ -762,3 +762,44 @@ Native terminal pipeline, protected provenance and actual macOS reboot remain op
 D64/production refusals unchanged, B5/1.2open, B6–B9held, B3/B4 not repeated and four
 histories separate. Next: checked owned source release, then scoped guest admission/
 manual restoration before D175. Receipt head still needs exact-head CI.
+
+
+### 2026-10-17 18:40 EDT — owned ABORT source-release candidate (D212)
+
+The existing reconcile module now has a fixture-only checked release and read-only
+released-source verifier, with exact canonical schemas, consumer-established file/full-
+flush and directory barriers, original host/source/ABORT/cleanup bindings, one source
+flag call, post-clear rehash and a fixed single-use attempt. Claude166/168's seven
+design corrections are incorporated. Ten intended-assertion mutants pass with their
+unmutated controls. An initial barrier-skip mutant survived because the test's blanket
+flush failure was reached again by the separate sample-file barrier; narrowing that
+fault to the original ABORT evidence table kills removal at its intended assertion.
+This was test masking, not a changed runtime permission.32release controls are being
+verified after the lock/sample/identity additions; earlier28 pass26.456s. The combined
+61release/terminal/fence controls pass88.299s. Exact-source Claude and exact-head CI
+remain pending; no source readiness or B5 closure is claimed.
+
+Every failure after flag-call entry is manual with flag state uncertain, never automatic
+re-guard/retry or a denial-held claim. A visible COMPLETE is not proof a prior process
+returned successfully; future admission must consume evidence under its own contract.
+Native complete cleanup→terminal→release and real guest reboot remain unproved. D64,
+production capture/reconcile fences and installed timers are unchanged; B5/1.2 open,
+B6–B9 held, B3/B4 not repeated, four histories separate. No local image/VM/launchd or
+production operation occurred.
+
+Next two gates: B5-D62-guest-admission/manual needs host decision binding before any
+guest gate, all OpenClaw launchd jobs and every process as the OpenClaw UID or executing
+production entrypoint roots compared against the recorded hold before Journal.recover;
+unexpected/unreadable scoped observations refuse, then stopped-unit/override checks and
+an explicit manual route. This is not a complete physical process census. B5-D175-owned-
+repin follows admission before gate construction: conditional journaled value-only
+changes to the five owned timer plists and manifest only if the device changed, with
+stable inode/birthtime/nonce/volume/path and same-boot descriptor checks. Both use B1
+source/owned authority, decisive negatives, Claude and exact-head CI; APFS reattach and
+actual disposable-macOS reboot/login/process/hold/migration rehearsal remain distinct
+requirements. Actual Mac access still needs an exact operator designation or a measured
+fixed disk/RAM/capacity decision; this gate provisions nothing.
+
+D212 pre-publication update: all32 owned release controls pass32.834s; all10 mutants
+are killed at their designated assertions.61bounded release/terminal/fence regressions
+pass88.299s. Review and exact-head CI are still pending. No source readiness claim.

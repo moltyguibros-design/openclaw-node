@@ -771,3 +771,39 @@ CI-only native HostCaptureTest checks sample_files against two real sample trees
 Local proof29terminal/15status and14mutants is green; native proof and exact-head
 Claude/CI remain pending. Current B1 source/owned authorization covers these corrections;
 no local VM/image/launchd test or production resource operation is added.
+
+
+## 2026-10-17 18:29 EDT — owned source release micro re-orient
+
+- Block1/step1.2 remains active at v1.2-pre; B5 is open and B6–B9 held.
+- D211 terminal ABORT source is reviewed; receipt c171c72c now has all8 green checks.
+- This slice consumes it durably under both locks before an owned-only source release.
+- It feeds guest decision binding/scoped admission and the manual route before D175.
+- No boot permission, production operation, native reboot claim or D64 relaxation.
+- Yes: D62 needs a checked release after the durable decision, separate from ABORT.
+
+Design is under Claude review before implementation. The fixed abort-release directory
+will be single use, with intent before the flag operation and completion only after
+post-release checks. Consumer-established file/directory synchronization, raw-byte
+readback and fresh original-host/source checks precede mutation. From entry to the flag
+operation onward, failures may leave denial uncertain: manual handling without automatic
+retry/re-guard or a success claim. The existing image flag helper remains descriptor-
+pinned; no reader descriptor is held across preflight's no-holder observation.
+
+§6 deltas: host_vm_reconcile.py, one reserved attempt name in host_clone_dispose.py,
+test_host_abort_release.py, mutate_host_abort_release.py, Linux/macOS suite registration,
+four plan ledgers and source-only audit records. New tests remain scripted for VM/flags
+with actual owned files and real checkpoint/cleanup/terminal producers. Native full
+cleanup→decision→release and actual guest reboot are carry-forwards, not this Verify.
+
+
+D212 design review166/168 adds the separate read-only release verifier and exact released
+identity helper now; canonical INTENT/COMPLETE exported schemas and the fixed three-
+sample layout; clone-only siblings; full file flush where available with no error
+fallback and bottom-up directory fsync; an honest uncertain/manual post-clear failure
+contract; and a dedicated source-clear hook with a ctime advance. These are the same
+owned release contract, not guest admission. A barrier-skipped mutant exposed blanket
+fault masking by a later independent sample barrier; the control now fails only the
+original evidence-table barrier and kills the intended missing-durability guard.
+Initial release fixture errors came from autospeccing an already mocked lstat; chaining
+the existing fixture's side-effect fixes test setup without changing runtime validation.

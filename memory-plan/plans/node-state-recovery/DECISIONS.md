@@ -5052,3 +5052,91 @@ B1 covers owned source/tests, not production operations. Actual macOS reboot/log
 hold-reattach/D175 evidence still requires exact operator-designated disposable access
 or a measured fixed disk/RAM/capacity decision. No new VM, local image or production
 resource operation is performed by this receipt.
+
+
+## D212 — 2026-10-17 18:41 EDT: separately journal an owned ABORT source release
+
+B5-D62-owned-source-release extends existing host_vm_reconcile.py under an entry-first
+production fence and the positive owned fixture boundary. Both original EX locks stay
+held through a fixed single-use abort-release attempt. Claude166's seven corrections
+and168's short schema/flush clarifications govern this slice. The read-only
+verify_release consumes caller-held descriptors and a caller-supplied fresh observation;
+it does not reuse verify_abort after the source flag is removed. The shared released
+identity helper requires the original device/inode/size/mtime/full sha256 and exact flags
+with only UF_IMMUTABLE removed; ctime may advance. Clone-only sibling checks permit old
+CAPTURE receipts without surviving clones. Core verifier grants no boot/admission.
+
+The release consumer first verifies the original ABORT/cleanup chain, synchronizes every
+verified transcript file and containing owned directory, then observes and verifies
+again. Files use fsync plus F_FULLFSYNC when available, with failure propagated and no
+error fallback; containing directories use fsync bottom-up. INTENT and COMPLETE use
+fully flushed temporary files before rename and directory fsync after. Existing producer
+records were fsync-level; the release consumer establishes its own barrier rather than
+inferring a prior fsync return from file presence. Same-uid coordinated rewrites and
+sampled-only denial/provenance limits remain D189/D210; this is not hardware power-loss
+proof or a protected acceptance root.
+
+Exact canonical INTENT binds ABORT/decision-completion/cleanup/cleanup-intent hashes,
+nonce, arm, head, checkpoint, complete evidence table, both pre-clear sample tables and
+original guarded source identity. COMPLETE binds INTENT, ABORT, after sample table and
+released source identity. Fixed layout is verify/barrier/after plus INTENT/COMPLETE only;
+missing, failed, temporary, unknown or repeated attempts refuse, including a visible
+COMPLETE beside FAILED. Before the one pinned source clear the original verification
+and transcript bytes are checked again. After it, fresh stopped/no-holder original-
+host/VM/boot/device/vmstate/config/controller checks and a full rehash precede completion.
+No source FD is held across preflight's holder observation.
+
+A failure before flag-call entry leaves release's flag operation unattempted. From entry
+onward the flag state is uncertain on failure: no automatic re-guard, retry, alternate
+output or BOOTABLE. Best-effort FAILED diagnostics preserve the primary BaseException
+and name manual handling; an intent/attempt remains single use even if diagnostics fail.
+This is not the still-open explicit guest manual-restoration route.
+
+Verify uses real owned checkpoint/commit/cleanup/terminal producers and file syncs, with
+scripted VM/flags and a ctime advance on clear, decisive failure/ordering/identity/retry
+controls and mutants. Claude exact-source and exact-head green CI are required before
+source readiness. Native full cleanup→decision→release, real B8 ACCEPTED, protected
+provenance, actual macOS reboot and the guest admission/manual route remain open. B5/1.2
+open at v1.2-pre, B6–B9 held; B3/B4 not repeated, four histories separate, D64 and all
+production fences unchanged. No local native image/VM/launchd operation is performed.
+
+
+### 2026-10-17 18:40 EDT — owned ABORT source-release candidate (D212)
+
+The existing reconcile module now has a fixture-only checked release and read-only
+released-source verifier, with exact canonical schemas, consumer-established file/full-
+flush and directory barriers, original host/source/ABORT/cleanup bindings, one source
+flag call, post-clear rehash and a fixed single-use attempt. Claude166/168's seven
+design corrections are incorporated. Ten intended-assertion mutants pass with their
+unmutated controls. An initial barrier-skip mutant survived because the test's blanket
+flush failure was reached again by the separate sample-file barrier; narrowing that
+fault to the original ABORT evidence table kills removal at its intended assertion.
+This was test masking, not a changed runtime permission.32release controls are being
+verified after the lock/sample/identity additions; earlier28 pass26.456s. The combined
+61release/terminal/fence controls pass88.299s. Exact-source Claude and exact-head CI
+remain pending; no source readiness or B5 closure is claimed.
+
+Every failure after flag-call entry is manual with flag state uncertain, never automatic
+re-guard/retry or a denial-held claim. A visible COMPLETE is not proof a prior process
+returned successfully; future admission must consume evidence under its own contract.
+Native complete cleanup→terminal→release and real guest reboot remain unproved. D64,
+production capture/reconcile fences and installed timers are unchanged; B5/1.2 open,
+B6–B9 held, B3/B4 not repeated, four histories separate. No local image/VM/launchd or
+production operation occurred.
+
+Next two gates: B5-D62-guest-admission/manual needs host decision binding before any
+guest gate, all OpenClaw launchd jobs and every process as the OpenClaw UID or executing
+production entrypoint roots compared against the recorded hold before Journal.recover;
+unexpected/unreadable scoped observations refuse, then stopped-unit/override checks and
+an explicit manual route. This is not a complete physical process census. B5-D175-owned-
+repin follows admission before gate construction: conditional journaled value-only
+changes to the five owned timer plists and manifest only if the device changed, with
+stable inode/birthtime/nonce/volume/path and same-boot descriptor checks. Both use B1
+source/owned authority, decisive negatives, Claude and exact-head CI; APFS reattach and
+actual disposable-macOS reboot/login/process/hold/migration rehearsal remain distinct
+requirements. Actual Mac access still needs an exact operator designation or a measured
+fixed disk/RAM/capacity decision; this gate provisions nothing.
+
+D212 pre-publication update: all32 owned release controls pass32.834s; all10 mutants
+are killed at their designated assertions.61bounded release/terminal/fence regressions
+pass88.299s. Review and exact-head CI are still pending. No source readiness claim.

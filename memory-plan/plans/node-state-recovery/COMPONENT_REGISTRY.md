@@ -1,12 +1,11 @@
 # Node state recovery — registry
 
-2026-10-17 17:58 EDT — D211 verifies the owned terminal ABORT source at00264a3c,
-CI39071272275 all8 checks green and Claude158 no required finding. Native fixture
-sample ingestion/private log modes,29terminal/15status controls and14mutants pass.
-This is not source release, guest admission, native terminal pipeline or reboot
-proof. B5/1.2 remain open; next checked owned source release, then scoped guest
-admission/manual restoration before D175. Production refusals and D64 remain.
-This evidence-only receipt head still needs its own exact-head CI.
+2026-10-17 18:40 EDT — D212 owned ABORT source-release candidate is implemented,
+with consumer-established barriers, one pinned clear, post-clear byte verification
+and a read-only release verifier. Ten decisive mutants pass; exact-source review/CI
+remain pending. B5/1.2 open; B6–B9 held. No guest admission, production release,
+native full terminal pipeline or Mac reboot proof. Next scoped guest admission/manual
+restoration, then D175 owned conditional timer re-pin.
 
 ## Family 1: persisted application state
 
