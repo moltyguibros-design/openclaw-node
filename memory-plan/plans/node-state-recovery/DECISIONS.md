@@ -4385,3 +4385,33 @@ interpreter startup and report I/O are not universally bounded. Timeout or
 lost report still refuses. No production timeout changes. A clean-exit arm
 or lighter recorder is not included, so signal-specific accounting and
 subsecond startup bias are not resolved by this experiment.
+
+
+## D200 — 2026-10-17 09:04 EDT: native timing shape supports an owned-fixture remedy review
+
+The corrected seven-arm probe at1695ce92 completed at exit0 in39034737877,
+job117402189372, artifact12101407361. Its exact report SHA2560659ef76…f6bc3f4
+and interpretation are B5_KICKSTART_TIMING_REPORT_20261017.json and OBSERVATIONS
+JSON. All7 first/second instruction records and final bootouts exist, each
+trial observed its label absent, and final per-target plus readable GUI-domain
+observations show none left; private files were removed. These are sequential
+owned-label observations, not physical-process exclusion or a live-node test.
+
+The short default-throttle case samples its client alive after10.007s then
+observes success at10.016s. DefaultR3/R12 blocks7.017s/.006s; delayed request
+by1s reduces short-default block to9.011s. ExplicitThrottle1 short/R3 blocks
+1.016s/.010s;Throttle0 short blocks1.007s. Taken together these support a
+prior-runtime/throttle-related wait and reproduce the budget-collision shape
+on this runner. They do not establish an exact timer-origin, rounding/minimum
+rule or the cause of the earlier full-suite failure. Python-instruction time
+is not kernel spawn; exits are observed, clocks/startup can bias residuals,
+and signal-by-label differs from the fixture's os.kill. Load averages24–43
+correct D199's idle-runner wording: the runner was separate, not known idle.
+No clean-exit arm or repetition distribution was measured.
+
+Review an owned temporary-fixture remedy using this evidence before changing
+any fixture policy; do not widen runtime10s/1s/20s budgets or claim a harmless
+flake. No remedy is applied by this evidence-only decision. Current source/
+evidence still needs Claude and all exact-head checks green; the native
+reader integration stays downstream. T1/T2 remain tracked. Production capture
+is disabled, B5/1.2 open, B6–B9 closed, D64 unchanged, histories separate.

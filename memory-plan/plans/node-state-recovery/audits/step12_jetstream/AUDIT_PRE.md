@@ -512,3 +512,23 @@ Next timing report, then an evidence-backed owned fixture/runtime remedy
 with Claude review and exact-head green CI before native reader integration.
 Both are B1-owned work; no production service/VM or timer change. B3/B4 were
 not repeated, B5/1.2 open, B6–B9 closed, D64 unchanged, four histories separate.
+
+
+2026-10-17 09:04 EDT — D200, B5-kickstart-cause-probe runtime report.
+1695ce92 job117402189372/run39034737877 exited0; artifact12101407361 and
+raw SHA2560659ef76…f6bc3f4 are retained. All7 trial bootouts and individual
+post-bootout checks passed; final target/domain observations show all7 absent,
+no probe labels left, directory removed. Default short-runtime client stayed
+alive after10.007s and returned success at10.016s. DefaultR3/R12 requests took
+7.017s/.006s; delayed-request1s short-default took9.011s; explicitThrottle1
+short/R3 took1.016s/.010s;Throttle0 short took1.007s. This supports a throttle-
+and prior-runtime-related wait and reproduces the failure shape on this
+runner, not an exact undocumented timing rule or proof of the earlier CI
+cause. The runner was not idle: recorded load averages were24–43. Python
+instruction timestamps, observed exits and the changed signal path limit
+transfer. No runtime or fixture policy has been changed.
+Claude's final source/evidence review and full exact-head CI remain pending.
+Next a reviewed owned-fixture remedy justified by these observations, then
+exact-head CI before native stopped-ASIF reader integration. Both are B1
+source/owned work; D62/macOS access stays separate. B3/B4 not repeated,
+B5/1.2 open, B6–B9 closed, D64 unchanged, production untouched.
