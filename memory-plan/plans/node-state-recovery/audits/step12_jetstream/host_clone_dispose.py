@@ -16,6 +16,7 @@ count, not prevented atomically. Neither unlink nor a cleanup receipt destroys b
 import datetime
 import json
 import hashlib
+import fcntl
 import os
 import pathlib
 import stat
@@ -23,6 +24,7 @@ import subprocess
 import sys
 
 from host_image_immutable import change_immutable
+from preservation_journal import ARM_SCOPE
 from host_vm_capture import (CAPTURE_SCOPE, FIXTURE_UUID, HOST_SPEC_FIELDS, file_hash,
                              fsync_parent, guarded_source, pinned_spec, same_host_image)
 from host_journal_mount import capture_inputs, capture_locks, clone_identity, record_failure
@@ -231,6 +233,17 @@ def no_terminal(capture_dir):
             'capture already has a boot decision or release record')
 
 
+def unattached_clone(clone, held):
+    require(fcntl.fcntl(held, fcntl.F_GETFL) & os.O_ACCMODE == os.O_RDONLY,
+            'cleanup retained clone descriptor is not read-only')
+    observed = subprocess.run(['/usr/sbin/lsof', '-Fpfan', '--', str(clone)],
+                              capture_output=True, timeout=15)
+    expected = (f'p{os.getpid()}\nf{held}\nar\nn{clone}\n').encode()
+    require(observed.returncode == 0 and not observed.stderr and observed.stdout == expected,
+            'clone holder observation differs from the one retained read-only descriptor')
+    no_disk_attachment(clone)
+
+
 def abort_sample(host_spec, capture_dir, output, pins, source, initial):
     host = json.loads(pins['host_spec'])
     observed = preflight(host_spec, output)
@@ -295,7 +308,8 @@ def abort_cleanup(host_spec, capture_dir, reason, fixture=False):
         initial = json.loads(pins['before-shutdown/preflight.json'])
         capture = json.loads(pins['CAPTURE.json'])
         commitment = inputs['commitment']
-        require(inputs['capture_sha256'] == hashlib.sha256(pins['CAPTURE.json']).hexdigest()
+        require(json.loads(pins['ARMED.json']).get('scope') == ARM_SCOPE
+                and inputs['capture_sha256'] == hashlib.sha256(pins['CAPTURE.json']).hexdigest()
                 and commitment == {**json.loads(pins['COMMITTED.json']),
                                    'checkpoint': json.loads(pins['CHECKPOINT.json'])}
                 and initial['state'] == 'started'
@@ -326,7 +340,7 @@ def abort_cleanup(host_spec, capture_dir, reason, fixture=False):
                 and not clone_before['flags'] & stat.UF_IMMUTABLE,
                 'cleanup clone descriptor differs or clone is immutable')
         no_sibling_clone(capture_dir)
-        unattached(clone)
+        unattached_clone(clone, clone_fd)
         require(abort_pins(host_spec, capture_dir, locks, directory_fd) == pins
                 and clone_identity(clone, capture, held=clone_fd) == clone_before,
                 'cleanup inputs changed before intent')
@@ -346,7 +360,7 @@ def abort_cleanup(host_spec, capture_dir, reason, fixture=False):
                 'cleanup inputs changed after intent')
         no_terminal(capture_dir)
         no_sibling_clone(capture_dir)
-        unattached(clone)
+        unattached_clone(clone, clone_fd)
         require(abort_pins(host_spec, capture_dir, locks, directory_fd) == pins
                 and clone_identity(clone, capture, held=clone_fd) == clone_before,
                 'cleanup inputs changed before unlink')

@@ -628,3 +628,26 @@ owned resources, need decisive negatives, Claude and their own exact-head CI; AC
 still requires a real B8 producer. Actual macOS reboot still needs the operator's exact
 disposable-machine designation or measured disk/RAM/capacity decision. No production
 service, VM, image or installed timer was operated.
+
+
+2026-10-17 16:01 EDT — D208 append-only correction, candidate not ready:
+cef42140's scripted holder seam hid a real refusal: retained clone_fd makes the
+legacy no-holder lsof check report our own PID. The new cleanup-only observation
+requires exactly the current PID and known read-only descriptor in lsof's p/f/a/n
+fields, no other own/foreign descriptor and no attachment. No image flag changes
+are added. An owned regular-file macOS control observes that exact descriptor and
+refuses an extra own writable descriptor; it is not native ASIF cleanup or a VM
+rehearsal. The original ARMED scope is also checked, with a negative that consistently
+re-pins all later records. Thirty controls including the native lsof case and seven
+focused mutants passed before this last scope control; final31/eight-mutant runs
+and exact-head Claude/CI are pending.
+
+The first cef42140 CI39064371810 has Node22 job117488789488 failing at unchanged
+cluster-replicated-r3-create with NATS400 peer offline, before any new Python test.
+Raw job-log SHA256 a223c756b1a7c353586048e484d9605bfe8120fd803bc2a378c108446e47485b.
+Six other jobs are green; full macOS remains running at this observation. It is
+not a green source proof. One specific-job rerun request was refused while the run
+was in progress; no blind retry or unrelated fixture rewrite was made. The corrected
+candidate needs a new exact-head run in any case. B5-exact-CI is Codex-owned and
+holds source readiness; no new operator authority/access is requested. D64, B6–B9,
+production capture/reconcile refusals and all production resources remain unchanged.

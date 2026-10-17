@@ -101,7 +101,7 @@ class AbortCleanup(fixture.HostCheckpoint):
 
         self.patch(pathlib.Path, 'lstat', side_effect=flagged, autospec=True)
         self.patch(cleanup, 'preflight', side_effect=self.sample)
-        self.patch(cleanup, 'unattached', side_effect=self.unattached)
+        self.patch(cleanup, 'unattached_clone', side_effect=self.unattached)
         self.patch(cleanup, 'no_disk_attachment', side_effect=self.unattached)
         self.flag_calls = []
         self.patch(cleanup, 'change_immutable', side_effect=self.change_flag)
@@ -120,7 +120,7 @@ class AbortCleanup(fixture.HostCheckpoint):
         write_record(output / 'preflight.json', self.stopped)
         return copy.deepcopy(self.stopped)
 
-    def unattached(self, path):
+    def unattached(self, path, *_):
         self.assertEqual(path, self.clone)
         self.events.append('unattached')
 
@@ -234,6 +234,16 @@ class Refusals(unittest.TestCase):
                 (case.capture / name).write_bytes((case.capture / name).read_bytes() + b' ')
                 refusal(case, 'differs|not committed|not captured|pin')
 
+    def test_wrong_arm_scope_refuses_even_when_all_later_pins_are_consistent(self):
+        with owned() as case:
+            case.rewrite('ARMED.json', scope='other operation')
+            case.rewrite('COMMITTED.json', arm_sha256=sha((case.capture / 'ARMED.json').read_bytes()))
+            case.rewrite('ACKED.json', commit_sha256=sha((case.capture / 'COMMITTED.json').read_bytes()))
+            case.rewrite('CHECKPOINT.json', commit_sha256=sha((case.capture / 'COMMITTED.json').read_bytes()),
+                         ack_sha256=sha((case.capture / 'ACKED.json').read_bytes()))
+            case.repin()
+            refusal(case, 'differs from the pinned checkpoint')
+
     def test_capture_and_original_identity_bindings(self):
         changes = [('host_boot_session', 'other'), ('source_size', 999),
                    ('vmstate_at_final_check', {'unexpected': True}), ('source_image_sha256', 'f' * 64),
@@ -295,7 +305,7 @@ class Refusals(unittest.TestCase):
     def test_attachment_or_inventory_failure(self):
         for error in (RuntimeError('clone is attached'), subprocess.TimeoutExpired('inventory', 15)):
             with self.subTest(error=type(error).__name__), owned() as case:
-                with mock.patch.object(cleanup, 'unattached', side_effect=error):
+                with mock.patch.object(cleanup, 'unattached_clone', side_effect=error):
                     with self.assertRaises(type(error)):
                         case.run_cleanup()
                 self.assertTrue(case.clone.exists())
@@ -550,6 +560,77 @@ class Refusals(unittest.TestCase):
                     case.run_cleanup()
                 case.assert_held()
 
+
+
+class HolderObservation(unittest.TestCase):
+    def test_exact_retained_readonly_fd_and_no_attachment(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-abort-holder-') as root:
+            clone = pathlib.Path(root).resolve() / 'owned-file'
+            clone.write_bytes(b'owned')
+            fd = os.open(clone, os.O_RDONLY)
+            try:
+                output = f'p{os.getpid()}\nf{fd}\nar\nn{clone}\n'.encode()
+                for fault in ('intact', 'other-pid', 'other-fd', 'extra-own-fd', 'writable', 'unreadable', 'empty'):
+                    raw, code, stderr = output, 0, b''
+                    if fault == 'other-pid':
+                        raw = output.replace(f'p{os.getpid()}'.encode(), b'p9999999')
+                    elif fault == 'other-fd':
+                        raw = output.replace(f'f{fd}'.encode(), b'f99999')
+                    elif fault == 'extra-own-fd':
+                        raw += f'f99999\naw\nn{clone}\n'.encode()
+                    elif fault == 'writable':
+                        raw = output.replace(b'ar\n', b'aw\n')
+                    elif fault == 'unreadable':
+                        stderr = b'observation failed'
+                    elif fault == 'empty':
+                        raw, code = b'', 1
+                    with self.subTest(fault=fault), \
+                            mock.patch.object(cleanup.subprocess, 'run', return_value=types.SimpleNamespace(
+                                returncode=code, stdout=raw, stderr=stderr)) as run, \
+                            mock.patch.object(cleanup, 'no_disk_attachment') as attachment:
+                        if fault == 'intact':
+                            cleanup.unattached_clone(clone, fd)
+                            attachment.assert_called_once_with(clone)
+                        else:
+                            with self.assertRaisesRegex(RuntimeError, 'holder observation differs'):
+                                cleanup.unattached_clone(clone, fd)
+                            attachment.assert_not_called()
+                        run.assert_called_once_with(['/usr/sbin/lsof', '-Fpfan', '--', str(clone)],
+                                                    capture_output=True, timeout=15)
+            finally:
+                os.close(fd)
+
+    def test_retained_writable_descriptor_refuses_before_observation(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-abort-holder-') as root:
+            clone = pathlib.Path(root).resolve() / 'owned-file'
+            clone.write_bytes(b'owned')
+            fd = os.open(clone, os.O_RDWR)
+            try:
+                with mock.patch.object(cleanup.subprocess, 'run') as observed:
+                    with self.assertRaisesRegex(RuntimeError, 'descriptor is not read-only'):
+                        cleanup.unattached_clone(clone, fd)
+                    observed.assert_not_called()
+            finally:
+                os.close(fd)
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'native lsof observation requires macOS')
+    def test_native_lsof_observes_exact_fd_and_refuses_second_own_fd(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-abort-holder-') as root:
+            clone = pathlib.Path(root).resolve() / 'owned-file'
+            clone.write_bytes(b'owned native lsof observation')
+            fd = os.open(clone, os.O_RDONLY)
+            try:
+                with mock.patch.object(cleanup, 'no_disk_attachment') as attachment:
+                    cleanup.unattached_clone(clone, fd)
+                    attachment.assert_called_once_with(clone)
+                    second = os.open(clone, os.O_RDWR)
+                    try:
+                        with self.assertRaisesRegex(RuntimeError, 'holder observation differs'):
+                            cleanup.unattached_clone(clone, fd)
+                    finally:
+                        os.close(second)
+            finally:
+                os.close(fd)
 
 
 if __name__ == '__main__':

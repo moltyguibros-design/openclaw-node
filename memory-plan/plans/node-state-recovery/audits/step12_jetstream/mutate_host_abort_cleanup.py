@@ -6,6 +6,14 @@ import sys
 STEP = pathlib.Path(__file__).resolve().parent
 MODULE = 'test_host_abort_cleanup.'
 MUTANTS = (
+    ('original-arm-scope',
+     "require(json.loads(pins['ARMED.json']).get('scope') == ARM_SCOPE",
+     'require(True', 'Refusals.test_wrong_arm_scope_refuses_even_when_all_later_pins_are_consistent',
+     'not raised'),
+    ('exact-retained-holder',
+     'require(observed.returncode == 0 and not observed.stderr and observed.stdout == expected,',
+     'require(True,', 'HolderObservation.test_exact_retained_readonly_fd_and_no_attachment',
+     'RuntimeError not raised'),
     ('production-fence',
      "require(fixture, 'production abort cleanup requires a verified host boot decision controller')",
      "require(True, 'production abort cleanup requires a verified host boot decision controller')",
