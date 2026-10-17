@@ -4263,3 +4263,43 @@ in this evidence-only revision. Current-head full CI/review are still pending;
 no source-readiness claim. D62 reboot/hold-reattach and D175 timer migration
 remain distinct, including the separate macOS access decision. B5/1.2 open,
 B6–B9 closed, D64 unchanged and production capture disabled.
+
+
+## D197 — 2026-10-17 06:48 EDT: strict native device binding with mandatory whole-disk observations
+
+Exact611127b9 passes all6 CI jobs39019163444. Claude Message96 finds no
+material defect and confirms the saved native facts, while identifying
+unharvestable-success and root-owner fixture-shape limits. The source-only
+151bb3bd milestone remains valid as scripted evidence; its inventory row
+now points to the native refusal instead of implying native acceptance.
+
+Use one shared parser/harvester in host_journal_mount.py for both wrapper
+and probe. Whole disks accept only bare diskN or canonical /dev/diskN;
+partitions require sN components. A successful attach must yield exactly
+one valid whole-disk observation. Harvest before status checking to retain
+an applied failure's known disk, but never let known disks authorize eject.
+The wrapper compares the canonical whole disk to its image's canonical
+inventory node, then requires a canonical Data DeviceNode whose exact raw
+partition is either that node or its bare spelling. Different disk numbers,
+whole disks offered as volumes, malformed paths and non-/dev DeviceNode
+values refuse. Preserve raw attach entities and raw inventory disk in the
+receipt. No mount flag, image hash/ctime or cleanup condition is weakened.
+
+The probe uses the same binding and refuses unharvestable success even
+when otherwise valid Data observations exist. After seeding only its own
+new volume, restore its volume root to0:0 and report root metadata per
+variant; this strengthens the native positive beyond a runner-owned root.
+It does not prove guest/host uid parity, a never-registered UUID, sibling
+volumes, dirty APFS, pre-existing xattrs, concurrent attachments or reboot.
+F3 error-filename/timestamp suggestions remain tracked follow-ups; no unrelated
+reporting expansion. D196's previously uncommitted replay is replaced by a
+committed test using the exact raw native JSON with all commands mocked.
+
+80 scripted tests pass with one platform guard skip;18 focused controls
+pass after a final root-owner assertion tightening. Seven intended-assertion
+mutants fail; source, log and runner hashes are recorded. This revision is
+for new native CI and Claude exact-head review, not source readiness or B5
+closure. Next integrated stopped-ASIF journal verification is separate.
+D62/D175, serving-NATS adapter, protected provenance and abort/manual resumption
+remain open. B3/B4 not repeated; B5/1.2 open, B6–B9 closed, D64 unchanged,
+production capture disabled and all four histories separate.

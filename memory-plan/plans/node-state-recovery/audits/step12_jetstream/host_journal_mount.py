@@ -17,9 +17,8 @@ claims neither. Only a capture of the owned fixture VM (named by the capture rec
 host's own pinned started sample), inside an owner-private fixture parent (the native fixture
 capture's or the owned tests'), is mounted; that check is positive, so no HOME override or deeper
 path reaches the durable recovery directory. The table is the caller's and is never read from the
-image. Command outputs, statfs layout and flags and the diskutil/hdiutil plist keys used here are
-as documented, not yet observed natively; the CI-only probe_asif_mount_ownership.py must confirm
-them first.
+image. D196 records one native CI runner's mount/ownership/identity observations; they do not
+establish end-to-end stopped-image reader acceptance or behavior on other systems.
 
 Every failure keeps its primary exception. Cleanup (unmount, eject, absence check, mount point
 removal) runs on every path, records each attempt and never raises; FAILED.json carries the
@@ -87,6 +86,29 @@ REQUIRED_FLAGS = (('read-only', MNT_RDONLY), ('nodev', MNT_NODEV), ('nosuid', MN
 SCOPE = ('owned read-only clone mount for the frozen journal reader; not stopped-ASIF acceptance; '
          'B3 host-pinned table and protected acceptance root external')
 DISK = re.compile(r'/dev/disk[0-9]+')
+PARTITION = re.compile(r'/dev/disk[0-9]+(?:s[0-9]+)+')
+
+
+def device_node(raw, *, partition=False):
+    require(isinstance(raw, str), 'device identifier is not a string')
+    node = raw if raw.startswith('/dev/') else '/dev/' + raw
+    require((PARTITION if partition else DISK).fullmatch(node), 'device identifier has an invalid shape')
+    return node
+
+
+def attached_disk(row):
+    try:
+        entities = plistlib.loads(row['stdout']).get('system-entities') or [{}]
+        return [device_node(entities[0].get('dev-entry'))]
+    except Exception:
+        return []
+
+
+def data_device(raw, info):
+    node = info.get('DeviceNode')
+    require(isinstance(node, str) and PARTITION.fullmatch(node) and raw in (node, node[5:]),
+            'Data DeviceNode differs from its attach entry')
+    return node
 
 
 def attempt(*argv, timeout=TIMEOUT):
@@ -217,9 +239,10 @@ def data_volume(entities, uuid):
     for entity in entities:
         if entity.get('content-hint') != 'Apple_APFS_Volume':
             continue
-        info = plist_of(attempt(DISKUTIL, 'info', '-plist', entity.get('dev-entry', '')), 'volume information')
+        raw = entity.get('dev-entry')
+        info = plist_of(attempt(DISKUTIL, 'info', '-plist', device_node(raw, partition=True)), 'volume information')
         if info.get('VolumeUUID') == uuid:
-            found.append((entity['dev-entry'], info))
+            found.append((data_device(raw, info), info))
     require(len(found) == 1, 'pinned Data volume UUID is not on the attached clone exactly once')
     volume, info = found[0]
     require(info.get('VolumeName') == 'Data', 'pinned volume is not named Data')
@@ -420,13 +443,14 @@ def locked_read(capture_dir, output, table, armed):
         stage = 'attach'
         attach_attempted = True
         attached = attempt(DISKUTIL, 'image', 'attach', '--plist', '--readOnly', '--noMount', str(clone))
+        known = attached_disk(attached)
         entities = plist_of(attached, 'read-only attach').get('system-entities') or [{}]
-        known = [entities[0].get('dev-entry')] if DISK.fullmatch(str(entities[0].get('dev-entry'))) else []
+        require(len(known) == 1, 'attach result names no valid whole disk')
         rows = attachments(clone)
         require(len(rows) == 1 and rows[0].get('writeable') is False,
                 'clone is not attached exactly once read-only')
         disk = rows[0].get('system-entities', [{}])[0].get('dev-entry')
-        require(isinstance(disk, str) and DISK.fullmatch(disk) and entities[0].get('dev-entry') == disk,
+        require(isinstance(disk, str) and DISK.fullmatch(disk) and known[0] == disk,
                 'attached clone disk differs from the attach result')
         stage = 'volume'
         volume = data_volume(entities, before['data_volume_uuid'])
@@ -468,7 +492,8 @@ def locked_read(capture_dir, output, table, armed):
             'capture_sha256': before['capture_sha256'],
             'checkpoint_sha256': before['commitment']['checkpoint']['checkpoint_sha256'],
             'clone_before': before['clone'], 'clone_after': after['clone'],
-            'attach': {'disk': disk, 'command': evidence(attached),
+            'attach': {'disk': disk, 'inventory_disk_raw': rows[0]['system-entities'][0]['dev-entry'],
+                       'command': evidence(attached),
                        'entities': [{key: entity.get(key) for key in ('dev-entry', 'content-hint')}
                                     for entity in entities]},
             'volume': volume, 'data_volume_uuid': before['data_volume_uuid'],

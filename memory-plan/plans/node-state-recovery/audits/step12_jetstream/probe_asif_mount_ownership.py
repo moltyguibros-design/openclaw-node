@@ -46,8 +46,6 @@ import hashlib
 import json
 import os
 import pathlib
-import plistlib
-import re
 import shutil
 import sys
 import tempfile
@@ -113,35 +111,21 @@ def image_state(image):
             'xattrs': names['stdout'].decode(errors='replace').split()}
 
 
-def attached_disk(row):
-    """The whole disk an attach output names, if its output parses at all; its status is not read."""
-    try:
-        entities = plistlib.loads(row['stdout']).get('system-entities') or [{}]
-        disk = entities[0].get('dev-entry')
-    except Exception:
-        return []
-    if not isinstance(disk, str):
-        return []
-    node = disk if disk.startswith('/dev/') else '/dev/' + disk
-    return [node] if wrapper.DISK.fullmatch(node) else []
-
-
 def attach(image, disks, *flags):
     row = attempt(DISKUTIL, 'image', 'attach', '--plist', *flags, '--noMount', str(image))
     # Recorded before the status check: an attach that failed or timed out may still have applied.
-    disks.extend(attached_disk(row))
+    known = wrapper.attached_disk(row)
+    disks.extend(known)
     checked(row, 'attach')
     entities = wrapper.plist_of(row, 'attach').get('system-entities') or []
+    require(len(known) == 1, 'attach result names no valid whole disk')
     data = []
     for entity in entities:
         if entity.get('content-hint') == 'Apple_APFS_Volume':
-            info = wrapper.plist_of(attempt(DISKUTIL, 'info', '-plist', entity['dev-entry']), 'info')
+            info = wrapper.plist_of(attempt(DISKUTIL, 'info', '-plist',
+                                           wrapper.device_node(entity.get('dev-entry'), partition=True)), 'info')
             if info.get('VolumeName') == 'Data':
-                node = info.get('DeviceNode')
-                require(isinstance(node, str) and re.fullmatch(r'/dev/disk[0-9]+(?:s[0-9]+)+', node)
-                        and entity['dev-entry'] in (node, node[5:]),
-                        'Data DeviceNode differs from its attach entry')
-                data.append((node, info))
+                data.append((wrapper.data_device(entity['dev-entry'], info), info))
     require(len(data) == 1, 'the probe image does not hold exactly one Data volume')
     return {'command': evidence(row), 'entities': entities, 'volume': data[0][0],
             'info': {key: data[0][1].get(key) for key in KEYS},
@@ -243,7 +227,11 @@ def write_phase(image, temp, report, disks):
         os.chmod(user, 0o600)
         os.chmod(root, 0o600)
         checked(attempt(SUDO, '-n', '/usr/sbin/chown', '0:0', str(root)), 'chown root')
+        checked(attempt(SUDO, '-n', '/usr/sbin/chown', '0:0', str(point)), 'restore fixture root owner')
+        volume_root = point.lstat()
         report['write']['after_enable'] = {
+            'volume_root': {'uid': volume_root.st_uid, 'gid': volume_root.st_gid,
+                            'mode': oct(volume_root.st_mode & 0o7777)},
             'info': info_of(attached['volume']),
             'statfs_flags': flag_names(wrapper.statfs(point)['flags']),
             'files': {path.name: {'uid': path.lstat().st_uid, 'gid': path.lstat().st_gid,
@@ -278,6 +266,9 @@ def read_only_variant(image, temp, name, options, disks, row):
         row['mount'] = evidence(mount_at(point, attached['volume'], 'readOnly', *flags))
         row['stage'] = 'observations'
         row['info'] = info_of(attached['volume'])
+        volume_root = point.lstat()
+        row['volume_root'] = {'uid': volume_root.st_uid, 'gid': volume_root.st_gid,
+                              'mode': oct(volume_root.st_mode & 0o7777)}
         found = wrapper.statfs(point)
         row['statfs'] = {**found, 'flag_names': flag_names(found['flags'])}
         row['files'] = {}

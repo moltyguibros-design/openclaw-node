@@ -391,3 +391,54 @@ owned resources and require Claude plus exact-head green CI. D62 reboot
 rehearsal still requires separately designated macOS access. B3/B4 were not
 repeated; B5/1.2 open, B6–B9 closed, production capture disabled, node not
 operationally accepted. No local VM, service, image or timer changed.
+
+## B5-native-device-binding preflight — 2026-10-17 06:45 EDT
+- Still1.2/B5; B1 permits source and owned tests, B6–B9 remain closed.
+- Exact611127b9 is green in all6 jobs39019163444; Claude Message96 finds no material defect.
+- D196 native rows expose two deterministic spelling refusals in the wrapper.
+- Correct strict device identity binding, requiring a harvestable whole disk after successful attach.
+- Reuse that binding in the existing probe; restore its seeded root to0:0/0755 for the native positive.
+- Owned scripted/native evidence plus Claude/exact-head CI; no production action or B3/B4 recapture.
+
+File deltas: host_journal_mount.py shares strict raw/canonical device parsing
+with the existing probe; bind attach whole disk to canonical inventory and
+Data DeviceNode to its exact raw partition, preserve raw receipt fields and
+mandatory cleanup absence checks. probe_asif_mount_ownership.py consumes those
+helpers and refuses a successful unharvestable attach (Claude F1); after
+seeding restore only its newly-created volume root to root ownership and
+record root uid/gid/mode per variant (F2). Extend the existing scripted suite
+with actual committed native rows, successful bare-ID read, mismatches,
+malformed/unharvestable entries and root seeding order. Mutation controls
+must kill removal of each binding/mandatory-observation rule. Record source,
+review/CI and runtime limits in the ledgers/evidence; VERSION stays-pre.
+This is the one named B5-native-device-binding gate, feeding the separate
+native stopped-ASIF reader integration, never production acceptance.
+
+Claude F3's error-filename/timestamp reporting suggestions remain follow-ups;
+no diagnostic expansion here. The new committed native-row replay tests
+replace D196's previously uncommitted replay claim with reviewable evidence.
+Read-write native phases changed the image's hash/times (write phase also
+size); that observation reinforces read-only attach plus post-read hashing,
+without generalizing a cause beyond this owned runner.
+
+
+2026-10-17 06:48 EDT — D197, B5-native-device-binding source candidate.
+Exact611127b9 has all6 CI jobs green (39019163444); Claude Message96
+reports no material defect and confirms D196's native observations. Shared
+strict parsing now accepts bare/canonical attach spellings, requires a valid
+whole-disk observation after successful attach, binds it to the canonical
+image inventory, and binds Data DeviceNode to the exact raw partition.
+Remembered disks remain absence checks only. Raw attach/inventory fields
+are retained. The existing CI-only probe consumes those same helpers and
+restores its fresh seeded volume root to0:0, recording per-variant root
+metadata; the root0600 negative stays intact.
+80 scripted tests OK (one native platform skip); after one final root-owner
+assertion tightening,18 focused controls pass and7 intended-assertion mutants
+are killed. The runner is committed, and actual native-row replay is now a
+committed test. B5_NATIVE_DEVICE_BINDING_SOURCE_20261017.json records hashes
+and the precise test sequence. New native CI and Claude review remain pending;
+no source-readiness claim. Next two gates: this source's exact-head review/CI
+and root-owned-root native report, then integrated owned stopped-ASIF reader
+verification. Both are B1-owned-test work; D62 macOS reboot access remains
+separate. B3/B4 were not repeated, B5/1.2 open, B6–B9 closed, D64 unchanged;
+all production services/VM/timers and four histories untouched.

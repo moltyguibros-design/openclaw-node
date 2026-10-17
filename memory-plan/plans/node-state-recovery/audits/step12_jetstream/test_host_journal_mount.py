@@ -68,6 +68,7 @@ class FakeHost:
         self.attach = 'ok'
         self.disk = DISK
         self.attach_disk = DISK
+        self.native_entries = False
         self.attach_rows = 1
         self.writeable = False
         self.inventory_fails = set()
@@ -123,7 +124,11 @@ class FakeHost:
             for index in range(self.attach_rows):
                 self.attached.append({'path': str(self.clone), 'writeable': self.writeable,
                                       'disk': self.disk if index == 0 else '/dev/disk%d' % (9 + index)})
-            out = plistlib.dumps({'system-entities': self.entities(self.attach_disk)})
+            entities = self.entities(self.attach_disk)
+            if self.native_entries:
+                entities = [{**entity, 'dev-entry': entity['dev-entry'].removeprefix('/dev/')}
+                            for entity in entities]
+            out = plistlib.dumps({'system-entities': entities})
             return {'ok': {**row, 'stdout': out}, 'timeout-applied': timed_out,
                     'fail-applied': {**failed, 'stdout': out},
                     'garbage': {**row, 'stdout': b'not a plist'}}[self.attach]
@@ -693,6 +698,15 @@ class Attach(MountCase):
         _, failed = self.refused('^read-only attach output is not a plist$', 'attach')
         self.released(failed)
 
+    def test_a_successful_attach_must_name_a_harvestable_whole_disk(self):
+        for spelling in ('rdisk7', '/dev/rdisk7', 'disk7 ', 'DISK7', '/dev/disk7s1'):
+            with self.subTest(spelling=spelling):
+                self.reset()
+                self.fake.attach_disk = spelling
+                _, failed = self.refused('^attach result names no valid whole disk$', 'attach')
+                self.released(failed)
+                self.assertEqual((self.calls(DISKUTIL, 'mount'), self.fake.reads), ([], []))
+
     def test_the_clone_must_be_attached_exactly_once_read_only(self):
         with self.subTest('writeable'):
             self.fake.writeable = True
@@ -742,6 +756,24 @@ class Volume(MountCase):
                 self.reset()
                 change(self.fake.volumes[1])
                 _, failed = self.refused('^' + pattern + '$', 'volume')
+                self.released(failed)
+                self.assertEqual((self.calls(DISKUTIL, 'mount'), self.fake.reads), ([], []))
+
+    def test_native_bare_entries_bind_to_the_canonical_inventory_and_device_node(self):
+        self.fake.native_entries = True
+        receipt, error = self.run_mount()
+        self.assertIsNone(error)
+        self.assertEqual((receipt['attach']['disk'], receipt['attach']['inventory_disk_raw'],
+                          receipt['attach']['entities'][0]['dev-entry'], receipt['volume']),
+                         (DISK, DISK, 'disk7', DATA))
+
+    def test_native_partition_must_match_a_canonical_device_node(self):
+        for node in ('/dev/disk99s2', '/dev/disk8', 'disk8s2', '/dev/disk8s2/../disk99s2'):
+            with self.subTest(node=node):
+                self.reset()
+                self.fake.native_entries = True
+                self.fake.volumes[1]['info']['DeviceNode'] = node
+                _, failed = self.refused('^Data DeviceNode differs from its attach entry$', 'volume')
                 self.released(failed)
                 self.assertEqual((self.calls(DISKUTIL, 'mount'), self.fake.reads), ([], []))
 
@@ -1370,14 +1402,30 @@ class ProbeAttach(unittest.TestCase):
     def test_only_whole_disk_nodes_are_harvested_from_either_native_spelling(self):
         for value in ('disk7', '/dev/disk7'):
             row = {'stdout': plistlib.dumps({'system-entities': [{'dev-entry': value}]})}
-            self.assertEqual(probe.attached_disk(row), ['/dev/disk7'])
+            self.assertEqual(wrapper.attached_disk(row), ['/dev/disk7'])
         for value in ('disk7s1', '/dev/disk7s1', '../disk7', 'disk7/..', '/dev//disk7', 'disk７', 7):
             row = {'stdout': plistlib.dumps({'system-entities': [{'dev-entry': value}]})}
-            self.assertEqual(probe.attached_disk(row), [], repr(value))
+            self.assertEqual(wrapper.attached_disk(row), [], repr(value))
+
+    def test_a_successful_probe_attach_requires_a_whole_disk_observation(self):
+        for value in ('rdisk7', '/dev/rdisk7', 'disk7 ', 'DISK7', 'disk7s1'):
+            disks = []
+            rows = [{'system-entities': [{'dev-entry': value},
+                                        {'dev-entry': 'disk8s1', 'content-hint': 'Apple_APFS_Volume'}]},
+                    {'VolumeName': 'Data', 'DeviceNode': '/dev/disk8s1'}]
+            def reply(*args):
+                return {'argv': list(args), 'returncode': 0, 'timed_out': False, 'stderr': '',
+                        'stdout': plistlib.dumps(rows.pop(0))}
+            with mock.patch.object(probe, 'attempt', side_effect=reply), \
+                    mock.patch.object(probe, 'attachments', return_value=[]), \
+                    mock.patch('subprocess.run', side_effect=AssertionError('command run')):
+                with self.assertRaisesRegex(RuntimeError, '^attach result names no valid whole disk$'):
+                    probe.attach(pathlib.Path('/nonexistent/probe.asif'), disks)
+            self.assertEqual(disks, [])
 
     def test_data_device_node_must_match_the_raw_attach_identifier(self):
         for spelling in ('disk8s1', '/dev/disk8s1'):
-            for node in ('/dev/disk8s1', '/dev/disk9s1', 'disk8s1', '/dev/disk8s1/../disk9s1'):
+            for node in ('/dev/disk8s1', '/dev/disk9s1', '/dev/disk8', 'disk8s1', '/dev/disk8s1/../disk9s1'):
                 disks = []
                 raw = {'system-entities': [{'dev-entry': 'disk7'},
                                           {'dev-entry': spelling, 'content-hint': 'Apple_APFS_Volume'}]}
@@ -1436,8 +1484,33 @@ class ProbeWritePreparation(unittest.TestCase):
         root_file = (probe.SUDO, '-n', '/usr/sbin/chown', '0:0', str(point / 'root.txt'))
         self.assertLess(calls.index(owner), calls.index(('write', str(point / 'user.txt'))))
         self.assertIn(root_file, calls)
+        root_owner = (probe.SUDO, '-n', '/usr/sbin/chown', '0:0', str(point))
+        self.assertIn(root_owner, calls)
+        self.assertLess(calls.index(root_file), calls.index(root_owner))
+        self.assertLess(calls.index(('write', str(point / 'root.txt'))), calls.index(root_owner))
         self.assertEqual(report['write']['after_enable']['files']['root.txt']['mode'], '0o600')
         self.assertFalse(point.exists())
+
+
+class NativeDeviceBinding(unittest.TestCase):
+    def test_committed_native_rows_bind_and_verify_without_a_device_spelling_refusal(self):
+        report = json.loads(pathlib.Path(__file__).with_name('B5_NATIVE_ASIF_COMPLETE_REPORT_20261017.json').read_bytes())
+        native = report['variants']['wrapper-options']
+        attach = native['attach']
+        self.assertEqual(wrapper.attached_disk({'stdout': plistlib.dumps({'system-entities': attach['entities']})}),
+                         [attach['inventory'][0]['system-entities'][0]['dev-entry']])
+        reply = {'returncode': 0, 'timed_out': False, 'stderr': '', 'stdout': plistlib.dumps(attach['info'])}
+        with mock.patch.object(wrapper, 'attempt', return_value=reply), \
+                mock.patch('subprocess.run', side_effect=AssertionError('command run')):
+            volume = wrapper.data_volume(attach['entities'], native['info']['VolumeUUID'])
+        self.assertEqual(volume, native['info']['DeviceNode'])
+        reply['stdout'] = plistlib.dumps(native['info'])
+        with mock.patch.object(wrapper, 'attempt', return_value=reply), \
+                mock.patch.object(wrapper, 'statfs', return_value=native['statfs']), \
+                mock.patch('subprocess.run', side_effect=AssertionError('command run')):
+            verified = wrapper.verify_mount(pathlib.Path(native['info']['MountPoint']), volume,
+                                            native['info']['VolumeUUID'])
+        self.assertEqual(verified['statfs']['mntfromname'], volume)
 
 
 class ProbeRun(unittest.TestCase):
