@@ -1,0 +1,44 @@
+{
+  "scope": "CI-only native probe setup correction; no local mount or VM action; not native read-only acceptance",
+  "first_attempt": {
+    "head": "6ae7dd58c482caeb1186e8fc64211d0f5ae17f70",
+    "merge": "166515490d120075a46fd2c9136006c403cefa08",
+    "run": 39018637637,
+    "job": 117355795880,
+    "artifact": 12096210442,
+    "report": "B5_NATIVE_ASIF_FIRST_REPORT_20261017.json",
+    "report_sha256": "5557d93a23b46fc4b347da49c9d094578b5cb6df055cfb6d951898d262daa57e",
+    "result": "exit1; PermissionError13 after enableOwnership; no read-only variants reached",
+    "observed_cleanup": "write release unmount/eject exited0; final inventory0, mounted[], removedtrue",
+    "limit": "bare attach disk7 was not harvested; disks_gone[] was vacuous, not independent absence proof",
+    "inference": "failure after ownership enable and before after_enable is consistent with user.write_bytes under root-owned volume root; not attributed by a traceback",
+    "native_format": "diskutil attach dev-entry bare disk7/disk8s1; hdiutil /dev/disk7; diskutil DeviceNode /dev/disk8s1"
+  },
+  "changes": [
+    "chown only newly-created probe volume root to runner after enabling ownership; root0600 file remains root-owned",
+    "normalize strict whole disk identifiers for cleanup absence checks; never authorize eject by remembered identifiers",
+    "require canonical Data DeviceNode to match exact raw attach identifier; retain raw entities",
+    "retain variant observations and release evidence in parent report even if variant raises"
+  ],
+  "tests": {
+    "scripted": 75,
+    "platform_skip": 1,
+    "full_log_sha256": "9ec69c501f859a83f71956802e8768cccc824e41e4e683150df05f942bcb145c",
+    "new_focused_controls": 9,
+    "mutants_killed_for_intended_reason": 4,
+    "mutation_log_sha256": "5435c3c1e9457058e6216b3d683039f7fa41dfdd5c51f841c66fbf36ef81c059"
+  },
+  "source_sha256": {
+    "probe_asif_mount_ownership.py": "eb73a1876cae4e328cb5ae3d7014258a82ae0b45acf5b82db751a9e94a1cae47",
+    "test_host_journal_mount.py": "ed50146da5371fe43911d9893498489895ecdc7051301b44668829d7e70f6823"
+  },
+  "remaining": [
+    "new native read-only observations",
+    "exact-head Claude review and green CI",
+    "wrapper raw-device spelling still refuses natively; no normalization applied to wrapper",
+    "owned stopped-ASIF integration",
+    "protected provenance",
+    "serving-NATS adapter",
+    "D62/D175 reboot and abort/manual resumption"
+  ]
+}

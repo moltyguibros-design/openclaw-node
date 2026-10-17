@@ -4198,3 +4198,36 @@ reviewed wiring, native positive/refusal evidence and exact-head CI. It is
 separate from D62 macOS reboot rehearsal and the operator's machine/resource
 decision. Production capture is disabled; B3/B4 were not repeated, B5/1.2
 stay open, B6–B9 closed and all four histories separate.
+
+
+## D195 — 2026-10-17 04:51 EDT: correct probe preparation from first native observations
+
+The first isolated native probe ran at6ae7dd58 in39018637637/job117355795880
+and refused with exit1. Its unchanged report is retained with hashes and
+artifact identity in B5_NATIVE_ASIF_SETUP_20261017.json. It never reached a
+read-only variant. After enableOwnership succeeded, file preparation raised
+PermissionError13; a root-owned volume root is the source-consistent inference,
+not a traceback-proven cause. Actual diskutil attach returns bare disk7 and
+disk8s1, while its DeviceNode and hdiutil inventory name /dev/disk8s1 and
+/dev/disk7. Inventory-bound unmount/eject succeeded and the probe directory was
+removed, but its empty remembered-disk list makes disks_gone[] vacuous.
+
+Correct the CI-only probe's own newly-created volume root to runner ownership
+after enabling owners, preserving the root-owned0600 file negative. Harvest
+both strict whole-disk spellings into canonical absence checks; these never
+authorize eject. Select Data's canonical DeviceNode only when its strict
+partition node exactly matches the raw attach identifier, and preserve raw
+attach rows. Keep each variant's partial observations/cleanup in the parent
+report before calling the variant, so a later refusal cannot discard them.
+The journal wrapper is unchanged and still refuses native bare attach rows;
+normalizing or relaxing it requires the complete report and separate review.
+No native flags, byte-identity condition, privilege check or acceptance rule
+is weakened. No unchanged blind rerun.
+
+75 scripted tests pass (one Linux-platform guard skip on macOS), including
+nine focused controls; four one-rule mutants fail for their intended reasons
+(bare-disk harvest, mismatched volume, missing fixture-root ownership and lost
+partial evidence). Source/log hashes are recorded. Publication is for new
+native CI and exact-head review, not source readiness or B5 closure. No local
+disk image or VM operation took place. B5/1.2 open, B6–B9 closed, D64 unchanged,
+four histories separate. Disposable-macOS reboot access remains independent.

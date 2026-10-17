@@ -325,3 +325,36 @@ Claude review and exact-head CI remain required for this workflow revision.
 No local disk image or VM operation is part of this gate. After it, the owned
 stopped-ASIF reader integration needs reviewed wiring and a native fixture;
 D62 reboot rehearsal still needs separately designated macOS access.
+
+
+## Native characterization re-orient — 2026-10-17 04:51 EDT
+- Still step1.2/B5, never a production stop or capture.
+- D194 executed the existing owned probe on a separate CI runner; setup refused.
+- Two native findings: owner enforcement exposes root-owned fixture root; attach IDs differ in spelling.
+- Correct only probe preparation/evidence retention and test those real boundaries.
+- File deltas add probe/tests plus raw report, hashed evidence and append-only ledgers; wrapper unchanged.
+- Same native verification outcome; no gate widening to D62/production or timer changes.
+
+
+2026-10-17 04:51 EDT — B5-native-ASIF-mount first actual report, D195:
+6ae7dd58 run39018637637/job117355795880 failed exit1 during write setup,
+PermissionError13 after ownership enable; no readonly variant ran. Retained
+artifact12096210442 is copied unchanged as B5_NATIVE_ASIF_FIRST_REPORT_20261017.json.
+Inventory-bound unmount/eject succeeded and final inventory0/mounted[]/removed
+are recorded, but bare disk7 was not harvested, so disks_gone[] is vacuous.
+The root-owned volume-root permission explanation is an inference pending
+native rerun, not a traceback-proven cause. Actual attach entries are bare
+IDs; inventory and DeviceNode use /dev paths. The wrapper still refuses that
+spelling and is unchanged.
+
+Codex-owned correction within this same native characterization gate: make
+only the newly created probe volume root runner-owned after enableOwnership
+(the root0600 file remains root-owned), strictly canonicalize attach IDs for
+absence checks and Data observation, and retain partial variant evidence on
+failure. No eject fallback is restored. The wrapper's checks are not relaxed.
+75 scripted tests pass (one platform skip); four intended-reason mutants are
+killed and nine focused controls pass. B5_NATIVE_ASIF_SETUP_20261017.json
+records report/source/log hashes. New native CI and Claude review are pending;
+this corrects the source fixture rather than retrying unchanged code. Next
+native observations then owned reader integration remain held until their
+actual verification. B5/1.2 open, B6–B9 closed; no local mount or VM action.

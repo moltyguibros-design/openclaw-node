@@ -47,6 +47,7 @@ import json
 import os
 import pathlib
 import plistlib
+import re
 import shutil
 import sys
 import tempfile
@@ -119,7 +120,10 @@ def attached_disk(row):
         disk = entities[0].get('dev-entry')
     except Exception:
         return []
-    return [disk] if isinstance(disk, str) and wrapper.DISK.fullmatch(disk) else []
+    if not isinstance(disk, str):
+        return []
+    node = disk if disk.startswith('/dev/') else '/dev/' + disk
+    return [node] if wrapper.DISK.fullmatch(node) else []
 
 
 def attach(image, disks, *flags):
@@ -133,7 +137,11 @@ def attach(image, disks, *flags):
         if entity.get('content-hint') == 'Apple_APFS_Volume':
             info = wrapper.plist_of(attempt(DISKUTIL, 'info', '-plist', entity['dev-entry']), 'info')
             if info.get('VolumeName') == 'Data':
-                data.append((entity['dev-entry'], info))
+                node = info.get('DeviceNode')
+                require(isinstance(node, str) and re.fullmatch(r'/dev/disk[0-9]+(?:s[0-9]+)+', node)
+                        and entity['dev-entry'] in (node, node[5:]),
+                        'Data DeviceNode differs from its attach entry')
+                data.append((node, info))
     require(len(data) == 1, 'the probe image does not hold exactly one Data volume')
     return {'command': evidence(row), 'entities': entities, 'volume': data[0][0],
             'info': {key: data[0][1].get(key) for key in KEYS},
@@ -224,6 +232,11 @@ def write_phase(image, temp, report, disks):
         report['write']['before_enable'] = {'info': info_of(attached['volume']),
                                             'statfs_flags': flag_names(wrapper.statfs(point)['flags'])}
         checked(attempt(SUDO, '-n', DISKUTIL, 'enableOwnership', str(point)), 'enableOwnership')
+        info = point.lstat()
+        report['write']['fixture_root_before_chown'] = {
+            'uid': info.st_uid, 'gid': info.st_gid, 'mode': oct(info.st_mode & 0o7777)}
+        checked(attempt(SUDO, '-n', '/usr/sbin/chown', '%s:%s' % (os.getuid(), os.getgid()), str(point)),
+                'chown fixture volume root')
         user, root = point / 'user.txt', point / 'root.txt'
         user.write_bytes(b'owned user file\n')
         root.write_bytes(b'decisive root-owned file\n')
@@ -254,14 +267,16 @@ def disable_ownership(image, temp, report, disks):
     point.rmdir()
 
 
-def read_only_variant(image, temp, name, options, disks):
-    row = {'image_before': image_state(image)}
+def read_only_variant(image, temp, name, options, disks, row):
+    row.update({'image_before': image_state(image), 'stage': 'attach'})
     attached = attach(image, disks, '--readOnly')
     row['attach'] = attached
     point = temp / name
     try:
+        row['stage'] = 'mount'
         flags = ['-mountOptions', options] if options else []
         row['mount'] = evidence(mount_at(point, attached['volume'], 'readOnly', *flags))
+        row['stage'] = 'observations'
         row['info'] = info_of(attached['volume'])
         found = wrapper.statfs(point)
         row['statfs'] = {**found, 'flag_names': flag_names(found['flags'])}
@@ -285,6 +300,7 @@ def read_only_variant(image, temp, name, options, disks):
     settled(row['release'], late, name, disks)
     point.rmdir()
     row['image_after'] = image_state(image)
+    row['stage'] = 'completed'
     return row
 
 
@@ -308,7 +324,8 @@ def run(output):
         for name, options, disabled in VARIANTS:
             if disabled and 'disable' not in report:
                 disable_ownership(image, temp, report, disks)
-            report['variants'][name] = read_only_variant(image, temp, name, options, disks)
+            row = report['variants'][name] = {}
+            read_only_variant(image, temp, name, options, disks, row)
         report['completed'] = True
     except Exception as error:
         report['error'] = repr(error)[:500]

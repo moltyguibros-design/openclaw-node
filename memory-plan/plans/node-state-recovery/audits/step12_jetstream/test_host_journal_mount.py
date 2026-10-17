@@ -6,7 +6,7 @@ cleanup must find through the inventory and statfs rather than the failed comman
 capture directory, its pins and commitment are the real host records (StoppedImage); the clone is
 an owned stand-in file whose size and sha256 the real pinned publication records. The fake mount
 is a copy of the owned stopped Data root, so the real reader runs on it. Nothing is attached or
-mounted, no VM is touched, and the CI-only ownership probe is exercised through guards and scripted cleanup only.
+mounted, no VM is touched, and the CI-only ownership probe is exercised through scripted host controls.
 """
 import copy
 import errno
@@ -1363,9 +1363,81 @@ class ProbeAttach(unittest.TestCase):
         self.assertEqual((disks, error), ([], 'attach failed: '))
         disks, error = self.attach({'returncode': 0, 'timed_out': False, 'stdout': b'not a plist'})
         self.assertEqual((disks, error), ([], 'attach output is not a plist'))
-        bogus = plistlib.dumps({'system-entities': [{'dev-entry': 'disk7'}]})
-        disks, error = self.attach({'returncode': 1, 'timed_out': False, 'stdout': bogus})
-        self.assertEqual((disks, error), ([], 'attach failed: '))
+        bare = plistlib.dumps({'system-entities': [{'dev-entry': 'disk7'}]})
+        disks, error = self.attach({'returncode': 1, 'timed_out': False, 'stdout': bare})
+        self.assertEqual((disks, error), (['/dev/disk7'], 'attach failed: '))
+
+    def test_only_whole_disk_nodes_are_harvested_from_either_native_spelling(self):
+        for value in ('disk7', '/dev/disk7'):
+            row = {'stdout': plistlib.dumps({'system-entities': [{'dev-entry': value}]})}
+            self.assertEqual(probe.attached_disk(row), ['/dev/disk7'])
+        for value in ('disk7s1', '/dev/disk7s1', '../disk7', 'disk7/..', '/dev//disk7', 'disk７', 7):
+            row = {'stdout': plistlib.dumps({'system-entities': [{'dev-entry': value}]})}
+            self.assertEqual(probe.attached_disk(row), [], repr(value))
+
+    def test_data_device_node_must_match_the_raw_attach_identifier(self):
+        for spelling in ('disk8s1', '/dev/disk8s1'):
+            for node in ('/dev/disk8s1', '/dev/disk9s1', 'disk8s1', '/dev/disk8s1/../disk9s1'):
+                disks = []
+                raw = {'system-entities': [{'dev-entry': 'disk7'},
+                                          {'dev-entry': spelling, 'content-hint': 'Apple_APFS_Volume'}]}
+                outputs = [raw, {'DeviceNode': node, 'VolumeName': 'Data'}]
+                def reply(*argv):
+                    return {'argv': list(argv), 'returncode': 0, 'timed_out': False, 'stderr': '',
+                            'stdout': plistlib.dumps(outputs.pop(0))}
+                with self.subTest(spelling=spelling, node=node), \
+                        mock.patch.object(probe, 'attempt', side_effect=reply), \
+                        mock.patch.object(probe, 'attachments', return_value=[]), \
+                        mock.patch('subprocess.run', side_effect=AssertionError('command run')):
+                    if node == '/dev/disk8s1':
+                        result = probe.attach(pathlib.Path('/nonexistent/probe.asif'), disks)
+                        self.assertEqual((result['volume'], result['entities']), (node, raw['system-entities']))
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, '^Data DeviceNode differs from its attach entry$'):
+                            probe.attach(pathlib.Path('/nonexistent/probe.asif'), disks)
+                self.assertEqual(disks, ['/dev/disk7'])
+
+
+class ProbeWritePreparation(unittest.TestCase):
+    def test_only_the_fresh_volume_root_is_made_runner_writable_before_seeding(self):
+        temp = pathlib.Path(tempfile.mkdtemp(prefix='openclaw-probe-setup-')).resolve()
+        self.addCleanup(shutil.rmtree, temp, True)
+        point, calls, state = temp / 'write', [], {'writable': False}
+        original_write = pathlib.Path.write_bytes
+
+        def write(path, payload):
+            if path.parent == point and not state['writable']:
+                raise PermissionError('owned volume root still owned by root')
+            calls.append(('write', str(path)))
+            return original_write(path, payload)
+
+        def attempt(*argv):
+            calls.append(argv)
+            if argv == (probe.SUDO, '-n', '/usr/sbin/chown', '%s:%s' % (os.getuid(), os.getgid()), str(point)):
+                state['writable'] = True
+            return {'argv': list(argv), 'returncode': 0, 'timed_out': False, 'stdout': b'', 'stderr': ''}
+
+        def release(*args):
+            for path in point.iterdir():
+                path.unlink()
+            return {'clean': True}, None
+
+        report = {}
+        with mock.patch.object(probe, 'attach', return_value={'volume': '/dev/disk8s1'}), \
+                mock.patch.object(probe, 'mount_at', side_effect=lambda *args: point.mkdir()), \
+                mock.patch.object(probe, 'info_of', return_value={}), \
+                mock.patch.object(wrapper, 'statfs', return_value={'flags': 0}), \
+                mock.patch.object(probe, 'attempt', side_effect=attempt), \
+                mock.patch.object(probe, 'release', side_effect=release), \
+                mock.patch.object(pathlib.Path, 'write_bytes', write), \
+                mock.patch('subprocess.run', side_effect=AssertionError('command run')):
+            probe.write_phase(temp / 'probe.asif', temp, report, [])
+        owner = (probe.SUDO, '-n', '/usr/sbin/chown', '%s:%s' % (os.getuid(), os.getgid()), str(point))
+        root_file = (probe.SUDO, '-n', '/usr/sbin/chown', '0:0', str(point / 'root.txt'))
+        self.assertLess(calls.index(owner), calls.index(('write', str(point / 'user.txt'))))
+        self.assertIn(root_file, calls)
+        self.assertEqual(report['write']['after_enable']['files']['root.txt']['mode'], '0o600')
+        self.assertFalse(point.exists())
 
 
 class ProbeRun(unittest.TestCase):
@@ -1382,7 +1454,7 @@ class ProbeRun(unittest.TestCase):
         self.clean = {'steps': [], 'errors': [], 'listed': [], 'remaining': 0, 'mounted': [], 'disks_gone': [],
                       'clean': True}
 
-    def run_probe(self, release, phase=None, rmtree=None):
+    def run_probe(self, release, phase=None, rmtree=None, variant=None):
         def scripted(*argv, **options):
             if argv[:3] == (DISKUTIL, 'image', 'create'):
                 pathlib.Path(argv[-1]).write_bytes(b'scripted image\n')
@@ -1393,7 +1465,7 @@ class ProbeRun(unittest.TestCase):
                 mock.patch.object(probe, 'image_state', return_value={}), \
                 mock.patch.object(probe, 'write_phase', side_effect=phase), \
                 mock.patch.object(probe, 'disable_ownership'), \
-                mock.patch.object(probe, 'read_only_variant', return_value={}), \
+                mock.patch.object(probe, 'read_only_variant', side_effect=variant, return_value={}), \
                 mock.patch.object(probe.shutil, 'rmtree', side_effect=rmtree or shutil.rmtree), \
                 mock.patch('subprocess.run', side_effect=AssertionError('command run')):
             return probe.run(self.output)
@@ -1432,6 +1504,17 @@ class ProbeRun(unittest.TestCase):
         report = self.report()
         self.assertEqual((code, report['completed'], report['cleanup']['removed']), (0, True, True))
         self.assertEqual([path.name for path in self.temp.iterdir()], ['report.json'])
+
+    def test_a_failed_variant_retains_its_partial_observations_and_cleanup(self):
+        def variant(image, temp, name, options, disks, row):
+            row.update({'stage': 'mount', 'attach': {'volume': '/dev/disk8s1'}, 'release': {'clean': True}})
+            raise RuntimeError('native mount refused')
+        code = self.run_probe(release=[(dict(self.clean), None)], variant=variant)
+        report = self.report()
+        self.assertEqual((code, report['completed'], report['cleanup']['removed']), (1, False, True))
+        self.assertEqual(report['variants']['wrapper-options'], {
+            'stage': 'mount', 'attach': {'volume': '/dev/disk8s1'}, 'release': {'clean': True}})
+        self.assertIn('native mount refused', report['error'])
 
 
 class ProbeGuards(unittest.TestCase):
