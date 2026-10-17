@@ -182,21 +182,23 @@ def attachments(clone):
     return found
 
 
-def clone_identity(path, capture):
+def clone_identity(path, capture, held=None):
     """The clone's owned single-link identity and sha256, as the capture record pins them."""
     info = path.lstat()
     require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and info.st_nlink == 1
             and stat.S_IMODE(info.st_mode) == 0o600 and info.st_size == capture.get('clone_size'),
             'clone is not the owned single-link 0600 image of the recorded size')
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW) if held is None else held
     try:
+        os.lseek(fd, 0, os.SEEK_SET)
         opened = os.fstat(fd)
         digest = hashlib.sha256()
         while chunk := os.read(fd, 1 << 20):
             digest.update(chunk)
         after = os.fstat(fd)
     finally:
-        os.close(fd)
+        if held is None:
+            os.close(fd)
     require((opened.st_dev, opened.st_ino) == (info.st_dev, info.st_ino)
             and (after.st_size, after.st_mtime_ns) == (info.st_size, info.st_mtime_ns),
             'clone changed while it was hashed')
@@ -373,7 +375,7 @@ def record_failure(output, stage, error, cleanup):
         pass
 
 
-def capture_locks(capture_dir):
+def capture_locks(capture_dir, directory_fd=None):
     """CAPTURE_ACTIVE.lock, then ARMED.json, each locked exclusively without waiting.
 
     Each is opened without following a link or blocking on a FIFO and must be an owner-private
@@ -382,7 +384,8 @@ def capture_locks(capture_dir):
     held = []
     try:
         for name, busy in LOCKS:
-            held.append(os.open(capture_dir / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK))
+            held.append(os.open(capture_dir / name if directory_fd is None else name,
+                                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd))
             info = os.fstat(held[-1])
             require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and info.st_nlink == 1
                     and stat.S_IMODE(info.st_mode) == 0o600, name + ' is not an owner-private lock file')

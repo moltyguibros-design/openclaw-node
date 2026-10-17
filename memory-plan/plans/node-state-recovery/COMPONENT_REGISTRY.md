@@ -543,3 +543,51 @@ or a measured fixed resource decision. B3/B4 not repeated; B5/1.2 open, B6–B9 
 D64 and production capture refusal unchanged. No production operation occurred.
 
 2026-10-17 15:16 EDT — D207 verifies the production release fence at e6543580 / all8 CI39059651789; native job117474802932 passes all7 reconcile tests, Linux all4 fence controls, Claude122 verifies both intended mutants. The test-only directory-mode refinement removes an order dependency; runtime/workflow bytes are unchanged. Host cleanup/terminal decisions, scoped boot admission/manual route, D175 and actual macOS reboot remain open. No production state changed.
+
+
+### 2026-10-17 15:52 EDT — B5-D62-owned-abort-cleanup candidate (D208)
+
+The existing clone-disposal module now has a completed-capture-only abort-cleanup
+operation with an entry-first production refusal. It consumes existing real checkpoint/
+commitment/capture validators, both exclusive locks relative to a pinned capture directory,
+original-host/guard bindings and stable source/clone bytes. Root fixed-name atomic intent
+and cleanup records flank only clone unlink; the clone descriptor remains open and must
+report link count zero. Capture already left its flag clear: cleanup refuses an immutable
+clone and changes no image flag. Source denial stays applied as sampled, never released.
+Existing MATCH/JOURNAL_INPUTS receipt bytes are pinned before further clone reads are
+foreclosed; they supply no acceptance. The host-spec hash is a forward pin only.
+
+Claude134 challenged unlink identity, lock self-deadlock, atomic publication, sibling
+policy and claim scope. The candidate uses direct preflight under locks, descriptor-based
+unlink/link-count verification, root atomic markers and a cleanup-only sibling-clone rule;
+a sibling CAPTURE without a clone remains evidence and is allowed. Reconcile's stricter
+rule is unchanged. Claude136 accepts retaining the existing mount binding imports and
+real HostCheckpoint fixture producers; the exact candidate source still needs review.
+The existing shared mount helpers gain only optional directory/held-descriptor inputs;
+old callers retain their behavior. No parallel decision controller is introduced.
+
+The fixed abort-cleanup diagnostic directory or either root final/temporary marker makes
+all retries refuse for manual handling. A failure after rename but before successful
+parent fsync may leave a complete visible receipt with FAILED.json: receipt presence is
+not success and future terminal consumers must reject failed/partial attempts. Intent
+survives failure. This is a cleanup prerequisite, not terminal ABORT, ACCEPTED, BOOTABLE,
+D62 admission or a manual restoration implementation. Same-uid path/flag interference
+between observations remains D189's limit; a swapped unlink can be detected by the held
+inode but is not atomically prevented. Unlink does not destroy shared image bytes.
+
+Verification in progress: portable real-producer fixtures, decisive identity/pin/lock/
+attachment/interruption/publication/replay negatives and guard mutants, existing mount
+regression, Claude and exact-head CI. Native flag/ASIF cleanup and actual reboot are not
+claimed. No source readiness or gate closure yet. Fresh PR head f83317d3 had all8 checks
+success before this candidate. Governance recheck: B1 source/owned only; B2 Alpine is a
+bounded historical guard rehearsal; B3's23 pins remain JIT; B4 remains bounded design
+input, neither repeated. B5/1.2 open; B6 has no exact attended-window release; B7–B9 remain
+held with no production capture, real-history acceptance or verified timer resumption.
+D64 and production capture refusal remain unchanged; all four histories stay separate.
+
+Next: terminal ABORT production/strict consumption after checked cleanup, then scoped
+guest job/process admission/manual restoration before D175. Both source gates use B1
+owned resources, need decisive negatives, Claude and their own exact-head CI; ACCEPTED
+still requires a real B8 producer. Actual macOS reboot still needs the operator's exact
+disposable-machine designation or measured disk/RAM/capacity decision. No production
+service, VM, image or installed timer was operated.
