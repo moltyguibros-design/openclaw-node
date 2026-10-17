@@ -460,3 +460,55 @@ stays open. Next that review/CI gate, then native owned stopped-ASIF journal
 reader integration, both within B1's owned-test authorization. D62 rehearsal
 access stays operator-owned and separate. B3/B4 were not repeated; B5/1.2
 open, B6–B9 closed, D64 unchanged and production untouched.
+
+## B5-kickstart-cause-probe preflight — 2026-10-17 08:45 EDT
+- Still1.2/B5; source6912b7e7 is5green/1red, not ready.
+- Claude Message100 finds no material defect; native80 controls pass in CI.
+- New trace samples the owned launchctl client alive after10.004358542s.
+- Advance one diagnostic gate: bounded seven-arm timing on separate CI-owned labels.
+- No runtime deadline, fixture throttle, acceptance rule, production service or VM changes.
+- Report interprets observed spawn/client timing; it cannot prove the prior failure's cause alone.
+
+Needs: exact red CI39026495833/job117378396060; prior source-only observer;
+Claude's immutable7d3e90a4 artifact, independently read and SHA256-verified
+77838cc9b9fcbb33c5f83776695223ee0d2a6c8f62c9251495ca9c4967871b64.
+That artifact is a design input, not yet executable readiness. Correct its
+owned-client interrupt cleanup, stale-PID signal use, ignored cleanup/domain
+observation failures and removal-before-proven-cleanup before native wiring.
+Keep primary errors and partial trial evidence; missing/nonzero reports hold.
+File deltas: one owned-only probe derived from that candidate, its pure/mock
+controls, isolated macOS CI job with always-upload, and plan/evidence ledgers.
+Verify: original guard refusals, completed/alive/pipe-held measurement controls,
+client interruption/cleanup controls and unknown job-observation refusals;
+CI report for seven fresh labels with actual first/second job times, ten-second
+post-timeout client observation, later return bound and verified bootout.
+Any cause inference is bounded to one runner and differentiated trials.
+Claude reviews material bytes; full exact-head CI remains required for source
+readiness. The original recovery10s/1s/20s limits remain unchanged.
+
+Carry-forwards from Message100: T1 root-uid ambiguity in the probe seeding
+scripted test and T2 missing wrapper applied-failure harvest-order assertion
+remain tracked owned-test work; neither is silently fixed in this diagnostic
+slice. The native integration gate stays held by exact-head CI. B3/B4 remain
+unrecaptured; B5/1.2 open, B6–B9 closed, D64 unchanged, four histories separate.
+
+
+2026-10-17 08:55 EDT — D199, B5-kickstart-cause-probe. Exact6912b7e7
+has5green/1red in39026495833; mount80 tests pass, while the owned stopped
+job kickstart times out again. The new client trace has poll=None after
+10.004358542s (bootstrap age.285780875s, stop wait.009570166s). This narrows
+the current failure to a still-alive sampled client, not a cause attribution.
+Recovery remains partial, gate closed and receipt unresolved. Claude
+Message100 finds no material defect in the binding revision; source readiness
+is held by red CI.
+A checksum-verified Claude7d3e90a4 experiment is adapted as one CI-only probe:
+seven fresh jobs vary runtime/throttle, record first/second job times, sample
+the launchctl client after10s and measure a bounded later return. Before
+wiring, Codex corrected client/target cleanup, stale-PID signals, unreadable
+observations, premature file removal and lost partial reports.19 pure/mock
+controls pass; the real classifier's3 shapes pass on the final local candidate and rerun in the dedicated CI job. Missing/nonzero/native
+partial reports cannot clear this gate; this is not a fixture/runtime fix.
+Next timing report, then an evidence-backed owned fixture/runtime remedy
+with Claude review and exact-head green CI before native reader integration.
+Both are B1-owned work; no production service/VM or timer change. B3/B4 were
+not repeated, B5/1.2 open, B6–B9 closed, D64 unchanged, four histories separate.

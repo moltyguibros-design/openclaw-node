@@ -2887,3 +2887,36 @@ stays open. Next that review/CI gate, then native owned stopped-ASIF journal
 reader integration, both within B1's owned-test authorization. D62 rehearsal
 access stays operator-owned and separate. B3/B4 were not repeated; B5/1.2
 open, B6–B9 closed, D64 unchanged and production untouched.
+
+
+2026-10-17 08:55 EDT — D199, B5-kickstart-cause-probe. Exact6912b7e7
+has5green/1red in39026495833; mount80 tests pass, while the owned stopped
+job kickstart times out again. The new client trace has poll=None after
+10.004358542s (bootstrap age.285780875s, stop wait.009570166s). This narrows
+the current failure to a still-alive sampled client, not a cause attribution.
+Recovery remains partial, gate closed and receipt unresolved. Claude
+Message100 finds no material defect in the binding revision; source readiness
+is held by red CI.
+A checksum-verified Claude7d3e90a4 experiment is adapted as one CI-only probe:
+seven fresh jobs vary runtime/throttle, record first/second job times, sample
+the launchctl client after10s and measure a bounded later return. Before
+wiring, Codex corrected client/target cleanup, stale-PID signals, unreadable
+observations, premature file removal and lost partial reports.19 pure/mock
+controls pass; the real classifier's3 shapes pass on the final local candidate and rerun in the dedicated CI job. Missing/nonzero/native
+partial reports cannot clear this gate; this is not a fixture/runtime fix.
+Next timing report, then an evidence-backed owned fixture/runtime remedy
+with Claude review and exact-head green CI before native reader integration.
+Both are B1-owned work; no production service/VM or timer change. B3/B4 were
+not repeated, B5/1.2 open, B6–B9 closed, D64 unchanged, four histories separate.
+
+
+- [ ] B5-kickstart-cause-probe: measure the owned launchctl client's late return and job timing across seven fresh CI-only labels.
+
+> **B5-kickstart-cause-probe — Goal:** constrain the recurring owned kickstart timeout hypotheses using differentiated timing observations.
+> **Needs:** exact6912b7e7 failure trace, checked7d3e90a4 candidate, corrected probe cleanup, isolated macOS CI runner, all native opt-in guards.
+> **Feeds:** evidence-backed owned fixture/runtime decision, then exact-head source readiness and stopped-ASIF reader integration.
+> **Verify:** code/runtime:19 pure/mock controls, real returned/alive/pipe-held classifier controls, retained seven-arm native report with first/second job instruction times, post-timeout poll and bounded late return, readable target/domain absence and confirmed removal; Claude review and exact-head CI. Nonzero/missing/partial reports or unresolved observations refuse; no causal extrapolation to other runs.
+
+Carry-forwards from Claude Message100 (not part of this diagnostic slice):
+- [ ] B5-test-nonroot-identity: seed fixture tests with fixed nonzero mocked uid/gid so root-run review distinguishes seeding and root restoration. Verify both root/nonroot test contexts without native chown.
+- [ ] B5-test-failed-attach-retention: assert canonical disk absence evidence after fail-applied attach and kill a wrapper harvest-after-status mutant. Source is correct; the current80 controls do not enforce that order.

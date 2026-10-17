@@ -105,6 +105,7 @@ jobs:
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_owned_kickstart_trace.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_timing.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_preflight_status.py
           NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_cluster.py
       - name: Root unit tests
@@ -228,6 +229,32 @@ jobs:
         with:
           name: asif-mount-ownership-${{ github.sha }}
           path: ${{ runner.temp }}/asif-mount-ownership.json
+          if-no-files-found: error
+
+  kickstart-timing-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify timing and cleanup controls
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_timing.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_kickstart_timing.py --self-test
+      - name: Measure seven fresh owned launchd targets
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          OPENCLAW_KICKSTART_PROBE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_kickstart_timing.py \
+            --ci-owned-probe "$RUNNER_TEMP/kickstart-timing.json"
+      - name: Retain timing observations on refusal
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kickstart-timing-${{ github.sha }}
+          path: ${{ runner.temp }}/kickstart-timing.json
           if-no-files-found: error
 
   macos-process-census:

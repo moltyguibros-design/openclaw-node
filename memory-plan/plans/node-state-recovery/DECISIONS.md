@@ -4329,3 +4329,59 @@ verification is owned stopped-ASIF journal reader integration after this
 source's review/CI. D62/D175 reboot/abort/manual resumption, protected roots
 and serving-NATS recovery remain open; production capture stays disabled,
 B6–B9 closed and all four histories separate.
+
+
+## D199 — 2026-10-17 08:55 EDT: measure the still-alive kickstart client before a remedy
+
+Exact6912b7e7 is5green/1red in39026495833/job117378396060. The80 mount
+controls pass. The recurring owned stopped-daemon test now samples its
+launchctl client alive after10.004358542s; bootstrap-request age before stop
+was.285780875s and stopped wait.009570166s. This excludes an already-exited
+client at that sample for this occurrence, not at the exact deadline, and
+does not establish throttle causality. The unchanged recovery response is
+partial, gate closed, receipt unresolved. Claude Message100 finds no material
+defect in the binding source/native evidence; exact-head red CI still holds
+source readiness. T1 root-uid test ambiguity and T2 the untested wrapper
+harvest-before-status rule are recorded as separate owned-test carry-forwards.
+
+Consume Claude's checked7d3e90a4 candidate (SHA25677838cc9…7871b64) as design
+input, not native-ready code. One adapted CI-only probe measures seven fresh
+owned launchd targets across requested runtime and ThrottleInterval arms.
+It retains post-timeout poll elapsed time and a bounded later return, plus
+job-written first/second instruction wall times and launchd observations.
+Controller elapsed time is monotonic; job wall-time deltas may reflect clock
+changes and are not kernel spawn/exit timestamps. A separate idle runner's
+observations constrain hypotheses; they do not alone attribute the prior
+full-suite failure or authorize a runtime policy change.
+
+Before wiring, correct own-client interrupt kill/reap and pipe cleanup,
+primary-error retention, numeric stale-PID signals (use exact fresh target),
+ignored target/domain observation failures and removal-before-cleanup. Require
+a second running job record and a verified trial bootout before another arm.
+Retain partial trial rows, preserve files after any failed trial or uncertain
+cleanup, and always attempt exclusive report upload. Cleanup is sequential,
+not physical exclusion or a guarantee against late starts. A job timeout,
+interrupt during directory removal or report-write failure can lose the
+report; missing/nonzero reports never pass the gate. The original recovery
+10s action/1s observation/20s parent limits, fixture settings and runtime
+acceptance are unchanged. No live service, VM, production disk or timer is
+involved.19 pure/mock controls pass; the dedicated job also executes the real
+returned/alive/exited-pipe-held self-test before native measurement. New
+native evidence and Claude/exact-head review/CI remain pending. B5/1.2 open,
+B6–B9 closed, D64 unchanged, production capture disabled, histories separate.
+
+
+D199 prepublication design refinement after Claude Message102: seven arms
+include default-throttle/R.3 with a deliberate1s request delay. A single
+stopped snapshot, poll latency, load average and control-print elapsed time
+avoid the original double-observation ambiguity. Three-origin predictions
+and residuals are illustrative: the recorded time is a Python instruction,
+not kernel spawn; wall clock and startup bias remain, and throttle0 may be
+interpreted specially. Signal-by-label differs from the fixture's os.kill;
+do not infer exact transfer. Probe-only extra/second-start/log waits are
+15/10/10s; target prints5s, logs once after trials. The isolated job is30min
+after conservative summed command/wait/cleanup accounting with margin;
+interpreter startup and report I/O are not universally bounded. Timeout or
+lost report still refuses. No production timeout changes. A clean-exit arm
+or lighter recorder is not included, so signal-specific accounting and
+subsecond startup bias are not resolved by this experiment.
