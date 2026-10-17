@@ -561,6 +561,85 @@ class Refusals(unittest.TestCase):
                 case.assert_held()
 
 
+    def test_post_unlink_terminal_or_sibling_appearance_refuses(self):
+        for fault in ('terminal', 'sibling'):
+            with self.subTest(fault=fault), owned() as case:
+                def appeared(path):
+                    if fault == 'terminal':
+                        write_record(case.capture / 'ABORT.json', {'untrusted': True})
+                    else:
+                        sibling = case.temp / 'late-capture'
+                        sibling.mkdir(mode=0o700)
+                        write_record(sibling / 'powered-off-image.asif', {})
+
+                with mock.patch.object(cleanup, 'no_disk_attachment', side_effect=appeared):
+                    with self.assertRaisesRegex(RuntimeError, 'boot decision|another temporary image'):
+                        case.run_cleanup()
+                self.assertFalse((case.capture / 'ABORT_CLEANUP.json').exists())
+                self.assertFalse(case.clone.exists())
+                self.assertEqual(case.flag_calls, [])
+                self.assertEqual(case.flags[case.source], stat.UF_IMMUTABLE)
+
+    def test_changed_intent_readback_refuses_before_unlink(self):
+        with owned() as case:
+            publish = cleanup.publish_abort_cleanup
+
+            def rewritten(directory_fd, name, value):
+                publish(directory_fd, name, value)
+                if name == 'ABORT_CLEANUP_INTENT.json':
+                    raw = json.loads((case.capture / name).read_bytes())
+                    raw['reason'] = 'rewritten intent'
+                    (case.capture / name).write_text(json.dumps(raw))
+
+            with mock.patch.object(cleanup, 'publish_abort_cleanup', side_effect=rewritten):
+                with self.assertRaisesRegex(RuntimeError, 'intent publication differs'):
+                    case.run_cleanup()
+            self.assertTrue(case.clone.exists())
+            self.assertFalse((case.capture / 'ABORT_CLEANUP.json').exists())
+            case.assert_held()
+
+    def test_changed_final_intent_refuses_receipt(self):
+        with owned() as case:
+            def rewritten(path):
+                intent = case.capture / 'ABORT_CLEANUP_INTENT.json'
+                raw = json.loads(intent.read_bytes())
+                raw['reason'] = 'rewritten after unlink'
+                intent.write_text(json.dumps(raw))
+
+            with mock.patch.object(cleanup, 'no_disk_attachment', side_effect=rewritten):
+                with self.assertRaisesRegex(RuntimeError, 'final source, input or clone absence differs'):
+                    case.run_cleanup()
+            self.assertFalse(case.clone.exists())
+            self.assertFalse((case.capture / 'ABORT_CLEANUP.json').exists())
+            case.assert_held()
+
+    def test_swap_before_named_check_refuses_without_unlinking_either_file(self):
+        with owned() as case:
+            identity = cleanup.clone_identity
+            clone_checks = 0
+            retained = case.capture / 'retained-before-unlink.asif'
+
+            def swapped(path, capture, **options):
+                nonlocal clone_checks
+                value = identity(path, capture, **options)
+                if path == case.clone:
+                    clone_checks += 1
+                    if clone_checks == 3:
+                        case.clone.rename(retained)
+                        case.clone.write_bytes(b'foreign owned file before named check')
+                        case.clone.chmod(0o600)
+                return value
+
+            with mock.patch.object(cleanup, 'clone_identity', side_effect=swapped):
+                with self.assertRaisesRegex(RuntimeError, 'clone or capture path changed before unlink'):
+                    case.run_cleanup()
+            self.assertEqual(clone_checks, 3)
+            self.assertTrue(case.clone.exists())
+            self.assertTrue(retained.exists())
+            self.assertFalse((case.capture / 'ABORT_CLEANUP.json').exists())
+            case.assert_held()
+
+
 
 class HolderObservation(unittest.TestCase):
     def test_exact_retained_readonly_fd_and_no_attachment(self):

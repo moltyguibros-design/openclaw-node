@@ -6,6 +6,21 @@ import sys
 STEP = pathlib.Path(__file__).resolve().parent
 MODULE = 'test_host_abort_cleanup.'
 MUTANTS = (
+    ('post-unlink-terminal-and-sibling',
+     '        no_disk_attachment(clone)\n        no_terminal(capture_dir)\n        no_sibling_clone(capture_dir)',
+     '        no_disk_attachment(clone)',
+     'Refusals.test_post_unlink_terminal_or_sibling_appearance_refuses', 'RuntimeError not raised'),
+    ('intent-readback', "require(json.loads(intent_bytes) == intent,", 'require(True,',
+     'Refusals.test_changed_intent_readback_refuses_before_unlink', 'RuntimeError not raised'),
+    ('final-intent-binding',
+     "and cleanup_bytes('ABORT_CLEANUP_INTENT.json', directory_fd) == intent_bytes,",
+     'and True,', 'Refusals.test_changed_final_intent_refuses_receipt', 'RuntimeError not raised'),
+    ('pre-unlink-named-binding',
+     "require((named.st_dev, named.st_ino) == (opened.st_dev, opened.st_ino)\n"
+     "                and (capture_dir.stat().st_dev, capture_dir.stat().st_ino) ==\n"
+     "                (os.fstat(directory_fd).st_dev, os.fstat(directory_fd).st_ino),",
+     'require(True,', 'Refusals.test_swap_before_named_check_refuses_without_unlinking_either_file',
+     'does not match'),
     ('original-arm-scope',
      "require(json.loads(pins['ARMED.json']).get('scope') == ARM_SCOPE",
      'require(True', 'Refusals.test_wrong_arm_scope_refuses_even_when_all_later_pins_are_consistent',

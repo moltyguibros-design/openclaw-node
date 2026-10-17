@@ -3122,7 +3122,7 @@ D64 and production capture refusal unchanged. No production operation occurred.
 
 ### 2026-10-17 15:42 EDT — B5-D62-owned-abort-cleanup preflight
 
-- [ ] B5-D62-owned-abort-cleanup: extend the existing clone-disposal module with a
+- [x] B5-D62-owned-abort-cleanup: extend the existing clone-disposal module with a
   production-refused, completed-capture-only owned cleanup operation. Verify checkpoint/
   commitment/capture/guard/spec bindings under both capture locks, publish a nonterminal
   intent before removing only the pinned clone, then record cleanup with source boot
@@ -3207,3 +3207,77 @@ was in progress; no blind retry or unrelated fixture rewrite was made. The corre
 candidate needs a new exact-head run in any case. B5-exact-CI is Codex-owned and
 holds source readiness; no new operator authority/access is requested. D64, B6–B9,
 production capture/reconcile refusals and all production resources remain unchanged.
+
+
+2026-10-17 16:10 EDT — D208 append-only scope correction after Claude142:
+The exact holder filter excludes additional descriptors visible to lsof as the calling
+user; it is not a cross-user descriptor census on macOS. The separate hdiutil inventory
+checks visible image attachments. Neither observation supplies physical exclusion or
+continuous denial. The earlier unqualified “no other own/foreign descriptor” wording
+is superseded by this visibility limit. Optional evidence pinning covers only MATCH.json
+and JOURNAL_INPUTS.json one directory level below the capture root, not arbitrary files
+or receipts elsewhere. The source hashes an owned0600 single-link source as a deliberate
+owned-fixture precondition; native ASIF liveness at other modes remains unproved.
+
+Claude142 finds no required source defect at cf98b242 and independently reproduces31
+controls (one Linux platform skip), all8 intended mutants, mount91 controls, capture
+and reconcile controls as uid65534. It verifies real per-role frozen stores can precede
+cleanup while the extracted root stays0700. The native single-fd observation remains
+Codex's macOS evidence; Claude used Linux. Four optional surviving guard mutants now
+receive focused test-only negatives for post-unlink decisions/sibling clones, intent
+read-back, final intent binding and pre-unlink named-entry binding. Runtime/workflow
+bytes are unchanged. SourceCI39065020767 remains pending; no source closure yet.
+
+
+### 2026-10-17 16:32 EDT — B5-D62-owned-abort-cleanup verified (D209)
+
+Verified runtime source cf98b242ad0fa69581dc8ea5e87e051a473c3125, exact CI39065020767 all8 checks success.
+CI checkout merge bfe3c82b9f010b590d5b6cb150600c93c2aeb022 has blob-identical step12 sources/tests
+and workflow, independently checked against the source head.
+Native macOS job117490728969 runs all31 cleanup controls, including the
+actual owned regular-file lsof single-readonly/extra-writable-descriptor observation,
+and kills all8 source guard mutants. Raw native job-log SHA256 2beceeb79790de542833306808bce20213a3411473a838f31ea98885c3283d0e.
+Linux Node22 also passes the complete JetStream step; its macOS-only lsof control is
+skipped there. The earlier unchanged R3 fixture failure did not repeat on this head;
+no claim that its cause was fixed follows. Superseded cef42140 run39064371810 is
+cancelled, with its failure evidence retained, never relabelled green.
+
+Claude142 independently reproduces31 controls with one Linux platform skip, all8
+intended mutants, mount91 and capture/reconcile controls as uid65534, and finds no
+required source defect. Its required visibility wording is corrected append-only:
+lsof covers descriptors visible as the calling user, not a cross-user holder census;
+hdiutil inventory is a separate observation. Only one-level MATCH/JOURNAL_INPUTS
+receipts are pinned. No continuity, physical exclusion, byte destruction, authorship,
+real-history acceptance or native ASIF cleanup claim follows.
+
+This receipt strengthens tests only: four optional surviving guards now have decisive
+negatives for late terminal/sibling appearance, changed intent read-back, changed final
+intent and a clone swap before the named-entry check. All35 controls pass locally on
+macOS; the committed runner passes its controls and kills all12 intended mutants,
+with no runner errors. Runtime and workflow bytes are unchanged from the verified
+source above. The receipt head still needs its own exact-head CI before readiness.
+
+B5-D62-owned-abort-cleanup closes only this nonterminal owned cleanup prerequisite:
+no image flag changes, no terminal ABORT/ACCEPTED/BOOTABLE, no source release or guest
+admission. Intent/final/temporary markers or the single-use abort-cleanup directory
+make every retry manual. A visible receipt beside FAILED.json is not success; future
+terminal consumers must refuse failed/partial evidence. D64 and production capture/
+reconcile refusals remain unchanged. B5/1.2 stay open at v1.2-pre, B6–B9 held; B3/B4
+were not repeated, all four histories remain separate, and no production resource was
+operated. Actual reboot behavior remains unproved.
+
+Next two gates: B5-D62-host-terminal-abort must strictly consume cleanup and all original
+arm/nonce/checkpoint/capture/guard/host bindings, reject failed/partial/stale evidence,
+recheck physical cleanup under active denial, then publish durable ABORT before a
+separately checked owned source release. ACCEPTED still needs a real B8 producer;
+MATCH, JOURNAL_INPUTS and the release verifier's byte-only VERIFY are not that decision.
+B5-D62-guest-admission/manual then needs that host-decision binding before any gate opens,
+all OpenClaw launchd jobs plus every process as the OpenClaw user or executing from
+production entrypoint roots compared before Journal.recover, unreadable/unexpected
+observations refused, then stopped-unit/override checks and an explicit manual route.
+This scope is not a complete physical process census. D175's conditional five-timer
+value-only migration follows admission and precedes gate construction; same-boot checks
+remain. B1 authorizes source/owned fixtures for both gates; no new VM access is needed
+for source work, and each needs decisive controls, Claude and exact-head CI. Actual
+macOS reboot/login/hold-reattach and D175 rehearsal still need an exact operator-designated
+disposable machine or a measured fixed disk/RAM/capacity decision. No VM is provisioned.
