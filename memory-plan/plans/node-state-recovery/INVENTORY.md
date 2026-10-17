@@ -2975,3 +2975,35 @@ production capture disabled and four physical histories separate. No live
 service, VM, production image or timer was changed.
 
 - [ ] B5-kickstart-measurement-extension: before interpreting a future incomplete/anomalous native probe, address Message104 F-A/F-D/F-E/F-B/F-G (deadline origin, per-arm anomaly isolation, prediction controls and run-wide failure logs); verify each with decisive owned controls and Claude/exact-head CI. Existing complete reports remain bounded D200/D201 evidence.
+
+
+2026-10-17 10:46 EDT — D202 begins B5-owned-kickstart-fixture after exact0d329038 CI6green/1red and Claude Message106's accepted bounded evidence plus required owned-adapter correction.
+
+- [ ] B5-owned-kickstart-fixture: require an explicit one-second throttle only on the owned temporary mesh-agent job and verify restoration without widening runtime budgets.
+
+> **B5-owned-kickstart-fixture — Goal:** remove the observed default-throttle collision from the owned restoration test while retaining strict configuration refusal and timeout behavior.
+> **Needs:** D200/D201 differentiated native reports, Message106 review, exact0d329038 failure trace, existing owned adapter/native/simulated fixtures and portable timeout controls.
+> **Feeds:** exact-head source readiness, then native owned stopped-ASIF reader integration; never production resumption acceptance.
+> **Verify:** code/runtime: portable strict-config positives and negatives with real file identities and no launchd call on refusal; intended equality-guard mutant kill; unchanged applied-timeout partial/closed/unresolved and no-second-kickstart retry; native stopped-daemon resolved with explicit1 trace; Claude exact-head review and all CI green.
+
+- [ ] B5-default-kickstart-policy: before production resumption readiness, resolve the default-throttle/action-budget collision on a disposable macOS fixture under D62; retain fail-closed partial/closed/unresolved behavior until a separately reviewed runtime decision. Throttle1 owned evidence cannot clear this item.
+
+
+D202 source checkpoint: the owned mesh-agent plist and adapter now require
+integer ThrottleInterval1; the timer remains unchanged and refuses that
+extra field. Both native and simulated fixture producers match. Portable
+real-file policy controls pass (including missing/0/2/bool throttle and extra
+fields), and a removed-equality mutant dies at the intended assertion.
+5 timeout controls and11 applied-timeout/readiness/policy tests pass locally;
+the durable partial/closed/unresolved outcome and retry without another
+kickstart remain asserted. Managed launchd/journal/gate/trace/probe bytes are
+unchanged from0d329038. Python syntax and plan conformance pass. The new
+15-minute focused macOS job exercises the two native cases with explicit
+trace output before the existing long all-job gate can finish. No native
+host test was run here. B5_OWNED_KICKSTART_FIXTURE_SOURCE_20261017.json records
+hashes, baseline failure and proof limits. Candidate Claude review and exact-
+head all-job CI remain pending; no source-readiness claim. Next native owned
+stopped-ASIF journal reader integration, then D62/D175 admission/resumption
+source under B1; actual macOS reboot still needs separate disposable access.
+B3/B4 not repeated, B5/1.2 open, B6–B9 closed, capture disabled, production
+untouched and all four histories separate.

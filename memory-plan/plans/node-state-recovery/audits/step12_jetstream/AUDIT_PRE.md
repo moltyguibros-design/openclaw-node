@@ -565,3 +565,38 @@ head green CI under B1. D62 disposable-macOS access remains a separate operator
 decision. B3/B4 were not repeated; B5/1.2 open, B6–B9 closed, D64 unchanged,
 production capture disabled and four physical histories separate. No live
 service, VM, production image or timer was changed.
+
+
+### 2026-10-17 10:46 EDT — B5-owned-kickstart-fixture preflight (D202)
+
+1.2 remains active; prior D201 has two complete timing reports but exact0d329038 CI is6green/1red.
+Claude106 accepts the observations and requires a matching owned adapter policy change.
+This slice changes only the temporary daemon throttle and its strict admission/tests.
+The north-star recovery contract still requires fail-closed durable restoration evidence.
+Needs above exist; B1 authorizes these owned tests, no live operation.
+Next remains this bounded fixture correction; native reader and D62 are downstream.
+
+File deltas: restore_only.py owned expected configuration; test_restore_only.py temporary daemon settings/trace assertion; test_kickstart_applied_timeout.py simulated settings and portable real-file configuration controls; mutate_owned_fixture_policy.py intended guard-removal verification; source-evidence JSON plus plan decision/inventory/frontier/registry/audit updates. No managed_launchd.py, journal, service_gate.py, timer or production file changes.
+Verification: portable controls/guard mutant and existing timeout regressions locally; CI-only native stopped-daemon recovery with trace; Claude review and exact-head full CI before source readiness. Remaining default-policy and measurement extensions stay tracked.
+
+D202 verification refinement: add a separate15-minute owned-kickstart-fixture-macos CI job for the existing timeout controls, intended guard mutant and two focused native cases. Full legacy/all-job CI remains mandatory; this gives earlier native feedback and does not replace it or rerun an unchanged failed artifact. Workflow is an additional planned verification delta.
+
+
+D202 source checkpoint: the owned mesh-agent plist and adapter now require
+integer ThrottleInterval1; the timer remains unchanged and refuses that
+extra field. Both native and simulated fixture producers match. Portable
+real-file policy controls pass (including missing/0/2/bool throttle and extra
+fields), and a removed-equality mutant dies at the intended assertion.
+5 timeout controls and11 applied-timeout/readiness/policy tests pass locally;
+the durable partial/closed/unresolved outcome and retry without another
+kickstart remain asserted. Managed launchd/journal/gate/trace/probe bytes are
+unchanged from0d329038. Python syntax and plan conformance pass. The new
+15-minute focused macOS job exercises the two native cases with explicit
+trace output before the existing long all-job gate can finish. No native
+host test was run here. B5_OWNED_KICKSTART_FIXTURE_SOURCE_20261017.json records
+hashes, baseline failure and proof limits. Candidate Claude review and exact-
+head all-job CI remain pending; no source-readiness claim. Next native owned
+stopped-ASIF journal reader integration, then D62/D175 admission/resumption
+source under B1; actual macOS reboot still needs separate disposable access.
+B3/B4 not repeated, B5/1.2 open, B6–B9 closed, capture disabled, production
+untouched and all four histories separate.

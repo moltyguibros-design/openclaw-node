@@ -177,7 +177,10 @@ class OwnedLaunchdAdapter:
             expected_plist['StartInterval'] = 3600
         else:
             expected_plist['KeepAlive'] = False
-        require(plist == expected_plist, 'owned launchd configuration differs')
+            expected_plist['ThrottleInterval'] = 1
+        require(plist == expected_plist
+                and (unit == ANCHOR or type(plist.get('ThrottleInterval')) is int),
+                'owned launchd configuration differs')
         private_file(self.root / (unit + '.out'))
         private_file(self.root / (unit + '.err'))
         actual = static_identity(path, tuple(saved['files']), saved['dependencies'])

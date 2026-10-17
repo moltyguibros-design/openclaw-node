@@ -4448,3 +4448,39 @@ head green CI under B1. D62 disposable-macOS access remains a separate operator
 decision. B3/B4 were not repeated; B5/1.2 open, B6–B9 closed, D64 unchanged,
 production capture disabled and four physical histories separate. No live
 service, VM, production image or timer was changed.
+
+
+## D202 — 2026-10-17 10:46 EDT: explicit throttle only for the owned restore fixture
+
+Exact0d329038 CI39035568789 is6green/1red. Its owned stopped-daemon test
+again samples an alive client after10.011953291s (bootstrap request age
+.366293083s, stopped wait.013771875s). Recovery records partial/closed/
+unresolved even though the subsequent process observation is running.
+Do not rerun unchanged code or widen the10s action/1s inspection/20s parent.
+Claude Message106 independently re-derived D200's report and accepted its
+bounded interpretation and cleanup order. The reviewer's whole-second-credit
+model is a fit to one loaded runner, not a launchd rule or proof of earlier
+failures. D201 supplies a second independent report with the same broad shape.
+
+B5-owned-kickstart-fixture will set ThrottleInterval=1 on the temporary
+mesh-agent job only, in both native and simulated owned fixtures, and require
+that same exact integer value in OwnedLaunchdAdapter's expected configuration.
+The timer policy and exact-dictionary refusal stay intact. This adapter is
+restricted to the owned temporary root; no production plist or runtime action
+budget changes. Add portable real-file identity controls with a freshly
+rebound baseline so a generic hash mismatch cannot mask a missing exact
+configuration check. Wrong/missing throttle and extra fields must refuse
+before any launchd service observation/action. Kill a removed equality guard
+mutant for its intended assertion. Existing applied-timeout durable refusal,
+closed gate/unresolved receipt and retry-without-second-kickstart controls
+must still pass; the native loaded/stopped test must return resolved with a
+trace confirming the explicit1 setting under unchanged budgets.
+
+The fixture no longer represents production's default throttle. Production
+or other default-throttle jobs may still collide with the10s action budget;
+the safe response remains partial/closed, and this test-only remedy cannot
+clear that runtime policy question or D62/B5 resumption. Track it explicitly.
+Source readiness needs Claude exact-head review and all CI green. Native
+stopped-ASIF reader integration follows; D62 disposable-macOS access remains
+separately operator-gated. B3/B4 not repeated, B5/1.2 open, B6–B9 closed,
+D64 unchanged, capture disabled and all four histories separate.

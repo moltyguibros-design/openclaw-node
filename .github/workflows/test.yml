@@ -211,6 +211,30 @@ jobs:
           /usr/bin/python3 test/test_nats_store_holder_census.py
           node --test test/nats-legacy-lock.test.mjs
 
+  owned-kickstart-fixture-macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify owned configuration and timeout refusals
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_owned_fixture_policy.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_timeout.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_applied_timeout.py
+      - name: Restore the fresh stopped daemon and refuse a changed timer
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: ${{ github.workspace }}/memory-plan/plans/node-state-recovery/audits/step12_jetstream
+        run: |
+          /usr/bin/python3 -m unittest -v \
+            test_restore_only.RestoreOnlyOwned.test_loaded_stopped_owned_daemon_is_kickstarted \
+            test_restore_only.RestoreOnlyOwned.test_owned_timer_refuses_daemon_throttle_before_launchd
+
   asif-mount-ownership-macos:
     runs-on: macos-latest
     timeout-minutes: 15

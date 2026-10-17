@@ -197,6 +197,7 @@ class RestoreOnlyOwned(unittest.TestCase):
             elif unit == 'mesh-agent':
                 settings['RunAtLoad'] = True
                 settings['KeepAlive'] = False
+                settings['ThrottleInterval'] = 1
             plist.write_bytes(plistlib.dumps(settings))
             plist.chmod(0o600)
             for name in (unit + '.out', unit + '.err'):
@@ -421,9 +422,31 @@ runpy.run_path(sys.argv[0], run_name='__main__')
         context['before_restore'] = self.services['mesh-agent'].status()
         code, result = self.command(kickstart_context=context)
         self.assertNotEqual(result['owned_kickstart_trace'], {'missing': True}, result)
+        self.assertEqual(result['owned_kickstart_trace']['context']['explicit_throttle_interval'], 1, result)
+        self.assertEqual(result['owned_kickstart_trace']['event'], 'completed', result)
+        self.assertEqual(result['owned_kickstart_trace']['timeout_s'], 10, result)
+        self.assertEqual(result['owned_kickstart_trace']['client_returncode_when_sampled'], 0, result)
         self.assertEqual(code, 0, result)
         self.assertEqual(result['outcome'], 'resolved')
         self.assertTrue(self.services['mesh-agent'].status()['running'])
+        print(json.dumps({'owned_kickstart_fixture': result['owned_kickstart_trace'],
+                          'outcome': result['outcome'], 'gate': result['gate'],
+                          'receipt_status': result['receipt_status']}, sort_keys=True), flush=True)
+
+    def test_owned_timer_refuses_daemon_throttle_before_launchd(self):
+        prior = copy.deepcopy(self.prior)
+        path = self.services[ANCHOR].plist
+        settings = plistlib.loads(path.read_bytes())
+        settings['ThrottleInterval'] = 1
+        path.write_bytes(plistlib.dumps(settings))
+        prior[ANCHOR]['identity'] = static_identity(path)
+        adapter = OwnedLaunchdAdapter.__new__(OwnedLaunchdAdapter)
+        adapter.root, adapter.prior = self.root, prior
+        adapter.label_prefix = 'ai.openclaw.' + self.root.name + '.'
+        with patch.object(adapter, 'service') as service:
+            with self.assertRaisesRegex(Refused, 'owned launchd configuration differs'):
+                adapter.restore(ANCHOR, prior[ANCHOR])
+            service.assert_not_called()
 
     def test_unloaded_owned_timer_is_bootstrapped_without_running_early(self):
         self.interrupt()

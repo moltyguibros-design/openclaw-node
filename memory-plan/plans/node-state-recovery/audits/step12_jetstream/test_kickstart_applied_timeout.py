@@ -8,6 +8,7 @@ Seams (behaviour-neutral for this path):
   - Linux only: the timer anchor skips the macOS-literal '/bin/sh' inventory entry, because /bin/sh
     is a symlink there; the kickstarted daemon's identity check is untouched.
 """
+import copy
 import json
 import os
 import pathlib
@@ -207,7 +208,8 @@ class AppliedKickstartTimeout(unittest.TestCase):
                                                  'OWNED_UNREADY_FILE': str(self.root / 'unready'),
                                                  'OWNED_FIRE_LOG': str(self.root / 'fires.log')},
                         'RunAtLoad': unit != ANCHOR,
-                        **({'StartInterval': 3600} if unit == ANCHOR else {'KeepAlive': False})}
+                        **({'StartInterval': 3600} if unit == ANCHOR else
+                           {'KeepAlive': False, 'ThrottleInterval': 1})}
             plist = self.root / 'plists' / (unit + '.plist')
             plist.write_bytes(plistlib.dumps(settings))
             plist.chmod(0o600)
@@ -307,6 +309,61 @@ class AppliedKickstartTimeout(unittest.TestCase):
         self.assertTrue(any(r['event'] == 'already-restored' and r.get('unit') == 'mesh-agent' for r in new))
         self.assertFalse(any(r['event'] == 'restoration-intent' and r.get('unit') == 'mesh-agent' for r in new))
         self.assertFalse(any(verb == 'kickstart' for verb, _, _ in self.sim.log))
+
+
+class OwnedPlistPolicy(unittest.TestCase):
+    def setUp(self):
+        self.root = pathlib.Path(tempfile.gettempdir()).resolve() / ('openclaw-owned-recovery-' + secrets.token_hex(8))
+        self.root.mkdir(mode=0o700)
+        self.addCleanup(shutil.rmtree, self.root)
+        (self.root / 'plists').mkdir(mode=0o700)
+        entry = self.root / 'owned_recovery_service.cjs'
+        entry.write_bytes((HERE / entry.name).read_bytes())
+        entry.chmod(0o600)
+        for name in ('mesh-agent.out', 'mesh-agent.err'):
+            (self.root / name).touch(mode=0o600)
+        self.path = self.root / 'plists/mesh-agent.plist'
+        self.adapter = restore_only.OwnedLaunchdAdapter.__new__(restore_only.OwnedLaunchdAdapter)
+        self.adapter.root = self.root
+        self.adapter.label_prefix = 'ai.openclaw.' + self.root.name + '.'
+        self.settings = {
+            'Label': self.adapter.label('mesh-agent'),
+            'ProgramArguments': [str(pathlib.Path(shutil.which('node')).resolve(strict=True)), str(entry)],
+            'WorkingDirectory': str(self.root), 'StandardOutPath': str(self.root / 'mesh-agent.out'),
+            'StandardErrorPath': str(self.root / 'mesh-agent.err'),
+            'EnvironmentVariables': {'OWNED_ROLE': 'mesh-agent', 'OWNED_HEALTH_PORT': '1',
+                                     'OWNED_UNREADY_FILE': str(self.root / 'unready'),
+                                     'OWNED_FIRE_LOG': str(self.root / 'fires.log')},
+            'RunAtLoad': True, 'KeepAlive': False, 'ThrottleInterval': 1}
+
+    def bind(self, settings):
+        self.path.write_bytes(plistlib.dumps(settings))
+        self.path.chmod(0o600)
+        self.prior = {'class': 'daemon', 'loaded': True, 'running': True, 'disabled': False,
+                      'identity': static_identity(self.path)}
+        self.adapter.prior = {'mesh-agent': self.prior}
+
+    def test_exact_owned_daemon_configuration_with_explicit_throttle_is_accepted(self):
+        self.bind(self.settings)
+        with patch.object(self.adapter, 'service') as service:
+            self.assertEqual(self.adapter.identity('mesh-agent', self.prior), self.prior['identity'])
+            service.assert_not_called()
+
+    def test_changed_owned_daemon_configuration_refuses_before_launchd(self):
+        for field, value in (('ThrottleInterval', None), ('ThrottleInterval', 0),
+                             ('ThrottleInterval', 2), ('ThrottleInterval', True),
+                             ('ExitTimeOut', 10), ('KeepAlive', True), ('RunAtLoad', False)):
+            with self.subTest(field=field, value=value):
+                settings = copy.deepcopy(self.settings)
+                if value is None:
+                    settings.pop(field)
+                else:
+                    settings[field] = value
+                self.bind(settings)
+                with patch.object(self.adapter, 'service') as service:
+                    with self.assertRaisesRegex(restore_only.Refused, 'owned launchd configuration differs'):
+                        self.adapter.restore('mesh-agent', self.prior)
+                    service.assert_not_called()
 
 
 class ControllerReadiness(unittest.TestCase):
