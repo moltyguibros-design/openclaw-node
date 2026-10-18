@@ -1,4 +1,4 @@
-# Recovery frontier — 2026-10-17 22:30 EDT
+# Recovery frontier — 2026-10-17 23:02 EDT
 
 This is the Codex desktop heartbeat's short control surface for recovery step
 1.2. It does not change `INVENTORY.md`, `DECISIONS.md`, the no-stop rule, or
@@ -58,7 +58,7 @@ review only, not source readiness or B5 closure. Production remains untouched.
 | B2 | **Cleared for the disposable mechanism only.** Codex registered a separate Apple-backend UTM VM with its own ASIF disk and a verified Alpine ISO. It started and stopped normally; while `UF_IMMUTABLE` guarded that stopped disk, UTM refused its start and remained stopped; after unlock it started and stopped normally. The production VM stayed started throughout. | Codex carries this owned result into B5's host boot controller; no further VM creation is needed for B2's guard mechanism. B5's macOS reboot rehearsal has a separate access requirement. `utmctl start` exited 0 even on the refused attempt, so the controller must check the resulting state and error. | `audits/step12_jetstream/B2_UTM_GUARD_REHEARSAL_20261012.json` records distinct VM/disk identities, ASIF format, guard refusal, unlock recovery and final states. This is not a production boot-denial certificate. | B5 controller implementation and owned tests. |
 | B3 | **Just-in-time installation pins:** the October 9 candidate names `viewer-observed-20261008`; the installed viewer has since moved to `viewer-plan-task-links-autosave-20261011`. The 23-job candidate is unapproved and can drift again. | Codex resolves known structural drift now, but re-captures all 23 installed jobs and direct file hashes only immediately before an approved window. Repeating the capture before a window is scheduled does **not** count as progress. | Current installed identities and hashes match the reviewed baseline at window entry, including the five old timer pins and the exact conditional migration form. No pre-window timer reinstall. | B6 and B7. |
 | B4 | **Cleared as a bounded design input:** all 23 installed plists and direct launch files, activation keys, and current GUI/user/system OpenClaw-label observations are captured. Claude's adversarial review at `ac954055` found no remaining concrete false claim. This is not a no-writer certificate. | Codex carries the identified child, deploy, viewer, bus and file-writing routes into B5; transitive and out-of-cohort writers remain fail-closed uncertainties for the window-time census and stopped-VM boundary. Re-running this static capture alone is not progress. | `audits/step12_jetstream/B4_WRITER_PROVENANCE_AUDIT_20261012.md` and its JSON cover all 23 labels, classify the only observed system-domain OpenClaw label, name re-entry edges, and state residual uncertainty without claiming pre-stop physical exclusion. | Boundary design B5. |
-| B5 | **In progress, owned source only:** D216 process diagnostic correction candidate passes local40 controls/29 mutants; exact-source review/CI pending. D215 pre-start decisions remain verified. No diagnostic grants admission or boot; B5-boot-process-policy stays open. | Codex builds scoped guest admission/manual restoration and per-filesystem D175 reattachment; operator separately designates an exact disposable Mac or decides a measured fixed resource proposal. | Reviewed exact-head source/CI; distinct native full pipeline, owned APFS reattach and disposable-Mac reboot/login/process/hold/migration evidence. Journal/decision stay user-owned; no pre-stop physical-exclusion claim. | Per-window release B6. |
+| B5 | **In progress, owned source only:** D217 closes the process-diagnostic prerequisite at81ac425b/all8 green/Claude215. Native40/29; unpatched scan refused with child matched. Receipt CI pending. B5-boot-process-policy remains open; no admission. | Codex builds explicit policy binding, boot comparator/observer contract, durable admission, manual restoration and D175. Operator separately designates exact disposable access or decides a measured resource proposal. | Reviewed exact-head source/CI; distinct native full pipeline, APFS reattach and disposable-Mac reboot/login/process/hold/migration evidence. D189 and pre-stop limits remain. | Per-window release B6. |
 | B6 | **Separate live-run release required.** B1's boundary choice and B5's design review never authorize a production stop. | Operator gives a fresh, explicit go/no-go for one exact attended window only after B2, B3 and B5 pass. The two-hour heartbeat may prepare and warn, but must never initiate the live stop. | Recorded window-specific authorization naming the reviewed runbook, current pins, host operator and abort contact; it explicitly names D173–D175's user-owned pre-stop evidence without root attestation, D62's ACCEPTED-or-ABORT pre-boot rule, the conditional post-admission/pre-restoration timer re-pin, and the manual-restoration fallback. Without it, B7 remains closed. | Live hold and shutdown B7. |
 | B7 | **Live full-node hold and shutdown closed.** No service or VM stop has occurred for this recovery. | Only in the attended, specifically authorized B6 window, execute the approved sequence and abort on any failed precondition. No single NATS member may be stopped as a rehearsal. | Application quiescence under the approved boundary, clean VM shutdown, active host boot denial and definitive physical no-writer proof at the boundary specified by B1. | Stopped-VM capture B8. |
 | B8 | **Four-store capture and isolated acceptance closed.** No three healthy cold masters have been accepted. | Bind host capture and restore tools to the four declared physical paths and volume, then restore the copies on isolated servers. | Four separately hashed path/volume/window-bound copies faithfully reproduce the observed bytes; offline streams, counts, sequences and expiring-stream treatment match. This does **not** prove historical independence of the four members; that needs deployment-time provenance outside this capture. | Step 1.2 closure and any topology change. |
@@ -960,3 +960,34 @@ all29 intended mutants pass with intact controls. Runtime/workflow bytes remain
 identical to07347924. Superseded CI39090103107 was canceled for the proof extension,
 not counted green. Corrected-test exact-source review and exact-head green CI are
 pending. B5/1.2 remain open/pre, D64/timers/production unchanged, no admission.
+
+
+### 2026-10-17 23:02 EDT — owned process diagnostic source verified (D217)
+
+Source81ac425be0c7e6115e4ed1ea7e1ec2a55de6049f passes all8 jobs in
+CI39090362566. Native117565607992 passes40 tests7.552s and29 intended mutants;
+the unpatched owned-runner scan refuses, matches the independently expected C
+child, and reports516 unknown entries/299 unexpected rows. Unknown entries are
+not distinct process counts; no per-reason or complete-table measurement is
+claimed. Linux117565608002 passes40 tests0.130s with one native skip and29 mutants.
+Claude215 independently reproduces40/29 as uid65534 (native skipped), verifies
+unchanged runtime/workflow and closes the directory-root proof gap with its
+independent equality-only mutant. No required finding remains.
+
+Checkout mergee2529cd5b01f9b5502c381271a54b97ff9589bb1 has source81ac425b as
+second parent and identical recovery, lib/bin/test/workspace-bin and workflow
+bytes. Native raw log SHA256 c58ce17e2e05bb53e1805d6fdf58b1dfd94452c635854b9bba64a6c754d5259b;
+Linux raw log SHA256 47c040b3163577ae5fcf76a67b1fc630f4eddea3737793eb470f5f11aa2aa2d2.
+The committed native excerpt B5_SCOPED_PROCESS_DIAGNOSTIC_NATIVE_EXCERPT_20261018.txt retains the result/count lines, not a full table.
+Excerpt SHA256 0934ded10b918e78ddf0d15da97352efa77367a54421cd951e09489f6cf964d0. Earlier runs39089415728 and39090103107 were canceled for the
+required scope fix and its proof extension; neither is green evidence.
+
+Only B5-D62-scoped-process-diagnostic closes as an owned source prerequisite.
+B5/1.2 remain open/pre, B6–B9 held, and D64, production, journal/Gate/census APIs
+and installed timers unchanged. No production operation or local full scan ran.
+Current-boot test expectations grant no boot policy, eligibility or admission;
+loaded-image, sampling, same-UID D189 and physical-census limits stay. Next is
+explicit pre-window process-policy binding, then a separately reviewed boot
+comparator/observer contract and durable admission record before manual/D175.
+Actual disposable-Mac access, APFS reattach and reboot rehearsal remain separate.
+The receipt changes evidence/docs only; its own exact-head CI/review is pending.

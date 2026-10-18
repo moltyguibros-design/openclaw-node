@@ -158,3 +158,34 @@ all29 intended mutants pass with intact controls. Runtime/workflow bytes remain
 identical to07347924. Superseded CI39090103107 was canceled for the proof extension,
 not counted green. Corrected-test exact-source review and exact-head green CI are
 pending. B5/1.2 remain open/pre, D64/timers/production unchanged, no admission.
+
+
+### 2026-10-17 23:02 EDT — owned process diagnostic source verified (D217)
+
+Source81ac425be0c7e6115e4ed1ea7e1ec2a55de6049f passes all8 jobs in
+CI39090362566. Native117565607992 passes40 tests7.552s and29 intended mutants;
+the unpatched owned-runner scan refuses, matches the independently expected C
+child, and reports516 unknown entries/299 unexpected rows. Unknown entries are
+not distinct process counts; no per-reason or complete-table measurement is
+claimed. Linux117565608002 passes40 tests0.130s with one native skip and29 mutants.
+Claude215 independently reproduces40/29 as uid65534 (native skipped), verifies
+unchanged runtime/workflow and closes the directory-root proof gap with its
+independent equality-only mutant. No required finding remains.
+
+Checkout mergee2529cd5b01f9b5502c381271a54b97ff9589bb1 has source81ac425b as
+second parent and identical recovery, lib/bin/test/workspace-bin and workflow
+bytes. Native raw log SHA256 c58ce17e2e05bb53e1805d6fdf58b1dfd94452c635854b9bba64a6c754d5259b;
+Linux raw log SHA256 47c040b3163577ae5fcf76a67b1fc630f4eddea3737793eb470f5f11aa2aa2d2.
+The committed native excerpt B5_SCOPED_PROCESS_DIAGNOSTIC_NATIVE_EXCERPT_20261018.txt retains the result/count lines, not a full table.
+Excerpt SHA256 0934ded10b918e78ddf0d15da97352efa77367a54421cd951e09489f6cf964d0. Earlier runs39089415728 and39090103107 were canceled for the
+required scope fix and its proof extension; neither is green evidence.
+
+Only B5-D62-scoped-process-diagnostic closes as an owned source prerequisite.
+B5/1.2 remain open/pre, B6–B9 held, and D64, production, journal/Gate/census APIs
+and installed timers unchanged. No production operation or local full scan ran.
+Current-boot test expectations grant no boot policy, eligibility or admission;
+loaded-image, sampling, same-UID D189 and physical-census limits stay. Next is
+explicit pre-window process-policy binding, then a separately reviewed boot
+comparator/observer contract and durable admission record before manual/D175.
+Actual disposable-Mac access, APFS reattach and reboot rehearsal remain separate.
+The receipt changes evidence/docs only; its own exact-head CI/review is pending.

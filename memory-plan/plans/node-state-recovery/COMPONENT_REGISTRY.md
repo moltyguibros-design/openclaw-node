@@ -1,11 +1,10 @@
 # Node state recovery — registry
 
-2026-10-17 22:30 EDT — D216 process diagnostic proof candidate:
-40 local controls/29 intended mutants pass; exact-source Claude and exact-head CI pending.
-No recovery consumer or admission changes; B5-boot-process-policy remains open. Last
-verified prerequisite is D215 at0d8099c1/all8 green. B5/1.2 open/pre, B6–B9 held, D64,
-production and timers unchanged. Next explicit policy producer/frozen binding, then durable
-boot-admission record; manual/D175 and actual Mac access/APFS/reboot proof follow.
+2026-10-17 23:02 EDT — D217 verifies the owned current-boot process diagnostic at81ac425b:
+all8 CI39090362566 green; native40/29, unpatched scan refused with owned child matched;
+Claude215 no required finding. Receipt CI/review pending. B5/1.2 stay open/pre and
+B6–B9 held. D64/production/timers unchanged. Next policy binding, then a separate
+boot comparator/observer contract and durable admission before manual/D175.
 
 ## Family 1: persisted application state
 
@@ -837,3 +836,34 @@ all29 intended mutants pass with intact controls. Runtime/workflow bytes remain
 identical to07347924. Superseded CI39090103107 was canceled for the proof extension,
 not counted green. Corrected-test exact-source review and exact-head green CI are
 pending. B5/1.2 remain open/pre, D64/timers/production unchanged, no admission.
+
+
+### 2026-10-17 23:02 EDT — owned process diagnostic source verified (D217)
+
+Source81ac425be0c7e6115e4ed1ea7e1ec2a55de6049f passes all8 jobs in
+CI39090362566. Native117565607992 passes40 tests7.552s and29 intended mutants;
+the unpatched owned-runner scan refuses, matches the independently expected C
+child, and reports516 unknown entries/299 unexpected rows. Unknown entries are
+not distinct process counts; no per-reason or complete-table measurement is
+claimed. Linux117565608002 passes40 tests0.130s with one native skip and29 mutants.
+Claude215 independently reproduces40/29 as uid65534 (native skipped), verifies
+unchanged runtime/workflow and closes the directory-root proof gap with its
+independent equality-only mutant. No required finding remains.
+
+Checkout mergee2529cd5b01f9b5502c381271a54b97ff9589bb1 has source81ac425b as
+second parent and identical recovery, lib/bin/test/workspace-bin and workflow
+bytes. Native raw log SHA256 c58ce17e2e05bb53e1805d6fdf58b1dfd94452c635854b9bba64a6c754d5259b;
+Linux raw log SHA256 47c040b3163577ae5fcf76a67b1fc630f4eddea3737793eb470f5f11aa2aa2d2.
+The committed native excerpt B5_SCOPED_PROCESS_DIAGNOSTIC_NATIVE_EXCERPT_20261018.txt retains the result/count lines, not a full table.
+Excerpt SHA256 0934ded10b918e78ddf0d15da97352efa77367a54421cd951e09489f6cf964d0. Earlier runs39089415728 and39090103107 were canceled for the
+required scope fix and its proof extension; neither is green evidence.
+
+Only B5-D62-scoped-process-diagnostic closes as an owned source prerequisite.
+B5/1.2 remain open/pre, B6–B9 held, and D64, production, journal/Gate/census APIs
+and installed timers unchanged. No production operation or local full scan ran.
+Current-boot test expectations grant no boot policy, eligibility or admission;
+loaded-image, sampling, same-UID D189 and physical-census limits stay. Next is
+explicit pre-window process-policy binding, then a separately reviewed boot
+comparator/observer contract and durable admission record before manual/D175.
+Actual disposable-Mac access, APFS reattach and reboot rehearsal remain separate.
+The receipt changes evidence/docs only; its own exact-head CI/review is pending.
