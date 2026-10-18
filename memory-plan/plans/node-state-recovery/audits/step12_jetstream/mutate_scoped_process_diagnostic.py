@@ -51,6 +51,11 @@ for key in ('pid', 'ppid', 'uid', 'gid', 'name', 'start_sec', 'start_usec',
         'test_each_generation_and_identity_field_is_bound', "'clean' != 'refused'" if key != 'pid' else '0 != 1'))
 
 
+REDUNDANT_NAMES = {'whole-argument-directory-root-skipped', 'whole-argument-path-skipped'}
+REDUNDANT = [row for row in MUTANTS if row[0] in REDUNDANT_NAMES]
+MUTANTS = [row for row in MUTANTS if row[0] not in REDUNDANT_NAMES]
+
+
 def execute(source, name):
     code = ("import scoped_process_diagnostic as m; exec(compile(%r,m.__file__,'exec'),m.__dict__); "
             "import unittest; r=unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromName(%r)); "
@@ -61,13 +66,21 @@ def execute(source, name):
 
 def main():
     controls = subprocess.run([sys.executable, '-m', 'unittest',
-                              *sorted({PREFIX + item[3] for item in MUTANTS})],
+                              *sorted({PREFIX + item[3] for item in MUTANTS + REDUNDANT})],
                              cwd=STEP, capture_output=True, text=True, timeout=60)
     if controls.returncode:
         print(controls.stdout + controls.stderr)
         return 1
     print('unmutated scoped diagnostic controls: all passed', flush=True)
     source = (STEP / 'scoped_process_diagnostic.py').read_text()
+    for name, old, new, test, _ in REDUNDANT:
+        if source.count(old) != 1:
+            raise RuntimeError(name + ': redundant-branch anchor differs')
+        changed = execute(source.replace(old, new), test)
+        if changed.returncode:
+            print(name + ': redundant-branch control failed\n' + changed.stdout + changed.stderr)
+            return 1
+        print(name + ': redundant-branch control passed (not a kill)', flush=True)
     for name, old, new, test, assertion in MUTANTS:
         if source.count(old) != 1:
             raise RuntimeError(name + ': mutation anchor differs')

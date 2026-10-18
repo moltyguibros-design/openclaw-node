@@ -35,6 +35,12 @@ whole('whole-value-unresolved', 'candidate.resolve(strict=False)', 'candidate',
       'test_absolute_whole_values_resolve_all_delimiters', 'whole absolute alias must match an exact file root')
 whole('whole-value-resolved-substring', 'resolved == root or root in resolved.parents', 'str(root) in str(resolved)',
       'test_resolved_prefix_sibling_alias_is_not_containment', 'resolved prefix sibling must not count as containment')
+whole('relative-absolute-gate-dropped', 'if candidate.is_absolute():', 'if True:',
+      'test_slash_relative_without_cwd_ignores_process_working_directory',
+      'relative input without supplied cwd must stay unclassified')
+whole('slash-tested-before-expansion', "'/' in expanded", "'/' in value",
+      'test_slash_relative_whole_values_resolve_against_expanded_cwd',
+      'slash introduced by expansion must use working directory')
 whole('whole-value-requires-existence', 'strict=False', 'strict=True',
       'test_dangling_alias_into_root_remains_relevant', 'dangling alias must resolve without requiring existence')
 whole('whole-value-equality-only', 'resolved == root or root in resolved.parents', 'resolved == root',

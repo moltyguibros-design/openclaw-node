@@ -7229,3 +7229,85 @@ then a separate reviewed green five-Markdown D233 receipt before row closure.
 B5/1.2 open/v1.2-pre,B6–B9 held. Current observer/override/freshD60, full held/
 process integration, durable admission/manual/D175 and Mac/APFS/reboot/four-history
 evidence remain later. D189 applies; production and installed timers untouched.
+
+
+## Mid-Implementation Findings — D232 process mutation redundancy
+
+One required proof interaction was exposed by exact source488ad0cf's Linux CI
+39139556698/job117710977048: the existing process runner's first mutant no
+longer fails because the new shared helper rescues the removed process-shim
+parent check. New21/17 was not reached in that job. Raw failed log83687bytes
+SHA2560a2d6f07d9565620ed039befbef4a107f12d9f59d03894a83d38a42be2c8f7a8
+is retained; no rerun or all8 claim. This is not the old R3 placement failure.
+
+Fresh local audit of all29 prior mutants finds27 intended assertion kills,
+exactly two surviving variants and0invalid/error results. Those are whole-
+argument-directory-root-skipped and whole-argument-path-skipped. Each also
+passes the full40 process tests (0.832s and0.198s, no skip locally). The two
+previous single-site kill claims are no longer independent with the shared
+whole-value rule; historical D21729-kill evidence at its old head stays true.
+
+Re-orient before correction: retain the production process shim and every
+existing assertion, keep the new21/17 proof fixed, and revise only the old
+mutation runner to classify these two as explicit expected-pass redundant-
+branch controls, never kills. Count27 remaining old process kills separately;
+no manufactured two-site variant or silently retained29 claim. This is a
+necessary proof-only exception to the earlier old-runners-fixed promise,
+not observer or production scope expansion. Claude318 assessment pending.
+New source head after this narrow proof/ledger correction must obtain fresh
+exact review/all8 CI before the separate D233 receipt. Original failure is
+retained. Current observer, B5/1.2 and physical gates remain open; production,
+D64/Gate/installed timers unchanged.
+
+
+### D232 proof re-orient settled — Claude319, before corrected head
+
+Micro re-orient: one shared classification outcome, nine runtime lines unchanged.
+CI failed a redundant old proof claim;319 confirms the structural rescue.
+319 also requires a real-cwd control for the natural absolute-gate mutant.
+Both are proof-only corrections within the same narrow outcome, settled before
+the corrected commit; no observer or new runtime outcome is added.
+B5/1.2 open/pre; physical and production gates stay held.
+
+319 independently reproduces21new controls/17kills as uid65534 and all315
+path/caller probes. Parent replay gives34failures/0errors across the full new
+suite, including12absolute and12relative subcases; Codex's selected-parent
+12absolute failures remains narrower separate evidence. It verifies all29old
+variants:27kills/2survivors/0errors; both survivors pass40process tests and
+fail again with the parent shared helper (18/36failures). Executable/cwd rows
+are validated absolute, and every relative argument is appended cwd-joined
+before the shared fallback, so all shim candidates reach the new shared rule.
+
+Necessary exception: mutate_scoped_process_diagnostic retains the two exact
+replacements as expected-pass selected-test controls. Its unmutated controls
+still include them, all existing assertions and production shim remain fixed.
+It now reports27intended process kills plus2redundant-branch passes, not29kills.
+New shared-helper mutations remain separately counted. Local full-module passes
+for each redundant variant are40/0.832s and40/0.198s; CI expected-pass checks
+use the selected delimiter test, avoiding extra unpatched native census runs.
+Historical D21729-kill proof remains attributed to its original source.
+
+319's second required proof correction: replacing the absolute gate byTrue
+survives the original21 tests because Path.resolve uses actual cwd, not the
+mocked Path.cwd. The same existing test now changes into an owned real cwd and
+registers restoration before temporary cleanup; the natural mutant fails its
+intended assertion. This is false in-scope classification (and possible false
+refusal downstream), not an admission bypass in the committed source. The
+optional raw-versus-expanded slash control is also adopted inside the existing
+relative test; its natural variant now dies independently. Test count stays21.
+
+Corrected local proof:21controls0.064s/no skip;19new intended-assertion kills
+with intact selected controls/noERROR; old runner27kills plus2expected-pass
+controls. Nine-line helper and every other runtime executable remain byte-
+identical to488ad0cf. The earlier311regressions45.650s/two CI-only native skips
+remain valid at those unchanged runtime bytes and are not relabelled a new run.
+Whole-after-token order is an equivalent, not counted. Passing a resolved path
+to the hardlink helper survives these controls and is not counted; no universal
+claim is made about spelling-dependent application exemptions. No shim cleanup.
+
+319 reproduces the complete failed Linux943-line log and its Codex byte count/
+digest, confirming Python ran and the first old mutant survived15commands
+before the new unit. This initial CI is not green; no retry of it is requested.
+Its prior-regression replay was34of40 with missing sandbox NATS and the old
+mutator exits when reported, not a claimed311replay. The corrected head needs
+its own exact review/full CI; only then D233. D64/Gate/timers/production fixed.

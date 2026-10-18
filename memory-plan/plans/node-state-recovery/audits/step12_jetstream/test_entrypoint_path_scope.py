@@ -52,6 +52,9 @@ class PathScope(unittest.TestCase):
                 self.assertTrue(self.relevant([value], working_directory='$BASE',
                                              environment={'BASE': str(self.outside)}),
                                 'slash-relative alias must use expanded working directory')
+                self.assertTrue(self.relevant(['$ENTRY'], working_directory=str(self.outside),
+                                             environment={'ENTRY': value}),
+                                'slash introduced by expansion must use working directory')
 
     def test_working_directory_whole_alias_is_relevant(self):
         alias = self.root / 'cwd alias'; alias.symlink_to(self.protected, target_is_directory=True)
@@ -66,10 +69,12 @@ class PathScope(unittest.TestCase):
                                       environment={'BASE': str(self.outside)}))
 
     def test_slash_relative_without_cwd_ignores_process_working_directory(self):
-        with patch.object(checks.pathlib.Path, 'cwd', return_value=self.root):
-            alias = self.alias()
-            self.assertFalse(self.relevant(['outside/' + alias.name]),
-                             'relative input without supplied cwd must stay unclassified')
+        alias = self.alias()
+        previous = pathlib.Path.cwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, previous)
+        self.assertFalse(self.relevant(['outside/' + alias.name]),
+                         'relative input without supplied cwd must stay unclassified')
 
     def test_dangling_alias_into_root_remains_relevant(self):
         missing = self.protected / 'not-created'
