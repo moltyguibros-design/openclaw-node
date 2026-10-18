@@ -1368,3 +1368,50 @@ all8 CI remain pending. Only this owned source prerequisite may close after its
 separate reviewed green evidence receipt. B5/1.2 remain open/pre, B6–B9 held.
 Jobs/hold/overrides/D60, durable admission, manual/D175, native positive attribution,
 full pipeline, Mac access/APFS/reboot and four-history acceptance stay later.
+
+
+## Mid-Implementation Findings — D222 own-label proof
+
+
+### 2026-10-18 03:50 EDT — D222 own-launchd-label proof correction
+
+Claude259 independently reproduces ea87f6fa as uid65534:37 new tests/one native
+skip/50 intended kills; old envelope55/one skip/50; combined181/three skips. It
+confirms the twelve-file delta,30 unchanged envelope definitions and the identical
+18-statement extracted body except paired returns. Source is correct, but it
+requires a proof correction: removing name == key survives the37-test suite.
+Two D218-valid launchd expectations can share a plist hash while differing in
+label and class. Swapped running anchors are internally recorded facts; the
+missing name filter then borrows the other label's matching generation and
+wrongly reports class-consistent. This predicate is not dominated by validation.
+
+Codex independently reproduces the surviving removal against the original37
+tests (all pass5.676s), then adds the coherent shared-plist/two-label swap control.
+The unchanged source refuses both rows, preserves their exact class_candidates,
+assigns neither and reports both missing; the new single-predicate removal fails
+that named assertion. D218 plist-hash uniqueness is not changed. The source,
+workflow, envelope helper and old runner are byte-identical to ea87f6fa.
+Only the new test/runner and six ledgers change in this correction.
+
+Local38 tests pass6.733s;51 intended-assertion mutants pass with intact controls;
+the combined suite passes182 tests32.091s. Earlier37/50 and181 runs retain their
+counts. Superseded CI39107975073 is cancelled for this required proof, not counted
+green. Its Linux117617833935 separately passed37/0.470s/one native skip/50, raw
+1517497 bytes SHA256145e23cafa336aad6cd1445b9088836f12aebe0e8d13a4e516bb95be694e8817,
+checkout4699d64b4786eeadf6716faa12c207d8605dac16 with ea87f6fa as second parent
+and an identical whole tree. It is not the corrected38/51 source proof; no native
+result is claimed for that cancelled job.
+
+The native CI test now asserts each process pass is non-null before indexing,
+turning that failure mode into an explicit assertion. CLI early exceptions can
+return a minimal refusal without phase/hashes; no class-consistent result follows.
+Claude259's five forbidden-key mutations share the observed7-tuple mechanism;
+they are counted, not discriminating, while the separate field positives pin the
+contract. Pass-B instead of A, PID instead of generation equality and dropping
+loaded are equivalent under recorded input, not gaps or counted extra kills.
+D220/D218 optional controls remain carried.
+
+Corrected exact-head source review and CI are pending; D222 stays open, B5/1.2
+open/pre, B6–B9 held. Runtime/operational boundaries remain unchanged. No local
+unpatched full scan, production operation, policy enrollment, hold eligibility,
+loaded-image/history/physical proof or admission is added or claimed.

@@ -58,6 +58,10 @@ change('nonrunning-attribution', "and anchor['j0'].get('state') == 'running'", '
 change('wrong-row-attribution', "and anchor['generation'] == envelope.generation(row)", '',
        'Classes.test_coherent_wrong_row_generation_cannot_attribute_a_matching_class',
        'anchor must name this candidate generation')
+change('own-launchd-anchor-label', "return any(name == key and anchor['j0']['loaded']",
+       "return any(anchor['j0']['loaded']",
+       'Classes.test_shared_plist_swapped_launchd_labels_cannot_borrow_each_others_anchor',
+       'each label must use its own launchd anchor')
 change('authored-plist-binding', "and anchor['plist']['sha256'] == attribution['plist_sha256']", '',
        'Classes.test_authored_plist_hash_is_separate_from_recorded_anchor_identity', 'authored plist digest must match')
 change('strict-parent-birth', 'birth(parent) < birth(row)', 'birth(parent) <= birth(row)',

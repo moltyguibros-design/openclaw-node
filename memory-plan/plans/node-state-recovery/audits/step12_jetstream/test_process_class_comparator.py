@@ -210,6 +210,25 @@ class Classes(unittest.TestCase):
         self.assertEqual(result['assigned'], {'controller': [411], 'other': []})
         self.assertEqual(result['unexpected'][0]['class_candidates'], ['other'])
 
+    def test_shared_plist_swapped_launchd_labels_cannot_borrow_each_others_anchor(self):
+        other = copy.deepcopy(self.policy['expected'][0])
+        other.update(label='other', executable=str(self.root / 'protected/other'),
+                     arguments=['other-command', SECRET + '-other'],
+                     attribution={**other['attribution'], 'label': 'application.other'})
+        self.policy['expected'].append(other)
+        row = process(other, pid=733, sec=150)
+        other_key = self.key.rsplit('/', 1)[0] + '/application.other'
+        anchors = {self.key: anchor(row, self.policy['expected'][0]),
+                   other_key: anchor(self.parent, other)}
+        value = self.value([self.parent, row], anchors=anchors)
+        self.assertEqual(value['outcome'], 'recorded')
+        result = self.evaluate(value)
+        self.assertEqual(result['outcome'], 'refused', 'each label must use its own launchd anchor')
+        self.assertEqual({item['process']['pid']: item['class_candidates'] for item in result['unexpected']},
+                         {411: ['controller'], 733: ['other']})
+        self.assertEqual(result['assigned'], {'controller': [], 'other': []})
+        self.assertEqual(result['missing'], {'controller': 1, 'other': 1})
+
     def test_parent_attribution_uses_already_unique_label_and_strict_birth(self):
         child = self.worker()
         result = self.evaluate(self.value([child, self.parent]))
@@ -521,6 +540,7 @@ class Consumer(unittest.TestCase):
                 self.assertEqual(full['outcome'], 'refused')
                 self.assertEqual(full['coverage']['enumeration'], 'full')
                 for name in ('pass_a', 'pass_b'):
+                    self.assertIsNotNone(value['stages'][name], 'full observation must reach both process passes')
                     self.assertIn(child.pid, [row['pid'] for row in value['stages'][name]['included']])
                 unknown = sum(len(value['stages'][name]['unknown']) for name in ('pass_a', 'pass_b'))
                 print('native owned class full scan: refused at envelope; child in both passes; unknown_entries=%d reasons=%d' %
