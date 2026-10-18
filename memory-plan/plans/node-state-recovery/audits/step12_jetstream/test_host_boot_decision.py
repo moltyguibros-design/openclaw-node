@@ -379,6 +379,75 @@ class BootDecision(unittest.TestCase):
                 verify(case)
             unchanged(case)
 
+    def test_verifier_rebound_stored_sample_requires_original_host(self):
+        for stage in ('verify', 'decision'):
+            with self.subTest(stage=stage), prepared() as case:
+                run(case)
+                sample = case.boot_output / stage / 'preflight.json'
+                sample.write_bytes(encoded({**json.loads(sample.read_bytes()), 'host_boot_session': 'foreign-host-boot'}))
+                intent = json.loads((case.boot_output / 'INTENT.json').read_bytes())
+                row = json.loads((case.boot_output / 'RESTORE_PRIOR.json').read_bytes())
+                table = decision.hashes(decision.sample_files(case.boot_output / stage))
+                if stage == 'verify':
+                    intent['verify_sample_sha256'] = row['verify_sample_sha256'] = table
+                else:
+                    row['decision_sample_sha256'] = table
+                intent_raw = encoded(intent)
+                (case.boot_output / 'INTENT.json').write_bytes(intent_raw)
+                row['intent_sha256'] = hashlib.sha256(intent_raw).hexdigest()
+                (case.boot_output / 'RESTORE_PRIOR.json').write_bytes(encoded(row))
+                with self.assertRaisesRegex(RuntimeError, 'original stopped host/source binding'):
+                    verify(case)
+                unchanged(case)
+
+    def test_verifier_decision_must_bind_intent(self):
+        with prepared() as case:
+            run(case)
+            path = case.boot_output / 'RESTORE_PRIOR.json'
+            path.write_bytes(encoded({**json.loads(path.read_bytes()), 'arm_sha256': '0' * 64}))
+            with self.assertRaisesRegex(RuntimeError, 'differs from intent or samples'):
+                verify(case)
+            unchanged(case)
+
+    def test_claim_independent_nonce_arm_and_checkpoint_bindings(self):
+        with prepared() as case:
+            result = run(case)
+            original = json.loads(result['decision'])
+            for field in ('capture_nonce', 'arm_sha256', 'checkpoint_sha256'):
+                raw = encoded({**original, field: '0' * 64})
+                with self.subTest(field=field), self.assertRaisesRegex(RuntimeError, 'claim differs from the local checkpoint'):
+                    guest.decode_restore_prior_claim(raw, hashlib.sha256(raw).hexdigest(), case.checkpoint_raw, fixture=True)
+            unchanged(case)
+
+    def test_claim_intact_changed_checkpoint_digest_refuses(self):
+        with prepared() as case:
+            result = run(case)
+            row = {**json.loads(case.checkpoint_raw), 'at': 'changed-body-with-valid-new-digest'}
+            row['sha256'] = hashlib.sha256(guest.encoded({k: v for k, v in row.items() if k != 'sha256'})).hexdigest()
+            with self.assertRaisesRegex(RuntimeError, 'claim differs from the local checkpoint'):
+                guest.decode_restore_prior_claim(result['decision'], result['sha256'], guest.encoded(row), fixture=True)
+            unchanged(case)
+
+    def test_claim_previous_must_equal_prehead_independently(self):
+        with prepared() as case:
+            result = run(case)
+            row = {**json.loads(case.checkpoint_raw), 'previous': '0' * 64}
+            row['sha256'] = hashlib.sha256(guest.encoded({k: v for k, v in row.items() if k != 'sha256'})).hexdigest()
+            raw = encoded({**json.loads(result['decision']), 'checkpoint_sha256': row['sha256']})
+            with self.assertRaisesRegex(RuntimeError, 'claim differs from the local checkpoint'):
+                guest.decode_restore_prior_claim(raw, hashlib.sha256(raw).hexdigest(), guest.encoded(row), fixture=True)
+            unchanged(case)
+
+    def test_claim_released_flags_must_be_clear(self):
+        with prepared() as case:
+            result = run(case)
+            row = json.loads(result['decision'])
+            row['released_source']['flags'] |= stat.UF_IMMUTABLE
+            raw = encoded(row)
+            with self.assertRaisesRegex(RuntimeError, 'released source schema'):
+                guest.decode_restore_prior_claim(raw, hashlib.sha256(raw).hexdigest(), case.checkpoint_raw, fixture=True)
+            unchanged(case)
+
     def test_claim_only_no_io_or_host_verification(self):
         with prepared() as case:
             result = run(case)

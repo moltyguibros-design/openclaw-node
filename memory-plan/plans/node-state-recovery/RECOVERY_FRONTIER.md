@@ -889,3 +889,17 @@ old release/runtime bodies and runner stay unchanged. All27 decision controls pa
 43.692s, all13 new decision mutants pass, and the unchanged prior release runner passes
 all13 intended kills with its controls. This is a necessary same-contract test integration
 correction, not a production behavior change. Exact corrected-head Claude/CI still required.
+
+
+D214 proof re-orient, 2026-10-17 20:36 EDT: Claude193 finds no required source
+finding at3cbc9cd5 and independently reproduces27controls/13decision/13release mutants
+as uid65534 plus regressions. Its live extra mutations expose three material optional
+proof gaps: stored-sample host binding, decision-to-intent pin and independent decoder
+nonce/arm/checkpoint bindings. Close B5-decision-binding-tests within this same owned
+handoff contract before source closure: six new controls also isolate previous/pre-head
+and released-flags schema; seven added mutants pin those present guards. All33 controls
+pass41.735s, all20 decision mutants fail at their intended assertions with controls
+passing/noERROR. Runtime/workflow/release runner bytes are unchanged from3cbc. This
+supersedes the27/13 test floor without relabelling earlier runs. Exact test-head Claude
+and CI remain required. Smaller JSONDecodeError normalization and host import-graph
+notes are carried, not defects or a new refactor. Guest/manual/D175 and Mac proof stay open.
