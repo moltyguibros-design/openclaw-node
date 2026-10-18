@@ -1933,3 +1933,138 @@ APFS reattach/reboot and four-history acceptance remain separate. No production
 operation or release. This receipt changes five Markdown records only, keeping
 all source/tests/workflow bytes fixed. Its own exact-head review and CI remain
 pending at commit time.
+
+
+### 2026-10-18 08:14 EDT — managed-job negative observation pre-audit candidate (D228)
+
+Micro re-orient: B5/1.2 remain open/v1.2-pre, B6–B9 held.
+D227 receipt2d54d6e9 and source6d2e9096 have clear289/285 reviews and
+all8 CI39123687039/39121279608. Claude291 distinguishes its independent
+source-native proof from Codex's later receipt-CI observations.
+Current managed facts and scripted negative consistency exist separately;
+this atom connects them without declaring a live hold or admission.
+
+Goal: one negative consistency result over a validated managed-job observation.
+Needs: D227 reviewed green source/receipt; unchanged managed.valid_observation,
+owned_records, collect_jobs, held.compare_held_jobs, private readers and honest
+frozen fixtures; B1/D189. All are present at2d54d6e9.
+Feeds: overrides/freshD60, complete held-gate/process integration, durable
+admission/manual/D175; no new production route or window authorization.
+Verify: portable envelope-to-comparator and real owned consumer controls with
+named assertion mutants; isolated CI native measurement without requiring a
+positive; exact-source review/all8 CI, then separate reviewed green receipt.
+Runtime: none in production; no local unpatched managed-label scan.
+
+Pre-audit request292 is pending. Proposed source surface: new
+managed_job_negative_observation.py plus test/mutation runner, four CI lines,
+and these six source ledgers. Existing executables/tests/runners remain fixed.
+No Journal/schema/recover/D64/Gate/identity/host/timer change. VERSION remains
+v1.2-pre because the enclosing live recovery exit gates are not satisfied.
+
+Proposed comparison first revalidates the complete observation against already
+frozen-verified records, recomputes recorded/refused, then and only then passes
+the proven complete, error-free, equal first sweep to unchanged held comparison.
+Loaded idle/no-PID is recordable but cannot satisfy the negative comparison.
+Input observation fingerprint, frozen binding, provenance/coverage and temporal
+budget summary remain visible. Nested supplied-fact comparator scope/source
+remain scripted; wrapper separately records observed or forced-scripted source.
+All hold/history/admission certification flags stay false.
+
+The real owned CLI requires fixture AND scripted before IO, reuses owned_records
+for pin coherence, one reader/frozen verification and every metadata owner tied
+to recordedUID, then reads the private canonical bounded managed-jobs.json.
+File source claims remain untrusted sample labels; no CLI collector reference.
+No constructor, state write or installation. The darwin+GITHUB_ACTIONS native
+test path may compose the reader, collector and wrapper; that guard is an
+isolation convention, not attestation. No native positive is assumed.
+
+Risk/claim limits: this uses only the job30min acceptance budget and two boot-
+bracketed sweeps, not a joint process/job window or a new age/freshness proof.
+No current clock/boot reread in pure comparison, no baseline-boot expectation,
+no continuous/physical exclusion or hold assertion. Blocked calls cannot be
+interrupted by the budget. Unprotected supplied facts remain subject to D189.
+Overrides/freshD60, strict process scope/attribution, durable admission/manual/
+D175, Mac designation/APFS/reboot and four-history acceptance remain later.
+Optional prior controls remain carried, not silently closed.
+
+
+### D228 pre-audit settled — Claude293, before source work
+
+Clear to implement pure composition, no new predicate beyond the recorded gate.
+Validate before fingerprint/comparison. Malformed observations propagate refusal;
+recomputed non-recorded returns phase observation, recomputed reasons, negative
+null and never calls the comparator. Hash the exact received value after validation,
+copy binding/source/sample_labels/coverage/budget from the recomputed copy.
+Pass its first sweep verbatim; loaded-idle/running facts must refuse. Preserve
+the nested comparator result exactly, including scripted scope/source; top success
+is managed-jobs-negative-consistent only for its held-jobs-negative-consistent.
+All top and nested admission/history/hold flags stay false. Missing/extra/unknown
+nested buckets are empty by construction on recorded inputs, upstream proof,
+not newly counted predicates. Raw input stages or sweep_b are equivalent on this
+path and are not counted mutants. No live authority or authorship follows source.
+
+Reuse one owned_records; fixture AND scripted precede IO. Keep the forcing block
+textually identical to managed.inspect_owned, pinned by textual control. Test
+frozen refusal before observation read, duplicate image reads, provenance loss,
+and explicit two-replacement gate-relaxation/live-route mutant with benign census
+and fixture-only CLI refusal/zero calls. No collector reference in real CLI.
+Native darwin-plus-CI branch composes reader/collector/wrapper and records actual
+phase/outcome/coverage/idempotence only. A negative-consistent runner observation
+is a runner fact, not a node positive or hold evidence. No local unpatched scan.
+Purity/no-input-mutation and observation idempotence controls are adopted; optional
+loaded_keys summary omitted. No new job/process coherence, current clock/boot read
+or freshness promise;30min acceptance window and blocked-call limits remain.
+Source/receipt exact reviews/all8 CI required separately; B5/1.2 open/pre.
+
+
+### 2026-10-18 08:19 EDT — D228 local negative-observation candidate proof
+
+The new64-line wrapper validates first, then fingerprints the exact received
+object and copies the recomputed frozen binding/provenance/coverage/budget and
+boot bracket. Non-recorded returns refused/phase observation/recomputed reasons/
+negative null, without a comparator call. Recorded passes the validated first
+sweep verbatim to unchanged compare_held_jobs; only its exact negative-consistent
+verdict yields top managed-jobs-negative-consistent. Loaded idle and running
+facts refuse. The nested result, literal scripted scope/source included, remains
+unchanged. Both layers keep admission/history/hold false; no raw job values or
+argv/policy appear in the wrapper result. Input immutability and no-IO comparison
+are controlled. No live clock/boot read or new temporal/physical guarantee.
+
+Local final20 tests pass7.981s with one intentional CI-only native skip;28 named
+intended-assertion mutants die with intact controls, no ERROR-only kill. The
+prior248 tests pass35.246s with the managed observer's one CI-only native skip.
+The first20-test run failed because the test helper treated explicit None as
+its default valid input; the malformed test now calls the wrapper directly.
+No source correction was needed. The intermediate20 run passed5.339s; final
+7.981s includes the provenance Refused-to-assertion control used by the runner.
+No failed/partial mutant run occurred. Live-route mutation has two explicit
+replacements: gate relaxation plus collector wiring; not a single-predicate kill.
+
+The real private frozen consumer uses exactly one unchanged owned_records,
+then bounded canonical observation read and the textually identical source/
+sample-label forcing block. Both flags precede IO; frozen refusal prevents the
+observation-file read. Genuine foreign recorded owner refuses upstream, with
+and without optional policy the honest fixture reaches the same narrow result.
+Journal/Gate construction and live census are forbidden in consumer controls;
+files remain identical before/after. Canonical stdout and all three CLI phases
+have correct exit codes. The fixture-only CLI with benign census refuses and
+makes zero census calls. No local unpatched managed-label scan occurred.
+
+All six pre-audit/local blocks are identical across the source ledgers. Promised
+deltas land: three new files, four workflow registration lines and six ledgers.
+Existing executable/test/mutator bytes remain fixed. Local plan lint14 PASS,
+1 old idle-version WARN,0 FAIL. Upstream full-record/coverage/shape predicates
+remain earlier proof, not new kills. Raw-stage or second-sweep substitutions are
+equivalent on recorded inputs, not counted. Optional loaded_keys omitted; prior
+optional controls remain carried. B5/1.2 open/v1.2-pre,B6–B9 held.
+
+Required exact-source review/all8 CI are pending, then a separate five-Markdown
+reviewed green receipt before only this owned row closes. CI native composes
+the real reader/collector/wrapper and prints actual outcome/phase/69-key coverage/
+errors/elapsed, asserting shape/idempotence only; no native positive is assumed.
+Any negative-consistent CI result describes only sampled runner facts, never
+node readiness, live hold, process absence, disabled overrides, full inventory,
+freshD60, eligibility/history/authorship/physical exclusion or admission.
+Overrides/freshD60, strict process integration, durable admission/manual/D175,
+Mac/APFS/reboot/four-history acceptance remain later. D64/Gate/timers/production
+are unchanged. No Phase-8 scope expansion or production operation occurred.
