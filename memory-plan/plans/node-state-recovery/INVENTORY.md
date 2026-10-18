@@ -5691,3 +5691,177 @@ untouched. This receipt changes five Markdown only; AUDIT_PRE and every non-
 Markdown byte stay fixed. Local lint14PASS/1old idle-versionWARN/0FAIL. Receipt
 exact-head review and its own all8CI remain pending at commit time, separately
 required before completion; no whole-B5 closure or source-origin claim.
+
+
+### 2026-10-18 14:48 EDT — owned placement-gossip diagnosis pre-audit (D236)
+
+Micro re-orient: B5/1.2 open/v1.2-pre; B6–B9 held.
+D235 source08f90df7/receipt6df6c8b6 are clear331/333 with both all8 attempt1 CI.
+Group settling is corrected; peer-offline placement diagnosis remains separate.
+This unit measures one candidate sufficiency gap in the unchanged placement gate.
+It serves trustworthy owned recovery evidence, never a production stop/admission.
+Still the right next unit: diagnosis before proposing a readiness repair.
+
+Pre-screen: clean parent6df6c8b6, existing NATS2.12.6/Node24.13.0 and owned
+fixture available; no BLOCKED.md. Retained CI39133265637/job117692584463 fails
+at cluster-offline-consumer-placeholder after the fixture's current waitCluster;
+no forensic root artifact was uploaded. Prior failure cause remains unproved.
+Official tagged NATS sources show placement consults peer configuration/statistics
+in addition to metadata replication; existing eight Raft/route checks do not
+inspect that cache. Source-level sufficiency gap is a hypothesis for the old
+failure, not its observed cause. The installed binary accepts a route permission
+rule denying only $SYS.SERVER.*.STATSZ; parser-only check started zero servers
+and made zero connections. No actual fault/control pair has run at this point.
+
+Goal: produce bounded owned fault/control evidence testing whether the unchanged
+placement gate can accept while R3 placement reports peer offline. Run a fresh
+three-node normal control and a fresh three-node cohort differing only in the
+STATSZ route-deny rule, with random loopback ports, own private tokens/routes,
+no advertise and production-port exclusions. Reuse the exact source of the
+existing placementState/waitCluster; no duplicate classifier or dynamic eval.
+Attempt create once per cohort only after the unchanged gate passes, retain full
+ready facts and exact API error/phase-local debug selection reasons, then require
+normal own cleanup. A gate timeout, wrong refusal, or failed cleanup is an
+inconclusive/failing experiment, never a counterexample. No creation retry or
+sleep-based repair. A reproduced counterexample establishes only this owned
+sufficiency gap; it cannot identify the historical CI interleaving.
+
+Section6 intended deltas: six candidate ledgers and one auxiliary diagnosis row
+first; private scratch probes during pre-screen, with no source-gate change.
+After the owned result and Claude336-request pre-audit are reconciled, promote
+only useful reproducible evidence: fixture-local shared extraction of the two
+unchanged readiness helpers, an owned placement-gossip probe, its meaningful
+controls/intended-assertion runner and explicit CI registration/evidence retention.
+Pin exact file set and checks before promoting source. If the proposed fault
+cannot isolate the gap, record that negative and re-orient rather than widening
+the experiment or claiming a repair. All production modules, D235 fixture and
+assertions, D64/Gate/installed timers stay fixed. No production connection,
+service/VM operation, resource provisioning, admission or B5 closure.
+
+Risk register: route filters may prevent metadata discovery itself; then no
+counterexample exists from this method. Route visibility and Raft current flags
+do not certify placement cache contents. Additional application connections may
+be needed to make discovery explicit; if used they must be identical in control
+and fault and declared as a different sequence from the historical CI. Debug
+logging is owned only; evidence must exclude configurations/tokens and identify
+its log window and truncation. A fault must not be "validated" only by a parser;
+require observed behavior and single-attempt accounting. Cleanup failures always
+invalidate live proof. Exact-head review/all8 CI and a separate reviewed green
+receipt are required for any source prerequisite closure; original placement
+repair and current observer remain open at this pre-audit.
+
+
+- [A] B5-CI-R3-placement-diagnosis — measure the unchanged gate against an owned statistics-gossip fault; D236 candidate, no repair claim.
+
+> **Goal:** establish owned evidence about the existing placement gate's sufficiency.
+> **Needs:** reviewed green D235, NATS2.12.6/Node24, exact unchanged readiness helpers, isolated ports/credentials; B1/D189.
+> **Feeds:** evidence-backed placement readiness decision and later CI/current observer work.
+> **Verify:** one controlled owned fault/control pair with exact existing gate, one create each only after ready, explicit inconclusive outcomes, normal cleanup and retained evidence; any promoted source needs controls/intended mutants, exact review/all8CI and a separately reviewed green receipt. Runtime: owned only; production untouched.
+
+
+### 2026-10-18 15:01 EDT — D236 pre-audit settled after owned pre-screen (Claude339)
+
+337 confirmed the upstream cache/readiness mechanism but predicted a possible
+miscellaneous-error outcome unless a connections event first creates bare peer
+entries. Actual first owned pair at owned-placement-gossip-mIhOJi does generate
+those events: one ordinary own connection to EACH member before the old gate,
+identical in control/fault. Fault denies only $SYS.SERVER.*.STATSZ in import and
+export of ALL THREE owned members. Old eight checks all pass in both; control
+creates once; fault creates once and returns400/10005/peer offline. Leader2's
+create-window log discards member1/member3 as offline, required3/found1/peers3,
+offline:true/misc:false. Both cohorts shut down normally with no cleanup failures.
+Initial report81477bytes SHA256d060942c1b5b5fc4ea882f65119fac46f07367a40eef0eb00b1e47097b3fce1c.
+This is the nil-config/statistics discard branch, not a historical CI cause;
+the filter and extra per-member connections are deliberate injectors absent
+from that historical sequence. No natural trigger, protected provenance or
+readiness repair follows. Initial scratch module copied exact source bodies
+into an owned static module; it used no eval and changed no repo executable.
+
+339 accepts this narrower observed scope and drops the new system-account RPC/
+authentication-domain expansion. Adopt byte-exact placementState/waitCluster
+extraction into fixture-only placement_readiness.mjs, imported by original test
+and probe; all original callsites/placementCounterexamples fixed. Add synthetic
+eight-counterexample controls, source/caller pins and intended-assertion runner.
+Promoted probe requires both ready tables, exact NATS2.12.6/10005 wording,
+create-window leader discard lines for every other peer and offline:true/
+misc:false summary, exactly one create each, separate own roots/ports/tokens/
+passwords, sequential execution and normal complete cleanup. Any other result is
+inconclusive, never reproduction. Preserve old15s readiness deadline and every
+original create/timeout/retry behavior. Four CI registration command lines run
+the new suite/runner on Linux22 and MacNode22, including a real owned pair on
+both; two always-run JSON-only evidence retention steps preserve the report,
+not configurations or raw logs. No new CI job or production deployment.
+
+Final section6 file set: original test_recovery.mjs (only two definitions moved
+and one import), new placement_readiness.mjs, probe_placement_gossip.mjs,
+test_placement_gossip.mjs and mutate_placement_gossip.mjs; .github/workflows/test.yml
+(four command lines plus owned JSON retention), six ledgers. All other existing
+bodies, D235 checks, production and VERSION remain fixed. Exact-head review/
+all8CI and separately reviewed green five-Markdown receipt before auxiliary
+closure. Original B5-CI-R3-placement repair/current observer stay open.
+
+Counter instrumentation pre-screen: upstream jetstream_api.go records total/
+errors on the server sending the API response, before publishing it. The create
+may be answered by a member other than the connected member. Therefore retain
+all three members' /jsz counters before/after the create (after manager setup),
+including connected member separately; measure which responder increments and
+reconcile339's connected-member delta pin against actual data before commit.
+Do not assume local forwarding is counted. No API call is retried to obtain a
+preferred counter result. A counter mismatch makes the probe inconclusive.
+
+
+### 2026-10-18 15:17 EDT — owned placement-gossip source candidate (D236)
+
+Claude341 independently checked tagged jetstream_api.go and corrects339 pin4:
+API totals/errors increment per account on the responding server, not necessarily
+the connected member. All three before/after rows are identity-bound to ready
+server IDs; aggregate totals must rise exactly1 with errors0 control/1 fault,
+every member delta nonnegative. Connected member and counter-increment member
+names are retained separately. Counters alone do not prove who answered; the
+fault's leader debug window is the causal branch evidence. In the first measured
+candidate, connected member1 stays flat in BOTH cohorts: control member3 total0→1,
+fault leader2 total1→2/errors0→1. No request was repeated to get a preferred delta.
+341 accepts two JSON-only always-run artifact steps in addition to four commands.
+
+Final local suite:30/30 pass,0 skips,1341.638125ms on Node24.13.0/macOS;29
+portable checks plus one real owned pair using NATS2.12.6. Unmutated portable
+controls pass;28/28 named intended-assertion kills: eight old-gate predicate
+omissions,12 evidence-acceptance omissions, one-peer/window/summary omissions,
+both counter identity bindings, connected-member-only and first-row-only sums.
+These are fixture/proof-contract mutants, not production admission defects.
+Final full report87319bytes SHA256
+57157b665e5f848faa7cdbe1728036276461a4cfb92ae0e4f40916e0121019fb.
+Root owned-placement-gossip-N1Oxd1: both eight-check tables true; control creates
+once, fault creates once and returns exact400/10005/peer offline. Fault leader1
+window8535..9043 contains both other-peer offline discard lines and required3/
+found1/peers3/result1/offline:true/misc:false. Aggregate request deltas1/1,
+errors0/1; all six owners exit0 with Server Exiting, no cleanup failures.
+Independent unfiltered original test_recovery fixture also passes, owned root
+openclaw-jetstream-fixture-XPh6Xl, allOwnedServersStopped:true; its output6375bytes
+SHA25672286662981609e94d75bdc915d9b21f25e6e7716e605239b92ec517aca86be1.
+
+Local corrections retained: an initial mutant-runner guard rejected the correct
+named assertion because Node formats error text as a multiline YAML block; the
+guard now accepts that exact block as well as a quoted scalar and still requires
+ERR_ASSERTION/status1. Initial negative name-selection pattern unexpectedly ran
+the real pair as part of its30-test success; portable selection now uses an
+explicit positive prefix and the runner asserts no live-report marker appears.
+There were four owned pairs during development: initial scratch, first measured
+candidate, that intermediate suite and final suite; every cohort attempted only
+one create, every pair succeeded as a counterexample with normal cleanup. These
+are distinct instrumentation/validation stages, not retries of a failed create.
+An extraction-check mismatch was only removed-definition newline accounting;
+removing each exact old definition plus its terminating newline and the new
+import makes the remaining original caller byte-identical, including every
+placementCounterexamples/callsite. Helper body hashes are pinned by the suite.
+
+CI registers the pair/runner before the old Linux recovery fixture, and before
+the D235 group controls on macOS; no prior command/body is altered. Both platforms
+now execute a real ephemeral six-server sequential pair. Artifact paths name only
+the private JSON report, excluding configs/tokens/raw logs. Four commands plus
+15 artifact lines,19 workflow additions total. All production executables,
+lib/bin/test/workspace-bin trees and other existing step12 bodies remain fixed.
+VERSION staysv1.2-pre; source exact-head review/all8 CI and separate five-Markdown
+receipt review/own all8 CI are still pending at this candidate. Diagnosis auxiliary
+stays[A]; original R3 placement repair and natural trigger/current observer remain
+open. No B5 closure, D64/Gate/timer or production operation.
