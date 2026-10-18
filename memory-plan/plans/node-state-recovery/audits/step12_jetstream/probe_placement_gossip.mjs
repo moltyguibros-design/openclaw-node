@@ -40,10 +40,20 @@ export function leaderReason(cohort) {
   const window = cohort.selection.find(row => row.name === leader);
   if (!window || window.from < 0 || window.to < window.from || window.truncated) return false;
   const others = NAMES.filter(name => name !== leader);
-  return others.length === 2 && others.every(name => window.lines.some(line =>
-    line.endsWith(`Peer selection: discard ${name}@recovery-fixture reason: offline`)))
-    && window.lines.some(line => line.includes('Peer selection: required 3 nodes but found 1 ')
-      && line.includes('peers: 3 result-peers: 1') && line.includes('offline:true') && line.includes('misc:false'));
+  const discardLines = window.lines.filter(line => line.includes('Peer selection: discard '));
+  const summaries = window.lines.filter(line => line.includes('Peer selection: required '));
+  if (window.lines.length !== discardLines.length + summaries.length || summaries.length !== 1) return false;
+  const matches = discardLines.map(line => line.match(/Peer selection: discard ([^@\s]+)@recovery-fixture reason: offline$/));
+  if (matches.some(match => !match)) return false;
+  const discarded = matches.map(match => match[1]);
+  if (new Set(discarded).size !== discarded.length || !discarded.every(name => NAMES.includes(name))) return false;
+  const remaining = NAMES.length - discarded.length;
+  const line = summaries[0];
+  const summary = line.match(/Peer selection: required (\d+) nodes but found (\d+) \(cluster: recovery-fixture replica: 3 existing: \[\]\/0 peers: (\d+) result-peers: (\d+) err: \{.*\}\)$/);
+  return others.length === 2 && others.every(name => discarded.includes(name)) && summary !== null
+    && Number(summary[1]) === 3 && Number(summary[3]) === 3
+    && Number(summary[2]) === remaining && Number(summary[4]) === remaining
+    && line.includes('offline:true') && line.includes('misc:false');
 }
 
 export function classifyDiagnosis(report) {

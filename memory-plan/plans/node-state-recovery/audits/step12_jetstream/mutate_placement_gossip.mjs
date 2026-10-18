@@ -29,12 +29,20 @@ for (const key of ['version', 'controlReady', 'faultReady', 'injections', 'singl
     test: `portable evidence ${key} refuses`, assertion: `evidence ${key} cannot claim reproduction` });
 }
 for (const [name, before, after] of [
-  ['one-peer-enough', 'others.every(name =>', 'others.some(name =>'],
-  ['drop-window', 'window.from < 0 || window.to < window.from || window.truncated', 'false'],
+    ['drop-window', 'window.from < 0 || window.to < window.from || window.truncated', 'false'],
   ['drop-offline-summary', "&& line.includes('offline:true')", ''],
   ['drop-misc-summary', "&& line.includes('misc:false')", ''],
 ]) variants.push({ name, target: 'probe', before, after,
   test: 'portable leader evidence rejects', assertion: 'leader evidence rejects missing or unrelated reason' });
+for (const [name, before, after, selected, assertion] of [
+  ['forced-remaining-one', 'const remaining = NAMES.length - discarded.length;', 'const remaining = 1;', 'portable three-discard partition includes', 'three-discard partition accepts remaining zero'],
+  ['drop-conservation', 'Number(summary[2]) === remaining && Number(summary[4]) === remaining', 'true', 'portable partition zero-without-self refuses', 'partition zero-without-self refuses'],
+  ['one-discard-accepted', 'others.every(name =>', 'others.some(name =>', 'portable partition single-nonleader refuses', 'partition single-nonleader refuses'],
+  ['foreign-name-accepted', '!discarded.every(name => NAMES.includes(name))', 'false', 'portable partition foreign-name refuses', 'partition foreign-name refuses'],
+  ['duplicate-name-accepted', 'new Set(discarded).size !== discarded.length || ', '', 'portable partition duplicate-name refuses', 'partition duplicate-name refuses'],
+  ['drop-summary-uniqueness', 'summaries.length !== 1', 'summaries.length === 0', 'portable partition two-summaries refuses', 'partition two-summaries refuses'],
+  ['leader-only-accepted', 'others.every(name => discarded.includes(name))', 'discarded.includes(leader)', 'portable partition leader-only refuses', 'partition leader-only refuses'],
+]) variants.push({ name, target: 'probe', before, after, test: selected, assertion });
 for (const [name, before] of [
   ['drop-before-identity', 'before[0].server_id !== ready.js.server_id || '],
   ['drop-after-identity', ' || after[0].server_id !== ready.js.server_id'],

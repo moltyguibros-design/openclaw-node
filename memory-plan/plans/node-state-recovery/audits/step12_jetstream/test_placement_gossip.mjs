@@ -32,7 +32,7 @@ function cohort(fault) {
     error: { code: '400', message: REFUSAL, api_error: { code: 400, err_code: 10005, description: REFUSAL } },
     selection: [{ name: NAMES[0], from: 100, to: 600, truncated: false, lines: [
       ...NAMES.slice(1).map(name => `[DBG] Peer selection: discard ${name}@recovery-fixture reason: offline`),
-      '[DBG] Peer selection: required 3 nodes but found 1 (peers: 3 result-peers: 1 offline:true misc:false)' ] }],
+      '[DBG] Peer selection: required 3 nodes but found 1 (cluster: recovery-fixture replica: 3 existing: []/0 peers: 3 result-peers: 1 err: {excludeTag:false offline:true noStorage:false uniqueTag:false misc:false noJsClust:false noMatchTags:map[] excludeTags:map[]})' ] }],
     cleanupFailures: [], owners: NAMES.map(name => ({ name, exitCode: 0, signalCode: null, shutdownMarker: true })) };
 }
 const report = () => ({ binary: { version: VERSION }, control: cohort(false), fault: cohort(true) });
@@ -111,6 +111,41 @@ test('portable leader evidence rejects each missing peer, wrong leader, reason a
   ];
   assert(leaderReason(cohort(true)));
   for (const edit of edits) { const c = cohort(true); edit(c); assert.equal(leaderReason(c), false, 'leader evidence rejects missing or unrelated reason'); }
+});
+
+function partition(c, names, found = 3 - names.length, result = found, required = 3, peers = 3) {
+  c.selection[0].lines = [
+    ...names.map(name => `[DBG] Peer selection: discard ${name}@recovery-fixture reason: offline`),
+    `[DBG] Peer selection: required ${required} nodes but found ${found} (cluster: recovery-fixture replica: 3 existing: []/0 peers: ${peers} result-peers: ${result} err: {excludeTag:false offline:true noStorage:false uniqueTag:false misc:false noJsClust:false noMatchTags:map[] excludeTags:map[]})`
+  ];
+}
+
+test('portable three-discard partition includes the leader', () => {
+  const value = report();
+  partition(value.fault, [NAMES[0], NAMES[2], NAMES[1]]);
+  assert.equal(leaderReason(value.fault), true, 'three-discard partition accepts remaining zero');
+  assert.equal(classifyDiagnosis(value).outcome, 'owned-counterexample');
+});
+
+const partitions = {
+  'single-nonleader': c => partition(c, [NAMES[1]]),
+  'leader-only': c => partition(c, [NAMES[0]]),
+  'self-plus-other': c => partition(c, [NAMES[0], NAMES[1]]),
+  'foreign-name': c => partition(c, [NAMES[1], NAMES[2], 'foreign']),
+  'duplicate-name': c => partition(c, [NAMES[1], NAMES[2], NAMES[1]]),
+  'two-summaries': c => c.selection[0].lines.push(c.selection[0].lines.at(-1)),
+  'wrong-required': c => partition(c, NAMES.slice(1), 1, 1, 2),
+  'wrong-peers': c => partition(c, NAMES.slice(1), 1, 1, 3, 4),
+  'wrong-found': c => partition(c, NAMES.slice(1), 0, 1),
+  'wrong-result': c => partition(c, NAMES.slice(1), 1, 0),
+  'zero-without-self': c => partition(c, NAMES.slice(1), 0, 0),
+  'one-with-self': c => partition(c, NAMES, 1, 1),
+  'unpinned-reason': c => { c.selection[0].lines[0] = c.selection[0].lines[0].replace('reason: offline', 'reason: not target cluster foreign'); },
+  'unpinned-line': c => c.selection[0].lines.push('[DBG] Peer selection: unknown message'),
+};
+for (const [name, change] of Object.entries(partitions)) test(`portable partition ${name} refuses`, () => {
+  const c = cohort(true); change(c);
+  assert.equal(leaderReason(c), false, `partition ${name} refuses`);
 });
 
 test('portable counter snapshots reject missing, duplicate, changed identity and reverse counters', () => {

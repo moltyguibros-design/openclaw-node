@@ -3106,3 +3106,104 @@ B5/1.2 staysv1.2-pre; B6–B9 held; D64/Gate/installed timers/production untouch
 No production connection/service/VM/resource operation. This five-Markdown receipt
 keeps source executables, workflow, VERSION and AUDIT_PRE byte-identical; its own
 exact review and all8 CI are pending at commit, not retrospectively preclaimed.
+
+
+### 2026-10-18 16:30 EDT — placement proof cardinality re-orient (D238 pre-audit)
+
+D236 sourcefa9f0a4a is clear343/all8CI39158146598; D237 receipt52f31d88 is
+clear345 but its OWN CI39161190466 failed attempt1: seven jobs success, native
+117774685858 fails only leaderReason. No rerun. Reopen the auxiliary diagnosis
+closure until a corrected exact head and separate receipt both satisfy review/CI.
+Source's successful evidence remains valid, and this failed history is retained.
+B5/1.2 staysopen/pre; B6–B9 held; production/D64/Gate/timers unchanged.
+
+Failed native report87278bytes SHA256
+030d5f024aa9f64344f76987abba1e0f1107c3679c2fbea224d5217634b73cd0,
+artifact12149732321 (JSON only). Full failed log127193bytes SHA256
+0f856e2a4ccc6e01df92ebbecea3d78f89d505f06d97178d6967a43d33d0db44.
+Both old eight-check tables pass, control creates once, fault returns exact
+400/10005/peer offline, aggregate counters total1/1/errors0/1, six owners exit0
+normally, empty cleanup. Fault leader2's create window8819..9433 contains exact
+offline discard lines for member2 ITSELF plus member3/member1, then required3/
+found0/peers3/result0/offline:true/misc:false. Comparator requires found1/result1,
+so honestly reports inconclusive and fails. No failed evidence is called a win.
+
+Tagged NATS2.12.6 selectPeerGroup iterates the peer list without a self exemption;
+its nil-cfg-or-stats guard emits this exact offline line. Our source proof assumed
+self cache was filled and only the two other peers could be discarded. The log
+shows that assumption is unnecessary for the intended nil-cache sufficiency
+counterexample. How self stats became absent is not established here; historical
+unfiltered CI trigger is still unproved. This is a proof-contract correction,
+not a new readiness rule, retry, delay or production admission.
+
+Proposed next atomic outcome: accept either fully evidenced partition, two known
+other-peer discards plus remaining1, OR all three known-peer discards plus
+remaining0, only when the named ready leader owns the create-window log, every
+other peer is discarded at the exact pinned site, discard names are unique/known,
+and the single summary's required3/peers3/found/result counts agree with that
+partition, offline:true/misc:false. Wrong/missing/duplicate/foreign discards,
+contradictory counts or reasons still refuse. Retain the original two-discard
+positive and add a three-discard positive plus independent conservation negatives
+and intended-assertion mutants. No post-create resampling to pick another window.
+
+Section6 prospective files after Claude review: probe_placement_gossip.mjs,
+test_placement_gossip.mjs, mutate_placement_gossip.mjs and six ledgers. Shared
+placement_readiness.mjs, original test_recovery, workflow, all other executables
+and VERSION fixed. Local portable/mutant/one-real-pair proof, exact source review/
+all8CI then separate five-Markdown receipt review/own all8CI required. PR remains
+draft. Original placement repair/current observer/natural trigger remain open.
+
+
+### 2026-10-18 16:36 EDT — D238 partition pre-audit settled (Claude347)
+
+347 independently reproduces the complete failed native1028-line log,127193byte
+hash, three-discard leader2 window and every other passing gate/normal cleanup.
+Tagged source creates self nodeInfo with cfg nonnil/stats:nil. Its own STATSZ send
+fills stats, under a one-second rate limiter; first heartbeat250ms can precede
+JetStream loading and discovery-triggered sends share the limiter. Peer selection
+includes self with no exemption. This supplies a second LOCAL producer of the
+nil-cache state, independent of route denial. The freshly started/elected leader
+window is a natural-trigger candidate, not proof of the retained historical cause.
+
+Adopt exact known-peer partition and conservation pins from347: both nonleaders
+required, leader optional, unique known names, no unpinned line/reason, exactly
+one summary, required3/peers3 and found=result=3-discardCount, offline:true/
+misc:false. Keep two-discard positive and add actual-shaped three-discard positive.
+Independent negatives include single nonleader, leader-only, self plus one other,
+foreign/duplicate names, two summaries, every inconsistent count and unknown
+reason/line. Count forced-one, dropped conservation, single-discard acceptance,
+foreign/duplicate acceptance, summary uniqueness and leader-only mutants only at
+named assertion failures with intact controls. No original helper/fixture,
+workflow, injection, create, counter, cleanup, timeout or production change.
+
+
+### 2026-10-18 16:38 EDT — D238 local partition correction candidate
+
+Only leaderReason changes in the probe: complete known/unique offline-discard
+partition from the named leader, no unpinned line, one summary with required3/
+peers3/found=result=3-discardCount and fixed flags. Both other peers mandatory;
+self optional. Two-discard/found1 and three-discard/found0 are accepted, while
+single peer, self-only/subset, foreign/duplicate names, duplicate summaries,
+unpinned reason/line and every inconsistent count refuse. Producer, helpers,
+original fixture, workflow, VERSION and all other code remain byte-identical.
+
+Local Node24.13.0/macOS proof:45/45 pass,0 skips,1703.582084ms;44 portable tests
+and one actual owned NATS2.12.6 pair.34/34 named intended assertions killed with
+intact portable controls/no live cohorts in the runner. Old one-peer variant is
+replaced by a targeted single-nonleader case; six distinct additions kill forced
+remaining1, dropped conservation, accepted foreign/duplicate names, dropped
+summary uniqueness and leader-only acceptance. No equivalent mutant is counted.
+The final actual pair takes the two-discard form at leader3, both old ready tables
+true, exact fault10005, one create per cohort, normal six-owner cleanup[].
+Report87328bytes SHA256
+432603f113d684d349bbe2ab88a9f82a5e61b2e52a54f37d0324d3c32269e2c5.
+The retained failed native JSON is also replayed READ-ONLY through the corrected
+comparator: all12checks true/owned-counterexample, including its three discards;
+original bytes/hash and its old inconclusive diagnosis are untouched. This is
+regression replay, not a rerun or a retroactive green claim for CI39161190466.
+
+Shared helper/original caller hash pins pass. Exact source review/all8CI and a
+separate reviewed green five-Markdown receipt remain pending. Diagnosis row[A]
+stays reopened; original placement repair/natural trigger/current observer remain
+open. B5/1.2pre, B6–B9 held, D64/Gate/timers/production unchanged. Failed D237
+native history and successful D236 source history remain separately retained.
