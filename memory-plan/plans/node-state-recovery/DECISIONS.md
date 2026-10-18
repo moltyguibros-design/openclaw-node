@@ -5870,3 +5870,59 @@ df5bf9c247e7ca712efdecad62a1490b649c8d1d46adb88a3f78443da204f277.
 That evidence is not the corrected55/50 proof. New-head review and CI remain
 pending; the D220 row stays candidate/open. B5/1.2 open/pre, B6–B9 held, no class
 matching, physical exclusion, eligibility, authorship or admission claim.
+
+
+## D221 — 2026-10-18 02:41 EDT: owned observation-envelope source verified
+
+
+### 2026-10-18 02:41 EDT — owned process observation-envelope source verified (D221)
+
+Source 89ae67dbe0057e308c8ae55674a21f8dfaa4247d passes all eight jobs in
+[CI39103018309](https://github.com/moltyguibros-design/openclaw-node/actions/runs/39103018309).
+Native job 117602984633 passes 55 tests in 5.192s and all 50
+intended-assertion mutants with intact designated controls. Its unpatched CI
+runner observation refuses while retaining the owned child in both passes:
+1030 unknown entries and 6 refusal reasons. These are entries across
+both passes, not distinct-process counts or a full table/per-reason measurement.
+Linux job 117602984610 passes 55 tests in 1.091s with 1 native skip
+and 50 intended mutations. Codex inspected both complete raw logs.
+Native raw log: 62453 bytes, SHA256 33127936fb27349d8211f0bcddad436baa3457143422972721ec8b46fe55a6b9;
+Linux raw log: 1512918 bytes, SHA256 315e20c6033272a8c2f88e75355b58ffdcca065eab5196a19d29b0798a175442.
+Both name checkout merge 756766914c7aa7ac9da290cf7c205ba1e715e640, whose second
+parent is the exact reviewed source and whose whole tree is identical to it.
+
+Claude247 independently reproduces 55 tests (one native skip) and all 50
+intended mutations as uid65534, with no required issue. Independent after-shorter sample and expiry probes fail the new assertions; removing the UID check is killed, and replay against 2393e724 fails both aliases without errors. Collected-path behaviour is unchanged. The added binding-key-set line is dominated by the following dictionary equality and is not counted as a mutant.
+The within-pass sample equality and elapsed/expired consistency gaps from Claude245 are
+pinned by coherent scripted negatives and individual mutants. The UID 0/1 Boolean
+alias is rejected by an explicit integer check before binding equality; the old
+source fails both cases and removal of the guard fails the new assertion.
+Earlier 2393e724/52/47, 141 and 139 results retain their counts; cancelled run39101987342
+is not counted green. Its Linux proof remains the earlier 52/47 only. Optional
+validator/consumer/collector controls from245 and D218's six items stay in INVENTORY.
+
+Only B5-D62-process-observation-envelope closes as an owned source prerequisite.
+Recorded is complete coherent sampled observation, never class matching, boot
+eligibility, authorship, history or admission. Four PID samples, strict unknown
+retention, scope facts, both launchd reads and plist identities remain observations
+under D189, not continuous/physical exclusion or loaded-image proof. The 120s
+acceptance window cannot interrupt blocked calls; the 16-anchor limit and 8MiB
+diagnostic-input bound do not change frozen-journal reader bounds. The private
+fixture table supplies no B3 provenance. Local native runs used substituted
+enumeration; no local unpatched full scan or production operation occurred.
+
+B5/1.2 remain open/pre and B6–B9 held. Every executable that predated this unit,
+including the diagnostic, policy binder, Journal/schema/recover/D64, Gate/identity,
+host paths and timers, stays unchanged from 2615452b. No class comparator, jobs/
+recorded hold/overrides/fresh D60 gate, durable admission, attended manual or D175
+was implemented. Claude249/251 supply design input only for the next pure class comparator;
+it needs its separate final pre-audit, exact field/attribution/count proof and
+one bounded shared owned-reader extraction. Class consistency cannot imply a
+stopped hold; jobs/hold/overrides/fresh D60 stay required. PID/generation/name
+key-exclusion claims each need their own intended mutation mechanism. A valid
+launchd expectation with count above one stays unsatisfied, without changing
+the policy validator. Preserve anchor facts privately and bind the redacted
+class report to the envelope hash; emit no policy or raw argv. No next-unit
+implementation or closure follows the design input. Mac access/APFS reattach/reboot and four-history acceptance remain separate.
+This receipt changes five Markdown records only; its own exact-head CI/review
+remain pending at commit time.

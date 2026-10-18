@@ -1,4 +1,4 @@
-# Recovery frontier — 2026-10-18 02:08 EDT
+# Recovery frontier — 2026-10-18 02:41 EDT
 
 This is the Codex desktop heartbeat's short control surface for recovery step
 1.2. It does not change `INVENTORY.md`, `DECISIONS.md`, the no-stop rule, or
@@ -58,7 +58,7 @@ review only, not source readiness or B5 closure. Production remains untouched.
 | B2 | **Cleared for the disposable mechanism only.** Codex registered a separate Apple-backend UTM VM with its own ASIF disk and a verified Alpine ISO. It started and stopped normally; while `UF_IMMUTABLE` guarded that stopped disk, UTM refused its start and remained stopped; after unlock it started and stopped normally. The production VM stayed started throughout. | Codex carries this owned result into B5's host boot controller; no further VM creation is needed for B2's guard mechanism. B5's macOS reboot rehearsal has a separate access requirement. `utmctl start` exited 0 even on the refused attempt, so the controller must check the resulting state and error. | `audits/step12_jetstream/B2_UTM_GUARD_REHEARSAL_20261012.json` records distinct VM/disk identities, ASIF format, guard refusal, unlock recovery and final states. This is not a production boot-denial certificate. | B5 controller implementation and owned tests. |
 | B3 | **Just-in-time installation pins:** the October 9 candidate names `viewer-observed-20261008`; the installed viewer has since moved to `viewer-plan-task-links-autosave-20261011`. The 23-job candidate is unapproved and can drift again. | Codex resolves known structural drift now, but re-captures all 23 installed jobs and direct file hashes only immediately before an approved window. Repeating the capture before a window is scheduled does **not** count as progress. | Current installed identities and hashes match the reviewed baseline at window entry, including the five old timer pins and the exact conditional migration form. No pre-window timer reinstall. | B6 and B7. |
 | B4 | **Cleared as a bounded design input:** all 23 installed plists and direct launch files, activation keys, and current GUI/user/system OpenClaw-label observations are captured. Claude's adversarial review at `ac954055` found no remaining concrete false claim. This is not a no-writer certificate. | Codex carries the identified child, deploy, viewer, bus and file-writing routes into B5; transitive and out-of-cohort writers remain fail-closed uncertainties for the window-time census and stopped-VM boundary. Re-running this static capture alone is not progress. | `audits/step12_jetstream/B4_WRITER_PROVENANCE_AUDIT_20261012.md` and its JSON cover all 23 labels, classify the only observed system-domain OpenClaw label, name re-entry edges, and state residual uncertainty without claiming pre-stop physical exclusion. | Boundary design B5. |
-| B5 | **In progress, owned source only:** D219 closes authored policy binding at ee311fcd/all8 CI39096484480/Claude229; receipt2615452b all8 CI39097936909/Claude237. Native49/46. D220 observation-envelope correction55/50; source review/CI pending, no admission. | Codex builds the observation envelope, separate class comparator, jobs/hold/D60, durable admission, manual restoration and D175. Operator separately designates exact disposable access or decides a measured resource proposal. | Reviewed exact-head source/CI; distinct native full pipeline, APFS reattach and disposable-Mac reboot/login/process/hold/migration evidence. D189 and pre-stop limits remain. | Per-window release B6. |
+| B5 | **In progress, owned source only:** D221 closes observation-envelope source 89ae67db/all8 CI39103018309/Claude247. Native55/50; unpatched runner refused with child in both passes. Receipt CI/review pending at commit. No class matching or admission. | Codex builds the pure class comparator, jobs/hold/D60, durable admission, manual restoration and D175. Operator separately designates exact disposable access or decides a measured resource proposal. | Reviewed exact-head source/CI; distinct native full pipeline, APFS reattach and disposable-Mac reboot/login/process/hold/migration evidence. D189 and pre-stop limits remain. | Per-window release B6. |
 | B6 | **Separate live-run release required.** B1's boundary choice and B5's design review never authorize a production stop. | Operator gives a fresh, explicit go/no-go for one exact attended window only after B2, B3 and B5 pass. The two-hour heartbeat may prepare and warn, but must never initiate the live stop. | Recorded window-specific authorization naming the reviewed runbook, current pins, host operator and abort contact; it explicitly names D173–D175's user-owned pre-stop evidence without root attestation, D62's ACCEPTED-or-ABORT pre-boot rule, the conditional post-admission/pre-restoration timer re-pin, and the manual-restoration fallback. Without it, B7 remains closed. | Live hold and shutdown B7. |
 | B7 | **Live full-node hold and shutdown closed.** No service or VM stop has occurred for this recovery. | Only in the attended, specifically authorized B6 window, execute the approved sequence and abort on any failed precondition. No single NATS member may be stopped as a rehearsal. | Application quiescence under the approved boundary, clean VM shutdown, active host boot denial and definitive physical no-writer proof at the boundary specified by B1. | Stopped-VM capture B8. |
 | B8 | **Four-store capture and isolated acceptance closed.** No three healthy cold masters have been accepted. | Bind host capture and restore tools to the four declared physical paths and volume, then restore the copies on isolated servers. | Four separately hashed path/volume/window-bound copies faithfully reproduce the observed bytes; offline streams, counts, sequences and expiring-stream treatment match. This does **not** prove historical independence of the four members; that needs deployment-time provenance outside this capture. | Step 1.2 closure and any topology change. |
@@ -1280,3 +1280,56 @@ df5bf9c247e7ca712efdecad62a1490b649c8d1d46adb88a3f78443da204f277.
 That evidence is not the corrected55/50 proof. New-head review and CI remain
 pending; the D220 row stays candidate/open. B5/1.2 open/pre, B6–B9 held, no class
 matching, physical exclusion, eligibility, authorship or admission claim.
+
+
+### 2026-10-18 02:41 EDT — owned process observation-envelope source verified (D221)
+
+Source 89ae67dbe0057e308c8ae55674a21f8dfaa4247d passes all eight jobs in
+[CI39103018309](https://github.com/moltyguibros-design/openclaw-node/actions/runs/39103018309).
+Native job 117602984633 passes 55 tests in 5.192s and all 50
+intended-assertion mutants with intact designated controls. Its unpatched CI
+runner observation refuses while retaining the owned child in both passes:
+1030 unknown entries and 6 refusal reasons. These are entries across
+both passes, not distinct-process counts or a full table/per-reason measurement.
+Linux job 117602984610 passes 55 tests in 1.091s with 1 native skip
+and 50 intended mutations. Codex inspected both complete raw logs.
+Native raw log: 62453 bytes, SHA256 33127936fb27349d8211f0bcddad436baa3457143422972721ec8b46fe55a6b9;
+Linux raw log: 1512918 bytes, SHA256 315e20c6033272a8c2f88e75355b58ffdcca065eab5196a19d29b0798a175442.
+Both name checkout merge 756766914c7aa7ac9da290cf7c205ba1e715e640, whose second
+parent is the exact reviewed source and whose whole tree is identical to it.
+
+Claude247 independently reproduces 55 tests (one native skip) and all 50
+intended mutations as uid65534, with no required issue. Independent after-shorter sample and expiry probes fail the new assertions; removing the UID check is killed, and replay against 2393e724 fails both aliases without errors. Collected-path behaviour is unchanged. The added binding-key-set line is dominated by the following dictionary equality and is not counted as a mutant.
+The within-pass sample equality and elapsed/expired consistency gaps from Claude245 are
+pinned by coherent scripted negatives and individual mutants. The UID 0/1 Boolean
+alias is rejected by an explicit integer check before binding equality; the old
+source fails both cases and removal of the guard fails the new assertion.
+Earlier 2393e724/52/47, 141 and 139 results retain their counts; cancelled run39101987342
+is not counted green. Its Linux proof remains the earlier 52/47 only. Optional
+validator/consumer/collector controls from245 and D218's six items stay in INVENTORY.
+
+Only B5-D62-process-observation-envelope closes as an owned source prerequisite.
+Recorded is complete coherent sampled observation, never class matching, boot
+eligibility, authorship, history or admission. Four PID samples, strict unknown
+retention, scope facts, both launchd reads and plist identities remain observations
+under D189, not continuous/physical exclusion or loaded-image proof. The 120s
+acceptance window cannot interrupt blocked calls; the 16-anchor limit and 8MiB
+diagnostic-input bound do not change frozen-journal reader bounds. The private
+fixture table supplies no B3 provenance. Local native runs used substituted
+enumeration; no local unpatched full scan or production operation occurred.
+
+B5/1.2 remain open/pre and B6–B9 held. Every executable that predated this unit,
+including the diagnostic, policy binder, Journal/schema/recover/D64, Gate/identity,
+host paths and timers, stays unchanged from 2615452b. No class comparator, jobs/
+recorded hold/overrides/fresh D60 gate, durable admission, attended manual or D175
+was implemented. Claude249/251 supply design input only for the next pure class comparator;
+it needs its separate final pre-audit, exact field/attribution/count proof and
+one bounded shared owned-reader extraction. Class consistency cannot imply a
+stopped hold; jobs/hold/overrides/fresh D60 stay required. PID/generation/name
+key-exclusion claims each need their own intended mutation mechanism. A valid
+launchd expectation with count above one stays unsatisfied, without changing
+the policy validator. Preserve anchor facts privately and bind the redacted
+class report to the envelope hash; emit no policy or raw argv. No next-unit
+implementation or closure follows the design input. Mac access/APFS reattach/reboot and four-history acceptance remain separate.
+This receipt changes five Markdown records only; its own exact-head CI/review
+remain pending at commit time.
