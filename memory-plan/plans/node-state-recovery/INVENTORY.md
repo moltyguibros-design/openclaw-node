@@ -3680,3 +3680,45 @@ states only, not future post-boot writers or the16MiB whole-lineage read budget.
 Exact-source review and exact-head green CI remain pending. The candidate row
 stays open; B5/1.2 pre/open and B6–B9 held. No production service, VM, timer, mount,
 resource provisioning, new live process scan, policy enrollment or admission.
+
+
+### 2026-10-18 00:14 EDT — D218 checkpoint-order proof correction candidate
+
+Claude227 reproduces source433966aa:47 controls/44 intended mutants as uid65534,
+435 existing tests ran with usual skips and all suites OK, unchanged runtime
+bodies except constructor/open. It finds no required source defect, but its
+checkpoint-before-policy reordering mutant survives47 tests. That is a required
+proof gap because malformed extracted records then escape as key/type errors or
+reach policy validation before the external committed digest is checked.
+
+The new negative feeds a non-list, a baseline missing inventory, a string prior
+and a rechained malformed policy, requiring the checkpoint's Refused class and
+message precedence. Its statement-reordering mutant now fails that named
+assertion, with no ERROR counted. A second negative also closes Claude227's
+optional image pin-order gap: a scripted divergent second commitment read must
+refuse before the real read_inputs can select a window. Local49 controls pass
+11.591s and46 intended mutants pass with intact controls. Runtime and workflow
+bytes are identical to433966aa; the prior324-test batch remains evidence of the
+common executable paths, not a new325/326-test execution claim.
+
+Superseded CI39095435399 is cancelled for this proof correction, not green. Its
+Linux117580780740 recorded47/0.960s/44 at merge3a743eddd6137ae831ae4a3441000ab169d4c504
+(source433966aa second parent, identical whole tree); raw SHA256
+1bc8c68cfa910d921f5c153c183a3bef064a06d8bfde703b955e2af4d03c7590. This
+is the earlier proof only. Corrected-test exact-source review and new-head CI
+remain pending. B5/1.2 stay open/pre; no admission, production, Gate or timer change.
+
+
+D218 carried non-blocking follow-ups from Claude227 (the image pin-order proof is now included):
+
+- The owned producer binds the hold root by recorded path only; it inspects no Gate inode and constructs no Gate. Any stronger current-Gate validation is separate strictness, not an eligibility claim.
+- Missing/unreadable authored files can propagate OSError instead of the sibling readers' Refused normalization. The path fails before Journal construction; no fallback/admission is added.
+- A policy-bearing successor-window/predecessor positive remains untested; the actual complete initial-record/receipt size calculation includes any predecessor generically.
+- Recorded metadata-identity device equality with the watched root device could be additional strictness; current owner/root-pin consistency is not filesystem observation.
+- The pure validator walks the policy before its256KiB bound; authored-file reads bound first, so the concern is the direct internal carrier API.
+- Local lint14/1/0 depends on existing gitignored automation/tick history. Git exports reproduce10/0/2 with the same two old missing-file failures.
+
+The baseline half of the size predicate is logically dominated by its containing
+receipt's size check. Removing only that half is equivalent and is not counted
+as a killed mutant. These optional items do not close the boot-policy, observer,
+physical rehearsal, durable admission, manual or D175 gates.

@@ -5645,3 +5645,30 @@ and D64 controls, exact-source Claude review and exact-head green CI. These
 checks are pending. Only this owned source prerequisite may close. B5/1.2 remain
 open/pre, B6–B9 held; boot comparator/observer/durable admission, manual/D175,
 Mac access/APFS reattach/reboot and the separate physical histories remain open.
+
+
+### 2026-10-18 00:14 EDT — D218 checkpoint-order proof correction candidate
+
+Claude227 reproduces source433966aa:47 controls/44 intended mutants as uid65534,
+435 existing tests ran with usual skips and all suites OK, unchanged runtime
+bodies except constructor/open. It finds no required source defect, but its
+checkpoint-before-policy reordering mutant survives47 tests. That is a required
+proof gap because malformed extracted records then escape as key/type errors or
+reach policy validation before the external committed digest is checked.
+
+The new negative feeds a non-list, a baseline missing inventory, a string prior
+and a rechained malformed policy, requiring the checkpoint's Refused class and
+message precedence. Its statement-reordering mutant now fails that named
+assertion, with no ERROR counted. A second negative also closes Claude227's
+optional image pin-order gap: a scripted divergent second commitment read must
+refuse before the real read_inputs can select a window. Local49 controls pass
+11.591s and46 intended mutants pass with intact controls. Runtime and workflow
+bytes are identical to433966aa; the prior324-test batch remains evidence of the
+common executable paths, not a new325/326-test execution claim.
+
+Superseded CI39095435399 is cancelled for this proof correction, not green. Its
+Linux117580780740 recorded47/0.960s/44 at merge3a743eddd6137ae831ae4a3441000ab169d4c504
+(source433966aa second parent, identical whole tree); raw SHA256
+1bc8c68cfa910d921f5c153c183a3bef064a06d8bfde703b955e2af4d03c7590. This
+is the earlier proof only. Corrected-test exact-source review and new-head CI
+remain pending. B5/1.2 stay open/pre; no admission, production, Gate or timer change.

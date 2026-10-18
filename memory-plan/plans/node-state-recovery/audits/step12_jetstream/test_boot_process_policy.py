@@ -570,6 +570,30 @@ class FrozenPolicy(unittest.TestCase):
         with self.assertRaisesRegex(Refused, 'committed digest'):
             self.consume(fixture, forged)
 
+    def test_checkpoint_refusal_precedes_policy_interpretation(self):
+        fixture = captured(self)
+        missing_inventory = copy.deepcopy(fixture.records)
+        del missing_inventory[0]['entrypoint_inventory']
+        malformed_prior = copy.deepcopy(fixture.records)
+        malformed_prior[0]['prior'] = 'untrusted prior'
+        malformed_policy = copy.deepcopy(fixture.records)
+        malformed_policy[0]['process_policy']['expected'][0]['count'] = 0
+        malformed_policy = guest.rechain(malformed_policy, 0)
+        for name, records, message in (
+                ('not-a-list', {'untrusted': 'records'}, 'capture journal is incomplete'),
+                ('missing-inventory', missing_inventory, 'capture journal chain differs'),
+                ('malformed-prior', malformed_prior, 'capture journal chain differs'),
+                ('rehashed-malformed-policy', malformed_policy, 'committed digest')):
+            with self.subTest(name=name):
+                observed = None
+                try:
+                    self.consume(fixture, records)
+                except (Refused, KeyError, TypeError, IndexError) as error:
+                    observed = error
+                self.assertIsInstance(observed, Refused,
+                                      'checkpoint must reject before policy interpretation')
+                self.assertRegex(str(observed), message)
+
     def test_policy_roots_remain_bound_after_external_commit(self):
         fixture = captured(self, transform=lambda p: p.update(roots=['/different']), unvalidated=True)
         with self.assertRaisesRegex(Refused, 'roots differ'):
@@ -599,6 +623,21 @@ class FrozenPolicy(unittest.TestCase):
         with patch.object(policy_module, 'read_inputs', return_value=found):
             with self.assertRaisesRegex(Refused, 'stopped-image reader ownership'):
                 policy_module.image_process_policy(fixture.capture, fixture.data, table=fixture.table)
+
+    def test_image_commitment_must_match_pins_before_window_selection(self):
+        fixture = captured(self, image=True)
+        divergent = copy.deepcopy(fixture.commitment)
+        divergent['checkpoint']['checkpoint_sha256'] = 'f' * 64
+        with patch.object(policy_module, 'require_committed', return_value=divergent), \
+             patch.object(policy_module, 'read_inputs', wraps=stopped_journal_inputs.read_inputs) as reader:
+            observed = None
+            try:
+                policy_module.image_process_policy(fixture.capture, fixture.data, table=fixture.table)
+            except Refused as error:
+                observed = error
+            self.assertIsInstance(observed, Refused)
+            self.assertIn('capture commitment differs from the pinned capture record', str(observed))
+            reader.assert_not_called()
 
 
 if __name__ == '__main__':
