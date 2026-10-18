@@ -3385,3 +3385,67 @@ These are final-source local checks; the earlier CI run on d5f396b9 does not
 validate this correction. No historical natural failure cause or placement
 repair is claimed. Source exact-head review and all-eight CI remain pending;
 D240 stays [A], B5/1.2 remains v1.2-pre, and production is untouched.
+
+
+### 2026-10-18 18:52 EDT — owned R3 failure evidence verified (D240)
+
+Corrected source 94bc8e766f6a10921d1ae6fa80e62762f6655fd8, sole parent
+d5f396b9aa70758fc0fc0522b75e13b311a8f9a1, is independently clear at Claude357.
+Claude355's required finding on the first candidate was corrected: only the
+original three cluster servers have debug logging, and the report records the
+age of caller-supplied pre-create observations. Exact-source CI 39171957048
+passed all eight jobs in attempt 1. Completed CI facts below are Codex
+observations, not claims that Claude read GitHub logs. Merge checkout
+85849f670905eb4c9416c3e6e32fe39e8cbd2a1c has source as its second parent and an
+identical tree.
+
+Linux unit-tests (22), job 117806710325: the actual owned fault/control pair
+passed 45 tests, its prior mutation runner killed 34/34, the new evidence suite
+passed 8/8 with no skips, and its runner killed 13/13 with intact controls. The
+controlled fault made one R3 create and refused with API 10005; its bounded
+report recorded all eight caller-supplied readiness checks true, timestamped
+observations, three complete selector lines on the leader, complete empty
+windows on the other members, and the original peer-offline error class. The
+full unfiltered owned recovery passed and all servers stopped. Full job log:
+24462 lines, 1614893 bytes, SHA256
+5c0ecb0a47529d790c301553deed670d2378312bc007ac4fcf7c55af1854f380. JSON-only
+placement-gossip artifact 12152962260: 86849 bytes, SHA256
+a49fba46c2986ca97ec628d856fc8683b9047cbc7116cd7aca0062068e5791fc; its diagnosis
+is owned-counterexample, all 12 checks true, one create per cohort, and empty
+cleanup failures. There is no unfiltered placement-failure artifact because the
+unfiltered fixture succeeded.
+
+Native legacy-writer-lock-macos, job 117806710192: the actual owned
+fault/control pair passed 45 tests, its prior mutation runner killed 34/34, the
+new evidence suite passed 8/8 with no skips, and its runner killed 13/13 with
+intact controls. The controlled fault made one R3 create and refused with API
+10005; the bounded report preserved three complete leader selector lines,
+timestamped pre-create observations and the original peer-offline error class.
+Full job log: 1472 lines, 163479 bytes, SHA256
+b186c260195dbc0d8742db644da2ac72da112c12e6fe47076d98fbe8b9eb5df9. JSON-only
+placement-gossip artifact 12153471850: 87192 bytes, SHA256
+0efec3acab195ae96e32565ebe4d6346a8bedcb599df631ab74c02d5e0d20686; its diagnosis
+is owned-counterexample, all 12 checks true, one create per cohort, and empty
+cleanup failures.
+
+Local corrected-source proof is separate from CI: the unfiltered owned recovery
+passed, all owned servers stopped, no failure report was produced, and retained
+configurations show debug only on the first three cluster servers. The
+controlled fault/control pair made one create per cohort, control created and
+fault refused with API 10005, all owners cleaned up; the private mode-0600
+failure report is 2456 bytes, SHA256
+14f8d8a84dd2a4b75c8d36bfce7075056a0f0cb967cfe6a286a9f49d6c2775d0. The new 8/8
+and 13/13 portable controls, existing 45/45 and 34/34 controls, and plan lint 14
+PASS/1 historical VERSION-idle WARN/0 FAIL support this owned fixture only.
+
+Only B5-CI-R3-failure-evidence closes as an auxiliary evidence prerequisite. A
+future natural owned R3 refusal is instrumented to retain bounded selector
+evidence without retrying; this did
+not establish the cause of past Linux failures or repair peer placement. The
+original placement repair, natural trigger, current inventory/override/fresh-D60
+observer, full held/process integration, durable admission, manual restoration,
+D175, native full pipeline, and disposable-Mac/APFS/reboot/four-history evidence
+remain open. B5/1.2 stays v1.2-pre, B6–B9 held; D64, Gate, installed timers and
+production remain untouched. This receipt changes five Markdown ledgers only;
+AUDIT_PRE, source, workflow and VERSION stay byte-fixed. Its own exact review
+and all-eight CI are pending at commit and are not preclaimed.
