@@ -5585,7 +5585,7 @@ second parent and identical recovery, lib/bin/test/workspace-bin and workflow
 bytes. Native raw log SHA256 c58ce17e2e05bb53e1805d6fdf58b1dfd94452c635854b9bba64a6c754d5259b;
 Linux raw log SHA256 47c040b3163577ae5fcf76a67b1fc630f4eddea3737793eb470f5f11aa2aa2d2.
 The committed native excerpt B5_SCOPED_PROCESS_DIAGNOSTIC_NATIVE_EXCERPT_20261018.txt retains the result/count lines, not a full table.
-Excerpt SHA256 0934ded10b918e78ddf0d15da97352efa77367a54421cd951e09489f6cf964d0. Earlier runs39089415728 and39090103107 were canceled for the
+Excerpt SHA256 5652932eea85c0f37413e6c61dbb63b82325ff103197b4bbd6b7c69e0dcf6d8f. Earlier runs39089415728 and39090103107 were canceled for the
 required scope fix and its proof extension; neither is green evidence.
 
 Only B5-D62-scoped-process-diagnostic closes as an owned source prerequisite.

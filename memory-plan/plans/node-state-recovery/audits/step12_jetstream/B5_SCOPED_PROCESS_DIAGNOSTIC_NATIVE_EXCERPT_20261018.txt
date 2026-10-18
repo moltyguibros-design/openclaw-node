@@ -1,4 +1,5 @@
 Native CI log excerpt; not a full process table or a production census.
+Timestamp-only blank stdout lines omitted; retained result lines are verbatim.
 Source: 81ac425be0c7e6115e4ed1ea7e1ec2a55de6049f
 Run: 39090362566; job: 117565607992
 Checkout merge: e2529cd5b01f9b5502c381271a54b97ff9589bb1
@@ -8,7 +9,6 @@ Full raw job log SHA256: c58ce17e2e05bb53e1805d6fdf58b1dfd94452c635854b9bba64a6c
 2026-10-18T02:55:03.8977610Z ........................................
 2026-10-18T02:55:03.8986510Z ----------------------------------------------------------------------
 2026-10-18T02:55:03.8987600Z Ran 40 tests in 7.552s
-2026-10-18T02:55:03.8988190Z 
 2026-10-18T02:55:03.8988630Z OK
 2026-10-18T02:55:04.3408280Z unmutated scoped diagnostic controls: all passed
 2026-10-18T02:55:04.6272430Z whole-argument-directory-root-skipped: intended assertion killed
