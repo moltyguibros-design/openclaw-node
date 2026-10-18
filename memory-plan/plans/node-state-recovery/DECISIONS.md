@@ -7016,3 +7016,88 @@ authorship/physical exclusion/admission or protected provenance. D189 applies.
 B5/1.2 open/v1.2-pre,B6–B9 held; D64/Gate/installed timers/production unchanged.
 Actual inventory/override/D60 observer, full held/process integration, durable
 admission/manual/D175/Mac/APFS/reboot/four-history evidence remain later.
+
+
+### 2026-10-18 10:22 EDT — owned scripted entrypoint consistency source verified (D231)
+
+Source 0aa1df7d78b1dc0d02a15d7a4e7cc4fd18f5f4c4 resolves all eight distinct latest job results successfully
+in [CI39133265637](https://github.com/moltyguibros-design/openclaw-node/actions/runs/39133265637)
+(attempt2). Native execution117692584475/attempt1
+(carried as API job117697503389/attempt2):28 tests in
+1.756s/no skip and39 intended-assertion kills/intact controls. Linux22
+job 117697502335,attempt2:28/1.689s/no skip/39. These are scripted
+frozen-reader portability checks, not new live inventory/override/D60 observations.
+Older process/managed-job native lines retain their own prior-unit scope. Codex
+inspected completed raw logs: native83783 bytes SHA256
+f594827f8c4ed4171e022b8a7d0e9f7ba34403216ac2416df6a0e399c26e2032; Linux1533703 bytes SHA256
+742b2441798bd0c9f066c4c57903396388f7ead9a192aa0b9b7706c3b31d4160. Both name mergec6b2e68c8ff6462cbaae986e631f89d9e20c0641
+with source as second parent and identical whole tree. These completed-CI facts
+are Codex observations, separate from the review and its CI status at that time.
+
+Attempt1 Linux job117692584463 failed at unchanged cluster-offline-consumer-
+placeholder, NATS10005 peer-offline placement, before any Python execution. Its
+completed raw43966 bytes SHA2567fa9cdfd2ac9b4dfe9b29b2395e4f28a61738c2b1fb6f2693d467b6570f6af2b
+remain failed evidence, not relabelled. Existing test_recovery/recovery bytes
+are identical to parent. One unmodified local owned fixture control using the
+same NATS2.12.6/CLI0.3.1 passed at2026-10-18T13:55:16.292Z; all owned processes exited and
+cleanup failures empty. Its raw6375 bytes SHA256
+067b6da0a7a31d624d0d98a30daa267cc2aca5b271c83ef466996876129caa36. This Mac/Node24 control is not a Linux reproduction or
+root-cause closure. B5-CI-R3-placement remains a separate follow-up; no fixture/
+readiness/timeout repair or production operation is included here. An initial
+job-rerun request while attempt1 was active was rejected, scheduling nothing.
+After attempt1 completed, exactly one targeted Linux22 rerun was scheduled on unchanged source bytes. GitHub lists the other seven carried successes under new attempt2 job IDs but with identical original runner/start/completion timestamps. Native is carried from execution job117692584475/attempt1 into reported job117697503389/attempt2, not a second native execution; matching raw bytes are checked. Only Linux executes anew in attempt2. No additional rerun or all-attempt1-green claim is made. All-green exact-head readiness was not waived.
+
+Claude307 independently clears the exact source with no remaining required
+finding. A full-tree uid65534 Linux replay independently reproduces28/no skips and39 intended assertion kills/intact controls. Exact sole parent/10files1681insertions/three hashes/80-line source/4workflowlines/unchanged prior blobs and identical D230 content across six ledgers are confirmed. Its broader workflow extraction passed23 prior unittest files, while two NATS-dependent files errored from missing sandbox server/environment; these are not source defects or a claimed268-test replay.11 prior mutation runners ended on their final kill lines with no failure signature. The separate local268/53.089s/two skips remains Codex proof. It verifies honest47-record nonempty exclusion/extra override chain,21gui/21user override flips, empty terminal loaded sets and exact frozen readback. Own probes confirm purity, comparison coverage and declared equivalents; the running-field contract kill is not an extra acceptance kill. Explicit exclusion call is an order pin with current shape revalidated inside the inventory validator; terminal overrides are chain-verified. Ordered roots and managed-jobs fixture prefix are accepted. It independently reads the complete480-line failed Linux log/BOM/no truncation, confirms no Python ran and unchanged test_recovery blob/parent plus six earlier runs passed. It establishes no root cause and saw six green/one Linux failure/native pending; no all8 claim at review time. The same307 response later adds a terminal attempt1 CI addendum: seven success/one Linux failure, hence no all8 at that time. It independently reads the complete995-line native log/BOM/no truncation and checks703/705/706/707–745:28/1.756s/OK/39 kills,43 OK blocks and no FAILED or runner error. That reproduces the native scripted portability result only; completed attempt2 all8 evidence is later Codex observation.
+The three appended D230 segments include the internal Mid-Implementation
+Findings heading, which accounts for the review’s four Markdown-block count.
+Local final28/8.394s/no skip and39 intended kills remain separate from the prior
+268/53.089s/two local CI-only native skips. First27/8.777s StopIteration and next
+28/9.095s valid_prior refusal are preserved as two failed proof attempts at one
+fixture precondition, not source defects. Full-node valid_prior admits no prior-
+unloaded enabled unit at this head. The impossible303 hypothetical was replaced
+with every managed start in all3 domains refusing against honest frozen records;
+no invalid baseline, bypass or post-verification record mutation. The80-line
+source never changed. First39 selected controls passed while that example was
+invalid; only the final28 plus fresh39 runner prove the corrected exact bytes.
+
+Only B5-D62-scripted-entrypoint-consistency closes as an owned source prerequisite.
+A private copy preserves baseline identities while substituting terminal loaded/
+running/disabled expectations; never persisted, called a baseline or passed to
+valid_prior. Explicit exclusion validation then unchanged inventory validation
+precede exact-input hashing/comparison. Static installed paths/roots/artifacts
+match baseline; loaded/overrides match terminal CAPTURE exactly. Exact overrides
+include every domain/key and none-versus-false, assuming persistence across reboot.
+Exclusion label sets and plist/wrapper/full app identity match baseline; app drift
+refuses and needs a separately reviewed baseline. Current excluded boot equals
+supplied boot; valid run-count/boot dynamics may differ from baseline.
+
+The honest nonempty exclusion/artifact and extra-override fixture records them
+before original Journal creation through the real capture/commit/stopped reader/
+frozen verifier. Both policy/exclusion cases pass. Consumer both flags before IO,
+one reused owned_records with coherent pins/reader/verifier/all recorded-owner
+ties, then private canonical bounded entrypoints.json. No collector reference,
+constructor/write or local unpatched inventory/job scan. Pure comparison has no
+IO/current clock/boot read or input mutation. Source fixed scripted; frozen
+digest/recordedUID binding and named reasons only, no raw inventory/path/override/
+exclusion/policy/argv. Hold/history/admission/freshness flags false.
+
+A nonempty consistent input asserts a completed successful run in the supplied
+boot but does not observe/authenticate it: verifiedtrue is shape only, no fresh
+D60, actual inventory/override completeness, process absence, live hold, eligibility,
+history/authorship, physical exclusion/admission or protected provenance. D189
+still applies. Loaded equality, installed digest and fixed exclusion paths are
+dominated shared proof; explicit exclusion removal/reversal pins ordering only.
+Identity corruption is a contract/false-refusal control, not a permissive defect.
+Running/copy-before-hash/terminal-identity variants remain equivalents, not extra
+kills. The live-route mutant explicitly relaxes flags plus wires a benign patched
+collector; no ERROR-only kill is counted. Prior optional controls remain carried.
+
+All pre-existing executables/tests/runners stay fixed. Source delta:3 new files,
+4workflowlines,6ledgers. This receipt changes5Markdown only, keeping AUDIT_PRE
+and all code/proof/workflow fixed. Local lint14PASS/1old idle-versionWARN/0FAIL;
+export's old missing automation/history failures remain separate. B5/1.2 open/
+v1.2-pre,B6–B9 held,D64/Gate/installed timers/production untouched. Actual current
+entrypoint/override/D60 observer, full held/process integration, durable admission/
+manual/D175 and Mac/APFS/reboot/four-history evidence remain later. Receipt exact-
+head review and its own all8 CI are pending at commit time; no operation/release.
