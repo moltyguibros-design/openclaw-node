@@ -160,6 +160,14 @@ def in_scope(row, uid, roots):
     values = [row['executable'], row['cwd'], *row['arguments']]
     if any('$' in arg or '~' in arg for arg in row['arguments']):
         raise Refused('other-UID argument path cannot be excluded')
+    for value in values:
+        candidate = pathlib.Path(value)
+        if not candidate.is_absolute():
+            candidate = pathlib.Path(row['cwd']) / candidate
+        resolved = candidate.resolve(strict=False)
+        if any(resolved == pathlib.Path(root) or pathlib.Path(root) in resolved.parents
+               for root in roots):
+            return True
     values.extend(str(pathlib.Path(row['cwd']) / arg)
                   for arg in row['arguments'] if arg and not arg.startswith('/'))
     return relevant_entrypoint('', values, tuple(map(pathlib.Path, roots)),

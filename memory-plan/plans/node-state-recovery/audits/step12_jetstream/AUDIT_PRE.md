@@ -995,3 +995,15 @@ requires a second per-PID sample and independently expected native argv. These s
 inside the same record-free process outcome; no admission/policy/recovery delta is added.
 The comparison's shared path helper reads paths, so read-only replaces the earlier pure
 wording. The C fixture replaces a false Python-launcher assumption. Production is unchanged.
+
+
+### 2026-10-17 22:28 EDT — D216 whole-argument scope correction candidate
+
+A bounded independent file-only reproduction at ffd7cb8c showed an other-UID
+argv symlink with spaces into a declared root reported clean/excluded. Whole
+executable/cwd/argv paths now resolve before the unchanged shared token helper;
+absolute and relative whole-argument regressions and their named mutant pin it.
+Local40 controls pass0.847s and28 intended mutants fail their named assertions
+with intact controls. Superseded CI39089415728 was canceled for this correction,
+not green. Exact-source review and corrected-head CI remain required. No shared
+runtime API, job/hold/journal/Gate/timer or production operation changed.

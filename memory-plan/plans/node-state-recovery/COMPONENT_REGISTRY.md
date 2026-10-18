@@ -1,7 +1,7 @@
 # Node state recovery — registry
 
-2026-10-17 22:13 EDT — D216 adds an owned current-boot process diagnostic candidate:
-36 local controls/24 intended mutants pass; exact-source Claude and exact-head CI pending.
+2026-10-17 22:25 EDT — D216 corrects an owned current-boot process diagnostic candidate:
+40 local controls/28 intended mutants pass; exact-source Claude and exact-head CI pending.
 No recovery consumer or admission changes; B5-boot-process-policy remains open. Last
 verified prerequisite is D215 at0d8099c1/all8 green. B5/1.2 open/pre, B6–B9 held, D64,
 production and timers unchanged. Next explicit policy producer/frozen binding, then durable
@@ -813,3 +813,12 @@ Claude207 design corrections are included; exact-source review and exact-head CI
 B5-boot-process-policy stays open, along with guest admission/manual/D175 and actual Mac
 access/measurement/reboot proof. B5/1.2 pre/open, B6–B9 held, D64/production/timers unchanged,
 four histories separate. See D216 for sampling, current-disk-image and decoder limits.
+
+
+### 2026-10-17 22:28 EDT — D216 whole-argument scope correction candidate
+
+An independent argv-with-spaces symlink reproduction falsely excluded an
+other-UID root process at ffd7cb8c. Whole process arguments are now resolved
+before the unchanged shared plist classifier. Local40 controls/28 intended
+mutants pass; corrected source review/CI remain pending. Superseded run39089415728
+was canceled, not green. No admission, production or shared-API change.

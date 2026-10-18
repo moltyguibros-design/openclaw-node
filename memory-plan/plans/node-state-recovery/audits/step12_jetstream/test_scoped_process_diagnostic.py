@@ -138,6 +138,35 @@ class ScopedProcessDiagnostic(unittest.TestCase):
         self.assertEqual(result['outcome'], 'clean')
         self.assertEqual(result['excluded_pids'], [42])
 
+    def test_other_uid_whole_argument_alias_with_spaces_is_in_scope(self):
+        outside = self.root / 'outside'
+        outside.mkdir()
+        arguments = []
+        for name in ('entry with spaces', 'entry(parentheses)', 'entry"quote', "entry'quote",
+                     'entry;semicolon', 'entry,comma', 'entry|pipe', 'entry&ampersand', 'entry`tick'):
+            alias = outside / name
+            alias.symlink_to(self.binary)
+            arguments.extend((str(alias), alias.name))
+        for argument in arguments:
+            with self.subTest(argument=argument):
+                row = {**self.row, 'uid': self.row['uid'] + 1,
+                       'executable': '/usr/bin/true', 'cwd': str(outside),
+                       'arguments': [argument]}
+                expected = {**self.expected, 'roots': [str(self.binary)], 'expected': []}
+                result = self.compare({**self.observed, 'processes': [row]}, expected)
+                self.assertEqual(result['outcome'], 'refused')
+                self.assertEqual([item['pid'] for item in result['unexpected']], [42])
+                self.assertEqual(result['excluded_pids'], [])
+
+    def test_argument_digest_preserves_boundaries(self):
+        digests = []
+        for arguments in (['ab', 'c'], ['a', 'bc']):
+            row = {**self.row, 'arguments': arguments}
+            result = self.compare({**self.observed, 'processes': [row]},
+                                  {**self.expected, 'expected': [row]})
+            digests.append(result['matched'][0]['arguments_sha256'])
+        self.assertNotEqual(*digests, 'argument boundaries must not collapse')
+
     def test_uid_alone_requires_explicit_expectations(self):
         row = {**self.row, 'executable': '/usr/bin/true', 'cwd': '/', 'arguments': ['/usr/bin/true']}
         result = self.compare({**self.observed, 'processes': [row]}, {**self.expected, 'expected': []})
@@ -285,6 +314,23 @@ class ScopedProcessDiagnostic(unittest.TestCase):
                     row, failure = diagnostic.snapshot(42)
                 self.assertIsNone(row)
                 self.assertEqual(failure['field'], 'stability')
+
+    def test_snapshot_identity_must_name_requested_pid(self):
+        self.row['pid'] = 43
+        observed = self.collector()
+        self.assertEqual(observed['processes'], [], 'wrong PID must not produce a stable row')
+        self.assertEqual(observed['unknown'][0]['field'], 'stability')
+
+    def test_cwd_vnode_change_with_same_path_is_unknown(self):
+        info = {key: self.row[key] for key in diagnostic.BRACKET_KEYS}
+        with (mock.patch.object(diagnostic.proc, 'bsd_info', return_value=info),
+              mock.patch.object(diagnostic.proc, 'executable', return_value=str(self.binary)),
+              mock.patch.object(diagnostic.proc, 'arguments', return_value=self.row['arguments']),
+              mock.patch.object(diagnostic.proc, 'working_directory', side_effect=[
+                  {'path': str(self.root), 'inode': 1}, {'path': str(self.root), 'inode': 2}])):
+            row, failure = diagnostic.snapshot(42)
+        self.assertIsNone(row, 'cwd vnode change must not produce a stable row')
+        self.assertEqual(failure['field'], 'stability')
 
     def test_pid_churn_and_boot_change_are_observed(self):
         observed = self.collector(lists=[[42], [42, 43]])

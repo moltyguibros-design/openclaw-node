@@ -3546,4 +3546,13 @@ four histories separate. See D216 for sampling, current-disk-image and decoder l
 > **B5-D62-scoped-process-diagnostic — Goal:** provide a strict record-free owned current-boot process diagnostic.
 > **Needs:** D215 receipt0d8099c1 all8 green; existing libproc, boot, file and path primitives; B1 owned authority.
 > **Feeds:** explicit process-policy authoring and disposable-Mac unknown-set measurement, then separate policy producer/admission/manual/D175 gates.
-> **Verify:** code:36 owned controls including an independently expected native child (substituted enumeration only),24 intended-assertion mutants with controls/noERROR, owned-runner unpatched refusal with child matched, unchanged existing executable bodies, Claude exact-source review and exact-head green CI. No production or full-host positive.
+> **Verify:** code:40 owned controls including an independently expected native child (substituted enumeration only),28 intended-assertion mutants with controls/noERROR, owned-runner unpatched refusal with child matched, unchanged existing executable bodies, Claude exact-source review and exact-head green CI. No production or full-host positive.
+
+
+### 2026-10-17 22:28 EDT — D216 whole-argument scope correction candidate
+
+An independent argv-with-spaces symlink reproduction falsely excluded an
+other-UID root process at ffd7cb8c. Whole process arguments are now resolved
+before the unchanged shared plist classifier. Local40 controls/28 intended
+mutants pass; corrected source review/CI remain pending. Superseded run39089415728
+was canceled, not green. No admission, production or shared-API change.

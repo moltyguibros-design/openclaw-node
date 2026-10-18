@@ -5525,3 +5525,26 @@ with reviewed frozen binding, then durable boot admission record; both need B1, 
 review and green exact-head CI. Manual/D175 follow them, with independent APFS and designated
 disposable-Mac rehearsal still required. Codex owes the measured resource proposal before
 a new guest budget decision; no provisioning or disposable designation is inferred.
+
+
+### D216 correction — 2026-10-17 22:28 EDT
+
+Candidate ffd7cb8c independently reproduced a required scope error: an other-UID
+argv element naming an absolute or relative symlink with spaces into a declared
+root was tokenized by the shared plist helper and could be falsely excluded.
+The process adapter now resolves whole executable/cwd/argv values against the
+observed cwd before retaining the unchanged shared helper scan. A dedicated
+absolute/relative regression and whole-path-removal mutant pin the correction;
+no shared classifier or census API changes. Local40 controls pass0.847s and all28
+intended-assertion mutants pass with intact controls. Superseded CI39089415728
+was canceled for this source correction, never counted green. Exact corrected
+source review and exact-head native/full CI remain pending; all D216 limits hold.
+
+Claude211 independently reproduces both false exclusions at ffd7cb8c and finds
+no other required source issue. The regression also covers quote, parenthesis
+and other tokenizer delimiters. Three optional surviving proof gaps are now
+pinned separately: argv-digest boundaries, requested-PID identity, and full cwd
+vnode reread with unchanged path. A kernel-canonical executable-path mutation
+remains near-equivalent and not counted as a kill. The name is kernel-reported
+and can be truncated; arbitrary long executable basenames are not assumed to
+match it. Existing mapped-image and same-user limits remain unchanged.

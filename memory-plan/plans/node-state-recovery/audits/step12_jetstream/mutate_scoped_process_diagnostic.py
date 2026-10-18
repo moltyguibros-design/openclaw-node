@@ -6,6 +6,15 @@ import sys
 STEP = pathlib.Path(__file__).resolve().parent
 PREFIX = 'test_scoped_process_diagnostic.ScopedProcessDiagnostic.'
 MUTANTS = [
+    ('argv-digest-boundaries-dropped', "b'\\0'.join(arg.encode()", "b''.join(arg.encode()",
+     'test_argument_digest_preserves_boundaries', 'argument boundaries must not collapse'),
+    ('requested-pid-check-skipped', "and before['pid'] == pid", 'and True',
+     'test_snapshot_identity_must_name_requested_pid', 'wrong PID must not produce a stable row'),
+    ('cwd-vnode-reread-reduced-to-path', 'and proc.working_directory(pid) == directory',
+     "and proc.working_directory(pid)['path'] == directory['path']",
+     'test_cwd_vnode_change_with_same_path_is_unknown', 'cwd vnode change must not produce a stable row'),
+    ('whole-argument-path-skipped', '    for value in values:\n',
+     '    for value in []:\n', 'test_other_uid_whole_argument_alias_with_spaces_is_in_scope', "'clean' != 'refused'"),
     ('empty-full-enumeration-allowed', "enumeration != 'full' or os.getpid() in listed",
      'True', 'test_full_enumeration_cannot_omit_the_diagnostic_process', "'clean' != 'refused'"),
     ('unknown-ignored', 'errors or unknown or unexpected or missing',

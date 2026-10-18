@@ -131,3 +131,15 @@ Claude207 design corrections are included; exact-source review and exact-head CI
 B5-boot-process-policy stays open, along with guest admission/manual/D175 and actual Mac
 access/measurement/reboot proof. B5/1.2 pre/open, B6–B9 held, D64/production/timers unchanged,
 four histories separate. See D216 for sampling, current-disk-image and decoder limits.
+
+
+### 2026-10-17 22:28 EDT — D216 whole-argument scope correction candidate
+
+A bounded independent file-only reproduction at ffd7cb8c showed an other-UID
+argv symlink with spaces into a declared root reported clean/excluded. Whole
+executable/cwd/argv paths now resolve before the unchanged shared token helper;
+absolute and relative whole-argument regressions and their named mutant pin it.
+Local40 controls pass0.847s and28 intended mutants fail their named assertions
+with intact controls. Superseded CI39089415728 was canceled for this correction,
+not green. Exact-source review and corrected-head CI remain required. No shared
+runtime API, job/hold/journal/Gate/timer or production operation changed.
