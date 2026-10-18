@@ -173,6 +173,8 @@ def valid_envelope(value, policy):
     require(value['scope'] == SCOPE and value['source'] in ('observed', 'scripted')
             and value['admission'] is False and value['history_certified'] is False,
             'envelope scope or authority differs')
+    keys(value['policy_binding'], ('policy_sha256', 'uid', 'roots', 'anchors'))
+    integer(value['policy_binding']['uid'])
     require(value['policy_binding'] == binding(policy), 'envelope policy binding differs')
     labels = value['sample_labels']
     if value['source'] == 'observed':

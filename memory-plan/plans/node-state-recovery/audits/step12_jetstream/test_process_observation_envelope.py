@@ -254,6 +254,39 @@ class Envelope(unittest.TestCase):
         value['stages']['pass_b']['included'].clear()
         self.assertEqual(self.check(value)['outcome'], 'refused')
 
+    def test_within_pass_samples_must_agree_even_when_union_and_rows_agree(self):
+        second = {**self.row, 'pid': 412}
+        sample = {**self.sample, 'before': [411, 412], 'after': [411, 412],
+                  'processes': [self.row, second]}
+        value, _, _ = self.collect(sample)
+        for name in ('pass_a', 'pass_b'):
+            value['stages'][name]['before'] = [411]
+        self.assertEqual(self.check(value)['outcome'], 'refused', 'all four PID samples must agree')
+
+    def test_expiry_claim_must_match_elapsed_time(self):
+        value, _, _ = self.collect()
+        for elapsed, expired in ((envelope.WINDOW_NS + 1, False),
+                                 (value['budget']['elapsed_ns'], True)):
+            forged = copy.deepcopy(value)
+            forged['budget'].update(elapsed_ns=elapsed, expired=expired)
+            with self.subTest(elapsed=elapsed, expired=expired), \
+                 self.assertRaisesRegex(envelope.Refused, 'expiry claim'):
+                self.check(forged)
+
+    def test_binding_uid_rejects_boolean_aliases_for_zero_and_one(self):
+        for uid, alias in ((0, False), (1, True)):
+            self.policy['uid'] = uid
+            self.policy['expected'][0]['uid'] = uid
+            self.row['uid'] = uid
+            self.sample = raw(self.row)
+            value, _, _ = self.collect()
+            value['policy_binding']['uid'] = alias
+            for name in ('scope_a', 'scope_b'):
+                value['stages'][name]['expectations_sha256'] = envelope.fingerprint(
+                    envelope.expectations(value['policy_binding'], BOOT))
+            with self.subTest(uid=uid), self.assertRaisesRegex(envelope.Refused, 'integer'):
+                self.check(value)
+
     def test_exact_schema_rejects_raw_arguments_and_embedded_old_verdicts(self):
         result, _, _ = self.collect()
         for target in ((), ('stages',), ('stages', 'pass_a'), ('stages', 'scope_a'),

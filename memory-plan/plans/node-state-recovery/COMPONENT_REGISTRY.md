@@ -1,5 +1,8 @@
 # Node state recovery — registry
 
+2026-10-18 02:08 EDT — D220 correction candidate:55 tests/50 intended mutants,144 bounded
+regressions pass. Strict UID type + required sample/expiry proof; review/CI pending.
+
 2026-10-18 01:50 EDT — D220 observation-envelope candidate:52 tests/47 intended mutants and
 141 bounded regressions pass. Source review/CI pending; no class matching or admission.
 
@@ -1135,3 +1138,40 @@ Exact-source review and exact-head CI are pending. The D220 row stays open;
 B5/1.2 open/pre, B6–B9 held. Class matching, jobs/hold/overrides/fresh D60, durable
 admission, attended manual/D175 and physical Mac/APFS/reboot histories stay later.
 No production operation, resource provisioning, policy enrollment or admission.
+
+
+### 2026-10-18 02:08 EDT — D220 sample/expiry proof and strict binding-UID correction
+
+Claude245 reproduces source2393e724 as uid65534:52 ran with one native skip and47
+intended kills with intact controls; it verifies the ten-file lineage, unchanged
+existing executable trees and each kill's intended assertion. It requires two
+proof additions: within-pass before/after equality can fail while union coverage
+and cross-pass rows agree, and elapsed_ns above the window can be paired with a
+false expired flag. Neither predicate is dominated. The earlier broad dominance
+sentence is withdrawn; the new negatives and individual runner mutations pin both.
+Only the specifically confirmed pass-B generation half and private symlink-leaf
+literal check are treated as dominated; other unpinned cases are carried below.
+
+Codex independently finds a strict-schema source defect: Python deep equality
+lets a Boolean binding uid alias valid UID0/1. A scripted pure table with both
+scope digests recomputed is recorded with that Boolean at2393e724; admission stays
+false. The new test fails for both aliases before the fix. The validator now
+checks the binding's exact key set and integer UID before equality, rejecting the
+aliases without changing any ordinary observation or production authority.
+
+Local55 tests pass52.273s;50 intended-assertion mutations pass with intact controls,
+including the two required predicates and removal of the UID type check. The
+combined suite passes144 tests41.351s. Earlier52/47,141 and139 executions retain
+their own counts; this is a new run. No ERROR or unrelated failure is counted.
+Only the new module's two binding-schema lines and its tests/runner change
+executable bytes from2393e724; the existing workflow and all pre-existing runtime
+paths stay byte-identical. No local unpatched full scan or production operation.
+
+Superseded CI39101987342 was cancelled for this required correction, not
+counted all-eight green. Its Linux117599965393 passed52/1.237s with one native skip
+and47 mutants at merge430dd088f8dbce75813c7d7dff0ac28344d8d643, source2393e724 second
+parent and identical whole tree; raw SHA256
+df5bf9c247e7ca712efdecad62a1490b649c8d1d46adb88a3f78443da204f277.
+That evidence is not the corrected55/50 proof. New-head review and CI remain
+pending; the D220 row stays candidate/open. B5/1.2 open/pre, B6–B9 held, no class
+matching, physical exclusion, eligibility, authorship or admission claim.

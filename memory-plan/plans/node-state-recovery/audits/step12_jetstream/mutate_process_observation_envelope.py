@@ -100,6 +100,12 @@ MUTANTS = [
      'Envelope.test_enumeration_labels_are_never_promoted', 'Refused not raised'),
     ('physical-exclusion-claim', "'physical_exclusion': False", "'physical_exclusion': True",
      'Envelope.test_enumeration_labels_are_never_promoted', 'Refused not raised'),
+    ('within-pass-sample-equality', "if observed['before'] != observed['after']:", 'if False:',
+     'Envelope.test_within_pass_samples_must_agree_even_when_union_and_rows_agree', 'all four PID samples must agree'),
+    ('expiry-claim-consistency', "and budget['expired'] == (budget['elapsed_ns'] > WINDOW_NS)", '',
+     'Envelope.test_expiry_claim_must_match_elapsed_time', 'Refused not raised'),
+    ('binding-uid-integer', "integer(value['policy_binding']['uid'])", 'pass',
+     'Envelope.test_binding_uid_rejects_boolean_aliases_for_zero_and_one', 'Refused not raised'),
 ]
 
 
