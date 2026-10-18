@@ -5459,3 +5459,69 @@ repeated; B6 has no fresh exact-window release, B7–B9 held. D64's first full-n
 boot refusal, production capture/reconcile fences and installed timers are unchanged.
 All four physical NATS histories remain separate. No production service/VM/image/timer,
 local native image/launchd operation or real guest reboot occurred in this work unit.
+
+
+## D216 — 2026-10-17 22:13 EDT: develop an owned current-boot process diagnostic
+
+Claude203/205 and the current source confirm that the checkpoint and baseline lack an
+explicit pre-window boot-process policy. A new record inside the forward window would
+violate capture_cohort. B5-boot-process-policy is a Codex-owned dependency: design and
+verify its producer/frozen binding before UID-wide guest admission, manual restoration
+or D175. Old PIDs, live-sampled exemption lists, broad platform/descendant classes and
+a UID-disabled owned positive cannot close it. Production D64 needs no new approval
+to remain strict while independent B1-owned prerequisites are developed.
+
+B5-D62-scoped-process-diagnostic is one smaller executable source prerequisite. Its new
+module composes the unchanged libproc, file-hash, boot and relevant_entrypoint primitives;
+its CLI is the concrete record-free consumer. The exact owner-private canonical expectation
+file is current-boot test input, not a pre-stop policy, enrollment output or admission
+capability. UID scope is always on, OR executable/cwd/argv paths under the declared roots.
+Every expected process has exact pid/ppid/uid/gid/name/start/executable/hash/argv/cwd fields;
+duplicates, extra fields and out-of-scope expectations refuse. No self/helper exception.
+
+Two PID samples each read every enumerated process. Per-process brackets compare identity
+including gid/name (not nfiles), executable/argv/cwd; both samples must agree. Unreadable
+fields, unresolved other-UID paths, unknown membership, churn, uncovered PIDs and a full
+list omitting the diagnostic process refuse. Current on-disk executable bytes are hashed
+with existing descriptor/path checks and ctime must not be later than process start at
+microsecond floor. This is not loaded-image identity/authorship. The comparison resolves
+paths through the existing helper, so it is read-only rather than a pure/no-I/O function;
+earlier pure-comparator wording is superseded. Substring expansion and hardlink checks
+can add scope/refusals; no interpreter-basename or missing-observation exemption exists.
+
+The report has outcome clean/refused, never a top-level verified key, and fixed admission
+and history_certified false. It binds the expectation bytes by digest and redacts argv
+to SHA256 of NUL-joined UTF-8 values. Enumeration is labelled full only while using the
+unchanged shared PID enumerator, otherwise substituted. Both remain sampled, non-atomic
+and non-continuous; no physical exclusion or complete readability is claimed. The CLI
+requires an explicit fixture flag, a literal private temporary fixture directory, a
+private single-link canonical file, current UID and roots inside that fixture. It writes
+no files and performs no service, gate, journal, VM or timer action.
+
+Claude207's material design corrections are included: ctime limit, exec-in-place brackets,
+second per-PID sample, explicit enumeration labels, no verified output and scope-valid
+expectations. The native child is a tiny freshly compiled owned C program: PID/PPID/UID/
+GID/name/path/hash/argv/cwd derive from spawn facts, seconds cross-check ps lstart, with
+subsecond start measured from the existing kernel primitive. Exact argv includes an empty
+later argument and UTF-8; the shared decoder's empty argv[0]/padding ambiguity remains
+unmodified and is not tested or closed here. An initial Python-based independent control
+correctly refused Apple's launcher re-exec/path/argv0 rewrite; the C fixture replaces it
+instead of treating the backend's own output as its expectation. The native positive
+uses only an explicitly substituted owned-child PID enumeration, never a full-host positive.
+CI additionally runs an unpatched owned-runner scan and requires refusal with that child
+matched; that measurement is pending, not relabelled local proof.
+
+Local36 controls pass1.456s including that real macOS child. All24 mutants fail their named
+assertions with unmutated controls passing and no ERROR counted. An initial None test
+helper default, a UID-scope proof masked by cwd/root scope, and a two-occurrence mutation
+anchor were corrected as test/runner setup, not counted kills. Existing executable
+bodies are unchanged; Linux/macOS CI registration adds this suite and runner only.
+Exact-source Claude and exact-head green CI remain required; this is a candidate, not
+source readiness or closure. B5/1.2 remain open/pre, B6–B9 held, D64/production/timers
+unchanged, four histories separate. B3/B4 not repeated. Jobs/stopped/overrides/fresh D60,
+local full chain/hold/host-decision binding and all cross-boot/manual restoration remain
+future admission work. Next two source gates: explicit pre-window process-policy producer
+with reviewed frozen binding, then durable boot admission record; both need B1, exact-source
+review and green exact-head CI. Manual/D175 follow them, with independent APFS and designated
+disposable-Mac rehearsal still required. Codex owes the measured resource proposal before
+a new guest budget decision; no provisioning or disposable designation is inferred.

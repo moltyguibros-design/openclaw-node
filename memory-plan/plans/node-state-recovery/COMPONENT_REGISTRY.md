@@ -1,11 +1,11 @@
 # Node state recovery — registry
 
-2026-10-17 21:06 EDT — D215 verifies the owned pre-start restore-prior decision
-source at d5636b54 / CI39083436062 all8 green, Claude195. Native33controls16.121s and
-20mutants; guest decoding is an unprotected operator claim/admission false. Real
-owned-file barriers, scripted VM/flags; no boot/admission/manual driver or real Mac
-reboot proof. B5/1.2 open/pre, B6–B9 held, D64/production/timers unchanged. Next scoped
-guest admission/manual, then per-filesystem D175 reattachment. Receipt needs its own CI.
+2026-10-17 22:13 EDT — D216 adds an owned current-boot process diagnostic candidate:
+36 local controls/24 intended mutants pass; exact-source Claude and exact-head CI pending.
+No recovery consumer or admission changes; B5-boot-process-policy remains open. Last
+verified prerequisite is D215 at0d8099c1/all8 green. B5/1.2 open/pre, B6–B9 held, D64,
+production and timers unchanged. Next explicit policy producer/frozen binding, then durable
+boot-admission record; manual/D175 and actual Mac access/APFS/reboot proof follow.
 
 ## Family 1: persisted application state
 
@@ -799,3 +799,17 @@ manual route before D175. B5-gate-device-reattach, serving-NATS adapter and actu
 access/APFS/reboot evidence remain open. B5/1.2 pre/open, B6–B9 held, D64/production/timers
 unchanged; B3/B4 not repeated and four histories separate. This five-Markdown receipt
 head needs its own exact-head green CI; no production operation or local native image/VM/launchd operation.
+
+
+### 2026-10-17 22:13 EDT — owned process diagnostic candidate (D216)
+
+New scoped_process_diagnostic.py composes unchanged process/path/file primitives and
+provides a record-free fixture CLI with explicit current-boot expectations.36 local
+controls1.456s and24 intended mutants pass, including an independent spawned C-child
+control under explicitly substituted enumeration. No native full-host positive, policy
+producer, job/hold/decision comparison or admission is claimed. Report outcome is clean/
+refused, never verified; admission/history_certified stay false and argv is redacted.
+Claude207 design corrections are included; exact-source review and exact-head CI pending.
+B5-boot-process-policy stays open, along with guest admission/manual/D175 and actual Mac
+access/measurement/reboot proof. B5/1.2 pre/open, B6–B9 held, D64/production/timers unchanged,
+four histories separate. See D216 for sampling, current-disk-image and decoder limits.

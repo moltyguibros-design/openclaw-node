@@ -910,3 +910,88 @@ passing/noERROR. Runtime/workflow/release runner bytes are unchanged from3cbc. T
 supersedes the27/13 test floor without relabelling earlier runs. Exact test-head Claude
 and CI remain required. Smaller JSONDecodeError normalization and host import-graph
 notes are carried, not defects or a new refactor. Guest/manual/D175 and Mac proof stay open.
+
+## 2026-10-17 21:56 EDT — D62 scoped-observation re-orient
+
+Step1.2/B5 remains open at v1.2-pre; D215's owned pre-start decision prerequisite is verified.
+The next outcome is a record-free scoped process diagnostic, before any admission exception.
+Existing Journal.recover, recover_owned, Gate, saved identities and installed timers stay unchanged.
+This supports the local-first recovery path without granting a production or reboot waiver.
+The source needs a process policy that the saved hold does not yet contain; producer work is separate.
+Still the right next source work: only an explicitly scoped diagnostic can advance independently.
+
+Fresh source pre-screen: capture_ready/CAPTURE_KEYS and capture_cohort bind the existing
+job observations, stopped states and original hold, but no UID-wide expected process policy.
+The forward window refuses new record types. The existing two-job owned recovery driver
+cannot supply a legitimate full-node post-boot policy. D64 remains its first cross-boot refusal.
+Fresh PR224 receipt0d8099c1 is open/draft with all8 checks success and a clean worktree before
+this audit. B1 permits design/owned tests; B2 stays Alpine-only; B3 stays23-job JIT and B4 a
+bounded design input, neither repeated. B6 lacks an exact-window release; B7–B9 remain held.
+
+New Codex-owned warning B5-boot-process-policy: a future UID-wide admission cannot derive
+expected post-boot processes from old PIDs, a live sampled allow-list, or the current saved
+job/override tables. Codex must design and verify an explicit recorded pre-window policy
+producer and its frozen binding before that admission. It holds guest admission, manual
+restoration and D175. The independent diagnostic must not close this warning or call a
+root-only/UID-disabled positive a full D62 observation.
+
+Claude203's initial design is not adopted as written. It proposes a pre-journal consumer in
+recover_owned but disables UID scope, uses basename-dependent unreadable-process handling,
+implicitly allows self/launchctl helpers and claims native readability from the older census.
+Codex204 rejects those exceptions and the claimed need for a new operator approval merely to
+keep production refusal in place. Unknown scope must refuse; every allowed process needs
+explicit expectations, with no automatic descendant/platform exception. D162's unreadable
+process evidence is a limit, not a readability guarantee. D60 needs a freshly validated boot
+anchor and static exclusion binding; its durable admission record is later work.
+
+Executable deltas and the exact diagnostic contract await the corrected design. No source,
+policy producer, admission record, recovery waiver, service/VM/image/timer operation or Mac
+reboot proof is implemented or claimed by this preflight. Four NATS histories remain separate.
+
+### First unit after the Claude205 correction: scoped process diagnostic
+
+B5-D62-scoped-process-diagnostic is narrower than the proposed combined observation gate.
+It compares an explicit CURRENT-BOOT expected-generation table, not a pre-stop policy or
+cross-boot admission. Its record-free owned CLI is the concrete consumer. Missing post-boot
+policy production, all job/hold/stopped/override/D60 comparison, admission records and manual
+restoration remain separate open outcomes. There is no inferred self/helper or UID-off mode.
+Unknown membership refuses even for another UID; PID-list changes refuse conservatively.
+Source reading measures per-process generations, argv/cwd and current on-disk executable
+bytes using existing libproc and file/path primitives. This is sampled path/UID evidence,
+not loaded-image authorship, physical exclusion or continuous coverage.
+
+§6 deltas: one new scoped_process_diagnostic.py module, one portable/native-owned test
+module, one intended-assertion runner, existing Linux/macOS CI registration and plan/audit
+ledgers. Every existing executable body, recovery driver, journal/hold schema, Gate, host
+module, shared census primitive and installed timer stays unchanged. The CLI requires an
+owner-private literal temporary fixture root/file before observation and emits redacted
+comparison facts with admission/history_certified false, never an enrollment policy.
+
+Needs: verified D215 exact-head all8 CI; existing nats_macos_proc, relevant_entrypoint,
+regular_content and boot_identity primitives. Feeds: explicit future policy authoring and
+disposable-Mac unknown-set measurement, then the separately reviewed producer/admission/
+manual/D175 gates. Verify: portable strict schema/scope/unknown/unstable/generation/code/
+argv/cwd/count/boot negatives, actual owned child primitive observation on macOS with any
+enumeration substitution labelled, byte-unchanged fixture/CLI refusals, intended-assertion
+mutants with passing controls/noERROR, Claude exact-source review and exact-head green CI.
+No native whole-host positive or admission/readability claim follows from this unit.
+
+
+### 2026-10-17 22:13 EDT — owned process diagnostic candidate (D216)
+
+New scoped_process_diagnostic.py composes unchanged process/path/file primitives and
+provides a record-free fixture CLI with explicit current-boot expectations.36 local
+controls1.456s and24 intended mutants pass, including an independent spawned C-child
+control under explicitly substituted enumeration. No native full-host positive, policy
+producer, job/hold/decision comparison or admission is claimed. Report outcome is clean/
+refused, never verified; admission/history_certified stay false and argv is redacted.
+Claude207 design corrections are included; exact-source review and exact-head CI pending.
+B5-boot-process-policy stays open, along with guest admission/manual/D175 and actual Mac
+access/measurement/reboot proof. B5/1.2 pre/open, B6–B9 held, D64/production/timers unchanged,
+four histories separate. See D216 for sampling, current-disk-image and decoder limits.
+
+Mid-implementation re-orient: Claude207 narrows image/ctime and enumeration claims,
+requires a second per-PID sample and independently expected native argv. These stay
+inside the same record-free process outcome; no admission/policy/recovery delta is added.
+The comparison's shared path helper reads paths, so read-only replaces the earlier pure
+wording. The C fixture replaces a false Python-launcher assumption. Production is unchanged.

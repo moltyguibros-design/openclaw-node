@@ -3526,3 +3526,24 @@ manual route before D175. B5-gate-device-reattach, serving-NATS adapter and actu
 access/APFS/reboot evidence remain open. B5/1.2 pre/open, B6–B9 held, D64/production/timers
 unchanged; B3/B4 not repeated and four histories separate. This five-Markdown receipt
 head needs its own exact-head green CI; no production operation or local native image/VM/launchd operation.
+
+
+### 2026-10-17 22:13 EDT — owned process diagnostic candidate (D216)
+
+New scoped_process_diagnostic.py composes unchanged process/path/file primitives and
+provides a record-free fixture CLI with explicit current-boot expectations.36 local
+controls1.456s and24 intended mutants pass, including an independent spawned C-child
+control under explicitly substituted enumeration. No native full-host positive, policy
+producer, job/hold/decision comparison or admission is claimed. Report outcome is clean/
+refused, never verified; admission/history_certified stay false and argv is redacted.
+Claude207 design corrections are included; exact-source review and exact-head CI pending.
+B5-boot-process-policy stays open, along with guest admission/manual/D175 and actual Mac
+access/measurement/reboot proof. B5/1.2 pre/open, B6–B9 held, D64/production/timers unchanged,
+four histories separate. See D216 for sampling, current-disk-image and decoder limits.
+
+- [A] B5-D62-scoped-process-diagnostic — exact-source review and CI remain required.
+
+> **B5-D62-scoped-process-diagnostic — Goal:** provide a strict record-free owned current-boot process diagnostic.
+> **Needs:** D215 receipt0d8099c1 all8 green; existing libproc, boot, file and path primitives; B1 owned authority.
+> **Feeds:** explicit process-policy authoring and disposable-Mac unknown-set measurement, then separate policy producer/admission/manual/D175 gates.
+> **Verify:** code:36 owned controls including an independently expected native child (substituted enumeration only),24 intended-assertion mutants with controls/noERROR, owned-runner unpatched refusal with child matched, unchanged existing executable bodies, Claude exact-source review and exact-head green CI. No production or full-host positive.

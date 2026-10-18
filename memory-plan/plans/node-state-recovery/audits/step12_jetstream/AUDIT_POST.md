@@ -117,3 +117,17 @@ failures and two held locks; yes — real file barriers and decisive33/20 proof;
 Claude exact-source review and all8 source CI. Feed lands in restore_only claim decoding;
 future full-node admission/manual/D175 consumers remain explicit open work. No runtime
 deploy, service restart, production hold, cold-master acceptance or operational closure.
+
+
+### 2026-10-17 22:13 EDT — owned process diagnostic candidate (D216)
+
+New scoped_process_diagnostic.py composes unchanged process/path/file primitives and
+provides a record-free fixture CLI with explicit current-boot expectations.36 local
+controls1.456s and24 intended mutants pass, including an independent spawned C-child
+control under explicitly substituted enumeration. No native full-host positive, policy
+producer, job/hold/decision comparison or admission is claimed. Report outcome is clean/
+refused, never verified; admission/history_certified stay false and argv is redacted.
+Claude207 design corrections are included; exact-source review and exact-head CI pending.
+B5-boot-process-policy stays open, along with guest admission/manual/D175 and actual Mac
+access/measurement/reboot proof. B5/1.2 pre/open, B6–B9 held, D64/production/timers unchanged,
+four histories separate. See D216 for sampling, current-disk-image and decoder limits.
