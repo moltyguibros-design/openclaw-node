@@ -286,3 +286,113 @@ budget contract still needs a final pre-audit before implementation. Mac access,
 APFS reattach, reboot rehearsal and the four physical histories remain separate.
 This receipt changes five Markdown records only; its own exact-head CI/review
 remain pending at commit time.
+
+
+### 2026-10-18 01:25 EDT — B5-D62-process-observation-envelope candidate (D220)
+
+D219 receipt2615452b and sourceee311fcd pass all8 CI39097936909 and39096484480.
+Claude229/237 find no required source/receipt issue. Receipt-native49/2.326s/46
+and Linux49/0.831s/46 are Codex's final run observations, separate from Claude237's
+independently verified source-native log. Receipt merge5335589ac9524a7d66d947453c16958466f64345
+has receipt2615452b as second parent and an identical whole tree. The stale B5
+frontier summary is corrected here; D219's pending-at-commit text stays historical.
+
+Next bounded outcome: one four-PID-sample, current-boot observation envelope over
+a bound authored policy, consumed by a record-free owned diagnostic. Claude241
+proposes composing unchanged diagnostic.compare(raw, empty expectations) for
+raw schema, scope and redaction rather than a second census/resolver. Its own
+clean/refused verdict is stripped. Codex242 pins outer-boot expectations so inner
+boot failures survive as unknown, all raw unknown multiplicity, excluded-row
+fingerprints, both launchd reads and plist identities, unique namespace/label
+pairs, integer monotonic offsets and the fixed owned fixture boundary. Final
+pre-audit response is pending; no observer source or test exists at this entry.
+
+Recorded means a complete coherent observation, never a class-policy match or
+admission. Unknown, unreadable, unstable, changed, incomplete or expired evidence
+refuses. Unloaded/idle job observations are known negative facts for the later
+comparator. Same-UID scope cannot be excluded. Other-UID scope remains read-only
+observer evidence, bound to the policy and samples, with D189's unprotected-input
+limit; no basename/platform/controller exception and no raw argv disclosure.
+The120-second acceptance window cannot interrupt blocked filesystem/libproc
+calls; at most16 distinct anchors are queried. No hard wall-clock guarantee.
+
+Minimal source surface after the pre-audit: one new step12 module, test and
+intended-assertion runner, four CI registration lines, and these six ledgers.
+Existing diagnostic, policy binder, shared lib, Journal/schema/recover/D64,
+Gate/identity, host executables and timers stay unchanged. The owned consumer
+reads a separately prepared fixture; it constructs no Journal/Gate, capture or
+policy enrollment and writes no file. Scripted file input always stays scripted.
+
+Verify before closing only this owned source prerequisite: pure schema/coherence
+controls and intended mutants; actual helper composition and ordered samples;
+unknown-entry retention, all-row stability, namespace/generation/plist bracketing,
+redaction, budget/cap and provenance negatives; honest frozen-policy owned reader
+with unchanged files and zero constructors; native substituted and CI full-runner
+measurements, no full-scope positive claim; exact-source review and green CI.
+Class matching, jobs/recorded hold/overrides/fresh D60, durable admission, attended
+manual/D175, Mac access/APFS reattach/reboot and four-history acceptance stay later.
+B5/1.2 remain open/pre, B6–B9 held. No production operation is added or performed.
+
+
+### D220 pre-audit settled — Claude243, before source work
+
+Claude243 accepts Codex242 with no required issue. Carry the seven precision pins:
+outer boot_start is the empty-expectations boot; inner boot=None and all unknowns
+survive unchanged; excluded rows carry full redacted-row fingerprints; J1 is read
+for unloaded/idle as well as running jobs; both redacted job reads and both plist
+identities survive; reported PID generations bind both passes, including excluded
+rows; anchors are unique namespace/label pairs without choosing an authored hash;
+integer monotonic_ns offsets use120000000000ns and16 anchors; fixed private owned
+fixture capture/data/table/envelope paths precede all reading/collection. table.json
+is fixture authority only and supplies no B3 provenance. Scripted source/coverage
+is forced by the file consumer; original claims are narrowly typed labels only.
+No raw arguments key or inherited diagnostic verdict appears in serialized facts.
+Recorded is coherent sampled observation only, never class matching or admission.
+The on-disk and D189 limits remain. Source/proof implementation now starts; exact
+review/CI and the candidate row remain open.
+
+
+### 2026-10-18 01:50 EDT — D220 local observation-envelope candidate proof
+
+The new process_observation_envelope composes the existing two-sample observe
+and compare scope stages twice, with an outer current boot and bracketed launchd
+facts. Its pure serialized validator retains all unknown entries, including
+multiple failures for one PID and global failures; compares included rows and
+excluded full-row fingerprints across passes; and independently recomputes
+coverage, generation/job/plist ties, budget and the envelope verdict. It strips
+the old diagnostic verdict and emits no raw process or launchd arguments.
+Recorded is coherent sampled observation only, not a class-policy match.
+
+Local52 tests pass11.274s; all47 named intended-assertion mutants pass with their
+unmutated controls intact. The combined old diagnostic/policy plus new suite
+passes141 tests22.714s. Earlier50/51 and139 executions retain their actual counts.
+The first four mutation attempts exposed proof-harness issues (an earlier
+assertion firing, nonviable mocks after removed guards, a finite fake clock and
+an inherited fixture umask dependency); those attempts are not complete proof.
+The final fixture sets private creation permissions only while preparing its
+owned files and restores the caller's mask; its standalone022-mask control
+passes. No exception or unrelated failure is counted as a kill.
+
+The owned consumer reads an honestly prepared frozen-policy fixture through the
+unchanged reader, with Journal/Gate constructors forbidden and unchanged file
+snapshots. It fixes capture/data/table/envelope inputs beneath one literal
+private temporary root, validates the actual caller/policy-root ownership, bounds
+canonical single-link file input at8MiB, and forces file provenance scripted.
+The table is fixture authority only, never B3 host-held pin provenance.
+Local native evidence is the substituted child run with four PID-list calls and
+real existing libproc/argv/hash/cwd primitives; no unpatched local full scan ran.
+The native CI full-runner measurement remains pending and must refuse unknown;
+no native full-scope or attribution positive is claimed.
+
+Only three new step12 executable/proof files and four CI registration lines
+change executable surface; every existing diagnostic, policy-binding, library,
+Journal/schema/recover/D64, Gate/identity, host executable and timer byte is
+unchanged from2615452b. Some cross-sample refusal predicates are dominated by
+coverage/row equality/empty-unknown constraints; no equivalent single-predicate
+removal is counted. The process-pass-reuse mutant and real four-list child
+control pin actual collection, and all47 counted changes fail named assertions.
+
+Exact-source review and exact-head CI are pending. The D220 row stays open;
+B5/1.2 open/pre, B6–B9 held. Class matching, jobs/hold/overrides/fresh D60, durable
+admission, attended manual/D175 and physical Mac/APFS/reboot histories stay later.
+No production operation, resource provisioning, policy enrollment or admission.
