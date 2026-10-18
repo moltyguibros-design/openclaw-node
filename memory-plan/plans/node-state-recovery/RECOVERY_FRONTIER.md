@@ -58,7 +58,7 @@ review only, not source readiness or B5 closure. Production remains untouched.
 | B2 | **Cleared for the disposable mechanism only.** Codex registered a separate Apple-backend UTM VM with its own ASIF disk and a verified Alpine ISO. It started and stopped normally; while `UF_IMMUTABLE` guarded that stopped disk, UTM refused its start and remained stopped; after unlock it started and stopped normally. The production VM stayed started throughout. | Codex carries this owned result into B5's host boot controller; no further VM creation is needed for B2's guard mechanism. B5's macOS reboot rehearsal has a separate access requirement. `utmctl start` exited 0 even on the refused attempt, so the controller must check the resulting state and error. | `audits/step12_jetstream/B2_UTM_GUARD_REHEARSAL_20261012.json` records distinct VM/disk identities, ASIF format, guard refusal, unlock recovery and final states. This is not a production boot-denial certificate. | B5 controller implementation and owned tests. |
 | B3 | **Just-in-time installation pins:** the October 9 candidate names `viewer-observed-20261008`; the installed viewer has since moved to `viewer-plan-task-links-autosave-20261011`. The 23-job candidate is unapproved and can drift again. | Codex resolves known structural drift now, but re-captures all 23 installed jobs and direct file hashes only immediately before an approved window. Repeating the capture before a window is scheduled does **not** count as progress. | Current installed identities and hashes match the reviewed baseline at window entry, including the five old timer pins and the exact conditional migration form. No pre-window timer reinstall. | B6 and B7. |
 | B4 | **Cleared as a bounded design input:** all 23 installed plists and direct launch files, activation keys, and current GUI/user/system OpenClaw-label observations are captured. Claude's adversarial review at `ac954055` found no remaining concrete false claim. This is not a no-writer certificate. | Codex carries the identified child, deploy, viewer, bus and file-writing routes into B5; transitive and out-of-cohort writers remain fail-closed uncertainties for the window-time census and stopped-VM boundary. Re-running this static capture alone is not progress. | `audits/step12_jetstream/B4_WRITER_PROVENANCE_AUDIT_20261012.md` and its JSON cover all 23 labels, classify the only observed system-domain OpenClaw label, name re-entry edges, and state residual uncertainty without claiming pre-stop physical exclusion. | Boundary design B5. |
-| B5 | **In progress, owned source only:** D231 closes scripted entrypoint consistency at source0aa1df7d/all8CI39133265637/Claude307. Native28/39 is scripted portability; no fresh D60/hold/admission. Receipt review/CI pending at commit. | Codex builds current entrypoint/override/D60 observation, full held/process integration, durable admission, manual restoration and D175. Operator separately designates disposable access or decides a measured resource proposal. | Reviewed exact-head source/CI; distinct native full pipeline, APFS reattach and disposable-Mac reboot/login/process/hold/migration evidence. D189 and pre-stop limits remain. | Per-window release B6. |
+| B5 | **In progress, owned source only:** D233 closes shared entrypoint whole-value classification at source4abd6360/all8CI39140772095/Claude321. Native21/19 proves owned path/caller portability only. Receipt review/CI pending at commit; current observer stays open. | Codex builds current inventory/override/D60 observation, full held/process integration, durable admission, manual restoration and D175. Operator separately designates disposable access or decides a measured resource proposal. | Reviewed exact-head source/CI; distinct native full pipeline, APFS reattach and disposable-Mac reboot/login/process/hold/migration evidence. D189 and pre-stop limits remain. | Per-window release B6. |
 | B6 | **Separate live-run release required.** B1's boundary choice and B5's design review never authorize a production stop. | Operator gives a fresh, explicit go/no-go for one exact attended window only after B2, B3 and B5 pass. The two-hour heartbeat may prepare and warn, but must never initiate the live stop. | Recorded window-specific authorization naming the reviewed runbook, current pins, host operator and abort contact; it explicitly names D173–D175's user-owned pre-stop evidence without root attestation, D62's ACCEPTED-or-ABORT pre-boot rule, the conditional post-admission/pre-restoration timer re-pin, and the manual-restoration fallback. Without it, B7 remains closed. | Live hold and shutdown B7. |
 | B7 | **Live full-node hold and shutdown closed.** No service or VM stop has occurred for this recovery. | Only in the attended, specifically authorized B6 window, execute the approved sequence and abort on any failed precondition. No single NATS member may be stopped as a rehearsal. | Application quiescence under the approved boundary, clean VM shutdown, active host boot denial and definitive physical no-writer proof at the boundary specified by B1. | Stopped-VM capture B8. |
 | B8 | **Four-store capture and isolated acceptance closed.** No three healthy cold masters have been accepted. | Bind host capture and restore tools to the four declared physical paths and volume, then restore the copies on isolated servers. | Four separately hashed path/volume/window-bound copies faithfully reproduce the observed bytes; offline streams, counts, sequences and expiring-stream treatment match. This does **not** prove historical independence of the four members; that needs deployment-time provenance outside this capture. | Step 1.2 closure and any topology change. |
@@ -2708,3 +2708,89 @@ before the new unit. This initial CI is not green; no retry of it is requested.
 Its prior-regression replay was34of40 with missing sandbox NATS and the old
 mutator exits when reported, not a claimed311replay. The corrected head needs
 its own exact review/full CI; only then D233. D64/Gate/timers/production fixed.
+
+
+### 2026-10-18 12:14 EDT — owned shared entrypoint path scope verified (D233)
+
+Source4abd636045d074a5d80f5696defc3f972579bfc6 passes all eight distinct latest job results in
+[CI39140772095](https://github.com/moltyguibros-design/openclaw-node/actions/runs/39140772095)
+attempt2. Native execution117714562189/attempt1
+(reported API117722261899/attempt2):21tests/0.073s/no skip/19 intended
+assertion kills/intact controls. Linux22 job117722224612:21/0.049s/no skip/19.
+Codex inspected completed full raw logs: native85970bytes SHA256
+ea0e428e0d6b8de982161641c4517510fad591be8c2140d52e2394c4a0da7d4a; Linux1535966bytes SHA256
+2426f7801e2c8c796850dbdbd1f31d3fec5bb19c6e8e25642d748bf005408d94. Both logs name merge3963b71bd73e1ebb534502ca83bdda2669192fac,
+source as second parent and identical whole tree. New native proof is owned
+filesystem/caller portability, never live inventory/override/D60 or launchd
+measurement. Older native lines retain their own scopes.
+
+Claude321 independently clears exact source/proof. Independent321 confirms sole parent488ad0cf then60992e9e and nine-file/521insertions/5deletions proof-only correction. Nine runtime lines, workflow, process shim and existing assertions are fixed. As uid65534 it reproduces21new tests,19 intended kills/intact controls, old27kills plus2explicit redundant-branch passes, and an audit with27kills/0survivors/0errors. Natural absolute-gate and raw-slash variants now die; resolved-path hardlink variant is not counted. It confirms LIFO real-cwd restoration, exact retained replacements, six-ledger blocks and honest failure/history attribution. Its initial488 prior replay finally completes40scripts:37exit0,3exit1 comprising two unavailable sandbox NATS binaries and the old uncorrected process runner; the corrected runner now passes. This is separate from local311regressions. CI was in progress with five early successes when321 read it; completed CI observations are later Codex evidence.
+Completed CI evidence remains attributed to Codex wherever the review did not
+reach it. Local21/0.064s/no skip and19kills are distinct from prior311/45.650s/
+two intentional CI-only native skips. Parent classifier fails all12 absolute
+delimiter subcases without errors. Whole-after-token ordering passes21 and
+remains an equivalent, not an extra kill. Inventory-extra refusal is a shared
+validator control, not an extra kill; every counted mutant dies by its named
+assertion with intact selected controls and no ERROR-only kill.
+
+Only B5-D62-entrypoint-whole-value-scope closes as an owned source prerequisite.
+The existing shared helper gains nine lines resolving each entire expanded
+absolute or slash-relative-with-supplied-cwd value with strict=False and exact
+equality/parent containment, then existing suspicious_hardlink with original
+source/label. Bare names never join cwd; process cwd is never inferred. Both
+hardlink exemptions remain. Existing prefix, raw substring, token fallback and
+environment/home expansion stay fixed. Dangling aliases into roots are relevant.
+A neutral real job reaching protected roots through delimiter aliases may newly
+refuse future baseline validation; that stricter membership is intended. Existing
+installed/loaded callers consume the helper; no parallel classifier or observer
+is added. The sole existing proof-runner exception retires two rescued process single-site
+kill claims into explicit expected-pass controls;27 intended process kills plus
+2redundant-branch passes are counted separately. Production process shim/all
+existing assertions remain fixed; all other pre-existing bodies stay fixed.
+
+Owned controls cover file/parent roots, delimiters/tab/newline, relative paths,
+working directories, home/environment, hardlinks and exemptions, prefix siblings
+and harmless/long/nonstring values. Callers use owned plists, supplied launchd
+text/inspect and blocked subprocess calls. Installed environment references
+expand; unused environment values are not scanned there. Loaded environment
+values are scanned. Newline works direct/plist; existing loaded parser cannot
+represent embedded newlines. Embedded --flag= delimiter aliases stay token-only
+negative; raw substring over-includes raw prefix siblings. The process shim's
+broader bare-name join remains fixed; its possible partial-redundancy cleanup
+is carried, not performed. No full membership, physical writer or provenance
+coverage follows. Initial488ad0cf CI39139556698 failed in the old runner before the new unit.
+Its complete Linux943-line/83687byte log SHA256
+0a2d6f07d9565620ed039befbef4a107f12d9f59d03894a83d38a42be2c8f7a8
+remains failed evidence; no retry or relabelled21/19. Initial native117710976978
+also failed the same old mutant before the new unit: raw33125bytes SHA256
+5ad7d023fe838a4115aafdf21726da529eda1294d05b0a2cf889d461a29f1831.
+Neither initial-platform result is green.319 accepted the narrow
+proof re-orient; both redundant variants pass40process tests and are rescued
+only by the new shared helper. Its second required proof correction replaces
+a Path.cwd mock with actual owned cwd/restoration and kills the natural
+absolute-gate variant. Expanded-only slash control is also adopted. Source
+nine lines/workflow/production shim remain fixed through4abd6360. Historical
+D21729kill proof stays true at its old head; current runner reports27plus2.
+Corrected-source attempt1 Linux117714562096 passed21/0.051s/no skip/19
+and the old27plus2, then the unchanged test_preservation_cluster failed its
+stream-add with peer-offline placement. Full raw116841bytes SHA256
+eb06b364fed34425d4412c7cb72ffdba7ac54ef12f1fb027fc5ee2326cb9a557 remain failed evidence; cleanupFailures empty.
+One unmodified owned Mac control with NATS2.12.6/Node24.13.0 passed3.275s with
+all own cleanup checks; raw342bytes SHA256074f3effbafc7aab67bf43e751d1445930462fa9b8e88ad8ee3a01684baddde3.
+That is not a Linux reproduction or root-cause closure. No readiness/timeout/
+fixture repair is included. After terminal attempt1 failure, exactly one targeted Linux rerun was scheduled on unchanged4abd6360. The other seven successes are carried under new API attempt2 IDs with identical original runner/start/end metadata; the native raw log is checked by byte identity, never called a second execution. No further retry or all-attempt1-green claim. The earlier488 proof failure was corrected in a new commit, not rerun. The R3 follow-up remains open
+and the exact-head all8 prerequisite was not waived.
+First noncanonical /var prescreen and failed relative workflow
+edit invocation are not used as evidence and changed no source.
+
+This source changes one function, two new proof files, one necessary existing proof-runner exception,
+four workflow lines and
+six ledgers. This D233 receipt changes five Markdown only, leaving AUDIT_PRE and
+all code/tests/runners/workflow fixed. Local lint14PASS/1old idle-versionWARN/
+0FAIL; export's old missing ignored automation/history limitation stays separate.
+Only source review/CI is closed at commit time; this receipt needs its own exact
+review/all8CI. The R3 placement follow-up and earlier optional controls remain
+open. Current inventory/override/freshD60 observer, full held/process integration,
+durable admission/manual/D175 and Mac/APFS/reboot/four-history evidence remain
+later. B5/1.2 open/v1.2-pre,B6–B9 held,D64/Gate/installed timers/production
+untouched; no fresh D60, live hold, history/authorship, eligibility or admission.

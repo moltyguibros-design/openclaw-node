@@ -2620,3 +2620,89 @@ before the new unit. This initial CI is not green; no retry of it is requested.
 Its prior-regression replay was34of40 with missing sandbox NATS and the old
 mutator exits when reported, not a claimed311replay. The corrected head needs
 its own exact review/full CI; only then D233. D64/Gate/timers/production fixed.
+
+
+### 2026-10-18 12:14 EDT — owned shared entrypoint path scope verified (D233)
+
+Source4abd636045d074a5d80f5696defc3f972579bfc6 passes all eight distinct latest job results in
+[CI39140772095](https://github.com/moltyguibros-design/openclaw-node/actions/runs/39140772095)
+attempt2. Native execution117714562189/attempt1
+(reported API117722261899/attempt2):21tests/0.073s/no skip/19 intended
+assertion kills/intact controls. Linux22 job117722224612:21/0.049s/no skip/19.
+Codex inspected completed full raw logs: native85970bytes SHA256
+ea0e428e0d6b8de982161641c4517510fad591be8c2140d52e2394c4a0da7d4a; Linux1535966bytes SHA256
+2426f7801e2c8c796850dbdbd1f31d3fec5bb19c6e8e25642d748bf005408d94. Both logs name merge3963b71bd73e1ebb534502ca83bdda2669192fac,
+source as second parent and identical whole tree. New native proof is owned
+filesystem/caller portability, never live inventory/override/D60 or launchd
+measurement. Older native lines retain their own scopes.
+
+Claude321 independently clears exact source/proof. Independent321 confirms sole parent488ad0cf then60992e9e and nine-file/521insertions/5deletions proof-only correction. Nine runtime lines, workflow, process shim and existing assertions are fixed. As uid65534 it reproduces21new tests,19 intended kills/intact controls, old27kills plus2explicit redundant-branch passes, and an audit with27kills/0survivors/0errors. Natural absolute-gate and raw-slash variants now die; resolved-path hardlink variant is not counted. It confirms LIFO real-cwd restoration, exact retained replacements, six-ledger blocks and honest failure/history attribution. Its initial488 prior replay finally completes40scripts:37exit0,3exit1 comprising two unavailable sandbox NATS binaries and the old uncorrected process runner; the corrected runner now passes. This is separate from local311regressions. CI was in progress with five early successes when321 read it; completed CI observations are later Codex evidence.
+Completed CI evidence remains attributed to Codex wherever the review did not
+reach it. Local21/0.064s/no skip and19kills are distinct from prior311/45.650s/
+two intentional CI-only native skips. Parent classifier fails all12 absolute
+delimiter subcases without errors. Whole-after-token ordering passes21 and
+remains an equivalent, not an extra kill. Inventory-extra refusal is a shared
+validator control, not an extra kill; every counted mutant dies by its named
+assertion with intact selected controls and no ERROR-only kill.
+
+Only B5-D62-entrypoint-whole-value-scope closes as an owned source prerequisite.
+The existing shared helper gains nine lines resolving each entire expanded
+absolute or slash-relative-with-supplied-cwd value with strict=False and exact
+equality/parent containment, then existing suspicious_hardlink with original
+source/label. Bare names never join cwd; process cwd is never inferred. Both
+hardlink exemptions remain. Existing prefix, raw substring, token fallback and
+environment/home expansion stay fixed. Dangling aliases into roots are relevant.
+A neutral real job reaching protected roots through delimiter aliases may newly
+refuse future baseline validation; that stricter membership is intended. Existing
+installed/loaded callers consume the helper; no parallel classifier or observer
+is added. The sole existing proof-runner exception retires two rescued process single-site
+kill claims into explicit expected-pass controls;27 intended process kills plus
+2redundant-branch passes are counted separately. Production process shim/all
+existing assertions remain fixed; all other pre-existing bodies stay fixed.
+
+Owned controls cover file/parent roots, delimiters/tab/newline, relative paths,
+working directories, home/environment, hardlinks and exemptions, prefix siblings
+and harmless/long/nonstring values. Callers use owned plists, supplied launchd
+text/inspect and blocked subprocess calls. Installed environment references
+expand; unused environment values are not scanned there. Loaded environment
+values are scanned. Newline works direct/plist; existing loaded parser cannot
+represent embedded newlines. Embedded --flag= delimiter aliases stay token-only
+negative; raw substring over-includes raw prefix siblings. The process shim's
+broader bare-name join remains fixed; its possible partial-redundancy cleanup
+is carried, not performed. No full membership, physical writer or provenance
+coverage follows. Initial488ad0cf CI39139556698 failed in the old runner before the new unit.
+Its complete Linux943-line/83687byte log SHA256
+0a2d6f07d9565620ed039befbef4a107f12d9f59d03894a83d38a42be2c8f7a8
+remains failed evidence; no retry or relabelled21/19. Initial native117710976978
+also failed the same old mutant before the new unit: raw33125bytes SHA256
+5ad7d023fe838a4115aafdf21726da529eda1294d05b0a2cf889d461a29f1831.
+Neither initial-platform result is green.319 accepted the narrow
+proof re-orient; both redundant variants pass40process tests and are rescued
+only by the new shared helper. Its second required proof correction replaces
+a Path.cwd mock with actual owned cwd/restoration and kills the natural
+absolute-gate variant. Expanded-only slash control is also adopted. Source
+nine lines/workflow/production shim remain fixed through4abd6360. Historical
+D21729kill proof stays true at its old head; current runner reports27plus2.
+Corrected-source attempt1 Linux117714562096 passed21/0.051s/no skip/19
+and the old27plus2, then the unchanged test_preservation_cluster failed its
+stream-add with peer-offline placement. Full raw116841bytes SHA256
+eb06b364fed34425d4412c7cb72ffdba7ac54ef12f1fb027fc5ee2326cb9a557 remain failed evidence; cleanupFailures empty.
+One unmodified owned Mac control with NATS2.12.6/Node24.13.0 passed3.275s with
+all own cleanup checks; raw342bytes SHA256074f3effbafc7aab67bf43e751d1445930462fa9b8e88ad8ee3a01684baddde3.
+That is not a Linux reproduction or root-cause closure. No readiness/timeout/
+fixture repair is included. After terminal attempt1 failure, exactly one targeted Linux rerun was scheduled on unchanged4abd6360. The other seven successes are carried under new API attempt2 IDs with identical original runner/start/end metadata; the native raw log is checked by byte identity, never called a second execution. No further retry or all-attempt1-green claim. The earlier488 proof failure was corrected in a new commit, not rerun. The R3 follow-up remains open
+and the exact-head all8 prerequisite was not waived.
+First noncanonical /var prescreen and failed relative workflow
+edit invocation are not used as evidence and changed no source.
+
+This source changes one function, two new proof files, one necessary existing proof-runner exception,
+four workflow lines and
+six ledgers. This D233 receipt changes five Markdown only, leaving AUDIT_PRE and
+all code/tests/runners/workflow fixed. Local lint14PASS/1old idle-versionWARN/
+0FAIL; export's old missing ignored automation/history limitation stays separate.
+Only source review/CI is closed at commit time; this receipt needs its own exact
+review/all8CI. The R3 placement follow-up and earlier optional controls remain
+open. Current inventory/override/freshD60 observer, full held/process integration,
+durable admission/manual/D175 and Mac/APFS/reboot/four-history evidence remain
+later. B5/1.2 open/v1.2-pre,B6–B9 held,D64/Gate/installed timers/production
+untouched; no fresh D60, live hold, history/authorship, eligibility or admission.
