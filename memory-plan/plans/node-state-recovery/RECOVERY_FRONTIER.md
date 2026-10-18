@@ -1,4 +1,4 @@
-# Recovery frontier — 2026-10-18 00:14 EDT
+# Recovery frontier — 2026-10-18 00:40 EDT
 
 This is the Codex desktop heartbeat's short control surface for recovery step
 1.2. It does not change `INVENTORY.md`, `DECISIONS.md`, the no-stop rule, or
@@ -1088,3 +1088,48 @@ Linux117580780740 recorded47/0.960s/44 at merge3a743eddd6137ae831ae4a3441000ab16
 1bc8c68cfa910d921f5c153c183a3bef064a06d8bfde703b955e2af4d03c7590. This
 is the earlier proof only. Corrected-test exact-source review and new-head CI
 remain pending. B5/1.2 stay open/pre; no admission, production, Gate or timer change.
+
+
+### 2026-10-18 00:40 EDT — owned authored process-policy binding source verified (D219)
+
+Source ee311fcd24f63df8439e0337588708831f4ff47a passes all eight jobs in
+[CI39096484480](https://github.com/moltyguibros-design/openclaw-node/actions/runs/39096484480).
+Native job117583902913 passes49 controls in1.188s and all46
+intended-assertion mutants with intact controls. Linux job117583902984 passes49
+controls in1.113s and46 intended mutants. Both complete raw logs were
+read by Codex; no ERROR or unrelated failure is counted as a mutant kill.
+Native raw-log SHA256 e034f1a9d62af75ebfdfea48c30b9cf7c73adcc5c75266b267afa72761fb2a1e;
+Linux raw-log SHA256 0c024fb7cb08be81448d74270b8a5ef91b62ebb667734bc1adbab91895927eea.
+Both logs name checkout merge 6c079518c14761e8ed684d0d51e07f7ee8ff1f9f, whose
+second parent is the reviewed source and whose whole tree is identical to it.
+
+Claude229 independently reproduces49/46 as uid65534 and finds no required issue.
+Its independent checkpoint-before-policy reordering variant, a variant wrapping
+policy errors into checkpoint-worded refusals, and the image pin-equality mutant
+all fail the new assertions. Claude227's required proof gap is closed; its six
+remaining non-blocking strictness/proof limits stay in INVENTORY. Runtime and
+workflow bytes are identical to433966aa; the earlier324-test regression remains
+that earlier common-executable run, not a new combined run. Superseded run39095435399
+was cancelled for the proof correction and is not counted green.
+
+Only B5-D62-process-policy-binding closes as an owned source prerequisite.
+The optional new full-node baseline field binds authored generation-free claims
+to the externally pinned checkpoint; every supplied-policy reopen route refuses,
+and both actual initial serialized files fit the existing1MiB reader bound.
+Owned producer/frozen/image positives use real owned file, Journal, host commitment
+and stopped-reader code; VM, launchd and hold observations remain scripted.
+This proves checkpoint consistency, not policy authorship, pre-stop authenticity,
+completeness, satisfiability, live enrollment, record-time eligibility or admission.
+The executable hash remains an on-disk claim, not loaded-image evidence. D189 stays.
+
+B5/1.2 remain open/pre and B6–B9 held. Recover/D64, Gate, forward/capture and frozen
+verifier bodies, host executables and installed timers stay unchanged. No production
+service/VM/timer operation, mount, resource provisioning, reboot or local live process
+scan ran for this unit. Next is a separately reviewed process-observation-envelope
+contract, then the pure process-class comparator, jobs/hold/overrides/fresh D60,
+durable admission and the attended manual route/D175. The envelope discussion is
+design input only; its sampling, scope-evidence, redaction and acceptance-window
+budget contract still needs a final pre-audit before implementation. Mac access,
+APFS reattach, reboot rehearsal and the four physical histories remain separate.
+This receipt changes five Markdown records only; its own exact-head CI/review
+remain pending at commit time.
