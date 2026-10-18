@@ -886,3 +886,13 @@ allow-list are not adopted. Its proposed manual steps name future tools, not a p
 executable route. D175 translation must eventually be per verified filesystem/path
 component, preserving identity.json bytes and all same-boot descriptor mappings. Guest
 scoped admission, actual manual restoration and reattachment remain subsequent units.
+
+
+D214 mutation-runner integration correction: aa340975 duplicates the prior release
+runner's literal durable_evidence(evidence) anchor (2 hits, expected1). CI39082243166
+was canceled as superseded before claiming a native/green result. Rename only the new
+decision producer's local variable to transcript and update only its own runner anchor;
+old release/runtime bodies and runner stay unchanged. All27 decision controls pass
+43.692s, all13 new decision mutants pass, and the unchanged prior release runner passes
+all13 intended kills with its controls. This is a necessary same-contract test integration
+correction, not a production behavior change. Exact corrected-head Claude/CI still required.

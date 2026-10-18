@@ -10,7 +10,7 @@ MUTANTS = (
      "intent == boot_intent(host_spec, capture_dir, evidence, samples['verify'])",
      'True', 1, 'test_verifier_rejects_rebound_evidence_table', 'RuntimeError not raised', False),
     ('original-barrier-skipped', 'host_vm_reconcile',
-     '            durable_evidence(evidence)\n', '            pass\n', 1,
+     '            durable_evidence(transcript)\n', '            pass\n', 1,
      'test_original_barrier_failure_precedes_intent', 'OSError not raised', True),
     ('decision-sample-barrier-skipped', 'host_vm_reconcile',
      "            durable_evidence({output / 'decision' / key: raw for key, raw in final_files.items()})\n",

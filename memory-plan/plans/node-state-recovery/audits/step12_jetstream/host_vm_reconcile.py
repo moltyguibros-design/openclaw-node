@@ -591,13 +591,13 @@ def decide_restore_prior(host_spec, capture_dir, fixture=False):
             require(json.loads(verify_files['preflight.json']) == observed,
                     'decision verify sample differs from consumed observation')
             released = verify_release(host_spec, capture_dir, observed, directory_fd, locks, fixture=True)
-            evidence = boot_evidence(host_spec, capture_dir, directory_fd, locks)
-            durable_evidence(evidence)
+            transcript = boot_evidence(host_spec, capture_dir, directory_fd, locks)
+            durable_evidence(transcript)
             durable_evidence({output / 'verify' / key: raw for key, raw in verify_files.items()})
             require(verify_release(host_spec, capture_dir, observed, directory_fd, locks, fixture=True) == released
-                    and boot_evidence(host_spec, capture_dir, directory_fd, locks) == evidence,
+                    and boot_evidence(host_spec, capture_dir, directory_fd, locks) == transcript,
                     'decision inputs changed during the durability barrier')
-            intent = boot_intent(host_spec, capture_dir, evidence, verify_files)
+            intent = boot_intent(host_spec, capture_dir, transcript, verify_files)
             publish_release(decision_fd, 'INTENT.json', intent)
             intent_raw = cleanup_bytes(output / 'INTENT.json')
             require(exact_record(intent_raw, BOOT_INTENT_KEYS) == intent, 'decision intent readback differs')
@@ -606,16 +606,16 @@ def decide_restore_prior(host_spec, capture_dir, fixture=False):
             require(json.loads(final_files['preflight.json']) == final,
                     'decision final sample differs from consumed observation')
             require(verify_release(host_spec, capture_dir, final, directory_fd, locks, fixture=True) == released
-                    and boot_evidence(host_spec, capture_dir, directory_fd, locks) == evidence
+                    and boot_evidence(host_spec, capture_dir, directory_fd, locks) == transcript
                     and cleanup_bytes(output / 'INTENT.json') == intent_raw,
-                    'decision source or evidence changed after intent')
+                    'decision source or transcript changed after intent')
             durable_evidence({output / 'decision' / key: raw for key, raw in final_files.items()})
             require(verify_release(host_spec, capture_dir, final, directory_fd, locks, fixture=True) == released
-                    and boot_evidence(host_spec, capture_dir, directory_fd, locks) == evidence
+                    and boot_evidence(host_spec, capture_dir, directory_fd, locks) == transcript
                     and cleanup_bytes(output / 'INTENT.json') == intent_raw
                     and sample_files(output / 'verify') == verify_files
                     and sample_files(output / 'decision') == final_files,
-                    'decision evidence changed after sample durability')
+                    'decision transcript changed after sample durability')
             decision = {**intent, 'scope': RESTORE_PRIOR_SCOPE,
                 'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 'intent_sha256': hashlib.sha256(intent_raw).hexdigest(),
