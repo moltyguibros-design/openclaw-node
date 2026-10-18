@@ -2673,7 +2673,7 @@ resumption remain open at 1.2[A]/v1.2-pre. No production state changed.
 
 Checkpoint 2026-10-13 18:47 EDT: local, uncommitted B5-exact-head-CI diagnostic draft classifies a timed-out managed kickstart as UndeterminedLaunchdAction, with one bounded post-timeout observation. Applied and unapplied actions both remain errors; an unavailable observation preserves the undetermined classification. Three mocked tests pass, with no launchctl invocation. No timeout increase or claim to fix the CI cause.
 
-- [ ] B5-exact-head-CI diagnostic draft: complete journal/restore integration negatives, Claude review, required checks and exact-head CI before source readiness. Current PR head 69970bb6 remains red; checkpoint, abort controller and macOS rehearsal remain open. No production state changed.
+- [x] B5-exact-head-CI diagnostic draft: D180's fail-closed timeout classification and integration controls landed; D193's owned client trace was reviewed and carried by green exact-head D194 CI 39011578564. The real launchctl delay cause remains open under B5-default-kickstart-policy. No production state changed.
 
 Checkpoint 2026-10-13 20:47 EDT: Claude reconstructed the timeout draft and ran seven simulated recover_owned scenarios plus mutants. It found no safety change (baseline already fails closed), but requested durable timeout budget and cause assertions. The local draft now labels observations explicitly, preserves the timeout budget and cause, uses a plain Exception for the potentially-applied action, and limits its added status read to one second (ordinary status default remains ten). Three direct tests and 21 StopWatchPreflight tests pass; macOS direct tests run before restore_only. Actual-diff journal integration and exact-head CI remain pending under the open diagnostic row above; no production action occurred.
 
@@ -2681,7 +2681,7 @@ Checkpoint: Claude supplied checksum-pinned test_kickstart_applied_timeout.py (9
 
 Checkpoint 2026-10-13: D181 adds a pure strict-subset NATS config identity reader and role binder, plus 15 decisive owned tests in both workflow paths. Read-only installed syntax conformance passed for all four configs after correcting the max_mem/max_file aliases; this is not a B3 window pin or live interpretation proof.
 
-- [ ] B5-role-binding integration: reviewed exact-head reader CI, live serving-unit interpretation comparison, then checkpoint and stopped-ASIF verifier wiring. Capture checkpoint, boot/abort admission and macOS rehearsal remain open; B6 stays closed. No production state changed.
+- [D] B5-role-binding integration: superseded composite. D181 delivered the pure role reader; D185–D187 bound it to the capture checkpoint and verifier. The unproved live serving-unit interpretation and just-in-time B3 pin are retained under B5-serving-role-runtime-binding below; stopped-image extraction and admission retain their own open gates. No production state changed.
 
 Checkpoint 2026-10-13 22:37 EDT: reader-only 15 tests pass and plan lint is conformant. Publication held: combined 42-test check failed in existing applied-timeout fixture setUp because interrupted child did not publish readiness within ten seconds, with empty stderr. No timeout increase or harmless-flake claim. Diagnose owned fixture readiness before publishing the D181 draft; no production state changed.
 
@@ -2701,9 +2701,31 @@ Checkpoint 2026-10-15: D187 local, uncommitted incremental fix on combined v2. C
 
 Checkpoint 2026-10-15: D188 local, uncommitted cleanup fix, separate from the native diagnostics. `gui_utm_status()` now bootstraps inside its cleanup guard; on any failure it boots out only the sample's unique label, records the bootout and (after an unsuccessful one) a print of that label in `utm-status-cleanup.json`, and re-raises the original error. On success a bootout that failed or timed out still refuses the sample, even when the print reads the label absent. 13 owned fake-launchctl tests pass (the unfixed function fails 11) and 15 source mutants are killed; added to Linux and macOS CI. A bootstrap applied by launchd after cleanup can still leave its unique label loaded (reproduced, recorded, not closed). No deadline changed; the native stall before ARMED.json remains undiagnosed pending the helper snapshot. Production capture stays disabled; no production state changed.
 
+- [ ] B5-serving-NATS recovery adapter: an enable-capable restore for the three serving members that recovery can verify, the precondition `StopWatch` names for a persistent NATS stop. Required before the producer below; member1 stays held and is not part of it. No production state changed.
 - [ ] B5-serving-NATS persistent-stop producer: a full-node stop path that disables and unloads nats, nats-2 and nats-3 under the original hold with managed-stop receipts; `StopWatch.mutate` refuses this today. Required before any capture-ready checkpoint can be produced outside owned tests. No production state changed.
-- [ ] B5-serving-NATS recovery adapter: an enable-capable restore for the three serving members that recovery can verify, the precondition `StopWatch` names for a persistent NATS stop. Required with the producer above; member1 stays held and is not part of it. No production state changed.
 - [ ] B5-stopped-ASIF checkpoint extraction: read-only extraction of the user journal directory, node receipt and NATS config bytes from the stopped image, refusing pending or unknown entries, feeding `verify_frozen_checkpoint()` after CAPTURE.json publication (it requires the D187 pins). No production state changed.
+
+> **B5-serving-NATS recovery adapter — Goal:** make persistent stops of the three serving NATS units recoverable by the existing owned restoration path while member 1 stays held.
+> **Needs:** D185 capture contract, D180/D193 fail-closed restoration evidence, unchanged managed journal and original hold, B1 owned authority.
+> **Feeds:** B5-serving-NATS persistent-stop producer, then an owned capture-ready checkpoint.
+> **Verify:** code: owned restore positives and interruption/refusal negatives, with exact source review and green exact-head CI; runtime: none on production.
+
+> **B5-serving-NATS persistent-stop producer — Goal:** produce one verified disable-and-unload receipt per serving NATS unit under the original hold.
+> **Needs:** reviewed recovery adapter, unchanged StopWatch and Journal hold predicates, B1 owned authority.
+> **Feeds:** the owned full-node capture-ready checkpoint.
+> **Verify:** code: class-specific receipt and recovery tests, decisive refusal controls, exact source review and green exact-head CI; runtime: owned only.
+
+> **B5-stopped-ASIF checkpoint extraction — Goal:** pass actual stopped-image journal and config bytes through the frozen verifier without deriving a checkpoint pin from those bytes.
+> **Needs:** D187 host pin, D191 reader, D205 owned mount integration, protected B3 table provenance before a real window.
+> **Feeds:** B5 frozen capture acceptance.
+> **Verify:** code and owned native image: authentic and altered-input cases with cleanup, exact source review and green exact-head CI; runtime: no production image in this source unit.
+
+- [ ] B5-serving-role-runtime-binding: compare the live serving units' actual interpreted NATS identity to D181's config-derived roles at the just-in-time B3 window; pure parsing and owned checkpoint tests alone do not prove that comparison.
+
+> **B5-serving-role-runtime-binding — Goal:** bind each live serving unit to the role and config used by the frozen checkpoint.
+> **Needs:** reviewed D181 reader and D185–D187 checkpoint, B3 just-in-time pins, a separately authorized attended window for live observations.
+> **Feeds:** B5 capture acceptance and B6 release evidence.
+> **Verify:** read-only live interpretation and exact byte/hash binding at the approved window, with independently reviewed refusal cases; no pre-window proxy can close this row.
 
 Checkpoint 2026-10-15: D189 matcher read-race correction and 13 decisive predicate tests verified on owned macOS resources: 14 capture-pin tests pass, new matcher comparison removal mutant killed, all 28 predicate mutants killed with unmutated 37-test suite passing. Published D185–D188 source is at 586f66b7 with all five exact-head CI jobs green; earlier local/uncommitted notes describe their prepublication stage. D189 needs its own exact-head CI and review. Same-uid pre-stop commitment replacement and coordinated capture-record rewrite remain explicit unclosed acceptance-root limits. B5/1.2 open, B6 closed.
 
@@ -2716,7 +2738,7 @@ Checkpoint 2026-10-16: D191 bounded stopped-journal/config reader implemented an
 > **Feeds:** B5-native-ASIF-mount and the stopped-ASIF checkpoint extraction adapter.
 > **Verify:** code: scripted positive and refusal controls pass, all designated one-rule mutations fail for the intended reason, Claude reviews the final bytes and exact-head CI is green. Production entry refuses before mounting; native probe remains unwired in this source slice.
 
-- [ ] B5-native-ASIF-mount: observe the wrapper's actual mount assumptions on a fresh image created only on an isolated macOS CI runner. Neither mocked commands nor an Alpine guest satisfy this gate.
+- [x] B5-native-ASIF-mount: D195/D196 observed the exact read-only mount assumptions on an isolated macOS CI image; D197 corrected bare/canonical device binding and D205 verified the owned stopped-image reader. These are owned mechanism observations, not production mount or physical-exclusion acceptance.
 
 > **B5-native-ASIF-mount — Goal:** establish whether the exact read-only mount options preserve ownership and image identity on the owned ASIF.
 > **Needs:** reviewed B5-owned-journal-mount source and cleanup; isolated macOS runner with ASIF support and the explicit CI-only probe guards.
@@ -6263,3 +6285,13 @@ remain open. B5/1.2 stays v1.2-pre, B6–B9 held; D64, Gate, installed timers an
 production remain untouched. This receipt changes five Markdown ledgers only;
 AUDIT_PRE, source, workflow and VERSION stay byte-fixed. Its own exact review
 and all-eight CI are pending at commit and are not preclaimed.
+
+### 2026-10-18 19:44 EDT — first-open-row reconciliation (D241)
+
+The D240 source 94bc8e76 and receipt 86ff2461 are reviewed clear by Claude357/359. Their exact-head CI runs 39171957048 and 39174246835 both passed all eight jobs at attempt 1. Claude361 independently found the first-open-row pointer stale and recommended reconciliation before another source unit. This change corrects that pointer; it does not deliver a stop, restoration adapter, admission or placement repair.
+
+Three historical rows are normalized against later evidence. B5-exact-head-CI diagnostic draft is marked complete only as fail-closed diagnosis: D180 integration controls, D193 owned client trace and the five-job green D194 carrier 151bb3bd/39011578564 exist; the launchctl delay's cause and default-throttle policy remain open. B5-role-binding integration is marked superseded as an overbroad composite: D181's pure reader and D185–D187's checkpoint/verifier wiring exist, but live serving-unit interpretation and just-in-time B3 binding are explicitly retained in B5-serving-role-runtime-binding. B5-native-ASIF-mount is marked complete only for the owned mechanism: D195/D196's isolated macOS observation is on green 6f7e9371/39018959320, followed by D197 device-binding correction and D205's owned reader integration on green e120e78d/39053730664. None is a production image or physical no-writer proof.
+
+The first still-open executable source prerequisite is now B5-serving-NATS recovery adapter. The existing StopWatch.mutate guard refuses persistent NATS disable-and-unload specifically because recovery lacks that adapter. The adapter therefore precedes the persistent-stop producer; both precede an owned capture-ready checkpoint. Stopped-ASIF extraction and the newly explicit live role-binding row remain open. The current entrypoint/override/fresh-D60 observer is a separate later D62 gate, not a substitute for the pre-capture producer. This ordering replaces the frontier table's stale current-observer-first pointer. The original B5-CI-R3-placement repair still needs a natural failure cause; D240 records future bounded selector evidence without retrying. No guessed readiness repair is included.
+
+Only these five Markdown ledgers change. All executable source, tests, workflow, AUDIT_PRE and VERSION stay byte-identical. B5/step 1.2 stays [A] at v1.2-pre; B6–B9, D64, Gate, installed timers and production stay untouched. No production service, VM, store, mount or history was operated. The next work unit is a separate pre-audit of the owned NATS recovery adapter, with its own exact-source review and CI. This documentation correction itself needs exact-head review and green CI before it is treated as a settled plan pointer.
