@@ -6164,3 +6164,125 @@ prerequisite; observation, comparison and durable admission remain separately
 reviewable before attended manual and D175. Native positive attribution/full pipeline, Mac access,
 APFS reattach/reboot and four-history acceptance remain separate. No production
 admission or runtime operation follows this source evidence receipt.
+
+
+## D224 — 2026-10-18 05:16 EDT: owned held-job negative comparator pre-audit
+
+### 2026-10-18 05:16 EDT — owned held-job negative comparator pre-audit (D224)
+
+Micro re-orient: B5/step1.2 stay open at v1.2-pre; B6–B9 held.
+D223 source39638d1e/receipt907046d9 have clear261/265 reviews and all8 exact-head
+CI39109210059/39111452945. Receipt native38/2.788s/51; full runner refused with
+child in both passes,1036 unknown entries and2 reasons; Linux38/.504s/one skip/51.
+Merge75c377af0dd4e8269e575fc2b9311819242bd3f3 has receipt second parent and equal
+tree. Later receipt-CI facts are Codex's;267 preserves that evidence separation.
+
+Pre-audit correction269: the optional launchd-command comparator does not feed
+the held-cohort gate because D218 forbids its labels/commands. Its uncommitted
+candidate is replaced before source work; no command-comparator source exists.
+The actual frontier is a pure held-cohort negative-job comparator. Claude271
+clears request270 at exact907046d9 with the following corrections adopted.
+
+Goal: one scripted negative-job consistency result for every verified managed
+label in gui/recordedUID, user/recordedUID and system, without admission.
+Needs: D223 clear source/receipt all8 CI, unchanged frozen/stopped readers,
+valid_job, complete full-node fixture and B1/D189 owned boundaries.
+Feeds: the later full managed-job current-boot collector, then overrides/fresh
+D60 and integration with strict process gates before durable admission/manual/D175.
+Verify: code: coherent portable/scripted positives and independent four-bucket,
+UID/key derivation, ordering, hash/privacy and intended-assertion mutations;
+real owned frozen-image reader/CLI with and without policy, no constructors/writes,
+unchanged prior regressions, exact-source review/all8 CI then a separate reviewed
+all8-green five-Markdown receipt. runtime: none. Native execution is scripted
+reader portability with no skip, never a live launchd/process or held-state claim.
+
+compare_held_jobs(records,jobs) takes records already verified by the unchanged
+frozen verifier; it is not a journal parser. That verifier already proves prior
+and CAPTURE completeness, held_as_checkpointed, all unloaded observations and
+empty final loaded inventory. These dominated predicates are reused, not counted
+as new proof or new intended mutants. Derive labels only from verified prior,
+using ai.openclaw.+unit; no timer-only, original-domain or policy-anchor filter.
+Derive all three namespace keys from that count (currently23 units/69 keys), with
+no16-anchor cap or hard-coded unit count. Owner UID is strictly int>=0 from
+scheduler-heartbeat.execution_hold.metadata_identity.uid, refusing absent/bool;
+this is D218's namespace-owner convention, not a caller-derived permission.
+The consumer requires nonempty stopped-reader metadata and every read UID equal
+to the recorded UID, without using os.getuid for that binding. Older records
+without this owner field refuse; no runtime/schema change supplies it here.
+
+Jobs is a string-keyed JSON object. Missing expected keys are missing; outside
+keys are extra without interpreting their shape or value; malformed present
+expected facts are unknown {key,error_type}, catching only valid_job's Refused.
+A well-typed loaded job is unexpected_loaded regardless of state or PID. Only
+exact {loaded:false} is negative. Each bucket is retained/sorted and independently
+pinned; no basename, command, process or loaded-idle exception. Report exact
+encoded(jobs) SHA, baseline and verified checkpoint digests; literal scripted
+source, sampled true/continuous false and admission/history/hold_certified false.
+Only all four empty yields held-jobs-negative-consistent. No job values, program,
+argv digest, plist path, policy or full table is emitted; optional baseline
+process_policy is ignored. No timing budget is inferred from the envelope.
+
+Owned consumer: --fixture AND --scripted before any IO; private/literal owned
+temp root openclaw-owned-held-jobs-16hex, root/capture/data checks and unchanged
+read_private for table.json and held-jobs.json (8MiB diagnostic, not frozen-reader
+widening). Copy image_process_policy's pin-coherence sequence textually; pins
+precede one read_inputs, then one verify_frozen_checkpoint, then owner binding,
+job-file read and compare. A frozen-verifier refusal must prevent compare and is
+pinned by an order-swap mutant. Canonical redacted CLI stdout;0 only narrow
+consistent,2 refusal, minimal early-error shape accepted. No process_policy need,
+new census, Journal/Gate construction or write. The policy-free honest fixture
+with recorded owner was read and frozen-verified locally:23 units,54 reads/uid501.
+The first prototype asked the fixture for missing binary/home attributes and
+failed; the corrected prototype uses read_inputs' actual returned fields.
+
+Deltas: three new held_job_negative_comparator/module-test-mutator files,
+four workflow registration lines, six ledgers. Existing executable/test/mutator
+bytes stay fixed. No Journal/schema/recover/D64/lib/Gate/identity/host/timer change.
+B5/1.2 stay open/pre; row close waits for source and separate receipt review/CI.
+No live observation, inventory/overrides/D60, hold/physical absence, eligibility,
+authorship/history or admission. No production operation. Optional D220/D218
+controls stay carried. Later69-key double sampling at10s per call can exceed20min;
+120s cannot be inherited, and system-domain unreadability must stay unknown.
+Mac access, APFS reattach/reboot and four-history acceptance remain separate.
+
+
+### 2026-10-18 05:23 EDT — D224 local held-job comparator candidate proof
+
+The new97-line record-free module consumes prevalidated frozen records and an
+explicit scripted job table, derives every managed label in all three domains
+from prior and the recorded owner UID, reuses valid_job, and retains sorted
+missing/extra/unknown/unexpected_loaded buckets. No optional policy is interpreted.
+Malformed expected facts are unknown; extra keys are retained without parsing
+key shape or value. Every well-typed loaded job refuses, including idle without
+PID. Exact jobs/baseline/checkpoint digests bind the claims; no job values or
+policy are emitted. No live node or execution-hold assertion is made.
+
+Local31 tests pass10.692s;44 intended-assertion mutants pass with intact named
+controls and no ERROR-only kill. Existing182 process regressions pass21.580s.
+The earlier30-test run passed6.477s. The first mutation attempt rejected a
+zero-UID guard mutant through a Refused exception rather than its intended
+assertion; it is not counted and the real zero-UID positive stays a non-counted
+control. The prior42-mutation run passed before adding explicit verifier skipped/
+duplicated controls and an owned-root owner mismatch check. Scope and false
+claim flags, recorded UID type/carrier, all domains/member1/federation, each
+bucket/verdict, idle/malformed loaded, hash/privacy, pin-before-read, exactly one
+read/verifier, verifier-before-compare, every read owner and CLI exits are pinned.
+
+The actual owned consumer succeeds with and without a process policy, requires
+both flags before IO and the literal private fixture root/files, copies the
+existing pin-coherence sequence textually, and runs one read_inputs followed by
+one verify_frozen_checkpoint before owner binding/job-file read/comparison.
+Constructors are forbidden in the observation test; before/after files match.
+Bad checkpoint/receipt, ownership, mode, alias or canonical input refuses through
+unchanged readers before comparison. No existing executable/test/mutation runner
+changes; only the three new files, four CI registration lines and six ledgers.
+
+Frozen record completeness/held_as_checkpointed/all-unloaded inventory are
+upstream verifier proof, not new comparator predicates or counted mutants.
+Native CI will execute the same31 scripted checks/44 mutations with no skip;
+there is no live job/process observation or new native full-scan measurement.
+Source exact-head review/all8 CI remain pending, followed by the separate
+five-Markdown receipt review/all8 CI before this owned row closes. B5/1.2
+remain open/pre, B6–B9 held; D64/Gate/installed timers/production unchanged.
+Full managed-job collection, overrides/freshD60, process-gate integration,
+durable admission/manual/D175 and physical Mac/APFS/reboot gates remain later.
