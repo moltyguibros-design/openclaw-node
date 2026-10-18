@@ -189,3 +189,28 @@ explicit pre-window process-policy binding, then a separately reviewed boot
 comparator/observer contract and durable admission record before manual/D175.
 Actual disposable-Mac access, APFS reattach and reboot rehearsal remain separate.
 The receipt changes evidence/docs only; its own exact-head CI/review is pending.
+
+
+### 2026-10-17 23:56 EDT — D218 local binding candidate proof
+
+Local47 portable controls pass5.229s; the44-mutant runner reports intact controls
+and44 named intended-assertion kills, never counting ERROR or an unrelated crash.
+The combined47 new and277 existing journal/checkpoint/host-commitment/stopped-reader/
+scripted-full-node controls pass324 tests162.378s. The first runner assertion token
+was corrected to the actual Refused class before any source commit; no failed
+runner invocation is counted as proof. Local plan lint14 PASS/1 existing WARN/0 FAIL;
+the warning is the existing idle step machinery, not a new close or version bump.
+
+The new honest producer and frozen/image positives use actual owned file bytes,
+Journal writes, checkpoint/commitment code and the stopped reader. VM, launchd and
+execution-hold observation remain existing scripted facades; this is portable
+source evidence on macOS, not a native full-node/reboot/eligibility proof. Only the
+two existing Journal constructor/open bodies change (AST comparison to4e3605bf);
+recover/D64, forward/capture/frozen verifier bodies and every other existing
+executable remain unchanged. The new validator performs no filesystem or process
+observation. Complete initial-receipt sizing covers capture-compatible creation
+states only, not future post-boot writers or the16MiB whole-lineage read budget.
+
+Exact-source review and exact-head green CI remain pending. The candidate row
+stays open; B5/1.2 pre/open and B6–B9 held. No production service, VM, timer, mount,
+resource provisioning, new live process scan, policy enrollment or admission.

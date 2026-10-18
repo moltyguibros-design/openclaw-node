@@ -1,8 +1,11 @@
 # Node state recovery — registry
 
+2026-10-17 23:56 EDT — D218 authored policy-binding candidate: local47/44 and324 bounded
+regressions pass. Exact-source review/CI pending; no admission. D217 remains verified.
+
 2026-10-17 23:02 EDT — D217 verifies the owned current-boot process diagnostic at81ac425b:
 all8 CI39090362566 green; native40/29, unpatched scan refused with owned child matched;
-Claude215 no required finding. Receipt CI/review pending. B5/1.2 stay open/pre and
+Claude215 no required finding. Receipt4e3605bf all8 CI39092308432; Claude221 no required finding. B5/1.2 stay open/pre and
 B6–B9 held. D64/production/timers unchanged. Next policy binding, then a separate
 boot comparator/observer contract and durable admission before manual/D175.
 
@@ -867,3 +870,73 @@ explicit pre-window process-policy binding, then a separately reviewed boot
 comparator/observer contract and durable admission record before manual/D175.
 Actual disposable-Mac access, APFS reattach and reboot rehearsal remain separate.
 The receipt changes evidence/docs only; its own exact-head CI/review is pending.
+
+
+### 2026-10-17 23:41 EDT — B5-D62-process-policy-binding candidate (D218)
+
+The owned diagnostic receipt4e3605bf passes all8 CI39092308432; native40
+controls8.813s/29 intended mutants, owned child matched/full scan refused with
+522 unknown entries and318 unexpected rows. Claude221 finds no required receipt
+issue; these receipt-CI observations are Codex's and do not replace D217's
+source-native516/299 evidence. No admission or production operation is added.
+
+The next bounded outcome is one authored, generation-free process policy in a
+new full-node baseline, plus a fixed-path owned producer and a dedicated frozen
+consumer that first verifies the external checkpoint. The optional carrier is
+inert for all old no-policy callers/readers. No in-window event, CAPTURE_KEYS,
+D64/recover, Gate, identity.json, timer, host executable or production change.
+Code/argv/cwd/uid/gid/count and explicit launchd-or-expectation attribution are
+exact; references must terminate, and held managed jobs/commands cannot be
+authored as expectations. No implicit self, root, platform or ancestor permission.
+
+Claude219/223/225 and Codex222/224 define the pre-audit. The complete initial
+receipt, not a policy-only cap or arbitrary growth reserve, is the tighter1MiB
+reader threshold; both actual serialized files must fit before publication.
+Ordinary reopen, interrupted-created=True initialization (including its OSError
+early return), and the final reopen path reject a supplied policy. The owned
+producer derives every writable path beneath its literal private temporary
+root, rejects symlinked parents before Journal construction, and takes explicit
+caller-supplied prior/inventory rather than claiming live process enrollment.
+
+Recorded owner binding uses the actual metadata_identity.uid and last watched
+gate-root identity.uid plus the root device:inode pin. Root/lock pins themselves
+are strings without uid; ancestor path owners differ. Missing owner carriers in
+a new policy refuse. The producer observes its own uid; only the image reader
+labels actual file-owner metadata. The pure validator observes no filesystem.
+The consumer claims pinned-checkpoint consistency only: same-uid coordinated
+rewrite/recommit remains undetected (D189); authorship, pre-stop authenticity,
+policy completeness/satisfiability and record-time eligibility remain unproven.
+
+Verify: portable honest producer/frozen/image positives and independent refusal
+cases for schema/code/argv/owner/root/count/attribution/held jobs, swap/absence/
+malformed rehashed policy, exact complete-receipt byte boundary and all reopen
+routes; intended-assertion mutants with intact controls; unchanged old baseline
+and D64 controls, exact-source Claude review and exact-head green CI. These
+checks are pending. Only this owned source prerequisite may close. B5/1.2 remain
+open/pre, B6–B9 held; boot comparator/observer/durable admission, manual/D175,
+Mac access/APFS reattach/reboot and the separate physical histories remain open.
+
+
+### 2026-10-17 23:56 EDT — D218 local binding candidate proof
+
+Local47 portable controls pass5.229s; the44-mutant runner reports intact controls
+and44 named intended-assertion kills, never counting ERROR or an unrelated crash.
+The combined47 new and277 existing journal/checkpoint/host-commitment/stopped-reader/
+scripted-full-node controls pass324 tests162.378s. The first runner assertion token
+was corrected to the actual Refused class before any source commit; no failed
+runner invocation is counted as proof. Local plan lint14 PASS/1 existing WARN/0 FAIL;
+the warning is the existing idle step machinery, not a new close or version bump.
+
+The new honest producer and frozen/image positives use actual owned file bytes,
+Journal writes, checkpoint/commitment code and the stopped reader. VM, launchd and
+execution-hold observation remain existing scripted facades; this is portable
+source evidence on macOS, not a native full-node/reboot/eligibility proof. Only the
+two existing Journal constructor/open bodies change (AST comparison to4e3605bf);
+recover/D64, forward/capture/frozen verifier bodies and every other existing
+executable remain unchanged. The new validator performs no filesystem or process
+observation. Complete initial-receipt sizing covers capture-compatible creation
+states only, not future post-boot writers or the16MiB whole-lineage read budget.
+
+Exact-source review and exact-head green CI remain pending. The candidate row
+stays open; B5/1.2 pre/open and B6–B9 held. No production service, VM, timer, mount,
+resource provisioning, new live process scan, policy enrollment or admission.

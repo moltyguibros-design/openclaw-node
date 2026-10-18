@@ -6,13 +6,14 @@ import json
 import os
 import pathlib
 import plistlib
+import posixpath
 import re
 import stat
 import subprocess
 import sys
 import uuid
 
-from nats_identity import bind_identities
+from nats_identity import LIMIT, bind_identities
 from preservation_checks import (RESUME_ORDER, Refused, capture_entrypoint_inventory,
                                  require, valid_tailscale_exclusion)
 
@@ -414,9 +415,114 @@ def valid_entrypoint_inventory(evidence, prior):
                 'full-node installed plist differs from the saved service identity')
 
 
+PROCESS_POLICY_SCOPE = 'explicit pre-window boot-process expectations; authored, not observed; no admission'
+PROCESS_POLICY_LIMIT = 256 << 10
+
+
+def valid_process_policy(policy, prior, inventory):
+    def integer(value):
+        return type(value) is int and value >= 0
+
+    def text(value):
+        return (isinstance(value, str) and not any(c in value for c in '\0\ufffd$~')
+                and not any(0xd800 <= ord(c) <= 0xdfff for c in value))
+
+    def path(value):
+        return (text(value) and value.startswith('/') and '..' not in pathlib.PurePosixPath(value).parts
+                and str(pathlib.PurePosixPath(value)) == value)
+
+    def label(value):
+        return isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', value)
+
+    def digest(value):
+        return isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value)
+
+    require(isinstance(policy, dict) and set(policy) == {'scope', 'uid', 'roots', 'expected'},
+            'process policy schema differs')
+    require(policy['scope'] == PROCESS_POLICY_SCOPE and integer(policy['uid']),
+            'process policy scope or uid differs')
+    roots = policy['roots']
+    require(isinstance(roots, list) and roots and all(path(root) for root in roots)
+            and len(set(roots)) == len(roots) and roots == inventory['roots'],
+            'process policy roots differ from baseline')
+    hold = prior['scheduler-heartbeat'].get('execution_hold')
+    require(isinstance(hold, dict) and set(hold) ==
+            {'root', 'pins', 'metadata', 'metadata_identity', 'metadata_sha256', 'paths', 'cohort'},
+            'process policy needs recorded hold owner identities')
+    watched = hold['paths']
+    metadata = hold['metadata_identity']
+    require(isinstance(watched, list) and watched and isinstance(watched[-1], dict)
+            and set(watched[-1]) == {'path', 'identity'} and path(hold['root'])
+            and watched[-1]['path'] == hold['root'] and isinstance(metadata, dict)
+            and isinstance(watched[-1]['identity'], dict), 'process policy hold root identity is absent')
+    root = watched[-1]['identity']
+    require(all(integer(identity.get(key)) for identity in (metadata, root)
+                for key in ('uid', 'device', 'inode'))
+            and policy['uid'] == metadata['uid'] == root['uid'],
+            'process policy uid differs from recorded hold owner')
+    require(isinstance(hold['pins'], dict) and set(hold['pins']) == {'root', 'lock'}
+            and hold['pins']['root'] == '%d:%d' % (root['device'], root['inode']),
+            'process policy owner identity differs from pinned gate root')
+    expected = policy['expected']
+    require(isinstance(expected, list) and len(expected) <= 1024, 'process policy expectation list differs')
+    labels, bindings = {}, set()
+    for row in expected:
+        require(isinstance(row, dict) and set(row) ==
+                {'label', 'executable', 'executable_sha256', 'arguments', 'uid', 'gid',
+                 'cwd', 'count', 'attribution'}, 'process expectation schema differs')
+        require(label(row['label']) and row['label'] not in labels,
+                'process expectation label is invalid or duplicated')
+        require(path(row['executable']) and digest(row['executable_sha256']) and path(row['cwd']),
+                'process expectation code or cwd binding differs')
+        require(isinstance(row['arguments'], list) and 0 < len(row['arguments']) <= 256
+                and all(text(arg) for arg in row['arguments']) and row['arguments'][0],
+                'process expectation arguments differ')
+        require(integer(row['uid']) and integer(row['gid'])
+                and type(row['count']) is int and 1 <= row['count'] <= 1024,
+                'process expectation uid, gid or count differs')
+        values = (row['executable'], row['cwd'], *row['arguments'])
+        resolved = [pathlib.PurePosixPath(posixpath.normpath(posixpath.join(row['cwd'], value)))
+                    for value in values]
+        require(row['uid'] == policy['uid'] or any(
+            candidate == pathlib.PurePosixPath(root_path)
+            or pathlib.PurePosixPath(root_path) in candidate.parents
+            for candidate in resolved for root_path in roots),
+            'process expectation is outside declared lexical scope')
+        attribution = row['attribution']
+        require(isinstance(attribution, dict), 'process expectation attribution differs')
+        if attribution.get('kind') == 'launchd':
+            require(set(attribution) == {'kind', 'domain', 'label', 'plist_sha256'}
+                    and attribution['domain'] in ('gui', 'user', 'system')
+                    and label(attribution['label']) and digest(attribution['plist_sha256']),
+                    'process launchd attribution differs')
+            require(attribution['label'] not in inventory['installed']
+                    and attribution['plist_sha256'] not in
+                    {item['sha256'] for item in inventory['installed'].values()},
+                    'process policy expects a held managed job')
+        else:
+            require(set(attribution) == {'kind', 'label'} and attribution['kind'] == 'expected'
+                    and label(attribution['label']), 'process parent attribution differs')
+        require(not any(row['arguments'] == state['identity']['argv']
+                        and row['cwd'] == state['identity']['working_directory']
+                        for state in prior.values()), 'process policy expects a held managed command')
+        binding = encoded({key: value for key, value in row.items() if key not in ('label', 'count')})
+        require(binding not in bindings, 'process expectation binding is duplicated')
+        bindings.add(binding)
+        labels[row['label']] = row
+    for row in expected:
+        visited = set()
+        while row['attribution']['kind'] == 'expected':
+            reference = row['attribution']['label']
+            require(reference in labels and reference not in visited,
+                    'process expectation attribution is missing or cyclic')
+            visited.add(reference)
+            row = labels[reference]
+    require(len(encoded(policy)) <= PROCESS_POLICY_LIMIT, 'process policy exceeds its authored bound')
+
+
 class Journal:
     def __init__(self, root, prior=None, boot=None, node_lock=None, scope=None,
-                 expected_entrypoints=None):
+                 expected_entrypoints=None, process_policy=None):
         self.root = pathlib.Path(root)
         self.boot = boot if boot is not None else boot_identity()
         self.lock = None
@@ -429,6 +535,7 @@ class Journal:
         self.reopened = not created
         require(created or expected_entrypoints is None,
                 'captured full-node inventory cannot reopen an existing journal')
+        require(created or process_policy is None, 'cannot replace a journal process policy')
         node_lock = pathlib.Path(node_lock) if node_lock is not None else pathlib.Path.home() / '.openclaw/preservation/node.lock'
         node_lock.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         info = node_lock.parent.lstat()
@@ -478,7 +585,8 @@ class Journal:
                             'only the current journal may rebuild a lost receipt')
             if (self.active is not None and self.active.get('phase') == 'initializing'
                     and self.active['journal_root'] == str(self.root.resolve())):
-                require(prior is None, 'interrupted creation must reopen for restoration only')
+                require(prior is None and process_policy is None,
+                        'interrupted creation must reopen for restoration only')
                 try:
                     self._finish_initialization()
                 except OSError:
@@ -504,7 +612,7 @@ class Journal:
                             rows = self._read(other)
                             require(rows and rows[-1]['event'] in TERMINAL,
                                     'unindexed journal requires manual resolution')
-            self._open(created, prior, scope, expected_entrypoints)
+            self._open(created, prior, scope, expected_entrypoints, process_policy)
         except BaseException:
             self.close()
             raise
@@ -525,7 +633,7 @@ class Journal:
             handle.close()
             raise
 
-    def _open(self, created, prior, scope, expected_entrypoints):
+    def _open(self, created, prior, scope, expected_entrypoints, process_policy):
         if created:
             require(scope in (TIMER_SCOPE, FULL_NODE_SCOPE),
                     'new journal requires an explicit protected scope')
@@ -543,10 +651,18 @@ class Journal:
             fields = {'scope': scope} if scope is not None else {}
             if entrypoints is not None:
                 fields['entrypoint_inventory'] = entrypoints
+            if process_policy is not None:
+                require(scope == FULL_NODE_SCOPE, 'process policy requires a full-node baseline')
+                valid_process_policy(process_policy, prior, entrypoints)
+                fields['process_policy'] = json.loads(encoded(process_policy))
             initial = self._record('baseline', prior=prior, predecessor=predecessor, **fields)
-            self._state({'journal_root': str(self.root.resolve()), 'baseline': initial,
-                         'status': 'unresolved', 'phase': 'initializing',
-                         'holder': {'pid': os.getpid(), 'boot': self.boot}})
+            state = {'journal_root': str(self.root.resolve()), 'baseline': initial,
+                     'status': 'unresolved', 'phase': 'initializing',
+                     'holder': {'pid': os.getpid(), 'boot': self.boot}}
+            if process_policy is not None:
+                require(len(encoded(initial)) <= LIMIT and len(encoded(state)) <= LIMIT,
+                        'process policy baseline or receipt exceeds the frozen reader bound')
+            self._state(state)
             self.root.mkdir(mode=0o700)
             sync_dir(self.root.parent)
         info = self.root.lstat()
@@ -566,6 +682,7 @@ class Journal:
             require(read_private(self.root / '000000.json') == self.records[0], 'baseline readback differs')
             self._state({**self.active, 'phase': 'initialized'})
         else:
+            require(process_policy is None, 'cannot replace a journal process policy')
             require(prior is None, 'cannot replace a journal baseline')
             require(scope is None, 'cannot replace a journal scope')
             require(self.records and self.records[0]['event'] == 'baseline', 'journal baseline is absent')
