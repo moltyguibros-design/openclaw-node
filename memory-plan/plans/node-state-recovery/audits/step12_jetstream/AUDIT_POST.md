@@ -1101,3 +1101,76 @@ not the earlier process full-scan evidence, which retains its original scope.
 B5/1.2 remain open/pre,B6–B9 held; D64/Gate/installed timers/production unchanged.
 Full hold/overrides/freshD60/process integration, durable admission/manual/D175,
 Mac access/APFS/reboot/four-history acceptance remain separately gated.
+
+
+### 2026-10-18 07:32 EDT — owned managed-job observation source verified (D227)
+
+Source 6d2e90961ce8ae9a0be2271e109e0c31cf09c80e passes all eight jobs in
+[CI39121279608](https://github.com/moltyguibros-design/openclaw-node/actions/runs/39121279608).
+Native job 117657230203 executes34 tests in3.686s with no skip and
+55 intended-assertion kills/intact controls. Its new unpatched fixed-label
+measurement reports outcome=recorded, 69 keys in two sweeps,
+error histogram {}, elapsed900688833ns.
+This measures fixed managed-job facts only, not process absence/attribution,
+complete installed entrypoint inventory, overrides, freshD60 or execution hold.
+The CI branch is an isolation convention, not host/environment attestation.
+It need not yield recorded; every error, including unreadable system-domain
+facts, remains a refusal. Earlier process full-scan lines retain their own scope.
+Linux job 117657230335 executes34 tests in1.778s with one intentional
+CI-only native skip and55 kills. Codex inspected both complete raw logs:
+native76572 bytes SHA256 e5c433155dc70bfdc78f5e3ae80c471bb8f9f4cc1fd6b874f19de161b45bbbf5;
+Linux1526778 bytes SHA256 987995de9d856b63e53b55a94c0d6a7109874171445645eda0a04b6e64e4e49c.
+Both name mergeacfc684524f5d708d3b1a0a91dd4d5f3fcc24d46 with reviewed source as second parent
+and an identical whole tree. These completed-CI/log facts are Codex observations
+separate from review285, which saw six of eight green at11:03UTC.
+
+Claude285 independently clears the exact source with no required source or proof
+finding. It confirms sole parent956f6c03, ten-file delta,202-line module and its
+SHA, four workflow lines, six identical ledger blocks and unchanged pre-existing
+executable/test/runner bytes. A full-tree uid65534 export reproduces34/one skip,
+55 intended kills/intact controls and214 prior regressions/three darwin skips.
+The local Mac214 run had no skip; those platform results are kept distinct.
+Independent namespace-key, error-as-fact and observed-label variants die.
+The source follows283: structured keys, pair guard, typed catch-bracket facts,
+complete error retention/expiry, four boot/sweep stages, pure recomputation and
+a collector-free CLI. The explicit two-replacement domain/unit/live-route
+variants retain their declared mechanism; no ERROR-only kill is counted.
+The local numeric0 redactor edge and immediate valid_job correction, early
+failed/partial runs, final34/15.367s/55 and separate214/42.920s keep their counts.
+
+Optional failure-stage vocabulary and string-key guards remain non-counted;
+string keys are guaranteed by JSON on the real consumer path. The verified-digest
+tie is dominated by the frozen binding. The conservative exact-expiry variant
+is not an extra kill or a permissive acceptance defect. sample_labels.coverage
+only repeats constants; the source label carries provenance information. The
+CLI always forces scripted source, preserving bounded file claims without
+promoting them. No new optional follow-up is silently closed. Existing
+D218/D220/D224 carry-forwards remain. Export lint retains its two old failures;
+local plan-lint remains14 PASS/1 old idle-version WARN/0 FAIL.
+
+Only B5-D62-managed-job-observation closes as an owned source prerequisite.
+The prepared stopped-image consumer uses private literal inputs, coherent pins
+before one reader/frozen verifier, and every read-owner equality to recordedUID
+before a private canonical bounded observation file. Both fixture/scripted flags
+precede input IO; no CLI route calls the live collector. Only the darwin-plus-CI
+test branch composes owned_records and collect_jobs, and no local unpatched
+fixed-label scan occurred. All existing executable/test/mutation files remain
+unchanged from956f6c03; only the three new files, four workflow lines and six
+source ledgers implement this unit. No Journal/schema/recover/D64/Gate/identity,
+shared census/parser, host executable or installed timer change. No file write
+or constructor is performed by observation/validation/consumer operations.
+
+This records sampled current-boot fixed managed-label facts, with loaded/idle
+facts recordable, not held-negative consistency, a live hold, eligibility,
+history/authorship, physical exclusion or admission. The30-minute acceptance
+window cannot interrupt calls and boot_identity has no timeout; cohort growth
+that outgrows twice the shared10s call budget fails the fixture control. No120s
+process-window inheritance. Serialized argv is hashed, never raw; source data
+remains unprotected under D189, with no protected B3 pin provenance.
+
+B5/1.2 stay open/v1.2-pre, B6–B9 held. Full held-gate combination, overrides/fresh
+D60, strict process integration, durable admission/manual/D175, Mac access,
+APFS reattach/reboot and four-history acceptance remain separate. No production
+operation or release. This receipt changes five Markdown records only, keeping
+all source/tests/workflow bytes fixed. Its own exact-head review and CI remain
+pending at commit time.
