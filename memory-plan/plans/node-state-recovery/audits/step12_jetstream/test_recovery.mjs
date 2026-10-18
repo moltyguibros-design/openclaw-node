@@ -37,11 +37,11 @@ async function ports(n) {
   return numbers;
 }
 
-async function start(name, store, clusterPorts, selected) {
+async function start(name, store, clusterPorts, selected, debug = false) {
   const [client, monitor, route] = selected || await ports(3);
   privateDir(store);
   const config = path.join(root, name + '-' + client + '.conf');
-  let text = `server_name: ${name}\nserver_tags: [${JSON.stringify(name)}]\n${clusterPorts ? 'debug: true\n' : ''}listen: 127.0.0.1:${client}\nhttp: 127.0.0.1:${monitor}\nauthorization { token: "${token}" }\njetstream { store_dir: "${store}", max_memory_store: 1GB, max_file_store: 2GB }\n`;
+  let text = `server_name: ${name}\nserver_tags: [${JSON.stringify(name)}]\n${debug ? 'debug: true\n' : ''}listen: 127.0.0.1:${client}\nhttp: 127.0.0.1:${monitor}\nauthorization { token: "${token}" }\njetstream { store_dir: "${store}", max_memory_store: 1GB, max_file_store: 2GB }\n`;
   if (clusterPorts) text += `cluster { name: recovery-fixture, listen: 127.0.0.1:${route}, no_advertise: true, authorization { user: recovery, password: "${routeToken}" }, routes: [${clusterPorts.filter(p => p !== route).map(p => `"nats-route://recovery:${routeToken}@127.0.0.1:${p}"`).join(',')}] }\n`;
   writePrivate(config, text);
   const fd = fs.openSync(config + '.log', 'wx', 0o600);
@@ -370,7 +370,7 @@ try {
     phase, process.env.PLACEMENT_FAILURE_REPORT || path.join(root, 'placement-failure.json'));
   phase = 'cluster-placement-readiness';
   const memberNames = ['member-1', 'member-2', 'member-3'];
-  for (let i = 0; i < 2; i++) members.push(await start(memberNames[i], path.join(root, 'cluster-' + (i + 1)), routes, triples[i]));
+  for (let i = 0; i < 2; i++) members.push(await start(memberNames[i], path.join(root, 'cluster-' + (i + 1)), routes, triples[i], true));
   const partial = await waitCluster(members, memberNames.slice(0, 2));
   const missing = placementState(partial, memberNames);
   assert.equal(missing.ready, false);
@@ -378,7 +378,7 @@ try {
   jsonPrivate(path.join(root, 'cluster-placement-incomplete.json'), { observations: partial, evaluation: missing });
   await assert.rejects(waitCluster(members, memberNames, 500), /owned placement cluster not ready/);
   results.incompletePlacementClusterRejected = true;
-  members.push(await start(memberNames[2], path.join(root, 'cluster-3'), routes, triples[2]));
+  members.push(await start(memberNames[2], path.join(root, 'cluster-3'), routes, triples[2], true));
   const ready = await waitCluster(members, memberNames);
   lastPlacementReady = ready;
   jsonPrivate(path.join(root, 'cluster-placement-ready.json'), ready);

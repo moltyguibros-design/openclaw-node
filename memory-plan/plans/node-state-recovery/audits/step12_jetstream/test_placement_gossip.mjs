@@ -50,7 +50,7 @@ test('portable source extraction keeps exact helpers and pins the owned recovery
   const source = fs.readFileSync(new URL('test_recovery.mjs', base), 'utf8');
   const line = "import { placementState, waitCluster, addR3WithEvidence } from './placement_readiness.mjs';\n";
   assert.equal(source.split(line).length, 2);
-  assert.equal(sha(source.replace(line, '')), 'ccaaff039ab694ab84aeea2c87f72a26d7107ce333b6c71e93c3c9b416a12041');
+  assert.equal(sha(source.replace(line, '')), '0aaae6f7f8dd4b089eed3a954baaaba2e1185afa46940bc69e93a68bece924b7');
 });
 
 test('portable old gate accepts the complete synthetic ready table', () => {

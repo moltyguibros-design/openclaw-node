@@ -3356,3 +3356,32 @@ stays [A]. A separate reviewed, green five-Markdown receipt is required before
 closing only this auxiliary evidence row. The original R3 placement repair,
 natural trigger and current inventory/override/fresh-D60 observer remain open;
 B5/1.2 stays v1.2-pre and B6–B9 stay held.
+
+
+### 2026-10-18 18:21 EDT — D240 review correction, scope and freshness
+
+Claude355 reviewed exact source d5f396b9 and reproduced 7/7 new portable tests,
+12/12 named kills, 44 portable placement passes and 34/34 existing kills under
+uid 65534. It found one required ledger correction: the original debug predicate
+also enabled logs on the three later cloned cluster members, so the D240 text
+claiming only three servers was false. This correction narrows the source as
+well: start() takes an explicit debug flag, passed only at the original three
+member starts. A complete unfiltered owned recovery run after that change
+passed, stopped all owners, produced no failure report, and its retained
+configuration files confirm exactly three debug-enabled servers. The caller
+source hash pin was recomputed; the eight old placement predicates remain
+byte-identical.
+
+The report now labels its readiness table as caller-supplied observations,
+retains each jsz.now and a failedAt timestamp, so the age of the last
+waitCluster snapshot can be seen rather than implied fresh. A new negative
+for overlong selector lines and a counted mutant raise the portable controls
+to 8/8 and 13/13; the success-report mutation now requires its exact assertion.
+The corrected controlled owned pair passed with one create per cohort, control
+created, fault API10005 refused, three complete selector lines, and empty
+cleanup failures. Its private 0600 report was 2456 bytes, SHA256
+14f8d8a84dd2a4b75c8d36bfce7075056a0f0cb967cfe6a286a9f49d6c2775d0.
+These are final-source local checks; the earlier CI run on d5f396b9 does not
+validate this correction. No historical natural failure cause or placement
+repair is claimed. Source exact-head review and all-eight CI remain pending;
+D240 stays [A], B5/1.2 remains v1.2-pre, and production is untouched.

@@ -37,6 +37,8 @@ const variants = [
     'portable failed pre-create', 'pre-create readiness is not inferred from the failed API call'],
   ['window-limit-raised', 'length <= 131072', 'length <= 262144',
     'portable oversized', 'oversized selector window cannot claim complete evidence'],
+  ['selector-line-limit-dropped', 'complete: complete && lines.every(line => line.length <= 1024)',
+    'complete', 'portable oversized selector line', 'long selector line cannot claim complete evidence'],
   ['window-hash-dropped', "createHash('sha256').update(window).digest('hex')",
     "createHash('sha256').update(Buffer.alloc(0)).digest('hex')",
     'portable failure records', 'raw window digest binds the selected bytes'],
@@ -44,7 +46,7 @@ const variants = [
     'portable evidence capture failure', 'original placement error identity survives capture'],
   ['success-report-written', 'return await manager.streams.add(config);',
     "const result = await manager.streams.add(config); fs.writeFileSync(output, '{}'); return result;",
-    'portable success', 'false']
+    'portable success', 'success cannot create a failure report']
 ];
 
 try {

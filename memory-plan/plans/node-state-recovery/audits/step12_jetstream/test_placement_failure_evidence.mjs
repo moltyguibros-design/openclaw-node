@@ -13,7 +13,7 @@ const { addR3WithEvidence } = await import(moduleURL);
 
 const names = ['member-1', 'member-2', 'member-3'];
 const ready = () => names.map((name, i) => ({ name,
-  js: { server_id: `id-${i}`, meta_cluster: { leader: names[0], cluster_size: 3,
+  js: { server_id: `id-${i}`, now: '2026-10-18T21:00:00Z', meta_cluster: { leader: names[0], cluster_size: 3,
     replicas: i === 0 ? names.slice(1).map(name => ({ name, current: true, offline: false })) : [] } },
   varz: { server_name: name, server_id: `id-${i}` },
   routes: { server_id: `id-${i}`, routes: names.flatMap((_, j) => j === i ? []
@@ -60,6 +60,9 @@ test('portable failure records exact post-offset selection windows and rethrows 
   assert.equal(report.schema, 'owned-r3-placement-failure-v1');
   assert.equal(report.phase, 'cluster-offline-consumer-placeholder');
   assert.equal(report.attempts, 1);
+  assert.equal(report.preCreate.source, 'caller-supplied-observations');
+  assert.deepEqual(report.preCreate.observedAt.map(row => row.at), Array(3).fill('2026-10-18T21:00:00Z'));
+  assert(new Date(report.failedAt).getTime() > new Date(report.preCreate.observedAt[0].at).getTime());
   assert.equal(report.preCreate.ready, true);
   assert.deepEqual(Object.values(report.preCreate.checks), Array(8).fill(true));
   assert.deepEqual(report.preCreate.members.map(row => row.name), names);
@@ -91,7 +94,7 @@ test('portable success returns the response without creating failure evidence', 
     { num_replicas: 3 }, items, ready(), 'cluster-replicated-r3-create', output, line => emitted.push(line));
   assert.equal(value, response);
   assert.equal(calls, 1);
-  assert.equal(fs.existsSync(output), false);
+  assert.equal(fs.existsSync(output), false, 'success cannot create a failure report');
   assert.deepEqual(emitted, []);
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -132,6 +135,19 @@ test('portable oversized selector windows remain explicitly incomplete', async (
   } } }, { num_replicas: 3 }, items, ready(), 'cluster-empty-r3-create', output, () => {}), value => value === error);
   const report = JSON.parse(fs.readFileSync(output, 'utf8'));
   assert.equal(report.windows[0].complete, false, 'oversized selector window cannot claim complete evidence');
+  assert.deepEqual(report.windows[0].selection, []);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('portable oversized selector line is withheld as incomplete', async () => {
+  const { root, items, output } = owned();
+  const error = new Error('owned failure');
+  await assert.rejects(addR3WithEvidence({ streams: { add: async () => {
+    fs.appendFileSync(items[0].log, 'Peer selection: ' + 'x'.repeat(1025) + '\n');
+    throw error;
+  } } }, { num_replicas: 3 }, items, ready(), 'cluster-empty-r3-create', output, () => {}), value => value === error);
+  const report = JSON.parse(fs.readFileSync(output, 'utf8'));
+  assert.equal(report.windows[0].complete, false, 'long selector line cannot claim complete evidence');
   assert.deepEqual(report.windows[0].selection, []);
   fs.rmSync(root, { recursive: true, force: true });
 });

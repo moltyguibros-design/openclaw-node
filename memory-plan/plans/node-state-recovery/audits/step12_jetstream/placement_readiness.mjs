@@ -83,7 +83,9 @@ export async function addR3WithEvidence(manager, config, items, observations, ph
       });
       const state = placementState(observations, items.map(item => item.name));
       const report = { schema: 'owned-r3-placement-failure-v1', phase, attempts: 1,
-        preCreate: { ready: state.ready, checks: state.checks,
+        failedAt: new Date().toISOString(),
+        preCreate: { source: 'caller-supplied-observations', ready: state.ready, checks: state.checks,
+          observedAt: observations.map(row => ({ name: row.name, at: row.js.now })),
           members: observations.map(row => ({ name: row.name, serverId: row.js.server_id,
             leader: row.js.meta_cluster?.leader })) },
         error: { name: error.name, code: error.code, apiCode: error.api_error?.code,
