@@ -2448,3 +2448,61 @@ separate reviewed green five-Markdown receipt remain pending. Diagnosis row[A]
 stays reopened; original placement repair/natural trigger/current observer remain
 open. B5/1.2pre, B6–B9 held, D64/Gate/timers/production unchanged. Failed D237
 native history and successful D236 source history remain separately retained.
+
+
+### 2026-10-18 17:10 EDT — corrected owned placement diagnosis verified (D239)
+
+Corrected source5e931120ec01de19c861024f8387e77952f104a9, sole parent52f31d88, is independently
+clear at Claude349; exact-head CI39164238245 all8 succeeded in attempt1.
+This new-head run is not a rerun of failed D237 CI39161190466. The original
+sourcefa9f0a4a/all8CI39158146598 evidence and D237 failed receipt remain separate.
+Completed CI/live facts are Codex observations unless the review details say
+otherwise. Both platforms execute the actual ephemeral six-owner sequential pair.
+
+linux: job117783726805, attempt1,45 tests/44portable+1actual pair, 0.960582542s,
+0skips,34 intended-assertion kills with intact controls. Fault leadermember-2,
+3 offline discards/remaining0; all12diagnostic checks true.
+Raw log1606576bytes SHA25617c8025dd254ff1b96d1e815ede82712d2ac15d2f8f654b700248924e9b312e2.
+JSON-only artifact12150182604, report86972bytes SHA256
+fa9c92376bb94f32259d6f70d90477194047aa561188cc70fd33dd9ee19c7667; ZIP digest verified, sole placement-gossip.json parsed equal to full live log report.
+native: job117783726786, attempt1,45 tests/44portable+1actual pair, 1.530703208s,
+0skips,34 intended-assertion kills with intact controls. Fault leadermember-1,
+2 offline discards/remaining1; all12diagnostic checks true.
+Raw log156387bytes SHA2569843674f8816105f73c684467440fd20cb9f6a40be46f7b65dae29347a3e4b8b.
+JSON-only artifact12150912021, report87185bytes SHA256
+698970007e9f778878af3d1ddd021b83350759edbe95ce401459d1b89a987a36; ZIP digest verified, sole placement-gossip.json parsed equal to full live log report.
+
+Every actual pair passes all eight unchanged readiness checks in both cohorts,
+control creates once, fault refuses once with exact400/10005/peer offline. Fault
+leader log contains both nonleaders and optionally self at the exact nil-cache
+offline-discard site; unique known names and one full2.12.6 new-stream summary
+conserve required3/peers3/found=result=3-discardCount with offline:true/misc:false.
+API before/after rows bind ready IDs, aggregate total1/1/errors0/1, per-member
+nonnegative; all six owners exit0 with shutdown marker and empty cleanup failures.
+Both JSON-only archives match their live report values. Checkout
+225e823e8601a701b3a859c9f52cc348aedb5850 matches both jobs, source second parent, identical tree.
+
+Claude349 independently verifies sole parent52f31d88/nine paths, sole probe hunk inside leaderReason, unchanged producer/helper/original/workflows/VERSION/other executables, three identical ledger headings and reopened row/frontier. Under Node22.22.2/uid65534:44 pass and1 real-pair failure solely because binary absent;34/34 runner kills with intact controls/no live cohorts; hash pins pass. From saved CI LOG reports, old failed report is inconclusive only at leaderReason under old probe and owned-counterexample under new; prior fa9 passing report stays accepted under both. Artifact bytes/digests and local Node24 timings stay Codex. Own adversarial variants confirm completeness/required/peers/conservation/self-count/two-discard positive; dropped match validation dies by TypeError, not a counted intended assertion. Optional unproved literals replica:3/existing:[]/0 are declared, not independently claimed as tested gates. End-anchor removal and reading last line are uncounted producer equivalents under pinned2.12.6, not arbitrary-input equivalences. Cosmetic indentation note is unchanged.347 attribution/failure retention accurate. Source CI was in progress with six early successes at reviewer query; no completed CI or logs read there. No required source finding.
+
+Failed history retained, not rewritten: D237 native117774685858/CI39161190466
+failed only hardcoded found1/result1, with legitimate three-discard/found0 evidence.
+Log127193bytes SHA256
+0f856e2a4ccc6e01df92ebbecea3d78f89d505f06d97178d6967a43d33d0db44;
+artifact12149732321/report87278bytes SHA256
+030d5f024aa9f64344f76987abba1e0f1107c3679c2fbea224d5217634b73cd0.
+347 independently reproduced this complete1028-line log and mechanism. Tagged
+source initializes self with stats:nil and fills it via rate-limited own STATSZ;
+there is no self exemption in placement. New local45/34 and read-only replay of
+that exact failed report prove the corrected classification without changing old
+bytes/outcome or claiming old CI green. Two and three-discard positives and all
+partition negatives are portable proof; fresh actual forms are stated above.
+
+Only B5-CI-R3-placement-diagnosis closes as a corrected owned prerequisite. Both
+injected route denial and per-member APP discovery connections remain explicit.
+No historical CI cause or readiness repair is established. Original placement
+repair/natural trigger/current inventory/override/fresh-D60 observer, full held/
+process integration, durable admission/manual/D175, full native pipeline and
+disposable-Mac/APFS/reboot/four-history evidence remain open. B5/1.2v1.2-pre,
+B6–B9 held; D64/Gate/installed timers/production unchanged. This five-Markdown
+receipt keeps source, workflow, VERSION and AUDIT_PRE byte-fixed; its own exact
+review and all8 CI are pending at commit and are not preclaimed.
