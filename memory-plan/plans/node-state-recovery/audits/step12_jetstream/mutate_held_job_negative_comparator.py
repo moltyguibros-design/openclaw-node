@@ -52,7 +52,7 @@ for bucket, test, assertion in (
         ('missing', 'test_missing_expected_key_is_retained_and_refuses', 'missing key must refuse'),
         ('extra', 'test_extra_key_is_retained_without_interpreting_key_or_value', 'extra key must refuse'),
         ('unknown', 'test_null_and_malformed_negative_are_unknown', 'unknown key must refuse'),
-        ('unexpected_loaded', 'test_idle_loaded_job_without_pid_is_unexpected', 'refused')):
+        ('unexpected_loaded', 'test_idle_loaded_job_without_pid_is_unexpected', 'loaded key must refuse')):
     old = "('missing', 'extra', 'unknown', 'unexpected_loaded')"
     new = '(' + ', '.join(repr(item) for item in ('missing', 'extra', 'unknown', 'unexpected_loaded') if item != bucket) + ')'
     change('verdict-ignores-' + bucket, old, new, 'Comparison.' + test, assertion)
@@ -104,6 +104,10 @@ change('empty-reader-metadata', "found['read'] and all", 'all',
        'Consumer.test_reader_metadata_all_rows_bind_to_recorded_owner', 'every read owner must match')
 change('one-reader-owner-enough', "all(row['uid'] == uid for row in found['read'])", "any(row['uid'] == uid for row in found['read'])",
        'Consumer.test_reader_metadata_all_rows_bind_to_recorded_owner', 'every read owner must match')
+change('consumer-runtime-owner-substitution', "all(row['uid'] == uid for row in found['read'])",
+       "all(row['uid'] == envelope.os.getuid() for row in found['read'])",
+       'Consumer.test_foreign_recorded_owner_refuses_even_when_every_image_file_has_runtime_owner',
+       'foreign recorded owner must refuse')
 change('cli-always-refused', "return 0 if result['outcome'] == 'held-jobs-negative-consistent' else 2", 'return 2',
        'Consumer.test_cli_positive_refusal_and_minimal_error_exits_keep_values_private', 'consistent CLI must exit zero')
 change('cli-always-positive', "return 0 if result['outcome'] == 'held-jobs-negative-consistent' else 2", 'return 0',

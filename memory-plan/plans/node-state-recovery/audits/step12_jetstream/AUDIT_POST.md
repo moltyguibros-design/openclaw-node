@@ -838,3 +838,48 @@ five-Markdown receipt review/all8 CI before this owned row closes. B5/1.2
 remain open/pre, B6–B9 held; D64/Gate/installed timers/production unchanged.
 Full managed-job collection, overrides/freshD60, process-gate integration,
 durable admission/manual/D175 and physical Mac/APFS/reboot gates remain later.
+
+
+### 2026-10-18 05:35 EDT — D224 consumer recorded-owner proof correction
+
+Claude273 independently reproduces exact104d808e as uid65534:31 tests/no skip,
+44 intended kills/intact controls,182 prior process regressions/three skips.
+It confirms the97-line source correct, the10-file/1332-insertion delta, unchanged
+pre-existing executable/test/mutator bytes, identical six-ledger blocks and pin
+sequence, full-node preconditions and every claimed source ordering/bucket fact.
+It requires one proof correction: replacing the ownership tie's recorded uid
+with envelope.os.getuid() survives all31 tests and accepts a constructible frozen
+image whose recorded owner is foreign but whose files belong to the runner.
+
+Codex independently reproduces that surviving substitution against the original
+31 controls: all pass6.746s. The new control patches only the existing fixture's
+recorded_hold metadata UID to runnerUID+1 before the honest journal/commit/capture
+flow. The real frozen reader verifies this policy-free chain; every returned
+file UID is runnerUID. The unchanged source refuses reader ownership and never
+calls compare. The one targeted ownership-tie substitution now fails the named
+foreign-owner refusal assertion, not through ERROR. Local32 tests pass11.587s;
+45 intended-assertion mutations pass with intact controls. Comparator/runtime,
+workflow and all existing source/proof files remain byte-identical to104d808e.
+Only the new test/runner and six ledgers change in this correction. The separate
+182 local regressions/21.580s are the earlier unchanged-runtime run, not a new run.
+
+Superseded CI39115186066 was cancelled for the required proof, never counted
+all8 green. Its completed Linux117639445757 separately passed31/1.597s/no skip/44;
+raw1521527 bytes SHA2565ee0980f5397e4f683e13f26b22e453fdf091c38e6d7dee038fd02cbbd5a412b,
+merge2042217fa6bfcfaa79d34d9247a1d0aa4a01d3b9 with104d808e second parent and equal
+whole tree. No completed native result is claimed for that cancelled run.
+The earlier30/42 and rejected ERROR-only control retain their historical counts.
+
+Claude273's optional weak verdict needle is strengthened to loaded-key-refusal
+wording without adding a count. Job-file read-after-owner ordering and the
+root-name/temp-parent predicates remain source facts but non-discriminating
+controls, carried as optional follow-ups; the string-key boundary is tested but
+not a counted mutant. Deriving labels from UNITS and dropping the verifier-digest
+override are equivalent for prevalidated records, not gaps or additional kills.
+No new source predicate, schema, reader, timer, hold or admission behavior changes.
+
+Corrected exact-head review/all8 CI remain pending, followed by the independent
+five-Markdown receipt review/all8 CI before only this owned row closes. B5/1.2
+stay open/pre,B6–B9 held; source remains scripted-only and all live observation,
+overrides/D60/process integration/durable admission/manual/D175/physical gates
+remain later. No production operation, caller-UID permission or release occurs.

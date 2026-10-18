@@ -157,7 +157,7 @@ class Comparison(unittest.TestCase):
         result = self.evaluate()
         self.assertEqual(result['unexpected_loaded'], [self.key], 'idle loaded without PID must refuse')
         self.assertEqual(result['unknown'], [])
-        self.assertEqual(result['outcome'], 'refused')
+        self.assertEqual(result['outcome'], 'refused', 'loaded key must refuse')
 
     def test_loaded_with_pid_in_nonrunning_state_is_unexpected(self):
         self.jobs[self.key] = loaded(pid=517)
@@ -303,6 +303,25 @@ class Consumer(unittest.TestCase):
                  self.assertRaisesRegex(comparator.envelope.Refused, 'reader ownership', msg='every read owner must match'):
                 self.consume(fixture)
             compare.assert_not_called()
+
+    def test_foreign_recorded_owner_refuses_even_when_every_image_file_has_runtime_owner(self):
+        recorded = policy_fixture.recorded_hold
+        uid = os.getuid()
+        def foreign(parent):
+            hold = recorded(parent)
+            hold['metadata_identity']['uid'] = uid + 1
+            return hold
+        with patch.object(policy_fixture, 'recorded_hold', side_effect=foreign):
+            fixture = self.fixture()
+        self.assertEqual(comparator.owner_uid(fixture.records), uid + 1)
+        found = comparator.read_inputs(fixture.data, fixture.commitment)
+        self.assertTrue(found['read'])
+        self.assertEqual({row['uid'] for row in found['read']}, {uid})
+        with patch.object(comparator, 'compare_held_jobs') as compare, \
+             self.assertRaisesRegex(comparator.envelope.Refused, 'reader ownership',
+                                    msg='foreign recorded owner must refuse'):
+            self.consume(fixture)
+        compare.assert_not_called()
 
     def test_private_literal_root_and_input_fences(self):
         fixture = self.fixture(); root = fixture.temp.resolve()
