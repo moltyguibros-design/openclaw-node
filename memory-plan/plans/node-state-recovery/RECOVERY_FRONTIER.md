@@ -58,7 +58,7 @@ review only, not source readiness or B5 closure. Production remains untouched.
 | B2 | **Cleared for the disposable mechanism only.** Codex registered a separate Apple-backend UTM VM with its own ASIF disk and a verified Alpine ISO. It started and stopped normally; while `UF_IMMUTABLE` guarded that stopped disk, UTM refused its start and remained stopped; after unlock it started and stopped normally. The production VM stayed started throughout. | Codex carries this owned result into B5's host boot controller; no further VM creation is needed for B2's guard mechanism. B5's macOS reboot rehearsal has a separate access requirement. `utmctl start` exited 0 even on the refused attempt, so the controller must check the resulting state and error. | `audits/step12_jetstream/B2_UTM_GUARD_REHEARSAL_20261012.json` records distinct VM/disk identities, ASIF format, guard refusal, unlock recovery and final states. This is not a production boot-denial certificate. | B5 controller implementation and owned tests. |
 | B3 | **Just-in-time installation pins:** the October 9 candidate names `viewer-observed-20261008`; the installed viewer has since moved to `viewer-plan-task-links-autosave-20261011`. The 23-job candidate is unapproved and can drift again. | Codex resolves known structural drift now, but re-captures all 23 installed jobs and direct file hashes only immediately before an approved window. Repeating the capture before a window is scheduled does **not** count as progress. | Current installed identities and hashes match the reviewed baseline at window entry, including the five old timer pins and the exact conditional migration form. No pre-window timer reinstall. | B6 and B7. |
 | B4 | **Cleared as a bounded design input:** all 23 installed plists and direct launch files, activation keys, and current GUI/user/system OpenClaw-label observations are captured. Claude's adversarial review at `ac954055` found no remaining concrete false claim. This is not a no-writer certificate. | Codex carries the identified child, deploy, viewer, bus and file-writing routes into B5; transitive and out-of-cohort writers remain fail-closed uncertainties for the window-time census and stopped-VM boundary. Re-running this static capture alone is not progress. | `audits/step12_jetstream/B4_WRITER_PROVENANCE_AUDIT_20261012.md` and its JSON cover all 23 labels, classify the only observed system-domain OpenClaw label, name re-entry edges, and state residual uncertainty without claiming pre-stop physical exclusion. | Boundary design B5. |
-| B5 | **In progress, owned source only:** D227 closes fixed managed-job observations at source6d2e9096/all8CI39121279608/Claude285. Native34/55 measures69 fixed keys; no hold/admission. Receipt review/CI pending at commit. | Codex builds held-gate combination, overrides/freshD60, process integration, durable admission, manual restoration and D175. Operator separately designates disposable access or decides a measured resource proposal. | Reviewed exact-head source/CI; distinct native full pipeline, APFS reattach and disposable-Mac reboot/login/process/hold/migration evidence. D189 and pre-stop limits remain. | Per-window release B6. |
+| B5 | **In progress, owned source only:** D229 closes sampled managed-job negative consistency at source665ccdb4/all8CI39126847156/Claude295. Native20/28;69 fixed keys, no live hold/admission. Receipt review/CI pending at commit. | Codex builds overrides/freshD60, full held/process integration, durable admission, manual restoration and D175. Operator separately designates disposable access or decides a measured resource proposal. | Reviewed exact-head source/CI; distinct native full pipeline, APFS reattach and disposable-Mac reboot/login/process/hold/migration evidence. D189 and pre-stop limits remain. | Per-window release B6. |
 | B6 | **Separate live-run release required.** B1's boundary choice and B5's design review never authorize a production stop. | Operator gives a fresh, explicit go/no-go for one exact attended window only after B2, B3 and B5 pass. The two-hour heartbeat may prepare and warn, but must never initiate the live stop. | Recorded window-specific authorization naming the reviewed runbook, current pins, host operator and abort contact; it explicitly names D173–D175's user-owned pre-stop evidence without root attestation, D62's ACCEPTED-or-ABORT pre-boot rule, the conditional post-admission/pre-restoration timer re-pin, and the manual-restoration fallback. Without it, B7 remains closed. | Live hold and shutdown B7. |
 | B7 | **Live full-node hold and shutdown closed.** No service or VM stop has occurred for this recovery. | Only in the attended, specifically authorized B6 window, execute the approved sequence and abort on any failed precondition. No single NATS member may be stopped as a rehearsal. | Application quiescence under the approved boundary, clean VM shutdown, active host boot denial and definitive physical no-writer proof at the boundary specified by B1. | Stopped-VM capture B8. |
 | B8 | **Four-store capture and isolated acceptance closed.** No three healthy cold masters have been accepted. | Bind host capture and restore tools to the four declared physical paths and volume, then restore the copies on isolated servers. | Four separately hashed path/volume/window-bound copies faithfully reproduce the observed bytes; offline streams, counts, sequences and expiring-stream treatment match. This does **not** prove historical independence of the four members; that needs deployment-time provenance outside this capture. | Step 1.2 closure and any topology change. |
@@ -2156,3 +2156,78 @@ freshD60, eligibility/history/authorship/physical exclusion or admission.
 Overrides/freshD60, strict process integration, durable admission/manual/D175,
 Mac/APFS/reboot/four-history acceptance remain later. D64/Gate/timers/production
 are unchanged. No Phase-8 scope expansion or production operation occurred.
+
+
+### 2026-10-18 08:55 EDT — owned managed-job negative observation source verified (D229)
+
+Source 665ccdb4cf82ef52cd73ca03b4f5babfbbbd8045 passes all eight jobs in
+[CI39126847156](https://github.com/moltyguibros-design/openclaw-node/actions/runs/39126847156).
+Native job 117673662377 runs20 tests in2.207s/no skip and28 intended
+assertion kills/intact controls. The new unpatched CI composition reports
+outcome=managed-jobs-negative-consistent,phase=negative,69 keys/two sweeps,
+errors {},elapsed731220792ns. This is only a sampled
+fixed-label runner fact, not a node positive, execution hold or admission proof.
+Linux job 117673662424 runs20 tests in1.157s/one CI-only native skip/28kills.
+Codex inspected complete raw logs: native79800 bytes SHA256
+fa3fa9fec2c911185612a90df64c08ad898b29d82084efb83993f7ead49af8f3; Linux1529725 bytes SHA256
+4a206fc3f14160059a86f8163b5054389562cea2fe599eb65897506cef8c56c1. Both name merge69537c6b8c7fae93911b21163d2ef434454668e7
+with the reviewed source as second parent and an identical whole tree.
+These completed-CI facts are Codex observations, distinct from the independent
+review and its CI status at review time. Older observer/process measurements
+in the same native log are not this wrapper's new composition evidence.
+
+Claude295 independently clears the exact source with no remaining required
+source/proof finding. The full-tree uid65534 replay passes20 tests/one CI-only native skip and28 intended kills, plus248 prior regressions/four platform skips (local Mac248 had one). Exact lineage/three hashes/64-line source/ten-file delta/four CI lines/six ledger copies and all293 pins are confirmed. Independent top-verdict, raw-reasons and non-recorded-comparison mutants die. Shallow-copy fields, raw boot bracket, second/raw first sweep and dropping the verified-digest tie survive as equivalents under the preconditions; no extra kills are claimed. Review saw five of eight CI green at12:23UTC.
+The three D228 sections are identical across six source ledgers; the earlier
+local note's six-block phrasing means six ledger copies, not six distinct sections.
+Local final20/7.981s/one native skip and28 intended kills, and the separate
+248/35.246s/one native skip retain their actual run counts. First20 failed only
+because the test helper treated explicit None as its valid default; direct-call
+control corrected that test, not the source. Intermediate20/5.339s and final
+provenance exception-to-assertion control remain historical, not relabelled.
+
+Optional295 clarification: observation_sha256 binds the forced object received
+by the wrapper, not the original file bytes. The private file is canonical;
+source/sample-label forcing changes that object before hashing. main catches
+only envelope.ERRORS as the existing convention; a broader catch surviving
+the suite remains an optional control, not a new claim or silently closed gap.
+
+Only B5-D62-managed-job-negative-observation closes as an owned source prerequisite.
+The64-line wrapper validates before hashing or comparison, fingerprints the exact
+received object, copies recomputed binding/provenance/budget/boot facts, and gates
+non-recorded observations with recomputed reasons and negative null. Recorded
+passes its first sweep verbatim to the unchanged comparator. Nested result and
+its literal scripted scope/source remain untouched; only its exact negative
+consistency success yields top managed-jobs-negative-consistent. Loaded idle
+and running facts refuse. All hold/history/admission flags remain false.
+No raw argv/job values/policy are emitted, and no input mutation or IO occurs
+in comparison. Sweep_b/raw-input substitution is equivalent for recorded facts;
+missing/extra/unknown buckets are already excluded upstream, not new kills.
+
+The consumer requires both flags before IO, reuses exactly one owned_records
+with coherent pins/one reader/frozen verifier/every recorded-owner tie, then
+private canonical bounded managed-jobs.json with a textually identical forcing
+block. No CLI collector reference; file claims stay untrusted sample labels and
+source scripted. The declared live-route mutant needs gate relaxation plus
+collector wiring and dies at the fixture-only CLI control with benign census;
+no ERROR-only kill is counted. No local unpatched managed-label scan occurred.
+The native CI guard remains convention, not environment attestation.
+
+Success means only validated supplied facts were unloaded at the sampled
+moments under the existing30min acceptance window, two sweeps and one boot
+bracket. It rereads no current clock/boot, does not compare baseline boot, and
+adds no freshness/continuous/coherent process-job window, process absence,
+disabled override, complete inventory, freshD60, live hold, eligibility/history/
+authorship/physical exclusion or admission guarantee. The observer budget
+cannot interrupt blocked calls. D189 and unprotected provenance still apply.
+Optional loaded_keys omitted; earlier optional controls remain carried.
+
+All existing executables/tests/mutators stay fixed. The source delta is three
+new files, four workflow lines and six ledgers; this separate receipt changes
+five Markdown records only, leaving AUDIT_PRE and all source/proof/workflow bytes
+fixed. Local lint14PASS/1old idle-version WARN/0FAIL; export's old two missing
+automation/history failures stay distinct. B5/1.2 open/v1.2-pre,B6–B9 held.
+Overrides/freshD60, full held/process integration, durable admission/manual/D175,
+Mac designation/APFS/reboot/four-history acceptance remain later. D64/Gate/
+installed timers/production remain untouched. Receipt exact-head review and
+its own all8 CI are pending at commit time; no production operation or release.
