@@ -2231,3 +2231,185 @@ Overrides/freshD60, full held/process integration, durable admission/manual/D175
 Mac designation/APFS/reboot/four-history acceptance remain later. D64/Gate/
 installed timers/production remain untouched. Receipt exact-head review and
 its own all8 CI are pending at commit time; no production operation or release.
+
+
+### 2026-10-18 09:36 EDT — scripted entrypoint consistency pre-audit candidate (D230)
+
+Micro re-orient: B5/1.2 open/v1.2-pre, B6–B9 held.
+D229 receipt7cdd3ba8/source665ccdb4 have all8 CI39129315402/39126847156
+and clear299/295 reviews; Claude301 acknowledges the evidence split.
+Fixed managed-job negatives are connected to validated observations; inventory,
+overrides and exclusion facts are not yet compared on the new diagnostic path.
+This atom targets scripted entrypoint consistency, not fresh observation.
+
+Goal: one scripted entrypoint consistency result against the frozen checkpoint.
+Needs: reviewed green D229; unchanged inventory/exclusion validators, frozen
+reader and honest fixture construction, full terminal CAPTURE facts; B1/D189.
+All source prerequisites exist at7cdd3ba8. A nonempty exclusion must be recorded
+through the honest fixture before its baseline, never injected after verification.
+Feeds: separately reviewed current entrypoint observer/overrides/freshD60
+measurement, full held/process integration, durable admission/manual/D175.
+Verify: portable real frozen-reader positives/negatives and decisive named
+assertion mutants; scripted native-CI portability only, exact source review/all8
+CI plus separate reviewed green five-Markdown receipt. Runtime: no production.
+
+Pre-audit request302 pending. Proposed surface: new scripted_entrypoint_consistency
+module/test/runner, four workflow registration lines and six source ledgers.
+No existing executable/test/mutator, Journal/schema/recover/D64/Gate/identity/
+host/timer change. VERSION stays pre because the enclosing live gates remain.
+
+Read-only source audit: valid_entrypoint_inventory binds baseline loaded and
+disabled flags, so original prior cannot validate held current facts. Proposed
+private expectation adapter copies baseline prior, replacing loaded/running/
+disabled from already-verified terminal observations, then calls that unchanged
+validator. No adapter is persisted or treated as a journal/baseline; its exact
+role and soundness await302. Compare installed/roots/disabled artifacts to
+baseline, loaded/overrides to terminal CAPTURE, all domains/all labels.
+
+Proposed exact supplied input is boot/inventory. D60 current shape uses unchanged
+valid_tailscale_exclusion; label set plus plist/wrapper identity equals baseline,
+current excluded boot equals the supplied boot. Old dynamic app/run/boot facts
+are not compared across boot. No live code/signature/launchd verification or
+new age/freshness claim follows a shaped file. Empty exclusions must match
+baseline emptiness. All source/hold/history/admission/freshness flags remain
+fixed scripted/false. Hash only the exact supplied value after validation,
+report binding/reasons without raw inventory/policy/argv.
+
+Consumer proposal: fixture AND scripted before IO, one managed.owned_records
+with coherent pins/one reader/frozen verifier/all recorded-owner ties, then
+private canonical bounded entrypoints.json and pure comparison. No collector
+reference, constructor or write. No local unpatched inventory/job scan.
+Current observer timing/boot-coherence and privileged readability remain later,
+not inherited from job30min or process120s envelopes. D189/unprotected provenance
+still applies. Physical Mac/APFS/reboot/four-history gates remain separate.
+Optional older controls remain carried, not silently closed. If adapter/fixture
+proof is unsound or scope spans outcomes, split before source work.
+
+
+### D230 pre-audit settled — Claude303, before implementation
+
+The atom and private terminal-state adapter are sound. valid_entrypoint_inventory
+uses prior only for installed plist digests, loaded-set expectation and disabled
+override rules; copy only terminal loaded/running/disabled into a private copy.
+Never persist it, call it a baseline or pass it to valid_prior. Exact terminal
+override equality is additional to the shared true/not-true predicate and rests
+on the stated premise that launchd's override database persists across reboot.
+A previously unloaded/non-disabled RunAtLoad job starting at login must refuse,
+correctly; this unit adds no permitted-start exception.
+
+Decision: app drift refuses. Compare the full per-label app identity as well as
+plist and wrapper to baseline; a Tailscale update requires a separately reviewed
+new baseline. This conservative owned-comparator choice is made before source
+work, not a production re-baseline operation. The proposed app-drift positive
+is dropped before implementation. Only validated launchd dynamics (e.g. run
+count) and boot may differ; current excluded boot must equal supplied boot.
+Equal label sets are mandatory both empty/nonempty ways. A nonempty passing
+input asserts not-running, runs>=1, exit0, disabledfalse in that supplied boot.
+Those are supplied shaped claims, not observed/authenticated fresh D60 proof.
+
+Order: exact outer schema/boot digest, explicit valid_tailscale_exclusion, then
+unchanged valid_entrypoint_inventory over the private adapter, then fingerprint
+exact received value, then compare. verifiedtrue is only a shape claim. Report
+fixed scripted source, frozen baseline/checkpoint/recordedUID binding and named
+field reasons without any raw inventory/overrides/exclusion/paths/policy/argv.
+Hold/history/admission/freshness flags false. Consumer both flags before IO,
+one owned_records, private canonical bounded file, no collector/constructor/
+write. CI scripted portability only, no new native or local unpatched scan.
+
+The pre-screen already proves the nonempty fixture viable: patch only guest
+full_entrypoint_evidence to carry tailscale_record and a disabled-artifact hash
+before original Journal creation; real capture/commit/stopped reader/frozen
+verification succeeds through owned_records.23 managed labels/1 excluded label,
+all3 loaded sets empty; private terminal adapter passes the shared validator.
+No post-verification record mutation, real Tailscale/file signature measurement
+or production operation. Temporary owned probe was cleaned.
+
+Count only decisive named assertions with intact controls, never ERROR-only
+kills. Loaded equality and installed digest comparison are dominated by shared
+validation; running substitution is unused there. Copying the exact input before
+hashing is equivalent because these validators do not normalize it; hashing
+only inventory (omitting supplied boot) is the discriminating hash variant.
+Copying terminal identity is also equivalent because frozen verification already
+binds it; arbitrary fourth-field identity corruption must be detected, not
+claimed as a permissive defect. Optional drift-only reporting is not adopted;
+all mismatches refuse. Earlier optional controls remain carried.
+
+D230 row stays candidate until source exact review/all8 CI and the separately
+reviewed green five-Markdown receipt. B5/1.2 open/pre,B6–B9 held,D64/Gate/
+installed timers/production untouched. Actual current inventory/override/D60
+observer, full held/process integration, durable admission/manual/D175 and
+physical Mac/APFS/reboot/four-history evidence remain later.
+
+
+### 2026-10-18 09:49 EDT — D230 local scripted entrypoint candidate proof
+
+The new80-line module shape-validates boot/inventory, explicitly validates D60
+shape, calls unchanged valid_entrypoint_inventory over the private terminal
+expectations, then hashes exact supplied input and compares. Installed paths,
+roots and disabled artifacts match baseline; loaded/overrides match terminal
+CAPTURE exactly; excluded label sets match and plist/wrapper/full app identity
+match baseline. Current exclusion boot equals supplied boot. Changed valid run
+counts/boot may pass; app SHA/version/cdhash drift refuses. Full maps preserve
+none versus false and extra com.openclaw override keys in every domain.
+No inventory/path/override/exclusion table/policy/argv is echoed. Fixed scripted
+source, frozen digest/recordedUID binding and all four certification flags false.
+
+Local final28 tests pass8.394s/no skip;39 named intended-assertion mutations
+pass with intact selected controls/no ERROR-only kills. Earlier268 regressions
+pass53.089s/two intentional CI-only native skips on this Mac. New native CI
+coverage is scripted portability only, not live collection or fresh D60.
+The honest nonempty exclusion/artifact fixture records them before original
+Journal creation and reaches the actual capture/commit/stopped reader/frozen
+verification path. Empty/nonempty and both policy cases work. The honest foreign
+recorded-owner chain verifies as a frozen input for the pure binding control,
+while the real owned consumer correctly refuses its reader UID mismatch.
+
+## Mid-Implementation Findings — D230 fixture precondition
+
+One fixture assumption in303 cannot occur under this head's full-node contract.
+All prior-unloaded units are disabled: member1 held and federation tick required
+disabled; known-broken Discord must be loaded, not disabled. First27-test run
+errors8.777s with StopIteration searching for an unloaded enabled unit. The next
+28-test run errors9.095s when a pre-baseline attempt to make Discord unloaded
+is correctly refused by unchanged valid_prior. No bypass, rehashed invalid
+fixture or post-verification record mutation is used. Replace that impossible
+example with every managed-label start in all3 domains refusing against honest
+frozen records. This is one precondition finding/two failed proof attempts, not
+two source defects or scope expansions. The80-line source never changed.
+
+The first39-kill run had intact selected controls but excluded the then-invalid
+example; it was not evidence of a passing28-test suite. After fixture correction
+the final full28 and a fresh39-kill runner pass on the same test bytes. Both
+runs retain their actual counts.303's generic RunAtLoad forecast is qualified:
+a future broadened baseline may allow it, but the current frozen precondition
+does not. No new allowed-start exemption is added.
+
+The terminal adapter preserves all other baseline fields and input immutability;
+its identity-corruption variant is a contract/false-refusal control, not a claimed
+permissive defect. Explicit exclusion removal/reversal pins call order; the later
+inventory validator already repeats exclusion shape checking. Installed digest,
+static exclusion path constraints and terminal loaded equality are dominated
+shared proof, not extra single-predicate acceptance kills. Running substitution,
+copying the full input before hashing and terminal identity substitution are
+equivalents, not counted. Full-input hash versus inventory-only is discriminating.
+The live-CLI variant explicitly relaxes flags AND wires a benign patched inventory
+collector; fixture-only CLI refusal/zero calls kills it. No real CLI collector
+reference, constructor, write or local unpatched inventory/job scan exists.
+
+Promised deltas land: three new files, four workflow lines and six ledgers. All
+pre-existing executable/test/runner bytes remain fixed. Pin/read/frozen verifier
+and every recorded-owner tie are reused once before private canonical bounded
+entrypoints.json and comparison. Input/capture/owner/flags/no-constructor/no-write/
+CLI controls pass. Local lint14PASS/1old idle-version WARN/0FAIL. No Phase-8
+patch or source scope expansion. Optional older controls remain carried.
+
+Source exact review/all8 CI are pending, then separate five-Markdown reviewed
+green receipt before this owned row closes. Exact override equality assumes
+launchd override persistence across reboot; no live measurement certifies it.
+Nonempty success supplies a completed successful run claim in the supplied boot,
+without observing/authenticating it. verifiedtrue is shape only; no fresh D60,
+current clock/boot read, process absence, live hold, eligibility/history/
+authorship/physical exclusion/admission or protected provenance. D189 applies.
+B5/1.2 open/v1.2-pre,B6–B9 held; D64/Gate/installed timers/production unchanged.
+Actual inventory/override/D60 observer, full held/process integration, durable
+admission/manual/D175/Mac/APFS/reboot/four-history evidence remain later.
