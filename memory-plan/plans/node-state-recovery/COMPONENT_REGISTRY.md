@@ -1,5 +1,9 @@
 # Node state recovery — registry
 
+2026-10-18 04:25 EDT — D223 verifies owned class comparator 39638d1e:
+all8 CI39109210059, native38/51, Claude261 clear. Only owned source row closes;
+B5/1.2 open/pre, B6–B9 held. Receipt CI/review pending at commit.
+
 2026-10-18 03:50 EDT — D222 own-label proof correction38 tests/51 intended mutants;182
 regressions pass. Runtime unchanged; source review/CI pending, B5/1.2 open/pre.
 
@@ -1412,3 +1416,64 @@ Corrected exact-head source review and CI are pending; D222 stays open, B5/1.2
 open/pre, B6–B9 held. Runtime/operational boundaries remain unchanged. No local
 unpatched full scan, production operation, policy enrollment, hold eligibility,
 loaded-image/history/physical proof or admission is added or claimed.
+
+
+### 2026-10-18 04:25 EDT — owned process-class-comparator source verified (D223)
+
+Source 39638d1edb6f41aadf217bf3a2c2c92a4e368c7f passes all eight jobs in
+[CI39109210059](https://github.com/moltyguibros-design/openclaw-node/actions/runs/39109210059).
+Native job 117621494888 passes 38 tests in 3.673s and all 51
+intended-assertion mutants with intact controls. The substituted owned C child
+matches exactly its pre-authored class label but refuses its unobservable parent;
+there is no native positive attribution claim. The CI-only unpatched full-runner
+observation refuses at the envelope with the child in both passes, 1092
+unknown entries across those passes and 2 envelope refusal reasons.
+Those are entries, not distinct-process counts or a full table/per-reason measure.
+Linux job 117621494877 passes 38 tests in 0.503s with 1 native skip
+and all 51 intended mutations. Codex inspected both complete raw logs.
+Native raw: 67213 bytes, SHA256 0f56bad260131e3d95c38a9a65cee18f7446dc997c87282f6edd5350bb1986a1.
+Linux raw: 1517552 bytes, SHA256 5db3b98478024f56063f51061c8b5d1491ddfc2c434edb3715e20f2ec3d42819.
+Both logs name checkout merge f50f74a8712d9a15822f21fa25ed6362b81954cb; its second
+parent is the reviewed source and its whole tree is identical to that head.
+
+Claude261 independently reviews the exact source with no required finding.
+It reproduces38 tests (one native skip) and51 intended kills as uid65534, plus old envelope55/50 and182 combined tests (three skips). Its exact guard-removal replay now fails only the new shared-plist swap assertion with no ERROR; D218 validation and a recorded envelope are independently confirmed. Comparator/helper/old proof/workflow blob ids equal ea87f6fa, and the eight-file proof-only correction and six identical ledger blocks are verified. No new required or optional finding remains. Linux raw logs beyond the connector’s last5000-line window remain Codex’s observations; the independent source reproductions stand separately.
+The own-label check was already correct; the required shared-plist swapped-label
+control now pins its removal with one additional intended assertion. Comparator runtime,
+workflow and helper bytes remain identical to ea87f6fa. Superseded CI39107975073
+was cancelled for that proof, not counted green; its Linux37/50 and earlier181
+remain those executions, never relabelled as the corrected source proof.
+The five forbidden-key mutants share a7-tuple mechanism, counted but not
+discriminating; per-field positives are separate evidence. Pass-B for A, PID
+for generation and dropping loaded are equivalent for recorded input, not gaps
+or additional kills. Minimal CLI early-error refusals may omit phase/hashes.
+The native CI pass-null condition is now an explicit assertion. D220/D218 optional
+items remain carried; no equivalent or ERROR-only mutation is counted.
+
+Only B5-D62-process-class-comparator closes as an owned source prerequisite.
+Its concrete consumer reaches the existing frozen-policy and envelope path once,
+then validates and compares without another census, file write or constructor.
+The envelope validator/binding/collector/private-reader bodies are unchanged;
+only the bounded owned-helper extraction and old policy-emission mutant anchor
+changed the preceding unit. D218 binder, Journal/schema/recover/D64, lib, Gate/
+identity, host executables and timers remain unchanged. This receipt changes
+five Markdown records only, with all executable/test/workflow bytes fixed.
+Its own exact-head CI and independent review remain pending at commit time.
+
+Class-consistent means exact sampled class/attribution/count consistency against
+a prevalidated authored claim. It does not establish a stopped hold, loaded-job
+configuration agreement, boot eligibility, completeness, policy authorship,
+historical independence, loaded executable image or admission. Exact input hashes
+bind received claims; recomputation decides envelope eligibility for comparison.
+Source/coverage are not promoted, unknown or unstable evidence refuses before
+class work, and admission/history remain false under D189. Scripted positives
+stay scripted; the private fixture table supplies no B3 protected provenance.
+The 120s window cannot interrupt blocked calls, and the 8MiB diagnostic input bound
+does not widen frozen readers. Local native enumeration was substituted; no local
+unpatched full scan or production service/VM/timer operation occurred.
+
+B5/1.2 remain open/pre and B6–B9 held. The next pre-audit scopes the smallest jobs/recorded hold/overrides/fresh D60
+prerequisite; observation, comparison and durable admission remain separately
+reviewable before attended manual and D175. Native positive attribution/full pipeline, Mac access,
+APFS reattach/reboot and four-history acceptance remain separate. No production
+admission or runtime operation follows this source evidence receipt.
