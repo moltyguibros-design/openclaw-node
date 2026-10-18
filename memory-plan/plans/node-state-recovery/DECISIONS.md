@@ -5383,3 +5383,79 @@ passing/noERROR. Runtime/workflow/release runner bytes are unchanged from3cbc. T
 supersedes the27/13 test floor without relabelling earlier runs. Exact test-head Claude
 and CI remain required. Smaller JSONDecodeError normalization and host import-graph
 notes are carried, not defects or a new refactor. Guest/manual/D175 and Mac proof stay open.
+
+
+## D215 — 2026-10-17 21:06 EDT: verify the owned pre-start restore-prior decision
+
+Exact source d5636b5411a29fbb25ce467c1119cb997f5a6ccb passes all8 checks in CI39083436062.
+Native macOS117544960569 passes33 decision controls16.121s and all20 intended decision
+mutants; all39 prior cleanup/terminal/release kills also pass (59 total). Raw job-log
+SHA256 d63ed33a35dcc81d808077e8c9c8a46b5359f57efd54079a669afa581aeda128. Native and Linux
+checkout merge34a3bd5a8a5d172160a97216dfc0c5cafee4f5e1 has source d563 as second parent;
+fetched recovery-step/workflow blobs are identical. Linux117544960755 passes33controls
+15.620s and20mutants plus its full recovery/root steps; raw log SHA256
+2f9a311895cffa339630a62ac892bbf78f42a0b6a34cbae3427c2b27d204badd.
+
+Claude193 finds no required runtime source finding at3cbc9cd5 and reproduces the initial
+27/13 and unchanged regressions as uid65534. Its live removals expose present but masked
+binding guards. Claude195 independently verifies the test-only d563 descendant:33OK14.1s,
+all20 intended kills with passing controls/noERROR. All its formerly surviving stored-
+sample, decision/intent, decoder nonce/arm/checkpoint and previous/flags mutations now
+fail their matching new negatives. No required finding remains. Runtime/workflow blobs
+are identical to3cbc; all lib/bin/test/workspace-bin trees are unchanged by the test proof.
+
+The earlier runtime head3cbc9cd559efdcee1e6742ed954126556d875cce separately passes all8
+checks in CI39082522585. Its native117542250800 is27controls15.531s/13decision mutants,
+not33/20; raw SHA256 d1fe14a370c6823cb458ef4179d06bc007bc97bda57065d5bc4c3e4a70f5213d.
+Its fetched merge10c2f24faa24201882bf5678b29ae2d5eb810f01 has3cbc as second parent and
+identical recovery/workflow blobs. The first aa340975 run39082243166 was canceled after
+the literal mutation-anchor collision was found; it is not green or native evidence.
+These results are distinct and never relabelled.
+
+B5-D62-host-boot-decision closes only the owned source prerequisite; B5-decision-binding-
+tests is cleared at the33/20 floor. The fixed single-use restore-prior record consumes
+completed ABORT/release under both EX locks and consumer-established file/directory
+barriers. Both fresh written/consumed samples and whole-image checks retain the original
+host session and source bytes. Pre-start-only verify_decision is read-only. The guest
+consumer checks the external digest and canonical local checkpoint, returning an
+unprotected operator_claim and admission false, with no I/O, Journal/Gate/recovery or
+post-boot host verification. It grants no VM start, guest admission, ACCEPTED or recovery
+point. Visible success beside FAILED or any partial/repeated attempt remains manual.
+Native controls use actual owned files/barriers on read-only descriptors, with the
+existing full-flush branch conditional on attribute availability. VM/flag operations are
+scripted; no native whole cleanup→decision→release→boot pipeline or hardware-loss proof.
+
+Carried optional notes: local checkpoint event/scope guard coverage is near-equivalent
+under the exact digest binding and D189 same-uid coordinated rewrite limit; JSONDecodeError
+normalization and the host import graph are not silently changed. Prior release X6, the
+helper no-op gap, strong-flush-attribute assertion, B5-CI-R3-placement and protected host/B3
+provenance limits remain tracked. No claim of authorship, continuous sampled denial,
+pre-power-off physical exclusion or real-history acceptance follows.
+
+Next B5-D62-guest-scoped-admission/manual needs the claim bound before any guest gate,
+local chain and recorded hold validation, all OpenClaw launchd jobs and every process as
+the OpenClaw UID or executing production entrypoint roots compared to that hold before
+Journal.recover, unreadable/unexpected in-scope observations refused, then stopped units,
+overrides and fresh exclusion checks. It is not a complete physical process census, and
+platform interpreters get no blanket exception. The explicit attended manual route is
+still unimplemented; a refusal leaves the node held and does not become already-restored.
+
+D175 follows admission before post-boot Gate construction/restoration. B5-gate-device-
+reattach stays open: a reviewed per-filesystem old-Data→new-Data mapping must account for
+identity.json, saved pins, saved metadata/path components and all five timer argv/manifest
+pins, preserving inode/birthtime/lock-ctime/nonce/hash/volume/path and same-boot FD/path
+checks without rewriting identity.json. Only the exact journaled installed value-only
+diff is allowed, only if device changed; altered identities/extra fields/non-timers/
+premature/same-boot/repeated migration must refuse. Owned APFS reattach and a separately
+designated disposable-Mac full reboot/login/process/hold/migration rehearsal are still
+required; no owned fixture substitutes for them. B1 permits the next source tests;
+actual Mac access still needs exact operator designation or a measured fixed resource
+decision, with Codex's resource proposal remaining a prerequisite for a new guest.
+
+This receipt changes five Markdown records only and requires its own exact-head green
+CI before current-head readiness. VERSION remains v1.2-pre; overall1.2/B5 open. B1 design
+only, B2 Alpine mechanism only, B3's23 pins JIT and B4 bounded design input, neither
+repeated; B6 has no fresh exact-window release, B7–B9 held. D64's first full-node cross-
+boot refusal, production capture/reconcile fences and installed timers are unchanged.
+All four physical NATS histories remain separate. No production service/VM/image/timer,
+local native image/launchd operation or real guest reboot occurred in this work unit.

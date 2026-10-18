@@ -91,3 +91,29 @@ passing/noERROR. Runtime/workflow/release runner bytes are unchanged from3cbc. T
 supersedes the27/13 test floor without relabelling earlier runs. Exact test-head Claude
 and CI remain required. Smaller JSONDecodeError normalization and host import-graph
 notes are carried, not defects or a new refactor. Guest/manual/D175 and Mac proof stay open.
+
+
+### 2026-10-17 21:06 EDT — owned pre-start decision source verified (D215)
+
+Source d5636b54 / CI39083436062 all8 green; Claude195 reproduces33controls/20mutants
+as uid65534 and closes every material193 proof gap plus previous/flags, no required
+finding. Native117544960569 runs33controls16.121s/20decision kills (59 with prior runners),
+raw SHA256 d63ed33a35dcc81d808077e8c9c8a46b5359f57efd54079a669afa581aeda128. Native/Linux merge34a3bd5a
+has identical recovery/workflow bytes; Linux117544960755 passes33controls15.620s/20kills.
+Earlier3cbc / CI39082522585 all8 is separately27/13 native15.531s, never relabelled33/20;
+aa340975 CI39082243166 canceled, not green. Only the owned source prerequisite closes.
+The decoded digest remains an unprotected claim with admission false; no boot or guest
+recovery authority. VM/flags scripted; actual owned-file barriers are not native whole-
+pipeline, physical authorship or real reboot proof. D189/protected provenance and the
+explicit optional notes remain. Source feeds claim decoding, then guest scoped admission/
+manual route before D175. B5-gate-device-reattach, serving-NATS adapter and actual Mac
+access/APFS/reboot evidence remain open. B5/1.2 pre/open, B6–B9 held, D64/production/timers
+unchanged; B3/B4 not repeated and four histories separate. This five-Markdown receipt
+head needs its own exact-head green CI; no production operation or local native image/VM/launchd operation.
+
+Promised-versus-landed: yes — existing-module owned decision producer/pre-start verifier;
+yes — pure checkpoint-bound claim-only consumer; yes — exact schemas/single-use manual
+failures and two held locks; yes — real file barriers and decisive33/20 proof; yes —
+Claude exact-source review and all8 source CI. Feed lands in restore_only claim decoding;
+future full-node admission/manual/D175 consumers remain explicit open work. No runtime
+deploy, service restart, production hold, cold-master acceptance or operational closure.
