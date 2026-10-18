@@ -143,3 +143,18 @@ Local40 controls pass0.847s and28 intended mutants fail their named assertions
 with intact controls. Superseded CI39089415728 was canceled for this correction,
 not green. Exact-source review and corrected-head CI remain required. No shared
 runtime API, job/hold/journal/Gate/timer or production operation changed.
+
+
+### 2026-10-17 22:30 EDT — D216 directory-root proof candidate
+
+Claude213 confirms the required whole-argument scope defect is fixed at07347924,
+reproduces40 portable tests (one native skip) and28 intended mutants as uid65534,
+and finds no required source issue. Its independent delimiter aliases and embedded
+flag control behave correctly. The optional live parent-directory branch was still
+unproved: the equality-only mutant passed40 tests. The regression now exercises
+each delimiter alias against both a file root and its parent directory; a named
+parents-branch mutant fails its intended assertion. Local40 tests pass3.023s and
+all29 intended mutants pass with intact controls. Runtime/workflow bytes remain
+identical to07347924. Superseded CI39090103107 was canceled for the proof extension,
+not counted green. Corrected-test exact-source review and exact-head green CI are
+pending. B5/1.2 remain open/pre, D64/timers/production unchanged, no admission.

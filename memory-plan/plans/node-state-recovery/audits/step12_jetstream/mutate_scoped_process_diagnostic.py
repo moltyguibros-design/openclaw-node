@@ -6,6 +6,8 @@ import sys
 STEP = pathlib.Path(__file__).resolve().parent
 PREFIX = 'test_scoped_process_diagnostic.ScopedProcessDiagnostic.'
 MUTANTS = [
+    ('whole-argument-directory-root-skipped', 'or pathlib.Path(root) in resolved.parents', '',
+     'test_other_uid_whole_argument_alias_with_spaces_is_in_scope', "'clean' != 'refused'"),
     ('argv-digest-boundaries-dropped', "b'\\0'.join(arg.encode()", "b''.join(arg.encode()",
      'test_argument_digest_preserves_boundaries', 'argument boundaries must not collapse'),
     ('requested-pid-check-skipped', "and before['pid'] == pid", 'and True',

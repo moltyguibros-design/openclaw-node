@@ -3546,7 +3546,7 @@ four histories separate. See D216 for sampling, current-disk-image and decoder l
 > **B5-D62-scoped-process-diagnostic — Goal:** provide a strict record-free owned current-boot process diagnostic.
 > **Needs:** D215 receipt0d8099c1 all8 green; existing libproc, boot, file and path primitives; B1 owned authority.
 > **Feeds:** explicit process-policy authoring and disposable-Mac unknown-set measurement, then separate policy producer/admission/manual/D175 gates.
-> **Verify:** code:40 owned controls including an independently expected native child (substituted enumeration only),28 intended-assertion mutants with controls/noERROR, owned-runner unpatched refusal with child matched, unchanged existing executable bodies, Claude exact-source review and exact-head green CI. No production or full-host positive.
+> **Verify:** code:40 owned controls including an independently expected native child (substituted enumeration only),29 intended-assertion mutants with controls/noERROR, owned-runner unpatched refusal with child matched, unchanged existing executable bodies, Claude exact-source review and exact-head green CI. No production or full-host positive.
 
 
 ### 2026-10-17 22:25 EDT — D216 whole-argument scope correction candidate
@@ -3556,3 +3556,18 @@ other-UID root process at ffd7cb8c. Whole process arguments are now resolved
 before the unchanged shared plist classifier. Local40 controls/28 intended
 mutants pass; corrected source review/CI remain pending. Superseded run39089415728
 was canceled, not green. No admission, production or shared-API change.
+
+
+### 2026-10-17 22:30 EDT — D216 directory-root proof candidate
+
+Claude213 confirms the required whole-argument scope defect is fixed at07347924,
+reproduces40 portable tests (one native skip) and28 intended mutants as uid65534,
+and finds no required source issue. Its independent delimiter aliases and embedded
+flag control behave correctly. The optional live parent-directory branch was still
+unproved: the equality-only mutant passed40 tests. The regression now exercises
+each delimiter alias against both a file root and its parent directory; a named
+parents-branch mutant fails its intended assertion. Local40 tests pass3.023s and
+all29 intended mutants pass with intact controls. Runtime/workflow bytes remain
+identical to07347924. Superseded CI39090103107 was canceled for the proof extension,
+not counted green. Corrected-test exact-source review and exact-head green CI are
+pending. B5/1.2 remain open/pre, D64/timers/production unchanged, no admission.

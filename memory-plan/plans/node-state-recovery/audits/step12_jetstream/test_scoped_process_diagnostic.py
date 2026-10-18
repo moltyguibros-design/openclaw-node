@@ -139,20 +139,25 @@ class ScopedProcessDiagnostic(unittest.TestCase):
         self.assertEqual(result['excluded_pids'], [42])
 
     def test_other_uid_whole_argument_alias_with_spaces_is_in_scope(self):
+        required = self.root / 'required'
+        required.mkdir()
+        target = required / 'program'
+        target.write_bytes(b'owned target')
         outside = self.root / 'outside'
         outside.mkdir()
         arguments = []
         for name in ('entry with spaces', 'entry(parentheses)', 'entry"quote', "entry'quote",
                      'entry;semicolon', 'entry,comma', 'entry|pipe', 'entry&ampersand', 'entry`tick'):
             alias = outside / name
-            alias.symlink_to(self.binary)
+            alias.symlink_to(target)
             arguments.extend((str(alias), alias.name))
-        for argument in arguments:
-            with self.subTest(argument=argument):
+        for argument, root in ((argument, root) for argument in arguments
+                               for root in (target, required)):
+            with self.subTest(argument=argument, root=root):
                 row = {**self.row, 'uid': self.row['uid'] + 1,
                        'executable': '/usr/bin/true', 'cwd': str(outside),
                        'arguments': [argument]}
-                expected = {**self.expected, 'roots': [str(self.binary)], 'expected': []}
+                expected = {**self.expected, 'roots': [str(root)], 'expected': []}
                 result = self.compare({**self.observed, 'processes': [row]}, expected)
                 self.assertEqual(result['outcome'], 'refused')
                 self.assertEqual([item['pid'] for item in result['unexpected']], [42])
