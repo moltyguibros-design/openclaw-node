@@ -218,3 +218,695 @@ FOUNDATION_CHECKPOINT.md. Code/test bytes remain5fabf6e; only plan/evidence
 clarifications accompany integration. Fresh private Journal58/58 passes;
 exact integration CI/read-only re-review remain required before merge. Do
 not close1.2 or introduce production imports, controller, holds or timer wiring.
+
+### B5 owned journal-mount source slice — 2026-10-17 00:44 EDT
+
+The active slice feeds B5-stopped-ASIF checkpoint extraction: wrap the D191
+reader in an owned-fixture-only read-only ASIF mount and publish a receipt
+of exactly the inputs it read. It does not enable production capture or
+close B5. D168/D173/D174/D175 and the four separate histories remain binding.
+
+Needs: published checkpoint/commitment/reader source at 5b6c84af, a completed
+owned capture, caller-supplied role table and no active capture worker. File
+deltas: host_journal_mount.py, probe_asif_mount_ownership.py,
+test_host_journal_mount.py, reader read-metadata output and its tests, both
+scripted CI paths, and the plan/evidence ledgers. The probe stays unwired;
+native mount facts and the protected B3/acceptance roots are separate gates.
+
+Verify: scripted mount suite passes, every new boundary has a decisive
+negative, designated unmutated controls pass, one-rule mutations fail for
+their intended reason, Claude challenges the final bytes, then exact-head
+CI passes. Native ASIF ownership/flags/ctime behavior must be observed on
+an isolated CI runner before claiming mounted-image verification. These
+scripted checks never mount a volume or touch a VM. Source publication
+does not satisfy the disposable-macOS reboot rehearsal.
+
+Current local evidence: 60 scripted macOS tests OK (one Linux platform-guard
+skip), 30 reader tests OK, 119 wrapper/probe mutations killed with no runner
+problems. The updated 46 reader mutations are all killed for their intended reason
+with unmutated controls passing and no runner problems. The previous
+published head has all five checks green in CI run 38930108319; that says
+nothing about this uncommitted delta.
+
+Mid-implementation finding: the probe's cleanup repeats eject by disk
+number without re-binding it to its own image, unlike the wrapper's
+cleanup. A timed-out applied eject can release that number for another
+image. Claude is reviewing this and the probe's partial-attach, interrupt
+and recursive-removal boundaries before source publication or any native
+probe execution. No production VM, service, image or timer changed.
+
+The scripted counterexample is reproduced locally: the first eject times
+out after releasing the probe image, the simulated disk number is reused,
+and the probe issues one foreign eject and reports clean. All command and
+inventory functions were mocked; no disk command ran. Claude confirmed
+the retry defect and additional partial-attach, unreadable-inventory,
+interrupt/report and recursive-removal defects. The previously passing
+119 mutations do not cover these cases. Corrected source plus decisive
+tests is required before the CI-only probe can be published or executed.
+
+
+2026-10-17 01:10 EDT — D192 source candidate: the acf2e671 patch was
+checksum-verified (93548a7d…63356) and applied. A new direct counterexample
+then reproduced foreign eject on a second cleanup with a stale attach disk
+list. Codex removed remembered-number eject authority from wrapper and probe;
+missing/unreadable inventory now keeps cleanup uncertain. Final local checks:
+71 scripted tests OK (one Linux-only skip), 30 reader tests OK, 46 reader
+mutations and 3 focused eject-rule mutations killed with controls passing.
+No native mount/probe/VM action occurred. Broader candidate probe mutations
+are not claimed as final validation. Final Claude review and exact-head CI
+are pending; B5-owned-journal-mount source is not yet ready. The next gate
+is native owned ASIF characterization on an isolated CI runner; B5-macOS-
+access and the separate reboot rehearsal remain open, and B6 stays closed.
+
+
+2026-10-17 02:51 EDT — B5-exact-head-CI diagnostic, D193. Exact b694b342
+has four green CI jobs and the recurring macOS owned-kickstart failure
+(39005360286/117316604376); its new reader30/mount71 tests pass. Claude
+Message85 reports no material defect on that head. The ten-second timeout
+still leaves recovery partial, gate closed and receipt unresolved.
+
+Goal: distinguish the owned launchctl client's post-timeout state from
+service state, without changing any recovery rule. Needs: exact owned argv
+and temporary root, original D180 behavior and no production hook. Feeds:
+B5-exact-head-CI diagnosis/source readiness, then B5-native-ASIF-mount.
+Verify: six subprocess controls and three decisive mutations pass, a native
+owned restoration emits the exact-client trace, and the revised head receives
+Claude review and CI. The native control succeeded with a 9.008 s request;
+this is not a cause attribution for CI. Only a test helper, its tests, the
+existing owned test and scripted CI registration change. Action10s, post-
+timeout observation1s and parent20s limits are unchanged; no fixture throttle
+override or runtime code changes. All production state stays unchanged.
+
+The next two gates remain reviewed exact-head source CI (owned resources
+only, B1 authorization) and then native ASIF characterization on an isolated
+CI-created image after source readiness. Disposable macOS reboot access is
+still separate; B3/B4 were not recaptured, B6–B9 stay closed and the node
+is not accepted as operational.
+
+2026-10-17 04:45 EDT — B5-native-ASIF-mount preflight. Exact source
+151bb3bdbcdf0bd09c7d15e6f0679832edae6a3d has all five checks green in
+39011578564; Claude Message89 finds no material defect, following Message85's
+review of the unchanged mount/probe source. The native owned kickstart trace
+completed at exit 0 in 9.026776584 s against the original 10 s limit. This
+does not explain the earlier timeouts. The current JSON-only caller cannot
+reach Claude's hypothetical non-serializable diagnostic context; record that
+limit without broadening this change into diagnostic hardening.
+
+The independently executable next gate is native ASIF mount characterization.
+Needs: the reviewed probe and cleanup, a separate GitHub-hosted macOS runner,
+all existing CI-only guards, and a fresh 64 MiB image created by the probe.
+File deltas: add one isolated job and unconditional report upload to
+.github/workflows/test.yml; correct the probe's now-obsolete unwired docstring;
+record D194 and the verified source milestone in the plan ledgers. No mount,
+capture or recovery implementation changes. Verify: inspect the uploaded
+report's actual ownership, root-0600 denial, flags, identities/ctime/xattrs
+and cleanup, not merely job exit 0; any failed assumption stays a refusal.
+Claude review and exact-head CI remain required for this workflow revision.
+No local disk image or VM operation is part of this gate. After it, the owned
+stopped-ASIF reader integration needs reviewed wiring and a native fixture;
+D62 reboot rehearsal still needs separately designated macOS access.
+
+
+## Native characterization re-orient — 2026-10-17 04:51 EDT
+- Still step1.2/B5, never a production stop or capture.
+- D194 executed the existing owned probe on a separate CI runner; setup refused.
+- Two native findings: owner enforcement exposes root-owned fixture root; attach IDs differ in spelling.
+- Correct only probe preparation/evidence retention and test those real boundaries.
+- File deltas add probe/tests plus raw report, hashed evidence and append-only ledgers; wrapper unchanged.
+- Same native verification outcome; no gate widening to D62/production or timer changes.
+
+
+2026-10-17 04:51 EDT — B5-native-ASIF-mount first actual report, D195:
+6ae7dd58 run39018637637/job117355795880 failed exit1 during write setup,
+PermissionError13 after ownership enable; no readonly variant ran. Retained
+artifact12096210442 is copied unchanged as B5_NATIVE_ASIF_FIRST_REPORT_20261017.json.
+Inventory-bound unmount/eject succeeded and final inventory0/mounted[]/removed
+are recorded, but bare disk7 was not harvested, so disks_gone[] is vacuous.
+The root-owned volume-root permission explanation is an inference pending
+native rerun, not a traceback-proven cause. Actual attach entries are bare
+IDs; inventory and DeviceNode use /dev paths. The wrapper still refuses that
+spelling and is unchanged.
+
+Codex-owned correction within this same native characterization gate: make
+only the newly created probe volume root runner-owned after enableOwnership
+(the root0600 file remains root-owned), strictly canonicalize attach IDs for
+absence checks and Data observation, and retain partial variant evidence on
+failure. No eject fallback is restored. The wrapper's checks are not relaxed.
+75 scripted tests pass (one platform skip); four intended-reason mutants are
+killed and nine focused controls pass. B5_NATIVE_ASIF_SETUP_20261017.json
+records report/source/log hashes. New native CI and Claude review are pending;
+this corrects the source fixture rather than retrying unchanged code. Next
+native observations then owned reader integration remain held until their
+actual verification. B5/1.2 open, B6–B9 closed; no local mount or VM action.
+
+
+2026-10-17 04:56 EDT — D196, B5-native-ASIF-mount runtime observations:
+6f7e9371 run39018959320/job117356737655 completed the corrected probe at
+exit0. Artifact12096186192 is retained unchanged as
+B5_NATIVE_ASIF_COMPLETE_REPORT_20261017.json (SHA2567097f7d9…2e09f4);
+B5_NATIVE_ASIF_OBSERVATIONS_20261017.json records the interpretation.
+On one isolated macOS26.6.2 arm64 runner, both exact-option variants set
+readonly/nodev/nosuid/noexec and honored owners, including after the probe
+explicitly disabled ownership before reattach. Root0:0 mode0600 stayed
+unreadable to uid501; its own0600 file was readable. Plain readonly was
+correctly refused for absent noexec. Image bytes/inode/size/mtime/ctime/flags
+and empty xattr-name lists were identical before/after each readonly cycle.
+The intervening write/disable phases are not covered by that equality.
+Each phase independently confirmed its remembered disk gone, inventory0
+and no mount; final cleanup removed the directory. These are sequential
+observations, not physical exclusion or real-history acceptance.
+
+B5-native-device-binding is a new Codex-owned source blocker: actual attach
+IDs are bare while hdiutil/DeviceNode are /dev paths. The unchanged wrapper
+refuses attach equality before mount; replay of the native rows with all
+commands mocked also returns bare disk8s1 from data_volume and refuses
+verify_mount with 'private mount point holds another device'. The probe's
+canonical call is accepted, not the complete wrapper. Exact unblock: reviewed
+strict canonical whole-disk/Data identity binding with decisive mismatch and
+cleanup controls, then native owned reader integration. No check is relaxed
+here. Native facts are observed; the gate stays open for review/current-head
+CI and this binding correction. The next two gates are that owned source
+correction and integrated stopped-ASIF reader verification; both use only
+owned resources and require Claude plus exact-head green CI. D62 reboot
+rehearsal still requires separately designated macOS access. B3/B4 were not
+repeated; B5/1.2 open, B6–B9 closed, production capture disabled, node not
+operationally accepted. No local VM, service, image or timer changed.
+
+## B5-native-device-binding preflight — 2026-10-17 06:45 EDT
+- Still1.2/B5; B1 permits source and owned tests, B6–B9 remain closed.
+- Exact611127b9 is green in all6 jobs39019163444; Claude Message96 finds no material defect.
+- D196 native rows expose two deterministic spelling refusals in the wrapper.
+- Correct strict device identity binding, requiring a harvestable whole disk after successful attach.
+- Reuse that binding in the existing probe; restore its seeded root to0:0/0755 for the native positive.
+- Owned scripted/native evidence plus Claude/exact-head CI; no production action or B3/B4 recapture.
+
+File deltas: host_journal_mount.py shares strict raw/canonical device parsing
+with the existing probe; bind attach whole disk to canonical inventory and
+Data DeviceNode to its exact raw partition, preserve raw receipt fields and
+mandatory cleanup absence checks. probe_asif_mount_ownership.py consumes those
+helpers and refuses a successful unharvestable attach (Claude F1); after
+seeding restore only its newly-created volume root to root ownership and
+record root uid/gid/mode per variant (F2). Extend the existing scripted suite
+with actual committed native rows, successful bare-ID read, mismatches,
+malformed/unharvestable entries and root seeding order. Mutation controls
+must kill removal of each binding/mandatory-observation rule. Record source,
+review/CI and runtime limits in the ledgers/evidence; VERSION stays-pre.
+This is the one named B5-native-device-binding gate, feeding the separate
+native stopped-ASIF reader integration, never production acceptance.
+
+Claude F3's error-filename/timestamp reporting suggestions remain follow-ups;
+no diagnostic expansion here. The new committed native-row replay tests
+replace D196's previously uncommitted replay claim with reviewable evidence.
+Read-write native phases changed the image's hash/times (write phase also
+size); that observation reinforces read-only attach plus post-read hashing,
+without generalizing a cause beyond this owned runner.
+
+
+2026-10-17 06:48 EDT — D197, B5-native-device-binding source candidate.
+Exact611127b9 has all6 CI jobs green (39019163444); Claude Message96
+reports no material defect and confirms D196's native observations. Shared
+strict parsing now accepts bare/canonical attach spellings, requires a valid
+whole-disk observation after successful attach, binds it to the canonical
+image inventory, and binds Data DeviceNode to the exact raw partition.
+Remembered disks remain absence checks only. Raw attach/inventory fields
+are retained. The existing CI-only probe consumes those same helpers and
+restores its fresh seeded volume root to0:0, recording per-variant root
+metadata; the root0600 negative stays intact.
+80 scripted tests OK (one native platform skip); after one final root-owner
+assertion tightening,18 focused controls pass and7 intended-assertion mutants
+are killed. The runner is committed, and actual native-row replay is now a
+committed test. B5_NATIVE_DEVICE_BINDING_SOURCE_20261017.json records hashes
+and the precise test sequence. New native CI and Claude review remain pending;
+no source-readiness claim. Next two gates: this source's exact-head review/CI
+and root-owned-root native report, then integrated owned stopped-ASIF reader
+verification. Both are B1-owned-test work; D62 macOS reboot access remains
+separate. B3/B4 were not repeated, B5/1.2 open, B6–B9 closed, D64 unchanged;
+all production services/VM/timers and four histories untouched.
+
+
+2026-10-17 06:51 EDT — D198: native shared device binding observed at
+b1119e78 in39026337387/job117377947876 (artifact12097953565), exit0.
+B5_NATIVE_DEVICE_BINDING_REPORT_20261017.json retains raw bytes with SHA256
+efbd1656…1ae4cd6; the RUNTIME JSON records the interpretation. The seeded
+volume root is0:0/0755 after preparation and in all3 variants. Both exact-
+option variants honor owners, deny root0600 reads, preserve every recorded
+image identity field across their readonly cycle and confirm per-phase
+known-disk absence/cleanup. Plain readonly still refuses absent noexec.
+The shared whole/Data binding helpers ran natively; the complete wrapper's
+locked reader/capture flow did not. Guest uid parity, never-registered UUIDs,
+sibling/dirty guest volumes and pre-existing xattrs remain unproved.
+All-six exact-head CI and Claude review are pending; B5-native-device-binding
+stays open. Next that review/CI gate, then native owned stopped-ASIF journal
+reader integration, both within B1's owned-test authorization. D62 rehearsal
+access stays operator-owned and separate. B3/B4 were not repeated; B5/1.2
+open, B6–B9 closed, D64 unchanged and production untouched.
+
+## B5-kickstart-cause-probe preflight — 2026-10-17 08:45 EDT
+- Still1.2/B5; source6912b7e7 is5green/1red, not ready.
+- Claude Message100 finds no material defect; native80 controls pass in CI.
+- New trace samples the owned launchctl client alive after10.004358542s.
+- Advance one diagnostic gate: bounded seven-arm timing on separate CI-owned labels.
+- No runtime deadline, fixture throttle, acceptance rule, production service or VM changes.
+- Report interprets observed spawn/client timing; it cannot prove the prior failure's cause alone.
+
+Needs: exact red CI39026495833/job117378396060; prior source-only observer;
+Claude's immutable7d3e90a4 artifact, independently read and SHA256-verified
+77838cc9b9fcbb33c5f83776695223ee0d2a6c8f62c9251495ca9c4967871b64.
+That artifact is a design input, not yet executable readiness. Correct its
+owned-client interrupt cleanup, stale-PID signal use, ignored cleanup/domain
+observation failures and removal-before-proven-cleanup before native wiring.
+Keep primary errors and partial trial evidence; missing/nonzero reports hold.
+File deltas: one owned-only probe derived from that candidate, its pure/mock
+controls, isolated macOS CI job with always-upload, and plan/evidence ledgers.
+Verify: original guard refusals, completed/alive/pipe-held measurement controls,
+client interruption/cleanup controls and unknown job-observation refusals;
+CI report for seven fresh labels with actual first/second job times, ten-second
+post-timeout client observation, later return bound and verified bootout.
+Any cause inference is bounded to one runner and differentiated trials.
+Claude reviews material bytes; full exact-head CI remains required for source
+readiness. The original recovery10s/1s/20s limits remain unchanged.
+
+Carry-forwards from Message100: T1 root-uid ambiguity in the probe seeding
+scripted test and T2 missing wrapper applied-failure harvest-order assertion
+remain tracked owned-test work; neither is silently fixed in this diagnostic
+slice. The native integration gate stays held by exact-head CI. B3/B4 remain
+unrecaptured; B5/1.2 open, B6–B9 closed, D64 unchanged, four histories separate.
+
+
+2026-10-17 08:55 EDT — D199, B5-kickstart-cause-probe. Exact6912b7e7
+has5green/1red in39026495833; mount80 tests pass, while the owned stopped
+job kickstart times out again. The new client trace has poll=None after
+10.004358542s (bootstrap age.285780875s, stop wait.009570166s). This narrows
+the current failure to a still-alive sampled client, not a cause attribution.
+Recovery remains partial, gate closed and receipt unresolved. Claude
+Message100 finds no material defect in the binding revision; source readiness
+is held by red CI.
+A checksum-verified Claude7d3e90a4 experiment is adapted as one CI-only probe:
+seven fresh jobs vary runtime/throttle, record first/second job times, sample
+the launchctl client after10s and measure a bounded later return. Before
+wiring, Codex corrected client/target cleanup, stale-PID signals, unreadable
+observations, premature file removal and lost partial reports.19 pure/mock
+controls pass; the real classifier's3 shapes pass on the final local candidate and rerun in the dedicated CI job. Missing/nonzero/native
+partial reports cannot clear this gate; this is not a fixture/runtime fix.
+Next timing report, then an evidence-backed owned fixture/runtime remedy
+with Claude review and exact-head green CI before native reader integration.
+Both are B1-owned work; no production service/VM or timer change. B3/B4 were
+not repeated, B5/1.2 open, B6–B9 closed, D64 unchanged, four histories separate.
+
+
+2026-10-17 09:04 EDT — D200, B5-kickstart-cause-probe runtime report.
+1695ce92 job117402189372/run39034737877 exited0; artifact12101407361 and
+raw SHA2560659ef76…f6bc3f4 are retained. All7 trial bootouts and individual
+post-bootout checks passed; final target/domain observations show all7 absent,
+no probe labels left, directory removed. Default short-runtime client stayed
+alive after10.007s and returned success at10.016s. DefaultR3/R12 requests took
+7.017s/.006s; delayed-request1s short-default took9.011s; explicitThrottle1
+short/R3 took1.016s/.010s;Throttle0 short took1.007s. This supports a throttle-
+and prior-runtime-related wait and reproduces the failure shape on this
+runner, not an exact undocumented timing rule or proof of the earlier CI
+cause. The runner was not idle: recorded load averages were24–43. Python
+instruction timestamps, observed exits and the changed signal path limit
+transfer. No runtime or fixture policy has been changed.
+Claude's final source/evidence review and full exact-head CI remain pending.
+Next a reviewed owned-fixture remedy justified by these observations, then
+exact-head CI before native stopped-ASIF reader integration. Both are B1
+source/owned work; D62/macOS access stays separate. B3/B4 not repeated,
+B5/1.2 open, B6–B9 closed, D64 unchanged, production untouched.
+
+
+2026-10-17 09:11 EDT — D201, B5-kickstart-cause-probe review and second CI report.
+Claude Message104 finds no material source defect at1695ce92 and independently
+passes19 controls plus3 real client classifiers. Runtime and old fixture bytes
+are unchanged. The review identifies measurement extensions before interpreting
+future anomalous/incomplete runs: second-start deadline anchoring, continuing
+other arms after a measured anomaly with verified cleanup, instruction-origin
+predictions/residual controls, and bounded logs on failure covering the run.
+These do not invalidate the7 completed D200 arms; no exact timer rule or
+historical full-suite cause is claimed. Codex corrected the review's prose:
+this implementation removes private files only after completed+clean and then
+writes the report. Lost reports cannot pass. Evidence interpretation review
+of7a8dcb64 is pending in Claude Message105; no fixture remedy is applied.
+
+The normal current-head CI39035129935, job117403289389, independently completed
+the unchanged7-arm probe at7a8dcb64 (mergefd9d06db). Artifact12102275128 is
+retained as B5_KICKSTART_TIMING_REPORT_REPEAT_20261017.json, SHA256
+e25d03de25d904e482f3e238ce4d16b11a24b5a1749872b5494860a400d3bccb.
+Default short/R3/R12/delayed-short client blocks are10.031/7.018/.008/9.017s;
+Throttle1 short/R3 are1.059/.007s;Throttle0 short is1.019s. The default-short
+client was alive at the post-timeout10.0036s sample and returned0 later.
+All7 trial bootouts and absence checks, final individual absences/readable
+GUI-domain/no-label checks and directory removal passed. Two separate CI
+reports support the bounded timing association; they are not a distribution,
+exact origin proof or production test. Full all-job CI remains pending, so
+source readiness and B5-native-device-binding closure remain held.
+Next gates: a reviewed owned-fixture-only remedy with unchanged runtime limits,
+then native owned stopped-ASIF reader integration. Both need Claude and exact-
+head green CI under B1. D62 disposable-macOS access remains a separate operator
+decision. B3/B4 were not repeated; B5/1.2 open, B6–B9 closed, D64 unchanged,
+production capture disabled and four physical histories separate. No live
+service, VM, production image or timer was changed.
+
+
+### 2026-10-17 10:46 EDT — B5-owned-kickstart-fixture preflight (D202)
+
+1.2 remains active; prior D201 has two complete timing reports but exact0d329038 CI is6green/1red.
+Claude106 accepts the observations and requires a matching owned adapter policy change.
+This slice changes only the temporary daemon throttle and its strict admission/tests.
+The north-star recovery contract still requires fail-closed durable restoration evidence.
+Needs above exist; B1 authorizes these owned tests, no live operation.
+Next remains this bounded fixture correction; native reader and D62 are downstream.
+
+File deltas: restore_only.py owned expected configuration; test_restore_only.py temporary daemon settings/trace assertion; test_kickstart_applied_timeout.py simulated settings and portable real-file configuration controls; mutate_owned_fixture_policy.py intended guard-removal verification; source-evidence JSON plus plan decision/inventory/frontier/registry/audit updates. No managed_launchd.py, journal, service_gate.py, timer or production file changes.
+Verification: portable controls/guard mutant and existing timeout regressions locally; CI-only native stopped-daemon recovery with trace; Claude review and exact-head full CI before source readiness. Remaining default-policy and measurement extensions stay tracked.
+
+D202 verification refinement: add a separate15-minute owned-kickstart-fixture-macos CI job for the existing timeout controls, intended guard mutant and two focused native cases. Full legacy/all-job CI remains mandatory; this gives earlier native feedback and does not replace it or rerun an unchanged failed artifact. Workflow is an additional planned verification delta.
+
+
+D202 source checkpoint: the owned mesh-agent plist and adapter now require
+integer ThrottleInterval1; the timer remains unchanged and refuses that
+extra field. Both native and simulated fixture producers match. Portable
+real-file policy controls pass (including missing/0/2/bool throttle and extra
+fields), and a removed-equality mutant dies at the intended assertion.
+5 timeout controls and11 applied-timeout/readiness/policy tests pass locally;
+the durable partial/closed/unresolved outcome and retry without another
+kickstart remain asserted. Managed launchd/journal/gate/trace/probe bytes are
+unchanged from0d329038. Python syntax and plan conformance pass. The new
+15-minute focused macOS job exercises the two native cases with explicit
+trace output before the existing long all-job gate can finish. No native
+host test was run here. B5_OWNED_KICKSTART_FIXTURE_SOURCE_20261017.json records
+hashes, baseline failure and proof limits. Candidate Claude review and exact-
+head all-job CI remain pending; no source-readiness claim. Next native owned
+stopped-ASIF journal reader integration, then D62/D175 admission/resumption
+source under B1; actual macOS reboot still needs separate disposable access.
+B3/B4 not repeated, B5/1.2 open, B6–B9 closed, capture disabled, production
+untouched and all four histories separate.
+
+
+### Mid-Implementation Findings — 2026-10-17 10:59 EDT, Claude108
+
+No material regression on exact1e915d8a. All changed-source and preserved-runtime hashes were independently checked. Linux11/5/6/19 applied-timeout/launchd/trace/timing controls pass, managed-launchd61 with40 platform skips and restore-only31 with29 skips; guard-removal/type/expected-value mutants are killed. T3: Linux's documented anchor identity seam bypasses its exact plist policy, so two anchor mutants survive there; native timer-negative and native simulated anchor restore exercise those checks. T3 is tracked separately rather than expanded into this daemon remedy. Existing RunAtLoad/KeepAlive bool/int dictionary equivalence is unchanged and not fixed here.
+
+Focused native job117424417161 succeeds on PR-head1e915d8a/mergec013dd3d, with explicitThrottle1 and a completed0.004771s client under timeout10, resolved/open recovery and restored receipt; changed timer is refused before launchd. B5_OWNED_KICKSTART_FIXTURE_NATIVE_20261017.json retains the narrow result and its inherited-teardown/no-independent-process-absence limit. All-job CI remains the final source gate.
+
+
+2026-10-17 11:17 EDT — D203, owned restoration fixture source verified at1e915d8a.
+All8 exact-head jobs pass in39042421331; Claude Message108 finds no material
+regression and independently verifies preserved runtime hashes, portable
+controls, refusal-before-launchd and guard mutants. Focused native job
+117424417161 passes2 tests; full macOS job117424417172 passes the31-test
+restore-only module in104.459s and completes the remaining job. The focused/
+full stopped-daemon traces show explicit integerThrottle1, client rc0 and
+completed in.004771/.006608s under timeout10; both recover resolved/open with
+receipt restored. The timer-only policy negative passes, and the applied-
+timeout controls still preserve partial/closed/unresolved plus a fresh retry
+without another kickstart. The full run has no failed check. This source-only
+milestone is at the named verified head; this receipt changes no executable
+or workflow. Later heads still require their own checks.
+
+The retained native JSON binds source/merge/run/jobs and filtered observations,
+not an independent teardown/process-absence proof. It does not prove production
+default-throttle recovery, D62 reboot safety, physical writer exclusion or real
+history acceptance. B5-default-kickstart-policy remains open. T3 portable
+anchor-policy coverage is a separate nonblocking carry-forward; T1/T2 and
+future anomalous-probe measurement extensions are not expanded here.
+Shared device-binding sources/probe and the differentiated timing probe are
+unchanged from their reviewed/native-observed revisions; this green exact-
+head run clears their outstanding CI hold without repeating their artifacts.
+
+Next B5-owned-stopped-ASIF-reader uses B1-owned CI storage, a valid synthetic
+checkpoint/commitment/CAPTURE fixture, the complete locked reader/mount wrapper
+and frozen verifier, decisive corrupt/pending/unknown-entry refusals, unchanged
+image identity, cleanup evidence, Claude review and exact-head green CI. Then
+D62/D175 restore-only admission/resumption needs durable host ACCEPTED-or-ABORT
+binding, scoped launchd/process comparison before Journal.recover, fail-closed
+manual fallback and conditional value-only timer migration tested on owned
+APFS reattach. Actual reboot/launchd/login/hold-reattach still requires a
+separately designated disposable macOS machine or approved measured disk/RAM
+budget/capacity source. No local UTM VM was provisioned or operated; only the owned CI checks ran.
+B3/B4 were not repeated; B5/1.2 remain open, B6–B9 closed, D64 unchanged,
+production capture disabled and all four histories separate. No live service,
+VM, production image or installed timer was changed.
+
+
+## B5-owned-stopped-ASIF-reader preflight — 2026-10-17 12:55 EDT
+
+Micro re-orient: Block1/step1.2 remains v1.2-pre; production preservation is closed.
+D203 verified the owned kickstart fixture; current68d45483 has all8 checks green.
+This slice supplies the missing complete native frozen-journal read on CI-owned ASIF.
+It feeds B5 byte binding, then D62/D175 admission/manual restoration; never B8 history acceptance.
+The checkpoint, pin publication, bounded reader, wrapper and private fixture all exist.
+This remains the next independently executable gate; no production operation is authorized.
+
+Needs checked against current source: StoppedImage builds the real Journal/capture_ready,
+commit/commit_checkpoint and pinned CAPTURE records with synthetic hold/VM observations;
+read_journal_inputs holds both real host locks and calls locked_read/verify_stopped_journal/
+verify_frozen_checkpoint. The native probe already owns its ASIF, mount options and
+inventory-bound cleanup. No BLOCKED.md; tree clean before this preflight.
+
+### File deltas / verification
+
+Extend probe_asif_mount_ownership.py with a separately guarded CI-only reader mode, reusing
+its native attach/release and the existing synthetic journal fixture. Bind the real fresh
+volume UUID before the manifest commitment, seed the owned tree while writable, restore
+root ownership, detach, then publish the fixture clone hash/size and read through the
+unmodified complete wrapper. Test intact, corrupt chain, pending, unknown entry and changed
+config bytes; each case retains before/after image metadata, receipt or exact primary refusal
+and nonvacuous known-disk cleanup. Native disk commands run only on an isolated CI runner.
+Portable controls in test_host_journal_mount.py cover fixture seeding, refusal oracle and
+reader-mode guards/dispatch; workflow retains the complete native report even on refusal.
+No runtime source, production plist, action budget, T1/T2/T3 or default-policy change.
+
+WIN: portable decisive controls pass; Claude adversarial review; native positive reaches
+the frozen verifier with matching host pins, every named negative refuses for its intended
+reason, every readonly cycle leaves image identity/bytes unchanged and disks absent, final
+owned directory removed; current exact-head CI all green. Native report is synthetic
+quiescence/mechanism evidence, not a VM capture, guest UID parity, physical writer proof or
+real-history acceptance. D64/production capture stay closed; B3/B4 are not repeated.
+
+### D204 mid-implementation finding — portable guard dispatch seam
+
+The new main-dispatch control must pass darwin explicitly to the real guard in its test
+seam: changing sys.platform cannot alter the import-bound function default. Corrected the
+control and passed it with the real default forced to linux. This is the same reader
+integration verification slice; no native/probe/runtime guard relaxed.
+
+### D204 review verification extension
+
+Claude's reader_run assertion coverage gap is in this slice's verification contract.
+Add ReaderRun controls in the existing test module;15 selected cases pass with one platform
+skip, and image/pin/head removed-guard mutants die at the intended0!=1 assertion. Retain
+the raw native report named in D204 (54 reads, four intended negatives,5 stable readonly
+cycles and known-disk cleanups, final directory removed). Runtime/probe source unchanged.
+Completed Claude verdict and current-head all-green CI still required before closure.
+
+### D204 review corrections and final verification outline
+
+Consume Claude114 R1 with ReaderRun negative/partial/cleanup controls; R2 keeps failed
+owned-reader images until diagnosis. Add mutate_stopped_asif_reader.py as a verification
+helper (4 intended guard kills) and run it in the existing isolated ASIF CI job. The
+workflow uploads a failed owned image; success still removes its own directory. Older
+ownership-run behavior and all production/runtime sources stay unchanged. Local91 tests
+pass (one platform skip), the6-control mutation baseline passes and all4 mutants die at
+their intended assertions. Native corrected-source and exact-head CI/review still pending.
+
+
+### 2026-10-17 14:01 EDT — B5-owned-stopped-ASIF-reader verified (D205)
+
+Verified source e120e78d / exact CI39053730664: all8 checks green; Claude116
+closes R1/R2 with no material defect. Native job117457344212 verifies54 intact file reads,
+4 intended read-stage refusals,5 stable readonly image intervals and nonvacuous seed/read
+disk absence, with final directory removed. The reviewed raw report is retained under
+step12_jetstream; its SHA256 starts e02ab656. All91 controls and4 intended guard mutants
+pass. Failed native upload itself was not exercised; scripted retention/interrupt controls
+are explicit. Synthetic fixture evidence only: no VM capture, guest UID parity, physical
+pre-stop exclusion or B8 acceptance.
+Next B5-D62-admission needs reviewed host-decision/scoped-observation/manual-fallback
+source and owned tests; B5-D175-owned-repin then needs that admission and strict5-timer
+value-only migration with owned APFS reattach negatives. Both need Claude/exact-head CI.
+Actual reboot rehearsal still needs separate operator-designated disposable macOS access
+or a measured fixed resource decision. B3/B4 not repeated; B5/1.2 open, B6–B9 closed,
+D64 and production capture refusal unchanged. No production operation occurred.
+
+D205 post-verification ledger: promised complete locked reader/frozen verifier — yes;
+intact and4 intended refusals — yes; unchanged readonly image metadata/hash and known-disk
+cleanup — yes; R1 outer/partial/interrupt controls and R2 retention — yes, native upload
+not exercised; Claude and exact source CI — yes. Feeds: native integration prerequisite
+for D62/D175 source/owned work; not B8 histories. Carry-forwards: T1/T2/T3, default-throttle
+policy and all production/reboot/host-provenance requirements remain tracked and open.
+
+
+## 2026-10-17 17:13 EDT — terminal ABORT micro re-orient and bounded delta
+
+- Block1/step1.2 remains active at v1.2-pre; production preservation is held.
+- D209 verified nonterminal clone cleanup under sampled source denial, final1f7dc5b7 CI green8/8.
+- This slice binds a terminal owned ABORT to that cleanup and strictly verifies it.
+- It feeds a separately checked source release, then guest admission/manual restoration.
+- No flag change, guest gate, production operation, ACCEPTED producer or D64 relaxation.
+- Yes: D62 requires a durable decision before future release; file presence is insufficient.
+
+Claude148's six design corrections govern: native preflight write-set allow-list, exactly
+one root ABORT exception in conflict checks, forward-bound cleanup sample bytes, caller-held
+locks and a caller-supplied fresh observation for the read-only verifier, exported exact
+key sets and canonical bytes. A completed fixed decision subtree is also required after
+post-publication checks; a visible ABORT without COMPLETE or beside FAILED/temp refuses.
+A metadata touch to the guarded source or a host reboot/device change makes the attempt
+manual; no exception is added. Same-user coordinated rewrites remain D189's limit.
+§6 deltas for this slice: host_clone_dispose.py, preflight file-name constant only,
+test_host_terminal_abort.py, mutate_host_terminal_abort.py, workflow registration and
+four plan ledgers. Tests use existing real checkpoint/cleanup producers with scripted
+host/flags; no local disk image, launchd, UTM or production operation is permitted.
+
+
+### D210 mid-implementation findings and re-orient — 2026-10-17 17:30 EDT
+
+The caller-lock cardinality counterexample and native log-mode assumption are two
+required corrections to the same terminal-decision input contract. Re-oriented at the
+consumer boundary: neither introduces source release, a new controller or guest recovery.
+The verifier must refuse incomplete lock lists; the strict reader must ingest its actual
+producer's files. The preflight writer change and native assertion are the named
+B5-terminal-native-stdio prerequisite within this source slice, not a production rollout.
+§6 delta correction: preflight now also pre-creates its two logs exclusively0600;
+test_host_vm_preflight_status.py models append-open and collisions, and the existing
+CI-only native HostCaptureTest checks sample_files against two real sample trees.
+Local proof29terminal/15status and14mutants is green; native proof and exact-head
+Claude/CI remain pending. Current B1 source/owned authorization covers these corrections;
+no local VM/image/launchd test or production resource operation is added.
+
+
+## 2026-10-17 18:29 EDT — owned source release micro re-orient
+
+- Block1/step1.2 remains active at v1.2-pre; B5 is open and B6–B9 held.
+- D211 terminal ABORT source is reviewed; receipt c171c72c now has all8 green checks.
+- This slice consumes it durably under both locks before an owned-only source release.
+- It feeds guest decision binding/scoped admission and the manual route before D175.
+- No boot permission, production operation, native reboot claim or D64 relaxation.
+- Yes: D62 needs a checked release after the durable decision, separate from ABORT.
+
+Design is under Claude review before implementation. The fixed abort-release directory
+will be single use, with intent before the flag operation and completion only after
+post-release checks. Consumer-established file/directory synchronization, raw-byte
+readback and fresh original-host/source checks precede mutation. From entry to the flag
+operation onward, failures may leave denial uncertain: manual handling without automatic
+retry/re-guard or a success claim. The existing image flag helper remains descriptor-
+pinned; no reader descriptor is held across preflight's no-holder observation.
+
+§6 deltas: host_vm_reconcile.py, one reserved attempt name in host_clone_dispose.py,
+test_host_abort_release.py, mutate_host_abort_release.py, Linux/macOS suite registration,
+four plan ledgers and source-only audit records. New tests remain scripted for VM/flags
+with actual owned files and real checkpoint/cleanup/terminal producers. Native full
+cleanup→decision→release and actual guest reboot are carry-forwards, not this Verify.
+
+
+D212 design review166/168 adds the separate read-only release verifier and exact released
+identity helper now; canonical INTENT/COMPLETE exported schemas and the fixed three-
+sample layout; clone-only siblings; full file flush where available with no error
+fallback and bottom-up directory fsync; an honest uncertain/manual post-clear failure
+contract; and a dedicated source-clear hook with a ctime advance. These are the same
+owned release contract, not guest admission. A barrier-skipped mutant exposed blanket
+fault masking by a later independent sample barrier; the control now fails only the
+original evidence-table barrier and kills the intended missing-durability guard.
+Initial release fixture errors came from autospeccing an already mocked lstat; chaining
+the existing fixture's side-effect fixes test setup without changing runtime validation.
+
+
+D212 freshness re-orient: B5-release-freshness is an owned release prerequisite,
+with a decisive current-source zero-flag-call failure after an INTENT-time holder
+change. Correct within this same release contract: last live sample after the full
+rehash and durable INTENT, cheap original metadata/guard checks, no new hash afterward,
+COMPLETE pins the added before-clear sample and the core verifier consumes it. Fixed
+layout and schema parity tests change together. No guest source or production fence
+changes. The source row stays active pending corrected exact review/CI; the earlier
+Linux CI failed before these Python controls, not at this source finding.
+
+
+Claude172 confirms correction and precision points: exact pre-clear ctime, final
+clone/attachment/clone-only sibling absence and INTENT bytes. These are included with
+zero-call negatives. Optional same-uid flag-helper no-op gap remains D189, not closed.
+Unrelated finding B5-CI-R3-placement is tracked in INVENTORY for its own work unit:
+recurring unchanged NATS peer-offline10005 before Python; no fixture patch here.
+
+
+## 2026-10-17 20:01 EDT — D62 guest-admission design re-orient
+
+- Block1/step1.2 remains active at v1.2-pre; B5 is open and B6–B9 held.
+- D213's e582f9f9 receipt now has all8 exact-head CI checks green, freshly rechecked.
+- The next source boundary must bind the host decision before any guest recovery gate.
+- It feeds scoped boot-time admission, explicit manual restoration and then D175.
+- B1 authorizes owned design/tests only; D64's production first refusal remains.
+- Re-orient before implementation: post-boot ASIF changes invalidate verify_release's inputs.
+
+Claude design review is pending against e582f9f9. The guest cannot call verify_release
+after boot: it requires the original stopped VM and unchanged original image bytes.
+A copied self-hashed decision is not a protected host authority. The producer/consumer,
+trusted external binding, durable single-use handling and failure/manual route must be
+explicit before any source admission exception is written. ACCEPTED has no B8 producer;
+the available ABORT/cleanup/release path is owned-only.
+
+The existing Gate constructor and JournaledHold.validate also compare saved st_dev in
+identity.json, metadata_identity and path evidence, before any conditional timer re-pin.
+Changing only the five timer plists and manifest pins would still fail that constructor.
+Design must preserve identity.json bytes/nonce/hash and same-boot descriptor/path mapping,
+yet avoid requiring a successfully constructed old-device Gate to admit the change.
+This is a dependency to resolve within the reviewed D62/D175 design, not permission to
+rewrite identity.json, relax arbitrary identities or operate installed timers.
+
+The first independently executable source slice and its §6 deltas will be recorded after
+the review identifies a concrete producer and consumer. No executable delta is authorized
+by this preflight beyond B1's owned boundary. Real launchd/login/process/hold-reattach
+rehearsal remains separately gated by exact disposable-Mac access and resource approval.
+
+### First unit selected after Claude183's source inspection
+
+B5-D62-host-boot-decision has one outcome: a strictly checked owned RESTORE_PRIOR
+decision and a pure claim-only consumer. It grants no start, admission or recovery.
+Its existing producer module is host_vm_reconcile.py; restore_only.py receives the
+canonical bytes/digest and the local checkpoint as an explicitly unprotected claim.
+The verifier remains pre-start only, preserving original-host session, stopped/holder,
+full source-byte and metadata checks; no post-start weakening is introduced.
+
+§6 deltas: those two existing modules; reserve abort-boot in host_clone_dispose.py;
+one portable owned test module and an intended-assertion mutant runner; existing Linux/
+macOS test registration; this audit, AUDIT_POST and the four plan ledgers. abort_conflicts,
+Journal.recover's first D64 refusal, Gate, JournaledHold and installed timers stay unchanged.
+The fixed attempt uses RESTORE_PRIOR.json, avoiding abort_conflicts' existing rejection
+of nested DECISION.json. Any failure/partial/repeat remains single use and manual.
+
+Verify: real owned checkpoint→commit→capture→cleanup→ABORT→release producers feed the
+new decision; actual owned-file barriers, two held locks, fresh consumed/written sample
+parity and unchanged source/transcript bind it. Decisive negatives cover production/
+fixture fences, locks, source/host identity, holders/clone/attachments/siblings, barrier/
+publication/readback errors, interruption, replay and canonical schema/enum/digests.
+The pure guest consumer refuses a changed checkpoint or digest and cannot call Journal,
+Gate, host verification, recovery or filesystem APIs. Guard mutants must fail intended
+assertions, with controls passing; Claude exact-source review and exact-head green CI
+precede source readiness. Native whole-pipeline/ASIF/VM reboot is not this Verify.
+
+Claude183's proposed changed-host-session/post-start mode and broad platform-interpreter
+allow-list are not adopted. Its proposed manual steps name future tools, not a presently
+executable route. D175 translation must eventually be per verified filesystem/path
+component, preserving identity.json bytes and all same-boot descriptor mappings. Guest
+scoped admission, actual manual restoration and reattachment remain subsequent units.
+
+
+D214 mutation-runner integration correction: aa340975 duplicates the prior release
+runner's literal durable_evidence(evidence) anchor (2 hits, expected1). CI39082243166
+was canceled as superseded before claiming a native/green result. Rename only the new
+decision producer's local variable to transcript and update only its own runner anchor;
+old release/runtime bodies and runner stay unchanged. All27 decision controls pass
+43.692s, all13 new decision mutants pass, and the unchanged prior release runner passes
+all13 intended kills with its controls. This is a necessary same-contract test integration
+correction, not a production behavior change. Exact corrected-head Claude/CI still required.
+
+
+D214 proof re-orient, 2026-10-17 20:36 EDT: Claude193 finds no required source
+finding at3cbc9cd5 and independently reproduces27controls/13decision/13release mutants
+as uid65534 plus regressions. Its live extra mutations expose three material optional
+proof gaps: stored-sample host binding, decision-to-intent pin and independent decoder
+nonce/arm/checkpoint bindings. Close B5-decision-binding-tests within this same owned
+handoff contract before source closure: six new controls also isolate previous/pre-head
+and released-flags schema; seven added mutants pin those present guards. All33 controls
+pass41.735s, all20 decision mutants fail at their intended assertions with controls
+passing/noERROR. Runtime/workflow/release runner bytes are unchanged from3cbc. This
+supersedes the27/13 test floor without relabelling earlier runs. Exact test-head Claude
+and CI remain required. Smaller JSONDecodeError normalization and host import-graph
+notes are carried, not defects or a new refactor. Guest/manual/D175 and Mac proof stay open.

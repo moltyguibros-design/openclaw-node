@@ -1,0 +1,40 @@
+{
+  "at_utc": "2026-10-04T21:15:36Z",
+  "source_commit": "15b384dffbabf6d227b15e2c954864beef04495a",
+  "scope": "inactive stopped-image guard intent and clone-first reconciliation; no production VM stop or boot",
+  "disposable_fixture": {
+    "guest_mac": "2 reconciliation/status tests passed; adjacent guard, capture and ASIF tests passed",
+    "host_mac": "2 reconciliation/status tests passed",
+    "checks": [
+      "missing guard intent refuses without clearing an immutable source",
+      "guard writes a private intent before applying the source flag",
+      "attached or sibling clone refuses with source still guarded",
+      "matching detached clone is removed before source unlock",
+      "successful BOOTABLE permits an unchanged no-op repeat",
+      "reapplied source flag after BOOTABLE refuses rather than reusing old intent",
+      "changed completed-capture source refuses",
+      "GUI status JSON appears only after atomic complete publication"
+    ]
+  },
+  "exact_head_ci": {
+    "run": 37234974722,
+    "result": "four jobs passed at 15b384df"
+  },
+  "adversarial_review": "Claude read-only no-blocker at f95414ab and narrow 15b384df delta; advisory guard and production integration limits disclosed",
+  "host_package": {
+    "directory": "~/Library/Application Support/OpenClawRecovery/tools-15b384df",
+    "source_manifest_sha256": "42a8e3684e14186f39d2ef0d38c015724cf16e87f56d79856652704a55f5a67d",
+    "files_verified": 10,
+    "mode": "directory 0700, files 0600, host-account owner, regular single-link files",
+    "status": "staged inactive; no production controller invokes it"
+  },
+  "fresh_read_only_host_preflight": {
+    "state": "started",
+    "image_holder_count": 1,
+    "holders_consistent": true,
+    "image_size_bytes": 211136020480,
+    "free_bytes": 103273349120
+  },
+  "production_state": "VM still running; no source image flag changed, VM stopped, real image cloned or store accepted",
+  "remaining_gate": "real disposable UTM start/refusal/recovery; full-node hold and shutdown provenance; continuous boot interlock; real-store isolated acceptance and truthful service resumption"
+}

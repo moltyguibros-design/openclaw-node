@@ -1,0 +1,45 @@
+{
+  "scope": "owned source device binding; not end-to-end native journal extraction or production readiness",
+  "baseline": {
+    "head": "611127b91d571afb6ec9638e31df99e89231a8f3",
+    "ci": 39019163444,
+    "all_six_jobs": "SUCCESS",
+    "claude": "Message96: no material defect"
+  },
+  "change": [
+    "share strict bare/canonical device parsing between wrapper and probe",
+    "require successful whole-disk observation; never fabricate or use it as eject authority",
+    "bind whole disk to canonical image inventory and Data DeviceNode to exact raw partition",
+    "retain raw attach entities and raw inventory disk in receipt",
+    "restore only new probe volume root to0:0 after seeding; record root metadata per variant"
+  ],
+  "tests": {
+    "full_suite": {
+      "tests": 80,
+      "skip": 1,
+      "log_sha256": "0704f62fd697d367f9d9d38cbfb5e39ac33ae6f92c4b3c7f433300f841fe14bd",
+      "limit": "before final assertIn(root_owner,calls) tightening"
+    },
+    "focused_after_assertion_tightening": {
+      "tests": 18,
+      "passed": true
+    },
+    "intended_assertion_mutants": 7,
+    "mutant_log_sha256": "f89844990cde115e5034841365bdf56236fd1b847e3371f37daad286895d375c",
+    "runner": "mutate_native_device_binding.py",
+    "native_rows": "B5_NATIVE_ASIF_COMPLETE_REPORT_20261017.json replayed with all commands mocked"
+  },
+  "source_sha256": {
+    "host_journal_mount.py": "0802beef3daf0c83eaddc7459fed3d85f376278cb45f2899d2ab37e65c86a333",
+    "probe_asif_mount_ownership.py": "3a58857e383f6cb075dc10294028bee1ef06f87ab48dfcf6c580e78a941f05fc",
+    "test_host_journal_mount.py": "0b22dde562c1a057d8057e211061d82eedb028351ab222eb33bbd39339a914ef",
+    "mutate_native_device_binding.py": "933a95d183e66c5b8182f126715007d2ec3ff2b2b43f09650e0e07d175dd421d"
+  },
+  "remaining": [
+    "exact-head Claude review and all-six CI",
+    "native root-owned-root observation with new shared bindings",
+    "integrated owned stopped-ASIF reader fixture",
+    "never-registered UUID, VM-written sibling volumes/dirty APFS/pre-existing xattrs and guest/host uid parity unproved",
+    "D62/D175 abort/manual resumption and macOS reboot access separate"
+  ]
+}

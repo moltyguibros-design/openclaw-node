@@ -1,0 +1,17 @@
+{
+  "source_commit": "fecf985879431007809f40bcea76e84d95c6237d",
+  "files_sha256": {
+    "node": "aed3321cf1a2ad333514339e8f7fc58a01ed9b6ac0d1325cd052260004928287",
+    "nats": "6be41e7097aac6278c3b9e4f394fc1536996608e921aa14fceae1bf0e800da0f",
+    "nats-server": "c3a71e72f6fc5dd008988f34b57fd2ab1fe69ab18d409f0a0aeebc51160e76e1",
+    "recovery.mjs": "8a9b78e0332997ec6814bcfdad7e7843c62221a771d6d6d5fb90a494f5373eaf",
+    "probe_cold_trees.mjs": "5e9779e11c4a648c311d1415bd7a5eb71864b709a79d91c8fc95ef6232c14100",
+    "test_recovery.mjs": "ca3e366f4f3e6cccda27f5d9a883839dc88c2a053135d0e29a58607e810587e7",
+    "take_snapshots.mjs": "067c538f2bc0ca3a8971bc84db270b00c2de31c8a796d93a762674afeaa36e8a",
+    "take_cold_baseline.mjs": "3524c06e339dbcae078f10f295c9c74e952edf62ab52558fbf797ce16f8503b3",
+    "source-manifest.json": "6ae3a3e85008e1fc7645c3418480524e98fd83b77e38fd83230ea5d75f4c4ea6"
+  },
+  "node_modules_packages": ["nats", "nkeys.js", "tweetnacl"],
+  "node_modules_files": 212,
+  "node_modules_sha256": "241308e6d7e6406ce800653e3bd4d238503f30e094f681ace3ef5d3b34df1015"
+}

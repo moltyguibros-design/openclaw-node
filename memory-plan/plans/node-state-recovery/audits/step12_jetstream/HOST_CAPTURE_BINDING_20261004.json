@@ -1,0 +1,21 @@
+{
+  "at": "2026-10-04 13:57 EDT",
+  "source_commit": "cb0234c59f2451338d9cce040445904e27f80421",
+  "scope": "inactive host capture tool staging and disposable ASIF fixture; no production VM or store mutation",
+  "host_account": "guillaumebrossard",
+  "host_tool_directory": "~/Library/Application Support/OpenClawRecovery/tools-cb0234c5",
+  "host_tool_manifest_sha256": "ea9bb5f0568ca5dfd6229e64e22aed3fa905f9a82dbe5c6d70623bbf36d49ae1",
+  "stopped_tree_match_sha256": "e6fc06a76821d442c3e72b79c236260db4c1e0b926639bf31e9820f21e945911",
+  "guest_disposable_asif_fixture": "passed",
+  "host_disposable_asif_fixture": "passed",
+  "changed_capture_receipt_control": "refused before MATCH.json",
+  "host_restore_release_verify": {
+    "verified": true,
+    "top_level_files": 9,
+    "dependency_files": 212,
+    "manifest_sha256": "964baae0d8540a875367f51aa569d06792ba49f1fc06ddcc43359b1c579c343b"
+  },
+  "production_image_copied": false,
+  "production_store_restored": false,
+  "historical_master_accepted": false
+}

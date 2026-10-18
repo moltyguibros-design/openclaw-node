@@ -1,0 +1,20 @@
+{
+  "type": "owned-apfs-memory-entry-unmount-characterization",
+  "scope": "Disposable APFS sparse image and owned child on an ephemeral macOS CI runner; no production VM, volume, service or NATS store",
+  "source_head": "5c360c224870ec70ef21aa5d9f1d518c853b95d7",
+  "script_sha256": "063c26043ac08022ca34f8ace7048f033b8f03d97ae3d7473d8a13b905a438ef",
+  "child_source_sha256": "beef015c61eaf4dcdabbf688122be5bdee41e511749b2f80bbffc2d96de7f381",
+  "job": "https://github.com/moltyguibros-design/openclaw-node/actions/runs/38193117276/job/114629923580",
+  "job_conclusion": "success",
+  "observed": {
+    "child_error": "",
+    "child_exit": 0,
+    "content_prefix_after_readonly_reattach": "M000",
+    "mounted_after_attempt": true,
+    "remap_outcome": "wrote",
+    "unmount_after_child_exit_returncode": 0,
+    "unmount_returncode": 1
+  },
+  "interpretation": "Normal unmount refused while the owned child retained a writable Mach memory entry to a file on the mounted image. The child remapped and changed the file. After child exit the same image unmounted normally; a read-only reattach showed the changed prefix. This supports a physical volume-unmount boundary on this owned image, not a guest full-node no-writer hold.",
+  "limits": "The probe did not inspect the diskutil refusal reason or prove that a live guest system/Data volume can be unmounted. It did not test a UTM boot guard, a clean VM shutdown, production processes, continuous absence of writers, or power-loss durability. The workflow invocation was one-time and removed after recording the result."
+}

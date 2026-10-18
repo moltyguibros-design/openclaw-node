@@ -77,7 +77,8 @@ async function fixture(t, { warnRejections = false } = {}) {
   await fs.mkdir(home, { mode: 0o700 });
   const port = await freePort();
   assert.ok(![4222, 4223, 4224, 6222, 6223, 6224, 8222, 8223, 8224].includes(port));
-  const monitorPort = await freePort();
+  let monitorPort = await freePort();
+  while (monitorPort === port) monitorPort = await freePort();
   assert.ok(![4222, 4223, 4224, 6222, 6223, 6224, 8222, 8223, 8224].includes(monitorPort));
   assert.notEqual(port, monitorPort);
   const token = randomBytes(32).toString('hex');

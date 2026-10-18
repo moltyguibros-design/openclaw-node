@@ -1,0 +1,35 @@
+{
+  "observed_at": "2026-10-04 21:36 EDT",
+  "scope": "point-in-time read-only observation of the retained member-1 R1 store and structural job inventory",
+  "cold_member1": {
+    "manifest_sha256": "0cc6f71ff0428627ada6dbef47dc4aebcb81ad810d0df3b649731a1b6add7e88",
+    "store_entries": 128,
+    "store_directories": 46,
+    "store_files": 82,
+    "store_bytes": 6346296,
+    "store_matches_colocated_manifest": true,
+    "store_entries_owner_only_read_only_immutable_at_observation": true,
+    "store_entries_regular_single_link_or_directory": true,
+    "root_and_original_files_owner_only_read_only_immutable_at_observation": true,
+    "prior_manifest_sha256_independently_pinned": false,
+    "original_config_sha256": "a3faf9bb0b008c0033f54ef3a06291cdc39708ed9c6883d278982c55d927980c",
+    "original_plist_sha256": "24107585b642829c6323109370167706e4e84b916a28b60bfad8cb987ebef206"
+  },
+  "jobs": {
+    "installed_count": 23,
+    "loaded_gui_count": 21,
+    "loaded_user_count": 0,
+    "loaded_system_count": 0,
+    "excluded_count": 1,
+    "installed_hashes_match_post_vault_watcher_baseline": true,
+    "member1_disabled": true,
+    "member1_unloaded": true
+  },
+  "limits": [
+    "This is self-consistency against a co-located manifest; its SHA-256 is pinned here for the first time. Continuity since the reported September 28 freeze is not proven.",
+    "Read-only and immutable flags were observed now. They do not prove that the owner never cleared and reapplied them.",
+    "This is not a new common recovery point.",
+    "The three serving cold masters, continuous full-node hold, stopped-VM receipt, real-history isolated restores, historical acceptance and service resumption remain unproven.",
+    "No VM, service, NATS store, topology or live configuration was changed."
+  ]
+}

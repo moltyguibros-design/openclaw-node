@@ -1,0 +1,17 @@
+{
+  "date": "2026-10-04",
+  "scope": "synthetic four-store ASIF capture and guest-to-host content match only",
+  "guest": "stopped_tree_match.py captured four owner-owned source trees before simulated shutdown",
+  "host": "read-only extracted trees matched guest paths, types, sizes and SHA-256 hashes and were then made read-only",
+  "negative": "altered extracted store file produced FAILED.json and no MATCH.json",
+  "tests": {
+    "guest_macos": "1 integrated ASIF capture/match test passed",
+    "host_macos": "1 integrated ASIF capture/match test passed"
+  },
+  "unverified": [
+    "production guest writer exclusion at final source hash",
+    "real guest clean shutdown and uninterrupted host stopped state",
+    "real NATS store match",
+    "isolated production restores and historical master acceptance"
+  ]
+}

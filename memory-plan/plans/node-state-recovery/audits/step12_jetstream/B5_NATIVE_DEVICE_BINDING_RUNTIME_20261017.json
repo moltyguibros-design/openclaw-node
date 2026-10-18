@@ -1,0 +1,116 @@
+{
+  "scope": "native shared binding and root-owned-root mount observations; not full wrapper/journal reader or reboot acceptance",
+  "head": "b1119e789bcf1883d88f0951f536c4488f45d7cd",
+  "merge": "9616c4de379685aae5156115c6d17904a56b0ff1",
+  "run": 39026337387,
+  "job": 117377947876,
+  "artifact": 12097953565,
+  "report": "B5_NATIVE_DEVICE_BINDING_REPORT_20261017.json",
+  "report_sha256": "efbd1656beb57ce3a8b79061c18dd5ce8684cb8c381ba093aeddce5341ae4cd6",
+  "completed": true,
+  "root_after_seed": {
+    "gid": 0,
+    "mode": "0o755",
+    "uid": 0
+  },
+  "variants": {
+    "plain-readonly": {
+      "root": {
+        "gid": 0,
+        "mode": "0o755",
+        "uid": 0
+      },
+      "verify_mount": "refused: mount is not noexec",
+      "flags": [
+        "rdonly",
+        "nosuid",
+        "nodev",
+        "removable",
+        "local",
+        "dovolfs",
+        "journaled",
+        "multilabel"
+      ],
+      "per_cycle_image_identity_equal": true,
+      "root0600_denied": true,
+      "user_readable": true,
+      "known_disk_absence": [
+        true
+      ],
+      "cleanup_clean": true
+    },
+    "wrapper-options": {
+      "root": {
+        "gid": 0,
+        "mode": "0o755",
+        "uid": 0
+      },
+      "verify_mount": "accepted",
+      "flags": [
+        "rdonly",
+        "noexec",
+        "nosuid",
+        "nodev",
+        "removable",
+        "local",
+        "dovolfs",
+        "dontbrowse",
+        "journaled",
+        "multilabel"
+      ],
+      "per_cycle_image_identity_equal": true,
+      "root0600_denied": true,
+      "user_readable": true,
+      "known_disk_absence": [
+        true
+      ],
+      "cleanup_clean": true
+    },
+    "wrapper-options-ownership-disabled": {
+      "root": {
+        "gid": 0,
+        "mode": "0o755",
+        "uid": 0
+      },
+      "verify_mount": "accepted",
+      "flags": [
+        "rdonly",
+        "noexec",
+        "nosuid",
+        "nodev",
+        "removable",
+        "local",
+        "dovolfs",
+        "dontbrowse",
+        "journaled",
+        "multilabel"
+      ],
+      "per_cycle_image_identity_equal": true,
+      "root0600_denied": true,
+      "user_readable": true,
+      "known_disk_absence": [
+        true
+      ],
+      "cleanup_clean": true
+    }
+  },
+  "final_cleanup": {
+    "clean": true,
+    "disks_gone": [],
+    "errors": [],
+    "listed": [],
+    "mounted": [],
+    "remaining": 0,
+    "removed": true,
+    "steps": []
+  },
+  "proof_limits": [
+    "same shared whole/Data helpers exercised by native probe; full locked_read and frozen reader remain untested on native image",
+    "one macOS26.6.2 runner, fresh host-written single-volume ASIF and matching uid501",
+    "per-cycle identity equality excludes intervening read-write phases; xattr names empty",
+    "per-phase known-disk absence nonvacuous; final list empty because settled cleared it",
+    "sequential inventories cannot exclude concurrent device replacement or same-uid attach",
+    "current-head full CI and Claude review pending; no source-readiness claim",
+    "production capture disabled; D62/D175 and disposable macOS reboot rehearsal separate"
+  ]
+}

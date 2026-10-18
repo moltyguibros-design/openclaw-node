@@ -1,0 +1,25 @@
+{
+  "observed_at": "2026-10-12 18:47 EDT",
+  "scope": "read-only host identity, GUI-session and UTM registration checks; no production or disposable VM start, stop, clone, image or service mutation",
+  "host_account": "guillaumebrossard",
+  "host_ssh": {
+    "existing_key_batch_login": "passed",
+    "macos_version": "26.6.2",
+    "gui_uid": 501,
+    "gui_launchd_domain": "present"
+  },
+  "utm_inventory": {
+    "method": "temporary owner-owned GUI LaunchAgent ran utmctl list; helper booted out and its temporary files removed",
+    "returncode": 0,
+    "registered_count": 1,
+    "registered": [
+      {
+        "name": "moltMacOS",
+        "status": "started",
+        "role": "production; excluded from rehearsal"
+      }
+    ],
+    "disposable_registered": false
+  },
+  "conclusion": "Existing host shell and GUI command path are reachable. B2 remains open because no registered disposable UTM VM with a disposable ASIF disk exists for guarded-start refusal and recovery testing. The live VM was not touched."
+}

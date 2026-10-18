@@ -9,6 +9,7 @@ jobs:
   unit-tests:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         # package.json engines.node is >=22; 20 kept for lower-bound breadth.
         # 18 dropped — EOL (2025-04) + below the floor; it only stayed green
@@ -94,7 +95,27 @@ jobs:
           node memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_recovery.mjs /tmp/nats-cli/nats-0.3.1-linux-amd64/nats /usr/local/bin/nats-server
           NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_checks.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_journal.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_full_node_baseline.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_managed_launchd.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_timeout.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_applied_timeout.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_nats_identity.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_owned_kickstart_trace.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_timing.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_preflight_status.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_reconcile.py ProductionReleaseFence
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_abort_cleanup.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_abort_cleanup.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_terminal_abort.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_terminal_abort.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_abort_release.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_abort_release.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_boot_decision.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_boot_decision.py
           NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_cluster.py
       - name: Root unit tests
         # npm test (not bare node --test): the pretest hook builds the
@@ -144,6 +165,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install owned launchd fixture dependencies
+        run: |
+          case "$(uname -m)" in
+            arm64) nats_arch=arm64; nats_sha=b9b287b786e83e783702214d516042f6397f7c1c4916985c6ec5e6d9d490151c ;;
+            x86_64) nats_arch=amd64; nats_sha=d7bc326ebbaf0a032ae1b03b99e4d863d9320ad010f37a22b2e8306ab3272ca0 ;;
+            *) exit 1 ;;
+          esac
+          nats_fixture_dir="$(mktemp -d)"
+          curl -fL --retry 3 --output "$nats_fixture_dir/nats.tar.gz" \
+            "https://github.com/nats-io/nats-server/releases/download/v2.12.6/nats-server-v2.12.6-darwin-${nats_arch}.tar.gz"
+          printf '%s  %s\n' "$nats_sha" "$nats_fixture_dir/nats.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$nats_fixture_dir/nats.tar.gz" -C "$nats_fixture_dir"
+          echo "$nats_fixture_dir/nats-server-v2.12.6-darwin-${nats_arch}" >> "$GITHUB_PATH"
+          npm ci --ignore-scripts --no-audit --no-fund
       - name: Verify macOS descriptor and subprocess lock behavior
         env:
           PYTHONDONTWRITEBYTECODE: "1"
@@ -153,19 +188,148 @@ jobs:
           /usr/bin/python3 test/test_nats_root_journal.py
           /usr/bin/python3 test/test_nats_user_transfer.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_journal.py
+          OPENCLAW_CI_FULL_NODE_INVENTORY_FIXTURE=1 /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_full_node_baseline.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_asif_extract.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_image_immutable.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_reconcile.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_abort_cleanup.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_abort_cleanup.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_terminal_abort.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_terminal_abort.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_abort_release.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_abort_release.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_boot_decision.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_boot_decision.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_release_verify.py
           PYTHONPATH="$PWD/memory-plan/plans/node-state-recovery/audits/step12_jetstream" /usr/bin/python3 -m unittest -q \
             test_preservation_checks.Gates.test_only_exact_tailscale_system_job_can_be_excluded \
             test_preservation_checks.Gates.test_tailscale_exclusion_refuses_loaded_activity_and_plist_triggers \
             test_preservation_checks.Gates.test_tailscale_exclusion_captures_physical_chain_and_refuses_wrapper_drift \
             test_preservation_checks.Gates.test_excluded_root_file_rejects_unprivileged_owner
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_journal_hold.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_timeout.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_applied_timeout.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_nats_identity.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint_facade.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_owned_kickstart_trace.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_preflight_status.py
           PYTHONPATH="$PWD/memory-plan/plans/node-state-recovery/audits/step12_jetstream" /usr/bin/python3 -m unittest -q test_restore_only
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_disabled.py
+          OPENCLAW_CI_FULL_NODE_LISTENER_FIXTURE=1 /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_managed_launchd.py
           /usr/bin/python3 test/test_nats_root_admission.py
           /usr/bin/python3 test/test_nats_root_decline.py
           /usr/bin/python3 test/test_nats_macos_proc.py
           /usr/bin/python3 test/test_nats_live_census.py
           /usr/bin/python3 test/test_nats_store_holder_census.py
           node --test test/nats-legacy-lock.test.mjs
+
+  owned-kickstart-fixture-macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify owned configuration and timeout refusals
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_owned_fixture_policy.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_timeout.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_applied_timeout.py
+      - name: Restore the fresh stopped daemon and refuse a changed timer
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: ${{ github.workspace }}/memory-plan/plans/node-state-recovery/audits/step12_jetstream
+        run: |
+          /usr/bin/python3 -m unittest -v \
+            test_restore_only.RestoreOnlyOwned.test_loaded_stopped_owned_daemon_is_kickstarted \
+            test_restore_only.RestoreOnlyOwned.test_owned_timer_refuses_daemon_throttle_before_launchd
+
+  asif-mount-ownership-macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify frozen-reader orchestration refusal controls
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_stopped_asif_reader.py
+      - name: Characterize ownership on a fresh CI-only ASIF
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          OPENCLAW_OWNERSHIP_PROBE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py \
+            --ci-owned-probe "$RUNNER_TEMP/asif-mount-ownership.json"
+      - name: Verify the complete frozen-journal reader on a fresh CI-only ASIF
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          OPENCLAW_OWNERSHIP_PROBE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py \
+            --ci-owned-reader "$RUNNER_TEMP/stopped-asif-reader.json"
+      - name: Retain native observations even when the probe refuses
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asif-mount-ownership-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/asif-mount-ownership.json
+            ${{ runner.temp }}/stopped-asif-reader.json
+          if-no-files-found: error
+      - name: Retain a failed reader's owned image for diagnosis
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stopped-asif-reader-failed-image-${{ github.sha }}
+          path: ${{ runner.temp }}/openclaw-capture-owned-reader-*/capture/powered-off-image.asif
+          if-no-files-found: ignore
+
+  kickstart-timing-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify timing and cleanup controls
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_timing.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_kickstart_timing.py --self-test
+      - name: Measure seven fresh owned launchd targets
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          OPENCLAW_KICKSTART_PROBE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_kickstart_timing.py \
+            --ci-owned-probe "$RUNNER_TEMP/kickstart-timing.json"
+      - name: Retain timing observations on refusal
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kickstart-timing-${{ github.sha }}
+          path: ${{ runner.temp }}/kickstart-timing.json
+          if-no-files-found: error
+
+  macos-process-census:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native process and store-holder census
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          /usr/bin/python3 test/test_nats_macos_proc.py
+          /usr/bin/python3 test/test_nats_live_census.py
+          /usr/bin/python3 test/test_nats_store_holder_census.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_mach_memory_entry.py
 
   mission-control-tests:
     runs-on: ubuntu-latest

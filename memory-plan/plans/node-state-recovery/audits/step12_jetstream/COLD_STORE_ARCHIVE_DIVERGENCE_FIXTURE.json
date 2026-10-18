@@ -1,0 +1,28 @@
+{
+  "scope": "owned isolated fixture only; no production cold-master acceptance",
+  "run_at_utc": "2026-10-03T17:47:34.296Z",
+  "fixture_source_sha256": "72d7525a72e8cd4df4c34677e7cca3a6a9cc46d022500867d69c5cc6281e52ba",
+  "nats_cli": {
+    "version": "0.3.1",
+    "sha256": "6be41e7097aac6278c3b9e4f394fc1536996608e921aa14fceae1bf0e800da0f"
+  },
+  "nats_server": {
+    "version": "2.12.6",
+    "sha256": "c3a71e72f6fc5dd008988f34b57fd2ab1fe69ab18d409f0a0aeebc51160e76e1"
+  },
+  "standalone": {
+    "online_archive_last_sequence": 12,
+    "pre_stop_and_cold_clone_last_sequence": 13,
+    "late_message_and_ack_floor_present_in_cold_clone": true,
+    "online_archive_differs_from_cold_clone": true,
+    "master_unchanged_after_clone_boot": true
+  },
+  "held_member_1_r1": {
+    "earlier_capture_last_sequence": 7,
+    "pre_stop_and_cold_clone_last_sequence": 8,
+    "late_message_and_ack_floor_present_in_cold_clone": true,
+    "single_member_direct_boot": true,
+    "master_unchanged_after_clone_boot": true
+  },
+  "owned_servers_stopped": true
+}

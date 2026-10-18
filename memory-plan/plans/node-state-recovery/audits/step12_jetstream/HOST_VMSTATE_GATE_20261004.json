@@ -1,0 +1,28 @@
+{
+  "at_utc": "2026-10-04T21:44:54Z",
+  "source_commit": "d85caa2039254b1dab9b7ac1546e2e1417fbd215",
+  "scope": "inactive sampled vmstate refusal in stopped-VM capture; no production hold or capture",
+  "guest_disposable_tests": "5 host capture and reconciliation tests passed, including changed-vmstate refusal before cloning, symlink refusal, and unchanged stale vmstate ASIF extraction",
+  "exact_head_ci": {
+    "run": 37236853002,
+    "result": "four jobs passed at d85caa20"
+  },
+  "adversarial_review": "Claude read-only no-blocker at d85caa20; real UTM clean-shutdown vmstate behavior remains untested and may fail closed",
+  "host_package": {
+    "directory": "~/Library/Application Support/OpenClawRecovery/tools-d85caa20",
+    "source_manifest_sha256": "eed08982adaeece48b05a927d49829eeb1eef89d0da49ce3ea77cf37c15ae932",
+    "files_verified": 10,
+    "mode": "directory 0700, files 0600, host-account owner, regular single-link files",
+    "status": "staged inactive; no production controller invokes it"
+  },
+  "fresh_read_only_host_preflight": {
+    "state": "started",
+    "image_holder_count": 1,
+    "holders_consistent": true,
+    "vmstate_present": true,
+    "vmstate_size_bytes": 14629736448,
+    "free_bytes": 103275552768
+  },
+  "production_state": "VM running; no source image flag, stop, clone, store extraction, isolated real-history restore or master acceptance",
+  "remaining_gate": "disposable UTM start/refusal/recovery and real clean-shutdown behavior, full-node hold, continuous no-start bracket, four real-history acceptance and verified resumption"
+}

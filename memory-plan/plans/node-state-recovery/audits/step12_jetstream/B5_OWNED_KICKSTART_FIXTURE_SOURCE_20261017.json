@@ -1,0 +1,72 @@
+{
+  "gate": "B5-owned-kickstart-fixture",
+  "base": "0d3290384755c48b3c6fb20e168d283eec0529f4",
+  "baseline_ci": {
+    "run": 39035568789,
+    "job": 117404554278,
+    "checks": "6green/1red",
+    "outcome": "partial",
+    "gate": "closed",
+    "receipt_status": "unresolved",
+    "owned_kickstart_trace": {
+      "client_pid": 87974,
+      "client_returncode_when_sampled": null,
+      "context": {
+        "before_restore": {
+          "exit_timeout": 5,
+          "last_exit_code": 0,
+          "loaded": true,
+          "pid": null,
+          "running": false,
+          "runs": 1
+        },
+        "before_stop": {
+          "exit_timeout": 5,
+          "loaded": true,
+          "pid": 87916,
+          "running": true,
+          "runs": 1
+        },
+        "bootstrap_request_age_before_stop_s": 0.36629308299999863,
+        "explicit_throttle_interval": null,
+        "stop_wait_s": 0.013771874999999767
+      },
+      "elapsed_s": 10.011953291000001,
+      "event": "timeout",
+      "scope": "owned test client observation; no cause or deadline-state attribution",
+      "stderr_length": 0,
+      "stdout_length": 0,
+      "timeout_s": 10
+    }
+  },
+  "review_input": "Claude Message106 independently accepts D200 observations and requires matching owned adapter exact-plist policy; fitted timing model is not adopted as a launchd rule",
+  "local_verification": {
+    "strict_policy_control": "2 tests passed,7 malformed/missing/extra/type subcases refuse before service()",
+    "equality_guard_mutant": "intended AssertionError kill verified with unmutated controls passing",
+    "launchd_timeout": "5 tests OK,0.002s",
+    "applied_timeout_and_readiness_with_new_policy": "11 tests OK,9.738s; durable partial/closed/unresolved, unchanged10s action/1s observation and no-second-kickstart retry asserted",
+    "python_syntax": "all4 changed/new Python files parsed",
+    "native": "not run on this host; focused native CI and full exact-head CI pending",
+    "claude_exact_candidate_review": "pending"
+  },
+  "sha256": {
+    "memory-plan/plans/node-state-recovery/audits/step12_jetstream/restore_only.py": "970923c0c8fd9993d4bd2d44dcb52a31c269783dabfed045bdae6d987d477e83",
+    "memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_restore_only.py": "83cbefee13fa34f17f9983458455e3a5b6d1c5e5f035a7138e3dcb1d67d33aee",
+    "memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_applied_timeout.py": "ae68d4165322fdf5bb33198bb6addc87fa8eace7b5406f078b695baed21ca395",
+    "memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_owned_fixture_policy.py": "9d9dc2222ce0730b9ed3ecf36765833303ab99e026ed9f05bcc606b0b2edc36a",
+    ".github/workflows/test.yml": "09cb8a7c69714ff63d30f9d89c75f7dd4b6deaf745539df858e00c28f3407758"
+  },
+  "unchanged_from_base": {
+    "memory-plan/plans/node-state-recovery/audits/step12_jetstream/managed_launchd.py": "af7472c88a9d8298bd60aa290927b8a195d51bed2c6e2c792b532f6bc154a5b0",
+    "memory-plan/plans/node-state-recovery/audits/step12_jetstream/preservation_journal.py": "99e4c285426531ca0daabda74ad512116ec8f0e79180e422c06ba1fe0082545f",
+    "workspace-bin/service_gate.py": "71443594568f2bd24917273f748a9761274c614efc9ff69828bb6acb3c32bbc7",
+    "memory-plan/plans/node-state-recovery/audits/step12_jetstream/owned_kickstart_trace.py": "438ef5724a48c0bfd17bd7921454dd966adffb4bfc86a6f6e53f9dc242ca0e3c",
+    "memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_kickstart_timing.py": "7aba8ec1aef7a8d50a45bfb36925a6b6ada27fb5f420a1796b3c8285045a311b"
+  },
+  "limits": [
+    "temporary owned mesh-agent throttle1 is not production default-throttle coverage",
+    "existing timeout response remains fail-closed; B5-default-kickstart-policy tracked",
+    "no live service/VM/timer/image change",
+    "no B5 closure or B6 authorization; D64 unchanged; four histories separate"
+  ]
+}

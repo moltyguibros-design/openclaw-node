@@ -1,0 +1,104 @@
+{
+  "scope": "CI-only kickstart timing experiment; no runtime/fixture acceptance-policy or production change",
+  "red_head": "6912b7e77c9acf5ece0952a620d816c92fc2b8ee",
+  "ci_run": 39026495833,
+  "macos_job": 117378396060,
+  "checks": "five green, legacy-writer-lock-macos red",
+  "macos_log_sha256": "91877ec028de5903e1f22e824043de572da958c078dfcf866c6f45f119d49e9a",
+  "owned_client_trace": {
+    "client_pid": 3310,
+    "client_returncode_when_sampled": null,
+    "context": {
+      "before_restore": {
+        "exit_timeout": 5,
+        "last_exit_code": 0,
+        "loaded": true,
+        "pid": null,
+        "running": false,
+        "runs": 1
+      },
+      "before_stop": {
+        "exit_timeout": 5,
+        "loaded": true,
+        "pid": 3252,
+        "running": true,
+        "runs": 1
+      },
+      "bootstrap_request_age_before_stop_s": 0.2857808750000004,
+      "explicit_throttle_interval": null,
+      "stop_wait_s": 0.009570166000003155
+    },
+    "elapsed_s": 10.004358542,
+    "event": "timeout",
+    "scope": "owned test client observation; no cause or deadline-state attribution",
+    "stderr_length": 0,
+    "stdout_length": 0,
+    "timeout_s": 10
+  },
+  "interpretation": "client was alive at the post-timeout sample; source correctly leaves effect undetermined, gate closed and receipt unresolved; cause not attributed",
+  "claude": "Message100: no material defect at6912b7e7; T1/T2 are tracked carry-forwards",
+  "candidate_provenance": {
+    "commit": "7d3e90a47e15843e8f5e1c8c0061ad7f581bc980",
+    "original_sha256": "77838cc9b9fcbb33c5f83776695223ee0d2a6c8f62c9251495ca9c4967871b64",
+    "active_file": "probe_kickstart_timing.py",
+    "original_not_executed_natively": true
+  },
+  "corrections": [
+    "own client finally kill/reap and pipe closure with primary failure retained",
+    "signal exact fresh launchd target instead of stale PID",
+    "require readable per-target/domain cleanup observations",
+    "require second running job record and observed trial bootout before next arm",
+    "retain partial trial evidence, keep files after failure/unknown cleanup, record removal failures"
+  ],
+  "tests": {
+    "pure_mock_controls": 19,
+    "log_sha256": "8b949121c8e43aa4c5b5f8ab60fdbccfb2671748aec62620279327c222473206",
+    "real_classifier_controls": {
+      "cases": [
+        "returned",
+        "alive",
+        "exited-pipe-held"
+      ],
+      "passed_on_final_local_candidate": true,
+      "log_sha256": "ec3f47c7d22f85c7629d0685ce57fc7c3f42a9c04b25434de053993dc496ad56"
+    }
+  },
+  "source_sha256": {
+    "probe_kickstart_timing.py": "7aba8ec1aef7a8d50a45bfb36925a6b6ada27fb5f420a1796b3c8285045a311b",
+    "test_kickstart_timing.py": "d9d1e1a1749cb08f66462e6c764618e1e1984214d5385cc77579d6e506351e6b"
+  },
+  "unchanged_limits": {
+    "recovery_action_seconds": 10,
+    "recovery_post_timeout_observation_seconds": 1,
+    "owned_restore_parent_seconds": 20
+  },
+  "native_timing_pending": true,
+  "exact_head_review_and_ci_pending": true,
+  "limits": [
+    "post-timeout sample not exact deadline state",
+    "job timestamp is first Python instruction wall time, not kernel spawn; cross-process deltas may reflect clock changes",
+    "one isolated runner and fresh labels differ from failing full suite",
+    "cleanup snapshots cannot exclude late starts or constitute a full physical process census",
+    "interrupt during directory removal or report-write failure can lose report; missing/nonzero never passes",
+    "B5 remains open; production capture disabled; D62/D175 and macOS rehearsal separate"
+  ],
+  "design_review": "Claude Message102 confirms defects in original candidate; add request-delay arm and bounded timing/load observations before wiring",
+  "arms": 7,
+  "ci_job_timeout_minutes": 30,
+  "probe_only_bounds": {
+    "command_default_seconds": 10,
+    "target_print_seconds": 5,
+    "post_budget_wait_seconds": 15,
+    "second_start_wait_seconds": 10,
+    "log_once_seconds": 10,
+    "bootout_seconds": 20
+  },
+  "measurement_changes": [
+    "one delayed-request arm at R0.3/default throttle",
+    "single stopped snapshot and poll latency",
+    "control-print latency and load average",
+    "illustrative three-origin predicted blocks/residuals; Python startup/clock/observed-exit bias remains",
+    "signal-by-label differs from fixture numeric PID signal",
+    "30-minute job includes conservative summed waits/cleanup with margin; interpreter/startup/report I/O are not a universal wall bound; interruption cannot pass"
+  ]
+}
