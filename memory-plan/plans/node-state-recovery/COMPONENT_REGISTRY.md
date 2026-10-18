@@ -727,3 +727,34 @@ Native terminal pipeline, protected provenance and actual macOS reboot remain op
 D64/production refusals unchanged, B5/1.2open, B6–B9held, B3/B4 not repeated and four
 histories separate. Next: checked owned source release, then scoped guest admission/
 manual restoration before D175. Receipt head still needs exact-head CI.
+
+
+### 2026-10-17 20:13 EDT — owned pre-start restore-prior decision candidate (D214)
+
+Existing host_vm_reconcile now records a fixed single-use owned RESTORE_PRIOR after the
+completed ABORT/release chain and a fresh unchanged original-host stopped sample; its
+read-only verifier is pre-start only. The pure restore_only claim decoder checks the
+external digest and local checkpoint, returns authority unprotected-user-owned/admission
+false and performs no recovery or filesystem operation. Claude187's four design points
+are included; changed-host-session/post-start weakening, automatic platform-process
+allow-lists and nested DECISION names are excluded.25 controls pass46.114s; mutants,
+regressions, exact-source review and exact-head CI remain pending. D214 records the
+Codex-owned B5-gate-device-reattach dependency: all four saved device bindings need a
+reviewed per-filesystem stable-identity mapping before D175/gate construction can close.
+Manual guest restoration remains future work, not an available command or bypass.
+B5/1.2 open, B6–B9 held, D64/production/timers unchanged; B3/B4 not repeated. Four
+histories separate. Next guest scoped admission/manual, then D175; actual Mac access
+and APFS/reboot proof remain distinct. No production/native image/VM/launchd operation.
+
+
+D214 pre-publication verification: all27 owned decision/claim controls pass47.922s;
+all13 mutants are killed at their designated assertions with unmutated controls passing
+and no test errors.45 bounded release/production-fence/D64 regressions pass63.547s.
+The attempt-directory fsync/open failure path now enters best-effort FAILED recording;
+its new negative preserves the original exception and retained manual attempt. Rebinding
+both INTENT/RESTORE_PRIOR to a wrong evidence table refuses. AST comparisons confirm
+reconcile, release_aborted, verify_release, abort_conflicts, no_terminal, terminal_abort,
+verify_abort, recover_owned and Journal.recover are unchanged. Linux/macOS registration
+adds the new27-control suite and13-mutant runner only. Plan lint14PASS/1existingWARN/0FAIL.
+Claude187 design corrections are included; exact-source review and new exact-head CI
+remain required. No source readiness, guest admission/manual route or B5 closure yet.

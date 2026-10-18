@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -22,11 +23,40 @@ sys.path.insert(0, str(HERE))
 from journal_hold import ANCHOR, JournaledHold
 from managed_launchd import Launchd
 from preservation_checks import Refused, require
-from preservation_journal import Journal, UNITS, matches, read_private, static_identity, valid_prior, valid_record
+from preservation_journal import (CAPTURE_EVENT, CAPTURE_KEYS, CAPTURE_SCOPE, DIGEST, Journal, UNITS,
+                                  encoded, matches, read_private, static_identity, valid_prior, valid_record)
+from host_vm_reconcile import restore_prior_record
 
 spec = importlib.util.spec_from_file_location('owned_service_gate', REPO / 'workspace-bin/service_gate.py')
 gate_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate_module)
+
+
+def decode_restore_prior_claim(raw, expected_digest, checkpoint_raw, *, fixture=False):
+    require(fixture, 'production restore-prior claim decoding is disabled')
+    require(isinstance(raw, bytes) and len(raw) <= 1 << 20
+            and isinstance(expected_digest, str) and DIGEST.fullmatch(expected_digest)
+            and hashlib.sha256(raw).hexdigest() == expected_digest,
+            'restore-prior claim digest differs')
+    decision = restore_prior_record(raw)
+    require(isinstance(checkpoint_raw, bytes) and len(checkpoint_raw) <= 1 << 20,
+            'restore-prior local checkpoint bytes are invalid')
+    checkpoint = json.loads(checkpoint_raw)
+    require(isinstance(checkpoint, dict) and set(checkpoint) == CAPTURE_KEYS
+            and encoded(checkpoint) == checkpoint_raw
+            and checkpoint['scope'] == CAPTURE_SCOPE and checkpoint['event'] == CAPTURE_EVENT
+            and checkpoint['sha256'] == hashlib.sha256(encoded(
+                {key: value for key, value in checkpoint.items() if key != 'sha256'})).hexdigest(),
+            'restore-prior local checkpoint is not intact or canonical')
+    require(all(decision[key] == checkpoint[field] for key, field in
+                (('capture_nonce', 'capture_nonce'), ('arm_sha256', 'arm_sha256'),
+                 ('journal_head', 'pre_head'), ('checkpoint_sha256', 'sha256')))
+            and checkpoint['previous'] == checkpoint['pre_head'],
+            'restore-prior claim differs from the local checkpoint')
+    return {'operator_claim': expected_digest, 'authority': 'unprotected-user-owned',
+            'admission': False, 'decision': 'RESTORE_PRIOR', 'released_source': decision['released_source'],
+            **{key: decision[key] for key in ('capture_nonce', 'arm_sha256', 'journal_head',
+                                             'checkpoint_sha256', 'vm_uuid')}}
 
 
 class NoHealthRedirect(urllib.request.HTTPRedirectHandler):

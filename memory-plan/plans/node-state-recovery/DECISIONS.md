@@ -5264,3 +5264,98 @@ checks stopped units/overrides; this is not a complete physical census. Both sou
 gates use B1 owned authorization, decisive negatives, Claude and exact-head CI. Actual
 APFS reattach and disposable-Mac reboot/migration still require their distinct evidence;
 Mac access needs an exact operator designation or a measured fixed resource decision.
+
+
+## D214 — 2026-10-17 20:13 EDT: record an owned pre-start restore-prior decision
+
+Claude183 identifies the missing handoff between D213's source release and future guest
+admission. verify_release requires the original stopped VM, original host session and
+unchanged whole-image bytes; calling it after the guest boots is impossible by design.
+This unit extends existing host_vm_reconcile.py with decide_restore_prior and a strictly
+pre-start, read-only verify_decision. It consumes the real cleanup→ABORT→release chain
+under both original EX locks, establishes its own evidence durability, publishes INTENT,
+takes a fresh stopped observation and re-verifies the unchanged released source and all
+pins before a separate RESTORE_PRIOR record. Neither function starts a VM, changes flags,
+permits guest admission or creates a new recovery point. ACCEPTED still has no B8 producer.
+
+The fixed owned-only abort-boot directory has exactly verify/, decision/, INTENT.json and
+RESTORE_PRIOR.json. Samples use the existing private-file allow-list and must equal the
+consumed observations. The intent pins original ABORT/checkpoint/arm/nonce, original host
+session/fixture VM, released source metadata/bytes, full prior evidence and first sample.
+The decision also binds intent bytes and the final sample. Consumer-established real file
+flushes/full flush where available and directory fsync precede publication. Both records
+use the existing exclusive temp/full-flush/rename/directory-sync publication. All partial,
+failed, temporary, unknown and repeated attempts refuse for manual handling, including a
+visible decision beside FAILED after an applied publication failure. The source state is
+not changed by this decision; it is not claimed continuously stopped or protected.
+
+restore_only.py adds a pure owned claim decoder: external expected digest, canonical
+host decision bytes, and caller-supplied local checkpoint bytes are required. The host
+record uses host_guest_commit.encoded (newline); the journal's canonical body hash uses
+preservation_journal.encoded (no newline). Exact schema/event/scope/body hash and
+nonce/arm/pre-head/previous/checkpoint bindings refuse mismatches. Output labels the digest
+operator_claim, authority unprotected-user-owned, admission false, with historical released
+source fields and no verified/provenance claim. It reads no file, constructs no Journal or
+Gate, and calls no host verifier/recovery. A caller-supplied checkpoint is not a chain or
+protected trust root; the later admission controller still owes the local chain/hold,
+boot-time jobs/processes, stopped-unit and override checks. No protected channel, signing
+key, start authority or admission capability is invented.
+
+Claude187 confirms four required design points: distinct canonical encoders; reserve the
+fixed attempt name in verify_abort_command; unchanged verify_release on both producer
+samples and current consumer sample; exact pure-decoder bindings and claim-only output.
+RESTORE_PRIOR.json deliberately avoids the existing nested DECISION.json conflict. Both
+abort_conflicts and no_terminal stay unchanged; ABORT remains the only root terminal.
+Claude withdraws183's changed-host-session/post-start verification, broad platform-binary
+allow-list, claimed currently actionable manual commands and blanket path-device mapping.
+Those are not adopted. Identity.json bytes/nonce/hash stay immutable in future design.
+
+New Codex-owned warning B5-gate-device-reattach: source reading and Claude183/187 confirm
+four device bindings: identity.json root/lock, JournaledHold saved pins, saved metadata/
+per-component path evidence, and five installed timer argv/manifest pins. D175's last
+binding alone cannot make the old-device Gate construct or the hold validate. Before
+that migration closes, a reviewed restore-only reattachment record must allow only the
+proven old-Data→new-Data device mapping for the affected filesystem components, preserving
+inode/birthtime/lock-ctime/uid/mode/nonce/metadata bytes/hash/volume/path binding and every
+same-boot FD/path st_dev comparison. This is source design, not permission to widen D175's
+allowed installed value-only diff or change any timer or identity file now. Actual APFS
+reattach and disposable-Mac reboot remain separate proof gates.
+
+The manual restoration route is a remaining implementation: after an explicit host
+choice and byte-bound operator claim, collect the actual scoped jobs/processes, refuse
+unexpected or unreadable observations, inspect stopped units/overrides and fresh exclusions;
+only after admission and any reviewed D175 reattachment may an attended restore-only driver
+restore in journaled dependency order with history_certified false. A refusal preserves
+the hold and names the specific condition for attended correction/re-observation; it never
+stops unexpected jobs automatically or turns a login start into already-restored success.
+No such full-node guest admission/manual driver is supplied or claimed in this unit.
+Platform interpreters and the controller's descendants receive no blanket exception.
+
+Candidate verification:25 owned controls pass46.114s with actual file flushes, scripted
+VM/flags and real checkpoint/capture/cleanup/terminal/release producers. Initial test
+setup incorrectly used the exclusive write_record for intentional overwrites; corrected
+fixture tampering uses write_bytes, without changing runtime policy. Intended-assertion
+mutants, bounded release/D64/fence regressions, exact-source Claude and current-head CI
+are still pending. An initial mutant control list used the assertion field as a test name;
+that runner error was rejected and corrected, not counted as a kill. No readiness claim.
+B1 remains source/owned only; B2 Alpine is historical bounded mechanism proof, B3's23 pins
+remain JIT and B4 a bounded design input, neither repeated. B5/1.2 stay open/pre, B6 lacks
+fresh exact-window approval, B7–B9 held with no live stop/capture/acceptance/resumption.
+D64's first cross-boot refusal and existing production fences are unchanged. Four NATS
+histories stay separate; no production service/VM/image/timer or local native image/launchd
+operation occurred. Next guest scoped admission/manual source, then D175 reattachment;
+both need decisive owned tests, Claude and exact CI. Real Mac access still needs the
+operator's exact disposable designation or a measured fixed resource decision.
+
+
+D214 pre-publication verification: all27 owned decision/claim controls pass47.922s;
+all13 mutants are killed at their designated assertions with unmutated controls passing
+and no test errors.45 bounded release/production-fence/D64 regressions pass63.547s.
+The attempt-directory fsync/open failure path now enters best-effort FAILED recording;
+its new negative preserves the original exception and retained manual attempt. Rebinding
+both INTENT/RESTORE_PRIOR to a wrong evidence table refuses. AST comparisons confirm
+reconcile, release_aborted, verify_release, abort_conflicts, no_terminal, terminal_abort,
+verify_abort, recover_owned and Journal.recover are unchanged. Linux/macOS registration
+adds the new27-control suite and13-mutant runner only. Plan lint14PASS/1existingWARN/0FAIL.
+Claude187 design corrections are included; exact-source review and new exact-head CI
+remain required. No source readiness, guest admission/manual route or B5 closure yet.

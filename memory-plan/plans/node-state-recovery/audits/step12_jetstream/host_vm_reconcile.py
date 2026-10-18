@@ -19,6 +19,7 @@ from host_image_immutable import change_immutable
 from host_vm_guard import GUARD_SCOPE
 from host_vm_capture import FIXTURE_UUID, HOST_SPEC_FIELDS, file_hash, fsync_parent, guarded_source, pinned_spec
 from host_vm_preflight import no_disk_attachment, owned_directory, preflight, require, write_record
+from preservation_journal import DIGEST
 
 
 BOOTABLE_SCOPE = ('temporary clone absent and source image bootable; '
@@ -479,7 +480,163 @@ def release_aborted(host_spec, capture_dir, fixture=False):
             os.close(release_fd)
 
 
+RESTORE_PRIOR_SCOPE = ('owned restore-prior-node decision; no new recovery point; unprotected user-owned claim; '
+                       'not VM start authorization, acceptance or guest admission')
+BOOT_INTENT_SCOPE = 'owned restore-prior decision intent; no VM start, acceptance or guest admission'
+BOOT_LAYOUT = frozenset({'verify', 'decision', 'INTENT.json', 'RESTORE_PRIOR.json'})
+BOOT_INTENT_KEYS = frozenset({'scope', 'decision', 'capture_nonce', 'arm_sha256', 'journal_head',
+    'checkpoint_sha256', 'abort_sha256', 'release_intent_sha256', 'release_complete_sha256',
+    'released_source', 'host_boot_session', 'vm_uuid', 'evidence_sha256', 'verify_sample_sha256'})
+BOOT_DECISION_KEYS = BOOT_INTENT_KEYS | {'at_utc', 'intent_sha256', 'decision_sample_sha256'}
+
+
+def restore_prior_record(raw):
+    value = exact_record(raw, BOOT_DECISION_KEYS)
+    require(value['scope'] == RESTORE_PRIOR_SCOPE and value['decision'] == 'RESTORE_PRIOR'
+            and value['vm_uuid'] == FIXTURE_UUID
+            and isinstance(value['host_boot_session'], str) and bool(value['host_boot_session'])
+            and isinstance(value['at_utc'], str) and bool(value['at_utc']),
+            'restore-prior decision scope, kind or host differs')
+    for key in ('capture_nonce', 'arm_sha256', 'journal_head', 'checkpoint_sha256', 'abort_sha256',
+                'release_intent_sha256', 'release_complete_sha256', 'intent_sha256'):
+        require(isinstance(value[key], str) and DIGEST.fullmatch(value[key]),
+                'restore-prior decision digest is invalid: ' + key)
+    source = value['released_source']
+    require(isinstance(source, dict) and set(source) == IMAGE_KEYS
+            and all(type(source[key]) is int and source[key] >= 0 for key in IMAGE_KEYS - {'sha256'})
+            and not source['flags'] & stat.UF_IMMUTABLE
+            and isinstance(source['sha256'], str) and DIGEST.fullmatch(source['sha256']),
+            'restore-prior released source schema differs')
+    for key in ('evidence_sha256', 'verify_sample_sha256', 'decision_sample_sha256'):
+        table = value[key]
+        require(isinstance(table, dict) and bool(table)
+                and all(isinstance(name, str) and bool(name) and isinstance(digest, str)
+                        and DIGEST.fullmatch(digest) for name, digest in table.items()),
+                'restore-prior evidence table differs: ' + key)
+    return value
+
+
+def boot_evidence(host_spec, capture_dir, directory_fd, locks):
+    evidence = release_evidence(host_spec, capture_dir, directory_fd, locks)
+    output = capture_dir / 'abort-release'
+    for name in ('INTENT.json', 'COMPLETE.json'):
+        evidence[output / name] = cleanup_bytes(output / name)
+    for name in ('verify', 'barrier', 'before-clear', 'after'):
+        evidence.update({output / name / key: raw for key, raw in sample_files(output / name).items()})
+    return evidence
+
+
+def boot_intent(host_spec, capture_dir, evidence, verify_files):
+    abort = exact_record(evidence[capture_dir / 'ABORT.json'], ABORT_KEYS)
+    released = exact_record(evidence[capture_dir / 'abort-release/COMPLETE.json'], RELEASE_COMPLETE_KEYS)
+    return {'scope': BOOT_INTENT_SCOPE, 'decision': 'RESTORE_PRIOR',
+        **{key: abort[key] for key in ('capture_nonce', 'arm_sha256', 'journal_head',
+                                     'checkpoint_sha256', 'host_boot_session', 'vm_uuid')},
+        'abort_sha256': hashlib.sha256(evidence[capture_dir / 'ABORT.json']).hexdigest(),
+        'release_intent_sha256': hashlib.sha256(evidence[capture_dir / 'abort-release/INTENT.json']).hexdigest(),
+        'release_complete_sha256': hashlib.sha256(evidence[capture_dir / 'abort-release/COMPLETE.json']).hexdigest(),
+        'released_source': released['source'],
+        'evidence_sha256': evidence_hashes(host_spec, capture_dir, evidence),
+        'verify_sample_sha256': hashes(verify_files)}
+
+
+def verify_decision(host_spec, capture_dir, observed, directory_fd, locks, *, fixture=False):
+    """Pre-start evidence only; the guest must never call this against a booted image."""
+    require(fixture, 'production restore-prior decision verification is disabled')
+    require(len(locks) == 2 and len(set(locks)) == 2,
+            'decision verification requires exactly two distinct lock descriptors')
+    host_spec, capture_dir = pathlib.Path(host_spec), pathlib.Path(capture_dir)
+    released = verify_release(host_spec, capture_dir, observed, directory_fd, locks, fixture=True)
+    output = capture_dir / 'abort-boot'
+    owned_directory(output)
+    require({path.name for path in output.iterdir()} == BOOT_LAYOUT,
+            'restore-prior decision is failed, partial, temporary or unknown; manual handling required')
+    evidence = boot_evidence(host_spec, capture_dir, directory_fd, locks)
+    samples = {name: sample_files(output / name) for name in ('verify', 'decision')}
+    initial = json.loads(evidence[capture_dir / 'before-shutdown/preflight.json'])
+    for files in samples.values():
+        sample_binding(json.loads(files['preflight.json']), initial, json.loads(evidence[host_spec]))
+    intent_raw = cleanup_bytes(output / 'INTENT.json')
+    intent = exact_record(intent_raw, BOOT_INTENT_KEYS)
+    require(intent == boot_intent(host_spec, capture_dir, evidence, samples['verify']),
+            'restore-prior intent or evidence binding differs')
+    raw = cleanup_bytes(output / 'RESTORE_PRIOR.json')
+    decision = restore_prior_record(raw)
+    require(decision == {**intent, 'scope': RESTORE_PRIOR_SCOPE, 'at_utc': decision['at_utc'],
+            'intent_sha256': hashlib.sha256(intent_raw).hexdigest(),
+            'decision_sample_sha256': hashes(samples['decision'])},
+            'restore-prior decision differs from intent or samples')
+    require(cleanup_bytes(output / 'INTENT.json') == intent_raw
+            and cleanup_bytes(output / 'RESTORE_PRIOR.json') == raw
+            and all(sample_files(output / name) == files for name, files in samples.items())
+            and boot_evidence(host_spec, capture_dir, directory_fd, locks) == evidence
+            and verify_release(host_spec, capture_dir, observed, directory_fd, locks, fixture=True) == released
+            and {path.name for path in output.iterdir()} == BOOT_LAYOUT,
+            'restore-prior records changed during verification')
+    return {'decision': raw, 'sha256': hashlib.sha256(raw).hexdigest()}
+
+
+def decide_restore_prior(host_spec, capture_dir, fixture=False):
+    require(fixture, 'production restore-prior decision requires a verified host boot controller')
+    with abort_context(host_spec, capture_dir, fixture) as (host_spec, capture_dir, directory_fd, locks):
+        output = capture_dir / 'abort-boot'
+        require(not os.path.lexists(output), 'restore-prior decision already attempted; manual handling required')
+        output.mkdir(mode=0o700)
+        decision_fd = None
+        try:
+            os.fsync(directory_fd)
+            decision_fd = os.open(output, os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY)
+            observed = preflight(host_spec, output / 'verify')
+            verify_files = sample_files(output / 'verify')
+            require(json.loads(verify_files['preflight.json']) == observed,
+                    'decision verify sample differs from consumed observation')
+            released = verify_release(host_spec, capture_dir, observed, directory_fd, locks, fixture=True)
+            evidence = boot_evidence(host_spec, capture_dir, directory_fd, locks)
+            durable_evidence(evidence)
+            durable_evidence({output / 'verify' / key: raw for key, raw in verify_files.items()})
+            require(verify_release(host_spec, capture_dir, observed, directory_fd, locks, fixture=True) == released
+                    and boot_evidence(host_spec, capture_dir, directory_fd, locks) == evidence,
+                    'decision inputs changed during the durability barrier')
+            intent = boot_intent(host_spec, capture_dir, evidence, verify_files)
+            publish_release(decision_fd, 'INTENT.json', intent)
+            intent_raw = cleanup_bytes(output / 'INTENT.json')
+            require(exact_record(intent_raw, BOOT_INTENT_KEYS) == intent, 'decision intent readback differs')
+            final = preflight(host_spec, output / 'decision')
+            final_files = sample_files(output / 'decision')
+            require(json.loads(final_files['preflight.json']) == final,
+                    'decision final sample differs from consumed observation')
+            require(verify_release(host_spec, capture_dir, final, directory_fd, locks, fixture=True) == released
+                    and boot_evidence(host_spec, capture_dir, directory_fd, locks) == evidence
+                    and cleanup_bytes(output / 'INTENT.json') == intent_raw,
+                    'decision source or evidence changed after intent')
+            durable_evidence({output / 'decision' / key: raw for key, raw in final_files.items()})
+            require(verify_release(host_spec, capture_dir, final, directory_fd, locks, fixture=True) == released
+                    and boot_evidence(host_spec, capture_dir, directory_fd, locks) == evidence
+                    and cleanup_bytes(output / 'INTENT.json') == intent_raw
+                    and sample_files(output / 'verify') == verify_files
+                    and sample_files(output / 'decision') == final_files,
+                    'decision evidence changed after sample durability')
+            decision = {**intent, 'scope': RESTORE_PRIOR_SCOPE,
+                'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                'intent_sha256': hashlib.sha256(intent_raw).hexdigest(),
+                'decision_sample_sha256': hashes(final_files)}
+            publish_release(decision_fd, 'RESTORE_PRIOR.json', decision)
+            return verify_decision(host_spec, capture_dir, final, directory_fd, locks, fixture=True)
+        except BaseException as error:
+            record_failure(output, 'restore-prior-decision', error,
+                           {'manual_required': True, 'source_flag_state': 'not changed by decision'})
+            raise
+        finally:
+            if decision_fd is not None:
+                os.close(decision_fd)
+
+
 if __name__ == '__main__':
+    if len(sys.argv) in (4, 5) and sys.argv[1] == 'decide-restore-prior':
+        require(len(sys.argv) == 4 or sys.argv[4] == '--fixture', 'invalid decision option')
+        result = decide_restore_prior(sys.argv[2], sys.argv[3], len(sys.argv) == 5)
+        print(result['sha256'])
+        raise SystemExit(0)
     if len(sys.argv) in (4, 5) and sys.argv[1] == 'release-aborted':
         require(len(sys.argv) == 4 or sys.argv[4] == '--fixture', 'invalid release option')
         release_aborted(sys.argv[2], sys.argv[3], len(sys.argv) == 5)

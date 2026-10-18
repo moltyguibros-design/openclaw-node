@@ -672,7 +672,7 @@ def verify_abort_command(host_spec, capture_dir, output, fixture=False):
     require(fixture, 'production terminal abort verification is disabled')
     with abort_context(host_spec, capture_dir, fixture) as (host_spec, capture_dir, directory_fd, locks):
         output = pathlib.Path(output)
-        require(output.parent == capture_dir and output.name not in ('abort-cleanup', 'abort-decision', 'abort-release')
+        require(output.parent == capture_dir and output.name not in ('abort-cleanup', 'abort-decision', 'abort-release', 'abort-boot')
                 and not os.path.lexists(output),
                 'abort verification output must be new and not a reserved attempt directory')
         output.mkdir(mode=0o700)

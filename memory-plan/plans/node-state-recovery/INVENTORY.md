@@ -3440,3 +3440,46 @@ guest admission, boot, real B8 or Mac reboot proof. X6 optional final-transcript
 negative and B5-CI-R3-placement remain tracked, alongside D189/helper no-op limits.
 Receipt head needs its own exact-head CI. B5/1.2 open, B6–B9 held, D64/production/timers
 unchanged. Next guest scoped admission/manual then D175; see D213 for exact contracts.
+
+### 2026-10-17 20:01 EDT — D62 host decision source preflight
+
+- [A] B5-D62-host-boot-decision: produce an owned-only RESTORE_PRIOR record before
+  start, consume its exact bytes as an unprotected claim, without granting guest
+  admission, VM start or recovery. Claude183 identifies the missing pre-boot handoff;
+  source scope/verification is in AUDIT_PRE. D64 and existing physical checks remain.
+
+> **B5-D62-host-boot-decision — Goal:** bind one owned restore-prior decision to the completed ABORT/release chain before boot.
+> **Needs:** verified D213 source/receipt e582f9f9 with all8 exact-head CI checks green; original stopped owned host/image and completed cleanup/ABORT/release; both exclusive capture locks.
+> **Feeds:** claim-only decoding in restore_only.py, then separately reviewed guest scoped admission/manual restoration and D175 reattachment.
+> **Verify:** code: real owned producer chain and file barriers, decisive identity/lock/holder/byte/partial/replay/schema/checkpoint negatives and intended-assertion mutants; Claude exact-source review and exact-head green CI. No production or native VM reboot claim.
+
+
+### 2026-10-17 20:13 EDT — owned pre-start restore-prior decision candidate (D214)
+
+Existing host_vm_reconcile now records a fixed single-use owned RESTORE_PRIOR after the
+completed ABORT/release chain and a fresh unchanged original-host stopped sample; its
+read-only verifier is pre-start only. The pure restore_only claim decoder checks the
+external digest and local checkpoint, returns authority unprotected-user-owned/admission
+false and performs no recovery or filesystem operation. Claude187's four design points
+are included; changed-host-session/post-start weakening, automatic platform-process
+allow-lists and nested DECISION names are excluded.25 controls pass46.114s; mutants,
+regressions, exact-source review and exact-head CI remain pending. D214 records the
+Codex-owned B5-gate-device-reattach dependency: all four saved device bindings need a
+reviewed per-filesystem stable-identity mapping before D175/gate construction can close.
+Manual guest restoration remains future work, not an available command or bypass.
+B5/1.2 open, B6–B9 held, D64/production/timers unchanged; B3/B4 not repeated. Four
+histories separate. Next guest scoped admission/manual, then D175; actual Mac access
+and APFS/reboot proof remain distinct. No production/native image/VM/launchd operation.
+
+
+D214 pre-publication verification: all27 owned decision/claim controls pass47.922s;
+all13 mutants are killed at their designated assertions with unmutated controls passing
+and no test errors.45 bounded release/production-fence/D64 regressions pass63.547s.
+The attempt-directory fsync/open failure path now enters best-effort FAILED recording;
+its new negative preserves the original exception and retained manual attempt. Rebinding
+both INTENT/RESTORE_PRIOR to a wrong evidence table refuses. AST comparisons confirm
+reconcile, release_aborted, verify_release, abort_conflicts, no_terminal, terminal_abort,
+verify_abort, recover_owned and Journal.recover are unchanged. Linux/macOS registration
+adds the new27-control suite and13-mutant runner only. Plan lint14PASS/1existingWARN/0FAIL.
+Claude187 design corrections are included; exact-source review and new exact-head CI
+remain required. No source readiness, guest admission/manual route or B5 closure yet.

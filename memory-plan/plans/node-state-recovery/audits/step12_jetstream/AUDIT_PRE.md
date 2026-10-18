@@ -824,3 +824,65 @@ clone/attachment/clone-only sibling absence and INTENT bytes. These are included
 zero-call negatives. Optional same-uid flag-helper no-op gap remains D189, not closed.
 Unrelated finding B5-CI-R3-placement is tracked in INVENTORY for its own work unit:
 recurring unchanged NATS peer-offline10005 before Python; no fixture patch here.
+
+
+## 2026-10-17 20:01 EDT — D62 guest-admission design re-orient
+
+- Block1/step1.2 remains active at v1.2-pre; B5 is open and B6–B9 held.
+- D213's e582f9f9 receipt now has all8 exact-head CI checks green, freshly rechecked.
+- The next source boundary must bind the host decision before any guest recovery gate.
+- It feeds scoped boot-time admission, explicit manual restoration and then D175.
+- B1 authorizes owned design/tests only; D64's production first refusal remains.
+- Re-orient before implementation: post-boot ASIF changes invalidate verify_release's inputs.
+
+Claude design review is pending against e582f9f9. The guest cannot call verify_release
+after boot: it requires the original stopped VM and unchanged original image bytes.
+A copied self-hashed decision is not a protected host authority. The producer/consumer,
+trusted external binding, durable single-use handling and failure/manual route must be
+explicit before any source admission exception is written. ACCEPTED has no B8 producer;
+the available ABORT/cleanup/release path is owned-only.
+
+The existing Gate constructor and JournaledHold.validate also compare saved st_dev in
+identity.json, metadata_identity and path evidence, before any conditional timer re-pin.
+Changing only the five timer plists and manifest pins would still fail that constructor.
+Design must preserve identity.json bytes/nonce/hash and same-boot descriptor/path mapping,
+yet avoid requiring a successfully constructed old-device Gate to admit the change.
+This is a dependency to resolve within the reviewed D62/D175 design, not permission to
+rewrite identity.json, relax arbitrary identities or operate installed timers.
+
+The first independently executable source slice and its §6 deltas will be recorded after
+the review identifies a concrete producer and consumer. No executable delta is authorized
+by this preflight beyond B1's owned boundary. Real launchd/login/process/hold-reattach
+rehearsal remains separately gated by exact disposable-Mac access and resource approval.
+
+### First unit selected after Claude183's source inspection
+
+B5-D62-host-boot-decision has one outcome: a strictly checked owned RESTORE_PRIOR
+decision and a pure claim-only consumer. It grants no start, admission or recovery.
+Its existing producer module is host_vm_reconcile.py; restore_only.py receives the
+canonical bytes/digest and the local checkpoint as an explicitly unprotected claim.
+The verifier remains pre-start only, preserving original-host session, stopped/holder,
+full source-byte and metadata checks; no post-start weakening is introduced.
+
+§6 deltas: those two existing modules; reserve abort-boot in host_clone_dispose.py;
+one portable owned test module and an intended-assertion mutant runner; existing Linux/
+macOS test registration; this audit, AUDIT_POST and the four plan ledgers. abort_conflicts,
+Journal.recover's first D64 refusal, Gate, JournaledHold and installed timers stay unchanged.
+The fixed attempt uses RESTORE_PRIOR.json, avoiding abort_conflicts' existing rejection
+of nested DECISION.json. Any failure/partial/repeat remains single use and manual.
+
+Verify: real owned checkpoint→commit→capture→cleanup→ABORT→release producers feed the
+new decision; actual owned-file barriers, two held locks, fresh consumed/written sample
+parity and unchanged source/transcript bind it. Decisive negatives cover production/
+fixture fences, locks, source/host identity, holders/clone/attachments/siblings, barrier/
+publication/readback errors, interruption, replay and canonical schema/enum/digests.
+The pure guest consumer refuses a changed checkpoint or digest and cannot call Journal,
+Gate, host verification, recovery or filesystem APIs. Guard mutants must fail intended
+assertions, with controls passing; Claude exact-source review and exact-head green CI
+precede source readiness. Native whole-pipeline/ASIF/VM reboot is not this Verify.
+
+Claude183's proposed changed-host-session/post-start mode and broad platform-interpreter
+allow-list are not adopted. Its proposed manual steps name future tools, not a presently
+executable route. D175 translation must eventually be per verified filesystem/path
+component, preserving identity.json bytes and all same-boot descriptor mappings. Guest
+scoped admission, actual manual restoration and reattachment remain subsequent units.
