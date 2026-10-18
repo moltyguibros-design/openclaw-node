@@ -4230,7 +4230,7 @@ APFS reattach/reboot and four-history acceptance remain separate. No production
 admission or runtime operation follows this source evidence receipt.
 
 
-- [A] B5-D62-held-job-negative-comparator — candidate; source/review/CI pending. No live hold or admission.
+- [x] B5-D62-held-job-negative-comparator — owned sourced5d6aefd; all8 CI39115988725; Claude275; D225. No live hold or admission.
 
 > **Goal:** one scripted managed-job negative consistency result.
 > **Needs:** D223 clear source/receipt all8 CI, unchanged readers/valid_job, B1/D189.
@@ -4400,3 +4400,66 @@ five-Markdown receipt review/all8 CI before only this owned row closes. B5/1.2
 stay open/pre,B6–B9 held; source remains scripted-only and all live observation,
 overrides/D60/process integration/durable admission/manual/D175/physical gates
 remain later. No production operation, caller-UID permission or release occurs.
+
+
+### 2026-10-18 06:11 EDT — owned held-job negative comparator source verified (D225)
+
+Source d5d6aefd468a6b47c1f969e5bbc50868c864fcc1 passes all eight jobs in
+[CI39115988725](https://github.com/moltyguibros-design/openclaw-node/actions/runs/39115988725).
+Native job 117641759357 executes 32 scripted tests in 2.258s with no skip
+and all 45 intended-assertion mutations with intact controls. These are
+scripted frozen-reader portability controls, not live launchd/process observations
+or a new full-scan measurement. Linux job 117641759535 executes 32 tests in
+1.726s with no skip and all 45 mutations. Codex inspected both complete
+raw logs: native 71429 bytes, SHA256 ba222634b29d04560a1c0b5ae5ec35161e95c0b019e03be49251bd205e5fa4fd;
+Linux 1521650 bytes, SHA256 0aa2783a5368e096f9bea7a0e9f7eb99cc92d491782dd228f056dcdeb2b6ab2e.
+Both logs name checkout merge fa40a7df4e88c60250734a6f9c6e9624f1c2f045, reviewed source
+as its second parent and an identical whole tree.
+
+Claude275 independently reviews the exact source with no required finding.
+Claude273 found the source correct and independently reproduced31/44 and182 prior regressions as uid65534, requiring the consumer recorded-owner proof. Claude275 independently reproduces32 tests/no skip and45 intended kills on the corrected full-tree export. Its exact runtime-UID replay passes all original31 but fails only the new foreign-owner assertion in the corrected32, with no ERROR. The eight-file proof-only correction, unchanged comparator/workflow/prior executable and proof blobs, six identical ledger blocks and carried optional controls are verified. No new required finding remains; optional job-read/root-name/temp-parent/schema controls remain non-discriminating and equivalent predicates are not counted. The superseded Linux raw digest remains Codex-only because its connector exposes only the last5000 lines.
+The comparator and workflow bytes remain identical to104d808e; only proof and
+ledgers corrected its recorded-versus-runtime consumer UID coverage. Claude273
+required that constructible false-acceptance control; the original31 controls
+independently let the substitution pass, while the new honest foreign-owner
+fixture and counted mutation pin the unchanged predicate. Superseded
+CI39115186066 was cancelled for that proof and is not counted all8 green; its
+completed Linux31/44 remains that older run, with no completed native claim.
+Optional job-read ordering/root-name/temp-parent/schema controls remain carried,
+and the verdict needle is strengthened. Equivalent predicates are not counted.
+The final local 32-test/45-mutation proof and the separate182 prior process
+regressions keep their actual run counts. Earlier30/42 and the partial rejected
+ERROR-only zero-UID counterfactual are not relabelled as final proof. Zero-UID
+positive and frozen record preconditions are non-counted controls. Upstream
+record completeness, held_as_checkpointed and unloaded CAPTURE inventory remain
+the unchanged frozen verifier's proof, not new comparator predicates or kills.
+
+Only B5-D62-held-job-negative-comparator closes as an owned source prerequisite.
+Its concrete record-free CLI requires both fixture/scripted flags before IO,
+private literal owned inputs, pin coherence before one stopped-image read and
+one frozen verification, then recorded-owner equality for every metadata row
+before job-file read/comparison. It works with or without optional baseline
+process policy. Labels derive from all verified prior units in all three owner
+namespaces, not timers or policy anchors. Missing/extra/unknown/loaded facts are
+retained; idle loaded/no-PID is not a negative. Exact jobs and frozen digests bind
+the received claims, and reports emit no job values or policy. All existing
+executable/test/mutation files remain unchanged from907046d9; only the three
+new source/proof files, four workflow lines and six ledgers implement this unit.
+
+This establishes scripted negative-job consistency for fixed labels/domains,
+not current node state, process absence, complete installed/loaded entrypoint
+inventory, disabled overrides, fresh D60, a live execution hold, eligibility,
+authorship, historical independence, physical exclusion or admission. D189 and
+unprotected owned fixture limits remain. Owner metadata absence refuses; no
+caller UID fallback or schema change supplies it. The consumer performs no census,
+local unpatched scan, Journal/Gate construction, write or installed timer change.
+The optional launchd-command comparator was deferred at pre-audit269, not built.
+
+B5/1.2 remain open/v1.2-pre and B6–B9 held. The later full managed-job collector
+needs current-boot complete-domain facts and its own timing budget; double69-key
+reads with10s calls can exceed20min, so it cannot inherit the120s envelope window.
+Unobservable system-domain reads remain unknown. Overrides/freshD60, integration
+with strict process gates, durable admission/manual/D175, Mac access/APFS/reboot
+and four-history acceptance remain separate. No production operation or release.
+This receipt changes five Markdown records only; executable/tests/workflow bytes
+remain fixed. Its own exact-head review and CI remain pending at commit time.
