@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -48,4 +50,50 @@ export async function waitCluster(items, names, milliseconds = 15000) {
     await delay(Math.min(50, Math.max(0, end - Date.now())));
   }
   throw new Error('owned placement cluster not ready');
+}
+
+export async function addR3WithEvidence(manager, config, items, observations, phase, output, emit = console.error) {
+  const offsets = items.map(item => {
+    const file = item.log || item.config + '.log';
+    return { name: item.name, file, from: fs.statSync(file).size };
+  });
+  try {
+    return await manager.streams.add(config);
+  } catch (error) {
+    try {
+      const windows = offsets.map(({ name, file, from }) => {
+        const fd = fs.openSync(file, 'r');
+        let to, window, complete;
+        try {
+          to = fs.fstatSync(fd).size;
+          const length = to - from;
+          complete = length >= 0 && length <= 131072;
+          window = complete ? Buffer.alloc(length) : Buffer.alloc(0);
+          if (complete) assert.equal(fs.readSync(fd, window, 0, length, from), length);
+        } finally {
+          fs.closeSync(fd);
+        }
+        const lines = complete ? window.toString('utf8').split('\n').flatMap(line => {
+          const index = line.indexOf('Peer selection:');
+          return index < 0 ? [] : [line.slice(index)];
+        }) : [];
+        return { name, from, to, complete: complete && lines.every(line => line.length <= 1024),
+          sha256: complete ? createHash('sha256').update(window).digest('hex') : null,
+          selection: lines.every(line => line.length <= 1024) ? lines : [] };
+      });
+      const state = placementState(observations, items.map(item => item.name));
+      const report = { schema: 'owned-r3-placement-failure-v1', phase, attempts: 1,
+        preCreate: { ready: state.ready, checks: state.checks,
+          members: observations.map(row => ({ name: row.name, serverId: row.js.server_id,
+            leader: row.js.meta_cluster?.leader })) },
+        error: { name: error.name, code: error.code, apiCode: error.api_error?.code,
+          apiErrorCode: error.api_error?.err_code,
+          peerOffline: error.message === 'no suitable peers for placement, peer offline' }, windows };
+      fs.writeFileSync(output, JSON.stringify(report, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
+      emit('owned-r3-placement-failure: ' + JSON.stringify(report));
+    } catch (captureError) {
+      console.error('owned-r3-placement-evidence-unavailable: ' + captureError.name);
+    }
+    throw error;
+  }
 }

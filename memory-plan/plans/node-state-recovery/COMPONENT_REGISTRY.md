@@ -3265,3 +3265,94 @@ disposable-Mac/APFS/reboot/four-history evidence remain open. B5/1.2v1.2-pre,
 B6–B9 held; D64/Gate/installed timers/production unchanged. This five-Markdown
 receipt keeps source, workflow, VERSION and AUDIT_PRE byte-fixed; its own exact
 review and all8 CI are pending at commit and are not preclaimed.
+
+
+### 2026-10-18 17:54 EDT — owned R3 failure evidence pre-audit (D240)
+
+Micro re-orient: B5/1.2 is open at v1.2-pre; B6–B9 remain held.
+D239 closes only the injected placement diagnosis with reviewed, green owned proof.
+The original unfiltered R3 CI failure still has no phase-local selector evidence.
+This unit records that evidence if the owned fixture fails; it does not repair placement.
+It feeds the separate B5-CI-R3-placement decision without a production operation.
+Still the right next bounded step: yes, because a repair now would guess the old cause.
+
+Pre-screen: source/receipt 5e931120/7dd079d0 are reviewed clear at Claude349/351,
+each with all eight CI jobs successful on attempt 1. The worktree is clean and no
+BLOCKED.md exists. NATS 2.12.6 selectPeerGroup reads cached peer cfg/stats in
+addition to the eight observable route/Raft checks; tagged events.go fills the
+cache after STATSZ updates. The old unfiltered CI logs have the API error and
+phase, but no selector window. One separate owned unfiltered startup/create
+attempt at 17:52 EDT passed with one APP connection, all three normal exits and
+no cleanup failure; this is a negative observation, not a historical replay.
+
+Goal: on a failed R3 stream creation in test_recovery.mjs, retain the exact
+phase-local owned server log windows and the pre-create readiness observation,
+while rethrowing the same error and making no second create attempt. A bounded
+private JSON report contains only generated member names/IDs, readiness checks,
+known error codes, log offsets and selector lines; no credentials or raw configs.
+No readiness predicate, server setting outside the owned fixture, timing,
+stream config, recovery mechanism, production path, or create retry changes.
+
+Section 6 prospective delta: fixture-only evidence helper in the existing
+placement_readiness.mjs, consumed by all four R3 add sites in test_recovery.mjs;
+enable debug logging only on this owned fixture's three servers. Add a portable
+negative/positive suite and intended-assertion runner for exact window, no retry,
+bounded redaction and original-error behavior; register them on Linux and macOS.
+The existing owned placement fault/control probe remains a separate proof and
+retains its source and report shape. Add an always-run JSON-only CI artifact for
+the failure report, uploaded only if an R3 failure occurs. Six ledgers describe
+the scope; VERSION remains v1.2-pre and B5/1.2 stays open.
+
+Verify: scripted pure and fake-manager failure controls, including no duplicate
+call and no report on success; run the unchanged unfiltered owned recovery test
+once with normal cleanup, then exact-source review and all-eight CI. The failure
+path must be exercised by a controlled owned fault without repeating the failed
+request. A later five-Markdown receipt gets separate review and all-eight CI
+before only this auxiliary row closes. The original B5-CI-R3-placement repair,
+natural historical trigger and current inventory/override/fresh-D60 observer
+stay open; D64, Gate, installed timers, VMs and production remain untouched.
+
+
+### 2026-10-18 18:02 EDT — D240 mid-implementation finding
+
+The pre-audit's unchanged-probe-source assumption was too narrow. The existing
+controlled STATSZ-denied probe is the only owned, reproducible R3 refusal, so it
+now calls the same failure-evidence helper once at its existing create site. Its
+report schema and comparator remain unchanged; on the fault side it additionally
+writes a private failure report. This also updates the portable original-caller
+source hash pin and adds an assertion comparing the helper's selector lines to
+the probe's already-retained window. No readiness predicate or second request
+was added. Debug logging is enabled only for the three owned cluster servers in
+test_recovery.mjs. The original unfiltered CI cause remains unproved.
+
+
+### 2026-10-18 18:08 EDT — D240 source candidate and owned proof
+
+The four owned R3 creation sites use one evidence helper. The helper snapshots
+log offsets immediately before each one-shot create, records the last successful
+waitCluster observation, and rethrows the identical error on failure. The private
+0600 report is bounded to 128 KiB read per member and 1024 characters per
+selector line; it retains offsets, a digest and selector lines, not full raw log
+bytes. Oversized windows are marked incomplete. The last waitCluster snapshot is
+pre-create evidence, not a contemporaneous check of the server's private peer
+stats. Debug logging is enabled for the three owned cluster servers only.
+
+Local controls at candidate source: seven portable tests passed; 12/12
+intended-assertion mutants killed with intact controls. The existing placement
+suite passed 45/45, and its runner killed 34/34. Plan lint was 14 PASS, 1 WARN,
+0 FAIL (historical VERSION-idle warning); diff whitespace check and syntax check
+passed. The final bounded-read source ran the entire unfiltered owned recovery
+fixture: pass=true, allOwnedServersStopped=true, no failure report. The final
+controlled owned pair had one create per cohort, control created, injected fault
+refused with API error 10005, both cleanup failures empty. Its 2081-byte report
+was mode 0600, SHA256
+f4a7c00e4e0e89db15ade38b1aefe3c8e04cfc0638721884d028f7ae3df90786;
+three selector lines were retained with all windows complete and pre-create
+readiness true. That is injected sufficiency evidence, not the historical CI
+cause. No production service, timer, Gate, D64 record or restore was touched.
+
+Source exact-head review and all-eight CI remain pending; this candidate row
+stays [A]. A separate reviewed, green five-Markdown receipt is required before
+closing only this auxiliary evidence row. The original R3 placement repair,
+natural trigger and current inventory/override/fresh-D60 observer remain open;
+B5/1.2 stays v1.2-pre and B6–B9 stay held.

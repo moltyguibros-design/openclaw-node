@@ -44,13 +44,13 @@ function refuses(change, check) {
   assert.equal(result.outcome, 'inconclusive', `evidence ${check} cannot claim reproduction`);
 }
 
-test('portable source extraction keeps exact helpers and all original caller bytes', () => {
+test('portable source extraction keeps exact helpers and pins the owned recovery caller', () => {
   assert.equal(sha(placementState.toString()), '55bd148bddf7b16efabd8c84a881b2f9eff75483c2792479ed31d8c18a499e0a');
   assert.equal(sha(waitCluster.toString()), '0458913e112d04a24918160160054cd772dd61bbc67f05cab4e3ff4461dffcf2');
   const source = fs.readFileSync(new URL('test_recovery.mjs', base), 'utf8');
-  const line = "import { placementState, waitCluster } from './placement_readiness.mjs';\n";
+  const line = "import { placementState, waitCluster, addR3WithEvidence } from './placement_readiness.mjs';\n";
   assert.equal(source.split(line).length, 2);
-  assert.equal(sha(source.replace(line, '')), 'aeda229e0633d8abc0c54b1d5b3182785d4fa7df73e8dad3c4851958215641ce');
+  assert.equal(sha(source.replace(line, '')), 'ccaaff039ab694ab84aeea2c87f72a26d7107ce333b6c71e93c3c9b416a12041');
 });
 
 test('portable old gate accepts the complete synthetic ready table', () => {
@@ -187,4 +187,13 @@ test('real owned control and STATSZ-denied pair', async () => {
   assert.equal(value.historicalCauseEstablished, false);
   assert.equal(value.repair, false);
   assert.equal(value.diagnosis.outcome, 'owned-counterexample', 'real owned pair must establish only the injected sufficiency counterexample');
+  assert.equal(fs.existsSync(path.join(value.control.root, 'placement-failure.json')), false);
+  const retained = JSON.parse(fs.readFileSync(path.join(value.fault.root, 'placement-failure.json'), 'utf8'));
+  assert.equal(retained.phase, 'injected-stats-denied-r3-create');
+  assert.equal(retained.attempts, 1);
+  assert.equal(retained.preCreate.ready, true);
+  assert.equal(retained.error.apiErrorCode, 10005);
+  const leader = value.fault.ready[0].js.meta_cluster.leader;
+  assert.deepEqual(retained.windows.find(row => row.name === leader).selection,
+    value.fault.selection.find(row => row.name === leader).lines.map(line => line.slice(line.indexOf('Peer selection:'))));
 });

@@ -9,7 +9,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { api, capture, cliBackup, cliRestore, consumerState, copyCold, digest, hashTree, jsonPrivate, listConsumerStates, openBus, privateDir, run, writePrivate } from './recovery.mjs';
-import { placementState, waitCluster } from './placement_readiness.mjs';
+import { placementState, waitCluster, addR3WithEvidence } from './placement_readiness.mjs';
 const { headers } = createRequire(import.meta.url)('nats');
 const coldBaselineDriver = path.join(path.dirname(fileURLToPath(import.meta.url)), 'take_cold_baseline.mjs');
 const coldTreeProbe = path.join(path.dirname(fileURLToPath(import.meta.url)), 'probe_cold_trees.mjs');
@@ -41,7 +41,7 @@ async function start(name, store, clusterPorts, selected) {
   const [client, monitor, route] = selected || await ports(3);
   privateDir(store);
   const config = path.join(root, name + '-' + client + '.conf');
-  let text = `server_name: ${name}\nserver_tags: [${JSON.stringify(name)}]\nlisten: 127.0.0.1:${client}\nhttp: 127.0.0.1:${monitor}\nauthorization { token: "${token}" }\njetstream { store_dir: "${store}", max_memory_store: 1GB, max_file_store: 2GB }\n`;
+  let text = `server_name: ${name}\nserver_tags: [${JSON.stringify(name)}]\n${clusterPorts ? 'debug: true\n' : ''}listen: 127.0.0.1:${client}\nhttp: 127.0.0.1:${monitor}\nauthorization { token: "${token}" }\njetstream { store_dir: "${store}", max_memory_store: 1GB, max_file_store: 2GB }\n`;
   if (clusterPorts) text += `cluster { name: recovery-fixture, listen: 127.0.0.1:${route}, no_advertise: true, authorization { user: recovery, password: "${routeToken}" }, routes: [${clusterPorts.filter(p => p !== route).map(p => `"nats-route://recovery:${routeToken}@127.0.0.1:${p}"`).join(',')}] }\n`;
   writePrivate(config, text);
   const fd = fs.openSync(config + '.log', 'wx', 0o600);
@@ -365,6 +365,9 @@ try {
   const selected = await ports(9), triples = [selected.slice(0, 3), selected.slice(3, 6), selected.slice(6, 9)];
   const routes = triples.map(p => p[2]);
   const members = [];
+  let lastPlacementReady;
+  const addR3 = (manager, config) => addR3WithEvidence(manager, config, members, lastPlacementReady,
+    phase, process.env.PLACEMENT_FAILURE_REPORT || path.join(root, 'placement-failure.json'));
   phase = 'cluster-placement-readiness';
   const memberNames = ['member-1', 'member-2', 'member-3'];
   for (let i = 0; i < 2; i++) members.push(await start(memberNames[i], path.join(root, 'cluster-' + (i + 1)), routes, triples[i]));
@@ -377,12 +380,13 @@ try {
   results.incompletePlacementClusterRejected = true;
   members.push(await start(memberNames[2], path.join(root, 'cluster-3'), routes, triples[2]));
   const ready = await waitCluster(members, memberNames);
+  lastPlacementReady = ready;
   jsonPrivate(path.join(root, 'cluster-placement-ready.json'), ready);
   results.placementPredicateNegatives = placementCounterexamples(ready, memberNames);
   let memberNC = await bus(members[0]);
   let manager = await memberNC.jetstreamManager();
   phase = 'cluster-offline-consumer-placeholder';
-  await manager.streams.add({ name: 'CONSUMER_PLACEHOLDER', subjects: ['consumer-placeholder'], storage: 'file', num_replicas: 3 });
+  await addR3(manager, { name: 'CONSUMER_PLACEHOLDER', subjects: ['consumer-placeholder'], storage: 'file', num_replicas: 3 });
   await memberNC.jetstream().publish('consumer-placeholder', Buffer.from('acknowledged'));
   await manager.consumers.add('CONSUMER_PLACEHOLDER', { durable_name: 'held-r1', ack_policy: 'explicit', num_replicas: 1 });
   const heldConsumer = await memberNC.jetstream().consumers.get('CONSUMER_PLACEHOLDER', 'held-r1');
@@ -403,7 +407,7 @@ try {
   assert(!fs.existsSync(path.join(unavailableConsumerBaseline, 'manifest.json')));
   await consumerNC.close();
   await restart(consumerOwner);
-  await waitCluster(members, memberNames);
+  lastPlacementReady = await waitCluster(members, memberNames);
   await memberNC.close();
   memberNC = await bus(members[0]);
   manager = await memberNC.jetstreamManager();
@@ -411,7 +415,7 @@ try {
   results.unavailableConsumerBaselineRejected = true;
   results.missingOnlyConsumerResponseRejected = true;
   phase = 'cluster-missing-consumer-without-placeholder';
-  await manager.streams.add({ name: 'CONSUMER_PLACEHOLDER', subjects: ['consumer-placeholder'], storage: 'file', num_replicas: 3 });
+  await addR3(manager, { name: 'CONSUMER_PLACEHOLDER', subjects: ['consumer-placeholder'], storage: 'file', num_replicas: 3 });
   await memberNC.jetstream().publish('consumer-placeholder', Buffer.from('acknowledged-r2'));
   await manager.consumers.add('CONSUMER_PLACEHOLDER', { durable_name: 'held-r2', ack_policy: 'explicit', num_replicas: 2 });
   const r2Consumer = await memberNC.jetstream().consumers.get('CONSUMER_PLACEHOLDER', 'held-r2');
@@ -442,7 +446,7 @@ try {
   assert(!fs.existsSync(path.join(omittedConsumerSnapshot, 'manifest.json')));
   await r2NC.close();
   await restart(r2Owner);
-  await waitCluster(members, memberNames);
+  lastPlacementReady = await waitCluster(members, memberNames);
   await memberNC.close();
   memberNC = await bus(members[0]);
   manager = await memberNC.jetstreamManager();
@@ -465,9 +469,9 @@ try {
   await assertRoutes(members);
   await assert.rejects(assertRoutes(members.slice(0, 2)), /route escaped fixture peers/);
   phase = 'cluster-replicated-r3-create';
-  await manager.streams.add({ name: 'REPLICATED', subjects: ['replicated'], storage: 'file', num_replicas: 3 });
+  await addR3(manager, { name: 'REPLICATED', subjects: ['replicated'], storage: 'file', num_replicas: 3 });
   phase = 'cluster-empty-r3-create';
-  await manager.streams.add({ name: 'EMPTY_R3', subjects: ['empty'], storage: 'file', num_replicas: 3 });
+  await addR3(manager, { name: 'EMPTY_R3', subjects: ['empty'], storage: 'file', num_replicas: 3 });
   const emptyOriginal = await capture(memberNC, 'EMPTY_R3');
   const emptyBackup = path.join(root, 'snapshot-EMPTY-R3');
   await cliBackup(cli, `nats://127.0.0.1:${members[0].client}`, token, 'EMPTY_R3', emptyBackup);

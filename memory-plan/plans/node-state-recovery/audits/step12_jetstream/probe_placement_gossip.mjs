@@ -8,7 +8,7 @@ import { once } from 'node:events';
 import { createHash, randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { placementState, waitCluster } from './placement_readiness.mjs';
+import { placementState, waitCluster, addR3WithEvidence } from './placement_readiness.mjs';
 
 export const NAMES = ['member-1', 'member-2', 'member-3'];
 export const VERSION = 'nats-server: v2.12.6';
@@ -194,8 +194,9 @@ cluster { name: recovery-fixture, listen: 127.0.0.1:${selected[i * 3 + 2]}, no_a
     result.phase = 'single-r3-create';
     result.attempts++;
     try {
-      const response = await manager.streams.add({ name: 'GOSSIP_PROBE', subjects: ['gossip-probe'],
-        storage: 'file', num_replicas: 3 });
+      const response = await addR3WithEvidence(manager, { name: 'GOSSIP_PROBE', subjects: ['gossip-probe'],
+        storage: 'file', num_replicas: 3 }, members, result.ready,
+      fault ? 'injected-stats-denied-r3-create' : 'control-r3-create', path.join(root, 'placement-failure.json'));
       result.response = { name: response.config.name, replicas: response.config.num_replicas };
       result.outcome = 'created';
     } catch (error) {
