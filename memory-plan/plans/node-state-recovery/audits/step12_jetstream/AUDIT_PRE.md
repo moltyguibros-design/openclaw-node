@@ -997,7 +997,7 @@ The comparison's shared path helper reads paths, so read-only replaces the earli
 wording. The C fixture replaces a false Python-launcher assumption. Production is unchanged.
 
 
-### 2026-10-17 22:28 EDT — D216 whole-argument scope correction candidate
+### 2026-10-17 22:25 EDT — D216 whole-argument scope correction candidate
 
 A bounded independent file-only reproduction at ffd7cb8c showed an other-UID
 argv symlink with spaces into a declared root reported clean/excluded. Whole

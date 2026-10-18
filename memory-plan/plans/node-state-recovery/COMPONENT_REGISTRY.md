@@ -815,7 +815,7 @@ access/measurement/reboot proof. B5/1.2 pre/open, B6–B9 held, D64/production/t
 four histories separate. See D216 for sampling, current-disk-image and decoder limits.
 
 
-### 2026-10-17 22:28 EDT — D216 whole-argument scope correction candidate
+### 2026-10-17 22:25 EDT — D216 whole-argument scope correction candidate
 
 An independent argv-with-spaces symlink reproduction falsely excluded an
 other-UID root process at ffd7cb8c. Whole process arguments are now resolved

@@ -5527,7 +5527,7 @@ disposable-Mac rehearsal still required. Codex owes the measured resource propos
 a new guest budget decision; no provisioning or disposable designation is inferred.
 
 
-### D216 correction — 2026-10-17 22:28 EDT
+### D216 correction — 2026-10-17 22:25 EDT
 
 Candidate ffd7cb8c independently reproduced a required scope error: an other-UID
 argv element naming an absolute or relative symlink with spaces into a declared

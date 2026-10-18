@@ -3549,7 +3549,7 @@ four histories separate. See D216 for sampling, current-disk-image and decoder l
 > **Verify:** code:40 owned controls including an independently expected native child (substituted enumeration only),28 intended-assertion mutants with controls/noERROR, owned-runner unpatched refusal with child matched, unchanged existing executable bodies, Claude exact-source review and exact-head green CI. No production or full-host positive.
 
 
-### 2026-10-17 22:28 EDT — D216 whole-argument scope correction candidate
+### 2026-10-17 22:25 EDT — D216 whole-argument scope correction candidate
 
 An independent argv-with-spaces symlink reproduction falsely excluded an
 other-UID root process at ffd7cb8c. Whole process arguments are now resolved
