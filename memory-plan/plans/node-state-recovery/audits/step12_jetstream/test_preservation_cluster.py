@@ -13,6 +13,42 @@ import unittest
 from preservation_checks import QuietWindow, Refused, capture, http_json
 
 
+def wait_for_groups(ports, root, *, clock=time.monotonic, sleep=time.sleep):
+    previous = None
+    stable_since = None
+    before = []
+    failures = []
+    last_reset = 'not sampled'
+    deadline = clock() + 10
+    while clock() < deadline:
+        before = [capture(ports[i*3+1]) for i in range(3)]
+        groups = [report['raft'] for report in before]
+        failures = []
+        for i, table in enumerate(groups):
+            conditions = [
+                ('$SYS missing', '$SYS' in table),
+                ('$G missing', '$G' in table),
+                ('$G group count below two', len(table.get('$G', {})) >= 2),
+                ('$G leader empty', all(node['leader'] for node in table.get('$G', {}).values())),
+            ]
+            failures.append({'member': i, 'failed': [name for name, valid in conditions if not valid]})
+        ready = not any(row['failed'] for row in failures)
+        if ready and groups == previous:
+            if stable_since is None:
+                stable_since = clock()
+            if clock() - stable_since >= 1:
+                return before
+        else:
+            stable_since = None
+            last_reset = 'invalid' if not ready else 'change'
+        previous = groups
+        sleep(.05)
+    (root/'raft-readiness-refused.json').write_text(json.dumps({
+        'captures': before, 'failures': failures, 'last_reset': last_reset}, indent=2))
+    raise AssertionError('owned replication groups did not settle after creation; '
+                         f'last reset: {last_reset}; failures: {failures}')
+
+
 class Cluster(unittest.TestCase):
     def test_stream_and_consumer_groups_and_real_stream_election(self):
         os.umask(0o077)
@@ -131,24 +167,7 @@ let nc,stage='connect';
                 (root/'publish-readiness-refused.json').write_text(json.dumps(subscriptions, indent=2))
                 self.fail('owned stream leader has no local history subscription')
             client('seed', port=ports[leader*3])
-            previous = None
-            stable_since = None
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
-                before = [capture(ports[i*3+1]) for i in range(3)]
-                groups = [report['raft'] for report in before]
-                if groups == previous:
-                    if stable_since is None:
-                        stable_since = time.monotonic()
-                    if time.monotonic() - stable_since >= 1:
-                        break
-                else:
-                    stable_since = None
-                previous = groups
-                time.sleep(.05)
-            else:
-                (root/'raft-readiness-refused.json').write_text(json.dumps(before, indent=2))
-                self.fail('owned replication groups did not settle after creation')
+            before = wait_for_groups(ports, root)
             for report in before:
                 self.assertIn('$SYS', report['raft'])
                 self.assertIn('$G', report['raft'])

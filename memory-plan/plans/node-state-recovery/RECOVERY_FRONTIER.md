@@ -2794,3 +2794,129 @@ open. Current inventory/override/freshD60 observer, full held/process integratio
 durable admission/manual/D175 and Mac/APFS/reboot/four-history evidence remain
 later. B5/1.2 open/v1.2-pre,B6–B9 held,D64/Gate/installed timers/production
 untouched; no fresh D60, live hold, history/authorship, eligibility or admission.
+
+
+### 2026-10-18 13:14 EDT — owned cluster group-readiness pre-audit (D234)
+
+Micro re-orient: B5/1.2 open/v1.2-pre; B6–B9 held.
+D233 receipt b0d55130/source4abd6360 have clear325/321 reviews and all8 CI.
+Current inventory observation remains open; repeated owned fixture failures impede CI.
+Split the two symptoms: fix group settling only; peer placement remains undiagnosed.
+This unit makes the existing owned test wait for its existing acceptance requirements.
+Still the right bounded prerequisite: yes; no production mechanism or admission.
+
+Pre-screen: exact clean parent b0d55130; existing capture and owned three-server
+fixture available; local NATS2.12.6/Node24.13.0 available. Retained receipt CI
+39144200140 attempt1 Linux117724597070 fails the unchanged nonempty $G leader
+assertion after stable-table settling, with cleanupFailures[]. The source loop
+can finish with an unchanged but invalid table: stable groups alone do not imply
+$SYS/$G presence, two account groups, or nonempty leaders. This source mismatch
+is demonstrable with scripted captures; the retained CI log contains no table
+and cannot prove which intermediate state caused its failure. No root-cause
+claim for peer-offline placement or real NATS convergence follows.
+
+Goal: one independently verifiable outcome: the existing owned replication
+fixture cannot finish its settling loop until every sample meets the unchanged
+post-loop requirements continuously for the existing one-second stable interval,
+within the existing ten-second deadline. Missing/empty groups or empty leaders
+reset stability, as do changed group tables. Preserve capture refusal behavior,
+the exact final assertions, QuietWindow, real election and own-process cleanup.
+Timeout retains the last full capture and raises an assertion; no wider timeout,
+stream-create retry, monitor-parser change, production scan or operation.
+
+Section6 file deltas: extract only the existing settle loop into a test-local
+wait_for_groups(ports,root) function in test_preservation_cluster.py and call it
+from the same place. New test_cluster_group_readiness.py scripts capture/time
+without network, covering invalid-stable timeout, eventual valid convergence,
+per-member failures, regression/reset, changing tables, capture refusal and
+last-observation timeout evidence. New mutate_cluster_group_readiness.py requires
+intact selected controls and named assertion failures, never ERROR-only kills.
+Four registration lines in .github/workflows/test.yml run the new portable
+suite/runner on Linux22 and native macOS. Existing real cluster remains its Linux
+consumer; run it once locally against three own loopback servers with normal
+cleanup. Six ledgers document candidate/proof and boundaries. All other existing
+executable/test/runner bodies stay fixed. Only a source-ready owned prerequisite
+may close after exact review/all8 CI and a separate reviewed green receipt;
+B5/1.2 and placement follow-up remain open. VERSION remains v1.2-pre.
+
+Risks: a valid table can regress while settling, so invalidate the clock rather
+than accumulating disjoint ready samples. The table is sampled, not continuous
+physical evidence. The test-local extraction must actually feed the real test;
+prove call placement and leave final assertions byte-identical. Missing monitor
+keys must be treated as not ready in the scripted predicate without weakening
+capture's strict parser. Root timeout evidence is fixture-owned; no raw token
+or config copied. No feature deployment/service restart applies to this test-only
+unit; actual owned test execution plus CI is its runtime, not serving services.
+D64/Gate/installed timers and production remain untouched; no retry-as-proof.
+
+
+### D234 pre-audit settled — Claude329, before implementation
+
+329 inspected exact b0d55130 without subagents and clears the atom with pins.
+Adopt all four existing conditions per member and no agreement/extra readiness
+rule; valid identical second sample starts the clock, invalid/change resets,
+previous always advances. Preserve sample-then-check deadline semantics: a batch
+started before10s may finish and succeed after10s; three unchanged capture calls
+can overrun by about6s. This is a polling deadline, not a hard wall-clock bound.
+Inject clock/sleep only on the test-local helper; real call passes neither.
+Timeout now records full last captures, named failed conditions per member and
+last reset cause (invalid/change), also in its assertion. Refused propagates.
+AST proves exactly one call/result feeds unchanged final assertions; Linux real
+cluster and one own Mac run are live proof, native new suite is scripted only.
+Keep syntax Python3.9 compatible. The explicit missing-$G predicate is logically
+dominated for acceptance by the >=2 count, but its named evidence remains
+independently testable; no false independent acceptance-kill claim.
+Parent extracted-loop replay with stable two $G groups/empty leaders reaches
+its final assertion at1.05 scripted seconds/66captures, no network. First replay
+used a three-port list instead of fixture's nine-port layout and raisedIndexError;
+that harness error is corrected and never counted as proof or mutant kill.
+No peer-placement root cause inferred, no timer/deadline constant change.
+
+
+### 2026-10-18 13:23 EDT — D234 local group-readiness candidate proof
+
+Landed only the test-local wait_for_groups extraction/call, two new proof files,
+four workflow lines and six ledgers. Final four assertions, creation readiness,
+QuietWindow/election/cleanup, preservation_checks and all production code stay
+fixed. Returned full captures feed the one real call with no injected clock or
+sleep; the portable AST control pins that tie.13controls0.282s/no skip and
+22 intended-assertion mutants pass with intact selected controls/no ERROR-only
+kills. Scripted cases cover all four original conditions on every member, empty
+and single groups, None/empty leaders, eventual convergence, invalid regression,
+valid changes, exact original polling/stability/deadline, completion overrun,
+no-sample timeout, full evidence, Refused identity and no added member agreement.
+The missing-$G condition's counted mutation tests its diagnostic reason; it is
+not an independent acceptance gate beyond the >=2 count. Removing only the
+invalid-sample clock reset while retaining valid-change reset passes the earlier
+12-test suite and is a logical acceptance equivalent, not a kill: next valid
+sample necessarily differs, then resets. Both resets remain in source; removing
+change reset or all resets dies. Source has no new readiness/member agreement.
+
+One actual owned Mac cluster run on NATS2.12.6/Node24.13.0 passes1test3.626s,
+normal three-process shutdown/cleanupFailures[], only random loopback ports and
+own credentials/routes. Owned root openclaw-preservation-cluster-xr8694ws;
+raw 312bytes SHA256b7c80ce4ef0eddd6f8f7d34d5fcab67dd08d1effc115c735872ba02e1c5c4190.
+This exercises the actual helper/QuietWindow/election consumer, not a Linux
+failure reproduction, deployment or proof of the retained failure's cause.
+Unchanged preservation_checks regressions23tests3.286s pass with three owned
+servers/cleanupFailures[]/noProductionConnections true. New macOS CI lines are
+scripted only; the existing Linux cluster line supplies real CI execution.
+Local plan lint14PASS/1old idle-versionWARN/0FAIL. No timeout extended and no
+stream-add retry; the peer-offline placement follow-up stays open.
+
+First local candidate proof failed one floating-point exact boundary expectation
+(1.65 became1.7 at the same >=1 comparison) and one AST harness dedent over the
+existing multiline JS string. Fixed only tests: permit one existing poll step
+of rounding and parse the full module before selecting the consumer AST. Neither
+failure is a source defect or counted mutant. No source expansion followed.
+
+Committed candidate digests:
+- test_preservation_cluster.py: 5ece2bec768b00d378204103a54c8bc599e55171ed466a1206f18b00b7d47ef6
+- test_cluster_group_readiness.py: 547e2e253e538b99c664f2d4fc4f70eef44e7a89d215660ff95fd460fddf875b
+- mutate_cluster_group_readiness.py: f679065dac56bde434fb17124913a5bc0813ec69eab2b03a3a6b3d545937bf6a
+
+Source exact-head review/all8CI remain pending; only after those a separate
+reviewed green five-Markdown receipt may close this auxiliary row. B5/1.2
+open/v1.2-pre,B6–B9held,D64/Gate/installed timers/production untouched. Current
+inventory/override/D60 observer, integration, admission/manual/D175 and physical
+reboot/history work remain later. This does not close B5-CI-R3-placement.
