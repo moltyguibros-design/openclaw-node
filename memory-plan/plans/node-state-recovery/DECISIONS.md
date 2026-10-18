@@ -7523,3 +7523,64 @@ reviewed green five-Markdown receipt may close this auxiliary row. B5/1.2
 open/v1.2-pre,B6–B9held,D64/Gate/installed timers/production untouched. Current
 inventory/override/D60 observer, integration, admission/manual/D175 and physical
 reboot/history work remain later. This does not close B5-CI-R3-placement.
+
+
+### 2026-10-18 14:01 EDT — owned cluster group-readiness verified (D235)
+
+Source 08f90df7bd9139e3d8dee7e34fcf7507b5e90ef1, sole parent b0d55130, passes all eight distinct jobs in
+[CI39149352811](https://github.com/moltyguibros-design/openclaw-node/actions/runs/39149352811)
+attempt1, with no rerun. Linux22 job117739620498:13tests/0.266s/no skip,
+22 intended assertion kills/intact controls; the actual owned three-member
+cluster test passes2.165s with cleanupFailures[]. Native job117739620342:
+13tests/0.252s/no skip/22. Native new-unit proof is scripted capture/clock
+portability, not an actual cluster execution. Codex inspects completed raw logs:
+Linux1538373bytes SHA2567a8c6b9aa3ae7872f24d37d14d28678dab00f6bb29f671af91c7278adda70f0e;
+native88375bytes SHA256b9a303bda3e3f8de1e160a6868244919f8c6d6dcdf9480c0fda856df64340d05.
+Both name merge c7bfd2b49258f1c3135a8c996f5f5fef291c2edd, source as second parent and
+identical whole tree. These completed CI facts are Codex observations, later
+than331's source review, not assigned to the reviewer.
+
+Claude331 independently clears exact source/proof after329's pre-audit pins.
+It verifies10files/1106insertions/18deletions, only the existing test-local
+settle block extracted, one real consumer call, four CI lines, two new proof
+files and six ledgers with three identical D234 blocks. Final assertions,
+creation, QuietWindow, election and cleanup are byte-fixed; all production code
+and other existing executables/tests/runners are fixed. As uid65534 it replays
+13tests and22 intended assertion kills with intact controls; own mutants for
+previous advancing only on valid samples, strict threshold, accumulated failure
+rows, recomputed deadline, raft-only return and node-truthiness leaders die.
+Its first full-suite deadline mutant hung and was narrowed to later-convergence;
+that is its harness, not source or extra proof. The missing-$G mutation tests
+named diagnostic evidence, not an independent count-dominated acceptance gate.
+Removing only invalid reset is acceptance-equivalent because next valid table
+necessarily differs and resets; it is not counted. No survivor is relabelled.
+
+Only B5-CI-group-readiness closes as an owned fixture prerequisite: each member
+must satisfy the same four old conditions before identical samples accrue1s
+from their second occurrence. Invalid/changed samples clear stability and every
+sample advances previous. Fixed10s top-of-loop deadline preserves sample-then-
+check: an in-flight batch may finish after it, with about6s pre-existing capture
+overrun; no hard completion bound or longer constant is claimed. Refused still
+propagates. Timeout retains full last captures, named per-member failed checks
+and last reset cause in the file/assertion. The real call injects no test clock
+or sleep; AST pins its one returned result into unchanged final assertions.
+Optional331 carry-forward: a late valid stable table may time out with last reset
+change/all-empty failures; truthful, but elapsed stability could clarify it later.
+No source defect or required correction remains; no unsolicited enhancement.
+
+Local owned Mac NATS2.12.6/Node24.13.0 real cluster1/3.626s and unchanged checks
+23/3.286s both have normal owned cleanup, no production connections. Local new
+suite13/0.282s/22kills stays distinct from CI. Parent replay accepts stable empty
+leaders then fails its final assertion at1.05 scripted seconds/66captures;
+its initial wrong-size port harness and the candidate's floating-boundary/AST
+harness corrections remain non-proof, not kills. Neither that replay nor the
+passing controls proves the cause of the prior receipt failure. Peer-offline
+placement diagnosis stays open, including test_recovery.mjs; no create retry,
+timeout widening, production scan or operation. Existing captured failure logs
+remain failed evidence. Current inventory/override/D60 observer, full held/
+process integration, admission/manual/D175 and physical reboot/history evidence
+remain later. B5/1.2 open/v1.2-pre,B6–B9held,D64/Gate/installed timers/production
+untouched. This receipt changes five Markdown only; AUDIT_PRE and every non-
+Markdown byte stay fixed. Local lint14PASS/1old idle-versionWARN/0FAIL. Receipt
+exact-head review and its own all8CI remain pending at commit time, separately
+required before completion; no whole-B5 closure or source-origin claim.

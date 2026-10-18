@@ -58,7 +58,7 @@ review only, not source readiness or B5 closure. Production remains untouched.
 | B2 | **Cleared for the disposable mechanism only.** Codex registered a separate Apple-backend UTM VM with its own ASIF disk and a verified Alpine ISO. It started and stopped normally; while `UF_IMMUTABLE` guarded that stopped disk, UTM refused its start and remained stopped; after unlock it started and stopped normally. The production VM stayed started throughout. | Codex carries this owned result into B5's host boot controller; no further VM creation is needed for B2's guard mechanism. B5's macOS reboot rehearsal has a separate access requirement. `utmctl start` exited 0 even on the refused attempt, so the controller must check the resulting state and error. | `audits/step12_jetstream/B2_UTM_GUARD_REHEARSAL_20261012.json` records distinct VM/disk identities, ASIF format, guard refusal, unlock recovery and final states. This is not a production boot-denial certificate. | B5 controller implementation and owned tests. |
 | B3 | **Just-in-time installation pins:** the October 9 candidate names `viewer-observed-20261008`; the installed viewer has since moved to `viewer-plan-task-links-autosave-20261011`. The 23-job candidate is unapproved and can drift again. | Codex resolves known structural drift now, but re-captures all 23 installed jobs and direct file hashes only immediately before an approved window. Repeating the capture before a window is scheduled does **not** count as progress. | Current installed identities and hashes match the reviewed baseline at window entry, including the five old timer pins and the exact conditional migration form. No pre-window timer reinstall. | B6 and B7. |
 | B4 | **Cleared as a bounded design input:** all 23 installed plists and direct launch files, activation keys, and current GUI/user/system OpenClaw-label observations are captured. Claude's adversarial review at `ac954055` found no remaining concrete false claim. This is not a no-writer certificate. | Codex carries the identified child, deploy, viewer, bus and file-writing routes into B5; transitive and out-of-cohort writers remain fail-closed uncertainties for the window-time census and stopped-VM boundary. Re-running this static capture alone is not progress. | `audits/step12_jetstream/B4_WRITER_PROVENANCE_AUDIT_20261012.md` and its JSON cover all 23 labels, classify the only observed system-domain OpenClaw label, name re-entry edges, and state residual uncertainty without claiming pre-stop physical exclusion. | Boundary design B5. |
-| B5 | **In progress, owned source only:** D233 closes shared entrypoint whole-value classification at source4abd6360/all8CI39140772095/Claude321. Native21/19 proves owned path/caller portability only. Receipt review/CI pending at commit; current observer stays open. | Codex builds current inventory/override/D60 observation, full held/process integration, durable admission, manual restoration and D175. Operator separately designates disposable access or decides a measured resource proposal. | Reviewed exact-head source/CI; distinct native full pipeline, APFS reattach and disposable-Mac reboot/login/process/hold/migration evidence. D189 and pre-stop limits remain. | Per-window release B6. |
+| B5 | D235 clears the owned group-readiness prerequisite at08f90df7/all8CI39149352811/Claude331; receipt-own review/CI pending at commit. Placement/current observer remain open. **In progress, owned source only:** D233 closes shared entrypoint whole-value classification at source4abd6360/all8CI39140772095/Claude321. Native21/19 proves owned path/caller portability only. Receipt review/CI pending at commit; current observer stays open. | Codex builds current inventory/override/D60 observation, full held/process integration, durable admission, manual restoration and D175. Operator separately designates disposable access or decides a measured resource proposal. | Reviewed exact-head source/CI; distinct native full pipeline, APFS reattach and disposable-Mac reboot/login/process/hold/migration evidence. D189 and pre-stop limits remain. | Per-window release B6. |
 | B6 | **Separate live-run release required.** B1's boundary choice and B5's design review never authorize a production stop. | Operator gives a fresh, explicit go/no-go for one exact attended window only after B2, B3 and B5 pass. The two-hour heartbeat may prepare and warn, but must never initiate the live stop. | Recorded window-specific authorization naming the reviewed runbook, current pins, host operator and abort contact; it explicitly names D173–D175's user-owned pre-stop evidence without root attestation, D62's ACCEPTED-or-ABORT pre-boot rule, the conditional post-admission/pre-restoration timer re-pin, and the manual-restoration fallback. Without it, B7 remains closed. | Live hold and shutdown B7. |
 | B7 | **Live full-node hold and shutdown closed.** No service or VM stop has occurred for this recovery. | Only in the attended, specifically authorized B6 window, execute the approved sequence and abort on any failed precondition. No single NATS member may be stopped as a rehearsal. | Application quiescence under the approved boundary, clean VM shutdown, active host boot denial and definitive physical no-writer proof at the boundary specified by B1. | Stopped-VM capture B8. |
 | B8 | **Four-store capture and isolated acceptance closed.** No three healthy cold masters have been accepted. | Bind host capture and restore tools to the four declared physical paths and volume, then restore the copies on isolated servers. | Four separately hashed path/volume/window-bound copies faithfully reproduce the observed bytes; offline streams, counts, sequences and expiring-stream treatment match. This does **not** prove historical independence of the four members; that needs deployment-time provenance outside this capture. | Step 1.2 closure and any topology change. |
@@ -2920,3 +2920,64 @@ reviewed green five-Markdown receipt may close this auxiliary row. B5/1.2
 open/v1.2-pre,B6–B9held,D64/Gate/installed timers/production untouched. Current
 inventory/override/D60 observer, integration, admission/manual/D175 and physical
 reboot/history work remain later. This does not close B5-CI-R3-placement.
+
+
+### 2026-10-18 14:01 EDT — owned cluster group-readiness verified (D235)
+
+Source 08f90df7bd9139e3d8dee7e34fcf7507b5e90ef1, sole parent b0d55130, passes all eight distinct jobs in
+[CI39149352811](https://github.com/moltyguibros-design/openclaw-node/actions/runs/39149352811)
+attempt1, with no rerun. Linux22 job117739620498:13tests/0.266s/no skip,
+22 intended assertion kills/intact controls; the actual owned three-member
+cluster test passes2.165s with cleanupFailures[]. Native job117739620342:
+13tests/0.252s/no skip/22. Native new-unit proof is scripted capture/clock
+portability, not an actual cluster execution. Codex inspects completed raw logs:
+Linux1538373bytes SHA2567a8c6b9aa3ae7872f24d37d14d28678dab00f6bb29f671af91c7278adda70f0e;
+native88375bytes SHA256b9a303bda3e3f8de1e160a6868244919f8c6d6dcdf9480c0fda856df64340d05.
+Both name merge c7bfd2b49258f1c3135a8c996f5f5fef291c2edd, source as second parent and
+identical whole tree. These completed CI facts are Codex observations, later
+than331's source review, not assigned to the reviewer.
+
+Claude331 independently clears exact source/proof after329's pre-audit pins.
+It verifies10files/1106insertions/18deletions, only the existing test-local
+settle block extracted, one real consumer call, four CI lines, two new proof
+files and six ledgers with three identical D234 blocks. Final assertions,
+creation, QuietWindow, election and cleanup are byte-fixed; all production code
+and other existing executables/tests/runners are fixed. As uid65534 it replays
+13tests and22 intended assertion kills with intact controls; own mutants for
+previous advancing only on valid samples, strict threshold, accumulated failure
+rows, recomputed deadline, raft-only return and node-truthiness leaders die.
+Its first full-suite deadline mutant hung and was narrowed to later-convergence;
+that is its harness, not source or extra proof. The missing-$G mutation tests
+named diagnostic evidence, not an independent count-dominated acceptance gate.
+Removing only invalid reset is acceptance-equivalent because next valid table
+necessarily differs and resets; it is not counted. No survivor is relabelled.
+
+Only B5-CI-group-readiness closes as an owned fixture prerequisite: each member
+must satisfy the same four old conditions before identical samples accrue1s
+from their second occurrence. Invalid/changed samples clear stability and every
+sample advances previous. Fixed10s top-of-loop deadline preserves sample-then-
+check: an in-flight batch may finish after it, with about6s pre-existing capture
+overrun; no hard completion bound or longer constant is claimed. Refused still
+propagates. Timeout retains full last captures, named per-member failed checks
+and last reset cause in the file/assertion. The real call injects no test clock
+or sleep; AST pins its one returned result into unchanged final assertions.
+Optional331 carry-forward: a late valid stable table may time out with last reset
+change/all-empty failures; truthful, but elapsed stability could clarify it later.
+No source defect or required correction remains; no unsolicited enhancement.
+
+Local owned Mac NATS2.12.6/Node24.13.0 real cluster1/3.626s and unchanged checks
+23/3.286s both have normal owned cleanup, no production connections. Local new
+suite13/0.282s/22kills stays distinct from CI. Parent replay accepts stable empty
+leaders then fails its final assertion at1.05 scripted seconds/66captures;
+its initial wrong-size port harness and the candidate's floating-boundary/AST
+harness corrections remain non-proof, not kills. Neither that replay nor the
+passing controls proves the cause of the prior receipt failure. Peer-offline
+placement diagnosis stays open, including test_recovery.mjs; no create retry,
+timeout widening, production scan or operation. Existing captured failure logs
+remain failed evidence. Current inventory/override/D60 observer, full held/
+process integration, admission/manual/D175 and physical reboot/history evidence
+remain later. B5/1.2 open/v1.2-pre,B6–B9held,D64/Gate/installed timers/production
+untouched. This receipt changes five Markdown only; AUDIT_PRE and every non-
+Markdown byte stay fixed. Local lint14PASS/1old idle-versionWARN/0FAIL. Receipt
+exact-head review and its own all8CI remain pending at commit time, separately
+required before completion; no whole-B5 closure or source-origin claim.
