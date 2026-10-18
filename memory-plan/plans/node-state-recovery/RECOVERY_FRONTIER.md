@@ -58,7 +58,7 @@ review only, not source readiness or B5 closure. Production remains untouched.
 | B2 | **Cleared for the disposable mechanism only.** Codex registered a separate Apple-backend UTM VM with its own ASIF disk and a verified Alpine ISO. It started and stopped normally; while `UF_IMMUTABLE` guarded that stopped disk, UTM refused its start and remained stopped; after unlock it started and stopped normally. The production VM stayed started throughout. | Codex carries this owned result into B5's host boot controller; no further VM creation is needed for B2's guard mechanism. B5's macOS reboot rehearsal has a separate access requirement. `utmctl start` exited 0 even on the refused attempt, so the controller must check the resulting state and error. | `audits/step12_jetstream/B2_UTM_GUARD_REHEARSAL_20261012.json` records distinct VM/disk identities, ASIF format, guard refusal, unlock recovery and final states. This is not a production boot-denial certificate. | B5 controller implementation and owned tests. |
 | B3 | **Just-in-time installation pins:** the October 9 candidate names `viewer-observed-20261008`; the installed viewer has since moved to `viewer-plan-task-links-autosave-20261011`. The 23-job candidate is unapproved and can drift again. | Codex resolves known structural drift now, but re-captures all 23 installed jobs and direct file hashes only immediately before an approved window. Repeating the capture before a window is scheduled does **not** count as progress. | Current installed identities and hashes match the reviewed baseline at window entry, including the five old timer pins and the exact conditional migration form. No pre-window timer reinstall. | B6 and B7. |
 | B4 | **Cleared as a bounded design input:** all 23 installed plists and direct launch files, activation keys, and current GUI/user/system OpenClaw-label observations are captured. Claude's adversarial review at `ac954055` found no remaining concrete false claim. This is not a no-writer certificate. | Codex carries the identified child, deploy, viewer, bus and file-writing routes into B5; transitive and out-of-cohort writers remain fail-closed uncertainties for the window-time census and stopped-VM boundary. Re-running this static capture alone is not progress. | `audits/step12_jetstream/B4_WRITER_PROVENANCE_AUDIT_20261012.md` and its JSON cover all 23 labels, classify the only observed system-domain OpenClaw label, name re-entry edges, and state residual uncertainty without claiming pre-stop physical exclusion. | Boundary design B5. |
-| B5 | D235 clears the owned group-readiness prerequisite at08f90df7/all8CI39149352811/Claude331; receipt-own review/CI pending at commit. Placement/current observer remain open. **In progress, owned source only:** D233 closes shared entrypoint whole-value classification at source4abd6360/all8CI39140772095/Claude321. Native21/19 proves owned path/caller portability only. Receipt review/CI pending at commit; current observer stays open. | Codex builds current inventory/override/D60 observation, full held/process integration, durable admission, manual restoration and D175. Operator separately designates disposable access or decides a measured resource proposal. | Reviewed exact-head source/CI; distinct native full pipeline, APFS reattach and disposable-Mac reboot/login/process/hold/migration evidence. D189 and pre-stop limits remain. | Per-window release B6. |
+| B5 | D237 clears only owned placement-gossip diagnosis atfa9f0a4a/all8CI39158146598/Claude343; receipt-own review/CI pending at commit. Original placement repair/natural trigger/current observer remain open. D235 clears the owned group-readiness prerequisite at08f90df7/all8CI39149352811/Claude331; receipt-own review/CI pending at commit. Placement/current observer remain open. **In progress, owned source only:** D233 closes shared entrypoint whole-value classification at source4abd6360/all8CI39140772095/Claude321. Native21/19 proves owned path/caller portability only. Receipt review/CI pending at commit; current observer stays open. | Codex builds current inventory/override/D60 observation, full held/process integration, durable admission, manual restoration and D175. Operator separately designates disposable access or decides a measured resource proposal. | Reviewed exact-head source/CI; distinct native full pipeline, APFS reattach and disposable-Mac reboot/login/process/hold/migration evidence. D189 and pre-stop limits remain. | Per-window release B6. |
 | B6 | **Separate live-run release required.** B1's boundary choice and B5's design review never authorize a production stop. | Operator gives a fresh, explicit go/no-go for one exact attended window only after B2, B3 and B5 pass. The two-hour heartbeat may prepare and warn, but must never initiate the live stop. | Recorded window-specific authorization naming the reviewed runbook, current pins, host operator and abort contact; it explicitly names D173–D175's user-owned pre-stop evidence without root attestation, D62's ACCEPTED-or-ABORT pre-boot rule, the conditional post-admission/pre-restoration timer re-pin, and the manual-restoration fallback. Without it, B7 remains closed. | Live hold and shutdown B7. |
 | B7 | **Live full-node hold and shutdown closed.** No service or VM stop has occurred for this recovery. | Only in the attended, specifically authorized B6 window, execute the approved sequence and abort on any failed precondition. No single NATS member may be stopped as a rehearsal. | Application quiescence under the approved boundary, clean VM shutdown, active host boot denial and definitive physical no-writer proof at the boundary specified by B1. | Stopped-VM capture B8. |
 | B8 | **Four-store capture and isolated acceptance closed.** No three healthy cold masters have been accepted. | Bind host capture and restore tools to the four declared physical paths and volume, then restore the copies on isolated servers. | Four separately hashed path/volume/window-bound copies faithfully reproduce the observed bytes; offline streams, counts, sequences and expiring-stream treatment match. This does **not** prove historical independence of the four members; that needs deployment-time provenance outside this capture. | Step 1.2 closure and any topology change. |
@@ -3147,3 +3147,50 @@ VERSION staysv1.2-pre; source exact-head review/all8 CI and separate five-Markdo
 receipt review/own all8 CI are still pending at this candidate. Diagnosis auxiliary
 stays[A]; original R3 placement repair and natural trigger/current observer remain
 open. No B5 closure, D64/Gate/timer or production operation.
+
+
+### 2026-10-18 15:58 EDT — owned placement-gossip diagnosis verified (D237)
+
+Sourcefa9f0a4a8a829e1e2cb72ba9cd9f56bdc56fe97b, sole parent6df6c8b6, is independently clear at
+Claude343; exact-head Tests CI39158146598 all8 succeeded in attempt1.
+No run was retried. Portable/real proof and retained artifacts are Codex CI
+observations unless the independent-review details below say otherwise.
+
+linux: job117765560352, attempt1,30 tests/29portable+1real,
+1.015242539s,0skips,28 named mutant kills with controls intact. Raw log1601113bytes
+SHA25688724f4954ca7be768d7f6b6fe48083db0207786930531deb87eb5a29740b3a0. JSON-only artifact12147498840, report86847bytes
+SHA25669a680c06853d4fa829b4389406bb63decac3c2fc28422b8b61225927a0e0ea5; only placement-gossip.json, parsed equal to full live log report.
+native: job117765560253, attempt1,30 tests/29portable+1real,
+1.476127625s,0skips,28 named mutant kills with controls intact. Raw log150992bytes
+SHA256cc125bdc3d2b2a334b8f9854945acb074a35585271d261d1b7b1a60e9c38bc6a. JSON-only artifact12148339981, report87180bytes
+SHA2562edf566e4aa62b4f65f506bce5f02b79d7a59f84993c8c1f189307ae84bda64f; only placement-gossip.json, parsed equal to full live log report.
+
+Both CI platforms execute the actual isolated pair on official NATS2.12.6:
+all eight unchanged gate checks pass in both cohorts; one control create succeeds,
+one fault create returns exact400/10005/peer offline; each fault leader's create
+window discards both other peers at the pinned offline site and reports required3/
+found1/peers3/result1/offline:true/misc:false. API snapshots bind to ready IDs,
+aggregate totals1/1, errors0/1, every member delta nonnegative. All six owned
+owners exit0 normally with shutdown marker and empty cleanup failures. This is
+injected sufficiency evidence, not the historical CI trigger or readiness repair.
+
+Checkouta4042de3fd3ee5792c1ad78bc977037ec26940e5 has source as second parent; Linux/native
+checkout IDs match and both merge-checkout trees are byte-identical to source.
+The workflow adds four registration commands and two JSON-only artifact steps;
+macOS new-unit proof includes real owned servers, not only scripted controls.
+Local30/28 and unchanged original recovery fixture evidence stays in D236.
+The explicit APP connection to EACH member and STATSZ route denial on ALL THREE
+members are deliberate injectors absent from the retained historical sequence.
+Counters identify increment locations, not an authenticated responder identity;
+leader debug evidence supports only the specific fault branch. D189 applies.
+
+Claude343 independently verifies sole-parent/twelve-file delta, exact helper extraction and all remaining caller bytes, three D236 block identities across six ledgers and candidate row. Under Node22/uid65534:29 portable pass with no live cohort; full suite29pass/1binary-absent failure (sandbox has no NATS), runner28/28 intended kills with controls intact. Five extra variants die: relaxed total, dropped error/version/discovery/nonnegativity. Three survivors are declared construction equivalents, uncounted: dropped cohort flag, dropped owner count and leader read from last ready row (all rows agree at a ready gate). They are equivalences under the fixed probe construction, not a claim about arbitrary forged report inputs. Truncation flag is a fixed false fact because the entire tail is read. Real pairs remain Codex CI evidence;343 read CI in progress and claims no completed CI result. No required source finding.
+
+Only B5-CI-R3-placement-diagnosis closes as an owned prerequisite. Original
+B5-CI-R3-placement repair/natural trigger, current inventory/override/fresh-D60
+observer, full held/process integration, durable admission/manual/D175, full
+native pipeline and disposable-Mac/APFS/reboot/four-history evidence remain open.
+B5/1.2 staysv1.2-pre; B6–B9 held; D64/Gate/installed timers/production untouched.
+No production connection/service/VM/resource operation. This five-Markdown receipt
+keeps source executables, workflow, VERSION and AUDIT_PRE byte-identical; its own
+exact review and all8 CI are pending at commit, not retrospectively preclaimed.

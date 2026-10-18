@@ -7750,3 +7750,50 @@ VERSION staysv1.2-pre; source exact-head review/all8 CI and separate five-Markdo
 receipt review/own all8 CI are still pending at this candidate. Diagnosis auxiliary
 stays[A]; original R3 placement repair and natural trigger/current observer remain
 open. No B5 closure, D64/Gate/timer or production operation.
+
+
+### 2026-10-18 15:58 EDT — owned placement-gossip diagnosis verified (D237)
+
+Sourcefa9f0a4a8a829e1e2cb72ba9cd9f56bdc56fe97b, sole parent6df6c8b6, is independently clear at
+Claude343; exact-head Tests CI39158146598 all8 succeeded in attempt1.
+No run was retried. Portable/real proof and retained artifacts are Codex CI
+observations unless the independent-review details below say otherwise.
+
+linux: job117765560352, attempt1,30 tests/29portable+1real,
+1.015242539s,0skips,28 named mutant kills with controls intact. Raw log1601113bytes
+SHA25688724f4954ca7be768d7f6b6fe48083db0207786930531deb87eb5a29740b3a0. JSON-only artifact12147498840, report86847bytes
+SHA25669a680c06853d4fa829b4389406bb63decac3c2fc28422b8b61225927a0e0ea5; only placement-gossip.json, parsed equal to full live log report.
+native: job117765560253, attempt1,30 tests/29portable+1real,
+1.476127625s,0skips,28 named mutant kills with controls intact. Raw log150992bytes
+SHA256cc125bdc3d2b2a334b8f9854945acb074a35585271d261d1b7b1a60e9c38bc6a. JSON-only artifact12148339981, report87180bytes
+SHA2562edf566e4aa62b4f65f506bce5f02b79d7a59f84993c8c1f189307ae84bda64f; only placement-gossip.json, parsed equal to full live log report.
+
+Both CI platforms execute the actual isolated pair on official NATS2.12.6:
+all eight unchanged gate checks pass in both cohorts; one control create succeeds,
+one fault create returns exact400/10005/peer offline; each fault leader's create
+window discards both other peers at the pinned offline site and reports required3/
+found1/peers3/result1/offline:true/misc:false. API snapshots bind to ready IDs,
+aggregate totals1/1, errors0/1, every member delta nonnegative. All six owned
+owners exit0 normally with shutdown marker and empty cleanup failures. This is
+injected sufficiency evidence, not the historical CI trigger or readiness repair.
+
+Checkouta4042de3fd3ee5792c1ad78bc977037ec26940e5 has source as second parent; Linux/native
+checkout IDs match and both merge-checkout trees are byte-identical to source.
+The workflow adds four registration commands and two JSON-only artifact steps;
+macOS new-unit proof includes real owned servers, not only scripted controls.
+Local30/28 and unchanged original recovery fixture evidence stays in D236.
+The explicit APP connection to EACH member and STATSZ route denial on ALL THREE
+members are deliberate injectors absent from the retained historical sequence.
+Counters identify increment locations, not an authenticated responder identity;
+leader debug evidence supports only the specific fault branch. D189 applies.
+
+Claude343 independently verifies sole-parent/twelve-file delta, exact helper extraction and all remaining caller bytes, three D236 block identities across six ledgers and candidate row. Under Node22/uid65534:29 portable pass with no live cohort; full suite29pass/1binary-absent failure (sandbox has no NATS), runner28/28 intended kills with controls intact. Five extra variants die: relaxed total, dropped error/version/discovery/nonnegativity. Three survivors are declared construction equivalents, uncounted: dropped cohort flag, dropped owner count and leader read from last ready row (all rows agree at a ready gate). They are equivalences under the fixed probe construction, not a claim about arbitrary forged report inputs. Truncation flag is a fixed false fact because the entire tail is read. Real pairs remain Codex CI evidence;343 read CI in progress and claims no completed CI result. No required source finding.
+
+Only B5-CI-R3-placement-diagnosis closes as an owned prerequisite. Original
+B5-CI-R3-placement repair/natural trigger, current inventory/override/fresh-D60
+observer, full held/process integration, durable admission/manual/D175, full
+native pipeline and disposable-Mac/APFS/reboot/four-history evidence remain open.
+B5/1.2 staysv1.2-pre; B6–B9 held; D64/Gate/installed timers/production untouched.
+No production connection/service/VM/resource operation. This five-Markdown receipt
+keeps source executables, workflow, VERSION and AUDIT_PRE byte-identical; its own
+exact review and all8 CI are pending at commit, not retrospectively preclaimed.
