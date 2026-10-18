@@ -1651,3 +1651,131 @@ v1.2-pre,B6–B9 held,D64/Gate/installed timers/production untouched. Actual cur
 entrypoint/override/D60 observer, full held/process integration, durable admission/
 manual/D175 and Mac/APFS/reboot/four-history evidence remain later. Receipt exact-
 head review and its own all8 CI are pending at commit time; no operation/release.
+
+
+### 2026-10-18 11:02 EDT — shared entrypoint whole-value scope pre-audit (D232)
+
+Micro re-orient: B5/1.2 open/v1.2-pre; B6–B9 held.
+D231 receipt60992e9e/source0aa1df7d are reviewed clear311/307 and
+all8CI39135740710/39133265637;313 acknowledges the temporal evidence split.
+Scripted consistency is available; current inventory observation is still open.
+Its pre-screen finds the shared classifier can silently omit a relevant job.
+Fix that bounded prerequisite before designing the observer envelope.
+
+Goal: classify a whole path containing tokenizer delimiters before token scanning.
+Needs: unchanged shared installed/loaded callers and classification contract,
+owned symlink/hardlink/plist fixtures, reviewed green D231; all exist at60992e9e.
+Feeds: existing installed_entrypoints/loaded_entrypoints/capture_entrypoint_inventory,
+then the separate current inventory/override/D60 observer.
+Verify: portable real owned-path and caller controls/intended-assertion mutants,
+prior preservation/process/job/comparator regressions, native CI owned-path
+portability, exact source review/all8CI plus separate reviewed green five-Markdown
+receipt. Runtime: no unpatched production inventory/job scan or service action.
+
+Pre-screen uses an owned canonical temporary root, neutral label org.fixture.neutral
+and a binary under a protected directory. Program/argv is an outside symlink:
+without space shared relevant=True and installed_labels contains the neutral label;
+with space both shared relevance and unclassified_executable are False and installed
+labels empty, although alias.resolve() has the protected root in its parents.
+This reproduces a permissive omission inherited by the prospective observer,
+not a defect in D230's supplied-value comparator. D216 corrected whole values in
+process scope only and explicitly left this shared API unchanged. The first
+noncanonical /var temporary-path probe did not establish containment on this Mac;
+only the resolved-root rerun above is evidence. No production path was scanned.
+
+Proposed delta: only relevant_entrypoint resolves each entire expanded absolute
+or cwd-relative value with strict=False and the same equal-or-parents predicate
+before retaining its existing substring/token scan. Preserve label prefixes,
+HOME/environment expansion, source/application/system hardlink rules, embedded
+flags/shell scans and nonpath negatives. Whole-value hardlink attribution should
+use the same existing suspicious_hardlink rule, never a new exemption. No changes
+to installed/loaded collectors, validators, Journal/schema/recover/D64/Gate/host/
+identity/timers, or the already-reviewed process shim. Pre-audit314 pending;
+settle exact whole-value and relative-path semantics before implementation.
+
+Proof plan: spaces, parentheses, both quotes, semicolon/comma/pipe/ampersand/backtick,
+absolute and cwd-relative aliases, equality and parent roots, expanded environment,
+whole argument hardlinks, embedded-token fallback, managed prefixes, benign paths,
+and actual installed/loaded callers refusing extras through shared inventory
+verification. Owned filesystem inputs only; no native launchd mutation or global
+scan. New test_entrypoint_path_scope.py and mutate_entrypoint_path_scope.py; four
+workflow registration lines plus six source ledgers. Existing executable delta is
+restricted to the one shared classifier; existing tests/runners remain fixed.
+
+This corrects one membership false negative; it is not complete physical writer
+coverage or fresh observation, process absence, execution hold, eligibility,
+protected provenance, history/authorship or admission. All observer timing/boot/
+recordedUID/native full-path measurement remains later. Prior optional controls
+and the R3 placement follow-up remain open. B5/1.2 open/pre; D64/Gate/installed
+timers/production untouched, four histories separate.
+
+
+### 2026-10-18 11:13 EDT — D232 settled pre-audit and local path-scope proof
+
+Claude315 independently reproduces the shared omission at60992e9e as uid65534
+through the helper and both callers; the atom is the smallest useful correction.
+Settled semantics, before source implementation: whole expanded absolute paths
+or slash-relative paths joined to expanded supplied cwd; bare names are never
+joined and no process cwd is inferred. strict=False intentionally includes
+dangling aliases resolving into a protected root. Root matching is exact equality
+or parent containment, never substring on the resolved value. Reuse existing
+hardlink suspicion with both System-source and application-path exemptions.
+Keep existing raw substring and token scans, prefix shortcut and expansion.
+The D216 process shim retains its broader bare-name join unchanged.
+
+Nine added lines in relevant_entrypoint implement exactly that rule. No other
+existing executable changed; callers/validators/process shim/Journal/schema/
+recover/D64/Gate/identity/host/timers remain fixed. A real future baseline may
+newly refuse a neutral job reaching protected roots through a delimiter alias;
+that is the intended rejection of extras, not a production observation here.
+The existing installed/loaded callers reach the corrected shared helper now;
+no parallel classifier or prospective observer envelope is introduced.
+
+New test_entrypoint_path_scope.py has21 passing controls,0.155s/no skip on this
+Mac. New runner kills17 named mutants by intended assertions with intact
+selected controls and no ERROR-only kills. All twelve absolute delimiter
+subcases fail on the parent helper with0errors. Whole-value-after-token order
+passes all21 and is declared equivalent, not counted. Mutants include whole-step
+omission/unresolved value/equality-only/parents-only/resolved substring/strict
+existence/bare-name or implicit process-cwd joins/no relative join/no expansion/
+hardlink removal or either exemption loss and fallback/prefix losses.
+
+Owned real symlinks and hardlinks exercise exact-file and parent roots, all
+tokenizer delimiters plus tab/newline, relative cwd/environment/home expansion,
+dangling targets and prefix siblings. Real installed caller uses owned plists;
+loaded caller uses supplied launchd text/inspect stub with subprocess blocked.
+Program/argv/cwd and loaded environment values reach the whole rule. The installed
+caller expands referenced environment variables; it does not scan unused
+environment values, which remains unchanged. Both discovered extra-label sets
+refuse through unchanged inventory verification as controls, not extra kills.
+No new native launchd call or unpatched inventory scan is performed locally.
+Native new-unit CI is real owned filesystem portability only.
+
+Declared limits: an embedded --flag= delimiter alias stays token-only/False;
+slash-relative without cwd staysFalse; nonstring values skipped; over-NAME_MAX
+values do not raise. The pre-existing raw substring rule may over-include raw
+prefix siblings, while a delimiter alias resolving to a prefix sibling correctly
+staysFalse. Supplied roots are resolved and home is explicit/owned. Newline is
+covered directly and through plist parsing, but the existing loaded text parser
+loses embedded newlines and that caller's delimiter matrix excludes newline.
+No full classification/completeness, physical writer or fresh D60 claim follows.
+Optional later removal of the now partially redundant process shim is carried,
+not implemented. Existing R3 placement and older optional controls stay open.
+
+Prior Gates/process-policy/envelope/class/job/entrypoint regressions:311 pass
+45.650s with two intentional CI-only unpatched native skips; no failed control.
+All pre-existing tests/runners are fixed. Delta: one existing function, two new
+proof files, four workflow registration lines and six ledgers. One workflow edit
+invocation initially used the step directory and found no relative workflow
+path; it changed nothing, then was applied from checkout root. No source repair
+or proof-failure claim follows that invocation.
+
+D231 receipt60992e9e independently clear311/source clear307 with all8 ownCI
+39135740710; source CI39133265637 resolves attempt2 with only Linux re-executed
+and the seven original successes carried, not relabelled new executions. Its
+original placement failure and local-control limits remain.313 acknowledges
+the evidence split. This D232 candidate needs exact source review/all8CI and
+then a separate reviewed green five-Markdown D233 receipt before row closure.
+B5/1.2 open/v1.2-pre,B6–B9 held. Current observer/override/freshD60, full held/
+process integration, durable admission/manual/D175 and Mac/APFS/reboot/four-history
+evidence remain later. D189 applies; production and installed timers untouched.

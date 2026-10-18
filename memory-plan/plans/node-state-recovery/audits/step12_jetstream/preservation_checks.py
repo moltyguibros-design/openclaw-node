@@ -260,6 +260,15 @@ def relevant_entrypoint(label, values, roots, home=None, environment=None,
         if not isinstance(value, str):
             continue
         expanded = expand(value)
+        candidate = pathlib.Path(expanded)
+        if not candidate.is_absolute() and cwd is not None and '/' in expanded:
+            candidate = cwd / candidate
+        if candidate.is_absolute():
+            resolved = candidate.resolve(strict=False)
+            if any(resolved == root or root in resolved.parents for root in roots):
+                return True
+            if suspicious_hardlink(candidate, source, label):
+                return True
         for root in roots:
             if str(root) in expanded:
                 return True

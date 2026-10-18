@@ -132,6 +132,8 @@ jobs:
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_managed_job_negative_observation.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_scripted_entrypoint_consistency.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_scripted_entrypoint_consistency.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_entrypoint_path_scope.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_entrypoint_path_scope.py
           NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_cluster.py
       - name: Root unit tests
         # npm test (not bare node --test): the pretest hook builds the
@@ -233,6 +235,8 @@ jobs:
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_managed_job_negative_observation.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_scripted_entrypoint_consistency.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_scripted_entrypoint_consistency.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_entrypoint_path_scope.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_entrypoint_path_scope.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_release_verify.py
           PYTHONPATH="$PWD/memory-plan/plans/node-state-recovery/audits/step12_jetstream" /usr/bin/python3 -m unittest -q \
             test_preservation_checks.Gates.test_only_exact_tailscale_system_job_can_be_excluded \
