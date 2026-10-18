@@ -58,7 +58,7 @@ review only, not source readiness or B5 closure. Production remains untouched.
 | B2 | **Cleared for the disposable mechanism only.** Codex registered a separate Apple-backend UTM VM with its own ASIF disk and a verified Alpine ISO. It started and stopped normally; while `UF_IMMUTABLE` guarded that stopped disk, UTM refused its start and remained stopped; after unlock it started and stopped normally. The production VM stayed started throughout. | Codex carries this owned result into B5's host boot controller; no further VM creation is needed for B2's guard mechanism. B5's macOS reboot rehearsal has a separate access requirement. `utmctl start` exited 0 even on the refused attempt, so the controller must check the resulting state and error. | `audits/step12_jetstream/B2_UTM_GUARD_REHEARSAL_20261012.json` records distinct VM/disk identities, ASIF format, guard refusal, unlock recovery and final states. This is not a production boot-denial certificate. | B5 controller implementation and owned tests. |
 | B3 | **Just-in-time installation pins:** the October 9 candidate names `viewer-observed-20261008`; the installed viewer has since moved to `viewer-plan-task-links-autosave-20261011`. The 23-job candidate is unapproved and can drift again. | Codex resolves known structural drift now, but re-captures all 23 installed jobs and direct file hashes only immediately before an approved window. Repeating the capture before a window is scheduled does **not** count as progress. | Current installed identities and hashes match the reviewed baseline at window entry, including the five old timer pins and the exact conditional migration form. No pre-window timer reinstall. | B6 and B7. |
 | B4 | **Cleared as a bounded design input:** all 23 installed plists and direct launch files, activation keys, and current GUI/user/system OpenClaw-label observations are captured. Claude's adversarial review at `ac954055` found no remaining concrete false claim. This is not a no-writer certificate. | Codex carries the identified child, deploy, viewer, bus and file-writing routes into B5; transitive and out-of-cohort writers remain fail-closed uncertainties for the window-time census and stopped-VM boundary. Re-running this static capture alone is not progress. | `audits/step12_jetstream/B4_WRITER_PROVENANCE_AUDIT_20261012.md` and its JSON cover all 23 labels, classify the only observed system-domain OpenClaw label, name re-entry edges, and state residual uncertainty without claiming pre-stop physical exclusion. | Boundary design B5. |
-| B5 | **In progress, owned source only:** D223 closes class-comparator source 39638d1e/all8 CI39109210059/Claude261. Native38/51; unpatched runner refused at envelope with child both passes. Receipt CI/review pending at commit. No hold eligibility/admission. | Codex builds jobs/hold/overrides/D60, durable admission, manual restoration and D175. Operator separately designates exact disposable access or decides a measured resource proposal. | Reviewed exact-head source/CI; distinct native full pipeline, APFS reattach and disposable-Mac reboot/login/process/hold/migration evidence. D189 and pre-stop limits remain. | Per-window release B6. |
+| B5 | **In progress, owned source only:** D225 closes scripted held-job negatives at sourced5d6aefd/all8CI39115988725/Claude275 and receipt956f6c03/all8CI39118302426/Claude279. No live hold/admission. | Codex pre-audits full current-boot managed-job observation, then overrides/freshD60, process integration, durable admission, manual restoration and D175. Operator separately designates disposable access or decides a measured resource proposal. | Reviewed exact-head source/CI; distinct native full pipeline, APFS reattach and disposable-Mac reboot/login/process/hold/migration evidence. D189 and pre-stop limits remain. | Per-window release B6. |
 | B6 | **Separate live-run release required.** B1's boundary choice and B5's design review never authorize a production stop. | Operator gives a fresh, explicit go/no-go for one exact attended window only after B2, B3 and B5 pass. The two-hour heartbeat may prepare and warn, but must never initiate the live stop. | Recorded window-specific authorization naming the reviewed runbook, current pins, host operator and abort contact; it explicitly names D173–D175's user-owned pre-stop evidence without root attestation, D62's ACCEPTED-or-ABORT pre-boot rule, the conditional post-admission/pre-restoration timer re-pin, and the manual-restoration fallback. Without it, B7 remains closed. | Live hold and shutdown B7. |
 | B7 | **Live full-node hold and shutdown closed.** No service or VM stop has occurred for this recovery. | Only in the attended, specifically authorized B6 window, execute the approved sequence and abort on any failed precondition. No single NATS member may be stopped as a rehearsal. | Application quiescence under the approved boundary, clean VM shutdown, active host boot denial and definitive physical no-writer proof at the boundary specified by B1. | Stopped-VM capture B8. |
 | B8 | **Four-store capture and isolated acceptance closed.** No three healthy cold masters have been accepted. | Bind host capture and restore tools to the four declared physical paths and volume, then restore the copies on isolated servers. | Four separately hashed path/volume/window-bound copies faithfully reproduce the observed bytes; offline streams, counts, sequences and expiring-stream treatment match. This does **not** prove historical independence of the four members; that needs deployment-time provenance outside this capture. | Step 1.2 closure and any topology change. |
@@ -1793,3 +1793,158 @@ with strict process gates, durable admission/manual/D175, Mac access/APFS/reboot
 and four-history acceptance remain separate. No production operation or release.
 This receipt changes five Markdown records only; executable/tests/workflow bytes
 remain fixed. Its own exact-head review and CI remain pending at commit time.
+
+
+### 2026-10-18 06:46 EDT — managed-job observation pre-audit candidate (D226)
+
+Micro re-orient: B5/1.2 remain open/v1.2-pre; B6–B9 held.
+D225 receipt956f6c03/source d5d6aefd have all8 CI39118302426/39115988725
+and clear279/275 reviews. Receipt native32 scripted tests/45 mutations; its
+complete-log/tree evidence is Codex's, separately acknowledged by Claude281.
+Only scripted negative-job consistency closed; current-boot managed-job facts
+remain absent. No local production-label scan or production operation is authorized.
+
+Goal: one complete, bounded, current-boot managed-job observation envelope.
+Needs: D225 reviewed green source and receipt; unchanged expected_keys/owner_uid,
+launchd_service, redacted_job/valid_job, boot_identity, private frozen readers
+and the honest full-node owned fixture; B1/D189. All exist at956f6c03.
+Feeds: later combination with the held-negative comparator, then overrides/fresh
+D60, strict process-gate integration, durable admission/manual restoration/D175.
+Verify: portable scripted collector/validator and real frozen-reader consumer
+controls, decisive named assertion mutations, isolated macOS CI observations,
+exact-source review/all8 CI and a separate reviewed green five-Markdown receipt.
+No production runtime verification or live hold/eligibility/admission claim.
+
+Pre-audit request282 is pending. Proposed surface: three new managed_job_observation
+module/test/mutator files, four CI registration lines and these six ledgers.
+No existing executable/test/mutator changes, no shared census primitive/parser,
+Journal/schema/recover/D64/Gate/identity/host/timer change. VERSION stays pre
+because the enclosing step has not met its live exit gates.
+
+Proposed observations derive every managed label and all gui/recordedUID,
+user/recordedUID and system keys from verified prior, with no policy/timer
+filter or16-anchor cap. Two complete sequential launchd_service sweeps retain
+per-key typed redacted facts or errors; only the shared parser's exact absent
+service return is unloaded. System/domain unreadability and timeouts stay unknown.
+Boot identity brackets and a separately reviewed30-minute acceptance-only
+budget are proposed, not a hard deadline:138 ten-second calls can take23 minutes
+and boot_identity itself has no subprocess timeout. No120s inheritance.
+Expiry must stop further job acquisition and retain every unsampled key.
+Loaded/idle facts may be recorded, never interpreted as held negatives here.
+
+The validator will rederive frozen binding/key coverage, schema, boot, budget,
+unknown and two-sweep agreement; stored outcome cannot authorize anything.
+Serialized facts contain argv digests, never raw arguments. No continuous,
+physical absence, process generation/attribution, complete entrypoint inventory,
+overrides, freshD60, hold, history/authorship or admission claim. D189 applies.
+The actual schema/budget/provenance and native boundary await282's review.
+
+The intended real CLI remains --fixture AND --scripted before anyIO, consuming
+private literal owned inputs and copied pin-coherence followed by one read_inputs,
+one frozen verification, then every read owner tied to recordedUID. It cannot
+turn an input file's observed claim into live authority. No constructor or write.
+A prepared temp image cannot prove host isolation; a collector library and
+isolated CI-owned native harness are proposed, with no local unpatched scan.
+Mac access/designation, APFS reattach/reboot and four-history acceptance stay
+separate. Optional D218/D220/D224 controls stay carried, not silently closed.
+
+
+### D226 pre-audit settled — Claude283, before source work
+
+Clear to implement the smallest live half of the held-job gate, with structural
+boundary: inspect_owned/main require fixture AND scripted before input IO and
+never call the collector. owned_records supplies only frozen records/digest;
+collect_jobs is called live only by the test harness's darwin/GITHUB_ACTIONS
+branch. That branch is an isolation convention, not environment attestation.
+No operator-gated live path is added. The requested two-replacement mutant must
+relax flags AND wire collection, and the CLI-with-fixture-only control must
+assert refusal and zero census calls.
+
+Use structured (namespace,label) pairs from owner_uid and every prior unit,
+never parse keys back into domains; assert their keys equal expected_keys.
+Each job entry is either unchanged valid_job shape or exact error_type string.
+Catch only envelope.ERRORS, including TimeoutExpired; malformed loaded/arguments
+become errors, never unloaded. On budget expiry retain every remaining key in
+both sweeps with BudgetExpired, no further census call.30min WINDOW_NS is an
+acceptance-only budget checked before each call and after boot_end; validator
+recomputes expired from elapsed. Pin30min >=2*keycount*shared10s timeout for the
+fixture so cohort growth cannot silently outgrow it. boot_identity has no timeout.
+
+Exact four stages boot_start/sweep_a/sweep_b/boot_end, all present, failures empty,
+not expired, two equal hex64 current boot values, complete exact key coverage,
+no per-key errors and equal sweep values are required for recorded. Bind exactly
+baseline/checkpoint digests and recordedUID, reject typed aliases; baseline boot
+is not an expectation. Loaded/idle facts may be recorded; no held-negative verdict.
+Stored outcome/reasons never trusted. Scripted input is private/bounded/canonical,
+source forced scripted, file source/coverage retained only as sample_labels;
+coverage sampled true/continuous false/physical false, admission/history/hold false.
+Only recorded/refused vocabulary, no raw arguments. Native CI prints real outcome
+and error histogram, asserts coverage/shape only, no native positive assumed.
+Per-key/domain/error/timeout/expiry/order/schema/provenance and owner/frozen-path
+controls get named intended assertion mutants; no ERROR-only kills. Optional
+shape-compatibility control may feed a recorded scripted sweep to the unchanged
+negative comparator; this is not full integration. Per-sweep timing and loaded
+summary are deferred. Plist digests/overrides/freshD60 remain outside this unit.
+
+
+### 2026-10-18 06:57 EDT — D226 local managed-job observation candidate proof
+
+The202-line module implements the settled283 boundary: the actual record-free
+CLI requires both flags before any input IO and never references collect_jobs.
+owned_records copies the unchanged pin-coherence sequence, reads once, frozen-
+verifies once and ties every nonempty read metadata row to the recorded UID.
+Only the CI-only native test branch composes that path with the live collector.
+Environment/fixture claims do not attest isolation; no local unpatched job scan
+was run. Source and script inputs remain unprotected under D189.
+
+The collector builds structured namespace/label pairs, cross-checks expected_keys
+and records two ordered complete-key sweeps, current boot brackets, elapsed
+acceptance budget and every per-key error. Exact shared absence is the only
+unloaded return; loaded/idle facts are recordable. TimeoutExpired is retained;
+programming errors outside envelope.ERRORS propagate. Expiry prevents more
+launchd calls and fills all remaining keys with BudgetExpired. Thirty minutes
+is independent of the process120s budget; boot_identity has no timeout and the
+limit cannot interrupt an in-flight call. The growth control compares2*keycount
+*shared10s against this limit. Plist identities, generations, overrides and D60
+are not acquired. No process attribution/absence or live hold can follow.
+
+Pure validation recomputes exact frozen binding, typed UID, four-stage presence,
+complete key coverage, both boot and sweep equality, errors/failures and expiry;
+stored verdict/reasons cannot control recording. Source/coverage/certification
+claims are constrained. The real private canonical bounded file consumer forces
+scripted provenance and retains only bounded source/coverage sample claims.
+Raw argv is digested through the shared redactor and never serialized. The
+optional shape control feeds a scripted sweep to the unchanged negative
+comparator without claiming full integration. Reports say recorded/refused only.
+
+Final local34 tests pass15.367s with one intentional CI-only native skip;
+55 named intended-assertion mutants pass with intact controls and no ERROR-only
+kill. Prior214 process/policy/envelope/class/held regressions pass42.920s with
+no local skip. Earlier34-test6.862s and33-test13.948s runs retain their counts;
+the final in-method extra sample-label control is included in15.367s.
+Initial32-test7.074s run had one error: the unchanged redactor's equality shortcut
+lets numeric0 resemble false until valid_job. The collector now invokes valid_job
+immediately inside its primitive-failure bracket, recording malformed facts as
+errors. The corrected32-test7.256s passed with the CI-only skip. No shared helper
+was changed. The first mutation attempt stopped after one kill because a genuine
+missing-domain assertion used a different needle; it is not a final full run.
+Expected pairs now derive independently from the unchanged held-key helper.
+The54-kill run predates the final bounded sample-label schema control;55 is the
+final count. Per-domain/unit omissions require removal of the independent pair
+coverage guard too; these are explicit two-replacement variants, not single
+predicate kills. The live-CLI variant also deliberately relaxes flags and wires
+the collector in, as283 required. Shared frozen/record/key preconditions remain
+upstream proof, not newly counted predicates.
+
+Delta: three new module/test/runner files, four workflow lines and six ledgers
+including the B5 frontier row reconciliation. Existing executable/test/mutation
+bytes stay fixed. Local plan-lint14 PASS/1 old idle-version WARN/0 FAIL.
+Promised collection/schema/CLI/proof/registration/ledger deltas all land; no
+Phase-8 scope expansion. Required source review and all8 exact-head CI remain
+pending, followed by a separate five-Markdown reviewed green receipt before
+this owned row closes. Native CI will measure only fixed-label job facts and
+print actual outcome/error histogram; it need not record successfully. This is
+not the earlier process full-scan evidence, which retains its original scope.
+B5/1.2 remain open/pre,B6–B9 held; D64/Gate/installed timers/production unchanged.
+Full hold/overrides/freshD60/process integration, durable admission/manual/D175,
+Mac access/APFS/reboot/four-history acceptance remain separately gated.
