@@ -426,7 +426,7 @@ def read_private(path):
     return value
 
 
-def inspect_owned(root, *, fixture=False, scripted=False):
+def owned_envelope(root, *, fixture=False, scripted=False):
     require(fixture, 'production process observation envelope is disabled')
     root = pathlib.Path(root)
     require(root.is_absolute() and root.parent == pathlib.Path(tempfile.gettempdir()).resolve()
@@ -445,7 +445,7 @@ def inspect_owned(root, *, fixture=False, scripted=False):
         require((path == root or root in path.parents) and path.resolve(strict=True) == path
                 and path.stat().st_uid == os.getuid(), 'envelope policy root escapes the owned fixture')
     if not scripted:
-        return collect_envelope(policy)
+        return policy, collect_envelope(policy)
     value = copy.deepcopy(value)
     keys(value, ENVELOPE_KEYS)
     keys(value['coverage'], (*COVERAGE, 'enumeration', 'attribution'))
@@ -454,7 +454,11 @@ def inspect_owned(root, *, fixture=False, scripted=False):
     value['source'] = 'scripted'
     value['coverage']['enumeration'] = 'scripted'
     value['coverage']['attribution'] = 'scripted'
-    return valid_envelope(value, policy)
+    return policy, valid_envelope(value, policy)
+
+
+def inspect_owned(root, *, fixture=False, scripted=False):
+    return owned_envelope(root, fixture=fixture, scripted=scripted)[1]
 
 
 def main():

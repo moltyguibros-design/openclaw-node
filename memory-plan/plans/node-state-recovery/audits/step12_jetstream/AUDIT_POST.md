@@ -486,3 +486,130 @@ class report to the envelope hash; emit no policy or raw argv. No next-unit
 implementation or closure follows the design input. Mac access/APFS reattach/reboot and four-history acceptance remain separate.
 This receipt changes five Markdown records only; its own exact-head CI/review
 remain pending at commit time.
+
+
+### 2026-10-18 03:14 EDT — B5-D62-process-class-comparator candidate (D222)
+
+Micro re-orient: step1.2/B5 stays open at v1.2-pre, B6–B9 held.
+D221 verifies the owned observation-envelope source; its receipt e9efb244 now
+passes all8 CI39104976663 and Claude253 is clear (255 acknowledges Codex's final
+run measurements). Receipt-native55/3.848s/50, full runner refused with child in
+both passes,1032 unknown entries and2 reasons; Linux55/1.813s/one skip/50.
+Merge34b4bb0423d6b41ca4dc74714d1e2a561ab40f97 has receipt as second parent and
+an identical whole tree. These final receipt-CI measurements are Codex's,
+separate from Claude253's independently checked source-native proof.
+
+This unit contributes only a pure process-class consistency comparison and its
+real record-free owned consumer over that verified envelope and D218 policy.
+The prevalidated policy comes from the unchanged frozen/image reader; this is
+not an arbitrary-policy parser or a replacement D218 validator. Final pre-audit
+is requested in Claude256; no comparator source/proof exists at this entry.
+
+Goal: compare one complete coherent sampled envelope to the bound authored
+class/attribution/count claims without granting eligibility or admission.
+Needs: D221 exact-head source/receipt all8 green, clear247/253 reviews, unchanged
+valid_envelope/binding/image_process_policy, and B1/D189 owned boundaries.
+Feeds: jobs/recorded hold/overrides/fresh D60, then durable admission, attended
+manual and D175. Class consistency cannot establish a stopped hold.
+Verify: code: pure scripted positives/negatives with intended-assertion mutants;
+owned frozen-policy consumer with no constructors/writes and unpromoted scripted
+provenance; old envelope55/50 behavior; native owned-child substituted refusal
+and CI-only full-runner refusal; exact-source review plus all8 CI, then a separate
+five-Markdown receipt with its own review/all8 CI. No native positive is claimed.
+
+Proposed contract: validate the envelope first, and refuse its non-recorded or
+malformed state before class logic. Bind the report to the exact input's canonical
+hash and policy hash. Keys are literal executable, on-disk SHA, NUL-joined argv
+SHA, uid/gid/cwd. PID/PPID/birth/name are not cross-boot class keys. Sort observed
+rows by birth then PID; attribute launchd rows to their actual policy-owner
+namespace/label, running state, current generation and authored plist SHA.
+Expected-parent rows need a strictly older included parent already uniquely
+assigned the referenced label. Zero candidates is unexpected, multiple ambiguous;
+counts are exact after assignment, never a count-solving permission. Launchd
+count above one remains valid but unsatisfied. Empty policy matches no included
+process. Carry source/coverage unchanged and always admission/history false.
+
+No raw argv representation or policy is emitted; redacted fields may legitimately
+overlap argv0/cwd, so tests pin dedicated secret sentinels rather than an impossible
+ban on every argument substring (including empty arguments). Keep anchors private
+in memory for the later jobs gate; the class report binds their envelope hash and
+does not itself carry job-configuration evidence. Do not count dominated single
+launchd checks as isolated kills; use coherent recorded wrong-row attribution,
+non-running-with-PID and authored-plist mismatches for the relevant mechanisms.
+
+File deltas: one new step12 process_class_comparator.py, its test and intended
+mutation runner; four CI registration lines; bounded extraction of inspect_owned
+into owned_envelope returning the same policy+envelope privately, with inspect_owned
+returning the latter and only its policy-emission mutation anchor updated; these
+six ledgers. No D218 binder, Journal/schema/recover/D64, lib, Gate/identity, host
+executable or timer change. No production operation or local unpatched full scan.
+Optional D220/D218 follow-ups stay carried. Mac access, native positive attribution,
+full pipeline, APFS reattach/reboot and four-history acceptance stay separate.
+
+
+### D222 pre-audit settled — Claude257, before source work
+
+Claude257 clears the contract with two required precisions, adopted: every
+unexpected entry carries its redacted process and class_candidates before
+attribution; gate on valid_envelope's recomputed copy and use that copy's reasons,
+while the hash binds the exact input bytes. Native child candidates must equal
+its authored label exactly. Rows/report entries follow (sec,usec,pid) order.
+Policy is the prevalidated reader argument; the optional redundant row-schema
+check is not added. Optional D220/D218 controls stay carried.
+
+The existing diagnostic.redacted helper only copies dict fields and replaces
+arguments with the NUL-join digest; it performs no process-schema validation.
+Expected keys can therefore project its actual output over the validated policy
+row, reusing that exact helper instead of duplicating its hash expression. Tests
+will pin that shared call and empty/non-ASCII/argv-boundary behavior.
+
+Only the settled comparator/extraction surface now enters implementation. No
+class comparator, jobs/hold/D60 gate, admission or production operation is claimed
+by this pre-audit entry; source review/CI and the candidate row stay open.
+
+
+### 2026-10-18 03:30 EDT — D222 local class-comparator candidate proof
+
+The102-line pure comparator validates the envelope before expected or observed
+class keys, gates on its recomputed outcome/reasons, and hashes the exact input
+object plus prevalidated policy. It reuses diagnostic.redacted for expected argv
+hashes, sorts rows by birth/PID, requires actual launchd namespace/running/current
+generation/authored plist or an older uniquely assigned referenced parent, then
+refuses zero/multiple candidates and exact count deficits/excess. Unexpected
+rows retain pre-attribution class_candidates. Source/coverage come from the
+recomputed envelope, so a forged full label cannot promote substituted/scripted
+facts. Redacted reports emit neither policy nor raw argv or job-anchor tables.
+Class-consistent establishes no stopped hold, eligibility, authorship or admission.
+
+Local37 tests pass5.536s; all50 intended-assertion mutants pass with intact named
+controls. Existing envelope55 tests pass8.781s and its50 mutants still pass after
+the bounded helper extraction/re-anchoring. The combined diagnostic/policy/envelope/
+class run passes181 tests21.429s. Earlier32/36 tests retain their actual counts;
+the32 run failed one incomplete test fixture that correctly stopped at envelope
+coverage. The first new mutation attempt left the argv-digest field unchanged
+because of whitespace in its replacement; that partial run is not complete proof.
+The corrected runner checks every replacement anchor and counts only the named
+assertion failure, never ERROR or an unrelated failure.
+
+The native owned C child is authored before spawn, observed through existing
+libproc/hash/argv/cwd calls with only PID enumeration substituted (four calls),
+and reports exactly its authored class candidate while refusing its absent
+parent. This is a native attribution refusal, not an attribution positive.
+Owned frozen-policy scripted positives pass through one shared reader; constructors
+are forbidden, files remain unchanged, and file source/coverage stays scripted.
+Only CI will perform the full-runner observation; no local unpatched full scan
+or production service/VM/timer operation occurred.
+
+Only three new files, four workflow lines, the envelope owned helper extraction,
+its old policy-emission mutation anchor, and six ledgers change. Every pre-existing
+envelope function except inspect_owned is AST-identical; valid_envelope, binding,
+collector and all frozen/private reader checks remain unchanged. The extracted
+body has the same first fixture gate and fences, returns the same policy plus
+value privately, and inspect_owned returns its second item. No D218 binder,
+Journal/schema/recover/D64, lib, Gate/identity, host executable or timer change.
+
+Claude257 pre-audit requirements are adopted; exact-source review and exact-head
+all8 CI remain pending. Only this owned source prerequisite may close after its
+separate reviewed green evidence receipt. B5/1.2 remain open/pre, B6–B9 held.
+Jobs/hold/overrides/D60, durable admission, manual/D175, native positive attribution,
+full pipeline, Mac access/APFS/reboot and four-history acceptance stay later.
