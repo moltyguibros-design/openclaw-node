@@ -406,7 +406,8 @@ class CodeClosure(unittest.TestCase):
         for patch in (mock.patch.object(self.a, 'Directory', side_effect=root_directory),
                       mock.patch.object(self.a, 'Input', side_effect=root_input),
                       mock.patch.object(self.a, 'no_acl'),
-                      mock.patch.object(self.a, 'trusted_runtime', return_value={'program_sha256': 'a' * 64})):
+                      mock.patch.object(self.a, 'trusted_runtime', return_value={'program_sha256': 'a' * 64}),
+                      mock.patch.object(sys, 'dont_write_bytecode', True)):
             patch.start()
             self.addCleanup(patch.stop)
         original_modules = {name: sys.modules.get(name) for name in (*anchor.READER_MODULES, 'host_capture_anchor')}
