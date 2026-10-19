@@ -2907,3 +2907,49 @@ still disabled, plus a scripted mirror, exact-source review and all-eight CI.
 The full three-member native case and failure case are needed before this
 adapter row closes. D109/D115 survivor and running-disabled reconciliation
 remain open; no automatic re-fence receipt is introduced.
+
+### 2026-10-18 23:32 EDT — D245 post-restore R3 quorum gate pre-audit
+
+Micro re-orient: B5/1.2 remains [A] at v1.2-pre; the serving-NATS adapter is
+closed by D243/D244, and the post-restore quorum gate is the first open source
+prerequisite. No persistent-stop producer or full-node production recovery
+caller exists. B6–B9, D64, Gate, installed timers and production remain held.
+
+Required premise correction: D243's native fixture places `nats`, `nats-2`
+and `nats-3` in one cluster. That proves individual per-member restoration,
+not the saved role topology: `nats` is standalone, `nats-1` is held member1,
+and `nats-2`/`nats-3` are the live two of three cluster members. The existing
+D234 `$G` group-count assertions require seeded stream/consumer state and
+cannot be copied into an unseeded post-restore meta-quorum gate.
+
+The owned, disposable NATS 2.12.6 probe started three loopback members,
+then stopped member1. Both survivors returned `200 {"status":"ok"}` from
+`/healthz?js-meta-only=true`; `/jsz` identified the same live leader and
+cluster size three; `/raftz` exposed `$SYS._meta_` size three, quorum two,
+one leader and one follower, stable peer identities and the held peer. The
+tagged 2.12.6 monitor source makes meta-only health check leader contact,
+currentness and meta recovery, and exposes `size`, `quorum_needed`, `state`,
+`leader`, `term`, `observer`, `paused`, `catching_up` and named peers. A sample
+immediately after a stop can still report the old leader, so the gate must
+wait for agreement and stability. This disposable probe is schema evidence,
+not a live B3 pin or production observation.
+
+Source contract: an owned observer takes the pinned standalone and three
+member names, the two live monitor ports and a finite caller-supplied budget.
+It checks standalone isolation, both live monitor identities, reciprocal
+routes, healthy/current meta, the same size-three/quorum-two group and live
+leader/term with exact member peer names, then stable repeated samples. A
+missing, stale, isolated, catching-up, undersized or inconsistent group
+refuses with bounded diagnostic evidence. The journal requires a fresh
+positive callback after this recovery call verifies all three serving units
+and before its first non-NATS observation or restoration when a serving NATS
+member had a persistent managed stop. It records a durable group receipt;
+failure leaves the original hold closed and cannot be reused on retry.
+
+Proof: portable observer and journal refusal/ordering/reentry controls; a
+role-faithful disposable Linux cluster with held member1 and a minority
+negative; corrected fixed-label macOS fixture with standalone `nats` and
+held member1, including a group-failure case after individual receipts.
+Source review and all-eight exact-head CI precede row closure. The real
+full-node driver, persistent-stop producer, live role binding, D60, reboot,
+capture and production remain outside this source unit.
