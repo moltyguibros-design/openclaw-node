@@ -38,6 +38,11 @@ function runIsolatedCli(home, script, args, env) {
     assert.ifError(check.error);
     assert.equal(check.status, 1);
   }
+  const childEnv = { ...env, PATH: `${bin}${path.delimiter}${env.PATH || ''}`, OPENCLAW_TEST_RELOAD_MARKER: path.join(home, 'reload-called') };
+  const lookup = spawnSync('sh', ['-c', 'command -v nats-server'], { encoding: 'utf8', env: childEnv });
+  assert.ifError(lookup.error);
+  assert.equal(lookup.status, 0);
+  assert.equal(lookup.stdout.trim(), path.join(bin, 'nats-server'));
   fs.writeFileSync(preload, `const fs = require('node:fs');
 const original = fs.lstatSync;
 fs.lstatSync = (name, ...rest) => {
@@ -50,7 +55,7 @@ fs.lstatSync = (name, ...rest) => {
 };
 `);
   return spawnSync(process.execPath, ['--require', preload, path.join(ROOT, script), ...args], {
-    encoding: 'utf8', env: { ...env, PATH: `${bin}${path.delimiter}${env.PATH || ''}`, OPENCLAW_TEST_RELOAD_MARKER: path.join(home, 'reload-called') },
+    encoding: 'utf8', env: childEnv,
   });
 }
 
