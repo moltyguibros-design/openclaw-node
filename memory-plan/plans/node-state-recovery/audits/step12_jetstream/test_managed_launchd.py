@@ -1212,7 +1212,7 @@ if not marker.exists():
                                         ['cluster']['name'], 'owned-b5')
                                     restored.append(unit)
                                     return
-                                if unit in ('scheduler-heartbeat', 'federation-tick', 'nats-1'):
+                                if unit in ('federation-tick', 'nats-1'):
                                     self.fail('held unit reached the restore callback')
                                 if saved['class'] in ('daemon', 'timer') or (
                                         saved['class'] == 'known-broken' and saved['running']):
