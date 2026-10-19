@@ -22,7 +22,6 @@ def wait_for_serving_group(names, ports, cluster, timeout, *, get=http_json,
             'serving NATS identities are not distinct')
     require(isinstance(timeout, (int, float)) and 1 < timeout <= 120,
             'serving NATS group needs a finite observation budget')
-    expected_members = {names[unit] for unit in ('nats-1', 'nats-2', 'nats-3')}
     expected_raft_ids = {unit: nats_node_id(names[unit])
                          for unit in ('nats-1', 'nats-2', 'nats-3')}
     require(len(set(expected_raft_ids.values())) == 3,
@@ -81,11 +80,16 @@ def wait_for_serving_group(names, ports, cluster, timeout, *, get=http_json,
         leader_meta = meta[leader_unit]
         replicas = leader_meta.get('replicas')
         require(isinstance(replicas, list) and len(replicas) == 2
-                and {row.get('name') for row in replicas} == expected_members - {leader},
+                and {row.get('peer') for row in replicas} == {
+                    expected_raft_ids['nats-1'], expected_raft_ids[follower_unit]},
                 'meta leader replica set differs from the three pinned members')
-        held = next(row for row in replicas if row['name'] == names['nats-1'])
-        follower = next(row for row in replicas if row['name'] == names[follower_unit])
-        require(held.get('offline') is True and follower.get('current') is True
+        held = next(row for row in replicas if row['peer'] == expected_raft_ids['nats-1'])
+        follower = next(row for row in replicas if row['peer'] == expected_raft_ids[follower_unit])
+        unknown_held = 'Server name unknown at this time (peerID: ' + expected_raft_ids['nats-1'] + ')'
+        require(held.get('name') in (names['nats-1'], unknown_held)
+                and held.get('offline') is True
+                and follower.get('name') == names[follower_unit]
+                and follower.get('current') is True
                 and follower.get('offline') is not True,
                 'held member or live follower status differs')
         raft_ids = {unit: groups[unit].get('id') for unit in live}

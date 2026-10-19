@@ -43,8 +43,8 @@ def scripted_responses():
         (8003, '/jsz'): {'meta_cluster': {
             'name': 'owned-group', 'leader': NAMES['nats-3'], 'peer': r3,
             'cluster_size': 3, 'replicas': [
-                {'name': NAMES['nats-1'], 'offline': True, 'current': True},
-                {'name': NAMES['nats-2'], 'current': True}]}},
+                {'name': NAMES['nats-1'], 'peer': r1, 'offline': True, 'current': True},
+                {'name': NAMES['nats-2'], 'peer': r2, 'current': True}]}},
         (8002, '/raftz'): {'$SYS': {'_meta_': group(r2, 'FOLLOWER', {
             r1: {'name': NAMES['nats-1'], 'known': True},
             r3: {'name': NAMES['nats-3'], 'known': True}})}},
@@ -73,6 +73,8 @@ class ScriptedGroup(unittest.TestCase):
     def test_offline_peer_name_can_be_absent_when_hash_matches(self):
         responses = scripted_responses()
         held_id = nats_node_id(NAMES['nats-1'])
+        responses[(8003, '/jsz')]['meta_cluster']['replicas'][0]['name'] = (
+            'Server name unknown at this time (peerID: ' + held_id + ')')
         for port in (8002, 8003):
             responses[(port, '/raftz')]['$SYS']['_meta_']['peers'][held_id] = {
                 'name': '', 'known': False}
@@ -94,6 +96,8 @@ class ScriptedGroup(unittest.TestCase):
             'split term': lambda r: r[(8002, '/raftz')]['$SYS']['_meta_'].update(term=3),
             'foreign peer': lambda r: r[(8003, '/raftz')]['$SYS']['_meta_']['peers'][
                 nats_node_id(NAMES['nats-1'])].update(name='foreign'),
+            'foreign replica': lambda r: r[(8003, '/jsz')]['meta_cluster']['replicas'][0].update(
+                peer='foreign'),
             'wrong peer ID': lambda r: r[(8003, '/raftz')]['$SYS']['_meta_']['peers'].update({
                 'foreign': r[(8003, '/raftz')]['$SYS']['_meta_']['peers'].pop(
                     nats_node_id(NAMES['nats-1']))}),
@@ -187,6 +191,14 @@ class RealGroup(unittest.TestCase):
             else:
                 self.fail('owned three-member meta group did not form')
             stop('nats-1')
+            for unit in ('nats-2', 'nats-3'):
+                stop(unit)
+            for unit in ('nats-2', 'nats-3'):
+                folder = root / unit
+                log = (folder / 'restored.log').open('wb')
+                logs.append(log)
+                processes[unit] = subprocess.Popen(
+                    [binary, '-c', str(folder / 'nats.conf')], stdout=log, stderr=log)
             monitor_ports = {unit: ports[unit][1] for unit in ('nats', 'nats-2', 'nats-3')}
             evidence = wait_for_serving_group(names, monitor_ports, cluster, 10)
             self.assertEqual((evidence['verified'], evidence['size'], evidence['quorum_needed']),
