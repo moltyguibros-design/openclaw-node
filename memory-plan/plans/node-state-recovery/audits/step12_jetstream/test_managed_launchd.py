@@ -1074,8 +1074,11 @@ if not marker.exists():
                 config.write_text(f'''server_name: {name}\nhost: 127.0.0.1\nport: {port}\nhttp_port: {monitor}\njetstream {{ store_dir: "{folder / 'store'}" }}\n''')
                 if unit != 'nats':
                     route = endpoints[unit][2]
+                    others = (('nats-1',) if fail_group and unit in ('nats-2', 'nats-3')
+                              else tuple(other for other in ('nats-1', 'nats-2', 'nats-3')
+                                         if other != unit))
                     routes = ', '.join('"nats-route://127.0.0.1:' + str(endpoints[other][2]) + '"'
-                                       for other in ('nats-1', 'nats-2', 'nats-3') if other != unit)
+                                       for other in others)
                     with config.open('a') as handle:
                         handle.write(f'cluster {{ name: owned-b5; listen: 127.0.0.1:{route}; '
                                      f'routes: [{routes}] }}\n')
@@ -1253,8 +1256,6 @@ if not marker.exists():
                                                     for unit in SERVING_NATS))
                                 self.assertFalse(held_member.status()['loaded'])
                                 self.assertTrue(held_member.disabled())
-                                if fail_group:
-                                    raise Refused('owned group failure after individual receipts')
                                 names = {unit: members[unit]['name'] for unit in all_nats}
                                 ports = {unit: members[unit]['monitor'] for unit in SERVING_NATS}
                                 return wait_for_serving_group(names, ports, 'owned-b5', 10)
@@ -1274,6 +1275,7 @@ if not marker.exists():
                                 self.assertEqual(restored[:3], list(SERVING_NATS))
                                 self.assertEqual(len(group_calls), 1)
                                 self.assertTrue(any(error['unit'] == 'nats-group'
+                                                    and 'reciprocal live-member route' in error['detail']
                                                     for error in result['errors']))
                                 self.assertNotIn(('restoration-intent', 'mesh-task-daemon'), rows)
                                 self.assertIsNotNone(gate.marker())
