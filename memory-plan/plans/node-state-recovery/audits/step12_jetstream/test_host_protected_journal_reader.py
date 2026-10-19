@@ -294,6 +294,32 @@ class Protected(MountCase):
         with self.assertRaisesRegex(RuntimeError, 'binding differs'):
             self.receipt()
 
+    def test_receipt_requires_each_protected_binding(self):
+        self.read_image()
+        original = self.final.read_bytes()
+        anchored = self.root_store / (self.nonce + '.json')
+        anchor_raw = anchored.read_bytes()
+        cases = {'scope': 'wrong scope', 'capture_nonce': 'f' * 64,
+                 'owner_context': {'capture_uid': -1}, 'anchor_sha256': 'f' * 64,
+                 'files': {}, 'authority': {}, 'code_sha256': {},
+                 'cleanup': {'clean': False}, 'copy_removed': False, 'anchor_authority': None}
+        for name, replacement in cases.items():
+            with self.subTest(binding=name):
+                value = json.loads(original)
+                if name == 'anchor_authority':
+                    changed = {**json.loads(anchor_raw), 'authority': {}}
+                    raw = anchor.encoded(changed)
+                    anchored.write_bytes(raw)
+                    value['anchor_sha256'] = anchor.sha(raw)
+                else:
+                    value[name] = replacement
+                self.final.write_bytes(anchor.encoded(value))
+                with self.assertRaisesRegex(RuntimeError, 'binding differs'):
+                    self.receipt()
+                anchored.write_bytes(anchor_raw)
+                self.final.write_bytes(original)
+        self.assertEqual(self.receipt(), json.loads(original))
+
     def test_receipt_with_pending_is_not_consumed(self):
         self.read_image()
         self.pending.mkdir(mode=0o700)
@@ -347,7 +373,8 @@ class Protected(MountCase):
 class CodeClosure(unittest.TestCase):
     def setUp(self):
         self.uid = os.getuid()
-        temp = tempfile.TemporaryDirectory(prefix='openclaw-q-code-', dir=str(pathlib.Path.home()))
+        temp = tempfile.TemporaryDirectory(prefix='openclaw-q-code-',
+                                           dir=pathlib.Path(os.environ.get('GITHUB_WORKSPACE', pathlib.Path.home())))
         self.addCleanup(temp.cleanup)
         self.path = pathlib.Path(temp.name).resolve()
         self.path.chmod(0o700)
