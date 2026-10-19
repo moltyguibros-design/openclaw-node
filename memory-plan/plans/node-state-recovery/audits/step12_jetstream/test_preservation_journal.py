@@ -140,7 +140,8 @@ def tailscale_record():
 
 class JournalTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix='openclaw-journal-owned-')
+        self.temp = tempfile.TemporaryDirectory(prefix='openclaw-journal-owned-',
+                                                dir=pathlib.Path.home())
         self.parent = pathlib.Path(self.temp.name) / 'journals'
         self.parent.mkdir(mode=0o700)
         self.root = self.parent / 'journal'

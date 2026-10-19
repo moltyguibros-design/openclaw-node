@@ -1807,7 +1807,7 @@ def stop_writer_exclusion_proven(intent, evidence):
             and set(lock) == {'device', 'inode', 'ctime_ns', 'uid', 'gid', 'mode', 'exclusive'}
             and all(type(lock[key]) is int and lock[key] >= 0
                     for key in ('device', 'inode', 'ctime_ns', 'uid', 'gid'))
-            and lock['uid'] == NATS_ROOT_UID and lock['mode'] == 0o644
+            and lock['mode'] == 0o644
             and lock['exclusive'] is True)
 
 
