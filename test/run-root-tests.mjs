@@ -23,7 +23,7 @@ function terminate(child, signal = 'SIGTERM') {
   try {
     if (child.rootTestGroup) process.kill(-child.pid, signal);
     else child.kill(signal);
-  } catch { /* already exited */ }
+  } catch {}
 }
 
 async function stop(child) {
@@ -69,6 +69,7 @@ async function run() {
   writeFileSync(join(home, 'nats-auth.conf'), renderAuthorization({
     mode: 'nkey', token, self: { nodeId: 'root-test-lead', nkey: nkey.publicNkey, role: 'lead' },
   }));
+  writeFileSync(join(identityDir, 'openclaw.env'), `OPENCLAW_NATS=${url}\nOPENCLAW_NATS_TOKEN=${token}\nOPENCLAW_NATS_AUTH=nkey\n`);
   const config = join(home, 'nats.conf');
   writeFileSync(config, `listen: 127.0.0.1:${port}\njetstream { store_dir: ${JSON.stringify(store)} }\ninclude "nats-auth.conf"\n`);
   const env = {
@@ -77,16 +78,17 @@ async function run() {
     OPENCLAW_HOME: home,
     OPENCLAW_IDENTITY_DIR: identityDir,
     OPENCLAW_NATS: url,
+    NATS_URL: url,
     OPENCLAW_NATS_TOKEN: token,
     OPENCLAW_NATS_AUTH: 'nkey',
-    OPENCLAW_NODE_ID: 'root-test-lead',
-    OPENCLAW_NODE_ROLE: 'lead',
     OPENCLAW_REQUIRE_MESH: '1',
     OPENCLAW_TEST_MESH_ISOLATED: '1',
     PYTHONDONTWRITEBYTECODE: '1',
     TMPDIR: scratch,
   };
   delete env.OPENCLAW_OPERATOR_TRUSTED_KEYS;
+  delete env.OPENCLAW_NODE_ID;
+  delete env.OPENCLAW_NODE_ROLE;
 
   let server;
   let daemon;
@@ -117,7 +119,8 @@ async function run() {
     if (unauthenticated) throw new Error('isolated NATS accepted an unauthenticated connection');
 
     daemon = spawn(process.execPath, [join(root, 'bin', 'mesh-task-daemon.js')], {
-      cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: root, env: { ...env, OPENCLAW_NODE_ID: 'root-test-lead', OPENCLAW_NODE_ROLE: 'lead' },
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     daemon.on('error', () => {});
     for (const stream of [daemon.stdout, daemon.stderr]) stream.on('data', chunk => { logs = (logs + chunk).slice(-8000); });
