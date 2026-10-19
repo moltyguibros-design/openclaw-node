@@ -23,7 +23,7 @@ from full_node_baseline import open_full_node_journal
 from journal_hold import JournaledHold, describe
 from legacy_fixture import legacy_journal
 from preservation_checks import Refused, STOP_ORDER, disabled_overrides, http_json
-from preservation_journal import Journal, SERVING_NATS, TIMER_UNITS, static_identity
+from preservation_journal import Journal, NATS_TRANSFER_UNITS, SERVING_NATS, TIMER_UNITS, static_identity
 from serving_nats_group import wait_for_serving_group
 from test_journal_hold import gate_module, gated_identity
 from test_preservation_journal import (full_entrypoint_evidence, full_node_inventory,
@@ -1235,10 +1235,7 @@ if not marker.exists():
                                             self.assertFalse(any(row['event'] == 'capture-ready'
                                                                  for row in journal.records))
                                             self.assertTrue(member['service'].disabled())
-                                            self.proofs.append({'test': self._testMethodName,
-                                                'failed_stop': 'nats', 'capture_ready': False,
-                                                'production_connections': False})
-                                            return
+                                            break
                                         proof = watch.mutate(journal, unit,
                                             lambda: client.recv(1) == b'', absent, hold=hold)
                                     self.assertTrue(Journal.managed_stop_proven(unit, proof))
@@ -1258,7 +1255,7 @@ if not marker.exists():
                                 if unit in ('federation-tick', 'nats-1'):
                                     self.fail('held unit reached the restore callback')
                                 if unit in members:
-                                    if unit == 'nats':
+                                    if unit == 'nats' and not fail_stop:
                                         self.assertTrue(all(not members[other]['service'].status()['loaded']
                                             and members[other]['service'].disabled()
                                             for other in ('nats-2', 'nats-3')))
@@ -1301,7 +1298,21 @@ if not marker.exists():
                                 deploy_fence=lambda: {'verified': True},
                                 nats_group_check=group_check)
                             rows = [(row['event'], row.get('unit')) for row in journal.records]
-                            if fail_first:
+                            if fail_stop:
+                                self.assertFalse(result['restored'])
+                                self.assertEqual(restored, [])
+                                self.assertTrue(any(error['unit'] == 'nats'
+                                    and 'override clear lacks a verified persistent stop'
+                                    in error['detail'] for error in result['errors']))
+                                blocked = {name for name, state in prior.items()
+                                    if name not in NATS_TRANSFER_UNITS
+                                    and name != 'scheduler-heartbeat' and state['loaded']}
+                                self.assertEqual(len(blocked), 17)
+                                self.assertFalse(any(event in ('recovery-verified', 'already-restored')
+                                    and name in blocked for event, name in rows))
+                                self.assertFalse(any(row[0] == 'capture-ready' for row in rows))
+                                self.assertIsNotNone(gate.marker())
+                            elif fail_first:
                                 self.assertFalse(result['restored'])
                                 self.assertEqual(restored, [])
                                 self.assertTrue(members['nats']['service'].disabled())
@@ -1334,7 +1345,8 @@ if not marker.exists():
                                 self.assertTrue(journal.resolve())
                             self.proofs.append({'test': self._testMethodName,
                                 'serving_members': list(SERVING_NATS), 'restored': restored,
-                                'member1_held': True, 'production_connections': False})
+                                'member1_held': True, 'failed_stop': fail_stop,
+                                'production_connections': False})
                         finally:
                             hold.close()
         finally:
