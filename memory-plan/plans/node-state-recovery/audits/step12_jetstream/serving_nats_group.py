@@ -1,8 +1,16 @@
 """Owned post-restore NATS meta-quorum observation for the saved four-role topology."""
 
+import hashlib
 import time
 
 from preservation_checks import Refused, http_json, require
+
+
+DIGITS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+
+
+def nats_node_id(server_name):
+    return ''.join(DIGITS[value % 62] for value in hashlib.sha256(server_name.encode()).digest()[:8])
 
 
 def wait_for_serving_group(names, ports, cluster, timeout, *, get=http_json,
@@ -15,6 +23,10 @@ def wait_for_serving_group(names, ports, cluster, timeout, *, get=http_json,
     require(isinstance(timeout, (int, float)) and 1 < timeout <= 120,
             'serving NATS group needs a finite observation budget')
     expected_members = {names[unit] for unit in ('nats-1', 'nats-2', 'nats-3')}
+    expected_raft_ids = {unit: nats_node_id(names[unit])
+                         for unit in ('nats-1', 'nats-2', 'nats-3')}
+    require(len(set(expected_raft_ids.values())) == 3,
+            'serving NATS names alias a meta Raft node ID')
     live = ('nats-2', 'nats-3')
     previous = None
     stable_since = None
@@ -26,6 +38,7 @@ def wait_for_serving_group(names, ports, cluster, timeout, *, get=http_json,
         require(standalone.get('server_name') == names['nats']
                 and standalone.get('version') == '2.12.6'
                 and isinstance(standalone.get('server_id'), str) and standalone['server_id']
+                and isinstance(standalone.get('start'), str) and standalone['start']
                 and not standalone.get('cluster'), 'standalone NATS identity or isolation changed')
         standalone_routes = get(ports['nats'], '/routez')
         require(standalone_routes.get('num_routes') == 0
@@ -34,9 +47,11 @@ def wait_for_serving_group(names, ports, cluster, timeout, *, get=http_json,
                 'standalone NATS joined a JetStream meta group')
         varz = {unit: get(ports[unit], '/varz') for unit in live}
         ids = {unit: varz[unit].get('server_id') for unit in live}
+        starts = {unit: varz[unit].get('start') for unit in live}
         require(all(varz[unit].get('server_name') == names[unit]
                     and varz[unit].get('version') == '2.12.6'
                     and varz[unit].get('cluster', {}).get('name') == cluster
+                    and isinstance(starts[unit], str) and starts[unit]
                     and isinstance(ids[unit], str) and ids[unit] for unit in live)
                 and ids['nats-2'] != ids['nats-3'],
                 'serving NATS member identity or cluster changed')
@@ -74,10 +89,8 @@ def wait_for_serving_group(names, ports, cluster, timeout, *, get=http_json,
                 and follower.get('offline') is not True,
                 'held member or live follower status differs')
         raft_ids = {unit: groups[unit].get('id') for unit in live}
-        require(all(isinstance(value, str) and value for value in raft_ids.values())
-                and raft_ids['nats-2'] != raft_ids['nats-3'],
+        require(all(raft_ids[unit] == expected_raft_ids[unit] for unit in live),
                 'meta Raft member IDs are absent or aliased')
-        held_ids = set()
         for unit in live:
             group = groups[unit]
             expected_state = 'LEADER' if unit == leader_unit else 'FOLLOWER'
@@ -89,26 +102,27 @@ def wait_for_serving_group(names, ports, cluster, timeout, *, get=http_json,
                     unit + ': meta Raft quorum, term or role is unready')
             peers = group.get('peers')
             require(isinstance(peers, dict)
-                    and {row.get('name') for row in peers.values()} == expected_members - {names[unit]}
-                    and all(row.get('known') is True for row in peers.values()),
+                    and set(peers) == {expected_raft_ids[other] for other in expected_raft_ids
+                                       if other != unit}
+                    and all(peers[expected_raft_ids[other]].get('name') == names[other]
+                            and peers[expected_raft_ids[other]].get('known') is True
+                            for other in live if other != unit)
+                    and peers[expected_raft_ids['nats-1']].get('name')
+                    in ('', names['nats-1']),
                     unit + ': meta Raft peer set differs')
-            other = next(other for other in live if other != unit)
-            require(peers.get(raft_ids[other], {}).get('name') == names[other],
-                    unit + ': live Raft peer identity differs')
-            held_ids.add(next(peer_id for peer_id, row in peers.items()
-                              if row['name'] == names['nats-1']))
-        require(len(held_ids) == 1
-                and groups['nats-2']['term'] == groups['nats-3']['term']
+        require(groups['nats-2']['term'] == groups['nats-3']['term']
                 and leader_meta.get('peer') == raft_ids[leader_unit],
                 'meta Raft views disagree on held peer, term or leader')
-        signature = (standalone.get('server_id'), tuple(ids[unit] for unit in live),
-                     tuple(raft_ids[unit] for unit in live), next(iter(held_ids)),
+        signature = (standalone.get('server_id'), standalone['start'],
+                     tuple((ids[unit], starts[unit]) for unit in live),
+                     tuple(raft_ids[unit] for unit in live), expected_raft_ids['nats-1'],
                      leader, groups[leader_unit]['term'])
         return signature, {'verified': True, 'cluster': cluster,
                            'standalone': names['nats'], 'members': [names[unit] for unit in live],
                            'held_member': names['nats-1'], 'leader': leader,
                            'term': groups[leader_unit]['term'], 'size': 3, 'quorum_needed': 2,
-                           'server_ids': ids, 'raft_ids': raft_ids}
+                           'server_ids': ids, 'server_starts': starts,
+                           'raft_ids': {**raft_ids, 'nats-1': expected_raft_ids['nats-1']}}
 
     while clock() < deadline:
         try:

@@ -12,7 +12,7 @@ import unittest
 import urllib.request
 
 from preservation_checks import Refused
-from serving_nats_group import wait_for_serving_group
+from serving_nats_group import nats_node_id, wait_for_serving_group
 
 
 NAMES = {'nats': 'owned-standalone', 'nats-1': 'owned-member-1',
@@ -21,12 +21,13 @@ PORTS = {'nats': 8001, 'nats-2': 8002, 'nats-3': 8003}
 
 
 def scripted_responses():
+    r1, r2, r3 = (nats_node_id(NAMES[unit]) for unit in ('nats-1', 'nats-2', 'nats-3'))
     varz = lambda name, server_id, cluster=None: {
         'server_name': name, 'server_id': server_id, 'version': '2.12.6',
-        'cluster': {'name': cluster} if cluster else {}}
+        'start': '2026-10-18T00:00:00Z', 'cluster': {'name': cluster} if cluster else {}}
     group = lambda own, state, peers: {
         'id': own, 'state': state, 'size': 3, 'quorum_needed': 2,
-        'leader': 'R3', 'term': 4, 'peers': peers}
+        'leader': r3, 'term': 4, 'peers': peers}
     return {
         (8001, '/varz'): varz(NAMES['nats'], 'S0'),
         (8001, '/routez'): {'num_routes': 0, 'routes': []},
@@ -40,16 +41,16 @@ def scripted_responses():
         (8002, '/jsz'): {'meta_cluster': {
             'name': 'owned-group', 'leader': NAMES['nats-3'], 'cluster_size': 3}},
         (8003, '/jsz'): {'meta_cluster': {
-            'name': 'owned-group', 'leader': NAMES['nats-3'], 'peer': 'R3',
+            'name': 'owned-group', 'leader': NAMES['nats-3'], 'peer': r3,
             'cluster_size': 3, 'replicas': [
                 {'name': NAMES['nats-1'], 'offline': True, 'current': True},
                 {'name': NAMES['nats-2'], 'current': True}]}},
-        (8002, '/raftz'): {'$SYS': {'_meta_': group('R2', 'FOLLOWER', {
-            'R1': {'name': NAMES['nats-1'], 'known': True},
-            'R3': {'name': NAMES['nats-3'], 'known': True}})}},
-        (8003, '/raftz'): {'$SYS': {'_meta_': group('R3', 'LEADER', {
-            'R1': {'name': NAMES['nats-1'], 'known': True},
-            'R2': {'name': NAMES['nats-2'], 'known': True}})}},
+        (8002, '/raftz'): {'$SYS': {'_meta_': group(r2, 'FOLLOWER', {
+            r1: {'name': NAMES['nats-1'], 'known': True},
+            r3: {'name': NAMES['nats-3'], 'known': True}})}},
+        (8003, '/raftz'): {'$SYS': {'_meta_': group(r3, 'LEADER', {
+            r1: {'name': NAMES['nats-1'], 'known': True},
+            r2: {'name': NAMES['nats-2'], 'known': True}})}},
     }
 
 
@@ -69,6 +70,14 @@ class ScriptedGroup(unittest.TestCase):
                          (True, 3, 2))
         self.assertEqual(evidence['leader'], NAMES['nats-3'])
 
+    def test_offline_peer_name_can_be_absent_when_hash_matches(self):
+        responses = scripted_responses()
+        held_id = nats_node_id(NAMES['nats-1'])
+        for port in (8002, 8003):
+            responses[(port, '/raftz')]['$SYS']['_meta_']['peers'][held_id] = {
+                'name': '', 'known': False}
+        self.assertTrue(self.run_observer(responses)['verified'])
+
     def test_missing_stale_or_partial_group_refuses(self):
         cases = {
             'standalone joined cluster': lambda r: r[(8001, '/varz')].update(cluster={'name': 'owned-group'}),
@@ -83,7 +92,11 @@ class ScriptedGroup(unittest.TestCase):
             'follower lagging': lambda r: r[(8003, '/jsz')]['meta_cluster']['replicas'][1].update(current=False),
             'catching up': lambda r: r[(8002, '/raftz')]['$SYS']['_meta_'].update(catching_up=True),
             'split term': lambda r: r[(8002, '/raftz')]['$SYS']['_meta_'].update(term=3),
-            'foreign peer': lambda r: r[(8003, '/raftz')]['$SYS']['_meta_']['peers']['R1'].update(name='foreign'),
+            'foreign peer': lambda r: r[(8003, '/raftz')]['$SYS']['_meta_']['peers'][
+                nats_node_id(NAMES['nats-1'])].update(name='foreign'),
+            'wrong peer ID': lambda r: r[(8003, '/raftz')]['$SYS']['_meta_']['peers'].update({
+                'foreign': r[(8003, '/raftz')]['$SYS']['_meta_']['peers'].pop(
+                    nats_node_id(NAMES['nats-1']))}),
         }
         for name, mutate in cases.items():
             with self.subTest(name=name):
@@ -181,6 +194,13 @@ class RealGroup(unittest.TestCase):
             stop('nats-3')
             with self.assertRaisesRegex(Refused, 'did not settle'):
                 wait_for_serving_group(names, monitor_ports, cluster, 2)
+            folder = root / 'nats-3'
+            log = (folder / 'restarted.log').open('wb')
+            logs.append(log)
+            processes['nats-3'] = subprocess.Popen(
+                [binary, '-c', str(folder / 'nats.conf')], stdout=log, stderr=log)
+            recovered = wait_for_serving_group(names, monitor_ports, cluster, 10)
+            self.assertTrue(recovered['verified'])
         finally:
             for unit in processes:
                 stop(unit)

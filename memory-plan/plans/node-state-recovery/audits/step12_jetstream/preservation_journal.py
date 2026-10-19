@@ -1324,8 +1324,13 @@ class Journal:
         held = 'execution_hold' in self.prior['scheduler-heartbeat']
         require((hold is not None) == held and (not held or hold.journal is self),
                 'baselined execution hold requires its journal recovery facade')
+        needs_nats_group = self.scope == FULL_NODE_SCOPE and any(
+            row['event'] == 'intent' and row.get('unit') in SERVING_NATS
+            and row.get('action') in ('stop', 'unload', 'disable-and-unload')
+            for row in self.records)
+        require(not needs_nats_group or callable(nats_group_check),
+                'post-restore NATS group check is required')
         binding_unavailable = False
-        needs_nats_group = False
         if self.scope == FULL_NODE_SCOPE:
             stopped = {}
             for row in self.records:
@@ -1333,10 +1338,6 @@ class Journal:
                     stopped[row['unit']] = row['action']
                 elif row['event'] == 'recovery-verified' and row.get('unit') in stopped:
                     del stopped[row['unit']]
-            needs_nats_group = any(row['event'] == 'intent'
-                                   and row.get('unit') in SERVING_NATS
-                                   and row.get('action') in ('stop', 'unload', 'disable-and-unload')
-                                   for row in self.records)
             def override_clear_unproven(unit):
                 latest = next((row for row in reversed(self.records)
                                if row.get('unit') == unit
@@ -1475,7 +1476,6 @@ class Journal:
                     require(set(SERVING_NATS) <= nats_verified,
                             'all serving NATS members need current-call recovery receipts')
                     require(not errors, 'earlier recovery errors bar NATS group release')
-                    require(callable(nats_group_check), 'post-restore NATS group check is required')
                     with nats_legacy_restore_guard():
                         hold.check_closed()
                         group = nats_group_check()

@@ -1322,7 +1322,8 @@ class JournalTests(unittest.TestCase):
                     journal.recover(lambda unit, _: restored.append(unit),
                         lambda unit, _: {**current[unit], 'verified': True},
                         lambda: {'verified': True}, hold=hold,
-                        deploy_fence=lambda: {'verified': True})
+                        deploy_fence=lambda: {'verified': True},
+                        nats_group_check=lambda: self.fail('group check ran'))
                 self.assertEqual(restored, [])
                 self.assertEqual(len(journal.records), before)
 
@@ -1686,7 +1687,8 @@ class JournalTests(unittest.TestCase):
                         'stopped unit override was cleared without verified recovery: nats'):
                     reopened.recover(lambda *_: self.fail('restore ran'),
                         lambda *_: self.fail('observe ran'), lambda: self.fail('final check ran'),
-                        hold=hold, deploy_fence=lambda: self.fail('deploy fence ran'))
+                        hold=hold, deploy_fence=lambda: self.fail('deploy fence ran'),
+                        nats_group_check=lambda: self.fail('group check ran'))
                 self.assertEqual(len(reopened.records), before)
 
     def test_override_clear_refuses_timer_without_spawn_proof(self):
@@ -1849,13 +1851,14 @@ class JournalTests(unittest.TestCase):
                                 monitor_port=8222, client_port=ports[unit],
                                 server_name=names[unit]), timeout=5)
                     restored.append((unit, binding['status']['pid']))
-                refused = journal.recover(restore,
-                    lambda unit, _: {**current[unit], 'verified': True},
-                    lambda: {'verified': True}, hold=hold,
-                    deploy_fence=lambda: {'verified': True})
-                self.assertFalse(refused['restored'])
-                self.assertTrue(any(error['unit'] == 'nats-group' for error in refused['errors']))
-                self.assertEqual([unit for unit, _ in restored], ['nats', 'nats-2', 'nats-3'])
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'post-restore NATS group check is required'):
+                    journal.recover(restore,
+                        lambda unit, _: {**current[unit], 'verified': True},
+                        lambda: {'verified': True}, hold=hold,
+                        deploy_fence=lambda: {'verified': True})
+                self.assertEqual(len(journal.records), before)
+                self.assertEqual(restored, [])
                 self.assertFalse(any(row['event'] == 'restoration-intent'
                                      and row.get('unit') == 'mesh-task-daemon'
                                      for row in journal.records))
@@ -1867,6 +1870,7 @@ class JournalTests(unittest.TestCase):
                                               'quorum_needed': 2, 'held_member': 'owned-nats-1',
                                               'leader': names['nats-2']})
                 self.assertFalse(partial['restored'])
+                self.assertEqual([unit for unit, _ in restored], ['nats', 'nats-2', 'nats-3'])
                 self.assertFalse(any(row['event'] == 'nats-group-recovery-verified'
                                      for row in journal.records))
                 group_calls = []
