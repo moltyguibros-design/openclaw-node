@@ -203,6 +203,45 @@ class JournalTests(unittest.TestCase):
                     'disabled': unit in ('nats', 'nats-2', 'nats-3'), 'verified': True}
         return journal, hold, observe, marker
 
+    def test_serving_nats_stop_requires_non_nats_fence_marker_absence_and_order(self):
+        prior = full_node_inventory()
+        loaded = full_entrypoint_evidence(prior)
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   side_effect=lambda _: copy.deepcopy(loaded)):
+            with Journal(self.root, prior, boot='boot-a', node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+                anchor_hold(journal, hold)
+                journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                               lambda: fence_listener(loaded),
+                               listener_stop_evidence, hold=hold)
+                def stop(unit):
+                    return journal.mutate(unit, 'disable-and-unload',
+                        lambda: fence_unit(loaded, unit),
+                        lambda: listener_stop_evidence(unit), hold=hold)
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'non-NATS jobs require'):
+                    stop('nats')
+                self.assertEqual(len(journal.records), before)
+                stop_non_nats(journal, prior, loaded, hold)
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'capture order'):
+                    stop('nats-2')
+                self.assertEqual(len(journal.records), before)
+                self.nats_marker.write_text('owned marker')
+                with self.assertRaisesRegex(Refused, 'marker already exists'):
+                    stop('nats')
+                self.assertEqual(len(journal.records), before)
+                self.nats_marker.unlink()
+                for unit in ('nats', 'nats-2', 'nats-3'):
+                    proof = stop(unit)
+                    self.assertTrue(journal.full_node_stop_proven(unit, proof))
+                self.assertEqual([row['unit'] for row in journal.records
+                                  if row['event'] == 'intent'
+                                  and row.get('unit') in ('nats', 'nats-2', 'nats-3')],
+                                 ['nats', 'nats-2', 'nats-3'])
+                self.assertFalse(any(row.get('unit') == 'nats-1' for row in journal.records[1:]))
+
     def publish_nats_return(self, journal, transfer, **changes):
         outcomes = pathlib.Path(self.temp.name) / 'root-outcomes'
         outcomes.mkdir(mode=0o755, exist_ok=True)

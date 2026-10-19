@@ -12,7 +12,7 @@ import subprocess
 import time
 
 from preservation_checks import Refused, http_json, require, verify_completion, verify_timer_idle
-from preservation_journal import FULL_NODE_SCOPE, NATS_TRANSFER_UNITS, regular_content, static_identity
+from preservation_journal import FULL_NODE_SCOPE, NATS_TRANSFER_UNITS, SERVING_NATS, regular_content, static_identity
 
 
 EXIT_FLAGS = 0x84000000
@@ -667,6 +667,9 @@ class StopWatch:
             require(unit != 'mesh-deploy-listener' or self.require_disabled,
                     'deploy listener requires a persistent managed stop')
             require(unit == 'mesh-deploy-listener' or not self.require_disabled
+                    or (unit in SERVING_NATS
+                        and journal.prior.get(unit, {}).get('class') == 'daemon'
+                        and journal.prior[unit]['loaded'] and journal.prior[unit]['running'])
                     or (unit not in NATS_TRANSFER_UNITS
                         and (journal.prior.get(unit, {}).get('class') == 'daemon'
                              or journal.prior.get(unit, {}).get('class') == 'known-broken'

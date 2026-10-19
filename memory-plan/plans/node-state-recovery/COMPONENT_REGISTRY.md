@@ -3605,3 +3605,49 @@ its own exact-head review and all-eight CI. B5/1.2 stays [A] at v1.2-pre,
 B6-B9 held; the persistent-stop producer is the first open source row. D64,
 Gate, installed timers and production are unchanged. No production service,
 VM, store, mount, timer or history was operated.
+
+### 2026-10-19 01:48 EDT — D249 serving-NATS persistent-stop producer pre-audit
+
+Micro re-orient: B5/1.2 is [A] at v1.2-pre. D243/D244 provide an owned
+serving-member recovery adapter; D247/D248 add a positive post-restore R3 gate.
+The first open source prerequisite is the persistent-stop producer, before an
+owned capture-ready checkpoint. This still serves recoverable histories; yes,
+it is the right next bounded step. B6–B9, D64, Gate and production remain held.
+
+Needs pre-screen: the reviewed adapter and group gate are present; corrected
+receipt c34494d1 passed all eight jobs on CI39202808141 and Claude389 cleared
+it. The original JournaledHold, StopWatch, class_stop_proven, non-NATS fence,
+NATS marker/transfer guards, and dedicated fixed-label native fixture exist.
+The worktree is clean and no BLOCKED.md exists. No live B3 pin or approved
+production stop window exists, so verification is owned only.
+
+Source contract: permit persistent StopWatch.mutate only for the explicit
+SERVING_NATS allowlist when each prior unit is a loaded, running daemon.
+`nats-1` remains excluded, as do idle or reclassified serving units. Keep
+unit-label binding, prepared kernel/process watch, original hold, disabled
+before bootout, verified exit/connection/listener proof and disabled override.
+The journal must refuse a protected NATS writer marker before the stop intent;
+its existing forward and transfer guards still apply. The existing non-NATS
+fence must pass before the first serving stop. The three stops run in saved
+capture order: standalone nats, then nats-2, then nats-3. A failure at any
+stage leaves durable partial/failed evidence and no capture-ready checkpoint;
+recovery is the only continuation.
+
+Delta: managed_launchd.py narrows the guard to serving daemon identities;
+preservation_journal.py adds the pre-intent marker refusal and ordered serving
+stop checks if the existing record-only checkpoint gate is too late; portable
+preflight and journal negatives pin the new admission; the dedicated macOS
+full-node fixture uses StopWatch.mutate for all three real disposable NATS
+servers, checks each durable receipt and full recovery, and injects a stop
+failure to prove no checkpoint. Register any added tests on both CI platforms.
+No restore_only.py, release gate, production driver, timeout or installed unit
+changes. An architectural expansion or two mid-implementation findings require
+re-orientation before implementation proceeds.
+
+Verify: owned positives produce one verified disable-and-unload receipt per
+serving member under the same original hold; wrong class/label, nats-1,
+preexisting override, missing hold, marker, partial stop and out-of-order
+paths refuse for their intended reasons. Run relevant suites and mutation
+controls, independent exact-source review and all-eight exact-head CI. This
+is source/owned runtime proof, not live NATS, D60, reboot, image or production
+acceptance. A separate reviewed green receipt may close only this source row.

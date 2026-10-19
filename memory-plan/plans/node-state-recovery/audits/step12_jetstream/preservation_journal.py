@@ -1222,6 +1222,14 @@ class Journal:
                     require(self.non_nats_fenced(self.check_entrypoints(forward=True)),
                             'all prior-loaded non-NATS jobs require verified persistent stops before NATS: '
                             + unit)
+                    if unit in SERVING_NATS:
+                        require(self.prior[unit]['class'] == 'daemon'
+                                and self.prior[unit]['loaded'] and self.prior[unit]['running'],
+                                'serving NATS stop requires a running daemon baseline')
+                        require_no_nats_marker()
+                        stopped = [row['unit'] for row in intents if row.get('unit') in SERVING_NATS]
+                        require(stopped == list(SERVING_NATS[:SERVING_NATS.index(unit)]),
+                                'serving NATS stops must follow capture order')
         fields = intent_fields or {}
         require(isinstance(fields, dict) and not set(fields) & {'unit', 'action'},
                 'intent fields cannot replace the mutation owner')

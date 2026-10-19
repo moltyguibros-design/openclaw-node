@@ -281,13 +281,28 @@ class StopWatchPreflight(unittest.TestCase):
                 ('mesh-deploy-listener', False, 'deploy listener requires'),
                 ('observer', True, 'lacks a daemon recovery adapter'),
                 ('mesh-agent', True, 'lacks a daemon recovery adapter'),
-                ('nats', True, 'lacks a daemon recovery adapter'),
                 ('nats-1', True, 'lacks a daemon recovery adapter')):
             watch = SimpleNamespace(service=SimpleNamespace(label='ai.openclaw.' + unit),
                                     require_disabled=persistent,
                                     ready_for_intent=lambda: self.fail('stop watch reached'))
             with self.subTest(unit=unit), self.assertRaisesRegex(Refused, expected):
                 StopWatch.mutate(watch, journal, unit, lambda: True, lambda: True)
+
+    def test_serving_nats_persistent_stop_reaches_the_bound_watch_only_for_running_daemons(self):
+        journal = SimpleNamespace(scope='full-node', prior=full_node_inventory())
+        for unit in SERVING_NATS:
+            watch = SimpleNamespace(service=SimpleNamespace(label='ai.openclaw.' + unit),
+                                    require_disabled=True,
+                                    ready_for_intent=lambda: self.fail('bound watch reached'))
+            with self.subTest(unit=unit), self.assertRaisesRegex(AssertionError, 'bound watch reached'):
+                StopWatch.mutate(watch, journal, unit, lambda: True, lambda: True)
+            for change in ({'class': 'timer'}, {'loaded': False}, {'running': False}):
+                modified = copy.deepcopy(journal.prior)
+                modified[unit].update(change)
+                with self.subTest(unit=unit, change=change), self.assertRaisesRegex(
+                        Refused, 'lacks a daemon recovery adapter'):
+                    StopWatch.mutate(watch, SimpleNamespace(scope='full-node', prior=modified),
+                                     unit, lambda: True, lambda: True)
 
     def test_known_broken_persistent_stop_requires_a_running_baseline(self):
         journal = SimpleNamespace(scope='full-node', prior=full_node_inventory())
@@ -1034,7 +1049,7 @@ if not marker.exists():
     def test_full_node_owned_listener_restores_after_verified_release(self):
         self.exercise_full_node_owned_listener(True)
 
-    def exercise_full_node_owned_nats_recovery(self, fail_first, fail_group=False):
+    def exercise_full_node_owned_nats_recovery(self, fail_first, fail_group=False, fail_stop=False):
         all_nats = ('nats', 'nats-1', 'nats-2', 'nats-3')
         labels = ['ai.openclaw.' + unit for unit in all_nats]
         for label in labels:
@@ -1204,17 +1219,40 @@ if not marker.exists():
                                     with StopWatch(member['service'], member['binding'],
                                                    [member['log'], member['err']], unit,
                                                    allowed_signals=(15,), require_disabled=True) as watch:
-                                        def stop():
-                                            member['service'].disable_for_hold()
-                                            watch.apply()
                                         def absent():
                                             with socket.socket() as connection:
                                                 connection.settimeout(.2)
                                                 return connection.connect_ex(('127.0.0.1', member['port'])) != 0
-                                        proof = hold.mutate(unit, 'disable-and-unload', stop,
-                                            lambda: watch.verify(lambda: client.recv(1) == b'', absent))
+                                        if fail_stop and unit == 'nats':
+                                            with self.assertRaisesRegex(Refused, 'former process listener'):
+                                                watch.mutate(journal, unit, lambda: client.recv(1) == b'',
+                                                             lambda: False, hold=hold)
+                                            self.assertEqual(journal.records[-1]['event'], 'failed')
+                                            self.assertEqual(journal.records[-1]['unit'], 'nats')
+                                            self.assertEqual(journal.records[-1]['failure_stage'],
+                                                             'verify-callback')
+                                            self.assertIsNotNone(gate.marker())
+                                            self.assertFalse(any(row['event'] == 'capture-ready'
+                                                                 for row in journal.records))
+                                            self.assertTrue(member['service'].disabled())
+                                            self.proofs.append({'test': self._testMethodName,
+                                                'failed_stop': 'nats', 'capture_ready': False,
+                                                'production_connections': False})
+                                            return
+                                        proof = watch.mutate(journal, unit,
+                                            lambda: client.recv(1) == b'', absent, hold=hold)
                                     self.assertTrue(Journal.managed_stop_proven(unit, proof))
                                     self.assertTrue(member['service'].disabled())
+                                    self.assertEqual(proof['execution_hold']['watch_session_id'],
+                                                     hold.original_session)
+                                    intents = [row for row in journal.records
+                                               if row['event'] == 'intent' and row.get('unit') == unit]
+                                    self.assertEqual(len(intents), 1)
+                                    receipts = [row for row in journal.records
+                                                if row['event'] == 'verified'
+                                                and row.get('intent') == intents[0]['sequence']]
+                                    self.assertEqual(len(receipts), 1)
+                                    self.assertEqual(receipts[0]['evidence'], proof)
                             restored = []
                             def restore(unit, saved):
                                 if unit in ('federation-tick', 'nats-1'):
@@ -1344,6 +1382,12 @@ if not marker.exists():
                          'fixed-label NATS recovery fixture runs only on a dedicated macOS CI runner')
     def test_full_node_owned_nats_group_failure_holds_clients(self):
         self.exercise_full_node_owned_nats_recovery(False, True)
+
+    @unittest.skipUnless(sys.platform == 'darwin'
+                         and os.environ.get('OPENCLAW_CI_FULL_NODE_LISTENER_FIXTURE') == '1',
+                         'fixed-label NATS stop fixture runs only on a dedicated macOS CI runner')
+    def test_full_node_owned_nats_failed_stop_keeps_hold(self):
+        self.exercise_full_node_owned_nats_recovery(False, fail_stop=True)
 
     def test_owned_nats_readiness_binds_listening_ports_to_owner(self):
         port, monitor = free_port(), free_port()
