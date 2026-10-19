@@ -87,7 +87,7 @@ class AbortCleanup(fixture.HostCheckpoint):
                    'store_relative_paths': committed['manifest']['store_relative_paths'],
                    'store_roles': sorted(committed['manifest']['stores'])}
         host_vm_capture.publish_pinned_capture(self.capture, capture,
-                                               require_committed(self.capture)['checkpoint'])
+                                               require_committed(self.capture)['checkpoint'], window_pins_source=self.capture / 'WINDOW_PINS.json')
         self.flags = {self.source: stat.UF_IMMUTABLE, self.clone: 0}
         real_lstat = pathlib.Path.lstat
 

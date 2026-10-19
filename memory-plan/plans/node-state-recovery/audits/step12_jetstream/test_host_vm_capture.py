@@ -186,6 +186,14 @@ def helper_snapshot(capture_dir, worker_pid):
     return '\n' + '\n'.join(lines)
 
 
+def window_pins_path(root):
+    from test_nats_identity import fixture
+
+    path = root / 'window-pins.json'
+    write_record(path, fixture()[1])
+    return path
+
+
 class VmstateGateTest(unittest.TestCase):
     def test_host_commit_refuses_a_vm_already_stopped(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-late-guest-commit-') as temporary:
@@ -458,7 +466,7 @@ class VmstateGateTest(unittest.TestCase):
             output = durable / 'capture'
             with mock.patch.object(pathlib.Path, 'home', return_value=root):
                 with self.assertRaisesRegex(RuntimeError, 'requires a verified acceptance or abort'):
-                    capture(host, stores, output, 5)
+                    capture(host, stores, window_pins_path(root), output, 5)
             self.assertFalse(output.exists())
 
     def test_reconcile_refuses_capture_paused_before_clone(self):
@@ -509,7 +517,7 @@ class VmstateGateTest(unittest.TestCase):
 
             def worker():
                 try:
-                    capture(host_spec, store_spec, output, 5, fixture=True)
+                    capture(host_spec, store_spec, window_pins_path(root), output, 5, fixture=True)
                 except Exception as error:
                     errors.append(error)
 
@@ -582,7 +590,7 @@ class VmstateGateTest(unittest.TestCase):
 
             def worker():
                 try:
-                    capture(host_spec, store_spec, output, 1, fixture=True)
+                    capture(host_spec, store_spec, window_pins_path(root), output, 1, fixture=True)
                 except Exception as error:
                     errors.append(error)
 
@@ -651,7 +659,7 @@ class VmstateGateTest(unittest.TestCase):
             output = root / 'capture'
             with mock.patch('host_vm_capture.preflight', side_effect=[before, stopped]):
                 with self.assertRaisesRegex(RuntimeError, 'identity changed'):
-                    capture(host_spec, store_spec, output, 1, fixture=True)
+                    capture(host_spec, store_spec, window_pins_path(root), output, 1, fixture=True)
             self.assertTrue((output / 'FAILED.json').exists())
             self.assertFalse((output / 'CAPTURE.json').exists())
             self.assertFalse((output / 'powered-off-image.asif').exists())
@@ -699,7 +707,7 @@ class VmstateGateTest(unittest.TestCase):
                     mock.patch.object(host_vm_capture, 'clone_only',
                                       side_effect=RuntimeError('clone boundary reached')) as clone:
                 with self.assertRaisesRegex(RuntimeError, expected):
-                    capture(host_spec, store_spec, output, 3, fixture=True)
+                    capture(host_spec, store_spec, window_pins_path(root), output, 3, fixture=True)
             self.assertEqual(clone.called, clone_expected)
             self.assertTrue((output / 'FAILED.json').exists())
             self.assertFalse((output / 'CAPTURE.json').exists())
@@ -753,7 +761,7 @@ class VmstateGateTest(unittest.TestCase):
                     mock.patch.object(host_vm_capture, 'require_committed'), \
                     mock.patch('host_vm_capture.clone_only') as clone:
                 with self.assertRaisesRegex(RuntimeError, 'completed image guard'):
-                    capture(host_spec, store_spec, output, 1, fixture=True)
+                    capture(host_spec, store_spec, window_pins_path(root), output, 1, fixture=True)
             clone.assert_not_called()
             self.assertTrue((output / 'FAILED.json').exists())
             self.assertFalse((output / 'CAPTURE.json').exists())
@@ -801,7 +809,7 @@ class VmstateGateTest(unittest.TestCase):
                     mock.patch.object(host_vm_capture, 'clone_only',
                                       side_effect=RuntimeError('clone boundary reached')) as clone:
                 with self.assertRaisesRegex(RuntimeError, 'commitment input is missing'):
-                    capture(host, stores, output, 1, fixture=True)
+                    capture(host, stores, window_pins_path(root), output, 1, fixture=True)
             clone.assert_not_called()
             self.assertTrue((output / 'FAILED.json').exists())
             self.assertFalse((output / 'CAPTURE.json').exists())
@@ -928,9 +936,10 @@ class HostCaptureTest(unittest.TestCase):
             preflight(spec, self.root / 'source-attached')
         self.assertTrue((self.root / 'source-attached' / 'FAILED.json').exists())
         self.eject()
+        pins = window_pins_path(self.root)
         unsafe = self.root / 'unsafe-production-path'
         refused_path = subprocess.run([sys.executable, str(CAPTURE), str(spec),
-                                       str(store_spec), str(unsafe), '1'], capture_output=True)
+                                       str(store_spec), str(pins), str(unsafe), '1'], capture_output=True)
         self.assertNotEqual(refused_path.returncode, 0)
         self.assertFalse(unsafe.exists())
         holder = subprocess.Popen([sys.executable, '-c',
@@ -941,7 +950,7 @@ class HostCaptureTest(unittest.TestCase):
         self.addCleanup(holder.stdin.close)
         time.sleep(0.2)
         output = self.root / 'capture'
-        worker = subprocess.Popen([sys.executable, str(CAPTURE), str(spec), str(store_spec),
+        worker = subprocess.Popen([sys.executable, str(CAPTURE), str(spec), str(store_spec), str(pins),
                                    str(output), '20', '--fixture'], stdout=subprocess.DEVNULL,
                                   stderr=subprocess.PIPE)
         marks = [('worker spawned', time.time())]
@@ -1298,7 +1307,7 @@ class HostCaptureTest(unittest.TestCase):
         self.addCleanup(second_holder.stdin.close)
         time.sleep(0.2)
         refused = self.root / 'no-shutdown'
-        no_stop = subprocess.run([sys.executable, str(CAPTURE), str(spec), str(store_spec),
+        no_stop = subprocess.run([sys.executable, str(CAPTURE), str(spec), str(store_spec), str(pins),
                                   str(refused), '1', '--fixture'], capture_output=True)
         self.assertNotEqual(no_stop.returncode, 0)
         self.assertTrue((refused / 'FAILED.json').exists())
@@ -1373,7 +1382,7 @@ class HostCaptureTest(unittest.TestCase):
         time.sleep(0.2)
         failed_capture = self.root / 'failed-capture'
         failed_worker = subprocess.Popen([sys.executable, str(CAPTURE), str(spec),
-                                          str(wrong_store_spec), str(failed_capture), '20', '--fixture'],
+                                          str(wrong_store_spec), str(pins), str(failed_capture), '20', '--fixture'],
                                          stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         self.processes.append(failed_worker)
         deadline = time.monotonic() + 15

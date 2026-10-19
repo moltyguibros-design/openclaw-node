@@ -59,9 +59,6 @@ def prepared(test):
             fixture = policy_fixture.captured(test, image=True)
     finally:
         os.umask(fixture_mask)
-    path = root / 'table.json'
-    path.write_bytes(envelope.encoded(fixture.table))
-    path.chmod(0o600)
     return fixture
 
 
@@ -639,13 +636,16 @@ class Consumer(unittest.TestCase):
     def test_root_and_each_fixed_input_fence_precede_reader_and_collection(self):
         fixture = prepared(self)
         root = fixture.temp.resolve()
+        path = root / 'envelope.json'
+        path.write_bytes(envelope.encoded({}))
+        path.chmod(0o600)
         for path, mode in ((root, 0o755), (root / 'capture', 0o755), (root / 'data', 0o755),
-                           (root / 'table.json', 0o644)):
+                           (root / 'envelope.json', 0o644)):
             old = path.stat().st_mode & 0o777
             path.chmod(mode)
             with self.subTest(path=path), patch.object(envelope, 'image_process_policy') as reader, \
                  patch.object(envelope, 'collect_envelope') as collect, self.assertRaises(envelope.Refused):
-                envelope.inspect_owned(root, fixture=True)
+                envelope.inspect_owned(root, fixture=True, scripted=True)
             reader.assert_not_called()
             collect.assert_not_called()
             path.chmod(old)
@@ -671,19 +671,20 @@ class Consumer(unittest.TestCase):
             envelope.inspect_owned(root, fixture=True)
         reader.assert_not_called()
 
-    def test_canonical_private_single_link_table_is_required(self):
+    def test_canonical_private_single_link_envelope_is_required(self):
         fixture = prepared(self)
         root = fixture.temp.resolve()
-        path = root / 'table.json'
-        for raw_bytes in (json.dumps(fixture.table).encode(), b'{}\n'):
+        path = root / 'envelope.json'
+        for raw_bytes in (b'{}\n', b' {}'):
             path.write_bytes(raw_bytes)
+            path.chmod(0o600)
             with patch.object(envelope, 'image_process_policy') as reader, self.assertRaises(envelope.Refused):
-                envelope.inspect_owned(root, fixture=True)
+                envelope.inspect_owned(root, fixture=True, scripted=True)
             reader.assert_not_called()
-        path.write_bytes(envelope.encoded(fixture.table))
-        os.link(path, root / 'table-link')
-        with patch.object(envelope, 'collect_envelope', return_value={}), self.assertRaises(envelope.Refused):
-            envelope.inspect_owned(root, fixture=True)
+        path.write_bytes(envelope.encoded({}))
+        os.link(path, root / 'envelope-link')
+        with self.assertRaisesRegex(envelope.Refused, 'not owner-private'):
+            envelope.read_private(path)
 
     def test_private_reader_byte_bound_and_read_identity_are_independent(self):
         root = owned(self)

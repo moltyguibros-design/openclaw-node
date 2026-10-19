@@ -71,7 +71,7 @@ def write_checkpoint_record(path, committed, **changes):
     return record
 
 
-def drive_capture_worker(parent, store_spec, while_running, during_extract=None, second_stop=None):
+def drive_capture_worker(parent, store_spec, window_pins, while_running, during_extract=None, second_stop=None):
     """Run the real host_vm_capture.capture() worker to CAPTURE.json publication without a VM.
 
     Owned stand-ins, all host-side and not under test here: VM power/holder samples (preflight,
@@ -126,7 +126,7 @@ def drive_capture_worker(parent, store_spec, while_running, during_extract=None,
 
     def worker():
         try:
-            host_vm_capture.capture(host, store_spec, output, 30, fixture=True)
+            host_vm_capture.capture(host, store_spec, window_pins, output, 30, fixture=True)
         except Exception as error:  # the caller asserts on it
             errors.append(error)
 
@@ -170,7 +170,13 @@ class HostCheckpoint(guest.CaptureCheckpoint):
         write_record(self.capture / 'ARMED.json', {
             'scope': ARM_SCOPE, 'capture_nonce': self.nonce, 'vm_uuid': PRIOR['vm_uuid'],
             'host_boot_session': 'boot', 'image_device': 1, 'image_inode': 2})
-        self.armed = (self.capture / 'ARMED.json').read_bytes()
+        self.window_pins = self.capture / 'WINDOW_PINS.json'
+        write_record(self.window_pins, self.table)
+        armed_path = self.capture / 'ARMED.json'
+        armed_value = json.loads(armed_path.read_bytes())
+        armed_path.unlink()
+        write_record(armed_path, {**armed_value, 'window_pins_sha256': sha(self.window_pins.read_bytes())})
+        self.armed = armed_path.read_bytes()
         self.spec = self.temp / 'stores.json'
         write_record(self.spec, {'data_volume_uuid': 'A' * 36, 'stores': [
             {'role': role, 'relative_path': identity_fixture.STORES[guest.UNIT_OF[role]][1:]}
@@ -207,7 +213,7 @@ class HostCheckpoint(guest.CaptureCheckpoint):
 
     def frozen(self, records=None):
         return verify_frozen_checkpoint(self.capture, records if records is not None else self.journal._read(),
-                                        table=self.table, configs=self.configs,
+                                         configs=self.configs,
                                         binary=identity_fixture.BINARY, home=identity_fixture.HOME)
 
     def refuses_checkpoint(self, pattern, path, **options):
@@ -218,7 +224,7 @@ class HostCheckpoint(guest.CaptureCheckpoint):
     def publish(self):
         """The worker's real pinned publication; only the clone/extraction fields are stand-ins."""
         return host_vm_capture.publish_pinned_capture(self.capture, dict(UNREAD),
-                                                      require_committed(self.capture)['checkpoint'])
+                                                      require_committed(self.capture)['checkpoint'], window_pins_source=self.capture / 'WINDOW_PINS.json')
 
     def rewrite(self, name, **changes):
         """A same-uid host rewrite of one capture-directory record, in write_record's format."""
@@ -533,7 +539,7 @@ class CapturePin(HostCheckpoint):
             flow['record'] = self.checkpoint(manifest=manifest)
             commit_checkpoint(self.host, output, self.journal_file(flow['record']))
 
-        output, error = drive_capture_worker(self.temp / 'worker', self.spec, while_running,
+        output, error = drive_capture_worker(self.temp / 'worker', self.spec, self.window_pins, while_running,
                                              during_extract, second_stop)
         return output, error, flow
 

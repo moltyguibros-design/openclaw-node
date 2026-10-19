@@ -12,12 +12,13 @@ fixture VM, the locked arm record, the clone's identity (device, inode, size, mt
 and hash and the Data volume UUID are checked and must be equal. The receipt lists the metadata of
 every file the reader actually read; it is published whole and exclusively, or not at all.
 
-Production refuses: no host-pinned B3 table or protected acceptance root exists, and this tool
+Production refuses: no protected B3 provenance or protected acceptance root exists, and this tool
 claims neither. Only a capture of the owned fixture VM (named by the capture record and by the
 host's own pinned started sample), inside an owner-private fixture parent (the native fixture
 capture's or the owned tests'), is mounted; that check is positive, so no HOME override or deeper
-path reaches the durable recovery directory. The table is the caller's and is never read from the
-image. D196 records one native CI runner's mount/ownership/identity observations; they do not
+path reaches the durable recovery directory. The table is bound into the arm before the checkpoint
+and consumed only through CAPTURE.json's pins; it is never read from the image or supplied at
+extraction. D196 records one native CI runner's mount/ownership/identity observations; they do not
 establish end-to-end stopped-image reader acceptance or behavior on other systems.
 
 Every failure keeps its primary exception. Cleanup (unmount, eject, absence check, mount point
@@ -400,7 +401,7 @@ def capture_locks(capture_dir, directory_fd=None):
     return held
 
 
-def read_journal_inputs(capture_dir, output, *, table, fixture=False):
+def read_journal_inputs(capture_dir, output, *, fixture=False):
     """Mount the fixture capture's clone read-only, read its journal inputs, release, receipt."""
     require(fixture, PRODUCTION_REFUSAL)
     capture_dir = pathlib.Path(capture_dir)
@@ -423,7 +424,7 @@ def read_journal_inputs(capture_dir, output, *, table, fixture=False):
             record_failure(output, 'lock', error, None)
             raise
         try:
-            return locked_read(capture_dir, output, table, locks[-1])
+            return locked_read(capture_dir, output, locks[-1])
         finally:
             for fd in locks:
                 os.close(fd)
@@ -431,7 +432,7 @@ def read_journal_inputs(capture_dir, output, *, table, fixture=False):
         os.umask(previous)
 
 
-def locked_read(capture_dir, output, table, armed):
+def locked_read(capture_dir, output, armed):
     clone = capture_dir / CLONE
     mount = output / 'mount'
     stage = 'inputs'
@@ -466,7 +467,7 @@ def locked_read(capture_dir, output, table, armed):
         verified = verify_mount(mount, volume, before['data_volume_uuid'])
         device = os.stat(mount).st_dev
         stage = 'read'
-        summary = verify_stopped_journal(capture_dir, mount, table=table)
+        summary = verify_stopped_journal(capture_dir, mount)
         # What the reader returned is bound to what was mounted and committed.
         require(summary['read'] and all(row['device'] == device for row in summary['read']),
                 'the reader read outside the verified mount')
@@ -514,9 +515,8 @@ def locked_read(capture_dir, output, table, armed):
 
 
 if __name__ == '__main__':
-    require(len(sys.argv) in (4, 5) and sys.argv[4:] in ([], ['--fixture']),
-            'usage: host_journal_mount.py CAPTURE_DIR OUTPUT TABLE_JSON [--fixture]')
+    require(len(sys.argv) in (3, 4) and sys.argv[3:] in ([], ['--fixture']),
+            'usage: host_journal_mount.py CAPTURE_DIR OUTPUT [--fixture]')
     # Refused before the table is even read.
-    require(sys.argv[4:] == ['--fixture'], PRODUCTION_REFUSAL)
-    read_journal_inputs(sys.argv[1], sys.argv[2], table=json.loads(private_bytes(pathlib.Path(sys.argv[3]))),
-                        fixture=True)
+    require(sys.argv[3:] == ['--fixture'], PRODUCTION_REFUSAL)
+    read_journal_inputs(sys.argv[1], sys.argv[2], fixture=True)

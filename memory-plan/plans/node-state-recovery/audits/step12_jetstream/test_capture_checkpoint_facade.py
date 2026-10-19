@@ -101,7 +101,9 @@ class RealFacadeCheckpoint(unittest.TestCase):
             self.assertEqual(events[:4], ['baseline', 'intent', 'hold-published', 'verified'])
             self.assertEqual(events[4:], ['intent', 'verified'] * (len(STOP_ORDER) + len(SERVING_NATS)))
 
-            bindings = {'table': table, 'configs': configs,
+            window_pins = root / 'window-pins.json'
+            write_record(window_pins, table)
+            bindings = {'configs': configs,
                     'binary': identity_fixture.BINARY, 'home': identity_fixture.HOME}
             store_spec = root / 'stores.json'
             write_record(store_spec, {'data_volume_uuid': 'A' * 36, 'stores': [
@@ -127,11 +129,11 @@ class RealFacadeCheckpoint(unittest.TestCase):
                 commit(output.parent / 'host.json', store_spec, output, flow['guest'])
                 flow['record'] = journal.capture_ready(
                     hold, lambda unit, saved: {**copy.deepcopy(current[unit]), 'verified': True},
-                    armed=armed, manifest=flow['manifest'], **bindings)
+                    armed=armed, manifest=flow['manifest'], table=table, **bindings)
                 commit_checkpoint(output.parent / 'host.json', output,
                                   root / 'journals' / 'window' / ('%06d.json' % flow['record']['sequence']))
 
-            output, error = drive_capture_worker(root / 'host', store_spec, while_running)
+            output, error = drive_capture_worker(root / 'host', store_spec, window_pins, while_running)
             self.assertIsNone(error)
             record = flow['record']
             self.assertEqual(record['pre_head'], head)

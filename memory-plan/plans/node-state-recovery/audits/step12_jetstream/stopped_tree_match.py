@@ -13,7 +13,7 @@ import subprocess
 import sys
 
 from host_asif_extract import declared_path, private_parent, require, write_json
-from host_guest_commit import require_committed
+from host_guest_commit import bind_window_pins, private_bytes, require_committed
 from host_vm_capture import CAPTURE_SCOPE
 
 
@@ -195,6 +195,7 @@ def host_match(guest_path, extracted, output):
     committed_bytes = (extracted.parent / 'COMMITTED.json').read_bytes()
     ack_bytes = (extracted.parent / 'ACKED.json').read_bytes()
     checkpoint_bytes = (extracted.parent / 'CHECKPOINT.json').read_bytes()
+    window_pins_bytes = private_bytes(extracted.parent / 'WINDOW_PINS.json')
     host = json.loads(host_bytes)
     capture = json.loads(capture_bytes)
     guard = json.loads(guard_bytes)
@@ -208,6 +209,7 @@ def host_match(guest_path, extracted, output):
                 and capture['guest_commit_sha256'] == hashlib.sha256(committed_bytes).hexdigest()
                 and capture['guest_ack_sha256'] == hashlib.sha256(ack_bytes).hexdigest()
                 and capture.get('guest_checkpoint_sha256') == hashlib.sha256(checkpoint_bytes).hexdigest()
+                and capture.get('window_pins_sha256') == hashlib.sha256(window_pins_bytes).hexdigest()
                 and capture['clone_image_sha256'] == host['image_sha256']
                 and capture['extraction_manifest_sha256'] == sha256(manifest_path)
                 and capture['data_volume_uuid'] == host['data_volume_uuid']
@@ -215,6 +217,8 @@ def host_match(guest_path, extracted, output):
                 and capture['clone_size'] == image_path.stat().st_size
                 and sha256(image_path) == capture['clone_image_sha256'],
                 'capture receipt, cloned image and extracted stores differ')
+        bind_window_pins(extracted.parent, {'WINDOW_PINS.json': window_pins_bytes,
+                                           'COMMITTED.json': committed_bytes})
         committed = require_committed(extracted.parent)
         require(committed == {**json.loads(committed_bytes),
                               'checkpoint': json.loads(checkpoint_bytes)},
@@ -275,6 +279,7 @@ def host_match(guest_path, extracted, output):
                 and (extracted.parent / 'COMMITTED.json').read_bytes() == committed_bytes
                 and (extracted.parent / 'ACKED.json').read_bytes() == ack_bytes
                 and (extracted.parent / 'CHECKPOINT.json').read_bytes() == checkpoint_bytes
+                and (extracted.parent / 'WINDOW_PINS.json').read_bytes() == window_pins_bytes
                 and manifest_path.read_bytes() == host_bytes
                 and capture_path.read_bytes() == capture_bytes
                 and guard_path.read_bytes() == guard_bytes

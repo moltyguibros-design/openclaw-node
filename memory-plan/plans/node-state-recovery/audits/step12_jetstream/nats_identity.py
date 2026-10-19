@@ -199,6 +199,23 @@ def store_path(home, unit):
     return home + '/.openclaw/nats/' + ('jetstream' if unit == 'nats' else 'jetstream-' + unit[-1])
 
 
+def validate_window_pins(table):
+    require(isinstance(table, dict) and set(table) == set(ROLES.values())
+            and all(isinstance(pin, dict) and set(pin) == {'config_sha256', *IDENTITY}
+                    and isinstance(pin['config_sha256'], str) and DIGEST.fullmatch(pin['config_sha256'])
+                    and isinstance(pin['server_name'], str) and NAME.fullmatch(pin['server_name'])
+                    and isinstance(pin['store_dir'], str) and pin['store_dir'].startswith('/')
+                    and not pin['store_dir'].startswith('//')
+                    and posixpath.normpath(pin['store_dir']) == pin['store_dir']
+                    and not any(c.isspace() for c in pin['store_dir'])
+                    and (pin['cluster'] is None or isinstance(pin['cluster'], str)
+                         and NAME.fullmatch(pin['cluster']))
+                    for pin in table.values()), 'window pin table is incomplete or malformed')
+    members = {table[role]['cluster'] for role in ('member1', 'member2', 'member3')}
+    require(table['standalone']['cluster'] is None and len(members) == 1 and None not in members,
+            'window pins disagree on cluster membership')
+
+
 def bind_identities(prior, table, configs, *, binary, home):
     """Bind each NATS unit to its role through baseline argv and hash plus the window pin table.
 
@@ -209,13 +226,7 @@ def bind_identities(prior, table, configs, *, binary, home):
     require(isinstance(binary, str) and binary.startswith('/')
             and isinstance(home, str) and re.fullmatch(r'/Users/[A-Za-z0-9._-]+', home),
             'binding needs the fixed binary and home')
-    require(isinstance(table, dict) and set(table) == set(ROLES.values())
-            and all(isinstance(pin, dict) and set(pin) == {'config_sha256', *IDENTITY}
-                    and isinstance(pin['config_sha256'], str) and DIGEST.fullmatch(pin['config_sha256'])
-                    for pin in table.values()), 'window pin table is incomplete or malformed')
-    members = {table[role]['cluster'] for role in ('member1', 'member2', 'member3')}
-    require(table['standalone']['cluster'] is None and len(members) == 1 and None not in members,
-            'window pins disagree on cluster membership')
+    validate_window_pins(table)
     require(isinstance(configs, dict) and set(configs) == {config_path(home, unit) for unit in ROLES},
             'config bytes are not exactly the four bound paths')
     bound = {}

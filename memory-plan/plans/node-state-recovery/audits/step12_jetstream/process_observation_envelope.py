@@ -435,10 +435,9 @@ def owned_envelope(root, *, fixture=False, scripted=False):
     for path in (root, root / 'capture', root / 'data'):
         private_dir(path)
         require(path.resolve(strict=True) == path, 'envelope fixture input is not literal')
-    table = read_private(root / 'table.json')
     if scripted:
         value = read_private(root / 'envelope.json')
-    policy = image_process_policy(root / 'capture', root / 'data', table=table)['process_policy']
+    policy = image_process_policy(root / 'capture', root / 'data')['process_policy']
     require(policy['uid'] == os.getuid(), 'envelope policy owner differs')
     for name in policy['roots']:
         path = pathlib.Path(name)

@@ -176,7 +176,7 @@ class Authentic(StoppedImage):
         before = snapshot(self.data)
         with mock.patch.object(preservation_journal.Journal, '__init__',
                                side_effect=AssertionError('Journal constructed')):
-            summary = verify_stopped_journal(self.capture, self.data, table=self.table)
+            summary = verify_stopped_journal(self.capture, self.data)
         self.assertEqual((summary['window'], summary['lineage']), ('window-1', ['window-1']))
         self.assertEqual(summary['config_modes'], {path: 0o600 for path in self.configs})
         self.assertEqual(summary['checkpoint_sha256'], self.record['sha256'])
@@ -615,8 +615,8 @@ class Refusals(StoppedImage):
 
 
 class Composition(StoppedImage):
-    def verify(self, table=None):
-        return verify_stopped_journal(self.capture, self.data, table=table if table is not None else self.table)
+    def verify(self):
+        return verify_stopped_journal(self.capture, self.data)
 
     def test_capture_pins_come_before_the_image_is_read(self):
         self.rewrite('CAPTURE.json', guest_checkpoint_sha256='0' * 64)
@@ -632,13 +632,9 @@ class Composition(StoppedImage):
             with self.assertRaisesRegex(RuntimeError, 'capture commitment differs from the pinned capture record'):
                 self.verify()
 
-    def test_the_caller_table_decides_the_identities(self):
-        table = copy.deepcopy(self.table)
-        table['member2']['config_sha256'] = '0' * 64
-        with self.assertRaisesRegex(Refused, 'nats-2: baseline config hash differs from the window pin'):
-            self.verify(table)
-        with self.assertRaisesRegex(Refused, 'window pin table is incomplete or malformed'):
-            self.verify({})
+    def test_a_caller_cannot_supply_a_table_after_capture(self):
+        with self.assertRaises(TypeError):
+            verify_stopped_journal(self.capture, self.data, table=self.table)
 
     def test_image_config_bytes_must_be_the_baseline_ones(self):
         path = config_file(self.data, 'nats-3')

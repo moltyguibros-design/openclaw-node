@@ -120,7 +120,7 @@ read = "found = read_inputs(root / 'data', commitment)"
 change('image-read-duplicated', read, read + "\n    read_inputs(root / 'data', commitment)",
        'Consumer.test_honest_frozen_path_once_then_scripted_validator_without_constructors_or_writes',
        "Expected 'read_inputs' to have been called once")
-verify = "    verified = verify_frozen_checkpoint(capture_dir, found['records'], table=table,\n                                        configs=found['configs'], binary=found['binary'], home=found['home'])\n"
+verify = "    verified = verify_frozen_checkpoint(capture_dir, found['records'],\n                                        configs=found['configs'], binary=found['binary'], home=found['home'])\n"
 change('frozen-verifier-skipped', verify, "    verified = {'checkpoint_sha256': found['records'][-1]['sha256']}\n",
        'Consumer.test_honest_frozen_path_once_then_scripted_validator_without_constructors_or_writes',
        "Expected 'verify_frozen_checkpoint' to have been called once")

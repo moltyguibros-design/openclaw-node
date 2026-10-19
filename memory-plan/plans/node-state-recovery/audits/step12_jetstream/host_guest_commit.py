@@ -25,7 +25,7 @@ CHECKPOINT_KEYS = {'scope', 'at_utc', 'capture_nonce', 'commit_sha256', 'ack_sha
 HEX = re.compile(r'[0-9a-f]{64}')
 # CAPTURE.json field -> the commitment file whose exact bytes it pins.
 CAPTURE_PINS = {'guest_commit_sha256': 'COMMITTED.json', 'guest_ack_sha256': 'ACKED.json',
-                'guest_checkpoint_sha256': 'CHECKPOINT.json'}
+                'guest_checkpoint_sha256': 'CHECKPOINT.json', 'window_pins_sha256': 'WINDOW_PINS.json'}
 
 
 def private_bytes(path):
@@ -39,6 +39,32 @@ def private_bytes(path):
 
 def encoded(value):
     return (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode()
+
+
+def window_pin_bytes(raw):
+    from nats_identity import validate_window_pins
+
+    table = json.loads(raw)
+    require(raw == encoded(table), 'window pin table is not canonical')
+    validate_window_pins(table)
+    return table
+
+
+def require_window_pins(path):
+    raw = private_bytes(pathlib.Path(path))
+    return window_pin_bytes(raw), raw
+
+
+def bind_window_pins(capture_dir, pinned):
+    raw = pinned['WINDOW_PINS.json']
+    table = window_pin_bytes(raw)
+    arm_raw = private_bytes(pathlib.Path(capture_dir) / 'ARMED.json')
+    arm = json.loads(arm_raw)
+    committed = json.loads(pinned['COMMITTED.json'])
+    require(hashlib.sha256(arm_raw).hexdigest() == committed.get('arm_sha256')
+            and arm.get('window_pins_sha256') == hashlib.sha256(raw).hexdigest(),
+            'window pin table differs from the committed arm')
+    return table
 
 
 def require_committed(capture_dir):
@@ -291,10 +317,11 @@ def require_captured(capture_dir):
             and all(capture.get(key) == hashlib.sha256(pinned[name]).hexdigest()
                     for key, name in CAPTURE_PINS.items()),
             'capture record does not pin this checkpoint commitment')
+    bind_window_pins(capture_dir, pinned)
     return pinned
 
 
-def verify_frozen_checkpoint(capture_dir, records, *, table, configs, binary, home):
+def verify_frozen_checkpoint(capture_dir, records, *, configs, binary, home):
     """Verify a journal extracted from the stopped image against the host's own commitment only.
 
     The CAPTURE.json pins are required before require_committed() provenance is consumed, and
@@ -306,7 +333,8 @@ def verify_frozen_checkpoint(capture_dir, records, *, table, configs, binary, ho
                            'checkpoint': json.loads(pinned['CHECKPOINT.json'])},
             'capture commitment differs from the pinned capture record')
     return verify_capture_checkpoint(records, commitment,
-                                     table=table, configs=configs, binary=binary, home=home)
+                                     table=window_pin_bytes(pinned['WINDOW_PINS.json']),
+                                     configs=configs, binary=binary, home=home)
 
 
 if __name__ == '__main__':

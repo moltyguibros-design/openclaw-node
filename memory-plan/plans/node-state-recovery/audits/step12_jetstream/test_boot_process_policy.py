@@ -534,7 +534,7 @@ class FrozenPolicy(unittest.TestCase):
     def consume(self, fixture, records=None):
         return policy_module.frozen_process_policy(
             fixture.capture, fixture.records if records is None else records,
-            table=fixture.table, configs=fixture.configs,
+             configs=fixture.configs,
             binary=identity_fixture.BINARY, home=identity_fixture.HOME)
 
     def test_honest_checkpoint_returns_only_bound_authored_policy(self):
@@ -609,7 +609,7 @@ class FrozenPolicy(unittest.TestCase):
     def test_image_consumer_uses_real_reader_owner_metadata_without_writes(self):
         fixture = captured(self, image=True)
         before = image_fixture.snapshot(fixture.data)
-        result = policy_module.image_process_policy(fixture.capture, fixture.data, table=fixture.table)
+        result = policy_module.image_process_policy(fixture.capture, fixture.data)
         self.assertEqual(result['process_policy'], fixture.policy)
         self.assertEqual(result['owner_observation']['uid'], os.getuid())
         self.assertIn('reader lstat', result['owner_observation']['scope'])
@@ -622,7 +622,7 @@ class FrozenPolicy(unittest.TestCase):
         found['read'][-1]['uid'] += 1
         with patch.object(policy_module, 'read_inputs', return_value=found):
             with self.assertRaisesRegex(Refused, 'stopped-image reader ownership'):
-                policy_module.image_process_policy(fixture.capture, fixture.data, table=fixture.table)
+                policy_module.image_process_policy(fixture.capture, fixture.data)
 
     def test_image_commitment_must_match_pins_before_window_selection(self):
         fixture = captured(self, image=True)
@@ -632,7 +632,7 @@ class FrozenPolicy(unittest.TestCase):
              patch.object(policy_module, 'read_inputs', wraps=stopped_journal_inputs.read_inputs) as reader:
             observed = None
             try:
-                policy_module.image_process_policy(fixture.capture, fixture.data, table=fixture.table)
+                policy_module.image_process_policy(fixture.capture, fixture.data)
             except Refused as error:
                 observed = error
             self.assertIsInstance(observed, Refused)

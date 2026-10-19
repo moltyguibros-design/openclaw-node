@@ -56,11 +56,11 @@ def prepared(test, policy=False):
             fixture = policy_fixture.captured(test, image=True, absent=not policy)
     finally:
         os.umask(mask)
-    for name, value in (('table.json', fixture.table), ('held-jobs.json', jobs_for(fixture.records))):
+    for name, value in (('held-jobs.json', jobs_for(fixture.records)),):
         path = root / name
         path.write_bytes(comparator.envelope.encoded(value)); path.chmod(0o600)
     found = comparator.read_inputs(fixture.data, fixture.commitment)
-    comparator.verify_frozen_checkpoint(fixture.capture, found['records'], table=fixture.table,
+    comparator.verify_frozen_checkpoint(fixture.capture, found['records'],
                                         configs=found['configs'], binary=found['binary'], home=found['home'])
     return fixture
 
@@ -332,7 +332,7 @@ class Consumer(unittest.TestCase):
         alias = root.with_name('openclaw-owned-held-jobs-' + secrets.token_hex(8)); alias.symlink_to(root)
         self.addCleanup(alias.unlink)
         with self.assertRaises(RuntimeError): comparator.inspect_owned(alias, fixture=True, scripted=True)
-        for target in (root, root / 'capture', root / 'data', root / 'table.json', root / 'held-jobs.json'):
+        for target in (root, root / 'capture', root / 'data', root / 'capture' / 'WINDOW_PINS.json', root / 'held-jobs.json'):
             mode = target.stat().st_mode & 0o777
             target.chmod(0o755 if target.is_dir() else 0o644)
             try:

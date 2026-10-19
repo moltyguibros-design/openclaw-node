@@ -18,7 +18,7 @@ import sys
 import time
 
 from host_asif_extract import extract
-from host_guest_commit import CAPTURE_PINS, require_committed
+from host_guest_commit import CAPTURE_PINS, bind_window_pins, private_bytes, require_committed, require_window_pins
 from host_image_immutable import change_immutable
 from host_vm_preflight import owned_directory, preflight, require, write_record
 
@@ -63,7 +63,7 @@ def publish_capture_record(output, result):
     fsync_parent(output)
 
 
-def publish_pinned_capture(output, result, stopped_checkpoint):
+def publish_pinned_capture(output, result, stopped_checkpoint, *, window_pins_source):
     """Publish CAPTURE.json pinning the exact COMMITTED, ACKED and CHECKPOINT bytes.
 
     commit_checkpoint() needs a running VM, so only the checkpoint commitment first seen once the
@@ -71,9 +71,12 @@ def publish_pinned_capture(output, result, stopped_checkpoint):
     """
     with (output / 'ARMED.json').open('rb') as armed:
         fcntl.flock(armed, fcntl.LOCK_EX)
-        pinned = {key: (output / name).read_bytes() for key, name in CAPTURE_PINS.items()}
+        pinned = {key: private_bytes(output / name) for key, name in CAPTURE_PINS.items()}
         digests = {key: hashlib.sha256(raw).hexdigest() for key, raw in pinned.items()}
         checkpoint = require_committed(output)['checkpoint']
+        bind_window_pins(output, {name: pinned[key] for key, name in CAPTURE_PINS.items()})
+        require(require_window_pins(window_pins_source)[1] == pinned['window_pins_sha256'],
+                'window pin table changed during capture')
         # The validated checkpoint records the COMMITTED and ACKED digests, so equal digests bind
         # those pins byte for byte to what require_committed() just accepted. CHECKPOINT itself
         # must parse to that commitment and still hold the pinned bytes once it was accepted.
@@ -146,10 +149,11 @@ def guarded_source(output, initial, observed):
     return file_hash(receipt_path)
 
 
-def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False):
+def capture(host_spec_path, store_spec_path, window_pins_path, output, wait_seconds, fixture=False):
     os.umask(0o077)
     host_spec_path = pathlib.Path(host_spec_path)
     store_spec_path = pathlib.Path(store_spec_path)
+    window_pins_path = pathlib.Path(window_pins_path)
     output = pathlib.Path(output)
     owned_directory(output.parent)
     require(not os.path.lexists(output), 'capture output already exists')
@@ -168,6 +172,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
     require(isinstance(stores['stores'], list) and len(stores['stores']) == 4,
             'capture requires four store declarations')
     require(1 <= wait_seconds <= 3600, 'shutdown wait must be bounded to one hour')
+    window_pins, window_pins_raw = require_window_pins(window_pins_path)
     output.mkdir(mode=0o700)
     fsync_parent(output.parent)
     active_fd = None
@@ -179,12 +184,14 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
         fsync_parent(output)
         first = preflight(host_spec_path, output / 'before-shutdown')
         require(first['state'] == 'started', 'capture did not begin with a running VM')
+        write_record(output / 'WINDOW_PINS.json', window_pins)
         write_record(output / 'ARMED.json', {
             'scope': 'waiting for external guest shutdown; no stop request issued',
             'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'capture_nonce': secrets.token_hex(32),
             'vm_uuid': host['uuid'], 'host_boot_session': first['host_boot_session'],
             'image_device': first['image_device'], 'image_inode': first['image_inode'],
+            'window_pins_sha256': hashlib.sha256(window_pins_raw).hexdigest(),
         })
         deadline = time.monotonic() + wait_seconds
         observation = None
@@ -290,7 +297,8 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
             'store_roles': sorted(extracted['stores']),
             'vm_state_at_final_check': 'stopped',
         }
-        return publish_pinned_capture(output, result, stopped_checkpoint)
+        return publish_pinned_capture(output, result, stopped_checkpoint,
+                                      window_pins_source=window_pins_path)
     except Exception as error:
         if os.path.lexists(output / 'ARMED.json'):
             with (output / 'ARMED.json').open('rb') as armed:
@@ -305,7 +313,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
 
 
 if __name__ == '__main__':
-    require(len(sys.argv) in (5, 6),
-            'usage: host_vm_capture.py HOST_SPEC STORE_SPEC OUTPUT WAIT_SECONDS [--fixture]')
-    require(len(sys.argv) == 5 or sys.argv[5] == '--fixture', 'invalid capture option')
-    capture(sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), len(sys.argv) == 6)
+    require(len(sys.argv) in (6, 7),
+            'usage: host_vm_capture.py HOST_SPEC STORE_SPEC WINDOW_PINS OUTPUT WAIT_SECONDS [--fixture]')
+    require(len(sys.argv) == 6 or sys.argv[6] == '--fixture', 'invalid capture option')
+    capture(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], int(sys.argv[5]), len(sys.argv) == 7)

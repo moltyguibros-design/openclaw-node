@@ -193,11 +193,11 @@ class FakeHost:
                     'mntfromname': self.mounted[1], **changes}
         return {'flags': 0x00005000, 'fstypename': 'apfs', 'mntonname': '/', 'mntfromname': '/dev/disk3s1s1'}
 
-    def reader(self, capture_dir, root, *, table):
+    def reader(self, capture_dir, root):
         self.reads.append(str(root))
         for hook in self.during_read:
             hook()
-        summary = self.real_reader(capture_dir, root, table=table)
+        summary = self.real_reader(capture_dir, root)
         return self.summary_change(summary) if self.summary_change else summary
 
 
@@ -228,12 +228,11 @@ class MountCase(fixture.StoppedImage):
         host_vm_capture.publish_pinned_capture(self.capture, {
             'scope': CAPTURE_SCOPE, 'vm_state_at_final_check': 'stopped', 'vm_uuid': FIXTURE_UUID,
             'clone_image_sha256': sha(self.clone_bytes), 'clone_size': len(self.clone_bytes),
-            'data_volume_uuid': UUID, **changes}, require_committed(self.capture)['checkpoint'])
+            'data_volume_uuid': UUID, **changes}, require_committed(self.capture)['checkpoint'], window_pins_source=self.capture / 'WINDOW_PINS.json')
 
-    def run_mount(self, output=None, table=None, fixture_flag=True):
+    def run_mount(self, output=None, fixture_flag=True):
         try:
             return wrapper.read_journal_inputs(self.capture, output or self.output,
-                                               table=self.table if table is None else table,
                                                fixture=fixture_flag), None
         except BaseException as error:
             return None, error
@@ -396,13 +395,10 @@ class EntryRefusals(MountCase):
         self.assertFalse(os.path.lexists(self.output))
 
     def test_cli_runs_only_as_the_fixture_and_its_usage_is_exact(self):
-        table = self.temp / 'table.json'
-        fixture.host.write_private(table, encoded(self.table))
-        for argv, pattern in (([str(table)], '^production journal mount requires'),
-                              ([str(self.temp / 'missing-table.json')], '^production journal mount requires'),
-                              ([str(table), '--production'], '^usage: '),
-                              ([str(table), '--fixture', '--fixture'], '^usage: '),
-                              ([], '^usage: ')):
+        for argv, pattern in (([], '^production journal mount requires'),
+                              (['--production'], '^usage: '),
+                              (['--fixture', '--fixture'], '^usage: '),
+                              ([str(self.temp / 'missing-table.json')], '^usage: ')):
             with self.subTest(argv), mock.patch.object(sys, 'argv', ['host_journal_mount.py', str(self.capture),
                                                                     str(self.output), *argv]), \
                     mock.patch('subprocess.run', side_effect=AssertionError('command run')):
@@ -914,13 +910,11 @@ class Reader(MountCase):
                 self.released(failed)
                 self.assertEqual(len(self.fake.reads), 1)
 
-    def test_the_caller_table_decides_the_identities(self):
-        table = copy.deepcopy(self.table)
-        table['member2']['config_sha256'] = '0' * 64
-        receipt, error = self.run_mount(table=table)
-        self.assertIsInstance(error, Refused)
-        self.assertRegex(str(error), 'nats-2: baseline config hash differs from the window pin')
-        self.released(self.failed())
+    def test_a_caller_cannot_supply_a_table_after_capture(self):
+        with self.assertRaises(TypeError):
+            wrapper.read_journal_inputs(self.capture, self.output, table=self.table, fixture=True)
+        self.assertEqual(self.fake.log, [])
+        self.assertFalse(self.output.exists())
 
 
 class Cleanup(MountCase):
@@ -1531,7 +1525,7 @@ class ReaderProbe(MountCase):
                 with mock.patch.object(stopped_journal_inputs, 'verify_frozen_checkpoint',
                                        wraps=stopped_journal_inputs.verify_frozen_checkpoint) as frozen:
                     probe.reader_case(self.capture, self.capture / ('journal-read-' + name.replace('-', '')),
-                                      self.table, expected, row)
+                                      expected, row)
                 self.assertEqual(frozen.call_count, int(name in ('intact', 'changed-config')))
                 if expected is None:
                     self.assertEqual(row['receipt']['reader']['checkpoint_sha256'], self.record['sha256'])
@@ -1540,18 +1534,18 @@ class ReaderProbe(MountCase):
                     self.assertTrue(row['failure']['cleanup']['clean'])
 
     def test_a_verifier_bypass_is_caught_by_the_changed_config_oracle(self):
-        authentic = self.fake.real_reader(self.capture, self.data, table=self.table)
+        authentic = self.fake.real_reader(self.capture, self.data)
         self.fake.image = self.image()
         probe.change_reader_seed(self.fake.image, 'changed-config')
         with mock.patch.object(stopped_journal_inputs, 'verify_frozen_checkpoint', return_value=authentic):
             with self.assertRaisesRegex(RuntimeError, '^reader accepted the damaged fixture$'):
-                probe.reader_case(self.capture, self.output, self.table,
+                probe.reader_case(self.capture, self.output,
                                   dict(probe.READER_CASES)['changed-config'], {})
 
     def test_an_unrelated_refusal_or_missing_known_disk_check_cannot_satisfy_the_oracle(self):
         self.fake.mount = 'fail'
         with self.assertRaisesRegex(RuntimeError, '^reader refused for another reason: '):
-            probe.reader_case(self.capture, self.output, self.table, 'unknown entry', {})
+            probe.reader_case(self.capture, self.output, 'unknown entry', {})
         self.fake.mount = 'ok'
         original = wrapper.release
 
@@ -1562,7 +1556,7 @@ class ReaderProbe(MountCase):
 
         with mock.patch.object(wrapper, 'release', side_effect=vacuous):
             with self.assertRaisesRegex(RuntimeError, '^reader did not confirm its attached disk gone$'):
-                probe.reader_case(self.capture, self.capture / 'journal-read-vacuous', self.table, None, {})
+                probe.reader_case(self.capture, self.capture / 'journal-read-vacuous', None, {})
 
 
 class ReaderSeed(unittest.TestCase):
@@ -1655,7 +1649,7 @@ class ReaderSeed(unittest.TestCase):
             committed = require_committed(capture)
             self.assertEqual(committed['manifest']['data_volume_uuid'], UUID)
             with mock.patch('preservation_journal.NATS_ROOT_UID', os.getuid()):
-                summary = stopped_journal_inputs.verify_stopped_journal(capture, seed, table=seeded['table'])
+                summary = stopped_journal_inputs.verify_stopped_journal(capture, seed)
             self.assertEqual(summary['checkpoint_sha256'], seeded['checkpoint_sha256'])
             self.assertEqual(summary['pre_head'], seeded['pre_head'])
             self.assertEqual(summary['window'], 'window-1')
@@ -1690,8 +1684,8 @@ class ReaderRun(unittest.TestCase):
             if case == 'intact':
                 row['fixture'] = self.fixture
 
-        def reader(capture, output, table, expected, row):
-            read.append((output.name, table, expected))
+        def reader(capture, output, expected, row):
+            read.append((output.name, expected))
             if fault == 'second-case' and len(read) == 2:
                 raise RuntimeError('owned later read failure')
             row['receipt'] = {'reader': {key: self.fixture[key] for key in ('checkpoint_sha256', 'pre_head')}}
@@ -1724,7 +1718,7 @@ class ReaderRun(unittest.TestCase):
     def test_complete_reader_loop_checks_every_case_and_removes_only_its_directory(self):
         code, read, published = self.run_reader()
         self.assertEqual(code, 0)
-        self.assertEqual(read, [('journal-read-' + name.replace('-', ''), self.fixture['table'], expected)
+        self.assertEqual(read, [('journal-read-' + name.replace('-', ''), expected)
                                 for name, expected in probe.READER_CASES])
         self.assertEqual(len(published), len(probe.READER_CASES))
         for call in published:

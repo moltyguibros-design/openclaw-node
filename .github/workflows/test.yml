@@ -107,6 +107,8 @@ jobs:
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_nats_identity.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_window_pin_binding.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_window_pin_binding.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_owned_kickstart_trace.py
@@ -278,6 +280,8 @@ jobs:
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint_facade.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_window_pin_binding.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_window_pin_binding.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_owned_kickstart_trace.py

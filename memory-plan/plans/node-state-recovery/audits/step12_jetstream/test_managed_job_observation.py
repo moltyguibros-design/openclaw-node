@@ -55,7 +55,7 @@ def prepared(test, policy=False):
             fixture = policy_fixture.captured(test, image=True, absent=not policy)
     finally:
         os.umask(mask)
-    for name, value in (('table.json', fixture.table), ('managed-jobs.json', collected(fixture.records))):
+    for name, value in (('managed-jobs.json', collected(fixture.records)),):
         path = root / name
         path.write_bytes(observation.envelope.encoded(value)); path.chmod(0o600)
     return fixture

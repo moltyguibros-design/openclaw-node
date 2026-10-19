@@ -28,11 +28,12 @@ Every path is fixed by the one home all four committed store paths already name.
 window is the unique direct child of the fixed journal parent whose last record carries the
 committed checkpoint digest; every other window must be its finished ancestor through the
 baseline predecessor links Journal writes. The node receipt is consistency evidence only, never
-the selector. The B3 pin table is the caller's: it is never read from the image or rebuilt from
-the checkpoint's identities. Its check is only as strong as its host provenance: a table rebuilt
-from the image (the checkpoint's own identities, or the baseline hashes with the image's configs)
-verifies, so the caller must pass B3's pre-window pin from a host-held record, a gate that is the
-caller's and still open. The NATS binary is the one the journal baseline names for all four
+the selector. The role pin table comes only from WINDOW_PINS.json, whose canonical bytes are
+bound into the host arm before the checkpoint and pinned in CAPTURE.json. It is never read from
+the image or supplied by the extraction caller. This is content binding, not protected B3
+provenance: identical table bytes reconstructed later are indistinguishable, and a same-uid actor
+who rewrites the whole host chain and image journal remains within D189's limit. Actual B3
+origin and the protected acceptance root are still open. The NATS binary is the one the journal baseline names for all four
 units; no pin binds it beyond that. Selection trusts the pinned commitment, so D189's residuals
 stand unchanged: a same-uid pre-stop CHECKPOINT rewrite and recommit, or a coordinated CAPTURE
 rewrite, selects whatever window matches the rewritten digest.
@@ -272,13 +273,13 @@ def read_inputs(root, commitment):
                      for row in budget['read']]}
 
 
-def verify_stopped_journal(capture_dir, root, *, table):
+def verify_stopped_journal(capture_dir, root):
     """verify_frozen_checkpoint() over the stopped image's own journal window and config bytes.
 
     The CAPTURE.json pins come first (D189): only the pinned commitment's digest selects a window,
     and verify_frozen_checkpoint() then rechecks the pins, the commitment and every record.
-    `table` must be B3's pre-window pin from a host-held record; one rebuilt from the image
-    verifies, so its provenance is the caller's gate.
+    The role table is consumed only from the capture-pinned bytes bound into the original arm.
+    Protected B3 provenance remains a separate gate.
     """
     pinned = require_captured(capture_dir)
     commitment = require_committed(capture_dir)
@@ -286,7 +287,7 @@ def verify_stopped_journal(capture_dir, root, *, table):
                            'checkpoint': json.loads(pinned['CHECKPOINT.json'])},
             'capture commitment differs from the pinned capture record')
     found = read_inputs(root, commitment)
-    summary = verify_frozen_checkpoint(capture_dir, found['records'], table=table,
+    summary = verify_frozen_checkpoint(capture_dir, found['records'],
                                        configs=found['configs'], binary=found['binary'],
                                        home=found['home'])
     return {**summary, 'window': found['window'], 'lineage': found['lineage'],

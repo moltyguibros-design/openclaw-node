@@ -170,6 +170,7 @@ ABORT_CLEANUP_SCOPE = ('owned completed-capture clone cleanup while source remai
                        'not ABORT, acceptance or boot permission; evidence reads foreclosed; '
                        'host spec forward pin only; flags sampled, not continuity; reason carries no authority')
 ABORT_INPUTS = ('ARMED.json', 'COMMITTED.json', 'ACKED.json', 'CHECKPOINT.json', 'CAPTURE.json',
+                'WINDOW_PINS.json',
                 'GUARD_INTENT.json', 'GUARD.json', 'before-shutdown/preflight.json',
                 'after-guard/preflight.json')
 TERMINALS = ('ABORT.json', 'ACCEPTED.json', 'BOOTABLE.json', 'DECISION.json')

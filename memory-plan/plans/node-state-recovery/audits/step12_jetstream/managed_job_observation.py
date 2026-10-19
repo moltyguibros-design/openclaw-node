@@ -154,7 +154,6 @@ def owned_records(root, *, fixture=False):
     for path in (root, root / 'capture', root / 'data'):
         envelope.private_dir(path)
         require(path.resolve(strict=True) == path, 'managed-job fixture input is not literal')
-    table = envelope.read_private(root / 'table.json')
     capture_dir = root / 'capture'
     pinned = require_captured(capture_dir)
     commitment = require_committed(capture_dir)
@@ -162,7 +161,7 @@ def owned_records(root, *, fixture=False):
                            'checkpoint': json.loads(pinned['CHECKPOINT.json'])},
             'capture commitment differs from the pinned capture record')
     found = read_inputs(root / 'data', commitment)
-    verified = verify_frozen_checkpoint(capture_dir, found['records'], table=table,
+    verified = verify_frozen_checkpoint(capture_dir, found['records'],
                                         configs=found['configs'], binary=found['binary'], home=found['home'])
     uid = held.owner_uid(found['records'])
     require(found['read'] and all(row['uid'] == uid for row in found['read']),

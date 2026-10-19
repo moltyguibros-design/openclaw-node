@@ -432,11 +432,11 @@ def reader_write_phase(image, temp, seed, capture, disks, case, row):
     point.rmdir()
 
 
-def reader_case(capture, output, table, expected, row):
+def reader_case(capture, output, expected, row):
     from preservation_checks import Refused
 
     try:
-        receipt = wrapper.read_journal_inputs(capture, output, table=table, fixture=True)
+        receipt = wrapper.read_journal_inputs(capture, output, fixture=True)
     except Exception as error:
         row['refusal'] = {'type': type(error).__name__, 'message': str(error)}
         if expected is None:
@@ -488,11 +488,11 @@ def reader_run(output):
                 'scope': CAPTURE_SCOPE, 'vm_state_at_final_check': 'stopped', 'vm_uuid': FIXTURE_UUID,
                 'clone_image_sha256': before['sha256'], 'clone_size': before['size'],
                 'data_volume_uuid': report['fixture']['data_volume_uuid']},
-                require_committed(capture)['checkpoint'])
+                require_committed(capture)['checkpoint'], window_pins_source=capture / 'WINDOW_PINS.json')
             pins = require_captured(capture)
             with mock.patch('preservation_journal.NATS_ROOT_UID', os.getuid()):
                 reader_case(capture, capture / ('journal-read-' + name.replace('-', '')),
-                            report['fixture']['table'], expected, row)
+                            expected, row)
             row['image_after'] = image_state(image)
             require(row['image_after'] == before, 'reader changed image bytes or identity')
             require(require_captured(capture) == pins, 'reader changed host commitment pins')

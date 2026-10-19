@@ -79,8 +79,8 @@ def bind_owned_policy_journal(root, window, prior, entrypoints, policy_path, *, 
                    scope=FULL_NODE_SCOPE, expected_entrypoints=entrypoints, process_policy=policy)
 
 
-def frozen_process_policy(capture_dir, records, *, table, configs, binary, home):
-    checkpoint = verify_frozen_checkpoint(capture_dir, records, table=table, configs=configs,
+def frozen_process_policy(capture_dir, records, *, configs, binary, home):
+    checkpoint = verify_frozen_checkpoint(capture_dir, records, configs=configs,
                                           binary=binary, home=home)
     baseline = records[0]
     require('process_policy' in baseline, 'frozen baseline has no authored process policy')
@@ -92,14 +92,14 @@ def frozen_process_policy(capture_dir, records, *, table, configs, binary, home)
             'authority': AUTHORITY, 'admission': False, 'history_certified': False}
 
 
-def image_process_policy(capture_dir, root, *, table):
+def image_process_policy(capture_dir, root):
     pinned = require_captured(capture_dir)
     commitment = require_committed(capture_dir)
     require(commitment == {**json.loads(pinned['COMMITTED.json']),
                            'checkpoint': json.loads(pinned['CHECKPOINT.json'])},
             'capture commitment differs from the pinned capture record')
     found = read_inputs(root, commitment)
-    result = frozen_process_policy(capture_dir, found['records'], table=table,
+    result = frozen_process_policy(capture_dir, found['records'],
                                     configs=found['configs'], binary=found['binary'], home=found['home'])
     uid = result['process_policy']['uid']
     require(found['read'] and all(row['uid'] == uid for row in found['read']),
