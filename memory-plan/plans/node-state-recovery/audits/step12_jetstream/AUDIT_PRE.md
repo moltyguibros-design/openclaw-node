@@ -3121,3 +3121,40 @@ Claude cleared 6aa054d0 with no required finding: under disposable dash and bash
 ### 2026-10-19 07:43 EDT — fifth isolation head actual command lookup
 
 Claude cleared 46f85982 with no required finding: the colon guard refused before test-bin creation and a guard-removal mutant restored the disposable decoy's SIGHUP. The same review found that dash interprets `%builtin` and `%func` inside PATH entries. A temporary path with that sequence could pass both direct stub-execution checks and the colon guard, yet `sh -c 'command -v nats-server'` selected the real binary; the decoy saw no HUP in that case, but the host binary was invoked. The fixture now checks the exact `command -v nats-server` result under the identical child PATH and requires its disposable stub before starting any CLI. The executable checks and delimiter guard remain. This is a bounded test-fixture safety correction, not a production reload change, and needs a new exact-head independent review and all-eight CI. The earlier heads remain evidence, not closure gates; no live operator-host NATS process or records were operated by this change.
+
+
+## 2026-10-19 13:26 EDT — B5 protected byte-anchor source unit (D261)
+
+### Micro Re-Orient
+- Step 1.2/B5 remains in flight at v1.2-pre; production capture is disabled.
+- D259/D260 verified pre-arm table content binding and the two root/attach test carry-forwards.
+- The operator selected interactive sudo per window for owned implementation/tests; no installation.
+- This unit retains post-capture bytes under an independent owner and makes a protected reader compare them.
+- This serves recoverable histories; it does not produce semantic ACCEPTED, guest admission or B6 release.
+- This is the next named prerequisite; pre-stop provenance and full acceptance integration remain tracked.
+
+### Needs and boundary
+
+D189 and D207 govern the residual provenance and terminal-decision limits. The window-pin source at 8f820784 has exact-source review and all-eight CI39285492438; the tree is unchanged through 6f5a651a. D261 records the authority choice. Claude has been asked for a bounded read-only pre-audit at that head. No production root exists or is created. Runtime deployment is not authorized; the source prerequisite requires owned execution evidence and keeps the parent B5 row open.
+
+### Proposed file deltas and proof
+
+Add a self-contained standard-library-only `host_capture_anchor.py`, portable tests `test_host_capture_anchor.py`, an intended-assertion mutation runner `mutate_host_capture_anchor.py`, and a CI-only independent-owner probe `probe_host_capture_anchor.py`. Extend the existing Linux/macOS portable steps and native ownership job in `.github/workflows/test.yml`. Keep existing capture/mount/decision code fixed and production refusals intact. Update only the five existing ledgers and this pre-audit as implementation/evidence becomes concrete.
+
+The owned producer must read fixed host record names and the clone through held no-follow descriptors, validate owner/mode/single-link/ACL/identity and bounded canonical records, preserve their byte hashes plus nonce and directory binding under root, refuse overwrite/re-pin, and publish only a complete record. The privileged consumer must reopen the actual protected root record and compare a fresh descriptor-bound snapshot; caller-supplied verification JSON is not authority. Partial publication refuses; any recoverable complete publication must be explicitly distinguished from partial state. The root store and all ancestors need independent ownership, private leaf mode and no ACL grants. Future installation must provide trusted code, interpreter and import closure; no sudo invocation of the writable checkout is a production model.
+
+Proof: portable source/ordering/refusal/interrupt/rewrite tests and decisive mutants; CI-only native distinct uid/root permissions, parent/mode/ACL controls, trusted temporary code copy and coordinated input/clone rewrite. No local elevated test suite or VM/image operation. Independent exact-source review and all-eight CI remain mandatory before source readiness. All unimplemented integration, installed provenance, B3/live bindings, D62/manual/D175 and macOS reboot gates remain open.
+
+
+### Pre-audit disposition and bounded integration boundary
+
+Claude Message 55 recommends the same self-contained byte-anchor/privileged-byte-verifier boundary. Incorporate isolated `-I -S -B` invocation and root-controlled interpreter/program/search-path/module checks (misinvocation detection, not self-authentication), explicit capture/SUDO uid binding, honest capture/arm locks, failed-capture refusal and fixture VM identity. Its suggested final frozen-reader receipt correlation is retained as the next protected-acceptance integration, rather than claiming a user-generated receipt is privileged journal verification. This source unit uses a separate synthetic capture/clone probe on Linux and macOS; it does not modify the existing ASIF probe or claim a root-performed frozen-journal read.
+
+Publication is intentionally stricter than the suggested automatic temp recovery: any pending file refuses both routes and requires attended reconciliation. A complete single-link record after final-unlink interruption may be verified only by the protected reader, which repeats the full byte comparison and file/directory sync. Re-publication always refuses; no temporary file is removed automatically and no new snapshot replaces an anchor. This is the ordinary fsync-level contract, with no power-loss or boot-decision claim. Benign deny-only ACLs are allowed; allow grants and unreadable ACL observations refuse.
+
+The parent protected-acceptance-root gate remains in flight. Its source primitive has a separate atomic `B5-protected-byte-anchor source` row so neither owned proof nor a byte-only CLI can close installation, actual frozen-reader receipt integration, B3 provenance or real-window acceptance. VERSION remains v1.2-pre under the existing parent step. No additional production permission is requested or inferred.
+
+
+### Local candidate verification
+
+The 28-case focused suite passes (22.283 s); the mutation runner's baseline is that same suite and all 18 designated mutants fail with the intended AssertionError. The existing three-module regression batch passes 139 tests (83.812 s, one platform skip). Python 3.9 syntax parsing and diff checks pass. Local plan lint is 14 PASS / one existing WARN / zero FAIL. No local root or native ownership probe was run. Distinct-owner Linux/macOS execution, native macOS ACL evidence, exact-source review and all-eight CI are pending. This candidate closes no row and leaves the full protected acceptance integration open.
