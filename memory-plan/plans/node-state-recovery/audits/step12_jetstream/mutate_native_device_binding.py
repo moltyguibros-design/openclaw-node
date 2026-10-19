@@ -10,6 +10,11 @@ CASES = (
      'NativeDeviceBinding.test_committed_native_rows_bind_and_verify_without_a_device_spelling_refusal'),
     ('whole-disk-mismatch', 'host_journal_mount', 'and known[0] == disk', 'and True',
      'Attach.test_the_attach_result_must_name_the_inventory_disk_and_cleanup_trusts_the_inventory'),
+    ('harvest-after-attach-status', 'host_journal_mount',
+     '        known = attached_disk(attached)\n        entities = plist_of(attached, \'read-only attach\')',
+     '        known = []\n        entities = plist_of(attached, \'read-only attach\')\n'
+     '        known = attached_disk(attached)',
+     'Attach.test_an_attach_that_failed_or_timed_out_after_it_applied_is_ejected_from_the_inventory'),
     ('noncanonical-data-node', 'host_journal_mount', 'and PARTITION.fullmatch(node)', 'and True',
      'ProbeAttach.test_data_device_node_must_match_the_raw_attach_identifier'),
     ('different-data-node', 'host_journal_mount', 'and raw in (node, node[5:])', 'and True',

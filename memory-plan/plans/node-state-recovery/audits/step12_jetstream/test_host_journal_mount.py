@@ -677,6 +677,12 @@ class Attach(MountCase):
                 self.fake.attach = mode
                 _, failed = self.refused('^read-only attach failed or timed out$', 'attach')
                 self.released(failed)
+                if mode == 'fail-applied':
+                    gone = [step for step in failed['cleanup']['steps']
+                            if step['step'] == 'attach result disk after eject']
+                    self.assertEqual(len(gone), 1)
+                    self.assertEqual(gone[0]['result']['argv'], [DISKUTIL, 'info', '-plist', DISK])
+                    self.assertEqual(gone[0]['result']['returncode'], 1)
                 self.assertEqual((self.calls(DISKUTIL, 'mount'), self.fake.reads), ([], []))
 
     def test_an_attachment_the_inventory_still_lists_is_never_clean(self):
