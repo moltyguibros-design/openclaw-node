@@ -199,7 +199,16 @@ def trusted_runtime():
     require(sys.flags.isolated and sys.flags.no_site and sys.flags.dont_write_bytecode,
             'anchor requires isolated Python without site processing or bytecode writes')
     program_sha = trusted_path(pathlib.Path(__file__).resolve(), program=True)
-    return {'program_sha256': program_sha, **trusted_interpreter()}
+    prefix = trusted_cache_prefix(pathlib.Path(__file__).resolve())
+    return {'program_sha256': program_sha, 'bytecode_prefix': prefix, **trusted_interpreter()}
+
+
+def trusted_cache_prefix(program):
+    prefix = program.parent / 'bytecode-disabled'
+    require(sys.pycache_prefix == str(prefix) and not os.path.lexists(prefix),
+            'anchor requires its protected absent bytecode prefix')
+    with Directory(prefix.parent, {0}, private=False):
+        return str(prefix)
 
 
 def snapshot(capture, writer_uid, nonce):

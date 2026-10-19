@@ -1,5 +1,10 @@
 import json
 import ast
+import contextlib
+import subprocess
+import py_compile
+import sys
+import tempfile
 import os
 import pathlib
 import stat
@@ -242,8 +247,8 @@ class Anchor(unittest.TestCase):
             self.verify()
 
     def test_capture_pin_and_nonce_changes_refuse_before_publication(self):
-        for name, key, value, pattern in (
-                ('CAPTURE.json', 'window_pins_sha256', '0' * 64, 'byte bindings'),
+        cases = [('CAPTURE.json', key, '0' * 64, 'byte bindings') for key in anchor.PINS]
+        for name, key, value, pattern in (*cases,
                 ('ARMED.json', 'capture_nonce', '0' * 64, 'nonce'),
                 ('CAPTURE.json', 'clone_image_sha256', '0' * 64, 'clone binding')):
             path = self.capture / name
@@ -258,6 +263,47 @@ class Anchor(unittest.TestCase):
     def test_operator_nonce_must_match_the_unchanged_capture(self):
         self.nonce = 'f' * 64 if self.nonce != 'f' * 64 else 'e' * 64
         with self.assertRaisesRegex(RuntimeError, 'nonce differs'):
+            self.publish()
+
+    def test_each_capture_byte_link_is_enforced(self):
+        originals = {name: (self.capture / name).read_bytes() for name in anchor.FILES}
+        edges = (('ARMED.json', 'window_pins_sha256', 'WINDOW_PINS.json'),
+                 ('COMMITTED.json', 'arm_sha256', 'ARMED.json'),
+                 ('ACKED.json', 'commit_sha256', 'COMMITTED.json'),
+                 ('CHECKPOINT.json', 'commit_sha256', 'COMMITTED.json'),
+                 ('CHECKPOINT.json', 'ack_sha256', 'ACKED.json'))
+        targets = [(name, field, 'byte bindings differ') for name, field, _dependency in edges]
+        for target, field, pattern in (*targets, ('ARMED.json', 'vm_uuid', 'fixture VM identity')):
+            with self.subTest(target=target, field=field):
+                values = {name: json.loads(raw) for name, raw in originals.items()}
+                if field == 'vm_uuid':
+                    values[target][field] = 'not-the-fixture'
+                for name, key, dependency in edges:
+                    values[name][key] = ('0' * 64 if (name, key) == (target, field)
+                                         else anchor.sha(anchor.encoded(values[dependency])))
+                for key, name in anchor.PINS.items():
+                    values['CAPTURE.json'][key] = anchor.sha(anchor.encoded(values[name]))
+                for name, value in values.items():
+                    (self.capture / name).write_bytes(anchor.encoded(value))
+                with self.assertRaisesRegex(RuntimeError, pattern):
+                    self.publish()
+                self.assertFalse(self.final.exists())
+
+    def test_each_clone_and_fixture_claim_is_enforced(self):
+        path, clone = self.capture / 'CAPTURE.json', self.capture / anchor.CLONE
+        raw, clone_raw = path.read_bytes(), clone.read_bytes()
+        for field, value, pattern in (('clone_size', len(clone_raw) + 1, 'clone binding'),
+                ('vm_state_at_final_check', 'started', 'clone binding'),
+                ('vm_uuid', 'not-the-fixture', 'fixture VM identity')):
+            with self.subTest(field=field):
+                path.write_bytes(anchor.encoded({**json.loads(raw), field: value}))
+                with self.assertRaisesRegex(RuntimeError, pattern):
+                    self.publish()
+                self.assertFalse(self.final.exists())
+        clone.write_bytes(b'x')
+        path.write_bytes(anchor.encoded({**json.loads(raw), 'clone_size': True,
+                                       'clone_image_sha256': anchor.sha(b'x')}))
+        with self.assertRaisesRegex(RuntimeError, 'clone binding'):
             self.publish()
 
     def test_record_size_limit_precedes_json_read(self):
@@ -287,6 +333,16 @@ class Anchor(unittest.TestCase):
 
 
 class Authority(unittest.TestCase):
+    def test_cache_policy_precedes_interpreter_use(self):
+        with mock.patch.object(anchor.sys, 'flags', types.SimpleNamespace(isolated=True, no_site=True,
+                                                                         dont_write_bytecode=True)), \
+                mock.patch.object(anchor, 'trusted_path', return_value='a' * 64), \
+                mock.patch.object(anchor, 'trusted_cache_prefix', side_effect=RuntimeError('absent bytecode prefix')), \
+                mock.patch.object(anchor, 'trusted_interpreter') as runtime:
+            with self.assertRaisesRegex(RuntimeError, 'absent bytecode prefix'):
+                anchor.trusted_runtime()
+            runtime.assert_not_called()
+
     def test_program_trust_failure_precedes_interpreter_use(self):
         with mock.patch.object(anchor.sys, 'flags', types.SimpleNamespace(isolated=True, no_site=True,
                                                                          dont_write_bytecode=True)), \
@@ -360,6 +416,7 @@ class Authority(unittest.TestCase):
                                                                          dont_write_bytecode=True)), \
                 mock.patch.object(anchor.sys, 'path', ['/root/stdlib']), \
                 mock.patch.object(anchor.sys, 'modules', {'untrusted': types.SimpleNamespace(__file__='/tmp/user.py')}), \
+                mock.patch.object(anchor, 'trusted_cache_prefix', return_value='/root/bytecode-disabled'), \
                 mock.patch.object(anchor, 'trusted_path', side_effect=lambda p, **_kwargs: str(p)):
             with self.assertRaisesRegex(RuntimeError, 'untrusted module'):
                 anchor.trusted_runtime()
@@ -420,6 +477,96 @@ class Authority(unittest.TestCase):
             with mock.patch.object(anchor.subprocess, 'run', side_effect=OSError('unreadable')):
                 with self.assertRaises(OSError):
                     anchor.no_acl(pathlib.Path('/owned'), 5)
+
+
+class TrustPaths(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(dir=os.environ.get('GITHUB_WORKSPACE', str(pathlib.Path.home())))
+        self.addCleanup(self.temp.cleanup)
+        self.directory = pathlib.Path(self.temp.name).resolve()
+        self.file = self.directory / 'untrusted.py'
+        self.file.write_text('VALUE = "SAFE"\n')
+        if os.getuid() == 0:
+            os.chown(self.file, 65534, 65534)
+
+    def test_root_controlled_system_file_passes_the_real_path_reader(self):
+        self.assertEqual(anchor.trusted_path('/usr/bin/true'), str(pathlib.Path('/usr/bin/true').resolve()))
+
+    def test_nonroot_directory_and_required_root_parent_refuse(self):
+        with mock.patch.object(anchor, 'no_acl'):
+            if os.getuid() != 0:
+                with self.assertRaisesRegex(RuntimeError, 'directory owner or mode'):
+                    anchor.trusted_path(self.directory)
+        def root_only(path, owners, private=True):
+            self.assertEqual(owners, {0})
+            raise RuntimeError('untrusted parent')
+
+        with mock.patch.object(anchor, 'Directory', side_effect=root_only):
+            with self.assertRaisesRegex(RuntimeError, 'untrusted parent'):
+                anchor.trusted_path(self.file)
+
+    def test_nonroot_file_refuses_with_its_parent_modelled_separately(self):
+        @contextlib.contextmanager
+        def parent(path, owners, private=True):
+            self.assertEqual(owners, {0})
+            fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                yield types.SimpleNamespace(fd=fd, path=pathlib.Path(path), check=lambda: None)
+            finally:
+                os.close(fd)
+
+        with mock.patch.object(anchor, 'Directory', side_effect=parent), mock.patch.object(anchor, 'no_acl'):
+            with self.assertRaisesRegex(RuntimeError, 'input owner, mode or links'):
+                anchor.trusted_path(self.file)
+
+    def test_loaded_module_file_metadata_is_checked_inside_allowed_paths(self):
+        real = anchor.trusted_path
+
+        def checked(path, **kwargs):
+            return real(path, **kwargs) if pathlib.Path(path) == self.file else str(path)
+
+        with mock.patch.object(anchor.sys, 'path', [str(self.directory)]), \
+                mock.patch.object(anchor.sys, 'modules', {'untrusted': types.SimpleNamespace(__file__=str(self.file))}), \
+                mock.patch.object(anchor, 'trusted_path', side_effect=checked), \
+                mock.patch.object(anchor, 'no_acl'):
+            with self.assertRaisesRegex(RuntimeError, 'owner or mode|input owner'):
+                anchor.trusted_interpreter()
+
+    def test_missing_wrong_or_existing_cache_prefix_refuses(self):
+        expected = self.directory / 'bytecode-disabled'
+        for value, exists in ((None, False), ('/elsewhere', False), (str(expected), True)):
+            with self.subTest(value=value, exists=exists), \
+                    mock.patch.object(anchor.sys, 'pycache_prefix', value), \
+                    mock.patch.object(anchor.os.path, 'lexists', return_value=exists), \
+                    mock.patch.object(anchor, 'Directory') as opened:
+                with self.assertRaisesRegex(RuntimeError, 'absent bytecode prefix'):
+                    anchor.trusted_cache_prefix(self.directory / 'program.py')
+                opened.assert_not_called()
+
+    def test_private_absent_cache_prefix_skips_forged_fresh_bytecode(self):
+        import importlib.util
+
+        original = self.file.read_bytes()
+        stamp = self.file.stat()
+        self.file.write_bytes(original.replace(b'SAFE', b'EVIL'))
+        os.utime(self.file, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        with mock.patch.object(sys, 'pycache_prefix', None):
+            cache = pathlib.Path(importlib.util.cache_from_source(str(self.file)))
+        cache.parent.mkdir()
+        py_compile.compile(str(self.file), cfile=str(cache), doraise=True,
+                           invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP)
+        self.file.write_bytes(original)
+        os.utime(self.file, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        code = 'import sys;sys.path.insert(0,sys.argv[1]);import untrusted;print(untrusted.VALUE)'
+        args = [sys.executable, '-I', '-S', '-B']
+        forged = subprocess.run([*args, '-c', code, str(self.directory)],
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual((forged.returncode, forged.stdout.strip()), (0, 'EVIL'))
+        prefix = self.directory / 'bytecode-disabled'
+        safe = subprocess.run([*args, '-X', 'pycache_prefix=' + str(prefix), '-c', code, str(self.directory)],
+                              capture_output=True, text=True, timeout=15)
+        self.assertEqual((safe.returncode, safe.stdout.strip()), (0, 'SAFE'))
+        self.assertFalse(prefix.exists())
 
 
 if __name__ == '__main__':

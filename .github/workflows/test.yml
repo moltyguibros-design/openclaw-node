@@ -111,7 +111,6 @@ jobs:
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_window_pin_binding.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_capture_anchor.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_capture_anchor.py
-          OPENCLAW_ANCHOR_PROBE=1 python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_host_capture_anchor.py "$RUNNER_TEMP/host-capture-anchor.json"
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_owned_kickstart_trace.py
@@ -161,13 +160,6 @@ jobs:
           name: placement-failure-linux-${{ github.sha }}
           path: ${{ runner.temp }}/placement-failure.json
           if-no-files-found: ignore
-      - name: Retain owned independent-root anchor report
-        if: always() && matrix.node-version == 22
-        uses: actions/upload-artifact@v4
-        with:
-          name: capture-anchor-linux-${{ github.sha }}
-          path: ${{ runner.temp }}/host-capture-anchor.json
-          if-no-files-found: ignore
       - name: Root unit tests
         # npm test (not bare node --test): the pretest hook builds the
         # event-schemas workspace dist that the broadcast libs fail loud on.
@@ -208,6 +200,19 @@ jobs:
           # cannot silently break the gate (it did at 9 -> 11).
           test "$(grep -c " scripts/install/.*\.sh" /tmp/pack.txt)" = "$(ls scripts/install/*.sh | wc -l | tr -d ' ')"
           grep -q " packages/event-schemas/dist/" /tmp/pack.txt
+
+      - name: Verify the independent root capture-byte anchor on owned resources
+        if: matrix.node-version == 22
+        env:
+          OPENCLAW_ANCHOR_PROBE: "1"
+        run: python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_host_capture_anchor.py "$RUNNER_TEMP/host-capture-anchor.json"
+      - name: Retain owned independent-root anchor report
+        if: always() && matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: capture-anchor-linux-${{ github.sha }}
+          path: ${{ runner.temp }}/host-capture-anchor.json
+          if-no-files-found: ignore
 
   legacy-writer-lock-macos:
     runs-on: macos-latest
@@ -364,13 +369,6 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_stopped_asif_reader.py
-      - name: Verify the independent root capture-byte anchor on owned resources
-        env:
-          PYTHONDONTWRITEBYTECODE: "1"
-          OPENCLAW_ANCHOR_PROBE: "1"
-        run: |
-          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_host_capture_anchor.py \
-            "$RUNNER_TEMP/host-capture-anchor.json"
       - name: Characterize ownership on a fresh CI-only ASIF
         env:
           PYTHONDONTWRITEBYTECODE: "1"
@@ -385,6 +383,13 @@ jobs:
         run: |
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py \
             --ci-owned-reader "$RUNNER_TEMP/stopped-asif-reader.json"
+      - name: Verify the independent root capture-byte anchor on owned resources
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          OPENCLAW_ANCHOR_PROBE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_host_capture_anchor.py \
+            "$RUNNER_TEMP/host-capture-anchor.json"
       - name: Retain native observations even when the probe refuses
         if: always()
         uses: actions/upload-artifact@v4
