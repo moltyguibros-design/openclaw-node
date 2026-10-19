@@ -483,7 +483,7 @@ class PolicyBinding(unittest.TestCase):
         self.assertEqual(observed[0], LIMIT, 'initial receipt must exercise the actual tighter boundary')
         budget = {'files': 2, 'bytes': 2 * LIMIT, 'read': []}
         for path in (journal.node_state, journal.root / '000000.json'):
-            raw, _ = stopped_journal_inputs.content(path, 0o600, budget)
+            raw, _ = stopped_journal_inputs.content(path, 0o600, budget, owner=os.getuid())
             self.assertLessEqual(len(raw), LIMIT)
         self.assertLess(len((journal.root / '000000.json').read_bytes()), LIMIT)
 

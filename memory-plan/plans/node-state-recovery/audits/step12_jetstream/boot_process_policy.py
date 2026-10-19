@@ -22,7 +22,7 @@ def owned_root(root):
     require(root.is_absolute() and root.parent == pathlib.Path(tempfile.gettempdir()).resolve()
             and re.fullmatch(r'openclaw-owned-policy-[0-9a-f]{16}', root.name),
             'process policy producer requires an owned fixture root')
-    private_dir(root)
+    private_dir(root, owner=os.getuid())
     require(root.resolve(strict=True) == root, 'process policy fixture root is not literal')
     return root
 
@@ -63,18 +63,18 @@ def bind_owned_policy_journal(root, window, prior, entrypoints, policy_path, *, 
             'process policy hold root is outside the owned fixture')
     preservation = root / 'preservation'
     if os.path.lexists(preservation):
-        private_dir(preservation)
+        private_dir(preservation, owner=os.getuid())
         require(preservation.resolve(strict=True) == preservation,
                 'process policy preservation parent is not literal')
     journals = preservation / 'journals'
     if os.path.lexists(journals):
-        private_dir(journals)
+        private_dir(journals, owner=os.getuid())
         require(journals.resolve(strict=True) == journals, 'process policy journal parent is not literal')
     journal_root = journals / window
     require(not os.path.lexists(journal_root), 'process policy producer cannot reopen a window')
     if not preservation.exists():
         preservation.mkdir(mode=0o700)
-        private_dir(preservation)
+        private_dir(preservation, owner=os.getuid())
     return Journal(journal_root, prior, boot=boot, node_lock=preservation / 'node.lock',
                    scope=FULL_NODE_SCOPE, expected_entrypoints=entrypoints, process_policy=policy)
 

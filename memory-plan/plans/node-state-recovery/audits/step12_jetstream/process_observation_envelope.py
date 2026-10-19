@@ -433,7 +433,7 @@ def owned_envelope(root, *, fixture=False, scripted=False):
             and re.fullmatch(r'openclaw-owned-envelope-[0-9a-f]{16}', root.name)
             and root.resolve(strict=True) == root, 'envelope requires a literal owned fixture root')
     for path in (root, root / 'capture', root / 'data'):
-        private_dir(path)
+        private_dir(path, owner=os.getuid())
         require(path.resolve(strict=True) == path, 'envelope fixture input is not literal')
     if scripted:
         value = read_private(root / 'envelope.json')

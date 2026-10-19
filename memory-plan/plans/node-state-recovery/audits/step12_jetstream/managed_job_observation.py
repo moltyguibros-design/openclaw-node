@@ -1,6 +1,7 @@
 import argparse
 import copy
 import json
+import os
 import pathlib
 import re
 import tempfile
@@ -152,7 +153,7 @@ def owned_records(root, *, fixture=False):
             and re.fullmatch(r'openclaw-owned-managed-jobs-[0-9a-f]{16}', root.name)
             and root.resolve(strict=True) == root, 'managed-job diagnostic requires a literal owned fixture root')
     for path in (root, root / 'capture', root / 'data'):
-        envelope.private_dir(path)
+        envelope.private_dir(path, owner=os.getuid())
         require(path.resolve(strict=True) == path, 'managed-job fixture input is not literal')
     capture_dir = root / 'capture'
     pinned = require_captured(capture_dir)
