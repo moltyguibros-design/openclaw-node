@@ -1,4 +1,6 @@
 import copy
+import contextlib
+import io
 import json
 import os
 import pathlib
@@ -6,10 +8,12 @@ import secrets
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
 import urllib.request
+from unittest import mock
 
 from preservation_checks import Refused, http_json
 from serving_nats_group import nats_node_id, wait_for_serving_group
@@ -19,6 +23,27 @@ NAMES = {'nats': 'owned-standalone', 'nats-1': 'owned-member-1',
          'nats-2': 'owned-member-2', 'nats-3': 'owned-member-3'}
 PORTS = {'nats': 8001, 'nats-2': 8002, 'nats-3': 8003}
 OWNED_GROUP_TIMEOUT = 30
+
+
+def owned_log_tails(root):
+    tails = {}
+    for path in sorted(root.glob('*/*.log')):
+        with path.open('rb') as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - 16384))
+            tails[str(path.relative_to(root))] = stream.read(16384).decode('utf-8', errors='replace')
+    return tails
+
+
+def emit_owned_group_evidence(value):
+    try:
+        print(json.dumps(value), flush=True)
+    except Exception as error:
+        try:
+            sys.stderr.write(json.dumps({'owned_group_evidence_error': repr(error)[:500]}) + '\n')
+            sys.stderr.flush()
+        except Exception:
+            pass
 
 
 def observe_owned_group(names, ports, cluster, phases, phase, *, timeout=OWNED_GROUP_TIMEOUT,
@@ -204,6 +229,19 @@ class ScriptedGroup(unittest.TestCase):
         self.assertGreaterEqual(phases[0]['elapsed'], OWNED_GROUP_TIMEOUT)
         self.assertLess(phases[0]['elapsed'], OWNED_GROUP_TIMEOUT + .1)
 
+    def test_owned_endpoint_error_is_retained_until_refusal(self):
+        now, phases = [0.0], []
+        def get(port, path):
+            raise Refused('owned endpoint unavailable')
+        def sleep(seconds):
+            now[0] += seconds
+        with self.assertRaisesRegex(Refused, 'owned endpoint unavailable'):
+            observe_owned_group(NAMES, PORTS, 'owned-group', phases, 'cold restore',
+                                get=get, clock=lambda: now[0], sleep=sleep)
+        self.assertIn('nats/varz', phases[0]['last'])
+        self.assertIn('owned endpoint unavailable', phases[0]['last']['nats/varz']['error'])
+        self.assertNotIn('result', phases[0])
+
 
 class RealGroup(unittest.TestCase):
     def test_disposable_two_of_three_then_minority(self):
@@ -300,24 +338,121 @@ class RealGroup(unittest.TestCase):
             failure = repr(error)[:500]
             raise
         finally:
+            diagnostic_errors = []
             if failure is not None:
-                print(json.dumps({'owned_serving_group_failure': failure, 'phases': phases,
-                                  'logs': {str(path.relative_to(root)): path.read_text()[-16384:]
-                                           for path in sorted(root.glob('*/*.log'))}}), flush=True)
+                try:
+                    emit_owned_group_evidence({'owned_serving_group_failure': failure, 'phases': phases,
+                                               'logs': owned_log_tails(root)})
+                except BaseException as error:
+                    diagnostic_errors.append(repr(error)[:500])
             cleanup = {}
+            cleanup_error = None
             for unit in processes:
+                cleanup[unit] = {}
                 try:
                     stop(unit)
-                finally:
-                    cleanup[unit] = processes[unit].poll()
-                    if failure is not None:
-                        print(json.dumps({'owned_serving_group_cleanup': cleanup}), flush=True)
+                except BaseException as error:
+                    cleanup[unit]['error'] = repr(error)[:500]
+                    if cleanup_error is None:
+                        cleanup_error = error
+                try:
+                    cleanup[unit]['returncode'] = processes[unit].poll()
+                except BaseException as error:
+                    cleanup[unit]['poll_error'] = repr(error)[:500]
+                    if cleanup_error is None:
+                        cleanup_error = error
             for log in logs:
-                log.close()
+                try:
+                    log.close()
+                except BaseException as error:
+                    diagnostic_errors.append(repr(error)[:500])
+                    if cleanup_error is None:
+                        cleanup_error = error
             if failure is None:
-                print(json.dumps({'owned_serving_group_phases': [
+                emit_owned_group_evidence({'owned_serving_group_phases': [
                     {key: row[key] for key in ('phase', 'budget', 'elapsed')} for row in phases],
-                    'cleanup': cleanup}), flush=True)
+                    'cleanup': cleanup, 'diagnostic_errors': diagnostic_errors})
+            else:
+                emit_owned_group_evidence({'owned_serving_group_cleanup': cleanup,
+                                           'diagnostic_errors': diagnostic_errors})
+            if failure is None and cleanup_error is not None:
+                raise cleanup_error
+
+
+class FixtureDiagnostics(unittest.TestCase):
+    def failed_fixture(self, *, diagnostic_error=False, stop_error=False):
+        original = Refused('scripted owned observer refusal')
+        processes, roots, caught = [], set(), []
+
+        class Child:
+            def __init__(self, argv, *, stdout, stderr):
+                self.returncode, self.attempted = None, False
+                self.fail_stop = stop_error and not processes
+                roots.add(pathlib.Path(argv[-1]).parent.parent)
+                stdout.write(b'x' * 20000 + b'\xff owned log tail\n')
+                stdout.flush()
+                processes.append(self)
+
+            def poll(self):
+                return self.returncode
+
+            def terminate(self):
+                self.attempted = True
+                if self.fail_stop:
+                    raise OSError('scripted child stop failure')
+
+            def wait(self, timeout):
+                self.returncode = -15
+
+        class Result(unittest.TestResult):
+            def addError(self, test, error):
+                caught.append(error[1])
+                super().addError(test, error)
+
+        def response(url, **kwargs):
+            value = {'status': 'ok'} if '/healthz?' in url else {'meta_cluster': {'cluster_size': 3}}
+            return io.BytesIO(json.dumps(value).encode())
+
+        output, result = io.StringIO(), Result()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.dict(os.environ, {'NATS_SERVER': '/owned-fixture-nats-server'}))
+            stack.enter_context(mock.patch.object(subprocess, 'Popen', Child))
+            stack.enter_context(mock.patch.object(urllib.request, 'urlopen', response))
+            stack.enter_context(mock.patch(__name__ + '.wait_for_serving_group', side_effect=original))
+            if diagnostic_error:
+                stack.enter_context(mock.patch(__name__ + '.owned_log_tails',
+                                               side_effect=OSError('scripted evidence read failure')))
+            stack.enter_context(contextlib.redirect_stdout(output))
+            RealGroup('test_disposable_two_of_three_then_minority').run(result)
+        self.assertEqual(len(caught), 1)
+        self.assertIs(caught[0], original)
+        self.assertTrue(all(child.attempted for child in processes))
+        self.assertTrue(all(child.returncode is not None for child in processes if not child.fail_stop))
+        self.assertTrue(roots)
+        self.assertTrue(all(not root.exists() for root in roots))
+        return [json.loads(line) for line in output.getvalue().splitlines()], processes
+
+    def test_undecodable_bounded_tail_preserves_refusal_and_reaps_every_child(self):
+        rows, processes = self.failed_fixture()
+        self.assertEqual(len(processes), 6)
+        failure = rows[0]
+        self.assertIn('owned_serving_group_failure', failure)
+        self.assertIn('scripted owned observer refusal', failure['owned_serving_group_failure'])
+        self.assertTrue(failure['logs'])
+        self.assertTrue(all(value == ('x' * (16384 - 17) + '\ufffd owned log tail\n')
+                            for value in failure['logs'].values()))
+        self.assertEqual(set(rows[-1]['owned_serving_group_cleanup']), set(NAMES))
+
+    def test_evidence_read_failure_still_preserves_refusal_and_reaps_every_child(self):
+        rows, _ = self.failed_fixture(diagnostic_error=True)
+        self.assertIn('scripted evidence read failure', rows[-1]['diagnostic_errors'][0])
+        self.assertEqual(set(rows[-1]['owned_serving_group_cleanup']), set(NAMES))
+
+    def test_one_stop_failure_does_not_skip_other_children_or_replace_refusal(self):
+        rows, processes = self.failed_fixture(stop_error=True)
+        self.assertIsNone(processes[0].returncode)
+        self.assertIn('scripted child stop failure',
+                      rows[-1]['owned_serving_group_cleanup']['nats']['error'])
 
 
 if __name__ == '__main__':

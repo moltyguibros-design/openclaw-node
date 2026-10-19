@@ -24,7 +24,8 @@ from journal_hold import JournaledHold, describe
 from legacy_fixture import legacy_journal
 from preservation_checks import Refused, STOP_ORDER, disabled_overrides, http_json
 from preservation_journal import Journal, NATS_TRANSFER_UNITS, SERVING_NATS, TIMER_UNITS, static_identity
-from serving_nats_group import wait_for_serving_group
+from test_serving_nats_group import (OWNED_GROUP_TIMEOUT, emit_owned_group_evidence,
+                                    observe_owned_group)
 from test_journal_hold import gate_module, gated_identity
 from test_preservation_journal import (full_entrypoint_evidence, full_node_inventory,
                                        inventory, listener_stop_evidence, timer_stop_evidence)
@@ -1298,6 +1299,7 @@ if not marker.exists():
                                     entrypoints['overrides'][domain][label] = baseline_entrypoints[
                                         'overrides'][domain][label]
                             group_calls = []
+                            group_phases = []
                             def group_check():
                                 group_calls.append(len(journal.records))
                                 self.assertTrue(all(members[unit]['service'].status()['running']
@@ -1306,7 +1308,12 @@ if not marker.exists():
                                 self.assertTrue(held_member.disabled())
                                 names = {unit: members[unit]['name'] for unit in all_nats}
                                 ports = {unit: members[unit]['monitor'] for unit in SERVING_NATS}
-                                return wait_for_serving_group(names, ports, 'owned-b5', 10)
+                                try:
+                                    return observe_owned_group(names, ports, 'owned-b5', group_phases,
+                                        'native restore', timeout=10 if fail_group else OWNED_GROUP_TIMEOUT)
+                                finally:
+                                    if group_phases:
+                                        emit_owned_group_evidence({'owned_native_group': group_phases[-1]})
                             result = hold.recover(restore, observe, lambda: {'verified': True},
                                 deploy_fence=lambda: {'verified': True},
                                 nats_group_check=group_check)
