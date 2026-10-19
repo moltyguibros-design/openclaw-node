@@ -12,6 +12,8 @@ CASES = (
      'Authority.test_production_and_nonroot_calls_refuse_before_any_open'),
     ('isolated-runtime', 'sys.flags.isolated and sys.flags.no_site and sys.flags.dont_write_bytecode', 'True',
      'Authority.test_invocation_flags_are_required_before_runtime_paths'),
+    ('trusted-program', 'program_sha = trusted_path(pathlib.Path(__file__).resolve(), program=True)',
+     "program_sha = 'unverified'", 'Authority.test_program_trust_failure_precedes_interpreter_use'),
     ('sudo-capture-user', "os.environ.get('SUDO_UID', str(writer_uid)) == str(writer_uid)", 'True',
      'Authority.test_sudo_uid_mismatch_refuses_before_runtime_checks'),
     ('ancestor-owner', 'and info.st_uid in owners', '',

@@ -7,6 +7,7 @@ import pathlib
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 from test_host_capture_anchor import fixture_capture
 
@@ -18,19 +19,44 @@ def checked(argv):
     return done.stdout.strip()
 
 
+def select_interpreter(source):
+    candidates = ('/Library/Developer/CommandLineTools/usr/bin/python3', '/usr/bin/python3') \
+        if sys.platform == 'darwin' else ('/usr/bin/python3',)
+    observations = []
+    code = ('import pathlib,sys,json; n={"__name__":"anchor_characterization","__file__":sys.argv[1]}; '
+            'exec(compile(pathlib.Path(sys.argv[1]).read_bytes(),sys.argv[1],"exec"),n); '
+            'print(json.dumps(n["trusted_interpreter"]()))')
+    for candidate in candidates:
+        if not pathlib.Path(candidate).is_file():
+            observations.append({'candidate': candidate, 'present': False})
+            continue
+        done = subprocess.run([candidate, '-I', '-S', '-B', '-c', code, str(source)],
+                              capture_output=True, text=True, timeout=90)
+        observations.append({'candidate': candidate, 'returncode': done.returncode,
+                             'detail': (done.stdout + done.stderr)[-3000:]})
+        if done.returncode == 0:
+            print(json.dumps({'interpreter_characterization': observations}), flush=True)
+            return candidate, observations
+    print(json.dumps({'interpreter_characterization': observations}), flush=True)
+    raise RuntimeError('CI has no independently protected interpreter; anchor remains held')
+
+
 def main(output):
     if (sys.platform not in ('darwin', 'linux') or os.getuid() == 0 or os.geteuid() == 0
             or os.environ.get('CI') != 'true' or os.environ.get('GITHUB_ACTIONS') != 'true'
             or os.environ.get('OPENCLAW_ANCHOR_PROBE') != '1'):
         raise RuntimeError('only the nonroot CI-owned anchor probe is enabled')
     root_home = '/private/var/root' if sys.platform == 'darwin' else '/root'
+    input_parent = '/private/var/db' if sys.platform == 'darwin' else '/var/lib'
     chown = '/usr/sbin/chown' if sys.platform == 'darwin' else '/bin/chown'
     sudo = ['/usr/bin/sudo', '-n', '-H']
-    python = ['/usr/bin/python3', '-I', '-S', '-B']
     source = pathlib.Path(__file__).with_name('host_capture_anchor.py')
+    interpreter, characterization = select_interpreter(source)
+    python = [interpreter, '-I', '-S', '-B']
     source_sha = hashlib.sha256(source.read_bytes()).hexdigest()
-    bootstrap = '''import pathlib,sys,tempfile,hashlib,os,shutil
+    bootstrap = '''import pathlib,sys,tempfile,hashlib,os,shutil,json
 p=pathlib.Path(tempfile.mkdtemp(prefix="openclaw-acceptance-owned-",dir=sys.argv[3]))
+inputs=None
 try:
     os.chmod(p,0o700)
     b=pathlib.Path(sys.argv[1]).read_bytes()
@@ -39,21 +65,37 @@ try:
     os.chmod(p/"program.py",0o600)
     (p/"data").mkdir(mode=0o700)
     (p/"data"/"openclaw-acceptance-owned-records").mkdir(mode=0o700)
+    inputs=pathlib.Path(tempfile.mkdtemp(prefix="openclaw-acceptance-input-",dir=sys.argv[4]))
+    for path,mode in ((p,0o700),(p/"program.py",0o600),(p/"data",0o700),
+                      (p/"data"/"openclaw-acceptance-owned-records",0o700),(inputs,0o700)):
+        if sys.platform == "linux":
+            for name in os.listxattr(path):
+                if name.startswith("system.posix_acl_"):
+                    os.removexattr(path,name)
+        os.chmod(path,mode)
+    os.chown(inputs,int(sys.argv[5]),int(sys.argv[6]))
 except BaseException:
+    if inputs is not None:
+        shutil.rmtree(inputs)
     shutil.rmtree(p)
     raise
-print(p)
+print(json.dumps({"root":str(p),"inputs":str(inputs)}))
 '''
-    base = pathlib.Path(checked([*sudo, *python, '-c', bootstrap, str(source), source_sha, root_home]))
+    setup = json.loads(checked([*sudo, *python, '-c', bootstrap, str(source), source_sha,
+                               root_home, input_parent, str(os.getuid()), str(os.getgid())]))
+    base, inputs = pathlib.Path(setup['root']), pathlib.Path(setup['inputs'])
     if base.parent != pathlib.Path(root_home) or not base.name.startswith('openclaw-acceptance-owned-'):
         raise RuntimeError('CI root fixture path differs')
+    if inputs.parent != pathlib.Path(input_parent) or not inputs.name.startswith('openclaw-acceptance-input-'):
+        raise RuntimeError('CI capture input fixture path differs')
     program = base / 'program.py'
     parent = base / 'data'
     root = parent / 'openclaw-acceptance-owned-records'
     case = unittest.TestCase('runTest')
     results = []
     try:
-        source_case, capture = fixture_capture(case)
+        with mock.patch.dict(os.environ, {'GITHUB_WORKSPACE': str(inputs)}):
+            source_case, capture = fixture_capture(case)
         nonce, uid = source_case.nonce, os.getuid()
         final = root / (nonce + '.json')
 
@@ -74,6 +116,12 @@ print(p)
 
         action('publish')
         action('verify')
+        root_command('/bin/chmod', '666', str(program))
+        action('verify', 'input owner, mode or links differ')
+        root_command('/bin/chmod', '600', str(program))
+        root_command(chown, str(uid), str(program))
+        action('verify', 'input owner, mode or links differ')
+        root_command(chown, '0', str(program))
         for name, attempt in (
                 ('user-read', lambda: final.read_bytes()),
                 ('user-replace', lambda: final.write_bytes(b'forged')),
@@ -122,13 +170,16 @@ print(p)
         action('verify')
         report = {'scope': 'CI-owned post-capture anchor only; no production installation or B8 acceptance',
                   'capture_uid': uid, 'authority_uid': 0, 'trusted_program_sha256': source_sha,
+                  'interpreter_characterization': characterization,
                   'cases': results, 'completed': True}
     finally:
         case.doCleanups()
-        cleanup = ('import pathlib,shutil,sys; p=pathlib.Path(sys.argv[1]); '
+        cleanup = ('import pathlib,shutil,sys; p=pathlib.Path(sys.argv[1]); q=pathlib.Path(sys.argv[3]); '
                    'assert p.parent==pathlib.Path(sys.argv[2]) '
-                   'and p.name.startswith("openclaw-acceptance-owned-"); shutil.rmtree(p)')
-        checked([*sudo, *python, '-c', cleanup, str(base), root_home])
+                   'and p.name.startswith("openclaw-acceptance-owned-"); '
+                   'assert q.parent==pathlib.Path(sys.argv[4]) '
+                   'and q.name.startswith("openclaw-acceptance-input-"); shutil.rmtree(q); shutil.rmtree(p)')
+        checked([*sudo, *python, '-c', cleanup, str(base), root_home, str(inputs), input_parent])
     output = pathlib.Path(output)
     with output.open('x') as stream:
         json.dump({**report, 'root_fixture_cleanup': 'removed'}, stream, sort_keys=True)

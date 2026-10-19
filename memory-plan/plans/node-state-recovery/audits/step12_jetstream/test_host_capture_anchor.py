@@ -49,6 +49,7 @@ class Anchor(unittest.TestCase):
             return original_input(directory, name, owner)
 
         for patch in (mock.patch.object(anchor, 'entry', return_value={'program_sha256': 'a' * 64}),
+                      mock.patch.object(anchor, 'no_acl'),
                       mock.patch.object(anchor, 'Directory', side_effect=directory),
                       mock.patch.object(anchor, 'Input', side_effect=read_input)):
             patch.start()
@@ -286,6 +287,36 @@ class Anchor(unittest.TestCase):
 
 
 class Authority(unittest.TestCase):
+    def test_program_trust_failure_precedes_interpreter_use(self):
+        with mock.patch.object(anchor.sys, 'flags', types.SimpleNamespace(isolated=True, no_site=True,
+                                                                         dont_write_bytecode=True)), \
+                mock.patch.object(anchor, 'trusted_path', side_effect=RuntimeError('program owner differs')), \
+                mock.patch.object(anchor, 'trusted_interpreter', return_value={'interpreter': '/trusted'}) as runtime:
+            with self.assertRaisesRegex(RuntimeError, 'program owner differs'):
+                anchor.trusted_runtime()
+            runtime.assert_not_called()
+
+    def test_linux_access_and_default_acl_metadata_refuse(self):
+        with mock.patch.object(anchor.sys, 'platform', 'linux'):
+            for name in ('system.posix_acl_access', 'system.posix_acl_default'):
+                with mock.patch.object(anchor.os, 'listxattr', return_value=[name], create=True):
+                    with self.assertRaisesRegex(RuntimeError, 'has an ACL'):
+                        anchor.no_acl(pathlib.Path('/owned'), 5)
+
+    def test_interpreter_selection_refuses_when_every_existing_candidate_is_untrusted(self):
+        import probe_host_capture_anchor as probe
+
+        failure = types.SimpleNamespace(returncode=1, stdout='', stderr='untrusted interpreter')
+        with mock.patch.object(probe.sys, 'platform', 'darwin'), \
+                mock.patch.object(probe.pathlib.Path, 'is_file', return_value=True), \
+                mock.patch.object(probe.subprocess, 'run', return_value=failure) as calls, \
+                mock.patch('builtins.print'):
+            with self.assertRaisesRegex(RuntimeError, 'no independently protected interpreter'):
+                probe.select_interpreter(pathlib.Path(anchor.__file__))
+            self.assertEqual(calls.call_count, 2)
+            for call in calls.call_args_list:
+                self.assertNotIn('/usr/bin/sudo', call.args[0])
+
     def test_native_probe_refuses_local_or_root_execution_before_sudo(self):
         import probe_host_capture_anchor as probe
 

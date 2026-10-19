@@ -3158,3 +3158,8 @@ The parent protected-acceptance-root gate remains in flight. Its source primitiv
 ### Local candidate verification
 
 The 28-case focused suite passes (22.283 s); the mutation runner's baseline is that same suite and all 18 designated mutants fail with the intended AssertionError. The existing three-module regression batch passes 139 tests (83.812 s, one platform skip). Python 3.9 syntax parsing and diff checks pass. Local plan lint is 14 PASS / one existing WARN / zero FAIL. No local root or native ownership probe was run. Distinct-owner Linux/macOS execution, native macOS ACL evidence, exact-source review and all-eight CI are pending. This candidate closes no row and leaves the full protected acceptance integration open.
+
+
+### 2026-10-19 14:01 EDT — CI proof re-orientation
+
+D262 records both failed candidate CI boundaries. The owned proof stays one outcome: an independently owned byte anchor detects a later capture-user rewrite. Refine only its CI interpreter selection and fixture ancestry, keeping every production refusal and protection predicate. The root program still validates the selected runtime itself. Portable tests simulate root ownership and ambient ACLs; actual owner/ACL claims depend on completed Linux/macOS probes. Fresh input/program/record fixture objects alone may be normalized; existing runtime/ancestor permissions may not be changed. Corrected local proof is31 focused tests/19 intended kills with baseline passing; root-bootstrap syntax parses under3.9. No local elevated probe is run and no acceptance row closes. The exact corrected head needs its own review and all-eight CI.

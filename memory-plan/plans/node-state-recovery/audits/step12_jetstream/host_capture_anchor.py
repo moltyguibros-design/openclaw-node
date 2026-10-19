@@ -51,10 +51,10 @@ def no_acl(path, fd):
                                 env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
         require(result.stdout and not result.stderr
                 and not any(re.match(r'\s*\d+:', line) and ' allow ' in line
-                            for line in result.stdout.splitlines()[1:]), 'anchor path has an ACL')
+                            for line in result.stdout.splitlines()[1:]), 'anchor path has an ACL: ' + str(path))
     else:
         require(not any(name.startswith('system.posix_acl_') for name in os.listxattr(fd)),
-                'anchor path has an ACL')
+                'anchor path has an ACL: ' + str(path))
 
 
 def directory_shape(info, owners, private):
@@ -177,11 +177,8 @@ def trusted_path(path, program=False, zip_entry=False):
     return digest if program else str(path)
 
 
-def trusted_runtime():
-    require(sys.flags.isolated and sys.flags.no_site and sys.flags.dont_write_bytecode,
-            'anchor requires isolated Python without site processing or bytecode writes')
+def trusted_interpreter():
     program = pathlib.Path(__file__).resolve()
-    program_sha = trusted_path(program, program=True)
     interpreter = trusted_path(sys.executable)
     trusted_path(sys._base_executable)
     paths = [trusted_path(path, zip_entry=True) for path in sys.path]
@@ -195,7 +192,14 @@ def trusted_runtime():
                     and os.path.commonpath((str(file), path)) == path for path in paths):
                 trusted_path(file)
     sys.path[:] = paths
-    return {'program_sha256': program_sha, 'interpreter': interpreter}
+    return {'interpreter': interpreter}
+
+
+def trusted_runtime():
+    require(sys.flags.isolated and sys.flags.no_site and sys.flags.dont_write_bytecode,
+            'anchor requires isolated Python without site processing or bytecode writes')
+    program_sha = trusted_path(pathlib.Path(__file__).resolve(), program=True)
+    return {'program_sha256': program_sha, **trusted_interpreter()}
 
 
 def snapshot(capture, writer_uid, nonce):
