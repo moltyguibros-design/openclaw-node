@@ -11,8 +11,9 @@ CASES = (
     ('whole-disk-mismatch', 'host_journal_mount', 'and known[0] == disk', 'and True',
      'Attach.test_the_attach_result_must_name_the_inventory_disk_and_cleanup_trusts_the_inventory'),
     ('harvest-after-attach-status', 'host_journal_mount',
-     '        known = attached_disk(attached)\n        entities = plist_of(attached, \'read-only attach\')',
-     '        known = []\n        entities = plist_of(attached, \'read-only attach\')\n'
+     "        known = attached_disk(attached)\n"
+     "        entities = plist_of(attached, 'read-only attach').get('system-entities') or [{}]",
+     "        known = []\n        entities = plist_of(attached, 'read-only attach').get('system-entities') or [{}]\n"
      '        known = attached_disk(attached)',
      'Attach.test_an_attach_that_failed_or_timed_out_after_it_applied_is_ejected_from_the_inventory'),
     ('noncanonical-data-node', 'host_journal_mount', 'and PARTITION.fullmatch(node)', 'and True',
@@ -32,6 +33,9 @@ CASES = (
     ('root-runner-guard', 'probe_asif_mount_ownership',
      "require(os.getuid() != 0 and os.geteuid() != 0,\n"
      "            'the ownership probe requires a non-root runner')", 'pass',
+     'ProbeGuards.test_root_runner_refuses_before_sudo_for_both_native_modes'),
+    ('real-root-guard', 'probe_asif_mount_ownership',
+     'os.getuid() != 0 and os.geteuid() != 0', 'os.geteuid() != 0',
      'ProbeGuards.test_root_runner_refuses_before_sudo_for_both_native_modes'),
     ('reader-nonroot-seed-owner', 'probe_asif_mount_ownership',
      "        checked(attempt(SUDO, '-n', '/usr/sbin/chown', '%s:%s' % (os.getuid(), os.getgid()), str(point)),\n"

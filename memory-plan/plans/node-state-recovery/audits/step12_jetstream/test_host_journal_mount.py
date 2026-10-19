@@ -1467,7 +1467,7 @@ class ProbeWritePreparation(unittest.TestCase):
 
         def attempt(*argv):
             calls.append(argv)
-            if argv == (probe.SUDO, '-n', '/usr/sbin/chown', '%s:%s' % (os.getuid(), os.getgid()), str(point)):
+            if argv == (probe.SUDO, '-n', '/usr/sbin/chown', '501:20', str(point)):
                 state['writable'] = True
             return {'argv': list(argv), 'returncode': 0, 'timed_out': False, 'stdout': b'', 'stderr': ''}
 
@@ -1483,10 +1483,12 @@ class ProbeWritePreparation(unittest.TestCase):
                 mock.patch.object(wrapper, 'statfs', return_value={'flags': 0}), \
                 mock.patch.object(probe, 'attempt', side_effect=attempt), \
                 mock.patch.object(probe, 'release', side_effect=release), \
+                mock.patch.object(probe.os, 'getuid', return_value=501), \
+                mock.patch.object(probe.os, 'getgid', return_value=20), \
                 mock.patch.object(pathlib.Path, 'write_bytes', write), \
                 mock.patch('subprocess.run', side_effect=AssertionError('command run')):
             probe.write_phase(temp / 'probe.asif', temp, report, [])
-        owner = (probe.SUDO, '-n', '/usr/sbin/chown', '%s:%s' % (os.getuid(), os.getgid()), str(point))
+        owner = (probe.SUDO, '-n', '/usr/sbin/chown', '501:20', str(point))
         root_file = (probe.SUDO, '-n', '/usr/sbin/chown', '0:0', str(point / 'root.txt'))
         self.assertLess(calls.index(owner), calls.index(('write', str(point / 'user.txt'))))
         self.assertIn(root_file, calls)
@@ -1593,6 +1595,13 @@ class ReaderSeed(unittest.TestCase):
                 (seed / 'Users').mkdir()
                 return {'owned': True}
 
+            original_copytree = shutil.copytree
+
+            def copytree(src, dst, *args, **kwargs):
+                self.assertEqual((src, dst), (seed / 'Users', point / 'Users'))
+                self.assertEqual(owner, {'uid': 501, 'gid': 20})
+                return original_copytree(src, dst, *args, **kwargs)
+
             def release(*args):
                 if (point / 'Users').exists():
                     shutil.rmtree(point / 'Users')
@@ -1614,6 +1623,7 @@ class ReaderSeed(unittest.TestCase):
                     mock.patch.object(probe, 'attempt', side_effect=command), \
                     mock.patch.object(probe, 'seed_reader_fixture', side_effect=seed_fixture), \
                     mock.patch.object(probe, 'change_reader_seed'), \
+                    mock.patch.object(probe.shutil, 'copytree', side_effect=copytree), \
                     mock.patch.object(probe, 'release', side_effect=release), \
                     mock.patch.object(probe, 'settled'), \
                     mock.patch.object(pathlib.Path, 'lstat', lstat), \
@@ -1925,7 +1935,7 @@ class ProbeGuards(unittest.TestCase):
 
     def test_root_runner_refuses_before_sudo_for_both_native_modes(self):
         for mode in ('--ci-owned-probe', '--ci-owned-reader'):
-            for uid, euid in ((0, 0), (501, 0)):
+            for uid, euid in ((0, 0), (501, 0), (0, 501)):
                 with self.subTest(mode=mode, uid=uid, euid=euid), \
                         mock.patch.object(probe.os, 'getuid', return_value=uid), \
                         mock.patch.object(probe.os, 'geteuid', return_value=euid), \
