@@ -10,6 +10,23 @@ import sys
 import tempfile
 
 
+def write_report(output, report):
+    staged = output.with_name(output.name + '.next')
+    fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+        json.dump(report, handle, sort_keys=True, indent=2)
+        handle.write('\n')
+        handle.flush()
+        os.fchmod(handle.fileno(), 0o644)
+        os.fsync(handle.fileno())
+    os.replace(staged, output)
+    fd = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def main(output):
     if (sys.platform != 'darwin' or os.getuid() != 0 or os.geteuid() != 0
             or os.environ.get('CI') != 'true' or os.environ.get('GITHUB_ACTIONS') != 'true'
@@ -51,7 +68,11 @@ def main(output):
     report = {'scope': 'CI-only protected synthetic journal reader; no B3/B8/VM/installation',
               'capture_uid': capture_uid, 'guest_uid': 65534, 'writer_uid': 0, 'authority_uid': 0,
               'code_sha256': hashes, 'interpreter_characterization': characterization,
-              'cases': [], 'completed': False}
+              'cases': [], 'completed': False,
+              'cleanup': {'clean': False, 'removed': False, 'state': 'not-yet-observed'}}
+    fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    os.close(fd)
+    write_report(output, report)
     images, disks, points = [], [], []
     clean = True
     error = None
@@ -93,6 +114,8 @@ def main(output):
              ('source-xattr', 'source image flags or xattrs differ'))
     try:
         for name, refusal in cases:
+            report['active_case'] = name
+            write_report(output, report)
             capture = inputs / ('capture-' + name)
             capture.mkdir(mode=0o700)
             image = capture / anchor.CLONE
@@ -184,6 +207,8 @@ def main(output):
             if name == 'source-xattr':
                 checked(mount.attempt('/usr/bin/xattr', '-d', 'openclaw-owned-q', str(image)), 'remove xattr')
             report['cases'].append(row)
+            report['active_case'] = None
+            write_report(output, report)
             print('protected native reader completed: ' + name, flush=True)
         report['completed'] = True
     except BaseException as failure:
@@ -202,11 +227,7 @@ def main(output):
             for path in (inputs, store, fixtures, code):
                 shutil.rmtree(path)
         report['cleanup'] = {'clean': clean, 'removed': all(not path.exists() for path in (inputs, store, fixtures, code))}
-        fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(fd, 'w') as handle:
-            json.dump(report, handle, sort_keys=True, indent=2)
-            handle.write('\n')
-            os.fchmod(handle.fileno(), 0o644)
+        write_report(output, report)
     if error is not None:
         raise error
     if not clean or not report['cleanup']['removed']:

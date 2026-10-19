@@ -320,6 +320,12 @@ class Protected(MountCase):
                 self.final.write_bytes(original)
         self.assertEqual(self.receipt(), json.loads(original))
 
+    def test_receipt_runtime_is_rechecked(self):
+        self.read_image()
+        self.runtime_check.return_value = {'program_sha256': 'changed'}
+        with self.assertRaisesRegex(RuntimeError, 'reader runtime changed'):
+            self.receipt()
+
     def test_receipt_with_pending_is_not_consumed(self):
         self.read_image()
         self.pending.mkdir(mode=0o700)
@@ -419,6 +425,8 @@ class CodeClosure(unittest.TestCase):
         sys.path[:] = [path for path in original_path
                        if not (pathlib.Path(path) / 'host_guest_commit.py').exists()]
         self.original_paths = list(sys.path)
+        with self.a.Directory(self.path, {0}):
+            pass
 
     def test_exact_closure_hashes_loaded_origins_and_source_fds_stay_pinned(self):
         with self.a.reader_code() as code:
@@ -540,6 +548,28 @@ class Shape(unittest.TestCase):
              mock.patch.object(reader.ctypes, 'CDLL', return_value=types.SimpleNamespace(fclonefileat=function)):
             with self.assertRaises(OSError):
                 reader.clone_fd(41, 73, 'powered-off-image.asif')
+
+    def test_probe_progress_report_keeps_the_last_complete_snapshot_on_interruption(self):
+        import probe_host_protected_journal_reader as probe
+        with tempfile.TemporaryDirectory(prefix='openclaw-q-report-') as temp:
+            output = pathlib.Path(temp) / 'report.json'
+            report = {'completed': False, 'cleanup': {'clean': False, 'removed': False},
+                      'cases': [{'case': 'intact'}], 'active_case': 'wrong-guest'}
+            probe.write_report(output, report)
+            previous = output.read_bytes()
+            self.assertEqual(json.loads(previous), report)
+            self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o644)
+            self.assertFalse(output.with_name(output.name + '.next').exists())
+            with mock.patch.object(probe.os, 'replace', side_effect=OSError('owned interrupted publish')):
+                with self.assertRaisesRegex(OSError, 'interrupted publish'):
+                    probe.write_report(output, {**report, 'cases': report['cases'] + [{'case': 'wrong-guest'}]})
+            self.assertEqual(output.read_bytes(), previous)
+            self.assertFalse(json.loads(output.read_bytes())['completed'])
+            output.with_name(output.name + '.next').unlink()
+            final = {**report, 'completed': True, 'active_case': None,
+                     'cleanup': {'clean': True, 'removed': True}}
+            probe.write_report(output, final)
+            self.assertEqual(json.loads(output.read_bytes()), final)
 
     def test_native_probe_guards_refuse_without_any_command_or_open(self):
         import probe_host_protected_journal_reader as probe

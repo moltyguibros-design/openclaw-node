@@ -52,6 +52,10 @@ CASES = (
         ('receipt-code', "value.get('code_sha256') == code['hashes']"),
         ('receipt-cleanup', "value.get('cleanup', {}).get('clean') is True"),
         ('receipt-copy-removed', "value.get('copy_removed') is True"))),
+    ('receipt-runtime', 'host_protected_journal_reader',
+     "            a.require(code['check']() == code['authority'], 'reader runtime changed')\n"
+     "            directory.check()\n            return value",
+     '            directory.check()\n            return value', 'Protected.test_receipt_runtime_is_rechecked'),
     ('one-read', 'host_protected_journal_reader',
      'not any(name in os.listdir(directory.fd) for name in (pending, final, staged))', 'True',
      'Protected.test_one_read_per_nonce_and_no_success_receipt_overwrite'),
