@@ -11,13 +11,43 @@ import time
 import unittest
 import urllib.request
 
-from preservation_checks import Refused
+from preservation_checks import Refused, http_json
 from serving_nats_group import nats_node_id, wait_for_serving_group
 
 
 NAMES = {'nats': 'owned-standalone', 'nats-1': 'owned-member-1',
          'nats-2': 'owned-member-2', 'nats-3': 'owned-member-3'}
 PORTS = {'nats': 8001, 'nats-2': 8002, 'nats-3': 8003}
+OWNED_GROUP_TIMEOUT = 30
+
+
+def observe_owned_group(names, ports, cluster, phases, phase, *, timeout=OWNED_GROUP_TIMEOUT,
+                        get=http_json, clock=time.monotonic, sleep=time.sleep):
+    started = clock()
+    row = {'phase': phase, 'budget': timeout, 'last': {}}
+    units = {port: unit for unit, port in ports.items()}
+
+    def observed(port, path):
+        key = units[port] + path
+        try:
+            value = get(port, path)
+        except Exception as error:
+            row['last'][key] = {'error': repr(error)[:500]}
+            raise
+        row['last'][key] = value
+        return value
+
+    try:
+        result = wait_for_serving_group(names, ports, cluster, timeout,
+                                        get=observed, clock=clock, sleep=sleep)
+        row['result'] = result
+        return result
+    except BaseException as error:
+        row['failure'] = repr(error)[:500]
+        raise
+    finally:
+        row['elapsed'] = clock() - started
+        phases.append(row)
 
 
 def scripted_responses():
@@ -127,6 +157,53 @@ class ScriptedGroup(unittest.TestCase):
             wait_for_serving_group(NAMES, PORTS, 'owned-group', 1.6,
                                    get=get, clock=lambda: now[0], sleep=sleep)
 
+    def test_owned_positive_budget_includes_a_late_election_and_stability(self):
+        def run(timeout=None):
+            now, phases = [0.0], []
+            responses = scripted_responses()
+            def get(port, path):
+                value = copy.deepcopy(responses[(port, path)])
+                if path == '/jsz' and port in (8002, 8003) and now[0] < 9.2:
+                    value['meta_cluster']['leader'] = NAMES['nats-1']
+                return value
+            def sleep(seconds):
+                now[0] += seconds
+            kwargs = {} if timeout is None else {'timeout': timeout}
+            result = observe_owned_group(NAMES, PORTS, 'owned-group', phases, 'cold restore',
+                                          get=get, clock=lambda: now[0], sleep=sleep, **kwargs)
+            return result, phases, now[0]
+
+        with self.assertRaisesRegex(Refused, 'did not settle'):
+            run(10)
+        try:
+            result, phases, elapsed = run()
+        except Refused as error:
+            self.fail('owned positive budget excludes late stable quorum: ' + str(error))
+        self.assertTrue(result['verified'])
+        self.assertGreater(elapsed, 10)
+        self.assertLess(elapsed, OWNED_GROUP_TIMEOUT)
+        self.assertEqual(phases[0]['result'], result)
+
+    def test_owned_failure_retains_observations_and_propagates_refusal(self):
+        now, phases = [0.0], []
+        responses = scripted_responses()
+        responses[(8002, '/jsz')]['meta_cluster']['leader'] = NAMES['nats-1']
+        def sleep(seconds):
+            now[0] += seconds
+        with self.assertRaisesRegex(Refused, 'meta leader or group size differs'):
+            observe_owned_group(NAMES, PORTS, 'owned-group', phases, 'cold restore',
+                                get=lambda port, path: copy.deepcopy(responses[(port, path)]),
+                                clock=lambda: now[0], sleep=sleep)
+        self.assertEqual(len(phases), 1)
+        self.assertEqual((phases[0]['phase'], phases[0]['budget']),
+                         ('cold restore', OWNED_GROUP_TIMEOUT))
+        self.assertIn('meta leader or group size differs', phases[0]['failure'])
+        self.assertIn('nats-2/jsz', phases[0]['last'])
+        self.assertEqual(phases[0]['last']['nats-2/jsz'], responses[(8002, '/jsz')])
+        self.assertNotIn('result', phases[0])
+        self.assertGreaterEqual(phases[0]['elapsed'], OWNED_GROUP_TIMEOUT)
+        self.assertLess(phases[0]['elapsed'], OWNED_GROUP_TIMEOUT + .1)
+
 
 class RealGroup(unittest.TestCase):
     def test_disposable_two_of_three_then_minority(self):
@@ -152,6 +229,8 @@ class RealGroup(unittest.TestCase):
         cluster = 'owned-group-' + nonce
         processes = {}
         logs = []
+        phases = []
+        failure = None
         def stop(unit):
             process = processes[unit]
             if process.poll() is None:
@@ -204,24 +283,41 @@ class RealGroup(unittest.TestCase):
                 processes[unit] = subprocess.Popen(
                     [binary, '-c', str(folder / 'nats.conf')], stdout=log, stderr=log)
             monitor_ports = {unit: ports[unit][1] for unit in ('nats', 'nats-2', 'nats-3')}
-            evidence = wait_for_serving_group(names, monitor_ports, cluster, 10)
+            evidence = observe_owned_group(names, monitor_ports, cluster, phases, 'cold restore')
             self.assertEqual((evidence['verified'], evidence['size'], evidence['quorum_needed']),
                              (True, 3, 2))
             stop('nats-3')
             with self.assertRaisesRegex(Refused, 'did not settle'):
-                wait_for_serving_group(names, monitor_ports, cluster, 2)
+                observe_owned_group(names, monitor_ports, cluster, phases, 'minority', timeout=2)
             folder = root / 'nats-3'
             log = (folder / 'restarted.log').open('wb')
             logs.append(log)
             processes['nats-3'] = subprocess.Popen(
                 [binary, '-c', str(folder / 'nats.conf')], stdout=log, stderr=log)
-            recovered = wait_for_serving_group(names, monitor_ports, cluster, 10)
+            recovered = observe_owned_group(names, monitor_ports, cluster, phases, 'rejoin')
             self.assertTrue(recovered['verified'])
+        except BaseException as error:
+            failure = repr(error)[:500]
+            raise
         finally:
+            if failure is not None:
+                print(json.dumps({'owned_serving_group_failure': failure, 'phases': phases,
+                                  'logs': {str(path.relative_to(root)): path.read_text()[-16384:]
+                                           for path in sorted(root.glob('*/*.log'))}}), flush=True)
+            cleanup = {}
             for unit in processes:
-                stop(unit)
+                try:
+                    stop(unit)
+                finally:
+                    cleanup[unit] = processes[unit].poll()
+                    if failure is not None:
+                        print(json.dumps({'owned_serving_group_cleanup': cleanup}), flush=True)
             for log in logs:
                 log.close()
+            if failure is None:
+                print(json.dumps({'owned_serving_group_phases': [
+                    {key: row[key] for key in ('phase', 'budget', 'elapsed')} for row in phases],
+                    'cleanup': cleanup}), flush=True)
 
 
 if __name__ == '__main__':
