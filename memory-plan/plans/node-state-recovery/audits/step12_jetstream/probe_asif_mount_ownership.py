@@ -106,7 +106,8 @@ def guard(argv, environ, platform=sys.platform):
     output = pathlib.Path(argv[1])
     require(output.is_absolute() and not os.path.lexists(output) and output.parent.is_dir(),
             'probe output must be a new file in an existing directory')
-    require(os.getuid() != 0, 'the ownership probe requires a non-root runner')
+    require(os.getuid() != 0 and os.geteuid() != 0,
+            'the ownership probe requires a non-root runner')
     sudo = attempt(SUDO, '-n', '/usr/bin/true')
     require(sudo['returncode'] == 0 and not sudo['timed_out'], 'passwordless sudo is required')
     return output

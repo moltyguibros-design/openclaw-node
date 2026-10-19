@@ -1877,6 +1877,7 @@ class ProbeGuards(unittest.TestCase):
         sudo_row = {'argv': [], 'returncode': sudo, 'timed_out': False, 'stdout': b'', 'stderr': ''}
         with mock.patch.object(probe, 'attempt', return_value=sudo_row) as attempt, \
                 mock.patch.object(probe.os, 'getuid', return_value=501), \
+                mock.patch.object(probe.os, 'geteuid', return_value=501), \
                 mock.patch('subprocess.run', side_effect=AssertionError('command run')):
             with self.assertRaisesRegex(RuntimeError, pattern):
                 probe.guard(self.argv if argv is None else argv,
@@ -1912,17 +1913,21 @@ class ProbeGuards(unittest.TestCase):
     def test_the_guarded_path_is_returned_only_when_every_guard_holds(self):
         sudo_row = {'argv': [], 'returncode': 0, 'timed_out': False, 'stdout': b'', 'stderr': ''}
         with mock.patch.object(probe, 'attempt', return_value=sudo_row), \
-                mock.patch.object(probe.os, 'getuid', return_value=501):
+                mock.patch.object(probe.os, 'getuid', return_value=501), \
+                mock.patch.object(probe.os, 'geteuid', return_value=501):
             self.assertEqual(probe.guard(self.argv, self.ENVIRON, 'darwin'), self.output)
 
     def test_root_runner_refuses_before_sudo_for_both_native_modes(self):
         for mode in ('--ci-owned-probe', '--ci-owned-reader'):
-            with self.subTest(mode=mode), mock.patch.object(probe.os, 'getuid', return_value=0), \
-                    mock.patch.object(probe, 'attempt') as attempt:
-                with self.assertRaisesRegex(RuntimeError, '^the ownership probe requires a non-root runner$'):
-                    probe.guard([mode, str(self.output)], self.ENVIRON, 'darwin')
-                attempt.assert_not_called()
-                self.assertFalse(self.output.exists())
+            for uid, euid in ((0, 0), (501, 0)):
+                with self.subTest(mode=mode, uid=uid, euid=euid), \
+                        mock.patch.object(probe.os, 'getuid', return_value=uid), \
+                        mock.patch.object(probe.os, 'geteuid', return_value=euid), \
+                        mock.patch.object(probe, 'attempt') as attempt:
+                    with self.assertRaisesRegex(RuntimeError, '^the ownership probe requires a non-root runner$'):
+                        probe.guard([mode, str(self.output)], self.ENVIRON, 'darwin')
+                    attempt.assert_not_called()
+                    self.assertFalse(self.output.exists())
 
     def test_reader_mode_has_the_same_guards_and_dispatches_only_after_them(self):
         argv = ['--ci-owned-reader', str(self.output)]
@@ -1930,6 +1935,7 @@ class ProbeGuards(unittest.TestCase):
         native_guard = probe.guard
         with mock.patch.object(probe, 'attempt', return_value=sudo_row), \
                 mock.patch.object(probe.os, 'getuid', return_value=501), \
+                mock.patch.object(probe.os, 'geteuid', return_value=501), \
                 mock.patch.object(probe, 'reader_run', return_value=0) as reader, \
                 mock.patch.object(probe, 'run', side_effect=AssertionError('ownership mode run')), \
                 mock.patch.object(probe, 'guard', side_effect=lambda args, env: native_guard(args, env, 'darwin')):

@@ -25,7 +25,8 @@ CASES = (
      '        volume_root = point.lstat()', 'pass\n        volume_root = point.lstat()',
      'ProbeWritePreparation.test_only_the_fresh_volume_root_is_made_runner_writable_before_seeding'),
     ('root-runner-guard', 'probe_asif_mount_ownership',
-     "require(os.getuid() != 0, 'the ownership probe requires a non-root runner')", 'pass',
+     "require(os.getuid() != 0 and os.geteuid() != 0,\n"
+     "            'the ownership probe requires a non-root runner')", 'pass',
      'ProbeGuards.test_root_runner_refuses_before_sudo_for_both_native_modes'),
     ('reader-nonroot-seed-owner', 'probe_asif_mount_ownership',
      "        checked(attempt(SUDO, '-n', '/usr/sbin/chown', '%s:%s' % (os.getuid(), os.getgid()), str(point)),\n"
