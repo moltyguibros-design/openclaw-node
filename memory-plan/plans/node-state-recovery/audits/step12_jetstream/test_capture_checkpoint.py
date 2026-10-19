@@ -62,7 +62,8 @@ def rechain(records, start):
 class CaptureCheckpoint(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(prefix='openclaw-capture-owned-',
-                                           dir=pathlib.Path.home())
+                                           dir=pathlib.Path(os.environ.get('GITHUB_WORKSPACE',
+                                                                           pathlib.Path.home())))
         self.addCleanup(temp.cleanup)
         self.temp = pathlib.Path(temp.name)
         self.parent = self.temp / 'journals'
