@@ -1,5 +1,6 @@
 import copy
 import errno
+import fcntl
 import hashlib
 import json
 import os
@@ -145,7 +146,7 @@ class JournalTests(unittest.TestCase):
         self.root = self.parent / 'journal'
         self.node_lock = pathlib.Path(self.temp.name) / 'node.lock'
         self.nats_marker = pathlib.Path(self.temp.name) / 'writer-handoff.json'
-        self.nats_lock = pathlib.Path(self.temp.name) / 'writer.lock'
+        self.nats_lock = pathlib.Path(self.temp.name).resolve() / 'writer.lock'
         self.nats_lock.write_bytes(b'owned writer lock')
         self.nats_lock.chmod(0o644)
         for name, path in (('NATS_WRITER_MARKER', self.nats_marker),
@@ -203,6 +204,23 @@ class JournalTests(unittest.TestCase):
                     'disabled': unit in ('nats', 'nats-2', 'nats-3'), 'verified': True}
         return journal, hold, observe, marker
 
+    def prepared_serving_stop(self):
+        prior = full_node_inventory()
+        loaded = full_entrypoint_evidence(prior)
+        inventory_patch = patch('preservation_journal.capture_entrypoint_inventory',
+                                side_effect=lambda _: copy.deepcopy(loaded))
+        inventory_patch.start()
+        self.addCleanup(inventory_patch.stop)
+        journal = Journal(self.root, prior, boot='boot-a', node_lock=self.node_lock,
+                          scope=FULL_NODE_SCOPE)
+        self.addCleanup(journal.close)
+        hold = SimpleNamespace(journal=journal, check_forward=lambda: {'verified': True})
+        anchor_hold(journal, hold)
+        journal.mutate('mesh-deploy-listener', 'disable-and-unload',
+                       lambda: fence_listener(loaded), listener_stop_evidence, hold=hold)
+        stop_non_nats(journal, prior, loaded, hold)
+        return journal, hold, loaded
+
     def test_serving_nats_stop_requires_non_nats_fence_marker_absence_and_order(self):
         prior = full_node_inventory()
         loaded = full_entrypoint_evidence(prior)
@@ -241,6 +259,102 @@ class JournalTests(unittest.TestCase):
                                   and row.get('unit') in ('nats', 'nats-2', 'nats-3')],
                                  ['nats', 'nats-2', 'nats-3'])
                 self.assertFalse(any(row.get('unit') == 'nats-1' for row in journal.records[1:]))
+
+    def test_serving_stop_excludes_legacy_writer_through_apply_and_verification(self):
+        journal, hold, loaded = self.prepared_serving_stop()
+        probe = ('import fcntl,os,sys; '
+                 'fd=os.open(sys.argv[1],os.O_RDONLY); '
+                 'fcntl.flock(fd,fcntl.LOCK_SH|fcntl.LOCK_NB)')
+        def shared_probe():
+            return subprocess.run([sys.executable, '-c', probe, str(self.nats_lock)],
+                                  capture_output=True, text=True, timeout=5)
+        def excluded():
+            attempt = shared_probe()
+            self.assertNotEqual(attempt.returncode, 0)
+            self.assertIn('BlockingIOError', attempt.stderr)
+        def apply():
+            self.assertEqual(journal.records[-1]['event'], 'intent')
+            excluded()
+            fence_unit(loaded, 'nats')
+        def verify():
+            excluded()
+            return listener_stop_evidence('nats')
+        proof = journal.mutate('nats', 'disable-and-unload', apply, verify, hold=hold)
+        intent = journal.records[-2]
+        self.assertEqual(intent['writer_exclusion'], proof['writer_exclusion'])
+        self.assertTrue(proof['writer_exclusion']['marker_absent'])
+        self.assertTrue(proof['writer_exclusion']['legacy_lock']['exclusive'])
+        self.assertEqual(proof['writer_exclusion']['legacy_lock']['inode'],
+                         self.nats_lock.stat().st_ino)
+        self.assertEqual(shared_probe().returncode, 0)
+
+    def test_serving_stop_refuses_missing_or_held_writer_lock_before_intent(self):
+        journal, hold, loaded = self.prepared_serving_stop()
+        before = len(journal.records)
+        stop = lambda: journal.mutate('nats', 'disable-and-unload',
+            lambda: self.fail('physical stop entered'), listener_stop_evidence, hold=hold)
+        self.nats_lock.unlink()
+        with self.assertRaisesRegex(Refused, 'lock is absent or unobservable'):
+            stop()
+        self.assertEqual(len(journal.records), before)
+        self.nats_lock.write_bytes(b'owned writer lock')
+        self.nats_lock.chmod(0o644)
+        fd = os.open(self.nats_lock, os.O_RDONLY)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            with self.assertRaisesRegex(Refused, 'writer holds the lock'):
+                stop()
+            self.assertEqual(len(journal.records), before)
+        finally:
+            os.close(fd)
+
+    def test_serving_stop_refuses_unprotected_writer_lock_before_intent(self):
+        journal, hold, loaded = self.prepared_serving_stop()
+        before = len(journal.records)
+        stop = lambda: journal.mutate('nats', 'disable-and-unload',
+            lambda: self.fail('physical stop entered'), listener_stop_evidence, hold=hold)
+        self.nats_lock.chmod(0o666)
+        with self.assertRaisesRegex(Refused, 'lock identity differs'):
+            stop()
+        self.nats_lock.chmod(0o644)
+        target = self.nats_lock.with_name('writer-target')
+        self.nats_lock.rename(target)
+        self.nats_lock.symlink_to(target)
+        with self.assertRaisesRegex(Refused, 'lock identity differs'):
+            stop()
+        self.nats_lock.unlink()
+        target.rename(self.nats_lock)
+        parent = self.nats_lock.parent
+        parent.chmod(0o770)
+        try:
+            with self.assertRaisesRegex(Refused, 'lock ancestor is not protected'):
+                stop()
+        finally:
+            parent.chmod(0o700)
+        self.assertEqual(len(journal.records), before)
+
+    def serving_stop_changed_writer(self, change, expected):
+        journal, hold, loaded = self.prepared_serving_stop()
+        def apply():
+            fence_unit(loaded, 'nats')
+            if change == 'marker':
+                self.nats_marker.write_text('{}')
+            else:
+                self.nats_lock.unlink()
+                self.nats_lock.write_bytes(b'replaced writer lock')
+                self.nats_lock.chmod(0o644)
+        with self.assertRaisesRegex(Refused, expected):
+            journal.mutate('nats', 'disable-and-unload', apply,
+                           lambda: listener_stop_evidence('nats'), hold=hold)
+        self.assertEqual(journal.records[-1]['event'], 'failed')
+        self.assertFalse(any(row['event'] == 'verified' and row.get('unit') == 'nats'
+                             for row in journal.records))
+
+    def test_serving_stop_refuses_marker_before_verified_receipt(self):
+        self.serving_stop_changed_writer('marker', 'marker already exists')
+
+    def test_serving_stop_refuses_lock_replacement_before_verified_receipt(self):
+        self.serving_stop_changed_writer('lock', 'lock changed during serving stop')
 
     def publish_nats_return(self, journal, transfer, **changes):
         outcomes = pathlib.Path(self.temp.name) / 'root-outcomes'

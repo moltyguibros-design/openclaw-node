@@ -1216,9 +1216,20 @@ if not marker.exists():
                                         chunk = client.recv(8192)
                                         self.assertTrue(chunk)
                                         reply += chunk
-                                    with StopWatch(member['service'], member['binding'],
+                                    physical_disable = member['service'].disable_for_hold
+                                    def disable_under_exclusion():
+                                        probe = subprocess.run([sys.executable, '-c',
+                                            'import fcntl,os,sys; fd=os.open(sys.argv[1],os.O_RDONLY); '
+                                            'fcntl.flock(fd,fcntl.LOCK_SH|fcntl.LOCK_NB)',
+                                            str(writer_lock)], capture_output=True, text=True, timeout=5)
+                                        self.assertNotEqual(probe.returncode, 0)
+                                        self.assertIn('BlockingIOError', probe.stderr)
+                                        return physical_disable()
+                                    with (StopWatch(member['service'], member['binding'],
                                                    [member['log'], member['err']], unit,
-                                                   allowed_signals=(15,), require_disabled=True) as watch:
+                                                   allowed_signals=(15,), require_disabled=True) as watch,
+                                          patch.object(member['service'], 'disable_for_hold',
+                                                       side_effect=disable_under_exclusion)):
                                         def absent():
                                             with socket.socket() as connection:
                                                 connection.settimeout(.2)
@@ -1242,6 +1253,8 @@ if not marker.exists():
                                     self.assertTrue(member['service'].disabled())
                                     self.assertEqual(proof['execution_hold']['watch_session_id'],
                                                      hold.original_session)
+                                    self.assertEqual(proof['writer_exclusion']['legacy_lock']['inode'],
+                                                     writer_lock.stat().st_ino)
                                     intents = [row for row in journal.records
                                                if row['event'] == 'intent' and row.get('unit') == unit]
                                     self.assertEqual(len(intents), 1)

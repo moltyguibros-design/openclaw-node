@@ -71,13 +71,13 @@ def require_no_nats_marker():
     raise Refused('protected NATS marker already exists')
 
 
-def require_no_outcome_acl(path):
+def require_no_protected_acl(path, subject):
     if sys.platform == 'darwin':
         result = subprocess.run(['/bin/ls', '-lde', str(path)], capture_output=True,
                                 text=True, check=True)
         require(result.stdout and not any(' allow ' in line
                                           for line in result.stdout.splitlines()[1:]),
-                'root NATS outcome path has an ACL')
+                subject + ' has an ACL')
 
 
 def read_nats_root_outcome(transaction):
@@ -86,7 +86,7 @@ def read_nats_root_outcome(transaction):
         require(stat.S_ISDIR(info.st_mode) and info.st_uid == NATS_ROOT_UID
                 and stat.S_IMODE(info.st_mode) == 0o755,
                 'root NATS outcome directory identity differs')
-        require_no_outcome_acl(NATS_ROOT_OUTCOMES)
+        require_no_protected_acl(NATS_ROOT_OUTCOMES, 'root NATS outcome path')
         directory = os.open(NATS_ROOT_OUTCOMES, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
             opened = os.fstat(directory)
@@ -98,7 +98,8 @@ def read_nats_root_outcome(transaction):
                 require(stat.S_ISREG(file_info.st_mode) and file_info.st_uid == NATS_ROOT_UID
                         and stat.S_IMODE(file_info.st_mode) == 0o644 and file_info.st_nlink == 1,
                         'root NATS outcome identity differs')
-                require_no_outcome_acl(NATS_ROOT_OUTCOMES / (transaction + '.json'))
+                require_no_protected_acl(NATS_ROOT_OUTCOMES / (transaction + '.json'),
+                                         'root NATS outcome path')
                 receipt = json.load(handle)
         finally:
             os.close(directory)
@@ -161,6 +162,57 @@ def nats_legacy_restore_guard():
         check()
         yield check
         check()
+    finally:
+        os.close(fd)
+
+
+@contextlib.contextmanager
+def nats_legacy_stop_guard():
+    require_no_nats_marker()
+    try:
+        for ancestor in reversed((NATS_LEGACY_LOCK.parent, *NATS_LEGACY_LOCK.parent.parents)):
+            info = ancestor.lstat()
+            require(stat.S_ISDIR(info.st_mode) and info.st_uid in (0, NATS_ROOT_UID)
+                    and not info.st_mode & 0o022,
+                    'legacy NATS writer lock ancestor is not protected')
+            require_no_protected_acl(ancestor, 'legacy NATS writer lock path')
+        named = NATS_LEGACY_LOCK.lstat()
+        require(stat.S_ISREG(named.st_mode) and named.st_uid == NATS_ROOT_UID
+                and named.st_gid == NATS_LEGACY_LOCK.parent.lstat().st_gid
+                and stat.S_IMODE(named.st_mode) == 0o644 and named.st_nlink == 1,
+                'legacy NATS writer lock identity differs')
+        require_no_protected_acl(NATS_LEGACY_LOCK, 'legacy NATS writer lock path')
+        fd = os.open(NATS_LEGACY_LOCK, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise Refused('legacy NATS writer lock is absent or unobservable') from error
+    try:
+        opened = os.fstat(fd)
+        require((opened.st_dev, opened.st_ino, opened.st_ctime_ns) ==
+                (named.st_dev, named.st_ino, named.st_ctime_ns),
+                'legacy NATS writer lock changed while opening')
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise Refused('legacy NATS writer holds the lock during serving stop') from error
+        except OSError as error:
+            raise Refused('legacy NATS writer lock acquisition failed') from error
+        def check():
+            try:
+                current = NATS_LEGACY_LOCK.lstat()
+                require_no_protected_acl(NATS_LEGACY_LOCK, 'legacy NATS writer lock path')
+            except (OSError, subprocess.CalledProcessError) as error:
+                raise Refused('legacy NATS writer lock is unobservable during serving stop') from error
+            require((current.st_dev, current.st_ino, current.st_ctime_ns) ==
+                    (opened.st_dev, opened.st_ino, opened.st_ctime_ns),
+                    'legacy NATS writer lock changed during serving stop')
+            require_no_nats_marker()
+            return {'marker_absent': True, 'legacy_lock': {
+                'device': opened.st_dev, 'inode': opened.st_ino,
+                'ctime_ns': opened.st_ctime_ns, 'uid': opened.st_uid,
+                'gid': opened.st_gid, 'mode': stat.S_IMODE(opened.st_mode),
+                'exclusive': True}}
+        check()
+        yield check
     finally:
         os.close(fd)
 
@@ -1230,89 +1282,99 @@ class Journal:
                         stopped = [row['unit'] for row in intents if row.get('unit') in SERVING_NATS]
                         require(stopped == list(SERVING_NATS[:SERVING_NATS.index(unit)]),
                                 'serving NATS stops must follow capture order')
-        fields = intent_fields or {}
-        require(isinstance(fields, dict) and not set(fields) & {'unit', 'action'},
-                'intent fields cannot replace the mutation owner')
-        intent = self.append('intent', unit=unit, action=action, **fields)
-        rejected_evidence = None
-        failure_stage = 'apply'
-        try:
-            apply()
-            failure_stage = 'pre-verify'
-            if held:
-                hold.check_forward()
-            expected = next((row['evidence']['entrypoint_loaded'] for row in reversed(self.records)
-                             if row['event'] == 'verified'
-                             and 'entrypoint_loaded' in row.get('evidence', {})),
-                            self.entrypoint_inventory['loaded'] if self.scope == FULL_NODE_SCOPE else None)
-            if self.scope == FULL_NODE_SCOPE and action in ('stop', 'unload', 'disable-and-unload'):
-                expected = {domain: sorted(set(labels) - {'ai.openclaw.' + unit})
-                            for domain, labels in expected.items()}
-            newly_disabled = ('ai.openclaw.' + unit if self.scope == FULL_NODE_SCOPE
-                              and action == 'disable-and-unload' else None)
-            before_verify = self.check_entrypoints(forward=True, expected_loaded=expected,
-                                                   newly_disabled=newly_disabled)
-            failure_stage = 'verify-callback'
-            evidence = verify()
-            failure_stage = 'evidence-serialization'
-            if isinstance(evidence, dict):
-                rejected_evidence = json.loads(encoded(evidence))
-            failure_stage = 'verified-evidence'
-            require(isinstance(evidence, dict) and evidence.get('verified') is True,
-                    'mutation lacks verified evidence')
-            if held and self.scope == FULL_NODE_SCOPE and action == 'disable-and-unload':
-                certificate = hold.check_forward()
-                original = next(row['evidence'] for row in self.records
-                                if row['event'] == 'verified'
-                                and row.get('unit') == 'scheduler-heartbeat'
-                                and row.get('action') == 'close-execution-hold')
-                if original.get('watch_session_id'):
-                    require(valid_execution_hold(certificate, original['watch_session_id']),
-                            'stop lost the original execution hold session')
-                if isinstance(certificate, dict):
-                    require(certificate.get('verified') is True
-                            and certificate.get('watch_session_id') == original.get('watch_session_id'),
-                            'stop lost the original execution hold session')
-                    if 'execution_hold' in evidence:
-                        claimed = evidence['execution_hold']
-                        require(isinstance(claimed, dict)
-                                and claimed.get('watch_session_id') == certificate.get('watch_session_id'),
-                                'stop proof names a different execution hold session')
-                    evidence = {**evidence, 'execution_hold': certificate}
-            failure_stage = 'persistent-stop-proof'
-            if self.scope == FULL_NODE_SCOPE and action == 'disable-and-unload':
-                if unit == 'mesh-deploy-listener':
-                    require(self.full_node_stop_proven(unit, evidence),
-                            'deploy listener stop lacks persistent unload and process proof')
-                elif unit in NATS_TRANSFER_UNITS:
-                    require(self.full_node_stop_proven(unit, evidence),
-                            'NATS stop lacks persistent unload and process proof: ' + unit)
-                else:
-                    require(self.full_node_stop_proven(unit, evidence),
-                            'full-node stop lacks class-specific persistent proof: ' + unit)
-            failure_stage = 'entrypoint-postcheck'
-            if self.scope == FULL_NODE_SCOPE:
-                after_verify = self.check_entrypoints(forward=True, expected_loaded=expected,
-                                                      expected_overrides=before_verify['overrides'])
-                require(after_verify['loaded'] == before_verify['loaded'],
-                        'full-node job changed during mutation verification')
-                evidence = {**evidence, 'entrypoint_loaded': after_verify['loaded'],
-                            'entrypoint_overrides': after_verify['overrides']}
-            self.append('verified', intent=intent['sequence'], unit=unit, action=action, evidence=evidence)
-            return evidence
-        except Exception as error:
-            if not self.write_failed:
-                detail = {'failure_stage': failure_stage}
-                if failure_evidence is not None:
-                    try:
-                        detail['evidence'] = json.loads(encoded(failure_evidence(error)))
-                    except Exception as inspection_error:
-                        detail['failure_evidence_error'] = type(inspection_error).__name__
-                if rejected_evidence is not None:
-                    detail['rejected_evidence'] = rejected_evidence
-                self.append('failed', intent=intent['sequence'], unit=unit, action=action,
-                            error_type=type(error).__name__, **detail)
-            raise
+        writer_guard = (nats_legacy_stop_guard() if self.scope == FULL_NODE_SCOPE
+                        and unit in SERVING_NATS else contextlib.nullcontext(None))
+        with writer_guard as writer_check:
+            fields = intent_fields or {}
+            require(isinstance(fields, dict) and not set(fields) & {'unit', 'action', 'writer_exclusion'},
+                    'intent fields cannot replace the mutation owner')
+            if writer_check is not None:
+                fields = {**fields, 'writer_exclusion': writer_check()}
+            intent = self.append('intent', unit=unit, action=action, **fields)
+            rejected_evidence = None
+            failure_stage = 'apply'
+            try:
+                apply()
+                failure_stage = 'pre-verify'
+                if held:
+                    hold.check_forward()
+                expected = next((row['evidence']['entrypoint_loaded'] for row in reversed(self.records)
+                                 if row['event'] == 'verified'
+                                 and 'entrypoint_loaded' in row.get('evidence', {})),
+                                self.entrypoint_inventory['loaded'] if self.scope == FULL_NODE_SCOPE else None)
+                if self.scope == FULL_NODE_SCOPE and action in ('stop', 'unload', 'disable-and-unload'):
+                    expected = {domain: sorted(set(labels) - {'ai.openclaw.' + unit})
+                                for domain, labels in expected.items()}
+                newly_disabled = ('ai.openclaw.' + unit if self.scope == FULL_NODE_SCOPE
+                                  and action == 'disable-and-unload' else None)
+                before_verify = self.check_entrypoints(forward=True, expected_loaded=expected,
+                                                       newly_disabled=newly_disabled)
+                failure_stage = 'verify-callback'
+                evidence = verify()
+                failure_stage = 'evidence-serialization'
+                if isinstance(evidence, dict):
+                    rejected_evidence = json.loads(encoded(evidence))
+                failure_stage = 'verified-evidence'
+                require(isinstance(evidence, dict) and evidence.get('verified') is True,
+                        'mutation lacks verified evidence')
+                if held and self.scope == FULL_NODE_SCOPE and action == 'disable-and-unload':
+                    certificate = hold.check_forward()
+                    original = next(row['evidence'] for row in self.records
+                                    if row['event'] == 'verified'
+                                    and row.get('unit') == 'scheduler-heartbeat'
+                                    and row.get('action') == 'close-execution-hold')
+                    if original.get('watch_session_id'):
+                        require(valid_execution_hold(certificate, original['watch_session_id']),
+                                'stop lost the original execution hold session')
+                    if isinstance(certificate, dict):
+                        require(certificate.get('verified') is True
+                                and certificate.get('watch_session_id') == original.get('watch_session_id'),
+                                'stop lost the original execution hold session')
+                        if 'execution_hold' in evidence:
+                            claimed = evidence['execution_hold']
+                            require(isinstance(claimed, dict)
+                                    and claimed.get('watch_session_id') == certificate.get('watch_session_id'),
+                                    'stop proof names a different execution hold session')
+                        evidence = {**evidence, 'execution_hold': certificate}
+                failure_stage = 'persistent-stop-proof'
+                if self.scope == FULL_NODE_SCOPE and action == 'disable-and-unload':
+                    if unit == 'mesh-deploy-listener':
+                        require(self.full_node_stop_proven(unit, evidence),
+                                'deploy listener stop lacks persistent unload and process proof')
+                    elif unit in NATS_TRANSFER_UNITS:
+                        require(self.full_node_stop_proven(unit, evidence),
+                                'NATS stop lacks persistent unload and process proof: ' + unit)
+                    else:
+                        require(self.full_node_stop_proven(unit, evidence),
+                                'full-node stop lacks class-specific persistent proof: ' + unit)
+                failure_stage = 'entrypoint-postcheck'
+                if self.scope == FULL_NODE_SCOPE:
+                    after_verify = self.check_entrypoints(forward=True, expected_loaded=expected,
+                                                          expected_overrides=before_verify['overrides'])
+                    require(after_verify['loaded'] == before_verify['loaded'],
+                            'full-node job changed during mutation verification')
+                    evidence = {**evidence, 'entrypoint_loaded': after_verify['loaded'],
+                                'entrypoint_overrides': after_verify['overrides']}
+                if writer_check is not None:
+                    writer_evidence = writer_check()
+                    require(writer_evidence == intent['writer_exclusion'],
+                            'serving NATS writer exclusion changed during stop')
+                    evidence = {**evidence, 'writer_exclusion': writer_evidence}
+                self.append('verified', intent=intent['sequence'], unit=unit, action=action, evidence=evidence)
+                return evidence
+            except Exception as error:
+                if not self.write_failed:
+                    detail = {'failure_stage': failure_stage}
+                    if failure_evidence is not None:
+                        try:
+                            detail['evidence'] = json.loads(encoded(failure_evidence(error)))
+                        except Exception as inspection_error:
+                            detail['failure_evidence_error'] = type(inspection_error).__name__
+                    if rejected_evidence is not None:
+                        detail['rejected_evidence'] = rejected_evidence
+                    self.append('failed', intent=intent['sequence'], unit=unit, action=action,
+                                error_type=type(error).__name__, **detail)
+                raise
 
     def recover(self, restore, observe, final_check, diagnostics=None, hold=None,
                 deploy_fence=None, nats_group_check=None):
@@ -1735,6 +1797,20 @@ def class_stop_proven(prior, unit, evidence):
                 and evidence['prior']['running'] == prior[unit]['running']))
 
 
+def stop_writer_exclusion_proven(intent, evidence):
+    observed = intent.get('writer_exclusion')
+    lock = observed.get('legacy_lock') if isinstance(observed, dict) else None
+    return (isinstance(evidence, dict) and evidence.get('writer_exclusion') == observed
+            and isinstance(observed, dict) and set(observed) == {'marker_absent', 'legacy_lock'}
+            and observed['marker_absent'] is True
+            and isinstance(lock, dict)
+            and set(lock) == {'device', 'inode', 'ctime_ns', 'uid', 'gid', 'mode', 'exclusive'}
+            and all(type(lock[key]) is int and lock[key] >= 0
+                    for key in ('device', 'inode', 'ctime_ns', 'uid', 'gid'))
+            and lock['uid'] == NATS_ROOT_UID and lock['mode'] == 0o644
+            and lock['exclusive'] is True)
+
+
 def original_hold(certificate, session, receipt):
     """A forward certificate of the original session for the one published hold window."""
     return valid_execution_hold(certificate, session) and certificate.get('receipt') == receipt
@@ -1838,6 +1914,9 @@ def capture_cohort(records):
             require(class_stop_proven(prior, unit, evidence)
                     and original_hold(evidence.get('execution_hold'), session, receipt),
                     'capture checkpoint stop lacks class proof or the original hold session: ' + unit)
+            if unit in SERVING_NATS:
+                require(stop_writer_exclusion_proven(intent, evidence),
+                        'capture checkpoint serving NATS stop lacks writer exclusion: ' + unit)
             require(all(isinstance(after_loaded[domain], list)
                         and len(set(after_loaded[domain])) == len(after_loaded[domain])
                         and set(after_loaded[domain]) == set(loaded[domain]) - {label}

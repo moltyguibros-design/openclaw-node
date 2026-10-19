@@ -68,8 +68,10 @@ class CaptureCheckpoint(unittest.TestCase):
         self.parent.mkdir(mode=0o700)
         self.root = self.parent / 'journal'
         self.node_lock = self.temp / 'node.lock'
-        lock = self.temp / 'writer.lock'
+        lock = self.temp.resolve() / 'writer.lock'
         lock.write_bytes(b'owned writer lock')
+        lock.chmod(0o644)
+        self.writer_lock = lock
         for name, value in (('NATS_WRITER_MARKER', self.temp / 'writer-handoff.json'),
                             ('NATS_LEGACY_LOCK', lock), ('NATS_ROOT_UID', os.getuid())):
             guarded = patch.object(preservation_journal, name, value)
@@ -127,13 +129,24 @@ class CaptureCheckpoint(unittest.TestCase):
         self.journal.mutate(unit, 'disable-and-unload', lambda: fence(self.loaded),
                             lambda: self.stop_evidence(unit), hold=self.hold)
 
+    def writer_claim(self, unit):
+        if unit not in SERVING_NATS:
+            return None
+        info = self.writer_lock.stat()
+        return {'marker_absent': True, 'legacy_lock': {
+            'device': info.st_dev, 'inode': info.st_ino, 'ctime_ns': info.st_ctime_ns,
+            'uid': info.st_uid, 'gid': info.st_gid, 'mode': 0o644, 'exclusive': True}}
+
     def forged_stop(self, unit, certificate=CERTIFICATE, evidence=None):
-        intent = self.journal.append('intent', unit=unit, action='disable-and-unload')
+        writer = self.writer_claim(unit)
+        intent = self.journal.append('intent', unit=unit, action='disable-and-unload',
+                                     **({'writer_exclusion': writer} if writer else {}))
         if 'ai.openclaw.' + unit in self.loaded['loaded']['gui']:
             fence_unit(self.loaded, unit)
         self.journal.append('verified', intent=intent['sequence'], unit=unit, action='disable-and-unload',
                             evidence={**(evidence if evidence is not None else self.stop_evidence(unit)),
                                       'execution_hold': certificate,
+                                      **({'writer_exclusion': writer} if writer else {}),
                                       'entrypoint_loaded': copy.deepcopy(self.loaded['loaded']),
                                       'entrypoint_overrides': copy.deepcopy(self.loaded['overrides'])})
 
@@ -734,7 +747,9 @@ class Decisive(CaptureCheckpoint):
     def custom_stop(self, unit, action='disable-and-unload', user=True, system=KEEP):
         """forged_stop with a chosen action and per-domain override result for its own label."""
         label = 'ai.openclaw.' + unit
-        intent = self.journal.append('intent', unit=unit, action=action)
+        writer = self.writer_claim(unit)
+        intent = self.journal.append('intent', unit=unit, action=action,
+                                     **({'writer_exclusion': writer} if writer else {}))
         if label in self.loaded['loaded']['gui']:
             self.loaded['loaded']['gui'].remove(label)
         self.loaded['overrides']['gui'][label] = True
@@ -744,6 +759,7 @@ class Decisive(CaptureCheckpoint):
             self.loaded['overrides']['system'][label] = system
         self.journal.append('verified', intent=intent['sequence'], unit=unit, action=action,
                             evidence={**self.stop_evidence(unit), 'execution_hold': CERTIFICATE,
+                                      **({'writer_exclusion': writer} if writer else {}),
                                       'entrypoint_loaded': copy.deepcopy(self.loaded['loaded']),
                                       'entrypoint_overrides': copy.deepcopy(self.loaded['overrides'])})
 
@@ -786,6 +802,35 @@ class Decisive(CaptureCheckpoint):
                 rows[receipt]['sha256'] = hashlib.sha256(encoded(rows[receipt])).hexdigest()
                 with self.assertRaisesRegex(Refused, '^capture journal chain differs$'):
                     self.verify(rows, record['sha256'], manifest=manifest)
+
+    def test_serving_stop_writer_exclusion_is_required_in_intent_and_receipt(self):
+        records, _, manifest = self.authentic()
+        intent = self.index(records, lambda row: row['event'] == 'intent'
+                            and row.get('unit') == 'nats')
+        receipt = self.receipt_of(records, 'nats')
+        for case in ('missing-intent', 'missing-receipt', 'receipt-lock-replaced', 'marker-present',
+                     'lock-not-exclusive', 'wrong-lock-identity'):
+            with self.subTest(case=case):
+                rows = copy.deepcopy(records)
+                if case == 'missing-intent':
+                    del rows[intent]['writer_exclusion']
+                elif case == 'missing-receipt':
+                    del rows[receipt]['evidence']['writer_exclusion']
+                elif case == 'receipt-lock-replaced':
+                    rows[receipt]['evidence']['writer_exclusion']['legacy_lock']['inode'] += 1
+                else:
+                    for value in (rows[intent]['writer_exclusion'],
+                                  rows[receipt]['evidence']['writer_exclusion']):
+                        if case == 'marker-present':
+                            value['marker_absent'] = False
+                        elif case == 'lock-not-exclusive':
+                            value['legacy_lock']['exclusive'] = False
+                        else:
+                            value['legacy_lock']['mode'] = 0o600
+                rows, again = self.reforged(rows, manifest, intent)
+                with self.assertRaisesRegex(Refused,
+                        '^capture checkpoint serving NATS stop lacks writer exclusion: nats$'):
+                    self.verify(rows, manifest=again)
 
     def test_chain_sequence_must_be_the_row_index(self):
         records, _, manifest = self.authentic()
