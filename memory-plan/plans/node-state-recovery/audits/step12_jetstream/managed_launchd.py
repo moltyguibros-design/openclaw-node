@@ -358,12 +358,21 @@ def restore_disabled_daemon(service, journal, unit, prior, ready, *, timeout):
 
 def serving_nats_member_ready(binding, *, monitor_port, client_port, server_name):
     require(binding['status']['loaded'] and binding['status']['running']
-            and binding['status']['pid'] is not None,
+            and type(binding['status']['pid']) is int and binding['status']['pid'] > 0,
             'serving NATS readiness needs a bound running owner')
     require(type(monitor_port) is int and 0 < monitor_port < 65536
             and type(client_port) is int and 0 < client_port < 65536
             and isinstance(server_name, str) and server_name,
             'serving NATS readiness needs saved local endpoints and name')
+    try:
+        sockets = command(['/usr/sbin/lsof', '-a', '-p', str(binding['status']['pid']),
+                           '-iTCP', '-sTCP:LISTEN', '-Fn'], timeout=1)
+    except (Refused, subprocess.TimeoutExpired):
+        return False
+    ports = {int(match[1]) for line in sockets.splitlines()
+             if line.startswith('n') and (match := re.search(r':(\d+)$', line))}
+    if not {monitor_port, client_port} <= ports:
+        return False
     try:
         varz = http_json(monitor_port, '/varz', timeout=1)
     except Refused:

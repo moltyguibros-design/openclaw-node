@@ -52,24 +52,37 @@ class StopWatchPreflight(unittest.TestCase):
             listener.bind(('127.0.0.1', 0))
             listener.listen()
             client_port = listener.getsockname()[1]
-            with patch('managed_launchd.http_json', return_value={
-                    'server_name': 'owned-nats', 'version': '2.12.6'}) as monitor:
-                self.assertTrue(serving_nats_member_ready(binding, monitor_port=8222,
+            sockets = f'p42\nnlocalhost:{client_port}\nnlocalhost:8222\n'
+            with patch('managed_launchd.command', return_value=sockets) as census:
+                with patch('managed_launchd.http_json', return_value={
+                        'server_name': 'owned-nats', 'version': '2.12.6'}) as monitor:
+                    self.assertTrue(serving_nats_member_ready(binding, monitor_port=8222,
+                        client_port=client_port, server_name='owned-nats'))
+                    monitor.assert_called_once_with(8222, '/varz', timeout=1)
+                    census.assert_called_once_with(['/usr/sbin/lsof', '-a', '-p', '42',
+                        '-iTCP', '-sTCP:LISTEN', '-Fn'], timeout=1)
+                for response in ({'server_name': 'other', 'version': '2.12.6'},
+                                 {'server_name': 'owned-nats', 'version': '2.12.5'}):
+                    with patch('managed_launchd.http_json', return_value=response):
+                        with self.assertRaisesRegex(Refused, 'monitoring identity differs'):
+                            serving_nats_member_ready(binding, monitor_port=8222,
+                                client_port=client_port, server_name='owned-nats')
+            for absent in (f'p42\nnlocalhost:{client_port}\n', 'p42\nnlocalhost:8222\n'):
+                with patch('managed_launchd.command', return_value=absent):
+                    with patch('managed_launchd.http_json', side_effect=AssertionError('monitor reached')):
+                        self.assertFalse(serving_nats_member_ready(binding, monitor_port=8222,
+                            client_port=client_port, server_name='owned-nats'))
+            with patch('managed_launchd.command', side_effect=Refused('owner has no listener')):
+                self.assertFalse(serving_nats_member_ready(binding, monitor_port=8222,
                     client_port=client_port, server_name='owned-nats'))
-                monitor.assert_called_once_with(8222, '/varz', timeout=1)
-            for response in ({'server_name': 'other', 'version': '2.12.6'},
-                             {'server_name': 'owned-nats', 'version': '2.12.5'}):
-                with patch('managed_launchd.http_json', return_value=response):
-                    with self.assertRaisesRegex(Refused, 'monitoring identity differs'):
-                        serving_nats_member_ready(binding, monitor_port=8222,
-                            client_port=client_port, server_name='owned-nats')
-        with patch('managed_launchd.http_json', side_effect=Refused('not up')):
-            self.assertFalse(serving_nats_member_ready(binding, monitor_port=8222,
-                client_port=client_port, server_name='owned-nats'))
-        with patch('managed_launchd.http_json', return_value={
-                'server_name': 'owned-nats', 'version': '2.12.6'}):
-            self.assertFalse(serving_nats_member_ready(binding, monitor_port=8222,
-                client_port=client_port, server_name='owned-nats'))
+        with patch('managed_launchd.command', return_value=sockets):
+            with patch('managed_launchd.http_json', side_effect=Refused('not up')):
+                self.assertFalse(serving_nats_member_ready(binding, monitor_port=8222,
+                    client_port=client_port, server_name='owned-nats'))
+            with patch('managed_launchd.http_json', return_value={
+                    'server_name': 'owned-nats', 'version': '2.12.6'}):
+                self.assertFalse(serving_nats_member_ready(binding, monitor_port=8222,
+                    client_port=client_port, server_name='owned-nats'))
         with self.assertRaisesRegex(Refused, 'bound running owner'):
             serving_nats_member_ready({'status': {'loaded': True, 'running': False, 'pid': None}},
                 monitor_port=8222, client_port=4222, server_name='owned-nats')
@@ -1040,13 +1053,24 @@ if not marker.exists():
         writer_lock.write_bytes(b'owned writer lock')
         writer_lock.chmod(0o644)
         try:
+            endpoints, used_ports = {}, set()
+            for unit in SERVING_NATS:
+                values = []
+                while len(values) < 3:
+                    value = free_port()
+                    if value not in used_ports:
+                        used_ports.add(value)
+                        values.append(value)
+                endpoints[unit] = values
             for unit in SERVING_NATS:
                 folder = self.directory / unit
                 folder.mkdir(mode=0o700)
-                port, monitor = free_port(), free_port()
+                port, monitor, route = endpoints[unit]
                 name = 'owned-' + unit + '-' + secrets.token_hex(4)
                 config = folder / 'nats.conf'
-                config.write_text(f'''server_name: {name}\nhost: 127.0.0.1\nport: {port}\nhttp_port: {monitor}\njetstream {{ store_dir: "{folder / 'store'}" }}\n''')
+                routes = ', '.join('"nats-route://127.0.0.1:' + str(endpoints[other][2]) + '"'
+                                   for other in SERVING_NATS if other != unit)
+                config.write_text(f'''server_name: {name}\nhost: 127.0.0.1\nport: {port}\nhttp_port: {monitor}\ncluster {{ name: owned-b5; listen: 127.0.0.1:{route}; routes: [{routes}] }}\njetstream {{ store_dir: "{folder / 'store'}" }}\n''')
                 plist = folder / 'unit.plist'
                 log, err = folder / 'server.log', folder / 'server.err'
                 log.touch(mode=0o600)
@@ -1184,6 +1208,8 @@ if not marker.exists():
                                             server_name=member['name']), timeout=.5 if fail_first else 10)
                                     self.assertNotEqual(binding['status']['pid'],
                                                         member['binding']['status']['pid'])
+                                    self.assertEqual(http_json(member['monitor'], '/varz')
+                                        ['cluster']['name'], 'owned-b5')
                                     restored.append(unit)
                                     return
                                 if unit in ('scheduler-heartbeat', 'federation-tick', 'nats-1'):
@@ -1251,11 +1277,36 @@ if not marker.exists():
     def test_full_node_owned_nats_failed_start_keeps_override(self):
         self.exercise_full_node_owned_nats_recovery(True)
 
+    def test_owned_nats_readiness_binds_listening_ports_to_owner(self):
+        port, monitor = free_port(), free_port()
+        config = self.directory / 'nats.conf'
+        name = 'owned-ready-' + secrets.token_hex(4)
+        config.write_text(f'''server_name: {name}\nhost: 127.0.0.1\nport: {port}\nhttp_port: {monitor}\njetstream {{ store_dir: "{self.directory / 'store'}" }}\n''')
+        argv = [self.nats, '-c', str(config)]
+        self.plist.write_bytes(plistlib.dumps({
+            'Label': self.name, 'ProgramArguments': argv,
+            'WorkingDirectory': str(self.directory), 'RunAtLoad': True,
+            'KeepAlive': False, 'ExitTimeOut': 5,
+            'StandardOutPath': str(self.log), 'StandardErrorPath': str(self.err)}))
+        self.service.bootstrap()
+        wait_for(lambda: self._owned_nats_varz(monitor))
+        binding = self.service.bind(argv, self.nats, self.directory)
+        absent_port = free_port()
+        while absent_port in (port, monitor):
+            absent_port = free_port()
+        self.assertTrue(serving_nats_member_ready(binding, monitor_port=monitor,
+            client_port=port, server_name=name))
+        self.assertFalse(serving_nats_member_ready(binding, monitor_port=monitor,
+            client_port=absent_port, server_name=name))
+        self.assertFalse(serving_nats_member_ready(binding, monitor_port=absent_port,
+            client_port=port, server_name=name))
+        self.proofs.append({'test': self._testMethodName, 'bound_owner': binding['status']['pid'],
+                            'listening_ports': [port, monitor], 'production_connections': False})
+
     def test_owned_nats_persistent_stop_has_transfer_termination_shape(self):
         port, monitor = free_port(), free_port()
         config = self.directory / 'nats.conf'
-        server_name = 'owned-stop-' + secrets.token_hex(4)
-        config.write_text(f'''server_name: {server_name}
+        config.write_text(f'''server_name: owned-stop-{secrets.token_hex(4)}
 host: 127.0.0.1
 port: {port}
 http_port: {monitor}
@@ -1275,8 +1326,6 @@ jetstream {{ store_dir: "{self.directory / 'store'}" }}
                 return False
         self.assertEqual(wait_for(ready)['version'], '2.12.6')
         binding = self.service.bind(argv, self.nats, self.directory)
-        self.assertTrue(serving_nats_member_ready(binding, monitor_port=monitor,
-                                                 client_port=port, server_name=server_name))
         with socket.create_connection(('127.0.0.1', port), timeout=2) as client:
             client.settimeout(2)
             self.assertIn(b'INFO', client.recv(8192))
@@ -1300,23 +1349,8 @@ jetstream {{ store_dir: "{self.directory / 'store'}" }}
         self.assertEqual(proof['termination'], {'exit': 0})
         self.assertEqual(proof['exits'][str(proof['owner'])]['wait_status'], 0)
         self.assertTrue(self.service.disabled())
-        unit = self.name.removeprefix('ai.openclaw.')
-        prior = {'class': 'daemon', 'loaded': True, 'identity': {
-            'plist_sha256': hashlib.sha256(self.plist.read_bytes()).hexdigest(),
-            'argv': argv, 'working_directory': str(self.directory),
-            'files': {path: item['sha256'] for path, item in binding['identity']['files'].items()}}}
-        intents = []
-        restored = restore_disabled_daemon(self.service,
-            SimpleNamespace(begin_override_clear=lambda name: intents.append(name)),
-            unit, prior, lambda owner: serving_nats_member_ready(owner,
-                monitor_port=monitor, client_port=port, server_name=server_name), timeout=10)
-        self.assertEqual(intents, [unit])
-        self.assertNotEqual(restored['status']['pid'], binding['status']['pid'])
-        self.assertTrue(self.service.status()['running'])
-        self.assertFalse(self.service.disabled())
         self.proofs.append({'test': self._testMethodName, 'stop': proof,
                             'isolated_port': port, 'owned_connection_closed': True,
-                            'restored_new_owner': restored['status']['pid'],
                             'production_connections': False})
 
     def test_post_disable_stop_failure_is_durable_and_keeps_override(self):

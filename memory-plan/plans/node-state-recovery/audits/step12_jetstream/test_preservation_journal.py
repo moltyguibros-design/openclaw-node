@@ -1840,8 +1840,10 @@ class JournalTests(unittest.TestCase):
                         enable_after_hold=lambda: state.update(disabled=False),
                         bootstrap=lambda: state.update(loaded=True, running=True),
                         bind=lambda *_: {'status': status()})
-                    with patch('managed_launchd.http_json', return_value={
-                            'server_name': names[unit], 'version': '2.12.6'}):
+                    with (patch('managed_launchd.command', return_value=
+                            f'p{status()["pid"]}\nnlocalhost:8222\nnlocalhost:{ports[unit]}\n'),
+                          patch('managed_launchd.http_json', return_value={
+                            'server_name': names[unit], 'version': '2.12.6'})):
                         binding = restore_disabled_daemon(service, journal, unit, wanted,
                             lambda bound: serving_nats_member_ready(bound,
                                 monitor_port=8222, client_port=ports[unit],
