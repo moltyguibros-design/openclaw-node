@@ -262,11 +262,11 @@ def read_private(path):
     return json.loads(path.read_bytes())
 
 
-def finder_metadata(path):
+def finder_metadata(path, *, owner):
     if path.name != '.DS_Store':
         return False
     info = path.lstat()
-    require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid(), 'unexpected Finder metadata owner or link')
+    require(stat.S_ISREG(info.st_mode) and info.st_uid == owner, 'unexpected Finder metadata owner or link')
     return True
 
 
@@ -854,7 +854,7 @@ class Journal:
     def _roots(self):
         roots = []
         for path in self.journals.iterdir():
-            if finder_metadata(path):
+            if finder_metadata(path, owner=os.getuid()):
                 continue
             info = path.lstat()
             require(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', path.name)
@@ -868,7 +868,7 @@ class Journal:
         require(stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o700
                 and info.st_uid == os.getuid(), 'journal directory is not owner-private')
         with self._lock(self.root / '.lock'):
-            require(all(finder_metadata(path) or path.name == '.lock' or path.name.startswith('.pending-')
+            require(all(finder_metadata(path, owner=os.getuid()) or path.name == '.lock' or path.name.startswith('.pending-')
                         or re.fullmatch(r'\d{6}\.json', path.name) for path in self.root.iterdir()),
                     'initializing journal contains unknown files')
             records = self._read()
@@ -1084,7 +1084,7 @@ class Journal:
         self.require_forward()
         require(self._read() == self.records, 'capture checkpoint requires the exact durable journal')
         require_no_nats_marker()
-        cohort = capture_cohort(self.records)
+        cohort = capture_cohort(self.records, writer_uid=NATS_ROOT_UID)
         session = cohort['session']
         identities = bind_identities(self.prior, table, configs, binary=binary, home=home)
         head = self.records[-1]['sha256']
@@ -1797,7 +1797,7 @@ def class_stop_proven(prior, unit, evidence):
                 and evidence['prior']['running'] == prior[unit]['running']))
 
 
-def stop_writer_exclusion_proven(intent, evidence):
+def stop_writer_exclusion_proven(intent, evidence, *, writer_uid):
     observed = intent.get('writer_exclusion')
     lock = observed.get('legacy_lock') if isinstance(observed, dict) else None
     return (isinstance(evidence, dict) and evidence.get('writer_exclusion') == observed
@@ -1807,7 +1807,7 @@ def stop_writer_exclusion_proven(intent, evidence):
             and set(lock) == {'device', 'inode', 'ctime_ns', 'uid', 'gid', 'mode', 'exclusive'}
             and all(type(lock[key]) is int and lock[key] >= 0
                     for key in ('device', 'inode', 'ctime_ns', 'uid', 'gid'))
-            and lock['uid'] == NATS_ROOT_UID and lock['mode'] == 0o644
+            and lock['uid'] == writer_uid and lock['mode'] == 0o644
             and lock['exclusive'] is True)
 
 
@@ -1827,7 +1827,7 @@ def held_as_checkpointed(prior, actual):
     return all(actual[key] == prior[key] for key in ('loaded', 'running', 'disabled'))
 
 
-def capture_cohort(records):
+def capture_cohort(records, *, writer_uid):
     """The record-only half of the checkpoint, shared by the live gate and the frozen verifier.
 
     The forward window must be strictly serial (intent, the anchor's publication, its receipt),
@@ -1835,6 +1835,7 @@ def capture_cohort(records):
     prior-loaded non-NATS unit next and the three serving NATS units last, each exactly once
     with a class-specific receipt bound to the original session. Member1 is never touched.
     """
+    require(type(writer_uid) is int and writer_uid >= 0, 'protected writer uid is invalid')
     baseline = records[0]
     require(baseline.get('event') == 'baseline' and baseline.get('scope') == FULL_NODE_SCOPE,
             'capture checkpoint requires a full-node baseline')
@@ -1915,7 +1916,7 @@ def capture_cohort(records):
                     and original_hold(evidence.get('execution_hold'), session, receipt),
                     'capture checkpoint stop lacks class proof or the original hold session: ' + unit)
             if unit in SERVING_NATS:
-                require(stop_writer_exclusion_proven(intent, evidence),
+                require(stop_writer_exclusion_proven(intent, evidence, writer_uid=writer_uid),
                         'capture checkpoint serving NATS stop lacks writer exclusion: ' + unit)
             require(all(isinstance(after_loaded[domain], list)
                         and len(set(after_loaded[domain])) == len(after_loaded[domain])
@@ -1976,7 +1977,7 @@ def bind_manifest(manifest, nonce, head, identities):
     return hashlib.sha256(manifest).hexdigest()
 
 
-def verify_capture_checkpoint(records, commitment, *, table, configs, binary, home):
+def verify_capture_checkpoint(records, commitment, *, table, configs, binary, home, writer_uid):
     """Pure check of a frozen user journal that must end in exactly one capture-ready checkpoint.
 
     Reads nothing. `commitment` is what host_guest_commit.require_committed() returns: the arm
@@ -2015,7 +2016,7 @@ def verify_capture_checkpoint(records, commitment, *, table, configs, binary, ho
             'capture checkpoint differs from the committed digest')
     # Extracted records are untrusted: malformed content refuses rather than escaping as a crash.
     try:
-        cohort = capture_cohort(records[:-1])
+        cohort = capture_cohort(records[:-1], writer_uid=writer_uid)
         identities = bind_identities(cohort['prior'], table, configs, binary=binary, home=home)
         head = records[-2]['sha256']
         require(checkpointed['journal_head'] == head, 'guest manifest was not taken at this journal head')

@@ -210,7 +210,8 @@ class CaptureCheckpoint(unittest.TestCase):
         """
         armed, manifest = inputs.pop('armed', self.armed), inputs.pop('manifest')
         values = {'table': self.table, 'configs': self.configs,
-                  'binary': identity_fixture.BINARY, 'home': identity_fixture.HOME}
+                  'binary': identity_fixture.BINARY, 'home': identity_fixture.HOME,
+                  'writer_uid': preservation_journal.NATS_ROOT_UID}
         values.update(inputs)
         nonce, committed = json.loads(armed)['capture_nonce'], json.loads(manifest)
         sha = hashlib.sha256(manifest).hexdigest()

@@ -12,6 +12,7 @@ import stat
 import sys
 import uuid
 
+import preservation_journal
 from host_vm_preflight import preflight, require, write_record
 from preservation_journal import (CAPTURE_EVENT, CAPTURE_KEYS, CAPTURE_SCOPE,
                                   encoded as journal_encoded, verify_capture_checkpoint)
@@ -26,6 +27,7 @@ HEX = re.compile(r'[0-9a-f]{64}')
 # CAPTURE.json field -> the commitment file whose exact bytes it pins.
 CAPTURE_PINS = {'guest_commit_sha256': 'COMMITTED.json', 'guest_ack_sha256': 'ACKED.json',
                 'guest_checkpoint_sha256': 'CHECKPOINT.json', 'window_pins_sha256': 'WINDOW_PINS.json'}
+FROZEN_FILES = frozenset(('ARMED.json', 'CAPTURE.json', *CAPTURE_PINS.values()))
 
 
 def private_bytes(path):
@@ -56,9 +58,12 @@ def require_window_pins(path):
 
 
 def bind_window_pins(capture_dir, pinned):
+    return bind_window_pin_bytes(private_bytes(pathlib.Path(capture_dir) / 'ARMED.json'), pinned)
+
+
+def bind_window_pin_bytes(arm_raw, pinned):
     raw = pinned['WINDOW_PINS.json']
     table = window_pin_bytes(raw)
-    arm_raw = private_bytes(pathlib.Path(capture_dir) / 'ARMED.json')
     arm = json.loads(arm_raw)
     committed = json.loads(pinned['COMMITTED.json'])
     require(hashlib.sha256(arm_raw).hexdigest() == committed.get('arm_sha256')
@@ -74,7 +79,23 @@ def require_committed(capture_dir):
     """
     capture_dir = pathlib.Path(capture_dir)
     committed, committed_bytes, ack_bytes = require_acked(capture_dir)
-    checkpoint = json.loads(private_bytes(capture_dir / 'CHECKPOINT.json'))
+    return checkpoint_from(committed, committed_bytes, ack_bytes,
+                           private_bytes(capture_dir / 'CHECKPOINT.json'))
+
+
+def frozen_files(files):
+    require(isinstance(files, dict) and set(files) == FROZEN_FILES
+            and all(isinstance(raw, bytes) for raw in files.values()),
+            'frozen capture requires exactly six record byte strings')
+
+
+def commitment_from(files):
+    frozen_files(files)
+    return checkpoint_from(*acked_from(files), files['CHECKPOINT.json'])
+
+
+def checkpoint_from(committed, committed_bytes, ack_bytes, raw):
+    checkpoint = json.loads(raw)
     ack = json.loads(ack_bytes)
     sample = checkpoint.get('started_sample') if isinstance(checkpoint, dict) else None
     require(isinstance(checkpoint, dict) and set(checkpoint) == CHECKPOINT_KEYS
@@ -102,11 +123,16 @@ def same_running_vm(sample, reference):
 
 def require_acked(capture_dir):
     capture_dir = pathlib.Path(capture_dir)
-    armed_bytes = private_bytes(capture_dir / 'ARMED.json')
+    return acked_from({name: private_bytes(capture_dir / name)
+                       for name in ('ARMED.json', 'COMMITTED.json', 'ACKED.json')})
+
+
+def acked_from(files):
+    armed_bytes = files['ARMED.json']
     armed = json.loads(armed_bytes)
-    committed_bytes = private_bytes(capture_dir / 'COMMITTED.json')
+    committed_bytes = files['COMMITTED.json']
     committed = json.loads(committed_bytes)
-    ack_bytes = private_bytes(capture_dir / 'ACKED.json')
+    ack_bytes = files['ACKED.json']
     ack = json.loads(ack_bytes)
     nonce = armed.get('capture_nonce')
     manifest = committed.get('manifest')
@@ -311,13 +337,26 @@ def commit_checkpoint(host_spec, capture_dir, guest_checkpoint):
 def require_captured(capture_dir):
     """The exact commitment bytes the published CAPTURE.json pins; refuses any unpinned file."""
     capture_dir = pathlib.Path(capture_dir)
-    capture = json.loads(private_bytes(capture_dir / 'CAPTURE.json'))
+    raw = private_bytes(capture_dir / 'CAPTURE.json')
     pinned = {name: private_bytes(capture_dir / name) for name in CAPTURE_PINS.values()}
+    capture_pins_from(raw, pinned)
+    bind_window_pins(capture_dir, pinned)
+    return pinned
+
+
+def capture_pins_from(raw, pinned):
+    capture = json.loads(raw)
     require(isinstance(capture, dict)
             and all(capture.get(key) == hashlib.sha256(pinned[name]).hexdigest()
                     for key, name in CAPTURE_PINS.items()),
             'capture record does not pin this checkpoint commitment')
-    bind_window_pins(capture_dir, pinned)
+
+
+def captured_from(files):
+    frozen_files(files)
+    pinned = {name: files[name] for name in CAPTURE_PINS.values()}
+    capture_pins_from(files['CAPTURE.json'], pinned)
+    bind_window_pin_bytes(files['ARMED.json'], pinned)
     return pinned
 
 
@@ -329,12 +368,25 @@ def verify_frozen_checkpoint(capture_dir, records, *, configs, binary, home):
     """
     pinned = require_captured(capture_dir)
     commitment = require_committed(capture_dir)
+    return frozen_checkpoint_from(pinned, commitment, records, configs=configs,
+                                   binary=binary, home=home,
+                                   writer_uid=preservation_journal.NATS_ROOT_UID)
+
+
+def verify_frozen_bytes(files, records, *, configs, binary, home, writer_uid):
+    pinned = captured_from(files)
+    commitment = commitment_from(files)
+    return frozen_checkpoint_from(pinned, commitment, records, configs=configs,
+                                   binary=binary, home=home, writer_uid=writer_uid)
+
+
+def frozen_checkpoint_from(pinned, commitment, records, *, configs, binary, home, writer_uid):
     require(commitment == {**json.loads(pinned['COMMITTED.json']),
                            'checkpoint': json.loads(pinned['CHECKPOINT.json'])},
             'capture commitment differs from the pinned capture record')
     return verify_capture_checkpoint(records, commitment,
                                      table=window_pin_bytes(pinned['WINDOW_PINS.json']),
-                                     configs=configs, binary=binary, home=home)
+                                     configs=configs, binary=binary, home=home, writer_uid=writer_uid)
 
 
 if __name__ == '__main__':

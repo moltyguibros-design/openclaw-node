@@ -502,7 +502,8 @@ class FrozenSubstitution(HostCheckpoint):
         commitment = self.host_checkpoint(self.journal_file(record))
         records = self.journal._read()
         options = {'table': self.table, 'configs': self.configs,
-                   'binary': identity_fixture.BINARY, 'home': identity_fixture.HOME}
+                   'binary': identity_fixture.BINARY, 'home': identity_fixture.HOME,
+                   'writer_uid': guest.preservation_journal.NATS_ROOT_UID}
         broken = (None, record['sha256'], {**commitment, 'checkpoint': None},
                   {**commitment, 'manifest_sha256': '0' * 64},
                   {**commitment, 'checkpoint': {**commitment['checkpoint'], 'manifest_sha256': '0' * 64}},

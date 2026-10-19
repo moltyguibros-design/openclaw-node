@@ -45,7 +45,8 @@ import pathlib
 import re
 import stat
 
-from host_guest_commit import require_captured, require_committed, verify_frozen_checkpoint
+from host_guest_commit import (captured_from, commitment_from, require_captured, require_committed,
+                               verify_frozen_bytes, verify_frozen_checkpoint)
 from nats_identity import LIMIT, ROLES, config_path, store_path
 from preservation_checks import Refused, require
 from preservation_journal import TERMINAL, encoded, finder_metadata
@@ -90,28 +91,28 @@ def directory(root, path):
     return cursor
 
 
-def owned(info, mode):
-    return info.st_uid == os.getuid() and (mode is None or stat.S_IMODE(info.st_mode) == mode)
+def owned(info, mode, *, owner):
+    return info.st_uid == owner and (mode is None or stat.S_IMODE(info.st_mode) == mode)
 
 
-def private_dir(path):
+def private_dir(path, *, owner):
     info = path.lstat()
-    require(stat.S_ISDIR(info.st_mode) and owned(info, 0o700),
+    require(stat.S_ISDIR(info.st_mode) and owned(info, 0o700, owner=owner),
             'journal directory is not owner-private: ' + path.name)
 
 
-def names(path):
+def names(path, *, owner):
     """At most MAX_ENTRIES directory entries, Finder metadata aside (finder_metadata refuses a foreign one)."""
     found = []
     with os.scandir(path) as entries:
         for entry in entries:
-            if not finder_metadata(path / entry.name):
+            if not finder_metadata(path / entry.name, owner=owner):
                 found.append(entry.name)
                 require(len(found) <= MAX_ENTRIES, 'stopped image directory holds too many entries: ' + path.name)
     return sorted(found)
 
 
-def content(path, mode, budget):
+def content(path, mode, budget, *, owner):
     """Exact bytes and lstat of one owned, single-link regular file of at most LIMIT bytes.
 
     The entry is checked before it is opened, so a link, FIFO or device node in the guest image is
@@ -122,7 +123,7 @@ def content(path, mode, budget):
     budget['files'] -= 1
     require(budget['files'] >= 0, 'stopped image reads exceed their file bound at: ' + path.name)
     info = path.lstat()
-    require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and owned(info, mode),
+    require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and owned(info, mode, owner=owner),
             'stopped image file is not an owned single-link regular file: ' + path.name)
     # Race guards only: O_NOFOLLOW and O_NONBLOCK keep a swapped-in link or FIFO from being followed
     # or blocking before the inode check refuses it.
@@ -144,9 +145,9 @@ def content(path, mode, budget):
     return raw, info
 
 
-def lock(path, budget):
+def lock(path, budget, *, owner):
     """A Journal lock file: created empty by its O_CREAT open and never written."""
-    require(content(path, 0o600, budget)[0] == b'', 'journal lock file is not empty: ' + path.name)
+    require(content(path, 0o600, budget, owner=owner)[0] == b'', 'journal lock file is not empty: ' + path.name)
 
 
 def canonical(raw, what):
@@ -164,18 +165,18 @@ def canonical(raw, what):
     return value
 
 
-def read_window(path, budget):
+def read_window(path, budget, *, owner):
     """One window's records as Journal wrote them: locked, named in sequence, canonical, hash-chained."""
-    private_dir(path)
-    entries = names(path)
+    private_dir(path, owner=owner)
+    entries = names(path, owner=owner)
     # Journal writes a record through a .pending- file and its rename; anything else is foreign.
     require(all(name == '.lock' or RECORD.fullmatch(name) for name in entries),
             'journal window holds an unknown or pending entry: ' + path.name)
-    lock(path / '.lock', budget)
+    lock(path / '.lock', budget, owner=owner)
     records, previous = [], None
     for index, name in enumerate(name for name in entries if RECORD.fullmatch(name)):
         require(name == '%06d.json' % index, 'journal window sequence has a gap: ' + path.name)
-        row = canonical(content(path / name, 0o600, budget)[0], 'journal record')
+        row = canonical(content(path / name, 0o600, budget, owner=owner)[0], 'journal record')
         try:
             digest = hashlib.sha256(encoded({key: value for key, value in row.items()
                                              if key != 'sha256'})).hexdigest()
@@ -213,34 +214,36 @@ def lineage(windows, window, parent):
     return chain
 
 
-def read_inputs(root, commitment):
+def read_inputs(root, commitment, *, owner=None):
     """The committed window's records, lineage, config bytes and modes, baseline binary and home,
     and `read`: the metadata of every file read, its path relative to `root`, in read order.
 
     `commitment` is the pinned require_committed() result. Reads only below `root`, at paths
     fixed by the committed home, and returns no pin table.
     """
+    owner = os.getuid() if owner is None else owner
+    require(type(owner) is int and owner >= 0, 'guest file owner uid is invalid')
     root = pathlib.Path(root)
     home = committed_home(commitment['manifest'])
     budget = {'files': MAX_FILES, 'bytes': MAX_TOTAL, 'read': []}
     try:
         require(root.resolve(strict=True) == root, 'stopped image root is not a literal absolute path')
         preservation = directory(root, home + PRESERVATION)
-        private_dir(preservation)
+        private_dir(preservation, owner=owner)
         # Presence is the reads' own: the lock and receipt below, the journal parent after them.
-        entries = set(names(preservation))
+        entries = set(names(preservation, owner=owner))
         require(entries <= PRESERVATION_ENTRIES | EVIDENCE,
                 'preservation directory holds a pending, corrupt-receipt or unknown entry')
         for name in sorted(entries & EVIDENCE):
-            content(preservation / name, 0o600, budget)
-        lock(preservation / 'node.lock', budget)
+            content(preservation / name, 0o600, budget, owner=owner)
+        lock(preservation / 'node.lock', budget, owner=owner)
         journals = preservation / 'journals'
-        private_dir(journals)
+        private_dir(journals, owner=owner)
         digest = commitment['checkpoint']['checkpoint_sha256']
         windows = {}
-        for name in names(journals):
+        for name in names(journals, owner=owner):
             require(WINDOW.fullmatch(name), 'unexpected entry in the journal parent')
-            rows = read_window(journals / name, budget)
+            rows = read_window(journals / name, budget, owner=owner)
             # Only the committed window is kept whole; the lineage needs each other's ends.
             windows[name] = rows if rows[-1]['sha256'] == digest else [rows[0], rows[-1]]
         chosen = [name for name, rows in windows.items() if rows[-1]['sha256'] == digest]
@@ -248,7 +251,7 @@ def read_inputs(root, commitment):
         window = chosen[0]
         records = windows[window]
         ancestry = lineage(windows, window, home + PRESERVATION + '/journals/')
-        receipt = canonical(content(preservation / 'node.lock.state.json', 0o600, budget)[0], 'node receipt')
+        receipt = canonical(content(preservation / 'node.lock.state.json', 0o600, budget, owner=owner)[0], 'node receipt')
         require(isinstance(receipt, dict) and set(receipt) == RECEIPT_KEYS
                 and receipt.get('journal_root') == home + PRESERVATION + '/journals/' + window
                 and receipt.get('status') == 'unresolved'
@@ -258,7 +261,7 @@ def read_inputs(root, commitment):
         configs, modes = {}, {}
         for unit in ROLES:
             path = config_path(home, unit)
-            configs[path], info = content(directory(root, path.rsplit('/', 1)[0]) / (unit + '.conf'), None, budget)
+            configs[path], info = content(directory(root, path.rsplit('/', 1)[0]) / (unit + '.conf'), None, budget, owner=owner)
             modes[path] = stat.S_IMODE(info.st_mode)
     except OSError as error:
         raise Refused('stopped image journal or config is absent or unreadable') from error
@@ -290,5 +293,17 @@ def verify_stopped_journal(capture_dir, root):
     summary = verify_frozen_checkpoint(capture_dir, found['records'],
                                        configs=found['configs'], binary=found['binary'],
                                        home=found['home'])
+    return {**summary, 'window': found['window'], 'lineage': found['lineage'],
+            'config_modes': found['config_modes'], 'read': found['read']}
+
+
+def verify_stopped_bytes(files, root, *, owner, writer_uid):
+    require(type(owner) is int and owner >= 0, 'guest file owner uid is invalid')
+    require(type(writer_uid) is int and writer_uid >= 0, 'protected writer uid is invalid')
+    captured_from(files)
+    commitment = commitment_from(files)
+    found = read_inputs(root, commitment, owner=owner)
+    summary = verify_frozen_bytes(files, found['records'], configs=found['configs'],
+                                  binary=found['binary'], home=found['home'], writer_uid=writer_uid)
     return {**summary, 'window': found['window'], 'lineage': found['lineage'],
             'config_modes': found['config_modes'], 'read': found['read']}

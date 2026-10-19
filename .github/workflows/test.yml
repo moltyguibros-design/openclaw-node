@@ -113,6 +113,8 @@ jobs:
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_capture_anchor.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_capture_anchor.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_frozen_owner_context.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_frozen_owner_context.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_owned_kickstart_trace.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_timing.py
@@ -207,6 +209,19 @@ jobs:
         env:
           OPENCLAW_ANCHOR_PROBE: "1"
         run: python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_host_capture_anchor.py "$RUNNER_TEMP/host-capture-anchor.json"
+      - name: Verify frozen owner context across real Linux owners
+        if: matrix.node-version == 22
+        run: |
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE GITHUB_ACTIONS=true OPENCLAW_FROZEN_OWNER_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            "$(command -v python3)" memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_frozen_owner_context.py \
+            "$RUNNER_TEMP/frozen-owner-context.json"
+      - name: Retain owned frozen owner-context report
+        if: always() && matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: frozen-owner-context-linux-${{ github.sha }}
+          path: ${{ runner.temp }}/frozen-owner-context.json
+          if-no-files-found: ignore
       - name: Retain owned independent-root anchor report
         if: always() && matrix.node-version == 22
         uses: actions/upload-artifact@v4
@@ -302,6 +317,8 @@ jobs:
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_capture_anchor.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_capture_anchor.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_frozen_owner_context.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_frozen_owner_context.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_owned_kickstart_trace.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_preflight_status.py
@@ -371,6 +388,11 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_stopped_asif_reader.py
+      - name: Verify frozen owner context across real macOS owners
+        run: |
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE GITHUB_ACTIONS=true OPENCLAW_FROZEN_OWNER_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_frozen_owner_context.py \
+            "$RUNNER_TEMP/frozen-owner-context.json"
       - name: Characterize ownership on a fresh CI-only ASIF
         env:
           PYTHONDONTWRITEBYTECODE: "1"
@@ -401,6 +423,7 @@ jobs:
             ${{ runner.temp }}/asif-mount-ownership.json
             ${{ runner.temp }}/stopped-asif-reader.json
             ${{ runner.temp }}/host-capture-anchor.json
+            ${{ runner.temp }}/frozen-owner-context.json
           if-no-files-found: error
       - name: Retain a failed reader's owned image for diagnosis
         if: failure()
