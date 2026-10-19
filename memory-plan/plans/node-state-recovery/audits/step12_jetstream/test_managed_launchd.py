@@ -1305,11 +1305,16 @@ if not marker.exists():
                                     and 'override clear lacks a verified persistent stop'
                                     in error['detail'] for error in result['errors']))
                                 blocked = {name for name, state in prior.items()
-                                    if name not in NATS_TRANSFER_UNITS
-                                    and name != 'scheduler-heartbeat' and state['loaded']}
-                                self.assertEqual(len(blocked), 17)
+                                    if name not in NATS_TRANSFER_UNITS and state['loaded']}
+                                self.assertEqual(len(blocked), 18)
                                 self.assertFalse(any(event in ('recovery-verified', 'already-restored')
                                     and name in blocked for event, name in rows))
+                                self.assertFalse(current['scheduler-heartbeat']['loaded'])
+                                self.assertEqual(sum(error['reason'] == 'bus recovery was not verified'
+                                    and error['unit'] in blocked for error in result['errors']), 17)
+                                self.assertTrue(any(error['unit'] == 'mesh-deploy-listener'
+                                    and error['reason'] == 'prior restoration was not verified'
+                                    for error in result['errors']))
                                 self.assertFalse(any(row[0] == 'capture-ready' for row in rows))
                                 self.assertIsNotNone(gate.marker())
                             elif fail_first:
