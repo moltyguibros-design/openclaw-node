@@ -1862,6 +1862,35 @@ class JournalTests(unittest.TestCase):
                 self.assertFalse(any(row['event'] == 'restoration-intent'
                                      and row.get('unit') == 'mesh-task-daemon'
                                      for row in journal.records))
+                check_entrypoints = journal.check_entrypoints
+                entrypoint_calls = []
+                def entrypoint_fails_once(*args, **kwargs):
+                    entrypoint_calls.append(1)
+                    if len(entrypoint_calls) == 1:
+                        raise Refused('owned entrypoint probe failed')
+                    return check_entrypoints(*args, **kwargs)
+                blocked_group_calls = []
+                def blocked_group_check():
+                    blocked_group_calls.append(1)
+                    return {'verified': True, 'size': 3, 'quorum_needed': 2,
+                            'held_member': names['nats-1'], 'leader': names['nats-2']}
+                with patch.object(journal, 'check_entrypoints', side_effect=entrypoint_fails_once):
+                    blocked = journal.recover(restore,
+                        lambda unit, _: {**current[unit], 'verified': True},
+                        lambda: {'verified': True}, hold=hold,
+                        deploy_fence=lambda: {'verified': True},
+                        nats_group_check=blocked_group_check)
+                self.assertFalse(blocked['restored'])
+                self.assertEqual([unit for unit, _ in restored], ['nats', 'nats-2', 'nats-3'])
+                self.assertEqual(blocked_group_calls, [])
+                self.assertTrue(any(error['unit'] == 'nats-group'
+                                    and 'earlier recovery errors' in error['detail']
+                                    for error in blocked['errors']))
+                self.assertFalse(any(row['event'] == 'nats-group-recovery-verified'
+                                     for row in journal.records))
+                self.assertFalse(any(row['event'] == 'restoration-intent'
+                                     and row.get('unit') == 'mesh-task-daemon'
+                                     for row in journal.records))
                 partial = journal.recover(restore,
                     lambda unit, _: {**current[unit], 'verified': True},
                     lambda: {'verified': True}, hold=hold,

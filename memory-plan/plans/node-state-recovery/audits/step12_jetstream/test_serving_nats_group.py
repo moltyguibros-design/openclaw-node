@@ -98,6 +98,10 @@ class ScriptedGroup(unittest.TestCase):
                 nats_node_id(NAMES['nats-1'])].update(name='foreign'),
             'foreign replica': lambda r: r[(8003, '/jsz')]['meta_cluster']['replicas'][0].update(
                 peer='foreign'),
+            'foreign held display': lambda r: r[(8003, '/jsz')]['meta_cluster']['replicas'][0].update(
+                name='foreign'),
+            'foreign follower display': lambda r: r[(8003, '/jsz')]['meta_cluster']['replicas'][1].update(
+                name='foreign'),
             'wrong peer ID': lambda r: r[(8003, '/raftz')]['$SYS']['_meta_']['peers'].update({
                 'foreign': r[(8003, '/raftz')]['$SYS']['_meta_']['peers'].pop(
                     nats_node_id(NAMES['nats-1']))}),

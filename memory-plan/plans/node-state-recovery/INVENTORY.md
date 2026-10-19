@@ -6372,3 +6372,38 @@ held member1, including a group-failure case after individual receipts.
 Source review and all-eight exact-head CI precede row closure. The real
 full-node driver, persistent-stop producer, live role binding, D60, reboot,
 capture and production remain outside this source unit.
+
+
+### 2026-10-19 00:21 EDT — D246 quorum-gate source-contract correction
+
+D245 is a pre-audit, not a completed source claim. The owned disposable
+cold-restart replay exposed one false refusal: after member1 is held and both
+survivors restart, NATS 2.12.6 may report the offline member in `/jsz` as
+`Server name unknown at this time (peerID: <id>)`. The source now binds every
+replica and `/raftz` peer by the NATS node ID derived from its pinned server
+name; the live follower's name must match exactly, while member1's `/jsz`
+name may be its pinned name or that exact ID-bearing placeholder and its
+`/raftz` peer name may be blank. The real four-role test stops all three
+members, restores only members two and three, proves the two-of-three group,
+refuses a one-member minority and accepts a survivor rejoin.
+
+The observer needs three monitor ports: standalone `nats` and live `nats-2`
+and `nats-3`. The journal requires the callback at recovery entry for any
+historical serving-NATS `stop`, `unload` or `disable-and-unload` intent in
+full-node scope, even before its managed proof is established. This broader
+trigger fails closed. After current-call receipts for all three serving
+units, and before the first non-NATS **recovery-loop** observation or
+restoration, the gate also refuses if any earlier recovery error exists.
+Earlier stopped-state and held-unit preflight observations are safety checks,
+not client resumption. A failed gate records a group error, leaves clients
+unrestored and the hold closed; a retry observes the group again.
+
+The fixed-label macOS failure case now uses a physical partial topology:
+member1 initially links the cluster, then both restored survivors retain
+routes only to held member1. A disposable NATS probe confirmed each survivor
+had zero routes and no leader after that restart; the native CI case must
+still run. Its group callback uses the real observer and must refuse before
+any client restoration. The ten-second fixture budget is a test value, not a
+measured production budget. The persistent-stop producer, full-node driver,
+current inventory, D60, reboot and production remain separate. The quorum
+row stays open pending exact-head source review and all-eight CI.
