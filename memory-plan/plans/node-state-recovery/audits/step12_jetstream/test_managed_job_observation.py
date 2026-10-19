@@ -41,7 +41,11 @@ def collected(records, service=None, boots=None, clock=None):
 
 
 def prepared(test, policy=False):
-    root = pathlib.Path(tempfile.gettempdir()).resolve() / ('openclaw-owned-managed-jobs-' + secrets.token_hex(8))
+    parent = pathlib.Path(os.environ.get('GITHUB_WORKSPACE', pathlib.Path.home())).resolve()
+    tempdir = patch.object(tempfile, 'gettempdir', return_value=str(parent))
+    tempdir.start()
+    test.addCleanup(tempdir.stop)
+    root = parent / ('openclaw-owned-managed-jobs-' + secrets.token_hex(8))
     root.mkdir(mode=0o700)
     test.addCleanup(shutil.rmtree, root)
     mask = os.umask(0o077)

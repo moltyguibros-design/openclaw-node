@@ -42,7 +42,11 @@ def loaded(state='waiting', pid=None):
 
 
 def prepared(test, policy=False):
-    root = pathlib.Path(tempfile.gettempdir()).resolve() / ('openclaw-owned-held-jobs-' + secrets.token_hex(8))
+    parent = pathlib.Path(os.environ.get('GITHUB_WORKSPACE', pathlib.Path.home())).resolve()
+    tempdir = patch.object(tempfile, 'gettempdir', return_value=str(parent))
+    tempdir.start()
+    test.addCleanup(tempdir.stop)
+    root = parent / ('openclaw-owned-held-jobs-' + secrets.token_hex(8))
     root.mkdir(mode=0o700)
     test.addCleanup(shutil.rmtree, root)
     mask = os.umask(0o077)
