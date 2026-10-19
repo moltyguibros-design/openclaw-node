@@ -3663,3 +3663,33 @@ Full-node recovery requires a supplied group callback at entry for any historica
 Claude383's first source review identified the cold-restart placeholder refusal, missing real restart test, unpinned earlier-error bar and synthetic native failure. The corrected b81e24eb source passed Claude385's independent review with no remaining required source or proof correction. The local scripted journal suite passed 158 tests, the group observer suite passed five including the real disposable cold-restart and minority case, and the earlier-error assertion was killed by its focused mutant. Plan lint was 14 PASS, one historical VERSION-idle WARN, zero FAIL. Exact source CI run 39199540826, attempt 1: passed all eight jobs at b81e24ebe8fd5e7d7d2bb2b23e5dd28ca4211040. Linux job 117889459786 reports the journal suite 158 OK and group suite five OK. macOS job 117889459822 reports the journal suite 158 OK, group suite five OK and all three dedicated fixed-label cases OK: failed-start override retention, physical group-failure client fence and ordered successful restoration; its 66-case managed-launchd suite has one unrelated skip. The complete native CLI-formatted job log fetched from the GitHub job-log API is 1483 lines, 164707 bytes, SHA-256 80bb0ac88c23ce122b3a4f52208fc44066df081c48b79af4ab9118b84f8accf0. The three case outcomes occur at lines 1346-1348 and the managed-launchd suite result at lines 1397-1399; that digest is for the API-returned raw log bytes, not a CLI-formatted stream. Earlier superseded CI runs 39196495672, 39197546958, 39198257408 and 39198719652 were canceled and are not success evidence.
 
 Only the B5-serving-NATS post-restore quorum gate row closes. This receipt head needs its own exact-head review and all-eight CI before the plan pointer is settled. The next source prerequisite is the persistent-stop producer. No full-node driver, live role binding, current inventory or D60 observation, reboot persistence, measured production budget or production restoration is claimed. B5/1.2 stays [A] at v1.2-pre, B6-B9 held; D64, Gate, installed timers and production remain untouched. No production service, VM, store, mount, timer or history was operated.
+
+### 2026-10-19 01:06 EDT — D248 D247 receipt wording correction
+
+Claude387 independently cleared D247's five-Markdown-only lineage, identical
+append, one quorum-row closure and persistent-stop frontier pointer, but found
+two required proof-wording corrections. First, the cited native log is the raw
+GitHub job-log API text, not a CLI-formatted `gh run --log` stream. It starts
+with a BOM, has timestamp-only lines without job/step columns, and its
+1483-line, 164707-byte SHA-256
+`80bb0ac88c23ce122b3a4f52208fc44066df081c48b79af4ab9118b84f8accf0`
+covers the fetched content with one trailing newline. The cited three native
+case outcomes and 66-test summary remain at D247's lines. Second, the group
+callback is reached after each of the three serving units has a current-call
+`recovery-verified` **or** `already-restored` row, with no earlier recovery
+error. The latter is required on a valid retry; the group observation itself
+is fresh in that call, never inherited from a previous receipt.
+
+For precision, D247's held-member identity sentence covers `/jsz`'s exact
+pinned name or exact ID-bearing placeholder and `/raftz`'s pinned name or
+blank name for that same hashed held peer. The earlier-error assertion killed
+the focused mutant, not conversely. D247's “local” 158/5 counts are Codex's
+owned runs; Claude385 separately reproduced the affected suites as uid 65534.
+The source CI all-eight result at b81e24eb, the native raw-log cases and the
+B5 boundary remain as stated. This clarification changes five Markdown
+ledgers only: no source, fixture, workflow, AUDIT_PRE, original D247 text,
+INVENTORY row or frontier pointer changes. The corrected receipt head needs
+its own exact-head review and all-eight CI. B5/1.2 stays [A] at v1.2-pre,
+B6-B9 held; the persistent-stop producer is the first open source row. D64,
+Gate, installed timers and production are unchanged. No production service,
+VM, store, mount, timer or history was operated.
