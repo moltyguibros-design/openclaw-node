@@ -329,6 +329,17 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Verify reader ownership tests under user and root callers
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          cd memory-plan/plans/node-state-recovery/audits/step12_jetstream
+          /usr/bin/python3 -m unittest -q \
+            test_host_journal_mount.ReaderSeed.test_writable_seed_uses_a_distinct_nonroot_owner_then_restores_root \
+            test_host_journal_mount.ProbeGuards.test_root_runner_refuses_before_sudo_for_both_native_modes
+          sudo -n /usr/bin/env PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m unittest -q \
+            test_host_journal_mount.ReaderSeed.test_writable_seed_uses_a_distinct_nonroot_owner_then_restores_root \
+            test_host_journal_mount.ProbeGuards.test_root_runner_refuses_before_sudo_for_both_native_modes
       - name: Verify frozen-reader orchestration refusal controls
         env:
           PYTHONDONTWRITEBYTECODE: "1"
