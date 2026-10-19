@@ -1306,7 +1306,8 @@ class Journal:
                             error_type=type(error).__name__, **detail)
             raise
 
-    def recover(self, restore, observe, final_check, diagnostics=None, hold=None, deploy_fence=None):
+    def recover(self, restore, observe, final_check, diagnostics=None, hold=None,
+                deploy_fence=None, nats_group_check=None):
         require(self.scope != FULL_NODE_SCOPE or self.boot == self.records[0]['boot'],
                 'full-node reboot recovery requires a verified boot hold decision')
         require(self.nats_transfer_open() is None, 'NATS transfer is open; await a root outcome')
@@ -1324,6 +1325,7 @@ class Journal:
         require((hold is not None) == held and (not held or hold.journal is self),
                 'baselined execution hold requires its journal recovery facade')
         binding_unavailable = False
+        needs_nats_group = False
         if self.scope == FULL_NODE_SCOPE:
             stopped = {}
             for row in self.records:
@@ -1331,6 +1333,10 @@ class Journal:
                     stopped[row['unit']] = row['action']
                 elif row['event'] == 'recovery-verified' and row.get('unit') in stopped:
                     del stopped[row['unit']]
+            needs_nats_group = any(row['event'] == 'intent'
+                                   and row.get('unit') in SERVING_NATS
+                                   and row.get('action') in ('stop', 'unload', 'disable-and-unload')
+                                   for row in self.records)
             def override_clear_unproven(unit):
                 latest = next((row for row in reversed(self.records)
                                if row.get('unit') == unit
@@ -1457,10 +1463,32 @@ class Journal:
                                'detail': str(error)})
         held_preflight_failed = len(errors) != held_errors_before
         buses_ready = True
+        nats_verified = set()
+        nats_group_checked = False
         unsafe_restart = False
         for unit in (u for u in RESUME_ORDER if u in self.prior):
             if held_preflight_failed:
                 break
+            if (self.scope == FULL_NODE_SCOPE and needs_nats_group
+                    and not unit.startswith('nats') and not nats_group_checked and buses_ready):
+                try:
+                    require(set(SERVING_NATS) <= nats_verified,
+                            'all serving NATS members need current-call recovery receipts')
+                    require(not errors, 'earlier recovery errors bar NATS group release')
+                    require(callable(nats_group_check), 'post-restore NATS group check is required')
+                    with nats_legacy_restore_guard():
+                        hold.check_closed()
+                        group = nats_group_check()
+                        require(isinstance(group, dict) and group.get('verified') is True
+                                and group.get('size') == 3 and group.get('quorum_needed') == 2
+                                and group.get('held_member') and group.get('leader'),
+                                'post-restore NATS group evidence is incomplete')
+                        record('nats-group-recovery-verified', evidence=group)
+                    nats_group_checked = True
+                except Exception as error:
+                    errors.append({'unit': 'nats-group', 'reason': type(error).__name__,
+                                   'detail': str(error)})
+                    buses_ready = False
             if self.scope == FULL_NODE_SCOPE and unit == 'mesh-deploy-listener':
                 check_held_units()
                 if errors:
@@ -1544,6 +1572,8 @@ class Journal:
                     if matches(actual, prior):
                         require(actual.get('verified') is True, 'existing service readiness was not verified')
                         record('already-restored', unit=unit, evidence=actual)
+                        if unit in SERVING_NATS:
+                            nats_verified.add(unit)
                         continue
                     require(prior['class'] not in ('held', 'absent'), 'held or absent unit needs manual restoration')
                     require(not (prior['class'] == 'timer' and actual['loaded'] and actual['running']),
@@ -1565,6 +1595,8 @@ class Journal:
                         hold.check_closed()
                     evidence = verify()
                     record('recovery-verified', unit=unit, evidence=evidence)
+                    if unit in SERVING_NATS:
+                        nats_verified.add(unit)
             except Exception as error:
                 errors.append({'unit': unit, 'reason': type(error).__name__,
                                'detail': str(error),

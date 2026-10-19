@@ -24,6 +24,7 @@ from journal_hold import JournaledHold, describe
 from legacy_fixture import legacy_journal
 from preservation_checks import Refused, STOP_ORDER, disabled_overrides, http_json
 from preservation_journal import Journal, SERVING_NATS, TIMER_UNITS, static_identity
+from serving_nats_group import wait_for_serving_group
 from test_journal_hold import gate_module, gated_identity
 from test_preservation_journal import (full_entrypoint_evidence, full_node_inventory,
                                        inventory, listener_stop_evidence, timer_stop_evidence)
@@ -1033,8 +1034,9 @@ if not marker.exists():
     def test_full_node_owned_listener_restores_after_verified_release(self):
         self.exercise_full_node_owned_listener(True)
 
-    def exercise_full_node_owned_nats_recovery(self, fail_first):
-        labels = ['ai.openclaw.' + unit for unit in SERVING_NATS]
+    def exercise_full_node_owned_nats_recovery(self, fail_first, fail_group=False):
+        all_nats = ('nats', 'nats-1', 'nats-2', 'nats-3')
+        labels = ['ai.openclaw.' + unit for unit in all_nats]
         for label in labels:
             for folder in (pathlib.Path.home() / 'Library/LaunchAgents',
                            pathlib.Path('/Library/LaunchAgents'), pathlib.Path('/Library/LaunchDaemons')):
@@ -1052,25 +1054,31 @@ if not marker.exists():
         writer_lock = self.directory / 'writer.lock'
         writer_lock.write_bytes(b'owned writer lock')
         writer_lock.chmod(0o644)
+        held_user_disabled = False
         try:
             endpoints, used_ports = {}, set()
-            for unit in SERVING_NATS:
+            for unit in all_nats:
                 values = []
-                while len(values) < 3:
+                while len(values) < (2 if unit == 'nats' else 3):
                     value = free_port()
                     if value not in used_ports:
                         used_ports.add(value)
                         values.append(value)
                 endpoints[unit] = values
-            for unit in SERVING_NATS:
+            for unit in all_nats:
                 folder = self.directory / unit
                 folder.mkdir(mode=0o700)
-                port, monitor, route = endpoints[unit]
+                port, monitor = endpoints[unit][:2]
                 name = 'owned-' + unit + '-' + secrets.token_hex(4)
                 config = folder / 'nats.conf'
-                routes = ', '.join('"nats-route://127.0.0.1:' + str(endpoints[other][2]) + '"'
-                                   for other in SERVING_NATS if other != unit)
-                config.write_text(f'''server_name: {name}\nhost: 127.0.0.1\nport: {port}\nhttp_port: {monitor}\ncluster {{ name: owned-b5; listen: 127.0.0.1:{route}; routes: [{routes}] }}\njetstream {{ store_dir: "{folder / 'store'}" }}\n''')
+                config.write_text(f'''server_name: {name}\nhost: 127.0.0.1\nport: {port}\nhttp_port: {monitor}\njetstream {{ store_dir: "{folder / 'store'}" }}\n''')
+                if unit != 'nats':
+                    route = endpoints[unit][2]
+                    routes = ', '.join('"nats-route://127.0.0.1:' + str(endpoints[other][2]) + '"'
+                                       for other in ('nats-1', 'nats-2', 'nats-3') if other != unit)
+                    with config.open('a') as handle:
+                        handle.write(f'cluster {{ name: owned-b5; listen: 127.0.0.1:{route}; '
+                                     f'routes: [{routes}] }}\n')
                 plist = folder / 'unit.plist'
                 log, err = folder / 'server.log', folder / 'server.err'
                 log.touch(mode=0o600)
@@ -1088,6 +1096,18 @@ if not marker.exists():
                 service.bootstrap()
                 wait_for(lambda monitor=monitor: self._owned_nats_varz(monitor))
                 members[unit]['binding'] = service.bind(argv, self.nats, folder)
+            wait_for(lambda: all(self._owned_nats_meta_ready(members[unit]['monitor'])
+                                 for unit in ('nats-1', 'nats-2', 'nats-3')), seconds=15)
+            held_member = members['nats-1']['service']
+            held_member.disable_for_hold()
+            subprocess.run(['/bin/launchctl', 'disable',
+                            'user/' + str(os.getuid()) + '/' + held_member.label],
+                           capture_output=True, check=True, timeout=10)
+            held_user_disabled = True
+            subprocess.run(['/bin/launchctl', 'bootout', held_member.target],
+                           capture_output=True, check=True, timeout=10)
+            wait_for(lambda: not held_member.status()['loaded'])
+            self.assertTrue(held_member.disabled())
             with (patch('preservation_journal.NATS_WRITER_MARKER',
                         self.directory / 'writer-handoff.json'),
                   patch('preservation_journal.NATS_LEGACY_LOCK', writer_lock),
@@ -1194,6 +1214,8 @@ if not marker.exists():
                                     self.assertTrue(member['service'].disabled())
                             restored = []
                             def restore(unit, saved):
+                                if unit in ('federation-tick', 'nats-1'):
+                                    self.fail('held unit reached the restore callback')
                                 if unit in members:
                                     if unit == 'nats':
                                         self.assertTrue(all(not members[other]['service'].status()['loaded']
@@ -1208,12 +1230,11 @@ if not marker.exists():
                                             server_name=member['name']), timeout=.5 if fail_first else 10)
                                     self.assertNotEqual(binding['status']['pid'],
                                                         member['binding']['status']['pid'])
-                                    self.assertEqual(http_json(member['monitor'], '/varz')
-                                        ['cluster']['name'], 'owned-b5')
+                                    observed_cluster = http_json(member['monitor'], '/varz')['cluster']
+                                    self.assertEqual(observed_cluster.get('name'),
+                                                     None if unit == 'nats' else 'owned-b5')
                                     restored.append(unit)
                                     return
-                                if unit in ('federation-tick', 'nats-1'):
-                                    self.fail('held unit reached the restore callback')
                                 if saved['class'] in ('daemon', 'timer') or (
                                         saved['class'] == 'known-broken' and saved['running']):
                                     journal.begin_override_clear(unit)
@@ -1225,8 +1246,21 @@ if not marker.exists():
                                 for domain in ('gui', 'user'):
                                     entrypoints['overrides'][domain][label] = baseline_entrypoints[
                                         'overrides'][domain][label]
+                            group_calls = []
+                            def group_check():
+                                group_calls.append(len(journal.records))
+                                self.assertTrue(all(members[unit]['service'].status()['running']
+                                                    for unit in SERVING_NATS))
+                                self.assertFalse(held_member.status()['loaded'])
+                                self.assertTrue(held_member.disabled())
+                                if fail_group:
+                                    raise Refused('owned group failure after individual receipts')
+                                names = {unit: members[unit]['name'] for unit in all_nats}
+                                ports = {unit: members[unit]['monitor'] for unit in SERVING_NATS}
+                                return wait_for_serving_group(names, ports, 'owned-b5', 10)
                             result = hold.recover(restore, observe, lambda: {'verified': True},
-                                deploy_fence=lambda: {'verified': True})
+                                deploy_fence=lambda: {'verified': True},
+                                nats_group_check=group_check)
                             rows = [(row['event'], row.get('unit')) for row in journal.records]
                             if fail_first:
                                 self.assertFalse(result['restored'])
@@ -1234,14 +1268,28 @@ if not marker.exists():
                                 self.assertTrue(members['nats']['service'].disabled())
                                 self.assertFalse(any(row == ('recovery-verified', 'nats') for row in rows))
                                 self.assertIn(('override-clear-intent', 'nats'), rows)
+                                self.assertEqual(group_calls, [])
+                            elif fail_group:
+                                self.assertFalse(result['restored'])
+                                self.assertEqual(restored[:3], list(SERVING_NATS))
+                                self.assertEqual(len(group_calls), 1)
+                                self.assertTrue(any(error['unit'] == 'nats-group'
+                                                    for error in result['errors']))
+                                self.assertNotIn(('restoration-intent', 'mesh-task-daemon'), rows)
+                                self.assertIsNotNone(gate.marker())
                             else:
                                 self.assertTrue(result['restored'], result)
+                                self.assertEqual(len(group_calls), 1)
                                 self.assertEqual(restored[:3], list(SERVING_NATS))
                                 for unit in SERVING_NATS:
                                     self.assertLess(rows.index(('restoration-intent', unit)),
                                                     rows.index(('override-clear-intent', unit)))
                                     self.assertLess(rows.index(('override-clear-intent', unit)),
                                                     rows.index(('recovery-verified', unit)))
+                                self.assertLess(rows.index(('recovery-verified', 'nats-3')),
+                                                rows.index(('nats-group-recovery-verified', None)))
+                                self.assertLess(rows.index(('nats-group-recovery-verified', None)),
+                                                rows.index(('recovery-observed', 'mesh-task-daemon')))
                                 self.assertIsNone(gate.marker())
                                 self.assertTrue(journal.resolve())
                             self.proofs.append({'test': self._testMethodName,
@@ -1257,11 +1305,23 @@ if not marker.exists():
                                    capture_output=True, check=True, timeout=10)
                 if service.disabled():
                     service.enable_after_hold()
+                if held_user_disabled and member is members.get('nats-1'):
+                    subprocess.run(['/bin/launchctl', 'enable',
+                                    'user/' + str(os.getuid()) + '/' + service.label],
+                                   capture_output=True, check=True, timeout=10)
 
     @staticmethod
     def _owned_nats_varz(monitor):
         try:
             return http_json(monitor, '/varz')
+        except Refused:
+            return False
+
+    @staticmethod
+    def _owned_nats_meta_ready(monitor):
+        try:
+            report = http_json(monitor, '/jsz').get('meta_cluster', {})
+            return report.get('cluster_size') == 3 and report.get('leader')
         except Refused:
             return False
 
@@ -1276,6 +1336,12 @@ if not marker.exists():
                          'fixed-label NATS recovery fixture runs only on a dedicated macOS CI runner')
     def test_full_node_owned_nats_failed_start_keeps_override(self):
         self.exercise_full_node_owned_nats_recovery(True)
+
+    @unittest.skipUnless(sys.platform == 'darwin'
+                         and os.environ.get('OPENCLAW_CI_FULL_NODE_LISTENER_FIXTURE') == '1',
+                         'fixed-label NATS recovery fixture runs only on a dedicated macOS CI runner')
+    def test_full_node_owned_nats_group_failure_holds_clients(self):
+        self.exercise_full_node_owned_nats_recovery(False, True)
 
     def test_owned_nats_readiness_binds_listening_ports_to_owner(self):
         port, monitor = free_port(), free_port()

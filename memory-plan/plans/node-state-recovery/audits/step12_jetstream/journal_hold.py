@@ -268,9 +268,11 @@ class JournaledHold:
                 'history_certified': not self.restore_only
                                      and self.journal.scope not in (TIMER_SCOPE, FULL_NODE_SCOPE)}
 
-    def recover(self, restore, observe, final_check, diagnostics=None, deploy_fence=None):
+    def recover(self, restore, observe, final_check, diagnostics=None, deploy_fence=None,
+                nats_group_check=None):
         return self.journal.recover(restore, observe, final_check, diagnostics, hold=self,
-                                    deploy_fence=deploy_fence)
+                                    deploy_fence=deploy_fence,
+                                    nats_group_check=nats_group_check)
 
     def close(self):
         if self.guard is not None:

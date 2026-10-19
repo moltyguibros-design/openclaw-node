@@ -99,6 +99,7 @@ jobs:
           PLACEMENT_FAILURE_REPORT="$RUNNER_TEMP/placement-failure.json" node memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_recovery.mjs /tmp/nats-cli/nats-0.3.1-linux-amd64/nats /usr/local/bin/nats-server
           NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_checks.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_journal.py
+          NATS_SERVER=/usr/local/bin/nats-server python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_serving_nats_group.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_full_node_baseline.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_managed_launchd.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_timeout.py
@@ -226,6 +227,7 @@ jobs:
           /usr/bin/python3 test/test_nats_root_journal.py
           /usr/bin/python3 test/test_nats_user_transfer.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_journal.py
+          NATS_SERVER="$(command -v nats-server)" /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_serving_nats_group.py
           OPENCLAW_CI_FULL_NODE_INVENTORY_FIXTURE=1 /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_full_node_baseline.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_asif_extract.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py

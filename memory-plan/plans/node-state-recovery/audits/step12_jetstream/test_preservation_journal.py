@@ -1849,11 +1849,40 @@ class JournalTests(unittest.TestCase):
                                 monitor_port=8222, client_port=ports[unit],
                                 server_name=names[unit]), timeout=5)
                     restored.append((unit, binding['status']['pid']))
-                result = journal.recover(restore,
+                refused = journal.recover(restore,
                     lambda unit, _: {**current[unit], 'verified': True},
                     lambda: {'verified': True}, hold=hold,
                     deploy_fence=lambda: {'verified': True})
+                self.assertFalse(refused['restored'])
+                self.assertTrue(any(error['unit'] == 'nats-group' for error in refused['errors']))
+                self.assertEqual([unit for unit, _ in restored], ['nats', 'nats-2', 'nats-3'])
+                self.assertFalse(any(row['event'] == 'restoration-intent'
+                                     and row.get('unit') == 'mesh-task-daemon'
+                                     for row in journal.records))
+                partial = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: {'verified': True},
+                    nats_group_check=lambda: {'verified': True, 'size': 2,
+                                              'quorum_needed': 2, 'held_member': 'owned-nats-1',
+                                              'leader': names['nats-2']})
+                self.assertFalse(partial['restored'])
+                self.assertFalse(any(row['event'] == 'nats-group-recovery-verified'
+                                     for row in journal.records))
+                group_calls = []
+                def group_check():
+                    group_calls.append(len(journal.records))
+                    self.assertTrue(all(current[unit]['running'] for unit in names))
+                    self.assertFalse(current['nats-1']['running'])
+                    self.assertFalse(current['mesh-task-daemon']['running'])
+                    return {'verified': True, 'size': 3, 'quorum_needed': 2,
+                            'held_member': 'owned-nats-1', 'leader': names['nats-2']}
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: {'verified': True}, nats_group_check=group_check)
                 self.assertTrue(result['restored'], result)
+                self.assertEqual(len(group_calls), 1)
                 self.assertEqual([unit for unit, _ in restored], ['nats', 'nats-2', 'nats-3'])
                 self.assertTrue(any(row['event'] == 'held-unit-verified'
                                     and row.get('unit') == 'nats-1' for row in journal.records))
@@ -1861,6 +1890,11 @@ class JournalTests(unittest.TestCase):
                     rows = [row['event'] for row in journal.records if row.get('unit') == unit]
                     self.assertLess(rows.index('restoration-intent'), rows.index('override-clear-intent'))
                     self.assertLess(rows.index('override-clear-intent'), rows.index('recovery-verified'))
+                rows = [(row['event'], row.get('unit')) for row in journal.records]
+                self.assertLess(rows.index(('already-restored', 'nats-3')),
+                                rows.index(('nats-group-recovery-verified', None)))
+                self.assertLess(rows.index(('nats-group-recovery-verified', None)),
+                                rows.index(('recovery-observed', 'mesh-task-daemon')))
 
     def test_full_scope_stops_when_another_unit_loses_its_stop_proof(self):
         prior = full_node_inventory()
@@ -2460,15 +2494,21 @@ class JournalTests(unittest.TestCase):
             recovery_hold = SimpleNamespace(journal=journal, prepare=lambda *_: None,
                 before_restore=lambda: None, check_closed=lambda: None,
                 complete=lambda *_: {'verified': True})
+            group_calls = []
+            def group_check():
+                group_calls.append(len(journal.records))
+                return {'verified': True, 'size': 3, 'quorum_needed': 2,
+                        'held_member': 'owned-nats-1', 'leader': 'owned-nats-2'}
             failed = journal.recover(restore, observe_current,
                 lambda: {'verified': False}, hold=recovery_hold,
-                deploy_fence=lambda: {'verified': True})
+                deploy_fence=lambda: {'verified': True}, nats_group_check=group_check)
             self.assertFalse(failed['restored'])
             self.assertFalse(states['mesh-deploy-listener']['running'])
             result = journal.recover(restore, observe_current,
                 lambda: {'verified': True}, hold=recovery_hold,
-                deploy_fence=lambda: {'verified': True})
+                deploy_fence=lambda: {'verified': True}, nats_group_check=group_check)
             self.assertTrue(result['restored'], result)
+            self.assertEqual(len(group_calls), 2)
             started = [row for row in journal.records if row['event'] == 'recovery-started']
             self.assertEqual([row['excluded_unchanged_since_baseline'] for row in started],
                              [False, False])
