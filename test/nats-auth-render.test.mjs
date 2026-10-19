@@ -29,6 +29,7 @@ const WORKER = 'UBZJ7OCYDR6BKVIAV4P2Z5SEVDISO2V2JKQ7CS3DI4FYIDMEJCYGM4WB';
 function runIsolatedCli(home, script, args, env) {
   const preload = path.join(home, 'isolated-handoff.cjs');
   const bin = path.join(home, 'test-bin');
+  assert.equal(bin.includes(path.delimiter), false, 'test command path contains a PATH delimiter');
   fs.mkdirSync(bin, { recursive: true });
   fs.writeFileSync(path.join(bin, 'nats-server'), '#!/bin/sh\ntest "$1" = "--signal" && test "$2" = "reload" || exit 1\nprintf reload > "$OPENCLAW_TEST_RELOAD_MARKER"\n', { mode: 0o755 });
   fs.writeFileSync(path.join(bin, 'pgrep'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
