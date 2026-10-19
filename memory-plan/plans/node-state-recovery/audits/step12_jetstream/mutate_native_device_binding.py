@@ -21,14 +21,28 @@ CASES = (
      "require(len(known) == 1, 'attach result names no valid whole disk')", 'pass',
      'ProbeAttach.test_a_successful_probe_attach_requires_a_whole_disk_observation'),
     ('runner-owned-volume-root', 'probe_asif_mount_ownership',
-     "checked(attempt(SUDO, '-n', '/usr/sbin/chown', '0:0', str(point)), 'restore fixture root owner')", 'pass',
+     "checked(attempt(SUDO, '-n', '/usr/sbin/chown', '0:0', str(point)), 'restore fixture root owner')\n"
+     '        volume_root = point.lstat()', 'pass\n        volume_root = point.lstat()',
      'ProbeWritePreparation.test_only_the_fresh_volume_root_is_made_runner_writable_before_seeding'),
+    ('root-runner-guard', 'probe_asif_mount_ownership',
+     "require(os.getuid() != 0, 'the ownership probe requires a non-root runner')", 'pass',
+     'ProbeGuards.test_root_runner_refuses_before_sudo_for_both_native_modes'),
+    ('reader-nonroot-seed-owner', 'probe_asif_mount_ownership',
+     "        checked(attempt(SUDO, '-n', '/usr/sbin/chown', '%s:%s' % (os.getuid(), os.getgid()), str(point)),\n"
+     "                'chown fixture volume root')\n        if not seed.exists():",
+     '        pass\n        if not seed.exists():',
+     'ReaderSeed.test_writable_seed_uses_a_distinct_nonroot_owner_then_restores_root'),
+    ('reader-root-restoration', 'probe_asif_mount_ownership',
+     "checked(attempt(SUDO, '-n', '/usr/sbin/chown', '0:0', str(point)), 'restore fixture root owner')\n"
+     '        info = point.lstat()', 'pass\n        info = point.lstat()',
+     'ReaderSeed.test_writable_seed_uses_a_distinct_nonroot_owner_then_restores_root'),
 )
 
 
 def main():
     controls = ['test_host_journal_mount.' + name for name in
-                ('Attach', 'Volume', 'ProbeAttach', 'ProbeWritePreparation', 'NativeDeviceBinding')]
+                ('Attach', 'Volume', 'ProbeAttach', 'ProbeWritePreparation', 'NativeDeviceBinding',
+                 'ProbeGuards', 'ReaderSeed')]
     positive = subprocess.run([sys.executable, '-m', 'unittest', '-q', *controls], cwd=STEP,
                               capture_output=True, text=True, timeout=120)
     if positive.returncode:

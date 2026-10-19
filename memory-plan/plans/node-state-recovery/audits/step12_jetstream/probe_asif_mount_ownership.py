@@ -30,7 +30,7 @@ gate.
 
 Guards, all required, checked before any command: macOS, CI=true and GITHUB_ACTIONS=true (both set
 by GitHub Actions), OPENCLAW_OWNERSHIP_PROBE=1, the --ci-owned-probe flag, a new output path in an
-existing directory, then passwordless sudo.
+existing directory, a non-root runner, then passwordless sudo.
 
 The isolated asif-mount-ownership-macos CI job invokes this probe and uploads its report:
 
@@ -106,6 +106,7 @@ def guard(argv, environ, platform=sys.platform):
     output = pathlib.Path(argv[1])
     require(output.is_absolute() and not os.path.lexists(output) and output.parent.is_dir(),
             'probe output must be a new file in an existing directory')
+    require(os.getuid() != 0, 'the ownership probe requires a non-root runner')
     sudo = attempt(SUDO, '-n', '/usr/bin/true')
     require(sudo['returncode'] == 0 and not sudo['timed_out'], 'passwordless sudo is required')
     return output

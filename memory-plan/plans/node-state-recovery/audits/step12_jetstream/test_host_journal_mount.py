@@ -1558,6 +1558,71 @@ class ReaderProbe(MountCase):
 
 
 class ReaderSeed(unittest.TestCase):
+    def test_writable_seed_uses_a_distinct_nonroot_owner_then_restores_root(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-reader-seed-owner-') as name:
+            temp = pathlib.Path(name).resolve()
+            image, seed, capture = temp / 'owned.asif', temp / 'seed', temp / 'capture'
+            image.write_bytes(b'owned image')
+            capture.mkdir()
+            point = temp / 'reader-seed'
+            calls = []
+            owner = {'uid': 0, 'gid': 0}
+
+            def mount(path, volume):
+                self.assertEqual((path, volume), (point, DATA))
+                path.mkdir(mode=0o755)
+                path.chmod(0o755)
+
+            def command(*argv):
+                calls.append(argv)
+                if argv[:3] == (probe.SUDO, '-n', '/usr/sbin/chown'):
+                    uid, gid = map(int, argv[3].split(':'))
+                    owner.update(uid=uid, gid=gid)
+                return {'returncode': 0, 'timed_out': False, 'stdout': b'', 'stderr': ''}
+
+            def seed_fixture(*args):
+                self.assertEqual((args[0], args[1]), (capture, seed))
+                self.assertEqual(owner, {'uid': 501, 'gid': 20})
+                seed.mkdir()
+                (seed / 'Users').mkdir()
+                return {'owned': True}
+
+            def release(*args):
+                if (point / 'Users').exists():
+                    shutil.rmtree(point / 'Users')
+                self.assertEqual(owner, {'uid': 0, 'gid': 0})
+                return {'clean': True}, None
+
+            original_lstat = pathlib.Path.lstat
+
+            def lstat(path):
+                info = original_lstat(path)
+                if path != point:
+                    return info
+                values = list(info)
+                values[4:6] = [owner['uid'], owner['gid']]
+                return os.stat_result(values)
+
+            with mock.patch.object(probe, 'attach', return_value={'volume': DATA, 'info': {'VolumeUUID': UUID}}), \
+                    mock.patch.object(probe, 'mount_at', side_effect=mount), \
+                    mock.patch.object(probe, 'attempt', side_effect=command), \
+                    mock.patch.object(probe, 'seed_reader_fixture', side_effect=seed_fixture), \
+                    mock.patch.object(probe, 'change_reader_seed'), \
+                    mock.patch.object(probe, 'release', side_effect=release), \
+                    mock.patch.object(probe, 'settled'), \
+                    mock.patch.object(pathlib.Path, 'lstat', lstat), \
+                    mock.patch.object(probe.os, 'getuid', return_value=501), \
+                    mock.patch.object(probe.os, 'getgid', return_value=20):
+                row = {}
+                probe.reader_write_phase(image, temp, seed, capture, [], 'intact', row)
+            self.assertEqual(row['fixture'], {'owned': True})
+            self.assertEqual(row['seed_root'], {'uid': 0, 'gid': 0, 'mode': '0o755'})
+            self.assertEqual([argv for argv in calls if argv[:3] ==
+                              (probe.SUDO, '-n', '/usr/sbin/chown')], [
+                (probe.SUDO, '-n', '/usr/sbin/chown', '501:20', str(point)),
+                (probe.SUDO, '-n', '/usr/sbin/chown', '0:0', str(point))])
+            self.assertFalse(point.exists())
+
     def test_native_uuid_is_bound_before_commitment_and_no_fixture_patch_survives_seeding(self):
         with tempfile.TemporaryDirectory(prefix='openclaw-capture-owned-seed-') as name:
             temp = pathlib.Path(name).resolve()
@@ -1811,6 +1876,7 @@ class ProbeGuards(unittest.TestCase):
     def refuses(self, pattern, argv=None, environ=None, platform='darwin', sudo=0):
         sudo_row = {'argv': [], 'returncode': sudo, 'timed_out': False, 'stdout': b'', 'stderr': ''}
         with mock.patch.object(probe, 'attempt', return_value=sudo_row) as attempt, \
+                mock.patch.object(probe.os, 'getuid', return_value=501), \
                 mock.patch('subprocess.run', side_effect=AssertionError('command run')):
             with self.assertRaisesRegex(RuntimeError, pattern):
                 probe.guard(self.argv if argv is None else argv,
@@ -1845,14 +1911,25 @@ class ProbeGuards(unittest.TestCase):
 
     def test_the_guarded_path_is_returned_only_when_every_guard_holds(self):
         sudo_row = {'argv': [], 'returncode': 0, 'timed_out': False, 'stdout': b'', 'stderr': ''}
-        with mock.patch.object(probe, 'attempt', return_value=sudo_row):
+        with mock.patch.object(probe, 'attempt', return_value=sudo_row), \
+                mock.patch.object(probe.os, 'getuid', return_value=501):
             self.assertEqual(probe.guard(self.argv, self.ENVIRON, 'darwin'), self.output)
+
+    def test_root_runner_refuses_before_sudo_for_both_native_modes(self):
+        for mode in ('--ci-owned-probe', '--ci-owned-reader'):
+            with self.subTest(mode=mode), mock.patch.object(probe.os, 'getuid', return_value=0), \
+                    mock.patch.object(probe, 'attempt') as attempt:
+                with self.assertRaisesRegex(RuntimeError, '^the ownership probe requires a non-root runner$'):
+                    probe.guard([mode, str(self.output)], self.ENVIRON, 'darwin')
+                attempt.assert_not_called()
+                self.assertFalse(self.output.exists())
 
     def test_reader_mode_has_the_same_guards_and_dispatches_only_after_them(self):
         argv = ['--ci-owned-reader', str(self.output)]
         sudo_row = {'returncode': 0, 'timed_out': False, 'stdout': b'', 'stderr': ''}
         native_guard = probe.guard
         with mock.patch.object(probe, 'attempt', return_value=sudo_row), \
+                mock.patch.object(probe.os, 'getuid', return_value=501), \
                 mock.patch.object(probe, 'reader_run', return_value=0) as reader, \
                 mock.patch.object(probe, 'run', side_effect=AssertionError('ownership mode run')), \
                 mock.patch.object(probe, 'guard', side_effect=lambda args, env: native_guard(args, env, 'darwin')):
