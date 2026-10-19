@@ -17,15 +17,16 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from managed_launchd import (Launchd, StopWatch, process_exists, process_tree,
-                             restore_disabled_daemon, restore_disabled_timer, unload_idle_timer)
+                             restore_disabled_daemon, restore_disabled_timer,
+                             serving_nats_member_ready, unload_idle_timer)
 from full_node_baseline import open_full_node_journal
 from journal_hold import JournaledHold, describe
 from legacy_fixture import legacy_journal
-from preservation_checks import Refused, disabled_overrides, http_json
-from preservation_journal import Journal, TIMER_UNITS, static_identity
+from preservation_checks import Refused, STOP_ORDER, disabled_overrides, http_json
+from preservation_journal import Journal, SERVING_NATS, TIMER_UNITS, static_identity
 from test_journal_hold import gate_module, gated_identity
 from test_preservation_journal import (full_entrypoint_evidence, full_node_inventory,
-                                       inventory)
+                                       inventory, listener_stop_evidence, timer_stop_evidence)
 
 
 def free_port():
@@ -45,6 +46,34 @@ def wait_for(check, seconds=10):
 
 
 class StopWatchPreflight(unittest.TestCase):
+    def test_serving_nats_member_readiness_uses_local_varz_and_client_port(self):
+        binding = {'status': {'loaded': True, 'running': True, 'pid': 42}}
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            listener.listen()
+            client_port = listener.getsockname()[1]
+            with patch('managed_launchd.http_json', return_value={
+                    'server_name': 'owned-nats', 'version': '2.12.6'}) as monitor:
+                self.assertTrue(serving_nats_member_ready(binding, monitor_port=8222,
+                    client_port=client_port, server_name='owned-nats'))
+                monitor.assert_called_once_with(8222, '/varz', timeout=1)
+            for response in ({'server_name': 'other', 'version': '2.12.6'},
+                             {'server_name': 'owned-nats', 'version': '2.12.5'}):
+                with patch('managed_launchd.http_json', return_value=response):
+                    with self.assertRaisesRegex(Refused, 'monitoring identity differs'):
+                        serving_nats_member_ready(binding, monitor_port=8222,
+                            client_port=client_port, server_name='owned-nats')
+        with patch('managed_launchd.http_json', side_effect=Refused('not up')):
+            self.assertFalse(serving_nats_member_ready(binding, monitor_port=8222,
+                client_port=client_port, server_name='owned-nats'))
+        with patch('managed_launchd.http_json', return_value={
+                'server_name': 'owned-nats', 'version': '2.12.6'}):
+            self.assertFalse(serving_nats_member_ready(binding, monitor_port=8222,
+                client_port=client_port, server_name='owned-nats'))
+        with self.assertRaisesRegex(Refused, 'bound running owner'):
+            serving_nats_member_ready({'status': {'loaded': True, 'running': False, 'pid': None}},
+                monitor_port=8222, client_port=4222, server_name='owned-nats')
+
     def test_daemon_restore_requires_explicit_readiness_budget(self):
         journal = SimpleNamespace(begin_override_clear=lambda _: self.fail('intent reached'))
         service = SimpleNamespace(label='ai.openclaw.gateway')
@@ -991,10 +1020,242 @@ if not marker.exists():
     def test_full_node_owned_listener_restores_after_verified_release(self):
         self.exercise_full_node_owned_listener(True)
 
+    def exercise_full_node_owned_nats_recovery(self, fail_first):
+        labels = ['ai.openclaw.' + unit for unit in SERVING_NATS]
+        for label in labels:
+            for folder in (pathlib.Path.home() / 'Library/LaunchAgents',
+                           pathlib.Path('/Library/LaunchAgents'), pathlib.Path('/Library/LaunchDaemons')):
+                self.assertFalse((folder / (label + '.plist')).exists(), label)
+            service = Launchd(label, self.directory / (label + '.plist'))
+            self.assertFalse(service.status()['loaded'], label)
+            self.assertFalse(service.disabled(), label)
+            for domain in ('user/' + str(os.getuid()), 'system'):
+                result = subprocess.run(['/bin/launchctl', 'print', domain + '/' + label],
+                                        capture_output=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0, label)
+        members = {}
+        gate_root = self.directory / 'gate'
+        pins = gate_module.initialize(gate_root)
+        writer_lock = self.directory / 'writer.lock'
+        writer_lock.write_bytes(b'owned writer lock')
+        writer_lock.chmod(0o644)
+        try:
+            for unit in SERVING_NATS:
+                folder = self.directory / unit
+                folder.mkdir(mode=0o700)
+                port, monitor = free_port(), free_port()
+                name = 'owned-' + unit + '-' + secrets.token_hex(4)
+                config = folder / 'nats.conf'
+                config.write_text(f'''server_name: {name}\nhost: 127.0.0.1\nport: {port}\nhttp_port: {monitor}\njetstream {{ store_dir: "{folder / 'store'}" }}\n''')
+                plist = folder / 'unit.plist'
+                log, err = folder / 'server.log', folder / 'server.err'
+                log.touch(mode=0o600)
+                err.touch(mode=0o600)
+                argv = [self.nats, '-c', str(config)]
+                plist.write_bytes(plistlib.dumps({
+                    'Label': 'ai.openclaw.' + unit, 'ProgramArguments': argv,
+                    'WorkingDirectory': str(folder), 'RunAtLoad': True,
+                    'KeepAlive': False, 'ExitTimeOut': 5,
+                    'StandardOutPath': str(log), 'StandardErrorPath': str(err)}))
+                service = Launchd('ai.openclaw.' + unit, plist)
+                members[unit] = {'service': service, 'plist': plist, 'log': log, 'err': err,
+                                 'argv': argv, 'folder': folder, 'port': port,
+                                 'monitor': monitor, 'name': name}
+                service.bootstrap()
+                wait_for(lambda monitor=monitor: self._owned_nats_varz(monitor))
+                members[unit]['binding'] = service.bind(argv, self.nats, folder)
+            with (patch('preservation_journal.NATS_WRITER_MARKER',
+                        self.directory / 'writer-handoff.json'),
+                  patch('preservation_journal.NATS_LEGACY_LOCK', writer_lock),
+                  patch('preservation_journal.NATS_ROOT_UID', os.getuid()),
+                  gate_module.Gate(gate_root, pins) as gate):
+                prior = full_node_inventory()
+                for unit in TIMER_UNITS:
+                    prior[unit]['identity'] = gated_identity(unit, gate_root, pins)
+                prior['scheduler-heartbeat']['execution_hold'] = describe(gate, sorted(TIMER_UNITS))
+                for unit, member in members.items():
+                    prior[unit]['identity'] = static_identity(member['plist'], (member['folder'] / 'nats.conf',))
+                entrypoints = full_entrypoint_evidence(prior)
+                for unit, member in members.items():
+                    entrypoints['installed']['ai.openclaw.' + unit] = {
+                        'path': str(member['plist']),
+                        'sha256': hashlib.sha256(member['plist'].read_bytes()).hexdigest()}
+                current = copy.deepcopy(prior)
+                def capture(_):
+                    observed = copy.deepcopy(entrypoints)
+                    for unit, member in members.items():
+                        label = 'ai.openclaw.' + unit
+                        status = member['service'].status()
+                        if status['loaded']:
+                            if label not in observed['loaded']['gui']:
+                                observed['loaded']['gui'].append(label)
+                        elif label in observed['loaded']['gui']:
+                            observed['loaded']['gui'].remove(label)
+                        observed['installed'][label]['sha256'] = hashlib.sha256(
+                            member['plist'].read_bytes()).hexdigest()
+                        for domain, target in (('gui', 'gui/' + str(os.getuid())),
+                                               ('user', 'user/' + str(os.getuid())),
+                                               ('system', 'system')):
+                            raw = subprocess.check_output(['/bin/launchctl', 'print-disabled', target],
+                                                          text=True, timeout=10)
+                            observed['overrides'][domain][label] = disabled_overrides(raw, {label})[label]
+                    observed['loaded']['gui'].sort()
+                    return observed
+                def observe(unit, saved):
+                    if unit not in members:
+                        return {**copy.deepcopy(current[unit]), 'verified': True}
+                    member = members[unit]
+                    service = member['service']
+                    status = service.status()
+                    verified = (serving_nats_member_ready(
+                        service.bind(member['argv'], self.nats, member['folder']),
+                        monitor_port=member['monitor'], client_port=member['port'],
+                        server_name=member['name']) if status['running'] else True)
+                    return {**copy.deepcopy(saved), 'loaded': status['loaded'],
+                            'running': status['running'], 'disabled': service.disabled(),
+                            'identity': static_identity(member['plist'], (member['folder'] / 'nats.conf',)),
+                            'verified': verified}
+                baseline_entrypoints = capture(None)
+                with (patch('full_node_baseline.capture_full_node_prior',
+                            return_value=(prior, baseline_entrypoints)),
+                      patch('preservation_journal.capture_entrypoint_inventory', side_effect=capture)):
+                    with open_full_node_journal(self.directory / 'journals' / 'window', gate, {},
+                                                boot='owned-boot',
+                                                node_lock=self.directory / 'node.lock') as journal:
+                        fast = lambda: {'verified': True,
+                                        'baseline_sha256': journal.records[0]['sha256']}
+                        hold = JournaledHold(journal, gate, fast)
+                        try:
+                            hold.close_and_drain()
+                            for unit in STOP_ORDER:
+                                if unit in members:
+                                    continue
+                                state = current[unit]
+                                evidence = (timer_stop_evidence(unit) if state['class'] in
+                                    ('timer', 'on-demand') or state['class'] == 'known-broken'
+                                    and not state['running'] else listener_stop_evidence(unit))
+                                def stop_scripted(unit=unit):
+                                    label = 'ai.openclaw.' + unit
+                                    entrypoints['loaded']['gui'].remove(label)
+                                    entrypoints['overrides']['gui'][label] = True
+                                    entrypoints['overrides']['user'][label] = True
+                                    current[unit].update(loaded=False, running=False, disabled=True)
+                                hold.mutate(unit, 'disable-and-unload', stop_scripted,
+                                            lambda evidence=evidence: evidence)
+                            self.hold_override_attempted = True
+                            for unit in SERVING_NATS:
+                                member = members[unit]
+                                with socket.create_connection(('127.0.0.1', member['port']), timeout=2) as client:
+                                    client.settimeout(2)
+                                    self.assertIn(b'INFO', client.recv(8192))
+                                    client.sendall(b'CONNECT {"verbose":false}\r\nPING\r\n')
+                                    reply = b''
+                                    while b'PONG' not in reply:
+                                        chunk = client.recv(8192)
+                                        self.assertTrue(chunk)
+                                        reply += chunk
+                                    with StopWatch(member['service'], member['binding'],
+                                                   [member['log'], member['err']], unit,
+                                                   allowed_signals=(15,), require_disabled=True) as watch:
+                                        def stop():
+                                            member['service'].disable_for_hold()
+                                            watch.apply()
+                                        def absent():
+                                            with socket.socket() as connection:
+                                                connection.settimeout(.2)
+                                                return connection.connect_ex(('127.0.0.1', member['port'])) != 0
+                                        proof = hold.mutate(unit, 'disable-and-unload', stop,
+                                            lambda: watch.verify(lambda: client.recv(1) == b'', absent))
+                                    self.assertTrue(Journal.managed_stop_proven(unit, proof))
+                                    self.assertTrue(member['service'].disabled())
+                            restored = []
+                            def restore(unit, saved):
+                                if unit in members:
+                                    if unit == 'nats':
+                                        self.assertTrue(all(not members[other]['service'].status()['loaded']
+                                            and members[other]['service'].disabled()
+                                            for other in ('nats-2', 'nats-3')))
+                                        self.assertFalse(prior['nats-1']['loaded'])
+                                    member = members[unit]
+                                    binding = restore_disabled_daemon(member['service'], journal,
+                                        unit, saved, lambda owner: False if fail_first and unit == 'nats'
+                                        else serving_nats_member_ready(owner,
+                                            monitor_port=member['monitor'], client_port=member['port'],
+                                            server_name=member['name']), timeout=.5 if fail_first else 10)
+                                    self.assertNotEqual(binding['status']['pid'],
+                                                        member['binding']['status']['pid'])
+                                    restored.append(unit)
+                                    return
+                                if unit in ('scheduler-heartbeat', 'federation-tick', 'nats-1'):
+                                    self.fail('held unit reached the restore callback')
+                                if saved['class'] in ('daemon', 'timer') or (
+                                        saved['class'] == 'known-broken' and saved['running']):
+                                    journal.begin_override_clear(unit)
+                                current[unit] = copy.deepcopy(saved)
+                                label = 'ai.openclaw.' + unit
+                                if label not in entrypoints['loaded']['gui']:
+                                    entrypoints['loaded']['gui'].append(label)
+                                    entrypoints['loaded']['gui'].sort()
+                                for domain in ('gui', 'user'):
+                                    entrypoints['overrides'][domain][label] = baseline_entrypoints[
+                                        'overrides'][domain][label]
+                            result = hold.recover(restore, observe, lambda: {'verified': True},
+                                deploy_fence=lambda: {'verified': True})
+                            rows = [(row['event'], row.get('unit')) for row in journal.records]
+                            if fail_first:
+                                self.assertFalse(result['restored'])
+                                self.assertEqual(restored, [])
+                                self.assertTrue(members['nats']['service'].disabled())
+                                self.assertFalse(any(row == ('recovery-verified', 'nats') for row in rows))
+                                self.assertIn(('override-clear-intent', 'nats'), rows)
+                            else:
+                                self.assertTrue(result['restored'], result)
+                                self.assertEqual(restored[:3], list(SERVING_NATS))
+                                for unit in SERVING_NATS:
+                                    self.assertLess(rows.index(('restoration-intent', unit)),
+                                                    rows.index(('override-clear-intent', unit)))
+                                    self.assertLess(rows.index(('override-clear-intent', unit)),
+                                                    rows.index(('recovery-verified', unit)))
+                                self.assertIsNone(gate.marker())
+                                self.assertTrue(journal.resolve())
+                            self.proofs.append({'test': self._testMethodName,
+                                'serving_members': list(SERVING_NATS), 'restored': restored,
+                                'member1_held': True, 'production_connections': False})
+                        finally:
+                            hold.close()
+        finally:
+            for member in members.values():
+                service = member['service']
+                if service.status()['loaded']:
+                    subprocess.run(['/bin/launchctl', 'bootout', service.target],
+                                   capture_output=True, check=True, timeout=10)
+                if service.disabled():
+                    service.enable_after_hold()
+
+    @staticmethod
+    def _owned_nats_varz(monitor):
+        try:
+            return http_json(monitor, '/varz')
+        except Refused:
+            return False
+
+    @unittest.skipUnless(sys.platform == 'darwin'
+                         and os.environ.get('OPENCLAW_CI_FULL_NODE_LISTENER_FIXTURE') == '1',
+                         'fixed-label NATS recovery fixture runs only on a dedicated macOS CI runner')
+    def test_full_node_owned_nats_members_restore_in_order(self):
+        self.exercise_full_node_owned_nats_recovery(False)
+
+    @unittest.skipUnless(sys.platform == 'darwin'
+                         and os.environ.get('OPENCLAW_CI_FULL_NODE_LISTENER_FIXTURE') == '1',
+                         'fixed-label NATS recovery fixture runs only on a dedicated macOS CI runner')
+    def test_full_node_owned_nats_failed_start_keeps_override(self):
+        self.exercise_full_node_owned_nats_recovery(True)
+
     def test_owned_nats_persistent_stop_has_transfer_termination_shape(self):
         port, monitor = free_port(), free_port()
         config = self.directory / 'nats.conf'
-        config.write_text(f'''server_name: owned-stop-{secrets.token_hex(4)}
+        server_name = 'owned-stop-' + secrets.token_hex(4)
+        config.write_text(f'''server_name: {server_name}
 host: 127.0.0.1
 port: {port}
 http_port: {monitor}
@@ -1014,6 +1275,8 @@ jetstream {{ store_dir: "{self.directory / 'store'}" }}
                 return False
         self.assertEqual(wait_for(ready)['version'], '2.12.6')
         binding = self.service.bind(argv, self.nats, self.directory)
+        self.assertTrue(serving_nats_member_ready(binding, monitor_port=monitor,
+                                                 client_port=port, server_name=server_name))
         with socket.create_connection(('127.0.0.1', port), timeout=2) as client:
             client.settimeout(2)
             self.assertIn(b'INFO', client.recv(8192))
@@ -1037,8 +1300,23 @@ jetstream {{ store_dir: "{self.directory / 'store'}" }}
         self.assertEqual(proof['termination'], {'exit': 0})
         self.assertEqual(proof['exits'][str(proof['owner'])]['wait_status'], 0)
         self.assertTrue(self.service.disabled())
+        unit = self.name.removeprefix('ai.openclaw.')
+        prior = {'class': 'daemon', 'loaded': True, 'identity': {
+            'plist_sha256': hashlib.sha256(self.plist.read_bytes()).hexdigest(),
+            'argv': argv, 'working_directory': str(self.directory),
+            'files': {path: item['sha256'] for path, item in binding['identity']['files'].items()}}}
+        intents = []
+        restored = restore_disabled_daemon(self.service,
+            SimpleNamespace(begin_override_clear=lambda name: intents.append(name)),
+            unit, prior, lambda owner: serving_nats_member_ready(owner,
+                monitor_port=monitor, client_port=port, server_name=server_name), timeout=10)
+        self.assertEqual(intents, [unit])
+        self.assertNotEqual(restored['status']['pid'], binding['status']['pid'])
+        self.assertTrue(self.service.status()['running'])
+        self.assertFalse(self.service.disabled())
         self.proofs.append({'test': self._testMethodName, 'stop': proof,
                             'isolated_port': port, 'owned_connection_closed': True,
+                            'restored_new_owner': restored['status']['pid'],
                             'production_connections': False})
 
     def test_post_disable_stop_failure_is_durable_and_keeps_override(self):

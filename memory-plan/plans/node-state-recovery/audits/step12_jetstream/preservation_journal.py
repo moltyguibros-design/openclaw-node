@@ -1162,8 +1162,12 @@ class Journal:
                 and self.prior[unit]['loaded']
                 and (self.prior[unit]['class'] != 'timer' or not self.prior[unit]['running'])
                 and (self.prior[unit]['class'] != 'known-broken' or self.prior[unit]['running'])
-                and unit not in NATS_TRANSFER_UNITS,
+                and unit != 'nats-1'
+                and (unit not in NATS_TRANSFER_UNITS or unit in SERVING_NATS),
                 'override clear is outside the current persistent restoration')
+        if unit in SERVING_NATS:
+            require(self.nats_transfer_open() is None, 'NATS transfer is open; await a root outcome')
+            require_no_nats_marker()
         restore = self.records[-1]
         require(restore['event'] == 'restoration-intent' and restore['unit'] == unit,
                 'override clear must immediately follow its restoration intent')

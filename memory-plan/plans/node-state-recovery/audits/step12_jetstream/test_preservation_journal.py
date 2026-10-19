@@ -5,6 +5,7 @@ import json
 import os
 import pathlib
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -17,7 +18,7 @@ from unittest.mock import patch
 from preservation_journal import CommittedRefusal, FULL_NODE_SCOPE, Journal, NATS_TRANSFER_UNITS, Refused, TIMER_SCOPE, TIMER_UNITS, UNITS, encoded, matches, valid_record
 import preservation_journal
 from preservation_checks import STOP_ORDER, TAILSCALE_BINARY, TAILSCALE_LABEL, TAILSCALE_PLIST, TAILSCALE_WRAPPER
-from managed_launchd import StopWatch, restore_disabled_daemon
+from managed_launchd import StopWatch, restore_disabled_daemon, serving_nats_member_ready
 from legacy_fixture import legacy_journal
 
 
@@ -1603,27 +1604,90 @@ class JournalTests(unittest.TestCase):
                     journal.begin_override_clear('gateway')
                 self.assertEqual(len(journal.records), before)
 
-    def test_override_clear_requires_verified_timer_stop_and_refuses_nats_members(self):
+    def test_override_clear_requires_verified_stop_and_admits_serving_nats(self):
         prior = full_node_inventory()
         with patch('preservation_journal.capture_entrypoint_inventory',
                    return_value=full_entrypoint_evidence(prior)):
             with Journal(self.root, prior, node_lock=self.node_lock,
                          scope=FULL_NODE_SCOPE) as journal:
                 for unit, evidence in (('observer', timer_stop_evidence('observer')),
-                                       ('nats', listener_stop_evidence('nats'))):
+                                       *((unit, listener_stop_evidence(unit))
+                                         for unit in ('nats', 'nats-2', 'nats-3'))):
                     stop = journal.append('intent', unit=unit, action='disable-and-unload')
                     journal.append('verified', unit=unit, intent=stop['sequence'],
                                    evidence=evidence)
                     journal.append('restoration-intent', unit=unit, action='restore-prior')
                     journal.restoring_unit = unit
-                    before = len(journal.records)
-                    if unit == 'observer':
-                        record = journal.begin_override_clear(unit)
-                        self.assertEqual(record['stop_intent'], stop['sequence'])
-                    else:
-                        with self.assertRaisesRegex(Refused, 'outside the current persistent restoration'):
-                            journal.begin_override_clear(unit)
-                        self.assertEqual(len(journal.records), before)
+                    record = journal.begin_override_clear(unit)
+                    self.assertEqual(record['stop_intent'], stop['sequence'])
+                journal.restoring_unit = 'nats-1'
+                journal.prior['nats-1'].update(**{'class': 'daemon', 'loaded': True})
+                before = len(journal.records)
+                with self.assertRaisesRegex(Refused, 'outside the current persistent restoration'):
+                    journal.begin_override_clear('nats-1')
+                self.assertEqual(len(journal.records), before)
+
+    def test_serving_nats_override_clear_refuses_transfer_and_marker(self):
+        prior = full_node_inventory()
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=full_entrypoint_evidence(prior)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                stop = journal.append('intent', unit='nats', action='disable-and-unload')
+                journal.append('verified', unit='nats', intent=stop['sequence'],
+                               evidence=listener_stop_evidence('nats'))
+                journal.append('restoration-intent', unit='nats', action='restore-prior')
+                journal.restoring_unit = 'nats'
+                before = len(journal.records)
+                with patch.object(journal, 'nats_transfer_open', return_value={'event': 'nats-transfer-intent'}):
+                    with self.assertRaisesRegex(Refused, 'transfer is open'):
+                        journal.begin_override_clear('nats')
+                self.assertEqual(len(journal.records), before)
+                self.nats_marker.write_text('{}')
+                with self.assertRaisesRegex(Refused, 'protected NATS marker already exists'):
+                    journal.begin_override_clear('nats')
+                self.assertEqual(len(journal.records), before)
+
+    def test_serving_nats_failed_readiness_keeps_override_and_poisoned_intent(self):
+        prior = full_node_inventory()
+        plist = pathlib.Path(self.temp.name) / 'nats.plist'
+        plist.write_bytes(b'owned nats plist')
+        prior['nats']['identity']['plist_sha256'] = hashlib.sha256(plist.read_bytes()).hexdigest()
+        with patch('preservation_journal.capture_entrypoint_inventory',
+                   return_value=full_entrypoint_evidence(prior)):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                stop = journal.append('intent', unit='nats', action='disable-and-unload')
+                journal.append('verified', unit='nats', intent=stop['sequence'],
+                               evidence=listener_stop_evidence('nats'))
+                journal.append('restoration-intent', unit='nats', action='restore-prior')
+                journal.restoring_unit = 'nats'
+                state = {'loaded': False, 'running': False, 'disabled': True}
+                def status(domain='gui'):
+                    return ({'loaded': False} if domain == 'user' else
+                            {'loaded': state['loaded'], 'running': state['running'], 'pid': 412})
+                service = SimpleNamespace(label='ai.openclaw.nats', plist=plist,
+                    status=status, disabled=lambda: state['disabled'],
+                    enable_after_hold=lambda: state.update(disabled=False),
+                    bootstrap=lambda: state.update(loaded=True, running=True),
+                    bind=lambda *_: {'status': status()},
+                    disable_for_hold=lambda: state.update(disabled=True))
+                with self.assertRaisesRegex(Refused, 'disabled override restored; owner running=True'):
+                    restore_disabled_daemon(service, journal, 'nats', prior['nats'],
+                                            lambda _: False, timeout=.01)
+                self.assertTrue(state['disabled'])
+                self.assertFalse(any(row['event'] == 'recovery-verified'
+                                     for row in journal.records))
+            with Journal(self.root, node_lock=self.node_lock) as reopened:
+                hold = SimpleNamespace(journal=reopened,
+                    prepare=lambda *_: self.fail('hold prepared'))
+                before = len(reopened.records)
+                with self.assertRaisesRegex(Refused,
+                        'stopped unit override was cleared without verified recovery: nats'):
+                    reopened.recover(lambda *_: self.fail('restore ran'),
+                        lambda *_: self.fail('observe ran'), lambda: self.fail('final check ran'),
+                        hold=hold, deploy_fence=lambda: self.fail('deploy fence ran'))
+                self.assertEqual(len(reopened.records), before)
 
     def test_override_clear_refuses_timer_without_spawn_proof(self):
         prior = full_node_inventory()
@@ -1712,6 +1776,89 @@ class JournalTests(unittest.TestCase):
                 events = [row['event'] for row in journal.records if row.get('unit') == 'gateway']
                 self.assertLess(events.index('restoration-intent'), events.index('override-clear-intent'))
                 self.assertLess(events.index('override-clear-intent'), events.index('recovery-verified'))
+
+    def test_serving_nats_restore_is_member_ordered_and_member1_stays_held(self):
+        prior = full_node_inventory()
+        current = copy.deepcopy(prior)
+        plists = {}
+        for unit in ('nats', 'nats-2', 'nats-3'):
+            plist = pathlib.Path(self.temp.name) / (unit + '.plist')
+            plist.write_bytes(('owned ' + unit).encode())
+            prior[unit]['identity']['plist_sha256'] = hashlib.sha256(plist.read_bytes()).hexdigest()
+            current[unit]['identity'] = copy.deepcopy(prior[unit]['identity'])
+            plists[unit] = plist
+        baseline = full_entrypoint_evidence(prior)
+        def entrypoints(_):
+            result = copy.deepcopy(baseline)
+            result['loaded']['gui'] = sorted('ai.openclaw.' + unit for unit, state in current.items()
+                                             if state['loaded'])
+            result['overrides']['gui'] = {'ai.openclaw.' + unit: True if state['disabled'] else None
+                                          for unit, state in current.items()}
+            result['overrides']['user'] = copy.deepcopy(result['overrides']['gui'])
+            return result
+        listeners = []
+        for _ in range(3):
+            listener = socket.socket()
+            listener.bind(('127.0.0.1', 0))
+            listener.listen()
+            listeners.append(listener)
+            self.addCleanup(listener.close)
+        names = {'nats': 'owned-nats', 'nats-2': 'owned-nats-2', 'nats-3': 'owned-nats-3'}
+        ports = {unit: listener.getsockname()[1]
+                 for unit, listener in zip(names, listeners)}
+        with patch('preservation_journal.capture_entrypoint_inventory', side_effect=entrypoints):
+            with Journal(self.root, prior, node_lock=self.node_lock,
+                         scope=FULL_NODE_SCOPE) as journal:
+                hold = SimpleNamespace(journal=journal, check_forward=lambda: None,
+                    prepare=lambda *_: None, before_restore=lambda: None,
+                    check_closed=lambda: None, complete=lambda *_: {'verified': True})
+                anchor_hold(journal, hold)
+                for unit in ('mesh-deploy-listener', *STOP_ORDER[1:], 'nats', 'nats-2', 'nats-3'):
+                    evidence = (timer_stop_evidence(unit) if prior[unit]['class'] in
+                                ('timer', 'on-demand') or prior[unit]['class'] == 'known-broken'
+                                and not prior[unit]['running'] else listener_stop_evidence(unit))
+                    journal.mutate(unit, 'disable-and-unload',
+                        lambda unit=unit: current[unit].update(
+                            loaded=False, running=False, disabled=True),
+                        lambda evidence=evidence: evidence, hold=hold)
+                restored = []
+                def restore(unit, wanted):
+                    if unit not in names:
+                        current[unit] = copy.deepcopy(wanted)
+                        return
+                    if unit == 'nats':
+                        self.assertTrue(all(current[other]['disabled']
+                                            and not current[other]['loaded']
+                                            for other in ('nats-2', 'nats-3')))
+                    state = current[unit]
+                    def status(domain='gui'):
+                        return ({'loaded': False} if domain == 'user' else
+                                {'loaded': state['loaded'], 'running': state['running'],
+                                 'pid': 410 + len(restored)})
+                    service = SimpleNamespace(label='ai.openclaw.' + unit,
+                        plist=plists[unit], status=status,
+                        enable_after_hold=lambda: state.update(disabled=False),
+                        bootstrap=lambda: state.update(loaded=True, running=True),
+                        bind=lambda *_: {'status': status()})
+                    with patch('managed_launchd.http_json', return_value={
+                            'server_name': names[unit], 'version': '2.12.6'}):
+                        binding = restore_disabled_daemon(service, journal, unit, wanted,
+                            lambda bound: serving_nats_member_ready(bound,
+                                monitor_port=8222, client_port=ports[unit],
+                                server_name=names[unit]), timeout=5)
+                    restored.append((unit, binding['status']['pid']))
+                result = journal.recover(restore,
+                    lambda unit, _: {**current[unit], 'verified': True},
+                    lambda: {'verified': True}, hold=hold,
+                    deploy_fence=lambda: {'verified': True})
+                self.assertTrue(result['restored'], result)
+                self.assertEqual([unit for unit, _ in restored], ['nats', 'nats-2', 'nats-3'])
+                self.assertTrue(any(row['event'] == 'held-unit-verified'
+                                    and row.get('unit') == 'nats-1' for row in journal.records))
+                for unit in names:
+                    rows = [row['event'] for row in journal.records if row.get('unit') == unit]
+                    self.assertLess(rows.index('restoration-intent'), rows.index('override-clear-intent'))
+                    self.assertLess(rows.index('override-clear-intent'), rows.index('recovery-verified'))
 
     def test_full_scope_stops_when_another_unit_loses_its_stop_proof(self):
         prior = full_node_inventory()

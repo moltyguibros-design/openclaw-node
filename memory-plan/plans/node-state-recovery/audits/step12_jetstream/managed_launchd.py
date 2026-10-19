@@ -6,11 +6,12 @@ import pathlib
 import plistlib
 import re
 import select
+import socket
 import struct
 import subprocess
 import time
 
-from preservation_checks import Refused, require, verify_completion, verify_timer_idle
+from preservation_checks import Refused, http_json, require, verify_completion, verify_timer_idle
 from preservation_journal import FULL_NODE_SCOPE, NATS_TRANSFER_UNITS, regular_content, static_identity
 
 
@@ -353,6 +354,28 @@ def restore_disabled_daemon(service, journal, unit, prior, ready, *, timeout):
         if not isinstance(error, Exception):
             raise
         raise Refused(str(error) + '; ' + physical) from error
+
+
+def serving_nats_member_ready(binding, *, monitor_port, client_port, server_name):
+    require(binding['status']['loaded'] and binding['status']['running']
+            and binding['status']['pid'] is not None,
+            'serving NATS readiness needs a bound running owner')
+    require(type(monitor_port) is int and 0 < monitor_port < 65536
+            and type(client_port) is int and 0 < client_port < 65536
+            and isinstance(server_name, str) and server_name,
+            'serving NATS readiness needs saved local endpoints and name')
+    try:
+        varz = http_json(monitor_port, '/varz', timeout=1)
+    except Refused:
+        return False
+    require(isinstance(varz, dict) and varz.get('server_name') == server_name
+            and varz.get('version') == '2.12.6',
+            'serving NATS monitoring identity differs from the saved member')
+    try:
+        with socket.create_connection(('127.0.0.1', client_port), timeout=1):
+            return True
+    except OSError:
+        return False
 
 
 def restore_disabled_timer(service, journal, unit, prior, ready, *, timeout):
