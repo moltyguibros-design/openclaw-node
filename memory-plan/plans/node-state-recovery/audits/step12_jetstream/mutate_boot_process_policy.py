@@ -1,3 +1,4 @@
+import json
 import pathlib
 import subprocess
 import sys
@@ -111,12 +112,14 @@ MUTANTS = [
 
 
 def execute(journal, policy, test):
-    code = ("import preservation_journal as j, boot_process_policy as p; "
-            "exec(compile(%r,j.__file__,'exec'),j.__dict__); "
-            "exec(compile(%r,p.__file__,'exec'),p.__dict__); "
-            "import unittest; r=unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromName(%r)); "
-            "raise SystemExit(not r.wasSuccessful())" % (journal, policy, 'test_boot_process_policy.' + test))
-    return subprocess.run([sys.executable, '-c', code], cwd=STEP, capture_output=True, text=True, timeout=120)
+    code = ("import json,sys; journal,policy,test=json.load(sys.stdin); "
+            "import preservation_journal as j, boot_process_policy as p; "
+            "exec(compile(journal,j.__file__,'exec'),j.__dict__); "
+            "exec(compile(policy,p.__file__,'exec'),p.__dict__); "
+            "import unittest; r=unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromName('test_boot_process_policy.'+test)); "
+            "raise SystemExit(not r.wasSuccessful())")
+    return subprocess.run([sys.executable, '-c', code], cwd=STEP, input=json.dumps((journal, policy, test)),
+                          capture_output=True, text=True, timeout=120)
 
 
 def main():

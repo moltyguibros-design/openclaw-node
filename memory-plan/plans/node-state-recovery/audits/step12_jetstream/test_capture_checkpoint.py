@@ -811,7 +811,7 @@ class Decisive(CaptureCheckpoint):
                             and row.get('unit') == 'nats')
         receipt = self.receipt_of(records, 'nats')
         for case in ('missing-intent', 'missing-receipt', 'receipt-lock-replaced', 'marker-present',
-                     'lock-not-exclusive', 'wrong-lock-identity'):
+                     'lock-not-exclusive', 'wrong-lock-identity', 'wrong-lock-owner'):
             with self.subTest(case=case):
                 rows = copy.deepcopy(records)
                 if case == 'missing-intent':
@@ -827,6 +827,8 @@ class Decisive(CaptureCheckpoint):
                             value['marker_absent'] = False
                         elif case == 'lock-not-exclusive':
                             value['legacy_lock']['exclusive'] = False
+                        elif case == 'wrong-lock-owner':
+                            value['legacy_lock']['uid'] += 1
                         else:
                             value['legacy_lock']['mode'] = 0o600
                 rows, again = self.reforged(rows, manifest, intent)

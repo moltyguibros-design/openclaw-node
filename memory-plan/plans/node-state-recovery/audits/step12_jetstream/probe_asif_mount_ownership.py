@@ -60,6 +60,7 @@ import shutil
 import sys
 import tempfile
 import time
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -487,7 +488,9 @@ def reader_run(output):
                 'data_volume_uuid': report['fixture']['data_volume_uuid']},
                 require_committed(capture)['checkpoint'])
             pins = require_captured(capture)
-            reader_case(capture, capture / ('journal-read-' + name.replace('-', '')), report['fixture']['table'], expected, row)
+            with mock.patch('preservation_journal.NATS_ROOT_UID', os.getuid()):
+                reader_case(capture, capture / ('journal-read-' + name.replace('-', '')),
+                            report['fixture']['table'], expected, row)
             row['image_after'] = image_state(image)
             require(row['image_after'] == before, 'reader changed image bytes or identity')
             require(require_captured(capture) == pins, 'reader changed host commitment pins')

@@ -1573,7 +1573,8 @@ class ReaderSeed(unittest.TestCase):
             self.assertIs(guest.preservation_journal.capture_entrypoint_inventory, inventory)
             committed = require_committed(capture)
             self.assertEqual(committed['manifest']['data_volume_uuid'], UUID)
-            summary = stopped_journal_inputs.verify_stopped_journal(capture, seed, table=seeded['table'])
+            with mock.patch('preservation_journal.NATS_ROOT_UID', os.getuid()):
+                summary = stopped_journal_inputs.verify_stopped_journal(capture, seed, table=seeded['table'])
             self.assertEqual(summary['checkpoint_sha256'], seeded['checkpoint_sha256'])
             self.assertEqual(summary['pre_head'], seeded['pre_head'])
             self.assertEqual(summary['window'], 'window-1')
