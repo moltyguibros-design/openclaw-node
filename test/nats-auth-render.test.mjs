@@ -31,6 +31,7 @@ function runIsolatedCli(home, script, args, env) {
   const bin = path.join(home, 'test-bin');
   fs.mkdirSync(bin, { recursive: true });
   fs.writeFileSync(path.join(bin, 'nats-server'), '#!/bin/sh\ntest "$1" = "--signal" && test "$2" = "reload" || exit 1\nprintf reload > "$OPENCLAW_TEST_RELOAD_MARKER"\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'pgrep'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
   fs.writeFileSync(preload, `const fs = require('node:fs');
 const original = fs.lstatSync;
 fs.lstatSync = (name, ...rest) => {
