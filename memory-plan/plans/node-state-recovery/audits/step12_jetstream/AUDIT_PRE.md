@@ -2890,9 +2890,10 @@ exercise actual launchd and NATS 2.12.6 with a real full-node journal and
 original hold: restore nats while nats-2/nats-3 remain disabled, then each
 other member. A failed start must remain terminal with its disposable label
 disabled. The operator Mac currently has `ai.openclaw.nats` loaded, so fixed
-serving labels must not be bootstrapped there; the native fixture needs a
-dedicated clean CI runner and must refuse label collisions rather than skip
-its proof. The older unique-label native stop test remains a separate proof.
+serving labels must not be bootstrapped there. On a non-dedicated host, the
+fixture skips with a named reason or is gated; on the dedicated clean CI
+runner, a label collision is a refusal, never a skip. The older unique-label
+native stop test remains a separate proof.
 
 After the third member's individual receipt, a distinct post-restore quorum
 gate must positively check D234's group conditions before any non-NATS
