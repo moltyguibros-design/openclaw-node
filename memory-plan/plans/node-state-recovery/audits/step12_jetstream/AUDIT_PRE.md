@@ -2775,3 +2775,134 @@ These are final-source local checks; the earlier CI run on d5f396b9 does not
 validate this correction. No historical natural failure cause or placement
 repair is claimed. Source exact-head review and all-eight CI remain pending;
 D240 stays [A], B5/1.2 remains v1.2-pre, and production is untouched.
+
+
+### 2026-10-18 20:31 EDT — serving-NATS recovery-adapter pre-audit (D242 candidate)
+
+Micro re-orient: B5/1.2 is open at v1.2-pre; B6–B9 remain held.
+D241 reconciled the first-open row to this adapter; its exact head 254ef778
+has a clear Claude363 review and all-eight CI 39177909270.
+The persistent-stop producer and owned capture-ready cohort still cannot run.
+This unit addresses restoration before changing the stop producer.
+The current observer, R3 placement repair, D64 and production are separate.
+
+Pre-screen: the D185 full-node prior and capture-ready shape, D100 managed
+NATS stop receipt, D109–D117 override-clear and recovery fences, D180/D193
+fail-closed restoration evidence, B1 owned authority, original JournaledHold,
+and the owned macOS NATS 2.12.6 stop fixture exist at this head. The worktree
+was clean and no BLOCKED.md existed. `StopWatch.mutate()` in
+`managed_launchd.py` lines 631–646 refuses persistent serving-NATS stops
+before an intent; `Journal.begin_override_clear()` in
+`preservation_journal.py` lines 1158–1183 forbids all four NATS transfer units.
+`Journal.recover()` already orders nats, nats-2 and nats-3 before clients,
+checks the original hold and protected NATS writer marker, and refuses any
+unverified override clear on the same run or reopen. `restore_disabled_daemon()`
+already records the clear before enabling, binds the new process generation to
+the saved files and loaded job, and leaves failures terminal. Member1 is a
+baseline-held class, never a serving daemon or restore target.
+
+Goal: make exactly the three serving daemons eligible for a journaled,
+enable-capable owned restoration after each has its own verified persistent
+stop, with independent per-member health evidence before its
+`recovery-verified` record. Preserve the original member1 hold and full-node
+restoration order. This is an adapter prerequisite, not a persistent-stop
+producer or production restoration authorization.
+
+Proposed §6 source delta, subject to adversarial pre-audit: narrowly admit
+`SERVING_NATS` in `begin_override_clear()` while retaining the full-node,
+current-unit, restoration-intent, verified-stop and once-only checks; keep
+`nats-1` excluded. Compose the existing `restore_disabled_daemon()` with
+`Journal.recover()` in owned tests instead of duplicating its enable/bind
+logic. Extend the existing native disposable NATS launchd fixture to prove
+stop → journal-before-enable → new bound owner → local readiness, using its
+unique owned label. Script the fixed-label full-node journal and hold to prove
+all three serving restoration intents, clear intents and verified records in
+order, with member1 untouched. The two fixtures have different evidence
+scope and must not be described as one native full-node run. Existing test
+files and CI registration already execute on both Linux and native macOS;
+no new workflow step is presumed necessary.
+
+Local readiness is deliberately less than R3 quorum. In a disposable
+single-server NATS 2.12.6 probe at 20:30 EDT, `/varz` had version, server
+name, client and monitor ports, a config digest and JetStream store config;
+`/jsz` named the same server ID while `meta_cluster` was null. The probe
+terminated normally and its temporary files were removed. A native callback
+can require those local identities, the pinned pre-stop config/store and a
+new bound launchd generation plus an authenticated client PONG. Cluster
+membership, leader, three-member readiness and four-history health remain
+later verification, never inferred from that per-member check.
+
+Required negatives: wrong class/label/member1; no own verified stop, wrong
+stop intent or another restoring unit; changed plist/config or saved owner;
+enable/bootstrap/bind/readiness failure and interruption; unresolved clear
+prevents a second NATS member or any client restoration and a reopened retry,
+with no `recovery-verified`, Gate release or fabricated re-fence receipt.
+The native NATS fixture must clean up its disposable label even when an
+owner remains running and disabled. No automatic bootout of an unbound owner,
+never-spawned assertion or process-absence claim follows from a restored
+disabled override. D115's running-disabled reconciliation, survivor proof
+and measured production readiness budgets remain separate hard gates.
+
+Verify the narrow diff and existing regressions locally; run the actual owned
+macOS fixture and portable journal controls, then request exact-source review
+and all-eight exact-head CI. A later reviewed, green receipt may close only
+this auxiliary adapter row. The StopWatch persistent-NATS refusal remains
+until the next producer can prove its own stops. The original hold, D64, Gate,
+timers, VM image and production NATS stores are not operated by this unit.
+Claude's read-only design review requested at exact head 254ef778 is pending;
+this candidate is not a settled implementation plan yet.
+
+
+### 2026-10-18 20:35 EDT — D242 pre-audit settled against exact source
+
+Claude365 read exact 254ef778 and accepted the adapter as a separate owned
+prerequisite with six required corrections. The candidate above is historical;
+the source unit must use this corrected boundary. The durable
+`begin_override_clear()` point itself must require no open NATS transfer and
+no protected writer marker for a serving member, then admit only the explicit
+`SERVING_NATS` allowlist while `nats-1` remains excluded by name and class.
+Both new refusal calls need negatives that fail if either guard is removed.
+The already-pinned timer/NATS exclusion test must be changed to admit the
+three serving members and refuse member1, transfer and marker; the old
+StopWatch guard test and D98 native stop test remain byte-identical.
+
+The per-member readiness helper belongs beside `restore_disabled_daemon`,
+not in `restore_only.py`. Its callback must pass while the other serving
+members remain stopped: the newly bound owner and stable generation, a
+`/varz` sample from the saved monitor port with the saved server name and
+pinned NATS version, and a TCP accept on the saved client port. The saved
+config digest and JetStream store path can strengthen the owned fixture's
+local identity comparison. It must not require default `/healthz`, a `/jsz`
+leader or cluster route/group convergence; those can refuse a lone healthy
+member and leave the override-clear intent permanently unproven. D117's
+finite readiness budget is explicit and production values need measurement.
+The candidate's authenticated-PONG requirement is removed; no authenticated
+client exchange is needed for this local port-readiness claim.
+
+Prospective executable delta: `preservation_journal.py` admission and guards,
+one `managed_launchd.py` readiness helper, changed and added controls in
+`test_preservation_journal.py` and `test_managed_launchd.py`, plus six ledgers.
+`restore_only.py`, the StopWatch persistent-stop refusal, D64, production
+driver and existing placement logic stay fixed. Scripted tests exercise
+admission, stop/intent matching, failure and interruption, reopen refusal,
+held member1 and bus-first ordering. A disposable macOS CI fixture must
+exercise actual launchd and NATS 2.12.6 with a real full-node journal and
+original hold: restore nats while nats-2/nats-3 remain disabled, then each
+other member. A failed start must remain terminal with its disposable label
+disabled. The operator Mac currently has `ai.openclaw.nats` loaded, so fixed
+serving labels must not be bootstrapped there; the native fixture needs a
+dedicated clean CI runner and must refuse label collisions rather than skip
+its proof. The older unique-label native stop test remains a separate proof.
+
+After the third member's individual receipt, a distinct post-restore quorum
+gate must positively check D234's group conditions before any non-NATS
+restore. Current `buses_ready` only propagates a failure; three local
+readiness receipts are not R3 availability. Add that gate as its own open
+row between this adapter and the persistent-stop producer. Until it lands,
+neither the producer nor production resumption is authorized. The first
+source gate is the native owned single-member case with intent-before-enable,
+new bound owner, local varz identity, member1 held and other serving members
+still disabled, plus a scripted mirror, exact-source review and all-eight CI.
+The full three-member native case and failure case are needed before this
+adapter row closes. D109/D115 survivor and running-disabled reconciliation
+remain open; no automatic re-fence receipt is introduced.
