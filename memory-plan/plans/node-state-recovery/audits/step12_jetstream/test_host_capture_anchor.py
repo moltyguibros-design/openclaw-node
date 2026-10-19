@@ -391,7 +391,7 @@ class Authority(unittest.TestCase):
 
     def test_program_is_python39_and_has_only_standard_library_imports(self):
         tree = ast.parse(pathlib.Path(anchor.__file__).read_text(), feature_version=(3, 9))
-        allowed = {'contextlib', 'fcntl', 'hashlib', 'json', 'os', 'pathlib', 're', 'stat', 'subprocess', 'sys'}
+        allowed = {'contextlib', 'fcntl', 'hashlib', 'importlib', 'json', 'os', 'pathlib', 're', 'stat', 'subprocess', 'sys'}
         imported = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):

@@ -115,6 +115,8 @@ jobs:
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_frozen_owner_context.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_frozen_owner_context.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_protected_journal_reader.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_protected_journal_reader.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_owned_kickstart_trace.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_timing.py
@@ -319,6 +321,8 @@ jobs:
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_frozen_owner_context.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_frozen_owner_context.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_protected_journal_reader.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_protected_journal_reader.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_owned_kickstart_trace.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_preflight_status.py
@@ -414,6 +418,11 @@ jobs:
         run: |
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_host_capture_anchor.py \
             "$RUNNER_TEMP/host-capture-anchor.json"
+      - name: Verify protected semantic reader on a fresh root-owned image copy
+        run: |
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE CI=true GITHUB_ACTIONS=true OPENCLAW_PROTECTED_READER_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_host_protected_journal_reader.py \
+            "$RUNNER_TEMP/protected-journal-reader.json"
       - name: Retain native observations even when the probe refuses
         if: always()
         uses: actions/upload-artifact@v4
@@ -424,6 +433,7 @@ jobs:
             ${{ runner.temp }}/stopped-asif-reader.json
             ${{ runner.temp }}/host-capture-anchor.json
             ${{ runner.temp }}/frozen-owner-context.json
+            ${{ runner.temp }}/protected-journal-reader.json
           if-no-files-found: error
       - name: Retain a failed reader's owned image for diagnosis
         if: failure()

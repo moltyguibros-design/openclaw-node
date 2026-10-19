@@ -223,6 +223,14 @@ def capture_inputs(capture_dir):
             'capture commitment differs from the pinned capture record')
     # require_captured() checked the pins against its own read: it must have read these bytes.
     require(private_bytes(capture_dir / 'CAPTURE.json') == raw, 'capture record changed while it was read')
+    capture = capture_record(raw, commitment)
+    armed = (capture_dir / 'ARMED.json').lstat()
+    return {'capture_sha256': hashlib.sha256(raw).hexdigest(), 'commitment': commitment,
+            'data_volume_uuid': capture['data_volume_uuid'], 'arm_record': [armed.st_dev, armed.st_ino],
+            'clone': clone_identity(capture_dir / CLONE, capture)}
+
+
+def capture_record(raw, commitment):
     capture = json.loads(raw)
     require(capture.get('scope') == CAPTURE_SCOPE and capture.get('vm_state_at_final_check') == 'stopped',
             'capture record is not a completed stopped-VM capture')
@@ -230,10 +238,7 @@ def capture_inputs(capture_dir):
             'capture is not of the owned fixture VM')
     require(isinstance(capture.get('data_volume_uuid'), str) and capture['data_volume_uuid'],
             'capture record names no Data volume')
-    armed = (capture_dir / 'ARMED.json').lstat()
-    return {'capture_sha256': hashlib.sha256(raw).hexdigest(), 'commitment': commitment,
-            'data_volume_uuid': capture['data_volume_uuid'], 'arm_record': [armed.st_dev, armed.st_ino],
-            'clone': clone_identity(capture_dir / CLONE, capture)}
+    return capture
 
 
 def data_volume(entities, uuid):

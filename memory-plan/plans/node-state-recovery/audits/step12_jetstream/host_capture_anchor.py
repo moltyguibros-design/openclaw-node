@@ -7,6 +7,7 @@ code cannot establish that trust. No production invocation or installer is suppl
 import contextlib
 import fcntl
 import hashlib
+import importlib
 import json
 import os
 import pathlib
@@ -211,7 +212,8 @@ def trusted_cache_prefix(program):
         return str(prefix)
 
 
-def snapshot(capture, writer_uid, nonce):
+@contextlib.contextmanager
+def held_snapshot(capture, writer_uid, nonce):
     with Directory(capture, {0, writer_uid}) as directory, contextlib.ExitStack() as stack:
         require(os.fstat(directory.fd).st_uid == writer_uid, 'capture owner differs')
         require('FAILED.json' not in os.listdir(directory.fd), 'failed capture cannot be anchored')
@@ -246,10 +248,93 @@ def snapshot(capture, writer_uid, nonce):
         require('FAILED.json' not in os.listdir(directory.fd), 'failed capture cannot be anchored')
         directory.check()
         info = os.fstat(directory.fd)
-        return {'scope': SCOPE, 'capture_nonce': nonce, 'writer_uid': writer_uid,
+        value = {'scope': SCOPE, 'capture_nonce': nonce, 'writer_uid': writer_uid,
                 'capture_path': str(directory.path), 'capture_device': info.st_dev,
                 'capture_inode': info.st_ino,
                 'files': {name: {'sha256': read[1], 'size': read[2]} for name, read in reads.items()}}
+
+
+        def check():
+            for item in inputs.values():
+                item.check()
+            active.check()
+            require('FAILED.json' not in os.listdir(directory.fd), 'failed capture cannot be anchored')
+            directory.check()
+
+        yield {'value': value, 'files': {name: reads[name][0] for name in FILES},
+               'clone': inputs[CLONE], 'directory': directory, 'check': check}
+
+
+def snapshot(capture, writer_uid, nonce):
+    with held_snapshot(capture, writer_uid, nonce) as held:
+        held['check']()
+        return held['value']
+
+
+READER_MODULES = ('host_asif_extract', 'host_guest_commit', 'host_image_immutable',
+                  'host_journal_mount', 'host_vm_capture', 'host_vm_preflight', 'nats_identity',
+                  'preservation_checks', 'preservation_journal', 'stopped_journal_inputs',
+                  'host_protected_journal_reader')
+
+
+@contextlib.contextmanager
+def reader_code():
+    program = pathlib.Path(__file__).resolve()
+    names = {name + '.py' for name in (*READER_MODULES, 'host_capture_anchor')}
+    with Directory(program.parent, {0}) as directory, contextlib.ExitStack() as stack:
+        require(set(os.listdir(directory.fd)) == names, 'reader code directory entries differ')
+        inputs = {name: stack.enter_context(Input(directory, name, 0, private=False)) for name in names}
+        hashes = {name: item.read(True)[1] for name, item in inputs.items()}
+        for name in READER_MODULES:
+            module = sys.modules.get(name)
+            require(module is None or getattr(module, '__file__', None) == str(program.parent / (name + '.py')),
+                    'reader module was preloaded from another origin')
+        if str(program.parent) not in sys.path:
+            sys.path.append(str(program.parent))
+        utility = importlib.import_module('importlib.util')
+        for name in READER_MODULES:
+            if name not in sys.modules:
+                found = utility.find_spec(name)
+                require(found is not None and found.origin == str(program.parent / (name + '.py')),
+                        'reader import resolution differs')
+        loaded = {name: importlib.import_module(name) for name in READER_MODULES}
+
+        def check():
+            require(set(os.listdir(directory.fd)) == names, 'reader code directory entries differ')
+            observed = set()
+            for module in tuple(sys.modules.values()):
+                file = getattr(module, '__file__', None)
+                if file and pathlib.Path(file).resolve().parent == program.parent:
+                    observed.add(pathlib.Path(file).name)
+            require(observed == names, 'reader loaded local module set differs')
+            for name, item in inputs.items():
+                os.lseek(item.fd, 0, os.SEEK_SET)
+                require(item.read(True)[1] == hashes[name], 'reader source hash changed')
+            directory.check()
+            return trusted_runtime()
+
+        authority = check()
+        yield {'modules': loaded, 'hashes': hashes, 'authority': authority, 'check': check}
+
+
+def reader_action(root, capture, capture_uid, nonce, guest_uid, writer_uid, *, fixture=False, receipt=False):
+    require(type(guest_uid) is int and guest_uid >= 0 and type(writer_uid) is int and writer_uid >= 0,
+            'reader owner context is invalid')
+    authority = entry(root, capture, capture_uid, nonce, fixture)
+    with reader_code() as code:
+        require(code['authority'] == {key: authority[key] for key in code['authority']},
+                'reader authority changed while loading code')
+        module = code['modules']['host_protected_journal_reader']
+        operation = module.read_receipt if receipt else module.read_image
+        environment = dict(os.environ)
+        try:
+            os.environ.clear()
+            os.environ.update(PATH='/usr/bin:/bin:/usr/sbin:/sbin', LC_ALL='C')
+            return operation(sys.modules[__name__], root, capture, capture_uid, nonce,
+                             guest_uid, writer_uid, authority, code)
+        finally:
+            os.environ.clear()
+            os.environ.update(environment)
 
 
 def entry(root, capture, writer_uid, nonce, fixture):
@@ -308,8 +393,18 @@ def verify(root, capture, writer_uid, nonce, *, fixture=False):
 
 if __name__ == '__main__':
     require(os.environ.get('CI') == 'true' and os.environ.get('GITHUB_ACTIONS') == 'true'
-            and len(sys.argv) == 7 and sys.argv[1] == '--ci-owned'
-            and sys.argv[2] in ('publish', 'verify'), 'only the CI-owned anchor command is enabled')
-    action = publish if sys.argv[2] == 'publish' else verify
-    action(pathlib.Path(sys.argv[3]), pathlib.Path(sys.argv[4]), int(sys.argv[5]), sys.argv[6], fixture=True)
-    print('owned byte anchor ' + ('published' if action == publish else 'verified'))
+            and len(sys.argv) in (7, 9) and sys.argv[1] == '--ci-owned',
+            'only the CI-owned anchor command is enabled')
+    if len(sys.argv) == 7:
+        require(sys.argv[2] in ('publish', 'verify'), 'only the CI-owned anchor command is enabled')
+        action = publish if sys.argv[2] == 'publish' else verify
+        action(pathlib.Path(sys.argv[3]), pathlib.Path(sys.argv[4]), int(sys.argv[5]), sys.argv[6], fixture=True)
+        print('owned byte anchor ' + ('published' if action == publish else 'verified'))
+    else:
+        require(sys.argv[2] in ('read', 'receipt')
+                and all(re.fullmatch('0|[1-9][0-9]*', sys.argv[index]) for index in (5, 7, 8)),
+                'reader action or decimal owner context is invalid')
+        value = reader_action(pathlib.Path(sys.argv[3]), pathlib.Path(sys.argv[4]), int(sys.argv[5]),
+                              sys.argv[6], int(sys.argv[7]), int(sys.argv[8]), fixture=True,
+                              receipt=sys.argv[2] == 'receipt')
+        print(json.dumps(value, sort_keys=True))
