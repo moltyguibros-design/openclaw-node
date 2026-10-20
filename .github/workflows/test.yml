@@ -25,6 +25,28 @@ jobs:
       - name: Install OS metadata tools for owned Stage0 fixtures
         if: matrix.node-version == 22
         run: sudo apt-get update -qq && sudo apt-get install -y acl attr e2fsprogs
+      - name: Verify inert root-copy local controls
+        if: matrix.node-version == 22
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          "$(command -v python3)" memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stage0_installer_copy.py
+      - name: Verify inert root-copy bytes and designated faults
+        if: matrix.node-version == 22
+        run: |
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE CI=true GITHUB_ACTIONS=true OPENCLAW_STAGE0_COPY_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            "$(command -v python3)" memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stage0_installer_copy.py --probe "$RUNNER_TEMP/stage0-installer-copy.json"
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE CI=true GITHUB_ACTIONS=true OPENCLAW_STAGE0_COPY_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            "$(command -v python3)" memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_stage0_installer_copy.py --probe "$RUNNER_TEMP/stage0-installer-copy-mutations.json"
+      - name: Retain owned inert root-copy observations
+        if: always() && matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage0-installer-copy-linux-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/stage0-installer-copy.json
+            ${{ runner.temp }}/stage0-installer-copy-mutations.json
+          if-no-files-found: error
       - name: Prepare inert installer authentication fixture parent
         if: matrix.node-version == 22
         run: |
@@ -463,6 +485,25 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Verify inert root-copy local controls
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stage0_installer_copy.py
+      - name: Verify inert root-copy bytes and designated faults
+        run: |
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE CI=true GITHUB_ACTIONS=true OPENCLAW_STAGE0_COPY_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stage0_installer_copy.py --probe "$RUNNER_TEMP/stage0-installer-copy.json"
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE CI=true GITHUB_ACTIONS=true OPENCLAW_STAGE0_COPY_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_stage0_installer_copy.py --probe "$RUNNER_TEMP/stage0-installer-copy-mutations.json"
+      - name: Retain owned inert root-copy observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage0-installer-copy-macos-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/stage0-installer-copy.json
+            ${{ runner.temp }}/stage0-installer-copy-mutations.json
+          if-no-files-found: error
       - name: Verify inert installer authentication across distinct macOS owners
         run: |
           sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE CI=true GITHUB_ACTIONS=true OPENCLAW_STAGE0_AUTH_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
