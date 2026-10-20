@@ -104,6 +104,14 @@ def preflight(code, expected):
     return row
 
 
+def close_stdin(p):
+    broken=False
+    try: p.stdin.close()
+    except BrokenPipeError: broken=True
+    p.stdin=None
+    return broken
+
+
 def launch(code, arguments, expected, during=None, early=None, timeout=45, expected_timeout=False):
     result = {'worker': False, 'script_prehashed': False, 'out': b'', 'err': b'',
               'rc': 1, 'waited': True, 'group_absent': True, 'failure': None,
@@ -137,8 +145,8 @@ def launch(code, arguments, expected, during=None, early=None, timeout=45, expec
                 p.stdin.write(START); p.stdin.flush()
                 result['handshake_sent'] = True
             except BrokenPipeError:
-                pass
-        p.stdin.close(); p.stdin = None
+                result['stdin_write_broken']=True
+        result['stdin_close_broken']=close_stdin(p)
         if during and p.poll() is None: during(p)
         monitored = time.monotonic() if expected_timeout else begin
         while p.poll() is None and time.monotonic() - monitored < timeout:
@@ -216,13 +224,14 @@ class Fixture:
     def pause(self, anchor, callback):
         raw = self.code.read_text(); assert raw.count(anchor) == 1, anchor
         ready = self.outer / 'ready'; resume = self.outer / 'resume'
-        injected = 'builtin printf ready > "' + str(ready) + '"\nwhile [[ ! -f "' + str(resume) + '" ]]; do :; done\n'
+        ready.write_bytes(b''); resume.write_bytes(b'')
+        injected = 'builtin printf ready > "' + str(ready) + '"\nwhile [[ ! -s "' + str(resume) + '" ]]; do :; done\n'
         self.code.write_text(raw.replace(anchor, injected + anchor))
         self.instrumentation.append({'kind':'fixed busy-loop rendezvous','anchor':anchor,'variant_sha256':sha(self.code.read_bytes())})
         def during(p):
             end = time.monotonic() + 8
-            while not ready.exists() and p.poll() is None and time.monotonic() < end: time.sleep(0.005)
-            assert ready.exists(), 'labelled pause not reached'
+            while ready.stat().st_size==0 and p.poll() is None and time.monotonic() < end: time.sleep(0.005)
+            assert ready.stat().st_size>0, 'labelled pause not reached'
             callback(self, p)
             resume.write_bytes(b'resume')
         return during
@@ -261,6 +270,16 @@ def fixture(name, private=False):
 
 
 class LocalTests(unittest.TestCase):
+    def test_closed_pipe_close_is_accounted(self):
+        p=subprocess.Popen([SHELL,'--noprofile','--norc','-p','-c','exit 0'],stdin=subprocess.PIPE,
+                           stdout=subprocess.PIPE,stderr=subprocess.PIPE,env={},start_new_session=True)
+        p.wait(timeout=5)
+        with self.assertRaises(BrokenPipeError):
+            p.stdin.write(START); p.stdin.flush()
+        self.assertTrue(close_stdin(p))
+        out,err=p.communicate(timeout=5)
+        self.assertEqual((p.returncode,out,err),(0,b'',b'')); self.assertTrue(absent_group(p.pid))
+
     def test_no_implicit_shell_temporary_files(self):
         raw = SCRIPT.read_bytes()
         self.assertTrue(all(token not in raw for token in (b'<<', b'<(', b'>(')), 'implicit root temporary-file construct')
@@ -405,16 +424,24 @@ class NativeTests(unittest.TestCase):
             def corrupt(current, worker):
                 p = current.pending / 'host_release_publish.py'; raw = p.read_bytes(); p.write_bytes(b'X'+raw[1:])
             during = f.pause(anchor, corrupt)
-            self.refused(f.invoke(during=during))
+            self.refused(f.invoke(during=during),'mapping')
             self.assertTrue(f.pending.exists(), 'failed copy was removed')
 
     def test_final_code_mapping_drift_refuses(self):
         with fixture('final-code-mapping',private=True) as f:
-            anchor='mapping "$script" "$script_record" 5\ndeadline'
-            def replace(current,worker):
-                raw=current.code.read_bytes(); current.code.rename(current.outer/'held-original-code')
-                current.code.write_bytes(raw); current.code.chmod(0o600)
-            self.refused(f.invoke(during=f.pause(anchor,replace)))
+            anchor='mapping "$script" "$script_record" 5\ncheck_trees\ndeadline'
+            during=f.pause(anchor,lambda current,worker: None)
+            twin=f.outer/'code-twin'
+            raw=f.code.read_text();f.code.write_text(raw.replace(anchor,'exec 5< "'+str(twin)+'"\n'+anchor))
+            twin.write_bytes(f.code.read_bytes());twin.chmod(0o600)
+            f.instrumentation.append({'kind':'FD5 substitution','twin_metadata':identity(twin),'twin_sha256':sha(twin.read_bytes())})
+            self.refused(f.invoke(during=during),'mapping')
+
+    def test_root_entry_set_after_create_and_at_completion(self):
+        for phase,anchor in (('after-mkdir','transition "$root" 10'),('final','mapping "$script" "$script_record" 5\ncheck_trees\ndeadline')):
+            with fixture('root-entry-'+phase,private=True) as f:
+                def extra(current,worker): (current.root/'foreign').write_bytes(b'inert unexpected root entry')
+                self.refused(f.invoke(during=f.pause(anchor,extra)),'root-entries')
 
     def test_source_and_copy_mapping_drift_refuse(self):
         for kind in ('source','copy'):
@@ -443,7 +470,7 @@ class NativeTests(unittest.TestCase):
                     if kind == 'gid': os.chown(p, 0, OPERATOR)
                     elif kind == 'mode': p.chmod(0o640)
                     else: os.link(p, current.outer / 'held-hardlink')
-                self.refused(f.invoke(during=f.pause(anchor, alter)))
+                self.refused(f.invoke(during=f.pause(anchor, alter)),{'gid':'transition','mode':'type','hardlink':'private'}[kind])
 
     def test_empty_destination_before_payload(self):
         for hazard in ('symlink', 'fifo'):

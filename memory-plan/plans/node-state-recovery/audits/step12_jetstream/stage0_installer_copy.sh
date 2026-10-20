@@ -184,11 +184,15 @@ inspect_tree() {
 }
 check_trees() {
     local index path
+    [[ -z "$pending" ]] || root_entries
     for ((index=0; index<${#paths[@]}; index++)); do
         deadline
         path=${paths[index]}
         [[ ! -L "$path" && "$(metadata "$path")" == "${records[index]}" && "$(attributes "$path" "${privates[index]}")" == "${attrs[index]}" ]] || refuse ancestor-drift
     done
+}
+root_entries() {
+    [[ "$(bounded "$ls_tool" -A1 "$root" 12>&-)" == "$pending"$'\nstage0_installer_copy.sh' ]] || refuse root-entries
 }
 record_size() {
     local IFS=$' \t\n'
@@ -310,6 +314,7 @@ set -C
 "$mkdir_tool" -m 700 -- "$pending" || refuse staging-fence
 transition "$root" 10 "${records[root_index]}" "${attrs[root_index]}" root
 records[root_index]=$transition_record
+root_entries
 child_record=$(metadata "$child") || refuse metadata
 [[ ! -L "$child" ]] || refuse link
 root_shape "$child_record" directory yes
@@ -336,5 +341,6 @@ check_trees
 [[ "$(hash_path "$child/installer.manifest" "$copied_manifest_record" 6 512)" == "$expected_manifest" ]] || refuse final-copy-manifest
 [[ "$(hash_path "$child/host_release_publish.py" "$copied_installer_record" 8 131072)" == "$expected_installer" ]] || refuse final-copy-installer
 mapping "$script" "$script_record" 5
+check_trees
 deadline
 builtin printf 'root-copy-observed-v1\n'
