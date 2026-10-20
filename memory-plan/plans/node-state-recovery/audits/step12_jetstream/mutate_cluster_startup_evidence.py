@@ -40,6 +40,11 @@ MUTANTS = [
     ('cohort-session-dropped', 'p', 'start_new_session=True', 'start_new_session=False', 'test_timeout_driver_owns_session_and_escalates_group', 'cohorts must own a new session'),
     ('cohort-term-dropped', 'p', 'for sig in (signal.SIGTERM, signal.SIGKILL):', 'for sig in (signal.SIGKILL,):', 'test_timeout_driver_owns_session_and_escalates_group', 'timeout must TERM then KILL the owned group'),
     ('cohort-kill-dropped', 'p', 'for sig in (signal.SIGTERM, signal.SIGKILL):', 'for sig in (signal.SIGTERM,):', 'test_timeout_driver_owns_session_and_escalates_group', 'timeout must TERM then KILL the owned group'),
+    ('delay-before-ready-break', 'c', '                        break\n                except Refused:', '                        time.sleep(1)\n                        break\n                except Refused:', 'test_inline_gate_contract_is_fixed', 'the continuous startup-to-create boundary must stay fixed'),
+    ('monitor-before-ready-break', 'c', '                        break\n                except Refused:', "                        http_json(ports[1], '/jsz')\n                        break\n                except Refused:", 'test_inline_gate_contract_is_fixed', 'the continuous startup-to-create boundary must stay fixed'),
+    ('delay-before-accept-record', 'c', '            evidence.accepted(js, routes)\n', '            time.sleep(1)\n            evidence.accepted(js, routes)\n', 'test_inline_gate_contract_is_fixed', 'the continuous startup-to-create boundary must stay fixed'),
+    ('startup-parser-forces-503', 'c', '                    error = json.loads(result.stderr)', "                    error = {'stage':'account-info','code':'503'}", 'test_inline_gate_contract_is_fixed', 'the complete startup parsing and 503 policy must stay fixed'),
+    ('group-absence-invented', 'p', '    end = time.monotonic() + seconds\n', '    return True\n    end = time.monotonic() + seconds\n', 'test_term_ignoring_group_requires_real_absence', 'a TERM-ignoring live group must require KILL'),
     ('inline-gate-weakened', 'c', "for route in report['routes']}) == 2", "for route in report['routes']}) >= 1", 'test_inline_gate_contract_is_fixed', 'the original inline predicate must stay fixed'),
 ]
 

@@ -139,7 +139,7 @@ const connected=()=>nc?{name:nc.info.server_name,id:nc.info.server_id}:null;
                     error = None
                 if isinstance(error, dict) and error.get('stage') == 'account-info' and error.get('code') == '503':
                     evidence.data['startup503Count'] = evidence.data.get('startup503Count', 0) + 1
-                    evidence.observe('startupApiRefusal', lambda: error)
+                    evidence.observe('startupApiRefusal', lambda: evidence.data['clients'].get(action, {'unparsed': True}))
                     return False
             self.assertEqual(result.returncode, 0, result.stderr.replace(token, '[owned token omitted]').replace(route_password, '[owned route password omitted]'))
             return json.loads(result.stdout) if action == 'create' else True

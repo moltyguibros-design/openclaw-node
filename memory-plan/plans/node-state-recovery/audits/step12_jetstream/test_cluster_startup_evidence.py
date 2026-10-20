@@ -1,3 +1,4 @@
+import hashlib
 import inspect
 import json
 import os
@@ -324,6 +325,49 @@ time.sleep(60)
                     os.killpg(proc.pid,signal.SIGTERM)
                     proc.wait(timeout=3)
 
+    def test_term_ignoring_group_requires_real_absence(self):
+        marker=self.root/'ignoring-child.ready'
+        child="import signal,sys,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);open(sys.argv[1],'w').write('ready');time.sleep(60)"
+        source="""import pathlib,signal,subprocess,sys,time
+signal.signal(signal.SIGTERM,signal.SIG_IGN)
+child=subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[2]])
+while not pathlib.Path(sys.argv[2]).exists(): time.sleep(.01)
+time.sleep(60)
+"""
+        launched=[]; original=subprocess.Popen
+        def start(*args,**kwargs):
+            proc=original(*args,**kwargs); launched.append(proc); return proc
+        try:
+            with patch.object(subprocess,'Popen',side_effect=start):
+                with self.assertRaises(CohortTimeout) as caught:
+                    run_cohort([sys.executable,'-c',source,child,str(marker)],os.environ.copy(),timeout=2,grace=3)
+            self.assertTrue(marker.exists(),'the child must install TERM refusal before timeout')
+            self.assertEqual(caught.exception.cleanup['signals'],['SIGTERM','SIGKILL'],
+                             'a TERM-ignoring live group must require KILL')
+            self.assertTrue(caught.exception.cleanup['groupAbsent'],'forced group absence must be observed')
+            self.assertTrue(caught.exception.cleanup['pythonReaped'])
+            self.assertEqual(caught.exception.cleanup['pythonExitCode'],-signal.SIGKILL)
+            print('owned-forced-timeout-cleanup: '+json.dumps(caught.exception.cleanup))
+        finally:
+            primary=sys.exc_info()[1]
+            for proc in launched:
+                try:
+                    os.killpg(proc.pid,signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                proc.wait(timeout=3)
+                end=time.monotonic()+5
+                while time.monotonic()<end:
+                    try:
+                        os.killpg(proc.pid,0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(.05)
+                else:
+                    if primary is None:
+                        self.fail('owned forced-timeout test group did not disappear')
+                    print('owned forced-timeout test cleanup: group absence unobserved')
+
     def test_inline_gate_contract_is_fixed(self):
         source=inspect.getsource(cluster.Cluster.test_stream_and_consumer_groups_and_real_stream_election)
         gate="""if all(report.get('meta_cluster', {}).get('leader', '').startswith('owned-raft-')
@@ -343,7 +387,7 @@ time.sleep(60)
 """,source,'the accepted-to-create boundary must stay fixed')
         self.assertIn("""                if isinstance(error, dict) and error.get('stage') == 'account-info' and error.get('code') == '503':
                     evidence.data['startup503Count'] = evidence.data.get('startup503Count', 0) + 1
-                    evidence.observe('startupApiRefusal', lambda: error)
+                    evidence.observe('startupApiRefusal', lambda: evidence.data['clients'].get(action, {'unparsed': True}))
                     return False
 """,source,'the complete 503 retry branch must stay fixed')
         self.assertIn('debug: true\nlisten: 127.0.0.1:{ports[i*3]}',source,'the owned config must enable debug')
@@ -355,6 +399,12 @@ time.sleep(60)
                     raise
                 print('preservation-cluster-startup: evidence unavailable; primary preserved')
 """,source,'the fixture finally wrapper must preserve primary and green failures')
+        boundary=source[source.index('js = routes = None'):source.index("creation = client('create')")+len("creation = client('create')")]
+        self.assertEqual(hashlib.sha256(boundary.encode()).hexdigest(), '096044df8c47f7bb2c66565bfdb6d1de3f86359f209c87379b953280aae8c5b1',
+                         'the continuous startup-to-create boundary must stay fixed')
+        branch=source[source.index('if result.returncode and startup:'):source.index('self.assertEqual(result.returncode')]
+        self.assertEqual(hashlib.sha256(branch.encode()).hexdigest(), '41ff2211867734d5f7967739dc38e7644d03fad62c8d568b01ce0e709a9f3554',
+                         'the complete startup parsing and 503 policy must stay fixed')
 
 
 class OwnedPair(unittest.TestCase):
