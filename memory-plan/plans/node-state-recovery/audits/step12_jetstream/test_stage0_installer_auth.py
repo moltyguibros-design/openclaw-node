@@ -458,8 +458,8 @@ class AuthenticationTests(unittest.TestCase):
         self.addCleanup(lambda: poison.unlink(missing_ok=True))
         result = self.fixture.invoke(parent_environment={'BASH_ENV': str(poison), 'UNKNOWN': 'fixture'})
         self.assertFalse(marker.exists())
-        self.assertIsNone(result['failure'], result)
         self.assertEqual(result['rc'], 0, 'fixed launch did not clear inherited startup keys: ' + str(result))
+        self.assertIsNone(result['failure'], result)
         self.assertEqual(result['out'], SUCCESS)
 
     def test_rendezvous_requires_exact_line_eof_and_observation(self):
