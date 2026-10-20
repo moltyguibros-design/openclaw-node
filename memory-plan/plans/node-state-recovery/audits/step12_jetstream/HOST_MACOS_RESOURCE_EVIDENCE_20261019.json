@@ -1,0 +1,323 @@
+{
+  "apple_catalog": {
+    "assets": [],
+    "at_utc": "2026-10-20T03:49:31.504766+00:00",
+    "bytes": 99450,
+    "catalog_url": "https://mesu.apple.com/assets/macos/com_apple_macOSIPSW/com_apple_macOSIPSW.xml",
+    "root_keys": [
+      "MobileDeviceProductTypes",
+      "MobileDeviceSoftwareVersionsByVersion"
+    ],
+    "scope": "Apple catalog metadata only; no installer download",
+    "sha256": "0925a0b28dc2da5342e180dac9a1911eacdae097f055c8b117882cf9b8cb2958"
+  },
+  "derived": {
+    "GiB_bytes": 1073741824,
+    "available_GiB": [
+      13.985057830810547,
+      13.984100341796875
+    ],
+    "capture_floor_GiB": 20,
+    "first_free_plus_speculative_GiB": 0.122039794921875,
+    "floor_shortfall_GiB": 6.015899658203125,
+    "installer_advertised_GiB": 24.80792539846152,
+    "net_host_free_loss_GiB": 19.51302719116211,
+    "production_allocated_delta_bytes": 0,
+    "workspace_gap_on_current_host_GiB": 306.0158996582031
+  },
+  "guest_version_observation": {
+    "build": "25C56",
+    "hardware_model": "VirtualMac2,1",
+    "method": "local production guest sw_vers/sysctl metadata queries during this assessment; not B3 window pins",
+    "product_version": "26.2"
+  },
+  "host_version_observation": {
+    "build": "25G83",
+    "hardware_model": "Mac16,5",
+    "logical_cpu_count": 16,
+    "method": "direct sw_vers/sysctl metadata queries during this assessment, separate from the timestamped resource pair",
+    "product_version": "26.6.2"
+  },
+  "image_object_inventory": {
+    "additional_or_overlapping_attempts_authorized": false,
+    "anchor_creates_image": false,
+    "exact_same_APFS_filesystem_required": true,
+    "files": {
+      "host_asif_extract.py": {
+        "bytes": 8021,
+        "sha256": "8b743f1e39614613d116b00208d43cebe69655cbe5f0eaf803bf28d504e06f88"
+      },
+      "host_capture_anchor.py": {
+        "bytes": 19399,
+        "sha256": "945c1baa3ecf90d02a0e4e50dd1706cd424a15b88c504bc5e64105e6a0e1e7d8"
+      },
+      "host_clone_dispose.py": {
+        "bytes": 42111,
+        "sha256": "2570672be208dcad4a883c99ef5b12a0866d3a2b9a0403f965356ee986e08443"
+      },
+      "host_journal_mount.py": {
+        "bytes": 27263,
+        "sha256": "715a22f62e5e84b952b1aa2390284c540effbcd3ad06e42edf833f916537f40e"
+      },
+      "host_protected_journal_reader.py": {
+        "bytes": 13920,
+        "sha256": "909ed7cd5957f58ff845492efdaec9079dfff8b74b7aa56a841026145bbb4a97"
+      },
+      "host_vm_capture.py": {
+        "bytes": 16998,
+        "sha256": "d754fb34f4e50fc32dd89218e49df80802e73088ea2405db9fb67de1f2850085"
+      },
+      "host_vm_reconcile.py": {
+        "bytes": 39819,
+        "sha256": "c76d99dc560616ce02bfce6ce41cc9ba1b59f7a24cc29b3cc1854276f0f7a54c"
+      }
+    },
+    "future_driver_or_overlapping_attempts_covered": false,
+    "image_count": 3,
+    "retained_Q_failure_copy_counted": true,
+    "source_commit": "3bc29dbd4fbf061b10731ffc211b5bf71f67f36e"
+  },
+  "installer_head": {
+    "at_utc": "2026-10-20T03:50:12.160900+00:00",
+    "candidates": [
+      {
+        "build": "26A434",
+        "head": {
+          "content_length": "26637307067",
+          "content_type": "binary/octet-stream",
+          "etag": "\"8faf3ef623fa1c181712440496ccc188-3175\"",
+          "status": 200,
+          "url": "https://updates.cdn-apple.com/2026FallFCS/59241290-5d51-4ca8-9df4-31624b9a4eac/UniversalMac_27.0.1_26A434_Restore.ipsw"
+        },
+        "product": "VirtualMac2,1",
+        "restore": {
+          "BuildVersion": "26A434",
+          "FirmwareURL": "https://updates.cdn-apple.com/2026FallFCS/59241290-5d51-4ca8-9df4-31624b9a4eac/UniversalMac_27.0.1_26A434_Restore.ipsw",
+          "ProductVersion": "27.0.1"
+        }
+      }
+    ],
+    "scope": "Apple catalog plus HTTP HEAD only; no IPSW download; host support unverified"
+  },
+  "observations": [
+    {
+      "after": {
+        "allocated_bytes": 211261108224,
+        "holders": {
+          "err": "",
+          "out": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+          "rc": 0
+        },
+        "identity": [
+          16777233,
+          17966030,
+          501,
+          20,
+          33188,
+          0
+        ],
+        "logical_bytes": 211267092480,
+        "status": {
+          "err": "",
+          "out": "started",
+          "rc": 0
+        }
+      },
+      "at_utc": "2026-10-20T03:48:43.326561+00:00",
+      "before": {
+        "allocated_bytes": 211261108224,
+        "holders": {
+          "err": "",
+          "out": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+          "rc": 0
+        },
+        "identity": [
+          16777233,
+          17966030,
+          501,
+          20,
+          33188,
+          0
+        ],
+        "logical_bytes": 211267092480,
+        "status": {
+          "err": "",
+          "out": "started",
+          "rc": 0
+        }
+      },
+      "resources": {
+        "available_bytes": 15016341504,
+        "external_volumes": [],
+        "filesystem_bytes": 994662584320,
+        "free_bytes": 15016341504,
+        "installer_names": [],
+        "memory": {
+          "holder_rss": {
+            "err": "",
+            "out": "8509 32727440 12:10:11",
+            "rc": 0
+          },
+          "logical_cpu": {
+            "err": "",
+            "out": "16",
+            "rc": 0
+          },
+          "physical_bytes": 68719476736,
+          "pressure": {
+            "err": "",
+            "out": "1",
+            "rc": 0
+          },
+          "query": {
+            "err": "",
+            "out": "The system has 68719476736 (4194304 pages with a page size of 16384).\nSystem-wide memory free percentage: 56%",
+            "rc": 0
+          },
+          "swap": {
+            "err": "",
+            "out": "total = 12288.00M  used = 11114.25M  free = 1173.75M  (encrypted)",
+            "rc": 0
+          },
+          "vm_stat": {
+            "err": "",
+            "out": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                     4022.\nPages active:                                1170499.\nPages inactive:                              1165241.\nPages speculative:                              3976.\nPages throttled:                                   0.\nPages wired down:                            1068186.\nPages purgeable:                               45337.\n\"Translation faults\":                     1764454033.\nPages copy-on-write:                        18604500.\nPages zero filled:                         781562620.\nPages reactivated:                         154065650.\nPages purged:                               30538835.\nFile-backed pages:                            500866.\nAnonymous pages:                             1838850.\nPages stored in compressor:                  2239807.\nPages occupied by compressor:                 721774.\nDecompressions:                            135833805.\nCompressions:                              155204912.\nPageins:                                    53443512.\nPageouts:                                     212432.\nSwapins:                                      586758.\nSwapouts:                                    1384990.",
+            "rc": 0
+          }
+        },
+        "vm_bundles": [
+          {
+            "backend": "Apple",
+            "boot_os": "Linux",
+            "bundle": "OpenClaw Recovery Guard Run.utm",
+            "cpu_count": 1,
+            "memory_MiB": 1024,
+            "uuid": "04A2CE0E-9F8C-4CC6-928C-55BFF8F70C67"
+          },
+          {
+            "backend": "Apple",
+            "boot_os": "macOS",
+            "bundle": "moltMacOS.utm",
+            "cpu_count": 0,
+            "memory_MiB": 20000,
+            "uuid": "79B25660-B7F1-4DDC-B379-52A4EB317DAE"
+          }
+        ]
+      },
+      "scope": "read-only host capacity/provenance metadata; no file contents or VM operation"
+    },
+    {
+      "after": {
+        "allocated_bytes": 211261108224,
+        "holders": {
+          "err": "",
+          "out": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+          "rc": 0
+        },
+        "identity": [
+          16777233,
+          17966030,
+          501,
+          20,
+          33188,
+          0
+        ],
+        "logical_bytes": 211267092480,
+        "status": {
+          "err": "",
+          "out": "started",
+          "rc": 0
+        }
+      },
+      "at_utc": "2026-10-20T03:50:33.161900+00:00",
+      "available_bytes": 15015313408,
+      "before": {
+        "allocated_bytes": 211261108224,
+        "holders": {
+          "err": "",
+          "out": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+          "rc": 0
+        },
+        "identity": [
+          16777233,
+          17966030,
+          501,
+          20,
+          33188,
+          0
+        ],
+        "logical_bytes": 211267092480,
+        "status": {
+          "err": "",
+          "out": "started",
+          "rc": 0
+        }
+      },
+      "holder_rss": {
+        "err": "",
+        "out": "8509 32902288 12:12:02",
+        "rc": 0
+      },
+      "memory_query": {
+        "err": "",
+        "out": "The system has 68719476736 (4194304 pages with a page size of 16384).\nSystem-wide memory free percentage: 58%",
+        "rc": 0
+      },
+      "pressure": {
+        "err": "",
+        "out": "1",
+        "rc": 0
+      },
+      "swap": {
+        "err": "",
+        "out": "total = 12288.00M  used = 11114.25M  free = 1173.75M  (encrypted)",
+        "rc": 0
+      }
+    }
+  ],
+  "prior_free_observation": {
+    "at_utc": "2026-10-19T19:53:52.201138+00:00",
+    "available_bytes": 35967266816,
+    "production_allocated_bytes": 211261108224
+  },
+  "proposal_only": {
+    "admitted": false,
+    "capacity_source": "separately operator-designated disposable Mac; one internal APFS Data filesystem for source/capture/protected store; none identified",
+    "disk_logical_GiB": 64,
+    "external_path_mapping_verified": false,
+    "future_growth_bound_verified": false,
+    "guest_memory_GiB": 8,
+    "guest_vCPU": 2,
+    "host_support_and_selected_image_minimums_verified": false,
+    "parts_GiB": {
+      "capture_clone": 64,
+      "fixture_evidence_temp_and_overhead": 8,
+      "guest_image": 64,
+      "installer_download_and_tool_stage": 64,
+      "protected_copy": 64,
+      "workspace_contingency": 56
+    },
+    "sufficient_production_memory_reserve_verified": false,
+    "workspace_GiB": 320
+  },
+  "retained_raw_bindings": {
+    "openclaw-D284-apple-catalog.plist": {
+      "bytes": 99450,
+      "sha256": "0925a0b28dc2da5342e180dac9a1911eacdae097f055c8b117882cf9b8cb2958"
+    },
+    "openclaw-D284-apple-installer-head.json": {
+      "bytes": 810,
+      "sha256": "4c735e17319ce7048124e0b4ca1af9410dd0ee7f98c052902fd4dcab6f86be45"
+    },
+    "openclaw-D284-host-after.json": {
+      "bytes": 1302,
+      "sha256": "b52f768ed21c413bec996f73f2adc77cf7764b2aea52632af3aa53099b4ca4f8"
+    },
+    "openclaw-D284-host-before.json": {
+      "bytes": 3588,
+      "sha256": "d393243ae821cb36fcdb9c2dd709d1d6243d7c9e669a4a48cec5dbb62640c143"
+    }
+  },
+  "scope": "planning-only read-only resource evidence; no capacity admission, provisioning or production operation",
+  "scope_qualification": "The first raw query scope phrase no file contents means no image data contents. Selected host VM config.plist contents were parsed for metadata; no VM configuration was changed."
+}
