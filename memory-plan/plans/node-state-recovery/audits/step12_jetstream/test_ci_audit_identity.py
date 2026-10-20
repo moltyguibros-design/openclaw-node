@@ -11,6 +11,36 @@ spec.loader.exec_module(p)
 o = p.o
 
 
+def static_no_identity_writes(source, name):
+    tree = ast.parse(source, feature_version=(3, 9))
+    setters = {'setauid', 'setaudit', 'setaudit_addr', 'putenv', 'unsetenv'}
+    for node in ast.walk(tree):
+        identifier = node.attr if isinstance(node, ast.Attribute) else node.id if isinstance(node, ast.Name) else None
+        assert identifier not in setters, 'identity or environment setter is forbidden'
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            assert node.value not in setters, 'dynamic identity setter spelling is forbidden'
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name):
+            assert node.func.id != 'open', 'built-in file open is outside the audited forms'
+        if not isinstance(node.func, ast.Attribute):
+            continue
+        form = ast.unparse(node.func)
+        if node.func.attr == 'open':
+            assert form == 'os.open', 'io or pathlib file open is outside the audited forms'
+            if name == 'ci_audit_identity_observer.py':
+                assert len(node.args) == 2 and ast.unparse(node.args[1]) == 'os.O_RDONLY | os.O_CLOEXEC', 'observer file open is not read-only'
+            else:
+                assert len(node.args) == 3 and ast.unparse(node.args[0]) == 'report_path' and ast.unparse(node.args[1]) == 'os.O_WRONLY | os.O_CREAT | os.O_EXCL' and ast.literal_eval(node.args[2]) == 0o600, 'driver file open is not the exclusive report'
+        if node.func.attr == 'fdopen':
+            assert name == 'probe_ci_audit_identity.py' and form == 'os.fdopen' and [ast.unparse(a) for a in node.args] == ['fd', "'wb'"], 'unreviewed descriptor writer'
+        assert node.func.attr not in {'write_bytes', 'write_text', 'touch', 'truncate', 'pwrite'}, 'pathlib or positional write is forbidden'
+        if node.func.attr == 'write':
+            expected = ('sys.stdout.buffer.write', 'raw') if name == 'ci_audit_identity_observer.py' else ('target.write', 'encoded')
+            assert (form, ast.unparse(node.args[0])) == expected, 'unreviewed file writer'
+    return tree
+
+
 class ObservationTests(unittest.TestCase):
     def test_lexical_values_never_become_identity_decisions(self):
         cases = [(None, 'absent'), (b'', 'non-canonical'), (b'0', 'decimal'),
@@ -67,10 +97,22 @@ class ObservationTests(unittest.TestCase):
                  'audit': {'header': o.HEADER, 'struct_size': 48, 'struct_alignment': 8,
                            'offsets': {'auid': 0, 'mask': 4, 'terminal': 12, 'asid': 36, 'flags': 40},
                            'getauid': {'rc': 0, 'errno': 0, 'raw_hex': 'f5010000', 'value': o.scalar(b'501')},
-                           'getaudit_addr': {'rc': -1, 'errno': 5, 'length': 48, 'raw_hex': '00' * 48,
+                           'getaudit_addr': {'rc': -1, 'errno': 5, 'length': 48, 'raw_hex': None,
                                              'decoded': None}, 'id_A': command}}
         with mock.patch.object(p.sys, 'platform', 'darwin'):
             p.check_observation(value, 'plain', 501)
+            value['audit']['getaudit_addr']['raw_hex'] = '00' * 48
+            with self.assertRaises(o.IntegrityError):
+                p.check_observation(value, 'plain', 501)
+            value['audit']['getaudit_addr']['raw_hex'] = None
+            original_uid = value['audit']['getauid']
+            value['audit']['getauid'] = {'rc': -1, 'errno': 1, 'raw_hex': 'ffffffff',
+                                        'value': o.scalar(error={'errno': 1})}
+            with self.assertRaises(o.IntegrityError):
+                p.check_observation(value, 'plain', 501)
+            value['audit']['getauid']['raw_hex'] = None
+            p.check_observation(value, 'plain', 501)
+            value['audit']['getauid'] = original_uid
             for target in (value['interpreter'], value['tty']['0'], value['saved_uid'], value['audit']):
                 target['extra_environment_values'] = {'CANARY': 'not permitted'}
                 with self.assertRaises(o.IntegrityError):
@@ -96,16 +138,10 @@ class ObservationTests(unittest.TestCase):
     def test_source_has_no_identity_writes_or_environment_replacement(self):
         for name in ('ci_audit_identity_observer.py', 'probe_ci_audit_identity.py'):
             source = (STEP / name).read_text()
-            tree = ast.parse(source, feature_version=(3, 9))
-            calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
-            attrs = [n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)]
-            self.assertFalse({'setauid', 'setaudit', 'setaudit_addr', 'putenv', 'unsetenv'}.intersection(attrs))
+            tree = static_no_identity_writes(source, name)
             self.assertNotIn('environ.clear', source)
             self.assertNotIn('environ.update', source)
             if name == 'ci_audit_identity_observer.py':
-                for call in calls:
-                    if isinstance(call.func, ast.Attribute) and call.func.attr == 'open':
-                        self.assertEqual(ast.unparse(call.args[1]), 'os.O_RDONLY | os.O_CLOEXEC')
                 self.assertIsInstance(tree.body[0], ast.Assign)
                 self.assertEqual(ast.unparse(tree.body[0].targets[0]), 'STARTUP')
         driver = (STEP / 'probe_ci_audit_identity.py').read_text()
@@ -113,6 +149,47 @@ class ObservationTests(unittest.TestCase):
         self.assertNotIn("'/usr/bin/sudo', '-S'", driver)
         self.assertNotIn("'/usr/bin/sudo', '-A'", driver)
         self.assertIn('os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600', driver)
+
+    def test_dead_write_forms_fail_the_static_assertion_without_execution(self):
+        forms = [
+            'open("/proc/self/loginuid", "w")',
+            'io.open("/proc/self/loginuid", "w")',
+            'os.open("/proc/self/loginuid", os.O_WRONLY)',
+            'pathlib.Path("/proc/self/loginuid").open("w")',
+            'pathlib.Path("/proc/self/loginuid").write_text("501")',
+            'pathlib.Path("/proc/self/loginuid").write_bytes(b"501")',
+            'library.setauid(None)',
+            'getattr(library, "setaudit_addr")(None, 0)',
+        ]
+        for name in ('ci_audit_identity_observer.py', 'probe_ci_audit_identity.py'):
+            baseline = (STEP / name).read_text()
+            for form in forms:
+                with self.subTest(file=name, form=form):
+                    with self.assertRaises(AssertionError):
+                        static_no_identity_writes(baseline + '\nif False:\n    ' + form + '\n', name)
+
+    def test_failed_darwin_calls_never_emit_initialized_buffers_as_raw(self):
+        def failure(*args):
+            o.ctypes.set_errno(1)
+            return -1
+        library = type('FakeLibrary', (), {})()
+        library.getauid = failure
+        library.getaudit_addr = failure
+        with mock.patch.object(o.ctypes, 'CDLL', return_value=library), mock.patch.object(o, 'child', return_value={'fixture': True}):
+            result = o.darwin_audit()
+        self.assertEqual(result['getauid']['rc'], -1)
+        self.assertEqual(result['getauid']['errno'], 1)
+        self.assertIsNone(result['getauid']['raw_hex'])
+        self.assertIsNone(result['getauid']['value']['raw_hex'])
+        self.assertIsNone(result['getauid']['value']['number'])
+        self.assertEqual(result['getauid']['value']['tag'], 'read-error')
+        self.assertEqual(result['getaudit_addr']['rc'], -1)
+        self.assertEqual(result['getaudit_addr']['errno'], 1)
+        self.assertIsNone(result['getaudit_addr']['raw_hex'])
+        self.assertIsNone(result['getaudit_addr']['decoded'])
+        self.assertIsNone(o.scalar(b'4294967295', {'errno': 1})['raw_hex'])
+        with self.assertRaises(o.IntegrityError):
+            p.check_scalar({'tag': 'read-error', 'raw_hex': 'ffffffff', 'number': 4294967295, 'error': {'errno': 1}})
 
 
 if __name__ == '__main__':

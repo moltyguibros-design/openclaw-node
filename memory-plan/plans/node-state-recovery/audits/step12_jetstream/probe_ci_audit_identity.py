@@ -39,6 +39,8 @@ def check_scalar(value):
         o.require(isinstance(value['raw_hex'], str) and len(value['raw_hex']) <= 128
                   and re.fullmatch('[0-9a-f]*', value['raw_hex']) is not None, 'raw scalar differs')
     o.require(value['number'] is None or type(value['number']) is int, 'scalar number differs')
+    if value['tag'] == 'read-error':
+        o.require(value['raw_hex'] is None and value['number'] is None, 'failed scalar has invented raw data')
 
 
 def exact(value, keys):
@@ -115,11 +117,19 @@ def check_observation(value, context, runner):
                   'Darwin audit schema differs')
         exact(audit['getauid'], ('rc', 'errno', 'raw_hex', 'value'))
         check_scalar(audit['getauid']['value'])
+        uid = audit['getauid']
+        o.require((uid['raw_hex'] is not None and len(uid['raw_hex']) == 8) if uid['rc'] == 0
+                  else uid['raw_hex'] is None and uid['value']['raw_hex'] is None
+                  and uid['value']['number'] is None and uid['value']['tag'] == 'read-error',
+                  'failed getauid has invented raw data')
         info = audit['getaudit_addr']
         exact(info, ('rc', 'errno', 'length', 'raw_hex', 'decoded') if 'error' not in info
               else ('rc', 'errno', 'length', 'raw_hex', 'decoded', 'error'))
         o.require(info['length'] == 48 and (info['raw_hex'] is None or len(info['raw_hex']) == 96),
                   'Darwin raw struct differs')
+        o.require((info['raw_hex'] is not None and info['decoded'] is not None) if info['rc'] == 0
+                  else info['raw_hex'] is None and info['decoded'] is None,
+                  'failed getaudit_addr has invented raw data')
         if info['decoded'] is not None:
             decoded = info['decoded']
             exact(decoded, ('auid', 'asid', 'mask', 'terminal', 'flags'))

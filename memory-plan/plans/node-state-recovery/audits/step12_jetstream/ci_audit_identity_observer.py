@@ -32,6 +32,7 @@ def require(condition, message):
 def scalar(raw=None, error=None, *, allow_lf=False):
     value = None
     if error is not None:
+        raw = None
         tag = 'read-error'
     elif raw is None:
         tag = 'absent'
@@ -158,9 +159,9 @@ def darwin_audit():
         ctypes.set_errno(0)
         rc = get_uid(ctypes.byref(uid))
         error = ctypes.get_errno() if rc else 0
-        raw = bytes(uid)
-        result['getauid'] = {'rc': rc, 'errno': error, 'raw_hex': raw.hex(),
-                            'value': scalar(str(uid.value).encode(),
+        raw = None if rc else bytes(uid)
+        result['getauid'] = {'rc': rc, 'errno': error, 'raw_hex': None if raw is None else raw.hex(),
+                            'value': scalar(None if rc else str(uid.value).encode(),
                                             {'errno': error} if rc else None)}
     except (OSError, AttributeError) as error:
         result['getauid'] = {'rc': None, 'errno': getattr(error, 'errno', None),
@@ -173,7 +174,7 @@ def darwin_audit():
         rc = get_info(ctypes.byref(info), ctypes.sizeof(info))
         error = ctypes.get_errno() if rc else 0
         result['getaudit_addr'] = {'rc': rc, 'errno': error, 'length': 48,
-            'raw_hex': bytes(info).hex(), 'decoded': None if rc else {
+            'raw_hex': None if rc else bytes(info).hex(), 'decoded': None if rc else {
                 'auid': scalar(str(info.auid).encode()),
                 'asid': scalar(str(info.asid & 4294967295).encode()),
                 'mask': [info.mask.success, info.mask.failure],
