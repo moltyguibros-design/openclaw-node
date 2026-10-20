@@ -10,7 +10,7 @@ import sys
 import unittest
 from unittest import mock
 
-from test_host_capture_anchor import fixture_capture
+from test_host_capture_anchor import fixture_capture, anchor
 
 
 def checked(argv):
@@ -59,22 +59,33 @@ def main(output):
     python = [interpreter, '-I', '-S', '-B', '-X',
               'pycache_prefix=' + root_home + '/openclaw-acceptance-bytecode-' + secrets.token_hex(16)]
     source_sha = hashlib.sha256(source.read_bytes()).hexdigest()
+    bindings = {name + '.py': {'sha256': hashlib.sha256((source.parent / (name + '.py')).read_bytes()).hexdigest(),
+                             'size': (source.parent / (name + '.py')).stat().st_size}
+                for name in (*anchor.READER_MODULES, 'host_capture_anchor')}
+    manifest_raw = anchor.encoded({'schema': anchor.RELEASE_SCHEMA, 'files': bindings})
+    manifest_sha = hashlib.sha256(manifest_raw).hexdigest()
     bootstrap = '''import pathlib,sys,tempfile,hashlib,os,shutil,json
 p=pathlib.Path(tempfile.mkdtemp(prefix="openclaw-acceptance-owned-",dir=sys.argv[3]))
 inputs=None
 store=None
 try:
     os.chmod(p,0o700)
-    b=pathlib.Path(sys.argv[1]).read_bytes()
-    assert hashlib.sha256(b).hexdigest()==sys.argv[2]
+    release=json.loads(sys.argv[2])
     (p/"programs").mkdir(mode=0o700)
-    (p/"programs"/"program.py").write_bytes(b)
-    os.chmod(p/"programs"/"program.py",0o600)
+    for name,binding in release['files'].items():
+        assert pathlib.Path(name).name==name and name.endswith('.py')
+        b=pathlib.Path(sys.argv[1]).with_name(name).read_bytes()
+        assert hashlib.sha256(b).hexdigest()==binding['sha256'] and len(b)==binding['size']
+        (p/"programs"/name).write_bytes(b)
+        os.chmod(p/"programs"/name,0o600)
+    (p/"release.json").write_bytes(sys.argv[2].encode())
+    os.chmod(p/"release.json",0o600)
     store=pathlib.Path(tempfile.mkdtemp(prefix="openclaw-acceptance-owned-",dir=sys.argv[4]))
     (store/"openclaw-acceptance-owned-records").mkdir(mode=0o700)
     inputs=pathlib.Path(tempfile.mkdtemp(prefix="openclaw-acceptance-input-",dir=sys.argv[4]))
-    for path,mode in ((p,0o700),(p/"programs",0o700),(p/"programs"/"program.py",0o600),(store,0o755),
-                      (store/"openclaw-acceptance-owned-records",0o700),(inputs,0o700)):
+    for path,mode in ((p,0o700),(p/"programs",0o700),(p/"release.json",0o600),(store,0o755),
+                      (store/"openclaw-acceptance-owned-records",0o700),(inputs,0o700),
+                      *((path,0o600) for path in (p/"programs").iterdir())):
         if sys.platform == "linux":
             for name in os.listxattr(path):
                 if name.startswith("system.posix_acl_"):
@@ -90,7 +101,7 @@ except BaseException:
     raise
 print(json.dumps({"root":str(p),"inputs":str(inputs),"store":str(store)}))
 '''
-    setup = json.loads(checked([*sudo, *python, '-c', bootstrap, str(source), source_sha,
+    setup = json.loads(checked([*sudo, *python, '-c', bootstrap, str(source), manifest_raw.decode(),
                                root_home, input_parent, str(os.getuid()), str(os.getgid())]))
     base, inputs = pathlib.Path(setup['root']), pathlib.Path(setup['inputs'])
     if base.parent != pathlib.Path(root_home) or not base.name.startswith('openclaw-acceptance-owned-'):
@@ -100,7 +111,7 @@ print(json.dumps({"root":str(p),"inputs":str(inputs),"store":str(store)}))
     store = pathlib.Path(setup['store'])
     if store.parent != pathlib.Path(input_parent) or not store.name.startswith('openclaw-acceptance-owned-'):
         raise RuntimeError('CI store fixture path differs')
-    program = base / 'programs' / 'program.py'
+    program = base / 'programs' / 'host_capture_anchor.py'
     program_python = [interpreter, '-I', '-S', '-B', '-X',
                       'pycache_prefix=' + str(program.parent / 'bytecode-disabled')]
     parent = store
@@ -113,11 +124,12 @@ print(json.dumps({"root":str(p),"inputs":str(inputs),"store":str(store)}))
         nonce, uid = source_case.nonce, os.getuid()
         final = root / (nonce + '.json')
 
-        def action(name, error=None, flags=None):
+        def action(name, error=None, flags=None, approval=None):
             done = subprocess.run([*sudo, '/usr/bin/env', 'CI=true', 'GITHUB_ACTIONS=true',
                                    *(program_python if flags is None else flags),
                                    str(program), '--ci-owned', name, str(root),
-                                   str(capture), str(uid), nonce],
+                                   str(capture), str(uid), nonce, str(base / 'release.json'),
+                                   manifest_sha if approval is None else approval],
                                   capture_output=True, text=True, timeout=90)
             if error is None:
                 if done.returncode or 'owned byte anchor ' not in done.stdout:
@@ -132,6 +144,7 @@ print(json.dumps({"root":str(p),"inputs":str(inputs),"store":str(store)}))
 
         action('publish')
         action('verify')
+        action('verify', 'not independently approved', approval='f' * 64)
         action('verify', 'isolated Python', flags=[arg for arg in program_python if arg != '-I'])
         root_command(chown, str(uid), str(program.parent))
         action('verify', 'directory owner or mode differs')
@@ -191,6 +204,7 @@ print(json.dumps({"root":str(p),"inputs":str(inputs),"store":str(store)}))
         report = {'scope': 'CI-owned post-capture anchor only; no production installation or B8 acceptance',
                   'capture_uid': uid, 'authority_uid': 0, 'trusted_program_sha256': source_sha,
                   'interpreter_characterization': characterization,
+                  'release_sha256': manifest_sha, 'code_bindings': bindings,
                   'cases': results, 'completed': True}
     finally:
         case.doCleanups()

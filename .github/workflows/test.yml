@@ -111,6 +111,8 @@ jobs:
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_window_pin_binding.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_window_pin_binding.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_capture_anchor.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_approved_release.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_approved_release.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_capture_anchor.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_frozen_owner_context.py
@@ -330,6 +332,8 @@ jobs:
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_window_pin_binding.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_window_pin_binding.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_capture_anchor.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_approved_release.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_approved_release.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_capture_anchor.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_frozen_owner_context.py

@@ -31,6 +31,14 @@ def fixture_capture(case):
     return source, target
 
 
+def selected_entry(a):
+    @contextlib.contextmanager
+    def selected(root, capture, uid, nonce, fixture, manifest, digest):
+        yield {'authority': a.entry(root, capture, uid, nonce, fixture),
+               'release': {'check': lambda: None}}
+    return selected
+
+
 class Anchor(unittest.TestCase):
     def setUp(self):
         self.source, self.capture = fixture_capture(self)
@@ -54,6 +62,7 @@ class Anchor(unittest.TestCase):
             return original_input(directory, name, owner)
 
         for patch in (mock.patch.object(anchor, 'entry', return_value={'program_sha256': 'a' * 64}),
+                      mock.patch.object(anchor, 'approved_entry', side_effect=selected_entry(anchor)),
                       mock.patch.object(anchor, 'no_acl'),
                       mock.patch.object(anchor, 'Directory', side_effect=directory),
                       mock.patch.object(anchor, 'Input', side_effect=read_input)):
@@ -61,10 +70,10 @@ class Anchor(unittest.TestCase):
             self.addCleanup(patch.stop)
 
     def publish(self):
-        return anchor.publish(self.root, self.capture, self.uid, self.nonce, fixture=True)
+        return anchor.publish(self.root, self.capture, self.uid, self.nonce, release_manifest='/fixture-manifest', release_sha256='a' * 64, fixture=True)
 
     def verify(self):
-        return anchor.verify(self.root, self.capture, self.uid, self.nonce, fixture=True)
+        return anchor.verify(self.root, self.capture, self.uid, self.nonce, release_manifest='/fixture-manifest', release_sha256='a' * 64, fixture=True)
 
     def test_protected_record_is_reopened_and_fresh_inputs_compared(self):
         self.publish()
@@ -441,7 +450,7 @@ class Authority(unittest.TestCase):
                         mock.patch.object(anchor.os, 'geteuid', return_value=euid), \
                         mock.patch.object(anchor, 'Directory') as opened:
                     with self.assertRaisesRegex(RuntimeError, pattern):
-                        action('/missing', '/missing', 501, 'a' * 64, fixture=fixture_mode)
+                        action('/missing', '/missing', 501, 'a' * 64, release_manifest='/fixture-manifest', release_sha256='a' * 64, fixture=fixture_mode)
                     opened.assert_not_called()
 
     def test_owner_type_nonce_and_fixture_paths_are_required(self):

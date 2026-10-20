@@ -54,20 +54,27 @@ def main(output):
     for path in (code, fixtures, inputs, store):
         path.chmod(0o700)
     os.chown(inputs, capture_uid, capture_gid)
-    hashes = {}
+    hashes, bindings = {}, {}
     for name in (*anchor.READER_MODULES, 'host_capture_anchor'):
         path = code / (name + '.py')
         raw = (step / path.name).read_bytes()
         path.write_bytes(raw)
         path.chmod(0o600)
         hashes[path.name] = hashlib.sha256(raw).hexdigest()
+        bindings[path.name] = {'sha256': hashes[path.name], 'size': len(raw)}
+    manifest = fixtures / 'release.json'
+    manifest_raw = anchor.encoded({'schema': anchor.RELEASE_SCHEMA, 'files': bindings})
+    manifest.write_bytes(manifest_raw)
+    manifest.chmod(0o600)
+    manifest_sha = hashlib.sha256(manifest_raw).hexdigest()
     program = [interpreter, '-I', '-S', '-B', '-X', 'pycache_prefix=' + str(code / 'bytecode-disabled'),
                str(code / 'host_capture_anchor.py'), '--ci-owned']
     environment = {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'LC_ALL': 'C',
                    'CI': 'true', 'GITHUB_ACTIONS': 'true', 'SUDO_UID': str(capture_uid)}
     report = {'scope': 'CI-only protected synthetic journal reader; no B3/B8/VM/installation',
               'capture_uid': capture_uid, 'guest_uid': 65534, 'writer_uid': 0, 'authority_uid': 0,
-              'code_sha256': hashes, 'interpreter_characterization': characterization,
+              'code_sha256': hashes, 'release_sha256': manifest_sha,
+              'code_bindings': bindings, 'interpreter_characterization': characterization,
               'cases': [], 'completed': False,
               'cleanup': {'clean': False, 'removed': False, 'state': 'not-yet-observed'}}
     fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -82,6 +89,7 @@ def main(output):
         args = [*program, name, str(root), str(capture), str(owner), nonce]
         if name in ('read', 'receipt'):
             args.extend((str(guest), str(writer)))
+        args.extend((str(manifest), manifest_sha))
         done = subprocess.run(args, env={**environment, 'SUDO_UID': str(owner)},
                               capture_output=True, text=True, timeout=180)
         if refusal is not None:

@@ -277,64 +277,166 @@ READER_MODULES = ('host_asif_extract', 'host_guest_commit', 'host_image_immutabl
                   'host_protected_journal_reader')
 
 
+RELEASE_SCHEMA = 'openclaw-approved-reader-v1'
+CODE_NAMES = {name + '.py' for name in (*READER_MODULES, 'host_capture_anchor')}
+
+
 @contextlib.contextmanager
-def reader_code():
+def approved_release(manifest_path, expected_digest):
+    require(isinstance(expected_digest, str) and re.fullmatch('[0-9a-f]{64}', expected_digest),
+            'approved release digest is invalid')
+    manifest_path = pathlib.Path(manifest_path)
     program = pathlib.Path(__file__).resolve()
-    names = {name + '.py' for name in (*READER_MODULES, 'host_capture_anchor')}
-    with Directory(program.parent, {0}) as directory, contextlib.ExitStack() as stack:
-        require(set(os.listdir(directory.fd)) == names, 'reader code directory entries differ')
-        inputs = {name: stack.enter_context(Input(directory, name, 0, private=False)) for name in names}
-        hashes = {name: item.read(True)[1] for name, item in inputs.items()}
-        for name in READER_MODULES:
-            module = sys.modules.get(name)
-            require(module is None or getattr(module, '__file__', None) == str(program.parent / (name + '.py')),
-                    'reader module was preloaded from another origin')
-        if str(program.parent) not in sys.path:
-            sys.path.append(str(program.parent))
-        utility = importlib.import_module('importlib.util')
-        for name in READER_MODULES:
-            if name not in sys.modules:
-                found = utility.find_spec(name)
-                require(found is not None and found.origin == str(program.parent / (name + '.py')),
-                        'reader import resolution differs')
-        loaded = {name: importlib.import_module(name) for name in READER_MODULES}
+    require(manifest_path.is_absolute() and '..' not in manifest_path.parts
+            and manifest_path.parent != program.parent and program.name == 'host_capture_anchor.py',
+            'approved manifest must be outside the exact code directory')
+    with contextlib.ExitStack() as stack:
+        parent = stack.enter_context(Directory(manifest_path.parent, {0}))
+        manifest = stack.enter_context(Input(parent, manifest_path.name, 0))
+        raw, digest, _size = manifest.read(True)
+        require(digest == expected_digest, 'release is not independently approved')
+        value = canonical(raw)
+        require(set(value) == {'schema', 'files'} and value['schema'] == RELEASE_SCHEMA
+                and isinstance(value['files'], dict) and set(value['files']) == CODE_NAMES,
+                'approved release schema or file set differs')
+        for item in value['files'].values():
+            require(isinstance(item, dict) and set(item) == {'size', 'sha256'}
+                    and type(item['size']) is int and 0 < item['size'] <= LIMIT
+                    and isinstance(item['sha256'], str) and re.fullmatch('[0-9a-f]{64}', item['sha256']),
+                    'approved release file binding is invalid')
+        directory = stack.enter_context(Directory(program.parent, {0}))
+        require(set(os.listdir(directory.fd)) == CODE_NAMES, 'reader code directory entries differ')
+        inputs = {name: stack.enter_context(Input(directory, name, 0, private=False))
+                  for name in sorted(CODE_NAMES)}
+        reads = {name: item.read(True) for name, item in inputs.items()}
+        require(all({'sha256': read[1], 'size': read[2]} == value['files'][name]
+                    for name, read in reads.items()), 'source differs from approved release')
 
         def check():
-            require(set(os.listdir(directory.fd)) == names, 'reader code directory entries differ')
-            observed = set()
-            for module in tuple(sys.modules.values()):
-                file = getattr(module, '__file__', None)
-                if file and pathlib.Path(file).resolve().parent == program.parent:
-                    observed.add(pathlib.Path(file).name)
-            require(observed == names, 'reader loaded local module set differs')
+            require(set(os.listdir(directory.fd)) == CODE_NAMES, 'reader code directory entries differ')
+            os.lseek(manifest.fd, 0, os.SEEK_SET)
+            require(manifest.read(True)[0] == raw, 'approved release manifest changed')
             for name, item in inputs.items():
                 os.lseek(item.fd, 0, os.SEEK_SET)
-                require(item.read(True)[1] == hashes[name], 'reader source hash changed')
+                require(item.read(True) == reads[name], 'reader source hash changed')
+            parent.check()
             directory.check()
+
+        check()
+        yield {'program': program, 'digest': digest,
+               'sources': {name: read[0] for name, read in reads.items()},
+               'hashes': {name: read[1] for name, read in reads.items()}, 'check': check}
+
+
+@contextlib.contextmanager
+def approved_entry(root, capture, writer_uid, nonce, fixture, manifest_path, expected_digest):
+    authority = entry(root, capture, writer_uid, nonce, fixture)
+    with approved_release(manifest_path, expected_digest) as release:
+        require(authority['program_sha256'] == release['hashes']['host_capture_anchor.py'],
+                'running anchor differs from approved release')
+        yield {'authority': {**authority, 'release_sha256': release['digest'],
+                             'source_sha256': release['hashes']}, 'release': release}
+        release['check']()
+
+
+@contextlib.contextmanager
+def reader_code(release):
+    program = release['program']
+    release['check']()
+    require(all(name not in sys.modules for name in (*READER_MODULES, 'host_capture_anchor')),
+            'reader project module was preloaded')
+    original_path = list(sys.path)
+    if str(program.parent) not in sys.path:
+        sys.path.append(str(program.parent))
+    utility = importlib.import_module('importlib.util')
+    loaded = {}
+    running = sys.modules[__name__]
+
+    class HeldLoader:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname.split('.')[0] not in (*READER_MODULES, 'host_capture_anchor'):
+                return None
+            require(fullname in READER_MODULES, 'reader anchor or submodule import is forbidden')
+            spec = utility.spec_from_loader(fullname, self,
+                                            origin=str(program.parent / (fullname + '.py')))
+            spec.has_location = True
+            return spec
+
+        def create_module(self, spec):
+            return None
+
+        def exec_module(self, module):
+            release['check']()
+            name = module.__name__
+            require(name in READER_MODULES and name not in loaded,
+                    'reader module execution differs')
+            require(module.__spec__.loader is self
+                    and module.__spec__.origin == str(program.parent / (name + '.py')),
+                    'reader import resolution differs')
+            loaded[name] = module
+            raw = release['sources'][name + '.py']
+            exec(compile(raw, str(program.parent / (name + '.py')), 'exec', dont_inherit=True),
+                 module.__dict__)
+            release['check']()
+
+    finder = HeldLoader()
+    sys.meta_path.insert(0, finder)
+    try:
+        modules = {name: importlib.import_module(name) for name in READER_MODULES}
+
+        def check():
+            release['check']()
+            require(sys.meta_path and sys.meta_path[0] is finder,
+                    'reader held import guard changed')
+            require('host_capture_anchor' not in sys.modules and set(loaded) == set(READER_MODULES)
+                    and all(sys.modules.get(name) is module and modules[name] is module
+                            and module.__file__ == str(program.parent / (name + '.py'))
+                            and module.__spec__.loader is finder for name, module in loaded.items()),
+                    'reader loaded module identity differs')
+            observed = set()
+            for name, module in tuple(sys.modules.items()):
+                file = getattr(module, '__file__', None)
+                if file and pathlib.Path(file).resolve().parent == program.parent:
+                    require((name == __name__ and module is running)
+                            or (name in loaded and loaded[name] is module),
+                            'reader loaded local module set differs')
+                    observed.add(pathlib.Path(file).name)
+            require(observed == CODE_NAMES, 'reader loaded local module set differs')
             return trusted_runtime()
 
         authority = check()
-        yield {'modules': loaded, 'hashes': hashes, 'authority': authority, 'check': check}
+        yield {'modules': modules, 'hashes': release['hashes'], 'authority': authority, 'check': check}
+    finally:
+        if finder in sys.meta_path:
+            sys.meta_path.remove(finder)
+        for name, module in loaded.items():
+            if sys.modules.get(name) is module:
+                del sys.modules[name]
+        sys.path[:] = original_path
 
 
-def reader_action(root, capture, capture_uid, nonce, guest_uid, writer_uid, *, fixture=False, receipt=False):
+def reader_action(root, capture, capture_uid, nonce, guest_uid, writer_uid, *,
+                  release_manifest, release_sha256, fixture=False, receipt=False):
     require(type(guest_uid) is int and guest_uid >= 0 and type(writer_uid) is int and writer_uid >= 0,
             'reader owner context is invalid')
-    authority = entry(root, capture, capture_uid, nonce, fixture)
-    with reader_code() as code:
-        require(code['authority'] == {key: authority[key] for key in code['authority']},
-                'reader authority changed while loading code')
-        module = code['modules']['host_protected_journal_reader']
-        operation = module.read_receipt if receipt else module.read_image
-        environment = dict(os.environ)
-        try:
-            os.environ.clear()
-            os.environ.update(PATH='/usr/bin:/bin:/usr/sbin:/sbin', LC_ALL='C')
-            return operation(sys.modules[__name__], root, capture, capture_uid, nonce,
-                             guest_uid, writer_uid, authority, code)
-        finally:
-            os.environ.clear()
-            os.environ.update(environment)
+    with approved_entry(root, capture, capture_uid, nonce, fixture,
+                        release_manifest, release_sha256) as selected:
+        authority, release = selected['authority'], selected['release']
+        with reader_code(release) as code:
+            require(code['authority'] == {key: authority[key] for key in code['authority']},
+                    'reader authority changed while loading code')
+            module = code['modules']['host_protected_journal_reader']
+            operation = module.read_receipt if receipt else module.read_image
+            environment = dict(os.environ)
+            try:
+                os.environ.clear()
+                os.environ.update(PATH='/usr/bin:/bin:/usr/sbin:/sbin', LC_ALL='C')
+                code['check']()
+                return operation(sys.modules[__name__], root, capture, capture_uid, nonce,
+                                 guest_uid, writer_uid, authority, code)
+            finally:
+                os.environ.clear()
+                os.environ.update(environment)
 
 
 def entry(root, capture, writer_uid, nonce, fixture):
@@ -349,62 +451,71 @@ def entry(root, capture, writer_uid, nonce, fixture):
     return {**trusted_runtime(), 'root_path': str(root)}
 
 
-def publish(root, capture, writer_uid, nonce, *, fixture=False):
-    authority = entry(root, capture, writer_uid, nonce, fixture)
-    with Directory(root, {0}) as directory:
-        fcntl.flock(directory.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        final, pending = nonce + '.json', nonce + '.pending'
-        require(not any(name in os.listdir(directory.fd) for name in (final, pending)),
-                'anchor already exists or publication is incomplete')
-        value = {**snapshot(capture, writer_uid, nonce), 'authority': authority}
-        fd = os.open(pending, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                     0o600, dir_fd=directory.fd)
-        with os.fdopen(fd, 'wb') as stream:
-            os.fchmod(stream.fileno(), 0o600)
-            stream.write(encoded(value))
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.fsync(directory.fd)
-        directory.check()
-        os.link(pending, final, src_dir_fd=directory.fd, dst_dir_fd=directory.fd,
-                follow_symlinks=False)
-        os.fsync(directory.fd)
-        os.unlink(pending, dir_fd=directory.fd)
-        os.fsync(directory.fd)
-        with Input(directory, final, 0) as record:
-            require(canonical(record.read(True)[0]) == value, 'anchor publication read-back differs')
-        directory.check()
-
-
-def verify(root, capture, writer_uid, nonce, *, fixture=False):
-    authority = entry(root, capture, writer_uid, nonce, fixture)
-    with Directory(root, {0}) as directory:
-        fcntl.flock(directory.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        require(nonce + '.pending' not in os.listdir(directory.fd), 'anchor publication is incomplete')
-        with Input(directory, nonce + '.json', 0) as record:
-            value = canonical(record.read(True)[0])
-            require(value == {**snapshot(capture, writer_uid, nonce), 'authority': authority},
-                    'protected capture byte anchor differs')
-            record.check()
-            directory.check()
-            os.fsync(record.fd)
+def publish(root, capture, writer_uid, nonce, *, release_manifest, release_sha256, fixture=False):
+    with approved_entry(root, capture, writer_uid, nonce, fixture,
+                        release_manifest, release_sha256) as selected:
+        authority, release = selected['authority'], selected['release']
+        with Directory(root, {0}) as directory:
+            fcntl.flock(directory.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            final, pending = nonce + '.json', nonce + '.pending'
+            require(not any(name in os.listdir(directory.fd) for name in (final, pending)),
+                    'anchor already exists or publication is incomplete')
+            release['check']()
+            value = {**snapshot(capture, writer_uid, nonce), 'authority': authority}
+            fd = os.open(pending, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                         0o600, dir_fd=directory.fd)
+            with os.fdopen(fd, 'wb') as stream:
+                os.fchmod(stream.fileno(), 0o600)
+                stream.write(encoded(value))
+                stream.flush()
+                os.fsync(stream.fileno())
             os.fsync(directory.fd)
+            directory.check()
+            release['check']()
+            os.link(pending, final, src_dir_fd=directory.fd, dst_dir_fd=directory.fd,
+                    follow_symlinks=False)
+            os.fsync(directory.fd)
+            os.unlink(pending, dir_fd=directory.fd)
+            os.fsync(directory.fd)
+            with Input(directory, final, 0) as record:
+                require(canonical(record.read(True)[0]) == value, 'anchor publication read-back differs')
+            directory.check()
+
+
+def verify(root, capture, writer_uid, nonce, *, release_manifest, release_sha256, fixture=False):
+    with approved_entry(root, capture, writer_uid, nonce, fixture,
+                        release_manifest, release_sha256) as selected:
+        authority, release = selected['authority'], selected['release']
+        with Directory(root, {0}) as directory:
+            fcntl.flock(directory.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            require(nonce + '.pending' not in os.listdir(directory.fd), 'anchor publication is incomplete')
+            with Input(directory, nonce + '.json', 0) as record:
+                value = canonical(record.read(True)[0])
+                release['check']()
+                require(value == {**snapshot(capture, writer_uid, nonce), 'authority': authority},
+                        'protected capture byte anchor differs')
+                record.check()
+                directory.check()
+                os.fsync(record.fd)
+                os.fsync(directory.fd)
 
 
 if __name__ == '__main__':
     require(os.environ.get('CI') == 'true' and os.environ.get('GITHUB_ACTIONS') == 'true'
-            and len(sys.argv) in (7, 9) and sys.argv[1] == '--ci-owned',
+            and len(sys.argv) in (9, 11) and sys.argv[1] == '--ci-owned',
             'only the CI-owned anchor command is enabled')
-    if len(sys.argv) == 7:
+    if len(sys.argv) == 9:
         require(sys.argv[2] in ('publish', 'verify'), 'only the CI-owned anchor command is enabled')
         action = publish if sys.argv[2] == 'publish' else verify
-        action(pathlib.Path(sys.argv[3]), pathlib.Path(sys.argv[4]), int(sys.argv[5]), sys.argv[6], fixture=True)
+        action(pathlib.Path(sys.argv[3]), pathlib.Path(sys.argv[4]), int(sys.argv[5]), sys.argv[6],
+               release_manifest=sys.argv[7], release_sha256=sys.argv[8], fixture=True)
         print('owned byte anchor ' + ('published' if action == publish else 'verified'))
     else:
         require(sys.argv[2] in ('read', 'receipt')
                 and all(re.fullmatch('0|[1-9][0-9]*', sys.argv[index]) for index in (5, 7, 8)),
                 'reader action or decimal owner context is invalid')
         value = reader_action(pathlib.Path(sys.argv[3]), pathlib.Path(sys.argv[4]), int(sys.argv[5]),
-                              sys.argv[6], int(sys.argv[7]), int(sys.argv[8]), fixture=True,
+                              sys.argv[6], int(sys.argv[7]), int(sys.argv[8]),
+                              release_manifest=sys.argv[9], release_sha256=sys.argv[10], fixture=True,
                               receipt=sys.argv[2] == 'receipt')
         print(json.dumps(value, sort_keys=True))

@@ -21,6 +21,7 @@ import host_journal_mount as mount
 import host_protected_journal_reader as reader
 import preservation_journal as journal
 import stopped_journal_inputs as stopped
+from test_host_capture_anchor import selected_entry
 from test_host_journal_mount import MountCase
 from test_stopped_journal_inputs import window_dir
 
@@ -103,10 +104,11 @@ class Protected(MountCase):
                      'check': self.runtime_check}
 
         @contextlib.contextmanager
-        def loaded_code():
+        def loaded_code(_release):
             yield self.code
 
         for patch in (mock.patch.object(anchor, 'entry', return_value=self.authority),
+                      mock.patch.object(anchor, 'approved_entry', side_effect=selected_entry(anchor)),
                       mock.patch.object(anchor, 'no_acl'),
                       mock.patch.object(anchor, 'Directory', side_effect=root_directory),
                       mock.patch.object(anchor, 'Input', side_effect=root_input),
@@ -118,16 +120,16 @@ class Protected(MountCase):
                       mock.patch.object(stopped, 'verify_stopped_bytes', side_effect=semantic)):
             patch.start()
             self.addCleanup(patch.stop)
-        anchor.publish(self.root_store, self.capture, self.uid, self.nonce, fixture=True)
+        anchor.publish(self.root_store, self.capture, self.uid, self.nonce, release_manifest='/fixture-manifest', release_sha256='a' * 64, fixture=True)
         anchor.entry.reset_mock()
 
     def read_image(self):
         return anchor.reader_action(self.root_store, self.capture, self.capture_uid, self.nonce,
-                                    self.guest_uid, self.writer_uid, fixture=True)
+                                    self.guest_uid, self.writer_uid, release_manifest='/fixture-manifest', release_sha256='a' * 64, fixture=True)
 
     def receipt(self):
         return anchor.reader_action(self.root_store, self.capture, self.capture_uid, self.nonce,
-                                    self.guest_uid, self.writer_uid, fixture=True, receipt=True)
+                                    self.guest_uid, self.writer_uid, release_manifest='/fixture-manifest', release_sha256='a' * 64, fixture=True, receipt=True)
 
     def failure(self, message):
         with self.assertRaisesRegex((RuntimeError, stopped.Refused, OSError), message):
@@ -337,7 +339,7 @@ class Protected(MountCase):
         value = json.loads(path.read_bytes())
         path.write_bytes(anchor.encoded({**value, 'scope': 'wrong scope'}))
         (self.root_store / (self.nonce + '.json')).unlink()
-        anchor.publish(self.root_store, self.capture, self.uid, self.nonce, fixture=True)
+        anchor.publish(self.root_store, self.capture, self.uid, self.nonce, release_manifest='/fixture-manifest', release_sha256='a' * 64, fixture=True)
         self.failure('not a completed stopped-VM capture')
         self.assertFalse(self.pending.exists())
         reader.clone_fd.assert_not_called()
@@ -374,154 +376,6 @@ class Protected(MountCase):
             self.read_image()
         self.assertEqual(reader.clone_fd.call_count, 1)
         self.assertEqual(self.final.read_bytes(), raw)
-
-
-class CodeClosure(unittest.TestCase):
-    def setUp(self):
-        self.uid = os.getuid()
-        temp = tempfile.TemporaryDirectory(prefix='openclaw-q-code-',
-                                           dir=pathlib.Path(os.environ.get('GITHUB_WORKSPACE', pathlib.Path.home())))
-        self.addCleanup(temp.cleanup)
-        self.path = pathlib.Path(temp.name).resolve()
-        self.path.chmod(0o700)
-        source = pathlib.Path(anchor.__file__).resolve().parent
-        for name in (*anchor.READER_MODULES, 'host_capture_anchor'):
-            path = self.path / (name + '.py')
-            path.write_bytes(getattr(anchor, '_test_reader_sources', {}).get(
-                path.name, (source / path.name).read_bytes()))
-            path.chmod(0o600)
-        self.a = types.ModuleType('host_capture_anchor')
-        self.a.__file__ = str(self.path / 'host_capture_anchor.py')
-        exec(compile(pathlib.Path(self.a.__file__).read_bytes(), self.a.__file__, 'exec'), self.a.__dict__)
-        directory, read_input = self.a.Directory, self.a.Input
-        def root_directory(path, owners, private=True):
-            self.assertEqual(owners, {0})
-            return directory(path, {0, self.uid}, private)
-        self.held_sources = []
-        def root_input(directory, name, owner, **options):
-            self.assertEqual(owner, 0)
-            item = read_input(directory, name, self.uid, **options)
-            self.held_sources.append(item)
-            return item
-        for patch in (mock.patch.object(self.a, 'Directory', side_effect=root_directory),
-                      mock.patch.object(self.a, 'Input', side_effect=root_input),
-                      mock.patch.object(self.a, 'no_acl'),
-                      mock.patch.object(self.a, 'trusted_runtime', return_value={'program_sha256': 'a' * 64}),
-                      mock.patch.object(sys, 'dont_write_bytecode', True)):
-            patch.start()
-            self.addCleanup(patch.stop)
-        original_modules = {name: sys.modules.get(name) for name in (*anchor.READER_MODULES, 'host_capture_anchor')}
-        original_path = list(sys.path)
-        def restore():
-            sys.path[:] = original_path
-            for name, module in original_modules.items():
-                if module is None:
-                    sys.modules.pop(name, None)
-                else:
-                    sys.modules[name] = module
-        self.addCleanup(restore)
-        for name in anchor.READER_MODULES:
-            sys.modules.pop(name, None)
-        sys.modules['host_capture_anchor'] = self.a
-        sys.path[:] = [path for path in original_path
-                       if not (pathlib.Path(path) / 'host_guest_commit.py').exists()]
-        self.original_paths = list(sys.path)
-        with self.a.Directory(self.path, {0}):
-            pass
-
-    def test_exact_closure_hashes_loaded_origins_and_source_fds_stay_pinned(self):
-        with self.a.reader_code() as code:
-            self.assertEqual(len(code['hashes']), 12)
-            self.assertEqual(set(code['modules']), set(anchor.READER_MODULES))
-            self.assertEqual(sys.path[:len(self.original_paths)], self.original_paths)
-            self.assertEqual(sys.path[-1], str(self.path))
-            self.assertEqual(code['check'](), code['authority'])
-            held = []
-            for item in self.a.Input.call_args_list:
-                self.assertEqual(item.args[2], 0)
-                held.append(item.args[1])
-            self.assertEqual(set(held), set(code['hashes']))
-            self.assertEqual(len(self.held_sources), 12)
-            self.assertTrue(all(os.fstat(item.fd).st_ino == item.initial.st_ino for item in self.held_sources))
-            self.assertIs(sys.modules['host_capture_anchor'], self.a)
-            self.assertNotIn('host_capture_anchor', code['modules'])
-        for item in self.held_sources:
-            with self.assertRaises(OSError):
-                os.fstat(item.fd)
-
-    def test_extra_code_or_cache_entry_refuses_before_project_import(self):
-        for name in ('unreviewed.py', '__pycache__', 'bytecode-disabled'):
-            path = self.path / name
-            path.write_bytes(b'extra')
-            with self.assertRaisesRegex(RuntimeError, 'code directory entries differ'):
-                with self.a.reader_code():
-                    self.fail('extra code entry accepted')
-            path.unlink()
-
-    def test_wrong_preloaded_origin_refuses_before_importing_project_code(self):
-        sys.modules['host_journal_mount'] = types.SimpleNamespace(__file__='/untrusted/module.py')
-        with self.assertRaisesRegex(RuntimeError, 'preloaded from another origin'):
-            with self.a.reader_code():
-                self.fail('wrong preloaded origin accepted')
-
-    def test_wrong_resolution_refuses_before_project_import(self):
-        utility = types.SimpleNamespace(find_spec=mock.Mock(return_value=types.SimpleNamespace(origin='/other.py')))
-        importer = mock.Mock(return_value=utility)
-        with mock.patch.object(self.a.importlib, 'import_module', importer):
-            with self.assertRaisesRegex(RuntimeError, 'import resolution differs'):
-                with self.a.reader_code():
-                    self.fail('wrong resolution accepted')
-        importer.assert_called_once_with('importlib.util')
-
-    def test_changed_source_mapping_refuses_before_receipt(self):
-        with self.a.reader_code() as code:
-            path = self.path / 'host_journal_mount.py'
-            raw = path.read_bytes()
-            path.rename(path.with_suffix('.aside'))
-            path.write_bytes(raw)
-            path.chmod(0o600)
-            path.with_suffix('.aside').unlink()
-            with self.assertRaisesRegex(RuntimeError, 'changed or was replaced'):
-                code['check']()
-
-    def test_source_digest_is_rechecked_not_just_metadata(self):
-        with self.a.reader_code() as code:
-            item = self.held_sources[0]
-            raw, digest, size = b'owned', 'f' * 64, item.initial.st_size
-            with mock.patch.object(item, 'read', return_value=(raw, digest, size)):
-                with self.assertRaisesRegex(RuntimeError, 'reader source hash changed'):
-                    code['check']()
-
-    def test_changed_loaded_local_set_refuses(self):
-        with self.a.reader_code() as code:
-            previous = sys.modules['host_journal_mount'].__file__
-            sys.modules['host_journal_mount'].__file__ = '/other/module.py'
-            try:
-                with self.assertRaisesRegex(RuntimeError, 'loaded local module set differs'):
-                    code['check']()
-            finally:
-                sys.modules['host_journal_mount'].__file__ = previous
-
-    def test_dispatch_passes_the_same_anchor_object_and_scrubs_child_environment(self):
-        code = {'authority': {'program_sha256': 'a' * 64}, 'modules': {}}
-        seen = []
-        def operation(a, *args):
-            self.assertIs(a, self.a)
-            self.assertIs(sys.modules['host_capture_anchor'], a)
-            self.assertEqual(dict(os.environ), {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'LC_ALL': 'C'})
-            seen.append(a)
-            return {'owned': True}
-        code['modules']['host_protected_journal_reader'] = types.SimpleNamespace(read_image=operation)
-        @contextlib.contextmanager
-        def loaded():
-            yield code
-        before = dict(os.environ)
-        with mock.patch.object(self.a, 'entry', return_value={'program_sha256': 'a' * 64}), \
-             mock.patch.object(self.a, 'reader_code', side_effect=loaded):
-            self.assertEqual(self.a.reader_action('/owned', '/input', 111, 'a' * 64, 222, 333, fixture=True),
-                             {'owned': True})
-        self.assertEqual(dict(os.environ), before)
-        self.assertEqual(seen, [self.a])
 
 
 
@@ -591,7 +445,7 @@ class Shape(unittest.TestCase):
         import subprocess
         for uid in ('-1', '01', ' 1', '1.0', 'True', '+1', ''):
             done = subprocess.run([sys.executable, anchor.__file__, '--ci-owned', 'read',
-                                   '/owned', '/input', '501', 'a' * 64, uid, '0'],
+                                   '/owned', '/input', '501', 'a' * 64, uid, '0', '/manifest', 'b' * 64],
                                   env={**os.environ, 'CI': 'true', 'GITHUB_ACTIONS': 'true'},
                                   capture_output=True, text=True, timeout=10)
             self.assertNotEqual(done.returncode, 0)

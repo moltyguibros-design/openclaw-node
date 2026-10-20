@@ -65,21 +65,9 @@ CASES = (
     ('runtime-before-final', 'host_protected_journal_reader',
      "                    a.require(code['check']() == code['authority'], 'reader runtime changed')\n                    work.check()",
      '                    work.check()', 'Protected.test_final_runtime_check_is_required'),
-    ('code-exact-entries', 'host_capture_anchor', 'set(os.listdir(directory.fd)) == names', 'True',
-     'CodeClosure.test_extra_code_or_cache_entry_refuses_before_project_import'),
-    ('code-origin', 'host_capture_anchor',
-     "module is None or getattr(module, '__file__', None) == str(program.parent / (name + '.py'))", 'True',
-     'CodeClosure.test_wrong_preloaded_origin_refuses_before_importing_project_code'),
-    ('code-resolution', 'host_capture_anchor',
-     "found is not None and found.origin == str(program.parent / (name + '.py'))", 'True',
-     'CodeClosure.test_wrong_resolution_refuses_before_project_import'),
-    ('code-loaded-set', 'host_capture_anchor', 'observed == names', 'True',
-     'CodeClosure.test_changed_loaded_local_set_refuses'),
-    ('code-hash', 'host_capture_anchor', "item.read(True)[1] == hashes[name]", 'True',
-     'CodeClosure.test_source_digest_is_rechecked_not_just_metadata'),
     ('capture-current-uid', 'host_capture_anchor',
-     'authority = entry(root, capture, capture_uid, nonce, fixture)',
-     'authority = entry(root, capture, os.getuid(), nonce, fixture)',
+     'with approved_entry(root, capture, capture_uid, nonce, fixture,',
+     'with approved_entry(root, capture, os.getuid(), nonce, fixture,',
      'Protected.test_three_uid_roles_are_passed_without_swaps_or_current_uid_fallbacks'),
     ('guest-current-uid', 'host_protected_journal_reader', 'owner=guest_uid, writer_uid=writer_uid)',
      'owner=os.getuid(), writer_uid=writer_uid)',
@@ -94,12 +82,12 @@ CASES = (
      'owner=guest_uid, writer_uid=commit.preservation_journal.NATS_ROOT_UID)',
      'Protected.test_three_uid_roles_are_passed_without_swaps_or_current_uid_fallbacks'),
     *((name, 'host_capture_anchor',
-       'sys.modules[__name__], root, capture, capture_uid, nonce,\n                             guest_uid, writer_uid, authority, code)', new,
+       'sys.modules[__name__], root, capture, capture_uid, nonce,\n                                 guest_uid, writer_uid, authority, code)', new,
        'Protected.test_three_uid_roles_are_passed_without_swaps_or_current_uid_fallbacks') for name, new in (
-        ('swap-capture-guest', 'sys.modules[__name__], root, capture, guest_uid, nonce,\n                             capture_uid, writer_uid, authority, code)'),
-        ('swap-capture-writer', 'sys.modules[__name__], root, capture, writer_uid, nonce,\n                             guest_uid, capture_uid, authority, code)'),
-        ('swap-guest-writer', 'sys.modules[__name__], root, capture, capture_uid, nonce,\n                             writer_uid, guest_uid, authority, code)'),
-        ('capture-global-writer', "sys.modules[__name__], root, capture, code['modules']['preservation_journal'].NATS_ROOT_UID, nonce,\n                             guest_uid, writer_uid, authority, code)"))),
+        ('swap-capture-guest', 'sys.modules[__name__], root, capture, guest_uid, nonce,\n                                 capture_uid, writer_uid, authority, code)'),
+        ('swap-capture-writer', 'sys.modules[__name__], root, capture, writer_uid, nonce,\n                                 guest_uid, capture_uid, authority, code)'),
+        ('swap-guest-writer', 'sys.modules[__name__], root, capture, capture_uid, nonce,\n                                 writer_uid, guest_uid, authority, code)'),
+        ('capture-global-writer', "sys.modules[__name__], root, capture, code['modules']['preservation_journal'].NATS_ROOT_UID, nonce,\n                                 guest_uid, writer_uid, authority, code)"))),
     ('capture-scope', 'host_journal_mount',
      "capture.get('scope') == CAPTURE_SCOPE", 'True', 'Shape.test_shared_capture_record_enforces_scope_fixture_and_uuid'),
     ('capture-data-uuid', 'host_journal_mount',
@@ -119,7 +107,7 @@ def main():
     for name, module, old, new, target in CASES:
         source = (STEP / (module + '.py')).read_text()
         count = source.count(old)
-        if count != (2 if name == 'code-exact-entries' else 1):
+        if count != 1:
             raise RuntimeError((name, 'mutation anchor count', count))
         mutated = source.replace(old, new)
         code = ('import host_capture_anchor as a; import importlib; m=importlib.import_module(%r); '
