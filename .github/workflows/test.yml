@@ -22,6 +22,9 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - run: npm ci
+      - name: Install OS metadata tools for owned Stage0 fixtures
+        if: matrix.node-version == 22
+        run: sudo apt-get update -qq && sudo apt-get install -y acl attr e2fsprogs
       - name: Legacy NATS writer lock fixtures
         run: |
           PYTHONDONTWRITEBYTECODE=1 python3 test/test_nats_legacy_lock.py
@@ -115,6 +118,8 @@ jobs:
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_approved_release.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_release_publish.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_release_publish.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stage0_installer_auth.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_stage0_installer_auth.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_capture_anchor.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_frozen_owner_context.py
@@ -244,6 +249,19 @@ jobs:
           name: release-publication-linux-${{ github.sha }}
           path: ${{ runner.temp }}/release-publication.json
           if-no-files-found: error
+      - name: Verify inert installer authentication across distinct Linux owners
+        if: matrix.node-version == 22
+        run: |
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE CI=true GITHUB_ACTIONS=true OPENCLAW_STAGE0_AUTH_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            "$(command -v python3)" memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_stage0_installer_auth.py \
+            "$RUNNER_TEMP/stage0-installer-auth.json"
+      - name: Retain owned installer authentication observations
+        if: always() && matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage0-installer-auth-linux-${{ github.sha }}
+          path: ${{ runner.temp }}/stage0-installer-auth.json
+          if-no-files-found: error
       - name: Retain owned frozen owner-context report
         if: always() && matrix.node-version == 22
         uses: actions/upload-artifact@v4
@@ -350,6 +368,8 @@ jobs:
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_approved_release.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_release_publish.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_release_publish.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stage0_installer_auth.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_stage0_installer_auth.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_capture_anchor.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_frozen_owner_context.py
@@ -470,6 +490,11 @@ jobs:
         run: |
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_host_release_publish.py \
             "$RUNNER_TEMP/release-publication.json"
+      - name: Verify inert installer authentication across distinct macOS owners
+        run: |
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE CI=true GITHUB_ACTIONS=true OPENCLAW_STAGE0_AUTH_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_stage0_installer_auth.py \
+            "$RUNNER_TEMP/stage0-installer-auth.json"
       - name: Retain native observations even when the probe refuses
         if: always()
         uses: actions/upload-artifact@v4
@@ -482,6 +507,7 @@ jobs:
             ${{ runner.temp }}/frozen-owner-context.json
             ${{ runner.temp }}/protected-journal-reader.json
             ${{ runner.temp }}/release-publication.json
+            ${{ runner.temp }}/stage0-installer-auth.json
           if-no-files-found: error
       - name: Retain a failed reader's owned image for diagnosis
         if: failure()
