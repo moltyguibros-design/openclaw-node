@@ -3338,3 +3338,8 @@ Risks/limits: up to6 seconds of sequential post-failure monitoring delays cleanu
 
 
 D280 local proof:24 tests/12.749s,50 designated intended kills/23 controls, fresh normal+denied pair with one create each and six individually waited exit0/marker/no-force owners. Normal retains stream-leader INFO; denied retains three observed post-failure jsz projections after the create window, streams0/consumers0. Every bounded window is complete. Existing startup/503/client/later assertion/workflow source remains fixed except the intentional try wrapper and diagnostic additions. The first mutator run stopped because the missing-hook mutant hit the earlier one-request assertion; correcting its expected label yields50/50. Exact-source review and fresh CI are required; no gate closes.
+
+
+### 2026-10-19 22:43 EDT — D281 append-only timeout qualification
+
+Claude101 clears D280 source/proof and requires only a timing-wording correction. The earlier “existing2-second jsz request” and “up to6 seconds” do not specify whole-request or total elapsed limits: urllib timeout=2 applies per socket operation. Continued progress can extend one request and the pre-cleanup diagnostic delay beyond that nominal sum; the reviewer demonstrated4.54s on one valid slow loopback reply. D281 withdraws the hard-time reading in all five ledgers and this pre-audit without rewriting history. Request count/retained bytes stay bounded, but no end-to-end elapsed deadline is added or proved. Source/workflow are unchanged. Corrected-head documentation review and all-eight CI remain required; the row remains[A] and every production/parent gate stays held.
