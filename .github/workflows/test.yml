@@ -25,6 +25,14 @@ jobs:
       - name: Install OS metadata tools for owned Stage0 fixtures
         if: matrix.node-version == 22
         run: sudo apt-get update -qq && sudo apt-get install -y acl attr e2fsprogs
+      - name: Prepare inert installer authentication fixture parent
+        if: matrix.node-version == 22
+        run: |
+          stage0_test_parent="$(sudo -n /usr/bin/mktemp -d /var/lib/openclaw-stage0-tests-owned-XXXXXXXX)"
+          sudo -n /usr/bin/chown -- "$(id -u):$(id -g)" "$stage0_test_parent"
+          printf 'OPENCLAW_STAGE0_TEST_PARENT=%s\n' "$stage0_test_parent" >> "$GITHUB_ENV"
+          printf 'OPENCLAW_STAGE0_TEST_PARENT_DEV=%s\n' "$(/usr/bin/stat -c %d "$stage0_test_parent")" >> "$GITHUB_ENV"
+          printf 'OPENCLAW_STAGE0_TEST_PARENT_INO=%s\n' "$(/usr/bin/stat -c %i "$stage0_test_parent")" >> "$GITHUB_ENV"
       - name: Verify inert installer authentication and designated faults
         if: matrix.node-version == 22
         env:
@@ -32,6 +40,19 @@ jobs:
         run: |
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stage0_installer_auth.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_stage0_installer_auth.py
+          python3 - <<'PY'
+          import json,os,pathlib,stat,subprocess
+          parent=pathlib.Path(os.environ['OPENCLAW_STAGE0_TEST_PARENT']);info=parent.lstat()
+          assert parent.parent==pathlib.Path('/var/lib') and parent.name.startswith('openclaw-stage0-tests-owned-')
+          assert str(parent)==str(parent.resolve()) and stat.S_ISDIR(info.st_mode)
+          assert info.st_uid==os.getuid() and stat.S_IMODE(info.st_mode)==0o700
+          assert str(info.st_dev)==os.environ['OPENCLAW_STAGE0_TEST_PARENT_DEV']
+          assert str(info.st_ino)==os.environ['OPENCLAW_STAGE0_TEST_PARENT_INO']
+          assert not list(parent.iterdir())
+          subprocess.run(['/usr/bin/sudo','-n','/usr/bin/rmdir','--',str(parent)],check=True)
+          assert not parent.exists()
+          print(json.dumps({'owned_stage0_test_parent':str(parent),'device':info.st_dev,'inode':info.st_ino,'removed':True}))
+          PY
       - name: Verify inert installer authentication across distinct Linux owners
         if: matrix.node-version == 22
         run: |

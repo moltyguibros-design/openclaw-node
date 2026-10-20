@@ -86,6 +86,7 @@ def main():
         for case in ['honest', 'root-refusal', 'wrong-script-approval', 'wrong-installer-approval',
                      'wrong-manifest-approval', 'private-xattr', 'unexpected-acl',
                      'capture-denial', 'interrupted']:
+            acl_name = None
             base = pathlib.Path(tempfile.mkdtemp(prefix='openclaw-stage0-auth-owned-', dir=str(parent)))
             os.chmod(base, 0o700)
             os.chown(base, OPERATOR, OPERATOR)
@@ -108,9 +109,9 @@ def main():
                     os.setxattr(base / 'host_release_publish.py', 'user.openclaw.stage0', b'owned')
             if case == 'unexpected-acl':
                 if sys.platform == 'darwin':
-                    name = pwd.getpwuid(capture).pw_name
-                    assert pwd.getpwnam(name).pw_uid == capture and name and name.isascii() and all(c.isalnum() or c in '_-' for c in name)
-                    subprocess.run(['/bin/chmod', '+a', 'user:' + name + ' allow read', str(base / 'host_release_publish.py')], check=True)
+                    acl_name = pwd.getpwuid(capture).pw_name
+                    assert pwd.getpwnam(acl_name).pw_uid == capture and acl_name and acl_name.isascii() and all(c.isalnum() or c in '_-' for c in acl_name)
+                    subprocess.run(['/bin/chmod', '+a', 'user:' + acl_name + ' allow read', str(base / 'host_release_publish.py')], check=True)
                 else:
                     subprocess.run(['/usr/bin/setfacl', '-m', 'u:' + str(capture) + ':r,m::---', str(base / 'host_release_publish.py')], check=True)
             if case == 'capture-denial':
@@ -143,7 +144,7 @@ def main():
             for key in ('out', 'err'): observed[key] = base64.b64encode(observed[key]).decode()
             if case == 'unexpected-acl':
                 entry['acl_kind'] = 'granting Darwin ACE' if sys.platform == 'darwin' else 'named masked POSIX ACL (stricter refusal)'
-                entry['acl_principal'] = {'uid': capture, 'name': name if sys.platform == 'darwin' else None}
+                entry['acl_principal'] = {'uid': capture, 'name': acl_name}
             if case == 'capture-denial': entry['capture_access'] = denied
             result['cases'].append(entry)
             print(json.dumps({'case': case, 'rc': observed['rc'], 'worker_group_absent': observed['group_absent']}), flush=True)

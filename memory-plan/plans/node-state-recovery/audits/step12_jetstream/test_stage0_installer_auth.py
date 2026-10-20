@@ -208,7 +208,18 @@ def launch(base, expected_script, expected_installer, expected_manifest,
 
 class Fixture:
     def __init__(self):
-        parent = pathlib.Path(os.environ.get('GITHUB_WORKSPACE', str(pathlib.Path.home()))).resolve()
+        selected = os.environ.get('OPENCLAW_STAGE0_TEST_PARENT')
+        if selected is not None:
+            parent = pathlib.Path(selected)
+            info = parent.lstat()
+            assert os.environ.get('CI') == os.environ.get('GITHUB_ACTIONS') == 'true'
+            assert parent.parent == pathlib.Path('/var/lib') and parent.name.startswith('openclaw-stage0-tests-owned-')
+            assert str(parent) == str(parent.resolve()) and stat.S_ISDIR(info.st_mode)
+            assert info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) == 0o700
+            assert str(info.st_dev) == os.environ['OPENCLAW_STAGE0_TEST_PARENT_DEV']
+            assert str(info.st_ino) == os.environ['OPENCLAW_STAGE0_TEST_PARENT_INO']
+        else:
+            parent = pathlib.Path(os.environ.get('GITHUB_WORKSPACE', str(pathlib.Path.home()))).resolve()
         self.temporary = tempfile.TemporaryDirectory(prefix='openclaw-stage0-auth-owned-', dir=str(parent))
         self.base = pathlib.Path(self.temporary.name)
         os.chmod(self.base, 0o700)
@@ -428,7 +439,7 @@ class AuthenticationTests(unittest.TestCase):
         self.assertNotEqual(result['rc'], 0)
 
     def test_exact_arguments_roles_environment_and_flags(self):
-        args = ['--ci-owned', UUID, str(os.getuid()), '65534', str(self.fixture.base),
+        args = ['--ci-owned', UUID, str(os.getuid()), str(65534 if os.getuid() != 65534 else 65532), str(self.fixture.base),
                 sha(self.fixture.installer.read_bytes()), sha(self.fixture.manifest.read_bytes())]
         for value in [args + ['extra'], ['--other'] + args[1:], [args[0], 'other'] + args[2:]]:
             self.refused('arguments', arguments=value)
@@ -475,7 +486,8 @@ class AuthenticationTests(unittest.TestCase):
         self.assertTrue(result['waited'] and result['group_absent'])
 
     def test_exact_early_role_refusal_is_negative_not_shell_proof(self):
-        result = self.fixture.invoke(op_uid=65533, early_refusal_reason='roles', observation_delay=0.05)
+        other = 65533 if os.getuid() != 65533 else 65532
+        result = self.fixture.invoke(op_uid=other, early_refusal_reason='roles', observation_delay=0.05)
         self.assertEqual(result['rc'], 1, result)
         self.assertEqual(result['err'], b'installer authentication refused: roles\n')
         self.assertEqual(result['out'], b'')
