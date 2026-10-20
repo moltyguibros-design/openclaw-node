@@ -3343,3 +3343,8 @@ D280 local proof:24 tests/12.749s,50 designated intended kills/23 controls, fres
 ### 2026-10-19 22:43 EDT — D281 append-only timeout qualification
 
 Claude101 clears D280 source/proof and requires only a timing-wording correction. The earlier “existing2-second jsz request” and “up to6 seconds” do not specify whole-request or total elapsed limits: urllib timeout=2 applies per socket operation. Continued progress can extend one request and the pre-cleanup diagnostic delay beyond that nominal sum; the reviewer demonstrated4.54s on one valid slow loopback reply. D281 withdraws the hard-time reading in all five ledgers and this pre-audit without rewriting history. Request count/retained bytes stay bounded, but no end-to-end elapsed deadline is added or proved. Source/workflow are unchanged. Corrected-head documentation review and all-eight CI remain required; the row remains[A] and every production/parent gate stays held.
+
+
+### 2026-10-19 23:25 EDT — D282 first-create failure evidence receipt
+
+Only the owned timeout-evidence source prerequisite closes on24d32299, cumulative Claude101/103 and all-eight CI39360542036. Retained Linux/macOS JSON verifies failure-only post-create samples, INFO selection, one create per cohort and normal owned cleanup. Per-socket timeout semantics supersede the earlier D280 elapsed-time wording; no whole-request or total elapsed bound is added or proved. All original and newly observed natural causes and every broader recovery/resource gate remain open at v1.2-pre. This is six Markdown files only, with no executable change and no preclaim of its own review or CI.
