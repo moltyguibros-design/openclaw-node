@@ -82,7 +82,8 @@ def absent_group(pid):
 def launch(base, expected_script, expected_installer, expected_manifest,
            op_uid=None, capture_uid=None, arguments=None, env_values=None,
            shell_flags=None, start=START, observe=True, during=None, timeout=30,
-           user=None, group=None):
+           user=None, group=None, parent_environment=None, hold_stdin_open=False,
+           early_refusal_reason=None, observation_delay=0):
     base = pathlib.Path(base)
     path = base / 'stage0_installer_auth.sh'
     fd = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -105,15 +106,18 @@ def launch(base, expected_script, expected_installer, expected_manifest,
     command = ['/usr/bin/env', '-i'] + values + [SHELL] + flags + [str(path)] + arguments
     options = {} if user is None else {'user': user, 'group': group, 'extra_groups': []}
     worker = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, cwd='/', env={}, start_new_session=True,
+                              stderr=subprocess.PIPE, cwd='/', env=parent_environment or {}, start_new_session=True,
                               **options)
     begin = time.monotonic()
     observations = []
     seen = False
     failure = None
+    handshake_sent = False
     allowed_transients = {str(pathlib.Path(sys.executable).resolve()), '/usr/bin/env'}
     stdout = stderr = b''
     try:
+        if observation_delay:
+            time.sleep(observation_delay)
         while not seen and time.monotonic() - begin < 5:
             if worker.poll() is not None:
                 break
@@ -136,10 +140,21 @@ def launch(base, expected_script, expected_installer, expected_manifest,
             if worker.poll() is None:
                 raise RuntimeError('no final-shell observation')
         else:
-            worker.stdin.write(start)
-            worker.stdin.close()
-            worker.stdin = None
-            if during is not None:
+            try:
+                worker.stdin.write(start)
+                worker.stdin.flush()
+                if not hold_stdin_open:
+                    worker.stdin.close()
+                    worker.stdin = None
+                handshake_sent = True
+            except BrokenPipeError:
+                try:
+                    worker.stdin.close()
+                except BrokenPipeError:
+                    pass
+                worker.stdin = None
+                worker.wait(timeout=1)
+            if handshake_sent and during is not None:
                 during(worker)
         while worker.poll() is None:
             if time.monotonic() - begin >= timeout:
@@ -178,9 +193,16 @@ def launch(base, expected_script, expected_installer, expected_manifest,
     if not gone:
         RETAINED.add(str(base))
     assert gone, 'owned worker group unresolved; retain fixture'
+    early = (not seen or not handshake_sent) and early_refusal_reason is not None and (
+        worker.returncode == 1 and not stdout and
+        stderr == ('installer authentication refused: ' + early_refusal_reason + '\n').encode()
+        and failure is None)
+    if not seen and not early and failure is None:
+        failure = 'exited before final-shell observation'
     return {'rc': worker.returncode, 'out': stdout, 'err': stderr, 'worker': True,
             'pid': worker.pid, 'waited': True, 'group_absent': gone,
             'failure': failure, 'shell_observed': seen, 'executables': observations,
+            'handshake_sent': handshake_sent, 'early_refusal': early,
             'script_prehashed': True, 'argv': command, 'elapsed_s': time.monotonic() - begin}
 
 
@@ -220,8 +242,23 @@ class AuthenticationTests(unittest.TestCase):
         self.fixture = Fixture()
         self.addCleanup(self.fixture.cleanup)
 
-    def honest(self):
-        result = self.fixture.invoke()
+    def honest(self, **kw):
+        result = self.fixture.invoke(**kw)
+        if result['rc'] != 0 and sys.platform != 'darwin':
+            diagnostic = []
+            for path in list(reversed(self.fixture.base.parents)) + [self.fixture.base]:
+                if len(diagnostic) >= 64: break
+                try:
+                    done = subprocess.run(['/usr/bin/getfacl', '-cpn', '--absolute-names', str(path)],
+                                          env={}, capture_output=True, timeout=3)
+                except FileNotFoundError:
+                    diagnostic.append({'path': str(path), 'missing_tool': '/usr/bin/getfacl'})
+                    break
+                diagnostic.append({'path': str(path), 'rc': done.returncode,
+                                   'acl': done.stdout[:4096].decode(errors='replace'),
+                                   'record_truncated': len(done.stdout) > 4096,
+                                   'error': done.stderr[:256].decode(errors='replace')})
+            print('OWNED ACL DIAGNOSTIC ' + json.dumps(diagnostic, sort_keys=True), flush=True)
         self.assertIsNone(result.get('failure'), result)
         self.assertEqual(result['rc'], 0, result)
         self.assertEqual(result['out'], SUCCESS, result)
@@ -230,7 +267,10 @@ class AuthenticationTests(unittest.TestCase):
         return result
 
     def refused(self, reason=None, **kw):
+        if reason in ('arguments', 'roles', 'environment', 'approvals', 'path', 'fixture'):
+            kw.setdefault('early_refusal_reason', reason)
         result = self.fixture.invoke(**kw)
+        self.assertIsNone(result.get('failure'), result)
         self.assertNotEqual(result['rc'], 0, result)
         self.assertNotIn(SUCCESS, result['out'], result)
         if reason is not None:
@@ -318,7 +358,7 @@ class AuthenticationTests(unittest.TestCase):
         for value in variants:
             with self.subTest(value=value[:40]):
                 self.fixture.manifest.write_bytes(value)
-                self.refused()
+                self.refused('canonical' if b'\x00' in value else 'schema')
 
     def test_declared_size_and_actual_installer_bytes_are_required(self):
         original = self.fixture.installer.read_bytes()
@@ -349,11 +389,13 @@ class AuthenticationTests(unittest.TestCase):
         self.fixture.installer.unlink()
         os.mkfifo(self.fixture.installer, 0o600)
         result = launch(self.fixture.base, sha(self.fixture.script.read_bytes()), sha(raw), sha(self.fixture.manifest.read_bytes()))
+        self.assertIsNone(result['failure'], result)
         self.assertNotEqual(result['rc'], 0)
         self.assertLess(result['elapsed_s'], 15)
         self.fixture.installer.unlink()
         self.fixture.installer.mkdir(mode=0o600)
         result = launch(self.fixture.base, sha(self.fixture.script.read_bytes()), sha(raw), sha(self.fixture.manifest.read_bytes()))
+        self.assertIsNone(result['failure'], result)
         self.assertNotEqual(result['rc'], 0)
 
     def test_private_modes_and_writable_ancestors_refuse(self):
@@ -382,6 +424,7 @@ class AuthenticationTests(unittest.TestCase):
         (self.fixture.base / 'extra').unlink()
         self.fixture.manifest.unlink()
         result = launch(self.fixture.base, sha(self.fixture.script.read_bytes()), '0' * 64, '0' * 64)
+        self.assertIsNone(result['failure'], result)
         self.assertNotEqual(result['rc'], 0)
 
     def test_exact_arguments_roles_environment_and_flags(self):
@@ -389,9 +432,9 @@ class AuthenticationTests(unittest.TestCase):
                 sha(self.fixture.installer.read_bytes()), sha(self.fixture.manifest.read_bytes())]
         for value in [args + ['extra'], ['--other'] + args[1:], [args[0], 'other'] + args[2:]]:
             self.refused('arguments', arguments=value)
-        for index, value in [(2, '0'), (2, '0501'), (3, str(os.getuid())), (4, str(self.fixture.base) + '/..'), (5, 'A' * 64)]:
+        for index, value, reason in [(2, '0', 'roles'), (2, '0501', 'roles'), (3, str(os.getuid()), 'roles'), (4, str(self.fixture.base) + '/..', 'fixture'), (5, 'A' * 64, 'approvals')]:
             changed = args[:]; changed[index] = value
-            self.refused(arguments=changed)
+            self.refused(reason, arguments=changed)
         for values in [['GITHUB_ACTIONS=true', 'LC_ALL=C'], ['CI=true', 'GITHUB_ACTIONS=true', 'LC_ALL=C', 'UNKNOWN=x']]:
             self.refused('environment', env_values=values)
         self.refused('environment', shell_flags=['--noprofile', '--norc', '-p'])
@@ -402,14 +445,11 @@ class AuthenticationTests(unittest.TestCase):
         poison.write_text('printf BAD > "' + str(marker) + '"\n')
         self.addCleanup(lambda: marker.unlink(missing_ok=True))
         self.addCleanup(lambda: poison.unlink(missing_ok=True))
-        old = os.environ.get('BASH_ENV')
-        os.environ['BASH_ENV'] = str(poison)
-        try:
-            self.honest()
-        finally:
-            if old is None: os.environ.pop('BASH_ENV', None)
-            else: os.environ['BASH_ENV'] = old
+        result = self.fixture.invoke(parent_environment={'BASH_ENV': str(poison), 'UNKNOWN': 'fixture'})
         self.assertFalse(marker.exists())
+        self.assertIsNone(result['failure'], result)
+        self.assertEqual(result['rc'], 0, 'fixed launch did not clear inherited startup keys: ' + str(result))
+        self.assertEqual(result['out'], SUCCESS)
 
     def test_rendezvous_requires_exact_line_eof_and_observation(self):
         self.refused('rendezvous', start=b'wrong\n')
@@ -426,6 +466,22 @@ class AuthenticationTests(unittest.TestCase):
         self.assertTrue(result['waited'] and result['group_absent'])
         self.assertEqual(result['out'], b'')
         self.assertEqual(self.fixture.installer.read_bytes(), before)
+
+    def test_held_open_stdin_never_counts_as_eof(self):
+        result = self.fixture.invoke(hold_stdin_open=True, timeout=2)
+        self.assertEqual(result['rc'], -9, result)
+        self.assertEqual(result['failure'], 'owned worker deadline', result)
+        self.assertEqual(result['out'], b'', result)
+        self.assertTrue(result['waited'] and result['group_absent'])
+
+    def test_exact_early_role_refusal_is_negative_not_shell_proof(self):
+        result = self.fixture.invoke(op_uid=65533, early_refusal_reason='roles', observation_delay=0.05)
+        self.assertEqual(result['rc'], 1, result)
+        self.assertEqual(result['err'], b'installer authentication refused: roles\n')
+        self.assertEqual(result['out'], b'')
+        self.assertTrue(result['early_refusal'] and result['waited'] and result['group_absent'])
+        self.assertFalse(result['shell_observed'] or result['handshake_sent'])
+        self.assertIsNone(result['failure'])
 
     def test_observed_drift_before_final_hash_refuses(self):
         during = self.pause('[[ "$(hash_path "$manifest" "$manifest_record" 3 512)" == "$expected_manifest" ]] || refuse final-manifest')

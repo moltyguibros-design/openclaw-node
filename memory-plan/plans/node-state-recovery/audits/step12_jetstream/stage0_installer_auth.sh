@@ -27,7 +27,7 @@ start=
 IFS= read -r -n 64 -t 10 start || refuse rendezvous
 [[ "$start" == openclaw-stage0-owned-start-v1 ]] || refuse rendezvous
 extra=
-if IFS= read -r -n 1 -t 1 extra; then refuse rendezvous; else eof_status=$?; fi
+if IFS= read -r -n 1 extra; then refuse rendezvous; else eof_status=$?; fi
 [[ $eof_status == 1 && -z "$extra" ]] || refuse rendezvous
 platform=$(/usr/bin/uname -s) || refuse platform
 case "$platform" in Darwin) ls_tool=/bin/ls;; Linux) ls_tool=/usr/bin/ls;; *) refuse platform;; esac

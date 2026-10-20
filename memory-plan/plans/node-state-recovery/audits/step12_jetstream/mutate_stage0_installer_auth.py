@@ -39,6 +39,8 @@ CASES = (
      'test_cooperative_budget_refuses_before_success'),
     ('rendezvous', '[[ "$start" == openclaw-stage0-owned-start-v1 ]] || refuse rendezvous', ':',
      'test_rendezvous_requires_exact_line_eof_and_observation'),
+    ('eof', 'if IFS= read -r -n 1 extra; then refuse rendezvous; else eof_status=$?; fi', 'eof_status=1; extra=',
+     'test_held_open_stdin_never_counts_as_eof'),
     ('execute-source', "builtin printf 'installer-auth-observed-v1\\n'", '. "$installer"\nbuiltin printf \'installer-auth-observed-v1\\n\'',
      'test_approved_polyglot_never_executes_under_any_interpreter'),
     ('execute-eval', "builtin printf 'installer-auth-observed-v1\\n'", 'eval "$(/usr/bin/head -c 131072 "$installer")"\nbuiltin printf \'installer-auth-observed-v1\\n\'',
@@ -77,14 +79,17 @@ def main():
             check([sys.executable, str(STEP / 'test_stage0_installer_auth.py'), 'AuthenticationTests.' + test], varied, intended, name)
             print('KILLED ' + name + ' at AuthenticationTests.' + test, flush=True)
         tests = (STEP / 'test_stage0_installer_auth.py').read_text()
-        old = 'if native_hash(raw, user=user, group=group) != expected_script:'
-        assert tests.count(old) == 1
         target = pathlib.Path(temporary) / 'test_stage0_installer_auth.py'
-        target.write_text(tests.replace('STEP = pathlib.Path(__file__).resolve().parent', 'STEP = pathlib.Path(' + repr(str(STEP)) + ')').replace(old, 'if False:'))
-        check([sys.executable, str(target), 'AuthenticationTests.test_external_script_approval_precedes_any_script_text'], env,
-              'BAD unapproved script was executed', 'external-prehash')
-        print('KILLED external-prehash at AuthenticationTests.test_external_script_approval_precedes_any_script_text', flush=True)
-    print(str(len(CASES) + 1) + ' intended-assertion Stage0 authentication kills', flush=True)
+        for name, old, new, test, assertion in [
+            ('external-prehash', 'if native_hash(raw, user=user, group=group) != expected_script:', 'if False:',
+             'test_external_script_approval_precedes_any_script_text', 'BAD unapproved script was executed'),
+            ('launch-env', "command = ['/usr/bin/env', '-i']", "command = ['/usr/bin/env']",
+             'test_clean_launch_discards_startup_environment', 'fixed launch did not clear inherited startup keys')]:
+            assert tests.count(old) == 1
+            target.write_text(tests.replace('STEP = pathlib.Path(__file__).resolve().parent', 'STEP = pathlib.Path(' + repr(str(STEP)) + ')').replace(old, new))
+            check([sys.executable, str(target), 'AuthenticationTests.' + test], env, assertion, name)
+            print('KILLED ' + name + ' at AuthenticationTests.' + test, flush=True)
+    print(str(len(CASES) + 2) + ' intended-assertion Stage0 authentication kills', flush=True)
 
 
 if __name__ == '__main__':
