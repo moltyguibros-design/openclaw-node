@@ -3348,3 +3348,19 @@ Claude101 clears D280 source/proof and requires only a timing-wording correction
 ### 2026-10-19 23:25 EDT — D282 first-create failure evidence receipt
 
 Only the owned timeout-evidence source prerequisite closes on24d32299, cumulative Claude101/103 and all-eight CI39360542036. Retained Linux/macOS JSON verifies failure-only post-create samples, INFO selection, one create per cohort and normal owned cleanup. Per-socket timeout semantics supersede the earlier D280 elapsed-time wording; no whole-request or total elapsed bound is added or proved. All original and newly observed natural causes and every broader recovery/resource gate remain open at v1.2-pre. This is six Markdown files only, with no executable change and no preclaim of its own review or CI.
+
+
+### 2026-10-19 23:43 EDT — D283 extraction source-pointer reconciliation
+
+§0 Micro re-orient: step1.2 and protected acceptance remain[A]/v1.2-pre; B6–B9 held.
+D282 is reviewed clear by Claude105; its own CI39364237022 is still incomplete.
+Claude107 traces the existing extraction callers at exacte115f84b and finds no missing consumer.
+The open extraction pointer conflates delivered owned source with real-window provenance.
+Reconcile that pointer without selecting optional coverage or another diagnostic as B5 progress.
+Every operational, resource, acceptance and unresolved-cause gate remains separate.
+
+Needs pre-screen: D191/D205/D259/P/Q sources and native workflow consumers exist. Current executable/workflow/VERSION bytes equal24d32299, whose39360542036 run is independently re-read as all-eight success at attempt1. Claude107 traces stopped_journal_inputs.read_inputs/verify_stopped_journal and Q's verify_stopped_bytes consumer, the native intact/corrupt/pending/unknown/changed-config controls and the current workflow. This is prior owned source proof, not B3 origin, installed authority or B8 acceptance. No BLOCKED.md is present in this silo.
+
+§6 deltas: six Markdown ledgers only. Reconcile the current extraction row and its Goal/Needs/Feeds/Verify wording as owned source satisfied; retain protected B3 and real-window requirements under B3/protected acceptance. Change only the B5 frontier owner pointer, then append the same D283 explanation to the five standard ledgers. Prior decision/evidence blocks, every other status, VERSION and all executables/workflow stay fixed. Do not declare all remaining integration code complete: full held/process integration, durable admission/manual restoration and D175 remain separately open and need their own bounded contract and physical proof. T3 and conditional measurement work remain open carry-forwards, not the next required recovery prerequisite.
+
+Verify: plan lint, exact allowed-diff/history-prefix/row/frontier-cell checks and independent immutable documentation review. The original R3 repair/natural trigger and later TIMEOUT/peer-offline causes stay unproved. No source test, elevation, root suite, local native image, launchd, VM, production service, timer or NATS history operation is needed or authorized by this reconciliation. Its own future review/CI is not preclaimed.
