@@ -3481,3 +3481,17 @@ Run39399768267 Linux22 job118551278903 fails the new33-test harness at09:22:09UT
 
 
 Claude145 independently recomputes all four f3a5d324 artifact bindings, reproduces33 tests/32 designated kills as uid65534 on a clean export/Python3.12, and finds no publication-logic defect. It requires S1/S2 claim corrections: qualify both the retained report and D291's claim about capture denial as PRIVATE-FIXTURE-ANCESTOR denial, not observed independent leaf/bundle denial; bundle owner/mode/ACL protections are metadata-checked. Keep the existing private fixture layout/CLI and qualify the report instead of adding another installation layout. State that a capture-writable payload permits its owner to force a same-release denial/fence before OR after rename despite intact approved output bytes; no availability guarantee follows. Carry the residual into B6, with actual use requiring prepared payload/ancestors outside capture write authority. Add only that clause to B6's evidence cell, preserving its prior text, all statuses and other gates. A publisher source change is not required or made. These report/limit corrections and the CI fixture-location regression remain one publication-proof correction; all optional coverage remains qualified rather than expanded.
+
+
+### 2026-10-20 06:24 EDT — D293 publication source-proof receipt contract
+
+Micro re-orient: recovery1.2/protected acceptance stay[A]/v1.2-pre; one publication source gate is being verified.
+D291 supplies the core; D292 qualifies S1/S2 and fixes CI's redirected-HOME fixture selection.
+Claude147 clears exact6d1a7535; own run39401186252 now completes all8 fresh jobs successfully at attempt1.
+Both downloaded publication reports match approved source bindings and complete their declared cases/worker/fixture accounting.
+This documentation closes only the owned publication source prerequisite and feeds later authenticated Stage0/installer work.
+No host installation, production operation or parent recovery acceptance follows.
+
+Needs pre-screen: clean/pushed6d1a753568be11b0d771e0148926ea2979d234d2, cumulative Claude145/147 source review, run39401186252 completed success/all8 fresh attempt1, source/CI merge whole-tree equality, actual Linux/macOS artifact/report hashes and complete worker/fixture observations all exist and are checked. Linux/macOS legacy logs contain34 controls and all32 designated intended kills. Old f3a5's Linux harness failure and unchanged Q180-second timeout are retained; that run is cancelled/excluded, not repaired or substituted. Q's later8-case success does not explain the earlier timeout.
+
+§6 delta: this pre-audit, identical D293 appends in DECISIONS/COMPONENT_REGISTRY/INVENTORY/RECOVERY_FRONTIER/AUDIT_POST, B5-release-publication-source[A]→[x] only, and its current B5 owner prefix. Keep the reconciliation[ ] contract, B6 availability clause and all other statuses/contracts/cells/old blocks/VERSION fixed. Change no source, test, probe, workflow or other non-Markdown artifact. Verify exact source/whole-tree equality to parent, five append blocks and permitted row/cell boundaries, report/log bindings and plan lint, then immutable receipt review and its own current-head CI. Neither that future review nor this receipt's own CI is preclaimed. Do not repeat tests or host/native probes for the documentation.
