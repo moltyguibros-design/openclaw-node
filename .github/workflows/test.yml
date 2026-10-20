@@ -25,6 +25,24 @@ jobs:
       - name: Install OS metadata tools for owned Stage0 fixtures
         if: matrix.node-version == 22
         run: sudo apt-get update -qq && sudo apt-get install -y acl attr e2fsprogs
+      - name: Characterize CI audit identity without admission
+        if: matrix.node-version == 22
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENCLAW_IDENTITY_JOB_NAME: "unit-tests (22)"
+          OPENCLAW_IDENTITY_CANARY: "non-secret-audit-canary-20261020"
+        run: |
+          identity_job_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" --jq '.jobs[] | select(.name == "unit-tests (22)") | .id')"
+          "$(command -v python3)" -I -S -B memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_ci_audit_identity.py
+          "$(command -v python3)" -I -S -B memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_ci_audit_identity.py --ci-audit-probe 00000000-0000-0000-0000-000000000003 "$RUNNER_TEMP/ci-audit-identity.json" "$identity_job_id"
+      - name: Retain record-only CI audit identity
+        if: always() && matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-audit-identity-linux-${{ github.sha }}
+          path: ${{ runner.temp }}/ci-audit-identity.json
+          if-no-files-found: error
       - name: Verify inert root-copy local controls
         if: matrix.node-version == 22
         env:
@@ -605,6 +623,23 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Characterize CI audit identity without admission
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENCLAW_IDENTITY_JOB_NAME: "macos-process-census"
+          OPENCLAW_IDENTITY_CANARY: "non-secret-audit-canary-20261020"
+        run: |
+          identity_job_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" --jq '.jobs[] | select(.name == "macos-process-census") | .id')"
+          /usr/bin/python3 -I -S -B memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_ci_audit_identity.py
+          /usr/bin/python3 -I -S -B memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_ci_audit_identity.py --ci-audit-probe 00000000-0000-0000-0000-000000000003 "$RUNNER_TEMP/ci-audit-identity.json" "$identity_job_id"
+      - name: Retain record-only CI audit identity
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-audit-identity-macos-${{ github.sha }}
+          path: ${{ runner.temp }}/ci-audit-identity.json
+          if-no-files-found: error
       - name: Verify inert root-copy local controls
         env:
           PYTHONDONTWRITEBYTECODE: "1"
