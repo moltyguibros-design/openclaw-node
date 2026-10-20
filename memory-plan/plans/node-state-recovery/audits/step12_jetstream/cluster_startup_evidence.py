@@ -12,6 +12,7 @@ LINE = 1024
 REPORT = 262144
 STARTUP = ('Route connection created', 'Self is new JetStream cluster metadata leader',
            'JetStream cluster new metadata leader:')
+CREATE_INFO = STARTUP + ('JetStream cluster new stream leader for ',)
 
 
 def log_window(path, start, end=None, *, startup=False):
@@ -26,7 +27,8 @@ def log_window(path, start, end=None, *, startup=False):
         if startup:
             if '[INF]' not in line or not any(term in line for term in STARTUP):
                 continue
-        elif 'Peer selection:' not in line:
+        elif ('Peer selection:' not in line and not
+              ('[INF]' in line and any(term in line for term in CREATE_INFO))):
             continue
         clipped |= len(line) > LINE
         lines.append(line[:LINE])
@@ -83,7 +85,7 @@ class StartupEvidence:
         self.data = {'schema': SCHEMA, 'scope': 'owned three-member fixture; diagnostic only',
                      'debug': True, 'phase': 'startup', 'ports': ports, 'accepted': None,
                      'createInvocations': 0, 'clients': {}, 'selector': [], 'startup': [],
-                     'owners': [], 'diagnosticErrors': []}
+                     'postFailure': None, 'owners': [], 'diagnosticErrors': []}
 
     def observe(self, key, read):
         try:
@@ -109,6 +111,28 @@ class StartupEvidence:
                     'jsObserved': js is not None, 'routesObserved': routes is not None,
                     'members': members}
         self.observe(key, project)
+
+    def post_failure(self, read):
+        def project():
+            members = []
+            for i in range(3):
+                row = {'name': f'owned-raft-{i}', 'observed': False, 'startedAt': time.time()}
+                try:
+                    report = read(i)
+                    meta = report.get('meta_cluster', {})
+                    row.update({'observed': True, 'serverId': report.get('server_id'),
+                        'now': report.get('now'), 'streams': report.get('streams'),
+                        'consumers': report.get('consumers'), 'leader': meta.get('leader'),
+                        'clusterSize': meta.get('cluster_size'),
+                        'replicas': [{key: peer.get(key) for key in ('name', 'current', 'offline', 'lag')}
+                                     for peer in meta.get('replicas', [])[:3]]})
+                except Exception as error:
+                    row['error'] = type(error).__name__
+                    self.data['diagnosticErrors'].append(f'postFailure member{i}: ' + type(error).__name__)
+                row['endedAt'] = time.time()
+                members.append(row)
+            return {'source': 'after failed create; sequential jsz samples', 'members': members}
+        self.observe('postFailure', project)
 
     def client(self, action, result):
         def parse():
@@ -197,6 +221,7 @@ class StartupEvidence:
                 'schema': SCHEMA, 'phase': self.data['phase'], 'passed': self.data['passed'],
                 'accepted': self.data['accepted'], 'createInvocations': self.data['createInvocations'],
                 'create': self.data['clients'].get('create'),
+                'postFailure': self.data['postFailure'],
                 'selectorCounts': [len(row['lines']) for row in self.data['selector']],
                 'owners': self.data['owners'], 'diagnosticErrors': self.data['diagnosticErrors']})
             print('preservation-cluster-startup: ' + json.dumps(summary))

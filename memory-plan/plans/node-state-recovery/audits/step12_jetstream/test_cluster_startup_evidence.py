@@ -123,9 +123,24 @@ class Portable(unittest.TestCase):
         startup = evidence.log_window(p, 0, startup=True)
         selector = evidence.log_window(p, 0)
         self.assertEqual(startup['lines'], ['[INF] Route connection created'], 'only verified INFO messages belong in startup')
-        self.assertEqual(len(selector['lines']), 1, 'only selector messages belong in create windows')
-        self.assertEqual(len(selector['lines'][0]), 1024, 'selector lines must be bounded')
+        self.assertEqual(len(selector['lines']), 2, 'only selector and verified INFO belong in create windows')
+        self.assertEqual(len(selector['lines'][-1]), 1024, 'selector lines must be bounded')
         self.assertFalse(selector['complete'], 'clipped lines must mark the window incomplete')
+
+    def test_create_info_is_retained_only_at_info_level_inside_the_window(self):
+        e = self.recorder()
+        messages = list(evidence.STARTUP) + ['JetStream cluster new stream leader for \'$G > HISTORY\'']
+        for i in range(3):
+            (self.root/f'server-{i}.log').write_text('[INF] ' + messages[-1] + '\n')
+        with e.create_window():
+            with (self.root/'server-1.log').open('a') as handle:
+                for message in messages:
+                    handle.write('[DBG] ' + message + '\n[INF] ' + message + '\n')
+                handle.write('[INF] Server Exiting\nconfig owned-password\n')
+        expected = ['[INF] ' + message for message in messages]
+        self.assertEqual([r['lines'] for r in e.data['selector']], [[], expected, []],
+                         'create windows must retain only current verified INFO and selector lines')
+        self.assertTrue(all(r['complete'] for r in e.data['selector']))
 
     def test_window_byte_bound(self):
         p = self.root/'log'; p.write_bytes(b'x' * (evidence.WINDOW + 1))
@@ -279,6 +294,95 @@ class Portable(unittest.TestCase):
         self.assertEqual(str(caught),'owned cluster failed readiness','readiness primary must survive cleanup failure')
         self.assertTrue(any(row['error'] for row in case.evidence.data['owners']))
 
+    def create_case(self, *, failed=True, refused_member=None, stuck=None):
+        case = cluster.Cluster()
+        created = False
+        primary_at_sample = []
+        owners = []
+        later = RuntimeError('after successful create')
+        def start(*args, **kwargs):
+            owner = Owner(len(owners), self.calls, len(owners) == stuck)
+            owners.append((owner, kwargs['stdout']))
+            kwargs['stdout'].write(b'[INF] Server Exiting\n')
+            return owner
+        def run(*args, **kwargs):
+            nonlocal created
+            if args[0][-1] == '--version':
+                return SimpleNamespace(stdout='nats-server: v2.12.6\n')
+            action = kwargs['env']['OWNED_ACTION']
+            self.calls.append(action)
+            created |= action == 'create'
+            if action == 'create' and failed:
+                return SimpleNamespace(returncode=1, stdout='', stderr=json.dumps({
+                    'stage': 'stream-add', 'code': 'TIMEOUT', 'streamAddAttempts': 1}))
+            return SimpleNamespace(returncode=0, stderr='', stdout=json.dumps({'leader': 'owned-raft-0'}))
+        def read(port, path):
+            i = case.evidence.data['ports'].index(port) // 3
+            if created:
+                if not failed:
+                    raise later
+                self.calls.append(('post', i))
+                primary_at_sample.append(sys.exc_info()[1])
+                self.assertEqual(path, '/jsz', 'post-failure observations must be jsz only')
+                self.assertIn('createEndedAt', case.evidence.data, 'post-failure reads must follow the create window')
+                self.assertEqual(len(case.evidence.data['selector']), 3,
+                                 'post-failure reads must follow the create window')
+                self.assertFalse(any(isinstance(c, tuple) and len(c) > 1 and c[1] == 'term' for c in self.calls),
+                                 'post-failure reads must precede cleanup')
+                if i == refused_member:
+                    raise Refused('injected monitor refusal')
+            if path == '/routez':
+                return {'routes': [{'remote_id': str(j)} for j in range(3) if j != i]}
+            return {'server_id': str(i), 'now': f'sample-{i}', 'streams': 1 if created else 0,
+                    'meta_cluster': {'leader': 'owned-raft-0', 'cluster_size': 3},
+                    'not_allowed': 'raw data must be dropped'}
+        with patch.object(cluster.tempfile, 'mkdtemp', return_value=str(self.root)), \
+             patch.object(cluster.subprocess, 'Popen', side_effect=start), \
+             patch.object(cluster.subprocess, 'run', side_effect=run), \
+             patch.object(cluster, 'http_json', side_effect=read):
+            caught = None
+            try:
+                case.test_stream_and_consumer_groups_and_real_stream_election()
+            except Exception as error:
+                caught = error
+        return case, caught, primary_at_sample, later
+
+    def test_failed_create_records_three_one_shot_samples_before_cleanup(self):
+        case, caught, primary, _ = self.create_case()
+        self.assertIsInstance(caught, AssertionError)
+        self.assertEqual([c for c in self.calls if isinstance(c, tuple) and c[0] == 'post'],
+                         [('post', 0), ('post', 1), ('post', 2)], 'one post-failure request per member is required')
+        self.assertTrue(all(p is caught for p in primary), 'post-failure evidence must preserve the identical primary')
+        row = case.evidence.data['postFailure']
+        self.assertIsInstance(row, dict, 'failed creates must retain post-failure observations')
+        self.assertEqual(len(row['members']), 3)
+        self.assertTrue(all(m['observed'] for m in row['members']), 'successful post-failure samples must be observed')
+        self.assertEqual([m['streams'] for m in row['members']], [1, 1, 1], 'post-failure stream counts must be retained')
+        self.assertEqual([m['now'] for m in row['members']], ['sample-0', 'sample-1', 'sample-2'])
+        self.assertTrue(all(m['startedAt'] <= m['endedAt'] for m in row['members']))
+        self.assertNotIn('not_allowed', json.dumps(row), 'post-failure projection must drop raw fields')
+        self.assertTrue(all(o['reaped'] and o['exitCode'] == 0 for o in case.evidence.data['owners']))
+
+    def test_post_failure_refusal_keeps_primary_and_attempts_remaining_members(self):
+        case, caught, primary, _ = self.create_case(refused_member=1, stuck=1)
+        self.assertIsInstance(caught, AssertionError)
+        self.assertTrue(all(p is caught for p in primary), 'post-failure evidence must preserve the identical primary')
+        rows = case.evidence.data['postFailure']['members']
+        self.assertEqual([r['observed'] for r in rows], [True, False, True],
+                         'a refused member must stay unknown without skipping later members')
+        self.assertEqual(rows[1]['error'], 'Refused')
+        self.assertEqual(len(case.evidence.data['owners']), 3)
+        self.assertTrue(any(not o['reaped'] for o in case.evidence.data['owners']))
+        self.assertTrue(all(o['reaped'] for o in case.evidence.data['owners'] if o['pid'] != 1))
+        self.assertTrue(case.evidence.data['diagnosticErrors'])
+
+    def test_successful_create_does_not_observe_post_failure(self):
+        case, caught, _, later = self.create_case(failed=False)
+        self.assertIs(caught, later)
+        self.assertIsNone(case.evidence.data['postFailure'], 'successful creates must not add monitor requests')
+        self.assertFalse(any(isinstance(c, tuple) and c[0] == 'post' for c in self.calls))
+        self.assertTrue(all(o['reaped'] for o in case.evidence.data['owners']))
+
     def test_timeout_driver_owns_session_and_escalates_group(self):
         from unittest.mock import Mock
         proc=SimpleNamespace(pid=12345,returncode=-9,poll=lambda:-9,
@@ -382,9 +486,14 @@ time.sleep(60)
         self.assertEqual(source.count('await jm.streams.add('),1,'one stream create must stay fixed')
         self.assertEqual(source.count("client('create')"),1,'one Python create invocation must stay fixed')
         self.assertIn("""            evidence.accepted(js, routes)
-            with evidence.create_window():
-                creation = client('create')
+            try:
+                with evidence.create_window():
+                    creation = client('create')
 """,source,'the accepted-to-create boundary must stay fixed')
+        self.assertIn("""            except Exception:
+                evidence.post_failure(lambda i: http_json(ports[i*3+1], '/jsz'))
+                raise
+""",source,'post-failure requests must remain wrapped and one-shot')
         self.assertIn("""                if isinstance(error, dict) and error.get('stage') == 'account-info' and error.get('code') == '503':
                     evidence.data['startup503Count'] = evidence.data.get('startup503Count', 0) + 1
                     evidence.observe('startupApiRefusal', lambda: evidence.data['clients'].get(action, {'unparsed': True}))
@@ -400,7 +509,7 @@ time.sleep(60)
                 print('preservation-cluster-startup: evidence unavailable; primary preserved')
 """,source,'the fixture finally wrapper must preserve primary and green failures')
         boundary=source[source.index('js = routes = None'):source.index("creation = client('create')")+len("creation = client('create')")]
-        self.assertEqual(hashlib.sha256(boundary.encode()).hexdigest(), '096044df8c47f7bb2c66565bfdb6d1de3f86359f209c87379b953280aae8c5b1',
+        self.assertEqual(hashlib.sha256(boundary.encode()).hexdigest(), '02352af3a10474f7ec7e076998379829fb0b63cd78095f029a20a562365fa729',
                          'the continuous startup-to-create boundary must stay fixed')
         branch=source[source.index('if result.returncode and startup:'):source.index('self.assertEqual(result.returncode')]
         self.assertEqual(hashlib.sha256(branch.encode()).hexdigest(), '41ff2211867734d5f7967739dc38e7644d03fad62c8d568b01ce0e709a9f3554',
@@ -441,10 +550,15 @@ class OwnedPair(unittest.TestCase):
                 if name=='normal':
                     self.assertEqual(result.returncode,0,result.stderr)
                     self.assertTrue(row['passed'])
+                    self.assertIsNone(row['postFailure'])
+                    self.assertTrue(any('JetStream cluster new stream leader for ' in line
+                                        for window in row['selector'] for line in window['lines']))
                 else:
                     self.assertEqual(result.returncode,1)
                     self.assertEqual(row['clients']['create']['stage'],'stream-add')
                     self.assertEqual(row['clients']['create']['api_error']['err_code'],10005)
+                    self.assertEqual(len(row['postFailure']['members']),3)
+                    self.assertTrue(all(member['observed'] for member in row['postFailure']['members']))
                     leader=row['accepted']['members'][0]['leader']
                     lines=next(window['lines'] for window in row['selector'] if window['name']==leader)
                     self.assertTrue(any('reason: offline' in line for line in lines))

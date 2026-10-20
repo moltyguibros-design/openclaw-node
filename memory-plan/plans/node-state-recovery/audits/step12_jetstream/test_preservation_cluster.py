@@ -174,8 +174,12 @@ const connected=()=>nc?{name:nc.info.server_name,id:nc.info.server_id}:null;
                                   source='last samples; possibly from different iterations')
                 self.fail('owned cluster failed readiness')
             evidence.accepted(js, routes)
-            with evidence.create_window():
-                creation = client('create')
+            try:
+                with evidence.create_window():
+                    creation = client('create')
+            except Exception:
+                evidence.post_failure(lambda i: http_json(ports[i*3+1], '/jsz'))
+                raise
             leader = int(creation['leader'].removeprefix('owned-raft-'))
             self.assertIn(leader, range(3))
             deadline = time.monotonic() + 5
