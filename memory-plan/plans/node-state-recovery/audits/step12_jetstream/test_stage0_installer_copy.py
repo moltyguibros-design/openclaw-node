@@ -81,7 +81,7 @@ def preflight(code, expected):
             assert not rows if path in (code, code.parent) else all(re.fullmatch(r'\s*\d+: (user|group):[a-zA-Z0-9_-]+ deny [a-z_,]+', line) for line in rows)
             if path in (code, code.parent): assert not a['xattrs']
         else:
-            rows = a['acl'].splitlines()
+            rows = a['acl'].rstrip('\n').splitlines()
             assert len(rows) == 3 and all(line.startswith(('user::', 'group::', 'other::')) for line in rows)
             assert set(a['flags'].split()[0]) <= set('-e')
             if path in (code, code.parent): assert not a['xattrs']
@@ -285,6 +285,7 @@ class NativeTests(unittest.TestCase):
         LocalTests().test_no_implicit_shell_temporary_files()
 
     def refused(self, result, reason=None):
+        self.assertTrue(result['worker'], 'unexpected pre-exec refusal: '+repr(result))
         self.assertIsNone(result['failure'], result)
         self.assertNotEqual(result['rc'], 0, 'invalid root copy was accepted')
         self.assertEqual(result['out'], b'', result)
@@ -462,7 +463,7 @@ class NativeTests(unittest.TestCase):
                 if hazard == 'fifo':
                     self.assertEqual(result['rc'], -9); self.assertTrue(result.get('watchdog_killed'))
                     self.assertEqual(result['out'], b'')
-                else: self.refused(result, 'empty-file')
+                else: self.refused(result, 'mapping')
                 self.assertTrue(f.pending.exists())
 
     def test_interruption_retains_and_blocks(self):
