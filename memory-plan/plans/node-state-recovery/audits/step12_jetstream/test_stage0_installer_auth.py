@@ -479,11 +479,59 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(self.fixture.installer.read_bytes(), before)
 
     def test_held_open_stdin_never_counts_as_eof(self):
-        result = self.fixture.invoke(hold_stdin_open=True, timeout=2)
-        self.assertEqual(result['rc'], -9, result)
-        self.assertEqual(result['failure'], 'owned worker deadline', result)
-        self.assertEqual(result['out'], b'', result)
-        self.assertTrue(result['waited'] and result['group_absent'])
+        ready = self.fixture.base.parent / (self.fixture.base.name + '-eof-ready')
+        self.addCleanup(lambda: ready.unlink(missing_ok=True))
+        start_guard = '[[ "$start" == openclaw-stage0-owned-start-v1 ]] || refuse rendezvous'
+        eof_guard = '[[ $eof_status == 1 && -z "$extra" ]] || refuse rendezvous'
+        raw = self.fixture.script.read_text()
+        self.assertEqual(raw.count(start_guard), 1)
+        self.assertEqual(raw.count(eof_guard), 1)
+        variant = raw.replace(start_guard, start_guard + '\nbuiltin printf ready > "' + str(ready) + '"', 1)
+        variant = variant.replace(eof_guard, eof_guard + "\nbuiltin printf 'eof-fixture-crossed-v1\\n'\nexit 0", 1)
+        self.fixture.script.write_text(variant)
+        reference = self.fixture.invoke()
+        self.assertIsNone(reference['failure'], reference)
+        self.assertTrue(ready.exists(), 'closed-stdin synchronization fixture never reached ready')
+        self.assertEqual(reference['rc'], 0, reference)
+        self.assertEqual(reference['out'], b'eof-fixture-crossed-v1\n', reference)
+        self.assertEqual(reference['err'], b'', reference)
+        self.assertTrue(reference['script_prehashed'] and reference['shell_observed']
+                        and reference['handshake_sent'] and reference['waited'] and reference['group_absent'])
+        ready.unlink()
+        observed = {'ready': False, 'byte_sent': False, 'already_exited': False, 'broken_pipe': False}
+
+        def late_byte(worker):
+            deadline = time.monotonic() + 10
+            while not ready.exists() and time.monotonic() < deadline and worker.poll() is None:
+                time.sleep(0.005)
+            observed['ready'] = ready.exists()
+            if not observed['ready']:
+                return
+            time.sleep(2)
+            if worker.poll() is not None:
+                observed['already_exited'] = True
+                return
+            try:
+                worker.stdin.write(b'X')
+                worker.stdin.flush()
+                observed['byte_sent'] = True
+            except BrokenPipeError:
+                observed['broken_pipe'] = True
+                try:
+                    worker.stdin.close()
+                except BrokenPipeError:
+                    pass
+                worker.stdin = None
+
+        result = self.fixture.invoke(hold_stdin_open=True, during=late_byte)
+        self.assertIsNone(result['failure'], result)
+        self.assertTrue(observed['ready'], 'held-open synchronization fixture never reached ready')
+        self.assertEqual(result['out'], b'', 'held-open EOF guard was bypassed')
+        self.assertTrue(observed['byte_sent'], observed)
+        self.assertEqual(result['rc'], 1, result)
+        self.assertEqual(result['err'], b'installer authentication refused: rendezvous\n', result)
+        self.assertTrue(result['script_prehashed'] and result['shell_observed']
+                        and result['handshake_sent'] and result['waited'] and result['group_absent'])
 
     def test_exact_early_role_refusal_is_negative_not_shell_proof(self):
         other = 65533 if os.getuid() != 65533 else 65532

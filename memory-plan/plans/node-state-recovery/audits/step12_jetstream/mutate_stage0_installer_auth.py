@@ -76,6 +76,8 @@ def main():
             path.write_text(script.replace(old, new))
             varied = dict(env, OPENCLAW_STAGE0_TEST_SCRIPT=str(path))
             intended = ('BAD installer was executed' if name.startswith('execute-') else 'AssertionError')
+            if name == 'eof':
+                intended = 'held-open EOF guard was bypassed'
             check([sys.executable, str(STEP / 'test_stage0_installer_auth.py'), 'AuthenticationTests.' + test], varied, intended, name)
             print('KILLED ' + name + ' at AuthenticationTests.' + test, flush=True)
         tests = (STEP / 'test_stage0_installer_auth.py').read_text()
