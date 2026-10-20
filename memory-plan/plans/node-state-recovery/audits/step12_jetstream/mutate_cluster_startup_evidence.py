@@ -1,4 +1,5 @@
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -22,11 +23,23 @@ MUTANTS = [
     ('unreaped-claimed', 'e', "'reaped': False,", "'reaped': True,", 'test_failed_kill_wait_does_not_skip_other_owners', 'failed wait must not claim reaping'),
     ('log-close-dropped', 'e', '                log.close()', '                pass', 'test_failed_kill_wait_does_not_skip_other_owners', 'every owner log must close'),
     ('green-report-ignored', 'e', "if not retained or self.data['diagnosticErrors']:", 'if False:', 'test_green_missing_report_refuses_after_cleanup', 'a green run must require retained evidence'),
-    ('empty-sample-unbound', 'c', '            js = routes = None\n', '', 'test_readiness_without_any_sample_keeps_readiness_failure', 'empty startup samples must be explicitly unknown'),
+    ('empty-sample-unbound', 'c', '            js = routes = None\n', '', 'test_readiness_without_any_sample_keeps_readiness_failure', 'timeout must retain the readiness failure'),
     ('startup-deadline', 'c', 'time.monotonic() + 15', 'time.monotonic() + 20', 'test_inline_gate_contract_is_fixed', 'the existing readiness and stream budgets must stay fixed'),
-    ('startup-poll', 'c', "                time.sleep(.05)\n            else:\n                evidence.observe", "                time.sleep(.1)\n            else:\n                evidence.observe", 'test_inline_gate_contract_is_fixed', 'the existing readiness and stream budgets must stay fixed'),
+    ('startup-poll', 'c', "                time.sleep(.05)\n            else:\n                evidence.accepted", "                time.sleep(.1)\n            else:\n                evidence.accepted", 'test_inline_gate_contract_is_fixed', 'the existing readiness and stream budgets must stay fixed'),
     ('startup-503-policy', 'c', "error.get('code') == '503'", "error.get('code') == '400'", 'test_inline_gate_contract_is_fixed', 'the existing readiness and stream budgets must stay fixed'),
     ('stream-deadline', 'c', 'Date.now()+5000', 'Date.now()+10000', 'test_inline_gate_contract_is_fixed', 'the existing readiness and stream budgets must stay fixed'),
+    ('duplicate-python-create', 'c', "                creation = client('create')", "                creation = client('create')\n                creation = client('create')", 'test_inline_gate_contract_is_fixed', 'one Python create invocation must stay fixed'),
+    ('pre-create-sleep', 'c', '            with evidence.create_window():', '            time.sleep(1)\n            with evidence.create_window():', 'test_inline_gate_contract_is_fixed', 'the accepted-to-create boundary must stay fixed'),
+    ('pre-create-monitor', 'c', '            with evidence.create_window():', "            http_json(ports[1], '/jsz')\n            with evidence.create_window():", 'test_inline_gate_contract_is_fixed', 'the accepted-to-create boundary must stay fixed'),
+    ('503-accepted', 'c', '                    return False', '                    return True', 'test_inline_gate_contract_is_fixed', 'the complete 503 retry branch must stay fixed'),
+    ('fixture-primary-lost', 'c', '            primary = sys.exc_info()[1]', '            primary = None', 'test_fixture_primary_survives_unclean_owner', 'readiness primary must survive cleanup failure'),
+    ('fixture-green-swallowed', 'c', '                if primary is None:', '                if False:', 'test_inline_gate_contract_is_fixed', 'the fixture finally wrapper must preserve primary and green failures'),
+    ('debug-config-removed', 'c', 'debug: true\n', '', 'test_inline_gate_contract_is_fixed', 'the owned config must enable debug'),
+    ('forced-kill-dropped', 'e', '                    proc.kill()', '                    pass', 'test_failed_kill_wait_does_not_skip_other_owners', 'the forced path must invoke kill'),
+    ('chmod-dropped', 'e', '            os.chmod(path, 0o600)', '            pass', 'test_report_is_private_and_exclusive', 'reports must be private'),
+    ('cohort-session-dropped', 'p', 'start_new_session=True', 'start_new_session=False', 'test_timeout_driver_owns_session_and_escalates_group', 'cohorts must own a new session'),
+    ('cohort-term-dropped', 'p', 'for sig in (signal.SIGTERM, signal.SIGKILL):', 'for sig in (signal.SIGKILL,):', 'test_timeout_driver_owns_session_and_escalates_group', 'timeout must TERM then KILL the owned group'),
+    ('cohort-kill-dropped', 'p', 'for sig in (signal.SIGTERM, signal.SIGKILL):', 'for sig in (signal.SIGTERM,):', 'test_timeout_driver_owns_session_and_escalates_group', 'timeout must TERM then KILL the owned group'),
     ('inline-gate-weakened', 'c', "for route in report['routes']}) == 2", "for route in report['routes']}) >= 1", 'test_inline_gate_contract_is_fixed', 'the original inline predicate must stay fixed'),
 ]
 
@@ -36,15 +49,18 @@ def main():
                             cwd=STEP,capture_output=True,text=True,timeout=60)
     if controls.returncode:
         print(controls.stdout+controls.stderr); return 1
-    print('unmutated startup-evidence controls: all15 passed',flush=True)
+    count=re.search(r'Ran (\d+) tests?',controls.stderr)
+    if count is None:
+        raise RuntimeError('control count unavailable')
+    print('unmutated startup-evidence controls: '+count.group(1)+' passed',flush=True)
     with tempfile.TemporaryDirectory(prefix='owned-startup-mutants-') as temporary:
         for name,target,old,new,test,assertion in MUTANTS:
-            module='cluster_startup_evidence' if target=='e' else 'test_preservation_cluster'
+            module={'e':'cluster_startup_evidence','c':'test_preservation_cluster','p':'test_cluster_startup_evidence'}[target]
             original=(STEP/(module+'.py')).read_text()
             if original.count(old)!=1:
                 raise RuntimeError(name+': mutation anchor differs')
             path=pathlib.Path(temporary)/(name+'.py');path.write_text(original.replace(old,new))
-            code=("import cluster_startup_evidence as e, test_preservation_cluster as c; "
+            code=("import cluster_startup_evidence as e, test_preservation_cluster as c, test_cluster_startup_evidence as p; "
                   "target=%s; target.__file__=%r; exec(compile(open(%r).read(),%r,'exec'),target.__dict__); "
                   "c.StartupEvidence=e.StartupEvidence; import unittest; "
                   "r=unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromName(%r)); "

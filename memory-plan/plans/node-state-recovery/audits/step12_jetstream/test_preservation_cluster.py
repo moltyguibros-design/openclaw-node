@@ -133,8 +133,11 @@ const connected=()=>nc?{name:nc.info.server_name,id:nc.info.server_id}:null;
                 capture_output=True, text=True, timeout=15)
             evidence.client(action, result)
             if result.returncode and startup:
-                error = evidence.data['clients'].get(action, {})
-                if error.get('stage') == 'account-info' and error.get('code') == '503':
+                try:
+                    error = json.loads(result.stderr)
+                except ValueError:
+                    error = None
+                if isinstance(error, dict) and error.get('stage') == 'account-info' and error.get('code') == '503':
                     evidence.data['startup503Count'] = evidence.data.get('startup503Count', 0) + 1
                     evidence.observe('startupApiRefusal', lambda: error)
                     return False
@@ -167,7 +170,8 @@ const connected=()=>nc?{name:nc.info.server_name,id:nc.info.server_id}:null;
                     pass
                 time.sleep(.05)
             else:
-                evidence.observe('lastReadiness', lambda: {'jsObserved': js is not None, 'routesObserved': routes is not None})
+                evidence.accepted(js, routes, key='lastReadiness',
+                                  source='last samples; possibly from different iterations')
                 self.fail('owned cluster failed readiness')
             evidence.accepted(js, routes)
             with evidence.create_window():

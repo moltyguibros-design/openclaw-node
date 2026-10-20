@@ -3,9 +3,11 @@ import json
 import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -16,6 +18,56 @@ from preservation_checks import Refused
 
 
 STEP = pathlib.Path(__file__).resolve().parent
+
+
+class CohortTimeout(TimeoutError):
+    def __init__(self, cleanup):
+        super().__init__('owned cohort timed out')
+        self.cleanup = cleanup
+
+
+def wait_group_absent(group, seconds):
+    end = time.monotonic() + seconds
+    while True:
+        try:
+            os.killpg(group, 0)
+        except ProcessLookupError:
+            return True
+        if time.monotonic() >= end:
+            return False
+        time.sleep(.05)
+
+
+def run_cohort(command, env, timeout=120, grace=3):
+    proc = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, start_new_session=True)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        cleanup = {'group': proc.pid, 'signals': [], 'errors': [], 'groupAbsent': False,
+                   'pythonReaped': False, 'pythonExitCode': None}
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(proc.pid, sig)
+                cleanup['signals'].append(sig.name)
+            except ProcessLookupError:
+                pass
+            except OSError as error:
+                cleanup['errors'].append('signal: ' + type(error).__name__)
+            try:
+                proc.communicate(timeout=grace)
+            except subprocess.TimeoutExpired:
+                cleanup['errors'].append(sig.name + ' parent wait expired')
+            try:
+                cleanup['groupAbsent'] = wait_group_absent(proc.pid, grace)
+            except OSError as error:
+                cleanup['errors'].append('group observation: ' + type(error).__name__)
+            if cleanup['groupAbsent']:
+                break
+        cleanup['pythonExitCode'] = proc.poll()
+        cleanup['pythonReaped'] = cleanup['pythonExitCode'] is not None
+        raise CohortTimeout(cleanup) from None
+    return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
 
 
 class Owner:
@@ -120,7 +172,11 @@ class Portable(unittest.TestCase):
 
     def test_report_is_private_and_exclusive(self):
         e = self.recorder(); p = self.root/'report.json'
-        e.write(p, '{}\n')
+        previous=os.umask(0o022)
+        try:
+            e.write(p, '{}\n')
+        finally:
+            os.umask(previous)
         self.assertEqual(p.stat().st_mode & 0o777, 0o600, 'reports must be private')
         with self.assertRaises(FileExistsError, msg='reports must not overwrite an existing object'):
             e.write(p, 'changed')
@@ -161,6 +217,8 @@ class Portable(unittest.TestCase):
                          'every owner must receive a stop attempt')
         self.assertTrue(all(log.closed for proc,log in owners), 'every owner log must close')
         middle=next(row for row in rows if row['pid']==1)
+        self.assertIn((1,'kill'),self.calls,'the forced path must invoke kill')
+        self.assertTrue(middle['forced'],'the forced path must be explicit')
         self.assertFalse(middle['reaped'], 'failed wait must not claim reaping')
         self.assertIn('kill-wait: TimeoutExpired', middle['error'], 'kill-wait failure must be retained')
         self.assertTrue(all(row['reaped'] for row in rows if row['pid']!=1))
@@ -188,10 +246,10 @@ class Portable(unittest.TestCase):
                 e.finish(owners,True,None)
         self.assertTrue(all(log.closed for proc,log in owners),'green refusal must follow cleanup')
 
-    def test_readiness_without_any_sample_keeps_readiness_failure(self):
+    def timeout_case(self, stuck=None):
         eowners=[]
         def start(*args,**kwargs):
-            p=Owner(len(eowners),self.calls); eowners.append((p,kwargs['stdout']))
+            p=Owner(len(eowners),self.calls,len(eowners)==stuck); eowners.append((p,kwargs['stdout']))
             kwargs['stdout'].write(b'[INF] Server Exiting\n'); return p
         clock=iter([0,0,20])
         case=cluster.Cluster()
@@ -201,11 +259,70 @@ class Portable(unittest.TestCase):
              patch.object(cluster,'http_json',side_effect=Refused('not ready')), \
              patch.object(cluster.time,'monotonic',side_effect=lambda:next(clock)), \
              patch.object(cluster.time,'sleep'):
-            with self.assertRaisesRegex(AssertionError,'owned cluster failed readiness',
-                                        msg='timeout must retain the readiness failure'):
+            caught=None
+            try:
                 case.test_stream_and_consumer_groups_and_real_stream_election()
-        self.assertEqual(case.evidence.data.get('lastReadiness'), {'jsObserved':False,'routesObserved':False}, 'empty startup samples must be explicitly unknown')
+            except Exception as error:
+                caught=error
+        return case,caught
+
+    def test_readiness_without_any_sample_keeps_readiness_failure(self):
+        case,caught=self.timeout_case()
+        self.assertEqual(str(caught),'owned cluster failed readiness','timeout must retain the readiness failure')
+        row=case.evidence.data.get('lastReadiness',{})
+        self.assertEqual((row.get('jsObserved'),row.get('routesObserved')), (False,False), 'empty startup samples must be explicitly unknown')
         self.assertEqual(len(case.evidence.data['owners']),3)
+
+    def test_fixture_primary_survives_unclean_owner(self):
+        case,caught=self.timeout_case(stuck=1)
+        self.assertEqual(str(caught),'owned cluster failed readiness','readiness primary must survive cleanup failure')
+        self.assertTrue(any(row['error'] for row in case.evidence.data['owners']))
+
+    def test_timeout_driver_owns_session_and_escalates_group(self):
+        from unittest.mock import Mock
+        proc=SimpleNamespace(pid=12345,returncode=-9,poll=lambda:-9,
+            communicate=Mock(side_effect=[subprocess.TimeoutExpired('fake',1),
+                                         subprocess.TimeoutExpired('fake',1),('','')]))
+        with patch.object(subprocess,'Popen',return_value=proc) as start, \
+             patch.object(os,'killpg') as send, \
+             patch(__name__+'.wait_group_absent',side_effect=[False,True]):
+            with self.assertRaises(CohortTimeout) as caught:
+                run_cohort(['owned fake'],{},timeout=1,grace=1)
+        self.assertTrue(start.call_args.kwargs.get('start_new_session'),'cohorts must own a new session')
+        self.assertEqual(send.call_args_list, [unittest.mock.call(12345,signal.SIGTERM),
+                                            unittest.mock.call(12345,signal.SIGKILL)],
+                         'timeout must TERM then KILL the owned group')
+        self.assertTrue(caught.exception.cleanup['groupAbsent'],'timeout must record group absence')
+        self.assertTrue(caught.exception.cleanup['pythonReaped'])
+
+    def test_real_timeout_removes_owned_parent_and_child(self):
+        pidfile=self.root/'child.pid'
+        source="""import os,signal,subprocess,sys,time
+child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])
+def stop(sig,frame):
+ child.wait(timeout=2)
+ raise SystemExit(0)
+signal.signal(signal.SIGTERM,stop)
+open(sys.argv[1],'w').write(str(child.pid))
+time.sleep(60)
+"""
+        launched=[]; original=subprocess.Popen
+        def start(*args,**kwargs):
+            proc=original(*args,**kwargs); launched.append(proc); return proc
+        try:
+            with patch.object(subprocess,'Popen',side_effect=start):
+                with self.assertRaises(CohortTimeout) as caught:
+                    run_cohort([sys.executable,'-c',source,str(pidfile)],os.environ.copy(),timeout=2,grace=2)
+            self.assertTrue(pidfile.exists(),'the owned timeout must include a real child')
+            self.assertTrue(caught.exception.cleanup['groupAbsent'],'the timed-out owned group must disappear')
+            self.assertTrue(caught.exception.cleanup['pythonReaped'])
+            self.assertFalse(caught.exception.cleanup['errors'])
+            print('owned-timeout-cleanup: '+json.dumps(caught.exception.cleanup))
+        finally:
+            for proc in launched:
+                if proc.poll() is None:
+                    os.killpg(proc.pid,signal.SIGTERM)
+                    proc.wait(timeout=3)
 
     def test_inline_gate_contract_is_fixed(self):
         source=inspect.getsource(cluster.Cluster.test_stream_and_consumer_groups_and_real_stream_election)
@@ -219,6 +336,25 @@ class Portable(unittest.TestCase):
         for literal in ("error.get('code') == '503'",'Date.now()+5000'):
             self.assertIn(literal,source,'the existing readiness and stream budgets must stay fixed')
         self.assertEqual(source.count('await jm.streams.add('),1,'one stream create must stay fixed')
+        self.assertEqual(source.count("client('create')"),1,'one Python create invocation must stay fixed')
+        self.assertIn("""            evidence.accepted(js, routes)
+            with evidence.create_window():
+                creation = client('create')
+""",source,'the accepted-to-create boundary must stay fixed')
+        self.assertIn("""                if isinstance(error, dict) and error.get('stage') == 'account-info' and error.get('code') == '503':
+                    evidence.data['startup503Count'] = evidence.data.get('startup503Count', 0) + 1
+                    evidence.observe('startupApiRefusal', lambda: error)
+                    return False
+""",source,'the complete 503 retry branch must stay fixed')
+        self.assertIn('debug: true\nlisten: 127.0.0.1:{ports[i*3]}',source,'the owned config must enable debug')
+        self.assertIn("""            primary = sys.exc_info()[1]
+            try:
+                evidence.finish(owners, succeeded, primary)
+            except Exception:
+                if primary is None:
+                    raise
+                print('preservation-cluster-startup: evidence unavailable; primary preserved')
+""",source,'the fixture finally wrapper must preserve primary and green failures')
 
 
 class OwnedPair(unittest.TestCase):
@@ -235,9 +371,12 @@ class OwnedPair(unittest.TestCase):
                     source=source.replace(anchor,' permissions {{ import {{ allow: [">"], deny: ["$SYS.SERVER.*.STATSZ"] }}, export {{ allow: [">"], deny: ["$SYS.SERVER.*.STATSZ"] }} }}\n'+anchor)
                 script=folder/'fixture.py';script.write_text(source)
                 output=folder/'report.json'
-                result=subprocess.run([sys.executable,str(script)],env={**os.environ,'PYTHONPATH':str(STEP),
-                    'RECOVERY_EVIDENCE_DIR':str(folder),'PRESERVATION_CLUSTER_REPORT':str(output)},
-                    capture_output=True,text=True,timeout=120)
+                try:
+                    result=run_cohort([sys.executable,str(script)],env={**os.environ,'PYTHONPATH':str(STEP),
+                        'RECOVERY_EVIDENCE_DIR':str(folder),'PRESERVATION_CLUSTER_REPORT':str(output)})
+                except CohortTimeout as error:
+                    reports[name]={'timedOut':True,'cleanup':error.cleanup}
+                    raise
                 reports[name]=json.loads(output.read_text())
                 row=reports[name]
                 self.assertEqual(row['createInvocations'],1,'each fresh cohort must invoke one create')
@@ -265,9 +404,15 @@ class OwnedPair(unittest.TestCase):
         finally:
             output=os.environ.get('CLUSTER_STARTUP_PAIR_REPORT')
             if output:
-                with pathlib.Path(output).open('x') as handle:
-                    os.chmod(output,0o600)
-                    handle.write(json.dumps({'schema':'owned-preservation-cluster-controls-v1','reports':reports},indent=2)+'\n')
+                primary=sys.exc_info()[1]
+                try:
+                    with pathlib.Path(output).open('x') as handle:
+                        os.chmod(output,0o600)
+                        handle.write(json.dumps({'schema':'owned-preservation-cluster-controls-v1','reports':reports},indent=2)+'\n')
+                except Exception:
+                    if primary is None:
+                        raise
+                    print('owned-startup-pair: report unavailable; primary preserved')
             if len(reports)==2 and all(len(row.get('owners',[]))==3 and all(owner['reaped'] and owner['exitCode']==0 for owner in row['owners']) for row in reports.values()):
                 shutil.rmtree(base)
 

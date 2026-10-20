@@ -91,21 +91,24 @@ class StartupEvidence:
         except Exception as error:
             self.data['diagnosticErrors'].append(key + ': ' + type(error).__name__)
 
-    def accepted(self, js, routes):
+    def accepted(self, js, routes, *, key='accepted', source='accepting loop iteration; sequential samples'):
         def project():
             members = []
             for i in range(3):
-                meta = js[i].get('meta_cluster', {})
-                members.append({'name': f'owned-raft-{i}', 'serverId': js[i].get('server_id'),
-                    'now': js[i].get('now'), 'routeNow': routes[i].get('now'),
-                    'routeServerId': routes[i].get('server_id'),
+                member = js[i] if js is not None else {}
+                route = routes[i] if routes is not None else {}
+                meta = member.get('meta_cluster', {})
+                members.append({'name': f'owned-raft-{i}', 'serverId': member.get('server_id'),
+                    'now': member.get('now'), 'routeNow': route.get('now'),
+                    'routeServerId': route.get('server_id'),
                     'leader': meta.get('leader'), 'clusterSize': meta.get('cluster_size'),
                     'replicas': [{key: peer.get(key) for key in ('name', 'current', 'offline', 'lag')}
                                  for peer in meta.get('replicas', [])[:3]],
-                    'routeIds': sorted({peer['remote_id'] for peer in routes[i]['routes']})[:3]})
-            return {'recordedAt': time.time(), 'source': 'accepting loop iteration; sequential samples',
+                    'routeIds': sorted({peer['remote_id'] for peer in route.get('routes', [])})[:3]})
+            return {'recordedAt': time.time(), 'source': source,
+                    'jsObserved': js is not None, 'routesObserved': routes is not None,
                     'members': members}
-        self.observe('accepted', project)
+        self.observe(key, project)
 
     def client(self, action, result):
         def parse():
