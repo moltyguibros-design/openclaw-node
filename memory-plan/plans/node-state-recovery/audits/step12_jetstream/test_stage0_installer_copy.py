@@ -69,32 +69,32 @@ def preflight(code, expected):
         s = os.lstat(path)
         assert not stat.S_ISLNK(s.st_mode) and s.st_uid == 0 and not s.st_mode & 0o022, 'root code storage protection'
         if path == code:
-            assert stat.S_ISREG(s.st_mode) and stat.S_IMODE(s.st_mode) == 0o600 and s.st_nlink == 1 and 0 < s.st_size <= 65536
+            assert stat.S_ISREG(s.st_mode) and stat.S_IMODE(s.st_mode) == 0o600 and s.st_nlink == 1 and 0 < s.st_size <= 65536, 'root code shape'
         else:
-            assert stat.S_ISDIR(s.st_mode)
+            assert stat.S_ISDIR(s.st_mode), 'root ancestor type'
         if path == code.parent:
-            assert stat.S_IMODE(s.st_mode) == 0o700
-        if path in (code, code.parent): assert not getattr(s, 'st_flags', 0)
+            assert stat.S_IMODE(s.st_mode) == 0o700, 'root base mode'
+        if path in (code, code.parent): assert not getattr(s, 'st_flags', 0), 'private flags'
         a = attributes(path)
         if sys.platform == 'darwin':
             rows = a['acl'].splitlines()[1:]
-            assert not rows if path in (code, code.parent) else all(re.fullmatch(r'\s*\d+: (user|group):[a-zA-Z0-9_-]+ deny [a-z_,]+', line) for line in rows)
-            if path in (code, code.parent): assert not a['xattrs']
+            assert (not rows if path in (code, code.parent) else all(re.fullmatch(r'\s*\d+: (user|group):[a-zA-Z0-9_-]+ deny [a-z_,]+', line) for line in rows)), 'root storage ACL'
+            if path in (code, code.parent): assert not a['xattrs'], 'private xattrs'
         else:
             rows = a['acl'].rstrip('\n').splitlines()
-            assert len(rows) == 3 and all(line.startswith(('user::', 'group::', 'other::')) for line in rows)
-            assert set(a['flags'].split()[0]) <= set('-e')
-            if path in (code, code.parent): assert not a['xattrs']
+            assert len(rows) == 3 and all(line.startswith(('user::', 'group::', 'other::')) for line in rows), 'root storage ACL rows'
+            assert set(a['flags'].split()[0]) <= set('-e'), 'root storage flags'
+            if path in (code, code.parent): assert not a['xattrs'], 'private xattrs'
         storage.append({'path':str(path),'metadata':identity(path),'attributes':a})
     fd = os.open(str(code), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         current = os.fstat(fd)
-        assert current.st_dev == before['dev'] and current.st_ino == before['ino']
+        assert current.st_dev == before['dev'] and current.st_ino == before['ino'], 'root code FD identity'
         raw = os.read(fd, 65537)
-        assert len(raw) == before['size'] and 0 < len(raw) <= 65536 and identity(code) == before
+        assert len(raw) == before['size'] and 0 < len(raw) <= 65536 and identity(code) == before, 'root code bounded bytes/path drift'
         after = os.fstat(fd)
         assert all(getattr(after, 'st_'+k) == getattr(current, 'st_'+k) for k in
-                   ('dev','ino','mode','uid','gid','nlink','size','mtime_ns','ctime_ns'))
+                   ('dev','ino','mode','uid','gid','nlink','size','mtime_ns','ctime_ns')), 'root code held FD drift'
     finally: os.close(fd)
     begin = time.monotonic(); actual = native_hash(raw)
     row = {'argv':HASH_TOOL,'stdin_scope':'exact held protected script bytes','timeout_s':10,'bytes':len(raw),
@@ -225,7 +225,7 @@ class Fixture:
         raw = self.code.read_text(); assert raw.count(anchor) == 1, anchor
         ready = self.outer / 'ready'; resume = self.outer / 'resume'
         ready.write_bytes(b''); resume.write_bytes(b'')
-        injected = 'builtin printf ready > "' + str(ready) + '"\nwhile [[ ! -s "' + str(resume) + '" ]]; do :; done\n'
+        injected = 'builtin printf ready >| "' + str(ready) + '"\nwhile [[ ! -s "' + str(resume) + '" ]]; do :; done\n'
         self.code.write_text(raw.replace(anchor, injected + anchor))
         self.instrumentation.append({'kind':'fixed busy-loop rendezvous','anchor':anchor,'variant_sha256':sha(self.code.read_bytes())})
         def during(p):
@@ -270,6 +270,17 @@ def fixture(name, private=False):
 
 
 class LocalTests(unittest.TestCase):
+    def test_owned_pause_updates_existing_inode_under_noclobber(self):
+        with tempfile.TemporaryDirectory(prefix='openclaw-copy-signal-') as directory:
+            path=pathlib.Path(directory)/'ready';path.write_bytes(b'')
+            parent_before=identity(directory);file_before=path.lstat()
+            p=subprocess.Popen([SHELL,'--noprofile','--norc','-p','-f','-c','set -C; builtin printf ready >| "$1"','owned-signal',str(path)],
+                               stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env={},start_new_session=True)
+            out,err=p.communicate(timeout=5)
+            self.assertEqual((p.returncode,out,err),(0,b'',b''));self.assertTrue(absent_group(p.pid))
+            self.assertEqual(path.read_bytes(),b'ready');self.assertEqual(identity(directory),parent_before)
+            self.assertEqual((path.lstat().st_dev,path.lstat().st_ino),(file_before.st_dev,file_before.st_ino))
+
     def test_closed_pipe_close_is_accounted(self):
         p=subprocess.Popen([SHELL,'--noprofile','--norc','-p','-c','exit 0'],stdin=subprocess.PIPE,
                            stdout=subprocess.PIPE,stderr=subprocess.PIPE,env={},start_new_session=True)
@@ -305,10 +316,14 @@ class NativeTests(unittest.TestCase):
 
     def refused(self, result, reason=None):
         self.assertTrue(result['worker'], 'unexpected pre-exec refusal: '+repr(result))
+        self.assertTrue(result['script_prehashed'])
+        self.assertTrue((result['shell_observed'] and result['handshake_sent']) or result['early_refusal'], 'unqualified negative provenance')
         self.assertIsNone(result['failure'], result)
         self.assertNotEqual(result['rc'], 0, 'invalid root copy was accepted')
         self.assertEqual(result['out'], b'', result)
-        if reason: self.assertIn(('installer authentication refused: ' + reason + '\n').encode(), result['err'], result)
+        if reason:
+            reasons=(reason,) if isinstance(reason,str) else reason
+            self.assertTrue(any(('installer authentication refused: '+r+'\n').encode() in result['err'] for r in reasons),result)
 
     def honest(self, f, result):
         self.assertIsNone(result['failure'], result)
@@ -335,7 +350,7 @@ class NativeTests(unittest.TestCase):
             command = ['/usr/bin/env','-i','CI=true','GITHUB_ACTIONS=true','LC_ALL=C',SHELL,
                        '--noprofile','--norc','-p','-f',str(code),'--ci-owned-root-copy',UUID,str(OPERATOR),
                        str(CAPTURE),str(f.source),str(f.root),sha(f.installer.read_bytes()),sha(f.manifest.read_bytes())]
-            p = subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.PIPE,cwd='/',env={},
+            p = subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,cwd='/',env={},
                                  user=OPERATOR,group=OPERATOR,extra_groups=[],start_new_session=True)
             out,err=p.communicate(timeout=5)
             self.assertTrue(absent_group(p.pid))
@@ -353,7 +368,7 @@ class NativeTests(unittest.TestCase):
                 elif which == 'installer': expected_i = '0'*64
                 else: f.set_installer(b'unapproved but self-consistent\n')
                 result = f.invoke(expected_installer=expected_i, expected_manifest=expected_m)
-                self.refused(result)
+                self.refused(result,'installer-approval' if which=='installer' else 'manifest-approval')
                 self.assertEqual({p.name for p in f.root.iterdir()}, {'stage0_installer_copy.sh'}, 'staging preceded independent source approvals')
 
     def test_canonical_schema_and_size(self):
@@ -363,7 +378,7 @@ class NativeTests(unittest.TestCase):
                 elif mutation == 'trailing': f.manifest.write_bytes(f.manifest.read_bytes() + b'\n')
                 elif mutation == 'nul': f.manifest.write_bytes(f.manifest.read_bytes().replace(b'v1', b'v\x001'))
                 else: f.manifest.write_bytes(f.manifest.read_bytes().replace(b'17889', b'017889'))
-                self.refused(f.invoke())
+                self.refused(f.invoke(),{'oversize':'size','trailing':'schema','nul':('canonical','schema'),'size':'schema'}[mutation])
                 self.assertEqual({p.name for p in f.root.iterdir()}, {'stage0_installer_copy.sh'})
 
     def test_external_code_approval_before_root_worker(self):
@@ -395,7 +410,7 @@ class NativeTests(unittest.TestCase):
                 else: observe(['/usr/bin/setfacl', '-m', 'u:'+str(CAPTURE)+':r,m::---', str(f.installer)])
                 REPORT['cases'][-1]['source_metadata'] = identity(f.installer)
                 if kind!='link': REPORT['cases'][-1]['source_attributes'] = attributes(f.installer)
-                self.refused(f.invoke())
+                self.refused(f.invoke(),{'owner':'owner','mode':'type','link':'link','hardlink':'private','extra':'entries','xattr':'xattrs','acl':'acl'}[kind])
                 self.assertEqual({p.name for p in f.root.iterdir()}, {'stage0_installer_copy.sh'})
 
     def test_root_parent_mode_and_owner_before_write(self):
@@ -406,7 +421,7 @@ class NativeTests(unittest.TestCase):
                     if kind == 'mode': current.root.chmod(0o777)
                     else: os.chown(current.root, OPERATOR, OPERATOR)
                 during = f.pause(anchor, change)
-                self.refused(f.invoke(during=during))
+                self.refused(f.invoke(during=during),'writable' if kind=='mode' else 'owner')
                 self.assertEqual({p.name for p in f.root.iterdir()}, {'stage0_installer_copy.sh'}, 'unsafe root storage was written')
 
     def test_existing_fences_are_untouched(self):
@@ -415,7 +430,7 @@ class NativeTests(unittest.TestCase):
                 path = f.pending if kind != 'other' else f.root / ('pending-installer-'+'f'*64)
                 path.mkdir(mode=0o700)
                 if kind != 'empty': (path / 'installer.manifest').write_bytes(b'held fence')
-                before = f.snapshot(); self.refused(f.invoke())
+                before = f.snapshot(); self.refused(f.invoke(),'root-entries')
                 self.assertEqual(f.snapshot(), before, 'existing pending fence changed')
 
     def test_copied_bytes_are_independently_checked(self):
@@ -424,7 +439,7 @@ class NativeTests(unittest.TestCase):
             def corrupt(current, worker):
                 p = current.pending / 'host_release_publish.py'; raw = p.read_bytes(); p.write_bytes(b'X'+raw[1:])
             during = f.pause(anchor, corrupt)
-            self.refused(f.invoke(during=during),'mapping')
+            self.refused(f.invoke(during=during),('mapping','installer-bytes'))
             self.assertTrue(f.pending.exists(), 'failed copy was removed')
 
     def test_final_code_mapping_drift_refuses(self):
@@ -452,7 +467,7 @@ class NativeTests(unittest.TestCase):
                     raw=path.read_bytes(); path.rename(current.outer/'held-original-data')
                     path.write_bytes(raw); path.chmod(0o600)
                     if kind=='source': os.chown(path,OPERATOR,OPERATOR)
-                self.refused(f.invoke(during=f.pause(anchor,replace)))
+                self.refused(f.invoke(during=f.pause(anchor,replace)),'ancestor-drift' if kind=='source' else 'mapping')
 
     def test_overlap_refuses_before_metadata(self):
         with fixture('nested-source') as f:
@@ -499,7 +514,7 @@ class NativeTests(unittest.TestCase):
             r = f.invoke(during=f.pause(anchor, lambda current, worker: os.killpg(worker.pid, signal.SIGKILL)))
             self.assertEqual(r['rc'], -9); self.assertEqual(r['out'], b'')
             self.assertTrue(r['waited'] and r['group_absent'] and f.pending.exists())
-            before = f.snapshot(); self.refused(f.invoke()); self.assertEqual(f.snapshot(), before)
+            before = f.snapshot(); self.refused(f.invoke(),'root-entries'); self.assertEqual(f.snapshot(), before)
 
     def test_approved_bad_installer_is_inert(self):
         with fixture('approved-inert-BAD') as f:
@@ -545,7 +560,7 @@ class NativeTests(unittest.TestCase):
                   sha(f.installer.read_bytes()),sha(f.manifest.read_bytes())]
             command=['/usr/bin/env','-i','CI=true','GITHUB_ACTIONS=true','LC_ALL=C',SHELL,
                      '--noprofile','--norc','-p','-f',str(old)]+args
-            p=subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.PIPE,cwd='/',env={},
+            p=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,cwd='/',env={},
                                user=OPERATOR,group=OPERATOR,extra_groups=[],start_new_session=True)
             out,err=p.communicate(timeout=5); self.assertTrue(absent_group(p.pid))
             self.assertEqual((p.returncode,out,err),(1,b'',b'installer authentication refused: arguments\n'))

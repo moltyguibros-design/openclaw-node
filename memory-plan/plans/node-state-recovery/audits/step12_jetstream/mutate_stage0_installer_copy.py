@@ -14,6 +14,14 @@ from test_stage0_installer_auth import absent_group
 
 
 STEP = pathlib.Path(__file__).resolve().parent
+ANCHORS = {
+    'test_root_parent_mode_and_owner_before_write': ('inspect_tree "$root" 0',),
+    'test_empty_destination_before_payload': ('    exec 12> "$name"',),
+    'test_transition_fields_are_pinned': ('    after=$(metadata "$child/$name")',),
+    'test_copied_bytes_are_independently_checked': ('verify_pair "$child/installer.manifest"',),
+    'test_final_code_mapping_drift_refuses': ('mapping "$script" "$script_record" 5\ncheck_trees\ndeadline',),
+    'test_root_entry_set_after_create_and_at_completion': ('transition "$root" 10','mapping "$script" "$script_record" 5\ncheck_trees\ndeadline'),
+}
 SUCCESS = "builtin printf 'root-copy-observed-v1\\n'"
 CASES = [
     ('implicit-temp', [('exec 9>&2', ': <<< inert\nexec 9>&2')],
@@ -99,6 +107,7 @@ def main():
             for old,new in replacements:
                 assert variant.count(old)>=1,(name,variant.count(old),old)
                 variant=variant.replace(old,new)
+            for anchor in ANCHORS.get(test,()): assert variant.count(anchor)==1, (name,'designated pause anchor must survive',anchor)
             path=outer/'stage0_installer_copy.sh'; path.write_text(variant); path.chmod(0o600)
             row=run(test,outer/(name+'.json'),path)
             row.update(name=name,test=test,intended_assertion=intended,mutant_sha256=sha(variant.encode()),
