@@ -1,0 +1,61 @@
+import pathlib
+import subprocess
+import sys
+import tempfile
+
+
+STEP = pathlib.Path(__file__).resolve().parent
+MUTANTS = [
+    ('window-bound', 'e', 'WINDOW = 131072', 'WINDOW = 262144', 'test_window_byte_bound', 'the byte window must remain bounded'),
+    ('line-bound', 'e', 'LINE = 1024', 'LINE = 2048', 'test_window_filters_and_line_bound', 'selector lines must be bounded'),
+    ('selector-filter', 'e', "elif 'Peer selection:' not in line:", 'elif False:', 'test_window_filters_and_line_bound', 'only selector messages belong in create windows'),
+    ('startup-info-filter', 'e', "'[INF]' not in line or ", '', 'test_window_filters_and_line_bound', 'only verified INFO messages belong in startup'),
+    ('clipped-complete', 'e', 'and not clipped,', 'and True,', 'test_window_filters_and_line_bound', 'clipped lines must mark the window incomplete'),
+    ('credential-suppression', 'e', 'any(secret and secret in raw for secret in self.secrets)', 'False', 'test_credentials_suppress_the_entire_report', 'credential-bearing evidence must be suppressed'),
+    ('total-cap', 'e', 'REPORT = 262144', 'REPORT = 524288', 'test_report_total_cap', 'oversized reports must be suppressed'),
+    ('exclusive-report', 'e', "path.open('x',", "path.open('w',", 'test_report_is_private_and_exclusive', 'reports must not overwrite an existing object'),
+    ('private-report', 'e', 'os.chmod(path, 0o600)', 'os.chmod(path, 0o644)', 'test_report_is_private_and_exclusive', 'reports must be private'),
+    ('non-json-parser', 'e', 'except (ValueError, TypeError):', 'except OSError:', 'test_non_json_client_output_is_diagnostic_only', 'non-JSON output must be marked unparsed'),
+    ('old-window-offset', 'e', "self.offsets[i] = (self.root/f'server-{i}.log').stat().st_size", 'self.offsets[i] = 0', 'test_offsets_exclude_earlier_selector_lines', 'only the current create window belongs in evidence'),
+    ('primary-replaced', 'e', 'if primary is None:', 'if True:', 'test_raising_writer_preserves_primary_after_all_cleanup', 'writer must preserve the identical primary'),
+    ('kill-wait-escapes-loop', 'e', "row['error'].append('kill-wait: ' + type(error).__name__)", "row['error'].append('kill-wait: ' + type(error).__name__)\n                break", 'test_failed_kill_wait_does_not_skip_other_owners', 'every owner must receive a stop attempt'),
+    ('unreaped-claimed', 'e', "'reaped': False,", "'reaped': True,", 'test_failed_kill_wait_does_not_skip_other_owners', 'failed wait must not claim reaping'),
+    ('log-close-dropped', 'e', '                log.close()', '                pass', 'test_failed_kill_wait_does_not_skip_other_owners', 'every owner log must close'),
+    ('green-report-ignored', 'e', "if not retained or self.data['diagnosticErrors']:", 'if False:', 'test_green_missing_report_refuses_after_cleanup', 'a green run must require retained evidence'),
+    ('empty-sample-unbound', 'c', '            js = routes = None\n', '', 'test_readiness_without_any_sample_keeps_readiness_failure', 'empty startup samples must be explicitly unknown'),
+    ('startup-deadline', 'c', 'time.monotonic() + 15', 'time.monotonic() + 20', 'test_inline_gate_contract_is_fixed', 'the existing readiness and stream budgets must stay fixed'),
+    ('startup-poll', 'c', "                time.sleep(.05)\n            else:\n                evidence.observe", "                time.sleep(.1)\n            else:\n                evidence.observe", 'test_inline_gate_contract_is_fixed', 'the existing readiness and stream budgets must stay fixed'),
+    ('startup-503-policy', 'c', "error.get('code') == '503'", "error.get('code') == '400'", 'test_inline_gate_contract_is_fixed', 'the existing readiness and stream budgets must stay fixed'),
+    ('stream-deadline', 'c', 'Date.now()+5000', 'Date.now()+10000', 'test_inline_gate_contract_is_fixed', 'the existing readiness and stream budgets must stay fixed'),
+    ('inline-gate-weakened', 'c', "for route in report['routes']}) == 2", "for route in report['routes']}) >= 1", 'test_inline_gate_contract_is_fixed', 'the original inline predicate must stay fixed'),
+]
+
+
+def main():
+    controls=subprocess.run([sys.executable,'-m','unittest','test_cluster_startup_evidence.Portable'],
+                            cwd=STEP,capture_output=True,text=True,timeout=60)
+    if controls.returncode:
+        print(controls.stdout+controls.stderr); return 1
+    print('unmutated startup-evidence controls: all15 passed',flush=True)
+    with tempfile.TemporaryDirectory(prefix='owned-startup-mutants-') as temporary:
+        for name,target,old,new,test,assertion in MUTANTS:
+            module='cluster_startup_evidence' if target=='e' else 'test_preservation_cluster'
+            original=(STEP/(module+'.py')).read_text()
+            if original.count(old)!=1:
+                raise RuntimeError(name+': mutation anchor differs')
+            path=pathlib.Path(temporary)/(name+'.py');path.write_text(original.replace(old,new))
+            code=("import cluster_startup_evidence as e, test_preservation_cluster as c; "
+                  "target=%s; target.__file__=%r; exec(compile(open(%r).read(),%r,'exec'),target.__dict__); "
+                  "c.StartupEvidence=e.StartupEvidence; import unittest; "
+                  "r=unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromName(%r)); "
+                  "raise SystemExit(not r.wasSuccessful())") % (target,str(path),str(path),str(path),'test_cluster_startup_evidence.Portable.'+test)
+            result=subprocess.run([sys.executable,'-c',code],cwd=STEP,capture_output=True,text=True,timeout=60)
+            output=result.stdout+result.stderr
+            if not (result.returncode==1 and 'FAIL: '+test in output and assertion in output and 'ERROR:' not in output):
+                print(name+': not an intended-assertion kill\n'+output);return 1
+            print(name+': intended assertion killed',flush=True)
+    return 0
+
+
+if __name__=='__main__':
+    raise SystemExit(main())

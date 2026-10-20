@@ -150,7 +150,18 @@ jobs:
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_entrypoint_path_scope.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_cluster_group_readiness.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_cluster_group_readiness.py
-          NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_cluster.py
+          NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" CLUSTER_STARTUP_PAIR_REPORT="$RUNNER_TEMP/preservation-cluster-controls.json" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_cluster_startup_evidence.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_cluster_startup_evidence.py
+          PRESERVATION_CLUSTER_REPORT="$RUNNER_TEMP/preservation-cluster-startup.json" NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_cluster.py
+      - name: Retain owned preservation-cluster startup diagnostics
+        if: always() && matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: preservation-cluster-startup-linux-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/preservation-cluster-startup.json
+            ${{ runner.temp }}/preservation-cluster-controls.json
+          if-no-files-found: warn
       - name: Retain owned placement-gossip report
         if: always() && matrix.node-version == 22
         uses: actions/upload-artifact@v4
@@ -301,6 +312,8 @@ jobs:
           node memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_placement_failure_evidence.mjs
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_cluster_group_readiness.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_cluster_group_readiness.py
+          NATS_SERVER="$(command -v nats-server)" RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" CLUSTER_STARTUP_PAIR_REPORT="$RUNNER_TEMP/preservation-cluster-controls.json" /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_cluster_startup_evidence.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_cluster_startup_evidence.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_release_verify.py
           PYTHONPATH="$PWD/memory-plan/plans/node-state-recovery/audits/step12_jetstream" /usr/bin/python3 -m unittest -q \
             test_preservation_checks.Gates.test_only_exact_tailscale_system_job_can_be_excluded \
@@ -336,6 +349,13 @@ jobs:
           /usr/bin/python3 test/test_nats_store_holder_census.py
           node --test test/nats-legacy-lock.test.mjs
 
+      - name: Retain owned preservation-cluster startup controls
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preservation-cluster-startup-macos-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/preservation-cluster-controls.json
+          if-no-files-found: warn
       - name: Retain owned placement-gossip report
         if: always()
         uses: actions/upload-artifact@v4
