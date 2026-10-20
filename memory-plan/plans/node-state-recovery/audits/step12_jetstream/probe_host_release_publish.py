@@ -209,6 +209,8 @@ def main(output):
     fixtures = []
     results = []
     report = {'scope': 'fresh disposable CI publication mechanism; no host installation/admission',
+              'denial_attribution': 'capture access refusals are enforced by private fixture ancestors; '
+                  'bundle protection is checked by metadata, not isolated leaf access denial',
               'capture_uid': uid, 'publisher_uid': 0, 'publisher_sha256': publisher_sha,
               'publisher_size': source.stat().st_size, 'release_sha256': digest,
               'manifest_size': len(manifest), 'bindings': bindings,
@@ -309,7 +311,8 @@ def main(output):
             again = action(fixture, 'destination already exists')
             results.append({'case': 'honest-payload-owner-' + str(owner), 'receipt': receipt,
                             'execution': outcome['execution'], 'consumer': compatibility,
-                            'capture_denied': denied, 'repeat': again})
+                            'capture_denied': denied, 'denial_attribution': report['denial_attribution'],
+                            'repeat': again})
             print(json.dumps({'case': results[-1]['case'], 'consumer_checked': True,
                               'capture_denied': len(denied)}), flush=True)
 

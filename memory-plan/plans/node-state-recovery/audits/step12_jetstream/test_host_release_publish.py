@@ -30,7 +30,7 @@ class Publication(unittest.TestCase):
     def setUp(self):
         self.m = load()
         self.temp = tempfile.TemporaryDirectory(prefix='openclaw-release-publish-test-',
-                                                dir=str(pathlib.Path.home()))
+            dir=os.environ.get('GITHUB_WORKSPACE', str(pathlib.Path.home())))
         self.addCleanup(self.temp.cleanup)
         self.base = pathlib.Path(self.temp.name).resolve()
         self.payload, self.parent = self.base / 'payload', self.base / 'programs'
@@ -575,6 +575,37 @@ class Publication(unittest.TestCase):
         self.assertEqual(result['returncode'], -9)
         self.assertEqual(result['stdout'], '')
         self.assertFalse(result['timed_out'])
+
+    def test_redirected_writable_home_still_uses_protected_workspace_fixtures(self):
+        shared = self.base / 'writable'
+        shared.mkdir(mode=0o777)
+        shared.chmod(0o777)
+        home = shared / 'home'
+        home.mkdir(mode=0o700)
+        env = {**os.environ, 'HOME': str(home), 'GITHUB_WORKSPACE': str(self.base)}
+        done = subprocess.run([sys.executable, '-B', '-m', 'unittest', '-q',
+            'test_host_release_publish.Publication.test_honest_publication_is_exact_private_inert_and_receipt_only'],
+            cwd=STEP, env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn('Ran 1 test', done.stderr)
+        self.assertEqual(list(home.iterdir()), [])
+        legacy = '''import pathlib,unittest,test_host_release_publish as t
+original=t.tempfile.TemporaryDirectory
+def previous(*args,**kwargs):
+    kwargs['dir']=str(pathlib.Path.home())
+    return original(*args,**kwargs)
+t.tempfile.TemporaryDirectory=previous
+suite=unittest.defaultTestLoader.loadTestsFromName(
+    'test_host_release_publish.Publication.test_honest_publication_is_exact_private_inert_and_receipt_only')
+result=unittest.TextTestRunner().run(suite)
+raise SystemExit(not result.wasSuccessful())
+'''
+        before = subprocess.run([sys.executable, '-B', '-c', legacy], cwd=STEP, env=env,
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(before.returncode, 1, before.stdout + before.stderr)
+        self.assertIn('directory shape differs', before.stderr)
+        self.assertIn('FAIL: test_honest_publication', before.stderr)
+        self.assertNotIn('ERROR:', before.stderr)
 
 
 def stat_flag():
