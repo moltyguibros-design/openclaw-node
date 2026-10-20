@@ -4,6 +4,24 @@
     "operator_answer": "go",
     "request": "Approve deleting only the two named ArcaneRapture Build/Intermediates.noindex folders; 13.4GiB reported, actual reclaim uncertain; finished builds, source, packages and logs retained; recompilation consequence stated."
   },
+  "check_recording_qualification": {
+    "holder_parameters": "Command, recursive arguments and timeout are absent from the runtime result. They reside only in the hash-bound temporary executed script, not in this repository.",
+    "holder_result_fields_retained": [
+      "rc",
+      "out",
+      "err",
+      "elapsed_s"
+    ],
+    "not_inferred": [
+      "No consumer-absence conclusion from rc1/empty channels or observer_pid alone.",
+      "No retroactive historical sample from a new process or lsof probe.",
+      "No independent code trace from a script digest without its source."
+    ],
+    "process_sample": "Never persisted; no historical PID/executable result can be reconstructed from the committed record. Codex reports a successful no-match assertion only.",
+    "raw_runtime_result_unchanged": true,
+    "review": "Claude121 R1 at original receipt9fc51867d81f25d3c231b7344837f5ec90f49790",
+    "scope": "Qualification only: actual action/outcome/retained/guard records and all arithmetic remain byte-value-equivalent as JSON; no host operation or repeat cleanup."
+  },
   "derived": {
     "GiB_bytes": 1073741824,
     "above_20_GiB_after": 4.558357238769531,
@@ -35,15 +53,15 @@
     "Removal proves target absence at recorded times, not an exclusion against later regeneration. The approval is consumed; do not automatically delete regenerated trees.",
     "No actual rebuild or complete source/dependency availability proof was performed. Next builds must regenerate intermediates; success/time is unproved.",
     "Retained project/workspace configuration hashes and directory identities/metadata match, not a byte hash of every retained product/package/log/source file.",
-    "No holder or relevant process was observed in bounded samples; these are not exclusion locks or exhaustive system-wide consumer proofs.",
+    "The historical raw process sample was never persisted. The holder results retain rc1, empty output/error and elapsed time, but not command, recursive arguments or timeout. Those parameters exist only in the hash-bound local temporary script with no retention promise. A successful script assertion, observer_pid or rc1 alone is not independently inspectable consumer-absence or method proof; no exclusion lock is established.",
     "The before/after available-space delta includes concurrent active-host changes; it is not a measurement of exclusive physical extents released by deletion.",
     "Reported 13.427GiB allocation is not a reclaim promise; no source is assigned to the difference versus observed pool change.",
     "No installer, model, runtime/history, package cache, finished product/log/source, system asset/swap/snapshot, or other DerivedData tree was selected.",
     "No app/service/timer/VM interruption, elevated/native rehearsal/root suite, installer download, resource admission or production capture occurred.",
     "Passing the observed20GiBfloor does not fund320GiBplusreserves or prove sustained growth/memory headroom, installer/version fit, protected authority/B3, full integration/reboot or parent B5 readiness.",
-    "The normalized runtime result needed for the conclusions is durable here; hashes of local temporary inputs do not promise their later retention."
+    "The durable result supports the recorded target absence, retained identities/configuration hashes, availability samples and production guard. It does not preserve the historical process sample or holder invocation parameters, so the earlier blanket durability claim is withdrawn for those checks. Current probes cannot replace them, and temporary-input hashes do not promise later retention."
   ],
-  "method": "Python3 standard-library shutil.rmtree with avoids_symlink_attacks required, exact allow-list, fresh pinned target and parent checks, deletion relative to the held parent fd, and no elevation/permission changes. The one-off script was streamed to host Python; no cleanup helper was installed or shipped.",
+  "method": "Codex-reported method from the hash-bound local temporary script: Python3 standard-library shutil.rmtree with avoids_symlink_attacks required, exact allow-list, fresh pinned target and parent checks, deletion relative to the held parent fd, and no elevation/permission changes. The one-off script was streamed to host Python; no cleanup helper was installed or shipped.",
   "parent": "82d92281860af3b544c03026398f0b0d3b9d0379",
   "reported_allocation_before_GiB": 13.427139282226562,
   "result": {
