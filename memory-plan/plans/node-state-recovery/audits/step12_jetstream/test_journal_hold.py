@@ -1,6 +1,7 @@
 import copy
 import fcntl
 import importlib.util
+import inspect
 import json
 import os
 import pathlib
@@ -49,6 +50,112 @@ def gated_identity(unit, gate_root, pins):
                      pins['root'], '--', '/owned/' + unit],
             'files': {str(entry): '1' * 64, str(manifest): digest},
             'dependencies': {}, 'working_directory': '/'}
+
+
+def wait_for_text(path, expected):
+    end = time.monotonic() + 10
+    while time.monotonic() < end:
+        try:
+            if path.read_text() == expected:
+                return
+        except FileNotFoundError:
+            pass
+        time.sleep(.01)
+
+
+class FileCompletionTests(unittest.TestCase):
+    def take(self, values, label):
+        if not values:
+            raise AssertionError('fake-queue-exhausted:' + label)
+        return values.pop(0)
+
+    def exercise(self, waiter, case, expected):
+        missing = FileNotFoundError('pending creation')
+        denied = PermissionError('owned read fault')
+        plans = {
+            'exact': ([expected], [0, 0], [expected], [], 2, 'completion-content'),
+            'created': ([missing, expected], [0, 0, .01],
+                        ['FileNotFoundError', expected], [.01], 3, 'completion-content'),
+            'partial': (['', expected[:3], expected], [0, 0, .01, .02],
+                        ['', expected[:3], expected], [.01, .01], 4, 'completion-content'),
+            'wrong-timeout': (['wrong', 'wrong'], [0, 0, 10, 20],
+                              ['wrong'], [.01], 3, 'completion-deadline'),
+            'missing-timeout': ([missing, missing], [0, 0, 10, 20],
+                                ['FileNotFoundError'], [.01], 3, 'completion-deadline'),
+            'read-error': ([denied], [0, 0, 10], ['PermissionError'], [], 2, 'completion-error'),
+        }
+        values, ticks, wanted_reads, wanted_sleeps, wanted_ticks, signal = plans[case]
+        reads = []
+        owner = self
+
+        class ScriptedPath:
+            def read_text(self):
+                value = owner.take(values, 'read')
+                reads.append(type(value).__name__ if isinstance(value, Exception) else value)
+                if isinstance(value, Exception):
+                    raise value
+                return value
+
+            def exists(self):
+                return True
+
+        fault = None
+        result = None
+        with patch.object(time, 'monotonic', side_effect=lambda: self.take(ticks, 'clock')) as clock, \
+                patch.object(time, 'sleep') as sleep:
+            try:
+                result = waiter(ScriptedPath(), expected)
+            except PermissionError as error:
+                fault = error
+        if case == 'read-error':
+            if fault is None or str(fault) != 'owned read fault':
+                raise AssertionError('completion-error')
+        elif fault is not None:
+            raise fault
+        if result is not None or reads != wanted_reads:
+            raise AssertionError(signal)
+        if [entry.args for entry in sleep.call_args_list] != [(value,) for value in wanted_sleeps] \
+                or any(entry.kwargs for entry in sleep.call_args_list) or clock.call_count != wanted_ticks:
+            raise AssertionError(signal)
+
+    def test_completed_text_waits_and_designated_mutants(self):
+        cases = ('exact', 'created', 'partial', 'wrong-timeout', 'missing-timeout', 'read-error')
+        for expected in ('detached and waiting', 'after drain'):
+            for case in cases:
+                self.exercise(wait_for_text, case, expected)
+        for label in ('clock', 'read'):
+            with self.assertRaises(AssertionError) as caught:
+                self.take([], label)
+            self.assertIs(type(caught.exception), AssertionError)
+            self.assertEqual(str(caught.exception), 'fake-queue-exhausted:' + label)
+        source = inspect.getsource(wait_for_text)
+        mutations = (
+            ('existence-only', 'if path.read_text() == expected:', 'if path.exists():',
+             'partial', 'completion-content'),
+            ('nonempty-only', 'if path.read_text() == expected:', 'if path.read_text():',
+             'partial', 'completion-content'),
+            ('swallowed-read-error', 'except FileNotFoundError:', 'except OSError:',
+             'read-error', 'completion-error'),
+            ('extended-deadline', 'time.monotonic() + 10', 'time.monotonic() + 20',
+             'wrong-timeout', 'completion-deadline'),
+        )
+        killed = []
+        for name, old, new, case, signal in mutations:
+            self.assertEqual(source.count(old), 1)
+            namespace = {'time': time}
+            exec(compile(source.replace(old, new, 1), '<detached-completion-' + name + '>', 'exec'),
+                 namespace)
+            self.exercise(wait_for_text, case, 'after drain')
+            with self.assertRaises(AssertionError) as caught:
+                self.exercise(namespace['wait_for_text'], case, 'after drain')
+            self.assertIs(type(caught.exception), AssertionError)
+            self.assertEqual(str(caught.exception), signal)
+            killed.append(name)
+        summary = 'DETACHED_TEXT_COMPLETION ' + json.dumps({
+            'scripted_controls': 12, 'guard_probes': 2, 'paired_baselines': 4,
+            'intended_mutant_kills': killed}, sort_keys=True, separators=(',', ':'))
+        self.assertLess(len(summary.encode('utf-8')), 1024)
+        print(summary, file=sys.stderr, flush=True)
 
 
 class HoldTests(unittest.TestCase):
@@ -697,18 +804,14 @@ subprocess.Popen([sys.executable,'-c',child,str(ready),str(release),str(written)
             str(ready), str(release), str(written)],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.children.append(wrapper)
-        end = time.monotonic() + 10
-        while not ready.exists() and time.monotonic() < end:
-            time.sleep(.01)
+        wait_for_text(ready, 'detached and waiting')
         self.assertEqual(ready.read_text(), 'detached and waiting')
         self.assertEqual(wrapper.wait(timeout=5), 0)
         self.gate.close_and_drain('owned-window', 'detached-writer-negative', 1)
         self.assertIsNotNone(self.gate.marker())
         self.assertFalse(written.exists())
         release.touch(mode=0o600)
-        end = time.monotonic() + 10
-        while not written.exists() and time.monotonic() < end:
-            time.sleep(.01)
+        wait_for_text(written, 'after drain')
         self.assertEqual(written.read_text(), 'after drain')
 
 
