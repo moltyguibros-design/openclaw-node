@@ -1,6 +1,8 @@
+import errno
 import hashlib
 import inspect
 import json
+import math
 import os
 import pathlib
 import shutil
@@ -16,27 +18,71 @@ from unittest.mock import patch
 import cluster_startup_evidence as evidence
 import test_preservation_cluster as cluster
 from preservation_checks import Refused
+from test_cohort_cleanup_controls import CohortControls
 
 
 STEP = pathlib.Path(__file__).resolve().parent
 
 
 class CohortTimeout(TimeoutError):
-    def __init__(self, cleanup):
+    def __init__(self, cleanup, observations=None):
         super().__init__('owned cohort timed out')
         self.cleanup = cleanup
+        self.observations = observations
+
+
+def cohort_error(error):
+    return {'type': type(error).__name__, 'errno': getattr(error, 'errno', None)}
+
+
+def emit_cohort_record(kind, record):
+    print(kind + ': ' + json.dumps(record, sort_keys=True, separators=(',', ':'),
+                                   allow_nan=False), flush=True)
 
 
 def wait_group_absent(group, seconds):
+    row = {'group': group, 'startedAt': None, 'deadline': None, 'endedAt': None,
+           'samples': [], 'totalSamples': 0, 'overflow': False, 'outcome': 'unknown',
+           'firstAbsenceAt': None}
+    wait_group_absent.last_observation = row
     end = time.monotonic() + seconds
-    while True:
-        try:
-            os.killpg(group, 0)
-        except ProcessLookupError:
-            return True
-        if time.monotonic() >= end:
-            return False
-        time.sleep(.05)
+    row['startedAt'], row['deadline'] = end - seconds, end
+    try:
+        while True:
+            sample = {'issuedAt': time.monotonic(), 'returnedAt': None,
+                      'result': None, 'error': None, 'deadlineCheckAt': None}
+            try:
+                os.killpg(group, 0)
+            except OSError as error:
+                sample['returnedAt'] = time.monotonic()
+                sample['error'] = cohort_error(error)
+                sample['result'] = 'absent' if error.errno == errno.ESRCH else 'error'
+                row['totalSamples'] += 1
+                if len(row['samples']) < 128:
+                    row['samples'].append(sample)
+                else:
+                    row['overflow'] = True
+                if sample['result'] == 'absent':
+                    row['outcome'] = 'absent'
+                    row['firstAbsenceAt'] = sample['returnedAt']
+                    return True
+                row['outcome'] = 'error'
+                raise
+            sample['returnedAt'] = time.monotonic()
+            sample['result'] = 'present'
+            check = time.monotonic()
+            sample['deadlineCheckAt'] = check
+            row['totalSamples'] += 1
+            if len(row['samples']) < 128:
+                row['samples'].append(sample)
+            else:
+                row['overflow'] = True
+            if check >= end:
+                row['outcome'] = 'deadline'
+                return False
+            time.sleep(.05)
+    finally:
+        row['endedAt'] = time.monotonic()
 
 
 def run_cohort(command, env, timeout=120, grace=3):
@@ -47,28 +93,219 @@ def run_cohort(command, env, timeout=120, grace=3):
     except subprocess.TimeoutExpired:
         cleanup = {'group': proc.pid, 'signals': [], 'errors': [], 'groupAbsent': False,
                    'pythonReaped': False, 'pythonExitCode': None}
-        for sig in (signal.SIGTERM, signal.SIGKILL):
+        observations = {'group': proc.pid, 'startedAt': time.monotonic(), 'endedAt': None,
+                        'windows': [], 'unexpectedError': None, 'pollError': None}
+        try:
+            for sig in (signal.SIGTERM, signal.SIGKILL):
+                window = {'signal': sig.name, 'signalIssuedAt': time.monotonic(),
+                          'signalReturnedAt': None, 'signalResult': 'unknown',
+                          'signalError': None, 'parentWait': None, 'observation': None,
+                          'endedAt': None}
+                observations['windows'].append(window)
+                try:
+                    os.killpg(proc.pid, sig)
+                    cleanup['signals'].append(sig.name)
+                    window['signalResult'] = 'returned'
+                except ProcessLookupError as error:
+                    window['signalResult'] = 'absent'
+                    window['signalError'] = cohort_error(error)
+                except OSError as error:
+                    cleanup['errors'].append('signal: ' + type(error).__name__)
+                    window['signalResult'] = 'error'
+                    window['signalError'] = cohort_error(error)
+                finally:
+                    window['signalReturnedAt'] = time.monotonic()
+                parent = {'startedAt': time.monotonic(), 'endedAt': None, 'seconds': grace,
+                          'outcome': 'unknown', 'exitCode': None, 'error': None}
+                window['parentWait'] = parent
+                try:
+                    proc.communicate(timeout=grace)
+                    parent['outcome'] = 'returned'
+                except subprocess.TimeoutExpired as error:
+                    cleanup['errors'].append(sig.name + ' parent wait expired')
+                    parent['outcome'] = 'timeout'
+                    parent['error'] = cohort_error(error)
+                finally:
+                    parent['endedAt'] = time.monotonic()
+                    parent['exitCode'] = proc.returncode
+                wait_group_absent.last_observation = None
+                try:
+                    cleanup['groupAbsent'] = wait_group_absent(proc.pid, grace)
+                except OSError as error:
+                    cleanup['errors'].append('group observation: ' + type(error).__name__)
+                finally:
+                    observed = wait_group_absent.last_observation
+                    window['observation'] = observed if type(observed) is dict else None
+                    window['endedAt'] = time.monotonic()
+                if cleanup['groupAbsent']:
+                    break
+        except BaseException as error:
+            observations['unexpectedError'] = cohort_error(error)
+            raise
+        finally:
             try:
-                os.killpg(proc.pid, sig)
-                cleanup['signals'].append(sig.name)
-            except ProcessLookupError:
-                pass
-            except OSError as error:
-                cleanup['errors'].append('signal: ' + type(error).__name__)
-            try:
-                proc.communicate(timeout=grace)
-            except subprocess.TimeoutExpired:
-                cleanup['errors'].append(sig.name + ' parent wait expired')
-            try:
-                cleanup['groupAbsent'] = wait_group_absent(proc.pid, grace)
-            except OSError as error:
-                cleanup['errors'].append('group observation: ' + type(error).__name__)
-            if cleanup['groupAbsent']:
-                break
-        cleanup['pythonExitCode'] = proc.poll()
-        cleanup['pythonReaped'] = cleanup['pythonExitCode'] is not None
-        raise CohortTimeout(cleanup) from None
+                cleanup['pythonExitCode'] = proc.poll()
+                cleanup['pythonReaped'] = cleanup['pythonExitCode'] is not None
+            except Exception as error:
+                observations['pollError'] = cohort_error(error)
+                raise
+            finally:
+                observations['endedAt'] = time.monotonic()
+                emit_cohort_record('owned-cohort-timeout-v2',
+                                   {'cleanup': cleanup, 'observations': observations})
+        raise CohortTimeout(cleanup, observations) from None
     return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
+
+
+def read_cohort_ready(marker):
+    row = {'state': 'unknown', 'bytes': None, 'value': None, 'error': None}
+    try:
+        with marker.open('rb') as handle:
+            raw = handle.read(4097)
+        row['bytes'] = len(raw)
+        if len(raw) > 4096:
+            row['state'] = 'oversize'
+        else:
+            row['value'] = json.loads(raw)
+            row['state'] = 'parsed'
+    except (OSError, ValueError) as error:
+        row['error'] = cohort_error(error)
+    return row
+
+
+def cohort_clock(value):
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+def require_forced_proof(cleanup, observations, ready):
+    assert type(cleanup) is dict and type(observations) is dict, 'cohort-proof-record'
+    assert set(cleanup) == {'group', 'signals', 'errors', 'groupAbsent', 'pythonReaped', 'pythonExitCode'} and set(observations) == {'group', 'startedAt', 'endedAt', 'windows', 'unexpectedError', 'pollError'}, 'cohort-proof-record-schema'
+    group = cleanup.get('group')
+    assert type(group) is int and group > 0 and observations.get('group') == group, 'cohort-proof-group'
+    assert cleanup.get('groupAbsent') is True, 'cohort-proof-absence'
+    assert cleanup.get('pythonReaped') is True and cleanup.get('pythonExitCode') == -signal.SIGKILL, 'cohort-proof-reaped'
+    assert cleanup.get('signals') == ['SIGTERM', 'SIGKILL'], 'cohort-proof-signals'
+    assert cleanup.get('errors') == ['SIGTERM parent wait expired'], 'cohort-proof-errors'
+    assert observations.get('unexpectedError') is None and observations.get('pollError') is None, 'cohort-proof-unexpected'
+    started, ended = observations.get('startedAt'), observations.get('endedAt')
+    assert cohort_clock(started) and cohort_clock(ended) and started <= ended, 'cohort-proof-clock'
+    windows = observations.get('windows')
+    assert type(windows) is list and len(windows) == 2, 'cohort-proof-windows'
+    previous = started
+    for index, name in enumerate(('SIGTERM', 'SIGKILL')):
+        window = windows[index]
+        assert type(window) is dict and window.get('signal') == name, 'cohort-proof-window-label'
+        assert set(window) == {'signal', 'signalIssuedAt', 'signalReturnedAt', 'signalResult', 'signalError', 'parentWait', 'observation', 'endedAt'}, 'cohort-proof-window-schema'
+        times = [window.get('signalIssuedAt'), window.get('signalReturnedAt'), window.get('endedAt')]
+        assert all(cohort_clock(t) for t in times) and previous <= times[0] <= times[1] <= times[2] <= ended, 'cohort-proof-window-clock'
+        assert window.get('signalResult') == 'returned' and window.get('signalError') is None, 'cohort-proof-signal-result'
+        parent, row = window.get('parentWait'), window.get('observation')
+        assert type(parent) is dict and type(row) is dict, 'cohort-proof-window-record'
+        assert set(parent) == {'startedAt', 'endedAt', 'seconds', 'outcome', 'exitCode', 'error'} and set(row) == {'group', 'startedAt', 'deadline', 'endedAt', 'samples', 'totalSamples', 'overflow', 'outcome', 'firstAbsenceAt'}, 'cohort-proof-observation-schema'
+        assert type(parent.get('seconds')) is int and parent['seconds'] == 3, 'cohort-proof-wait-bound'
+        a, b, c, d, deadline = (parent.get('startedAt'), parent.get('endedAt'), row.get('startedAt'), row.get('endedAt'), row.get('deadline'))
+        assert all(cohort_clock(t) for t in (a, b, c, d, deadline)) and times[1] <= a <= b <= c <= d <= times[2] and deadline == c + 3, 'cohort-proof-observation-clock'
+        expected = 'timeout' if index == 0 else 'returned'
+        assert parent.get('outcome') == expected, 'cohort-proof-parent-outcome'
+        expected_error = {'type': 'TimeoutExpired', 'errno': None} if index == 0 else None
+        assert parent.get('error') == expected_error and parent.get('exitCode') == (None if index == 0 else -signal.SIGKILL), 'cohort-proof-parent-error'
+        assert row.get('group') == group and row.get('overflow') is False, 'cohort-proof-observation-binding'
+        samples = row.get('samples')
+        assert type(samples) is list and 0 < len(samples) <= 128 and type(row.get('totalSamples')) is int and row['totalSamples'] == len(samples), 'cohort-proof-samples'
+        prior = c
+        for offset, sample in enumerate(samples):
+            assert type(sample) is dict, 'cohort-proof-sample-record'
+            assert set(sample) == {'issuedAt', 'returnedAt', 'result', 'error', 'deadlineCheckAt'}, 'cohort-proof-sample-schema'
+            issued, returned, check = sample.get('issuedAt'), sample.get('returnedAt'), sample.get('deadlineCheckAt')
+            assert cohort_clock(issued) and cohort_clock(returned) and prior <= issued <= returned <= d, 'cohort-proof-sample-clock'
+            last = offset == len(samples) - 1
+            if index == 1 and last:
+                assert sample.get('result') == 'absent' and type(sample.get('error')) is dict and set(sample['error']) == {'type', 'errno'} and sample['error'].get('type') in ('ProcessLookupError', 'OSError') and sample['error'].get('errno') == errno.ESRCH and check is None, 'cohort-proof-esrch'
+                assert cohort_clock(row.get('firstAbsenceAt')) and row['firstAbsenceAt'] == returned, 'cohort-proof-first-absence'
+                prior = returned
+            else:
+                assert sample.get('result') == 'present' and sample.get('error') is None, 'cohort-proof-present'
+                assert cohort_clock(check) and returned <= check <= d, 'cohort-proof-decision-clock'
+                assert (check >= deadline) if index == 0 and last else (check < deadline), 'cohort-proof-decision-branch'
+                prior = check
+        assert row.get('outcome') == ('deadline' if index == 0 else 'absent'), 'cohort-proof-outcome'
+        if index == 0:
+            assert row.get('firstAbsenceAt') is None, 'cohort-proof-term-absence'
+        previous = times[2]
+    assert type(ready) is dict and ready.get('state') == 'parsed' and ready.get('error') is None, 'cohort-proof-ready-record'
+    assert set(ready) == {'state', 'bytes', 'value', 'error'} and type(ready.get('bytes')) is int and 0 < ready['bytes'] <= 4096, 'cohort-proof-ready-record'
+    value = ready.get('value')
+    assert type(value) is dict and set(value) == {'ready', 'pid', 'ppid', 'pgid', 'session'} and value.get('ready') is True, 'cohort-proof-ready-schema'
+    assert all(type(value[k]) is int and value[k] > 0 for k in ('pid', 'ppid', 'pgid', 'session')) and value['pid'] != group and all(value[k] == group for k in ('ppid', 'pgid', 'session')), 'cohort-proof-ready-binding'
+
+
+def final_forced_cleanup(proc, primary):
+    row = {'group': proc.pid, 'primaryType': type(primary).__name__ if primary else None,
+           'signal': {'issuedAt': time.monotonic(), 'returnedAt': None, 'result': 'unknown', 'error': None},
+           'parentWait': None, 'observation': None, 'error': None, 'groupAbsent': False}
+    phase = 'signal'
+    try:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+            row['signal']['result'] = 'returned'
+        except ProcessLookupError as error:
+            row['signal']['result'] = 'absent'
+            row['signal']['error'] = cohort_error(error)
+        finally:
+            row['signal']['returnedAt'] = time.monotonic()
+        phase = 'parent-wait'
+        row['parentWait'] = {'startedAt': time.monotonic(), 'endedAt': None, 'seconds': 3,
+                             'returned': False, 'exitCode': None}
+        try:
+            row['parentWait']['exitCode'] = proc.wait(timeout=3)
+            row['parentWait']['returned'] = True
+        finally:
+            row['parentWait']['endedAt'] = time.monotonic()
+        phase = 'presence'
+        final_deadline = time.monotonic() + 5
+        observation = {'startedAt': final_deadline - 5, 'deadline': final_deadline, 'endedAt': None,
+                       'samples': [], 'totalSamples': 0, 'overflow': False, 'outcome': 'deadline'}
+        row['observation'] = observation
+        try:
+            while True:
+                check = time.monotonic()
+                if check >= final_deadline:
+                    observation['deadlineCheckAt'] = check
+                    break
+                sample = {'issuedAt': time.monotonic(), 'returnedAt': None, 'error': None,
+                          'result': 'unknown', 'entryCheckAt': check}
+                try:
+                    os.killpg(proc.pid, 0)
+                    sample['result'] = 'present'
+                except OSError as error:
+                    sample['error'] = cohort_error(error)
+                    sample['result'] = 'absent' if error.errno == errno.ESRCH else 'error'
+                    if sample['result'] == 'error':
+                        raise
+                    row['groupAbsent'] = True
+                    observation['outcome'] = 'absent'
+                finally:
+                    sample['returnedAt'] = time.monotonic()
+                    observation['totalSamples'] += 1
+                    if len(observation['samples']) < 128:
+                        observation['samples'].append(sample)
+                    else:
+                        observation['overflow'] = True
+                if row['groupAbsent']:
+                    break
+                time.sleep(.05)
+        finally:
+            observation['endedAt'] = time.monotonic()
+    except Exception as error:
+        row['error'] = {'phase': phase, **cohort_error(error)}
+        if primary is None:
+            raise
+    finally:
+        emit_cohort_record('owned-forced-final-v2', row)
+    if primary is None:
+        assert row['parentWait'] and row['parentWait']['returned'], 'cohort-final-reaped'
+        assert row['groupAbsent'] and row['observation'] and not row['observation']['overflow'], 'cohort-final-absence'
+    return row
 
 
 class Owner:
@@ -431,7 +668,13 @@ time.sleep(60)
 
     def test_term_ignoring_group_requires_real_absence(self):
         marker=self.root/'ignoring-child.ready'
-        child="import signal,sys,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);open(sys.argv[1],'w').write('ready');time.sleep(60)"
+        child="""import json,os,signal,sys,time
+signal.signal(signal.SIGTERM,signal.SIG_IGN)
+with open(sys.argv[1]+'.partial','w') as handle:
+ json.dump({'ready':True,'pid':os.getpid(),'ppid':os.getppid(),'pgid':os.getpgrp(),'session':os.getsid(0)},handle)
+os.rename(sys.argv[1]+'.partial',sys.argv[1])
+time.sleep(60)
+"""
         source="""import pathlib,signal,subprocess,sys,time
 signal.signal(signal.SIGTERM,signal.SIG_IGN)
 child=subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[2]])
@@ -445,32 +688,20 @@ time.sleep(60)
             with patch.object(subprocess,'Popen',side_effect=start):
                 with self.assertRaises(CohortTimeout) as caught:
                     run_cohort([sys.executable,'-c',source,child,str(marker)],os.environ.copy(),timeout=2,grace=3)
+            ready=read_cohort_ready(marker)
+            emit_cohort_record('owned-forced-ready-v2',ready)
             self.assertTrue(marker.exists(),'the child must install TERM refusal before timeout')
             self.assertEqual(caught.exception.cleanup['signals'],['SIGTERM','SIGKILL'],
                              'a TERM-ignoring live group must require KILL')
             self.assertTrue(caught.exception.cleanup['groupAbsent'],'forced group absence must be observed')
             self.assertTrue(caught.exception.cleanup['pythonReaped'])
             self.assertEqual(caught.exception.cleanup['pythonExitCode'],-signal.SIGKILL)
+            require_forced_proof(caught.exception.cleanup,caught.exception.observations,ready)
             print('owned-forced-timeout-cleanup: '+json.dumps(caught.exception.cleanup))
         finally:
             primary=sys.exc_info()[1]
             for proc in launched:
-                try:
-                    os.killpg(proc.pid,signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                proc.wait(timeout=3)
-                end=time.monotonic()+5
-                while time.monotonic()<end:
-                    try:
-                        os.killpg(proc.pid,0)
-                    except ProcessLookupError:
-                        break
-                    time.sleep(.05)
-                else:
-                    if primary is None:
-                        self.fail('owned forced-timeout test group did not disappear')
-                    print('owned forced-timeout test cleanup: group absence unobserved')
+                final_forced_cleanup(proc,primary)
 
     def test_inline_gate_contract_is_fixed(self):
         source=inspect.getsource(cluster.Cluster.test_stream_and_consumer_groups_and_real_stream_election)
