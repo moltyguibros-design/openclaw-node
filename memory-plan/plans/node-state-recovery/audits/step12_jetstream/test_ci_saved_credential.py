@@ -27,6 +27,7 @@ P2_WORKFLOW_TEMPLATE = r'''      - name: Measure preregistered saved credentials
               return result
           class NoRedirect(urllib.request.HTTPRedirectHandler):
               def redirect_request(self, *args): return None
+          phase = 'preflight'
           try:
               env = os.environ
               if env['GITHUB_REPOSITORY'] != 'moltyguibros-design/openclaw-node' or env['GITHUB_JOB'] != 'macos-process-census' or env['GITHUB_EVENT_NAME'] != 'pull_request': raise ValueError()
@@ -37,13 +38,20 @@ P2_WORKFLOW_TEMPLATE = r'''      - name: Measure preregistered saved credentials
               event = json.loads(event_raw, object_pairs_hook=pairs)
               head = event['pull_request']['head']['sha']
               if re.fullmatch(r'[0-9a-f]{40}', head) is None: raise ValueError()
+              phase = 'token'
               token = env['GH_TOKEN']
-              if re.fullmatch(r'[A-Za-z0-9_]{1,512}', token) is None: raise ValueError()
+              if re.fullmatch(r'[\x21-\x7e]{1,4096}', token) is None: raise ValueError()
+              phase = 'request'
               request = urllib.request.Request('https://api.github.com/repos/moltyguibros-design/openclaw-node/actions/runs/' + run + '/jobs?filter=all&per_page=100', headers={'Authorization':'Bearer ' + token, 'Accept':'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28'})
+              opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect)
               signal.signal(signal.SIGALRM, refuse)
               signal.setitimer(signal.ITIMER_REAL, 5)
-              with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect).open(request, timeout=5) as response: raw = response.read(262145)
-              signal.setitimer(signal.ITIMER_REAL, 0)
+              try:
+                  with opener.open(request, timeout=5) as response:
+                      phase = 'response'
+                      raw = response.read(262145)
+              finally:
+                  signal.setitimer(signal.ITIMER_REAL, 0)
               if len(raw) > 262144: raise ValueError()
               value = json.loads(raw, object_pairs_hook=pairs)
               if type(value['total_count']) is not int or not 1 <= value['total_count'] <= 100 or type(value['jobs']) is not list or len(value['jobs']) != value['total_count']: raise ValueError()
@@ -51,7 +59,7 @@ P2_WORKFLOW_TEMPLATE = r'''      - name: Measure preregistered saved credentials
               if len(matches) != 1 or type(matches[0]['id']) is not int or not 0 < matches[0]['id'] <= 9223372036854775807: raise ValueError()
               print(matches[0]['id'])
           except Exception:
-              raise SystemExit('saved-credential job selection unavailable') from None
+              raise SystemExit('saved-credential job selection unavailable: phase=' + phase) from None
           PY_JOB
           )"
           /usr/bin/python3 -I -S -B memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_ci_saved_credential.py
@@ -1012,6 +1020,63 @@ class FailureAndBoundsTests(unittest.TestCase):
                 backend.close()
         COUNTS['schema_controls'] += 8
 
+
+def selector_text(t):
+    lines=t.splitlines();a="          saved_job_id=\"$(/usr/bin/python3 -I -S -B - <<'PY_JOB'";z='          PY_JOB'
+    assert lines.count(a)==lines.count(z)==1, 'selector-delimiters'
+    i,j=lines.index(a),lines.index(z);body=lines[i+1:j]
+    assert i<j and body and all(x.startswith(' '*10) for x in body), 'selector-indent'
+    return '\n'.join(x[10:] for x in body)+'\n'
+
+
+def test_tokens(self):
+    eq,raises=self.assertEqual,self.assertRaisesRegex
+    from types import SimpleNamespace as N
+    code=selector_text(P2_WORKFLOW_TEMPLATE)
+    def select(token,error=None,read=False,text=code):
+        b=FakeBackend();resp=mock.MagicMock();resp.__enter__.return_value=resp
+        resp.read.return_value=json.dumps(dict(total_count=1,jobs=[dict(name='macos-process-census',run_id=39550906038,run_attempt=1,head_sha='2'*40,id=123)])).encode()
+        op=mock.Mock();op.open.return_value=resp
+        if error:(resp.read if read else op.open).side_effect=error
+        req=mock.Mock(HTTPRedirectHandler=object);req.build_opener.return_value=op
+        sig=mock.Mock(SIGALRM=1,ITIMER_REAL=2);fos=N(environ=dict(b.environment,GH_TOKEN=token));url=N(request=req)
+        assert fos.environ is not p.os.environ
+        for value,name in [(fos,'os'),(sig,'signal'),(url,'urllib'),(req,'urllib.request')]:assert value is not sys.modules.get(name)
+        tree=ast.parse(text);tree.body=[x for x in tree.body if not isinstance(x,ast.Import)];out=io.StringIO();err=None
+        with contextlib.redirect_stdout(out):
+            try:exec(compile(tree,'<actual-selector>','exec'),dict(json=json,re=re,os=fos,signal=sig,urllib=url,open=lambda *a:io.BytesIO(json.dumps(b.event).encode())))
+            except SystemExit as ex:err=str(ex)
+        if op.open.called:eq(sig.setitimer.call_args_list,[mock.call(2,5),mock.call(2,0)])
+        return out.getvalue(),err
+    good=['ghs_'+'A'*36,'ghs_1_'+'A'*170+'.'+'B'*170+'.'+'C-'*86,'X'*4096,'opaque"\\value'];bad=['',' ','\r','\n','\0','\x7f','é','X'*4097]
+    for token in good:assert select(token)==('123\n',None), 'kill:selector'
+    prefix='saved-credential job selection unavailable: phase='
+    for token in bad:eq(select(token),('',prefix+'token'))
+    for read in (False,True):eq(select(good[0],ValueError('never print me'),read),('',prefix+('response' if read else 'request')))
+    with self.assertRaises(AssertionError):selector_text(P2_WORKFLOW_TEMPLATE*2)
+    with raises(AssertionError,'^kill:selector$'):assert select(good[1],text=code.replace(r'[\x21-\x7e]{1,4096}',r'[A-Za-z0-9_]{1,512}'))==('123\n',None), 'kill:selector'
+    def driver(raw,token):
+        ns=dict(p.__dict__);exec(raw,ns);cls=ns['RealBackend']
+        with mock.patch.object(cls,'now',return_value=0):
+            try:b=cls('/r','/w',{'GH_TOKEN':token},1)
+            except ns['Refusal'] as ex:
+                eq((ex.record['stage'],ex.record['kind']),('ci','token'))
+                raise AssertionError('kill:driver') from None
+            ops=mock.Mock();ns.update(ProcessOperations=ops,capture_worker=lambda *a:dict(stdout=dict(captured_bytes=0),stderr=dict(captured_bytes=0)));b.start(0,'x',['/usr/bin/curl'],5,100,auth=True)
+        argv,env,wire=ops.call_args.args;eq((argv,env),(['/usr/bin/curl'],p.CLEAN))
+        try:value=json.loads(wire.splitlines()[0].split(b' = ',1)[1])
+        except ValueError:raise AssertionError('kill:config') from None
+        assert value=='Authorization: Bearer '+token, 'kill:config'
+    raw=INPUTS[p.FILES[2]].decode()
+    for token in good:driver(raw,token)
+    for token in bad:
+        with raises(AssertionError,'^kill:driver$'):driver(raw,token)
+    for text,token,tag in [(raw.replace(r'[\x21-\x7e]{1,4096}',r'[A-Za-z0-9_]{1,512}'),good[1],'driver'),(raw.replace(".replace(b'\\\\', b'\\\\\\\\').replace(b'\"', b'\\\\\"')",''),good[3],'config')]:
+        self.assertNotEqual(text,raw)
+        with raises(AssertionError,'^kill:'+tag+'$'):driver(text,token)
+    print('CI_SAVED_TOKEN_CONTROLS paired=3 killed=3 synthetic-only',file=sys.stderr)
+
+SourceAndMutationTests.test_tokens=test_tokens
 
 PRIVATE = None
 

@@ -736,7 +736,7 @@ class RealBackend:
         self.deadline = self.now() + 150000000000
         self.progress_size = self.progress_count = self.metadata_size = self.argv_size = self.raw_size = 0
         token = environment.get('GH_TOKEN', '')
-        require(type(token) is str and re.fullmatch(r'[A-Za-z0-9_]{1,512}', token) is not None,
+        require(type(token) is str and re.fullmatch(r'[\x21-\x7e]{1,4096}', token) is not None,
             'ci', 'token')
         self.secret = token.encode('ascii')
 
@@ -826,7 +826,7 @@ class RealBackend:
             env['TMPDIR'] = self.work + '/compiler-tmp'
         input_bytes = b''
         if auth:
-            input_bytes = (b'header = "Authorization: Bearer ' + self.secret + b'"\n'
+            input_bytes = (b'header = "Authorization: Bearer ' + self.secret.replace(b'\\', b'\\\\').replace(b'"', b'\\"') + b'"\n'
                 b'header = "Accept: application/vnd.github+json"\n'
                 b'header = "X-GitHub-Api-Version: 2022-11-28"\n')
         ops = ProcessOperations(argv, env, input_bytes)
