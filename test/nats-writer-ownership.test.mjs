@@ -6,6 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { assertLegacyNatsWriterAllowed, PROTECTED_NATS_HANDOFF } from '../lib/nats-writer-ownership.mjs';
+import { LEGACY_NATS_WRITER_LOCK } from '../lib/nats-legacy-lock.mjs';
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -29,7 +30,15 @@ it('auth sync refuses before trust changes the registry or writes auth', () => {
   const preload = path.join(root, 'committed.cjs');
   fs.writeFileSync(preload, `const fs = require('node:fs');
 const original = fs.lstatSync;
-fs.lstatSync = (name, ...args) => String(name) === ${JSON.stringify(PROTECTED_NATS_HANDOFF)} ? {} : original(name, ...args);
+fs.lstatSync = (name, ...args) => {
+  if (String(name) === ${JSON.stringify(PROTECTED_NATS_HANDOFF)}) return {};
+  if (String(name) === ${JSON.stringify(LEGACY_NATS_WRITER_LOCK)}) {
+    const error = new Error('ENOENT');
+    error.code = 'ENOENT';
+    throw error;
+  }
+  return original(name, ...args);
+};
 `);
   const env = { ...process.env, HOME: root, OPENCLAW_IDENTITY_DIR: root,
     OPENCLAW_BRIDGE_DIR: path.join(root, 'no-bridge'), NODE_OPTIONS: `--require=${preload}` };

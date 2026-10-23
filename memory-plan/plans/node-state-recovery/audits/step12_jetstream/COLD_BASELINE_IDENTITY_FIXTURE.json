@@ -1,0 +1,27 @@
+{
+  "scope": "owned isolated fixture only; no production owner or host-image acceptance",
+  "run_at_utc": "2026-10-03T19:06:14.544Z",
+  "baseline_source_sha256": "3524c06e339dbcae078f10f295c9c74e952edf62ab52558fbf797ce16f8503b3",
+  "fixture_source_sha256": "ca3e366f4f3e6cccda27f5d9a883839dc88c2a053135d0e29a58607e810587e7",
+  "probe_source_sha256": "b86c0e2d5c423ec06267dad976098ae0f9780832b97954201e0f122151507ffc",
+  "recovery_source_sha256": "8a9b78e0332997ec6814bcfdad7e7843c62221a771d6d6d5fb90a494f5373eaf",
+  "nats_cli": {
+    "version": "0.3.1",
+    "sha256": "6be41e7097aac6278c3b9e4f394fc1536996608e921aa14fceae1bf0e800da0f"
+  },
+  "nats_server": {
+    "version": "2.12.6",
+    "sha256": "c3a71e72f6fc5dd008988f34b57fd2ab1fe69ab18d409f0a0aeebc51160e76e1"
+  },
+  "expected_identity_persisted_in_success_manifest": true,
+  "standalone_and_cluster_positive_captures": true,
+  "wrong_server_name_refused": true,
+  "wrong_server_id_refused": true,
+  "wrong_cluster_refused": true,
+  "identity_refusals_precede_stream_capture": true,
+  "private_failure_mode": "0600",
+  "private_directory_mode": "0700",
+  "no_success_manifest_after_refusal": true,
+  "complete_four_tree_fixture_passed": true,
+  "owned_servers_stopped": true
+}

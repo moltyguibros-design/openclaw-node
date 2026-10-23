@@ -3,7 +3,7 @@ import json
 import os
 import pathlib
 import secrets
-import signal
+import sys
 import socket
 import subprocess
 import tempfile
@@ -11,6 +11,43 @@ import time
 import unittest
 
 from preservation_checks import QuietWindow, Refused, capture, http_json
+from cluster_startup_evidence import StartupEvidence
+
+
+def wait_for_groups(ports, root, *, clock=time.monotonic, sleep=time.sleep):
+    previous = None
+    stable_since = None
+    before = []
+    failures = []
+    last_reset = 'not sampled'
+    deadline = clock() + 10
+    while clock() < deadline:
+        before = [capture(ports[i*3+1]) for i in range(3)]
+        groups = [report['raft'] for report in before]
+        failures = []
+        for i, table in enumerate(groups):
+            conditions = [
+                ('$SYS missing', '$SYS' in table),
+                ('$G missing', '$G' in table),
+                ('$G group count below two', len(table.get('$G', {})) >= 2),
+                ('$G leader empty', all(node['leader'] for node in table.get('$G', {}).values())),
+            ]
+            failures.append({'member': i, 'failed': [name for name, valid in conditions if not valid]})
+        ready = not any(row['failed'] for row in failures)
+        if ready and groups == previous:
+            if stable_since is None:
+                stable_since = clock()
+            if clock() - stable_since >= 1:
+                return before
+        else:
+            stable_since = None
+            last_reset = 'invalid' if not ready else 'change'
+        previous = groups
+        sleep(.05)
+    (root/'raft-readiness-refused.json').write_text(json.dumps({
+        'captures': before, 'failures': failures, 'last_reset': last_reset}, indent=2))
+    raise AssertionError('owned replication groups did not settle after creation; '
+                         f'last reset: {last_reset}; failures: {failures}')
 
 
 class Cluster(unittest.TestCase):
@@ -34,6 +71,7 @@ class Cluster(unittest.TestCase):
             routes = ','.join(f'"nats://owned:{route_password}@127.0.0.1:{ports[j*3+2]}"'
                               for j in range(3) if j != i)
             config.write_text(f'''server_name: owned-raft-{i}
+debug: true
 listen: 127.0.0.1:{ports[i*3]}
 http: 127.0.0.1:{ports[i*3+1]}
 authorization {{ token: "{token}" }}
@@ -48,20 +86,22 @@ cluster {{ name: owned-preservation
             configs.append(config)
         script = root/'client.cjs'
         script.write_text('''const {connect,StringCodec}=require(process.env.OWNED_NATS_MODULE);
-let nc,stage='connect';
+let nc,stage='connect',streamAddAttempts=0;
+const connected=()=>nc?{name:nc.info.server_name,id:nc.info.server_id}:null;
 (async()=>{
  nc=await connect({servers:process.env.OWNED_URL,token:process.env.OWNED_TOKEN,reconnect:false,name:'owned-raft-control'});
  stage='account-info';const jm=await nc.jetstreamManager();
- if(process.env.OWNED_ACTION==='ready')await jm.getAccountInfo();
+ if(process.env.OWNED_ACTION==='ready'){await jm.getAccountInfo();console.log(JSON.stringify({connected:connected(),stage,streamAddAttempts}));}
  else if(process.env.OWNED_ACTION==='create'){
   stage='stream-add';
+  streamAddAttempts++;
   await jm.streams.add({name:'HISTORY',subjects:['history'],storage:'file',num_replicas:3});
   stage='stream-readiness';
   const deadline=Date.now()+5000;
   while(true){
    const info=await jm.streams.info('HISTORY');
    if(info.cluster?.leader&&info.cluster.replicas?.length===2&&info.cluster.replicas.every(r=>r.current)){
-    console.log(JSON.stringify({leader:info.cluster.leader}));break;
+    console.log(JSON.stringify({leader:info.cluster.leader,connected:connected(),stage,streamAddAttempts}));break;
    }
    if(Date.now()>=deadline)throw Error('owned stream failed readiness');
    await new Promise(resolve=>setTimeout(resolve,20));
@@ -78,10 +118,12 @@ let nc,stage='connect';
   const data=JSON.parse(new TextDecoder().decode(reply.data));if(data.error||!data.success)throw Error('owned stepdown failed');
  }
  await nc.drain();
-})().catch(async error=>{console.error(JSON.stringify({stage,name:error.name,code:error.code,message:error.message}));await nc?.close();process.exitCode=1;});
+})().catch(async error=>{console.error(JSON.stringify({stage,name:error.name,code:error.code,message:error.message,api_error:error.api_error,connected:connected(),streamAddAttempts}));await nc?.close();process.exitCode=1;});
 ''')
         owners = []
-        cleanup = []
+        output = os.environ.get('PRESERVATION_CLUSTER_REPORT')
+        evidence = StartupEvidence(root, ports, token, route_password, pathlib.Path(output) if output else None)
+        self.evidence = evidence
         succeeded = False
         for sock in held:
             sock.close()
@@ -89,19 +131,31 @@ let nc,stage='connect';
             result = subprocess.run([node, str(script)], env={**os.environ, 'OWNED_NATS_MODULE': module,
                 'OWNED_URL': f'nats://127.0.0.1:{port or ports[0]}', 'OWNED_TOKEN': token, 'OWNED_ACTION': action},
                 capture_output=True, text=True, timeout=15)
+            evidence.client(action, result)
             if result.returncode and startup:
-                error = json.loads(result.stderr)
-                if error.get('stage') == 'account-info' and error.get('code') == '503':
-                    with (root/'startup-api-refusals.jsonl').open('a') as handle:
-                        handle.write(json.dumps(error)+'\n')
+                try:
+                    error = json.loads(result.stderr)
+                except ValueError:
+                    error = None
+                if isinstance(error, dict) and error.get('stage') == 'account-info' and error.get('code') == '503':
+                    evidence.data['startup503Count'] = evidence.data.get('startup503Count', 0) + 1
+                    evidence.observe('startupApiRefusal', lambda: evidence.data['clients'].get(action, {'unparsed': True}))
                     return False
-            self.assertEqual(result.returncode, 0, result.stderr.replace(token, '[owned token omitted]'))
+            self.assertEqual(result.returncode, 0, result.stderr.replace(token, '[owned token omitted]').replace(route_password, '[owned route password omitted]'))
             return json.loads(result.stdout) if action == 'create' else True
         try:
+            version = subprocess.run([binary, '--version'], capture_output=True, text=True, timeout=5, check=True).stdout.strip()
+            evidence.data['version'] = version
+            self.assertEqual(version, 'nats-server: v2.12.6')
             for i, config in enumerate(configs):
                 log = open(root/f'server-{i}.log', 'ab', buffering=0)
-                proc = subprocess.Popen([binary, '--config', str(config)], stdout=log, stderr=log)
+                try:
+                    proc = subprocess.Popen([binary, '--config', str(config)], stdout=log, stderr=log)
+                except BaseException:
+                    log.close()
+                    raise
                 owners.append((proc, log))
+            js = routes = None
             deadline = time.monotonic() + 15
             while time.monotonic() < deadline:
                 self.assertTrue(all(proc.poll() is None for proc, log in owners))
@@ -116,9 +170,16 @@ let nc,stage='connect';
                     pass
                 time.sleep(.05)
             else:
-                (root/'readiness-refused.json').write_text(json.dumps({'jsz': js, 'routes': routes}, indent=2))
+                evidence.accepted(js, routes, key='lastReadiness',
+                                  source='last samples; possibly from different iterations')
                 self.fail('owned cluster failed readiness')
-            creation = client('create')
+            evidence.accepted(js, routes)
+            try:
+                with evidence.create_window():
+                    creation = client('create')
+            except Exception:
+                evidence.post_failure(lambda i: http_json(ports[i*3+1], '/jsz'))
+                raise
             leader = int(creation['leader'].removeprefix('owned-raft-'))
             self.assertIn(leader, range(3))
             deadline = time.monotonic() + 5
@@ -130,25 +191,9 @@ let nc,stage='connect';
             else:
                 (root/'publish-readiness-refused.json').write_text(json.dumps(subscriptions, indent=2))
                 self.fail('owned stream leader has no local history subscription')
+            evidence.data['phase'] = 'seed-and-groups'
             client('seed', port=ports[leader*3])
-            previous = None
-            stable_since = None
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
-                before = [capture(ports[i*3+1]) for i in range(3)]
-                groups = [report['raft'] for report in before]
-                if groups == previous:
-                    if stable_since is None:
-                        stable_since = time.monotonic()
-                    if time.monotonic() - stable_since >= 1:
-                        break
-                else:
-                    stable_since = None
-                previous = groups
-                time.sleep(.05)
-            else:
-                (root/'raft-readiness-refused.json').write_text(json.dumps(before, indent=2))
-                self.fail('owned replication groups did not settle after creation')
+            before = wait_for_groups(ports, root)
             for report in before:
                 self.assertIn('$SYS', report['raft'])
                 self.assertIn('$G', report['raft'])
@@ -163,6 +208,7 @@ let nc,stage='connect';
                 except Refused:
                     (root/'quiet-refused.json').write_text(json.dumps({'before': before, 'after': readings}, indent=2))
                     raise
+            evidence.data['phase'] = 'election'
             client('stepdown')
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline:
@@ -178,24 +224,16 @@ let nc,stage='connect';
                 QuietWindow({'owned': before[0]}).check({'owned': changed}, {'owned': peers['0']})
             (root/'group-evidence.json').write_text(json.dumps({'before': before, 'after': after}, indent=2))
             succeeded = True
+            evidence.data['phase'] = 'complete'
         finally:
-            for i, (proc, log) in reversed(list(enumerate(owners))):
-                try:
-                    if proc.poll() is None:
-                        proc.send_signal(signal.SIGTERM)
-                    self.assertEqual(proc.wait(timeout=10), 0)
-                    self.assertIn('Server Exiting', (root/f'server-{i}.log').read_text())
-                except Exception as error:
-                    cleanup.append({'pid': proc.pid, 'error': str(error), 'forced': proc.poll() is None})
-                    if proc.poll() is None:
-                        proc.kill(); proc.wait(timeout=5)
-                finally:
-                    log.close()
-            report = {'root': str(root), 'passed': succeeded and not cleanup, 'cleanupFailures': cleanup,
-                      'scope': 'owned three-member cluster only; no production ports or routes'}
-            (root/'cleanup.json').write_text(json.dumps(report, indent=2))
-            print(json.dumps(report))
-            self.assertFalse(cleanup, 'owned cluster shutdown was not normal')
+            primary = sys.exc_info()[1]
+            try:
+                evidence.finish(owners, succeeded, primary)
+            except Exception:
+                if primary is None:
+                    raise
+                print('preservation-cluster-startup: evidence unavailable; primary preserved')
+
 
 
 if __name__ == '__main__':

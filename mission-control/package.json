@@ -27,7 +27,7 @@
     "gray-matter": "^4.0.3",
     "lucide-react": "^0.575.0",
     "nats": "^2.29.3",
-    "next": "16.3.8",
+    "next": "16.4.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-force-graph-2d": "^1.29.1",
@@ -52,6 +52,6 @@
     "vitest": "^4.1.0"
   },
   "overrides": {
-    "sharp": "^0.35.0"
+    "sharp": "^0.35.5"
   }
 }

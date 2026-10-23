@@ -218,3 +218,3997 @@ FOUNDATION_CHECKPOINT.md. Code/test bytes remain5fabf6e; only plan/evidence
 clarifications accompany integration. Fresh private Journal58/58 passes;
 exact integration CI/read-only re-review remain required before merge. Do
 not close1.2 or introduce production imports, controller, holds or timer wiring.
+
+### B5 owned journal-mount source slice — 2026-10-17 00:44 EDT
+
+The active slice feeds B5-stopped-ASIF checkpoint extraction: wrap the D191
+reader in an owned-fixture-only read-only ASIF mount and publish a receipt
+of exactly the inputs it read. It does not enable production capture or
+close B5. D168/D173/D174/D175 and the four separate histories remain binding.
+
+Needs: published checkpoint/commitment/reader source at 5b6c84af, a completed
+owned capture, caller-supplied role table and no active capture worker. File
+deltas: host_journal_mount.py, probe_asif_mount_ownership.py,
+test_host_journal_mount.py, reader read-metadata output and its tests, both
+scripted CI paths, and the plan/evidence ledgers. The probe stays unwired;
+native mount facts and the protected B3/acceptance roots are separate gates.
+
+Verify: scripted mount suite passes, every new boundary has a decisive
+negative, designated unmutated controls pass, one-rule mutations fail for
+their intended reason, Claude challenges the final bytes, then exact-head
+CI passes. Native ASIF ownership/flags/ctime behavior must be observed on
+an isolated CI runner before claiming mounted-image verification. These
+scripted checks never mount a volume or touch a VM. Source publication
+does not satisfy the disposable-macOS reboot rehearsal.
+
+Current local evidence: 60 scripted macOS tests OK (one Linux platform-guard
+skip), 30 reader tests OK, 119 wrapper/probe mutations killed with no runner
+problems. The updated 46 reader mutations are all killed for their intended reason
+with unmutated controls passing and no runner problems. The previous
+published head has all five checks green in CI run 38930108319; that says
+nothing about this uncommitted delta.
+
+Mid-implementation finding: the probe's cleanup repeats eject by disk
+number without re-binding it to its own image, unlike the wrapper's
+cleanup. A timed-out applied eject can release that number for another
+image. Claude is reviewing this and the probe's partial-attach, interrupt
+and recursive-removal boundaries before source publication or any native
+probe execution. No production VM, service, image or timer changed.
+
+The scripted counterexample is reproduced locally: the first eject times
+out after releasing the probe image, the simulated disk number is reused,
+and the probe issues one foreign eject and reports clean. All command and
+inventory functions were mocked; no disk command ran. Claude confirmed
+the retry defect and additional partial-attach, unreadable-inventory,
+interrupt/report and recursive-removal defects. The previously passing
+119 mutations do not cover these cases. Corrected source plus decisive
+tests is required before the CI-only probe can be published or executed.
+
+
+2026-10-17 01:10 EDT — D192 source candidate: the acf2e671 patch was
+checksum-verified (93548a7d…63356) and applied. A new direct counterexample
+then reproduced foreign eject on a second cleanup with a stale attach disk
+list. Codex removed remembered-number eject authority from wrapper and probe;
+missing/unreadable inventory now keeps cleanup uncertain. Final local checks:
+71 scripted tests OK (one Linux-only skip), 30 reader tests OK, 46 reader
+mutations and 3 focused eject-rule mutations killed with controls passing.
+No native mount/probe/VM action occurred. Broader candidate probe mutations
+are not claimed as final validation. Final Claude review and exact-head CI
+are pending; B5-owned-journal-mount source is not yet ready. The next gate
+is native owned ASIF characterization on an isolated CI runner; B5-macOS-
+access and the separate reboot rehearsal remain open, and B6 stays closed.
+
+
+2026-10-17 02:51 EDT — B5-exact-head-CI diagnostic, D193. Exact b694b342
+has four green CI jobs and the recurring macOS owned-kickstart failure
+(39005360286/117316604376); its new reader30/mount71 tests pass. Claude
+Message85 reports no material defect on that head. The ten-second timeout
+still leaves recovery partial, gate closed and receipt unresolved.
+
+Goal: distinguish the owned launchctl client's post-timeout state from
+service state, without changing any recovery rule. Needs: exact owned argv
+and temporary root, original D180 behavior and no production hook. Feeds:
+B5-exact-head-CI diagnosis/source readiness, then B5-native-ASIF-mount.
+Verify: six subprocess controls and three decisive mutations pass, a native
+owned restoration emits the exact-client trace, and the revised head receives
+Claude review and CI. The native control succeeded with a 9.008 s request;
+this is not a cause attribution for CI. Only a test helper, its tests, the
+existing owned test and scripted CI registration change. Action10s, post-
+timeout observation1s and parent20s limits are unchanged; no fixture throttle
+override or runtime code changes. All production state stays unchanged.
+
+The next two gates remain reviewed exact-head source CI (owned resources
+only, B1 authorization) and then native ASIF characterization on an isolated
+CI-created image after source readiness. Disposable macOS reboot access is
+still separate; B3/B4 were not recaptured, B6–B9 stay closed and the node
+is not accepted as operational.
+
+2026-10-17 04:45 EDT — B5-native-ASIF-mount preflight. Exact source
+151bb3bdbcdf0bd09c7d15e6f0679832edae6a3d has all five checks green in
+39011578564; Claude Message89 finds no material defect, following Message85's
+review of the unchanged mount/probe source. The native owned kickstart trace
+completed at exit 0 in 9.026776584 s against the original 10 s limit. This
+does not explain the earlier timeouts. The current JSON-only caller cannot
+reach Claude's hypothetical non-serializable diagnostic context; record that
+limit without broadening this change into diagnostic hardening.
+
+The independently executable next gate is native ASIF mount characterization.
+Needs: the reviewed probe and cleanup, a separate GitHub-hosted macOS runner,
+all existing CI-only guards, and a fresh 64 MiB image created by the probe.
+File deltas: add one isolated job and unconditional report upload to
+.github/workflows/test.yml; correct the probe's now-obsolete unwired docstring;
+record D194 and the verified source milestone in the plan ledgers. No mount,
+capture or recovery implementation changes. Verify: inspect the uploaded
+report's actual ownership, root-0600 denial, flags, identities/ctime/xattrs
+and cleanup, not merely job exit 0; any failed assumption stays a refusal.
+Claude review and exact-head CI remain required for this workflow revision.
+No local disk image or VM operation is part of this gate. After it, the owned
+stopped-ASIF reader integration needs reviewed wiring and a native fixture;
+D62 reboot rehearsal still needs separately designated macOS access.
+
+
+## Native characterization re-orient — 2026-10-17 04:51 EDT
+- Still step1.2/B5, never a production stop or capture.
+- D194 executed the existing owned probe on a separate CI runner; setup refused.
+- Two native findings: owner enforcement exposes root-owned fixture root; attach IDs differ in spelling.
+- Correct only probe preparation/evidence retention and test those real boundaries.
+- File deltas add probe/tests plus raw report, hashed evidence and append-only ledgers; wrapper unchanged.
+- Same native verification outcome; no gate widening to D62/production or timer changes.
+
+
+2026-10-17 04:51 EDT — B5-native-ASIF-mount first actual report, D195:
+6ae7dd58 run39018637637/job117355795880 failed exit1 during write setup,
+PermissionError13 after ownership enable; no readonly variant ran. Retained
+artifact12096210442 is copied unchanged as B5_NATIVE_ASIF_FIRST_REPORT_20261017.json.
+Inventory-bound unmount/eject succeeded and final inventory0/mounted[]/removed
+are recorded, but bare disk7 was not harvested, so disks_gone[] is vacuous.
+The root-owned volume-root permission explanation is an inference pending
+native rerun, not a traceback-proven cause. Actual attach entries are bare
+IDs; inventory and DeviceNode use /dev paths. The wrapper still refuses that
+spelling and is unchanged.
+
+Codex-owned correction within this same native characterization gate: make
+only the newly created probe volume root runner-owned after enableOwnership
+(the root0600 file remains root-owned), strictly canonicalize attach IDs for
+absence checks and Data observation, and retain partial variant evidence on
+failure. No eject fallback is restored. The wrapper's checks are not relaxed.
+75 scripted tests pass (one platform skip); four intended-reason mutants are
+killed and nine focused controls pass. B5_NATIVE_ASIF_SETUP_20261017.json
+records report/source/log hashes. New native CI and Claude review are pending;
+this corrects the source fixture rather than retrying unchanged code. Next
+native observations then owned reader integration remain held until their
+actual verification. B5/1.2 open, B6–B9 closed; no local mount or VM action.
+
+
+2026-10-17 04:56 EDT — D196, B5-native-ASIF-mount runtime observations:
+6f7e9371 run39018959320/job117356737655 completed the corrected probe at
+exit0. Artifact12096186192 is retained unchanged as
+B5_NATIVE_ASIF_COMPLETE_REPORT_20261017.json (SHA2567097f7d9…2e09f4);
+B5_NATIVE_ASIF_OBSERVATIONS_20261017.json records the interpretation.
+On one isolated macOS26.6.2 arm64 runner, both exact-option variants set
+readonly/nodev/nosuid/noexec and honored owners, including after the probe
+explicitly disabled ownership before reattach. Root0:0 mode0600 stayed
+unreadable to uid501; its own0600 file was readable. Plain readonly was
+correctly refused for absent noexec. Image bytes/inode/size/mtime/ctime/flags
+and empty xattr-name lists were identical before/after each readonly cycle.
+The intervening write/disable phases are not covered by that equality.
+Each phase independently confirmed its remembered disk gone, inventory0
+and no mount; final cleanup removed the directory. These are sequential
+observations, not physical exclusion or real-history acceptance.
+
+B5-native-device-binding is a new Codex-owned source blocker: actual attach
+IDs are bare while hdiutil/DeviceNode are /dev paths. The unchanged wrapper
+refuses attach equality before mount; replay of the native rows with all
+commands mocked also returns bare disk8s1 from data_volume and refuses
+verify_mount with 'private mount point holds another device'. The probe's
+canonical call is accepted, not the complete wrapper. Exact unblock: reviewed
+strict canonical whole-disk/Data identity binding with decisive mismatch and
+cleanup controls, then native owned reader integration. No check is relaxed
+here. Native facts are observed; the gate stays open for review/current-head
+CI and this binding correction. The next two gates are that owned source
+correction and integrated stopped-ASIF reader verification; both use only
+owned resources and require Claude plus exact-head green CI. D62 reboot
+rehearsal still requires separately designated macOS access. B3/B4 were not
+repeated; B5/1.2 open, B6–B9 closed, production capture disabled, node not
+operationally accepted. No local VM, service, image or timer changed.
+
+## B5-native-device-binding preflight — 2026-10-17 06:45 EDT
+- Still1.2/B5; B1 permits source and owned tests, B6–B9 remain closed.
+- Exact611127b9 is green in all6 jobs39019163444; Claude Message96 finds no material defect.
+- D196 native rows expose two deterministic spelling refusals in the wrapper.
+- Correct strict device identity binding, requiring a harvestable whole disk after successful attach.
+- Reuse that binding in the existing probe; restore its seeded root to0:0/0755 for the native positive.
+- Owned scripted/native evidence plus Claude/exact-head CI; no production action or B3/B4 recapture.
+
+File deltas: host_journal_mount.py shares strict raw/canonical device parsing
+with the existing probe; bind attach whole disk to canonical inventory and
+Data DeviceNode to its exact raw partition, preserve raw receipt fields and
+mandatory cleanup absence checks. probe_asif_mount_ownership.py consumes those
+helpers and refuses a successful unharvestable attach (Claude F1); after
+seeding restore only its newly-created volume root to root ownership and
+record root uid/gid/mode per variant (F2). Extend the existing scripted suite
+with actual committed native rows, successful bare-ID read, mismatches,
+malformed/unharvestable entries and root seeding order. Mutation controls
+must kill removal of each binding/mandatory-observation rule. Record source,
+review/CI and runtime limits in the ledgers/evidence; VERSION stays-pre.
+This is the one named B5-native-device-binding gate, feeding the separate
+native stopped-ASIF reader integration, never production acceptance.
+
+Claude F3's error-filename/timestamp reporting suggestions remain follow-ups;
+no diagnostic expansion here. The new committed native-row replay tests
+replace D196's previously uncommitted replay claim with reviewable evidence.
+Read-write native phases changed the image's hash/times (write phase also
+size); that observation reinforces read-only attach plus post-read hashing,
+without generalizing a cause beyond this owned runner.
+
+
+2026-10-17 06:48 EDT — D197, B5-native-device-binding source candidate.
+Exact611127b9 has all6 CI jobs green (39019163444); Claude Message96
+reports no material defect and confirms D196's native observations. Shared
+strict parsing now accepts bare/canonical attach spellings, requires a valid
+whole-disk observation after successful attach, binds it to the canonical
+image inventory, and binds Data DeviceNode to the exact raw partition.
+Remembered disks remain absence checks only. Raw attach/inventory fields
+are retained. The existing CI-only probe consumes those same helpers and
+restores its fresh seeded volume root to0:0, recording per-variant root
+metadata; the root0600 negative stays intact.
+80 scripted tests OK (one native platform skip); after one final root-owner
+assertion tightening,18 focused controls pass and7 intended-assertion mutants
+are killed. The runner is committed, and actual native-row replay is now a
+committed test. B5_NATIVE_DEVICE_BINDING_SOURCE_20261017.json records hashes
+and the precise test sequence. New native CI and Claude review remain pending;
+no source-readiness claim. Next two gates: this source's exact-head review/CI
+and root-owned-root native report, then integrated owned stopped-ASIF reader
+verification. Both are B1-owned-test work; D62 macOS reboot access remains
+separate. B3/B4 were not repeated, B5/1.2 open, B6–B9 closed, D64 unchanged;
+all production services/VM/timers and four histories untouched.
+
+
+2026-10-17 06:51 EDT — D198: native shared device binding observed at
+b1119e78 in39026337387/job117377947876 (artifact12097953565), exit0.
+B5_NATIVE_DEVICE_BINDING_REPORT_20261017.json retains raw bytes with SHA256
+efbd1656…1ae4cd6; the RUNTIME JSON records the interpretation. The seeded
+volume root is0:0/0755 after preparation and in all3 variants. Both exact-
+option variants honor owners, deny root0600 reads, preserve every recorded
+image identity field across their readonly cycle and confirm per-phase
+known-disk absence/cleanup. Plain readonly still refuses absent noexec.
+The shared whole/Data binding helpers ran natively; the complete wrapper's
+locked reader/capture flow did not. Guest uid parity, never-registered UUIDs,
+sibling/dirty guest volumes and pre-existing xattrs remain unproved.
+All-six exact-head CI and Claude review are pending; B5-native-device-binding
+stays open. Next that review/CI gate, then native owned stopped-ASIF journal
+reader integration, both within B1's owned-test authorization. D62 rehearsal
+access stays operator-owned and separate. B3/B4 were not repeated; B5/1.2
+open, B6–B9 closed, D64 unchanged and production untouched.
+
+## B5-kickstart-cause-probe preflight — 2026-10-17 08:45 EDT
+- Still1.2/B5; source6912b7e7 is5green/1red, not ready.
+- Claude Message100 finds no material defect; native80 controls pass in CI.
+- New trace samples the owned launchctl client alive after10.004358542s.
+- Advance one diagnostic gate: bounded seven-arm timing on separate CI-owned labels.
+- No runtime deadline, fixture throttle, acceptance rule, production service or VM changes.
+- Report interprets observed spawn/client timing; it cannot prove the prior failure's cause alone.
+
+Needs: exact red CI39026495833/job117378396060; prior source-only observer;
+Claude's immutable7d3e90a4 artifact, independently read and SHA256-verified
+77838cc9b9fcbb33c5f83776695223ee0d2a6c8f62c9251495ca9c4967871b64.
+That artifact is a design input, not yet executable readiness. Correct its
+owned-client interrupt cleanup, stale-PID signal use, ignored cleanup/domain
+observation failures and removal-before-proven-cleanup before native wiring.
+Keep primary errors and partial trial evidence; missing/nonzero reports hold.
+File deltas: one owned-only probe derived from that candidate, its pure/mock
+controls, isolated macOS CI job with always-upload, and plan/evidence ledgers.
+Verify: original guard refusals, completed/alive/pipe-held measurement controls,
+client interruption/cleanup controls and unknown job-observation refusals;
+CI report for seven fresh labels with actual first/second job times, ten-second
+post-timeout client observation, later return bound and verified bootout.
+Any cause inference is bounded to one runner and differentiated trials.
+Claude reviews material bytes; full exact-head CI remains required for source
+readiness. The original recovery10s/1s/20s limits remain unchanged.
+
+Carry-forwards from Message100: T1 root-uid ambiguity in the probe seeding
+scripted test and T2 missing wrapper applied-failure harvest-order assertion
+remain tracked owned-test work; neither is silently fixed in this diagnostic
+slice. The native integration gate stays held by exact-head CI. B3/B4 remain
+unrecaptured; B5/1.2 open, B6–B9 closed, D64 unchanged, four histories separate.
+
+
+2026-10-17 08:55 EDT — D199, B5-kickstart-cause-probe. Exact6912b7e7
+has5green/1red in39026495833; mount80 tests pass, while the owned stopped
+job kickstart times out again. The new client trace has poll=None after
+10.004358542s (bootstrap age.285780875s, stop wait.009570166s). This narrows
+the current failure to a still-alive sampled client, not a cause attribution.
+Recovery remains partial, gate closed and receipt unresolved. Claude
+Message100 finds no material defect in the binding revision; source readiness
+is held by red CI.
+A checksum-verified Claude7d3e90a4 experiment is adapted as one CI-only probe:
+seven fresh jobs vary runtime/throttle, record first/second job times, sample
+the launchctl client after10s and measure a bounded later return. Before
+wiring, Codex corrected client/target cleanup, stale-PID signals, unreadable
+observations, premature file removal and lost partial reports.19 pure/mock
+controls pass; the real classifier's3 shapes pass on the final local candidate and rerun in the dedicated CI job. Missing/nonzero/native
+partial reports cannot clear this gate; this is not a fixture/runtime fix.
+Next timing report, then an evidence-backed owned fixture/runtime remedy
+with Claude review and exact-head green CI before native reader integration.
+Both are B1-owned work; no production service/VM or timer change. B3/B4 were
+not repeated, B5/1.2 open, B6–B9 closed, D64 unchanged, four histories separate.
+
+
+2026-10-17 09:04 EDT — D200, B5-kickstart-cause-probe runtime report.
+1695ce92 job117402189372/run39034737877 exited0; artifact12101407361 and
+raw SHA2560659ef76…f6bc3f4 are retained. All7 trial bootouts and individual
+post-bootout checks passed; final target/domain observations show all7 absent,
+no probe labels left, directory removed. Default short-runtime client stayed
+alive after10.007s and returned success at10.016s. DefaultR3/R12 requests took
+7.017s/.006s; delayed-request1s short-default took9.011s; explicitThrottle1
+short/R3 took1.016s/.010s;Throttle0 short took1.007s. This supports a throttle-
+and prior-runtime-related wait and reproduces the failure shape on this
+runner, not an exact undocumented timing rule or proof of the earlier CI
+cause. The runner was not idle: recorded load averages were24–43. Python
+instruction timestamps, observed exits and the changed signal path limit
+transfer. No runtime or fixture policy has been changed.
+Claude's final source/evidence review and full exact-head CI remain pending.
+Next a reviewed owned-fixture remedy justified by these observations, then
+exact-head CI before native stopped-ASIF reader integration. Both are B1
+source/owned work; D62/macOS access stays separate. B3/B4 not repeated,
+B5/1.2 open, B6–B9 closed, D64 unchanged, production untouched.
+
+
+2026-10-17 09:11 EDT — D201, B5-kickstart-cause-probe review and second CI report.
+Claude Message104 finds no material source defect at1695ce92 and independently
+passes19 controls plus3 real client classifiers. Runtime and old fixture bytes
+are unchanged. The review identifies measurement extensions before interpreting
+future anomalous/incomplete runs: second-start deadline anchoring, continuing
+other arms after a measured anomaly with verified cleanup, instruction-origin
+predictions/residual controls, and bounded logs on failure covering the run.
+These do not invalidate the7 completed D200 arms; no exact timer rule or
+historical full-suite cause is claimed. Codex corrected the review's prose:
+this implementation removes private files only after completed+clean and then
+writes the report. Lost reports cannot pass. Evidence interpretation review
+of7a8dcb64 is pending in Claude Message105; no fixture remedy is applied.
+
+The normal current-head CI39035129935, job117403289389, independently completed
+the unchanged7-arm probe at7a8dcb64 (mergefd9d06db). Artifact12102275128 is
+retained as B5_KICKSTART_TIMING_REPORT_REPEAT_20261017.json, SHA256
+e25d03de25d904e482f3e238ce4d16b11a24b5a1749872b5494860a400d3bccb.
+Default short/R3/R12/delayed-short client blocks are10.031/7.018/.008/9.017s;
+Throttle1 short/R3 are1.059/.007s;Throttle0 short is1.019s. The default-short
+client was alive at the post-timeout10.0036s sample and returned0 later.
+All7 trial bootouts and absence checks, final individual absences/readable
+GUI-domain/no-label checks and directory removal passed. Two separate CI
+reports support the bounded timing association; they are not a distribution,
+exact origin proof or production test. Full all-job CI remains pending, so
+source readiness and B5-native-device-binding closure remain held.
+Next gates: a reviewed owned-fixture-only remedy with unchanged runtime limits,
+then native owned stopped-ASIF reader integration. Both need Claude and exact-
+head green CI under B1. D62 disposable-macOS access remains a separate operator
+decision. B3/B4 were not repeated; B5/1.2 open, B6–B9 closed, D64 unchanged,
+production capture disabled and four physical histories separate. No live
+service, VM, production image or timer was changed.
+
+
+### 2026-10-17 10:46 EDT — B5-owned-kickstart-fixture preflight (D202)
+
+1.2 remains active; prior D201 has two complete timing reports but exact0d329038 CI is6green/1red.
+Claude106 accepts the observations and requires a matching owned adapter policy change.
+This slice changes only the temporary daemon throttle and its strict admission/tests.
+The north-star recovery contract still requires fail-closed durable restoration evidence.
+Needs above exist; B1 authorizes these owned tests, no live operation.
+Next remains this bounded fixture correction; native reader and D62 are downstream.
+
+File deltas: restore_only.py owned expected configuration; test_restore_only.py temporary daemon settings/trace assertion; test_kickstart_applied_timeout.py simulated settings and portable real-file configuration controls; mutate_owned_fixture_policy.py intended guard-removal verification; source-evidence JSON plus plan decision/inventory/frontier/registry/audit updates. No managed_launchd.py, journal, service_gate.py, timer or production file changes.
+Verification: portable controls/guard mutant and existing timeout regressions locally; CI-only native stopped-daemon recovery with trace; Claude review and exact-head full CI before source readiness. Remaining default-policy and measurement extensions stay tracked.
+
+D202 verification refinement: add a separate15-minute owned-kickstart-fixture-macos CI job for the existing timeout controls, intended guard mutant and two focused native cases. Full legacy/all-job CI remains mandatory; this gives earlier native feedback and does not replace it or rerun an unchanged failed artifact. Workflow is an additional planned verification delta.
+
+
+D202 source checkpoint: the owned mesh-agent plist and adapter now require
+integer ThrottleInterval1; the timer remains unchanged and refuses that
+extra field. Both native and simulated fixture producers match. Portable
+real-file policy controls pass (including missing/0/2/bool throttle and extra
+fields), and a removed-equality mutant dies at the intended assertion.
+5 timeout controls and11 applied-timeout/readiness/policy tests pass locally;
+the durable partial/closed/unresolved outcome and retry without another
+kickstart remain asserted. Managed launchd/journal/gate/trace/probe bytes are
+unchanged from0d329038. Python syntax and plan conformance pass. The new
+15-minute focused macOS job exercises the two native cases with explicit
+trace output before the existing long all-job gate can finish. No native
+host test was run here. B5_OWNED_KICKSTART_FIXTURE_SOURCE_20261017.json records
+hashes, baseline failure and proof limits. Candidate Claude review and exact-
+head all-job CI remain pending; no source-readiness claim. Next native owned
+stopped-ASIF journal reader integration, then D62/D175 admission/resumption
+source under B1; actual macOS reboot still needs separate disposable access.
+B3/B4 not repeated, B5/1.2 open, B6–B9 closed, capture disabled, production
+untouched and all four histories separate.
+
+
+### Mid-Implementation Findings — 2026-10-17 10:59 EDT, Claude108
+
+No material regression on exact1e915d8a. All changed-source and preserved-runtime hashes were independently checked. Linux11/5/6/19 applied-timeout/launchd/trace/timing controls pass, managed-launchd61 with40 platform skips and restore-only31 with29 skips; guard-removal/type/expected-value mutants are killed. T3: Linux's documented anchor identity seam bypasses its exact plist policy, so two anchor mutants survive there; native timer-negative and native simulated anchor restore exercise those checks. T3 is tracked separately rather than expanded into this daemon remedy. Existing RunAtLoad/KeepAlive bool/int dictionary equivalence is unchanged and not fixed here.
+
+Focused native job117424417161 succeeds on PR-head1e915d8a/mergec013dd3d, with explicitThrottle1 and a completed0.004771s client under timeout10, resolved/open recovery and restored receipt; changed timer is refused before launchd. B5_OWNED_KICKSTART_FIXTURE_NATIVE_20261017.json retains the narrow result and its inherited-teardown/no-independent-process-absence limit. All-job CI remains the final source gate.
+
+
+2026-10-17 11:17 EDT — D203, owned restoration fixture source verified at1e915d8a.
+All8 exact-head jobs pass in39042421331; Claude Message108 finds no material
+regression and independently verifies preserved runtime hashes, portable
+controls, refusal-before-launchd and guard mutants. Focused native job
+117424417161 passes2 tests; full macOS job117424417172 passes the31-test
+restore-only module in104.459s and completes the remaining job. The focused/
+full stopped-daemon traces show explicit integerThrottle1, client rc0 and
+completed in.004771/.006608s under timeout10; both recover resolved/open with
+receipt restored. The timer-only policy negative passes, and the applied-
+timeout controls still preserve partial/closed/unresolved plus a fresh retry
+without another kickstart. The full run has no failed check. This source-only
+milestone is at the named verified head; this receipt changes no executable
+or workflow. Later heads still require their own checks.
+
+The retained native JSON binds source/merge/run/jobs and filtered observations,
+not an independent teardown/process-absence proof. It does not prove production
+default-throttle recovery, D62 reboot safety, physical writer exclusion or real
+history acceptance. B5-default-kickstart-policy remains open. T3 portable
+anchor-policy coverage is a separate nonblocking carry-forward; T1/T2 and
+future anomalous-probe measurement extensions are not expanded here.
+Shared device-binding sources/probe and the differentiated timing probe are
+unchanged from their reviewed/native-observed revisions; this green exact-
+head run clears their outstanding CI hold without repeating their artifacts.
+
+Next B5-owned-stopped-ASIF-reader uses B1-owned CI storage, a valid synthetic
+checkpoint/commitment/CAPTURE fixture, the complete locked reader/mount wrapper
+and frozen verifier, decisive corrupt/pending/unknown-entry refusals, unchanged
+image identity, cleanup evidence, Claude review and exact-head green CI. Then
+D62/D175 restore-only admission/resumption needs durable host ACCEPTED-or-ABORT
+binding, scoped launchd/process comparison before Journal.recover, fail-closed
+manual fallback and conditional value-only timer migration tested on owned
+APFS reattach. Actual reboot/launchd/login/hold-reattach still requires a
+separately designated disposable macOS machine or approved measured disk/RAM
+budget/capacity source. No local UTM VM was provisioned or operated; only the owned CI checks ran.
+B3/B4 were not repeated; B5/1.2 remain open, B6–B9 closed, D64 unchanged,
+production capture disabled and all four histories separate. No live service,
+VM, production image or installed timer was changed.
+
+
+## B5-owned-stopped-ASIF-reader preflight — 2026-10-17 12:55 EDT
+
+Micro re-orient: Block1/step1.2 remains v1.2-pre; production preservation is closed.
+D203 verified the owned kickstart fixture; current68d45483 has all8 checks green.
+This slice supplies the missing complete native frozen-journal read on CI-owned ASIF.
+It feeds B5 byte binding, then D62/D175 admission/manual restoration; never B8 history acceptance.
+The checkpoint, pin publication, bounded reader, wrapper and private fixture all exist.
+This remains the next independently executable gate; no production operation is authorized.
+
+Needs checked against current source: StoppedImage builds the real Journal/capture_ready,
+commit/commit_checkpoint and pinned CAPTURE records with synthetic hold/VM observations;
+read_journal_inputs holds both real host locks and calls locked_read/verify_stopped_journal/
+verify_frozen_checkpoint. The native probe already owns its ASIF, mount options and
+inventory-bound cleanup. No BLOCKED.md; tree clean before this preflight.
+
+### File deltas / verification
+
+Extend probe_asif_mount_ownership.py with a separately guarded CI-only reader mode, reusing
+its native attach/release and the existing synthetic journal fixture. Bind the real fresh
+volume UUID before the manifest commitment, seed the owned tree while writable, restore
+root ownership, detach, then publish the fixture clone hash/size and read through the
+unmodified complete wrapper. Test intact, corrupt chain, pending, unknown entry and changed
+config bytes; each case retains before/after image metadata, receipt or exact primary refusal
+and nonvacuous known-disk cleanup. Native disk commands run only on an isolated CI runner.
+Portable controls in test_host_journal_mount.py cover fixture seeding, refusal oracle and
+reader-mode guards/dispatch; workflow retains the complete native report even on refusal.
+No runtime source, production plist, action budget, T1/T2/T3 or default-policy change.
+
+WIN: portable decisive controls pass; Claude adversarial review; native positive reaches
+the frozen verifier with matching host pins, every named negative refuses for its intended
+reason, every readonly cycle leaves image identity/bytes unchanged and disks absent, final
+owned directory removed; current exact-head CI all green. Native report is synthetic
+quiescence/mechanism evidence, not a VM capture, guest UID parity, physical writer proof or
+real-history acceptance. D64/production capture stay closed; B3/B4 are not repeated.
+
+### D204 mid-implementation finding — portable guard dispatch seam
+
+The new main-dispatch control must pass darwin explicitly to the real guard in its test
+seam: changing sys.platform cannot alter the import-bound function default. Corrected the
+control and passed it with the real default forced to linux. This is the same reader
+integration verification slice; no native/probe/runtime guard relaxed.
+
+### D204 review verification extension
+
+Claude's reader_run assertion coverage gap is in this slice's verification contract.
+Add ReaderRun controls in the existing test module;15 selected cases pass with one platform
+skip, and image/pin/head removed-guard mutants die at the intended0!=1 assertion. Retain
+the raw native report named in D204 (54 reads, four intended negatives,5 stable readonly
+cycles and known-disk cleanups, final directory removed). Runtime/probe source unchanged.
+Completed Claude verdict and current-head all-green CI still required before closure.
+
+### D204 review corrections and final verification outline
+
+Consume Claude114 R1 with ReaderRun negative/partial/cleanup controls; R2 keeps failed
+owned-reader images until diagnosis. Add mutate_stopped_asif_reader.py as a verification
+helper (4 intended guard kills) and run it in the existing isolated ASIF CI job. The
+workflow uploads a failed owned image; success still removes its own directory. Older
+ownership-run behavior and all production/runtime sources stay unchanged. Local91 tests
+pass (one platform skip), the6-control mutation baseline passes and all4 mutants die at
+their intended assertions. Native corrected-source and exact-head CI/review still pending.
+
+
+### 2026-10-17 14:01 EDT — B5-owned-stopped-ASIF-reader verified (D205)
+
+Verified source e120e78d / exact CI39053730664: all8 checks green; Claude116
+closes R1/R2 with no material defect. Native job117457344212 verifies54 intact file reads,
+4 intended read-stage refusals,5 stable readonly image intervals and nonvacuous seed/read
+disk absence, with final directory removed. The reviewed raw report is retained under
+step12_jetstream; its SHA256 starts e02ab656. All91 controls and4 intended guard mutants
+pass. Failed native upload itself was not exercised; scripted retention/interrupt controls
+are explicit. Synthetic fixture evidence only: no VM capture, guest UID parity, physical
+pre-stop exclusion or B8 acceptance.
+Next B5-D62-admission needs reviewed host-decision/scoped-observation/manual-fallback
+source and owned tests; B5-D175-owned-repin then needs that admission and strict5-timer
+value-only migration with owned APFS reattach negatives. Both need Claude/exact-head CI.
+Actual reboot rehearsal still needs separate operator-designated disposable macOS access
+or a measured fixed resource decision. B3/B4 not repeated; B5/1.2 open, B6–B9 closed,
+D64 and production capture refusal unchanged. No production operation occurred.
+
+D205 post-verification ledger: promised complete locked reader/frozen verifier — yes;
+intact and4 intended refusals — yes; unchanged readonly image metadata/hash and known-disk
+cleanup — yes; R1 outer/partial/interrupt controls and R2 retention — yes, native upload
+not exercised; Claude and exact source CI — yes. Feeds: native integration prerequisite
+for D62/D175 source/owned work; not B8 histories. Carry-forwards: T1/T2/T3, default-throttle
+policy and all production/reboot/host-provenance requirements remain tracked and open.
+
+
+## 2026-10-17 17:13 EDT — terminal ABORT micro re-orient and bounded delta
+
+- Block1/step1.2 remains active at v1.2-pre; production preservation is held.
+- D209 verified nonterminal clone cleanup under sampled source denial, final1f7dc5b7 CI green8/8.
+- This slice binds a terminal owned ABORT to that cleanup and strictly verifies it.
+- It feeds a separately checked source release, then guest admission/manual restoration.
+- No flag change, guest gate, production operation, ACCEPTED producer or D64 relaxation.
+- Yes: D62 requires a durable decision before future release; file presence is insufficient.
+
+Claude148's six design corrections govern: native preflight write-set allow-list, exactly
+one root ABORT exception in conflict checks, forward-bound cleanup sample bytes, caller-held
+locks and a caller-supplied fresh observation for the read-only verifier, exported exact
+key sets and canonical bytes. A completed fixed decision subtree is also required after
+post-publication checks; a visible ABORT without COMPLETE or beside FAILED/temp refuses.
+A metadata touch to the guarded source or a host reboot/device change makes the attempt
+manual; no exception is added. Same-user coordinated rewrites remain D189's limit.
+§6 deltas for this slice: host_clone_dispose.py, preflight file-name constant only,
+test_host_terminal_abort.py, mutate_host_terminal_abort.py, workflow registration and
+four plan ledgers. Tests use existing real checkpoint/cleanup producers with scripted
+host/flags; no local disk image, launchd, UTM or production operation is permitted.
+
+
+### D210 mid-implementation findings and re-orient — 2026-10-17 17:30 EDT
+
+The caller-lock cardinality counterexample and native log-mode assumption are two
+required corrections to the same terminal-decision input contract. Re-oriented at the
+consumer boundary: neither introduces source release, a new controller or guest recovery.
+The verifier must refuse incomplete lock lists; the strict reader must ingest its actual
+producer's files. The preflight writer change and native assertion are the named
+B5-terminal-native-stdio prerequisite within this source slice, not a production rollout.
+§6 delta correction: preflight now also pre-creates its two logs exclusively0600;
+test_host_vm_preflight_status.py models append-open and collisions, and the existing
+CI-only native HostCaptureTest checks sample_files against two real sample trees.
+Local proof29terminal/15status and14mutants is green; native proof and exact-head
+Claude/CI remain pending. Current B1 source/owned authorization covers these corrections;
+no local VM/image/launchd test or production resource operation is added.
+
+
+## 2026-10-17 18:29 EDT — owned source release micro re-orient
+
+- Block1/step1.2 remains active at v1.2-pre; B5 is open and B6–B9 held.
+- D211 terminal ABORT source is reviewed; receipt c171c72c now has all8 green checks.
+- This slice consumes it durably under both locks before an owned-only source release.
+- It feeds guest decision binding/scoped admission and the manual route before D175.
+- No boot permission, production operation, native reboot claim or D64 relaxation.
+- Yes: D62 needs a checked release after the durable decision, separate from ABORT.
+
+Design is under Claude review before implementation. The fixed abort-release directory
+will be single use, with intent before the flag operation and completion only after
+post-release checks. Consumer-established file/directory synchronization, raw-byte
+readback and fresh original-host/source checks precede mutation. From entry to the flag
+operation onward, failures may leave denial uncertain: manual handling without automatic
+retry/re-guard or a success claim. The existing image flag helper remains descriptor-
+pinned; no reader descriptor is held across preflight's no-holder observation.
+
+§6 deltas: host_vm_reconcile.py, one reserved attempt name in host_clone_dispose.py,
+test_host_abort_release.py, mutate_host_abort_release.py, Linux/macOS suite registration,
+four plan ledgers and source-only audit records. New tests remain scripted for VM/flags
+with actual owned files and real checkpoint/cleanup/terminal producers. Native full
+cleanup→decision→release and actual guest reboot are carry-forwards, not this Verify.
+
+
+D212 design review166/168 adds the separate read-only release verifier and exact released
+identity helper now; canonical INTENT/COMPLETE exported schemas and the fixed three-
+sample layout; clone-only siblings; full file flush where available with no error
+fallback and bottom-up directory fsync; an honest uncertain/manual post-clear failure
+contract; and a dedicated source-clear hook with a ctime advance. These are the same
+owned release contract, not guest admission. A barrier-skipped mutant exposed blanket
+fault masking by a later independent sample barrier; the control now fails only the
+original evidence-table barrier and kills the intended missing-durability guard.
+Initial release fixture errors came from autospeccing an already mocked lstat; chaining
+the existing fixture's side-effect fixes test setup without changing runtime validation.
+
+
+D212 freshness re-orient: B5-release-freshness is an owned release prerequisite,
+with a decisive current-source zero-flag-call failure after an INTENT-time holder
+change. Correct within this same release contract: last live sample after the full
+rehash and durable INTENT, cheap original metadata/guard checks, no new hash afterward,
+COMPLETE pins the added before-clear sample and the core verifier consumes it. Fixed
+layout and schema parity tests change together. No guest source or production fence
+changes. The source row stays active pending corrected exact review/CI; the earlier
+Linux CI failed before these Python controls, not at this source finding.
+
+
+Claude172 confirms correction and precision points: exact pre-clear ctime, final
+clone/attachment/clone-only sibling absence and INTENT bytes. These are included with
+zero-call negatives. Optional same-uid flag-helper no-op gap remains D189, not closed.
+Unrelated finding B5-CI-R3-placement is tracked in INVENTORY for its own work unit:
+recurring unchanged NATS peer-offline10005 before Python; no fixture patch here.
+
+
+## 2026-10-17 20:01 EDT — D62 guest-admission design re-orient
+
+- Block1/step1.2 remains active at v1.2-pre; B5 is open and B6–B9 held.
+- D213's e582f9f9 receipt now has all8 exact-head CI checks green, freshly rechecked.
+- The next source boundary must bind the host decision before any guest recovery gate.
+- It feeds scoped boot-time admission, explicit manual restoration and then D175.
+- B1 authorizes owned design/tests only; D64's production first refusal remains.
+- Re-orient before implementation: post-boot ASIF changes invalidate verify_release's inputs.
+
+Claude design review is pending against e582f9f9. The guest cannot call verify_release
+after boot: it requires the original stopped VM and unchanged original image bytes.
+A copied self-hashed decision is not a protected host authority. The producer/consumer,
+trusted external binding, durable single-use handling and failure/manual route must be
+explicit before any source admission exception is written. ACCEPTED has no B8 producer;
+the available ABORT/cleanup/release path is owned-only.
+
+The existing Gate constructor and JournaledHold.validate also compare saved st_dev in
+identity.json, metadata_identity and path evidence, before any conditional timer re-pin.
+Changing only the five timer plists and manifest pins would still fail that constructor.
+Design must preserve identity.json bytes/nonce/hash and same-boot descriptor/path mapping,
+yet avoid requiring a successfully constructed old-device Gate to admit the change.
+This is a dependency to resolve within the reviewed D62/D175 design, not permission to
+rewrite identity.json, relax arbitrary identities or operate installed timers.
+
+The first independently executable source slice and its §6 deltas will be recorded after
+the review identifies a concrete producer and consumer. No executable delta is authorized
+by this preflight beyond B1's owned boundary. Real launchd/login/process/hold-reattach
+rehearsal remains separately gated by exact disposable-Mac access and resource approval.
+
+### First unit selected after Claude183's source inspection
+
+B5-D62-host-boot-decision has one outcome: a strictly checked owned RESTORE_PRIOR
+decision and a pure claim-only consumer. It grants no start, admission or recovery.
+Its existing producer module is host_vm_reconcile.py; restore_only.py receives the
+canonical bytes/digest and the local checkpoint as an explicitly unprotected claim.
+The verifier remains pre-start only, preserving original-host session, stopped/holder,
+full source-byte and metadata checks; no post-start weakening is introduced.
+
+§6 deltas: those two existing modules; reserve abort-boot in host_clone_dispose.py;
+one portable owned test module and an intended-assertion mutant runner; existing Linux/
+macOS test registration; this audit, AUDIT_POST and the four plan ledgers. abort_conflicts,
+Journal.recover's first D64 refusal, Gate, JournaledHold and installed timers stay unchanged.
+The fixed attempt uses RESTORE_PRIOR.json, avoiding abort_conflicts' existing rejection
+of nested DECISION.json. Any failure/partial/repeat remains single use and manual.
+
+Verify: real owned checkpoint→commit→capture→cleanup→ABORT→release producers feed the
+new decision; actual owned-file barriers, two held locks, fresh consumed/written sample
+parity and unchanged source/transcript bind it. Decisive negatives cover production/
+fixture fences, locks, source/host identity, holders/clone/attachments/siblings, barrier/
+publication/readback errors, interruption, replay and canonical schema/enum/digests.
+The pure guest consumer refuses a changed checkpoint or digest and cannot call Journal,
+Gate, host verification, recovery or filesystem APIs. Guard mutants must fail intended
+assertions, with controls passing; Claude exact-source review and exact-head green CI
+precede source readiness. Native whole-pipeline/ASIF/VM reboot is not this Verify.
+
+Claude183's proposed changed-host-session/post-start mode and broad platform-interpreter
+allow-list are not adopted. Its proposed manual steps name future tools, not a presently
+executable route. D175 translation must eventually be per verified filesystem/path
+component, preserving identity.json bytes and all same-boot descriptor mappings. Guest
+scoped admission, actual manual restoration and reattachment remain subsequent units.
+
+
+D214 mutation-runner integration correction: aa340975 duplicates the prior release
+runner's literal durable_evidence(evidence) anchor (2 hits, expected1). CI39082243166
+was canceled as superseded before claiming a native/green result. Rename only the new
+decision producer's local variable to transcript and update only its own runner anchor;
+old release/runtime bodies and runner stay unchanged. All27 decision controls pass
+43.692s, all13 new decision mutants pass, and the unchanged prior release runner passes
+all13 intended kills with its controls. This is a necessary same-contract test integration
+correction, not a production behavior change. Exact corrected-head Claude/CI still required.
+
+
+D214 proof re-orient, 2026-10-17 20:36 EDT: Claude193 finds no required source
+finding at3cbc9cd5 and independently reproduces27controls/13decision/13release mutants
+as uid65534 plus regressions. Its live extra mutations expose three material optional
+proof gaps: stored-sample host binding, decision-to-intent pin and independent decoder
+nonce/arm/checkpoint bindings. Close B5-decision-binding-tests within this same owned
+handoff contract before source closure: six new controls also isolate previous/pre-head
+and released-flags schema; seven added mutants pin those present guards. All33 controls
+pass41.735s, all20 decision mutants fail at their intended assertions with controls
+passing/noERROR. Runtime/workflow/release runner bytes are unchanged from3cbc. This
+supersedes the27/13 test floor without relabelling earlier runs. Exact test-head Claude
+and CI remain required. Smaller JSONDecodeError normalization and host import-graph
+notes are carried, not defects or a new refactor. Guest/manual/D175 and Mac proof stay open.
+
+## 2026-10-17 21:56 EDT — D62 scoped-observation re-orient
+
+Step1.2/B5 remains open at v1.2-pre; D215's owned pre-start decision prerequisite is verified.
+The next outcome is a record-free scoped process diagnostic, before any admission exception.
+Existing Journal.recover, recover_owned, Gate, saved identities and installed timers stay unchanged.
+This supports the local-first recovery path without granting a production or reboot waiver.
+The source needs a process policy that the saved hold does not yet contain; producer work is separate.
+Still the right next source work: only an explicitly scoped diagnostic can advance independently.
+
+Fresh source pre-screen: capture_ready/CAPTURE_KEYS and capture_cohort bind the existing
+job observations, stopped states and original hold, but no UID-wide expected process policy.
+The forward window refuses new record types. The existing two-job owned recovery driver
+cannot supply a legitimate full-node post-boot policy. D64 remains its first cross-boot refusal.
+Fresh PR224 receipt0d8099c1 is open/draft with all8 checks success and a clean worktree before
+this audit. B1 permits design/owned tests; B2 stays Alpine-only; B3 stays23-job JIT and B4 a
+bounded design input, neither repeated. B6 lacks an exact-window release; B7–B9 remain held.
+
+New Codex-owned warning B5-boot-process-policy: a future UID-wide admission cannot derive
+expected post-boot processes from old PIDs, a live sampled allow-list, or the current saved
+job/override tables. Codex must design and verify an explicit recorded pre-window policy
+producer and its frozen binding before that admission. It holds guest admission, manual
+restoration and D175. The independent diagnostic must not close this warning or call a
+root-only/UID-disabled positive a full D62 observation.
+
+Claude203's initial design is not adopted as written. It proposes a pre-journal consumer in
+recover_owned but disables UID scope, uses basename-dependent unreadable-process handling,
+implicitly allows self/launchctl helpers and claims native readability from the older census.
+Codex204 rejects those exceptions and the claimed need for a new operator approval merely to
+keep production refusal in place. Unknown scope must refuse; every allowed process needs
+explicit expectations, with no automatic descendant/platform exception. D162's unreadable
+process evidence is a limit, not a readability guarantee. D60 needs a freshly validated boot
+anchor and static exclusion binding; its durable admission record is later work.
+
+Executable deltas and the exact diagnostic contract await the corrected design. No source,
+policy producer, admission record, recovery waiver, service/VM/image/timer operation or Mac
+reboot proof is implemented or claimed by this preflight. Four NATS histories remain separate.
+
+### First unit after the Claude205 correction: scoped process diagnostic
+
+B5-D62-scoped-process-diagnostic is narrower than the proposed combined observation gate.
+It compares an explicit CURRENT-BOOT expected-generation table, not a pre-stop policy or
+cross-boot admission. Its record-free owned CLI is the concrete consumer. Missing post-boot
+policy production, all job/hold/stopped/override/D60 comparison, admission records and manual
+restoration remain separate open outcomes. There is no inferred self/helper or UID-off mode.
+Unknown membership refuses even for another UID; PID-list changes refuse conservatively.
+Source reading measures per-process generations, argv/cwd and current on-disk executable
+bytes using existing libproc and file/path primitives. This is sampled path/UID evidence,
+not loaded-image authorship, physical exclusion or continuous coverage.
+
+§6 deltas: one new scoped_process_diagnostic.py module, one portable/native-owned test
+module, one intended-assertion runner, existing Linux/macOS CI registration and plan/audit
+ledgers. Every existing executable body, recovery driver, journal/hold schema, Gate, host
+module, shared census primitive and installed timer stays unchanged. The CLI requires an
+owner-private literal temporary fixture root/file before observation and emits redacted
+comparison facts with admission/history_certified false, never an enrollment policy.
+
+Needs: verified D215 exact-head all8 CI; existing nats_macos_proc, relevant_entrypoint,
+regular_content and boot_identity primitives. Feeds: explicit future policy authoring and
+disposable-Mac unknown-set measurement, then the separately reviewed producer/admission/
+manual/D175 gates. Verify: portable strict schema/scope/unknown/unstable/generation/code/
+argv/cwd/count/boot negatives, actual owned child primitive observation on macOS with any
+enumeration substitution labelled, byte-unchanged fixture/CLI refusals, intended-assertion
+mutants with passing controls/noERROR, Claude exact-source review and exact-head green CI.
+No native whole-host positive or admission/readability claim follows from this unit.
+
+
+### 2026-10-17 22:13 EDT — owned process diagnostic candidate (D216)
+
+New scoped_process_diagnostic.py composes unchanged process/path/file primitives and
+provides a record-free fixture CLI with explicit current-boot expectations.36 local
+controls1.456s and24 intended mutants pass, including an independent spawned C-child
+control under explicitly substituted enumeration. No native full-host positive, policy
+producer, job/hold/decision comparison or admission is claimed. Report outcome is clean/
+refused, never verified; admission/history_certified stay false and argv is redacted.
+Claude207 design corrections are included; exact-source review and exact-head CI pending.
+B5-boot-process-policy stays open, along with guest admission/manual/D175 and actual Mac
+access/measurement/reboot proof. B5/1.2 pre/open, B6–B9 held, D64/production/timers unchanged,
+four histories separate. See D216 for sampling, current-disk-image and decoder limits.
+
+Mid-implementation re-orient: Claude207 narrows image/ctime and enumeration claims,
+requires a second per-PID sample and independently expected native argv. These stay
+inside the same record-free process outcome; no admission/policy/recovery delta is added.
+The comparison's shared path helper reads paths, so read-only replaces the earlier pure
+wording. The C fixture replaces a false Python-launcher assumption. Production is unchanged.
+
+
+### 2026-10-17 22:25 EDT — D216 whole-argument scope correction candidate
+
+A bounded independent file-only reproduction at ffd7cb8c showed an other-UID
+argv symlink with spaces into a declared root reported clean/excluded. Whole
+executable/cwd/argv paths now resolve before the unchanged shared token helper;
+absolute and relative whole-argument regressions and their named mutant pin it.
+Local40 controls pass0.847s and28 intended mutants fail their named assertions
+with intact controls. Superseded CI39089415728 was canceled for this correction,
+not green. Exact-source review and corrected-head CI remain required. No shared
+runtime API, job/hold/journal/Gate/timer or production operation changed.
+
+
+### 2026-10-17 22:30 EDT — D216 directory-root proof candidate
+
+Claude213 confirms the required whole-argument scope defect is fixed at07347924,
+reproduces40 portable tests (one native skip) and28 intended mutants as uid65534,
+and finds no required source issue. Its independent delimiter aliases and embedded
+flag control behave correctly. The optional live parent-directory branch was still
+unproved: the equality-only mutant passed40 tests. The regression now exercises
+each delimiter alias against both a file root and its parent directory; a named
+parents-branch mutant fails its intended assertion. Local40 tests pass3.023s and
+all29 intended mutants pass with intact controls. Runtime/workflow bytes remain
+identical to07347924. Superseded CI39090103107 was canceled for the proof extension,
+not counted green. Corrected-test exact-source review and exact-head green CI are
+pending. B5/1.2 remain open/pre, D64/timers/production unchanged, no admission.
+
+
+### 2026-10-17 23:41 EDT — B5-D62-process-policy-binding candidate (D218)
+
+The owned diagnostic receipt4e3605bf passes all8 CI39092308432; native40
+controls8.813s/29 intended mutants, owned child matched/full scan refused with
+522 unknown entries and318 unexpected rows. Claude221 finds no required receipt
+issue; these receipt-CI observations are Codex's and do not replace D217's
+source-native516/299 evidence. No admission or production operation is added.
+
+The next bounded outcome is one authored, generation-free process policy in a
+new full-node baseline, plus a fixed-path owned producer and a dedicated frozen
+consumer that first verifies the external checkpoint. The optional carrier is
+inert for all old no-policy callers/readers. No in-window event, CAPTURE_KEYS,
+D64/recover, Gate, identity.json, timer, host executable or production change.
+Code/argv/cwd/uid/gid/count and explicit launchd-or-expectation attribution are
+exact; references must terminate, and held managed jobs/commands cannot be
+authored as expectations. No implicit self, root, platform or ancestor permission.
+
+Claude219/223/225 and Codex222/224 define the pre-audit. The complete initial
+receipt, not a policy-only cap or arbitrary growth reserve, is the tighter1MiB
+reader threshold; both actual serialized files must fit before publication.
+Ordinary reopen, interrupted-created=True initialization (including its OSError
+early return), and the final reopen path reject a supplied policy. The owned
+producer derives every writable path beneath its literal private temporary
+root, rejects symlinked parents before Journal construction, and takes explicit
+caller-supplied prior/inventory rather than claiming live process enrollment.
+
+Recorded owner binding uses the actual metadata_identity.uid and last watched
+gate-root identity.uid plus the root device:inode pin. Root/lock pins themselves
+are strings without uid; ancestor path owners differ. Missing owner carriers in
+a new policy refuse. The producer observes its own uid; only the image reader
+labels actual file-owner metadata. The pure validator observes no filesystem.
+The consumer claims pinned-checkpoint consistency only: same-uid coordinated
+rewrite/recommit remains undetected (D189); authorship, pre-stop authenticity,
+policy completeness/satisfiability and record-time eligibility remain unproven.
+
+Verify: portable honest producer/frozen/image positives and independent refusal
+cases for schema/code/argv/owner/root/count/attribution/held jobs, swap/absence/
+malformed rehashed policy, exact complete-receipt byte boundary and all reopen
+routes; intended-assertion mutants with intact controls; unchanged old baseline
+and D64 controls, exact-source Claude review and exact-head green CI. These
+checks are pending. Only this owned source prerequisite may close. B5/1.2 remain
+open/pre, B6–B9 held; boot comparator/observer/durable admission, manual/D175,
+Mac access/APFS reattach/reboot and the separate physical histories remain open.
+
+
+### 2026-10-18 00:14 EDT — D218 checkpoint-order proof correction candidate
+
+Claude227 reproduces source433966aa:47 controls/44 intended mutants as uid65534,
+435 existing tests ran with usual skips and all suites OK, unchanged runtime
+bodies except constructor/open. It finds no required source defect, but its
+checkpoint-before-policy reordering mutant survives47 tests. That is a required
+proof gap because malformed extracted records then escape as key/type errors or
+reach policy validation before the external committed digest is checked.
+
+The new negative feeds a non-list, a baseline missing inventory, a string prior
+and a rechained malformed policy, requiring the checkpoint's Refused class and
+message precedence. Its statement-reordering mutant now fails that named
+assertion, with no ERROR counted. A second negative also closes Claude227's
+optional image pin-order gap: a scripted divergent second commitment read must
+refuse before the real read_inputs can select a window. Local49 controls pass
+11.591s and46 intended mutants pass with intact controls. Runtime and workflow
+bytes are identical to433966aa; the prior324-test batch remains evidence of the
+common executable paths, not a new325/326-test execution claim.
+
+Superseded CI39095435399 is cancelled for this proof correction, not green. Its
+Linux117580780740 recorded47/0.960s/44 at merge3a743eddd6137ae831ae4a3441000ab169d4c504
+(source433966aa second parent, identical whole tree); raw SHA256
+1bc8c68cfa910d921f5c153c183a3bef064a06d8bfde703b955e2af4d03c7590. This
+is the earlier proof only. Corrected-test exact-source review and new-head CI
+remain pending. B5/1.2 stay open/pre; no admission, production, Gate or timer change.
+
+
+### 2026-10-18 01:25 EDT — B5-D62-process-observation-envelope candidate (D220)
+
+D219 receipt2615452b and sourceee311fcd pass all8 CI39097936909 and39096484480.
+Claude229/237 find no required source/receipt issue. Receipt-native49/2.326s/46
+and Linux49/0.831s/46 are Codex's final run observations, separate from Claude237's
+independently verified source-native log. Receipt merge5335589ac9524a7d66d947453c16958466f64345
+has receipt2615452b as second parent and an identical whole tree. The stale B5
+frontier summary is corrected here; D219's pending-at-commit text stays historical.
+
+Next bounded outcome: one four-PID-sample, current-boot observation envelope over
+a bound authored policy, consumed by a record-free owned diagnostic. Claude241
+proposes composing unchanged diagnostic.compare(raw, empty expectations) for
+raw schema, scope and redaction rather than a second census/resolver. Its own
+clean/refused verdict is stripped. Codex242 pins outer-boot expectations so inner
+boot failures survive as unknown, all raw unknown multiplicity, excluded-row
+fingerprints, both launchd reads and plist identities, unique namespace/label
+pairs, integer monotonic offsets and the fixed owned fixture boundary. Final
+pre-audit response is pending; no observer source or test exists at this entry.
+
+Recorded means a complete coherent observation, never a class-policy match or
+admission. Unknown, unreadable, unstable, changed, incomplete or expired evidence
+refuses. Unloaded/idle job observations are known negative facts for the later
+comparator. Same-UID scope cannot be excluded. Other-UID scope remains read-only
+observer evidence, bound to the policy and samples, with D189's unprotected-input
+limit; no basename/platform/controller exception and no raw argv disclosure.
+The120-second acceptance window cannot interrupt blocked filesystem/libproc
+calls; at most16 distinct anchors are queried. No hard wall-clock guarantee.
+
+Minimal source surface after the pre-audit: one new step12 module, test and
+intended-assertion runner, four CI registration lines, and these six ledgers.
+Existing diagnostic, policy binder, shared lib, Journal/schema/recover/D64,
+Gate/identity, host executables and timers stay unchanged. The owned consumer
+reads a separately prepared fixture; it constructs no Journal/Gate, capture or
+policy enrollment and writes no file. Scripted file input always stays scripted.
+
+Verify before closing only this owned source prerequisite: pure schema/coherence
+controls and intended mutants; actual helper composition and ordered samples;
+unknown-entry retention, all-row stability, namespace/generation/plist bracketing,
+redaction, budget/cap and provenance negatives; honest frozen-policy owned reader
+with unchanged files and zero constructors; native substituted and CI full-runner
+measurements, no full-scope positive claim; exact-source review and green CI.
+Class matching, jobs/recorded hold/overrides/fresh D60, durable admission, attended
+manual/D175, Mac access/APFS reattach/reboot and four-history acceptance stay later.
+B5/1.2 remain open/pre, B6–B9 held. No production operation is added or performed.
+
+
+### D220 pre-audit settled — Claude243, before source work
+
+Claude243 accepts Codex242 with no required issue. Carry the seven precision pins:
+outer boot_start is the empty-expectations boot; inner boot=None and all unknowns
+survive unchanged; excluded rows carry full redacted-row fingerprints; J1 is read
+for unloaded/idle as well as running jobs; both redacted job reads and both plist
+identities survive; reported PID generations bind both passes, including excluded
+rows; anchors are unique namespace/label pairs without choosing an authored hash;
+integer monotonic_ns offsets use120000000000ns and16 anchors; fixed private owned
+fixture capture/data/table/envelope paths precede all reading/collection. table.json
+is fixture authority only and supplies no B3 provenance. Scripted source/coverage
+is forced by the file consumer; original claims are narrowly typed labels only.
+No raw arguments key or inherited diagnostic verdict appears in serialized facts.
+Recorded is coherent sampled observation only, never class matching or admission.
+The on-disk and D189 limits remain. Source/proof implementation now starts; exact
+review/CI and the candidate row remain open.
+
+
+### 2026-10-18 01:50 EDT — D220 local observation-envelope candidate proof
+
+The new process_observation_envelope composes the existing two-sample observe
+and compare scope stages twice, with an outer current boot and bracketed launchd
+facts. Its pure serialized validator retains all unknown entries, including
+multiple failures for one PID and global failures; compares included rows and
+excluded full-row fingerprints across passes; and independently recomputes
+coverage, generation/job/plist ties, budget and the envelope verdict. It strips
+the old diagnostic verdict and emits no raw process or launchd arguments.
+Recorded is coherent sampled observation only, not a class-policy match.
+
+Local52 tests pass11.274s; all47 named intended-assertion mutants pass with their
+unmutated controls intact. The combined old diagnostic/policy plus new suite
+passes141 tests22.714s. Earlier50/51 and139 executions retain their actual counts.
+The first four mutation attempts exposed proof-harness issues (an earlier
+assertion firing, nonviable mocks after removed guards, a finite fake clock and
+an inherited fixture umask dependency); those attempts are not complete proof.
+The final fixture sets private creation permissions only while preparing its
+owned files and restores the caller's mask; its standalone022-mask control
+passes. No exception or unrelated failure is counted as a kill.
+
+The owned consumer reads an honestly prepared frozen-policy fixture through the
+unchanged reader, with Journal/Gate constructors forbidden and unchanged file
+snapshots. It fixes capture/data/table/envelope inputs beneath one literal
+private temporary root, validates the actual caller/policy-root ownership, bounds
+canonical single-link file input at8MiB, and forces file provenance scripted.
+The table is fixture authority only, never B3 host-held pin provenance.
+Local native evidence is the substituted child run with four PID-list calls and
+real existing libproc/argv/hash/cwd primitives; no unpatched local full scan ran.
+The native CI full-runner measurement remains pending and must refuse unknown;
+no native full-scope or attribution positive is claimed.
+
+Only three new step12 executable/proof files and four CI registration lines
+change executable surface; every existing diagnostic, policy-binding, library,
+Journal/schema/recover/D64, Gate/identity, host executable and timer byte is
+unchanged from2615452b. Some cross-sample refusal predicates are dominated by
+coverage/row equality/empty-unknown constraints; no equivalent single-predicate
+removal is counted. The process-pass-reuse mutant and real four-list child
+control pin actual collection, and all47 counted changes fail named assertions.
+
+Exact-source review and exact-head CI are pending. The D220 row stays open;
+B5/1.2 open/pre, B6–B9 held. Class matching, jobs/hold/overrides/fresh D60, durable
+admission, attended manual/D175 and physical Mac/APFS/reboot histories stay later.
+No production operation, resource provisioning, policy enrollment or admission.
+
+
+### 2026-10-18 02:08 EDT — D220 sample/expiry proof and strict binding-UID correction
+
+Claude245 reproduces source2393e724 as uid65534:52 ran with one native skip and47
+intended kills with intact controls; it verifies the ten-file lineage, unchanged
+existing executable trees and each kill's intended assertion. It requires two
+proof additions: within-pass before/after equality can fail while union coverage
+and cross-pass rows agree, and elapsed_ns above the window can be paired with a
+false expired flag. Neither predicate is dominated. The earlier broad dominance
+sentence is withdrawn; the new negatives and individual runner mutations pin both.
+Only the specifically confirmed pass-B generation half and private symlink-leaf
+literal check are treated as dominated; other unpinned cases are carried below.
+
+Codex independently finds a strict-schema source defect: Python deep equality
+lets a Boolean binding uid alias valid UID0/1. A scripted pure table with both
+scope digests recomputed is recorded with that Boolean at2393e724; admission stays
+false. The new test fails for both aliases before the fix. The validator now
+checks the binding's exact key set and integer UID before equality, rejecting the
+aliases without changing any ordinary observation or production authority.
+
+Local55 tests pass52.273s;50 intended-assertion mutations pass with intact controls,
+including the two required predicates and removal of the UID type check. The
+combined suite passes144 tests41.351s. Earlier52/47,141 and139 executions retain
+their own counts; this is a new run. No ERROR or unrelated failure is counted.
+Only the new module's two binding-schema lines and its tests/runner change
+executable bytes from2393e724; the existing workflow and all pre-existing runtime
+paths stay byte-identical. No local unpatched full scan or production operation.
+
+Superseded CI39101987342 was cancelled for this required correction, not
+counted all-eight green. Its Linux117599965393 passed52/1.237s with one native skip
+and47 mutants at merge430dd088f8dbce75813c7d7dff0ac28344d8d643, source2393e724 second
+parent and identical whole tree; raw SHA256
+df5bf9c247e7ca712efdecad62a1490b649c8d1d46adb88a3f78443da204f277.
+That evidence is not the corrected55/50 proof. New-head review and CI remain
+pending; the D220 row stays candidate/open. B5/1.2 open/pre, B6–B9 held, no class
+matching, physical exclusion, eligibility, authorship or admission claim.
+
+
+### 2026-10-18 03:14 EDT — B5-D62-process-class-comparator candidate (D222)
+
+Micro re-orient: step1.2/B5 stays open at v1.2-pre, B6–B9 held.
+D221 verifies the owned observation-envelope source; its receipt e9efb244 now
+passes all8 CI39104976663 and Claude253 is clear (255 acknowledges Codex's final
+run measurements). Receipt-native55/3.848s/50, full runner refused with child in
+both passes,1032 unknown entries and2 reasons; Linux55/1.813s/one skip/50.
+Merge34b4bb0423d6b41ca4dc74714d1e2a561ab40f97 has receipt as second parent and
+an identical whole tree. These final receipt-CI measurements are Codex's,
+separate from Claude253's independently checked source-native proof.
+
+This unit contributes only a pure process-class consistency comparison and its
+real record-free owned consumer over that verified envelope and D218 policy.
+The prevalidated policy comes from the unchanged frozen/image reader; this is
+not an arbitrary-policy parser or a replacement D218 validator. Final pre-audit
+is requested in Claude256; no comparator source/proof exists at this entry.
+
+Goal: compare one complete coherent sampled envelope to the bound authored
+class/attribution/count claims without granting eligibility or admission.
+Needs: D221 exact-head source/receipt all8 green, clear247/253 reviews, unchanged
+valid_envelope/binding/image_process_policy, and B1/D189 owned boundaries.
+Feeds: jobs/recorded hold/overrides/fresh D60, then durable admission, attended
+manual and D175. Class consistency cannot establish a stopped hold.
+Verify: code: pure scripted positives/negatives with intended-assertion mutants;
+owned frozen-policy consumer with no constructors/writes and unpromoted scripted
+provenance; old envelope55/50 behavior; native owned-child substituted refusal
+and CI-only full-runner refusal; exact-source review plus all8 CI, then a separate
+five-Markdown receipt with its own review/all8 CI. No native positive is claimed.
+
+Proposed contract: validate the envelope first, and refuse its non-recorded or
+malformed state before class logic. Bind the report to the exact input's canonical
+hash and policy hash. Keys are literal executable, on-disk SHA, NUL-joined argv
+SHA, uid/gid/cwd. PID/PPID/birth/name are not cross-boot class keys. Sort observed
+rows by birth then PID; attribute launchd rows to their actual policy-owner
+namespace/label, running state, current generation and authored plist SHA.
+Expected-parent rows need a strictly older included parent already uniquely
+assigned the referenced label. Zero candidates is unexpected, multiple ambiguous;
+counts are exact after assignment, never a count-solving permission. Launchd
+count above one remains valid but unsatisfied. Empty policy matches no included
+process. Carry source/coverage unchanged and always admission/history false.
+
+No raw argv representation or policy is emitted; redacted fields may legitimately
+overlap argv0/cwd, so tests pin dedicated secret sentinels rather than an impossible
+ban on every argument substring (including empty arguments). Keep anchors private
+in memory for the later jobs gate; the class report binds their envelope hash and
+does not itself carry job-configuration evidence. Do not count dominated single
+launchd checks as isolated kills; use coherent recorded wrong-row attribution,
+non-running-with-PID and authored-plist mismatches for the relevant mechanisms.
+
+File deltas: one new step12 process_class_comparator.py, its test and intended
+mutation runner; four CI registration lines; bounded extraction of inspect_owned
+into owned_envelope returning the same policy+envelope privately, with inspect_owned
+returning the latter and only its policy-emission mutation anchor updated; these
+six ledgers. No D218 binder, Journal/schema/recover/D64, lib, Gate/identity, host
+executable or timer change. No production operation or local unpatched full scan.
+Optional D220/D218 follow-ups stay carried. Mac access, native positive attribution,
+full pipeline, APFS reattach/reboot and four-history acceptance stay separate.
+
+
+### D222 pre-audit settled — Claude257, before source work
+
+Claude257 clears the contract with two required precisions, adopted: every
+unexpected entry carries its redacted process and class_candidates before
+attribution; gate on valid_envelope's recomputed copy and use that copy's reasons,
+while the hash binds the exact input bytes. Native child candidates must equal
+its authored label exactly. Rows/report entries follow (sec,usec,pid) order.
+Policy is the prevalidated reader argument; the optional redundant row-schema
+check is not added. Optional D220/D218 controls stay carried.
+
+The existing diagnostic.redacted helper only copies dict fields and replaces
+arguments with the NUL-join digest; it performs no process-schema validation.
+Expected keys can therefore project its actual output over the validated policy
+row, reusing that exact helper instead of duplicating its hash expression. Tests
+will pin that shared call and empty/non-ASCII/argv-boundary behavior.
+
+Only the settled comparator/extraction surface now enters implementation. No
+class comparator, jobs/hold/D60 gate, admission or production operation is claimed
+by this pre-audit entry; source review/CI and the candidate row stay open.
+
+
+### 2026-10-18 03:30 EDT — D222 local class-comparator candidate proof
+
+The102-line pure comparator validates the envelope before expected or observed
+class keys, gates on its recomputed outcome/reasons, and hashes the exact input
+object plus prevalidated policy. It reuses diagnostic.redacted for expected argv
+hashes, sorts rows by birth/PID, requires actual launchd namespace/running/current
+generation/authored plist or an older uniquely assigned referenced parent, then
+refuses zero/multiple candidates and exact count deficits/excess. Unexpected
+rows retain pre-attribution class_candidates. Source/coverage come from the
+recomputed envelope, so a forged full label cannot promote substituted/scripted
+facts. Redacted reports emit neither policy nor raw argv or job-anchor tables.
+Class-consistent establishes no stopped hold, eligibility, authorship or admission.
+
+Local37 tests pass5.536s; all50 intended-assertion mutants pass with intact named
+controls. Existing envelope55 tests pass8.781s and its50 mutants still pass after
+the bounded helper extraction/re-anchoring. The combined diagnostic/policy/envelope/
+class run passes181 tests21.429s. Earlier32/36 tests retain their actual counts;
+the32 run failed one incomplete test fixture that correctly stopped at envelope
+coverage. The first new mutation attempt left the argv-digest field unchanged
+because of whitespace in its replacement; that partial run is not complete proof.
+The corrected runner checks every replacement anchor and counts only the named
+assertion failure, never ERROR or an unrelated failure.
+
+The native owned C child is authored before spawn, observed through existing
+libproc/hash/argv/cwd calls with only PID enumeration substituted (four calls),
+and reports exactly its authored class candidate while refusing its absent
+parent. This is a native attribution refusal, not an attribution positive.
+Owned frozen-policy scripted positives pass through one shared reader; constructors
+are forbidden, files remain unchanged, and file source/coverage stays scripted.
+Only CI will perform the full-runner observation; no local unpatched full scan
+or production service/VM/timer operation occurred.
+
+Only three new files, four workflow lines, the envelope owned helper extraction,
+its old policy-emission mutation anchor, and six ledgers change. Every pre-existing
+envelope function except inspect_owned is AST-identical; valid_envelope, binding,
+collector and all frozen/private reader checks remain unchanged. The extracted
+body has the same first fixture gate and fences, returns the same policy plus
+value privately, and inspect_owned returns its second item. No D218 binder,
+Journal/schema/recover/D64, lib, Gate/identity, host executable or timer change.
+
+Claude257 pre-audit requirements are adopted; exact-source review and exact-head
+all8 CI remain pending. Only this owned source prerequisite may close after its
+separate reviewed green evidence receipt. B5/1.2 remain open/pre, B6–B9 held.
+Jobs/hold/overrides/D60, durable admission, manual/D175, native positive attribution,
+full pipeline, Mac access/APFS/reboot and four-history acceptance stay later.
+
+
+## Mid-Implementation Findings — D222 own-label proof
+
+
+### 2026-10-18 03:50 EDT — D222 own-launchd-label proof correction
+
+Claude259 independently reproduces ea87f6fa as uid65534:37 new tests/one native
+skip/50 intended kills; old envelope55/one skip/50; combined181/three skips. It
+confirms the twelve-file delta,30 unchanged envelope definitions and the identical
+18-statement extracted body except paired returns. Source is correct, but it
+requires a proof correction: removing name == key survives the37-test suite.
+Two D218-valid launchd expectations can share a plist hash while differing in
+label and class. Swapped running anchors are internally recorded facts; the
+missing name filter then borrows the other label's matching generation and
+wrongly reports class-consistent. This predicate is not dominated by validation.
+
+Codex independently reproduces the surviving removal against the original37
+tests (all pass5.676s), then adds the coherent shared-plist/two-label swap control.
+The unchanged source refuses both rows, preserves their exact class_candidates,
+assigns neither and reports both missing; the new single-predicate removal fails
+that named assertion. D218 plist-hash uniqueness is not changed. The source,
+workflow, envelope helper and old runner are byte-identical to ea87f6fa.
+Only the new test/runner and six ledgers change in this correction.
+
+Local38 tests pass6.733s;51 intended-assertion mutants pass with intact controls;
+the combined suite passes182 tests32.091s. Earlier37/50 and181 runs retain their
+counts. Superseded CI39107975073 is cancelled for this required proof, not counted
+green. Its Linux117617833935 separately passed37/0.470s/one native skip/50, raw
+1517497 bytes SHA256145e23cafa336aad6cd1445b9088836f12aebe0e8d13a4e516bb95be694e8817,
+checkout4699d64b4786eeadf6716faa12c207d8605dac16 with ea87f6fa as second parent
+and an identical whole tree. It is not the corrected38/51 source proof; no native
+result is claimed for that cancelled job.
+
+The native CI test now asserts each process pass is non-null before indexing,
+turning that failure mode into an explicit assertion. CLI early exceptions can
+return a minimal refusal without phase/hashes; no class-consistent result follows.
+Claude259's five forbidden-key mutations share the observed7-tuple mechanism;
+they are counted, not discriminating, while the separate field positives pin the
+contract. Pass-B instead of A, PID instead of generation equality and dropping
+loaded are equivalent under recorded input, not gaps or counted extra kills.
+D220/D218 optional controls remain carried.
+
+Corrected exact-head source review and CI are pending; D222 stays open, B5/1.2
+open/pre, B6–B9 held. Runtime/operational boundaries remain unchanged. No local
+unpatched full scan, production operation, policy enrollment, hold eligibility,
+loaded-image/history/physical proof or admission is added or claimed.
+
+
+### 2026-10-18 05:16 EDT — owned held-job negative comparator pre-audit (D224)
+
+Micro re-orient: B5/step1.2 stay open at v1.2-pre; B6–B9 held.
+D223 source39638d1e/receipt907046d9 have clear261/265 reviews and all8 exact-head
+CI39109210059/39111452945. Receipt native38/2.788s/51; full runner refused with
+child in both passes,1036 unknown entries and2 reasons; Linux38/.504s/one skip/51.
+Merge75c377af0dd4e8269e575fc2b9311819242bd3f3 has receipt second parent and equal
+tree. Later receipt-CI facts are Codex's;267 preserves that evidence separation.
+
+Pre-audit correction269: the optional launchd-command comparator does not feed
+the held-cohort gate because D218 forbids its labels/commands. Its uncommitted
+candidate is replaced before source work; no command-comparator source exists.
+The actual frontier is a pure held-cohort negative-job comparator. Claude271
+clears request270 at exact907046d9 with the following corrections adopted.
+
+Goal: one scripted negative-job consistency result for every verified managed
+label in gui/recordedUID, user/recordedUID and system, without admission.
+Needs: D223 clear source/receipt all8 CI, unchanged frozen/stopped readers,
+valid_job, complete full-node fixture and B1/D189 owned boundaries.
+Feeds: the later full managed-job current-boot collector, then overrides/fresh
+D60 and integration with strict process gates before durable admission/manual/D175.
+Verify: code: coherent portable/scripted positives and independent four-bucket,
+UID/key derivation, ordering, hash/privacy and intended-assertion mutations;
+real owned frozen-image reader/CLI with and without policy, no constructors/writes,
+unchanged prior regressions, exact-source review/all8 CI then a separate reviewed
+all8-green five-Markdown receipt. runtime: none. Native execution is scripted
+reader portability with no skip, never a live launchd/process or held-state claim.
+
+compare_held_jobs(records,jobs) takes records already verified by the unchanged
+frozen verifier; it is not a journal parser. That verifier already proves prior
+and CAPTURE completeness, held_as_checkpointed, all unloaded observations and
+empty final loaded inventory. These dominated predicates are reused, not counted
+as new proof or new intended mutants. Derive labels only from verified prior,
+using ai.openclaw.+unit; no timer-only, original-domain or policy-anchor filter.
+Derive all three namespace keys from that count (currently23 units/69 keys), with
+no16-anchor cap or hard-coded unit count. Owner UID is strictly int>=0 from
+scheduler-heartbeat.execution_hold.metadata_identity.uid, refusing absent/bool;
+this is D218's namespace-owner convention, not a caller-derived permission.
+The consumer requires nonempty stopped-reader metadata and every read UID equal
+to the recorded UID, without using os.getuid for that binding. Older records
+without this owner field refuse; no runtime/schema change supplies it here.
+
+Jobs is a string-keyed JSON object. Missing expected keys are missing; outside
+keys are extra without interpreting their shape or value; malformed present
+expected facts are unknown {key,error_type}, catching only valid_job's Refused.
+A well-typed loaded job is unexpected_loaded regardless of state or PID. Only
+exact {loaded:false} is negative. Each bucket is retained/sorted and independently
+pinned; no basename, command, process or loaded-idle exception. Report exact
+encoded(jobs) SHA, baseline and verified checkpoint digests; literal scripted
+source, sampled true/continuous false and admission/history/hold_certified false.
+Only all four empty yields held-jobs-negative-consistent. No job values, program,
+argv digest, plist path, policy or full table is emitted; optional baseline
+process_policy is ignored. No timing budget is inferred from the envelope.
+
+Owned consumer: --fixture AND --scripted before any IO; private/literal owned
+temp root openclaw-owned-held-jobs-16hex, root/capture/data checks and unchanged
+read_private for table.json and held-jobs.json (8MiB diagnostic, not frozen-reader
+widening). Copy image_process_policy's pin-coherence sequence textually; pins
+precede one read_inputs, then one verify_frozen_checkpoint, then owner binding,
+job-file read and compare. A frozen-verifier refusal must prevent compare and is
+pinned by an order-swap mutant. Canonical redacted CLI stdout;0 only narrow
+consistent,2 refusal, minimal early-error shape accepted. No process_policy need,
+new census, Journal/Gate construction or write. The policy-free honest fixture
+with recorded owner was read and frozen-verified locally:23 units,54 reads/uid501.
+The first prototype asked the fixture for missing binary/home attributes and
+failed; the corrected prototype uses read_inputs' actual returned fields.
+
+Deltas: three new held_job_negative_comparator/module-test-mutator files,
+four workflow registration lines, six ledgers. Existing executable/test/mutator
+bytes stay fixed. No Journal/schema/recover/D64/lib/Gate/identity/host/timer change.
+B5/1.2 stay open/pre; row close waits for source and separate receipt review/CI.
+No live observation, inventory/overrides/D60, hold/physical absence, eligibility,
+authorship/history or admission. No production operation. Optional D220/D218
+controls stay carried. Later69-key double sampling at10s per call can exceed20min;
+120s cannot be inherited, and system-domain unreadability must stay unknown.
+Mac access, APFS reattach/reboot and four-history acceptance remain separate.
+
+
+### 2026-10-18 05:23 EDT — D224 local held-job comparator candidate proof
+
+The new97-line record-free module consumes prevalidated frozen records and an
+explicit scripted job table, derives every managed label in all three domains
+from prior and the recorded owner UID, reuses valid_job, and retains sorted
+missing/extra/unknown/unexpected_loaded buckets. No optional policy is interpreted.
+Malformed expected facts are unknown; extra keys are retained without parsing
+key shape or value. Every well-typed loaded job refuses, including idle without
+PID. Exact jobs/baseline/checkpoint digests bind the claims; no job values or
+policy are emitted. No live node or execution-hold assertion is made.
+
+Local31 tests pass10.692s;44 intended-assertion mutants pass with intact named
+controls and no ERROR-only kill. Existing182 process regressions pass21.580s.
+The earlier30-test run passed6.477s. The first mutation attempt rejected a
+zero-UID guard mutant through a Refused exception rather than its intended
+assertion; it is not counted and the real zero-UID positive stays a non-counted
+control. The prior42-mutation run passed before adding explicit verifier skipped/
+duplicated controls and an owned-root owner mismatch check. Scope and false
+claim flags, recorded UID type/carrier, all domains/member1/federation, each
+bucket/verdict, idle/malformed loaded, hash/privacy, pin-before-read, exactly one
+read/verifier, verifier-before-compare, every read owner and CLI exits are pinned.
+
+The actual owned consumer succeeds with and without a process policy, requires
+both flags before IO and the literal private fixture root/files, copies the
+existing pin-coherence sequence textually, and runs one read_inputs followed by
+one verify_frozen_checkpoint before owner binding/job-file read/comparison.
+Constructors are forbidden in the observation test; before/after files match.
+Bad checkpoint/receipt, ownership, mode, alias or canonical input refuses through
+unchanged readers before comparison. No existing executable/test/mutation runner
+changes; only the three new files, four CI registration lines and six ledgers.
+
+Frozen record completeness/held_as_checkpointed/all-unloaded inventory are
+upstream verifier proof, not new comparator predicates or counted mutants.
+Native CI will execute the same31 scripted checks/44 mutations with no skip;
+there is no live job/process observation or new native full-scan measurement.
+Source exact-head review/all8 CI remain pending, followed by the separate
+five-Markdown receipt review/all8 CI before this owned row closes. B5/1.2
+remain open/pre, B6–B9 held; D64/Gate/installed timers/production unchanged.
+Full managed-job collection, overrides/freshD60, process-gate integration,
+durable admission/manual/D175 and physical Mac/APFS/reboot gates remain later.
+
+
+### 2026-10-18 05:35 EDT — D224 consumer recorded-owner proof correction
+
+Claude273 independently reproduces exact104d808e as uid65534:31 tests/no skip,
+44 intended kills/intact controls,182 prior process regressions/three skips.
+It confirms the97-line source correct, the10-file/1332-insertion delta, unchanged
+pre-existing executable/test/mutator bytes, identical six-ledger blocks and pin
+sequence, full-node preconditions and every claimed source ordering/bucket fact.
+It requires one proof correction: replacing the ownership tie's recorded uid
+with envelope.os.getuid() survives all31 tests and accepts a constructible frozen
+image whose recorded owner is foreign but whose files belong to the runner.
+
+Codex independently reproduces that surviving substitution against the original
+31 controls: all pass6.746s. The new control patches only the existing fixture's
+recorded_hold metadata UID to runnerUID+1 before the honest journal/commit/capture
+flow. The real frozen reader verifies this policy-free chain; every returned
+file UID is runnerUID. The unchanged source refuses reader ownership and never
+calls compare. The one targeted ownership-tie substitution now fails the named
+foreign-owner refusal assertion, not through ERROR. Local32 tests pass11.587s;
+45 intended-assertion mutations pass with intact controls. Comparator/runtime,
+workflow and all existing source/proof files remain byte-identical to104d808e.
+Only the new test/runner and six ledgers change in this correction. The separate
+182 local regressions/21.580s are the earlier unchanged-runtime run, not a new run.
+
+Superseded CI39115186066 was cancelled for the required proof, never counted
+all8 green. Its completed Linux117639445757 separately passed31/1.597s/no skip/44;
+raw1521527 bytes SHA2565ee0980f5397e4f683e13f26b22e453fdf091c38e6d7dee038fd02cbbd5a412b,
+merge2042217fa6bfcfaa79d34d9247a1d0aa4a01d3b9 with104d808e second parent and equal
+whole tree. No completed native result is claimed for that cancelled run.
+The earlier30/42 and rejected ERROR-only control retain their historical counts.
+
+Claude273's optional weak verdict needle is strengthened to loaded-key-refusal
+wording without adding a count. Job-file read-after-owner ordering and the
+root-name/temp-parent predicates remain source facts but non-discriminating
+controls, carried as optional follow-ups; the string-key boundary is tested but
+not a counted mutant. Deriving labels from UNITS and dropping the verifier-digest
+override are equivalent for prevalidated records, not gaps or additional kills.
+No new source predicate, schema, reader, timer, hold or admission behavior changes.
+
+Corrected exact-head review/all8 CI remain pending, followed by the independent
+five-Markdown receipt review/all8 CI before only this owned row closes. B5/1.2
+stay open/pre,B6–B9 held; source remains scripted-only and all live observation,
+overrides/D60/process integration/durable admission/manual/D175/physical gates
+remain later. No production operation, caller-UID permission or release occurs.
+
+
+### 2026-10-18 06:46 EDT — managed-job observation pre-audit candidate (D226)
+
+Micro re-orient: B5/1.2 remain open/v1.2-pre; B6–B9 held.
+D225 receipt956f6c03/source d5d6aefd have all8 CI39118302426/39115988725
+and clear279/275 reviews. Receipt native32 scripted tests/45 mutations; its
+complete-log/tree evidence is Codex's, separately acknowledged by Claude281.
+Only scripted negative-job consistency closed; current-boot managed-job facts
+remain absent. No local production-label scan or production operation is authorized.
+
+Goal: one complete, bounded, current-boot managed-job observation envelope.
+Needs: D225 reviewed green source and receipt; unchanged expected_keys/owner_uid,
+launchd_service, redacted_job/valid_job, boot_identity, private frozen readers
+and the honest full-node owned fixture; B1/D189. All exist at956f6c03.
+Feeds: later combination with the held-negative comparator, then overrides/fresh
+D60, strict process-gate integration, durable admission/manual restoration/D175.
+Verify: portable scripted collector/validator and real frozen-reader consumer
+controls, decisive named assertion mutations, isolated macOS CI observations,
+exact-source review/all8 CI and a separate reviewed green five-Markdown receipt.
+No production runtime verification or live hold/eligibility/admission claim.
+
+Pre-audit request282 is pending. Proposed surface: three new managed_job_observation
+module/test/mutator files, four CI registration lines and these six ledgers.
+No existing executable/test/mutator changes, no shared census primitive/parser,
+Journal/schema/recover/D64/Gate/identity/host/timer change. VERSION stays pre
+because the enclosing step has not met its live exit gates.
+
+Proposed observations derive every managed label and all gui/recordedUID,
+user/recordedUID and system keys from verified prior, with no policy/timer
+filter or16-anchor cap. Two complete sequential launchd_service sweeps retain
+per-key typed redacted facts or errors; only the shared parser's exact absent
+service return is unloaded. System/domain unreadability and timeouts stay unknown.
+Boot identity brackets and a separately reviewed30-minute acceptance-only
+budget are proposed, not a hard deadline:138 ten-second calls can take23 minutes
+and boot_identity itself has no subprocess timeout. No120s inheritance.
+Expiry must stop further job acquisition and retain every unsampled key.
+Loaded/idle facts may be recorded, never interpreted as held negatives here.
+
+The validator will rederive frozen binding/key coverage, schema, boot, budget,
+unknown and two-sweep agreement; stored outcome cannot authorize anything.
+Serialized facts contain argv digests, never raw arguments. No continuous,
+physical absence, process generation/attribution, complete entrypoint inventory,
+overrides, freshD60, hold, history/authorship or admission claim. D189 applies.
+The actual schema/budget/provenance and native boundary await282's review.
+
+The intended real CLI remains --fixture AND --scripted before anyIO, consuming
+private literal owned inputs and copied pin-coherence followed by one read_inputs,
+one frozen verification, then every read owner tied to recordedUID. It cannot
+turn an input file's observed claim into live authority. No constructor or write.
+A prepared temp image cannot prove host isolation; a collector library and
+isolated CI-owned native harness are proposed, with no local unpatched scan.
+Mac access/designation, APFS reattach/reboot and four-history acceptance stay
+separate. Optional D218/D220/D224 controls stay carried, not silently closed.
+
+
+### D226 pre-audit settled — Claude283, before source work
+
+Clear to implement the smallest live half of the held-job gate, with structural
+boundary: inspect_owned/main require fixture AND scripted before input IO and
+never call the collector. owned_records supplies only frozen records/digest;
+collect_jobs is called live only by the test harness's darwin/GITHUB_ACTIONS
+branch. That branch is an isolation convention, not environment attestation.
+No operator-gated live path is added. The requested two-replacement mutant must
+relax flags AND wire collection, and the CLI-with-fixture-only control must
+assert refusal and zero census calls.
+
+Use structured (namespace,label) pairs from owner_uid and every prior unit,
+never parse keys back into domains; assert their keys equal expected_keys.
+Each job entry is either unchanged valid_job shape or exact error_type string.
+Catch only envelope.ERRORS, including TimeoutExpired; malformed loaded/arguments
+become errors, never unloaded. On budget expiry retain every remaining key in
+both sweeps with BudgetExpired, no further census call.30min WINDOW_NS is an
+acceptance-only budget checked before each call and after boot_end; validator
+recomputes expired from elapsed. Pin30min >=2*keycount*shared10s timeout for the
+fixture so cohort growth cannot silently outgrow it. boot_identity has no timeout.
+
+Exact four stages boot_start/sweep_a/sweep_b/boot_end, all present, failures empty,
+not expired, two equal hex64 current boot values, complete exact key coverage,
+no per-key errors and equal sweep values are required for recorded. Bind exactly
+baseline/checkpoint digests and recordedUID, reject typed aliases; baseline boot
+is not an expectation. Loaded/idle facts may be recorded; no held-negative verdict.
+Stored outcome/reasons never trusted. Scripted input is private/bounded/canonical,
+source forced scripted, file source/coverage retained only as sample_labels;
+coverage sampled true/continuous false/physical false, admission/history/hold false.
+Only recorded/refused vocabulary, no raw arguments. Native CI prints real outcome
+and error histogram, asserts coverage/shape only, no native positive assumed.
+Per-key/domain/error/timeout/expiry/order/schema/provenance and owner/frozen-path
+controls get named intended assertion mutants; no ERROR-only kills. Optional
+shape-compatibility control may feed a recorded scripted sweep to the unchanged
+negative comparator; this is not full integration. Per-sweep timing and loaded
+summary are deferred. Plist digests/overrides/freshD60 remain outside this unit.
+
+
+### 2026-10-18 06:57 EDT — D226 local managed-job observation candidate proof
+
+The202-line module implements the settled283 boundary: the actual record-free
+CLI requires both flags before any input IO and never references collect_jobs.
+owned_records copies the unchanged pin-coherence sequence, reads once, frozen-
+verifies once and ties every nonempty read metadata row to the recorded UID.
+Only the CI-only native test branch composes that path with the live collector.
+Environment/fixture claims do not attest isolation; no local unpatched job scan
+was run. Source and script inputs remain unprotected under D189.
+
+The collector builds structured namespace/label pairs, cross-checks expected_keys
+and records two ordered complete-key sweeps, current boot brackets, elapsed
+acceptance budget and every per-key error. Exact shared absence is the only
+unloaded return; loaded/idle facts are recordable. TimeoutExpired is retained;
+programming errors outside envelope.ERRORS propagate. Expiry prevents more
+launchd calls and fills all remaining keys with BudgetExpired. Thirty minutes
+is independent of the process120s budget; boot_identity has no timeout and the
+limit cannot interrupt an in-flight call. The growth control compares2*keycount
+*shared10s against this limit. Plist identities, generations, overrides and D60
+are not acquired. No process attribution/absence or live hold can follow.
+
+Pure validation recomputes exact frozen binding, typed UID, four-stage presence,
+complete key coverage, both boot and sweep equality, errors/failures and expiry;
+stored verdict/reasons cannot control recording. Source/coverage/certification
+claims are constrained. The real private canonical bounded file consumer forces
+scripted provenance and retains only bounded source/coverage sample claims.
+Raw argv is digested through the shared redactor and never serialized. The
+optional shape control feeds a scripted sweep to the unchanged negative
+comparator without claiming full integration. Reports say recorded/refused only.
+
+Final local34 tests pass15.367s with one intentional CI-only native skip;
+55 named intended-assertion mutants pass with intact controls and no ERROR-only
+kill. Prior214 process/policy/envelope/class/held regressions pass42.920s with
+no local skip. Earlier34-test6.862s and33-test13.948s runs retain their counts;
+the final in-method extra sample-label control is included in15.367s.
+Initial32-test7.074s run had one error: the unchanged redactor's equality shortcut
+lets numeric0 resemble false until valid_job. The collector now invokes valid_job
+immediately inside its primitive-failure bracket, recording malformed facts as
+errors. The corrected32-test7.256s passed with the CI-only skip. No shared helper
+was changed. The first mutation attempt stopped after one kill because a genuine
+missing-domain assertion used a different needle; it is not a final full run.
+Expected pairs now derive independently from the unchanged held-key helper.
+The54-kill run predates the final bounded sample-label schema control;55 is the
+final count. Per-domain/unit omissions require removal of the independent pair
+coverage guard too; these are explicit two-replacement variants, not single
+predicate kills. The live-CLI variant also deliberately relaxes flags and wires
+the collector in, as283 required. Shared frozen/record/key preconditions remain
+upstream proof, not newly counted predicates.
+
+Delta: three new module/test/runner files, four workflow lines and six ledgers
+including the B5 frontier row reconciliation. Existing executable/test/mutation
+bytes stay fixed. Local plan-lint14 PASS/1 old idle-version WARN/0 FAIL.
+Promised collection/schema/CLI/proof/registration/ledger deltas all land; no
+Phase-8 scope expansion. Required source review and all8 exact-head CI remain
+pending, followed by a separate five-Markdown reviewed green receipt before
+this owned row closes. Native CI will measure only fixed-label job facts and
+print actual outcome/error histogram; it need not record successfully. This is
+not the earlier process full-scan evidence, which retains its original scope.
+B5/1.2 remain open/pre,B6–B9 held; D64/Gate/installed timers/production unchanged.
+Full hold/overrides/freshD60/process integration, durable admission/manual/D175,
+Mac access/APFS/reboot/four-history acceptance remain separately gated.
+
+
+### 2026-10-18 08:14 EDT — managed-job negative observation pre-audit candidate (D228)
+
+Micro re-orient: B5/1.2 remain open/v1.2-pre, B6–B9 held.
+D227 receipt2d54d6e9 and source6d2e9096 have clear289/285 reviews and
+all8 CI39123687039/39121279608. Claude291 distinguishes its independent
+source-native proof from Codex's later receipt-CI observations.
+Current managed facts and scripted negative consistency exist separately;
+this atom connects them without declaring a live hold or admission.
+
+Goal: one negative consistency result over a validated managed-job observation.
+Needs: D227 reviewed green source/receipt; unchanged managed.valid_observation,
+owned_records, collect_jobs, held.compare_held_jobs, private readers and honest
+frozen fixtures; B1/D189. All are present at2d54d6e9.
+Feeds: overrides/freshD60, complete held-gate/process integration, durable
+admission/manual/D175; no new production route or window authorization.
+Verify: portable envelope-to-comparator and real owned consumer controls with
+named assertion mutants; isolated CI native measurement without requiring a
+positive; exact-source review/all8 CI, then separate reviewed green receipt.
+Runtime: none in production; no local unpatched managed-label scan.
+
+Pre-audit request292 is pending. Proposed source surface: new
+managed_job_negative_observation.py plus test/mutation runner, four CI lines,
+and these six source ledgers. Existing executables/tests/runners remain fixed.
+No Journal/schema/recover/D64/Gate/identity/host/timer change. VERSION remains
+v1.2-pre because the enclosing live recovery exit gates are not satisfied.
+
+Proposed comparison first revalidates the complete observation against already
+frozen-verified records, recomputes recorded/refused, then and only then passes
+the proven complete, error-free, equal first sweep to unchanged held comparison.
+Loaded idle/no-PID is recordable but cannot satisfy the negative comparison.
+Input observation fingerprint, frozen binding, provenance/coverage and temporal
+budget summary remain visible. Nested supplied-fact comparator scope/source
+remain scripted; wrapper separately records observed or forced-scripted source.
+All hold/history/admission certification flags stay false.
+
+The real owned CLI requires fixture AND scripted before IO, reuses owned_records
+for pin coherence, one reader/frozen verification and every metadata owner tied
+to recordedUID, then reads the private canonical bounded managed-jobs.json.
+File source claims remain untrusted sample labels; no CLI collector reference.
+No constructor, state write or installation. The darwin+GITHUB_ACTIONS native
+test path may compose the reader, collector and wrapper; that guard is an
+isolation convention, not attestation. No native positive is assumed.
+
+Risk/claim limits: this uses only the job30min acceptance budget and two boot-
+bracketed sweeps, not a joint process/job window or a new age/freshness proof.
+No current clock/boot reread in pure comparison, no baseline-boot expectation,
+no continuous/physical exclusion or hold assertion. Blocked calls cannot be
+interrupted by the budget. Unprotected supplied facts remain subject to D189.
+Overrides/freshD60, strict process scope/attribution, durable admission/manual/
+D175, Mac designation/APFS/reboot and four-history acceptance remain later.
+Optional prior controls remain carried, not silently closed.
+
+
+### D228 pre-audit settled — Claude293, before source work
+
+Clear to implement pure composition, no new predicate beyond the recorded gate.
+Validate before fingerprint/comparison. Malformed observations propagate refusal;
+recomputed non-recorded returns phase observation, recomputed reasons, negative
+null and never calls the comparator. Hash the exact received value after validation,
+copy binding/source/sample_labels/coverage/budget from the recomputed copy.
+Pass its first sweep verbatim; loaded-idle/running facts must refuse. Preserve
+the nested comparator result exactly, including scripted scope/source; top success
+is managed-jobs-negative-consistent only for its held-jobs-negative-consistent.
+All top and nested admission/history/hold flags stay false. Missing/extra/unknown
+nested buckets are empty by construction on recorded inputs, upstream proof,
+not newly counted predicates. Raw input stages or sweep_b are equivalent on this
+path and are not counted mutants. No live authority or authorship follows source.
+
+Reuse one owned_records; fixture AND scripted precede IO. Keep the forcing block
+textually identical to managed.inspect_owned, pinned by textual control. Test
+frozen refusal before observation read, duplicate image reads, provenance loss,
+and explicit two-replacement gate-relaxation/live-route mutant with benign census
+and fixture-only CLI refusal/zero calls. No collector reference in real CLI.
+Native darwin-plus-CI branch composes reader/collector/wrapper and records actual
+phase/outcome/coverage/idempotence only. A negative-consistent runner observation
+is a runner fact, not a node positive or hold evidence. No local unpatched scan.
+Purity/no-input-mutation and observation idempotence controls are adopted; optional
+loaded_keys summary omitted. No new job/process coherence, current clock/boot read
+or freshness promise;30min acceptance window and blocked-call limits remain.
+Source/receipt exact reviews/all8 CI required separately; B5/1.2 open/pre.
+
+
+### 2026-10-18 08:19 EDT — D228 local negative-observation candidate proof
+
+The new64-line wrapper validates first, then fingerprints the exact received
+object and copies the recomputed frozen binding/provenance/coverage/budget and
+boot bracket. Non-recorded returns refused/phase observation/recomputed reasons/
+negative null, without a comparator call. Recorded passes the validated first
+sweep verbatim to unchanged compare_held_jobs; only its exact negative-consistent
+verdict yields top managed-jobs-negative-consistent. Loaded idle and running
+facts refuse. The nested result, literal scripted scope/source included, remains
+unchanged. Both layers keep admission/history/hold false; no raw job values or
+argv/policy appear in the wrapper result. Input immutability and no-IO comparison
+are controlled. No live clock/boot read or new temporal/physical guarantee.
+
+Local final20 tests pass7.981s with one intentional CI-only native skip;28 named
+intended-assertion mutants die with intact controls, no ERROR-only kill. The
+prior248 tests pass35.246s with the managed observer's one CI-only native skip.
+The first20-test run failed because the test helper treated explicit None as
+its default valid input; the malformed test now calls the wrapper directly.
+No source correction was needed. The intermediate20 run passed5.339s; final
+7.981s includes the provenance Refused-to-assertion control used by the runner.
+No failed/partial mutant run occurred. Live-route mutation has two explicit
+replacements: gate relaxation plus collector wiring; not a single-predicate kill.
+
+The real private frozen consumer uses exactly one unchanged owned_records,
+then bounded canonical observation read and the textually identical source/
+sample-label forcing block. Both flags precede IO; frozen refusal prevents the
+observation-file read. Genuine foreign recorded owner refuses upstream, with
+and without optional policy the honest fixture reaches the same narrow result.
+Journal/Gate construction and live census are forbidden in consumer controls;
+files remain identical before/after. Canonical stdout and all three CLI phases
+have correct exit codes. The fixture-only CLI with benign census refuses and
+makes zero census calls. No local unpatched managed-label scan occurred.
+
+All six pre-audit/local blocks are identical across the source ledgers. Promised
+deltas land: three new files, four workflow registration lines and six ledgers.
+Existing executable/test/mutator bytes remain fixed. Local plan lint14 PASS,
+1 old idle-version WARN,0 FAIL. Upstream full-record/coverage/shape predicates
+remain earlier proof, not new kills. Raw-stage or second-sweep substitutions are
+equivalent on recorded inputs, not counted. Optional loaded_keys omitted; prior
+optional controls remain carried. B5/1.2 open/v1.2-pre,B6–B9 held.
+
+Required exact-source review/all8 CI are pending, then a separate five-Markdown
+reviewed green receipt before only this owned row closes. CI native composes
+the real reader/collector/wrapper and prints actual outcome/phase/69-key coverage/
+errors/elapsed, asserting shape/idempotence only; no native positive is assumed.
+Any negative-consistent CI result describes only sampled runner facts, never
+node readiness, live hold, process absence, disabled overrides, full inventory,
+freshD60, eligibility/history/authorship/physical exclusion or admission.
+Overrides/freshD60, strict process integration, durable admission/manual/D175,
+Mac/APFS/reboot/four-history acceptance remain later. D64/Gate/timers/production
+are unchanged. No Phase-8 scope expansion or production operation occurred.
+
+
+### 2026-10-18 09:36 EDT — scripted entrypoint consistency pre-audit candidate (D230)
+
+Micro re-orient: B5/1.2 open/v1.2-pre, B6–B9 held.
+D229 receipt7cdd3ba8/source665ccdb4 have all8 CI39129315402/39126847156
+and clear299/295 reviews; Claude301 acknowledges the evidence split.
+Fixed managed-job negatives are connected to validated observations; inventory,
+overrides and exclusion facts are not yet compared on the new diagnostic path.
+This atom targets scripted entrypoint consistency, not fresh observation.
+
+Goal: one scripted entrypoint consistency result against the frozen checkpoint.
+Needs: reviewed green D229; unchanged inventory/exclusion validators, frozen
+reader and honest fixture construction, full terminal CAPTURE facts; B1/D189.
+All source prerequisites exist at7cdd3ba8. A nonempty exclusion must be recorded
+through the honest fixture before its baseline, never injected after verification.
+Feeds: separately reviewed current entrypoint observer/overrides/freshD60
+measurement, full held/process integration, durable admission/manual/D175.
+Verify: portable real frozen-reader positives/negatives and decisive named
+assertion mutants; scripted native-CI portability only, exact source review/all8
+CI plus separate reviewed green five-Markdown receipt. Runtime: no production.
+
+Pre-audit request302 pending. Proposed surface: new scripted_entrypoint_consistency
+module/test/runner, four workflow registration lines and six source ledgers.
+No existing executable/test/mutator, Journal/schema/recover/D64/Gate/identity/
+host/timer change. VERSION stays pre because the enclosing live gates remain.
+
+Read-only source audit: valid_entrypoint_inventory binds baseline loaded and
+disabled flags, so original prior cannot validate held current facts. Proposed
+private expectation adapter copies baseline prior, replacing loaded/running/
+disabled from already-verified terminal observations, then calls that unchanged
+validator. No adapter is persisted or treated as a journal/baseline; its exact
+role and soundness await302. Compare installed/roots/disabled artifacts to
+baseline, loaded/overrides to terminal CAPTURE, all domains/all labels.
+
+Proposed exact supplied input is boot/inventory. D60 current shape uses unchanged
+valid_tailscale_exclusion; label set plus plist/wrapper identity equals baseline,
+current excluded boot equals the supplied boot. Old dynamic app/run/boot facts
+are not compared across boot. No live code/signature/launchd verification or
+new age/freshness claim follows a shaped file. Empty exclusions must match
+baseline emptiness. All source/hold/history/admission/freshness flags remain
+fixed scripted/false. Hash only the exact supplied value after validation,
+report binding/reasons without raw inventory/policy/argv.
+
+Consumer proposal: fixture AND scripted before IO, one managed.owned_records
+with coherent pins/one reader/frozen verifier/all recorded-owner ties, then
+private canonical bounded entrypoints.json and pure comparison. No collector
+reference, constructor or write. No local unpatched inventory/job scan.
+Current observer timing/boot-coherence and privileged readability remain later,
+not inherited from job30min or process120s envelopes. D189/unprotected provenance
+still applies. Physical Mac/APFS/reboot/four-history gates remain separate.
+Optional older controls remain carried, not silently closed. If adapter/fixture
+proof is unsound or scope spans outcomes, split before source work.
+
+
+### D230 pre-audit settled — Claude303, before implementation
+
+The atom and private terminal-state adapter are sound. valid_entrypoint_inventory
+uses prior only for installed plist digests, loaded-set expectation and disabled
+override rules; copy only terminal loaded/running/disabled into a private copy.
+Never persist it, call it a baseline or pass it to valid_prior. Exact terminal
+override equality is additional to the shared true/not-true predicate and rests
+on the stated premise that launchd's override database persists across reboot.
+A previously unloaded/non-disabled RunAtLoad job starting at login must refuse,
+correctly; this unit adds no permitted-start exception.
+
+Decision: app drift refuses. Compare the full per-label app identity as well as
+plist and wrapper to baseline; a Tailscale update requires a separately reviewed
+new baseline. This conservative owned-comparator choice is made before source
+work, not a production re-baseline operation. The proposed app-drift positive
+is dropped before implementation. Only validated launchd dynamics (e.g. run
+count) and boot may differ; current excluded boot must equal supplied boot.
+Equal label sets are mandatory both empty/nonempty ways. A nonempty passing
+input asserts not-running, runs>=1, exit0, disabledfalse in that supplied boot.
+Those are supplied shaped claims, not observed/authenticated fresh D60 proof.
+
+Order: exact outer schema/boot digest, explicit valid_tailscale_exclusion, then
+unchanged valid_entrypoint_inventory over the private adapter, then fingerprint
+exact received value, then compare. verifiedtrue is only a shape claim. Report
+fixed scripted source, frozen baseline/checkpoint/recordedUID binding and named
+field reasons without any raw inventory/overrides/exclusion/paths/policy/argv.
+Hold/history/admission/freshness flags false. Consumer both flags before IO,
+one owned_records, private canonical bounded file, no collector/constructor/
+write. CI scripted portability only, no new native or local unpatched scan.
+
+The pre-screen already proves the nonempty fixture viable: patch only guest
+full_entrypoint_evidence to carry tailscale_record and a disabled-artifact hash
+before original Journal creation; real capture/commit/stopped reader/frozen
+verification succeeds through owned_records.23 managed labels/1 excluded label,
+all3 loaded sets empty; private terminal adapter passes the shared validator.
+No post-verification record mutation, real Tailscale/file signature measurement
+or production operation. Temporary owned probe was cleaned.
+
+Count only decisive named assertions with intact controls, never ERROR-only
+kills. Loaded equality and installed digest comparison are dominated by shared
+validation; running substitution is unused there. Copying the exact input before
+hashing is equivalent because these validators do not normalize it; hashing
+only inventory (omitting supplied boot) is the discriminating hash variant.
+Copying terminal identity is also equivalent because frozen verification already
+binds it; arbitrary fourth-field identity corruption must be detected, not
+claimed as a permissive defect. Optional drift-only reporting is not adopted;
+all mismatches refuse. Earlier optional controls remain carried.
+
+D230 row stays candidate until source exact review/all8 CI and the separately
+reviewed green five-Markdown receipt. B5/1.2 open/pre,B6–B9 held,D64/Gate/
+installed timers/production untouched. Actual current inventory/override/D60
+observer, full held/process integration, durable admission/manual/D175 and
+physical Mac/APFS/reboot/four-history evidence remain later.
+
+
+### 2026-10-18 09:49 EDT — D230 local scripted entrypoint candidate proof
+
+The new80-line module shape-validates boot/inventory, explicitly validates D60
+shape, calls unchanged valid_entrypoint_inventory over the private terminal
+expectations, then hashes exact supplied input and compares. Installed paths,
+roots and disabled artifacts match baseline; loaded/overrides match terminal
+CAPTURE exactly; excluded label sets match and plist/wrapper/full app identity
+match baseline. Current exclusion boot equals supplied boot. Changed valid run
+counts/boot may pass; app SHA/version/cdhash drift refuses. Full maps preserve
+none versus false and extra com.openclaw override keys in every domain.
+No inventory/path/override/exclusion table/policy/argv is echoed. Fixed scripted
+source, frozen digest/recordedUID binding and all four certification flags false.
+
+Local final28 tests pass8.394s/no skip;39 named intended-assertion mutations
+pass with intact selected controls/no ERROR-only kills. Earlier268 regressions
+pass53.089s/two intentional CI-only native skips on this Mac. New native CI
+coverage is scripted portability only, not live collection or fresh D60.
+The honest nonempty exclusion/artifact fixture records them before original
+Journal creation and reaches the actual capture/commit/stopped reader/frozen
+verification path. Empty/nonempty and both policy cases work. The honest foreign
+recorded-owner chain verifies as a frozen input for the pure binding control,
+while the real owned consumer correctly refuses its reader UID mismatch.
+
+## Mid-Implementation Findings — D230 fixture precondition
+
+One fixture assumption in303 cannot occur under this head's full-node contract.
+All prior-unloaded units are disabled: member1 held and federation tick required
+disabled; known-broken Discord must be loaded, not disabled. First27-test run
+errors8.777s with StopIteration searching for an unloaded enabled unit. The next
+28-test run errors9.095s when a pre-baseline attempt to make Discord unloaded
+is correctly refused by unchanged valid_prior. No bypass, rehashed invalid
+fixture or post-verification record mutation is used. Replace that impossible
+example with every managed-label start in all3 domains refusing against honest
+frozen records. This is one precondition finding/two failed proof attempts, not
+two source defects or scope expansions. The80-line source never changed.
+
+The first39-kill run had intact selected controls but excluded the then-invalid
+example; it was not evidence of a passing28-test suite. After fixture correction
+the final full28 and a fresh39-kill runner pass on the same test bytes. Both
+runs retain their actual counts.303's generic RunAtLoad forecast is qualified:
+a future broadened baseline may allow it, but the current frozen precondition
+does not. No new allowed-start exemption is added.
+
+The terminal adapter preserves all other baseline fields and input immutability;
+its identity-corruption variant is a contract/false-refusal control, not a claimed
+permissive defect. Explicit exclusion removal/reversal pins call order; the later
+inventory validator already repeats exclusion shape checking. Installed digest,
+static exclusion path constraints and terminal loaded equality are dominated
+shared proof, not extra single-predicate acceptance kills. Running substitution,
+copying the full input before hashing and terminal identity substitution are
+equivalents, not counted. Full-input hash versus inventory-only is discriminating.
+The live-CLI variant explicitly relaxes flags AND wires a benign patched inventory
+collector; fixture-only CLI refusal/zero calls kills it. No real CLI collector
+reference, constructor, write or local unpatched inventory/job scan exists.
+
+Promised deltas land: three new files, four workflow lines and six ledgers. All
+pre-existing executable/test/runner bytes remain fixed. Pin/read/frozen verifier
+and every recorded-owner tie are reused once before private canonical bounded
+entrypoints.json and comparison. Input/capture/owner/flags/no-constructor/no-write/
+CLI controls pass. Local lint14PASS/1old idle-version WARN/0FAIL. No Phase-8
+patch or source scope expansion. Optional older controls remain carried.
+
+Source exact review/all8 CI are pending, then separate five-Markdown reviewed
+green receipt before this owned row closes. Exact override equality assumes
+launchd override persistence across reboot; no live measurement certifies it.
+Nonempty success supplies a completed successful run claim in the supplied boot,
+without observing/authenticating it. verifiedtrue is shape only; no fresh D60,
+current clock/boot read, process absence, live hold, eligibility/history/
+authorship/physical exclusion/admission or protected provenance. D189 applies.
+B5/1.2 open/v1.2-pre,B6–B9 held; D64/Gate/installed timers/production unchanged.
+Actual inventory/override/D60 observer, full held/process integration, durable
+admission/manual/D175/Mac/APFS/reboot/four-history evidence remain later.
+
+
+### 2026-10-18 11:02 EDT — shared entrypoint whole-value scope pre-audit (D232)
+
+Micro re-orient: B5/1.2 open/v1.2-pre; B6–B9 held.
+D231 receipt60992e9e/source0aa1df7d are reviewed clear311/307 and
+all8CI39135740710/39133265637;313 acknowledges the temporal evidence split.
+Scripted consistency is available; current inventory observation is still open.
+Its pre-screen finds the shared classifier can silently omit a relevant job.
+Fix that bounded prerequisite before designing the observer envelope.
+
+Goal: classify a whole path containing tokenizer delimiters before token scanning.
+Needs: unchanged shared installed/loaded callers and classification contract,
+owned symlink/hardlink/plist fixtures, reviewed green D231; all exist at60992e9e.
+Feeds: existing installed_entrypoints/loaded_entrypoints/capture_entrypoint_inventory,
+then the separate current inventory/override/D60 observer.
+Verify: portable real owned-path and caller controls/intended-assertion mutants,
+prior preservation/process/job/comparator regressions, native CI owned-path
+portability, exact source review/all8CI plus separate reviewed green five-Markdown
+receipt. Runtime: no unpatched production inventory/job scan or service action.
+
+Pre-screen uses an owned canonical temporary root, neutral label org.fixture.neutral
+and a binary under a protected directory. Program/argv is an outside symlink:
+without space shared relevant=True and installed_labels contains the neutral label;
+with space both shared relevance and unclassified_executable are False and installed
+labels empty, although alias.resolve() has the protected root in its parents.
+This reproduces a permissive omission inherited by the prospective observer,
+not a defect in D230's supplied-value comparator. D216 corrected whole values in
+process scope only and explicitly left this shared API unchanged. The first
+noncanonical /var temporary-path probe did not establish containment on this Mac;
+only the resolved-root rerun above is evidence. No production path was scanned.
+
+Proposed delta: only relevant_entrypoint resolves each entire expanded absolute
+or cwd-relative value with strict=False and the same equal-or-parents predicate
+before retaining its existing substring/token scan. Preserve label prefixes,
+HOME/environment expansion, source/application/system hardlink rules, embedded
+flags/shell scans and nonpath negatives. Whole-value hardlink attribution should
+use the same existing suspicious_hardlink rule, never a new exemption. No changes
+to installed/loaded collectors, validators, Journal/schema/recover/D64/Gate/host/
+identity/timers, or the already-reviewed process shim. Pre-audit314 pending;
+settle exact whole-value and relative-path semantics before implementation.
+
+Proof plan: spaces, parentheses, both quotes, semicolon/comma/pipe/ampersand/backtick,
+absolute and cwd-relative aliases, equality and parent roots, expanded environment,
+whole argument hardlinks, embedded-token fallback, managed prefixes, benign paths,
+and actual installed/loaded callers refusing extras through shared inventory
+verification. Owned filesystem inputs only; no native launchd mutation or global
+scan. New test_entrypoint_path_scope.py and mutate_entrypoint_path_scope.py; four
+workflow registration lines plus six source ledgers. Existing executable delta is
+restricted to the one shared classifier; existing tests/runners remain fixed.
+
+This corrects one membership false negative; it is not complete physical writer
+coverage or fresh observation, process absence, execution hold, eligibility,
+protected provenance, history/authorship or admission. All observer timing/boot/
+recordedUID/native full-path measurement remains later. Prior optional controls
+and the R3 placement follow-up remain open. B5/1.2 open/pre; D64/Gate/installed
+timers/production untouched, four histories separate.
+
+
+### 2026-10-18 11:13 EDT — D232 settled pre-audit and local path-scope proof
+
+Claude315 independently reproduces the shared omission at60992e9e as uid65534
+through the helper and both callers; the atom is the smallest useful correction.
+Settled semantics, before source implementation: whole expanded absolute paths
+or slash-relative paths joined to expanded supplied cwd; bare names are never
+joined and no process cwd is inferred. strict=False intentionally includes
+dangling aliases resolving into a protected root. Root matching is exact equality
+or parent containment, never substring on the resolved value. Reuse existing
+hardlink suspicion with both System-source and application-path exemptions.
+Keep existing raw substring and token scans, prefix shortcut and expansion.
+The D216 process shim retains its broader bare-name join unchanged.
+
+Nine added lines in relevant_entrypoint implement exactly that rule. No other
+existing executable changed; callers/validators/process shim/Journal/schema/
+recover/D64/Gate/identity/host/timers remain fixed. A real future baseline may
+newly refuse a neutral job reaching protected roots through a delimiter alias;
+that is the intended rejection of extras, not a production observation here.
+The existing installed/loaded callers reach the corrected shared helper now;
+no parallel classifier or prospective observer envelope is introduced.
+
+New test_entrypoint_path_scope.py has21 passing controls,0.155s/no skip on this
+Mac. New runner kills17 named mutants by intended assertions with intact
+selected controls and no ERROR-only kills. All twelve absolute delimiter
+subcases fail on the parent helper with0errors. Whole-value-after-token order
+passes all21 and is declared equivalent, not counted. Mutants include whole-step
+omission/unresolved value/equality-only/parents-only/resolved substring/strict
+existence/bare-name or implicit process-cwd joins/no relative join/no expansion/
+hardlink removal or either exemption loss and fallback/prefix losses.
+
+Owned real symlinks and hardlinks exercise exact-file and parent roots, all
+tokenizer delimiters plus tab/newline, relative cwd/environment/home expansion,
+dangling targets and prefix siblings. Real installed caller uses owned plists;
+loaded caller uses supplied launchd text/inspect stub with subprocess blocked.
+Program/argv/cwd and loaded environment values reach the whole rule. The installed
+caller expands referenced environment variables; it does not scan unused
+environment values, which remains unchanged. Both discovered extra-label sets
+refuse through unchanged inventory verification as controls, not extra kills.
+No new native launchd call or unpatched inventory scan is performed locally.
+Native new-unit CI is real owned filesystem portability only.
+
+Declared limits: an embedded --flag= delimiter alias stays token-only/False;
+slash-relative without cwd staysFalse; nonstring values skipped; over-NAME_MAX
+values do not raise. The pre-existing raw substring rule may over-include raw
+prefix siblings, while a delimiter alias resolving to a prefix sibling correctly
+staysFalse. Supplied roots are resolved and home is explicit/owned. Newline is
+covered directly and through plist parsing, but the existing loaded text parser
+loses embedded newlines and that caller's delimiter matrix excludes newline.
+No full classification/completeness, physical writer or fresh D60 claim follows.
+Optional later removal of the now partially redundant process shim is carried,
+not implemented. Existing R3 placement and older optional controls stay open.
+
+Prior Gates/process-policy/envelope/class/job/entrypoint regressions:311 pass
+45.650s with two intentional CI-only unpatched native skips; no failed control.
+All pre-existing tests/runners are fixed. Delta: one existing function, two new
+proof files, four workflow registration lines and six ledgers. One workflow edit
+invocation initially used the step directory and found no relative workflow
+path; it changed nothing, then was applied from checkout root. No source repair
+or proof-failure claim follows that invocation.
+
+D231 receipt60992e9e independently clear311/source clear307 with all8 ownCI
+39135740710; source CI39133265637 resolves attempt2 with only Linux re-executed
+and the seven original successes carried, not relabelled new executions. Its
+original placement failure and local-control limits remain.313 acknowledges
+the evidence split. This D232 candidate needs exact source review/all8CI and
+then a separate reviewed green five-Markdown D233 receipt before row closure.
+B5/1.2 open/v1.2-pre,B6–B9 held. Current observer/override/freshD60, full held/
+process integration, durable admission/manual/D175 and Mac/APFS/reboot/four-history
+evidence remain later. D189 applies; production and installed timers untouched.
+
+
+## Mid-Implementation Findings — D232 process mutation redundancy
+
+One required proof interaction was exposed by exact source488ad0cf's Linux CI
+39139556698/job117710977048: the existing process runner's first mutant no
+longer fails because the new shared helper rescues the removed process-shim
+parent check. New21/17 was not reached in that job. Raw failed log83687bytes
+SHA2560a2d6f07d9565620ed039befbef4a107f12d9f59d03894a83d38a42be2c8f7a8
+is retained; no rerun or all8 claim. This is not the old R3 placement failure.
+
+Fresh local audit of all29 prior mutants finds27 intended assertion kills,
+exactly two surviving variants and0invalid/error results. Those are whole-
+argument-directory-root-skipped and whole-argument-path-skipped. Each also
+passes the full40 process tests (0.832s and0.198s, no skip locally). The two
+previous single-site kill claims are no longer independent with the shared
+whole-value rule; historical D21729-kill evidence at its old head stays true.
+
+Re-orient before correction: retain the production process shim and every
+existing assertion, keep the new21/17 proof fixed, and revise only the old
+mutation runner to classify these two as explicit expected-pass redundant-
+branch controls, never kills. Count27 remaining old process kills separately;
+no manufactured two-site variant or silently retained29 claim. This is a
+necessary proof-only exception to the earlier old-runners-fixed promise,
+not observer or production scope expansion. Claude318 assessment pending.
+New source head after this narrow proof/ledger correction must obtain fresh
+exact review/all8 CI before the separate D233 receipt. Original failure is
+retained. Current observer, B5/1.2 and physical gates remain open; production,
+D64/Gate/installed timers unchanged.
+
+
+### D232 proof re-orient settled — Claude319, before corrected head
+
+Micro re-orient: one shared classification outcome, nine runtime lines unchanged.
+CI failed a redundant old proof claim;319 confirms the structural rescue.
+319 also requires a real-cwd control for the natural absolute-gate mutant.
+Both are proof-only corrections within the same narrow outcome, settled before
+the corrected commit; no observer or new runtime outcome is added.
+B5/1.2 open/pre; physical and production gates stay held.
+
+319 independently reproduces21new controls/17kills as uid65534 and all315
+path/caller probes. Parent replay gives34failures/0errors across the full new
+suite, including12absolute and12relative subcases; Codex's selected-parent
+12absolute failures remains narrower separate evidence. It verifies all29old
+variants:27kills/2survivors/0errors; both survivors pass40process tests and
+fail again with the parent shared helper (18/36failures). Executable/cwd rows
+are validated absolute, and every relative argument is appended cwd-joined
+before the shared fallback, so all shim candidates reach the new shared rule.
+
+Necessary exception: mutate_scoped_process_diagnostic retains the two exact
+replacements as expected-pass selected-test controls. Its unmutated controls
+still include them, all existing assertions and production shim remain fixed.
+It now reports27intended process kills plus2redundant-branch passes, not29kills.
+New shared-helper mutations remain separately counted. Local full-module passes
+for each redundant variant are40/0.832s and40/0.198s; CI expected-pass checks
+use the selected delimiter test, avoiding extra unpatched native census runs.
+Historical D21729-kill proof remains attributed to its original source.
+
+319's second required proof correction: replacing the absolute gate byTrue
+survives the original21 tests because Path.resolve uses actual cwd, not the
+mocked Path.cwd. The same existing test now changes into an owned real cwd and
+registers restoration before temporary cleanup; the natural mutant fails its
+intended assertion. This is false in-scope classification (and possible false
+refusal downstream), not an admission bypass in the committed source. The
+optional raw-versus-expanded slash control is also adopted inside the existing
+relative test; its natural variant now dies independently. Test count stays21.
+
+Corrected local proof:21controls0.064s/no skip;19new intended-assertion kills
+with intact selected controls/noERROR; old runner27kills plus2expected-pass
+controls. Nine-line helper and every other runtime executable remain byte-
+identical to488ad0cf. The earlier311regressions45.650s/two CI-only native skips
+remain valid at those unchanged runtime bytes and are not relabelled a new run.
+Whole-after-token order is an equivalent, not counted. Passing a resolved path
+to the hardlink helper survives these controls and is not counted; no universal
+claim is made about spelling-dependent application exemptions. No shim cleanup.
+
+319 reproduces the complete failed Linux943-line log and its Codex byte count/
+digest, confirming Python ran and the first old mutant survived15commands
+before the new unit. This initial CI is not green; no retry of it is requested.
+Its prior-regression replay was34of40 with missing sandbox NATS and the old
+mutator exits when reported, not a claimed311replay. The corrected head needs
+its own exact review/full CI; only then D233. D64/Gate/timers/production fixed.
+
+
+### 2026-10-18 13:14 EDT — owned cluster group-readiness pre-audit (D234)
+
+Micro re-orient: B5/1.2 open/v1.2-pre; B6–B9 held.
+D233 receipt b0d55130/source4abd6360 have clear325/321 reviews and all8 CI.
+Current inventory observation remains open; repeated owned fixture failures impede CI.
+Split the two symptoms: fix group settling only; peer placement remains undiagnosed.
+This unit makes the existing owned test wait for its existing acceptance requirements.
+Still the right bounded prerequisite: yes; no production mechanism or admission.
+
+Pre-screen: exact clean parent b0d55130; existing capture and owned three-server
+fixture available; local NATS2.12.6/Node24.13.0 available. Retained receipt CI
+39144200140 attempt1 Linux117724597070 fails the unchanged nonempty $G leader
+assertion after stable-table settling, with cleanupFailures[]. The source loop
+can finish with an unchanged but invalid table: stable groups alone do not imply
+$SYS/$G presence, two account groups, or nonempty leaders. This source mismatch
+is demonstrable with scripted captures; the retained CI log contains no table
+and cannot prove which intermediate state caused its failure. No root-cause
+claim for peer-offline placement or real NATS convergence follows.
+
+Goal: one independently verifiable outcome: the existing owned replication
+fixture cannot finish its settling loop until every sample meets the unchanged
+post-loop requirements continuously for the existing one-second stable interval,
+within the existing ten-second deadline. Missing/empty groups or empty leaders
+reset stability, as do changed group tables. Preserve capture refusal behavior,
+the exact final assertions, QuietWindow, real election and own-process cleanup.
+Timeout retains the last full capture and raises an assertion; no wider timeout,
+stream-create retry, monitor-parser change, production scan or operation.
+
+Section6 file deltas: extract only the existing settle loop into a test-local
+wait_for_groups(ports,root) function in test_preservation_cluster.py and call it
+from the same place. New test_cluster_group_readiness.py scripts capture/time
+without network, covering invalid-stable timeout, eventual valid convergence,
+per-member failures, regression/reset, changing tables, capture refusal and
+last-observation timeout evidence. New mutate_cluster_group_readiness.py requires
+intact selected controls and named assertion failures, never ERROR-only kills.
+Four registration lines in .github/workflows/test.yml run the new portable
+suite/runner on Linux22 and native macOS. Existing real cluster remains its Linux
+consumer; run it once locally against three own loopback servers with normal
+cleanup. Six ledgers document candidate/proof and boundaries. All other existing
+executable/test/runner bodies stay fixed. Only a source-ready owned prerequisite
+may close after exact review/all8 CI and a separate reviewed green receipt;
+B5/1.2 and placement follow-up remain open. VERSION remains v1.2-pre.
+
+Risks: a valid table can regress while settling, so invalidate the clock rather
+than accumulating disjoint ready samples. The table is sampled, not continuous
+physical evidence. The test-local extraction must actually feed the real test;
+prove call placement and leave final assertions byte-identical. Missing monitor
+keys must be treated as not ready in the scripted predicate without weakening
+capture's strict parser. Root timeout evidence is fixture-owned; no raw token
+or config copied. No feature deployment/service restart applies to this test-only
+unit; actual owned test execution plus CI is its runtime, not serving services.
+D64/Gate/installed timers and production remain untouched; no retry-as-proof.
+
+
+### D234 pre-audit settled — Claude329, before implementation
+
+329 inspected exact b0d55130 without subagents and clears the atom with pins.
+Adopt all four existing conditions per member and no agreement/extra readiness
+rule; valid identical second sample starts the clock, invalid/change resets,
+previous always advances. Preserve sample-then-check deadline semantics: a batch
+started before10s may finish and succeed after10s; three unchanged capture calls
+can overrun by about6s. This is a polling deadline, not a hard wall-clock bound.
+Inject clock/sleep only on the test-local helper; real call passes neither.
+Timeout now records full last captures, named failed conditions per member and
+last reset cause (invalid/change), also in its assertion. Refused propagates.
+AST proves exactly one call/result feeds unchanged final assertions; Linux real
+cluster and one own Mac run are live proof, native new suite is scripted only.
+Keep syntax Python3.9 compatible. The explicit missing-$G predicate is logically
+dominated for acceptance by the >=2 count, but its named evidence remains
+independently testable; no false independent acceptance-kill claim.
+Parent extracted-loop replay with stable two $G groups/empty leaders reaches
+its final assertion at1.05 scripted seconds/66captures, no network. First replay
+used a three-port list instead of fixture's nine-port layout and raisedIndexError;
+that harness error is corrected and never counted as proof or mutant kill.
+No peer-placement root cause inferred, no timer/deadline constant change.
+
+
+### 2026-10-18 13:23 EDT — D234 local group-readiness candidate proof
+
+Landed only the test-local wait_for_groups extraction/call, two new proof files,
+four workflow lines and six ledgers. Final four assertions, creation readiness,
+QuietWindow/election/cleanup, preservation_checks and all production code stay
+fixed. Returned full captures feed the one real call with no injected clock or
+sleep; the portable AST control pins that tie.13controls0.282s/no skip and
+22 intended-assertion mutants pass with intact selected controls/no ERROR-only
+kills. Scripted cases cover all four original conditions on every member, empty
+and single groups, None/empty leaders, eventual convergence, invalid regression,
+valid changes, exact original polling/stability/deadline, completion overrun,
+no-sample timeout, full evidence, Refused identity and no added member agreement.
+The missing-$G condition's counted mutation tests its diagnostic reason; it is
+not an independent acceptance gate beyond the >=2 count. Removing only the
+invalid-sample clock reset while retaining valid-change reset passes the earlier
+12-test suite and is a logical acceptance equivalent, not a kill: next valid
+sample necessarily differs, then resets. Both resets remain in source; removing
+change reset or all resets dies. Source has no new readiness/member agreement.
+
+One actual owned Mac cluster run on NATS2.12.6/Node24.13.0 passes1test3.626s,
+normal three-process shutdown/cleanupFailures[], only random loopback ports and
+own credentials/routes. Owned root openclaw-preservation-cluster-xr8694ws;
+raw 312bytes SHA256b7c80ce4ef0eddd6f8f7d34d5fcab67dd08d1effc115c735872ba02e1c5c4190.
+This exercises the actual helper/QuietWindow/election consumer, not a Linux
+failure reproduction, deployment or proof of the retained failure's cause.
+Unchanged preservation_checks regressions23tests3.286s pass with three owned
+servers/cleanupFailures[]/noProductionConnections true. New macOS CI lines are
+scripted only; the existing Linux cluster line supplies real CI execution.
+Local plan lint14PASS/1old idle-versionWARN/0FAIL. No timeout extended and no
+stream-add retry; the peer-offline placement follow-up stays open.
+
+First local candidate proof failed one floating-point exact boundary expectation
+(1.65 became1.7 at the same >=1 comparison) and one AST harness dedent over the
+existing multiline JS string. Fixed only tests: permit one existing poll step
+of rounding and parse the full module before selecting the consumer AST. Neither
+failure is a source defect or counted mutant. No source expansion followed.
+
+Committed candidate digests:
+- test_preservation_cluster.py: 5ece2bec768b00d378204103a54c8bc599e55171ed466a1206f18b00b7d47ef6
+- test_cluster_group_readiness.py: 547e2e253e538b99c664f2d4fc4f70eef44e7a89d215660ff95fd460fddf875b
+- mutate_cluster_group_readiness.py: f679065dac56bde434fb17124913a5bc0813ec69eab2b03a3a6b3d545937bf6a
+
+Source exact-head review/all8CI remain pending; only after those a separate
+reviewed green five-Markdown receipt may close this auxiliary row. B5/1.2
+open/v1.2-pre,B6–B9held,D64/Gate/installed timers/production untouched. Current
+inventory/override/D60 observer, integration, admission/manual/D175 and physical
+reboot/history work remain later. This does not close B5-CI-R3-placement.
+
+
+### 2026-10-18 14:48 EDT — owned placement-gossip diagnosis pre-audit (D236)
+
+Micro re-orient: B5/1.2 open/v1.2-pre; B6–B9 held.
+D235 source08f90df7/receipt6df6c8b6 are clear331/333 with both all8 attempt1 CI.
+Group settling is corrected; peer-offline placement diagnosis remains separate.
+This unit measures one candidate sufficiency gap in the unchanged placement gate.
+It serves trustworthy owned recovery evidence, never a production stop/admission.
+Still the right next unit: diagnosis before proposing a readiness repair.
+
+Pre-screen: clean parent6df6c8b6, existing NATS2.12.6/Node24.13.0 and owned
+fixture available; no BLOCKED.md. Retained CI39133265637/job117692584463 fails
+at cluster-offline-consumer-placeholder after the fixture's current waitCluster;
+no forensic root artifact was uploaded. Prior failure cause remains unproved.
+Official tagged NATS sources show placement consults peer configuration/statistics
+in addition to metadata replication; existing eight Raft/route checks do not
+inspect that cache. Source-level sufficiency gap is a hypothesis for the old
+failure, not its observed cause. The installed binary accepts a route permission
+rule denying only $SYS.SERVER.*.STATSZ; parser-only check started zero servers
+and made zero connections. No actual fault/control pair has run at this point.
+
+Goal: produce bounded owned fault/control evidence testing whether the unchanged
+placement gate can accept while R3 placement reports peer offline. Run a fresh
+three-node normal control and a fresh three-node cohort differing only in the
+STATSZ route-deny rule, with random loopback ports, own private tokens/routes,
+no advertise and production-port exclusions. Reuse the exact source of the
+existing placementState/waitCluster; no duplicate classifier or dynamic eval.
+Attempt create once per cohort only after the unchanged gate passes, retain full
+ready facts and exact API error/phase-local debug selection reasons, then require
+normal own cleanup. A gate timeout, wrong refusal, or failed cleanup is an
+inconclusive/failing experiment, never a counterexample. No creation retry or
+sleep-based repair. A reproduced counterexample establishes only this owned
+sufficiency gap; it cannot identify the historical CI interleaving.
+
+Section6 intended deltas: six candidate ledgers and one auxiliary diagnosis row
+first; private scratch probes during pre-screen, with no source-gate change.
+After the owned result and Claude336-request pre-audit are reconciled, promote
+only useful reproducible evidence: fixture-local shared extraction of the two
+unchanged readiness helpers, an owned placement-gossip probe, its meaningful
+controls/intended-assertion runner and explicit CI registration/evidence retention.
+Pin exact file set and checks before promoting source. If the proposed fault
+cannot isolate the gap, record that negative and re-orient rather than widening
+the experiment or claiming a repair. All production modules, D235 fixture and
+assertions, D64/Gate/installed timers stay fixed. No production connection,
+service/VM operation, resource provisioning, admission or B5 closure.
+
+Risk register: route filters may prevent metadata discovery itself; then no
+counterexample exists from this method. Route visibility and Raft current flags
+do not certify placement cache contents. Additional application connections may
+be needed to make discovery explicit; if used they must be identical in control
+and fault and declared as a different sequence from the historical CI. Debug
+logging is owned only; evidence must exclude configurations/tokens and identify
+its log window and truncation. A fault must not be "validated" only by a parser;
+require observed behavior and single-attempt accounting. Cleanup failures always
+invalidate live proof. Exact-head review/all8 CI and a separate reviewed green
+receipt are required for any source prerequisite closure; original placement
+repair and current observer remain open at this pre-audit.
+
+
+### 2026-10-18 15:01 EDT — D236 pre-audit settled after owned pre-screen (Claude339)
+
+337 confirmed the upstream cache/readiness mechanism but predicted a possible
+miscellaneous-error outcome unless a connections event first creates bare peer
+entries. Actual first owned pair at owned-placement-gossip-mIhOJi does generate
+those events: one ordinary own connection to EACH member before the old gate,
+identical in control/fault. Fault denies only $SYS.SERVER.*.STATSZ in import and
+export of ALL THREE owned members. Old eight checks all pass in both; control
+creates once; fault creates once and returns400/10005/peer offline. Leader2's
+create-window log discards member1/member3 as offline, required3/found1/peers3,
+offline:true/misc:false. Both cohorts shut down normally with no cleanup failures.
+Initial report81477bytes SHA256d060942c1b5b5fc4ea882f65119fac46f07367a40eef0eb00b1e47097b3fce1c.
+This is the nil-config/statistics discard branch, not a historical CI cause;
+the filter and extra per-member connections are deliberate injectors absent
+from that historical sequence. No natural trigger, protected provenance or
+readiness repair follows. Initial scratch module copied exact source bodies
+into an owned static module; it used no eval and changed no repo executable.
+
+339 accepts this narrower observed scope and drops the new system-account RPC/
+authentication-domain expansion. Adopt byte-exact placementState/waitCluster
+extraction into fixture-only placement_readiness.mjs, imported by original test
+and probe; all original callsites/placementCounterexamples fixed. Add synthetic
+eight-counterexample controls, source/caller pins and intended-assertion runner.
+Promoted probe requires both ready tables, exact NATS2.12.6/10005 wording,
+create-window leader discard lines for every other peer and offline:true/
+misc:false summary, exactly one create each, separate own roots/ports/tokens/
+passwords, sequential execution and normal complete cleanup. Any other result is
+inconclusive, never reproduction. Preserve old15s readiness deadline and every
+original create/timeout/retry behavior. Four CI registration command lines run
+the new suite/runner on Linux22 and MacNode22, including a real owned pair on
+both; two always-run JSON-only evidence retention steps preserve the report,
+not configurations or raw logs. No new CI job or production deployment.
+
+Final section6 file set: original test_recovery.mjs (only two definitions moved
+and one import), new placement_readiness.mjs, probe_placement_gossip.mjs,
+test_placement_gossip.mjs and mutate_placement_gossip.mjs; .github/workflows/test.yml
+(four command lines plus owned JSON retention), six ledgers. All other existing
+bodies, D235 checks, production and VERSION remain fixed. Exact-head review/
+all8CI and separately reviewed green five-Markdown receipt before auxiliary
+closure. Original B5-CI-R3-placement repair/current observer stay open.
+
+Counter instrumentation pre-screen: upstream jetstream_api.go records total/
+errors on the server sending the API response, before publishing it. The create
+may be answered by a member other than the connected member. Therefore retain
+all three members' /jsz counters before/after the create (after manager setup),
+including connected member separately; measure which responder increments and
+reconcile339's connected-member delta pin against actual data before commit.
+Do not assume local forwarding is counted. No API call is retried to obtain a
+preferred counter result. A counter mismatch makes the probe inconclusive.
+
+
+### 2026-10-18 15:17 EDT — owned placement-gossip source candidate (D236)
+
+Claude341 independently checked tagged jetstream_api.go and corrects339 pin4:
+API totals/errors increment per account on the responding server, not necessarily
+the connected member. All three before/after rows are identity-bound to ready
+server IDs; aggregate totals must rise exactly1 with errors0 control/1 fault,
+every member delta nonnegative. Connected member and counter-increment member
+names are retained separately. Counters alone do not prove who answered; the
+fault's leader debug window is the causal branch evidence. In the first measured
+candidate, connected member1 stays flat in BOTH cohorts: control member3 total0→1,
+fault leader2 total1→2/errors0→1. No request was repeated to get a preferred delta.
+341 accepts two JSON-only always-run artifact steps in addition to four commands.
+
+Final local suite:30/30 pass,0 skips,1341.638125ms on Node24.13.0/macOS;29
+portable checks plus one real owned pair using NATS2.12.6. Unmutated portable
+controls pass;28/28 named intended-assertion kills: eight old-gate predicate
+omissions,12 evidence-acceptance omissions, one-peer/window/summary omissions,
+both counter identity bindings, connected-member-only and first-row-only sums.
+These are fixture/proof-contract mutants, not production admission defects.
+Final full report87319bytes SHA256
+57157b665e5f848faa7cdbe1728036276461a4cfb92ae0e4f40916e0121019fb.
+Root owned-placement-gossip-N1Oxd1: both eight-check tables true; control creates
+once, fault creates once and returns exact400/10005/peer offline. Fault leader1
+window8535..9043 contains both other-peer offline discard lines and required3/
+found1/peers3/result1/offline:true/misc:false. Aggregate request deltas1/1,
+errors0/1; all six owners exit0 with Server Exiting, no cleanup failures.
+Independent unfiltered original test_recovery fixture also passes, owned root
+openclaw-jetstream-fixture-XPh6Xl, allOwnedServersStopped:true; its output6375bytes
+SHA25672286662981609e94d75bdc915d9b21f25e6e7716e605239b92ec517aca86be1.
+
+Local corrections retained: an initial mutant-runner guard rejected the correct
+named assertion because Node formats error text as a multiline YAML block; the
+guard now accepts that exact block as well as a quoted scalar and still requires
+ERR_ASSERTION/status1. Initial negative name-selection pattern unexpectedly ran
+the real pair as part of its30-test success; portable selection now uses an
+explicit positive prefix and the runner asserts no live-report marker appears.
+There were four owned pairs during development: initial scratch, first measured
+candidate, that intermediate suite and final suite; every cohort attempted only
+one create, every pair succeeded as a counterexample with normal cleanup. These
+are distinct instrumentation/validation stages, not retries of a failed create.
+An extraction-check mismatch was only removed-definition newline accounting;
+removing each exact old definition plus its terminating newline and the new
+import makes the remaining original caller byte-identical, including every
+placementCounterexamples/callsite. Helper body hashes are pinned by the suite.
+
+CI registers the pair/runner before the old Linux recovery fixture, and before
+the D235 group controls on macOS; no prior command/body is altered. Both platforms
+now execute a real ephemeral six-server sequential pair. Artifact paths name only
+the private JSON report, excluding configs/tokens/raw logs. Four commands plus
+15 artifact lines,19 workflow additions total. All production executables,
+lib/bin/test/workspace-bin trees and other existing step12 bodies remain fixed.
+VERSION staysv1.2-pre; source exact-head review/all8 CI and separate five-Markdown
+receipt review/own all8 CI are still pending at this candidate. Diagnosis auxiliary
+stays[A]; original R3 placement repair and natural trigger/current observer remain
+open. No B5 closure, D64/Gate/timer or production operation.
+
+
+### 2026-10-18 16:30 EDT — placement proof cardinality re-orient (D238 pre-audit)
+
+D236 sourcefa9f0a4a is clear343/all8CI39158146598; D237 receipt52f31d88 is
+clear345 but its OWN CI39161190466 failed attempt1: seven jobs success, native
+117774685858 fails only leaderReason. No rerun. Reopen the auxiliary diagnosis
+closure until a corrected exact head and separate receipt both satisfy review/CI.
+Source's successful evidence remains valid, and this failed history is retained.
+B5/1.2 staysopen/pre; B6–B9 held; production/D64/Gate/timers unchanged.
+
+Failed native report87278bytes SHA256
+030d5f024aa9f64344f76987abba1e0f1107c3679c2fbea224d5217634b73cd0,
+artifact12149732321 (JSON only). Full failed log127193bytes SHA256
+0f856e2a4ccc6e01df92ebbecea3d78f89d505f06d97178d6967a43d33d0db44.
+Both old eight-check tables pass, control creates once, fault returns exact
+400/10005/peer offline, aggregate counters total1/1/errors0/1, six owners exit0
+normally, empty cleanup. Fault leader2's create window8819..9433 contains exact
+offline discard lines for member2 ITSELF plus member3/member1, then required3/
+found0/peers3/result0/offline:true/misc:false. Comparator requires found1/result1,
+so honestly reports inconclusive and fails. No failed evidence is called a win.
+
+Tagged NATS2.12.6 selectPeerGroup iterates the peer list without a self exemption;
+its nil-cfg-or-stats guard emits this exact offline line. Our source proof assumed
+self cache was filled and only the two other peers could be discarded. The log
+shows that assumption is unnecessary for the intended nil-cache sufficiency
+counterexample. How self stats became absent is not established here; historical
+unfiltered CI trigger is still unproved. This is a proof-contract correction,
+not a new readiness rule, retry, delay or production admission.
+
+Proposed next atomic outcome: accept either fully evidenced partition, two known
+other-peer discards plus remaining1, OR all three known-peer discards plus
+remaining0, only when the named ready leader owns the create-window log, every
+other peer is discarded at the exact pinned site, discard names are unique/known,
+and the single summary's required3/peers3/found/result counts agree with that
+partition, offline:true/misc:false. Wrong/missing/duplicate/foreign discards,
+contradictory counts or reasons still refuse. Retain the original two-discard
+positive and add a three-discard positive plus independent conservation negatives
+and intended-assertion mutants. No post-create resampling to pick another window.
+
+Section6 prospective files after Claude review: probe_placement_gossip.mjs,
+test_placement_gossip.mjs, mutate_placement_gossip.mjs and six ledgers. Shared
+placement_readiness.mjs, original test_recovery, workflow, all other executables
+and VERSION fixed. Local portable/mutant/one-real-pair proof, exact source review/
+all8CI then separate five-Markdown receipt review/own all8CI required. PR remains
+draft. Original placement repair/current observer/natural trigger remain open.
+
+
+### 2026-10-18 16:36 EDT — D238 partition pre-audit settled (Claude347)
+
+347 independently reproduces the complete failed native1028-line log,127193byte
+hash, three-discard leader2 window and every other passing gate/normal cleanup.
+Tagged source creates self nodeInfo with cfg nonnil/stats:nil. Its own STATSZ send
+fills stats, under a one-second rate limiter; first heartbeat250ms can precede
+JetStream loading and discovery-triggered sends share the limiter. Peer selection
+includes self with no exemption. This supplies a second LOCAL producer of the
+nil-cache state, independent of route denial. The freshly started/elected leader
+window is a natural-trigger candidate, not proof of the retained historical cause.
+
+Adopt exact known-peer partition and conservation pins from347: both nonleaders
+required, leader optional, unique known names, no unpinned line/reason, exactly
+one summary, required3/peers3 and found=result=3-discardCount, offline:true/
+misc:false. Keep two-discard positive and add actual-shaped three-discard positive.
+Independent negatives include single nonleader, leader-only, self plus one other,
+foreign/duplicate names, two summaries, every inconsistent count and unknown
+reason/line. Count forced-one, dropped conservation, single-discard acceptance,
+foreign/duplicate acceptance, summary uniqueness and leader-only mutants only at
+named assertion failures with intact controls. No original helper/fixture,
+workflow, injection, create, counter, cleanup, timeout or production change.
+
+
+### 2026-10-18 16:38 EDT — D238 local partition correction candidate
+
+Only leaderReason changes in the probe: complete known/unique offline-discard
+partition from the named leader, no unpinned line, one summary with required3/
+peers3/found=result=3-discardCount and fixed flags. Both other peers mandatory;
+self optional. Two-discard/found1 and three-discard/found0 are accepted, while
+single peer, self-only/subset, foreign/duplicate names, duplicate summaries,
+unpinned reason/line and every inconsistent count refuse. Producer, helpers,
+original fixture, workflow, VERSION and all other code remain byte-identical.
+
+Local Node24.13.0/macOS proof:45/45 pass,0 skips,1703.582084ms;44 portable tests
+and one actual owned NATS2.12.6 pair.34/34 named intended assertions killed with
+intact portable controls/no live cohorts in the runner. Old one-peer variant is
+replaced by a targeted single-nonleader case; six distinct additions kill forced
+remaining1, dropped conservation, accepted foreign/duplicate names, dropped
+summary uniqueness and leader-only acceptance. No equivalent mutant is counted.
+The final actual pair takes the two-discard form at leader3, both old ready tables
+true, exact fault10005, one create per cohort, normal six-owner cleanup[].
+Report87328bytes SHA256
+432603f113d684d349bbe2ab88a9f82a5e61b2e52a54f37d0324d3c32269e2c5.
+The retained failed native JSON is also replayed READ-ONLY through the corrected
+comparator: all12checks true/owned-counterexample, including its three discards;
+original bytes/hash and its old inconclusive diagnosis are untouched. This is
+regression replay, not a rerun or a retroactive green claim for CI39161190466.
+
+Shared helper/original caller hash pins pass. Exact source review/all8CI and a
+separate reviewed green five-Markdown receipt remain pending. Diagnosis row[A]
+stays reopened; original placement repair/natural trigger/current observer remain
+open. B5/1.2pre, B6–B9 held, D64/Gate/timers/production unchanged. Failed D237
+native history and successful D236 source history remain separately retained.
+
+
+### 2026-10-18 17:54 EDT — owned R3 failure evidence pre-audit (D240)
+
+Micro re-orient: B5/1.2 is open at v1.2-pre; B6–B9 remain held.
+D239 closes only the injected placement diagnosis with reviewed, green owned proof.
+The original unfiltered R3 CI failure still has no phase-local selector evidence.
+This unit records that evidence if the owned fixture fails; it does not repair placement.
+It feeds the separate B5-CI-R3-placement decision without a production operation.
+Still the right next bounded step: yes, because a repair now would guess the old cause.
+
+Pre-screen: source/receipt 5e931120/7dd079d0 are reviewed clear at Claude349/351,
+each with all eight CI jobs successful on attempt 1. The worktree is clean and no
+BLOCKED.md exists. NATS 2.12.6 selectPeerGroup reads cached peer cfg/stats in
+addition to the eight observable route/Raft checks; tagged events.go fills the
+cache after STATSZ updates. The old unfiltered CI logs have the API error and
+phase, but no selector window. One separate owned unfiltered startup/create
+attempt at 17:52 EDT passed with one APP connection, all three normal exits and
+no cleanup failure; this is a negative observation, not a historical replay.
+
+Goal: on a failed R3 stream creation in test_recovery.mjs, retain the exact
+phase-local owned server log windows and the pre-create readiness observation,
+while rethrowing the same error and making no second create attempt. A bounded
+private JSON report contains only generated member names/IDs, readiness checks,
+known error codes, log offsets and selector lines; no credentials or raw configs.
+No readiness predicate, server setting outside the owned fixture, timing,
+stream config, recovery mechanism, production path, or create retry changes.
+
+Section 6 prospective delta: fixture-only evidence helper in the existing
+placement_readiness.mjs, consumed by all four R3 add sites in test_recovery.mjs;
+enable debug logging only on this owned fixture's three servers. Add a portable
+negative/positive suite and intended-assertion runner for exact window, no retry,
+bounded redaction and original-error behavior; register them on Linux and macOS.
+The existing owned placement fault/control probe remains a separate proof and
+retains its source and report shape. Add an always-run JSON-only CI artifact for
+the failure report, uploaded only if an R3 failure occurs. Six ledgers describe
+the scope; VERSION remains v1.2-pre and B5/1.2 stays open.
+
+Verify: scripted pure and fake-manager failure controls, including no duplicate
+call and no report on success; run the unchanged unfiltered owned recovery test
+once with normal cleanup, then exact-source review and all-eight CI. The failure
+path must be exercised by a controlled owned fault without repeating the failed
+request. A later five-Markdown receipt gets separate review and all-eight CI
+before only this auxiliary row closes. The original B5-CI-R3-placement repair,
+natural historical trigger and current inventory/override/fresh-D60 observer
+stay open; D64, Gate, installed timers, VMs and production remain untouched.
+
+
+### 2026-10-18 18:02 EDT — D240 mid-implementation finding
+
+The pre-audit's unchanged-probe-source assumption was too narrow. The existing
+controlled STATSZ-denied probe is the only owned, reproducible R3 refusal, so it
+now calls the same failure-evidence helper once at its existing create site. Its
+report schema and comparator remain unchanged; on the fault side it additionally
+writes a private failure report. This also updates the portable original-caller
+source hash pin and adds an assertion comparing the helper's selector lines to
+the probe's already-retained window. No readiness predicate or second request
+was added. Debug logging is enabled only for the three owned cluster servers in
+test_recovery.mjs. The original unfiltered CI cause remains unproved.
+
+
+### 2026-10-18 18:08 EDT — D240 source candidate and owned proof
+
+The four owned R3 creation sites use one evidence helper. The helper snapshots
+log offsets immediately before each one-shot create, records the last successful
+waitCluster observation, and rethrows the identical error on failure. The private
+0600 report is bounded to 128 KiB read per member and 1024 characters per
+selector line; it retains offsets, a digest and selector lines, not full raw log
+bytes. Oversized windows are marked incomplete. The last waitCluster snapshot is
+pre-create evidence, not a contemporaneous check of the server's private peer
+stats. Debug logging is enabled for the three owned cluster servers only.
+
+Local controls at candidate source: seven portable tests passed; 12/12
+intended-assertion mutants killed with intact controls. The existing placement
+suite passed 45/45, and its runner killed 34/34. Plan lint was 14 PASS, 1 WARN,
+0 FAIL (historical VERSION-idle warning); diff whitespace check and syntax check
+passed. The final bounded-read source ran the entire unfiltered owned recovery
+fixture: pass=true, allOwnedServersStopped=true, no failure report. The final
+controlled owned pair had one create per cohort, control created, injected fault
+refused with API error 10005, both cleanup failures empty. Its 2081-byte report
+was mode 0600, SHA256
+f4a7c00e4e0e89db15ade38b1aefe3c8e04cfc0638721884d028f7ae3df90786;
+three selector lines were retained with all windows complete and pre-create
+readiness true. That is injected sufficiency evidence, not the historical CI
+cause. No production service, timer, Gate, D64 record or restore was touched.
+
+Source exact-head review and all-eight CI remain pending; this candidate row
+stays [A]. A separate reviewed, green five-Markdown receipt is required before
+closing only this auxiliary evidence row. The original R3 placement repair,
+natural trigger and current inventory/override/fresh-D60 observer remain open;
+B5/1.2 stays v1.2-pre and B6–B9 stay held.
+
+
+### 2026-10-18 18:21 EDT — D240 review correction, scope and freshness
+
+Claude355 reviewed exact source d5f396b9 and reproduced 7/7 new portable tests,
+12/12 named kills, 44 portable placement passes and 34/34 existing kills under
+uid 65534. It found one required ledger correction: the original debug predicate
+also enabled logs on the three later cloned cluster members, so the D240 text
+claiming only three servers was false. This correction narrows the source as
+well: start() takes an explicit debug flag, passed only at the original three
+member starts. A complete unfiltered owned recovery run after that change
+passed, stopped all owners, produced no failure report, and its retained
+configuration files confirm exactly three debug-enabled servers. The caller
+source hash pin was recomputed; the eight old placement predicates remain
+byte-identical.
+
+The report now labels its readiness table as caller-supplied observations,
+retains each jsz.now and a failedAt timestamp, so the age of the last
+waitCluster snapshot can be seen rather than implied fresh. A new negative
+for overlong selector lines and a counted mutant raise the portable controls
+to 8/8 and 13/13; the success-report mutation now requires its exact assertion.
+The corrected controlled owned pair passed with one create per cohort, control
+created, fault API10005 refused, three complete selector lines, and empty
+cleanup failures. Its private 0600 report was 2456 bytes, SHA256
+14f8d8a84dd2a4b75c8d36bfce7075056a0f0cb967cfe6a286a9f49d6c2775d0.
+These are final-source local checks; the earlier CI run on d5f396b9 does not
+validate this correction. No historical natural failure cause or placement
+repair is claimed. Source exact-head review and all-eight CI remain pending;
+D240 stays [A], B5/1.2 remains v1.2-pre, and production is untouched.
+
+
+### 2026-10-18 20:31 EDT — serving-NATS recovery-adapter pre-audit (D242 candidate)
+
+Micro re-orient: B5/1.2 is open at v1.2-pre; B6–B9 remain held.
+D241 reconciled the first-open row to this adapter; its exact head 254ef778
+has a clear Claude363 review and all-eight CI 39177909270.
+The persistent-stop producer and owned capture-ready cohort still cannot run.
+This unit addresses restoration before changing the stop producer.
+The current observer, R3 placement repair, D64 and production are separate.
+
+Pre-screen: the D185 full-node prior and capture-ready shape, D100 managed
+NATS stop receipt, D109–D117 override-clear and recovery fences, D180/D193
+fail-closed restoration evidence, B1 owned authority, original JournaledHold,
+and the owned macOS NATS 2.12.6 stop fixture exist at this head. The worktree
+was clean and no BLOCKED.md existed. `StopWatch.mutate()` in
+`managed_launchd.py` lines 631–646 refuses persistent serving-NATS stops
+before an intent; `Journal.begin_override_clear()` in
+`preservation_journal.py` lines 1158–1183 forbids all four NATS transfer units.
+`Journal.recover()` already orders nats, nats-2 and nats-3 before clients,
+checks the original hold and protected NATS writer marker, and refuses any
+unverified override clear on the same run or reopen. `restore_disabled_daemon()`
+already records the clear before enabling, binds the new process generation to
+the saved files and loaded job, and leaves failures terminal. Member1 is a
+baseline-held class, never a serving daemon or restore target.
+
+Goal: make exactly the three serving daemons eligible for a journaled,
+enable-capable owned restoration after each has its own verified persistent
+stop, with independent per-member health evidence before its
+`recovery-verified` record. Preserve the original member1 hold and full-node
+restoration order. This is an adapter prerequisite, not a persistent-stop
+producer or production restoration authorization.
+
+Proposed §6 source delta, subject to adversarial pre-audit: narrowly admit
+`SERVING_NATS` in `begin_override_clear()` while retaining the full-node,
+current-unit, restoration-intent, verified-stop and once-only checks; keep
+`nats-1` excluded. Compose the existing `restore_disabled_daemon()` with
+`Journal.recover()` in owned tests instead of duplicating its enable/bind
+logic. Extend the existing native disposable NATS launchd fixture to prove
+stop → journal-before-enable → new bound owner → local readiness, using its
+unique owned label. Script the fixed-label full-node journal and hold to prove
+all three serving restoration intents, clear intents and verified records in
+order, with member1 untouched. The two fixtures have different evidence
+scope and must not be described as one native full-node run. Existing test
+files and CI registration already execute on both Linux and native macOS;
+no new workflow step is presumed necessary.
+
+Local readiness is deliberately less than R3 quorum. In a disposable
+single-server NATS 2.12.6 probe at 20:30 EDT, `/varz` had version, server
+name, client and monitor ports, a config digest and JetStream store config;
+`/jsz` named the same server ID while `meta_cluster` was null. The probe
+terminated normally and its temporary files were removed. A native callback
+can require those local identities, the pinned pre-stop config/store and a
+new bound launchd generation plus an authenticated client PONG. Cluster
+membership, leader, three-member readiness and four-history health remain
+later verification, never inferred from that per-member check.
+
+Required negatives: wrong class/label/member1; no own verified stop, wrong
+stop intent or another restoring unit; changed plist/config or saved owner;
+enable/bootstrap/bind/readiness failure and interruption; unresolved clear
+prevents a second NATS member or any client restoration and a reopened retry,
+with no `recovery-verified`, Gate release or fabricated re-fence receipt.
+The native NATS fixture must clean up its disposable label even when an
+owner remains running and disabled. No automatic bootout of an unbound owner,
+never-spawned assertion or process-absence claim follows from a restored
+disabled override. D115's running-disabled reconciliation, survivor proof
+and measured production readiness budgets remain separate hard gates.
+
+Verify the narrow diff and existing regressions locally; run the actual owned
+macOS fixture and portable journal controls, then request exact-source review
+and all-eight exact-head CI. A later reviewed, green receipt may close only
+this auxiliary adapter row. The StopWatch persistent-NATS refusal remains
+until the next producer can prove its own stops. The original hold, D64, Gate,
+timers, VM image and production NATS stores are not operated by this unit.
+Claude's read-only design review requested at exact head 254ef778 is pending;
+this candidate is not a settled implementation plan yet.
+
+
+### 2026-10-18 20:35 EDT — D242 pre-audit settled against exact source
+
+Claude365 read exact 254ef778 and accepted the adapter as a separate owned
+prerequisite with six required corrections. The candidate above is historical;
+the source unit must use this corrected boundary. The durable
+`begin_override_clear()` point itself must require no open NATS transfer and
+no protected writer marker for a serving member, then admit only the explicit
+`SERVING_NATS` allowlist while `nats-1` remains excluded by name and class.
+Both new refusal calls need negatives that fail if either guard is removed.
+The already-pinned timer/NATS exclusion test must be changed to admit the
+three serving members and refuse member1, transfer and marker; the old
+StopWatch guard test and D98 native stop test remain byte-identical.
+
+The per-member readiness helper belongs beside `restore_disabled_daemon`,
+not in `restore_only.py`. Its callback must pass while the other serving
+members remain stopped: the newly bound owner and stable generation, a
+`/varz` sample from the saved monitor port with the saved server name and
+pinned NATS version, and a TCP accept on the saved client port. The saved
+config digest and JetStream store path can strengthen the owned fixture's
+local identity comparison. It must not require default `/healthz`, a `/jsz`
+leader or cluster route/group convergence; those can refuse a lone healthy
+member and leave the override-clear intent permanently unproven. D117's
+finite readiness budget is explicit and production values need measurement.
+The candidate's authenticated-PONG requirement is removed; no authenticated
+client exchange is needed for this local port-readiness claim.
+
+Prospective executable delta: `preservation_journal.py` admission and guards,
+one `managed_launchd.py` readiness helper, changed and added controls in
+`test_preservation_journal.py` and `test_managed_launchd.py`, plus six ledgers.
+`restore_only.py`, the StopWatch persistent-stop refusal, D64, production
+driver and existing placement logic stay fixed. Scripted tests exercise
+admission, stop/intent matching, failure and interruption, reopen refusal,
+held member1 and bus-first ordering. A disposable macOS CI fixture must
+exercise actual launchd and NATS 2.12.6 with a real full-node journal and
+original hold: restore nats while nats-2/nats-3 remain disabled, then each
+other member. A failed start must remain terminal with its disposable label
+disabled. The operator Mac currently has `ai.openclaw.nats` loaded, so fixed
+serving labels must not be bootstrapped there. On a non-dedicated host, the
+fixture skips with a named reason or is gated; on the dedicated clean CI
+runner, a label collision is a refusal, never a skip. The older unique-label
+native stop test remains a separate proof.
+
+After the third member's individual receipt, a distinct post-restore quorum
+gate must positively check D234's group conditions before any non-NATS
+restore. Current `buses_ready` only propagates a failure; three local
+readiness receipts are not R3 availability. Add that gate as its own open
+row between this adapter and the persistent-stop producer. Until it lands,
+neither the producer nor production resumption is authorized. The first
+source gate is the native owned single-member case with intent-before-enable,
+new bound owner, local varz identity, member1 held and other serving members
+still disabled, plus a scripted mirror, exact-source review and all-eight CI.
+The full three-member native case and failure case are needed before this
+adapter row closes. D109/D115 survivor and running-disabled reconciliation
+remain open; no automatic re-fence receipt is introduced.
+
+### 2026-10-18 23:32 EDT — D245 post-restore R3 quorum gate pre-audit
+
+Micro re-orient: B5/1.2 remains [A] at v1.2-pre; the serving-NATS adapter is
+closed by D243/D244, and the post-restore quorum gate is the first open source
+prerequisite. No persistent-stop producer or full-node production recovery
+caller exists. B6–B9, D64, Gate, installed timers and production remain held.
+
+Required premise correction: D243's native fixture places `nats`, `nats-2`
+and `nats-3` in one cluster. That proves individual per-member restoration,
+not the saved role topology: `nats` is standalone, `nats-1` is held member1,
+and `nats-2`/`nats-3` are the live two of three cluster members. The existing
+D234 `$G` group-count assertions require seeded stream/consumer state and
+cannot be copied into an unseeded post-restore meta-quorum gate.
+
+The owned, disposable NATS 2.12.6 probe started three loopback members,
+then stopped member1. Both survivors returned `200 {"status":"ok"}` from
+`/healthz?js-meta-only=true`; `/jsz` identified the same live leader and
+cluster size three; `/raftz` exposed `$SYS._meta_` size three, quorum two,
+one leader and one follower, stable peer identities and the held peer. The
+tagged 2.12.6 monitor source makes meta-only health check leader contact,
+currentness and meta recovery, and exposes `size`, `quorum_needed`, `state`,
+`leader`, `term`, `observer`, `paused`, `catching_up` and named peers. A sample
+immediately after a stop can still report the old leader, so the gate must
+wait for agreement and stability. This disposable probe is schema evidence,
+not a live B3 pin or production observation.
+
+Source contract: an owned observer takes the pinned standalone and three
+member names, the two live monitor ports and a finite caller-supplied budget.
+It checks standalone isolation, both live monitor identities, reciprocal
+routes, healthy/current meta, the same size-three/quorum-two group and live
+leader/term with exact member peer names, then stable repeated samples. A
+missing, stale, isolated, catching-up, undersized or inconsistent group
+refuses with bounded diagnostic evidence. The journal requires a fresh
+positive callback after this recovery call verifies all three serving units
+and before its first non-NATS observation or restoration when a serving NATS
+member had a persistent managed stop. It records a durable group receipt;
+failure leaves the original hold closed and cannot be reused on retry.
+
+Proof: portable observer and journal refusal/ordering/reentry controls; a
+role-faithful disposable Linux cluster with held member1 and a minority
+negative; corrected fixed-label macOS fixture with standalone `nats` and
+held member1, including a group-failure case after individual receipts.
+Source review and all-eight exact-head CI precede row closure. The real
+full-node driver, persistent-stop producer, live role binding, D60, reboot,
+capture and production remain outside this source unit.
+
+
+### 2026-10-19 00:21 EDT — D246 quorum-gate source-contract correction
+
+D245 is a pre-audit, not a completed source claim. The owned disposable
+cold-restart replay exposed one false refusal: after member1 is held and both
+survivors restart, NATS 2.12.6 may report the offline member in `/jsz` as
+`Server name unknown at this time (peerID: <id>)`. The source now binds every
+replica and `/raftz` peer by the NATS node ID derived from its pinned server
+name; the live follower's name must match exactly, while member1's `/jsz`
+name may be its pinned name or that exact ID-bearing placeholder and its
+`/raftz` peer name may be blank. The real four-role test stops all three
+members, restores only members two and three, proves the two-of-three group,
+refuses a one-member minority and accepts a survivor rejoin.
+
+The observer needs three monitor ports: standalone `nats` and live `nats-2`
+and `nats-3`. The journal requires the callback at recovery entry for any
+historical serving-NATS `stop`, `unload` or `disable-and-unload` intent in
+full-node scope, even before its managed proof is established. This broader
+trigger fails closed. After current-call receipts for all three serving
+units, and before the first non-NATS **recovery-loop** observation or
+restoration, the gate also refuses if any earlier recovery error exists.
+Earlier stopped-state and held-unit preflight observations are safety checks,
+not client resumption. A failed gate records a group error, leaves clients
+unrestored and the hold closed; a retry observes the group again.
+
+The fixed-label macOS failure case now uses a physical partial topology:
+member1 initially links the cluster, then both restored survivors retain
+routes only to held member1. A disposable NATS probe confirmed each survivor
+had zero routes and no leader after that restart; the native CI case must
+still run. Its group callback uses the real observer and must refuse before
+any client restoration. The ten-second fixture budget is a test value, not a
+measured production budget. The persistent-stop producer, full-node driver,
+current inventory, D60, reboot and production remain separate. The quorum
+row stays open pending exact-head source review and all-eight CI.
+
+### 2026-10-19 01:48 EDT — D249 serving-NATS persistent-stop producer pre-audit
+
+Micro re-orient: B5/1.2 is [A] at v1.2-pre. D243/D244 provide an owned
+serving-member recovery adapter; D247/D248 add a positive post-restore R3 gate.
+The first open source prerequisite is the persistent-stop producer, before an
+owned capture-ready checkpoint. This still serves recoverable histories; yes,
+it is the right next bounded step. B6–B9, D64, Gate and production remain held.
+
+Needs pre-screen: the reviewed adapter and group gate are present; corrected
+receipt c34494d1 passed all eight jobs on CI39202808141 and Claude389 cleared
+it. The original JournaledHold, StopWatch, class_stop_proven, non-NATS fence,
+NATS marker/transfer guards, and dedicated fixed-label native fixture exist.
+The worktree is clean and no BLOCKED.md exists. No live B3 pin or approved
+production stop window exists, so verification is owned only.
+
+Source contract: permit persistent StopWatch.mutate only for the explicit
+SERVING_NATS allowlist when each prior unit is a loaded, running daemon.
+`nats-1` remains excluded, as do idle or reclassified serving units. Keep
+unit-label binding, prepared kernel/process watch, original hold, disabled
+before bootout, verified exit/connection/listener proof and disabled override.
+The journal must refuse a protected NATS writer marker before the stop intent;
+its existing forward and transfer guards still apply. The existing non-NATS
+fence must pass before the first serving stop. The three stops run in saved
+capture order: standalone nats, then nats-2, then nats-3. A failure at any
+stage leaves durable partial/failed evidence and no capture-ready checkpoint;
+recovery is the only continuation.
+
+Delta: managed_launchd.py narrows the guard to serving daemon identities;
+preservation_journal.py adds the pre-intent marker refusal and ordered serving
+stop checks if the existing record-only checkpoint gate is too late; portable
+preflight and journal negatives pin the new admission; the dedicated macOS
+full-node fixture uses StopWatch.mutate for all three real disposable NATS
+servers, checks each durable receipt and full recovery, and injects a stop
+failure to prove no checkpoint. Register any added tests on both CI platforms.
+No restore_only.py, release gate, production driver, timeout or installed unit
+changes. An architectural expansion or two mid-implementation findings require
+re-orientation before implementation proceeds.
+
+Verify: owned positives produce one verified disable-and-unload receipt per
+serving member under the same original hold; wrong class/label, nats-1,
+preexisting override, missing hold, marker, partial stop and out-of-order
+paths refuse for their intended reasons. Run relevant suites and mutation
+controls, independent exact-source review and all-eight exact-head CI. This
+is source/owned runtime proof, not live NATS, D60, reboot, image or production
+acceptance. A separate reviewed green receipt may close only this source row.
+
+## Mid-Implementation Findings — 2026-10-19 01:55 EDT
+
+A local `npm test` run in this worktree was unsafe as a baseline check: the
+root suite connected to the host's live NATS at `nats://127.0.0.1:4222` and
+exercised integration RPCs before it was interrupted. The test code creates
+`test-<timestamp>` mesh tasks and best-effort cancels them in an after hook;
+the interruption means cleanup completion and residual test records are not
+established. It also found a local `better-sqlite3` Node-24 binary mismatch.
+No service, VM, timer, image, NATS process or configuration was intentionally
+stopped or changed, but test records may have been written to live application
+state. This is an unintended live-bus operation, retained as an explicit
+exception to D249's owned-only plan. Do not repeat root `npm test` on this host;
+use the focused Python suites and disposable CI for this source unit. This
+finding does not authorize deleting test records or expanding the source diff.
+
+### 2026-10-19 02:08 EDT — D250 serving-stop failure and live-bus incident correction
+
+D249's statement that “recovery is the only continuation” after any failed serving stop is withdrawn. In the owned verification-failure case, `nats` is physically booted out and disabled but has a durable `failed` row instead of a verified persistent-stop receipt. `begin_override_clear()` requires that receipt, so automatic recovery refuses to clear the override; retrying does not cure it, and the 17 prior-loaded clients remain held. This is a full-node outage, not a successful rollback. The corrected fixed-label native case now calls recovery after the failure and asserts the refusal, blocked client restoration and closed hold. A failed serving stop requires a separately reviewed operator reconciliation; no automatic override-clear exception is introduced here. The case is specifically a verification refusal after bootout, not a bootout failure. Success-path recovery of all three members remains a separate positive.
+
+The local root `npm test` incident recorded in AUDIT_PRE is wider than the initial single-file description. The Node runner may start files concurrently. Six root integration files connect to the resolved live NATS address and can submit tasks: `agent-recruit` (`recruit-`, also broadcasts a recruit signal), `collab-agent-lifecycle` (`lifecycle-`), `collab-integration` (`test-`, also creates collab sessions), `distributed-mc` (test task IDs), `e2e-collab` (`e2e-`), and `field-roundtrip` (`frt-`). Which of these reached a write before interruption is unknown. Their cancellation hooks are best-effort; a live worker may have claimed or joined a test task. No cleanup or live-state reconciliation was attempted, and residual records are unknown. No production service, VM, timer, NATS process or configuration was intentionally changed. This turn did contact the live application bus, so historical “production untouched” statements must not be repeated as a current-state claim. Local root `npm test` is excluded from subsequent verification on this host; isolated CI and owned tests are the source gate.
+
+The new marker refusal is pre-intent only. It does not hold the legacy writer exclusion lock across a physical serving stop, unlike NATS recovery. That gap is now an explicit open source row before any live full-node stop; capture's later marker recheck does not prove stop-time exclusion. The enforced nats, nats-2, nats-3 sequence is the serving-member stop order, not a fixed order required by the capture validator. The journal's loaded/running serving-baseline check is redundant with valid full-node baseline shape. D249's successful producer evidence and the B5/1.2 boundary are otherwise unchanged; the source and this correction still require exact-head native CI and independent review before the producer row can close.
+
+### 2026-10-19 02:16 EDT — D251 failed-stop blocked-unit count correction
+
+D250 repeated the independent review's incorrect “17 prior-loaded clients” count. The failed `nats` stop leaves all 18 prior-loaded non-NATS units unrestored. Recovery assigns “bus recovery was not verified” to 17, including the scheduler-heartbeat timer that anchors the original hold; the deploy listener separately reports “prior restoration was not verified.” Only nats-2 and nats-3 receive restored/already-restored rows because they were never stopped. The native failed-stop case now asserts all 18 units lack restored rows, the anchor timer remains unloaded, the 17 bus errors, the listener's distinct refusal, and the closed hold. D250's fail-closed, operator-reconciliation and live-bus incident findings otherwise stand. Exact-head native CI and independent review of this correction remain required before the persistent-stop producer row can close.
+
+### 2026-10-19 04:05 EDT — D255 serving-NATS forward writer exclusion pre-audit
+
+Micro re-orient: B5/1.2 remains `[A]` at `v1.2-pre`. D252 closed the owned persistent-stop producer, and D254's corrected current frontier retains its natural-trigger and operator gates. The next open source prerequisite is forward writer exclusion during the three serving stops. Its needs exist: the source producer, original execution hold, protected legacy writer wrapper and root lock contract, and owned fixed-label native fixture. The current worktree began clean at 29209984 with no BLOCKED.md. No live stop, current B3 pins or production capture window is available, so this is an owned source unit only.
+
+Source contract: before a serving NATS intent, require the protected legacy lock file and ancestors, absent protected writer marker, and nonblocking exclusive possession of that lock. Hold the same descriptor through the physical disable/bootout, process/connection/listener verification, entrypoint checks and durable verified or failed row. Check path identity and marker again before accepting a verified receipt. Record matching lock identity, exclusive state and marker absence in the intent and verified evidence; the live and frozen capture-cohort readers must refuse missing, changed or malformed writer evidence. A missing, occupied, redirected or changed lock refuses; member1 stays outside the serving-stop path. The protected legacy writer uses a shared lock, so an exclusive stop lock excludes its concurrent entry. This is a contract for protected writers, not a claim about an unwrapped writer.
+
+§6 delta: change `preservation_journal.py` for the guard, journal boundary and checkpoint evidence predicate; extend `test_preservation_journal.py` for before-intent refusal, subprocess shared-lock contention during apply and verify, and changed-marker/lock failed receipts; extend `test_capture_checkpoint.py` for honest and forged frozen inputs; extend the existing `test_managed_launchd.py` owned serving-member fixture to probe contention at actual disable time. This AUDIT_PRE block records the bounded design. Existing CI commands cover all three suites on Linux and macOS, including the fixed-label native fixture on the dedicated runner. No root writer helper, production service, VM, timer, timeout or release-gate change is in scope.
+
+Verify with focused owned suites, independent exact-head source review and all-eight exact-head CI before a separate receipt can close only the forward-exclusion row. The existing failed-stop operator-reconciliation case and D250 live-bus residue uncertainty remain; do not run local root `npm test` or infer that production data is untouched. Stopped-ASIF extraction, role binding, live B3/D60 observation, original placement repair and its natural trigger, and operator disposable-access/resource choice remain separate gates. B5/1.2, B6–B9, D64 and Gate stay as recorded.
+
+### 2026-10-19 04:21 EDT — D255 first-head CI correction
+
+Source head ca888d88 is rejected, not a successful gate. Its Linux 20/22 jobs stopped in the unchanged user-transfer suite because the new guard correctly refused the suite's lock fixture below world-writable `/tmp`; the macOS ASIF reader refused a synthetic fixture whose writer lock was owned by the runner user because the frozen schema had assumed root ownership despite having no live lock to inspect. The native legacy-writer job was still in progress when these failures were diagnosed. The correction puts the journal and capture test fixtures under the runner's protected home and keeps live root-ownership enforcement in `nats_legacy_stop_guard()`. The frozen cohort checks a nonnegative owner claim and its exact match across intent and verified receipt; that offline claim does not prove the owner of a current file. Local owned replay passed 41 user-transfer, 164 journal, 38 capture, 30 stopped-image, 34 host-commit, 91 mount-wrapper and one native facade test. This correction needs a new exact-head CI run and independent review. No live bus or production operation was used for the replay.
+
+### 2026-10-19 04:29 EDT — D255 second-head CI fixture correction
+
+Source head e1198e94 is also rejected as an all-eight gate. It passes the formerly failing macOS ASIF reader, and both Linux jobs pass the legacy-lock step, including all 41 user-transfer tests. Linux 22 then fails in the journal suite: the workflow's preceding authenticated-bus setup deliberately writes `HOME=/tmp/ci-openclaw-home` to `GITHUB_ENV`, so `Path.home()` again places the lock below world-writable `/tmp`. The source guard is still correct. The fixture now prefers the isolated checkout's `GITHUB_WORKSPACE` when CI supplies it and uses the protected home elsewhere. This changes only test placement; the production lock path and exclusion contract remain fixed. The failing head and its step-specific cause remain retained evidence. A further exact-head CI and review are required.
+
+### 2026-10-19 04:36 EDT — D255 independent-review owner-claim correction
+
+Claude's independent review of e1198e94 also rejected its frozen owner predicate: accepting any nonnegative `legacy_lock.uid` let a rehashed intent and receipt claim the same wrong owner and still pass the capture reader. The frozen predicate again requires the recorded protected root UID and mode 0644, while the live guard continues to inspect the current file before and during the stop. The capture suite now rehashes a forged wrong-owner pair and requires refusal. The macOS ASIF probe seeds a synthetic lock owned by the CI runner, so its reader case temporarily binds the expected UID to that runner while exercising the real frozen reader; this is confined to the CI-only fixture and is not a production acceptance rule. This correction and the `GITHUB_WORKSPACE` fixture placement need one new exact-head all-eight CI run and independent review. Neither earlier source head is a green gate.
+
+### 2026-10-19 04:40 EDT — D255 third-head mutation-runner limit
+
+Source head a9123ef7 is also rejected as an all-eight gate. The formerly failing Linux fixture placement, Linux 20, and macOS ASIF jobs pass, but Linux 22 stops before the boot-process-policy mutant assertions: that pre-existing runner embeds the enlarged 121371-byte journal source in one Python `-c` argument and Linux returns `E2BIG`. The runner now transports the same journal, policy and selected test through standard input; its unchanged 46 controls and intended-assertion kills pass locally. Restoring the protected owner predicate also exposed a synthetic `ReaderSeed` unit that verifies after fixture cleanup; its test now binds the runner UID only around that offline verification, matching the CI-only ASIF probe. The current source head must pass these suites, exact-head all-eight CI, and independent review before any D255 receipt. No failed head is counted as source closure.
+
+### 2026-10-19 04:52 EDT — D255 fourth-head protected-fixture correction
+
+Source head 06c051b4 is not an all-eight gate: its macOS ASIF and Linux 20 jobs pass, but Linux 22 reaches `test_process_observation_envelope.py` and reports ten setup errors because that older synthetic envelope fixture forces an owned guest below `/tmp`. The protected legacy-lock guard correctly refuses that ancestry. The envelope, held-job and managed-job test helpers now place their owned roots below the isolated `GITHUB_WORKSPACE` checkout on CI and protected home elsewhere. Each helper binds its test-only `tempfile.gettempdir()` view to the same parent for its literal-root consumer check, with cleanup restoring the view; production readers and the lock guard are unchanged. Under CI's `HOME=/tmp/ci-openclaw-home`, the affected envelope suite passes 55 tests and 50 intended-reason mutants; held-job 32, managed-job 34 with one platform skip, managed-job negative 20 with one platform skip, and scripted-entrypoint 28 all pass. This is a fixture correction, not permission to accept a world-writable lock ancestor. A new exact-head CI and independent review remain required; the 06c051b4 native job had not reached a terminal result when diagnosed.
+
+### 2026-10-19 06:54 EDT — root-suite live-bus isolation and residue pre-audit
+
+Micro re-orient: D255/D256 closed the forward-writer-exclusion source prerequisite; B5/1.2 stays `[A]` at `v1.2-pre`. The next open row is the D250 interrupted-root-suite incident and future test isolation. Its read-only task/collab access and nine mesh-gated suite files exist. The current worktree began clean at 7f5b79ae, with no BLOCKED.md. The bounded read-only audit is in `ROOT_TEST_BUS_AUDIT_2026-10-19.md`: 36 current test-prefixed tasks and 18 sessions were found, including one queued e2e task and its active session. No live record is changed or removed. Latest KV state cannot exclude transient worker effects or deleted records.
+
+Source contract: route `test`, `test:unit`, `test:strict` and `test:integration` through a disposable authenticated loopback NATS, JetStream store and mesh-task-daemon, with a temporary home, node identity, scratch directory and explicit bus URL. Fail closed when isolated setup fails. Direct invocation of the nine mesh-gated suites must visibly skip their mesh tier without the runner flag, so a developer's direct `node --test` cannot silently use the host's resolver fallback. Preserve the existing nkey test mode and make the root runner refuse unauthenticated bus connections. Clean up its process group and temporary files on completion or interruption.
+
+§6 delta: `package.json` changes four root scripts; `test/run-root-tests.mjs` is the isolated runner; `test/helpers/mesh-available.cjs` guards direct mesh suites; `test/root-test-isolation.test.mjs` proves an inherited configured bus receives no connection and the temporary home is removed; `test/nats-auth-render.test.mjs` replaces its real process reload lookup with a disposable command stub. This pre-audit, the dedicated read-only audit, and later same-silo receipts are the only plan-document changes. No production NATS, task daemon, worker, timer, VM, service or configuration operation is part of the source change. No test-record cleanup is authorized.
+
+Focused probe and integration checks passed locally; the operator-host full root run failed for the recorded Node-24 `better-sqlite3` mismatch and existing native timer fixture, so it is not a source gate. Require an independent exact-head review and all-eight exact-head CI before closing only this prerequisite row. The queued task and active session remain for attended reconciliation. Stopped-ASIF extraction, live role binding, current B3/D60 observation, original R3 placement repair and natural trigger, operator disposable-access/resource choice, B5/1.2 and later gates remain open.
+
+### 2026-10-19 07:02 EDT — first isolation head correction
+
+Source f4f209e2 is not a closure gate. Its Node-20 root job failed `test/publishers.test.mjs` because the runner gave every test process `OPENCLAW_NODE_ID=root-test-lead`, overriding that unit's explicit `nodeId: 'test-node'`; the daemon alone needs the lead ID and role. The runner now reserves those values for the daemon and removes inherited node ID/role from the root test environment. Source review also exposed the pre-existing `nats-auth-render` test's process-wide reload lookup: the first head isolated its task bus but did not isolate that CLI's protected-host-lock re-exec and `nats-server --signal reload` fallback, which could touch the host lock and signal the operator's servers. The test CLI now masks those host paths, receives a disposable `nats-server` command stub, and asserts the stubbed reload. The runner's temporary `openclaw.env` supplies its isolated URL, token and nkey mode when a child drops explicit bus env but keeps the temporary HOME; it also overrides inherited `NATS_URL`, which some publishers prioritize over the shared resolver. The original f4 CI and review remain failed/incomplete evidence; the corrected source requires its own exact-head CI and independent review. No live cleanup was performed.
+
+### 2026-10-19 07:11 EDT — second isolation head host-lock correction
+
+Source head 340d2e8c is not a closure gate. Independent review confirmed its corrected `nats-auth-render` test no longer signals a disposable same-uid `nats-server` and does not contend for a sandbox stand-in host lock. The same review found that sibling `nats-writer-ownership.test.mjs` still forged only the protected handoff marker. Its three spawned CLIs could re-execute under the production writer lock before refusing. In a sandbox reproduction, the uncorrected test held a shared lock during 53 probes. Its test-only preload now also reports the protected legacy lock absent, allowing the handoff-refusal assertions to run without acquiring the host lock. The auth-render test also places a failing `pgrep` stub on its child PATH, so a failed or unexecutable reload stub cannot fall through to a host process list. The prior reference to `nats-server --signal reload` as a fallback was imprecise: it is the primary signal path; `pgrep`/SIGHUP is the fallback. The source change and audit correction require a new exact-head CI run and independent review. The interrupted local root run's process-level lock or reload effects remain unknown; no live cleanup was attempted.
+
+### 2026-10-19 07:27 EDT — third isolation head executable-stub preflight
+
+Claude cleared source ec1968ae with no required finding after a darwin-forced sandbox proof: both corrected CLI tests passed without writer-lock contention, while removing their lock masks made the same tests pass with 485 and 207 contended probes. This replaces the earlier Linux-only zero-contention observation, which did not exercise `lockExists()`. The review also found that libuv can skip an unexecutable `pgrep` stub on a `noexec` temp mount and reach the real executable. At ec1968ae the reload helper crashes before that fallback when its primary stub cannot spawn, so no HUP was observed in the disposable noexec case, but that crash is not an isolation contract. The auth-render fixture now executes both disposable stubs with inert arguments before invoking any CLI and refuses if either cannot run. This source refinement requires a new exact-head review and all-eight CI; ec1968ae is retained as cleared source evidence, not credited as the final gate. No host lock, live process or live bus was operated by this local change.
+
+### 2026-10-19 07:38 EDT — fourth isolation head PATH-delimiter correction
+
+Claude cleared 6aa054d0 with no required finding: under disposable dash and bash shells, its executable-stub preflight refused a `noexec` temp directory before any CLI or SIGHUP, and the normal fixture still required the actual reload marker. Its sandbox also found a different edge: when the temporary directory contains `:`, the fixture's `PATH` entry splits; the direct stub preflight passes, but a child can resolve the real `nats-server` and signal a same-uid decoy before the test assertion fails. The auth-render fixture now rejects a test-bin path containing `path.delimiter` before creating or launching any child. This is a test-fixture safety guard, not a production reload change. The 07:11 statement that a failed or unexecutable stub cannot reach the host process list is superseded by the 07:27 preflight and this path guard; ec1968ae was vulnerable to a noexec/bash primary-path lookup, while 6aa054d0 remained vulnerable to a colon in TMPDIR. The new source head requires its own review and exact-head all-eight CI. No operator-host NATS process or record was operated for this correction.
+
+### 2026-10-19 07:43 EDT — fifth isolation head actual command lookup
+
+Claude cleared 46f85982 with no required finding: the colon guard refused before test-bin creation and a guard-removal mutant restored the disposable decoy's SIGHUP. The same review found that dash interprets `%builtin` and `%func` inside PATH entries. A temporary path with that sequence could pass both direct stub-execution checks and the colon guard, yet `sh -c 'command -v nats-server'` selected the real binary; the decoy saw no HUP in that case, but the host binary was invoked. The fixture now checks the exact `command -v nats-server` result under the identical child PATH and requires its disposable stub before starting any CLI. The executable checks and delimiter guard remain. This is a bounded test-fixture safety correction, not a production reload change, and needs a new exact-head independent review and all-eight CI. The earlier heads remain evidence, not closure gates; no live operator-host NATS process or records were operated by this change.
+
+
+## 2026-10-19 13:26 EDT — B5 protected byte-anchor source unit (D261)
+
+### Micro Re-Orient
+- Step 1.2/B5 remains in flight at v1.2-pre; production capture is disabled.
+- D259/D260 verified pre-arm table content binding and the two root/attach test carry-forwards.
+- The operator selected interactive sudo per window for owned implementation/tests; no installation.
+- This unit retains post-capture bytes under an independent owner and makes a protected reader compare them.
+- This serves recoverable histories; it does not produce semantic ACCEPTED, guest admission or B6 release.
+- This is the next named prerequisite; pre-stop provenance and full acceptance integration remain tracked.
+
+### Needs and boundary
+
+D189 and D207 govern the residual provenance and terminal-decision limits. The window-pin source at 8f820784 has exact-source review and all-eight CI39285492438; the tree is unchanged through 6f5a651a. D261 records the authority choice. Claude has been asked for a bounded read-only pre-audit at that head. No production root exists or is created. Runtime deployment is not authorized; the source prerequisite requires owned execution evidence and keeps the parent B5 row open.
+
+### Proposed file deltas and proof
+
+Add a self-contained standard-library-only `host_capture_anchor.py`, portable tests `test_host_capture_anchor.py`, an intended-assertion mutation runner `mutate_host_capture_anchor.py`, and a CI-only independent-owner probe `probe_host_capture_anchor.py`. Extend the existing Linux/macOS portable steps and native ownership job in `.github/workflows/test.yml`. Keep existing capture/mount/decision code fixed and production refusals intact. Update only the five existing ledgers and this pre-audit as implementation/evidence becomes concrete.
+
+The owned producer must read fixed host record names and the clone through held no-follow descriptors, validate owner/mode/single-link/ACL/identity and bounded canonical records, preserve their byte hashes plus nonce and directory binding under root, refuse overwrite/re-pin, and publish only a complete record. The privileged consumer must reopen the actual protected root record and compare a fresh descriptor-bound snapshot; caller-supplied verification JSON is not authority. Partial publication refuses; any recoverable complete publication must be explicitly distinguished from partial state. The root store and all ancestors need independent ownership, private leaf mode and no ACL grants. Future installation must provide trusted code, interpreter and import closure; no sudo invocation of the writable checkout is a production model.
+
+Proof: portable source/ordering/refusal/interrupt/rewrite tests and decisive mutants; CI-only native distinct uid/root permissions, parent/mode/ACL controls, trusted temporary code copy and coordinated input/clone rewrite. No local elevated test suite or VM/image operation. Independent exact-source review and all-eight CI remain mandatory before source readiness. All unimplemented integration, installed provenance, B3/live bindings, D62/manual/D175 and macOS reboot gates remain open.
+
+
+### Pre-audit disposition and bounded integration boundary
+
+Claude Message 55 recommends the same self-contained byte-anchor/privileged-byte-verifier boundary. Incorporate isolated `-I -S -B` invocation and root-controlled interpreter/program/search-path/module checks (misinvocation detection, not self-authentication), explicit capture/SUDO uid binding, honest capture/arm locks, failed-capture refusal and fixture VM identity. Its suggested final frozen-reader receipt correlation is retained as the next protected-acceptance integration, rather than claiming a user-generated receipt is privileged journal verification. This source unit uses a separate synthetic capture/clone probe on Linux and macOS; it does not modify the existing ASIF probe or claim a root-performed frozen-journal read.
+
+Publication is intentionally stricter than the suggested automatic temp recovery: any pending file refuses both routes and requires attended reconciliation. A complete single-link record after final-unlink interruption may be verified only by the protected reader, which repeats the full byte comparison and file/directory sync. Re-publication always refuses; no temporary file is removed automatically and no new snapshot replaces an anchor. This is the ordinary fsync-level contract, with no power-loss or boot-decision claim. Benign deny-only ACLs are allowed; allow grants and unreadable ACL observations refuse.
+
+The parent protected-acceptance-root gate remains in flight. Its source primitive has a separate atomic `B5-protected-byte-anchor source` row so neither owned proof nor a byte-only CLI can close installation, actual frozen-reader receipt integration, B3 provenance or real-window acceptance. VERSION remains v1.2-pre under the existing parent step. No additional production permission is requested or inferred.
+
+
+### Local candidate verification
+
+The 28-case focused suite passes (22.283 s); the mutation runner's baseline is that same suite and all 18 designated mutants fail with the intended AssertionError. The existing three-module regression batch passes 139 tests (83.812 s, one platform skip). Python 3.9 syntax parsing and diff checks pass. Local plan lint is 14 PASS / one existing WARN / zero FAIL. No local root or native ownership probe was run. Distinct-owner Linux/macOS execution, native macOS ACL evidence, exact-source review and all-eight CI are pending. This candidate closes no row and leaves the full protected acceptance integration open.
+
+
+### 2026-10-19 14:01 EDT — CI proof re-orientation
+
+D262 records both failed candidate CI boundaries. The owned proof stays one outcome: an independently owned byte anchor detects a later capture-user rewrite. Refine only its CI interpreter selection and fixture ancestry, keeping every production refusal and protection predicate. The root program still validates the selected runtime itself. Portable tests simulate root ownership and ambient ACLs; actual owner/ACL claims depend on completed Linux/macOS probes. Fresh input/program/record fixture objects alone may be normalized; existing runtime/ancestor permissions may not be changed. Corrected local proof is31 focused tests/19 intended kills with baseline passing; root-bootstrap syntax parses under3.9. No local elevated probe is run and no acceptance row closes. The exact corrected head needs its own review and all-eight CI.
+
+
+### 2026-10-19 14:19 EDT — Message57 proof correction
+
+D263 records the three required source/proof corrections and their bounded changes. The one outcome remains protected post-capture byte integrity; no production path, source authority or semantic acceptance is added. The final local baseline is40 tests OK and40 designated assertion kills. The cache experiment explicitly ignores the caller's cache-prefix setting when creating the forged cache and forces timestamp validation. Its first local attempts used macOS's configured global cache prefix; four exact generated EVIL-only test caches were identified by recent owner/single-link metadata, their code constants/names and deleted unique temporary source paths, and removed. No existing module cache or application history was altered. Future artifacts stay under the owned temporary tree.
+
+The path-based ACL observation on capture-user inputs can describe an alias during a same-uid path race; it is not independent privacy/provenance proof. Descriptor-bound reads and final identity/digest comparison preserve the stated byte-integrity outcome. Root-store paths are independently controlled. Other non-blocking adequacy notes remain notes rather than an exhaustive mutation-coverage claim. Exact final-source review and all-eight CI, including the corrected native invocation/store fixture, remain mandatory. No local elevated probe or production operation was run.
+
+
+### 2026-10-19 15:18 EDT — B5-CI-serving-group-settle re-orientation before source work
+
+The operator's next go starts protected frozen-reader integration, and Claude has its bounded exact-source pre-audit at 8d3a837e. Before that expansion, this documentation head's macOS legacy job 118251575729 in run39308471837 failed in the existing RealGroup cold-restart positive: its ten-second observer reported `nats-2: meta leader or group size differs`. It never reached the byte-anchor suite. The exact byte-anchor source e2bffb7c still has its own successful all-eight run39301653593; no result from this failed receipt job replaces it. Its raw log has 29095 bytes/300 lines/SHA-256 aa994867cfabb8026a2306e1bb97b12584c57e886d0df82a283626e55db2dc58, retrieved with the raw gh-api job-log method.
+
+Six unprivileged, separately created four-loopback-server reproductions use the installed NATS2.12.6 binary, fresh store roots and only their own child PIDs. All complete the cold restart, minority refusal and rejoin; cold positives take 5.448,6.618,9.382,5.511,9.981 and7.469 seconds under the existing ten-second budget. They do not reproduce the CI refusal or establish its cause. The v2.12.6 tagged raft.go defines randomized four-to-nine-second elections, while our observer requires a further full second of stable agreement and routes. Ten seconds leaves no reliable allowance for that combination, scheduler delay or another election. The failing CI job retained no server logs or monitor snapshots, so this is a demonstrated test-budget weakness, not a proven explanation of that CI event.
+
+One independently executable prerequisite now preempts reader implementation: owned quorum-fixture budget and failure evidence. Keep serving_nats_group.py and every production/recovery predicate unchanged. Give only the real fixture's two positive phases a finite thirty-second test budget; keep the minority's two-second refusal and the observer's one-second stability rule. Route these calls through a test-local observer wrapper that retains phase, budget, elapsed time and last endpoint observations and re-raises the original refusal. Before removing its own temporary tree, the real fixture must retain bounded server-log tails and child cleanup evidence on failure; successful phases print their measured summary. No production timing guarantee follows from the test value.
+
+Meaningful portable proof must make a valid group appear late enough that ten seconds cannot include the required stability window, show acceptance under the owned budget, show the shorter budget still refuses, and ensure a permanently invalid group refuses and propagates its failure with evidence. Designated mutants must kill the shortened positive budget and swallowed refusal. Run the corrected real four-role fixture unprivileged, with cold/minority/rejoin controls; then independent exact-source review and all-eight CI are required. The original CI event's unobserved trigger and the older R3 placement/natural-trigger item remain open. No local root suite, existing NATS process, production service, VM or timer is touched. Protected reader integration, all other B5 work and B6–B9 stay held.
+
+Claude63's integration pre-audit arrived during this repair and confirms a necessary preceding source unit: pure commitment/capture/frozen verification over six held record byte strings, explicit guest-file owner and protected-writer uid, and unchanged existing path wrappers/callers. Its future privileged integration must verify a trusted root-private import closure, keep capture descriptors/locks through the operation, mount a root-controlled copy hashed against the anchored held clone, run the real semantic verifier, release cleanly and publish a protected receipt bound to that anchor and owner context. Neither a user-generated receipt nor a root invocation of current uid-assuming wrappers is that proof. Same-volume CoW availability and guest/capture uid equality require separate evidence; no production assumption or installation authority follows. P's portable/root-CI proof and Q's distinct-owner native mount proof remain future work, not part of this fixture repair.
+
+### 2026-10-19 15:35 EDT — Claude65 fixture-candidate correction
+
+Candidate bdd535a7 is rejected as a source gate: Claude65 independently reproduced seven tests/4 kills and three real NATS2.12.6 successes, but an undecodable log byte replaced an injected refusal and bypassed cleanup, leaving three sandbox children that the reviewer then removed. Its sibling fixed-label native recovery positive also retained the same ten-second allowance. The correction reads only the last16KiB as bytes with replacement decoding, contains evidence errors, attempts every child's stop and exit observation independently, and preserves the primary refusal while retaining secondary cleanup errors. Three committed portable regressions run the actual RealGroup control flow with fake children: corrupt-byte evidence, evidence-read failure and one child-stop failure; all require the original exception and complete cleanup attempts, without claiming a simulated failed stop reaped its child. An additional endpoint-error control/mutant covers the review's non-blocking evidence note.
+
+The sibling native callback now uses the same test-local observer and thirty-second positive budget, retaining its deliberately isolated negative's ten seconds and its original predicates/holds. It emits that callback's actual phase evidence; native execution remains CI-only. The separate real-group minority stays at two seconds. Local final proof is11 tests OK11.742s,8 intended assertion kills with ten portable controls passing, and23 scripted managed-launchd preflight regressions OK. No local launchd fixture or elevated test ran. The superseded candidate's CI cancellation is requested because its source has required findings; it cannot establish readiness even if earlier jobs passed. The corrected source needs a fresh immutable-head review and all-eight CI; no row closes.
+
+### 2026-10-19 16:22 EDT — D267 proof receipt and next source boundary
+
+The corrected owned fixture source36946f55 has Claude67 clear and all-eight successful exact-source run39312416398 attempt1, including actual macOS callback budgets/refusal and order proof. D267 closes only B5-CI-serving-group-settle; the original CI event trigger remains unknown. The next independent source prerequisite is Claude63 pure six-record byte verification with explicit guest-file/protected-writer owner context, preserving path wrappers and semantic checks. Its owned proof and exact-source review/CI precede protected native reader integration. The separate read-only host assessment refreshes B5-macOS-access without granting VM/resource or production authority; all other B5, D250/D251 and B6–B9 holds remain.
+
+### 2026-10-19 16:30 EDT — B5-frozen-byte-owner-context re-orientation
+
+Block1/step1.2 remains pre; D267 closed only the owned fixture gate.
+This unit supplies the Claude63 prerequisite to protected frozen-reader integration.
+The current path reader assumes caller-owned guest files and a module-global protected writer uid.
+B1/D261 permits owned source/tests only; deployment, native mounting and acceptance stay separate.
+This remains the right next source gate; existing source369 has exact all-eight CI and clear review.
+
+Goal: one semantic verifier over six held capture-record byte strings, with explicit guest-file owner and protected-writer uid at the future root boundary. Preserve require_captured/require_committed and verify_frozen_checkpoint/verify_stopped_journal path-wrapper patchpoints and ordering; shared pure helpers retain all existing checks. Thread writer uid through verify_capture_checkpoint, capture_cohort and writer-exclusion comparison; live/path callers pass the current preservation_journal.NATS_ROOT_UID dynamically. Thread guest owner through read_inputs and its directory/file/lock/Finder checks; live Journal calls retain their current uid. New byte APIs require explicit context, reject malformed uid values and perform no capture-path reads.
+
+Section6 deltas: host_guest_commit.py shared byte helpers and pure verification; preservation_journal.py explicit owner arguments plus unchanged live calls; stopped_journal_inputs.py explicit owner reads and byte composition; two existing checkpoint test helpers pass dynamic writer uid; new focused owner-context tests, assertion-mutant runner and CI-only distinct-owner probe; workflow wires portable tests/mutants and Linux/macOS root-owned disposable-tree proof; standard ledgers record the candidate/proof and only its own row may close. Existing window-pin mutation anchors may need mechanical retargeting when a check moves into a shared helper; their designated assertions must remain killing.
+
+Verify: pure calls return the same summary after the capture path is renamed and while file/uid accessors refuse; explicit correct writer uid succeeds even under a different global, wrong uid refuses; guest owner checks cover directory, regular files, locks and Finder metadata, and reject malformed context before reads. CI-only root owns the capture records, reads a fresh uid65534 guest tree through the explicit API, and the unchanged current-owner wrapper refuses that tree. AST-reachable pure calls, focused regressions, relevant existing mutators and all-eight exact-source CI plus Claude adversarial review are mandatory. No local sudo/root probe, production service/VM/timer/image operation or broader root suite. The future protected native reader is not implemented here.
+
+### 2026-10-19 16:48 EDT — Mid-Implementation Findings: shared helper callers
+
+Claude71's review of immutable a74df78c identifies one shared-signature regression: existing current-owner consumers did not supply the new required owner keyword. The direct boot-policy content test reproduces the TypeError. Four boot-policy private_dir calls, the observation-envelope call and its held-job/managed-job re-exports also require explicit current uid. An initial narrow direct-import census missed those re-exports; it is not completeness proof. The first expanded local consumer batch Ran256 with35 errors and2 skips, all at the remaining re-export calls. The correction supplies os.getuid() at all seven current-owner private_dir calls plus the existing direct content test, preserving their prior policy. It adds no new owner choice, admission or recovery behavior.
+
+The expanded corrected consumer batch Ran256 in50.096s, OK with2 platform skips (254 executed). Their existing mutation runners and the complete source review/CI remain required. The rejected candidate run39321357854 is completed/cancelled after confirmed source findings and cannot establish readiness. Core byte APIs, fifteen focused controls/thirteen mutants and the CI-only root owner probe are unchanged; no local root probe runs. These five caller/test files are required dependent deltas within the existing owner-context unit. No prerequisite closes and all D268 holds remain.
+
+### 2026-10-19 17:26 EDT — D270 source proof and next boundary
+
+D270 closes only B5-frozen-byte-owner-context (P) at corrected source679e200b: Claude73 clear, all-eight run39322919247 and real Linux/macOS nine-case distinct-owner tree reports with cleanup. Its full dependency replay covers the D269 shared-helper callers. The next separate owned source unit is protected frozen-reader integration (Q), requiring trusted dependency closure, held descriptors/locks, an anchored root-owned image copy, real semantic verification and a protected receipt with native distinct-owner image/cleanup proof. Q is not implemented here; installation, production capture, B5/1.2, D250/D251 limits and B6–B9 remain held. This receipt changes no executable and does not claim its own future CI/review.
+
+### 2026-10-19 17:39 EDT — D271 protected frozen-reader re-orientation and pre-audit
+
+Block1/step1.2 remains pre; D270 closes only the P byte/owner prerequisite.
+The operator's next go advances only Q's owned protected native reader receipt.
+B1/D261 source authority applies; production entry, installation and B6–B9 stay held.
+The source foundation is P679e200b, Claude73 clear and all-eight CI39322919247.
+D270747da00e has Claude75 clear; its own documentation CI remains a separate observation.
+This is the next source gate; no macOS VM/resource or live window action follows.
+
+Goal: one protected semantic reader receipt over a root-controlled image copy bound to the existing protected anchor and explicit capture, guest-file and protected-writer uids. Refactor anchor snapshot into a held context preserving its existing wrapper. Hold protected-store/anchor and capture directory/record/clone descriptors plus both locks until cleanup and publication. Validate the root-private local dependency closure before importing it, hash and recheck it. Clone only from the held source FD using native fclonefileat with CLONE_NOOWNERCOPY (SDK sys/clonefile.h), require root-owned0600 single-link copy and the anchored hash; no cross-volume/full-copy fallback. Mount only that protected path using existing bounded primitives. Call P on held record bytes and the verified Data mount with explicit owner contexts. Reverify mount, cleanup, copy/source/anchor/runtime before a staged, durable, exclusive protected receipt. Interrupted or failed attempts remain pending and cannot yield a usable receipt or retry automatically.
+
+Section6 deltas: host_capture_anchor.py held snapshot/trusted reader dispatch; new host_protected_journal_reader.py orchestration over existing mount and semantic primitives; focused portable test and designated-mutant runner; CI-only native owned ASIF/distinct-owner probe; workflow wiring; standard ledgers. Existing journal/capture/mount semantic predicates and production refusals remain unchanged. No local root, mount, launchd, production or VM operation. The independent pre-audit is requested before implementation; concrete sequencing or missing-prerequisite findings must settle before source work.
+
+Verify: meaningful real Journal/commitment portable composition with scripted native actions, descriptor and lock continuity through cleanup/publication, source/anchor/copy/mount/context/semantic/receipt refusals and intended mutants. Existing40/40 anchor,15/13 P and checkpoint/stopped-reader/mount regressions must remain green. CI-only actual macOS CoW ASIF and root0/capture-nonroot/guest65534/writer0 proof must execute the real shared verifier, reject wrong owners/writer and corrupt journal or coordinated source rewrite, and retain cleanup/protected-output evidence. Exact-head adversarial review and all-eight CI precede a bounded proof receipt. Installed launch provenance, real B3 origin, four-history restores, D62/D64/D175 and disposable-macOS reboot remain separate.
+
+### D271 pre-audit settled — Claude77, before source implementation
+
+Claude77 finds no external prerequisite or scope error and requires eight implementation constraints. C1 adds one internal file delta: extract the existing capture scope/stopped/fixture-started-sample/Data-UUID predicates from host_journal_mount.capture_inputs into a pure byte helper, retaining their text and using it from both paths; recompute/replay that module's dependent suites and mutators (including dispose/reconcile). C2 passes the single anchor module object into Q, with a no-second-import test. C3 performs all entry/runtime/store/anchor-pending/Q-state/capture-lock/snapshot checks before creating Q's distinct pending directory; exactly one read per nonce, no retry or overwrite after pending/receipt publication.
+
+C4 supersedes the proposed flag repair: refuse any held source st_flags, require a regular root-owned single-link0600 copy on the pending directory device, exact anchored size, zero flags, no ACL and an empty bounded xattr-name list before hashing. Python3.9 Darwin uses descriptor flistxattr through ctypes, not os.listxattr. No attribute repair or copy fallback. Existing retained native reports show empty xattr lists; that is prior observation, not this source's native proof. C5 requires exactly12 source files (anchor, Q and ten dependencies), no extra/cache directory, held source Inputs, stdlib-first sys.path append, exact loaded local set, and fresh source/runtime identity+hash checks before attach and receipt. C6 requires three distinct synthetic uid roles through portable call flow, pairwise-swap and current/global-uid fallback mutants, and a native capture/guest swap refusal; real code permits equality. C7 targets Python3.9 in local parse and macOS CI. C8 retains the18 existing snapshot mutation anchors exactly once, standard-library-only publish/verify and their argv shape; Q has a separate strict-decimal argv shape.
+
+Also implement the small protected receipt reader enforcing the pending fence, scrub subprocess environment for the root action, refuse an attached source and put the Q native step after older macOS probes. Root-owned copy metadata changes caused by attach, source/copy xattrs or root-private attach incompatibility remain refusals, never silent relaxations. Add explicit source/copy metadata/flags/xattr negatives, shared capture-helper dependency regressions, one-anchor-module proof and receipt-readback/pending controls to the existing Verify contract. Q receipts say caller-asserted uids, CI fixture only, no B3/B8 or installed authority. No extra installation or live gate is introduced.
+
+
+### 2026-10-19 18:34 EDT — D272 candidate fixture and receipt-proof correction
+
+CI39334325475 at6009a904 fails Linux22's new suite: CodeClosure uses HOME=/tmp/ci-openclaw-home, so the unchanged Directory policy correctly rejects its world-writable /tmp ancestor. Only the test fixture base changes to the existing GITHUB_WORKSPACE-or-home convention; no production/root directory policy is relaxed. A replay of all eight CodeClosure tests with Path.home modeled as /tmp and the actual workspace selected passes. The same run's native Q step remains in progress and is not readiness evidence yet.
+
+Claude79 independently reproduces this CI failure, confirms all23 dependent suites pass (Ran723,683 executed/40 platform skips) and all18 dependent mutation runners pass in its isolated uid65534 export. It also identifies required receipt-verifier test adequacy: several binding-term removals survive the original40-test suite. Add one table-driven actual receipt/anchor corruption test covering scope, nonce, owner context, anchor hash, file pins, receipt and anchor authority, code hashes, clean cleanup and copy removal. For the anchor-authority case, update the receipt's anchor digest too so the authority term alone decides. Add ten designated term-removal mutants; all must be intended assertion kills with a passing complete baseline. No runtime behavior changes in this correction.
+
+The corrected local baseline now reports41 tests OK and45 intended assertion kills with controls. This narrows the earlier coverage gap; it is not exhaustive failure-path coverage. Independent review of the exact corrected source and its own all-eight CI/native proof remain required before Q can close. D271 and every historical block stay unchanged; B5/1.2, parent acceptance, installed authority and all operational gates stay held.
+
+
+D272 native-budget observation: job118339871983 starts22:21:20 UTC; Q begins22:26:12 after the older probes. Its real intact case completes22:29:48, then wrong guest22:31:46, wrong writer22:33:30, capture/guest swap22:34:19 and corrupt chain22:35:56. The unchanged15-minute job ceiling cancels Q at22:36:34 before its remaining three cases and final driver cleanup report. Only four older reports are uploaded; no Q report exists and no final cleanup or readiness is claimed. Increase only this CI-owned job ceiling to30 minutes, allowing the measured integrated workload and cleanup to finish. Per-command timeouts, negative budgets, all checks and the native probe source remain unchanged. This workflow delta is part of the same owned Q source/test unit.
+
+
+### 2026-10-19 18:40 EDT — D273 complete Claude79 proof corrections
+
+The final Claude79 report adds two details to D272's already-published corrections. R3 includes the protected receipt consumer's runtime recheck, beyond the ten record terms: add a changed-runtime receipt test and a designated removal mutant. R2 also requires progress-report retention after each case, since a whole-job timeout can interrupt the final cleanup block. Add a non-acceptance diagnostic snapshot at initialization, each case start/completion and final cleanup; replace it atomically from a fresh nofollow/exclusive sibling after fsync. Initial output creation stays exclusive, incomplete snapshots say completed=false/cleanup unobserved, and only the final report can record complete cases and measured cleanup. Test this diagnostic writer without root/native operations. No reader/runtime predicate, command/negative timeout or native case changes. The changed probe must receive its own fresh exact-source CI proof; D272's run is superseded before Q proof, not reused as readiness.
+
+
+### 2026-10-19 18:48 EDT — D274 model the existing no-bytecode root flag in the closure fixture
+
+Exact-source run39336819548 at10113c8a fails Linux22 job118348279024 with four CodeClosure errors after imports: the real exact12-entry check correctly sees Python's generated __pycache__. macOS local Python defaults to an external pycache_prefix; Linux defaults to writing beside source. This is a distinct environment condition from D272's /tmp ancestor failure. An unprivileged local replay with sys.pycache_prefix=None and sys.dont_write_bytecode=False reproduces exactly four errors among eight closure tests. Model sys.dont_write_bytecode=True inside only CodeClosure's reversible fixture patches, matching the already-required real -B root CLI; keep the twelve-file/root runtime policy unchanged. Replay the full43/46 with the default cache prefix cleared and bytecode initially enabled, plus /tmp-home/workspace controls. This test-only delta needs its own exact-source review and all-eight CI; no native predicate or probe changes.
+
+
+### 2026-10-19 19:46 EDT — D275 source-proof receipt boundary
+
+The corrected source7e945480 is cleared cumulatively by Claude79/81/83. Run39337630740 completes success at attempt2: only failed Linux22 reruns, the other seven successes carry from attempt1. Actual root/capture/guest native eight-case report and final cleanup are complete and retained. D275 closes only Q and adds the separately observed owned preservation-cluster startup failure as an open finding; a later fresh-job pass proves no cause or repair. The receipt changes only six Markdown files, preserves D271–D274, VERSION and all other gate statuses, and needs its own bounded receipt review. Its future documentation CI is separate; no executable or operational action follows.
+
+
+### 2026-10-19 20:01 EDT — D276 preservation-cluster startup re-orientation and pre-audit
+
+Block1/step1.2 remains pre; D275 closes only Q at7e945480, not parent acceptance.
+The operator's next go advances the separate B5-CI-preservation-cluster-startup finding.
+The failed first create and successful fresh-job retry remain distinct immutable evidence.
+B1 owned source authority applies; no local elevated/native/root suite or production operation.
+The next useful outcome is phase-local evidence of this fixture's unchanged startup boundary.
+Original R3 readiness repair and its natural trigger remain separate, unproved gates.
+
+Needs are present: D275/Claude85, retained raw failed Linux118350995715 and retry118367021558 logs, current test_preservation_cluster.py, NATS2.12.6 and Node/module, random-loopback allocation and owned cleanup. Headc898bfee is clean. D275 receipt CI39343766023 is independently still running (six succeeded, two macOS jobs pending); its completion is not assumed. An independent pre-audit is requested at c898bfee before source implementation.
+
+Goal: diagnose/retain the actual startup-to-first-create boundary without guessing a readiness repair. Keep the existing leader/route/account readiness predicate, its15-second deadline, one stream create per cohort, post-create group/election/QuietWindow assertions and production paths unchanged. Retain bounded, sanitized projections of startup/accepted-ready monitor facts, exact first-create Node stage/API error/connected-member facts, bounded debug peer-selector log windows and measured cleanup. Monitoring is sequential, not an atomic cache snapshot. Retention failures must preserve the primary exception and allow cleanup of every owned child. No raw configs, stores, credentials or entire logs enter CI artifacts.
+
+Section6 proposed deltas: existing test_preservation_cluster.py diagnostic hooks and fresh-cohort fault seam; a small test-local evidence helper if needed; focused portable/actual-owned proof and designated-mutant runner; Linux/macOS workflow test/report wiring; standard six Markdown ledgers. No production readiness helper, NATS source, timeout budget, retry policy, serving-NATS or protected reader changes. A normal and deliberately STATSZ-route-denied fresh cohort each create once and clean up their own processes. The fault can demonstrate only a controlled sufficiency gap, not the original event's cause. Any pre-audit corrections must settle before implementation.
+
+Verify: meaningful portable evidence-shape/failure-path/primary-error/cleanup controls and intended assertions; actual isolated NATS2.12.6 normal and injected-refusal cohorts with one create each and normal cleanup; existing13 group-readiness controls/22 mutants remain green. Independent exact-source review and all-eight CI precede any owned diagnostic-source closure. Original placement repair/natural trigger remains open. No local root, native mount, launchd, production service, VM, timer, image or history operation.
+
+
+D276 investigation before implementation: the unchanged local fixture passes once (Ran1/4.467s), with passed=true and cleanupFailures empty. A separate temporary copy changes only owned debug logging and denies $SYS.SERVER.*.STATSZ on the three owned routes. Its unchanged readiness gate returns, its sole first create refuses at stream-add400/peer offline (Ran1/0.917s), and cleanupFailures remains empty. The meta leader owned-raft-2 logs offline discards for owned-raft-0 and owned-raft-1 plus the exact required3/found1/peers3/result1 summary. This is a controlled counterexample to this Python gate's sufficiency, not the original CI interleaving. Scratch outputs are retained locally at /tmp/openclaw-D276-{baseline,fault}.json; no repository source was edited for these two runs. No unfiltered natural refusal was reproduced.
+
+The pinned official nats-io/nats-server v2.12.6 server/jetstream_cluster.go peer-selection loop (lines7360–7364; fetched source SHA-256 dd80405c2587acdfa43f859cd4c650e7fd210e3ae4ccd6224b663dd58bca9516) discards a node when cfg or stats is nil. Its later online-peer quorum check can also mark an offline placement refusal. The old Python gate observes neither private cache; the failed historical error alone does not distinguish these paths. D239/D240 remain prior controlled evidence, not natural-cause proof. New diagnostics must identify their own sequential observation times and may affect fixture timing; they cannot retrospectively recreate absent startup facts.
+
+
+D276 pre-audit settled — Claude87 trace/Claude89 verdict: proceed within diagnostic scope. Nine constraints are incorporated: preserve the inline gate/predicate15s/.05/503 behavior, one create/5s stream wait and all later assertions; debug only the three owned servers and pin/record2.12.6; bounded selector and verified INFO startup windows; allow-listed Node API/connected identity with non-JSON stderr retained as unparsed; a separate Python schema/helper rather than invented varz facts; exclusive0600/size-capped JSON with credential suppression and primary-error preservation; js/routes initialization and per-owner guarded kill-wait/log cleanup/Popen handle registration; JSON-only always-upload artifacts with source/attempt names; concise live diagnostics. A real fixture fault is introduced only in a scratch copy, never through an environment toggle in the real fixture. The predicate pin and each required portable failure path need designated mutants. Green-path unavailable/suppressed evidence refuses only after cleanup.
+
+Claude89 performed source inspection, not cohort replay; downloaded official dependencies were hash-checked then removed when bounded-scope steering arrived. Its verified source trace identifies route.go:2346's unconditional route-registration overwrite of cached cfg/stats as another unobserved candidate. Append-only correction to D238's speculative heartbeat candidate: routing starts after JetStream, so a pre-JetStream heartbeat cannot reach remote peers over routes; it can affect only the server's own entry. Neither source candidate is the historical CI cause. All original natural-trigger/placement repair and operational gates remain open.
+
+
+D276 final Section6: test_preservation_cluster.py, cluster_startup_evidence.py, test_cluster_startup_evidence.py, mutate_cluster_startup_evidence.py, .github/workflows/test.yml, COMPONENT_REGISTRY/DECISIONS/INVENTORY/RECOVERY_FRONTIER and this step's AUDIT_PRE/AUDIT_POST. No other source delta. The final15 portable/one actual-pair suite passes16/2.921s;22 new designated kills and13/22 existing group proof pass. Only diagnostic artifacts and owned-fixture code consume this result. Exact-source review/CI and its retained reports remain required before this auxiliary row may close; VERSION stays the parent v1.2-pre.
+
+
+### 2026-10-19 20:35 EDT — D277 exact-source review correction re-orientation
+
+Claude91 verifies all nine runtime constraints at6a6904de and independently replays16 tests/22 kills, existing13/22, the real unfiltered fixture and Python3.9 controls. It requires five corrections within the same owned diagnostic outcome: stronger one-create/no-extra-observation/503-return pins; an actual primary-plus-cleanup-failure control and finally-wrapper pin; debug config proof; forced-kill call/flag proof; and owned process-group cleanup when the new pair harness times out. The last is a demonstrated real harness hole: killing only its Python parent leaves three owned NATS children. The reviewer terminates those children and retains no production claim. This re-orientation changes no gate policy, source scope, production or acceptance boundary. The candidate's in-flight run39347338288 is requested cancelled after the required findings; its completed Linux diagnostics remain observations of that superseded source, not corrected readiness. D276 history stays intact. D277 is a source/proof correction, not a closure receipt.
+
+The pair driver will create an owned session, TERM then bounded KILL its entire group on timeout, record group/parent cleanup separately from normal per-server evidence, and refuse. A real tiny owned parent/child timeout control and scripted escalation control will prove that boundary without root, NATS/prod ports or launchd. Proof corrections also restore allow-listed last timeout samples, decouple503 policy parsing from the recorder and test file mode under022. Route-close lines remain unretained and explicit as a diagnostic limit. No original natural trigger is established; all B5/1.2/B6–B9 and operator access/reboot holds remain.
+
+
+D277 local correction proof:19 tests/5.373s,34 intended kills with18 controls; the tiny parent/child and the separate scratch NATS hang both leave their owned group absent and their Python parent waited. The NATS hang yields three shutdown markers and no individually waited server exit-code claim. The ordinary pair keeps six individually waited exit0 owners and one create each. Workflow, group-readiness function and all original predicates stay fixed. Corrected source review/CI remain required; no source/parent gate closes.
+
+
+### 2026-10-19 20:52 EDT — D278 bounded C1–C3 proof correction
+
+Claude93 clears R2/R3/R4 and confirms R5 on real NATS plus a real TERM-ignoring parent/child escalation;19/34 and the older13/22 pass as uid65534 on Python3.12, with3.9 controls/34 also passing. Runtime behavior is correct. It requires a continuous startup-to-create pin (three neighbouring sleep/query mutants), the full503 branch starting at result.returncode/startup (one forced-parsed-error mutant), and a TERM-ignoring real parent/child control that kills an always-true group-absence mutant. This is bounded proof correction within the same diagnostic unit, not another readiness change. The raw503 refusal record will also use the existing projection. Prior D277's tree removal was the local scratch experiment's own cleanup; the shipped timeout driver retains its diagnostic tree. Group absence includes zombies and depends on host init reaping; an unobserved absence remains false, never accepted as normal cleanup. D276/D277 stay intact, B5/1.2 stays pre and every operational gate remains held. Run39349290479 is requested cancelled after these required proof findings and remains superseded source, not corrected readiness.
+
+
+### 2026-10-19 22:20 EDT — D279 diagnostic source evidence receipt
+
+Only B5-CI-preservation-cluster-startup closes on d63eb330/Claude95 and all-eight CI39350641642 attempt2, with six original successes carried and exactly one replay of both failed jobs. D279 retains the first TIMEOUT and natural peer-offline reports without a cause or repair claim, corrects the pre-audit INFO-window limitation and tracks separate bounded post-failure evidence work. This is a six-Markdown receipt; no executable or VERSION change, production operation or broader gate closure. Its own review and CI are not preclaimed.
+
+
+### 2026-10-19 22:30 EDT — D280 first-create failure evidence pre-audit
+
+§0 Micro re-orient: parent1.2 remains[A]/v1.2-pre; only the D279 diagnostic prerequisite is closed.
+Claude99 clears a35312c6's receipt; its CI39358395455 is still running, not inherited proof for this unit.
+This unit retains missing phase-local facts for later owned CI startup cause analysis.
+It serves recoverable histories; neither historical R3 nor the two new natural causes are established.
+The D279 follow-up contract remains the correct next owned source unit; all operational gates stay held.
+
+Needs pre-screen: D279's retained Linux/macOS failed and successful artifacts and raw logs are present locally and in CI; the current helper/fixture/proof files exist; fresh unprivileged NATS2.12.6 and the Node nats dependency are available. Official v2.12.6 resolves to0e0639058e0d2d8fce0cc34941f9897da152ab32. Downloaded server/jetstream_cluster.go is327946 bytes/SHA-256dd80405c2587acdfa43f859cd4c650e7fd210e3ae4ccd6224b663dd58bca9516; line4315 emits the stream-leader Noticef, and7021/7033/7035 emit the existing metadata-leader messages. The existing verified route-created INFO site remains in the allow-list.
+
+Design: keep startup filtering fixed, but let the bounded create window retain its existing peer-selector lines plus the verified INFO route-created/metadata-leader messages and the stream-leader prefix. On an exception from the single create window, first finish its log window, then take exactly one existing2-second http_json('/jsz') call per member before owned cleanup. Retain each sequential request's start/end times and allow-listed identity/now/meta/stream-count facts; unavailable facts remain unknown. A failed member observation cannot skip another member or replace the identical primary exception. No post-failure request runs on success. The JSON schema remains additive, private/exclusive/credential-suppressed/size-capped; include the projected post-failure rows in the concise log summary so blob-inaccessible reviewers can inspect them.
+
+§6 deltas: cluster_startup_evidence.py, test_preservation_cluster.py, test_cluster_startup_evidence.py and mutate_cluster_startup_evidence.py; six standard Markdown ledgers. Workflow wiring stays fixed. Add designated INFO-level/filter/offset controls and mutants; scripted actual-fixture create-failure controls must prove three one-shot reads after the create window and before all owner cleanup, per-member read refusal, original exception identity and zero reads on success. The normal/denied owned pair must prove INFO retention, failure-only projections, one create each and six normal exits. Update only the intentional wrapper part of the continuous source boundary pin; retain the original readiness loop,503 branch, client body, budgets and later election assertions. Existing mutation controls remain required.
+
+Risks/limits: up to6 seconds of sequential post-failure monitoring delays cleanup, but changes no pre-create timing or request retry. Monitor replies are later sequential facts, not private-cache or exact-failure snapshots; stream counts do not prove request delivery or acknowledgement. INFO/diagnostics can affect timing. A natural refusal need not recur in this unit. Independent exact-source review, fresh Linux/macOS owned reports and all-eight CI remain required before this auxiliary row can close. No local elevation, launchd/native-image/full-root suite, production, VM or serving-NATS operation is authorized.
+
+
+D280 local proof:24 tests/12.749s,50 designated intended kills/23 controls, fresh normal+denied pair with one create each and six individually waited exit0/marker/no-force owners. Normal retains stream-leader INFO; denied retains three observed post-failure jsz projections after the create window, streams0/consumers0. Every bounded window is complete. Existing startup/503/client/later assertion/workflow source remains fixed except the intentional try wrapper and diagnostic additions. The first mutator run stopped because the missing-hook mutant hit the earlier one-request assertion; correcting its expected label yields50/50. Exact-source review and fresh CI are required; no gate closes.
+
+
+### 2026-10-19 22:43 EDT — D281 append-only timeout qualification
+
+Claude101 clears D280 source/proof and requires only a timing-wording correction. The earlier “existing2-second jsz request” and “up to6 seconds” do not specify whole-request or total elapsed limits: urllib timeout=2 applies per socket operation. Continued progress can extend one request and the pre-cleanup diagnostic delay beyond that nominal sum; the reviewer demonstrated4.54s on one valid slow loopback reply. D281 withdraws the hard-time reading in all five ledgers and this pre-audit without rewriting history. Request count/retained bytes stay bounded, but no end-to-end elapsed deadline is added or proved. Source/workflow are unchanged. Corrected-head documentation review and all-eight CI remain required; the row remains[A] and every production/parent gate stays held.
+
+
+### 2026-10-19 23:25 EDT — D282 first-create failure evidence receipt
+
+Only the owned timeout-evidence source prerequisite closes on24d32299, cumulative Claude101/103 and all-eight CI39360542036. Retained Linux/macOS JSON verifies failure-only post-create samples, INFO selection, one create per cohort and normal owned cleanup. Per-socket timeout semantics supersede the earlier D280 elapsed-time wording; no whole-request or total elapsed bound is added or proved. All original and newly observed natural causes and every broader recovery/resource gate remain open at v1.2-pre. This is six Markdown files only, with no executable change and no preclaim of its own review or CI.
+
+
+### 2026-10-19 23:43 EDT — D283 extraction source-pointer reconciliation
+
+§0 Micro re-orient: step1.2 and protected acceptance remain[A]/v1.2-pre; B6–B9 held.
+D282 is reviewed clear by Claude105; its own CI39364237022 is still incomplete.
+Claude107 traces the existing extraction callers at exacte115f84b and finds no missing consumer.
+The open extraction pointer conflates delivered owned source with real-window provenance.
+Reconcile that pointer without selecting optional coverage or another diagnostic as B5 progress.
+Every operational, resource, acceptance and unresolved-cause gate remains separate.
+
+Needs pre-screen: D191/D205/D259/P/Q sources and native workflow consumers exist. Current executable/workflow/VERSION bytes equal24d32299, whose39360542036 run is independently re-read as all-eight success at attempt1. Claude107 traces stopped_journal_inputs.read_inputs/verify_stopped_journal and Q's verify_stopped_bytes consumer, the native intact/corrupt/pending/unknown/changed-config controls and the current workflow. This is prior owned source proof, not B3 origin, installed authority or B8 acceptance. No BLOCKED.md is present in this silo.
+
+§6 deltas: six Markdown ledgers only. Reconcile the current extraction row and its Goal/Needs/Feeds/Verify wording as owned source satisfied; retain protected B3 and real-window requirements under B3/protected acceptance. Change only the B5 frontier owner pointer, then append the same D283 explanation to the five standard ledgers. Prior decision/evidence blocks, every other status, VERSION and all executables/workflow stay fixed. Do not declare all remaining integration code complete: full held/process integration, durable admission/manual restoration and D175 remain separately open and need their own bounded contract and physical proof. T3 and conditional measurement work remain open carry-forwards, not the next required recovery prerequisite.
+
+Verify: plan lint, exact allowed-diff/history-prefix/row/frontier-cell checks and independent immutable documentation review. The original R3 repair/natural trigger and later TIMEOUT/peer-offline causes stay unproved. No source test, elevation, root suite, local native image, launchd, VM, production service, timer or NATS history operation is needed or authorized by this reconciliation. Its own future review/CI is not preclaimed.
+
+
+### 2026-10-19 23:53 EDT — D284 macOS VM capacity proposal pre-audit
+
+§0 Micro re-orient: B5/1.2 and protected acceptance stay[A]/v1.2-pre; B6–B9 held.
+D283 reconciles owned extraction source; Claude109 clears its immutable documentation.
+The next operator go selects preparation of the recommended resource proposal, not provisioning.
+Read-only host metadata and official installer metadata now feed that proposal.
+No production service/VM/image, installer download, cleanup or installed authority is released.
+This outcome is a planning artifact; resource admission and physical rehearsal remain open.
+
+Needs pre-screen: D267's dated access assessment exists, and the existing keyed host-shell identity is verified against the same production bundle/image holder. Current host13.984–13.985GiB available is below the20GiB capture floor; only production macOS and the Alpine bundle are observed. Current memory queries and two unchanged-image/holder observations are retained. Apple's official IPSW catalog is fetched as99,450 bytes and its one VirtualMac2,1 restore candidate receives HTTP HEAD200/26,637,307,067 advertised bytes, without an installer body. That candidate is27.0.1/26A434 while this host is26.6.2/25G83; host API support, minimum requirements and rehearsal-version fidelity remain unverified. No compiler, catalog-helper installation or native image operation is needed.
+
+§6 deltas: the proposal HOST_MACOS_RESOURCE_PROPOSAL_20261019.md and normalized HOST_MACOS_RESOURCE_EVIDENCE_20261019.json in this audit directory; six standard Markdown ledgers. Add one planning-only auxiliary row/contract and update only the B5 owner pointer/resource warning. Existing20GiB capture reserve, all existing statuses, VERSION, executables/workflow and all old decision/evidence blocks stay fixed. A proposed256GiB external/separate-host workspace budgets three64GiB images,32GiB installer ceiling,8GiB fixture/evidence and24GiB reserve; candidate guest ceiling8GiB/2vCPU requires actual selected-image support/minimum validation. These are proposed caps, not observed requirements or permission. Prefer a separately designated Mac; no current on-host memory or storage admission is claimed.
+
+Verify: document arithmetic, normalized evidence and SHA/byte bindings, scope/history/status/frontier-cell checks, plan lint and independent immutable review. A planning-only close does not close B5-macOS-access, prove a production growth bound or sufficient memory reserve, approve an OS-version substitution, select capacity, authorize installation/download/start/reboot, or replace D62/B3/B6 gates. The prior CI outcomes are checked separately and not inherited as this document's own CI. No source tests or root suite are required for this document-only outcome.
+
+
+D284 pre-publication review/re-orient: Claude111 verifies supplied arithmetic and requires a complete image-object census, exact unprivileged/APFS available-space semantics, the full current-host proposal gap, a guest-derived rehearsal version and an explicit production-fidelity exclusion. Source inspection of3bc29dbd does not confirm its suggested fourth image: host_capture_anchor.held_snapshot/snapshot return digest/size metadata and publish writes JSON only; no anchored image file is created. The current capture, anchor, Q, extraction, disposal and reconciliation paths are enumerated and their six source hashes retained. Three image-sized files exist in that bounded path; future unimplemented/overlapping/failed-attempt objects are excluded until separately budgeted. No source changed for this investigation.
+
+The initial256GiB draft is superseded by320GiB for two installer staging slots and a larger workspace contingency:192+64+8+56. This is not a fourth-image charge. The8GiB/2vCPU/64GiB ceilings remain conditional. Use f_bavail*f_frsize on the intended owner's exact APFS volume immediately before use; no added purgeable/snapshot estimates, and no same-pool/system-volume reserve claim. The current host is306.016GiB below320 before extra workload reserve, distinct from its6.016GiB capture-floor shortfall. The cause of19.513GiB net free-space loss and future growth/headroom remain unresolved. Fresh local guest metadata is26.2/25C56/VirtualMac2,1; the host is26.6.2/25G83. No26.2 restore source is identified; the27.0.1 HTTP metadata result is not compatible-image or fidelity proof. A64GiB synthetic image cannot fund or model the roughly197GiB production pipeline. These corrections remain one planning outcome; no new source, cleanup, host operation or provisioning scope follows.
+
+
+Claude113 independently traces current source and withdraws Message111's suggested fourth-image finding: only capture clone_only and Q clone_fd create images; the anchor is JSON metadata. Its seven hashes match the candidate's retained pins. C1/C2 are incorporated before publication: all three images, capture and protected reader root share one APFS filesystem; with D261's proposed path, the preferred capacity is the designated Mac's internal Data volume. An external disk is not a drop-in path change. Q failure may retain the third budgeted copy and pending evidence; no new/overlapping attempt or automatic cleanup/retry is proposed. The8GiB store/extraction/restore allowance is expressly unmeasured. Draft arithmetic/scope are sound; host/guest/catalog observations remain Codex's, not independent host verification. Immutable artifact/ledger review is still required.
+
+
+### 2026-10-20 00:15 EDT — D285 bounded host storage assessment contract
+
+The next operator go continues the resource investigation with read-only host metadata. The unit measures the shared APFS pool, swap allocation/timestamps, snapshot metadata and selected directory allocations; it does not admit resources or authorize cleanup, elevation, VM/service operations, installation or rehearsal. The file delta is two assessment/evidence artifacts plus this pre-audit and matching D285 appendices in COMPONENT_REGISTRY, DECISIONS, INVENTORY, RECOVERY_FRONTIER and AUDIT_POST. One new auxiliary inventory row records completion of the bounded assessment only. Existing statuses, current frontier cells, old blocks, VERSION and all executable/workflow bytes stay fixed. Verification will recompute derived figures, check retained metadata and production identity/status/holder guards, check append-only boundaries and run plan lint. Historical free-space samples lack matching per-file and per-volume allocation baselines, so the net loss cannot be attributed from current totals alone. Broader scans, denied paths and cleanup are not silently escalated.
+
+
+### 2026-10-20 00:24 EDT — D286 current-host cleanup proposal contract
+
+The continued operator go is taken as authorization to prepare a reviewable current-host cleanup proposal, since no separate Mac was named; it is not approval to delete, clear caches, quit applications or operate production. The unit uses bounded size, installer identity, app-version/help and filtered executable metadata to classify exact candidates and distinguish reported allocation from reclaim. Deliver two proposal/evidence artifacts and this pre-audit plus matching D286 appendices in the five ledgers. Add only a planning-artifact inventory row/contract; preserve all old statuses, frontier cells, prior blocks, VERSION and executable/workflow bytes. Verify arithmetic, object/path identities, production guards, vendor-method provenance and append-only boundaries, then plan lint and independent immutable review. The output feeds a specific future cleanup decision, not resource admission. Do not widen into whole-home scans, private contents, active history pruning, a cleanup helper, actual clearing, app interruption or rehearsal.
+
+
+### 2026-10-20 00:34 EDT — D287 approved two-folder intermediate cleanup contract
+
+The operator answers go to the explicit approval request naming only arcane-semantic-dd/Build/Intermediates.noindex and Unity-iPhone-btlavqxzwobadbdkojemuxzotpjm/Build/Intermediates.noindex under the physical host's Xcode DerivedData. This authorizes removal of those two generated-intermediate trees only, with recompilation cost acknowledged. It does not approve the D286 table, whole DerivedData, finished builds, SourcePackages, logs, project/source files, installers, uv/Spotify cleanup, app interruption or any VM/service/provisioning operation. The read-only precursor maps both outputs to existing ArcaneRapture workspaces and Unity/Pods project configs, pins target/parent/sibling identities and config hashes, and observes no open files/relevant build process. No rebuild was run or guaranteed.
+
+Refresh those exact identities/types/owners, workspace/project configuration hashes, retained siblings, bounded open-file/process observations and production state immediately before deletion; refuse on a mismatch, consumer or incomplete observation. Remove only the two approved paths without elevation, permission changes, symlink traversal or forced app/tool termination. Record any partial failure and stop rather than widen or force. Verify target absence, retained products/packages/logs and project/config identities/hashes, production UUID/status/image identity/holder/allocation, and actual Data-volume f_bavail before/after. Allocation/accounting totals are not a reclaim promise; active-host availability deltas include concurrent activity. This can restore the capture floor only if observed; it cannot admit the320GiB rehearsal or resolve memory/installer/authority/parent gates.
+
+File delta: actual cleanup report/evidence artifacts, this pre-audit, matching D287 appendices in COMPONENT_REGISTRY/DECISIONS/INVENTORY/RECOVERY_FRONTIER/AUDIT_POST and one dedicated inventory row/contract. Preserve old statuses, current frontier cells, old blocks, VERSION and executable/workflow bytes. Verify retained evidence/arithmetic/append-only boundaries, plan lint and independent immutable review. No new cleanup helper is shipped and no local root suite or native rehearsal runs.
+
+
+### 2026-10-20 00:47 EDT — D288 qualify D287 consumer-check recording gap
+
+Claude121 finds one required receipt correction at9fc51867: the durable runtime JSON has no historical filtered process sample and its holder results omit invocation/recursion/timeout parameters. The successful one-off script's asserted checks are Codex-reported execution details, not independently inspectable consumer-absence proof in that JSON. Correct the result text and evidence limits, preserving all runtime result values, arithmetic and recorded target/retained/production facts. Explicitly say that the raw process sample was never persisted; do not imply it can be recovered from the temporary script. Holder parameters are only in the hash-bound temporary script, with no retention guarantee. No current probe can supply the missing historical observation; repeat neither cleanup nor a substitute observation.
+
+The delta is the two existing D287 result/evidence artifacts plus this pre-audit and identical D288 appendices in the five ledgers. Preserve every existing status/contract/frontier cell, old D287/earlier block, VERSION, executable and workflow. No host operation, source change, new cleanup or new auxiliary closure. Verify old/new runtime JSON equality, derived arithmetic, artifact hashes, history/status/cell boundaries and plan lint, then exact corrected-head document review. The actual two-folder result remains complete; the receipt's unsupported recording claims are what this fixes.
+
+
+### 2026-10-20 02:59 EDT — D289 approved release and held import source contract (refreshed)
+
+Micro re-orient: Recovery1.2 remains[A]/v1.2-pre, B5-protected-acceptance-root in flight.
+D288 qualified cleanup evidence; its unchanged source baseline794ad739 has all-eight own CI.
+Claude135 clears the cumulative launch DESIGN contract, not source/host/artifact approval.
+This unit makes one independently selected release supply every protected action's source bytes.
+It feeds later installed trusted launch, not production enablement or B8/D62 admission.
+The operator's continued go and D168/D261 authorize this owned source/test unit; no elevation.
+
+Needs pre-screen: existing anchor/Q implementation and tests/probes, explicit common-entry drift-check contract, local design v6 (27619bytes/SHA256512d2f72ce4353d9380c6faef5359a775fd739a8afc9f258129efcab337e942c), Claude135's design-only verdict and a clean794ad739 worktree all exist. Installed authority, actual release approval and host/runtime profiles do not exist and are not needed to exercise fixture approval values. Source approval must later come from the independent reviewer's recomputation from immutable source, not an author-only digest.
+
+Design: publish/verify/read/receipt all require a separate expected canonical manifest digest. A shared whole-action context opens/holds the root-controlled manifest outside the exact twelve-source directory, verifies strict schema/size/hash entries and retains exact source snapshots/descriptors. The existing reader_code consumes that context, serving eleven names including transitive imports from approved bytes only; the running anchor is compared for drift but is nonimportable and passed explicitly to Q. Refuse preloaded canonical names, pathname fallback, changed descriptor/path mappings, wrong loaded object/origin and unapproved/stale releases before action effects. Preserve existing runtime/origin, CI, uid, path and fixture-UUID refusals. The comparer detects drift/misinvocation; it cannot authenticate its own already-running code.
+
+§6 file deltas: host_capture_anchor.py; new test_host_approved_release.py and mutate_host_approved_release.py; existing test_host_capture_anchor.py/test_host_protected_journal_reader.py and mutate_host_protected_journal_reader.py for changed API/relocated loader proof; probe_host_capture_anchor.py/probe_host_protected_journal_reader.py for the actual twelve-file CI command/manifest contract; .github/workflows/test.yml for both unprivileged proof paths; this pre-audit, immutable design snapshot PROTECTED_ACCEPTANCE_LAUNCH_DESIGN_20261020.txt, and D289 appendices in the five standard ledgers. Add only a dedicated auxiliary source row/contract and prepend its current next-action pointer to the B5 owner cell, retaining every existing requirement. Parent1.2/protected-acceptance statuses and VERSION remain pre; no earlier blocks or evidence are rewritten. No new runtime loader tree, production adapter, installer, identity adapter, root assessment, policy/challenge, disposer or B8 handoff is included.
+
+Verify: fresh-process owned honest selection, independently expected digest refusals, coordinated code+manifest rewrite, exact/noncanonical/schema/type/size/module-set negatives, entry-to-reader/hash-to-exec/transitive swaps, preloaded/anchor-import/object/finder refusals, and designated common/per-action/held/import mutants that die at intended assertions. Existing anchor and Q semantics remain covered after updating their fixture API. Run bounded unprivileged dependent tests/plan lint, exact-source Claude adversarial review and all-eight exact-head CI. Native/distinct-owner tests run only on fresh disposable CI; never a local elevated/full-root suite or live bus. Do not claim source readiness before review/CI or physical/installed/runtime authority from fixtures. B5/1.2 and protected acceptance stay[A]/v1.2-pre; B6–B9 held, D64/Gate unchanged, production capture disabled. Disposable macOS access/resource/installer/reserve, live B3/provenance, integration/admission/manual/D175 and original incidents/causes remain open.
+
+
+### 2026-10-20 03:55 EDT — D290 source-proof receipt contract
+
+Record actual completion of D289's immutable source6b30fbccec45600f5a9916725aa52a79b80e8498: Claude137 has no required findings, independently recomputes the1440-byte release manifest and reproduces95 tests/104 designated kills; exact CI39384331263 has completed all eight fresh jobs at attempt1. The downloaded Linux/native reports pass archive/report hash, source-binding, owner/case/completion/cleanup checks; the CI merge whole tree equals the reviewed source. No source, test, probe, workflow, VERSION, earlier block or parent status changes are needed.
+
+§6 delta is this pre-audit, identical D290 appends in DECISIONS/COMPONENT_REGISTRY/INVENTORY/RECOVERY_FRONTIER/AUDIT_POST, closing only B5-approved-release-source and replacing only its current B5 owner prefix. Keep all existing requirements as the suffix and all other statuses/contracts/cells unchanged. Verify source/whole-tree equality to the parent, exact ledger suffix equality and row/cell boundaries, artifact/log bindings and plan lint, then independent immutable receipt review. This receipt does not preclaim its own CI/review. No tests, host probe, native resource, installation, cleanup or other operation is repeated for documentation.
+
+Claude137's non-required observations are retained without widening this unit: no designated running-anchor-drift comparison fixture/mutant; no portable CI real-trusted-runtime-over-held-modules case (the independent ownership-confined harness and native Q do exercise it); fd-number reuse limits the closure assertion. No exhaustive coverage is claimed. Installer/Stage0, runtime/identity, actual protected approval/host assessment/access/installation, policy/challenge, B8/disposal and native reboot gates remain separate and open.
+
+
+### 2026-10-20 04:54 EDT — D291 bounded approved-release publication source contract
+
+Micro re-orient: Recovery1.2 and protected acceptance stay[A]/v1.2-pre.
+D290 closes only approved-release comparison source at6b30fbcc; receipt ee08a2f9 is clear/all-eight green.
+This unit publishes one exactly approved inert reader closure into an owned protected CI fixture.
+It feeds the later independently authenticated Stage0/installer launch, never installs on the host.
+D168/D261 and the operator's continued go authorize owned source/tests only.
+Bootstrap/runtime approval, operator identity, actual installation and all production gates stay open.
+
+Needs pre-screen: clean ee08a2f9, the D289 strict twelve-file manifest schema and existing anchor consumer, Claude135 launch-design contract, Claude137/139 clear reviews, existing disposable Linux/macOS root-fixture workflow and current all-eight CI exist. There is no existing release publisher/installer implementation in this path. No actual host/runtime/profile approval is assumed. The new publication core is a separate installer artifact outside the twelve reader sources; it imports no application payload. It is not Stage0 or a production launcher. Independent exact-source review must recompute its artifact binding; fixture digests are not operator approval.
+
+Selected atomic outcome: publish an approved release bundle once, exclusively, from inert payload bytes. Split Stage0 authentication/runtime verification into the next separate source contract rather than combining independently testable outcomes. A future authenticated installer must reach this same publication core; no second reader or source loader is introduced.
+
+Inputs: explicit independently expected openclaw-approved-reader-v1 manifest digest, protected manifest file outside payload, capture uid and a pre-existing private destination parent. The trusted caller/runtime is a prerequisite, not authenticated by the publisher. Source payload may be capture-owned mutable data, never imported/executed. Canonical schema, exact twelve names, strict sizes (positive int, max2MiB each), lowercase SHA256 and raw manifest hash are checked before staging. Open with held directory-relative NOFOLLOW/NONBLOCK descriptors, reject links/nonregular/hardlinks/flags/xattrs/granting ACLs, and bound enumeration to thirteen entries. Hold source/manifest/ancestor mappings; snapshot bytes once and require hash/size equality with the independent manifest. Recheck source identity/content and exact name set before publication; accepted destination bytes must be the approved snapshots, not a later pathname read.
+
+Destination: private parent/programs supplied as an already-created fixture directory, root0700; published bundle name is the manifest digest, containing src/ (exact twelve0600 files) and release.json outside src. Stage slot is .pending-<digest>, created exclusively0700. Existing pending or final names refuse, with no retry, fallback/current symlink, overwrite or automatic deletion. All executable ancestors must be root-owned, non-granting and not group/world writable; every path mapping remains held. New nodes are checked for owner/mode/flags/xattrs/ACL before payload bytes; all files are synced, independently reread/hashed, directories synced, then one directory-relative RENAME_EXCL on Darwin / RENAME_NOREPLACE on Linux publishes without replacement and its parent is synced. Unsupported exclusive rename refuses, never falls back to replacing rename. Reopen and verify the final protected tree and descriptor mappings before returning a bounded success receipt.
+
+Failures retain bounded staging (at most24MiB payload plus a bounded manifest per independently selected release) for separately attended reconciliation. Exceptions never return a success receipt. A fault after rename can leave a published name with uncertain durability; record that limitation, retain denial and do not retry, infer success, auto-clean or run the bundle. The later bootstrap consumer must require separately verified publication/admission rather than treating a digest-shaped directory as authority. No claim of power-loss recovery or exclusion of a trusted root updater is made. Source-reading deadline checks are cooperative between bounded regular-file reads, not a hard kernel I/O deadline; disposable proof process has an external timeout and reports interruption/retention. Stage0's own hard source/type/time contract remains unimplemented.
+
+§6 deltas: new host_release_publish.py (self-contained standard-library publication core/CI-only entry), test_host_release_publish.py, mutate_host_release_publish.py and probe_host_release_publish.py; .github/workflows/test.yml only to run those owned tests/designated mutations and a fresh distinct-owner Linux/macOS proof with retained report; this pre-audit, a dedicated B5-release-publication-source row/contract, current B5 owner pointer and identical D291 ledger appendices. Existing twelve reader sources, their tests/probes, earlier blocks and all parent statuses/VERSION stay unchanged. No Stage0 artifact, actual installer startup/production entry, identity/runtime adapter, privileged host assessment, policy/challenge, B8 handoff, disposer, service/VM/image/timer or live bus change.
+
+Verify: unprivileged owned honest exact-byte publication, no payload execution, canonical/approval/set/type/size/link/ACL/flag negatives; source/path/hash-to-copy races; destination/ancestor/staging races; short-write/byte-drift/fsync/fault-before-and-after-rename refusals with retained bounded residue; same-release concurrency and actual exclusive rename against empty/nonempty/link targets. Designated mutants must die at intended assertions with honest controls. Fresh disposable CI proves root/capture ownership and access denial, exact twelve-file approved_release consumer compatibility, actual kernel exclusivity, interruption/retention and cleanup of only enumerated owned fixture roots by the probe (not publisher auto-cleanup). Run bounded local unprivileged tests/plan lint, independent exact-source Claude review and all-eight fresh exact-head CI; no source-readiness claim before them. No local elevation/full-root/live-bus suite. Parent B5/1.2 and protected acceptance stay[A]/v1.2-pre, B6–B9 held, D64/Gate unchanged and production capture disabled.
+
+
+D291 pre-audit corrections — Claude141 identifies five precision/scope requirements, all incorporated before source. (P1) Sync means os.fsync(2) ordering on both platforms; Darwin F_FULLFSYNC is NOT used and no stable-storage/power-loss promise follows. Success receipt is bounded canonical JSON on stdout ONLY, outside the bundle; include release digest, final directory/file identities/size/hashes, actual exclusive-rename API/flag and fsync-only semantics. It is observation for future admission, never admission. (P2) Failed same-digest attempts stay permanently fenced in that parent until a separately reviewed exact-identity release-publication reconciliation contract exists. That contract is OPEN and not supplied here; absent it there is no recovery in that parent. A different destination parent would itself need separate review/authorization, not an automatic retry. CI removal is fixture-only. (P3) The publisher belongs to the future Stage0-verified installer set, under the independently approved installer-manifest release constant, never just the reader digest. Real use must load only its protected verified copy, never the checkout. CI uses a fixture-hash-checked protected copy to prove the mechanism, not production bootstrap authentication. (P4) capture_uid is strictly nonzero and distinct from publisher uid0, identifying the principal denied destination access. A separate explicit payload_uid defines input metadata allow-set {0,payload_uid}; it may be capture, administrator or root. That data policy is not operator authentication; byte integrity rests only on independent hashes. Destination denies capture by root0700/0600, no granting ACL and protected ancestors, plus actual unprivileged denial tests. (P5) Honest payload code would write a BAD marker if executed; assert no marker and kill a designated execution mutant. A swap after snapshot but before copying must leave only original approved snapshot bytes in retained staging, even though final source-drift verification refuses; a later-pathname-copy mutant dies at that assertion. Inputs deliberately require xattr-free regular data, potentially stricter than a real checkout; no xattrs are removed automatically. Same-release contention uses the fixed exclusive pending name, not an added lock. Linux uses the libc renameat2 wrapper, no raw syscall/fallback. Schema/name equality gets a compatibility check.
+
+
+Claude143 clears all five D291 amendments at design-contract level only. The implementation uses a descriptor-based Darwin flistxattr size observation because system Python3.9 exposes no os.listxattr on Darwin; unknown status refuses. Nonprivate root-controlled system ancestors may carry restrictive system flags (this guest's / and /Users report SF_RESTRICTED); their flags are pinned and rechecked, while private leaves and all files must have zero flags. These are platform details of the declared metadata predicate, not relaxed payload byte approval or new host admission. CI uses an outer root fixture driver with an owned process group, bounded wait/TERM/KILL/reap and group-absence observations. Unresolved workers retain their fixture instead of being deleted under a running process. A real unprivileged stopped-worker control verifies that driver; no local sudo or native/root probe is run.
+
+
+### 2026-10-20 05:24 EDT — D292 publication fixture-parent correction contract
+
+Run39399768267 Linux22 job118551278903 fails the new33-test harness at09:22:09UTC before the mutator/native publisher probe. Directory-shape refusals occur before staging. The workflow deliberately exports HOME=/tmp/ci-openclaw-home, while the new tests choose Path.home(); the common /tmp ancestor is writable. The publisher's refusal is correct. Existing approved-release fixtures choose GITHUB_WORKSPACE instead. No production or native-host observation is inferred.
+
+§6 deltas: only test_host_release_publish.py uses GITHUB_WORKSPACE when present (otherwise the unprivileged local home) for its private fixtures, and adds a real subprocess honest-publication regression with deliberately writable HOME ancestors and a separate protected workspace. Do not relax root/ancestor permissions or any publisher/source predicate. Record this failure and correction in the six plan docs, retaining D291 and all statuses/VERSION/history. Focused controls/designated mutants must pass, then exact corrected-head Claude review and all-eight fresh CI/native reports remain required. This is a proof-harness correction within the same publication outcome, not a second recovery action or gate closure.
+
+
+Claude145 independently recomputes all four f3a5d324 artifact bindings, reproduces33 tests/32 designated kills as uid65534 on a clean export/Python3.12, and finds no publication-logic defect. It requires S1/S2 claim corrections: qualify both the retained report and D291's claim about capture denial as PRIVATE-FIXTURE-ANCESTOR denial, not observed independent leaf/bundle denial; bundle owner/mode/ACL protections are metadata-checked. Keep the existing private fixture layout/CLI and qualify the report instead of adding another installation layout. State that a capture-writable payload permits its owner to force a same-release denial/fence before OR after rename despite intact approved output bytes; no availability guarantee follows. Carry the residual into B6, with actual use requiring prepared payload/ancestors outside capture write authority. Add only that clause to B6's evidence cell, preserving its prior text, all statuses and other gates. A publisher source change is not required or made. These report/limit corrections and the CI fixture-location regression remain one publication-proof correction; all optional coverage remains qualified rather than expanded.
+
+
+### 2026-10-20 06:24 EDT — D293 publication source-proof receipt contract
+
+Micro re-orient: recovery1.2/protected acceptance stay[A]/v1.2-pre; one publication source gate is being verified.
+D291 supplies the core; D292 qualifies S1/S2 and fixes CI's redirected-HOME fixture selection.
+Claude147 clears exact6d1a7535; own run39401186252 now completes all8 fresh jobs successfully at attempt1.
+Both downloaded publication reports match approved source bindings and complete their declared cases/worker/fixture accounting.
+This documentation closes only the owned publication source prerequisite and feeds later authenticated Stage0/installer work.
+No host installation, production operation or parent recovery acceptance follows.
+
+Needs pre-screen: clean/pushed6d1a753568be11b0d771e0148926ea2979d234d2, cumulative Claude145/147 source review, run39401186252 completed success/all8 fresh attempt1, source/CI merge whole-tree equality, actual Linux/macOS artifact/report hashes and complete worker/fixture observations all exist and are checked. Linux/macOS legacy logs contain34 controls and all32 designated intended kills. Old f3a5's Linux harness failure and unchanged Q180-second timeout are retained; that run is cancelled/excluded, not repaired or substituted. Q's later8-case success does not explain the earlier timeout.
+
+§6 delta: this pre-audit, identical D293 appends in DECISIONS/COMPONENT_REGISTRY/INVENTORY/RECOVERY_FRONTIER/AUDIT_POST, B5-release-publication-source[A]→[x] only, and its current B5 owner prefix. Keep the reconciliation[ ] contract, B6 availability clause and all other statuses/contracts/cells/old blocks/VERSION fixed. Change no source, test, probe, workflow or other non-Markdown artifact. Verify exact source/whole-tree equality to parent, five append blocks and permitted row/cell boundaries, report/log bindings and plan lint, then immutable receipt review and its own current-head CI. Neither that future review nor this receipt's own CI is preclaimed. Do not repeat tests or host/native probes for the documentation.
+
+
+### 2026-10-20 07:16 EDT — D294 Stage0 installer authentication pre-audit
+
+#### Micro re-orient
+B5/1.2 remains in flight at v1.2-pre; D293 closes only exclusive publication source.
+This unit authenticates the installer/manifest as inert data with trusted OS commands.
+It supplies no runtime approval, root copy, identity adapter or production entry.
+The consumer is later separately reviewed root-copy authentication; this observation grants it no authority.
+D168/D261 owned source/tests and the operator's continued go cover this source unit only.
+The next step is appropriate; physical host, installation, B6–B9 and all parent gates remain held.
+
+#### Needs and controlling design
+Verified source baseline722f233130470abdd4ec3c8a274974e7b353833a is clean/pushed; D293 own CI39408227850 is all eight successful at attempt1. D290/D293 source gates and existing publisher/reader fixtures exist. Claude151 raises A1–A5;153 clears A2/A4/A5 and most A1, adds B1/B2;155 clears the authentication-only design with the required native-tool wording correction incorporated here. These are design reviews, not source readiness, host measurements or operator approvals. Source edits begin only after this pre-audit.
+
+One independently verifiable outcome: authenticate an independently selected installer and its canonical manifest as INERT data using stage0_installer_auth.sh. This is an authentication-only CI artifact, not the complete production Stage0. It never invokes, sources, evals, imports or compiles installer data; no candidate interpreter is used by it. The four-line LF manifest is openclaw-installer-v1, host_release_publish.py, canonical positive decimal size, lowercase64 SHA256. This first installer-set schema has exactly the existing self-contained publisher. Raw manifest approval precedes interpretation; separate installer SHA must match manifest and bounded actual bytes. The committed installer.manifest is unissued until independent exact-source reviewer recomputation; fixture expected values are not operator approval.
+
+#### Exact entry and observation contract
+The fixed launch uses /usr/bin/env -i CI=true GITHUB_ACTIONS=true LC_ALL=C FINAL_BASH --noprofile --norc -p -f ABS_PROTECTED_SCRIPT followed by exactly seven declared argv values: --ci-owned, UUID00000000-0000-0000-0000-000000000003, operator uid, capture uid, absolute fixture base, independent installer SHA and independent manifest SHA. FINAL_BASH is /bin/bash on Darwin and /usr/bin/bash on Linux; it is a platform-table constant, never caller-selected code. Bash3.2-compatible syntax, arrays and pipefail are intentional. -p suppresses startup environment/functions and grants no privilege; real/effective expected operator uid must match, be nonzero and differ from capture. Exact CI environment/flags/parameters refuse unknowns. No production path, root invocation or identity authority.
+
+After fixture/environment/role checks the CI-only shell reads literal openclaw-stage0-owned-start-v1 from stdin (at most64 characters,10seconds), then requires EOF status1; extra data/timeout/unknown refuses. The trusted fixture driver launches with a pipe and new process group, polls its own unreaped child's kernel executable for at most5seconds, requires a matching final Bash observation, and sends the literal/EOF only after that match. Before it, only known Python/env transients may appear; after it every live observation must remain that final shell. Miss, mismatch, early exit or unknown kills/waits the owned group and fails. This is fixture plumbing, not pre-start runtime proof. A future production artifact must be separately reviewed/re-proved or preserve its reviewed fixed rendezvous; this CI-only artifact is not silently relabelled the v6 production Stage0.
+
+Base prefix openclaw-stage0-auth-owned-, literal restricted ASCII absolute path, no links/dot/dotdot/empty components, at most4096bytes/64ancestors. Operator0700 base contains exactly script/installer.manifest/host_release_publish.py, each operator0600/regular/single-link/zero private flags/empty ACL/xattrs. Ancestors are root/operator owned, not group/other writable, with exact path snapshots and metadata/ACL/xattr observations rechecked. Recognized Darwin deny-only ancestor ACEs are allowed; every allow/unknown refuses. System ancestor flags may be nonzero and are pinned. Distinct-owner CI uses numeric operator65533, capture actual runner1001/501, no accounts created; base directly beneath traversable root-owned /private/var/db or /var/lib makes its0700 mode the denial boundary. Local fixtures are owned uid501 and make no actual distinct-owner denial claim.
+
+Source FDs pin file identities only. Data rereads REOPEN paths with FD/path metadata brackets; ancestors are path snapshots, not held directories. Sole fixed line installer-auth-observed-v1 means that the final bracketed path/held-inode metadata matched and reopened bounded bytes hashed to the independent values. It expires with that observation and MUST NOT authorize downstream startup or installation. The later root-copy phase reauthenticates its own protected copy against the same independent values. Trusted root/operator short-gap noninterference is an assumption, not writer exclusion. Darwin timestamps here have second precision; content hashes are rechecked, but unobserved ABA changes are not excluded.
+
+#### Fixed OS tool table and bounds
+Darwin: native /bin/bash, /usr/bin/stat -f numeric device/inode/full-octal-mode/uid/gid/nlink/size/mtime/ctime/birthtime/flags; its no-operand stdin form supplies actual fstat (NOT stat of fdescfs /dev/fd). /bin/ls -lde supplies ACL observations; /usr/bin/xattr -s lists names only. Native /usr/bin/openssl dgst -sha256 on capped stdin must output exactly lowercase64hex plus one LF. This supersedes the old immutable launch-design TXT's minimal shasum command and Claude135's clearance of that command; no old bytes are rewritten.
+Linux: final /usr/bin/bash; /usr/bin/stat -c corresponding numeric fields plus full timestamp strings, -L /proc/self/fd/0 with held stdin for FD metadata; /usr/bin/getfacl -cpn --absolute-names permits only base owner/group/other entries (no named/default ACL); /usr/bin/getfattr -m - --absolute-names lists xattr names; /usr/bin/lsattr -d accepts only declared extent e/dash flags, refusing others/unsupported results. This is Linux attribute policy, not Darwin st_flags equivalence. /usr/bin/sha256sum over stdin must output64hex followed by two spaces and -. Linux acl/attr/e2fsprogs are explicit CI OS fixture dependencies, not a host installation. Common native head/date/uname and platform ls/env paths are fixed.
+Native-format classification refuses scripts, links, nonregular and unrecognized executable formats, but DOES NOT prove non-dispatch: dispatcher absence rests on this explicit fixed OS-tool allow-list/platform assumption. Only the shell's non-re-exec is observed live. Actual OS build/shared cache/SIP/SSV/tool/dependency profile approval remains a separate unmet gate; no tool certifies its own startup.
+Manifest<=512bytes, installer<=131072bytes, metadata output<=4096bytes. Hashes use capped regular-file reads, size prechecks and hash equality, no separate read-count claim. Parsing uses capped data only and reconstructs canonical bytes to catch NUL/trailing-line normalization. Oversized metadata intentionally refuses via output cap/pipefail; it is not partial acceptance. Cooperative elapsed wall-clock budget between OS calls; no hard blocked-kernel-I/O or production worst-case promise. External test/CI watchdog bounds and records worker termination/reaping; unresolved group absence retains fixture and failure. No unbounded cp/cat, raw input disclosure, arbitrary tool stderr, mutation, chmod/chown, staging, retry, cleanup or installation receipt in artifact.
+
+#### Verification / risk register
+External fixture harness inertly copies the script, checks it with the same trusted native OS digest tool against its selected fixture binding BEFORE execution; no self-hash loop. Real approval still needs independent exact-source reviewer recomputation and protected-channel comparison. Honest publisher is data. Approved shell/Python polyglot BAD controls demonstrate both execution paths live; source/eval/shell/Python execution mutants must die at BAD absence assertion. Cover strict approvals-before-parse, independent installer hash, canonical schema/size/set, arguments/environment/flags, metadata/type/links/ACL/xattrs/attributes, observed drift and interruption. Local real shell subprocess controls/designated assertion mutants only; root/native ownership/ACL proof exclusively fresh disposable CI, actual executable observations and complete waited/group-absent worker + exact-identity cleanup accounting. Missing tools/observations refuse. No incidental root/full-suite/live-bus tests or host probes. Independent exact-source Claude review, all-eight fresh CI and complete retained proof required before source-only closure.
+
+#### File delta / feeds
+Add stage0_installer_auth.sh, installer.manifest, test_stage0_installer_auth.py, mutate_stage0_installer_auth.py and probe_stage0_installer_auth.py; wire only their owned proof into existing Linux22/macOS jobs. Add B5-stage0-installer-auth-source[A] contract before code; append candidate/result receipts to AUDIT_POST and identical five-ledger D294 blocks, advancing only B5 current owner prefix as appropriate. Existing publisher, twelve reader sources/tests/probes, old rows/contracts/B6 evidence and VERSION remain fixed. Output feeds later root-copy authentication source contract, never current privilege/startup/admission. Runtime/profile/identity, root-copy integration, protected operator/access/assessment/installation, B3/policy/challenge, B8/disposal, actual resource/reboot/D62/D175 and full integration/manual/parent acceptance remain open. Cleanup authority remains consumed; original causes/attended incident reconciliation remain open. B5/1.2/protected acceptance[A]/v1.2-pre; B6–B9 held, D64/Gate unchanged, production capture disabled.
+
+
+### 2026-10-20 07:42 EDT — D295 authentication proof independence correction contract
+
+Micro re-orient: B5 auth source remains[A]/v1.2-pre; D294 source review is still running. First exact-head CI39415575512 fails Linux22 job118603636319 at11:33:30UTC in unchanged test_recovery.mjs, cluster-cold-baseline / cluster-held-rejoin: consumer inventory reports unavailable cold-tail,offline-drained. New authentication tests/probe never run. Cause remains unresolved; do not call it repaired or prove it unrelated merely from source equality. Exact raw job bytes are134799/1098lines/SHA2565591c6e798ada5d5629d7a105ce7ac51bdf191986f7284356d03b9562682605e, retained under /Users/moltymac/.codex/outputs/openclaw-recovery/cdb58c59/linux22-job.log. Missing new/publication report uploads are downstream consequences, not separate source diagnoses.
+
+The bounded correction moves ONLY the new independent authentication proof into its own early steps in the same existing Linux22/macOS jobs. It requires no NATS/ASIF predecessor. Native reports get dedicated early always-upload artifacts on both platforms, so a later unrelated guard or image timeout does not erase the new proof. Every pre-existing job/step/command/guard/budget remains structurally identical to722f2331 after filtering out only the new authentication steps; eight jobs remain. No old NATS, Q, publisher, test, timeout or retry logic changes. This corrects proof wiring, not the cold-cluster failure. All source/test/probe/mutator/manifest bytes remain cdb58c59. No local tests need repetition for this workflow-only correction: YAML/action/old-step-equality/append/plan checks suffice; a fresh all-eight exact corrected-head run and actual new reports remain required. No old success may be carried into that run or relabelled a repair. Current source review can still bind the unchanged source; this delta needs its own exact review/CI. All parent/host/production gates stay held.
+
+
+### 2026-10-20 07:54 EDT — D296 correct authentication proof/EOF semantics before source readiness
+
+Micro re-orient: same B5 authentication-only source outcome remains[A]/v1.2-pre. D295 makes its proof independent; corrected-head run39416909628 now exposes the new code. Claude157 independently recomputes all D294 blobs/manifest and finds two required corrections, with source logic otherwise sound: R1 Darwin Bash3.2 read timeout returns1 like EOF; R2 an early roles refusal can exit before the final shell observation (1/300 unprivileged reviewer trials). Reviewer has no getfacl/getfattr and ran no native/root proof, so honest baseline/mutants were not reproduced there. This is not source clearance.
+
+Selected R1 fix: remove the timed EOF read. An open stdin cannot become a successful EOF observation; the declared external owned-process watchdog kills/waits it. Add a held-open-stdin regression and an intended-assertion EOF-bypass mutant. The first literal read remains bounded64characters/10seconds. The EOF read can block; its execution bound is supplied by the external supervisor, not a Bash3.2 return-status inference or an artifact hard-deadline promise. The channel is a private CI ASCII synchronization stream, not an arbitrary-byte parser/approval input; Bash5 NUL-skipping semantics are explicitly not a byte-validation claim, and no original stdin is interpreted after this handshake. No production artifact or authority follows.
+
+Selected R2 fix: explicitly classify an already-exited pre-handshake refusal. Only an expected entry reason, exact rc1/fixed refusal stderr/empty stdout and waited/group-absent worker can qualify as that NEGATIVE observation. It receives no matching-shell or successful-handshake credit when unobserved. Honest/post-handshake cases still require a kernel-observed final shell; unknown/live timeout/mismatch remains failure. The root probe supplies only its exact expected roles refusal. Add a deterministic delayed-observer regression as unprivileged uid501 modelling the same roles branch; no local root execution. A broken write after definite expected exit is classified, never blindly swallowed.
+
+D295 CI failures are distinct from the first cold-test refusal. Linux22 job118608043111 fails12/19 portable tests at the Linux ACL ancestor observation; the exact native ACL stdout is not yet retained, so do not guess/relax the predicate. Add test-harness-only scoped diagnostics for the owned fixture/ancestor ACL observations, bounded record count/size/time; the artifact's private-data/error behavior stays fixed and all unknown/named/default ACLs keep refusing. Native macOS job118608043039 completes6 cases (honest/root refusal/3wrong approvals/xattr), then chmod +a user:501 fails because decimal501 cannot resolve to an ACL UUID. Resolve the actual CI capture account name with pwd, cross-check its numeric uid/name and use that fixture account name in the granting ACE. No account creation or production identity adapter.
+
+Raw Linux log51543bytes/465lines/SHA25608dd1eff12ab89ae28e0903f6e52a4954217a4f545c2b706c3cc9d3a85171b21; macOS18087/206/7e01d460e5f9b3c979d923bc26cc4aad4750b1913a188d9e91878ed0d5cceca6. Dedicated native archive12261803233 is1791bytes/7c5926e5a4ef89df17739f612d2399d28a1eb93cefa8490e042059e1319fe435; report12075/9217cf7adeab9f41f7046d047b01383f9b8c0fda183c6541cfb88148d43108ab has completed=false,6completed cases,7pinned fixtures,cleanup.removed=false/retained_due_to_uncertainty=true. Do not turn runner teardown into verified cleanup. Exact logs/archive/report retained under /Users/moltymac/.codex/outputs/openclaw-recovery/70022489.
+
+Proof integrity corrections within this same outcome: refused() must reject harness exceptions instead of counting them as semantic refusals (Claude157 O1); source/environment tests must actually pass a controlled inherited BASH_ENV/unknown key through the fixed env-i launcher rather than pre-clear it in Popen, with a targeted env-i bypass mutant. No optional owner/flag/other coverage expansion. Changes only shell EOF line, test/mutator/probe proof, pre-audit and five identical D296 appends/B5 owner prefix. Publisher/manifest/twelve readers/workflow/old blocks/statuses/contracts/B6 clause/VERSION remain fixed. Independent corrected-head review, actual Linux/macOS complete reports and all-eight fresh CI remain required. No local elevation/native/full-suite/live-bus/physical-host work or new production admission.
+
+
+### 2026-10-20 08:08 EDT — D297 use an ACL-neutral owned CI parent and fix principal recording
+
+Micro re-orient: same authentication source outcome[A]/v1.2-pre. D29621/23 local proof passes, corrected-source review159 is in progress, and own run39419053085 remains not green. Its Linux22 job118615149307 now durably diagnoses the strict refusal: /home has a DEFAULT ACL including default:user:1001:rwx/default:mask::rwx, while / and the later owned workspace/base show only base ACL entries. The artifact correctly rejects any named/default ACL on ancestors. Do NOT relax/remove that predicate or change the runner's /home ACL. Raw log77966bytes/574lines/SHA2561d8d59bce7d90acda3d78267be6fd3be69ad13c0f3355b3bf1fc30c0e6a4d7a7 is retained under /Users/moltymac/.codex/outputs/openclaw-recovery/7a90ee1e/linux22-job.log. Its23 failed assertions include subtests;21 tests are registered. No Linux success is claimed.
+
+The bounded fixture-only correction provisions ONE fresh /var/lib/openclaw-stage0-tests-owned- random parent on disposable Linux CI, assigns current runner uid/gid and0700 mode, and records device/inode/path in declared GITHUB_ENV fixture-data fields. Portable Fixture uses that explicit parent instead of the /home workspace; it validates location/prefix/owner/mode/original device/inode. The authentication artifact itself still checks every ancestor under the same strict ACL/mode/link/owner policy, with no exception/bypass. No ACL is stripped, root-home grant changed or real host preparation authorized. After both portable controls and mutants pass and their child fixtures are removed, only that exact pinned EMPTY parent may be removed with rmdir (no recursion), verifying identity/uid/mode and absence and recording result. Failure/uncertainty retains it. This minimal CI root preparation/empty removal is owned fixture plumbing under D168/D261, not actual host installation, a disposer or production authority. No local sudo/root execution.
+
+D296 macOS early native proof now completes9 cases/8 waited group-absent auth workers/9 removed bases at exact7a90ee1e bindings. Archive12262996857 is2086bytes/SHA25632e6e0436cd87d7162fe2a4ef613aa8b9048b45c82019ca10857d63013a27547; report17297/064392dedcebe3a03716e347926b497145eee3b8f89b7d5c275cfdc3460f83fc. But acl_principal.name incorrectly records installer.manifest: the source-binding inspection loop reuses name after chmod already consumed the verified runner account name. This is a recording defect, not durable proof of the actual ACE principal. Preserve the old report unchanged; fix only the selected principal variable/record and require a fresh current-head native report with the correct principal. No retroactive data backfill or host claim.
+
+Only test fixture-parent selection, that probe record variable, the new Linux proof setup/empty cleanup workflow, this pre-audit and identical D297 appends/B5 owner prefix change. Shell artifact/manifest/publisher/twelve readers/old guards/source/budgets/statuses/contracts/B6/VERSION stay fixed. Repeat current21/23 local proof for the test harness change; YAML/source/old-step equality and append checks; then exact-source/delta review, actual complete Linux/macOS current-head reports and all-eight fresh CI. The first two superseded runs were cancelled only after all other jobs had completed, leaving only obsolete macOS legacy jobs: cdb118603636273 cancelled12:03:09UTC;700118608043296 cancellation requested, final time still to verify. Their earlier failures remain excluded/not green, no carried success/retry/repair claim. Current39419053085 has not been cancelled/rerun. All actual host/access/runtime/profile/root-copy/identity/installation/window/history/resource/parent gates remain held.
+
+D297 pre-code proof portability amendment: Claude159 interim re-run as uid65534 exposes a hardcoded65534 capture value in the exact-argument test. Select a distinct capture value just as Fixture.invoke already does, preserving the explicit intentional equal-role negative. Likewise select a guaranteed-different model operator for the delayed early-role negative. These are test-data corrections only, no source role predicate or root operation. Cancellation wording is time-specific: Message158 was sent before the subsequent12:03 cancellation requests; this follow-up records both resulting cancelled legacy jobs and retains their earlier failures. No retrospective green or cleanup claim.
+
+
+### 2026-10-20 08:20 EDT — D298 deterministic inherited-environment mutant assertion
+
+Same authentication proof outcome remains[A]. Claude159 clears R1/R2/O1 source corrections and identifies N1 principal recording, already corrected by D297. It also notes that the launch-env mutant's intended rc assertion can be preceded by the harness-failure assertion when its expected early environment refusal exits before observation. Swap only those two assertions so the exact targeted inherited-startup-key rc message is tested first; honest baseline still requires failure=None and the fixed success output. No source/launcher/role/timeout policy changes and no negative is admitted. Run the affected honest control and targeted launcher mutant, not an unrelated suite. Current D297 neutral-parent/record/uid delta still needs exact review and fresh complete native/CI evidence.
+
+D295 proof independence is one-way: failed early authentication skips later old default-guard steps, and their always-upload steps may report missing artifacts. Structural old-step equality does not mean two-way execution independence. This tradeoff is explicit; no old failure is cleared by a skip and all-eight fresh successes are still required. No optional test coverage or runtime work is added. Only the one test assertion order, this pre-audit, identical D298 appends/B5 owner prefix change; shell/manifest/publisher/probe/mutator/workflow/twelve readers/old contracts/statuses/B6/VERSION remain fixed, with all actual host/production/parent gates held.
+
+
+### 2026-10-20 08:35 EDT — D299 authentication-only source proof closure contract
+
+Micro re-orient: exact source30c26cd1, sole parent1d1bab46, remains the one B5-stage0-installer-auth-source[A] outcome. Claude159 clears R1/R2/O1 at7a90ee1e and Claude161 clears the exact D297/D298 principal-record/neutral-parent/uid-data/assertion corrections with no required findings, independently recomputing current bindings and unchanged release constants. Reviewer has no Darwin/root/getfacl/getfattr full proof and cannot download the report artifacts. The author's fresh current-head Linux/macOS reports have now been downloaded, ZIP API digests and all three input bindings checked: each completes9cases/8waited group-absent authentication workers/9removed bases, with correct macOS runner/501 principal. Full current CI39421895003/attempt1 still runs; no source closure or final all-eight result is yet claimed.
+
+Before closing only this auxiliary source row, require all eight current-head jobs to succeed freshly in this attempt, inspect exact raw portable/native logs and reports, and verify the tested merge's entire tree equals the independently reviewed source tree. Retain failed/superseded history, explicit cancellation times, observed worker/cleanup distinctions and unproven causes. Bind checked report/log bytes, hashes, CI run/job/artifact IDs and review scope in identical D299 appends to DECISIONS, COMPONENT_REGISTRY, INVENTORY, RECOVERY_FRONTIER and AUDIT_POST. Only then change this row[A]→[x] and the B5 current-owner prefix. All other rows/contracts/frontier cells, VERSION and every source/test/probe/workflow byte remain fixed. This six-Markdown closure receipt itself requires independent exact-head review and its own fresh CI; neither is preclaimed.
+
+Qualify workflow equality as structural only: the three GITHUB_ENV fixture-data fields persist into later Linux22 steps and point to a removed parent; reviewer found no other consumer, and the generic OPENCLAW scanner filters them. The neutral parent's identity/empty-rmdir/absence record lives in the raw job log, not the dedicated JSON report. Linux portable proof traverses /var/lib ancestors under the unchanged strict policy, not the real /home workspace path; previous default-ACL refusal remains correct. New proof independence is one-way, as D298 states. No optional tests or unrelated NATS/Q timeout/guard repair is added.
+
+The CI-only authentication artifact reads inert bytes and produces only a transient non-authorizing observation. Later root copy must reauthenticate its own bytes; actual runtime/profile/identity/protected-session/operator approval and production Stage0 form remain absent. No installed root-copy/policy/challenge, B3/B8/disposer, real-window acceptance, host access/resource/reserve/reboot/D62/D175 or full integration/manual/parent gate closes. B5/1.2/protected acceptance[A]/v1.2-pre, B6–B9 held, D64/Gate unchanged, production capture disabled. Reconciliation remains[ ]/unimplemented, the B6 payload-availability clause stays fixed, consumed real cleanup authority is not renewed, and original causes/attended incident reconciliation remain open. No local sudo/elevated/native/full-suite/live-bus or physical-host operation. Stop after this one source outcome and its receipt review/CI; no next runtime/root-copy unit begins automatically.
+
+
+### 2026-10-20 10:20 EDT — D300 CI-owned inert root-copy authentication design contract
+
+Micro re-orient: B5/1.2/protected acceptance remain[A]/v1.2-pre; D299 closes only the CI-owned authentication observation source.
+Its exact receipt b79ffd73 is clear at Claude163 and all8fresh CI39429307632/attempt1, with no outstanding review or CI.
+The operator's new yes/go opens ONE next source outcome: a root-owned inert copy whose actual copied bytes match independent installer/manifest approvals.
+This feeds later separately reviewed Stage1 startup under the same protected acceptance path; it does not execute that installer or admit a runtime.
+D168/D261 owned-source authority applies; all actual root operations and principal isolation proof run only on fresh disposable CI.
+The launch design and existing source are read afresh; independent design clearance is required before code.
+
+#### Proposed artifact contract — pending independent design review
+
+Extend the EXISTING stage0_installer_auth.sh in place with one separate CI-only --ci-owned-root-copy mode; preserve its existing nonroot --ci-owned mode and strict environment/OS-tool/metadata/schema policy. No parallel loader/copier or Python bootstrap. The new exact eight arguments are mode, existing fixture UUID, positive operator uid, distinct positive capture uid, source base, root base, independently expected installer SHA256 and manifest SHA256. It requires UID=EUID=0, exact CI/GITHUB_ACTIONS/LC_ALL/entry flags, and the existing fixed clean-env absolute Bash launch/rendezvous/external watchdog. Numeric role fields and CI approval inputs are fixture data, not authenticated operator identity. Normal mode still refuses root. The SAME expanded script bytes are prehashed externally by the fixed native OS digest before either mode executes; their new release binding requires independent exact-source reviewer recomputation, never a self-hash approval loop or automatic reuse of D299's old script approval.
+
+The new root mode executes ONLY the prehashed root-owned0600 single-link script in a fresh root-owned0700 root base under root-only controlled ancestors. It never elevates or executes an operator-owned checkout. Source base is a distinct operator-owned0700 protected input leaf with exactly installer.manifest and host_release_publish.py,0600 single-link regular bounded files; normal mode keeps its existing three-entry set. Both bases use restricted canonical absolute literal paths, existing depth/byte/count caps and no links/granting or unknown ACL/xattr/flag exception. Root-storage ancestors must be root-owned, not merely root-or-operator-owned. Only trusted root updaters remain outside exclusion; path/FD observations are brackets, not locks or ABA exclusion. No actual host runtime/profile/session/elevation-route approval is inferred from fixed OS paths or recognized native formats.
+
+Before ANY write, validate both protected input bindings and canonical manifest with the existing full check order, the root code/storage metadata and path mappings, and a root base containing only the selected script. The root base cannot contain any existing staging name, including a different digest. Hold/check source descriptors, root-parent identity and cwd mapping. Only then use fixed native mkdir with umask077 and a single fixed relative pending-installer-<manifest-sha256> child in the verified root-parent cwd. Require exclusive mkdir success; existing/partial/completed names all refuse untouched, without retry, resume, fallback, cleanup or parent rotation. Writes stay relative to pinned cwd/held directory identities, with path checks before/after. Rebaseline only the parent metadata fields necessarily changed by this declared child creation, preserving its device/inode/birthtime/type/owner/mode/flags/ACL identity. A measured mismatch retains denial and the owned staging bytes.
+
+Create exactly two0600 root-owned single-link files with no-clobber redirection inside the new private child. Use capped raw native head reads from the already held input descriptors, preserving binary bytes; no command substitution/eval/source/import/compile/interpreter of installer data. Maximum failed-copy data is131073+513bytes. Check source and destination FD/path metadata, strict entry set, owner/mode/ACL/xattrs/flags, sizes and both independently approved hashes on the ACTUAL ROOT COPIES; parse only the already digest-checked copied manifest and recheck mappings/bytes before the sole fixed root-copy-observed-v1 LF output. The earlier installer-auth-observed-v1 line is never an input or authorization. Root copying reauthenticates independently. New fixed tool is native mkdir (/bin/mkdir Darwin,/usr/bin/mkdir Linux); other OS tools and Bash assumptions remain explicit.
+
+This is an inert copy/read-back observation, not exclusive release publication, a durable installer receipt or permission to execute. No fsync/stable-storage/crash-durable-fence guarantee is claimed. Missing/partial/corrupt state after interruption or crash cannot authorize use. Success and failure both leave the fixed inert pending child; the artifact performs no removal or automatic reconciliation. A later separately bounded Stage1 launch must reauthenticate its own root-copy bytes, require actual approved runtime/profile and mechanical operator/capture identity, and preserve all installation/window gates. No Stage1 entry, runtime selection/profile parser, identity adapter, root policy/challenge, B8 handoff or disposer is included.
+
+#### Proof and file delta
+
+Local work stays unprivileged: existing normal-mode regressions/designated kills, shell/Python syntax, new unprivileged root-mode refusal and inert schema/helper controls only; no local sudo/root/native-image/full-suite/live-bus run. Fresh Linux/macOS CI alone executes the actual new root mode. Root fixture plumbing prepares root code/storage and distinct operator/capture input leaves without account changes; approved values remain fixtures. Actual root copies must be root-owned, byte-equal to immutable approved installer/manifest, with original input unchanged. Both nonroot principals must fail list/read/replace/create of root staging under a traversable root-owned parent; record denial attribution, exact argv/bounds/statuses/times and normalized results.
+
+Honest controls and decisive negatives cover independent approvals/self-consistent unapproved rewrites before mkdir, malformed canonical schema and caps, source/code/root parent metadata and identity drift, foreign/granting ACL/xattrs, exact entry sets, existing/partial/complete fences unchanged, wrong root-copy bytes/read-back, copy-stage mapping drift and interrupted root workers with retained non-authorizing staging. Instrumented pauses are labelled. Use a live shell/Python polyglot BAD installer accepted as approved inert data; separately prove its BAD marker live, then show root copying never runs it. Designated root-copy mutants remove the critical role/storage/approval/fence/read-back/mapping/no-execution checks and must fail their intended tests/assertions with honest controls and no unittest ERROR. Retain existing23 normal-mode kills, retargeting only exact source anchors if the common metadata helper is parameterized.
+
+Every root authentication worker has actual kernel final-Bash observation (or strictly classified exact early NEGATIVE with no positive provenance), waited exit/group absence, complete bounded source/staging/failure evidence and no usable startup receipt. CI fixture cleanup occurs only after worker accounting and exact fixture-root identity checks; uncertainty retains and fails, with no teardown-derived cleanup credit. Dedicated always-upload reports preserve partial failures. Wire new proof early in the SAME eight existing CI jobs; keep old guards/actions/budgets structurally fixed and acknowledge one-way independence and any environment persistence. Existing native root fixture plumbing may be reused; no new host/VM/image work. All-eight fresh exact-head CI, complete checked reports and independent exact-source/delta/digest review precede source-only closure; the closure receipt then needs its own review/CI.
+
+Planned delta: existing stage0_installer_auth.sh and its test/launcher/native-tool/mutator anchors only as needed; new test_stage0_installer_copy.py and mutate_stage0_installer_copy.py with their bounded CI report driver; workflow only those owned proof steps; one new B5-stage0-installer-root-copy-source[A] contract, this pre-audit and identical candidate/result blocks in the five ledgers/B5 owner prefix. Installer.manifest, publisher, twelve readers and their existing proof, old rows/contracts/frontier cells/B6/VERSION stay fixed. Only this source outcome may eventually close; no actual installation/production or parent gate changes. Source design is still pending; no root-copy code exists yet.
+
+
+### 2026-10-20 10:30 EDT — D300 design corrections controlling the preceding draft
+
+Claude165 identifies three required PRE-CODE corrections and otherwise finds the one-outcome CI-only design coherent. These supersede the preceding draft's in-place file/mutation/exclusivity/rebaseline descriptions; no source has been written yet.
+
+R1: exclusivity comes from exclusive mkdir and the verified empty private child, not Bash no-clobber semantics. For EACH file, first verify the expected current child entry set, open a write FD under umask077/no-clobber, and BEFORE any payload write verify FD↔path identity plus a NEW EMPTY regular single-link root-owned0600 inode with zero flags/no ACL/no xattrs. Only then capped raw head from its single-use held source FD into that held write FD. Acquire a matching held read FD, close the writer and re-bracket the completed file before copied-byte hashing. No arbitrary existing nonregular target is described as safely excluded by set-C. Interrupted open/partial-file states retain denial; external supervision handles blocking kernel I/O.
+
+R2: select the recommended SEPARATE artifact stage0_installer_copy.sh. Existing stage0_installer_auth.sh, its test/mutator/probe and D299 digest/23kills stay BYTE-IDENTICAL and write-free. This is the first root-copy artifact, not a replacement/parallel loader or a second implementation of an existing copier. Copy the existing reviewed metadata/hash/shape/attribute helpers byte-for-byte for diffable reuse; never source/import one shell file from the other. New context-specific empty-file and metadata-transition checks remain explicit. The new root-only artifact accepts only the exact8argument --ci-owned-root-copy shape. Distinct source/root fixture prefixes are openclaw-stage0-copy-input-owned- and openclaw-stage0-copy-root-owned-; reject equal, nested or overlapping bases explicitly. Its own script lives only at rootbase/stage0_installer_copy.sh. External fixture PRE-EXEC checks verify all root code/storage ancestor metadata and native digest BEFORE root Bash executes that root-private copy; checks inside the running artifact are drift/misinvocation detection, not startup self-authentication. Bad startup metadata/digest gets no root authentication worker. Post-start drift negatives remain inside an inaccessible root-owned outer fixture. A new independent reviewer-recomputed script digest is required; no old Stage0 approval or production four-binding profile is silently substituted or expanded.
+
+R3 metadata transition table (both path and held FD; compare all fields not named here): root base after its one mkdir may change nlink,size,mtime,ctime; pending child after EACH declared file creation may change size,mtime,ctime and Darwin/APFS nlink only (Linux nlink stays pinned); each copied file after its own data write/close may change ONLY size,mtime,ctime. Linux's trailing %y/%z strings are allowed to change only with those declared mtime/ctime transitions. Device,inode,type,mode,uid,gid,birthtime,flags are always pinned, and regular-file nlink remains exactly1. ACL/xattr/flag observations never change. Outside these individual transitions FULL metadata must match; no generic rebaseline or unlabelled mutation allowance. Require expected child entries after each creation. Changing cwd uses cd-P and verifies dot against the just-observed child/root-parent FD/inode. Source FDs start at offset0 and are copied ONCE only; hash checks keep using bracketed path reopens, since BSD head may consume extra source bytes through buffering.
+
+G1: creation is three non-atomic steps, so a kill can retain an empty child, one file or a partial file; all block further attempts in that root base, none authorizes use. G2: success is page-cache readback, with no fsync/stable-storage/crash-durable fence promise. G3: root-copy-observed-v1 is a point-in-time non-authorizing observation, not a certificate of later state; trusted root updaters are not excluded. Darwin provenance xattrs, if encountered, must be recorded as an honest refusal, never stripped or silently allowed. Root gid is not an approval field but must stay unchanged through each transition, and0700/0600 still excludes both nonroot principals.
+
+Corrected file delta: ADD stage0_installer_copy.sh, test_stage0_installer_copy.py and mutate_stage0_installer_copy.py, plus ONLY their early dedicated CI proof/report steps, the auxiliary[A] contract, pre-audit and candidate/result ledger/B5-prefix changes. Existing authentication artifact/test/mutator/probe, installer manifest, publisher, twelve readers, all their old proof and workflow steps/guards/budgets, VERSION/B6/old rows/contracts stay fixed. Source remains unimplemented pending correction-design clearance. All D168/D261 actual-host/production/parent holds remain unchanged.
+
+
+### 2026-10-20 10:35 EDT — D300 remove implicit shell temporary-file creation
+
+Claude167 clears R1/R2/R3 and G1–G3, but requires R4 before code: Darwin Bash3.2 here-strings create transient0600 root-owned files in /var/tmp under clean-env startup. The new artifact must contain NO here-strings, here-documents or process-substitution fallback. Replace only those parsing sites in the copied helpers with parameter-expansion newline loops and function-local controlled IFS plus set-f/set-- splitting of bounded fixed-format metadata records; data stays literal words, never eval or code. Environment and ACL line loops must process the final unterminated line and reject malformed/unknown records as before. Record-size extraction uses the same literal metadata splitter. These are explicit reviewed diffs from copied helpers, so the prior byte-for-byte-copy claim is narrowed ONLY for the required no-temp-file parsing changes. New empty-file/transition helpers remain explicit. A static no-here-redirection control and labelled parser mutant must protect this root-write inventory. Existing nonroot artifact and its tests/proof stay unchanged.
+
+Precision note on closed D294/D299: that old nonroot artifact's application inputs stay inert, but Darwin Bash here-strings can create immediately unlinked operator-owned shell temporary files. This qualifies any blanket no-filesystem-mutation wording; it does not reopen the closed source gate or authorize root/host use. The new root artifact removes that implicit write, and no temporary-directory override or new temp namespace is proposed.
+
+Use an explicit FD allocation table (source3/4, code5, copied manifest6, digest-reopen7, copied installer8, refusal9, held root-parent10, held child11, writer12); never reuse9/255. Close writer12 in each non-copy OS-tool child, while head alone inherits it as payload destination. Allowed metadata deltas MAY change, never must. Labelled pre-create symlink-to-/dev/null and FIFO hazard controls must refuse before any payload; FIFO blocking is externally killed/waited at-9 with no success/retained staging. Cross-artifact wrong-argv controls and positive denial under a directly traversable parent remain required scoped proof. No source exists yet; corrected-design review remains pending.
+
+FD precision: descriptor-stat verification necessarily receives a temporary fd0 duplicate of writer12 so native stat can observe that actual inode; close12 itself in that child after the duplication. This is a narrowly declared trusted metadata observation, not a claim that no other process ever possesses a writable file description. Unrelated OS-tool children close12 and receive no such duplicate; only the capped head call writes payload. No application code or unapproved tool receives the descriptor. All descriptor/file transition observations remain within the same CI-only fixed-OS-tool assumption.
+
+
+### 2026-10-20 11:02 EDT — D300 corrected design cleared; implement only the selected root-copy source
+
+Claude169 clears the corrected R1–R4/G1–G3 design for implementation, source-only, with no required findings. Walker FD6 finishes before copied-manifest FD6 is assigned. Literal metadata splitting requires exactly11 Darwin or17 Linux fields. Keep the three new artifacts and early dedicated CI proof/report steps within the corrected delta. Instrumented pauses and BAD execution controls remain explicitly labelled fixture variants. Actual root-positive/isolation/ACL/mutant work stays disposable CI-only; local controls stay unprivileged. Source review and all-eight fresh CI are pending, no source readiness or installation/production authority is claimed.
+
+
+### 2026-10-20 11:07 EDT — D301 correct root-copy proof serialization and hazard assertion
+
+Same D300 source outcome[A], no root-copy source predicate change. First candidate a11785a9 own CI39445133400/attempt1 is NOT green. Linux22 job118704909508 records getfacl's conventional final blank separator; external fixture preflight counted splitlines without trimming terminal LF and refused every root worker. Report is completed=false/38cases/0workers/removed=true, not root-copy negative proof. Correct only the preflight ACL serialization to strip terminal LF before exact three-row validation, preserving interior-blank/named/default ACL refusal. Require semantic refused() controls to have actually launched a worker, so external refusal cannot satisfy those negatives. The two intentionally wrong code binding/owner controls retain explicit no-worker assertions.
+
+macOS native118704908815 runs20 tests/39cases/36workers with removed=true but completed=false: the symlink hazard correctly refuses at the earlier path/FD mapping check, with no payload canary. Its test incorrectly demanded the later empty-file reason. Expect the exact mapping refusal while still requiring no payload entry and retained staging; then actually reach the FIFO hazard. No artifact guard is relaxed. Both first-attempt reports/ZIP API digests/raw logs are retained under /Users/moltymac/.codex/outputs/openclaw-recovery/a11785a9; first evidence remains failed/incomplete and is never backfilled or treated green. No mutant proof ran after these failed baselines. Source review171 remains pending. All actual host/production/parent holds remain.
+
+Linux ZIP13760/SHA256c0b2de3406e1a28aaec3522d4529df1f4c8d09208d41f39af3b8421218b4b494, report242688/92066b5b99dd432570130d40f56d76ab633ebdafdd83e76482b4c75cdb32a71e; macOS ZIP46740/1493d18f8944ae744d2841f4ab2d7214354b01491518a88a4864b32380b7b94e, report1022303/dc67782f8955903bdff9451b9a65ee6079cb99987d1c3d7bca6d721dc509d104. Linux rawlog47012bytes/534lines/1d5086e65a313899a054d9ab03ba47c70a651929074d16493decc79004061908. Exact corrected source review, complete current reports and all8fresh CI remain required. No optional coverage/unrelated repair is added.
+
+
+### 2026-10-20 11:12 EDT — D302 enforce post-create root entries and remove masked pause refusals
+
+Same D300 source outcome[A]. Claude171 interim trace identifies that the root base entry set is checked only before mkdir, not after the declared transition or at completion. Add a fixed expected root entry observation (pending name plus selected script) immediately after mkdir/transition, during subsequent tree checks and at final completion; preserve full metadata checks outside transitions. Add one labelled post-mkdir/final extra-entry negative and its designated guard-bypass mutant. This is the existing exact-entry contract, not new publication or updater exclusion.
+
+Current8ddb760a own CI39445607217/attempt1 Linux22 job118706564954 is NOT green: raw root-copy report completes20tests/40cases/37workers/removed=true, but mutant driver stops after7kills when transition-gid survives. Its GID negative returns ancestor-drift: the labelled pause creates ready/resume files AFTER ancestor snapshots, so their parent-directory metadata change masks the intended fault. No instrumented-negative coverage is credited from that run. Precreate both empty signal files before the worker; only write their contents later, waiting on nonempty size, so their ancestor entries/metadata stay unchanged. Require baseline transition reasons to match transition/type/private, copied corruption to match mapping, and isolate the final code-FD control by substituting FD5 with a precreated byte-identical root-owned twin without renaming its ancestors. Record this explicit fixture-only FD substitution. Add final tree/root-entry checks after code/hash observations. No natural race or trusted-root exclusion is claimed.
+
+Claude171 interim also reproduces BrokenPipeError on buffered stdin.close after a failed flush. Close stdin through a shared helper catching only BrokenPipeError, clear the handle, preserve strictly qualified exact early-negative handling and positive shell/handshake requirements; add an unprivileged closed-pipe regression. This does not convert a harness failure into semantic refusal. Preserve fixed launcher/UID/tool/approval policies.
+
+Retained Linux archive12275996025=118768bytes/SHA2564ba98ca719d737e886977f9017279cf56b4640ecc9f77affcc09f7cbbd83497f; root report1071324/6c577ac9193e69ed8ec985ab0ff7024c48145ffd718a1ee0d1b3e9de1a3b3250; mutant report1367537/45bf329ac75cf6bf22c3d4b89fdec9af4bb6e453a59d34258ac1aaa374f0c11f completed=false/8attempted/lastsurvives/removed=false. Its outer mutant fixture is retained, never credited as cleaned by runner teardown; each recorded nested case worker is waited/group-absent. Rawlog95958bytes/423lines/270cf0dfe9170afa238df39259bae3e97327d1f472bc9d067ff2f0387a18d4f8. Reports/logs unchanged under /Users/moltymac/.codex/outputs/openclaw-recovery/8ddb760a. Other old CI jobs and current macOS proof are still pending, no overall CI/source closure.
+
+Only new shell/test/mutator, pre-audit and identical D302 ledger/B5-owner corrections are in scope. Old authentication proof, manifest/publisher/readers/workflow steps/guards/budgets/VERSION/old statuses/contracts remain fixed. Fresh corrected-source review, actual complete current Linux/macOS reports and all8fresh CI remain required, followed by the source closure receipt's own review/CI. All actual host/installation/runtime/profile/identity/production/parent holds remain; no local root/elevation/native/full-suite/live-bus/physical-host operation, optional coverage or unrelated repair.
+
+
+### 2026-10-20 11:17 EDT — D303 finish Claude171 proof obligations
+
+Claude171 final source review of a11785a9 is NOT cleared: RQ1 ACL terminal separator, RQ2 no-worker false negatives, RQ3 symlink reason, RQ4 self-deleted copied-readback anchor, RQ5 root entries and RQ6 buffered close. D301/D302 address the core corrections; before corrected-head review also give every preflight assertion an explicit diagnostic, make refused() explicitly require prehash plus observed final Bash/handshake OR the exact early-negative classification, and assert every designated pause anchor survives each mutant. Direct role/cross-artifact negative controls get explicit DEVNULL stdin so the role fault never depends on an inherited pipe. Keep existing authority/role/tool/guard policies.
+
+Qualify the copied-corruption check accurately: Linux subsecond metadata can detect the in-place write at mapping; Darwin's collected second-resolution times may remain equal and let the hash detect it as installer-bytes. Accept ONLY those two exact reason families, excluding ancestor-drift and all other harness/guard failures. This proves the combined independent read-back check, not a uniquely hash-only Linux path. This controls D302's narrower mapping-only wording; no artifact predicate is weakened. No optional equal/root-inside-source expansion. Local closed-pipe controls remain unprivileged; actual corrected fault proof remains fresh CI-only. D3021fb9ceb7 CI39446651416/attempt1 is pending; no current success is preclaimed.
+
+Superseded first run39445133400 had all seven other jobs completed before cancellation request2026-10-20T15:15:21UTC; only obsolete legacy118704908385 remained, with native/image job already completed failed. Cancel only that obsolete remainder to free the runner. Preserve all first failures, no image/native phase cancelled, no teardown-derived child/cleanup claim. All existing actual-host/production/parent holds remain. Only new test/mutator, pre-audit and identical ledger/B5 corrections; shell/old proof/manifest/publisher/readers/workflow/VERSION/statuses/contracts fixed.
+
+D303 pre-code fixture-signal amendment: D3021fb9ceb7 CI39446651416 fails both root probes because precreated ready files meet the artifact's later set-C: the labelled printf-ready redirection refuses before reaching the pause. Root-parent pauses before set-C still work. Use >| ONLY in the explicitly instrumented fixture signal write to its predeclared root-owned empty ready inode; no actual copier redirection/guard changes. Resume still changes only existing signal contents. The seven affected cases retain their fixture on harness uncertainty, never credited cleanup/negative proof; no mutant ran. Linux rawlog60406bytes/654lines/26e8048bd0a9497004e97b9494ebdd6527271c4b7281b109d24774c821e4a4e1; macOS43750/443/7e828a66d092a2e77a841d471a3eda6ef5e128913a4e98d76feb8f2df08c61ea, retained unchanged under outputs/openclaw-recovery/1fb9ceb7. This is the same pause-proof correction, no guard weakening, natural-cause repair or actual-host operation. Fresh current reports/review/CI still required.
+
+Verify that specific signal fix with an unprivileged owned shell control: preexisting empty inode, set-C enabled, forced fixture-only overwrite, unchanged inode/parent metadata and exact ready bytes. This is normal disposable shell plumbing, not root copier execution or positive provenance. All actual root controls remain CI-only.
+
+
+### 2026-10-20 11:28 EDT — D304 root-copy source proof closure contract
+
+Micro re-orient: exact sourcea686f6255202964780bdb7624e7648ee48e6132a remains B5-stage0-installer-root-copy-source[A]/v1.2-pre. Claude173 clears all Message171 RQ1–RQ6 and the signal-file correction, source-only/no new required findings, independently recomputing current bindings and correction appends. The author's checked current Linux/macOS reports each complete21Native tests/42cases/39root authentication workers/42removed fixtures;37workers have observed final Bash+handshake and2are strictly classified early NEGATIVES, not positive provenance. Each mutator completes12designated baseline methods/16intended-assertion kills without ERROR,47nested removed fixtures/45waited group-absent root workers plus removed outer fixture. Exact code/input/ZIP digests and complete channel/accounting checks are saved at outputs/openclaw-recovery/a686f625/source-proof-binding.json. Actual root bytes/denials/ACL principal/fault reason checks pass on the fresh disposable runners. Current source CI39447505267/attempt1 still runs; no all-eight or source closure is yet claimed.
+
+Before closing only this auxiliary source row, require ALL8fresh current-head jobs success in attempt1, check raw local/native/old-auth21controls23kills logs and dedicated reports, and bind the tested merge7afaa41038642034bee48bc2ae4a446b19ed4f10 (parentsb00f5687026d06cfd8c93699e283b6305818b2ad+a686f625) whose ENTIRE tree81ff368369f44ca30306516c1afbe424c69071d1 equals reviewed source. Retain every failed/superseded report and exclusion, incomplete cleanup distinction and cancellation chronology. External wrong-code approval/owner controls assert no-worker; author must separately check exact current-report refusal messages rather than call them unique assertion proof. No optional external-prehash mutant/overlap expansion or unrelated repair is added.
+
+Only THEN change auxiliary root-copy row[A]→[x] and B5 current-owner prefix; append one identical D304 receipt to DECISIONS/REGISTRY/INVENTORY/FRONTIER/AUDIT_POST after unchanged old bytes, with this pre-contract. All source/test/mutator/probe/workflow bytes, old rows/contracts/statuses, other frontier cells, B6 clause and VERSION remain fixed. The six-Markdown receipt itself needs independent exact-head review and OWN all8fresh CI before this source unit is finished; neither is preclaimed.
+
+Qualify source-only scope: transient root-copy-observed-v1 is inert/page-cache readback, no startup/installation/durable receipt/fsync/physical updater exclusion; later Stage1 must reauthenticate copies and actual runtime/profile/identity/route/session approval. Success/failure retain fixed pending staging, no reset/retry/resume/cleanup/rotation. All actual installed/protected-session root-copy/host installation/policy/challenge/production/parent gates remain open. B5/1.2/protected[A]/v1.2-pre; B6–B9 held, D64/Gate unchanged, production capture disabled. Reconciliation[ ]unimplemented, B6 payload-availability clause fixed, consumed real cleanup authority unrenewed, original causes/attended incident reconciliation open. No local root/elevation/native/full-suite/live-bus/physical-host/service/VM/image/timer/account/access operations. Stop after this ONE source unit receipt review/CI; no next operational unit starts automatically.
+
+
+### 2026-10-20 11:54 EDT — D305 relocate only owned macOS copy proof; closure deferred
+
+D304's proposed closure is NOT executed: sourcea686f625 remains[A]. Its own CI39447505267 native118713212986 concludes cancelled at15:51:18UTC; the check-run annotation explicitly says the job exceeded30m0s. This is runner-enforced job timeout, NOT an author cancellation of the native/image phase. Source copy proof itself completes21tests/42cases/39workers/42removedfixtures and16kills in each platform, and Claude173 clears source, but six other completed successes plus one pending legacy job cannot supply all-eight CI.
+
+The new Mac root-copy steps occupy15:21:04–15:24:04 (~3minutes) inside the preexisting30minute ASIF job. Its unchanged protected reader starts15:29:39 and is interrupted at15:51:10 with7completed cases/active source-xattr/completed=false/cleanup.clean=false/removed=false/not-yet-observed. No full semantic-reader or child/fixture cleanup is inferred from runner teardown. Original reader timing/cause is NOT repaired or explained by byte equality or any later green. Retained exact native rawlog39071bytes/424lines/SHA256889d77fa0f9f0442eb60b035a9d1f2c358fb70b6c902cd799d9f2d0465dcf454; incomplete native archive12279660501 ZIP12308/e39b19b758658668d0f98464d924aadafb32bb3ff6afa9b62024ef37cff6c8b2, protected report14009/fba7d70de5f543725a24b46cad6f39a114c19c7e9d5a68768dafde9eac618dca. All unchanged at outputs/openclaw-recovery/a686f625. Source root-copy/old-auth reports and Linux rawlog remain separately valid fragments, not overall CI/source closure.
+
+Bounded proof-wiring correction: MOVE exactly the THREE NEW macOS inert root-copy local/root/mutant/report steps, byte-for-byte, from immediately after checkout in asif-mount-ownership-macos to immediately after checkout in the EXISTING macos-process-census job. Both already use macos-latest and /usr/bin/python3; no new job/runner type/tool/install/account/environment field or authority is added. Root proof remains isolated disposable CI fixture plumbing with native pre-exec protection/hash and distinct actual principals. This removes its ~3minute budget charge from the ASIF job without touching any old reader/source/step/action/guard/timeout/budget. It is not a Q/NATS runtime repair and does not guarantee the next ASIF duration. Copy and image proof then run on different fresh CI runners; no same-runner/process integration or approved production-runtime claim. The old census still follows new proof with default success guards, preserving the explicitly one-way dependence there; old ASIF steps are restored structurally to the pre-D300 form. Linux new proof is unchanged.
+
+Keep exactly eight jobs, all old structural properties/guards/actions/budgets fixed after filtering the six new proof steps; compare moved Mac steps byte-for-byte and entire pre-D300 workflow structure. Only workflow placement, this pre-audit and five identical D305 candidate appends/B5 prefix may change. All three new source/test/mutator files remain at Claude173-cleared a686 bytes; old auth/manifest/publisher/readers/proof/VERSION/statuses/contracts/B6 fixed. No optional tests, timeout increase or unrelated code change. Source remains[A] pending independent exact placement/delta review, fresh complete reports and all8fresh current-head CI, then a separately reviewed six-Markdown closure receipt with own8fresh CI. No local root/elevation/native/full-suite/live-bus or actual-host/production operation; all D300 holds and consumed-authority limits remain. Stop after this ONE source outcome and its receipt proof.
+
+
+### 2026-10-20 12:49:55 EDT — D306 root-copy source proof closure contract
+
+Exact source77eb2f6f3d1a29fd1126e479fe88c3ddbb2b6564 now meets the source-only close conditions. Claude173 clears executable RQ1–RQ6/signal corrections; Claude175 clears the byte-exact CI placement/delta, no required findings. Current CI39452973225/attempt1 succeeds ALL8fresh jobs, complete2026-10-20T16:47:07UTC, no current cancellation/rerun/carried success. Tested merge d1e0a9cc1420194ef33a6f913f2b39f006a1d1ab has parentsb00f5687026d06cfd8c93699e283b6305818b2ad+77eb2f6f and ENTIRE treeaf91a96ffaf178e650d4a1e80f84766ea89a3a96 equals reviewed source. D304's old a686 closure contract was never executed; that run remains excluded/not green.
+
+Author checks both current copy archives' API ZIP digests, immutable code/input bindings, complete21Native tests/42cases/39workers/42removedfixtures per platform,37observed Bash+handshake and2strict early NEGATIVES, all waited/group-absent/failure=None. Each mutator completes12designated baseline methods/16intended-assertion kills/no ERROR/47nested removed fixtures/45root workers/removed outer. Current Mac copy proof is CENSUS job118732373327/artifact12278559287, distinct from ASIF job118732373554; Linux22 job118732373607/artifact12278503980. Source actual root bytes/protection, both actual nonroot four-operation denials, runner/501 ACL identity, expected metadata/readback/entry/FIFO/interruption reasons and exact external no-worker refusal messages checked. External-code test assertions are no-worker checks, not unique reason/mutant proof. Complete source raw logs retained with all old auth21/23proof intact. Current native ASIF archive12279954132 ZIP17319/9d9b4eab4968e01655ee380ab6a8d1459b13711f316d7233a53e769caaefc611 includes complete8case Q/cleanup.clean+removed and10case publication; this does not repair/explain prior timing causes.
+
+Now close ONLY B5-stage0-installer-root-copy-source[A]→[x] and update B5 current-owner prefix. Append identical D306 receipts in the five ledgers after unchanged bytes, binding complete source data/review/CI and retained exclusions. All other rows/contracts/statuses/frontier cells/B6/VERSION and EVERY source/test/mutator/probe/workflow byte remain fixed. This six-Markdown receipt still needs independent exact-head review and OWN ALL8fresh CI/complete reports before this unit is finished; neither is preclaimed.
+
+Record exact old cancellation chronology, distinguish runner-native deadline from author legacy-only cancellations, preserve incomplete cleanup/no teardown credit and all excluded masked proof. D305's 11:58 heading is ahead of its actual git commit2026-10-20T11:56:11-04:00; exact Git/GitHub timestamps control chronology, with its11:54 pre-audit preceding the wiring change. Do not rewrite old blocks or turn that heading into execution proof. All CI-only/inert/transient/no-fsync/platform/updater/ABA limits and actual installation/runtime/profile/identity/resource/access/reboot/production/parent holds remain. B5/1.2/protected[A]/v1.2-pre; B6–B9 held, D64/Gate unchanged, production disabled, reconciliation[ ]/unimplemented, B6 payload clause fixed, real cleanup consumed, original causes/attended incident reconciliation open. No local root/elevation/native/full-suite/live-bus/physical-host operation or optional expansion. Stop after this ONE source outcome receipt review/CI; no next operational unit starts automatically.
+
+
+### 2026-10-20 14:05:13 EDT — D307 record-only CI audit identity pre-screen
+
+Micro re-orient: B5/1.2 and protected acceptance remain[A]/v1.2-pre; D306 is complete at812f1480 with Claude177 clear and own8fresh CI39461587082/attempt1 complete17:50:10UTC. The operator newly says yes/go for ONE next owned unit. Claude179 refuses an identity adapter's missing native-positive Need and selects this record-only pre-screen. It serves the later Stage1/window identity contract; it admits no runtime/profile/host or installation. Still the right next step: observe actual CI facts before guessing that adapter.
+
+Goal: retain bounded actual plain-runner and clean-env→sudo process/audit metadata on fresh disposable Linux/macOS CI, with no admission decision. Needs checked before code: immutable baseline812f1480 clean/pushed/draft; existing8-job CI and Python3.9-compatible stdlib; D168/D261 owned-only authority; Claude179 R1/R3/R4/R5/R6 characterization contract. XNU audit.h pinned atf6217f891ac0bb64f3d375211650a4c1ff8ca1ea,12942bytes/SHA256338dff615c1c7d8e3bd3379dd491969f1fb39f0d626e9b1c349f2a66fa9d73f4: uid32, asid32, dev32, flags64 aligned8; auditinfo_addr48bytes, offsets0/4/12/36/40. Current CI audit values are UNKNOWN, not preclaimed. Feeds: a separately reviewed identity adapter design, or its explicitly unmet native-positive Need. This pre-screen is a complete observation outcome even if identity is unset/unavailable; that does not close the adapter's Need.
+
+Interpretation fixed BEFORE running: unset/unavailable kernel identity means no native positive on that runner image; set equal to runner uid means only refusal evidence for the EXISTING harness's operator==capture model; set different from runner uid is unexpected and stops for design review, without policy/image work. Plain/sudo disagreement needs an explicit design decision. Darwin id-A/syscall disagreement permits neither method to be selected. Missing SUDO_UID requires a written review of the existing CI-only fallback assumption. All results describe dated hosted-runner images, never the actual target host or a protected operator session. An auid/SUDO_UID agreement is consistency only, not authentication. Linux permits unprivileged setting of an unset loginuid; this unit NEVER sets it. No source method, saved-uid policy, positive fixture class or actual runtime/profile is chosen by these observations.
+
+Design: a new record-only observer snapshots the initial environment before other program logic and never replaces it. No anchor, installer, Stage0, release module or production path is imported or invoked. Only lexical tags absent/read-error/non-canonical/sentinel-4294967295/decimal are emitted for raw identity values. Record real/effective uid, Linux saveduid/getresuid and bounded /proc/self/status Uid/Gid lines; Darwin saveduid explicitly unavailable; gid/groups/pid/ppid/session/process-group/tty metadata; sorted environment KEY NAMES and only SUDO_UID/GID/USER/COMMAND values. Every count/string/channel/report is capped. The driver injects a non-secret canary into the real plain CI environment and verifies its VALUE never reaches the report/log payload. No arbitrary environment values are emitted.
+
+Linux records exact bounded read-only loginuid/sessionid bytes or errno. Darwin records getauid and length-checked getaudit_addr status/errno,48byte raw struct hex and declared layout/decoded data, plus bounded native id-A stdout/stderr/rc. Run context binds source head/tested checkout/run/attempt/job ID, runner-reported image strings, uname/OS/sudo version, interpreter path/realpath/version/flags as CI platform assumptions, not approved runtime or kernel executable provenance. No selectable syscall fallback or native-positive injection. sudo -n only; no -S/-A/askpass, retry or post-sudo env wrapper. The direct fixed invocation is env-i PATH/LC_ALL then absolute sudo-n then selected absolute Python-I-S-B observer; SUDO_COMMAND makes the absence of an intervening wrapper reviewable.
+
+Verification: local pure-data/schema/static/argument controls and Python3.9 AST only, NO local native identity observations. Static/AST controls prohibit audit setters and writable proc identity opens; strict-schema/canary/canonical-tag tests forbid admission/authentication/positive fields and arbitrary environment values. Every child is deadline-bounded and waited; unexpected status/missing context/schema/truncation/worker uncertainty fails integrity. Unset/unavailable audit identity is ordinary recorded data, not a failed probe. One exclusive0600 RUNNER_TEMP report per platform, always-uploaded; canonical bounded report and SHA256 are printed for review. A failed child/sudo is recorded without retry; partial/incomplete proof stays failed with no teardown cleanup credit. No persistent fixture, root storage, account/audit/rights/password/config/VM/image/service change or recursive cleanup.
+
+Exact deltas: new ci_audit_identity_observer.py, probe_ci_audit_identity.py and test_ci_audit_identity.py; two new proof/upload steps each in existing Linux22 and macOS-census jobs, proof steps with own timeout-minutes; this PRE append; identical D307 appends in five ledgers; one auxiliary characterization[A] row/contract and one tracked future identity-profile-binding[ ] contract; prepend only B5 current-owner cell. Filtering four new CI steps must equal the entire812f1480 workflow structure, including all old actions/guards/budgets. No ASIF time charge or additional job. Existing anchor's SUDO_UID default/argv and post-sudo CI-env assumptions remain byte-identical and explicitly CI-only, never identity evidence. No optional179 O1–O5 work. Exact-source review/fresh all8 CI and complete checked report/API ZIP/source/merge bindings are required before a source-only closure receipt, which itself needs own review/fresh8CI.
+
+Claude179 R2/R7 remain future design gates: before any adapter, bind operator/capture identities to independently approved data (digest-bound runtime-profile fields or a separately approved fifth binding), decide Darwin saved-uid uncertainty and the native-positive fixture class, then replace the old CI entry only under a separate stricter contract. This unit makes no such choice or implementation. B5/1.2/protected[A]/v1.2-pre; B6–B9 held; D64/Gate unchanged; production capture disabled. Actual runtime/profile/operator-session/access/root-copy/identity/installation/policy/challenge/B3/B8/disposal/resource/reserve/reboot/integration/admission/manual/D175/parent gates remain open; reconciliation[ ]/unimplemented, B6 payload clause fixed, consumed real cleanup consent unrenewed and original R3/TIMEOUT/peer-offline/attended incident causes open. No local elevated/native/full-suite/live-bus/physical-host operation. Stop after this one pre-screen source/receipt proof.
+
+
+### 2026-10-20 14:26:46 EDT — D308 Message181 F1/F2/F3 recording-integrity correction
+
+Re-orient: same ONE D307 record-only CI pre-screen, not an adapter. Claude181 verifies source/delta/header/R1/R3/R5/R6 but requires three bounded corrections, explicitly no new scope: F1 direct built-in/io/os/pathlib write forms in BOTH files escape the static control; F2 failed Darwin calls record caller-initialized buffers as raw output; F3 SUDO_COMMAND is argv evidence, not a dispatcher/launcher-absence or exact sudo-produced environment proof. The reviewer read the actual517c source and observed NO identity write or fake result. Source row stays[A]; no parent or source closure is made.
+
+Before correcting code: extend the AST control across both observer and driver, explicitly permit only the existing read-only os.open and exclusive report writer/fd writer/stdout, reject built-in/io/pathlib writes and audit-setter spellings, and add safe AST-only controls for181's two dead-code mutants plus other named open forms. No injected write executes. For F2 set getauid/getaudit_addr raw fields and scalar values to null on any failed status, enforce this in schema and add a fake-library EPERM test with child/native functions mocked; successful native value recording is unchanged. Do NOT run a native failure or identity mutation to test it. Observer/driver/tests plus this pre-audit and identical five-ledger appends/B5 current-owner prefix only; workflow/old source/rows/contracts/VERSION remain fixed.
+
+F3 qualification controls D307's wrapper sentence now and in the later closure: SUDO_COMMAND/exact argv show no explicitly inserted env wrapper after sudo. They do not prove absence of Apple's xcrun/framework launcher stubs or other runtime launch components. Key names are the OBSERVER's initial environment after that launch chain, not necessarily precisely sudo's constructed environment. Path/realpath/version are declared CI assumptions, never pre-start/runtime/dispatcher proof. No executable census or extra profile work is added. The non-secret workflow canary's value is deliberately literal in the workflow/step preamble; absence is checked only in the canonical report and that report's printed payload, NOT the entire job log. No secret-value confidentiality is inferred from that literal test marker.
+
+First517c CI39473157994/attempt1 has completed new Linux22/Mac-census proof steps and immutable checked artifacts under outputs/openclaw-recovery/517c0375; it is not yet all8 green and is not corrected-source proof. Actual successful Darwin calls and both id-A results agree on auid501/asid100002; Linux raw loginuid/sessionid are4294967295 in both contexts. Those recorded observations remain dated fragments, not a native positive under the old runner==capture model, not approval and not evidence of F2's failed-call path. The old exact report/ZIP bindings remain untouched; no backfill or carried CI. Fresh corrected-source review, reports and all8 CI are mandatory. Do not cancel any active native/image phase or alter old budgets. All D307/D168/D261 parent/actual-host/production/consumed-authority/original-cause holds and no-local-native constraints remain. Stop after the same one source/receipt proof.
+
+
+### 2026-10-20 14:58:49 EDT — D309 CI identity observation source closure contract
+
+Micro re-orient: the same ONE D307/D308 record-only pre-screen remains[A], at reviewed source ff700edc3047500dad341d19cb362520820ed945, sole parent517c037569e74393e2264d284108cf29ddb8b418. Claude183 clears all Message181 F1/F2/F3 source corrections, independently passing eight baseline tests and killing two F1 plus six F2 mutants at intended assertions without unittest ERROR. This is no adapter or operational unit; native-positive/profile/saved-uid design Needs remain open. Current source run39475358747/attempt1 is NOTgreen: six jobs succeed, legacy118809785330 still runs, and census118809785389 was provider-cancelled before runner acquisition (runner_id0, no steps), with hosted macOS ARM64 capacity/acquisition annotations. No corrected Mac observation exists yet. Checked corrected Linux artifact12289870191/job118809785644 records unset loginuid/sessionid in both contexts; source bindings/canonical printed report/log SHA are checked. No own receipt review/CI is preclaimed.
+
+Goal: close only the auxiliary CI characterization source outcome after complete checked current-head Linux/macOS observations and all eight job outcomes succeed. Needs: Claude183 source clearance, immutable current source/API ZIP/report/log/tested-merge bindings, both bounded complete two-context/three-argument-refusal records, original interpretation contract plus C1 below, all retained failures/cancellation chronology, and all eight current-head successful jobs. Feeds: the separately reviewed Stage1 identity design and its still-unmet independent approval/native-positive Need; never actual host/runtime/profile/session admission. Verify: exact six-Markdown receipt delta, identical five-ledger append, only the auxiliary row[A]→[x] and B5 current-owner prefix; own immutable independent review and own full eight-job CI with actual reports/source/tested-merge bindings. Every source/test/probe/workflow byte, VERSION, old contracts/rows/statuses/other frontier cells/B6 clause stays fixed.
+
+Capacity qualification is explicit BEFORE retry: wait for all other SEVEN source jobs to succeed, then request ONCE only the never-acquired census job at the SAME head. Preserve the original no-run failure, request time, new job/attempt/artifact and seven carried attempt1 successes. No code/guard/budget/runner change, dummy commit or whole-workflow rerun. This qualifies D307's all-eight-fresh wording: each selected job must actually succeed at this immutable source, on its fresh disposable runner, but seven successes may be carried from attempt1 with the one replacement census in its actual later attempt. It is NOT eight fresh successes in one attempt. Unknown retry outcome is inspected, never blindly repeated. A second failure cannot be silently promoted to pass. Do not cancel any current active native/image phase.
+
+C1 explicit design interpretation, before corrected Mac retry: the preregistered plain/sudo identity comparison covers auid, asid, termid and flags; it does not require privilege-filtered audit masks to match. All four identity fields agreed in the initial517c fragment; the corrected report must be checked independently. The masks' plain[0xffffffff,0xffffffff] versus root[0,0] difference is retained as observed metadata, not identity drift or authentication. Basis: pinned XNU f6217f891ac0bb64f3d375211650a4c1ff8ca1ea/bsd/security/audit/audit_syscalls.c, getaudit_addr_internal lines1056/1063–1069 returns ~0 masks to a non-superuser. Reference33103bytes/SHA256e79b27335e5dee159f515fab4bc6ca9f28eff095a9fe1cb94b09c1da903b2378, saved unchanged in outputs/openclaw-recovery/audit-identity-prescreen. This reference is NOT verification of the running kernel or its source version. Any auid/asid/termid/flags or within-context syscall/id-A mismatch still stops for design review; no method or native-positive class is selected.
+
+Carry F3 literally: argv/SUDO_COMMAND establish only no explicitly inserted post-sudo env wrapper, not absence of xcrun/framework/runtime launchers; keys are observer startup AFTER that chain, not necessarily exactly sudo-constructed environment. Interpreter path/realpath/version are CI assumptions, not kernel executable or pre-start profile proof. Canary absence is ONLY canonical report/printed payload including hex; the deliberately non-secret literal appears in workflow/setup and is not absent from the whole log. Failed calls must have null raw/number/decoded fields; no failed-call path is certified from a successful native call, only reviewed fake-library/schema controls. Direct children are bounded/waited; no full descendant absence or teardown-cleanup proof.
+
+First517c run39473157994 remains cancelled/notgreen and excluded from corrected-source proof. All seven other jobs, including native118802177890, finished before the author requested cancellation18:40:43.249015UTC; only obsolete legacy118802178495 was cancelled18:41:18UTC. Its valid dated fragments stay unchanged, never backfilled or substituted. Current census118809785389's provider acquisition cancellation18:45:38UTC is a separate event with zero executed steps. Both chronologies/annotations/complete records stay retained. No cancelled job supplies cleanup or native proof.
+
+B5/1.2/protected[A]/v1.2-pre; B6–B9 held, D64/Gate unchanged, production capture disabled. Actual host/runtime/profile/operator-session/access/root-copy/identity/installation/policy/challenge/B3/B8/disposal/resource/reserve/reboot/current-inventory/override/fresh-D60/full held-process integration/durable admission/manual restoration/D175/parent gates remain open. R2 independent identity-profile approval, R7 Darwin saved-uid/native-positive class, reconciliation[ ]/unimplemented, consumed real cleanup authority and original R3/TIMEOUT/peer-offline/attended D250-D251 causes remain open. No local root/elevation/native/full-suite/live-bus/physical-host/account/session/service/VM/image/timer operation or optional expansion. Stop after this ONE source outcome and its receipt review/CI; no adapter or next operational unit starts automatically.
+
+
+### 2026-10-20 18:31:56 EDT — D310 Message159 Q1 chronology qualification contract
+
+Same ONE record-only CI characterization source receipt, no new adapter or operational unit. Claude159 clears D309 b2b3de525a4d1addb03c64c9b168aa50ee41a704 delta/evidence/C1 and verifies its own ALL8fresh CI39484416928/attempt1, but requires Q1: the D309 PRE heading timestamps and alleged earlier recording order are author-attested, not established by immutable Git history. Append an identical qualification to the five ledgers; preserve every source/test/probe/workflow byte, old block/row/contract/status/frontier cell/B6 clause/VERSION. Do not repeat CI observations, census or any host operation to fabricate earlier evidence.
+
+Goal: distinguish the author-reported local write/request chronology from durable commit/API observations. Needs: exact b2b3 parentff700edc, Claude159 Q1, source run39475358747 across-attempt evidence and receipt run39484416928 ALL8fresh, all retained artifact/log bindings and holds. Feeds: honest interpretation of the same closed auxiliary source outcome, not actual session/runtime/profile admission. Verify: six-Markdown pure appends, one byte-identical five-ledger Q1 block, immutable independent review and this correction head own eight-job CI/checked reports. No current-head review/CI is preclaimed.
+
+This entry and the Q1 result will first share the correction commit; their labels are author-reported and do not independently sequence local writes. Exact Git/GitHub timestamps control durable chronology. All D309/D168/D261 actual-host/production/original-cause/consumed-cleanup/R2/R7 and no-local-elevated/native/full-suite/live-bus/physical-host constraints remain; no status/gate advances. Stop after the same ONE source unit correction/review/CI, no next unit automatically.
+
+
+### 2026-10-20 18:44:32 EDT — D311 isolate the existing EOF proof blocking this receipt
+
+Micro re-orient: the same ONE record-only CI characterization receipt remains unfinished because D310 own CI39508848019/attempt1 is RED. Claude5 clears D310 Q1; legacy118924509529 failed22:34:08UTC at the old EOF mutant (16prior kills, then Ran1test2.047s/OK), so later lock proof was skipped. Raw187lines/16814bytes/SHA25640a349d451589254a0d7d493ad3f5f079e0bd6736646253f8f5e6394c1a4cba5 retained outputs/d27050bb/legacy-failed-job.log. No rerun or cancellation; other current native/image phases continue. Oldb2green cannot substitute. The current Mac identity fragment is complete and checked, but the full head is NOTgreen.
+
+Goal: make the existing EOF mutant prove its own handshake fault instead of being masked by the later metadata walk hitting a2second harness deadline. Needs: D168/D261 owned-test authority, exact d27050bb, retained failed log/static trace, Claude7 required bounded alternative/no other blocking Need. Feeds: valid current-head CI for this same source receipt, not new authentication/adapter/production capability. Verify: only the existing test_held_open_stdin_never_counts_as_eof method and eof mutator expected string change; labelled real-CI closed reference/late-byte semantic refusal/unique marker mutant kill on Linux Bash5/macOS Bash3.2, full21tests/23intended kills and ALL8current-head CI, independent exact-source review and checked report/merge bindings. Local work stays AST/fixture-text/data-only, no native/elevated/root/full-suite execution.
+
+Claude7 confirms static masking: EOF mutant skips the read, but full metadata/hash work can consume the same2second deadline the test treats as success. This supports latent test timing dependence, NOT exact scheduler attribution. The proposed read-t1 alternative is rejected and NEVER implemented: Apple Bash3.2 read.def at51bf3fc6f26e9517c3a2e4bc3d208f9b39b87178 returns EXECUTION_FAILURE1 for both timeout(line332) and EOF(line530). Reference20131bytes/SHA256928a96c41d21b8e2fe3d287c1e47180162b01e8ecce5277e1340d2490ef8ef00, not a binary observation. No timeout/status substitution may fake EOF semantics.
+
+Implement the required labelled fixture-only variant from the current copied script with TWO exact surviving anchors: after the exact start-line guard, write a ready file OUTSIDE base using the existing pause pattern; after the exact EOF-status/empty-extra guard, emit ONLY eof-fixture-crossed-v1 plus LF and exit0 before expensive work. Both anchors occur exactly once in honest and EOF-mutated scripts; the blocking read itself and released artifact stay UNCHANGED. Closed-stdin reference must reach ready/marker/rc0/emptyerr/failureNone with actual shell/handshake/wait/group accounting; this is synchronization fixture output, NOT authentication success. Remove only that ready file before the held-open case.
+
+Held-open during callback waits at most10seconds for ready, holds the writer open/no data for2seconds, then sends ONE byte without closing only if the worker is alive. Record already-exited/BrokenPipe without raising; close/clear a broken stdin handle safely so communicate cannot introduce a secondary buffered BrokenPipe failure. Keep the existing default30second harness bound, not timeout2, and no job/artifact/launch/provenance budget change. Assertions in order: failureNone, ready reached, emptyout with UNIQUE held-open EOF guard was bypassed message, then actualbyteSent/rc1/EXACT installer authentication refused: rendezvous LF/observed shell/handshake/prehash/wait/group absence. A timeout or other refusal is failure, never credited as semantic negative. The honest read consumes the late byte and refuses whether already blocked or not; the EOF mutant never consumes it and reaches the postguard marker whether before or after injection. The2second hold is a bounded phase, not proof of indefinite blocking. Special-case ONLY eof to require that unique stdout assertion; generic AssertionError/ERROR/deadline cannot count as its kill. Preserve all other mutator anchors/counts/tests; add no duplicated prehash/env-launch anchor text to the test file.
+
+Only those TWO test/proof files, this PRE and identical five-ledger D311 appends are in scope; old rows/contracts/statuses/frontier cells/B6/VERSION and every released auth/observer/probe/launcher/reader/root-copy/workflow byte stay fixed. Current correction exact review/ALL8fresh CI remain required, not preclaimed. This PRE/code/result first share the correction commit, so labels/local write ordering remain author-attested under Q1, not independently Git-sequenced. All B5[A]/v1.2-pre/B6–B9held/D64/productiondisabled/R2/R7/actual-host/runtime/profile/identity/operator-session/access/installation/policy/challenge/B3/B8/disposal/resource/reboot/integration/admission/manual/D175/parent/original/attended/consumed-cleanup/no-local-native constraints remain. Stop after this SAME original source-unit proof correction; no next adapter or unrelated unit.
+
+
+### 2026-10-20 19:42:57 EDT — D312 identity-profile provenance design pre-audit
+
+Micro re-orient: B5/1.2/protected[A]/v1.2-pre. Previous D311 f4135e09 is complete: Claude9 source-only clear; own CI39510472636/attempt1 ALL8fresh success23:35:44UTC and checked exact report/merge bindings. The human newly says yes/go. Select ONE open B5-stage1-identity-profile-binding design, serving later Stage1/window provenance before an adapter. Still the right next step: the observation never approved identities.
+
+Goal: choose independently approved provenance for both future policy identities. Needs checked: launch proposal v6, Claude179 R2/R7 as retained in D307 PRE, D168/D261 owned design authority, current clean pushed f413 head/open draftPR224/all8green. Feeds: later separately reviewed adapter contract; no actual profile approval. Verify: independent immutable review of approval-before-interpretation, unknown/mismatch refusal and caller-data exclusion; local document/delta/hash/append/plan-lint checks and own exact-head CI. No local native/elevated/full-suite or actual host operation.
+
+Select mandatory identity_policy inside the EXISTING independently approved per-host runtime profile, not a fifth binding. Bind both distinct roles, host and independently reviewed account-record provenance in the complete approved bytes; approve externally before semantic use. Exact final profile schema/account/native method is later adapter-contract Need, not current implementation. Retain R7 Darwin saved-uid/native-positive limits as OPEN, with no waiver or fabricated positive. Existing v6, all source/test/probe/workflow/manifests/VERSION/old contracts/statuses remain fixed except chosen auxiliary row[ ]to[A]. New design candidate 11803bytes/SHA256e8b31e1966bf18870286baa0651c6bc8560a0ba4868681cc93cb8beb860a5c03; identical D312 candidate block in five ledgers. Independent exact review/CI pending, no closure preclaimed.
+
+Only new design companion, this PRE, five ledger appends and the chosen row are in scope. Preserve all B5/1.2/production/B6/R7/actual-host/original/consumed-cleanup holds. PRE labels/local write order are author-attested under D310 Q1; Git first records PRE and candidate together. No adapter or next unit automatically.
+
+
+### 2026-10-20 19:47:18 EDT — D313 required D312 design corrections
+
+Same ONE identity-profile provenance design, auxiliary row[A]. Claude11 confirms D312 binding choice matches179R2 and R7 is correctly open, but does not clear d544333e. Required R1: explicit refusal obligations for complete validly approved wrong-host/platform and superseded same-host rollback profiles. Required R2: every profile-referenced file consumed at phase time follows bounded/protected/digest-before-interpretation/held-snapshot/drift-refusal rules. Select that rule, not runtime exemption for account records; require a declared fixed reference set/bounds and no implicit includes.
+
+Only design companion changes v1to v2 (13424bytes/SHA256ec8c9b323748665fd07bf3c8073a29aecb1f759e8e3892cb3d90e6bc3f7040ce), plus this PRE and five identical correction appends. Historical D312 v1 bytes/hash remain atd544333e; no retrospective rewrite. Existing contracts/rows/statuses/frontiercells/v6/source/test/probe/workflow/manifests/VERSION fixed. Local data/delta/hash/append checks and planlint; independent corrected immutable review and own CI required, not preclaimed. Native R7 method/source/positive-class optional pointers are deferred; no native/local/host work. Labels are author-attested under Q1. All holds unchanged; stop after same ONE design.
+
+
+### 2026-10-20 20:53:24 EDT — D314 identity provenance design closure pre-audit
+
+Micro re-orient: same ONE auxiliary B5-stage1-identity-profile-binding design[A]. Claude11 confirmed D312's binding choice but required R1/R2; Claude13 clears BOTH corrected v2 at immutable46aa503f with no remaining design Need blocking design-only closure. Exact source ownCI39517293438/attempt1 is now ALL8FRESH SUCCESS, completed2026-10-21T00:50:47Z. Checked current Linux/Mac report/API/printed-payload/source and whole-merge-tree bindings are retained under outputs/openclaw-recovery/46aa503f. No actual host approval or native positive is inferred.
+
+Goal: record only the independently reviewed R2 provenance design as closed. Needs: exact reviewed v2/source, own complete8fresh CI, current checked reports/merge, existing chosen-row contract and all D168/D261 limits. Feeds: new explicitly open B5-stage1-identity-adapter-contract design row with exact-schema/protected-approval/native-method/R7/native-positive prerequisites. Verify: six-Markdown delta only, five identical pure closure appends, chosen auxiliary[A]to[x] only, new next-contract row and B5 owner-cell PREFIX only; all prior contracts/statuses/other cells/VERSION/v6/design/source/test/workflow/manifests fixed, planlint, exact receipt review and own8fresh CI required.
+
+This receipt may close only the completed R2 design. R7, implementation and all actual profile/identity/session/runtime/host/installation/production gates stay open. No source unit or operator action starts automatically. Own receipt review/CI are PENDING at commit and tracked in the INVENTORY append, never preclaimed from source proof. Local heading/order are author-attested under D310 Q1; PRE and receipt first share a commit. Preserve original/attended/consumed-cleanup/reconciliation/B6payload holds. No local elevated/native/full-suite/live-bus/physical-host operation.
+
+
+### 2026-10-20 21:48:07 EDT — D315 identity adapter contract prerequisite assessment pre-audit
+
+Micro re-orient: fresh human go selects ONE owned design/prerequisite assessment of B5-stage1-identity-adapter-contract after completed D314ce5813a5. D314 OWN CI39524076263/attempt1 is ALL8FRESH SUCCESS at2026-10-21T01:39:38Z; Claude15 clears only that receipt and does not supply an adapter/native positive. Current-source clean/pushed proof is outputs/openclaw-recovery/ce5813a5/completion-proof.json. Canonical/plan bootstrap and actual source interfaces read before changes.
+
+Goal: determine whether a supported mechanical identity contract can honestly be finalized now and record the exact preceding Need if not. Needs: D314 reviewed provenance/v2, launchv6, D309/D311 dated observations, D168/D261 limits. Feeds: a design-only prerequisite assessment and separately open record-only R7 native feasibility pre-screen, never adapter source/actual host approval. Verify: exact baseline/new companion, fixed current contract lines, chosen row[ ]to[A] only, new future preregistration row, five identical pure appends and B5 current-owner PREFIX only; no source/test/workflow/profile/manifest/v6/VERSION/B6/other frontier-cell change. Immutable independent review and this exact head's OWN ALL8fresh CI are required for the assessment, not closure of the unmet adapter contract.
+
+No complete runtime-profile schema, host/account method, Darwin saved-uid ABI or distinct-role native-positive fixture is preclaimed. Fetching pinned Apple source is read-only reference work, not an OS query, running-kernel match or native proof. No actual profile/account/session/service/rights/root-copy/VM/image/timer/cleanup operation; no local native/elevated/full-suite/live-bus/physical-host test. Heading/write order is author-attested; PRE and assessment first share a commit under D310Q1. Stop after this ONE reviewed assessment and own CI; no automatic pre-screen implementation.
+
+
+### 2026-10-20 22:33:15 EDT — D316 saved-credential preregistration DESIGN pre-audit
+
+Micro re-orient: fresh human go selects ONE B5-CI-saved-credential-feasibility-preregistration design after completed D315a4c354fb. Claude17 clears the assessment; ownCI39529673731/attempt1 ALL8FRESH SUCCESS2026-10-21T02:23:56Z, current clean/pushed open-draft PR224 and external completion-proof verified. Canonical/plan bootstrap read in order. R7/N1-N6 remain open. This design fixes a prospective macOS self-only measurement protocol before any new native source/workflow.
+
+Goal: preregister the exact measurement method/ABI candidate, commands, bounds, schema, refusal/interpretation and prospective source-review-to-enabling chronology. Needs: reviewed D315 assessment17967/18e0755ee371eef3c216f13947f912f4d9d450204ecdeb86f0e313eee4505faf, D314 provenance/v6, dated D309/D311 observations, pinned Apple source and D168/D261 CI-only authority. Feeds: later separately scoped source-candidate contract with no native enabling, then only after immutable exact-source/digest review a separately committed native-enabling workflow. Current DESIGN approval is NOT the future exact-source execution registration. Every source/witness/test/driver byte must still be bound and independently reviewed before enabling; no blank or self-selected binding can run.
+
+Deltas: ONE new inert preregistration companion, PRE, identical five-ledger D316 appends and chosen auxiliary[ ]to[A]/summary only. No source/test/workflow/manifest/profile/v6/D314/D315design/VERSION/frontiercell/B6 change in this candidate. No native C compile/execution, OS/ABI/credential query, account or protected session test locally; static/pure-data layout arithmetic and reference text only. Verify: pinned-reference/layout arithmetic and delta/hash/old-prefix/contract equality, planlint, immutable independent design review and ownALL8fresh currentheadCI. No current-design closure preclaimed; closure later needs its own exact review/CI.
+
+The ABI table is a DERIVED candidate from pinned reference widths/MAXCOMLEN, NOT observed SDK/runtime support. Current design selects no production API/library or actual identity/profile. Future SDK witness must independently compile/check every constant before any proposed native query; mismatch retains no supported measurement. Current proposed workload has NO distinct-role/account or protected-session positive, and all N1-N6/R7/host/production gates remain open. Heading/PRE order is author-attested underQ1, not immutable prospective evidence; this current design and later source-review records MUST precede any separately enabled new native run. Preserve all original/attended/consumed-cleanup/reconciliation/B6payload limits. Stop after this ONE design review/CI and receipt proof, no new source automatically.
+
+
+### 2026-10-20 22:46:08 EDT — D317 correct Message19 pre-start merge-tree review gap
+
+Same ONE D316 P0 preregistration DESIGN. Claude19 verifies exact delta/derivedABI/protocol/scope but requires R1: promotion's currentbase must be an ancestor of reviewedP2 and, BEFORE any compile/newnative child, actual checked-out ENTIREtree must equal the immutable eventPR-head commit tree obtained by bounded primaryAPI lookup. Post-run equality cannot establish before-run review if main moved. Today's baseb00f5687 is an ancestor, so this is a design correction, not an observed unreviewed new native run. No newnative workload exists.
+
+Deltas ONLY: current companionv1to v2 with required promotion/pre-start tree gate, exact additional metadata/API/worker bounds, durable preflight binding and intended refusal/mutant obligations; clarify O2's exactlength/nonzeroerrno fail-closed status. O1 fixed-lproc flag remains explicitly unverified and cannot silently fall back; no optionalSDK/library investigation. PRE plus identical five D317 appends; no row/status/contract/frontiercell/B6/VERSION/source/test/probe/workflow/manifest/v6/D314/D315 change. Preserve v1 atbf976641 and its own stillrunningCI39534354427 without cancellation/rerun/carry.
+
+Verify: whole old prefixes and allcontracts/cells equal, precise v1to v2 diff/hash, design-required guard precedes every future compiler/witness/native step, count metadata calls in26-worker/5s/65536-byte API bounds and test negative whole-tree mismatch even when four source hashes equal. Planlint and corrected immutable independent review/OWNall8freshCI required; no closure from oldsource proof. PRE timing author-attested underQ1. CandidateABI/R7/N1-N6 and allactualhost/identity/profile/session/installation/production/original/attended/cleanup/reconciliation/B6payload holds unchanged. No local native/compile/elevated/fullsuite/livebus/physicalhost operation.
+
+
+### 2026-10-20 22:57:35 EDT — D318 retain the unchanged detached-writer test failure before ONE fresh validation
+
+Same ONE P0 preregistration design. Claude21 clears corrected12f8eaac/R1 with no blocking DESIGN Need, but ownCI39535107625/attempt1 job119009836442 (Linux20) FAILS in unchanged HoldTests.test_gate_drain_does_not_certify_a_detached_writer at test_journal_hold.py712: emptytext != afterdrain. No closure may use this redrun. Rawlog1240181/SHA25695c5801ec8d61c246e36b39a38bb52833e9e3a37a2220f3a82a43d693c25f1ce, exact source bindings and failure-observation retained under outputs/12f8eaac. Static source permits existence-before-content interleaving; observed schedule was NOT recorded, so cause remains an inference, not proven/fixed/infrastructure-only.
+
+Goal: qualify the failed validation and track the separate test-completion Need, without changing the P0 protocol or any executable/test/workflow. Deltas only PRE/five identical D318appends/new OPEN test-followup row+GoalNeedsFeedsVerify. All existing statuses/contracts/frontiercells/B6/VERSION/v6/design/source/test/probe/workflow/manifests fixed. P0rowstays[A]. No local test/native/compile/fullsuite/elevated/host run and no test fix is performed.
+
+Bounded prospective validation plan: wait for BOTH bf976641CI39534354427 and12f8eaacCI39535107625 to finish all active native/image/otherjobs, retain all outcomes; THEN publish this six-Markdown qualification head ONCE for a FULL eight-job fresh attempt1 validation. No APIrerun/cancellation/carried results, no source/fixture/assertion/timing/budget/environment change, no automatic additional repeat if this validation fails. This is explicitly a validation repeat on a new docs-only head, not a claimed repair or deletion of first failure. Its commit precedes its run; retain exact Git/GitHub timing. Need independent exact qualification review and its OWN all8fresh success before any design-only closure; old successful jobs or oldheadgreen cannot substitute. If repeated/new failure occurs, retain unmet CI gate and stop automatic repetitions.
+
+Feeds separately scoped later CI-owned test-completion fix, before P1 saved-credential source work. Keep the unchanged failing source and firstred observation durable. Current design approval remains P0only, R7/N1-N6/allactualgates open; old12f head remains red even if a later head passes. Original/attended/consumedcleanup/reconciliation/B6payload holds fixed; no sourceunit/productionwork automatically.
+
+
+### 2026-10-21 00:06:10 EDT — D319 P0 saved-credential preregistration DESIGN closure pre-audit
+
+Micro re-orient: same ONE P0 design. Claude21 clears corrected v2/R1 at12f8eaac; Claude23 clears immutable D318 qualification atc9bc9ed86b8df0004821c171a9b74add739833a5. Source qualification ownCI39538377270/attempt1 is ALL8FRESH SUCCESS at2026-10-21T04:05:28Z; current report/API/log/source/whole-tree bindings are checked in outputs/openclaw-recovery/c9bc9ed8. The failed12f run39535107625 remains RED, not replaced or repaired. D318's ONE new validation began only after both earlier runs and all16jobs were terminal; publication timestamps/primary metadata retained. No API rerun/cancel/carried result or source change.
+
+Goal: close ONLY the independently approved P0 prospective protocol design. Needs: unchanged reviewed companionv2, exact qualification review, own eight fresh jobs/current artifacts/whole merge, original chosen-row contract and D168/D261 limits. Feeds: explicitly OPEN later P1 source-registration contract, dependent FIRST on separately completed B5-detached-writer-test-completion; P2 exact no-run enabling-delta review remains later. Verify: six Markdown only; PRE and five identical appends, chosen P0[A]to[x] only, one new P1 row/contract and B5 owner prefix; all preexisting contract bytes/statuses/other frontier cells/B6payload/VERSION/design/source/test/workflow fixed; planlint; receipt's OWN independent exact review and eight fresh jobs remain pending at commit and tracked in INVENTORY append.
+
+The test-completion follow-up remains OPEN and UNREPAIRED. Exists-before-content is a static possibility, not a proven interleaving/cause. No saved-credential source/ABI witness, native measurement, eligible positive, adapter schema, host/account/session/profile approval or production action is delivered. Local PRE/order remains author-attested per D310Q1 because it first shares this commit. Stop after SAME P0 and receipt proof; no next test/source/native/operational unit automatically. Original/attended/consumed-cleanup/reconciliation/B6payload holds preserved.
+
+
+### 2026-10-21 00:52:28 EDT — D320 detached-writer test-completion pre-audit
+
+Micro re-orient: same supporting node-state-recovery1.2/B5, main[A]/v1.2-pre. Fresh human go selects ONLY B5-detached-writer-test-completion before P1. D319ffe3d03b is completed: independent25clear/source and receipt all8fresh CI, externalcompletionproof. North-star preservation requires honest test evidence, not claiming a drained gate excludes a detached writer. The open reconciliation row stays first/unimplemented; actual mutation authority is absent. This is still the right owned prerequisite and is not saved-credential P1/P2.
+
+Needs pre-screen PASS: immutable D318 failed run39535107625/job119009836442 log1240181/SHA25695c5801ec8d61c246e36b39a38bb52833e9e3a37a2220f3a82a43d693c25f1ce rehashed; assertion atwritten712 is empty != after drain. test_journal_hold.py44856/cf59ce758a4b93037de955f6fb8339d26a15424a4c64055a542913a740612ce1 unchanged atffe. Source confirms BOTH ready703/childwrite682 and written712 are exists-then-read. A possible empty-before-content interval is inference, not a persisted scheduling trace or confirmed cause. D168/D261 owned fresh-disposable-CI-only authority and existing row contract are present. Exact pre-audit design independent review is REQUIRED before implementation; its result is retained separately and appended truthfully, never preclaimed here.
+
+Goal/design: change only this test's two completion waits to observe exact expected text within the same monotonic10s bound and existing0.01s polling cadence. A small test-only wait_for_text(path,expected) reads until equality, tolerates ONLY FileNotFoundError while creation is pending, returns on exact text or deadline, and propagates other read errors immediately. Both call sites use it and retain their ORIGINAL final assertEqual(read_text(),expected). Ready uses detached and waiting; written uses after drain. Missing/wrong content at expiry must still fail those original assertions. No temporary-file rename, new handshake protocol, arbitrary delay, broader helper adoption or process lifecycle change.
+
+Verification design: add a scripted fake-path/fake-clock test class in the SAME test file, executing the real helper without gate/process/OS observations. Six case families for BOTH expected strings: immediate exact; missing then exact; empty then partial then exact; persistent wrong until unchanged deadline; missing until deadline; unexpected read error. Assert exact read/return/error/poll/deadline traces and0.01 cadence, no real sleep. Four designated mutants are compiled from the ACTUAL helper source using single exact replacements: equality to path.exists(); equality to nonempty text; FileNotFoundError catch to OSError catch; deadline10 to20. Each has a passing unmutated paired control and MUST die at its named content/error/deadline assertion, never import/setup/later native work. Finite fake clock/read queues prevent an unbounded mutation case. Every queue access explicitly asserts nonempty BEFORE popping; exhaustion is AssertionError with its DISTINCT exact tag fake-queue-exhausted:clock or fake-queue-exhausted:read, never an intended-assertion tag, incidental StopIteration/IndexError or a counted ERROR. Two explicit guard probes check those exact exhaustion tags. Mutant scripts include sufficient terminal-clock/read data to reach their intended trace/error assertions without relying on exhaustion; only an AssertionError whose ENTIRE message exactly equals the designated intended-assertion tag counts as a kill, with the same unmutated paired case passing first; no regex/substring match, exhaustion tag or other error may count, and any exhaustion during a mutant run is a CONTROL FAILURE. Write the greppable control/guard/paired-baseline/intended-kill summary explicitly to sys.stderr with flush=True ONLY after every assertion passes; added summary and per-test output stays below2048UTF8bytes. Linux Node wrapper logs stderr and discards stdout; its maxBuffer/workflow remain unchanged. Existing real detached-writer negative remains unmutated and executes on both fresh Linux/macOS CI; log evidence must show it and the scripted controls pass. No local full suite/native/elevated/SDK/process reproduction.
+
+File deltas: test_journal_hold.py only (test-only helper, scripted controls and the two wait blocks); AUDIT_PRE pure append; five identical D320 source-result appends to COMPONENT_REGISTRY, DECISIONS, INVENTORY, RECOVERY_FRONTIER, AUDIT_POST; chosen auxiliary row[ ]to[A]summary only. All existing four contract lines/other statuses/frontiercells/B6payload/VERSION/P0v2/v6/design/runtime/journal_hold.py/service_gate.py/Node wrapper/workflow/manifests fixed. Child15s, wrapper5s, gate drain1s, each wait10s/poll0.01s and Node60sLinux/600smacOS budgets fixed. No other exists-then-read pattern is edited.
+
+Verify/close: local static Python3.9 AST parse (feature_version=(3,9))/scope/byte checks and planlint only; exact independent corrected-source review, fresh CI controls/intended mutants and real original detached-writer case on BOTH Linux/macOS, complete current job logs/source/artifact/ENTIREtestedmerge bindings and ALL8fresh attempt1 success required. Any failure is retained and inspected; no blind repeat/cancel/weakened assertion/budget. Only then a separately reviewed/own8fresh closure receipt may flip this auxiliary row[A]to[x], record P1's prerequisite landing and retain all other open gates. No runtime deploy/restart or actual host operation is authorized. PRE/local timing is author-attested under D310Q1 if first sharing the source commit; review-message chronology is separately retained, not called Git-sequenced. Stop after this ONE test-fix unit/receipt proof; P1/P2 are not started automatically.
+
+Holds: B5/1.2/protected[A]/v1.2-pre, B6-B9held/D64fixed/productiondisabled; R7/N1-N6/nativepositive/all actualhost/profile/runtime/identity/session/access/rootcopy/installation/resource/reboot/integration/admission/manual/D175/parent gates OPEN. OriginalR3/TIMEOUT/peer-offline and attendedD250-D251 unresolved; reconciliation[ ]unimplemented/B6payloadfixed/cleanupconsentconsumedunrenewed. No local native/compile/SDK/elevated/fullsuite/livebus/physicalhost/account/session/rights/service/NATS/VM/image/timer/reboot/cleanup work.
+
+
+### 2026-10-21 01:40:02 EDT — D321 detached-writer test-completion source closure pre-audit
+
+Micro re-orient: SAME ONE B5-detached-writer-test-completion. Claude31 cleared exactD320PREv3 before implementation; Claude33 clears immutable source91e50b3f48f161918d2bb727e8c6fb3500da49f9. OWN CI39546883744/attempt1 ALL8FRESH SUCCESS at2026-10-21T05:38:50Z. Current Linux20/Linux22/Mac legacy complete logs prove12scriptedcases/2guards/4pairedcontrols/4preciseintendedkills plus actual originalDetachednegativeOK,48tests each; current reports/API/source/ENTIREmerge verified. No historical scheduling cause, writer exclusion or host acceptance inferred.
+
+Goal: close ONLY this CI-owned test-completion source prerequisite. Needs: reviewed source/own8fresh/current3joblogs/nativecase/controls and report/source/wholemerge bindings, unchanged row4contract and D168/D261 bounds. Feeds: the existing OPEN P1source-registration row may consume this completed test prerequisite; no P1 code/schema/hash/enabling/native-positive or real authority is delivered. Verify: sixMarkdownonly, PRE/fiveidenticalD321appends, chosenAtox summary and B5ownerPREFIXonly; alloldcontracts/otherstatuses/cells/B6/VERSION/P0/test/runtime/Nodewrapper/workflowfixed. Receipt OWN independent exactreview/currentALL8fresh CI plus current same test/log/report/tree proof remain PENDING at commit and tracked in INVENTORYappend.
+
+Local chronology/PRE first share receiptcommit and remain author-attestedunderD310Q1; source CI completion precedes receipt creation. Keep old12fRED/causeinference/actualhost/profile/session/parent/original/attended/consumedcleanup/reconciliation/B6payloadholds. No local tests/import/native/SDK/compile/elevation/fullsuite or production operations. Stop after SAME ONE testfix/receipt proof; no P1/P2 automatically.
+
+
+## D322 P1 saved-credential source registration — prospective pre-audit v3
+
+### Micro re-orient
+Node-state-recovery B5/1.2 remains [A]/v1.2-pre; this is ONE CI-owned source registration, not an adapter or operational acceptance.
+D321 source91e50b3f and receipt66c1a116 have their own all8fresh attempt1 success and Claude31/33/35 clearance; both test waits now require complete text.
+Fresh human “yes and go” selects the existing P1 row, whose test prerequisite is complete; the earlier first-open reconciliation remains separately unimplemented and without actual mutation authority.
+This unit supplies the exact four source files, complete strict schema and fake/static controls consumed by a later separately reviewed P2 enabling delta.
+It serves preserved-history evidence under MASTER_PLAN; no host/profile/session identity is approved and no new credential/native measurement is enabled.
+Still the right next unit: yes, within completed P0v2, D168/D261 and the reviewed source-before-enabling chronology.
+
+### Needs and immutable baseline
+Base HEAD/upstream/open draft PR224 is66c1a116141f0694a7e55475f7e99d61db0e60e8; primary checkout untouched. Current baseb00f5687026d06cfd8c93699e283b6305818b2ad. D321 completion-proof.json in outputs/openclaw-recovery/66c1a116 verifies source39546883744 and receipt39550906038, each all8fresh/attempt1, current artifacts/full three logs/ENTIRE merge and exact reviews; no carried pass or API rerun.
+P0v2 selected from closed/reviewedc9bc9ed86b8df0004821c171a9b74add739833a5: CI_SAVED_CREDENTIAL_PREREGISTRATION_20261020.txt36456bytes/SHA256d55f1a2d1cd9a38579269fb1a61f6a95010e0335a954b389dc4f45421953efbc. These exact current bytes were rehashed. Unchanged workflow .github/workflows/test.yml49066/SHA25631b25cb486fa780908a9410b83e34dd83c1326c1423b737674f492315b9e0ab9, registered baseline commit66c1a116. Existing test_journal_hold.py49797/feab803f60715908fe6c4299ac66a3dea0d4916ed57400b2b74a66253156f24a stays fixed. Four prospective source names are absent; no nested AGENTS/CLAUDE or live BLOCKED applies.
+
+### One outcome and exact file deltas
+Create ONLY these four files beneath memory-plan/plans/node-state-recovery/audits/step12_jetstream/:
+ci_saved_credential_abi.c; ci_saved_credential_observer.c; probe_ci_saved_credential.py; test_ci_saved_credential.py.
+Each <=65536bytes, aggregate <=262144bytes. No fifth schema/helper/registration file, wrapper, existing source/test, workflow or entrypoint change. The driver contains the entire concrete schema and the exact future two-step YAML generator; neither it nor any C code executes at import. The inert execution registration does NOT exist in P1 and is supplied only by a separately reviewed P2 commit. No own-authoritative source commit/digest is embedded; P2 later names the actual independently reviewed P1 commit and recomputed four hashes.
+Append this PRE plus actual post-implementation exact four path/byte/SHA256 bindings before source publication; append identical D322 candidate blocks to the five usual ledgers and change ONLY the selected P1 [ ] to [A] summary, preserving its original four contract lines. All other rows/statuses/frontier cells/B6 payload and VERSIONv1.2-pre remain fixed. Post-implementation source hashes do not pretend to be prospective execution approval. Exact immutable source review remains later and MUST precede P2 enabling. PRE/local timestamps first share the source commit and remain author-attested under D310Q1.
+
+### Fixed C source
+Both programs include the selected SDK real libproc/proc_info/param/types headers and assert the P0 candidate: Darwin arm64 little-endian LP64/CHAR_BIT8; uid/gid unsigned32, pid/int signed32, uint64/pointer64; bsdinfo size136/alignment8/flavor3/MAXCOMLEN16; all ten exact offset/width entries. There is no copied ABI struct or alternative symbol/library/flavor/SDK.
+ABI witness has no credential/proc/audit query and prints actual SDK sizeof/alignment/type/signedness/offset/width/signature facts as strict canonical sorted ASCII JSON, using a C11 compile-time exact proc_pidinfo function-type check without calling it. Observer independently asserts the same SDK layout and prints its own layout with each payload. This is still an uncompiled source candidate; -lproc remains fixed, unverified and without fallback.
+Observer exact four-argument guard runs BEFORE getenv, getters, clocks, alarm or proc query. Invalid forms return64, empty stdout, fixed bounded refusal. After the guard it records only bounded startup SUDO_UID (over32bytes refuses before querying), ordinary getters and self PID/PPID before/after, and one initialized-buffer self proc_pidinfo call. errno is zeroed immediately before and rc/errno captured immediately after. Only rc136/errno0 emits raw136 bytes plus ten actual SDK fields; all failed/short/oversized/errno cases retain status/rc/errno with null raw/fields. Clocks are monotonic/wall nanoseconds before/after and must be nondecreasing. No credential/audit/login/session setters, account lookup, fork/exec, external PID, environment replacement or fallback.
+The self4s alarm is established with default disposition and unblocked SIGALRM, and own core dumps are disabled before the query; errors refuse. These operations implement only P0's self-alarm/core-suppression exception. The alarm remains armed through output/exit. They do not create a login/audit session or establish descendant cleanup.
+
+### Driver order, metadata and future workflow
+Fixed CLI is exactly the P0 flag/UUID/WORK/JOB_ID/REGISTRATION_PATH/literal REGISTRATION_SHA256 with no optional override. Import is constants/definitions only. Real execution requires current Darwin arm64 unprivileged CI, exact repository/job/event and an exclusively created0700 direct leaf under RUNNER_TEMP; files/journal/report are exclusive0600 and compiler-tmp0700. Existing leaves are never reused. Unsafe early WORK/CLI refusal may have no report; never write to an untrusted existing path.
+Read/hash inert registration once BEFORE interpretation. Exact p0 and workflow_baseline literals bind the selected records above; p1 has four exact basenames/bytes/hashes and source_review.approved_commit equals p1.commit. Unknown/missing/duplicate keys or provisional binding refuse. The expected registration digest is the P2 reviewed CLI literal, never recomputed as its own approval.
+Fix absolute Git to /opt/homebrew/bin/git as an explicitly unverified hosted-arm64 CI execution assumption, with bounded path/metadata observations and NO fallback to bare git or another path. Before xcrun/compiler/witness/native, use only fixed argv: absolute git --no-optional-locks -C REPO rev-parse HEAD; rev-parse HEAD^{tree}; status --porcelain=v1 --untracked-files=all (with fixed -c core.fsmonitor=false); one primary GitHub git-commit request for THIS provider event's immutable PR head SHA. Require pull_request, exact repo/nonfork PR224/branchcodex/stopped-vm-recovery/base main, canonical SHAs, actual HEAD==GITHUB_SHA (provider merge checkout), an empty bounded worktree-status result and local ENTIRE tree==API event-head tree with returned SHA==request. There is NO in-run ancestry worker, deeper fetch or extra API lookup: actions/checkout is depth1, so P1 ancestry cannot be independently walked in that clone. P2 descent from the registered P1 remains a separately verified review/promotion prerequisite outside the run, never claimed as checked by this driver. The extra status worker works in depth1 and observes dirty/untracked checkout data rather than ancestry; --no-optional-locks and core.fsmonitor=false avoid optional index writes and the fsmonitor hook. No GIT_* variables enter clean children; Homebrew/system gitconfig and the tool/runtime remain declared hosted-CI assumptions, not authenticated host authority. Never mutable-head lookup, local expected-tree selection, checkout replacement or selected-files-only equality. A racing base change therefore refuses before toolchain even if all four hashes match.
+Use /usr/bin/curl with fixed primary URL, --proto =https, --fail/--silent/--show-error/--max-time5, fixed Accept/API-version headers and --config - for this one API child. Authorization is sent only through unrecorded bounded stdin; the clean child environment and retained argv contain no token. No redirects/retry. API raw stdout/stderr <=65536/channel and5s; JSON must provide exact typed requested SHA/tree. Any accidental token occurrence in output is suppressed, explicitly incomplete and failed rather than retained as raw success. No secret or environment dump in an exception/report.
+Future outer P2 step makes exactly one additional job-selection API request through fixed /usr/bin/python3 -I -S -B inline code:5s, bounded262144 transport bytes, bounded count100 jobs, exact run/attempt/job-name/head selection, exactly one canonical positive job ID. The fixed inline Python HTTPS/CA runtime is an explicitly unverified CI assumption; verification failure refuses with no CA/protocol/library fallback. It passes only that JOB_ID to the fixed probe CLI. This is declared provider/workflow input, not a second independently observed operator identity. Driver makes no third metadata request. The full future two-step YAML bytes (job selector, fake test argv, probe argv/literal registration digest, always-upload of only report/progress/two binaries/five named SDK copies) are implemented as inert text in P1 for P2 review; workflow TODAY remains byte-identical. Projecting those exact two later steps out must reproduce the registered baseline hash. No P2 review branch or execution registration is created now.
+After the prestart gate the exact direct-worker order is: xcrun SDK path, xcrun clang, CC --version, uname -s/-m/-r/-v, sw_vers -productVersion/-buildVersion, the two P0 builds with fixed -lproc, otool -L on both outputs, ABI witness, three bad-argument refusals, plain observer, direct clean-env-before-sudo observer. Together with four prestart git/API workers this is23 direct driver children (cap26), one witness, two native observations, two builds, no retry. Fixed discovery/metadata5s, build30s, witness3s, observer8s, bounded2s reap allowance,150s global, later3minute step. Budget remaining caps each; no native child after any failure or witness mismatch.
+Only fixed named SDK inputs are read/retained: SDKSettings.json and libproc.h/sys/proc_info.h/sys/param.h/sys/types.h; respect65536/262144/1114112 aggregate bounds. Each SDK/tool path has <=16 components and <=16 symlink resolutions, with original/resolved/final metadata; refuse loops/unknowns. Recheck exact selected SDK/tool/binary/source metadata/hashes after execution; no scan or alternative candidate. Both outputs<=8MiB each, sum<=16MiB. Retained artifact allowlist is report.json, progress.jsonl, abi-witness, saved-observer, sdk-settings.json, sdk-libproc.h, sdk-proc_info.h, sdk-param.h, sdk-types.h, <=20MiB total before ZIP; compiler scratch is not uploaded.
+
+### Strict report and bounded failure handling
+Implement all P0 report/registration/helper/witness keys, not generic opaque dicts. Canonical ASCII JSON sorted compact keys/finalLF; reject duplicate/unknown/missing keys, trailing data, NaN/float/bool-as-int, overbound strings/arrays/depth/integers. All thirteen top-level P0 report keys exist, with explicit nullable not-run records; no success-shaped default. Define exact typed records for metadata/paths/files, every direct worker/channel/wait, build/discovery/SDK/binary/drift, event/prestart binding, witness/layout, two ordered context slots, three argument-refusal slots, outcome/failure/limits. Full schema validity never turns an unavailable record into a successful measurement.
+Raw channels have explicit observed/captured byte counts, EOF/completeness/redaction/overbound flags, raw hex/hash, not silently shortened data. Add conservative total retained raw-channel49152byte and metadata32768byte caps to ensure final262144/progress524288/128-record limits; oversize remains incomplete failure and never a successful measurement. Earlier records survive. A channel prefix on excess is labelled incomplete, with the measured lower-bound byte count; secret-output retains no raw value. Do not truncate and call it complete. All emitted progress data has a concrete kind-specific schema; prestart event/tree binding and ordering are retained BEFORE the first toolchain worker.
+Worker capture uses nonblocking bounded reads and monotonic deadlines, clean environments/cwd=/, DEVNULL except API auth stdin. Ordinary child timeout/oversize receives bounded process-group TERM then KILL/reap within the2s allowance; record exact wrapper PID/rc/eof/wait/reap/termination/unknown states. No unbounded wait/communicate. Privileged sudo-wrapper uncertainty receives NO new privileged kill or process census: retain unknown state, fail and start no further native work. Helper's own alarm is not a false claim that every descendant was reaped. No provider cleanup credit. Driver report distinguishes wrapper waits from helper self PID.
+Successful helper decoding independently checks all ten raw offsets/widths, saved vs effective values, PID/PPID and before/after getter equality, exact length/errno/status/nulling, bounded SUDO_UID classification and clocks. Saved IDs are recorded, never inferred. Expected runner triples/nonzero UID and sudo zero triples/SUDO_UID relation are hypotheses; mismatch/sentinel retains values, unsupported outcome/nonzeroexit. eligible_native_positive is ALWAYS literal not-tested and claim ALWAYS dated-self-credential-observation-only. Actual audit/login identity is not queried in these processes and cannot be joined from an old observer into session proof.
+
+### Verification and feeds
+P1-only tests are independently runnable on a non-Darwin/non-CI reviewer host with Python3.9+ as ONE unprivileged command: /usr/bin/python3 -I -S -B memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_ci_saved_credential.py. Platform/CI/event/getter/clock/worker facts are injected; no actual subprocess, network, SDK/native or credential API calls occur. Tests may read only the exact selected source/design/workflow inputs; every test write is inside one private TemporaryDirectory it creates and removes on success or failure. The same STATIC/PURE-DATA/FAKE-CHILD command may run locally, with actual process/native/SDK/credential APIs forbidden/mocked; no new real worker, C compile or existing root/native/full suite. Old unchanged CI proofs may execute only on their existing disposable runners. Source import has no file/process/native execution side effects. Parse both Python files as3.9. Traverse every concrete schema/registration boundary with missing/extra/type/overflow cases, all ten raw field offsets/widths and wrong/null/errno results. Fake protocol controls cover every prestart mismatch (including extra/changed nonmeasurement or workflow content with four hashes intact and racing base), ordering counters, source bindings, SDK/witness/drift/refusals, SUDO_UID no-default, bounded wait/EOF/termination/unknown privileged worker, token/artifact/report bounds and incomplete states.
+At least one actual-source designated mutant for EACH P0 class plus whole-tree guard and forbidden C API must fail at its EXACT intended AssertionError tag, with a passing unmutated paired control and separate fake-exhaustion/other-error classification. No substring/regex/generic import/syntax/timeout ERROR is a kill. C-source mutants are syntactic controls, not native execution. Print compact synthetic-only counts only after the ENTIRE fake suite succeeds; actual counts/hashes are recorded after execution, never preclaimed here.
+Before P1 closure require exact immutable independent SOURCE review recomputing all four bindings and inspecting C/ABI/error/no-setter/driver/schema/control details; own ALL8fresh attempt1 CI with current unchanged observer reports/full logs/artifacts/ENTIRE tested merge checked. P1 fake-suite proof is distinctly local unprivileged/fake, not a claim that unchanged CI ran the new files. Review must explicitly clear this complete execution-registration SOURCE; no P0 design or author's digest substitutes. Any required correction gets a new immutable binding/review, not amend/backfill. Retain any new failure; no blind rerun, cancellation, weakened assertion/budget or automatic repetition. Later P1 closure receipt has its own review/all8fresh proof. Feeds ONLY a later independently reviewed P2 no-run enabling delta; stop after this ONE source/receipt unit.
+
+### Holds
+B5/1.2/protected [A]/v1.2-pre; B6-B9 held, D64/Gate fixed, production disabled. R7/N1-N6/native-positive and ALL actual host/profile/runtime/identity/operator-session/access/root-copy/installation/policy/challenge/B3/B8/disposal/resource/reserve/reboot/current inventory/override/freshD60/full held-process integration/durable admission/manual restoration/D175/parent gates OPEN. Reconciliation remains [ ]/unimplemented/no actual mutation authorization, B6 payload clause fixed. Original R3/TIMEOUT/peer-offline/attendedD250-D251 unresolved; real two-folder cleanup consent consumed/unrenewed. No actual account/session/rights/runtime/profile, service/NATS/VM/image/timer/reboot/cleanup operation, no local native/SDK/compiler/elevation/full-suite/live-bus. No P2 enabling, new native measurement or operational action automatically.
+
+
+### Prospective pre-screen correction before implementation — Claude37
+Message37 checked the supplied choices against P0/workflow, NOT the full author-held PRE hash and NOT nonexistent source. Required R1 removes the impossible shallow-clone ancestry worker; P2 ancestry stays an external reviewed-promotion property. Required R2 corrects the exact report key count to13, with no fourthteen-key proposal. Required R3 makes the Python3.9-compatible one-command static/pure/fake suite independently runnable on Linux/non-CI/no-SDK, with injected facts/no process/network/native/credential calls and private-temp-only writes/cleanup. Summary requires the whole suite pass. All three are incorporated above before any source exists. Additional proposed dirty-worktree metadata status keeps four prestart workers/23 total, respects depth1/no additional API, and is separately disclosed to the prospective reviewer. Actual complete nested schema and source/digest execution-registration clearance remain pending immutable P1 source review.
+
+
+### Prospective clearance before implementation — Claude39
+Message39 clears Message37 R1/R2/R3 for the supplied choices and sees no remaining required Need before implementation. It explicitly does NOT clear source/execution or independently hash-clear the author-held PRE. The added shallow-safe read-only status worker fits four prestart/23total<=26 and unchanged workflow. No in-run ancestry remains. The later reviewer will independently run the Python3.9+ Linux/non-CI/no-SDK fake command; -I requires loading the probe by explicit file path.
+Adopt optional scope qualifications: empty git status excludes ignored files; this is not a recursive ignored-file or physical writer-exclusion proof. Git children inherit only clean PATH/LC_ALL, and successful git workers MUST have empty stderr; a bounded warning/error is retained and refuses before toolchain. HOME/system-config/runtime assumptions remain explicit, not authenticated. Add a16384byte aggregate retained-argv cap alongside raw49152/file-metadata32768 to bound repeated variable paths before any new worker. Further nested key/count/string/array/integer limits are concretely fixed in the source and independently reviewed there; no generic remainder is approved. All final/progress serialized limits still refuse incomplete oversize rather than dropping earlier records and claiming completeness.
+
+
+### D322 implementation detail — inert reviewed data stays inside the four registered files
+The complete report schema and future workflow generator remain in the driver. Its exact two-step YAML TEMPLATE is an inert constant P2_WORKFLOW_TEMPLATE in the registered test source, keeping the driver within its65536byte bound without a fifth file or executable import. The driver reads and verifies ALL four selected source byte/hash bindings FIRST, then parses only that already-selected test source as Python3.9 AST and extracts ONE literal string assignment; it never imports/executes test code or follows another include. The literal registration SHA is substituted once into this fixed reviewed data. Removing exactly those two steps immediately after the old Mac identity upload must recover the entire registered baseline workflow bytes/hash. Full source review will inspect the complete template/generator and all four exact bindings; prospective39 did not review this concrete source or full PRE. No workflow or execution registration is created by P1. This is data placement within the same registered four-file outcome, not a new execution mechanism.
+The printed final report is reconstructed from bounded4000byte hex chunks plus its full SHA256, so complete payload equality can be checked without assuming one262144byte CI log line survives. The report/journal themselves have no in-report selfhash; the internal artifact manifest covers only the7fixed SDK/binary payload files, while external acceptance checks all9retained names/ZIP. No native observation or positive eligibility is claimed by a fake report.
+
+
+### 2026-10-21 03:52:24 EDT — D322 P1 post-implementation source bindings; immutable review still pending
+
+- memory-plan/plans/node-state-recovery/audits/step12_jetstream/ci_saved_credential_abi.c: 6842 bytes / SHA256 5b402af5d9d5bc96ac45944500e64f69b437188fdeab7cfb03934d0c573372b8
+- memory-plan/plans/node-state-recovery/audits/step12_jetstream/ci_saved_credential_observer.c: 12860 bytes / SHA256 16c79de156b3ee7ac8fb1fcd29d85c5f42b79fa752acedfc23fa4e4e681c00b5
+- memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_ci_saved_credential.py: 65363 bytes / SHA256 3f8ce529fa2b12cee708d59056271f5eada93997e9fee25c69b59445f37570b0
+- memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_ci_saved_credential.py: 61171 bytes / SHA256 5a853ddb4839198bc5a76c9b04eca631460005a49bfe58269d56204e9c576c33
+
+Aggregate 146236 bytes. All four source candidates are bounded; both Python files parse as3.9. P0v2 remains36456/d55f1a2d1cd9a38579269fb1a61f6a95010e0335a954b389dc4f45421953efbc atc9bc9ed86b8df0004821c171a9b74add739833a5. Workflow remains49066/31b25cb486fa780908a9410b83e34dd83c1326c1423b737674f492315b9e0ab9, baseline66c1a116. Existing test_journal_hold49797/feab803f60715908fe6c4299ac66a3dea0d4916ed57400b2b74a66253156f24a and VERSIONv1.2-pre fixed.
+
+Author ran ONLY /usr/bin/python3 -I -S -B memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_ci_saved_credential.py:23 tests/14.223s/OK;7604schema,43protocol,10capture,2distinctfakeexhaustionguardprobes,14pairedunmutatedbaselines/14actualsource intended-assertion kills. Exact names: source-binding, whole-tree-before-toolchain, witness-before-native, fixed-return-length, failed-buffer-nulling, raw-field-equality, self-pid, real-effective-getter-map, saved-not-effective, sudo-absence-no-default, timeout-eof-wait, no-admission-literal, forbidden-C-api, argument-guard-order. Full synthetic-only summary appears only after the complete suite passes. Earlier failing development controls were inspected/corrected before this candidate, not credited as mutant kills or native evidence. Full local log 2530/3f3b58683747fa50c457af4bab43817f72f6ab0289b4babe0073b1896ab69f2f retained externally; no process/network/native/credential call in the test body, no C compile/SDK/native execution/elevation or existing full/root/live-bus suite. Private fixture-only filesystem reads/writes are not real SDK/credential observations. Local planlint14P/1existingW/0F is context-dependent, not a clean-export/CI claim.
+
+Implementation refinements remain within the reviewed prospective choice: worker-state/channel/env/stdin/wait/privileged consistency; artifact payload size/hash crossbinding; direct worker failures retain phase/index. Merged-workflow projection mismatches explicitly refuse atprestart-tree-binding before any child. Inert future exact P2 YAML is a constant in the registered test source; driver AST-extracts it only after four source hashes pass, never importing test code. Test initialization accepts only the fixed baseline or its exact two-step projection so its later P2 invocation remains meaningful; this creates no current entrypoint. Four files total, no fifth schema/helper/registration file. Final report has13exact keys;23driverchildren<=26;two associated metadata requests only; raw49152/argv16384/metadata32768/global150s/reap2s/report262144/progress524288bounds. Manifest holds only7payloads (cannot selfhash report/journal); external future acceptance independently checks all9fixed uploaded files and printed report/SHA.
+
+No source/execution clearance or own CI is preclaimed. Claude37/39 cleared supplied prospective choices, not this full PRE hash or source. Immutable exact four-file/schema/C-policy/controls review must recompute these bindings and independently run the safe command; P1 own ALL8fresh CI/current unchanged artifacts/full logs/ENTIRE merge remains pending. No P2 enabling or new native measurement until separately scoped no-run exact enabling review and same-commit promotion after current-base ancestry; shallow in-run gate checks ENTIRE tree instead of unavailable ancestry. Stop after this ONE P1 source/receipt proof; all holds unchanged. Local PRE order/source bindings first share this source commit and are author-attested, never called independently Git-sequenced.
+
+
+### 2026-10-21 04:41:58 EDT — D323 P1 RED-CI failure qualification pre-audit; NO closure
+
+Micro re-orient SAME P1: source50735517 source-review43 is clear, but own run39565136101/attempt1 endedRED7success/1failure2026-10-21T08:29:12Z. Never execute the superseded P1closure draft; no[x]or sourceALL8claim. Failed job119105491620/Portable.test_term_ignoring_group_requires_real_absence/test_cluster_startup_evidence.py451,24tests14.075s/1failure; full log163062/21df02ad7c694d172d4a9376767509396821aae4607f03ca87fc093c4d574463 retained. Failing cleanup dictionary/PID/observation trace was not printed beforeassert; sourcecause unknown.
+
+Goal: honestly retain the failure and next unmet prerequisite, not repair or closeP1. Needs: exact originalrun/log/source/artifact/tree bindings and strict fact/inference split, reviewer43sourceclear honestly separate from pending read-only failure review45. Feeds: separately scoped future CI-only forced-group-absence proof follow-up before any P1resume; no automaticcode/native/P2unit. Verify: ONLY sixMarkdown: PRE/fiveidenticalD323appends, selectedP1[A]summary updatedwithoutchangingits4contracts, new[ ]follow-up+4contract and B5ownerPREFIXonly. Originalfirstopenreconciliation2751/otherstatuses/cells/B6payload/VERSIONv1.2pre/allfourP1/oldtest/runtime/wrappers/manifests/workflow fixed. New qualification exactreview/ownCI pending atcommit; any laterdoc-only pass cannot repairthetest, greenoriginal507run or closeP1/follow-up.
+
+No local tests/native/SDK/compile/elevation/fullsuite/host/process/cleanup or CIrerun/cancel. Normal publication may trigger unchangedCI for this new evidence-onlyhead; that is not an originalrun retry or repair experiment, and newnativeP1code remains unexecuted. LocalPREfirst sharesqualificationcommit/author-attestedD310Q1. All B5parent/protected[A]/v1.2pre/B6-B9/D64/production/R7/N1-N6/nativepositive/allactual/original/attended/consumedcleanup/reconciliation/B6payload holds unchanged.
+
+
+### D323 prospective failure review45 corrections, incorporated before qualification publication
+
+Reviewer45 confirms exact RED7/8/run/job/log/source/ENTIREmerge facts and requires: explicitly35unruncommands; unknown non-ESRCH-OSError observation versusdeadline path/BOTHwindows; limited source-implied finalpoll absence within5s afterits extraKILL without claiming originalhelper success/directreaping or missingtimestamps; priorpasses onlyfrequencycontext (notrate/flake/regression/causation); exactworkflowfixed/P1fourbytesfixed and renewedsource registration if laterworkflowchanges. Futurefollow-up must emit fullcleanuprecord BEFORE ANYassertion and recordfinalcleanup/outcomes/errors ratherthan silence, with unknownstillfailure. These are nowin the draftfiveidenticalD323blocks/new4contract; no tests/source/workflow change. Source43clear notreadiness. Reviewer45 source/API/logonly, no tests; toolnormalizedlogneededitsomittedfinalLF restored to match original163062/21dfhash; author ownsrawZIP/payloadchecks, reviewerartifactmetadata/sourceonly. Wholemoduletiminginferenceleftout. Exactqualification review/ownCIpending.
+
+
+### 2026-10-21 04:57:01 EDT — D324 same failure-qualification timing clarification pre-audit
+
+Goal/Needs: correct D323's inherited timing imprecision identified by exactreview47 (which otherwise clears986b5d8b/no requiredfindings). This is sixMarkdownAPPENDONLY, no new source/unit/row/status/cell/contract/workflow/VERSIONchange. Feeds: accurate qualification of original507CIRED; P1[A]/followup[ ]/pendingoperatorchoice remainfixed. Verify: fiveidenticalD324blocks, parent986prefixallbytesunchanged, allfourP1/oldtests/runtime/P0/workflowpinsfixed; exactnewheadreview/ownCIpending, no tests/native/SDK/elevated/host/cleanup/rerun/cancel operation. No closure/repair or originalrunretrogreen. PRE/localchronology author-attestedD310Q1.
+
+
+Prospective D325 — B5-CI-forced-group-absence-follow-up, CI-owned test evidence only
+
+Micro re-orient
+We are in B5/1.2 at v1.2-pre; protected acceptance is still in flight.
+D323/D324 retain the P1 source CI failure and correct its evidence limits.
+The human explicitly selected this ONE cleanup-test proof follow-up with yes and go.
+This unit makes owned forced-group absence/reaping evidence complete and decisively tested.
+It serves reliable, fail-closed preservation evidence; it is not a host or credential operation.
+The earlier first-open reconciliation remains unimplemented; this named supporting prerequisite is the selected unit.
+
+1. Needs / retained negative
+Baseline 62a60acd7fb39e28fc44b64a3b8828f0c93b983b, parent986b5d8b. Original P1 source50735517 CI39565136101/attempt1 is permanently RED7/8. Failed legacy job119105491620 log163062/SHA25621df02ad7c694d172d4a9376767509396821aae4607f03ca87fc093c4d574463. Test source32702/acc907e8028882924bb0f1b96220a097682d563a869230d1a12e828a84c9b45f, adjacent runtime11318/1369c514395bb41c8a04771202318bd1817f6e2ce5860e4fc77a621a5a8edf94. Original groupAbsent=False could be a post-KILL presence deadline or a non-ESRCH OSError in either window; which, PGID, original parent status/errors and exact scheduling were not retained. No reconstruction, confirmed cause, infrastructure-only/flake or repaired historical result is claimed. The other passing cleanup record is unrelated. The later finally implies only a returned parent wait then later ESRCH; no five-second-from-KILL or hard8-second guarantee. Artifact12331003745 has normal/stats-denied reports only, not the failing cleanup fields.
+
+D168/D261 owned-test authority and the new human selection permit this test-only source/evidence change. D323/D324 reviews45/47/49 do not approve a repair or fixture topology. This exact prospective design must be independently reviewed BEFORE implementation; any required corrections are incorporated into a new exact design and reviewed first. Local PRE/order remains author-attested when first committed with source; independent review messages supply their own chronology.
+
+2. Selected design / scope
+Keep the SAME real parent and descendant topology: Popen(start_new_session=True), parent and child ignore TERM, both sleep60, timeout2/grace3, real TERM then KILL of owned PGID, real parent communicate/poll, actual killpg(group,0)/ESRCH absence. Keep the original positive assertions, especially SIGTERM/SIGKILL, groupAbsent=True, pythonReaped=True and exitCode=-SIGKILL. Keep final extra-KILL attempt, parent wait3, THEN presence poll5, with .05 polling and no larger budget. No reaper topology, different signal policy, sleep, extra grace or accepted zombie/presence is introduced. This is an evidence/proof repair, NOT a claim to know or fix the original absence delay. A fresh failure keeps the unit open with complete evidence and stops automatic repetition.
+
+Instrument existing test-local wait_group_absent and run_cohort without adding native API queries or extra presence probes. Each existing probe records monotonic issue AND return times, present/ESRCH or exception type+errno, with the original deadline-check time/branch retained. Each TERM/KILL window records signal attempt/time/result/error, original communicate start/end/timeout/result/exitCode, observation start/deadline/end, bounded sample list, outcome, first actual ESRCH time. Maximum128 retained samples/window, plus total sample count and explicit overflow. This cap affects recording ONLY, NEVER the original loop decisions; overflowing/incomplete evidence is refused by the proof. Keep EXACT original probe-first -> deadline-check -> sleep.05 rule: an ESRCH return after end can still return True if that is the unchanged loop decision; record its lateness, do not reclassify it or claim a stricter deadline. A late-boundary control must show this accepted original decision explicitly. Samples predating their own signal/window, borrowed from another window, missing deadline-branch history or unknown/overflowed observations are refused. Fake-script exhaustion is distinct and cannot count as an intended mutant kill. No deadline is widened or narrowed. A non-ESRCH OSError remains unknown/False and carries its own window/type/errno; it cannot be silently classified as absence.
+
+CohortTimeout.cleanup stays EXACTLY its old keys and values, including the untouched old errors list. New window/clock/error details live ONLY in a separate CohortTimeout.observations attribute and separate printed record, so OwnedPair still writes the exact old artifact schema/content projection. The existing graceful test errors-empty assertion stays valid. Emit a flushed canonical JSON record containing separate cleanup and observations from run_cohort BEFORE it raises CohortTimeout, so any test assertion or later report failure cannot suppress the helper record. On unexpected cleanup error retain that error and emit the partial record before propagation; no success default. Do not log environment, secrets or arbitrary child output/command text. Record only the owned PIDs, signals, statuses, monotonic clocks and fixed error identity.
+
+For the forced fixture only, the child writes/closes a small complete JSON readiness record to its private sibling .partial file and renames it to the marker after installing SIG_IGN, containing ready=true, its PID/PPID/PGID/session. Parent still waits on that file and sleeps under the same timeout; outer test reads a bounded4096-byte record after helper completion, emits it BEFORE assertions, validates exact keys and distinct positive child PID, PPID/PGID/session all tied to the original owned parent. Missing/empty/partial/oversized/invalid record is unknown/refused; do not guess a child PID or count existence alone as completed readiness. No new native metadata query is performed outside this CI-owned child. Keep the original marker.exists assertion and all forced/group/reaping assertions.
+
+Add a shared test-only forced-proof assertion function used by the real test AND fake controls. It requires exactly two complete TERM/KILL windows, TERM exits the unchanged deadline branch after only present samples/no error (NOT continuous presence through a deadline), KILL exits the unchanged ESRCH branch with its actual issue/return time and any lateness explicitly retained, real parent wait/reaped/-SIGKILL and no unknown/error/missing observation. Expected TERM parent-wait TimeoutExpired is recorded and allowed; other errors refuse. Parent reaping does not imply group absence. Require evidence matching the same owned group and fixture child bindings. Keep the old explicit positive assertions in their ORIGINAL ORDER (marker.exists, signals, groupAbsent, pythonReaped, exitCode) BEFORE ANY readiness/proof assertion, so old group-absence-invented still dies at its exact signals message. The new proof runs afterward. All samples must be ordered inside their own window after signal attempt and parent wait return; do not borrow TERM samples for KILL or later final cleanup.
+
+In forced-test finally, emit an explicit final-cleanup record even when a prior assertion/helper error exists. Preserve the exact original extra-KILL attempt -> wait3 -> presence-poll5 ordering, and record attempted versus syscall-returned/ESRCH/error (a returned call is not independently proved delivery or a live-member observation), wait return/status/error and actual later presence observations. Emit before any cleanup assertion. A final observed absence/reap cannot overwrite the original helper record or make its failed assertion pass. Preserve an original primary exception while recording all cleanup errors; without a primary, unobserved absence/reaping remains an assertion failure. Records are durable in the full provider job log; no claim that existing normal/stats-denied artifact contains them. Retain/download/hash those complete logs after CI, including failures. No workflow or artifact schema change. Diagnostic text must never contain FAIL:, ERROR: or designated old assertion messages; never stringify exception messages or mock return values.
+
+3. Verification design
+New adjacent test_cohort_cleanup_controls.py is stdlib-only, Python3.9-compatible. It AST-extracts ONLY the actual selected timeout/proof/final-cleanup helpers from test_cluster_startup_evidence.py, supplies fake os/signal/process/clock/output objects, and never imports the runtime/NATS test modules or runs a process/network/native query. Safe independent command is /usr/bin/python3 -I -S -B <absolute audit dir>/test_cohort_cleanup_controls.py. It writes no fixture files and uses bounded scripted clocks/read sequences; exhaustion raises a distinct non-AssertionError. All real process operations exist only inside the unchanged owned Linux/macOS CI entrypoints.
+
+Expose the new controls class through the existing test_cluster_startup_evidence.py unittest module so BOTH existing unchanged direct Linux22/macOS CI entrypoints execute them (Python3.12 Linux and3.9.6 Mac; ast.Constant only, no ast.Str). No Node wrapper/workflow edit. Existing Portable and OwnedPair cases and old mutation runner remain, with all existing mutation anchors uniquely applicable. The controls-only command is the ONLY local executable test authorized by this PRE; no full module/mutation runner, native processes, compile, SDK, elevation, root/full suite, live bus or host reproduction locally.
+
+Controls independently vary BOTH TERM and KILL windows: missing record/window/sample, empty or unknown result, non-ESRCH errors with exact errno/window attribution, original deadline-branch exit, original probe-first ESRCH before/at/after end, wrongly borrowed/pre-signal/post-window samples, parent unreaped/wait error and false claimed absence. Late ESRCH is accepted ONLY when it is the original unchanged loop decision with full ordered evidence; it is not turned into a new semantic failure. Overflow refuses proof without changing loop result. Paired positive fixtures precede each mutation. Exercise complete pre-assertion emission ordering, original primary preservation and final-record emission on signal/wait/observation errors. Include readiness missing/partial/oversize/mismatched PID/parent/group/session refusals, successful complete owned bindings, and explicit no borrowing final absence for original failure. Failures cannot certify absence or reaping.
+
+Actual-source intended mutants target absence invented, missing/error/out-of-window acceptance, absent reaping, lost error/window identity, emission after assertion, suppressed final record and primary replaced. Each intended kill must be an exact designated AssertionError tag from its decisive control; compile/runtime/exhaustion/other assertion failures do not count. Each mutant has the identical unmutated passing control. Counts are reported only after actual successful execution, not preclaimed. Mechanical binding checks find EXACTLY ONE definition of each selected helper, verify the real forced method calls the extracted proof/final helpers and module-level run_cohort, verify run_cohort uses module-level wait_group_absent, and reject local shadows/bypasses. Final cleanup becomes a named helper; controls cannot target an unused implementation. Original mutation runner remains unmodified; its native real cases run only on disposable CI after publication. Fixed old anchors are checked statically across the WHOLE existing test file: start_new_session=True; for sig in (signal.SIGTERM, signal.SIGKILL):; and the exact four-space end = time.monotonic() + seconds plus LF, each exactly once, even in strings. Keep wait_group_absent name, two-argument signature and plain True/False return; pre-initialize its separate last-observation record BEFORE the end anchor so old early-return mutant prints unknown rather than KeyError/ERROR. run_cohort resets and immediately consumes this test-local per-call attribute (no concurrency is introduced); the old patched True/False Mock leaves it unknown. Touch ONLY pid/returncode/poll/three communicate results on the old fake process; never record Mock killpg return values. Existing fake driver test and all three designated session/TERM/KILL kills remain intact. No added sleeps/time against old runner60s limit.
+
+4. File deltas / boundaries
+Only these source deltas: existing audits/step12_jetstream/test_cluster_startup_evidence.py and new adjacent test_cohort_cleanup_controls.py. PRE append, five identical D325 ledger appends and selected follow-up summary [ ]->[A] are the only documentation edits; retain its original four contract lines, every other row/status/cell/history and first-open reconciliation. VERSION remains v1.2-pre. The adjacent cluster_startup_evidence.py, existing test_preservation_cluster.py, test_journal_hold.py, all wrappers/manifests and workflow remain byte-identical.
+
+Four cleared P1 source files and P0v2 are FIXED. Workflow49066/SHA25631b25cb486fa780908a9410b83e34dd83c1326c1423b737674f492315b9e0ab9 is FIXED. Any need to change those is outside this unit and requires renewed registration/source review. No P2 registration, enabling, new credential compilation/query, adapter or actual host action.
+
+5. Completion / feeds / risks
+After prospective clearance: implement exact deltas, run ONLY safe fake controls locally, static source/old mutation-anchor/hash/prefix/contract checks and plan lint. Commit normally/signed-off, no amend or force; publish one substantive evidence/proof candidate on existing draftPR224. Require immutable independent full source review and own ALL8fresh attempt1 CI, complete full Linux/macOS logs/proof controls, unchanged identity reports and ENTIRE tested-merge equality. Source review and CI may proceed in parallel because no new credential/native enabling is introduced; any correction receives new immutable review/bindings, never evidence backfill. No automatic retry after a failure; preserve full records and stop on unmet proof. Later closure receipt requires its OWN exact review/fresh8CI.
+
+Only after this prerequisite's completed proof may a separately recorded new exact-head P1 readiness review/ownALL8fresh be assessed with its same four files/workflow; this unit itself never closes P1 or enables P2. D323 original negative remains red. Additional D323 ASIF action read/intact180s timeout is a separate unresolved outcome, not selected for source repair here. Current qualification CI metadata may complete independently; no repeated paper-only heads to chase green.
+
+B5/1.2/protected[A]/v1.2-pre, B6-B9held, D64/Gate fixed, production disabled. R7/N1-N6/native-positive and all actual host/profile/runtime/identity/operator-session/access/root-copy/installation/policy/challenge/B3/B8/disposal/resource/reserve/reboot/currentinventory/override/freshD60/fullheld-processintegration/durableadmission/manualrestoration/D175/parent gates OPEN. Original R3/TIMEOUT/peer-offline/attendedD250-D251 unresolved; old cleanup consent consumed/unrenewed. No local native/compile/SDK/elevated/full-suite/live-bus or physical-host/account/session/rights/service/NATS/VM/image/timer/reboot/cleanup operation. Stop after this ONE selected CI-owned test proof unit and its own evidence.
+
+Prospective review51 disposition BEFORE implementation
+Review51 considers this a substantive evidence/proof candidate and the two-file/no-workflow scope sufficient, but requires R1 original-loop timing/sample ordering/cap-only-recording, R2 old whole-file anchors/intended kills/fake compatibility/emitted text, R3 separate observations without changing cleanup/errors/artifact, and R4 mechanical helper-to-real-test binding. All are adopted above; no code yet. Optional atomic child marker publication is adopted. Child identity binds topology only; with no per-PID probes it cannot identify a future lingering member. Communicate output is never recorded. Review51 checked immutable baseline only and did not reconstruct the full PRE hash or run tests; source/execution are not cleared. Revised prospective choices require independent clearance before implementation.
+
+
+Prospective Message53 clearance BEFORE implementation: R1-R4 corrected CHOICES cleared, no new required corrections. This is not independent reconstruction/clearance of full PREv2 hash, source or execution. Adopt its exact-source checks: recorded deadline-check uses the SAME clock value as comparison; no forbidden old/new diagnostic/assertion substrings; explicit-name controls TestCase import only, lazy AST checks inside tests; primary captured in the real finally and passed explicitly; no additional killpg calls. Existing workflow/P1/source/host holds fixed.
+
+
+D325 post-implementation bindings (not prospective source clearance):
+{
+  "test_cluster_startup_evidence.py": {
+    "bytes": 46569,
+    "sha256": "f4088fb83d45b1466fa6aa173f1aad9379452db9ec7dc761e1a759804642035e"
+  },
+  "test_cohort_cleanup_controls.py": {
+    "bytes": 29346,
+    "sha256": "4c8d0845ea9d417c1163c293098ab97e3121a23d05ffa7cbb9b2c964ff8d541d"
+  },
+  "local_log": {
+    "bytes": 253,
+    "sha256": "8b1df8d0b06412544e592ad5f3105b0e5dc6f157f8543c35390c162a6ab1ef55",
+    "tests": 9,
+    "boundary_cases": 10,
+    "window_cases": 56,
+    "ready_cases": 20,
+    "guards": 2,
+    "paired": 14,
+    "intended_kills": 14,
+    "elapsed_s": 0.575,
+    "native": false
+  }
+}
+Only two test files implemented under Claude53 corrected choices. Full source review/own fresh CI pending. Local9 fake tests pass; no native/full module/old mutation runner locally. Original507 negative/unknown cause and all holds unchanged.
+
+
+### 2026-10-21 06:31:12 EDT — D326 owned forced-group evidence closure RECEIPT pre-audit
+
+Micro re-orient: B5/1.2/protected remain[A]/v1.2-pre; this is the selected supporting test-proof unit only. D325 source94e3954492197ef4f587bddb5ef82f08977c7d11 has exact review55 and own completed fresh CI39578271182/attempt1. This receipt reconciles only its delivered CI-owned evidence, not the original cause/P1/native/host gates. Goal: close ONLY B5-CI-forced-group-absence-follow-up at its observed reviewed source. Needs: exact55 clearance, checked new forced-absence proof/full logs/identity artifacts/ENTIREmerge, own8fresh and fixed P1/workflow/source hashes (all checked before writing). Feeds: separately decided later new exact-head P1 readiness review/own8fresh with the same four P1 bytes/workflow; never automatic P2/native/admission. Verify: sixMarkdown only, chosen[A]to[x], B5owner PREFIX only, PRE/five identical appends, original four contracts/all other cells/statuses/VERSION/source fixed; exact receipt review and receipt OWN8fresh remain pending. No local tests/native/compile/elevation/fullsuite/livebus/host/cleanup/rerun/cancel. PRE/local ordering author-attested underD310Q1.
+
+
+### 2026-10-21 07:39:00 EDT — D327 P1 source-readiness prospective pre-audit
+
+Micro re-orient: B5/1.2/protected remain [A]/v1.2-pre; the new human go selects only P1 source readiness after completed D325/D326.
+The cleanup prerequisite source94e39544/review55/CI39578271182 and receipt720697c3/review59/CI39585258997 each completed own ALL8fresh attempt1; detached-writer D321 and P0v2/D319 are complete.
+This unit rebinds the unchanged four P1 sources to a new immutable exact-head readiness review and NEW own eight-job CI run; no earlier head's CI is substituted.
+North-star purpose: truthful bounded prerequisites before later protected identity design, never unobserved native or production acceptance.
+The supporting P1 row is selected explicitly by the human; first-open publication reconciliation remains unimplemented and has no mutation authority.
+Still the right unit: yes, limited to this source-readiness assessment and its own subsequent closure receipt proof.
+
+Goal/Needs: verify the complete original P1 source/schema/refusal/fake-test obligations under its unchanged contract. All four source files, P0v2, exact workflow, completed cleanup/detached-writer tests and adjacent runtime have been rehashed; prerequisite completion proof7643/SHA256d49936f89a367f69da78ecdce78577d083ad0571790f74adcc67d80d1cbbd614 was checked before writing. Claude43's complete source review/ordinary-UID65534 fake command remains dated evidence only. Original50735517/CI39565136101attempt1 stays RED7/8; its missing cleanup/window/error fields and historical cause stay unknown. D323ASIF180s timeout stays separate/unknown. Neither current positive cleanup proof nor later green diagnoses either old failure.
+
+Exact deltas: ONLY AUDIT_PRE append, five identical D327 appends, P1 [A] summary update with original four contract lines fixed and a prefix to B5 frontier owner cell3 preserving the entire old cell as suffix. All other rows/statuses/cells/history, VERSIONv1.2-pre, B6payload, four P1 sources/P0/workflow, every test/runtime/wrapper/manifest remain byte-identical. No new implementation or test is needed. Local checks are read-only static/hash/delta/contract/prefix checks and plan lint only.
+
+Verify: independent immutable FULL P1 source/hash/C-policy/strict13-key complete nested-schema/driver/inert-template review on the NEW candidate, not just six-document delta review. Request independently executed exact Python3.9+ stdlib fake-only test_ci_saved_credential.py with -I -S -B as ordinary unprivileged user; injected facts/private temporaryfixture only, no subprocess/network/native/credential/SDK/compiler/elevation. Expected23 tests/7604schema/43protocol/10capture/2distinct exhaustion/14paired unmutated baselines/14actual-source intended assertion kills require actual successful execution; wrong error/exhaustion cannot count. C checks remain syntactic/UNCOMPILED; fixed -lproc stays unverified/no fallback. No local executable test rerun is needed or performed.
+
+Publish one candidate normally on existing draftPR224, signed-off/no amend/force. Independently reviewed candidate requires its OWN NEW ALL8fresh attempt1 CI, complete current Linux20/Linux22/macOS regression logs, unchanged identity reports/ZIP/payload/printedSHA/source/API/job bindings and ENTIRE testedmerge equality. Unchanged workflow does NOT execute four P1 files, so CI is existing regression/dated metadata proof only, never saved-credential/native-positive execution. Safe fake execution is separately attributed. Preserve new cleanup records and D320 checks in current CI. No API rerun/cancel/carried successes; any failure is retained and inspected without automatic repetition. Required source correction would need new scope/bindings/review; do not silently modify fixed files. P1 remains[A] while any proof is pending. A later six-document closure receipt must have its OWN exact review/new8fresh; candidate green cannot preclaim receipt green.
+
+Feeds/stop: completed P1 SOURCE registration may feed only a separately selected P2 no-run enabling proposal/exact entire-tree review/current-base ancestry/same-commit promotion. No execution-registration JSON, enabling branch/workflow, new native measurement or adapter is created here. Four hashes alone never authorize toolchain; driver pre-toolchain event/API/whole-tree guard, absolute Git assumption, fixed ABI136/SDK witness, strict bounds, failed-buffer nulling, no setters and literal not-tested eligibility remain required. R7/N1-N6/native-positive and all actual host/profile/runtime/identity/operator-session/access/root-copy/installation/policy/challenge/B3/B8/disposal/resource/reserve/reboot/currentinventory/override/freshD60/fullheld-processintegration/durableadmission/manualrestoration/D175/parent gates OPEN. B5/1.2/protected[A]/v1.2pre/B6-B9held/D64fixed/productiondisabled. OriginalR3/TIMEOUT/peer-offline/attendedD250-D251 unresolved; old realcleanupconsent consumed/unrenewed. No local native/compile/SDK/elevation/fullsuite/livebus/physicalhost/account/session/rights/service/NATS/VM/image/timer/reboot/cleanup action. PRE/local chronology author-attested underD310Q1, not independently Git-sequenced.
+
+
+### 2026-10-21 09:50:34 EDT — D328 P1 SOURCE-registration closure receipt pre-audit
+
+Micro re-orient: only selected P1 source-readiness unit; B5/1.2/protected remain[A]/v1.2-pre. Unchanged four-source candidatec2238ede1eb8c5dadcd45ac322012646a7736794 has full exact P1 review61/independent ordinary-user fake execution and own NEW ALL8fresh CI39593550684/attempt1. Needs checked: fixed pins, complete current regression logs/identity artifacts/wholemerge, detached-writer/forced-group proof; all checked before writing. Goal: close ONLY P1 SOURCE registration, not native feasibility/eligibility, P2 or actual gates. Deltas ONLY PRE/five identical D328 appends, selected P1[A]to[x]summary/originalfourcontracts fixed and B5cell3 prefix keeping entire oldcell exactsuffix; all other rows/cells/history/VERSION/source/workflow fixed. Verify receipt exact review/OWN NEW8fresh pending, never substituted from candidate. Feeds separately selected P2 no-run/exact enabling review/ancestry/promotion, no automatic next unit. No local executable tests/native/SDK/compile/elevation/fullsuite/livebus/host operation. PRE/local chronology author-attestedD310Q1.
+
+
+### 2026-10-21 14:17:08 EDT — D329 P2 saved-credential enabling prospective pre-audit
+
+Micro re-orient: a NEW human go AFTER completed D328 selects ONE P2 enabling unit. P1 source readinessc2238ede/review61/ownCI39593550684attempt1 and receipt9f9d02ec/review63/ownCI39611633268attempt1 each completed ALL8fresh. Final external proof18949/SHA256eeb01e9db8760a07d8b37d7edb22f6bbc403fbd9eeedb6ab06831152999fc03a was rehashed. First-open publication reconciliation remains unimplemented/no real mutation authority. This selected supporting unit is still the right next prerequisite to an honest CI-only saved-credential observation; it cannot close the supported identity adapter or actual host gates.
+
+B1-B9 recheck: current repo/primary draftPR224/base/provider metadata and completed P1 proof are fresh; B1 owned design/CI-only authority and B2 Alpine limits stand. B3 installed23pins is just-in-time and not repeated; B4 provenance is bounded design evidence, not physical writer exclusion. B5/1.2/protected[A]/v1.2-pre; B6-B9 held, D64 fixed, production capture disabled. No current physical-host/VM/resource admission is inferred. Original four-role histories remain separate. No production, local native/SDK/compiler/elevation/full-suite/live-bus/account/session/service/NATS/VM/image/timer/reboot/cleanup operation is within this unit.
+
+Exact permitted delta: ONLY new ci_saved_credential_execution_registration.json, the two P1-inert-template workflow steps inserted immediately after existing macOS audit-identity upload, this PRE and five identical D329 ledger appends, a new P2[A] four-field contract, and B5 frontier owner PREFIX preserving the entire old cell suffix. All four P1 files/P0v2, old tests/runtime/wrappers/manifests, mirror workflow, other rows/contracts/cells/history/B6payload/VERSION stay fixed. Registration is canonical ASCII/sorted/compact/LF, 1495bytes/SHA2564d7f31fc47e6928004fd5a5df2ebb86e33ed42193c28998e8b4ad7a9aae4381d; it selects reviewed P0c9bc9ed8, exact P1c2238ede/four bindings, truthful Message61 review reference and unchanged workflow66c1a116/49066/31b25cb4. Exact template4886bytes/SHA256b0422465efdc086a1b823ce613827fa889e1eb1b7d0e18a8279a99900877a2e1; inserted steps4931bytes/SHA256eb53daa56b66845ea679b1cd71be2d3dc1cdc5f866347eddeef66ea8af909a7b. No new CLI/ABI/library/command or source choices.
+
+Local verification: static AST/literal extraction only, exact canonical registration/strict fields/bindings, source ancestry/pins, workflow projection recreates ALL49066baselinebytes, old-row/cell/contract/prefix/delta checks and plan lint. The ONLY local executable test allowed is /usr/bin/python3 -I -S -B AUDIT/test_ci_saved_credential.py, safe stdlib pure-data/fake-only23controls; no native child, network, SDK/compiler or elevation. Record actual counts/timing/result, never preclaim. C remains uncompiled and fixed-lproc unverified/no fallback. No local full module/old mutation runner or regression/native suite.
+
+No-run publication gate BEFORE enabling: dated primary API pre-screen has exactly Tests and Mirror workflows; both current main and recovery immutable workflows have only main push (Tests also PR-to-main), hooks[]/rulesets[], unused codex/saved-credential-p2-review-d329 and NO PR. Main Tests content differs from recovery branch but triggers were checked separately; initial collector's equality assumption was corrected without candidate/run. Recheck applicable provider/workflow triggers, branch absence/noPR, current PR9f9d02ec and fixed source immediately before publishing immutable candidate to this NEW review branch ONLY. Never open its PR or move existing PR head before independent exact enabling review. Retain commit/publication/no-run observation/review chronology externally; PRE local timing is author-attestedD310Q1, not retroactively Git-sequenced. If no-run transport cannot be established, retain gate; do not enable to make reviewable.
+
+Independent exact immutable P2 enabling review must recompute registration/workflow/template/fourP1/P0/whole-tree bindings and clear complete source execution selection and prospective interpretation/bounds BEFORE any new native run. Required correction needs another immutable binding/review; never amend or silently repair fixed source/design. After CLEAR, immediately retrieve current primary PR base SHA and prove ancestor of SAME reviewed P2 commit, verify unchanged PR head and normal fast-forward promotion of that EXACT commit to codex/stopped-vm-recovery. Missing/nonancestor base refuses; no unreviewed merge. Driver's event/API ENTIRE tested-merge-tree equality BEFORE all new toolchain/witness/native children independently catches a racing base. Record base/ancestry/promotion/run times. Human selection covers this one reviewed P2 enabling/one fresh initial CI and its required receipt proof, not automatic retry after any failure or another source/method unit.
+
+Hosted CI only: exact template Measure timeout3minutes, bounded job selector/metadata then safe23fake suite then fixed driver CLI/registration digest; always Retain fixed nine report/journal/binary/SDK filenames. Unchanged old job steps/guards/order/budgets and every other job are preserved. Native failure may skip later default-guard steps; skipped never credited. Token metadata-only/no native argv-env-artifact leakage. Actual SDK witness must equal fixed Darwinarm64 littleLP64 candidate136 before bounded native selfquery; getters/ordinary/sudo hypotheses remain hypotheses. Any build/ABI/API/identity/refusal/drift/channel/timeout/EOF/wait mismatch => incomplete/nonzero with available full records, no fallback/API substitution/desired-value retry. eligible_native_positive ALWAYS not-tested. No actual saved-credential or success is preclaimed; unavailable is an honest possible result requiring retained failure/independent interpretation.
+
+Acceptance/stop: exact independent enabling clearance plus OWN new ALL8fresh attempt1 CI/current complete Linux20/Linux22/macOS regression logs and unchanged identity ZIP/canonicalpayload/printedSHA proof; ADDITIONALLY new saved-credential ZIP bytecount/API digest, strict canonical final report/progress journal, all selected source/compiled/header hashes, complete bounded workers/argument refusals and printed report hex/SHA equality, current run/attempt/job/ENTIREmerge-parent/tree proof. Retain D320 actual detached-writer negative and D325 real original/separate-final absence/reaping proof, counts and all qualifications. No old pass/source green substitutes for current enabling/receipt proof. No run rerun/cancel/carried success/automatic repeat; retain and independently review any failure. Only successful full source evidence may feed a later six-document closure receipt with OWN exact review/new8fresh and current artifact proof; source green never preclaims receipt green. Stop after ONE P2 unit and required proof, or retain its unmet gates on failure; no adapter/ASIF repair or next implementation automatically.
+
+Original507/CI39565136101 stays permanently RED7/8; missing historical cleanup/window/error/PGID/schedule/cause unknown, no retrogreen/flake/infrastructure-only diagnosis. Separate D323ASIF180s timeout remains unknown/outside this unit. R7/N1-N6/nativepositive and ALL actual host/profile/runtime/identity/operator-session/access/rootcopy/installation/policy/challenge/B3/B8/disposal/resource/reserve/reboot/currentinventory/override/freshD60/fullintegration/admission/manual/D175/parent gates OPEN. Original R3/TIMEOUT/peer-offline/attendedD250-D251 unresolved; old real cleanup consent consumed/unrenewed. Existing B5-macOS-access reminder dedupe/capacity needs remain; no fresh physical query/provisioning or authority implied.
+
+
+### D330 — prospective token compatibility correction (2026-10-22, before source edits)
+
+Micro re-orient: the human's “fix it!!!!” selects one bounded correction to the failed P2 selector. D329/0901 was promoted once; its own39813727759attempt1 failed before the new fake suite/driver. Corrected source must be independently reviewed and rebound before another enabled run. The original failed run is never retroactively green. This feeds the same selected P2 observation; no adapter or actual host work.
+
+Needs/evidence: current clean0901 and original38671-byte failed log SHA2566fb80d2d838d995a938c645d75164b6ba9dc8f2a2a75dd987fc7de9b38d9e634. Inner exception/token were not retained, so historical exact cause remains UNKNOWN. Prior gh selector succeeded; retained jobs-list has run_attempt/head_sha. Do not claim permissions or head-versus-merge caused it. GitHub's October2 official stateless-token rollout and April24 ActionsGITHUB_TOKEN notice document opaque tokens around520characters. Both selector and driver currently reject >512 and punctuation. These primary documents were author-read; Claude's proxy blocked github.blog. Source incompatibility is established independently of the missing old token.
+
+Prospective design: Claude rendered9 required hard byte budgets/exact diagnostics/mechanical selector extraction;11 required correct timeout/I-O categories;13 required timer cleanup. Rendered15 explicitly CLEARS v4 prospective choices with no required correction, not nonexistent source or enabling. External v4 is10465bytes/SHA2560817bfd2bf5267615e16e64c864ac7956537e7aff7bae5d439f26a70791045ad; external PRE bytes not independently read. Actual review reference: https://claude.ai/epitaxy/session_016kJLv6PaP2ZRRDwocBGweu rendered15/request14.
+
+§6 file deltas: ONLY probe_ci_saved_credential.py opaque visibleASCII33..126 nonempty max4096 predicate and curl-config escaping backslash THEN doublequote; test_ci_saved_credential.py same predicate in literal selector, fixed diagnostics, timer finally and actual-source pure controls. Restore .github/workflows/test.yml to exact49066baseline31b25cb486fa780908a9410b83e34dd83c1326c1423b737674f492315b9e0ab9 and remove old execution registration, disabling measurement in source stage. This PRE plus five identical D330 blocks in AUDIT_POST/registry/decisions/inventory/frontier, new corrective[A]four-contract and B5owner PREFIX only; existing rows/contracts/history/B6/VERSION/C/P0/oldtests/runtime/manifests/mirror fixed. Exactlyfour measurement files; each<=65536/aggregate<=262144. Driver65363 may grow<=173; test61171 may grow<=4365 INCLUDING literal+ALL controls. Never compact unrelated old code, remove required controls or create a fifth file to fit. If all controls cannot fit STOP for prospective P0-level decision.
+
+Selector: same urllib transport/oneprimaryrequest/5s/262144bytes/100jobs/event1MiB/strictunique run-attempt-head/no retry. No token interpretation, logging, argv/report/helperenv. Exact failure string “saved-credential job selection unavailable: phase=PHASE category=CATEGORY”, interpreterLF/exit1. Phases context,event,token,request,response,selection. Categories invalid,timeout,http,transport. NEVER status/rawexception/body/env/token. request includes construction/open/connect/headerwait; response starts immediately before read and includes size/JSON/container. For network phases: TimeoutError/socket.timeout or URLError.reason of either=>timeout; else HTTPError=>http; else URLError/OSError/HTTPException=>transport; else invalid. All other phases invalid. Opener constructed before alarm; arm5s immediately before innertry open/read; finally ONLY disarm0 inside outertry on every exit before classification. Late signal may yield timeout/refusal, never success.
+
+Pure verification: mechanically select unique exact ten-space start/end heredoc lines, assert every intervening line starts with ten-space prefix, remove ONLY10spaces, compile exactbody after removing imports solely for fake injection. Missing/duplicate delimiters/malformedindent refuse. Fake env/files/signals/opener/read; no realprocess/network/native/credential query. Old40/new520dotted-hyphenated/4096/quote/backslash positives; empty/space/CR/LF/NUL/DEL/nonASCII/4097 negatives in BOTH selector/driver. Exactjob selection missing/duplicate/wrongrun/attempt/head/nonintID controls; HTTP/URLError/wrappedtimeout/distinct3.9-style sockettimeout/readreset/HTTPException/bounds controls assert ENTIREfixedline/emptystdout. Timerreset success+HTTP/readerrors. Driver fake ProcessOperations/capture_worker verifies escaped config roundtrip/no secretargv/cleanenv. Paired actual-original-token-predicate and unescaped-config mutants must die at exact tags; othererror/exhaustion not credited. Existing23test/counts7604/43/10/2/14/14 unchanged and separately counted. All new code stays inside byte budgets. Optional O1/O2/O3 only if fit, never claim absent coverage.
+
+Source stage: commit disabled source, fresh unused no-PR codex review branch only after trigger audit, independent exact four-source/hash/fulltree review+safe fake execution before sameSHA FF to existing draftPR. NOnewCI until old39813727759 ALL8terminal; existing observer retains same-attempt logs read-only, never restart. Own source-stage ALL8freshattempt1/full oldregression/identity/wholemerge evidence required. Then new canonical registration selects actual corrected immutable source/review and exact2 corrected-template steps from oldbaseline; no source/selfhash cycle. That separate enabling commit needs fresh no-run/exact entire enabling review BEFORE sameSHA/currentbaseancestor FF; ownnew8/full strict saved ZIP/APIsha/report/journal/source/compiled/SDK/worker/refusal/printedSHA plus current oldproof. Old collectors do not prove new measurement. No rerun/cancel/carriedpass/automatic repeat/fallback/sourcefix. Later successful receipt needs ownreview/fresh8/full proof; sourcegreen neverreceiptgreen.
+
+B1-B9: B1design/owned authority; B2Alpine notmacOSreboot; B3pinsJIT/B4boundedprovenance not repeated; B5/1.2/protected[A]/v1.2-pre/B6-B9held/D64fixed/productiondisabled. R7/N1-N6/nativepositive literalnot-tested/all actual host/profile/session/access/resource/reboot/manual/D175/parent gates OPEN. Four physical histories stay separate; no live stop. D62ACCEPTED-or-ABORT and scopedboot comparison/D173-D175 quiescence-only checkpoint/device-only re-pin limits unchanged. Original507RED7/8 and D323ASIF180stimeout stayunknown; old50kills sensitivityonly/latercleanup notoriginalproof. Original/attended/consumedcleanup/reconciliation/B6payloadholds fixed. No local C/SDK/native/elevation/fullsuite/livebus/host/account/session/service/VM/image/timer/reboot/cleanup action. ONLY /usr/bin/python3 -I -S -B AUDIT/test_ci_saved_credential.py purefake suite and static/lint locally. PRE chronology is author-attested, not Git-sequenced proof.
+
+
+#### D330 mid-implementation byte-budget finding — STOP before tests
+
+The literal/driver correction was drafted under prospective15. Complete new controls draft6034bytes and a second new-code-only draft5391 exceed the remaining3511-byte test budget. Neither control draft was applied or executed. No required control was dropped, no unrelated old code compacted and no fifth repository file created. Partial source was retained externally then reverted to0901; this PRE remains. Source implementation is STOPPED pending prospective P0-level decision on raising ONLY the pure-test file bound to98304 while keeping the other3files65536, aggregate262144 and exactly4files. No new CI/push/native operation occurred.
+
+
+### 2026-10-22 13:37:30 EDT — D330 focused source correction supersedes the undelivered broader drafts
+
+Micro re-orient: SAME human-selected bounded CI token/selector correction after0901failed. Human literalinstruction “fix it!!!!” was recorded by author at2026-10-22T16:46:57.095606Z (12:46:57EDT); this is receipt/record time, not an invented message creation timestamp. Scope relied on: the concrete B5-P2-job-selection unblock requested one prospective P0/P1-template/workflow/source-selection correction, its necessary independent reviews and exact-head validation. No new operator scope choice is pending. No actual host/native-positive authority follows.
+
+The speculative network-error categories/provider-negative expansion and P0v3/cap/path proposal above were NOT delivered. Their external drafts and this PRE history stay preserved. They are superseded by this focused plan BEFORE source implementation resumes. OriginalP0v2/D319 remains complete and BYTE-IDENTICAL; all4files<=65536/aggregate262144/exactly4files. No new P0 design/closure/handoff item, bound change, fifth file, unrelated old-code compaction or omitted existing test. Proposed test65491 and driver65409 fit originalbounds.
+
+Prospective review: actual Claude rendered21/request20 clears the narrowed technical choices, except one required PRE/source-review statement. That requirement is satisfied here BEFORE applying source: THE ENVIRONMENT PASSED TO RealBackend IN EVERY DRIVER CONTROL IS A LITERAL SYNTHETIC DICT, NEVER os.environ OR A COPY OF IT. Its GH_TOKEN value comes ONLY from the fixed synthetic test-token list. Actual production/CI token is never read or copied by these controls. Selector controls likewise inject fake os/syntheticdict, fake urllib/request/opener, fake signal and fake open/BytesIO event, with identity assertions against real modules and realos.environ; no third API request/real signal/native/process/clock/credential query. Review21 was conditional on this explicit statement; author verified it here, not an invented unconditional verdict or exact-source clearance. Immutable source review remains PENDING and must independently check this requirement. Earlier v4 full-category clearance15 is historical, not this plan's source clearance.
+
+Exact corrected behavior: same opaque nonempty visibleASCII33..126 <=4096 predicate in selector and driver; no JWT/prefix/signature parsing. Curl config stdin escapes backslash THEN doublequote; token neverargv/log/report/artifact/nativeenv. Same urllib/permissions/one5s primary request/262144response/100jobs/1MiBevent/strict run-attempt-head/no retries. Same timer innerfinally15: opener beforealarm; arm5s immediatelybefore innertry open/read; finally ONLY disarm0, insideoutertry before errorhandler. EXACT failure SystemExit is saved-credential job selection unavailable: phase=PHASE, interpreterLF/exit1. PHASE exactly preflight,token,request,response; preflight covers env/run/event, tokenbeforeopaquecheck, requestbeforeRequest/opener/connect/headerwait, responsebefore read and remains through size/JSON/jobmatching. There are NO error categories/status/rawexception/body/env/token or causal inference. No new report/workdir on selectorfailure.
+
+Focused controls preserve all old23methods7604schema43protocol10capture2guards14paired14intendedkills. Add one named test_tokens function explicitly assigned as a new SourceAndMutationTests method, under existing fake_only tripwires; no existing method replaced. Mechanically extract unique exact ten-space heredoc delimiters/body, strip only10spaces and importnodes for controlledfakes; duplicate-template negative. Four tokens: old40/new520dotted-hyphenated/4096/quote+backslash; eight negatives empty/space/CR/LF/NUL/DEL/nonASCII/4097 in BOTH gates. Full actualselector successstdout/jobid and exact phase-only failure/emptystdout on token/open/readerrors. Assert exact one-shot timer call list[(ITIMER_REAL,5),(ITIMER_REAL,0)] on success/open/readfailure. Driver execs actual registered source under non-main namespace as existingmutated_module does, mocks clock throughoutconstructor/start and ProcessOperations/capture_worker, verifies exact ci/token refusal, fixedargv/cleanenv and JSONquoted-line roundtrip of actualconfig. Escaping produces only doublebackslash/escapedquote, making this parser comparison appropriate. Three paired actualsource mutants at exact tags kill:selector,kill:driver,kill:config; otherexceptions/exhaustion cannot count. Fulloldcontrols unchanged. Python3.9 grammar check of BOTHfiles and extractedselector required; exact3.9.6 execution not preclaimed. Preflight/matching phase placement and finally placement are SOURCE-reviewed, not separately mutation-proved. No broader unchanged API-negative/category coverage claimed.
+
+Originalfailed0901/39813727759/attempt1 remains RED, exactinnerexception/token unknown. The oldpattern incompatibility with documented longer/dotted tokens is concrete, not proof of historical cause. Python3.9.6 selector HTTPS/TLS has no successful observation yet; sourcefix cannot promise it. If newCI fails, keepfullpartials/nonzero/skipnotcredited; no fallback/rerun/cancel/carriedpass/source/API/library change automatically. C/ABI/fixed-lproc/no-fallback/nativecommands/strictschema/alllimits untouched.
+
+Source delta ONLY twoPythonfiles, workflowrestoreexact49066/31b25cb4, obsolete registrationremoval and sixledgers/newcorrective[A]fourcontract/B5prefix. P0v2/C/oldtests/runtime/mirror/VERSION/B6/oldcontracts fixed. Source no-run branch/exact independent four-source/fake review BEFORE sameSHA/baseancestor FF; own8fresh oldproofCI after old398 all8terminal. Then separately reviewed exact newregistration/two-template-step enabling selects actualcorrectedsource/review, sameSHA/no-run/baseancestor gate and OWN8fresh/full newartifact/oldregression/identity/wholemerge evidence. Required successful finalreceipt still needs OWNreview/fresh8/fullproof, not sourcegreen substitution. All B1-B9/actualholds/productiondisabled/originalnegative qualifications from initialPRE remain. No new P0 amendment is created.
+
+
+### 2026-10-22 14:43:35 EDT — D331 prospective MC Next audit prerequisite
+
+Micro re-orient: SAME selected P2 source-readiness path, after source6d6930fc/review23. Its own39828592519attempt1 failed the unchanged Mission Control shipped-dependency audit after npmci/lint/129unit passed; dev audit/build skipped. The active observer currently has7terminal jobs and one remaining; all8must be terminal before publishing any new candidate. No source readiness or native result is preclaimed.
+
+Scope/authority: the human explicitly requested evaluation and repair of the broken automation/process. That latest instruction owns routine reversible supporting CI prerequisites; the current control/authorization record withdraws the prior unnecessary dependency-scope question without fabricating a user choice. This is a new bounded supporting prerequisite, not an in-place widening of D330. Source dependency edits are limited to mission-control/package.json next16.3.8->16.4.1 and package-lock root plus10Next records. Necessary six ledger deltas only: this append, five identical D331 blocks, new aux[A]four-contract and B5owner prefix retaining ENTIREoldcell. All old rows/contracts/statuses/othercells/history/B6/VERSION/four measurement sources/P0/workflow/runtime/wrappers/manifests/mirror remain exact.
+
+Independent failure interpretation Claude rendered25/request24 supports this minimal future scope; its required concerns remain applied: PR own MC blobs f3c134be/6b9979cc rather than main, npm10 generation, exact10registry integrities, no blanket force/downgrades, own full gates and no deployed exposure inference. Its old operator-scope concern is addressed by the latest process-repair authority record, not relabelled as an earlier approval. Actual patch clearance remains PENDING.
+
+Prepared owned metadata-only proposal was generated with npm10.9.9 from exact6d base; no node_modules/scripts/install/build/test execution. Target package1465/SHA2565a28bd40722ac69b3ce807e7a0c56b8afde3a2df0664217861914eaf17e7cbc3; lock432843/b16eec6571caa50d3915ead1f7e5c43d3b75a0b08c6a0e66520ce13b7dad6301. Next/env/eightSWC all16.4.1; every other lock entry/package/override fixed, no additions/removals. Registry tarball/integrity for all10checked. Its npm10 lock-only production audit at2026-10-22T18:27:33Z exited0 with0high/0critical/4moderate. This does not prove npmci/build or future CI. Official advisories GHSA-2464-fhr4-w9xw and GHSA-p3m5-59mp-jv5r identify16.4.1 as patched; existing sharp0.35.5/override stays fixed. No React/ESLint/gray-matter or policy change.
+
+Verification: static exact-delta/JSON/10record/registry/pin/prefix/contract checks and planlint only locally; do not repeat completed safe24 or any local npmci/fullsuite/native/SDK/C compile/elevation/host query. Commit a truthful candidate, safe unused no-PR reviewbranch only after all prior8jobs terminal and fresh primary triggers/hooks/rules audit. Exact immutable full dependency+ledger/current four-source selection review BEFORE normalFF SAME SHA/currentprimarybaseancestor to existing OPEN/DRAFTPR224. Require own NEW8fresh attempt1, MC npm10cleaninstall/lint129/shipped-highaudit/devreport/build plus complete current Linux20/Linux22/Mac regression logs/identity ZIP-payload-printedSHA/ENTIREmerge proof. Any failure keeps gate unmet/fullpartials; no rerun/cancel/carriedpass/automaticfallback/silent newsource method.
+
+Unchanged four source bytes retain review23/source-only fake24 proof with accurate Linux3.13.16 attribution, no rerun/new native proof. Old6d remains CI-failed; no retroactive green from later pass. Original0901 token/innercause, original507RED7/8 and D323ASIF180s causes stay unknown. After source readiness, exact new registration/template enabling still needs separate review/no-run/base/whole-tree guards/OWNnewmeasurementartifact/full8proof; later successful receipt owns its review/CI. No paper-only CI head is created merely to report a later green.
+
+B1-B9, D62/D64/D168/D173-D175/D261, v1.2pre/B5/1.2/protected[A]/B6-B9held/D64fixed/productiondisabled and all actual runtime/profile/identity/session/rootcopy/installation/resource/VM/reboot/manual/parent/R7/N1-N6/native-positive/incident/consumedcleanup/reconciliation/B6payload holds remain. Source C is uncompiled/-lproc unverified; no local service/VM/NATS/image/timer/account/native/SDK/privileged/fullsuite/livebus operation.
+
+
+### 2026-10-22 22:50:15 EDT — D332 corrected-source P2 enabling prospective pre-audit
+
+Micro re-orient: SAME selected P2 unit after sourcef4a69e31 becomes ready; no new human selection is invented.
+Source23 fully reviewed four files; D331rendered request4/response5 clears exactf4 prerequisite/current source selection by same6d blobs, not a fresh line retrace.
+OWNCI39867251748attempt1 is ALL8fresh; full current logs/identity ZIP-payload-printedSHA/ENTIREmerge/MC129-shippedaudit0-build are author-verified separately.
+This gate prepares one immutable LOCAL enabling candidate only. Later safe publication/exact enabling review/promotion/native/receipt gates stay separate.
+B5/1.2/protected[A]/v1.2-pre and B6-B9held/D64fixed/productiondisabled remain; actual node readiness is not inferred.
+
+Intent and exact selection: only canonical ci_saved_credential_execution_registration.json selects actual corrected immutable sourcef4a69e3107ec04591bae06f01bab683cf9c0e411 and these SAME four source bindings. P0c9bc9ed8 remains36456/d55f1a2d and baselineworkflow66c1a116 remains49066/31b25cb4. Registration is 1771bytes/SHA256ea858319b6b864420e0f7cc11550ec90c79a9a606de7df2d4fb7185be6ee9283; schema/strict old keys/approved_commit==p1.commit hold. Truthful source_review reference names actual D331renderedrequest4/response5/observed2026-10-22T20:47:48.741374Z and its same-four-Gitblob basis to D330rendered23/fullreview/ordinaryUIDGID65534/Python3.13.16/safe24/19.145s. It does not fabricate semantic65CLEAR, a freshf4 fake run/line retrace/Ccompile/enabling review, or reviewer access to author artifacts. Full source proof11354/a2a8d08bd4c8c26392446263772d571a043d93f9010e1582718d44f74d799176 is AUTHOR evidence. Old source0901/6d failures stay failed; review-only branch and source green do not establish this candidate's CI or native proof.
+
+File deltas BEFORE implementation: exactly8files, no others. New registration; two workflow steps extracted from fixed current test-file single P2_WORKFLOW_TEMPLATE literal (5137bytes/9f442b596d232d949a140b891a00d4ca09001cda6de52ec1f12860ef8bd5e736) with ONLY registration digest substituted (5182bytes/0a3c46b1abe790b5f6af440e7a81e024a8a0e93c64c5d7638e8443ad99721d5e). Insert immediately after existing macos-process-census audit-identity upload. Remove exact two steps to reproduce ENTIRE49066baselinebytes; every old job/step/order/guard/budget remains fixed. Six Markdown ledgers: this pure PRE append; five identical D332 blocks; new corrected-enabling[A]four-field contract; B5owner column3 PREFIX retaining ENTIRE old cell suffix. All old rows/contracts/statuses/othercells/history/B6payload/VERSION, allfour source bytes/P0, MCNext16.4.1 manifest+lock/otherdeps/auditpolicy, old tests/runtime/wrappers/manifests/mirror stay fixed. Historical D330/D331 pending phrases remain dated; this append records SOURCE readiness only without a paper-only receipt or preclosed P2 row.
+
+Verification now: static AST literal extraction/unique placeholder/canonical JSON and source/commit pin checks, exact whole-workflow projection, normalized six-doc delta/old rows-contracts-cells/B6 checks and plan lint. Do NOT repeat completed safe24, source review, source CI observers/collectors/finalizers or old candidate writers. No new local tests, native/SDK/Ccompile/elevation/npmci/fullsuite/livebus/host query. Capture PRE, preimages, static proof and clean local commit before any publication. PRE clock chronology is author-attestedD310Q1, not retrospective Git-sequenced proof.
+
+Initial read-only primary prescreen at2026-10-23T02:45:15.617970+00:00: current draftPR224/headf4, primarybaseb00f5687026d06cfd8c93699e283b6305818b2ad ancestor of samef4, exact2active Tests253211495/Mirror245761727, immutable recovery/main triggers mainpushonly plusTestsPRtomain, hooks[]/rulesets[], unused codex/saved-credential-corrected-p2-review-d332 with NO PR, all8sourcejobs terminalsuccess. These dated facts are not permanent admission. Later publication must freshly recheck applicable provider/workflow/base/no-run/unusedbranch/noPR/source guards and publish SAME immutable candidate ONLY to that review branch; PR224 staysf4 and no reviewbranch PR is opened. No safe transport means retain gate. This wake does NOT publish, prompt another review or start CI.
+
+Independent exact enabling clearance remains REQUIRED before any new native run: recompute literal registration/currentfour/P0/source-selection/whole-eight-file-tree/template/no-run interpretation and state no required correction. Existing Claude approved session only; do not restart completed old65/0901/Codex/source23/D331review or fabricate a new semantic identity. After actual CLEAR only, freshly retrieve primary current PRbase and prove ancestor of SAME reviewed candidate, verify PRf4/open-draft and normalFF that EXACT commit to existingPRbranch. Missing/nonancestor base refuses, no unreviewed merge. Driver ENTIRE event/API/testedmerge-tree preflight BEFORE toolchain/compiler/SDKwitness/native catches racing base; later complete testedmerge proof is additional.
+
+Hosted future measurement only: exact current literal selector opaque visibleASCII33..126/max4096/five-second primary request/262144response/100jobs/1MiBevent/phase-onlyrefusal/finallydisarm; then safe24 and fixed driver. All existing bounds, 13-key/nested report schema, source65536each/262144aggregate, workers26/metadata2/driver150s/step3min, absoluteGit /opt/homebrew/bin/git, Darwinarm64littleLP64 candidate136/SDKwitness-before-self-query, fixed-lproc UNVERIFIED/no fallback and fixed native CLI remain unchanged. Always upload nine fixed report/progress/binary/SDK/header filenames; upload/skip never means complete success. C is UNCOMPILED and native-positive eligibility ALWAYS literalnot-tested even if measurement completes.
+
+Future acceptance: OWN new ALL8freshattempt1 with current full Linux20/Linux22/Mac oldregression and unchanged identity ZIP/APIsha/canonicalpayload/printedSHA/ENTIREtree evidence PLUS NEWsavedcredential ZIP/APIsha/strict canonical report+progress/source-compiled-SDK-header hashes/completeworker-refusal accounting/printedhexSHA. New native-artifact verifier is NOT implemented; old collectors cannot certify it. Any failure retains fullpartials/nonzero/refusal/skipnotcredited/independent interpretation, no rerun/cancel/carriedpass/automaticrepeat/newAPI-ABI-library fallback/silent fixedsource edit. Later successful closure receipt requires OWN exact independent review and OWN8fresh/fullproof, never sourcegreen substitution. MCdevreport12findings6high6moderate and build path warnings remain retained, not remediated by this unit.
+
+B1-B9/D62/D64/D168/D173-D175/D261 recheck from current source/Git/provider and historical qualified evidence only; no physical-host refresh. B1 design/owned only, B2 Alpine notmacOSreboot proof, B3JIT23pins not repeated, B4 bounded provenance notphysicalwriterproof. User-owned checkpoint provesquiescenceonly; commitment/ACK/capture/frozenchecks bindbytes, stoppedVM+bootdenial excludeswrites frompoweroffonly, isolatedrestoresnotauthorship. Bootdenial until durableACCEPTEDafterB8 orABORTaftercleanup beforegateopens; scopedlaunchd/OpenClawuser/prodroot processcomparison unreadable/unexpectedrefuse beforeJournal.recover, notcompletephysicalcensus. D175all5timerplists+manifestdevicepins, no preB6reload/reinstall; onlypostadmission/beforegate/changeddevice/value-onlyjournaledrepin and ownedAPFS/disposablemacOSnegatives. ExactdisposableMac orfixed disk/RAMcapacitysource remains operator-owned; historical24.558GiB/42GiB isnotcurrentadmission. No UTM/hostrestart/moltMacOSdiskuse. B6fresh exact-windowgo namingprestoplimit/ACCEPTEDorABORT/repin/manualfallback; heartbeat neverlivestops. B8realhistories/B9all5gatedexit0/migration/livegate/newhashes beforeoperationalclaim.
+
+All actualhost/profile/runtime/identity/session/access/rootcopy/installation/policy/challenge/B3/B8/disposal/resource/reserve/reboot/currentinventory/override/freshD60/fullintegration/admission/manual/D175/parent/R7/N1-N6/nativepositive/originalR3-TIMEOUT-peer-offline/attendedD250-D251/consumedcleanup/reconciliation/B6payload holds persist. Original507RED7/8 and separateD323ASIF180s causes remainunknown; old50kills are sensitivitynot50certificates/defaultdeadlinealone notexpiry/latercleanup neveroriginalproof. No service/VM/NATS/image/timer/account/rights/reboot/cleanup operation or authority is gained. STOP after this local candidate gate; next safe publication/independent exact enabling review, then gated samecommit CI/native/fullreceipt proof.
+
+
+### 2026-10-23 00:44:49 EDT — D333 P2 CI-only acceptance closure receipt pre-audit
+
+Micro re-orient: SAME selected P2 unit; source D332 at cd390cf36ddec1c5bd194a32013fbc25a73c161f now has exact independent enabling clearance and its OWN CI39897203052/attempt1 ALL8fresh plus complete current old-regression/identity/ENTIREmerge and NEW native artifact data proof. B5/1.2/protected remain[A]/v1.2-pre, B6-B9 held and production capture disabled. Needs checked BEFORE writing: source review identity/time, current complete run, immutable full proof13870/dc09a0853aeef518552741ebbaada195b0806b6f1e4f7476212c141905bce9b1 and every linked evidence-file digest, fixed sources/P0/workflow/registration/dependencies, clean local source head and primary OPEN/DRAFT PR224/remote/upstream all cd39 with current base ancestor. Goal: record only completion of the CI-owned corrected-source measurement auxiliary; native-positive remains literal not-tested, no actual admission. Deltas exactly six Markdown files: this prospective PRE append; five identical D333 blocks in registry/decisions/inventory/frontier/POST; only corrected-enabling[A]to[x] summary keeping its original four contract lines; B5 owner cell3 prefix preserving ENTIRE prior cell suffix. Every other row/status/contract/cell/history, VERSION/B6/source/workflow/registration/runtime fixed. Verification: exact byte projections, unchanged non-ledger tree, plan lint and one clean immutable local receipt with soleparent cd39. Its OWN exact independent enabled-receipt review, safe no-run publication/current-base/SAMEcommit promotion and OWN new ALL8fresh/full old+NEW native evidence remain PENDING, never supplied by source green. Feeds only completion of this selected P2 unit/receipt; no automatic adapter, ASIF repair or host unit. No publication, review request, promotion, CI rerun/cancellation, local source tests/native/SDK/compiler/elevation/full suite/live-bus/physical-host/service/VM/account/timer/reboot/cleanup action in this preparation gate. PRE local chronology is author-attested D310Q1, not Git-sequenced proof of prospectivity.

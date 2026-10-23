@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-04",
+  "scope": "synthetic host-side isolated JetStream fixture; no production VM or store touched",
+  "host": "macOS 26.6.2",
+  "runtime": {
+    "node_version": "24.13.0",
+    "node_sha256": "aed3321cf1a2ad333514339e8f7fc58a01ed9b6ac0d1325cd052260004928287",
+    "nats_server_version": "2.12.6",
+    "nats_server_sha256": "c3a71e72f6fc5dd008988f34b57fd2ab1fe69ab18d409f0a0aeebc51160e76e1",
+    "nats_cli_version": "0.3.1",
+    "nats_cli_sha256": "6be41e7097aac6278c3b9e4f394fc1536996608e921aa14fceae1bf0e800da0f"
+  },
+  "result": {
+    "acceptance_pass": true,
+    "all_owned_servers_stopped": true,
+    "cold_tree_masters_unchanged": true,
+    "standalone_cold_high_water": 13,
+    "standalone_archive_high_water": 12,
+    "held_r1_cold_high_water": 8,
+    "held_r1_archive_high_water": 7,
+    "wrong_listener_controls": "refused",
+    "stale_archive_baseline": "refused"
+  },
+  "unverified": [
+    "production image extraction and provenance",
+    "production direct-store comparison",
+    "production isolated restores",
+    "live service resumption"
+  ]
+}

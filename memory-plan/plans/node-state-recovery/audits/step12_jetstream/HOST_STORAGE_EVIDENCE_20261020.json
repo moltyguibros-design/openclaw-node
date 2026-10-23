@@ -1,0 +1,966 @@
+{
+  "D284_last": {
+    "at_utc": "2026-10-20T03:50:33.161900+00:00",
+    "available_bytes": 15015313408,
+    "production": {
+      "allocated_bytes": 211261108224,
+      "holders": {
+        "err": "",
+        "out": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+        "rc": 0
+      },
+      "identity": [
+        16777233,
+        17966030,
+        501,
+        20,
+        33188,
+        0
+      ],
+      "logical_bytes": 211267092480,
+      "status": {
+        "err": "",
+        "out": "started",
+        "rc": 0
+      }
+    }
+  },
+  "baseline": {
+    "at_utc": "2026-10-19T19:53:52.201138+00:00",
+    "available_bytes": 35967266816,
+    "limits": "No baseline swap directory inventory, per-volume capacity census, or per-file directory allocation totals.",
+    "production": {
+      "holders": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+      "image_allocated_bytes": 211261108224,
+      "image_identity": [
+        16777233,
+        17966030,
+        501,
+        20,
+        33188,
+        0
+      ],
+      "image_logical_bytes": 211267092480,
+      "status": "started"
+    }
+  },
+  "derived": {
+    "GiB_bytes": 1073741824,
+    "change_since_D284_last_GiB": 0.15443038940429688,
+    "latest_available_GiB": 14.138530731201172,
+    "latest_available_bytes": 15181131776,
+    "latest_short_of_20_GiB": 5.861469268798828,
+    "latest_short_of_320_GiB": 305.8614692687988,
+    "net_loss_since_baseline_GiB": 19.358596801757812,
+    "recent_large_file_current_allocation_GiB": 15.840400695800781,
+    "swap_born_after_baseline_current_allocation_GiB": 6.0,
+    "swap_current_allocated_GiB": 12.0,
+    "swap_current_file_count": 12,
+    "swap_files_born_after_baseline": [
+      "/System/Volumes/VM/swapfile12",
+      "/System/Volumes/VM/swapfile11",
+      "/System/Volumes/VM/swapfile6",
+      "/System/Volumes/VM/swapfile8",
+      "/System/Volumes/VM/swapfile9",
+      "/System/Volumes/VM/swapfile7"
+    ]
+  },
+  "limits": [
+    "Sequential samples, not an atomic filesystem snapshot.",
+    "Birth times and current allocations do not establish net historical contribution; deletions and replaced files are unobserved.",
+    "Directory du totals are metadata accounting, not exclusive/reclaimable APFS extents; do not sum overlapping categories.",
+    "The selected recent-file scan hit its 50000-entry limit with 175 directories remaining; it is not exhaustive.",
+    "One home directory size command used conflicting options and failed; its corrected 20-second query timed out without totals.",
+    "System snapshot query by unmounted volume identifier failed; the subsequent mounted-root query succeeded.",
+    "AssetsV2 and private var folders contain permission-denied paths; their size totals are incomplete. No elevation or permission change attempted.",
+    "Raw-input digests bind the original local temporary files; normalized metadata needed for the conclusions is retained here, not a promise that temporary files survive.",
+    "No cleanup amount, full cause, sustained reserve, physical fit, or allocation/provisioning authority is established."
+  ],
+  "observations": {
+    "directory": {
+      "bytes": 7261,
+      "record": {
+        "after": {
+          "allocated_bytes": 211261108224,
+          "holders": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+          "identity": [
+            16777233,
+            17966030,
+            501,
+            20,
+            33188,
+            0
+          ],
+          "logical_bytes": 211267092480,
+          "status": "started"
+        },
+        "assets_size": {
+          "elapsed_s": 0.453,
+          "err": "du: /System/Library/AssetsV2/com_apple_MobileAsset_UAF_FM_Visual: Operation not permitted\ndu: /System/Library/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels: Operation not permitted\ndu: /System/Library/AssetsV2/com_apple_MobileAsset_UAF_IF_Planner: Operation not permitted\ndu: /System/Library/AssetsV2/com_apple_MobileAsset_UAF_FM_Overrides: Operation not permitted\ndu: /System/Library/AssetsV2/com_apple_MobileAsset_UAF_FM_CodeLM: Operation not permitted",
+          "out": "17458284\t/System/Library/AssetsV2",
+          "rc": 1
+        },
+        "at_utc": "2026-10-20T04:12:37.270125+00:00",
+        "available_bytes_after": 15091220480,
+        "before": {
+          "allocated_bytes": 211261108224,
+          "holders": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+          "identity": [
+            16777233,
+            17966030,
+            501,
+            20,
+            33188,
+            0
+          ],
+          "logical_bytes": 211267092480,
+          "status": "started"
+        },
+        "guard_unchanged": true,
+        "home_sizes": {
+          "elapsed_s": 0.002,
+          "err": "usage: du [-Aclnx] [-H | -L | -P] [-g | -h | -k | -m] [-a | -s | -d depth] [-B blocksize] [-I mask] [-t threshold] [file ...]",
+          "out": "",
+          "rc": 64
+        },
+        "scope": "fixed root directory allocated-size summaries with per-command deadline, swap timestamps, root snapshots; no file contents, deletion or elevation",
+        "swap_files": [
+          {
+            "allocated_bytes": 1073741824,
+            "birthtime": 1792453703.8878953,
+            "ctime_ns": 1792453704458589237,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792453704458589237,
+            "path": "/System/Volumes/VM/swapfile12"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "birthtime": 1792435909.8280993,
+            "ctime_ns": 1792435909954860949,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792435909954860949,
+            "path": "/System/Volumes/VM/swapfile5"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "birthtime": 1792431203.100761,
+            "ctime_ns": 1792431203183200826,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792431203183200826,
+            "path": "/System/Volumes/VM/swapfile2"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "birthtime": 1792435866.025083,
+            "ctime_ns": 1792435866183555522,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792435866183555522,
+            "path": "/System/Volumes/VM/swapfile3"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "birthtime": 1792435900.4458213,
+            "ctime_ns": 1792435900488331372,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792435900488331372,
+            "path": "/System/Volumes/VM/swapfile4"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "birthtime": 1792453698.635385,
+            "ctime_ns": 1792453698806066964,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792453698806066964,
+            "path": "/System/Volumes/VM/swapfile11"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "birthtime": 1792431202.2179983,
+            "ctime_ns": 1792431202262901085,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792431202262901085,
+            "path": "/System/Volumes/VM/swapfile1"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "birthtime": 1792451630.488943,
+            "ctime_ns": 1792451630720316505,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792451630720316505,
+            "path": "/System/Volumes/VM/swapfile6"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "birthtime": 1792451849.5714993,
+            "ctime_ns": 1792451850001731689,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792451850001731689,
+            "path": "/System/Volumes/VM/swapfile8"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "birthtime": 1792451852.7813542,
+            "ctime_ns": 1792451852980765623,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792451852980765623,
+            "path": "/System/Volumes/VM/swapfile9"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "birthtime": 1792451848.1495275,
+            "ctime_ns": 1792451848443272938,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792451848443272938,
+            "path": "/System/Volumes/VM/swapfile7"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "birthtime": 1792425903.6810584,
+            "ctime_ns": 1792425903682714865,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792425903682714865,
+            "path": "/System/Volumes/VM/swapfile0"
+          }
+        ],
+        "system_snapshots": {
+          "elapsed_s": 0.026,
+          "err": "",
+          "out": {
+            "Snapshots": [
+              {
+                "LimitingContainerShrink": true,
+                "Purgeable": false,
+                "RevertTo": false,
+                "RootTo": false,
+                "SnapshotName": "com.apple.os.update-60587424F5399FC05D957DF05B4D2F65543462495C77AEF520F790FBB57CB212",
+                "SnapshotUUID": "B28FA6E1-BF0B-4D35-95CD-BC9ADBC21C29",
+                "SnapshotXID": 47294912
+              }
+            ]
+          },
+          "rc": 0
+        },
+        "var_folders_size": {
+          "elapsed_s": 0.415,
+          "err": "du: /private/var/folders/zz/zyxvpxvq6csfxvn_n000012m00008n/T: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n000012m00008n/C: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n00000b000002r/T: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n00000b000002r/C: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n000010r000086/T: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n000010r000086/C: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n00000sm00006d/0: Operation not permitted\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n00000sm00006d/T: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n00000sm00006d/C: Operation not permitted\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n00000b400002s/T: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n00000b400002s/C: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n0000150000098/T: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n0000150000098/C: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n000012800008k/T: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n000012800008k/C: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n00000c4000031/T: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n00000c4000031/C: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n000011h00008c/T: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n000011h00008c/C: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n000003000000r/T: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n000003000000r/C: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n00000s800006_/T: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n00000s800006_/C: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n0000084000021/T: Permission denied\ndu: /private/var/folders/zz/zyxvpxvq6csfxvn_n0000084000021/C: Permis",
+          "out": "4534524\t/private/var/folders",
+          "rc": 1
+        }
+      },
+      "sha256": "c37d2b411fbe43e2b88ed4f7d9fe9ead261131d6b3f27bc20b1ac10015b0426b"
+    },
+    "home": {
+      "bytes": 760,
+      "record": {
+        "after": {
+          "allocated_bytes": 211261108224,
+          "holders": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+          "identity": [
+            16777233,
+            17966030,
+            501,
+            20,
+            33188,
+            0
+          ],
+          "logical_bytes": 211267092480,
+          "status": "started"
+        },
+        "at_utc": "2026-10-20T04:13:00.288925+00:00",
+        "available_bytes_after": 15135420416,
+        "before": {
+          "allocated_bytes": 211261108224,
+          "holders": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+          "identity": [
+            16777233,
+            17966030,
+            501,
+            20,
+            33188,
+            0
+          ],
+          "logical_bytes": 211267092480,
+          "status": "started"
+        },
+        "guard_unchanged": true,
+        "home_sizes": {
+          "partial_err": "",
+          "partial_out": "",
+          "timeout_s": 20
+        }
+      },
+      "sha256": "35446e92af3e13a3da5de639c28b4940d8de4e0d90a4281fb220361b85062248"
+    },
+    "initial": {
+      "bytes": 15909,
+      "record": {
+        "after": {
+          "allocated_bytes": 211261108224,
+          "holders": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+          "identity": [
+            16777233,
+            17966030,
+            501,
+            20,
+            33188,
+            0
+          ],
+          "logical_bytes": 211267092480,
+          "status": "started"
+        },
+        "apfs": {
+          "elapsed_s": 0.189,
+          "err": "",
+          "out": {
+            "Containers": [
+              {
+                "APFSContainerUUID": "F364FDD8-3C9B-4871-BF89-E6B8393E1BA7",
+                "CapacityCeiling": 524288000,
+                "CapacityFree": 503664640,
+                "ContainerReference": "disk1",
+                "DesignatedPhysicalStore": "disk0s1",
+                "PhysicalStores": [
+                  {
+                    "DeviceIdentifier": "disk0s1",
+                    "DiskUUID": "D0FCEE03-7BF2-499C-BE9A-E4E02B69560C",
+                    "Size": 524288000
+                  }
+                ],
+                "Volumes": [
+                  {
+                    "APFSVolumeUUID": "E8B9E336-71FD-44E5-A18A-62A4B631151C",
+                    "CapacityInUse": 5902336,
+                    "CapacityQuota": 0,
+                    "CapacityReserve": 0,
+                    "CryptoMigrationOn": false,
+                    "DeviceIdentifier": "disk1s1",
+                    "Encryption": false,
+                    "FileVault": false,
+                    "Locked": false,
+                    "Name": "iSCPreboot",
+                    "Roles": [
+                      "Preboot"
+                    ]
+                  },
+                  {
+                    "APFSVolumeUUID": "0F3D8C55-9A4D-495B-8995-97A3D67E2CDE",
+                    "CapacityInUse": 6311936,
+                    "CapacityQuota": 0,
+                    "CapacityReserve": 0,
+                    "CryptoMigrationOn": false,
+                    "DeviceIdentifier": "disk1s2",
+                    "Encryption": false,
+                    "FileVault": false,
+                    "Locked": false,
+                    "Name": "xART",
+                    "Roles": [
+                      "xART"
+                    ]
+                  },
+                  {
+                    "APFSVolumeUUID": "C20F974D-9D06-48B4-95B3-C53A00AE66B8",
+                    "CapacityInUse": 3432448,
+                    "CapacityQuota": 0,
+                    "CapacityReserve": 0,
+                    "CryptoMigrationOn": false,
+                    "DeviceIdentifier": "disk1s3",
+                    "Encryption": false,
+                    "FileVault": false,
+                    "Locked": false,
+                    "Name": "Hardware",
+                    "Roles": [
+                      "Hardware"
+                    ]
+                  },
+                  {
+                    "APFSVolumeUUID": "71E55FED-518B-46EE-BD83-1208F3E200A0",
+                    "CapacityInUse": 20480,
+                    "CapacityQuota": 0,
+                    "CapacityReserve": 0,
+                    "CryptoMigrationOn": false,
+                    "DeviceIdentifier": "disk1s4",
+                    "Encryption": false,
+                    "FileVault": false,
+                    "Locked": false,
+                    "Name": "Recovery",
+                    "Roles": [
+                      "Recovery"
+                    ]
+                  }
+                ]
+              },
+              {
+                "APFSContainerUUID": "28B00DBB-9F6B-49D8-8CE3-375CDE163365",
+                "CapacityCeiling": 5368664064,
+                "CapacityFree": 2880778240,
+                "ContainerReference": "disk2",
+                "DesignatedPhysicalStore": "disk0s3",
+                "PhysicalStores": [
+                  {
+                    "DeviceIdentifier": "disk0s3",
+                    "DiskUUID": "877869A4-620D-448B-B63A-B8DBFEF31D7B",
+                    "Size": 5368664064
+                  }
+                ],
+                "Volumes": [
+                  {
+                    "APFSVolumeUUID": "D8BBDCA9-DB9A-49D5-AFAA-9E23358135C6",
+                    "CapacityInUse": 2465865728,
+                    "CapacityQuota": 0,
+                    "CapacityReserve": 0,
+                    "CryptoMigrationOn": false,
+                    "DeviceIdentifier": "disk2s1",
+                    "Encryption": false,
+                    "FileVault": false,
+                    "Locked": false,
+                    "Name": "Recovery",
+                    "Roles": [
+                      "Recovery"
+                    ]
+                  },
+                  {
+                    "APFSVolumeUUID": "94B367DB-96F6-4702-B9F2-16B5E1762AE9",
+                    "CapacityInUse": 2273280,
+                    "CapacityQuota": 0,
+                    "CapacityReserve": 0,
+                    "CryptoMigrationOn": false,
+                    "DeviceIdentifier": "disk2s2",
+                    "Encryption": false,
+                    "FileVault": false,
+                    "Locked": false,
+                    "Name": "Update",
+                    "Roles": [
+                      "Update"
+                    ]
+                  }
+                ]
+              },
+              {
+                "APFSContainerUUID": "25765238-27BC-42B1-A878-420F4F7FD9D0",
+                "CapacityCeiling": 994662584320,
+                "CapacityFree": 15094099968,
+                "ContainerReference": "disk3",
+                "DesignatedPhysicalStore": "disk0s2",
+                "PhysicalStores": [
+                  {
+                    "DeviceIdentifier": "disk0s2",
+                    "DiskUUID": "B5FF1E0F-DCB6-4E29-AB28-745C096069D8",
+                    "Size": 994662584320
+                  }
+                ],
+                "Volumes": [
+                  {
+                    "APFSVolumeUUID": "BAB1F310-FFDF-41E2-9D7A-1EC76CA497AD",
+                    "CapacityInUse": 12638752768,
+                    "CapacityQuota": 0,
+                    "CapacityReserve": 0,
+                    "CryptoMigrationOn": false,
+                    "DeviceIdentifier": "disk3s1",
+                    "Encryption": true,
+                    "FileVault": true,
+                    "Locked": false,
+                    "Name": "Macintosh HD",
+                    "Roles": [
+                      "System"
+                    ]
+                  },
+                  {
+                    "APFSVolumeUUID": "F1FD41B6-0406-451C-92C8-F3BA941B6B3A",
+                    "CapacityInUse": 9034616832,
+                    "CapacityQuota": 0,
+                    "CapacityReserve": 0,
+                    "CryptoMigrationOn": false,
+                    "DeviceIdentifier": "disk3s2",
+                    "Encryption": false,
+                    "FileVault": false,
+                    "Locked": false,
+                    "Name": "Preboot",
+                    "Roles": [
+                      "Preboot"
+                    ]
+                  },
+                  {
+                    "APFSVolumeUUID": "D7F4B899-A9B4-4EF4-B4C3-E2DD164ACF23",
+                    "CapacityInUse": 1303298048,
+                    "CapacityQuota": 0,
+                    "CapacityReserve": 0,
+                    "CryptoMigrationOn": false,
+                    "DeviceIdentifier": "disk3s3",
+                    "Encryption": false,
+                    "FileVault": false,
+                    "Locked": false,
+                    "Name": "Recovery",
+                    "Roles": [
+                      "Recovery"
+                    ]
+                  },
+                  {
+                    "APFSVolumeUUID": "BC60ED15-8B15-48D9-9806-02D887B0430C",
+                    "CapacityInUse": 4370432,
+                    "CapacityQuota": 0,
+                    "CapacityReserve": 0,
+                    "CryptoMigrationOn": false,
+                    "DeviceIdentifier": "disk3s4",
+                    "Encryption": false,
+                    "FileVault": false,
+                    "Locked": false,
+                    "Name": "Update",
+                    "Roles": [
+                      "Update"
+                    ]
+                  },
+                  {
+                    "APFSVolumeUUID": "B92685C8-D80E-4644-AD08-7AD8F0AF3669",
+                    "CapacityInUse": 943493586944,
+                    "CapacityQuota": 0,
+                    "CapacityReserve": 0,
+                    "CryptoMigrationOn": false,
+                    "DeviceIdentifier": "disk3s5",
+                    "Encryption": true,
+                    "FileVault": true,
+                    "Locked": false,
+                    "Name": "Data",
+                    "Roles": [
+                      "Data"
+                    ]
+                  },
+                  {
+                    "APFSVolumeUUID": "EA37FDFD-69AD-427F-9EB7-0CACCE2D1F5C",
+                    "CapacityInUse": 12887175168,
+                    "CapacityQuota": 0,
+                    "CapacityReserve": 0,
+                    "CryptoMigrationOn": false,
+                    "DeviceIdentifier": "disk3s6",
+                    "Encryption": false,
+                    "FileVault": false,
+                    "Locked": false,
+                    "Name": "VM",
+                    "Roles": [
+                      "VM"
+                    ]
+                  }
+                ]
+              },
+              {
+                "APFSContainerUUID": "1B62F46D-9FFC-4E2A-A462-B2771F7DA4C3",
+                "CapacityCeiling": 17754488832,
+                "CapacityFree": 459620352,
+                "ContainerReference": "disk5",
+                "DesignatedPhysicalStore": "disk4s1",
+                "PhysicalStores": [
+                  {
+                    "DeviceIdentifier": "disk4s1",
+                    "DiskUUID": "EF633C91-D0E9-43D2-9596-99F14B35E609",
+                    "Size": 17754488832
+                  }
+                ],
+                "Volumes": [
+                  {
+                    "APFSVolumeUUID": "24D4020B-374E-41EA-850D-95D245363378",
+                    "CapacityInUse": 17248563200,
+                    "CapacityQuota": 0,
+                    "CapacityReserve": 0,
+                    "CryptoMigrationOn": false,
+                    "DeviceIdentifier": "disk5s1",
+                    "Encryption": false,
+                    "FileVault": false,
+                    "Locked": false,
+                    "Name": "iOS 26.3.1 Simulator",
+                    "Roles": []
+                  }
+                ]
+              }
+            ]
+          },
+          "rc": 0
+        },
+        "at_utc": "2026-10-20T04:11:34.233795+00:00",
+        "before": {
+          "allocated_bytes": 211261108224,
+          "holders": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+          "identity": [
+            16777233,
+            17966030,
+            501,
+            20,
+            33188,
+            0
+          ],
+          "logical_bytes": 211267092480,
+          "status": "started"
+        },
+        "data_info": {
+          "elapsed_s": 0.151,
+          "err": "",
+          "out": {
+            "APFSContainerFree": 15094050816,
+            "APFSContainerReference": "disk3",
+            "APFSContainerSize": 994662584320,
+            "CapacityInUse": 943493636096,
+            "DeviceIdentifier": "disk3s5",
+            "FilesystemType": "apfs",
+            "Internal": true,
+            "MountPoint": "/System/Volumes/Data"
+          },
+          "rc": 0
+        },
+        "guard_unchanged": true,
+        "local_snapshots": {
+          "elapsed_s": 0.037,
+          "err": "",
+          "out": "Snapshots for disk /:",
+          "rc": 0
+        },
+        "scope": "read-only volume/container/snapshot/swap metadata; no image bytes or cleanup",
+        "space": {
+          "/": {
+            "available_bytes": 15093972992,
+            "block_size": 4096,
+            "free_bytes": 15093972992,
+            "total_bytes": 994662584320
+          },
+          "/System/Volumes/Data": {
+            "available_bytes": 15093972992,
+            "block_size": 4096,
+            "free_bytes": 15093972992,
+            "total_bytes": 994662584320
+          },
+          "/System/Volumes/VM": {
+            "available_bytes": 15093972992,
+            "block_size": 4096,
+            "free_bytes": 15093972992,
+            "total_bytes": 994662584320
+          }
+        },
+        "swap_files": [
+          {
+            "allocated_bytes": 1073741824,
+            "ctime_ns": 1792453704458589237,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792453704458589237,
+            "path": "/System/Volumes/VM/swapfile12"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "ctime_ns": 1792435909954860949,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792435909954860949,
+            "path": "/System/Volumes/VM/swapfile5"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "ctime_ns": 1792431203183200826,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792431203183200826,
+            "path": "/System/Volumes/VM/swapfile2"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "ctime_ns": 1792435866183555522,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792435866183555522,
+            "path": "/System/Volumes/VM/swapfile3"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "ctime_ns": 1792435900488331372,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792435900488331372,
+            "path": "/System/Volumes/VM/swapfile4"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "ctime_ns": 1792453698806066964,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792453698806066964,
+            "path": "/System/Volumes/VM/swapfile11"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "ctime_ns": 1792431202262901085,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792431202262901085,
+            "path": "/System/Volumes/VM/swapfile1"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "ctime_ns": 1792451630720316505,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792451630720316505,
+            "path": "/System/Volumes/VM/swapfile6"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "ctime_ns": 1792451850001731689,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792451850001731689,
+            "path": "/System/Volumes/VM/swapfile8"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "ctime_ns": 1792451852980765623,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792451852980765623,
+            "path": "/System/Volumes/VM/swapfile9"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "ctime_ns": 1792451848443272938,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792451848443272938,
+            "path": "/System/Volumes/VM/swapfile7"
+          },
+          {
+            "allocated_bytes": 1073741824,
+            "ctime_ns": 1792425903682714865,
+            "logical_bytes": 1073741824,
+            "mtime_ns": 1792425903682714865,
+            "path": "/System/Volumes/VM/swapfile0"
+          }
+        ],
+        "swapusage": {
+          "elapsed_s": 0.003,
+          "err": "",
+          "out": "total = 12288.00M  used = 10922.25M  free = 1365.75M  (encrypted)",
+          "rc": 0
+        }
+      },
+      "sha256": "ac249a7451ad4f5c170ad1ddc02bebcadd2d7f046ca76e13a956cf7075fe1cd6"
+    },
+    "secondary": {
+      "bytes": 2744,
+      "record": {
+        "after": {
+          "allocated_bytes": 211261108224,
+          "holders": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+          "identity": [
+            16777233,
+            17966030,
+            501,
+            20,
+            33188,
+            0
+          ],
+          "logical_bytes": 211267092480,
+          "status": "started"
+        },
+        "at_utc": "2026-10-20T04:12:04.337336+00:00",
+        "available_bytes_after": 15092248576,
+        "before": {
+          "allocated_bytes": 211261108224,
+          "holders": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+          "identity": [
+            16777233,
+            17966030,
+            501,
+            20,
+            33188,
+            0
+          ],
+          "logical_bytes": 211267092480,
+          "status": "started"
+        },
+        "disk_images": {
+          "err": "",
+          "images": [
+            {
+              "entities": [
+                {
+                  "content-hint": "GUID_partition_scheme",
+                  "dev-entry": "/dev/disk4",
+                  "mount-point": null
+                },
+                {
+                  "content-hint": "7C3457EF-0000-11AA-AA11-00306543ECAC",
+                  "dev-entry": "/dev/disk4s1",
+                  "mount-point": null
+                },
+                {
+                  "content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC",
+                  "dev-entry": "/dev/disk5",
+                  "mount-point": null
+                },
+                {
+                  "content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+                  "dev-entry": "/dev/disk5s1",
+                  "mount-point": "/Library/Developer/CoreSimulator/Volumes/iOS_23D8133"
+                }
+              ],
+              "file_metadata": {
+                "allocated_bytes": 8393506816,
+                "birthtime": 1785109949.6557107,
+                "ctime_ns": 1785111136271230217,
+                "logical_bytes": 8393503393,
+                "mtime_ns": 1785111136271230217
+              },
+              "image_path": "/System/Library/AssetsV2/com_apple_MobileAsset_iOSSimulatorRuntime/c6f07ed8ec1586ca140801a2c7c60f478e947602.asset/AssetData/Restore/094-26194-058.dmg"
+            }
+          ],
+          "rc": 0
+        },
+        "guard_unchanged": true,
+        "sizes": {
+          "/Library/Developer/CoreSimulator": {
+            "elapsed_s": 0.032,
+            "err": "",
+            "out": "3985892\t/Library/Developer/CoreSimulator",
+            "rc": 0
+          },
+          "/Users/guillaumebrossard/Downloads": {
+            "elapsed_s": 0.192,
+            "err": "",
+            "out": "5126384\t/Users/guillaumebrossard/Downloads",
+            "rc": 0
+          },
+          "/Users/guillaumebrossard/Library/Caches": {
+            "elapsed_s": 2.946,
+            "err": "",
+            "out": "10111284\t/Users/guillaumebrossard/Library/Caches",
+            "rc": 0
+          }
+        },
+        "snapshot_data": {
+          "elapsed_s": 0.028,
+          "err": "",
+          "out": {
+            "Snapshots": []
+          },
+          "rc": 0
+        },
+        "snapshot_system": {
+          "elapsed_s": 0.017,
+          "err": "Error getting list of snapshots for APFS Volume: A disk with a mount point is required (-69854)",
+          "out": "",
+          "rc": 1
+        }
+      },
+      "sha256": "e1a51290263710b6c5e5c5898fdb0ee7546b60cb0f1992e7f1ff291f56df3335"
+    },
+    "selected": {
+      "bytes": 3065,
+      "record": {
+        "after": {
+          "allocated_bytes": 211261108224,
+          "holders": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+          "identity": [
+            16777233,
+            17966030,
+            501,
+            20,
+            33188,
+            0
+          ],
+          "logical_bytes": 211267092480,
+          "status": "started"
+        },
+        "at_utc": "2026-10-20T04:13:54.620747+00:00",
+        "available_bytes_after": 15181131776,
+        "before": {
+          "allocated_bytes": 211261108224,
+          "holders": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+          "identity": [
+            16777233,
+            17966030,
+            501,
+            20,
+            33188,
+            0
+          ],
+          "logical_bytes": 211267092480,
+          "status": "started"
+        },
+        "guard_unchanged": true,
+        "recent_large_metadata": {
+          "entries_seen": 50000,
+          "errors": 0,
+          "files": [
+            {
+              "allocated_bytes": 8090681344,
+              "birthtime": 1788490915.4383538,
+              "logical_bytes": 8084164608,
+              "mtime": 1792469640.288023,
+              "path": ".codex/thread_history_1.sqlite"
+            },
+            {
+              "allocated_bytes": 7511584768,
+              "birthtime": 1790381213.7445288,
+              "logical_bytes": 7503772531,
+              "mtime": 1792469646.4381804,
+              "path": ".codex/sessions/2026/08/22/rollout-2026-08-22T13-48-06-01a02a96-4400-75b1-9a95-2b44a46e844c.jsonl"
+            },
+            {
+              "allocated_bytes": 1406234624,
+              "birthtime": 1790381227.999282,
+              "logical_bytes": 1394578449,
+              "mtime": 1792454352.3114252,
+              "path": ".codex/sessions/2026/09/12/rollout-2026-09-12T21-15-10-01a09855-1e22-7133-aa0c-071dc9d9d2d0.jsonl"
+            }
+          ],
+          "limit_hit": true,
+          "max_depth": 4,
+          "max_entries": 50000,
+          "max_seconds": 8,
+          "min_logical_bytes": 536870912,
+          "modified_since_utc": "2026-10-19T19:53:52.201138+00:00",
+          "roots": [
+            "Library/Caches",
+            "Downloads",
+            ".cache",
+            ".codex",
+            ".claude"
+          ],
+          "stack_remaining": 175
+        },
+        "scope": "bounded selected directory size and recent large file metadata only; no contents or cleanup",
+        "sizes": {
+          ".Trash": {
+            "elapsed_s": 0.043,
+            "err": "",
+            "out": "454560\t/Users/guillaumebrossard/.Trash",
+            "rc": 0
+          },
+          ".cache": {
+            "elapsed_s": 1.487,
+            "err": "",
+            "out": "5644516\t/Users/guillaumebrossard/.cache",
+            "rc": 0
+          },
+          ".claude": {
+            "elapsed_s": 0.085,
+            "err": "",
+            "out": "64940\t/Users/guillaumebrossard/.claude",
+            "rc": 0
+          },
+          ".codex": {
+            "elapsed_s": 2.626,
+            "err": "",
+            "out": "39188980\t/Users/guillaumebrossard/.codex",
+            "rc": 0
+          },
+          "Library/Application Support": {
+            "elapsed_s": 4.852,
+            "err": "",
+            "out": "50410440\t/Users/guillaumebrossard/Library/Application Support",
+            "rc": 0
+          },
+          "Library/Containers": {
+            "elapsed_s": 3.938,
+            "err": "",
+            "out": "263834944\t/Users/guillaumebrossard/Library/Containers",
+            "rc": 0
+          },
+          "Library/Developer": {
+            "elapsed_s": 2.098,
+            "err": "",
+            "out": "43028944\t/Users/guillaumebrossard/Library/Developer",
+            "rc": 0
+          }
+        }
+      },
+      "sha256": "f7443698f28095760a9f495bb6336d4903254c16cd7117f3ac7e2a890a47cf44"
+    }
+  },
+  "scope": "Read-only; no file data, image contents, cleanup, elevation, VM/service operations or provisioning. Directory names and file metadata only. Host observations are Codex supplied, not an independent host review.",
+  "source_head": "384e51f5bacc0c669f37cd5d2f60a2e4c2bfa1dd",
+  "unit": "D285 bounded host storage metadata assessment"
+}

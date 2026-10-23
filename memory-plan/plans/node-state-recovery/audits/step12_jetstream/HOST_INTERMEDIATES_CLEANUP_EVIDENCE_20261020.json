@@ -1,0 +1,912 @@
+{
+  "authorization": {
+    "interpretation": "Approval of those exact two trees for this one execution only, not the D286 table or regenerated trees.",
+    "operator_answer": "go",
+    "request": "Approve deleting only the two named ArcaneRapture Build/Intermediates.noindex folders; 13.4GiB reported, actual reclaim uncertain; finished builds, source, packages and logs retained; recompilation consequence stated."
+  },
+  "check_recording_qualification": {
+    "holder_parameters": "Command, recursive arguments and timeout are absent from the runtime result. They reside only in the hash-bound temporary executed script, not in this repository.",
+    "holder_result_fields_retained": [
+      "rc",
+      "out",
+      "err",
+      "elapsed_s"
+    ],
+    "not_inferred": [
+      "No consumer-absence conclusion from rc1/empty channels or observer_pid alone.",
+      "No retroactive historical sample from a new process or lsof probe.",
+      "No independent code trace from a script digest without its source."
+    ],
+    "process_sample": "Never persisted; no historical PID/executable result can be reconstructed from the committed record. Codex reports a successful no-match assertion only.",
+    "raw_runtime_result_unchanged": true,
+    "review": "Claude121 R1 at original receipt9fc51867d81f25d3c231b7344837f5ec90f49790",
+    "scope": "Qualification only: actual action/outcome/retained/guard records and all arithmetic remain byte-value-equivalent as JSON; no host operation or repeat cleanup."
+  },
+  "derived": {
+    "GiB_bytes": 1073741824,
+    "above_20_GiB_after": 4.558357238769531,
+    "available_after_GiB": 24.55835723876953,
+    "available_after_bytes": 26369335296,
+    "available_before_GiB": 14.635643005371094,
+    "available_before_bytes": 15714902016,
+    "both_targets_removed": true,
+    "observed_available_change_GiB": 9.922714233398438,
+    "observed_available_change_bytes": 10654433280,
+    "short_of_320_GiB_after": 295.44164276123047
+  },
+  "input_bindings": {
+    "executed_local_temporary_script": {
+      "bytes": 22078,
+      "sha256": "c56495c1fbad0274d0e2ba54683f858dc150af0c7e5ded7fca9abbbb293de268"
+    },
+    "original_result": {
+      "bytes": 22711,
+      "sha256": "f32ad76091ac8fbf6dc069239c861593af3e01b990c7a17ba7eb9d75ded079cd"
+    },
+    "prior_read_only_preflight": {
+      "bytes": 16134,
+      "sha256": "2f78df726f12ce344fd667be7af6172d9b459aa8bbe33775b1088d1241123cda"
+    }
+  },
+  "limits": [
+    "All host/action observations are Codex supplied, not an independent host verification.",
+    "Removal proves target absence at recorded times, not an exclusion against later regeneration. The approval is consumed; do not automatically delete regenerated trees.",
+    "No actual rebuild or complete source/dependency availability proof was performed. Next builds must regenerate intermediates; success/time is unproved.",
+    "Retained project/workspace configuration hashes and directory identities/metadata match, not a byte hash of every retained product/package/log/source file.",
+    "The historical raw process sample was never persisted. The holder results retain rc1, empty output/error and elapsed time, but not command, recursive arguments or timeout. Those parameters exist only in the hash-bound local temporary script with no retention promise. A successful script assertion, observer_pid or rc1 alone is not independently inspectable consumer-absence or method proof; no exclusion lock is established.",
+    "The before/after available-space delta includes concurrent active-host changes; it is not a measurement of exclusive physical extents released by deletion.",
+    "Reported 13.427GiB allocation is not a reclaim promise; no source is assigned to the difference versus observed pool change.",
+    "No installer, model, runtime/history, package cache, finished product/log/source, system asset/swap/snapshot, or other DerivedData tree was selected.",
+    "No app/service/timer/VM interruption, elevated/native rehearsal/root suite, installer download, resource admission or production capture occurred.",
+    "Passing the observed20GiBfloor does not fund320GiBplusreserves or prove sustained growth/memory headroom, installer/version fit, protected authority/B3, full integration/reboot or parent B5 readiness.",
+    "The durable result supports the recorded target absence, retained identities/configuration hashes, availability samples and production guard. It does not preserve the historical process sample or holder invocation parameters, so the earlier blanket durability claim is withdrawn for those checks. Current probes cannot replace them, and temporary-input hashes do not promise later retention."
+  ],
+  "method": "Codex-reported method from the hash-bound local temporary script: Python3 standard-library shutil.rmtree with avoids_symlink_attacks required, exact allow-list, fresh pinned target and parent checks, deletion relative to the held parent fd, and no elevation/permission changes. The one-off script was streamed to host Python; no cleanup helper was installed or shipped.",
+  "parent": "82d92281860af3b544c03026398f0b0d3b9d0379",
+  "reported_allocation_before_GiB": 13.427139282226562,
+  "result": {
+    "actions": [
+      {
+        "available_bytes_after": 22535438336,
+        "available_bytes_before": 15714885632,
+        "finished_at_utc": "2026-10-20T04:36:47.899887+00:00",
+        "fresh_target_metadata": {
+          "allocated_bytes": 0,
+          "identity": [
+            16777233,
+            240707727,
+            501,
+            20,
+            16877,
+            0
+          ],
+          "is_symlink": false,
+          "logical_bytes": 512,
+          "mtime_ns": 1788728775763214488
+        },
+        "name": "Unity-iPhone-btlavqxzwobadbdkojemuxzotpjm",
+        "path": "/Users/guillaumebrossard/Library/Developer/Xcode/DerivedData/Unity-iPhone-btlavqxzwobadbdkojemuxzotpjm/Build/Intermediates.noindex",
+        "production_after": {
+          "allocated_bytes": 211261108224,
+          "holders": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+          "identity": [
+            16777233,
+            17966030,
+            501,
+            20,
+            33188,
+            0
+          ],
+          "logical_bytes": 211267092480,
+          "status": "started"
+        },
+        "retained_after": {
+          "parent": {
+            "allocated_bytes": 0,
+            "identity": [
+              16777233,
+              240707726,
+              501,
+              20,
+              16877,
+              0
+            ],
+            "is_symlink": false,
+            "logical_bytes": 96,
+            "mtime_ns": 1792471007899803553
+          },
+          "project_configs": [
+            {
+              "metadata": {
+                "allocated_bytes": 606208,
+                "identity": [
+                  16777233,
+                  160901523,
+                  501,
+                  20,
+                  33152,
+                  0
+                ],
+                "is_symlink": false,
+                "logical_bytes": 604784,
+                "mtime_ns": 1791838183696829293
+              },
+              "path": "/Users/guillaumebrossard/ArcaneRapture/builds/Unity-iPhone.xcodeproj/project.pbxproj",
+              "sha256": "78b10fae22ad10497ac36d3fe9636d27d37c3904837a6c76c3c0a53565b2cc08"
+            },
+            {
+              "metadata": {
+                "allocated_bytes": 40960,
+                "identity": [
+                  16777233,
+                  299192231,
+                  501,
+                  20,
+                  33152,
+                  0
+                ],
+                "is_symlink": false,
+                "logical_bytes": 38972,
+                "mtime_ns": 1791838183525218665
+              },
+              "path": "/Users/guillaumebrossard/ArcaneRapture/builds/Pods/Pods.xcodeproj/project.pbxproj",
+              "sha256": "ca40a721a0ca555d10ab06a6050b14844fe0e8399cfa92de56938b5d64b336fb"
+            }
+          ],
+          "siblings": {
+            "Build/Products": {
+              "allocated_bytes": 0,
+              "identity": [
+                16777233,
+                240709361,
+                501,
+                20,
+                16877,
+                0
+              ],
+              "is_symlink": false,
+              "logical_bytes": 96,
+              "mtime_ns": 1788728543829656854
+            },
+            "Logs": {
+              "allocated_bytes": 0,
+              "identity": [
+                16777233,
+                240638809,
+                501,
+                20,
+                16877,
+                0
+              ],
+              "is_symlink": false,
+              "logical_bytes": 352,
+              "mtime_ns": 1788728488761504101
+            },
+            "SourcePackages": {
+              "allocated_bytes": 0,
+              "identity": [
+                16777233,
+                240638927,
+                501,
+                20,
+                16877,
+                0
+              ],
+              "is_symlink": false,
+              "logical_bytes": 192,
+              "mtime_ns": 1788728500780642307
+            }
+          },
+          "workspace": {
+            "allocated_bytes": 0,
+            "identity": [
+              16777233,
+              160901521,
+              501,
+              20,
+              16877,
+              0
+            ],
+            "is_symlink": false,
+            "logical_bytes": 160,
+            "mtime_ns": 1785464409937577309
+          },
+          "workspace_reference_sha256": "d38719024328ab6720507f0abe42e402c367541f438622d604d2c885d3887eb8"
+        },
+        "started_at_utc": "2026-10-20T04:36:46.343049+00:00",
+        "status": "removed",
+        "target_absent": true
+      },
+      {
+        "available_bytes_after": 26369343488,
+        "available_bytes_before": 22535974912,
+        "finished_at_utc": "2026-10-20T04:36:49.160253+00:00",
+        "fresh_target_metadata": {
+          "allocated_bytes": 0,
+          "identity": [
+            16777233,
+            268978051,
+            501,
+            20,
+            16877,
+            0
+          ],
+          "is_symlink": false,
+          "logical_bytes": 512,
+          "mtime_ns": 1789667101554616131
+        },
+        "name": "arcane-semantic-dd",
+        "path": "/Users/guillaumebrossard/Library/Developer/Xcode/DerivedData/arcane-semantic-dd/Build/Intermediates.noindex",
+        "production_after": {
+          "allocated_bytes": 211261108224,
+          "holders": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+          "identity": [
+            16777233,
+            17966030,
+            501,
+            20,
+            33188,
+            0
+          ],
+          "logical_bytes": 211267092480,
+          "status": "started"
+        },
+        "retained_after": {
+          "parent": {
+            "allocated_bytes": 0,
+            "identity": [
+              16777233,
+              268978050,
+              501,
+              20,
+              16877,
+              0
+            ],
+            "is_symlink": false,
+            "logical_bytes": 96,
+            "mtime_ns": 1792471009160190393
+          },
+          "project_configs": [
+            {
+              "metadata": {
+                "allocated_bytes": 479232,
+                "identity": [
+                  16777233,
+                  290358946,
+                  501,
+                  20,
+                  33152,
+                  0
+                ],
+                "is_symlink": false,
+                "logical_bytes": 475611,
+                "mtime_ns": 1790529059122602931
+              },
+              "path": "/Users/guillaumebrossard/ArcaneRapture/builds/InterpreterSoloSemanticDev/Unity-iPhone.xcodeproj/project.pbxproj",
+              "sha256": "79870446fd65c40b8bbe8651e35efc3d9b67336196ee4b8873fb405c96b3900e"
+            },
+            {
+              "metadata": {
+                "allocated_bytes": 40960,
+                "identity": [
+                  16777233,
+                  290358943,
+                  501,
+                  20,
+                  33152,
+                  0
+                ],
+                "is_symlink": false,
+                "logical_bytes": 38972,
+                "mtime_ns": 1790529058902956767
+              },
+              "path": "/Users/guillaumebrossard/ArcaneRapture/builds/InterpreterSoloSemanticDev/Pods/Pods.xcodeproj/project.pbxproj",
+              "sha256": "ca40a721a0ca555d10ab06a6050b14844fe0e8399cfa92de56938b5d64b336fb"
+            }
+          ],
+          "siblings": {
+            "Build/Products": {
+              "allocated_bytes": 0,
+              "identity": [
+                16777233,
+                268978683,
+                501,
+                20,
+                16877,
+                0
+              ],
+              "is_symlink": false,
+              "logical_bytes": 96,
+              "mtime_ns": 1789666913271075296
+            },
+            "Logs": {
+              "allocated_bytes": 0,
+              "identity": [
+                16777233,
+                268911903,
+                501,
+                20,
+                16877,
+                0
+              ],
+              "is_symlink": false,
+              "logical_bytes": 224,
+              "mtime_ns": 1789666893756029463
+            },
+            "SourcePackages": {
+              "allocated_bytes": 0,
+              "identity": [
+                16777233,
+                268911918,
+                501,
+                20,
+                16877,
+                0
+              ],
+              "is_symlink": false,
+              "logical_bytes": 192,
+              "mtime_ns": 1789666894264664679
+            }
+          },
+          "workspace": {
+            "allocated_bytes": 0,
+            "identity": [
+              16777233,
+              290358944,
+              501,
+              20,
+              16877,
+              0
+            ],
+            "is_symlink": false,
+            "logical_bytes": 128,
+            "mtime_ns": 1790529071210048694
+          },
+          "workspace_reference_sha256": "d38719024328ab6720507f0abe42e402c367541f438622d604d2c885d3887eb8"
+        },
+        "started_at_utc": "2026-10-20T04:36:48.573461+00:00",
+        "status": "removed",
+        "target_absent": true
+      }
+    ],
+    "all_targets_absent": true,
+    "available_bytes_after": 26369335296,
+    "available_bytes_before": 15714902016,
+    "finished_at_utc": "2026-10-20T04:36:49.632892+00:00",
+    "observer_pid": 94938,
+    "operator_authorization": "go in direct response to explicit approval of only the two named intermediate folders, with recompilation consequence",
+    "preflight": {
+      "Unity-iPhone-btlavqxzwobadbdkojemuxzotpjm": {
+        "holders": {
+          "elapsed_s": 0.157,
+          "err": "",
+          "out": "",
+          "rc": 1
+        },
+        "retained": {
+          "parent": {
+            "allocated_bytes": 0,
+            "identity": [
+              16777233,
+              240707726,
+              501,
+              20,
+              16877,
+              0
+            ],
+            "is_symlink": false,
+            "logical_bytes": 128,
+            "mtime_ns": 1788728543826210256
+          },
+          "project_configs": [
+            {
+              "metadata": {
+                "allocated_bytes": 606208,
+                "identity": [
+                  16777233,
+                  160901523,
+                  501,
+                  20,
+                  33152,
+                  0
+                ],
+                "is_symlink": false,
+                "logical_bytes": 604784,
+                "mtime_ns": 1791838183696829293
+              },
+              "path": "/Users/guillaumebrossard/ArcaneRapture/builds/Unity-iPhone.xcodeproj/project.pbxproj",
+              "sha256": "78b10fae22ad10497ac36d3fe9636d27d37c3904837a6c76c3c0a53565b2cc08"
+            },
+            {
+              "metadata": {
+                "allocated_bytes": 40960,
+                "identity": [
+                  16777233,
+                  299192231,
+                  501,
+                  20,
+                  33152,
+                  0
+                ],
+                "is_symlink": false,
+                "logical_bytes": 38972,
+                "mtime_ns": 1791838183525218665
+              },
+              "path": "/Users/guillaumebrossard/ArcaneRapture/builds/Pods/Pods.xcodeproj/project.pbxproj",
+              "sha256": "ca40a721a0ca555d10ab06a6050b14844fe0e8399cfa92de56938b5d64b336fb"
+            }
+          ],
+          "siblings": {
+            "Build/Products": {
+              "allocated_bytes": 0,
+              "identity": [
+                16777233,
+                240709361,
+                501,
+                20,
+                16877,
+                0
+              ],
+              "is_symlink": false,
+              "logical_bytes": 96,
+              "mtime_ns": 1788728543829656854
+            },
+            "Logs": {
+              "allocated_bytes": 0,
+              "identity": [
+                16777233,
+                240638809,
+                501,
+                20,
+                16877,
+                0
+              ],
+              "is_symlink": false,
+              "logical_bytes": 352,
+              "mtime_ns": 1788728488761504101
+            },
+            "SourcePackages": {
+              "allocated_bytes": 0,
+              "identity": [
+                16777233,
+                240638927,
+                501,
+                20,
+                16877,
+                0
+              ],
+              "is_symlink": false,
+              "logical_bytes": 192,
+              "mtime_ns": 1788728500780642307
+            }
+          },
+          "workspace": {
+            "allocated_bytes": 0,
+            "identity": [
+              16777233,
+              160901521,
+              501,
+              20,
+              16877,
+              0
+            ],
+            "is_symlink": false,
+            "logical_bytes": 160,
+            "mtime_ns": 1785464409937577309
+          },
+          "workspace_reference_sha256": "d38719024328ab6720507f0abe42e402c367541f438622d604d2c885d3887eb8"
+        },
+        "target_metadata": {
+          "allocated_bytes": 0,
+          "identity": [
+            16777233,
+            240707727,
+            501,
+            20,
+            16877,
+            0
+          ],
+          "is_symlink": false,
+          "logical_bytes": 512,
+          "mtime_ns": 1788728775763214488
+        }
+      },
+      "arcane-semantic-dd": {
+        "holders": {
+          "elapsed_s": 0.162,
+          "err": "",
+          "out": "",
+          "rc": 1
+        },
+        "retained": {
+          "parent": {
+            "allocated_bytes": 0,
+            "identity": [
+              16777233,
+              268978050,
+              501,
+              20,
+              16877,
+              0
+            ],
+            "is_symlink": false,
+            "logical_bytes": 128,
+            "mtime_ns": 1789666913267231073
+          },
+          "project_configs": [
+            {
+              "metadata": {
+                "allocated_bytes": 479232,
+                "identity": [
+                  16777233,
+                  290358946,
+                  501,
+                  20,
+                  33152,
+                  0
+                ],
+                "is_symlink": false,
+                "logical_bytes": 475611,
+                "mtime_ns": 1790529059122602931
+              },
+              "path": "/Users/guillaumebrossard/ArcaneRapture/builds/InterpreterSoloSemanticDev/Unity-iPhone.xcodeproj/project.pbxproj",
+              "sha256": "79870446fd65c40b8bbe8651e35efc3d9b67336196ee4b8873fb405c96b3900e"
+            },
+            {
+              "metadata": {
+                "allocated_bytes": 40960,
+                "identity": [
+                  16777233,
+                  290358943,
+                  501,
+                  20,
+                  33152,
+                  0
+                ],
+                "is_symlink": false,
+                "logical_bytes": 38972,
+                "mtime_ns": 1790529058902956767
+              },
+              "path": "/Users/guillaumebrossard/ArcaneRapture/builds/InterpreterSoloSemanticDev/Pods/Pods.xcodeproj/project.pbxproj",
+              "sha256": "ca40a721a0ca555d10ab06a6050b14844fe0e8399cfa92de56938b5d64b336fb"
+            }
+          ],
+          "siblings": {
+            "Build/Products": {
+              "allocated_bytes": 0,
+              "identity": [
+                16777233,
+                268978683,
+                501,
+                20,
+                16877,
+                0
+              ],
+              "is_symlink": false,
+              "logical_bytes": 96,
+              "mtime_ns": 1789666913271075296
+            },
+            "Logs": {
+              "allocated_bytes": 0,
+              "identity": [
+                16777233,
+                268911903,
+                501,
+                20,
+                16877,
+                0
+              ],
+              "is_symlink": false,
+              "logical_bytes": 224,
+              "mtime_ns": 1789666893756029463
+            },
+            "SourcePackages": {
+              "allocated_bytes": 0,
+              "identity": [
+                16777233,
+                268911918,
+                501,
+                20,
+                16877,
+                0
+              ],
+              "is_symlink": false,
+              "logical_bytes": 192,
+              "mtime_ns": 1789666894264664679
+            }
+          },
+          "workspace": {
+            "allocated_bytes": 0,
+            "identity": [
+              16777233,
+              290358944,
+              501,
+              20,
+              16877,
+              0
+            ],
+            "is_symlink": false,
+            "logical_bytes": 128,
+            "mtime_ns": 1790529071210048694
+          },
+          "workspace_reference_sha256": "d38719024328ab6720507f0abe42e402c367541f438622d604d2c885d3887eb8"
+        },
+        "target_metadata": {
+          "allocated_bytes": 0,
+          "identity": [
+            16777233,
+            268978051,
+            501,
+            20,
+            16877,
+            0
+          ],
+          "is_symlink": false,
+          "logical_bytes": 512,
+          "mtime_ns": 1789667101554616131
+        }
+      }
+    },
+    "production_after": {
+      "allocated_bytes": 211261108224,
+      "holders": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+      "identity": [
+        16777233,
+        17966030,
+        501,
+        20,
+        33188,
+        0
+      ],
+      "logical_bytes": 211267092480,
+      "status": "started"
+    },
+    "production_before": {
+      "allocated_bytes": 211261108224,
+      "holders": "p8509\nccom.apple.Virtualization.Virtua\nf10",
+      "identity": [
+        16777233,
+        17966030,
+        501,
+        20,
+        33188,
+        0
+      ],
+      "logical_bytes": 211267092480,
+      "status": "started"
+    },
+    "production_guard_unchanged": true,
+    "retained_after": {
+      "Unity-iPhone-btlavqxzwobadbdkojemuxzotpjm": {
+        "parent": {
+          "allocated_bytes": 0,
+          "identity": [
+            16777233,
+            240707726,
+            501,
+            20,
+            16877,
+            0
+          ],
+          "is_symlink": false,
+          "logical_bytes": 96,
+          "mtime_ns": 1792471007899803553
+        },
+        "project_configs": [
+          {
+            "metadata": {
+              "allocated_bytes": 606208,
+              "identity": [
+                16777233,
+                160901523,
+                501,
+                20,
+                33152,
+                0
+              ],
+              "is_symlink": false,
+              "logical_bytes": 604784,
+              "mtime_ns": 1791838183696829293
+            },
+            "path": "/Users/guillaumebrossard/ArcaneRapture/builds/Unity-iPhone.xcodeproj/project.pbxproj",
+            "sha256": "78b10fae22ad10497ac36d3fe9636d27d37c3904837a6c76c3c0a53565b2cc08"
+          },
+          {
+            "metadata": {
+              "allocated_bytes": 40960,
+              "identity": [
+                16777233,
+                299192231,
+                501,
+                20,
+                33152,
+                0
+              ],
+              "is_symlink": false,
+              "logical_bytes": 38972,
+              "mtime_ns": 1791838183525218665
+            },
+            "path": "/Users/guillaumebrossard/ArcaneRapture/builds/Pods/Pods.xcodeproj/project.pbxproj",
+            "sha256": "ca40a721a0ca555d10ab06a6050b14844fe0e8399cfa92de56938b5d64b336fb"
+          }
+        ],
+        "siblings": {
+          "Build/Products": {
+            "allocated_bytes": 0,
+            "identity": [
+              16777233,
+              240709361,
+              501,
+              20,
+              16877,
+              0
+            ],
+            "is_symlink": false,
+            "logical_bytes": 96,
+            "mtime_ns": 1788728543829656854
+          },
+          "Logs": {
+            "allocated_bytes": 0,
+            "identity": [
+              16777233,
+              240638809,
+              501,
+              20,
+              16877,
+              0
+            ],
+            "is_symlink": false,
+            "logical_bytes": 352,
+            "mtime_ns": 1788728488761504101
+          },
+          "SourcePackages": {
+            "allocated_bytes": 0,
+            "identity": [
+              16777233,
+              240638927,
+              501,
+              20,
+              16877,
+              0
+            ],
+            "is_symlink": false,
+            "logical_bytes": 192,
+            "mtime_ns": 1788728500780642307
+          }
+        },
+        "workspace": {
+          "allocated_bytes": 0,
+          "identity": [
+            16777233,
+            160901521,
+            501,
+            20,
+            16877,
+            0
+          ],
+          "is_symlink": false,
+          "logical_bytes": 160,
+          "mtime_ns": 1785464409937577309
+        },
+        "workspace_reference_sha256": "d38719024328ab6720507f0abe42e402c367541f438622d604d2c885d3887eb8"
+      },
+      "arcane-semantic-dd": {
+        "parent": {
+          "allocated_bytes": 0,
+          "identity": [
+            16777233,
+            268978050,
+            501,
+            20,
+            16877,
+            0
+          ],
+          "is_symlink": false,
+          "logical_bytes": 96,
+          "mtime_ns": 1792471009160190393
+        },
+        "project_configs": [
+          {
+            "metadata": {
+              "allocated_bytes": 479232,
+              "identity": [
+                16777233,
+                290358946,
+                501,
+                20,
+                33152,
+                0
+              ],
+              "is_symlink": false,
+              "logical_bytes": 475611,
+              "mtime_ns": 1790529059122602931
+            },
+            "path": "/Users/guillaumebrossard/ArcaneRapture/builds/InterpreterSoloSemanticDev/Unity-iPhone.xcodeproj/project.pbxproj",
+            "sha256": "79870446fd65c40b8bbe8651e35efc3d9b67336196ee4b8873fb405c96b3900e"
+          },
+          {
+            "metadata": {
+              "allocated_bytes": 40960,
+              "identity": [
+                16777233,
+                290358943,
+                501,
+                20,
+                33152,
+                0
+              ],
+              "is_symlink": false,
+              "logical_bytes": 38972,
+              "mtime_ns": 1790529058902956767
+            },
+            "path": "/Users/guillaumebrossard/ArcaneRapture/builds/InterpreterSoloSemanticDev/Pods/Pods.xcodeproj/project.pbxproj",
+            "sha256": "ca40a721a0ca555d10ab06a6050b14844fe0e8399cfa92de56938b5d64b336fb"
+          }
+        ],
+        "siblings": {
+          "Build/Products": {
+            "allocated_bytes": 0,
+            "identity": [
+              16777233,
+              268978683,
+              501,
+              20,
+              16877,
+              0
+            ],
+            "is_symlink": false,
+            "logical_bytes": 96,
+            "mtime_ns": 1789666913271075296
+          },
+          "Logs": {
+            "allocated_bytes": 0,
+            "identity": [
+              16777233,
+              268911903,
+              501,
+              20,
+              16877,
+              0
+            ],
+            "is_symlink": false,
+            "logical_bytes": 224,
+            "mtime_ns": 1789666893756029463
+          },
+          "SourcePackages": {
+            "allocated_bytes": 0,
+            "identity": [
+              16777233,
+              268911918,
+              501,
+              20,
+              16877,
+              0
+            ],
+            "is_symlink": false,
+            "logical_bytes": 192,
+            "mtime_ns": 1789666894264664679
+          }
+        },
+        "workspace": {
+          "allocated_bytes": 0,
+          "identity": [
+            16777233,
+            290358944,
+            501,
+            20,
+            16877,
+            0
+          ],
+          "is_symlink": false,
+          "logical_bytes": 128,
+          "mtime_ns": 1790529071210048694
+        },
+        "workspace_reference_sha256": "d38719024328ab6720507f0abe42e402c367541f438622d604d2c885d3887eb8"
+      }
+    },
+    "scope": "Remove only the two approved generated-intermediate trees. No source/product/package/log or other cache deletion; no elevation, app quit/start, build, service, timer or VM operation.",
+    "started_at_utc": "2026-10-20T04:36:45.294925+00:00",
+    "status": "complete"
+  },
+  "unit": "D287 actual approved two-folder intermediate cleanup"
+}

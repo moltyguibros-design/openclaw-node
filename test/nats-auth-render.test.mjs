@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { renderAuthorization, syncNatsAuth, WORKER_PUBLISH_DENY, peersFromRegistry } from '../bin/nats-auth-render.mjs';
 import { PROTECTED_NATS_HANDOFF } from '../lib/nats-writer-ownership.mjs';
+import { LEGACY_NATS_WRITER_LOCK } from '../lib/nats-legacy-lock.mjs';
 import { getOrCreateIdentity, createIdentityRegistry } from '../lib/node-identity.mjs';
 
 const require = createRequire(import.meta.url);
@@ -27,10 +28,25 @@ const WORKER = 'UBZJ7OCYDR6BKVIAV4P2Z5SEVDISO2V2JKQ7CS3DI4FYIDMEJCYGM4WB';
 
 function runIsolatedCli(home, script, args, env) {
   const preload = path.join(home, 'isolated-handoff.cjs');
+  const bin = path.join(home, 'test-bin');
+  assert.equal(bin.includes(path.delimiter), false, 'test command path contains a PATH delimiter');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, 'nats-server'), '#!/bin/sh\ntest "$1" = "--signal" && test "$2" = "reload" || exit 1\nprintf reload > "$OPENCLAW_TEST_RELOAD_MARKER"\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'pgrep'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  for (const command of ['nats-server', 'pgrep']) {
+    const check = spawnSync(path.join(bin, command), ['--fixture-exec-check'], { encoding: 'utf8' });
+    assert.ifError(check.error);
+    assert.equal(check.status, 1);
+  }
+  const childEnv = { ...env, PATH: `${bin}${path.delimiter}${env.PATH || ''}`, OPENCLAW_TEST_RELOAD_MARKER: path.join(home, 'reload-called') };
+  const lookup = spawnSync('sh', ['-c', 'command -v nats-server'], { encoding: 'utf8', env: childEnv });
+  assert.ifError(lookup.error);
+  assert.equal(lookup.status, 0);
+  assert.equal(lookup.stdout.trim(), path.join(bin, 'nats-server'));
   fs.writeFileSync(preload, `const fs = require('node:fs');
 const original = fs.lstatSync;
 fs.lstatSync = (name, ...rest) => {
-  if (String(name) === ${JSON.stringify(PROTECTED_NATS_HANDOFF)}) {
+  if ([${JSON.stringify(PROTECTED_NATS_HANDOFF)}, ${JSON.stringify(LEGACY_NATS_WRITER_LOCK)}].includes(String(name))) {
     const error = new Error('isolated fixture has no host handoff');
     error.code = 'ENOENT';
     throw error;
@@ -38,7 +54,9 @@ fs.lstatSync = (name, ...rest) => {
   return original(name, ...rest);
 };
 `);
-  return spawnSync(process.execPath, ['--require', preload, path.join(ROOT, script), ...args], { encoding: 'utf8', env });
+  return spawnSync(process.execPath, ['--require', preload, path.join(ROOT, script), ...args], {
+    encoding: 'utf8', env: childEnv,
+  });
 }
 
 describe('renderAuthorization', () => {
@@ -142,8 +160,8 @@ describe('syncNatsAuth', () => {
     assert.match(r.stdout, /nats-auth: nkey mode/);
     const text = fs.readFileSync(path.join(dir, 'config', 'nats-auth.conf'), 'utf8');
     assert.ok(text.includes(publicKeyBase64ToNkey(peer.publicKeyBase64)));
-    // The reload is best-effort: with no nats-server around it reports, never fails.
-    assert.match(r.stdout, /no running nats-server found|SIGHUP sent|reloaded/);
+    assert.match(r.stdout, /reloaded via nats-server --signal reload/);
+    assert.equal(fs.readFileSync(path.join(home, 'reload-called'), 'utf8'), 'reload');
     fs.rmSync(home, { recursive: true, force: true });
   });
 });

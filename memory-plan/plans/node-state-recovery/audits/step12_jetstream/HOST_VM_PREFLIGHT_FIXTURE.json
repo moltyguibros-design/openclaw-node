@@ -1,0 +1,26 @@
+{
+  "date": "2026-10-04T12:39:50 EDT",
+  "scope": "read-only host preflight; VM remained running and no disk copy was made",
+  "host_control": {
+    "detached_ssh_child_survived_session_end": true,
+    "detached_ssh_child_read_pinned_utm_config": true,
+    "gui_launchagent_package_read": "denied by macOS privacy controls",
+    "gui_launchagent_utm_status": "started",
+    "combined_preflight": "passed through SSH-owned filesystem read and one-shot GUI UTM status helper"
+  },
+  "identity": {
+    "vm_uuid": "79B25660-B7F1-4DDC-B379-52A4EB317DAE",
+    "config_sha256": "de181e164d416eacaf5cefd2ff9ff46330995983397fbb28d9cb746af173f4c5",
+    "image_size_bytes": 211136020480,
+    "image_holders": 1,
+    "host_free_bytes": 115184340992
+  },
+  "negative": "wrong pinned config hash wrote FAILED.json and no preflight.json",
+  "unverified": [
+    "clean guest shutdown and stopped UTM state",
+    "absence of writable image holders during the entire cold copy",
+    "production ASIF clone and extraction",
+    "host provenance receipt and isolated production restore",
+    "resumption of the original node"
+  ]
+}
