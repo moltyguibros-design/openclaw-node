@@ -640,6 +640,76 @@ jobs:
           name: ci-audit-identity-macos-${{ github.sha }}
           path: ${{ runner.temp }}/ci-audit-identity.json
           if-no-files-found: error
+      - name: Measure preregistered saved credentials
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          saved_job_id="$(/usr/bin/python3 -I -S -B - <<'PY_JOB'
+          import json, os, re, signal, urllib.request
+          def refuse(*args):
+              raise TimeoutError()
+          def pairs(items):
+              result = {}
+              for key, value in items:
+                  if key in result: raise ValueError()
+                  result[key] = value
+              return result
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *args): return None
+          phase = 'preflight'
+          try:
+              env = os.environ
+              if env['GITHUB_REPOSITORY'] != 'moltyguibros-design/openclaw-node' or env['GITHUB_JOB'] != 'macos-process-census' or env['GITHUB_EVENT_NAME'] != 'pull_request': raise ValueError()
+              run, attempt = env['GITHUB_RUN_ID'], env['GITHUB_RUN_ATTEMPT']
+              if any(re.fullmatch(r'[1-9][0-9]{0,18}', n) is None or int(n) > 9223372036854775807 for n in (run, attempt)): raise ValueError()
+              with open(env['GITHUB_EVENT_PATH'], 'rb') as source: event_raw = source.read(1048577)
+              if len(event_raw) > 1048576: raise ValueError()
+              event = json.loads(event_raw, object_pairs_hook=pairs)
+              head = event['pull_request']['head']['sha']
+              if re.fullmatch(r'[0-9a-f]{40}', head) is None: raise ValueError()
+              phase = 'token'
+              token = env['GH_TOKEN']
+              if re.fullmatch(r'[\x21-\x7e]{1,4096}', token) is None: raise ValueError()
+              phase = 'request'
+              request = urllib.request.Request('https://api.github.com/repos/moltyguibros-design/openclaw-node/actions/runs/' + run + '/jobs?filter=all&per_page=100', headers={'Authorization':'Bearer ' + token, 'Accept':'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28'})
+              opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect)
+              signal.signal(signal.SIGALRM, refuse)
+              signal.setitimer(signal.ITIMER_REAL, 5)
+              try:
+                  with opener.open(request, timeout=5) as response:
+                      phase = 'response'
+                      raw = response.read(262145)
+              finally:
+                  signal.setitimer(signal.ITIMER_REAL, 0)
+              if len(raw) > 262144: raise ValueError()
+              value = json.loads(raw, object_pairs_hook=pairs)
+              if type(value['total_count']) is not int or not 1 <= value['total_count'] <= 100 or type(value['jobs']) is not list or len(value['jobs']) != value['total_count']: raise ValueError()
+              matches = [j for j in value['jobs'] if j['name'] == 'macos-process-census' and type(j['run_id']) is int and j['run_id'] == int(run) and type(j['run_attempt']) is int and j['run_attempt'] == int(attempt) and j['head_sha'] == head]
+              if len(matches) != 1 or type(matches[0]['id']) is not int or not 0 < matches[0]['id'] <= 9223372036854775807: raise ValueError()
+              print(matches[0]['id'])
+          except Exception:
+              raise SystemExit('saved-credential job selection unavailable: phase=' + phase) from None
+          PY_JOB
+          )"
+          /usr/bin/python3 -I -S -B memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_ci_saved_credential.py
+          /usr/bin/python3 -I -S -B memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_ci_saved_credential.py --ci-saved-probe 00000000-0000-0000-0000-000000000003 "$RUNNER_TEMP/ci-saved-credential-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "$saved_job_id" memory-plan/plans/node-state-recovery/audits/step12_jetstream/ci_saved_credential_execution_registration.json ea858319b6b864420e0f7cc11550ec90c79a9a606de7df2d4fb7185be6ee9283
+      - name: Retain saved credential measurement
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: saved-credential-macos-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/report.json
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/progress.jsonl
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/abi-witness
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/saved-observer
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/sdk-settings.json
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/sdk-libproc.h
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/sdk-proc_info.h
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/sdk-param.h
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/sdk-types.h
+          if-no-files-found: error
       - name: Verify inert root-copy local controls
         env:
           PYTHONDONTWRITEBYTECODE: "1"
