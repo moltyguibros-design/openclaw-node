@@ -1,8 +1,26 @@
 # Node Acceptance Protocol
 
-**Status:** BUILT for single-node (2026-06-15) — `bin/node-acceptance.mjs` + `lib/node-acceptance.mjs` +
-`lib/node-acceptance-probes.mjs` implement L0–L2 + L4 hard-tests across memory / LLM / network. 31
-mocked unit tests green; **not yet run against a live node** (operator will run it on the deployment).
+**Status:** Built for single-node. On 2026-09-30, disposable `qwen3:8b` fixtures at `b8ea264`
+and `be579f3` each passed the then-current 7-check memory-axis gate. The real daemon imported
+and indexed a separately watched session, persisted a nonce-linked SQLite decision, and returned
+it through injection. The gold probes took 576 s and 381 s. Those runs' watcher alerts counted
+two idempotent no-ops *after* a successful first extraction as failures; that classification is
+corrected. A third isolated run after `be579f3`, using the revised required watcher probe, was
+**REJECTED** on 2026-09-30 at 07:32 EDT (6 PASS, 2 FAIL). The parser rejected its first model
+response as containing another JSON object. The daemon fell back to regex, no SQLite decision was
+stored within 1022 s, and the watcher emitted `extraction_failure`. The stricter gate correctly
+rejected that run. These are isolated memory-path results, not full-node acceptance: extraction reliability, clean install,
+restart recovery, memory quality, production latency and two-machine execution remain open.
+With the Qwen3 non-thinking primer aligned to its template, a fourth isolated run on 2026-09-30
+at 08:03 EDT was **ACCEPTED** (8 PASS). Its daemon imported and indexed four turns, stored the
+synthetic SQLite decision, and returned that decision through the injector; the gold round-trip
+took 649 s and the watcher observed a clean first extraction. One green run after a red run does
+not establish first-attempt reliability. After the harness terminated it, the daemon logged
+`Daemon stopped` but the native runtime then aborted with a mutex error (`SIGABRT`). Restarting
+against the same fixture state restored the injector and isolated runtime paths; no duplicate
+gold extraction appeared during a 15 s observation. The native abort remains unresolved.
+`bin/node-acceptance.mjs` + `lib/node-acceptance.mjs` +
+`lib/node-acceptance-probes.mjs` implement L0–L2 + L4 hard-tests across memory / LLM / network.
 Inter-node L3 is specified but deferred (§8).
 **Owner principle:** MASTER_PLAN §4.1 (code on disk ≠ shipped), §4.7 (tests are not done-criteria),
 §5 (done requires runtime evidence). This protocol is the operational instance of §5 applied to a
@@ -20,6 +38,8 @@ node bin/node-acceptance.mjs --axis llm # one axis: memory | llm | network | sto
 node bin/node-acceptance.mjs --no-mutate# skip probes that write synthetic data
 node bin/node-acceptance.mjs --deep     # include invasive probes (e.g. extract-trigger)
 node bin/node-acceptance.mjs --json --report /path/report.md
+node bin/run-memory-fixture.mjs         # disposable real daemon/bus/injector + memory gate
+node bin/run-memory-fixture.mjs --startup-only # verify isolated service startup without the gold probe
 ```
 
 Exit codes: **0** ACCEPTED · **1** REJECTED · **2** INCOMPLETE · **3** harness error. Writes an evidence
@@ -116,8 +136,9 @@ The pipeline under test: `JSONL session → ingest → state.db → extraction (
 decisions → indexing (knowledge.db FTS+vec, graph-cache.db) → retrieval (5 channels) → inject :7893`.
 Acceptance is a **round-trip**, not "the database opens".
 
-All synthetic data is tagged with a per-run nonce (`acceptance-<runId>`) in an isolated synthetic session
-so probes never pollute real memory, and is deleted in teardown (§7.4).
+Synthetic data carries a per-run nonce in a separate session. Teardown removes the rows it owns, but
+the gold round-trip can mutate shared derived memory and the event log. Run that probe only in an
+isolated fixture (§7.3–7.4).
 
 | ID | Proves | Method | PASS threshold | Evidence captured | Builds on |
 |---|---|---|---|---|---|
@@ -133,8 +154,8 @@ so probes never pollute real memory, and is deleted in teardown (§7.4).
 | MEM-L2-5 | graph fresh | `graph-cache.db` `last_refresh_at` | within 1h (or advanced this run) | SQL value | 5.2 |
 | MEM-L2-6 | **all 5 retrieval channels live** | `POST /memory/inject` with token + the known-good query | `concepts≥1 ∧ decisions≥1 ∧ snippets≥1`; each of FTS/vec/entity/theme/spreading returns ≥1 | response body (per-channel counts) | 1.3 v5.3 done-criterion |
 | MEM-L2-7 | inject latency | time MEM-L2-6 (analysis-disabled or tolerant of the 1s LLM ceiling) | p95 < 500 ms excluding LLM analysis | measured ms | 1.3 target |
-| MEM-L4-1 | **gold round-trip** | inject a unique nonce *fact* via the synthetic session → after extract+index → query inject for the nonce | the nonce string appears in a returned snippet/concept | the matching block, verbatim | full pipeline |
-| MEM-L2-8 | watcher observing | tail `~/.openclaw/watcher.jsonl` | a record within the last health interval; no open `watcher.alert` | last record + alert state | 1.8 |
+| MEM-L4-1 | **gold round-trip** | write a nonce transcript in the daemon's watched source under a session ID distinct from direct ingest; wait for the daemon's `sessions.message_count`, `session_documents.turn_count`, and durable decision; query inject for the database choice | the indexed session has all four messages, the decision has the nonce, SQLite and an embedded/portable rationale, and the returned `Recent decisions` section contains that decision | import/index counts + decision row + returned decision line | full pipeline; poll budget at least extraction budget + 120 s (`ACCEPT_ROUNDTRIP_POLL_MS`) |
+| MEM-L2-WATCHER | watcher observing | inspect `~/.openclaw/watcher.jsonl` after the gold and inject probes | a fresh extraction and injection record; first extraction succeeds; no `watcher.alert` during the run | event count + alert state | 1.8 |
 
 > **MEM-L4-1 is the crown probe.** It is the single check that proves *the memory function actually
 > works* on this node: a fact that did not exist before the run is created, extracted, indexed, and
@@ -152,14 +173,14 @@ answers `/api/tags`.
 |---|---|---|---|---|---|
 | LLM-L1-1 | server up | `GET :11434/api/tags` | HTTP 200 | model list | health-check `checkOllama` |
 | LLM-L1-2 | **configured model present** | the model named by `LLM_MODEL` is in `/api/tags` | exact name match (not "some model") | matched tag | MASTER_PLAN 3.2 |
-| LLM-L2-1 | **generation runs** | `POST :11434/api/generate` `{model:LLM_MODEL, prompt:"reply OK", stream:false}` | non-empty `response`, `eval_count>0`, within budget (default 30s, env `ACCEPT_GEN_BUDGET_MS`) | response text + eval_count + ms | llm-client |
+| LLM-L2-1 | **generation runs** | the production `llm-client` sends a short non-thinking streamed `/api/chat` request, or `/v1/chat/completions` when `LLM_NATIVE_API=false` | non-empty completion, within budget (default 30s, env `ACCEPT_GEN_BUDGET_MS`) | response text + completion tokens + ms | llm-client |
 | LLM-L2-2 | **embedder runs** | embed a string with BGE-M3 via `@huggingface/transformers` | vector length = 1024, all finite, L2-norm > 0 | dim + norm | health-check `checkEmbedder`, embed-benchmark |
-| LLM-L2-3 | **production task works** | run the structured-extraction path on a tiny synthetic transcript | output passes `extraction-schema` validation (after `coerceExtractionResult`) | validation result + counts | extraction-prompt/schema 3.4 |
+| LLM-L2-3 | **production task works** | run the structured-extraction path on a tiny synthetic transcript that rejects Postgres for a nonce-named project | schema-valid output links the nonce to the SQLite decision and its embedded/portable rationale, without choosing Postgres; within the production 600 s budget (override `ACCEPT_EXTRACT_BUDGET_MS`) | validation result + counts + ms | extraction-prompt/schema 3.4 |
 | LLM-L2-4 | queue not stuck | read `ollama-queue` state snapshot | `consecutive_timeouts.{extraction,analysis} < 3`; no fallback in last 5 min | snapshot fields | ollama-queue, health-watch `deriveQueueStatus` |
 | LLM-L0-1 | RAM headroom (advisory) | `bin/check-llm-baseline.mjs` | advisory only — `WARN` not `FAIL` if under recommendation | advisor output | MASTER_PLAN 3.2 |
 
 > LLM-L2-3 is the LLM analogue of the gold round-trip: it proves the backing works for the *real* task
-> (schema-valid structured extraction), not just freeform text. A model that generates prose but fails
+> (a schema-valid decision grounded in the transcript), not just freeform text. A model that generates prose but fails
 > structured extraction is a failed LLM backing for this node's purpose.
 
 ---
@@ -225,17 +246,21 @@ GATE: REJECTED — 1 FAIL. Evidence → ~/.openclaw/.node-acceptance.md
 
 ### 7.3 Determinism + safety
 
-- Synthetic-only writes, tagged `acceptance-<runId>`; no mutation of real sessions/entities.
+- Mutating memory probes require a separate daemon and state DB; the gold round-trip additionally requires a separate inject server and bus. `bin/run-memory-fixture.mjs` creates these under a mode-0700 temporary HOME and stops its children on exit. It uses the installed `nats-server`, project dependencies and the local Ollama service. Its report and logs remain in the printed fixture path. The launcher sets `OPENCLAW_HOME=$HOME/.openclaw`, `OPENCLAW_WORKSPACE=$OPENCLAW_HOME/workspace`, `ACCEPT_ISOLATED_MEMORY=1`, `--axis memory`, a distinct `OPENCLAW_NATS_TOKEN` and `OPENCLAW_NODE_ID`, and dedicated high loopback bus/monitor and inject ports. `ACCEPTANCE_FIXTURE` is JSON with `{"type":"node-readiness-memory-fixture-v1","natsServerName":"acc-<unique-name>"}`. The fixture `openclaw.env` names that bus URL and token; its `config/daemon.json` contains only fixture-local workspace and scalar settings. The guard rejects paths or database hardlinks overlapping live state, transcript sources watched by the live daemon, copied live bus credentials, and a bus whose server identity/topology or monitor connection list does not match the marker and fixture daemon. The daemon verifies the private bus before its first subscription or JetStream call and disables reconnect in fixture mode. The authenticated inject server reports the daemon's own resolved script, HOME, workspace, DB, vault, model cache and registry paths and current bus identity; the gold probe refuses if any write path leaves the fixture. Reports are marked FIXTURE and stay inside the fixture home. A fresh initialized database plus verified daemon, bus and inject server are required before the round-trip can count as runtime evidence. Run the fixture while live Ollama extraction is idle.
+- The LLM extraction probe uses a new synthetic session with no known-memory candidates. A green result proves generation of a nonce-linked SQLite decision; it does not prove typed references or supersession against existing memories. Those require a seeded fixture test.
+- Direct ingest and the gold round-trip use different session IDs and nonces. The former checks the session-store API; only the daemon can create the latter's store and index rows. The gold probe waits for both rows before retrieving, so a direct import or a snippet repeating the decision cannot make it pass.
+- The required watcher probe runs after the gold and inject probes. It rejects a watcher alert or a gold session that needed an extraction retry; an idempotent no-op after a successful extraction does not count as a failed attempt. The fixture's one-second synthesis cadence is a stress setting, not a production latency claim.
+- Native Ollama streaming has a 600-second owned request budget, but Node's HTTP client may time out waiting for the first response headers after about 300 seconds. A cold or overloaded model can therefore fail before the first token; record that separately from mid-stream completion.
 - Idempotent: a second run produces the same verdicts (modulo real drift).
 - Read-mostly: the only writes are the synthetic session JSONL, its derived rows, a probe NATS message,
   and the report file.
 
 ### 7.4 Teardown
 
-Always-run cleanup (even on failure): delete the synthetic JSONL, `DELETE` synthetic rows from
-`state.db`/`knowledge.db`/`graph-cache.db` by nonce, purge the probe NATS subject. A `--keep` flag
-preserves fixtures for debugging. Teardown failures are themselves reported (a node that can't clean up
-is a finding).
+Always-run cleanup (even on failure): delete synthetic JSONL and session rows, clear any decision
+supersession pointer to a synthetic decision, and remove nonce aliases and run-owned edges. A cleanup
+failure rejects acceptance. Durable event-log writes and updates to shared themes cannot be rolled back
+by this cleanup; the gold probe must run in an isolated fixture.
 
 ---
 
@@ -266,7 +291,7 @@ dogfood harness *witness* it. Cluster/peer setup: docs/MULTI_NODE_DEPLOY.md, doc
 
 | ID | Proves | Method | PASS threshold | Note |
 |---|---|---|---|---|
-| E2E-L4-1 | memory loop closes | = MEM-L4-1 gold round-trip | nonce fact retrievable | the deployable single-node e2e |
+| E2E-L4-1 | memory loop closes | = MEM-L4-1 gold round-trip | nonce-linked SQLite decision persisted and retrieved | the deployable single-node e2e |
 | E2E-L4-2 | harness→LLM injection | with companion-bridge `:8787` up, send a prompt; inspect the upstream request | a memory block is present in the request to the LLM | `SKIP` while bridge is `INERT` (2.1); conditional |
 
 E2E-L4-2 depends on companion-bridge running as a daemon, which it currently is not (COMPONENT_REGISTRY
@@ -301,7 +326,7 @@ Each step is atomic, runtime-verifiable, and maps to a layer — suitable as a `
 2. **L0 presence** — deploy-surface probes (files, symlinks, `diff -rq`, plists, token perms). *Verify:* a deliberately-removed symlink flips MEM-L0 red.
 3. **Network axis (L1/L2)** — NATS port/monitor/jsz/stream, pub/sub + JetStream round-trip, trigger round-trip. *Verify:* round-trip nonce echoed; stopping NATS flips it red.
 4. **LLM axis** — model-present, generation, embedding, structured-extraction, queue. *Verify:* real generation text + 1024-dim vector captured.
-5. **Memory axis incl. gold round-trip** — synthetic ingest→extract→index→inject, MEM-L4-1, teardown. *Verify:* nonce fact retrieved by content; fixtures gone after.
+5. **Memory axis incl. gold round-trip** — synthetic ingest→extract→persist decision→index→inject, MEM-L4-1, teardown. *Verify:* the SQLite decision is stored and retrieved for the nonce project; fixtures gone after.
 6. **Enforcement wiring** — deploy-listener hook + optional schedule + done-contract reference. *Verify:* a red gate blocks deploy-complete.
 
 L3 (§8) is a **separate future block**, gated on federation being deployed.

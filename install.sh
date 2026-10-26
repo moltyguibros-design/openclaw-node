@@ -104,6 +104,8 @@ for arg in "$@"; do
   esac
 done
 
+if $DRY_RUN; then export PYTHONDONTWRITEBYTECODE=1; fi
+
 source "$REPO_DIR/scripts/install/helpers.sh"
 source "$REPO_DIR/scripts/install/llm-host.sh"
 

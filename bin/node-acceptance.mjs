@@ -16,11 +16,11 @@
  * Exit: 0 ACCEPTED · 1 REJECTED · 2 INCOMPLETE · 3 harness error.
  */
 
-import { writeFile, mkdir } from 'node:fs/promises';
+import { writeFile, mkdir, realpath, rename } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { parseArgs } from 'node:util';
-import { runAcceptance, formatTable, formatReport } from '../lib/node-acceptance.mjs';
+import { runAcceptance, formatTable, formatReport, resolveNodeConfig } from '../lib/node-acceptance.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -38,9 +38,21 @@ const { values } = parseArgs({
   },
 });
 
-const DEFAULT_REPORT = path.join(os.homedir(), '.openclaw', '.node-acceptance.md');
+const config = resolveNodeConfig();
+const DEFAULT_REPORT = path.join(config.home, config.isolatedMemoryAcceptance ? '.node-acceptance-FIXTURE.md' : '.node-acceptance.md');
+const within = (root, target) => {
+  const relative = path.relative(root, target);
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+};
 
 async function main() {
+  if (config.isolatedMemoryAcceptance && values.axis !== 'memory') {
+    throw new Error('isolated memory acceptance requires --axis memory');
+  }
+  if (config.isolatedMemoryAcceptance && values.report
+    && path.relative(config.home, path.resolve(values.report)).startsWith('..')) {
+    throw new Error('fixture report path must stay inside OPENCLAW_HOME');
+  }
   const report = await runAcceptance({
     profile: values.profile,
     axis: values.axis,
@@ -56,14 +68,23 @@ async function main() {
   }
 
   // An axis run is a partial view — it must not clobber the full-gate evidence file.
-  const reportPath = values.report || (values.axis ? null : DEFAULT_REPORT);
+  const reportPath = values.report || (values.axis && !config.isolatedMemoryAcceptance ? null : DEFAULT_REPORT);
   if (reportPath) {
     try {
       await mkdir(path.dirname(reportPath), { recursive: true });
-      await writeFile(reportPath, formatReport(report), 'utf8');
+      if (config.isolatedMemoryAcceptance) {
+        const root = await realpath(config.home);
+        const parent = await realpath(path.dirname(reportPath));
+        const live = await realpath(path.join(os.userInfo().homedir, '.openclaw'));
+        if (!within(root, parent) || within(live, root)) throw new Error('fixture report path resolves into live state');
+      }
+      const temp = `${reportPath}.${process.pid}.${Date.now()}.tmp`;
+      await writeFile(temp, `${config.isolatedMemoryAcceptance ? '# FIXTURE — isolated memory acceptance\n\n' : ''}${formatReport(report)}`, { mode: 0o600 });
+      await rename(temp, reportPath);
       if (!values.quiet && !values.json) process.stdout.write(`Evidence -> ${reportPath}\n`);
     } catch (err) {
       process.stderr.write(`[node-acceptance] could not write report: ${err.message}\n`);
+      if (config.isolatedMemoryAcceptance) throw err;
     }
   }
 
