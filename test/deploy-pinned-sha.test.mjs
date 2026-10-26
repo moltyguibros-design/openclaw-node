@@ -101,7 +101,11 @@ if (IS_MAC) {
 }
 
 // What a node's clone needs to run bin/mesh-deploy.js.
-const DEPLOY_SCRIPT_FILES = ['bin/mesh-deploy.js', 'lib/tracer.js', 'lib/obs-db.js'];
+const DEPLOY_SCRIPT_FILES = [
+  'bin/mesh-deploy.js', 'bin/mesh-deploy-listener.js', 'bin/schema-deploy-transition.js',
+  'lib/tracer.js', 'lib/obs-db.js', 'lib/node-id.js', 'lib/nats-resolve.js', 'lib/mesh-roles.js',
+  'lib/deploy-trigger-auth.mjs', 'lib/node-identity.mjs', 'lib/atomic-write.mjs',
+];
 git(ROOT, 'init', '-q', '--bare', '-b', 'main', ORIGIN);
 git(ROOT, 'init', '-q', '-b', 'main', SEED);
 git(SEED, 'remote', 'add', 'origin', ORIGIN);
@@ -135,6 +139,17 @@ after(() => fs.rmSync(ROOT, { recursive: true, force: true }));
 
 describe('pinned-sha deploy through the listener (bare origin + node clone)', () => {
   let S1, S2, S3;
+
+  it('bootstraps every role component when a Git clone has no deploy record', async () => {
+    assert.equal(fs.existsSync(RT.state), false);
+    const r = await runDeploy(trigger(S0));
+    assert.equal(r.status, 'success', r.errors.join('; '));
+    assert.equal(r.preSha, null);
+    assert.ok(r.componentsDeployed.some(c => c.id === 'mesh-daemons'));
+    assert.ok(r.componentsDeployed.some(c => c.id === 'shared-lib'));
+    assert.equal(read(path.join(RT.bin, 'mesh-agent.js')), '// agent v0\n');
+    assert.equal(state().deployedSha, S0);
+  });
 
   it('--force reinstalls every component at the signed sha even when nothing changed', async () => {
     const r = await runDeploy(trigger(S0, { force: true }));
@@ -254,6 +269,26 @@ describe('pinned-sha deploy through the listener (bare origin + node clone)', ()
     }
   });
 
+  it('refuses a foreign-linked daemon before checkout without attempting rollback', async () => {
+    write(HOME, 'other-checkout/memory-daemon.mjs', '// operator edit\n');
+    fs.mkdirSync(path.join(RT.workspace, 'bin'), { recursive: true });
+    const linked = path.join(RT.workspace, 'bin', 'memory-daemon.mjs');
+    fs.symlinkSync(path.join(HOME, 'other-checkout', 'memory-daemon.mjs'), linked);
+    write(SEED, 'workspace-bin/memory-daemon.mjs', '// new daemon\n');
+    const target = commit('daemon update');
+    try {
+      const r = await runDeploy(trigger(target));
+      assert.equal(r.status, 'refused');
+      assert.match(r.errors[0], /points outside this deployed revision/);
+      assert.equal(r.rolledBack, undefined);
+      assert.equal(head(), S3);
+      assert.equal(state().deployedSha, S3);
+      assert.equal(read(path.join(HOME, 'other-checkout', 'memory-daemon.mjs')), '// operator edit\n');
+    } finally {
+      fs.rmSync(linked);
+    }
+  });
+
   it('refuses a sha that is not on origin, and a checkout carrying unpushed commits', async () => {
     const unknown = await runDeploy(trigger('0123456789abcdef0123456789abcdef01234567'));
     assert.equal(unknown.status, 'failed');
@@ -270,6 +305,67 @@ describe('pinned-sha deploy through the listener (bare origin + node clone)', ()
     assert.match(r.errors[0], /not on origin\/main — refusing to move this checkout/);
     assert.equal(head(), local, 'the checkout was left where it was');
   });
+
+  it('refuses a copied source tree without Git before changing its files', async () => {
+    const priorHead = head();
+    const savedGit = path.join(NODE, '.git.saved');
+    fs.renameSync(path.join(NODE, '.git'), savedGit);
+    try {
+      const before = read(path.join(NODE, 'bin', 'mesh-agent.js'));
+      const r = await runDeploy(trigger(S2));
+      assert.equal(r.status, 'refused');
+      assert.match(r.errors[0], /no Git checkout/);
+      assert.equal(r.rolledBack, undefined);
+      assert.equal(read(path.join(NODE, 'bin', 'mesh-agent.js')), before);
+      assert.equal(fs.existsSync(path.join(NODE, '.git')), false);
+    } finally {
+      fs.renameSync(savedGit, path.join(NODE, '.git'));
+    }
+    assert.equal(head(), priorHead);
+  });
+
+  it('bootstraps an older clean clone at a newer signed sha with no deploy record', () => {
+    const bootNode = path.join(ROOT, 'bootstrap-node');
+    const bootHome = path.join(ROOT, 'bootstrap-home');
+    git(ROOT, 'clone', '-q', ORIGIN, bootNode);
+    git(bootNode, 'checkout', '-q', '--detach', S3);
+    const target = git(SEED, 'rev-parse', 'HEAD');
+    const code = `require(${JSON.stringify(path.join(REPO, 'bin', 'mesh-deploy-listener.js'))}).runDeploy({sha:${JSON.stringify(target.slice(0, 7))},branch:'main',components:['all']}).then(r=>console.log('RESULTJSON '+JSON.stringify(r)))`;
+    const run = spawnSync(process.execPath, ['-e', code], {
+      cwd: bootNode, encoding: 'utf8', timeout: 120000,
+      env: { ...process.env, HOME: bootHome, OPENCLAW_REPO_DIR: bootNode, DEPLOY_TEST_CALLS: path.join(ROOT, 'bootstrap-calls.log') },
+    });
+    assert.equal(run.status, 0, run.stderr || run.stdout);
+    const outcome = JSON.parse(run.stdout.split('\n').find((line) => line.startsWith('RESULTJSON ')).slice(11));
+    assert.equal(outcome.status, 'success', outcome.errors.join('; '));
+    assert.equal(git(bootNode, 'rev-parse', 'HEAD'), target);
+    assert.equal(JSON.parse(read(path.join(bootHome, '.openclaw', '.deploy-state.json'))).deployedSha, target);
+  });
+
+  for (const [name, deployedSha] of [
+    ['null', null],
+    ['unknown', 'f'.repeat(40)],
+  ]) {
+    it(`bootstraps an older clone whose deploy state has a ${name} sha`, () => {
+      const bootNode = path.join(ROOT, `bootstrap-${name}-node`);
+      const bootHome = path.join(ROOT, `bootstrap-${name}-home`);
+      git(ROOT, 'clone', '-q', ORIGIN, bootNode);
+      git(bootNode, 'checkout', '-q', '--detach', S3);
+      write(bootHome, '.openclaw/.deploy-state.json', JSON.stringify({ deployedSha, lastSha: null, components: {} }));
+      const target = git(SEED, 'rev-parse', 'HEAD');
+      const code = `require(${JSON.stringify(path.join(REPO, 'bin', 'mesh-deploy-listener.js'))}).runDeploy({sha:${JSON.stringify(target.slice(0, 7))},branch:'main',components:['all']}).then(r=>console.log('RESULTJSON '+JSON.stringify(r)))`;
+      const run = spawnSync(process.execPath, ['-e', code], {
+        cwd: bootNode, encoding: 'utf8', timeout: 120000,
+        env: { ...process.env, HOME: bootHome, OPENCLAW_REPO_DIR: bootNode, DEPLOY_TEST_CALLS: path.join(ROOT, `bootstrap-${name}-calls.log`) },
+      });
+      assert.equal(run.status, 0, run.stderr || run.stdout);
+      const outcome = JSON.parse(run.stdout.split('\n').find((line) => line.startsWith('RESULTJSON ')).slice(11));
+      assert.equal(outcome.status, 'success', outcome.errors.join('; '));
+      assert.equal(outcome.preSha, null);
+      assert.equal(git(bootNode, 'rev-parse', 'HEAD'), target);
+      assert.equal(JSON.parse(read(path.join(bootHome, '.openclaw', '.deploy-state.json'))).deployedSha, target);
+    });
+  }
 });
 
 // ── Independent nodes, bin/mesh-deploy.js run directly ──────────────────────
@@ -315,6 +411,97 @@ function makeNode(name, files) {
 const ranOk = run => assert.equal(run.status, 0, `deploy failed:\n${run.stdout}\n${run.stderr}`);
 const resultOf = run => JSON.parse(run.stdout.split('\n').find(l => l.startsWith('DEPLOY_RESULT ')).slice('DEPLOY_RESULT '.length));
 const fileMode = p => fs.statSync(p).mode & 0o777;
+
+describe('first tracked schema-dist transition', () => {
+  it('restores the prior generated code and runtime copies on rollback', () => {
+    const fx = makeNode('schema-transition', {
+      'bin/mesh-agent.js': '// agent old\n',
+      'packages/event-schemas/package.json': '{ "name": "event-schemas" }\n',
+    });
+    write(fx.node, 'packages/event-schemas/dist/index.js', '// old generated\n');
+    write(fx.home, 'openclaw/packages/event-schemas/dist/index.js', '// old runtime\n');
+    write(fx.home, '.openclaw/workspace/packages/event-schemas/dist/index.js', '// old workspace\n');
+    const S1 = fx.commit('track generated schemas', {
+      'bin/mesh-agent.js': '// agent new\n',
+      'packages/event-schemas/dist/index.js': '// new generated\n',
+    });
+    ranOk(fx.deploy(['--from', fx.S0, '--to', S1]));
+    assert.equal(read(path.join(fx.node, 'packages/event-schemas/dist/index.js')), '// new generated\n');
+    write(fx.home, 'openclaw/packages/event-schemas/dist/index.js', '// new runtime\n');
+    write(fx.home, '.openclaw/workspace/packages/event-schemas/dist/index.js', '// new workspace\n');
+
+    ranOk(fx.deploy(['--from', S1, '--to', fx.S0]));
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), fx.S0);
+    assert.equal(read(path.join(fx.node, 'packages/event-schemas/dist/index.js')), '// old generated\n');
+    assert.equal(read(fx.rt('openclaw/packages/event-schemas/dist/index.js')), '// old runtime\n');
+    assert.equal(read(fx.rt('.openclaw/workspace/packages/event-schemas/dist/index.js')), '// old workspace\n');
+  });
+
+  it('refuses to leave the tracked version when no prior backup exists', () => {
+    const fx = makeNode('schema-no-backup', {
+      'bin/mesh-agent.js': '// agent old\n',
+      'packages/event-schemas/package.json': '{ "name": "event-schemas" }\n',
+    });
+    const S1 = fx.commit('track generated schemas', {
+      'bin/mesh-agent.js': '// agent new\n',
+      'packages/event-schemas/dist/index.js': '// new generated\n',
+    });
+    git(fx.node, 'checkout', '-q', '--detach', S1);
+    const run = fx.deploy(['--from', S1, '--to', fx.S0]);
+    assert.notEqual(run.status, 0);
+    assert.match(run.stdout, /needs its pre-schema-dist backup/);
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), S1);
+  });
+});
+
+describe('listener source reload', () => {
+  it('checks the new listener can load before accepting an upgrade', () => {
+    const fx = makeNode('listener-load', { 'bin/mesh-agent.js': '// agent old\n' });
+    ranOk(fx.deploy(['--from', fx.S0, '--to', fx.S0, '--component', 'all']));
+    const bad = fx.commit('broken listener', { 'bin/mesh-deploy-listener.js': 'this is not JavaScript\n' });
+    const code = `require(process.argv[1]).runDeploy({sha:${JSON.stringify(bad.slice(0, 7))},branch:'main',components:['all']}).then(r=>console.log('RESULTJSON '+JSON.stringify(r)))`;
+    const run = spawnSync(process.execPath, ['-e', code, path.join(fx.node, 'bin/mesh-deploy-listener.js')], {
+      cwd: fx.node, encoding: 'utf8', timeout: 120000,
+      env: { ...process.env, HOME: fx.home, OPENCLAW_REPO_DIR: fx.node, DEPLOY_TEST_CALLS: fx.callLog },
+    });
+    assert.equal(run.status, 0, run.stderr || run.stdout);
+    const result = JSON.parse(run.stdout.split('\n').find(line => line.startsWith('RESULTJSON ')).slice(11));
+    assert.equal(result.status, 'failed');
+    assert.match(result.errors[0], /new deploy listener cannot load/);
+    assert.equal(result.rolledBack, true, result.errors.join('; '));
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), fx.S0);
+    assert.match(read(path.join(fx.home, 'openclaw', 'bin', 'mesh-deploy-listener.js')), /function validateFreshListener/);
+  });
+});
+
+describe('listener rollback across schema tracking', () => {
+  it('restores the old generated tree after a failed signed upgrade', () => {
+    const fx = makeNode('listener-schema-rollback', {
+      'bin/mesh-agent.js': '// agent old\n',
+      'packages/event-schemas/package.json': '{ "name": "event-schemas" }\n',
+    });
+    write(fx.node, 'packages/event-schemas/dist/index.js', '// old generated\n');
+    write(fx.home, '.openclaw/workspace/packages/event-schemas/dist/index.js', '// old workspace\n');
+    if (IS_MAC) write(fx.home, 'Library/LaunchAgents/ai.openclaw.mesh-agent.plist', '<plist/>\n');
+    ranOk(fx.deploy(['--from', fx.S0, '--to', fx.S0, '--component', 'all']));
+    const bad = fx.commit('track schemas and fail service', {
+      'bin/mesh-agent.js': '// BREAK_DEPLOY\n',
+      'packages/event-schemas/dist/index.js': '// new generated\n',
+    });
+    const code = `require(process.argv[1]).runDeploy({sha:${JSON.stringify(bad.slice(0, 7))},branch:'main',components:['all']}).then(r=>console.log('RESULTJSON '+JSON.stringify(r)))`;
+    const run = spawnSync(process.execPath, ['-e', code, path.join(fx.node, 'bin/mesh-deploy-listener.js')], {
+      cwd: fx.node, encoding: 'utf8', timeout: 120000,
+      env: { ...process.env, HOME: fx.home, OPENCLAW_REPO_DIR: fx.node, DEPLOY_TEST_CALLS: fx.callLog },
+    });
+    assert.equal(run.status, 0, run.stderr || run.stdout);
+    const result = JSON.parse(run.stdout.split('\n').find(line => line.startsWith('RESULTJSON ')).slice(11));
+    assert.equal(result.status, 'failed');
+    assert.equal(result.rolledBack, true, result.errors.join('; '));
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), fx.S0);
+    assert.equal(read(path.join(fx.node, 'packages/event-schemas/dist/index.js')), '// old generated\n');
+    assert.equal(read(fx.rt('.openclaw/workspace/packages/event-schemas/dist/index.js')), '// old workspace\n');
+  });
+});
 
 describe('`mesh deploy --force` on a live node leaves what the node owns alone', () => {
   // A worker (Mission Control, whose build runs npm, is lead-only) with a live
@@ -470,6 +657,110 @@ describe('a deploy restarts only the services that are running', () => {
     assert.ok(!launchctl.includes(`launchctl kickstart -k gui/${uid}/ai.openclaw.mesh-agent`), 'the stopped agent was started');
     assert.match(run.stdout, /ai\.openclaw\.mesh-agent not running — left stopped/);
     assert.deepEqual(resultOf(run).restarted, ['ai.openclaw.mesh-health-publisher']);
+  });
+});
+
+describe('shared library deploy reaches workspace daemons', () => {
+  it('updates both runtime lib trees and restarts a running memory daemon', () => {
+    const fx = makeNode('workspace-lib', {});
+    write(fx.home, '.openclaw/workspace/lib/tracer.js', '// stale tracer\n');
+    const S1 = fx.commit('lib update', { 'lib/runtime-helper.mjs': '// helper v1\n' });
+    const run = fx.deploy(['--from', fx.S0, '--to', S1], {
+      DEPLOY_TEST_PLATFORM: 'linux',
+      DEPLOY_TEST_UNITS: 'openclaw-memory-daemon',
+    });
+    ranOk(run);
+    assert.equal(read(fx.rt('openclaw/lib/runtime-helper.mjs')), '// helper v1\n');
+    assert.equal(read(fx.rt('.openclaw/workspace/lib/runtime-helper.mjs')), '// helper v1\n');
+    assert.equal(read(fx.rt('.openclaw/workspace/lib/tracer.js')), read(path.join(REPO, 'lib/tracer.js')));
+    assert.ok(fx.calls().includes('systemctl --user try-restart openclaw-memory-daemon'));
+
+    write(fx.home, 'Library/LaunchAgents/ai.openclaw.memory-daemon.plist', '<plist/>\n');
+    fs.rmSync(fx.callLog, { force: true });
+    const S2 = fx.commit('lib update again', { 'lib/runtime-helper.mjs': '// helper v2\n' });
+    const macRun = fx.deploy(['--from', S1, '--to', S2], { DEPLOY_TEST_PLATFORM: 'darwin' });
+    ranOk(macRun);
+    assert.equal(read(fx.rt('.openclaw/workspace/lib/runtime-helper.mjs')), '// helper v2\n');
+    assert.ok(fx.calls().some((call) => call.startsWith('launchctl kickstart -k ') && call.endsWith('/ai.openclaw.memory-daemon')));
+  });
+
+  it('refuses a workspace lib symlink into a different checkout before copying', () => {
+    const fx = makeNode('foreign-workspace-lib', {});
+    write(fx.home, 'other-checkout/lib/sentinel.mjs', '// untouched\n');
+    fs.mkdirSync(fx.rt('.openclaw/workspace'), { recursive: true });
+    fs.symlinkSync(fx.rt('other-checkout/lib'), fx.rt('.openclaw/workspace/lib'));
+    const S1 = fx.commit('new shared module', { 'lib/runtime-helper.mjs': '// helper v1\n' });
+    const run = fx.deploy(['--from', fx.S0, '--to', S1], { DEPLOY_TEST_PLATFORM: 'linux' });
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr + run.stdout, /points outside this deployed revision/);
+    assert.equal(read(fx.rt('other-checkout/lib/sentinel.mjs')), '// untouched\n');
+    assert.equal(fs.existsSync(fx.rt('other-checkout/lib/runtime-helper.mjs')), false);
+    assert.equal(fs.existsSync(fx.rt('openclaw/lib/runtime-helper.mjs')), false);
+  });
+
+  it('refuses an individual shared-lib file linked into a different checkout', () => {
+    const fx = makeNode('foreign-workspace-file', { 'lib/runtime-helper.mjs': '// helper v0\n' });
+    write(fx.home, 'other-checkout/runtime-helper.mjs', '// untouched\n');
+    fs.mkdirSync(fx.rt('.openclaw/workspace/lib'), { recursive: true });
+    fs.symlinkSync(fx.rt('other-checkout/runtime-helper.mjs'), fx.rt('.openclaw/workspace/lib/runtime-helper.mjs'));
+    const S1 = fx.commit('update shared module', { 'lib/runtime-helper.mjs': '// helper v1\n' });
+    const run = fx.deploy(['--from', fx.S0, '--to', S1], { DEPLOY_TEST_PLATFORM: 'linux' });
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr + run.stdout, /points outside this deployed revision/);
+    assert.equal(read(fx.rt('other-checkout/runtime-helper.mjs')), '// untouched\n');
+    assert.equal(fs.existsSync(fx.rt('openclaw/lib/runtime-helper.mjs')), false);
+  });
+
+  it('refuses a deleted shared-lib file linked into a different checkout before other copies', () => {
+    const fx = makeNode('foreign-deleted-file', { 'lib/runtime-helper.mjs': '// helper v0\n' });
+    write(fx.home, 'other-checkout/runtime-helper.mjs', '// helper v0\n');
+    fs.mkdirSync(fx.rt('.openclaw/workspace/lib'), { recursive: true });
+    fs.symlinkSync(fx.rt('other-checkout/runtime-helper.mjs'), fx.rt('.openclaw/workspace/lib/runtime-helper.mjs'));
+    fs.rmSync(path.join(fx.seed, 'lib/runtime-helper.mjs'));
+    const S1 = fx.commit('delete shared module', {});
+    const run = fx.deploy(['--from', fx.S0, '--to', S1], { DEPLOY_TEST_PLATFORM: 'linux' });
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr + run.stdout, /points outside this deployed revision/);
+    assert.equal(read(fx.rt('other-checkout/runtime-helper.mjs')), '// helper v0\n');
+    assert.equal(fs.existsSync(fx.rt('openclaw/lib/tracer.js')), false);
+  });
+
+  it('refuses a nested shared-lib directory linked into a different checkout', () => {
+    const fx = makeNode('foreign-nested-dir', {});
+    write(fx.home, 'other-checkout/isolated/sentinel.mjs', '// untouched\n');
+    fs.mkdirSync(fx.rt('.openclaw/workspace/lib'), { recursive: true });
+    fs.symlinkSync(fx.rt('other-checkout/isolated'), fx.rt('.openclaw/workspace/lib/isolated'));
+    const S1 = fx.commit('new nested module', { 'lib/isolated/helper.mjs': '// helper v1\n' });
+    const run = fx.deploy(['--from', fx.S0, '--to', S1], { DEPLOY_TEST_PLATFORM: 'linux' });
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr + run.stdout, /points outside this deployed revision/);
+    assert.equal(read(fx.rt('other-checkout/isolated/sentinel.mjs')), '// untouched\n');
+    assert.equal(fs.existsSync(fx.rt('other-checkout/isolated/helper.mjs')), false);
+    assert.equal(fs.existsSync(fx.rt('openclaw/lib/tracer.js')), false);
+  });
+
+  it('refuses a symlinked parent of workspace/lib', () => {
+    const fx = makeNode('foreign-workspace-parent', {});
+    write(fx.home, 'other-checkout/sentinel.mjs', '// untouched\n');
+    fs.mkdirSync(fx.rt('.openclaw'), { recursive: true });
+    fs.symlinkSync(fx.rt('other-checkout'), fx.rt('.openclaw/workspace'));
+    const S1 = fx.commit('lib update', { 'lib/runtime-helper.mjs': '// helper v1\n' });
+    const run = fx.deploy(['--from', fx.S0, '--to', S1], { DEPLOY_TEST_PLATFORM: 'linux' });
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr + run.stdout, /points outside this deployed revision/);
+    assert.equal(read(fx.rt('other-checkout/sentinel.mjs')), '// untouched\n');
+    assert.equal(fs.existsSync(fx.rt('openclaw/lib/runtime-helper.mjs')), false);
+  });
+
+  it('replaces a hard-linked destination without changing its other name', () => {
+    const fx = makeNode('hard-linked-lib', {});
+    write(fx.home, 'other-checkout/tracer.js', '// operator edit\n');
+    fs.mkdirSync(fx.rt('.openclaw/workspace/lib'), { recursive: true });
+    fs.linkSync(fx.rt('other-checkout/tracer.js'), fx.rt('.openclaw/workspace/lib/tracer.js'));
+    const S1 = fx.commit('lib update', { 'lib/runtime-helper.mjs': '// helper v1\n' });
+    ranOk(fx.deploy(['--from', fx.S0, '--to', S1], { DEPLOY_TEST_PLATFORM: 'linux' }));
+    assert.equal(read(fx.rt('other-checkout/tracer.js')), '// operator edit\n');
+    assert.equal(read(fx.rt('.openclaw/workspace/lib/tracer.js')), read(path.join(REPO, 'lib/tracer.js')));
   });
 });
 
