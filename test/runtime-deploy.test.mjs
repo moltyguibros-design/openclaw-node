@@ -321,3 +321,39 @@ test('declared native dependency readiness is exercised before allocation and re
   assert.deepEqual(next.receipt.dependencyProbe.checks, ['better-sqlite3']);
   assert.equal(next.receipt.dependencyProbe.abi, process.versions.modules);
 });
+
+test('model-free staging probes SQLite and vector without requiring model-only native binaries', t => {
+  const f = fixture(t), manifest = JSON.parse(fs.readFileSync(path.join(f.source, 'package.json'), 'utf8'));
+  manifest.dependencies = { 'better-sqlite3': 'owned', 'sqlite-vec': 'owned', '@huggingface/transformers': 'owned' };
+  f.write('package.json', JSON.stringify(manifest));
+  f.write('node_modules/better-sqlite3/index.js', 'module.exports=class{close(){}};');
+  f.write('node_modules/sqlite-vec/index.js', 'exports.load=()=>{};');
+  fs.mkdirSync(path.join(f.root, 'config'), { recursive: true });
+  fs.writeFileSync(path.join(f.root, 'openclaw.env'), 'OPENCLAW_MODEL_ENABLED=0\n');
+  const prior = process.env.OPENCLAW_MODEL_ENABLED;
+  delete process.env.OPENCLAW_MODEL_ENABLED;
+  try {
+    const disabled = f.stage();
+    assert.deepEqual(disabled.receipt.dependencyProbe.checks, ['better-sqlite3', 'sqlite-vec']);
+    assert.equal(disabled.receipt.dependencyProbe.modelEnabled, false);
+    f.write('node_modules/sqlite-vec/index.js', 'exports.load=()=>{throw new Error("vector unavailable")};');
+    const beforeVector = fs.readdirSync(path.dirname(disabled.release)).sort();
+    assert.throws(() => f.stage(), /Native dependency readiness refused/);
+    assert.deepEqual(fs.readdirSync(path.dirname(disabled.release)).sort(), beforeVector);
+    f.write('node_modules/sqlite-vec/index.js', 'exports.load=()=>{};');
+    fs.writeFileSync(path.join(f.root, 'openclaw.env'), 'OPENCLAW_MODEL_ENABLED=1\n');
+    const before = fs.readdirSync(path.dirname(disabled.release)).sort();
+    assert.throws(() => f.stage(), /Native dependency readiness refused/);
+    assert.deepEqual(fs.readdirSync(path.dirname(disabled.release)).sort(), before);
+    assert.equal(fs.realpathSync(path.join(f.root, 'runtime/node/current')), disabled.release);
+    f.write('node_modules/sharp/index.js', 'module.exports=()=>{};');
+    f.write('node_modules/onnxruntime-node/index.js', 'module.exports={};');
+    const enabled = f.stage();
+    assert.deepEqual(enabled.receipt.dependencyProbe.checks,
+      ['better-sqlite3', 'sqlite-vec', 'sharp', 'onnxruntime-node']);
+    assert.equal(enabled.receipt.dependencyProbe.modelEnabled, true);
+  } finally {
+    if (prior === undefined) delete process.env.OPENCLAW_MODEL_ENABLED;
+    else process.env.OPENCLAW_MODEL_ENABLED = prior;
+  }
+});

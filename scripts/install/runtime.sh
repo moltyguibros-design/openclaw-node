@@ -1,5 +1,11 @@
 step "Stage checkout-independent runtime"
 
+if $SKIP_LLM && { ${DISABLE_MODELS:-true} || ! grep -q '^OPENCLAW_MODEL_ENABLED=' "$ENV_FILE" 2>/dev/null; }; then
+  export OPENCLAW_MODEL_ENABLED=0
+elif ! grep -q '^OPENCLAW_MODEL_ENABLED=' "$ENV_FILE" 2>/dev/null; then
+  export OPENCLAW_MODEL_ENABLED=1
+fi
+
 if $DRY_RUN; then
   info "[dry-run] would stage source/dependencies into $OPENCLAW_ROOT/runtime/node"
   export OPENCLAW_RUNTIME_DIR="$REPO_DIR"

@@ -51,3 +51,26 @@ test('shipped CI audit uses the pinned driver and propagates advisory/provider f
   await assert.rejects(auditShippedDependencies({ cwd: f.repo, env: { ...f.env, OWNED_STATUS: '1' } }), /audit failed/);
   await assert.rejects(auditShippedDependencies({ cwd: f.repo, env: { ...f.env, OWNED_STATUS: '2' } }), /audit failed/);
 });
+
+test('runtime staging uses the same model capability that installation will persist', t => {
+  const f = fixture(t), script = fileURLToPath(new URL('../scripts/install/runtime.sh', import.meta.url));
+  const envFile = path.join(f.home, 'openclaw.env');
+  const run = (disable, saved, skip = 'true', inherited = saved) => {
+    if (saved === null) fs.rmSync(envFile, { force: true });
+    else fs.writeFileSync(envFile, `OPENCLAW_MODEL_ENABLED=${saved}\n`);
+    const env = { ...process.env, SCRIPT: script, ENV_FILE: envFile, REPO_DIR: f.repo,
+      OPENCLAW_ROOT: f.home, DRY_RUN: 'true', SKIP_LLM: skip, DISABLE_MODELS: disable };
+    if (inherited === null) delete env.OPENCLAW_MODEL_ENABLED;
+    else env.OPENCLAW_MODEL_ENABLED = inherited;
+    const result = spawnSync('bash', ['-c',
+      'step(){ :; }; info(){ :; }; source "$SCRIPT"; printf "%s" "${OPENCLAW_MODEL_ENABLED:-unset}"'],
+      { env, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout;
+  };
+  assert.equal(run('true', '1'), '0');
+  assert.equal(run('false', null), '0');
+  assert.equal(run('false', '1'), '1');
+  assert.equal(run('false', '0'), '0');
+  assert.equal(run('false', null, 'false', '0'), '1');
+});

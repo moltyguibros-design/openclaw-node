@@ -4262,3 +4262,6 @@ D345 U7a PRE reconciliation: same7paths completed with final exact source review
 
 
 D346 U4 PRE reconciliation: prospective PRE-v3 7e5bd744 froze the exact14 source paths and pinned npm11 writer before edit. Claude70/71 cleared the frozen U4-v2 bytes without required correction. Owned Ubuntu whole update passed but full root suite remains RED5/2820; no carried green or operational close. U5/U6/U7 and final own-head CI/receipt remain. External U4-proof.json SHA256ac4c09fe1b7cf597ce3158c624230ef3aaf24e2a55088d850bb82a05201774a5.
+
+
+D347 U5a PRE reconciliation: frozen five-path prospective PRE78dd4554; v1 Claude72/73 required one inherited-setting correction, retained, then exact v2 Claude74/75 CLEAR. Focused23/23 and one Ubuntu model-free whole update rc0/preservation proof a5e7d7c45924b9b5280e09c491ce7eac0d0b18f3c3207759f6147a997c4b6f2e. Acceptance remains INCOMPLETE L4, root suite RED5/2820; no final-head/ownCI/operational clearance.
