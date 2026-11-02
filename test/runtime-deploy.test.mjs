@@ -294,3 +294,14 @@ test('invalid Git checkout metadata refuses instead of changing to packed-source
   assert.throws(() => f.stage(), /Cannot enumerate the source Git checkout/);
   assert.equal(fs.existsSync(path.join(f.root, 'runtime/node/current')), false);
 });
+
+
+test('malformed prior installation metadata refuses before allocating new runtime code', t => {
+  const f = fixture(t), first = f.stage(), parent = path.dirname(first.release);
+  const before = fs.readdirSync(parent).sort();
+  fs.writeFileSync(path.join(f.root, 'config/installation.json'), '{broken');
+  f.write('bin/start.cjs', 'console.log("new source must not allocate");\n');
+  assert.throws(() => f.stage(), SyntaxError);
+  assert.deepEqual(fs.readdirSync(parent).sort(), before);
+  assert.equal(fs.realpathSync(path.join(parent, 'current')), first.release);
+});

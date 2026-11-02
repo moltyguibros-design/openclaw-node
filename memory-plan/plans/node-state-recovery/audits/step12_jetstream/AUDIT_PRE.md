@@ -4256,3 +4256,6 @@ PRE205c7d3a froze3paths before edits and explicitly chose refusal rather than in
 
 
 D344 U3c2b3 PRE reconciliation: same8paths completed with final exact static review62/63 and owned/actual Ubuntu proof 275888b7a145470fcf30a8708c4cdc6e559ac1f65360377bf8c11f65901e2183. v1/v2/v3 provenance retained; no retroactive execution/CI/operational clearance. U7 capacity prerequisite applies before next allocation.
+
+
+D345 U7a PRE reconciliation: same7paths completed with final exact source review68/69,47targeted+10temporary-HOME/current real archive and inherited whole-installer proof df2664c9143cd20f08726ac4437f0f57658fe82933d8dccd7bcbca43719f89d4. Five retired code releases removed only after verified retained archive; all data/config/selection/PIDs stayed intact during archive. One later reviewed allocation within cap8; no automatic replay/rollback/native/operational clearance.
