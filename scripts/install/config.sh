@@ -41,7 +41,7 @@ if [ -n "$CLUSTER_PEERS" ]; then
   else
     PENDING_CLUSTER_DIR="$(mktemp -d "$OPENCLAW_ROOT/config/.cluster-XXXXXX")"
     chmod 700 "$PENDING_CLUSTER_DIR"
-    trap 'rm -rf "${PENDING_CLUSTER_DIR:-}"' EXIT
+    trap installer_exit_cleanup EXIT
     if [ -f "$OPENCLAW_ROOT/config/nats-auth.conf" ]; then
       cp "$OPENCLAW_ROOT/config/nats-auth.conf" "$PENDING_CLUSTER_DIR/nats-auth.conf"
     else
@@ -336,7 +336,7 @@ if [ -n "$PENDING_CLUSTER_DIR" ]; then
   set_env_key OPENCLAW_NATS "$OPENCLAW_NATS"
   rm -rf "$PENDING_CLUSTER_DIR"
   PENDING_CLUSTER_DIR=""
-  trap - EXIT
+  $_INSTALLER_LOCK_HELD || trap - EXIT
   info "Validated cluster configuration selected; KV replica target R=$KV_REPLICAS"
   warn "Start nats-server on all council machines before the daemons; no cluster was started here."
 fi

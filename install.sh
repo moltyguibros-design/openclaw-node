@@ -47,6 +47,7 @@ DRY_RUN=false
 UPDATE_ONLY=false
 SKIP_MESH=false
 ENABLE_SERVICES=false
+START_DEFAULT_SERVICES=false
 SKIP_LLM=false
 DISABLE_MODELS=false
 SKIP_VERIFY=false
@@ -65,6 +66,7 @@ for arg in "$@"; do
     --update)            UPDATE_ONLY=true ;;
     --skip-mesh)         SKIP_MESH=true ;;
     --enable-services)   ENABLE_SERVICES=true ;;
+    --start-default-services) ENABLE_SERVICES=true; START_DEFAULT_SERVICES=true ;;
     --skip-llm)          SKIP_LLM=true; DISABLE_MODELS=true ;;
     --skip-model-downloads) SKIP_LLM=true ;;
     --skip-verify)       SKIP_VERIFY=true ;;
@@ -100,6 +102,8 @@ for arg in "$@"; do
       echo "                      (openclaw-trust-peer --my-pubkey on the lead). Merged into"
       echo "                      the deploy/operator trust allowlists so lead-signed actions verify."
       echo "  --enable-services   Also enable and start services after installing"
+      echo "  --start-default-services Start manifest defaults on an older prepared node;"
+      echo "                      implies --enable-services; masks remain untouched"
       echo "In a VM whose host serves Ollama with the node's model, LLM_BASE_URL points at the host"
       echo "(nothing runs or downloads in the VM). OPENCLAW_LLM_HOST=0 keeps the VM on its own Ollama."
       exit 0
@@ -112,6 +116,13 @@ if grep -q '^OPENCLAW_MODEL_ENABLED=0$' "$ENV_FILE" 2>/dev/null; then
 fi
 
 source "$REPO_DIR/scripts/install/helpers.sh"
+if [ -f "$OPENCLAW_ROOT/config/installation.json" ] || {
+  [ -f "$ENV_FILE" ] && [ -f "$WORKSPACE/bin/memory-daemon.mjs" ];
+}; then
+  UPDATE_ONLY=true
+  info "Existing node detected; preserving update behavior"
+fi
+acquire_installer_lock
 source "$REPO_DIR/scripts/install/llm-host.sh"
 
 echo ""

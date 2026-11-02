@@ -14,11 +14,15 @@ INSTALLED_COUNT=0
 SKIPPED_COUNT=0
 RENDER_ERRORS=0
 LINUX_START_UNITS=()
+PENDING_START_DIR="$OPENCLAW_ROOT/config/pending-service-starts"
 export OPENCLAW_MISSION_CONTROL_DIR="${OPENCLAW_MISSION_CONTROL_DIR:-$OPENCLAW_WORKSPACE/projects/mission-control}"
 
 queue_linux_unit() {
   local unit="$1" state
   LINUX_SKIP_RENDER=false
+  if [ "$SVC_AUTO" = true ] && [ ! -e "$SYSTEMD_DEST/$unit" ] && [ ! -L "$SYSTEMD_DEST/$unit" ] && ! $DRY_RUN; then
+    (umask 077; mkdir -p "$PENDING_START_DIR"; : > "$PENDING_START_DIR/$unit")
+  fi
   $ENABLE_SERVICES || return 0
   if $UPDATE_ONLY && { [ -e "$SYSTEMD_DEST/$unit" ] || [ -L "$SYSTEMD_DEST/$unit" ]; }; then
     state="$(systemctl --user is-enabled "$unit" 2>/dev/null || true)"
@@ -26,7 +30,9 @@ queue_linux_unit() {
       enabled|enabled-runtime) LINUX_START_UNITS+=("$unit|enable") ;;
       masked|masked-runtime) info "  Preserving masked unit: $unit"; LINUX_SKIP_RENDER=true ;;
       disabled|static|indirect|linked|linked-runtime)
-        if systemctl --user is-active --quiet "$unit"; then
+        if [ "$SVC_AUTO" = true ] && { [ -f "$PENDING_START_DIR/$unit" ] || ${START_DEFAULT_SERVICES:-false}; }; then
+          LINUX_START_UNITS+=("$unit|enable")
+        elif systemctl --user is-active --quiet "$unit"; then
           LINUX_START_UNITS+=("$unit|keep")
         else
           info "  Preserving inactive $state unit: $unit"
@@ -243,6 +249,7 @@ else
         else
           run systemctl --user start "$unit"
         fi
+        run rm -f "$PENDING_START_DIR/$unit"
         if [ "$unit" = openclaw-mission-control.service ] && [ -L "$OPENCLAW_ROOT/runtime/mission-control/current" ]; then
           run "$NODE_BIN" "$REPO_DIR/bin/deploy-mission-control.mjs" --cleanup --root "$OPENCLAW_ROOT" --workspace "$WORKSPACE"
         fi

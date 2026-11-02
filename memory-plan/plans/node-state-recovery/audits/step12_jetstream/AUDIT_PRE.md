@@ -4233,3 +4233,8 @@ D338 U3b prospective record and exact outcome: predeclared U3b-PRE.json SHA2566d
 
 
 D339 U3c1: original prospective12file outline preceded edits; review R1/R2 consumer corrections expanded prospectively to23paths before template/node-init changes. Frozen U3c1-PRE-v3-selection SHA256122de98370fa76adbf6cbc6d62da895f82ccdbbf0f00d734afa26db5ffe5c003; serialization draft preserved separately. Exact final22changed files have same-session CLEAR46/47,95targetedpass and actual source-absent continuation. Proof SHA256bb151b3fd111929a55fe89b351a7c14714d857360f201a69f18a7cbdf55c25fe. Whole-installer/rollback/learned data/legacy paths remain U3c2; no false global closure.
+
+
+### U3c2a prospective plan and exact result reconciliation
+
+Original PRE02116773 and correction PREbf687a3c were frozen before their edits. Only outlined9source/test files plus ledgers changed. Required exact review50/51 CLEAR and own Ubuntu targeted/whole-update/owned-first-start proof are complete at the bounded scope recorded in D340. No larger inventory/operational close, old-row rewrite or final-headCI credit. External proof SHA256758e776d13416da79e49c56dcf643d0defb242d7cbb5bfa2f1eef55866eb3528.

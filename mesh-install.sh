@@ -192,6 +192,10 @@ if [ -n "$TOKEN" ]; then
   resolve_repo_url "$TOKEN_PAYLOAD"
 fi
 
+if [ -f "${OPENCLAW_ROOT:-$HOME/.openclaw}/config/installation.json" ]; then
+  die "Managed runtime requires the staged installer; mesh bootstrap refused before Git/npm/provisioning"
+fi
+
 # ── Mesh Code ─────────────────────────────────────────
 
 MESH_DIR="$HOME/openclaw"

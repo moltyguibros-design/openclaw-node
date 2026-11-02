@@ -314,9 +314,8 @@ if [ -n "${OPENCLAW_SRC:-}" ]; then
   [ -f "$SRC/install.sh" ] || die "OPENCLAW_SRC=$SRC has no install.sh"
   ok "using existing checkout: $SRC"
 else
-  SRC="$HOME/.openclaw-src/openclaw-node"
-  mkdir -p "$(dirname "$SRC")"
-  rm -rf "$SRC"; mkdir -p "$SRC"
+  (umask 077; mkdir -p "$HOME/.openclaw-src")
+  SRC="$(mktemp -d "$HOME/.openclaw-src/openclaw-node-XXXXXX")"
   # Tarball, not `git clone`: on a virgin Mac `git` is a stub that pops the
   # Xcode GUI prompt, which would stall a piped install.
   curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$REF" \

@@ -146,7 +146,10 @@ done
 
 step "Step 5: Soul Definitions"
 
-run rsync -av "$REPO_DIR/souls/" "$OPENCLAW_ROOT/souls/"
+run rsync -av --checksum --exclude='/*/evolution/genes.json' --exclude='/*/evolution/events.jsonl' \
+  "$REPO_DIR/souls/" "$OPENCLAW_ROOT/souls/"
+run rsync -av --ignore-existing --include='*/' --include='/*/evolution/genes.json' \
+  --include='/*/evolution/events.jsonl' --exclude='*' "$REPO_DIR/souls/" "$OPENCLAW_ROOT/souls/"
 info "Souls installed to $OPENCLAW_ROOT/souls/"
 
 # ============================================================

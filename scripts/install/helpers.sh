@@ -140,3 +140,44 @@ backup_installer_config() {
     info "Private configuration backup: $destination"
   fi
 }
+
+
+_INSTALLER_LOCK_PATH=""
+_INSTALLER_LOCK_HELD=false
+
+installer_exit_cleanup() {
+  local result=$?
+  if [ -n "${PENDING_CLUSTER_DIR:-}" ]; then
+    rm -rf "$PENDING_CLUSTER_DIR" || warn "Could not clean the owned cluster candidate: $PENDING_CLUSTER_DIR"
+  fi
+  if $_INSTALLER_LOCK_HELD; then
+    if [ ! -e "$_INSTALLER_LOCK_PATH/owner.txt" ]; then
+      rmdir "$_INSTALLER_LOCK_PATH" 2>/dev/null || warn "Installer lock retained: $_INSTALLER_LOCK_PATH"
+    elif grep -Fxq "pid=$$" "$_INSTALLER_LOCK_PATH/owner.txt"; then
+      rm -f "$_INSTALLER_LOCK_PATH/owner.txt"
+      rmdir "$_INSTALLER_LOCK_PATH" 2>/dev/null || warn "Installer lock contains unexpected files; retained: $_INSTALLER_LOCK_PATH"
+    else
+      warn "Installer lock ownership changed; retained: $_INSTALLER_LOCK_PATH"
+    fi
+  fi
+  return "$result"
+}
+
+acquire_installer_lock() {
+  if $DRY_RUN; then
+    info "[dry-run] would acquire the installer lock"
+    return
+  fi
+  (umask 077; mkdir -p "$OPENCLAW_ROOT")
+  _INSTALLER_LOCK_PATH="$OPENCLAW_ROOT/.installer-lock"
+  if ! (umask 077; mkdir "$_INSTALLER_LOCK_PATH") 2>/dev/null; then
+    error "Another or interrupted installer owns $_INSTALLER_LOCK_PATH; reconcile its owner record before continuing"
+    return 1
+  fi
+  _INSTALLER_LOCK_HELD=true
+  PENDING_CLUSTER_DIR=""
+  trap installer_exit_cleanup EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  (umask 077; printf '%s\n' "pid=$$" "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "source=$REPO_DIR" > "$_INSTALLER_LOCK_PATH/owner.txt")
+}
