@@ -161,6 +161,8 @@ step "Step 12: Playwright Browser"
 
 if $SANDBOX; then
   info "Sandbox: skipping Playwright"
+elif $DRY_RUN; then
+  info "[dry-run] would install Chromium ($OS) and verify a headless launch"
 elif [ -e "$WORKSPACE/node_modules/playwright" ]; then
   # playwright is a ROOT dependency; the workspace node_modules tree is a set
   # of symlinks into the root install (workspace.sh link_dependency_tree).
@@ -169,9 +171,28 @@ elif [ -e "$WORKSPACE/node_modules/playwright" ]; then
   # workspace against its own (near-empty) package.json and pruned every
   # symlinked mesh dependency as extraneous. Never npm-install in the workspace.
   info "Playwright available via the shared dependency tree"
-  (cd "$REPO_DIR" && run npx playwright install chromium 2>/dev/null) || warn "Chromium browser install failed"
+  if [ "$OS" = linux ] && [ "${UPDATE_ONLY:-false}" = false ]; then
+    (cd "$REPO_DIR" && run npx playwright install --with-deps chromium) \
+      || { error "Chromium browser or Linux system dependencies failed to install"; exit 1; }
+  else
+    (cd "$REPO_DIR" && run npx playwright install chromium) \
+      || { error "Chromium browser failed to install"; exit 1; }
+  fi
+  if ! $DRY_RUN; then
+    (cd "$REPO_DIR" && "$NODE_BIN" -e \
+      "require('playwright').chromium.launch({headless:true}).then(b=>b.close()).catch(e=>{console.error(e);process.exitCode=1})") \
+      || {
+        error "Chromium headless launch failed"
+        if [ "$OS" = linux ] && [ "${UPDATE_ONLY:-false}" = true ]; then
+          error "Install Linux browser prerequisites separately from the runtime source with sudo npx playwright install-deps chromium, then retry"
+        fi
+        exit 1
+      }
+    info "Chromium headless launch verified"
+  fi
 else
-  warn "playwright missing from the shared dependency tree — the root 'npm install' did not complete; re-run install.sh"
+  error "playwright missing from the shared dependency tree — the root dependency install did not complete"
+  exit 1
 fi
 
 # ============================================================

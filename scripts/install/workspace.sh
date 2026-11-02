@@ -158,7 +158,7 @@ info "Souls installed to $OPENCLAW_ROOT/souls/"
 
 step "Step 6: Skills"
 
-run rsync -av --exclude='dist/' --exclude='scripts/' "$REPO_DIR/skills/" "$WORKSPACE/skills/"
+run rsync -av --exclude='dist/' "$REPO_DIR/skills/" "$WORKSPACE/skills/"
 info "Skills installed to $WORKSPACE/skills/ ($(ls -d "$REPO_DIR/skills"/*/ 2>/dev/null | grep -v dist | grep -v scripts | wc -l | tr -d ' ') skills)"
 
 # Install skill-specific dependencies (npm/pip where needed)
@@ -167,6 +167,7 @@ if $SANDBOX; then
 else
 info "Installing skill dependencies..."
 for skill_dir in "$WORKSPACE/skills"/*/; do
+  skill_dir="${skill_dir%/}"
   skill_name=$(basename "$skill_dir")
   # npm-based skills
   if [ -f "$skill_dir/package.json" ] && [ ! -d "$skill_dir/node_modules" ]; then
@@ -174,8 +175,18 @@ for skill_dir in "$WORKSPACE/skills"/*/; do
   fi
   # pip-based skills
   if [ -f "$skill_dir/requirements.txt" ]; then
-    run pip3 install --user -r "$skill_dir/requirements.txt" 2>/dev/null || warn "  pip failed: $skill_name"
-    info "  pip: $skill_name"
+    skill_python="$skill_dir/.venv/bin/python"
+    if $DRY_RUN; then
+      info "[dry-run] would create a managed Python environment for $skill_name"
+      info "[dry-run] would install and verify $skill_dir/requirements.txt"
+    else
+      python3 -m venv "$skill_dir/.venv" || { error "Python environment failed: $skill_name"; exit 1; }
+      "$skill_python" -m pip install -r "$skill_dir/requirements.txt" \
+        || { error "Python requirements failed: $skill_name"; exit 1; }
+      "$skill_python" -m pip check \
+        || { error "Python requirements invalid: $skill_name"; exit 1; }
+      info "  Python skill ready: $skill_name ($skill_python)"
+    fi
   fi
 done
 fi

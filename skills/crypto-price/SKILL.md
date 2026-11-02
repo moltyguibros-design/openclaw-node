@@ -24,15 +24,15 @@ Get cryptocurrency token price and generate candlestick charts.
 Execute the script with token symbol and optional duration:
 
 ```bash
-python3 {baseDir}/scripts/get_price_chart.py <SYMBOL> [duration]
+{baseDir}/.venv/bin/python {baseDir}/scripts/get_price_chart.py <SYMBOL> [duration]
 ```
 
 **Examples:**
-- `python3 {baseDir}/scripts/get_price_chart.py HYPE`
-- `python3 {baseDir}/scripts/get_price_chart.py HYPE 12h`
-- `python3 {baseDir}/scripts/get_price_chart.py BTC 3h`
-- `python3 {baseDir}/scripts/get_price_chart.py ETH 30m`
-- `python3 {baseDir}/scripts/get_price_chart.py SOL 2d`
+- `{baseDir}/.venv/bin/python {baseDir}/scripts/get_price_chart.py HYPE`
+- `{baseDir}/.venv/bin/python {baseDir}/scripts/get_price_chart.py HYPE 12h`
+- `{baseDir}/.venv/bin/python {baseDir}/scripts/get_price_chart.py BTC 3h`
+- `{baseDir}/.venv/bin/python {baseDir}/scripts/get_price_chart.py ETH 30m`
+- `{baseDir}/.venv/bin/python {baseDir}/scripts/get_price_chart.py SOL 2d`
 
 **Duration format:** `30m`, `3h`, `12h`, `24h` (default), `2d`
 

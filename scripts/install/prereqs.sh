@@ -138,7 +138,7 @@ else
     # and died mid-run under `set -e`.
     $SUDO apt-get update -y || { error "apt-get update failed"; exit 1; }
     $SUDO apt-get install -y \
-      curl git sqlite3 build-essential jq python3 python3-pip ca-certificates gnupg \
+      curl git sqlite3 build-essential jq python3 python3-pip python3-venv ca-certificates gnupg \
       || error "apt baseline install failed"
   fi
 
