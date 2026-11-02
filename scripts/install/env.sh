@@ -6,6 +6,8 @@ if [ -z "$NODE_BIN" ]; then
 fi
 export NODE_BIN
 
+load_env_file "$ENV_FILE"
+
 # ── Resolve nats-server binary (service templates exec ${NATS_SERVER_BIN}) ──
 NATS_SERVER_BIN="$(command -v nats-server 2>/dev/null || echo "")"
 if [ -z "$NATS_SERVER_BIN" ]; then
@@ -65,8 +67,8 @@ provider_binary() {
 }
 PROVIDER="${PROVIDER:-${OPENCLAW_PROVIDER:-}}"
 PROVIDER_SOURCE="--provider"
-if [ -z "$PROVIDER" ] && [ -f "$ENV_FILE" ]; then
-  PROVIDER="$(grep -m1 '^MESH_LLM_PROVIDER=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d "\"'" | xargs || true)"
+if [ -z "$PROVIDER" ]; then
+  PROVIDER="${MESH_LLM_PROVIDER:-}"
   PROVIDER_SOURCE="$ENV_FILE"
 fi
 if [ -n "$PROVIDER" ]; then
@@ -93,6 +95,9 @@ export KNOWN_PROVIDERS
 # ── Resolve node role ──
 if [ -z "$NODE_ROLE" ]; then
   NODE_ROLE="${OPENCLAW_NODE_ROLE:-}"
+fi
+if [ -z "$NODE_ROLE" ]; then
+  NODE_ROLE="$(saved_unit_role)"
 fi
 if [ -z "$NODE_ROLE" ]; then
   if [ "$OS" = "macos" ]; then

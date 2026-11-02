@@ -6,7 +6,7 @@
 # Usage:
 #   bash install.sh              # Full install
 #   bash install.sh --dry-run    # Show what would happen
-#   bash install.sh --update     # Re-copy scripts/configs, skip deps
+#   bash install.sh --update     # Refresh scripts; preserve configs, skip deps
 #
 # --dry-run behavior:
 #   Echoes every command that would execute (prefixed with [DRY-RUN]) without
@@ -79,7 +79,7 @@ for arg in "$@"; do
     --help|-h)
       echo "Usage: bash install.sh [--dry-run] [--update] [--skip-mesh] [--skip-llm] [--skip-verify] [--role=lead|worker] [--provider=NAME] [--enable-services]"
       echo "  --dry-run           Show what would happen without making changes"
-      echo "  --update            Re-copy scripts/configs only (skip system deps)"
+      echo "  --update            Refresh scripts, keep existing configs (skip system deps)"
       echo "  --skip-mesh         Skip mesh network setup (used by meta-installer)"
       echo "  --skip-llm          Skip ollama install + model pull + embedder prefetch (extraction degrades to regex)"
       echo "  --skip-model-downloads Defer model provisioning; preserve an existing model capability"
@@ -87,7 +87,7 @@ for arg in "$@"; do
       echo "  --skip-frontend     Skip agent-frontend (Claude Code) detection/install"
       echo "  --verify-frontend   Verify frontend auth with one small live call"
       echo "  --sandbox           Wiring-test mode: skip network-heavy installs (implies --skip-llm --skip-mesh)"
-      echo "  --role=lead|worker  Set node role (default: macOS=lead, Linux=worker)"
+      echo "  --role=lead|worker  Set role (otherwise keep saved role; new: macOS=lead, Linux=worker)"
       echo "  --cluster-peers=A,B Join a multi-MACHINE NATS cluster: A,B are the OTHER"
       echo "                      machines' addresses (Tailscale/LAN IPs). Renders THIS"
       echo "                      machine's nats.conf to cluster with them (R=3 failsafe)."

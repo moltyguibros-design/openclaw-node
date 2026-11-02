@@ -279,7 +279,7 @@ else
 fi
 
 NOTIFY_CONFIG="$OPENCLAW_ROOT/config/notify.json"
-if [ -f "$NOTIFY_CONFIG" ] && ! $UPDATE_ONLY; then
+if [ -f "$NOTIFY_CONFIG" ]; then
   info "Notification config already exists, keeping it"
 else
   write_file "$NOTIFY_CONFIG" <<'EOF'

@@ -74,3 +74,69 @@ detect_os() {
 }
 
 OS=$(detect_os)
+
+trim_env_field() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+load_env_file() {
+  local file="$1" line key value
+  [ -f "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" = *=* ]] || continue
+    key="$(trim_env_field "${line%%=*}")"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    value="$(trim_env_field "${line#*=}")"
+    if [ "${#value}" -ge 2 ]; then
+      case "$value" in
+      \"*\") value="${value:1:${#value}-2}" ;;
+      \'*\') value="${value:1:${#value}-2}" ;;
+      esac
+    fi
+    export "$key=$value"
+  done < "$file"
+}
+
+saved_unit_role() {
+  local unit
+  if [ "$OS" = linux ]; then
+    unit="${OPENCLAW_SYSTEMD_DIR:-$HOME/.config/systemd/user}/openclaw-mesh-deploy-listener.service"
+  else
+    unit="$HOME/Library/LaunchAgents/ai.openclaw.mesh-deploy-listener.plist"
+  fi
+  [ -f "$unit" ] || return 0
+  "$NODE_BIN" -e '
+    const text = require("fs").readFileSync(process.argv[1], "utf8");
+    const match = text.match(/^Environment=["\x27]?OPENCLAW_NODE_ROLE=(lead|worker)["\x27]?\s*$/m)
+      || text.match(/<key>OPENCLAW_NODE_ROLE<\/key>\s*<string>(lead|worker)<\/string>/);
+    if (match) process.stdout.write(match[1]);
+  ' "$unit"
+}
+
+backup_installer_config() {
+  local relative source destination=""
+  if $DRY_RUN; then
+    info "[dry-run] would privately back up existing installer configuration"
+    return
+  fi
+  for relative in openclaw.env openclaw.json config/daemon.json config/transcript-sources.json \
+    config/obsidian-sync.json config/notify.json config/nats.conf config/nats-1.conf \
+    config/nats-2.conf config/nats-3.conf config/nats-auth.conf config/nats-writer-cohort.json; do
+    source="$OPENCLAW_ROOT/$relative"
+    [ -f "$source" ] || continue
+    if [ -z "$destination" ]; then
+      (umask 077; mkdir -p "$OPENCLAW_ROOT/config-backups")
+      destination="$(mktemp -d "$OPENCLAW_ROOT/config-backups/install-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX")"
+      chmod 700 "$destination"
+    fi
+    (umask 077; mkdir -p "$destination/$(dirname "$relative")")
+    cp "$source" "$destination/$relative"
+    chmod 600 "$destination/$relative"
+  done
+  if [ -n "$destination" ]; then
+    info "Private configuration backup: $destination"
+  fi
+}

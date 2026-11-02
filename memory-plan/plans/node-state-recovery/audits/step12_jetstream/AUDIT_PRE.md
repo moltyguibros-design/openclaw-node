@@ -4227,3 +4227,6 @@ The bounded U2-PRE.json was frozen at07:50UTC before source edits and is linked 
 ## U3a prospective outline and chronology — 2026-11-02
 
 U3 was decomposed before source edits into atomic MC staging, configuration preservation and runtime/install-path units. Frozen external U3a-PRE/v2/v3 preserve the initial plan, safer dedicated-current-path refinement before implementation, and later required review corrections/file additions before their changes. This ledger append records that chronology after implementation, not a Git-sequenced claim of prospectivity. Exact implementation, verification, review identities, failure history and carried limitations are in D337 and the bounded audit. This unit supplies only disposable-Ubuntu installer source/runtime proof; no actual Mac/production/native recovery admission or old CI reuse.
+
+
+D338 U3b prospective record and exact outcome: predeclared U3b-PRE.json SHA2566d12c5c79c81a467fe99041cac1ad9c7d451301d79414c608c7800ffb7076b7c preceded source edits; seven planned paths, six changed files. Same-session final source CLEAR42/43,35targetedpass and actual Ubuntu unchanged-config proof are in U3b-proof.json SHA2563a1b397d24d5b2968636b2ad28b462c709508399e7899a53b8e10e59af694a6f. Author v1 auth failure and token observation error are retained; no final-head/CI/Mac or production acceptance inferred.
