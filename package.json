@@ -69,7 +69,7 @@
     "prepack": "npm run --workspaces --if-present build"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12.0"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",
