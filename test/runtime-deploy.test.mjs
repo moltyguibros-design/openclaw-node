@@ -305,3 +305,19 @@ test('malformed prior installation metadata refuses before allocating new runtim
   assert.deepEqual(fs.readdirSync(parent).sort(), before);
   assert.equal(fs.realpathSync(path.join(parent, 'current')), first.release);
 });
+
+test('declared native dependency readiness is exercised before allocation and retains current on failure', t => {
+  const f = fixture(t), first = f.stage(), parent = path.dirname(first.release);
+  const manifest = JSON.parse(fs.readFileSync(path.join(f.source, 'package.json'), 'utf8'));
+  manifest.dependencies = { 'better-sqlite3': 'owned' };
+  f.write('package.json', JSON.stringify(manifest));
+  f.write('node_modules/better-sqlite3/index.js', 'module.exports=class{constructor(){throw Error("owned ABI load failure")}close(){}};');
+  const before = fs.readdirSync(parent).sort();
+  assert.throws(() => f.stage(), /Native dependency readiness refused.*owned ABI load failure/s);
+  assert.deepEqual(fs.readdirSync(parent).sort(), before);
+  assert.equal(fs.realpathSync(path.join(parent, 'current')), first.release);
+  f.write('node_modules/better-sqlite3/index.js', 'module.exports=class{close(){}};');
+  const next = f.stage(); assert.equal(next.receipt.dependencyProbe.outcome, 'passed');
+  assert.deepEqual(next.receipt.dependencyProbe.checks, ['better-sqlite3']);
+  assert.equal(next.receipt.dependencyProbe.abi, process.versions.modules);
+});

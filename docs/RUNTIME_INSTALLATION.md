@@ -45,3 +45,13 @@ An interrupted or failed attempt retains its partial archive and result. Do not 
 
 
 When Linux denies metadata for an owned process (for example the capability-bearing systemd user manager), the default reader refuses. Explicit `--privileged-process-reader` instead selects `sudo -n /usr/bin/python3 -I -S -B` for the same reviewed helper's process-reference-only mode. Authenticate sudo in the VM's terminal beforehand; this command does not change sudo policy or ask for/store a password. Only process metadata (including environment references) for the invoking real/effective UID is read with privilege. Output contains matching release digests, never environment values. The archive, verification and pruning remain unprivileged, and running the whole archival helper as root is refused. Reader failure refuses archival; it never ignores a process or switches methods automatically.
+
+
+Canonical dependency readiness
+-----------------------------
+
+Runtime updates clean-install the checked-in lock with `ci --omit=dev` even when an old `nats` directory exists. Runtime installation and staged Mission Control builds explicitly use `npx --yes --package=npm@11.21.1 npm`, checking that exact version before `ci`. This is the selected toolchain, with no older-writer fallback or global npm replacement. The package comes from the public npm registry; an unavailable tool or failed installation refuses. It requires Node20.17+ or Node22.9+; the node installer remains on its supported Node22 line, and Mission Control's pinned Vite8.1.6 needs Node22.12+. Mission Control owns Vite8.1.6 and Vitest4.1.12 as dev tools. Historical npm10.9.9 proofs remain historical; its internal peer-graph failures are retained rather than represented as source/build failures.
+
+Before runtime allocation, declared SQLite/vector dependencies are opened only in memory; Sharp and ONNX modules are imported without loading a model or running inference. Failure preserves the current release. Readonly dependencies are shared only across matching ABI/platform/architecture receipts. Managed identity refuses a running Node ABI/platform/architecture mismatch and reports recorded/running versions separately. These are staging-time compatibility checks, not continuous executable authentication or inference capacity proof.
+
+Root CI audits the shipped dependency graph at the high/critical threshold using the same pinned tool, within the existing root test driver. Advisory/provider errors fail the gate. Mission Control's shipped/full audits and all fresh final-head CI/artifact/receipt gates remain separate. An audit version fix does not establish a demonstrated exploit in every application's transport or schema path.

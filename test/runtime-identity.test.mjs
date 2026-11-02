@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { stageRuntime } from '../lib/runtime-deploy.mjs';
@@ -123,4 +124,22 @@ test('both actual staged consumers report their code path even when the configur
     assert.equal(identity.digest, deployed.digest);
     assert.equal(identity.deployVersion, `runtime:${deployed.digest}`);
   }
+});
+
+
+test('a self-consistent receipt for a foreign ABI refuses while a version difference stays explicit', t => {
+  const f = fixture(t), deployed = f.stage();
+  let location = deployed.release, receipt = JSON.parse(fs.readFileSync(path.join(location, '.openclaw-node-release.json')));
+  const replace = change => {
+    change(receipt.node);
+    receipt.digest = createHash('sha256').update(JSON.stringify({ node: receipt.node, files: receipt.files })).digest('hex');
+    const next = path.join(path.dirname(location), receipt.digest); fs.renameSync(location, next); location = next;
+    fs.writeFileSync(path.join(location, '.openclaw-node-release.json'), JSON.stringify(receipt));
+  };
+  replace(node => { node.version = 'owned-other-version'; });
+  const version = readRuntimeIdentity({ repoDir: location, root: f.root });
+  assert.equal(version.nodeVersionMatches, false); assert.equal(version.nodeAbiCompatible, true);
+  assert.equal(version.runningNode.version, process.versions.node);
+  replace(node => { node.abi = 'owned-foreign-ABI'; });
+  assert.throws(() => readRuntimeIdentity({ repoDir: location, root: f.root }), /ABI\/platform\/architecture/);
 });

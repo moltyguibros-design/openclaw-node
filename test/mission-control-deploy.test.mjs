@@ -308,3 +308,19 @@ test('failure creating the MC selection link is retained and archived with the c
   assert.equal(fs.realpathSync(first.directory), first.release);
   assert.equal(fs.readFileSync(path.join(first.release, 'data/owned.db'), 'utf8'), 'owned live data');
 });
+
+test('default builder refuses the wrong pinned npm before install/build and retains failure evidence', t => {
+  const f = fixture(t), first = f.deploy(), stub = path.join(f.home, 'stub'), log = path.join(f.home, 'tool-calls');
+  fs.mkdirSync(stub);
+  fs.writeFileSync(path.join(stub, 'npx'), '#!/usr/bin/env node\nconst fs=require("node:fs");fs.appendFileSync(' + JSON.stringify(log)
+    + ',JSON.stringify(process.argv.slice(2))+"\\n");process.stdout.write("10.9.9\\n");\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(f.source, 'src/new.ts'), 'owned changed source');
+  assert.throws(() => deployMissionControl({ source: f.source, root: f.root, workspace: f.workspace,
+    freeBytes: () => 16 * 1024 ** 3, confirmActive: () => true, env: { PATH: stub + ':' + process.env.PATH } }), /requires npm 11.21.1/);
+  const calls = fs.readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
+  assert.deepEqual(calls, [['--yes', '--package=npm@11.21.1', 'npm', '--version']]);
+  assert.equal(fs.realpathSync(first.directory), first.release);
+  assert.equal(fs.readFileSync(path.join(f.legacy, 'data/owned.db'), 'utf8'), 'owned live data');
+  const parent = path.dirname(first.directory), failed = fs.readdirSync(parent).find(name => name.startsWith('.staging-'));
+  assert.match(fs.readFileSync(path.join(parent, failed, '.failed.json'), 'utf8'), /requires npm 11.21.1/);
+});

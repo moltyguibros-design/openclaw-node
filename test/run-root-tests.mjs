@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { connect, nkeyAuthenticator, StringCodec } from 'nats';
@@ -47,9 +47,16 @@ async function waitFor(check, child, label) {
   throw new Error(`${label} did not become ready`);
 }
 
+export async function auditShippedDependencies({ cwd = root, env = process.env } = {}) {
+  const child = spawn('npx', ['--yes', '--package=npm@11.21.1', 'npm', 'audit', '--omit=dev', '--audit-level=high'], { cwd, env, stdio: 'inherit' });
+  const status = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', (code, signal) => resolve(signal || code)); });
+  if (status !== 0) throw new Error(`Shipped dependency audit failed (${status})`);
+}
+
 async function run() {
   const mode = process.argv[2];
   if (mode && !['--probe', '--integration'].includes(mode)) throw new Error(`unknown option: ${mode}`);
+  if (process.env.CI && mode !== '--probe') await auditShippedDependencies();
   const binary = natsServerBin();
   if (!binary) throw new Error('isolated root tests require nats-server on PATH');
 
@@ -167,4 +174,4 @@ async function run() {
   }
 }
 
-await run();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await run();

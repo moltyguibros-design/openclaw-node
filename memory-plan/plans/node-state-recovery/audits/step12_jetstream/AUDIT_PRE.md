@@ -4259,3 +4259,6 @@ D344 U3c2b3 PRE reconciliation: same8paths completed with final exact static rev
 
 
 D345 U7a PRE reconciliation: same7paths completed with final exact source review68/69,47targeted+10temporary-HOME/current real archive and inherited whole-installer proof df2664c9143cd20f08726ac4437f0f57658fe82933d8dccd7bcbca43719f89d4. Five retired code releases removed only after verified retained archive; all data/config/selection/PIDs stayed intact during archive. One later reviewed allocation within cap8; no automatic replay/rollback/native/operational clearance.
+
+
+D346 U4 PRE reconciliation: prospective PRE-v3 7e5bd744 froze the exact14 source paths and pinned npm11 writer before edit. Claude70/71 cleared the frozen U4-v2 bytes without required correction. Owned Ubuntu whole update passed but full root suite remains RED5/2820; no carried green or operational close. U5/U6/U7 and final own-head CI/receipt remain. External U4-proof.json SHA256ac4c09fe1b7cf597ce3158c624230ef3aaf24e2a55088d850bb82a05201774a5.

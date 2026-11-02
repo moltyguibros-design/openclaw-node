@@ -23,14 +23,16 @@ fi
 export NATS_SERVER_BIN
 info "nats-server: $NATS_SERVER_BIN"
 
-# ── Repo runtime dependencies ──
-# The mesh daemons exec from the repo tree and require the repo's node_modules
-# (`nats` above all). The npx path ships them; the git-clone path does not.
-if [ ! -d "$REPO_DIR/node_modules/nats" ]; then
-  info "Installing repo runtime dependencies (npm install --omit=dev)..."
-  (cd "$REPO_DIR" && run npm install --omit=dev) || { error "repo npm install failed — mesh daemons cannot run"; exit 1; }
+if $DRY_RUN; then
+  info "[dry-run] would clean-install the canonical runtime lock with npm 11.21.1"
 else
-  info "Repo node_modules present"
+  NPM_VERSION="$(npx --yes --package=npm@11.21.1 npm --version)"
+  if [ "$NPM_VERSION" != "11.21.1" ]; then
+    error "Runtime installation requires npm 11.21.1 (found $NPM_VERSION); prepare the pinned toolchain first"
+    exit 1
+  fi
+  info "Clean-installing canonical runtime dependencies (pinned npm ci --omit=dev)..."
+  (cd "$REPO_DIR" && run npx --yes --package=npm@11.21.1 npm ci --omit=dev) || { error "Canonical runtime dependency install failed"; exit 1; }
 fi
 
 # The memory daemon imports packages/event-schemas/dist and exits at startup
