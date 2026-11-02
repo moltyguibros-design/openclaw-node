@@ -161,9 +161,41 @@ step "Step 12: Playwright Browser"
 
 if $SANDBOX; then
   info "Sandbox: skipping Playwright"
-elif $DRY_RUN; then
-  info "[dry-run] would install Chromium ($OS) and verify a headless launch"
-elif [ -e "$WORKSPACE/node_modules/playwright" ]; then
+else
+  PLAYWRIGHT_UBUNTU26_ARM64=false
+  if [ "$OS" = linux ] && [ -r /etc/os-release ]; then
+    PLAYWRIGHT_OS_ID=$(sed -n 's/^ID=//p' /etc/os-release)
+    case "$PLAYWRIGHT_OS_ID" in
+      ubuntu|'"ubuntu"'|"'ubuntu'")
+        PLAYWRIGHT_OS_VERSION=$(sed -n 's/^VERSION_ID=//p' /etc/os-release)
+        case "$PLAYWRIGHT_OS_VERSION" in
+          \"*\"|\'*\')
+            PLAYWRIGHT_OS_VERSION=${PLAYWRIGHT_OS_VERSION#?}
+            PLAYWRIGHT_OS_VERSION=${PLAYWRIGHT_OS_VERSION%?}
+            ;;
+        esac
+        if ! [[ "$PLAYWRIGHT_OS_VERSION" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+          error "Linux OS identity is malformed; browser platform selection refused"
+          exit 1
+        fi
+        if [ "$PLAYWRIGHT_OS_VERSION" = 26.04 ]; then
+          if [ "$(uname -m)" != aarch64 ]; then
+            error "Ubuntu 26.04 browser selection is reviewed only for ARM64; unsupported architecture refused"
+            exit 1
+          fi
+          PLAYWRIGHT_UBUNTU26_ARM64=true
+        fi
+        ;;
+    esac
+  fi
+
+  if $DRY_RUN; then
+    if $PLAYWRIGHT_UBUNTU26_ARM64; then
+      info "[dry-run] would select ubuntu24.04-arm64 Chromium on Ubuntu 26.04 ARM64 without automatic system dependencies if installed Playwright is exactly 1.58.2; would verify a headless launch"
+    else
+      info "[dry-run] would install Chromium ($OS) and verify a headless launch"
+    fi
+  elif [ -e "$WORKSPACE/node_modules/playwright" ]; then
   # playwright is a ROOT dependency; the workspace node_modules tree is a set
   # of symlinks into the root install (workspace.sh link_dependency_tree).
   # Running `npm install --save playwright` INSIDE the workspace was the root
@@ -171,14 +203,55 @@ elif [ -e "$WORKSPACE/node_modules/playwright" ]; then
   # workspace against its own (near-empty) package.json and pruned every
   # symlinked mesh dependency as extraneous. Never npm-install in the workspace.
   info "Playwright available via the shared dependency tree"
-  if [ "$OS" = linux ] && [ "${UPDATE_ONLY:-false}" = false ]; then
+  if $PLAYWRIGHT_UBUNTU26_ARM64; then
+    if [ "$("$NODE_BIN" -p 'process.arch' 2>/dev/null)" != arm64 ]; then
+      error "Ubuntu 26.04 ARM64 browser selection requires an ARM64 Node runtime"
+      exit 1
+    fi
+    if ! "$NODE_BIN" - "$REPO_DIR" <<'PLAYWRIGHT_PINS'
+const fs = require('node:fs');
+const path = require('node:path');
+const root = process.argv[2];
+const read = file => JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
+try {
+  const lock = read('package-lock.json').packages;
+  for (const name of ['playwright', 'playwright-core']) {
+    const key = `node_modules/${name}`;
+    if (read(`${key}/package.json`).version !== '1.58.2' || lock[key]?.version !== '1.58.2') throw new Error(`${name} version differs from reviewed 1.58.2`);
+  }
+  const browsers = new Map(read('node_modules/playwright-core/browsers.json').browsers.map(item => [item.name, item.revision]));
+  for (const [name, revision] of [['chromium', '1208'], ['chromium-headless-shell', '1208'], ['ffmpeg', '1011']]) {
+    if (browsers.get(name) !== revision) throw new Error(`${name} revision differs from reviewed ${revision}`);
+  }
+  if (!fs.statSync(path.join(root, 'node_modules/playwright/cli.js')).isFile()) throw new Error('local Playwright CLI missing');
+} catch (error) {
+  console.error(error.message);
+  process.exitCode = 1;
+}
+PLAYWRIGHT_PINS
+    then
+      error "Reviewed Ubuntu 26.04 ARM64 Playwright package/browser pins are unavailable; browser install refused"
+      exit 1
+    fi
+    (cd "$REPO_DIR" && env PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-arm64 \
+      "$NODE_BIN" "$REPO_DIR/node_modules/playwright/cli.js" install chromium) \
+      || { error "Reviewed Ubuntu 26.04 ARM64 Chromium download failed"; exit 1; }
+  elif [ "$OS" = linux ] && [ "${UPDATE_ONLY:-false}" = false ]; then
     (cd "$REPO_DIR" && run npx playwright install --with-deps chromium) \
       || { error "Chromium browser or Linux system dependencies failed to install"; exit 1; }
   else
     (cd "$REPO_DIR" && run npx playwright install chromium) \
       || { error "Chromium browser failed to install"; exit 1; }
   fi
-  if ! $DRY_RUN; then
+  if $PLAYWRIGHT_UBUNTU26_ARM64; then
+    (cd "$REPO_DIR" && env PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-arm64 "$NODE_BIN" -e \
+      "require('playwright').chromium.launch({headless:true}).then(b=>b.close()).catch(e=>{console.error(e);process.exitCode=1})") \
+      || {
+        error "Chromium headless launch failed"
+        error "A separately reviewed system-library decision is required; upstream install-deps/apt suggestions are unreviewed for Ubuntu 26.04"
+        exit 1
+      }
+  else
     (cd "$REPO_DIR" && "$NODE_BIN" -e \
       "require('playwright').chromium.launch({headless:true}).then(b=>b.close()).catch(e=>{console.error(e);process.exitCode=1})") \
       || {
@@ -188,11 +261,12 @@ elif [ -e "$WORKSPACE/node_modules/playwright" ]; then
         fi
         exit 1
       }
-    info "Chromium headless launch verified"
   fi
-else
-  error "playwright missing from the shared dependency tree — the root dependency install did not complete"
-  exit 1
+  info "Chromium headless launch verified"
+  else
+    error "playwright missing from the shared dependency tree — the root dependency install did not complete"
+    exit 1
+  fi
 fi
 
 # ============================================================
