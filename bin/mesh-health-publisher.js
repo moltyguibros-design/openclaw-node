@@ -20,6 +20,7 @@ const { execSync } = require("child_process");
 const os = require("os");
 const fs = require("fs");
 const path = require("path");
+const { readRuntimeIdentity } = require('../lib/runtime-identity');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-health-publisher');
 
@@ -31,8 +32,7 @@ const PUBLISH_INTERVAL_MS = 15_000; // 15 seconds
 const HEALTH_BUCKET = "MESH_NODE_HEALTH";
 const KV_TTL_MS = 120_000; // entries expire after 2 minutes if node dies
 
-const REPO_DIR = process.env.OPENCLAW_REPO_DIR ||
-  path.join(os.homedir(), 'openclaw');
+const CODE_DIR = path.resolve(__dirname, '..');
 
 const sc = StringCodec();
 const IS_MAC = os.platform() === "darwin";
@@ -170,14 +170,12 @@ function getAgentStatus() {
   return status;
 }
 
-function getDeployVersion() {
+function getDeployIdentity() {
   try {
-    return execSync('git rev-parse --short HEAD', {
-      cwd: REPO_DIR, encoding: 'utf-8', timeout: 5000,
-    }).trim();
+    return readRuntimeIdentity({ repoDir: CODE_DIR });
   } catch (err) {
     console.warn(`[health-publisher] read deploy version: ${err.message}`);
-    return 'unknown';
+    return { kind: 'unavailable', deployVersion: 'unknown', reason: err.message };
   }
 }
 
@@ -297,12 +295,14 @@ function gatherHealth(nc) {
   const natsInfo = getNatsInfo(nc, NATS_URL);
   const natsHost = new URL(NATS_URL).hostname;
   natsInfo.isHost = (natsHost === tsData.selfIp || natsHost === '127.0.0.1' || natsHost === 'localhost');
+  const deployIdentity = getDeployIdentity();
 
   return {
     nodeId: NODE_ID,
     platform: os.platform(),
     role,
-    deployVersion: getDeployVersion(),
+    deployVersion: deployIdentity.deployVersion,
+    deployIdentity,
     components: ROLE_COMPONENTS[role] || ROLE_COMPONENTS.worker,
     tailscaleIp: tsData.selfIp,
     diskPercent: getDiskPercent(),
@@ -404,7 +404,11 @@ async function main() {
   await nc.closed();
 }
 
-main().catch((err) => {
-  console.error("[health-publisher] fatal:", err);
-  process.exit(1);
-});
+module.exports = { getDeployIdentity };
+
+if (require.main === module) {
+  main().catch((err) => {
+    console.error("[health-publisher] fatal:", err);
+    process.exit(1);
+  });
+}

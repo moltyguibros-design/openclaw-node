@@ -25,6 +25,7 @@ const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { readRuntimeIdentity } = require('../lib/runtime-identity');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-deploy-listener');
 
@@ -35,6 +36,7 @@ const NODE_ID = require('../lib/node-id').resolveNodeId();
 // ~/openclaw-node. See mesh-deploy.js "Two-directory problem" comment.
 const REPO_DIR = process.env.OPENCLAW_REPO_DIR ||
   path.join(os.homedir(), 'openclaw');
+const CODE_DIR = path.resolve(__dirname, '..');
 const REPO_REMOTE_URL = process.env.OPENCLAW_REPO_URL ||
   'https://github.com/moltyguibros-design/openclaw-node.git';
 const DEPLOY_SCRIPT = path.join(REPO_DIR, 'bin', 'mesh-deploy.js');
@@ -138,6 +140,15 @@ function git(...args) {
   return execFileSync('git', args, {
     cwd: REPO_DIR, encoding: 'utf8', timeout: 120000, stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
+}
+
+function getDeployIdentity() {
+  try {
+    return readRuntimeIdentity({ repoDir: CODE_DIR });
+  } catch (err) {
+    console.warn(`[deploy-listener] read runtime identity: ${err.message}`);
+    return { kind: 'unavailable', deployVersion: 'unknown', reason: err.message };
+  }
 }
 
 function isAncestor(ancestor, descendant) {
@@ -392,6 +403,11 @@ async function executeDeploy(trigger, resultsKv, nodesKv, opts = {}) {
  * If another deploy happened while we were offline, catch up now.
  */
 async function checkAndCatchUp(resultsKv, nodesKv) {
+  if (fs.existsSync(path.join(process.env.OPENCLAW_ROOT || path.join(os.homedir(), '.openclaw'), 'config', 'installation.json'))
+    || fs.existsSync(path.join(CODE_DIR, '.openclaw-node-release.json'))) {
+    console.log('[deploy-listener] Managed runtime uses the staged installer; automatic legacy catch-up disabled');
+    return;
+  }
   try {
     // Read the latest deploy marker from the "latest" key
     const latest = await resultsKv.get('latest');
@@ -511,14 +527,12 @@ async function main() {
   const statusSub = nc.subscribe(`mesh.deploy.status.${NODE_ID}`);
   (async () => {
     for await (const msg of statusSub) {
-      let currentSha = 'unknown';
-      try {
-        currentSha = git('rev-parse', '--short', 'HEAD');
-      } catch (err) { console.warn(`[deploy-listener] read git HEAD: ${err.message}`); }
+      const deployIdentity = getDeployIdentity();
 
       const response = {
         nodeId: NODE_ID,
-        deployVersion: currentSha,
+        deployVersion: deployIdentity.deployVersion,
+        deployIdentity,
         deploying,
         repoDir: REPO_DIR,
         platform: os.platform(),
@@ -553,7 +567,7 @@ async function main() {
   console.log(`[deploy-listener] ═══ Ready ═══`);
 }
 
-module.exports = { shouldCatchUp, runDeploy };
+module.exports = { shouldCatchUp, runDeploy, getDeployIdentity };
 
 if (require.main === module) {
   main().catch(err => {
