@@ -210,3 +210,101 @@ test('interrupted first installs can recover before any current release or servi
   assert.equal(f.deploy().changed, true);
   assert.equal(fs.readFileSync(path.join(f.legacy, 'data/owned.db'), 'utf8'), 'owned live data');
 });
+
+test('active MC transaction excludes another deploy or cleanup before a second builder runs', t => {
+  const f = fixture(t); let otherBuildCalls = 0;
+  const options = { source: f.source, root: f.root, workspace: f.workspace, confirmActive: () => true, freeBytes: () => 16 * 1024 ** 3 };
+  const result = deployMissionControl({ ...options, run(args, { cwd }) {
+    assert.throws(() => deployMissionControl({ ...options, run() { otherBuildCalls++; } }), /locked/);
+    assert.throws(() => cleanupMissionControl(options), /locked/);
+    if (args[0] === 'run') { fs.mkdirSync(path.join(cwd, '.next')); fs.writeFileSync(path.join(cwd, '.next/BUILD_ID'), 'owned-concurrent-build'); }
+  } });
+  assert.equal(otherBuildCalls, 0); assert.ok(fs.existsSync(result.directory));
+  assert.equal(fs.existsSync(path.join(f.root, '.installer-lock')), false);
+  assert.equal(fs.existsSync(path.join(f.root, 'runtime/mission-control/.deploy-lock')), false);
+});
+
+test('foreign per-MC lock remains intact and a symlinked root/workspace reuse canonical ownership', t => {
+  const f = fixture(t), first = f.deploy(), parent = path.join(f.root, 'runtime/mission-control');
+  const lock = path.join(parent, '.deploy-lock'); fs.mkdirSync(lock);
+  fs.writeFileSync(path.join(lock, 'owner.txt'), 'foreign owned fixture');
+  assert.throws(() => f.deploy(), /locked/);
+  assert.equal(fs.readFileSync(path.join(lock, 'owner.txt'), 'utf8'), 'foreign owned fixture');
+  assert.equal(fs.existsSync(path.join(f.root, '.installer-lock')), false);
+  fs.rmSync(lock, { recursive: true });
+  const rootLink = path.join(f.home, 'root-link'), workspaceLink = path.join(f.home, 'workspace-link');
+  fs.symlinkSync(f.root, rootLink); fs.symlinkSync(f.workspace, workspaceLink);
+  const reused = deployMissionControl({ root: rootLink, workspace: workspaceLink, source: f.source,
+    run() { throw Error('canonical unchanged source must not rebuild'); }, confirmActive: () => true });
+  assert.equal(reused.changed, false); assert.equal(reused.release, first.release);
+  assert.equal(fs.readFileSync(path.join(first.release, 'data/owned.db'), 'utf8'), 'owned live data');
+});
+
+test('failed MC selection removes its own temporary link and archives failure before pruning the build', t => {
+  const f = fixture(t), first = f.deploy(), parent = path.join(f.root, 'runtime/mission-control');
+  const inode = fs.statSync(path.join(f.legacy, 'data/owned.db')).ino;
+  fs.writeFileSync(path.join(f.source, 'src/new-route.ts'), 'owned changed route');
+  const rename = fs.renameSync;
+  fs.renameSync = (from, to) => {
+    if (path.basename(from).startsWith('.current-')) throw Error('owned selection failure');
+    return rename(from, to);
+  };
+  try { assert.throws(() => f.deploy(), /owned selection failure/); }
+  finally { fs.renameSync = rename; }
+  assert.equal(fs.realpathSync(first.directory), first.release);
+  assert.equal(fs.statSync(path.join(f.legacy, 'data/owned.db')).ino, inode);
+  assert.equal(fs.readdirSync(parent).some(name => name.startsWith('.current-')), false);
+  const failed = fs.readdirSync(parent).find(name => name !== path.basename(first.release) && /^[a-f0-9]{16}-/.test(name));
+  const failedPath = path.join(parent, failed);
+  assert.match(fs.readFileSync(path.join(failedPath, '.selection-failed.json'), 'utf8'), /owned selection failure/);
+  f.cleanup();
+  assert.equal(fs.existsSync(failedPath), false);
+  const archive = JSON.parse(gunzipSync(fs.readFileSync(path.join(parent, 'failure-history', failed + '.json.gz'))));
+  assert.match(Buffer.from(archive.files['.selection-failed.json'], 'base64').toString('utf8'), /owned selection failure/);
+  assert.equal(fs.realpathSync(first.directory), first.release);
+  assert.equal(fs.readFileSync(path.join(first.release, 'data/owned.db'), 'utf8'), 'owned live data');
+});
+
+test('a broken current link refuses a changed build and remains available for explicit reconciliation', t => {
+  const f = fixture(t), parent = path.join(f.root, 'runtime/mission-control'); fs.mkdirSync(parent, { recursive: true });
+  const current = path.join(parent, 'current'); fs.symlinkSync(path.join(parent, 'missing-owned-release'), current);
+  assert.throws(() => f.deploy(), /existing release symlink/);
+  assert.equal(fs.readlinkSync(current), path.join(parent, 'missing-owned-release'));
+  assert.equal(f.calls.length, 0);
+});
+
+test('unchanged build reuse cannot bypass current directory or foreign-target ownership checks', t => {
+  for (const foreign of [false, true]) {
+    const f = fixture(t), first = f.deploy(), beforeCalls = f.calls.length;
+    fs.unlinkSync(first.directory);
+    if (foreign) {
+      const outside = path.join(f.home, 'outside-release'); fs.renameSync(first.release, outside);
+      fs.symlinkSync(outside, first.directory);
+    } else {
+      fs.renameSync(first.release, first.directory);
+    }
+    f.active(false);
+    assert.throws(() => f.deploy(), foreign ? /leaves the managed release directory/ : /existing release symlink/);
+    assert.equal(f.calls.length, beforeCalls);
+    assert.equal(fs.readFileSync(path.join(f.legacy, 'data/owned.db'), 'utf8'), 'owned live data');
+  }
+});
+
+test('failure creating the MC selection link is retained and archived with the completed unselected build', t => {
+  const f = fixture(t), first = f.deploy(), parent = path.join(f.root, 'runtime/mission-control');
+  fs.writeFileSync(path.join(f.source, 'src/new-route.ts'), 'owned new route');
+  const symlink = fs.symlinkSync;
+  fs.symlinkSync = (from, to, ...args) => {
+    if (path.basename(to).startsWith('.current-')) throw Error('owned link creation failure');
+    return symlink(from, to, ...args);
+  };
+  try { assert.throws(() => f.deploy(), /owned link creation failure/); }
+  finally { fs.symlinkSync = symlink; }
+  const failed = fs.readdirSync(parent).find(name => name !== path.basename(first.release) && /^[a-f0-9]{16}-/.test(name));
+  assert.match(fs.readFileSync(path.join(parent, failed, '.selection-failed.json'), 'utf8'), /owned link creation failure/);
+  f.cleanup();
+  const archive = JSON.parse(gunzipSync(fs.readFileSync(path.join(parent, 'failure-history', failed + '.json.gz'))));
+  assert.match(Buffer.from(archive.files['.selection-failed.json'], 'base64').toString('utf8'), /owned link creation failure/);
+  assert.equal(fs.realpathSync(first.directory), first.release);
+  assert.equal(fs.readFileSync(path.join(first.release, 'data/owned.db'), 'utf8'), 'owned live data');
+});

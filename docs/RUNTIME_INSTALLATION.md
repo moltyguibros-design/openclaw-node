@@ -24,3 +24,11 @@ Older prepared installations may have no pending-start records. `--start-default
 Old runtime directories are retained. A runtime bundle carrying its release receipt, or a source path inside the managed runtime directory, cannot be used as installer source. Selecting a non-current retained release from matching independent source is also refused. These are deliberate refusal boundaries, not an automatic rollback path. Preserving code does not establish that old code can read the current database schema, event history, configuration, external tools or native dependencies.
 
 A code-only recovery needs an explicitly selected, independently prepared and reviewed revision plus a compatible-data contract. It must preserve current data, record the exact selection, refresh only authorized services and obtain new runtime evidence. It must not silently restore an old database or borrow the previous installer's acceptance. This installer supplies no retained-release activation command; an actual recovery remains a separately reviewed operation. Removing a receipt or copying old files does not establish compatibility or clearance.
+
+## Installer transactions
+
+A mutating installer, model setup, or standalone Mission Control deploy/cleanup holds the private `.installer-lock`. An existing or interrupted lock refuses another writer; PID records do not authorize stale takeover. Check the owner and retained evidence before reconciling an interrupted transaction.
+
+The installer passes a per-invocation nonce to its direct Node children. A child inherits only when its parent PID and nonce match the current owner record; it never removes the outer lock. Standalone Mission Control takes the same outer lock and its own transaction lock. Canonical paths make root/workspace symlink aliases use the same release and lock. `llm-setup.sh --check` remains advisory and does not acquire a writer lock.
+
+A failed Mission Control selection keeps the old current/data, removes only its own temporary selection link, and retains a failure record. Later cleanup archives that record before pruning the unselected build. Capacity bounds can stop cleanup or another build; those refusals do not authorize data deletion or a hidden fallback.

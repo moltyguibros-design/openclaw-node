@@ -153,7 +153,8 @@ installer_exit_cleanup() {
   if $_INSTALLER_LOCK_HELD; then
     if [ ! -e "$_INSTALLER_LOCK_PATH/owner.txt" ]; then
       rmdir "$_INSTALLER_LOCK_PATH" 2>/dev/null || warn "Installer lock retained: $_INSTALLER_LOCK_PATH"
-    elif grep -Fxq "pid=$$" "$_INSTALLER_LOCK_PATH/owner.txt"; then
+    elif grep -Fxq "pid=$$" "$_INSTALLER_LOCK_PATH/owner.txt" &&
+      grep -Fxq "nonce=${OPENCLAW_INSTALLER_LOCK_NONCE:-}" "$_INSTALLER_LOCK_PATH/owner.txt"; then
       rm -f "$_INSTALLER_LOCK_PATH/owner.txt"
       rmdir "$_INSTALLER_LOCK_PATH" 2>/dev/null || warn "Installer lock contains unexpected files; retained: $_INSTALLER_LOCK_PATH"
     else
@@ -179,5 +180,7 @@ acquire_installer_lock() {
   trap installer_exit_cleanup EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  (umask 077; printf '%s\n' "pid=$$" "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "source=$REPO_DIR" > "$_INSTALLER_LOCK_PATH/owner.txt")
+  export OPENCLAW_INSTALLER_LOCK_PID="$$"
+  export OPENCLAW_INSTALLER_LOCK_NONCE="$$-$RANDOM-$RANDOM"
+  (umask 077; printf '%s\n' "pid=$$" "nonce=$OPENCLAW_INSTALLER_LOCK_NONCE" "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "source=$REPO_DIR" > "$_INSTALLER_LOCK_PATH/owner.txt")
 }

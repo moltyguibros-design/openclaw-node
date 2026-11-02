@@ -53,6 +53,11 @@ ENV_FILE="${ENV_FILE:-$OPENCLAW_ROOT/openclaw.env}"
 WORKSPACE="${WORKSPACE:-$OPENCLAW_ROOT/workspace}"
 NODE_BIN="${NODE_BIN:-$(command -v node)}"
 REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
+if [ "$MODE" != check ]; then
+  DRY_RUN=false
+  . "$REPO_DIR/scripts/install/helpers.sh" || exit 1
+  acquire_installer_lock || exit 1
+fi
 LLM_BASE_URL="${LLM_BASE_URL:-$(grep -m1 '^LLM_BASE_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)}"
 LLM_BASE_URL="${LLM_BASE_URL:-http://127.0.0.1:11434}"
 

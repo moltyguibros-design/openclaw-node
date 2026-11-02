@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,4 +66,5 @@ fi
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(readFileSync(envFile, 'utf8'), /^OPENCLAW_MODEL_ENABLED=1$/m);
   assert.equal(readFileSync(restartLog, 'utf8'), '--user restart openclaw-memory-daemon.service\n');
+  assert.equal(existsSync(join(home, '.installer-lock')), false);
 });

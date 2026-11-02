@@ -4253,3 +4253,6 @@ PRE5871594b froze6paths before edits. Required exact Claude56/57 CLEAR and own47
 ### U3c2b2b prospective/exact result reconciliation
 
 PRE205c7d3a froze3paths before edits and explicitly chose refusal rather than inventing rollback activation. Exact Claude58/59 CLEAR,42tests and actual deployed CLI3refusals satisfy that source-boundary outcome. No data/code rollback or prior acceptance borrowed. External proof SHA256d71c27b005ff45efed66258bbd092b482589cc9fe4dac837686575f711d27b94.
+
+
+D344 U3c2b3 PRE reconciliation: same8paths completed with final exact static review62/63 and owned/actual Ubuntu proof 275888b7a145470fcf30a8708c4cdc6e559ac1f65360377bf8c11f65901e2183. v1/v2/v3 provenance retained; no retroactive execution/CI/operational clearance. U7 capacity prerequisite applies before next allocation.
