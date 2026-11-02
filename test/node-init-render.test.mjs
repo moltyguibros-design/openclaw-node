@@ -201,3 +201,18 @@ describe('node-init join-token trust provisioning', () => {
     });
   });
 });
+
+
+describe('installed service paths select the declared runtime', () => {
+  const templates = [
+    'systemd/openclaw-memory-daemon.service', 'systemd/openclaw-mission-control.service',
+    'systemd/openclaw-lane-watchdog.service', 'systemd/openclaw-log-rotate.service',
+    'systemd/openclaw-gateway.service', 'launchd/ai.openclaw.log-rotate.plist',
+    'launchd/ai.openclaw.lane-watchdog.plist', 'launchd/ai.openclaw.mesh-tool-discord.plist',
+  ];
+  for (const name of templates) it(name, () => {
+    const source = readFileSync(join(ROOT, 'services', name), 'utf8');
+    assert.doesNotMatch(source, /\$\{HOME\}\/openclaw(?:\/|\n)/);
+    assert.ok(source.includes('${OPENCLAW_REPO_DIR}'));
+  });
+});

@@ -4230,3 +4230,6 @@ U3 was decomposed before source edits into atomic MC staging, configuration pres
 
 
 D338 U3b prospective record and exact outcome: predeclared U3b-PRE.json SHA2566d12c5c79c81a467fe99041cac1ad9c7d451301d79414c608c7800ffb7076b7c preceded source edits; seven planned paths, six changed files. Same-session final source CLEAR42/43,35targetedpass and actual Ubuntu unchanged-config proof are in U3b-proof.json SHA2563a1b397d24d5b2968636b2ad28b462c709508399e7899a53b8e10e59af694a6f. Author v1 auth failure and token observation error are retained; no final-head/CI/Mac or production acceptance inferred.
+
+
+D339 U3c1: original prospective12file outline preceded edits; review R1/R2 consumer corrections expanded prospectively to23paths before template/node-init changes. Frozen U3c1-PRE-v3-selection SHA256122de98370fa76adbf6cbc6d62da895f82ccdbbf0f00d734afa26db5ffe5c003; serialization draft preserved separately. Exact final22changed files have same-session CLEAR46/47,95targetedpass and actual source-absent continuation. Proof SHA256bb151b3fd111929a55fe89b351a7c14714d857360f201a69f18a7cbdf55c25fe. Whole-installer/rollback/learned data/legacy paths remain U3c2; no false global closure.

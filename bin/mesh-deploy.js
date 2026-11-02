@@ -1016,6 +1016,10 @@ deploy = tracer.wrap('deploy', deploy, { tier: 2, category: 'lifecycle' });
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function main() {
+  if (fs.existsSync(path.join(process.env.OPENCLAW_ROOT || path.join(HOME, '.openclaw'), 'config', 'installation.json'))
+    || fs.existsSync(path.join(REPO_DIR, '.openclaw-node-release.json'))) {
+    throw new Error('Managed runtime requires the staged installer update; legacy Git/copy deploy refused before fetch');
+  }
   const args = process.argv.slice(2);
   const dryRun = args.includes('--dry-run');
   const localOnly = args.includes('--local');

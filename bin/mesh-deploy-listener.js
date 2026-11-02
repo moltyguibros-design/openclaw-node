@@ -198,6 +198,10 @@ async function runDeployScript(args) {
  */
 async function runDeploy(trigger, { forwardOnly = false } = {}) {
   const result = { status: 'success', sha: trigger.sha, preSha: null, componentsDeployed: [], warnings: [], errors: [], log: '' };
+  if (fs.existsSync(path.join(process.env.OPENCLAW_ROOT || path.join(os.homedir(), '.openclaw'), 'config', 'installation.json'))
+    || fs.existsSync(path.join(REPO_DIR, '.openclaw-node-release.json'))) {
+    return { ...result, status: 'failed', errors: ['Managed runtime requires the staged installer update; legacy Git/copy deploy refused before fetch'] };
+  }
 
   // Requested components this role runs; a filtered run reinstalls them in full.
   const componentArgs = [];

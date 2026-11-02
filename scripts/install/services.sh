@@ -1,3 +1,4 @@
+export OPENCLAW_REPO_DIR="${OPENCLAW_RUNTIME_DIR:-$OPENCLAW_REPO_DIR}"
 # ============================================================
 # Step 16: Install Services (role-aware, template-based)
 # ============================================================
