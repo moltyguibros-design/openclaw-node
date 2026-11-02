@@ -5,7 +5,7 @@
 step "Step 8.6: LLM Backend"
 
 if $SKIP_LLM; then
-  info "Skipped (--skip-llm) — extraction degrades to regex; local agents have no provider"
+  info "Model provisioning deferred; runtime model capability=$OPENCLAW_MODEL_ENABLED"
 elif $DRY_RUN; then
   if llm_url_is_local "$LLM_BASE_URL"; then
     info "[dry-run] would ensure ollama up, RAM-tier LLM_MODEL, model pulled, embedder prefetched"

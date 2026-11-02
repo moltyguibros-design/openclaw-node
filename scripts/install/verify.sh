@@ -16,7 +16,7 @@ elif $ENABLE_SERVICES; then
   # --skip-llm installs no model on purpose: tell the gate so the LLM axis is
   # N/A (covered) instead of a FAIL that would reject every documented install.
   GATE_ARGS=""
-  if $SKIP_LLM; then
+  if [ "${OPENCLAW_MODEL_ENABLED:-1}" = 0 ]; then
     warn "LLM axis skipped (--skip-llm) — the gate will not prove model-backed extraction"
     GATE_ARGS="--skip-axis llm"
   fi

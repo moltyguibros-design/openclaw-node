@@ -68,6 +68,16 @@ fi
 # organ; the agent provider is whatever env.sh resolved (--provider=, the env
 # file, or a CLI on PATH). No provider is ever written by default: a node with
 # no mind chosen says so and Step 13.5 asks.
+if $SKIP_LLM; then
+  if ${DISABLE_MODELS:-true} || ! grep -q '^OPENCLAW_MODEL_ENABLED=' "$ENV_FILE"; then
+    set_env_key OPENCLAW_MODEL_ENABLED 0
+    OPENCLAW_MODEL_ENABLED=0
+  fi
+elif ! grep -q '^OPENCLAW_MODEL_ENABLED=' "$ENV_FILE"; then
+  set_env_key OPENCLAW_MODEL_ENABLED 1
+  OPENCLAW_MODEL_ENABLED=1
+fi
+export OPENCLAW_MODEL_ENABLED="${OPENCLAW_MODEL_ENABLED:-1}"
 if [ -f "$ENV_FILE" ] && [ -n "${OPENCLAW_PROVIDER:-}" ]; then
   set_env_key MESH_LLM_PROVIDER "$OPENCLAW_PROVIDER"
   info "MESH_LLM_PROVIDER=$OPENCLAW_PROVIDER recorded in $ENV_FILE"

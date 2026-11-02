@@ -48,6 +48,7 @@ UPDATE_ONLY=false
 SKIP_MESH=false
 ENABLE_SERVICES=false
 SKIP_LLM=false
+DISABLE_MODELS=false
 SKIP_VERIFY=false
 SKIP_FRONTEND=false
 VERIFY_FRONTEND=false
@@ -64,7 +65,8 @@ for arg in "$@"; do
     --update)            UPDATE_ONLY=true ;;
     --skip-mesh)         SKIP_MESH=true ;;
     --enable-services)   ENABLE_SERVICES=true ;;
-    --skip-llm)          SKIP_LLM=true ;;
+    --skip-llm)          SKIP_LLM=true; DISABLE_MODELS=true ;;
+    --skip-model-downloads) SKIP_LLM=true ;;
     --skip-verify)       SKIP_VERIFY=true ;;
     --skip-frontend)     SKIP_FRONTEND=true ;;
     --verify-frontend)   VERIFY_FRONTEND=true ;;
@@ -80,6 +82,7 @@ for arg in "$@"; do
       echo "  --update            Re-copy scripts/configs only (skip system deps)"
       echo "  --skip-mesh         Skip mesh network setup (used by meta-installer)"
       echo "  --skip-llm          Skip ollama install + model pull + embedder prefetch (extraction degrades to regex)"
+      echo "  --skip-model-downloads Defer model provisioning; preserve an existing model capability"
       echo "  --skip-verify       Skip the final acceptance gate"
       echo "  --skip-frontend     Skip agent-frontend (Claude Code) detection/install"
       echo "  --verify-frontend   Verify frontend auth with one small live call"
@@ -103,6 +106,10 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+if grep -q '^OPENCLAW_MODEL_ENABLED=0$' "$ENV_FILE" 2>/dev/null; then
+  SKIP_LLM=true
+fi
 
 source "$REPO_DIR/scripts/install/helpers.sh"
 source "$REPO_DIR/scripts/install/llm-host.sh"

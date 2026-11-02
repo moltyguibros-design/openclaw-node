@@ -84,6 +84,9 @@ async function run() {
     OPENCLAW_REQUIRE_MESH: '1',
     OPENCLAW_TEST_MESH_ISOLATED: '1',
     PYTHONDONTWRITEBYTECODE: '1',
+    OPENCLAW_NO_EMBED_MODEL: process.env.OPENCLAW_NO_EMBED_MODEL
+      ?? (process.env.OPENCLAW_REQUIRE_EMBEDDER === '1' ? '0' : '1'),
+    GITHUB_WORKSPACE: process.env.GITHUB_WORKSPACE || root,
     TMPDIR: scratch,
   };
   delete env.OPENCLAW_OPERATOR_TRUSTED_KEYS;
@@ -141,7 +144,7 @@ async function run() {
     const files = mode === '--integration'
       ? [join(testDir, 'distributed-mc.test.js')]
       : readdirSync(testDir).filter(name => /\.test\.(?:js|mjs)$/.test(name)).sort().map(name => join(testDir, name));
-    tests = spawn(process.execPath, ['--test', ...files], {
+    tests = spawn(process.execPath, ['--test', '--test-concurrency=2', ...files], {
       cwd: root, env, stdio: 'inherit', detached: true,
     });
     tests.rootTestGroup = true;

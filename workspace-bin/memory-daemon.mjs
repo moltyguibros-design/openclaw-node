@@ -41,6 +41,7 @@ const tracer = createTracer('memory-daemon');
 
 // --- Hermes-inspired modules ---
 import { shouldFlush, USE_LLM_EXTRACTION } from '../lib/pre-compression-flush.mjs';
+import { modelsEnabled } from '../lib/model-policy.mjs';
 import { createBudget } from '../lib/memory-budget.mjs';
 import { createSessionTraceEmitter } from './session-trace-emitter.mjs';
 import { createLocalEventLog, buildMemoryEvent } from '../lib/local-event-log.mjs';
@@ -906,6 +907,28 @@ If this file says \`status: active\` but the session is dead:
 // ============================================================
 
 const THROTTLE_STATE_FILE = path.join(STATE_DIR, 'daemon-throttle.json');
+let knowledgeIndexOffLogged = false;
+
+async function runKnowledgeIndex({
+  stateDbPath = path.join(HOME, '.openclaw/state.db'),
+  knowledgeDbPath = path.join(HOME, '.openclaw/workspace/.knowledge.db'),
+  run = execFileAsync,
+} = {}) {
+  if (!modelsEnabled()) return { indexed: 0, chunks: 0, skipped: 'models_disabled' };
+  if (!fs.existsSync(stateDbPath)) return { indexed: 0, chunks: 0, skipped: 'state_absent' };
+  const jobArgs = [path.join(WORKSPACE, 'bin/knowledge-index-job.mjs'), stateDbPath, knowledgeDbPath];
+  let out;
+  try {
+    const result = await run(process.execPath, jobArgs,
+      { timeout: 30 * 60_000, maxBuffer: 4 * 1024 * 1024, cwd: WORKSPACE });
+    out = result.stdout;
+  } catch (error) {
+    // The native addon can abort during teardown after printing its result.
+    out = error.stdout || '';
+    if (!out.trim()) throw error;
+  }
+  return JSON.parse(out.trim().split('\n').pop());
+}
 const THROTTLE_DEFAULTS = Object.freeze({
   lastRecap: 0, lastMaintenance: 0, lastObsidianSync: 0, lastTrustHealth: 0,
   lastClawvaultReflect: 0, lastClawvaultArchive: 0, lastClawvaultObserve: 0,
@@ -1088,34 +1111,14 @@ async function runPhase2ThrottledWork(config, sessionState) {
     stage1.push(
       (async () => {
         try {
-          const stateDbPath = path.join(HOME, '.openclaw/state.db');
-          if (!fs.existsSync(stateDbPath)) return;
-          // Child process, NOT the flush worker and NOT this thread: the
-          // transformers embedder pinned the daemon's microtask queue for
-          // minutes per grown session and deafened :7893, and its
-          // onnxruntime-node native addon fatally crashes the whole process
-          // when loaded in a worker_thread (both observed —
-          // audits/inject_hang).
-          const jobArgs = [
-            path.join(WORKSPACE, 'bin/knowledge-index-job.mjs'),
-            stateDbPath,
-            path.join(HOME, '.openclaw/workspace/.knowledge.db'),
-          ];
-          let out = '';
-          try {
-            const r = await execFileAsync(process.execPath, jobArgs,
-              { timeout: 30 * 60_000, maxBuffer: 4 * 1024 * 1024, cwd: WORKSPACE });
-            out = r.stdout;
-          } catch (e) {
-            // onnxruntime-node aborts in C++ static teardown AFTER the job has
-            // printed its result (dispose() doesn't prevent it — repro'd in
-            // audits/inject_hang). The trailing JSON line is the completion
-            // certificate; the exit code of this job is noise.
-            out = e.stdout || '';
-            if (!out.trim()) throw e;
+          const result = await runKnowledgeIndex();
+          if (result.skipped === 'models_disabled') {
+            if (!knowledgeIndexOffLogged) log('  Phase 2: knowledge-index OFF (models disabled)');
+            knowledgeIndexOffLogged = true;
+          } else {
+            knowledgeIndexOffLogged = false;
+            if (result.indexed > 0) log(`  Phase 2: knowledge-index: ${result.indexed} sessions indexed (${result.chunks} chunks)`);
           }
-          const { indexed, chunks } = JSON.parse(out.trim().split('\n').pop());
-          if (indexed > 0) log(`  Phase 2: knowledge-index: ${indexed} sessions indexed (${chunks} chunks)`);
         } catch (e) { log(`  Phase 2: knowledge-index failed: ${e.message}`); emitErrorEvent('knowledge_index', e); }
       })()
     );
@@ -2038,4 +2041,4 @@ if (process.env.OPENCLAW_MEMORY_DAEMON_NO_AUTOSTART !== '1') {
   });
 }
 
-export { runNodeVaultMaintenance, handleFlushResult };
+export { runNodeVaultMaintenance, handleFlushResult, runKnowledgeIndex };

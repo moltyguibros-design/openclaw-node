@@ -22,6 +22,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 import {
   estimateTokens,
@@ -247,13 +248,20 @@ Just a paragraph
 // ─── USE_LLM_EXTRACTION const ────────────────────────────────────────────────
 
 describe('USE_LLM_EXTRACTION', () => {
-  it('is a boolean reflecting env var (default true)', () => {
+  it('requires both model capability and extraction to be enabled', () => {
     assert.equal(typeof USE_LLM_EXTRACTION, 'boolean');
-    // Default behavior: only false when env explicitly set to "false"
-    if (process.env.USE_LLM_EXTRACTION === 'false') {
-      assert.equal(USE_LLM_EXTRACTION, false);
-    } else {
-      assert.equal(USE_LLM_EXTRACTION, true);
+    const moduleUrl = new URL('../lib/pre-compression-flush.mjs', import.meta.url).href;
+    for (const [models, extraction, expected] of [
+      ['0', 'true', 'false'], ['0', 'false', 'false'],
+      ['1', 'true', 'true'], ['1', 'false', 'false'],
+    ]) {
+      const result = spawnSync(process.execPath, ['--input-type=module', '-e',
+        `import { USE_LLM_EXTRACTION } from ${JSON.stringify(moduleUrl)}; process.stdout.write(String(USE_LLM_EXTRACTION));`], {
+        env: { ...process.env, OPENCLAW_MODEL_ENABLED: models, USE_LLM_EXTRACTION: extraction },
+        encoding: 'utf8', timeout: 10_000,
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout, expected);
     }
   });
 });

@@ -301,6 +301,17 @@ fi
 fi  # SKIP_PULL
 
 # ---------- embedder ----------
+if [ "$MODE" != embedder ]; then
+  export OPENCLAW_MODEL_ENABLED=1
+  if [ -f "$ENV_FILE" ]; then
+    if grep -q '^OPENCLAW_MODEL_ENABLED=' "$ENV_FILE"; then
+      sed -i.bak 's/^OPENCLAW_MODEL_ENABLED=.*/OPENCLAW_MODEL_ENABLED=1/' "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+    else
+      echo 'OPENCLAW_MODEL_ENABLED=1' >> "$ENV_FILE"
+    fi
+  fi
+fi
+
 if $EMBEDDER_NEEDED && [ -d "$WORKSPACE/node_modules/@huggingface/transformers" ]; then
   step "Prefetching embedder Xenova/bge-m3 (~2 GB, one-time)"
   # Keep the reason. core.mjs raises a precise error (403, offline, no disk,
@@ -327,7 +338,18 @@ elif $EMBEDDER_NEEDED; then
 fi
 
 echo ""
-ok "Wave 2 complete — model: ${CHOICE:-${ENDPOINT:+endpoint $ENDPOINT ($ENDPOINT_MODEL)}}${CHOICE:-${ENDPOINT:-unchanged}}"
-info "Restart the services so they pick it up:"
-echo "    bash $REPO_DIR/install.sh --update --enable-services"
+if [ "$MODE" != embedder ] && [ "$(uname -s)" = Linux ]; then
+  for unit in openclaw-memory-daemon.service openclaw-node-watch.service; do
+    if systemctl --user is-active --quiet "$unit"; then
+      if ! systemctl --user restart "$unit"; then
+        error "Model settings saved, but $unit could not restart. Settings are not verified live."
+        exit 1
+      fi
+      info "Restarted $unit with the saved model settings"
+    fi
+  done
+else
+  info "Refresh running services with: bash $REPO_DIR/install.sh --update --enable-services"
+fi
+ok "Model setup complete; verify the node with: $NODE_BIN $WORKSPACE/bin/node-acceptance.mjs"
 echo ""

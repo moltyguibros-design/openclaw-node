@@ -251,6 +251,30 @@ describe('node-watch honesty invariants', () => {
     assert.equal((await target('mem.inject').run(envFor(makeCtx(), { probes: bad }))).status, STATUS.BROKEN);
   });
 
+  it('disabled model capability prevents both light injection and deep model probes', async () => {
+    const prior = process.env.OPENCLAW_MODEL_ENABLED;
+    process.env.OPENCLAW_MODEL_ENABLED = '0';
+    let calls = 0;
+    try {
+      const probes = {
+        'MEM-L2-INJECT': { needs: ['llm'], run: async () => { calls++; } },
+        'LLM-L2-GEN': { axis: 'llm', slow: true, run: async () => { calls++; } },
+        'LLM-L2-EMBED': { axis: 'llm', slow: true, run: async () => { calls++; } },
+      };
+      for (const includeHeavy of [false, true]) {
+        for (const id of ['mem.inject', 'mem.knowledge_index', 'llm.local_gen', 'llm.embedder']) {
+          const result = await target(id).run(envFor(makeCtx(), { probes, includeHeavy }));
+          assert.equal(result.status, STATUS.OFF);
+          assert.match(result.detail, /models disabled/);
+        }
+      }
+      assert.equal(calls, 0);
+    } finally {
+      if (prior === undefined) delete process.env.OPENCLAW_MODEL_ENABLED;
+      else process.env.OPENCLAW_MODEL_ENABLED = prior;
+    }
+  });
+
   it('a missing reused probe is UNKNOWN, never WORKING', async () => {
     const r = await target('net.nats').run(envFor(makeCtx(), { probes: {} }));
     assert.equal(r.status, STATUS.UNKNOWN);

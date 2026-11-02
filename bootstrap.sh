@@ -328,16 +328,14 @@ fi
 step "Wave 1: running install.sh"
 cd "$SRC" || die "cannot enter $SRC"
 
-# Wave 1 is binaries + a running node. --skip-llm is forced here so the 5-20 GB
-# model pull never starts unannounced; wave 2 below asks first. If the caller
-# already passed --skip-llm they want no models at all, so wave 2 is skipped too.
+# Wave 1 defers downloads without disabling an already provisioned node.
 USER_SKIP_LLM=false
 for a in "$@"; do [ "$a" = "--skip-llm" ] && USER_SKIP_LLM=true; done
 
 if [ $# -gt 0 ]; then
-  bash install.sh --enable-services --skip-llm "$@"
+  bash install.sh --enable-services --skip-model-downloads "$@"
 else
-  bash install.sh --enable-services --skip-llm
+  bash install.sh --enable-services --skip-model-downloads
 fi
 RC=$?
 
@@ -346,7 +344,7 @@ if [ $RC -ne 0 ]; then
   err "install.sh exited $RC — dependencies were fine, the failure is downstream."
   exit $RC
 fi
-ok "wave 1 complete — node installed and running (no models yet)"
+ok "wave 1 complete — model downloads deferred"
 
 # ============================================================
 # Wave 2 — models, only after the user says so
