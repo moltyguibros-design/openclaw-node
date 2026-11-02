@@ -513,3 +513,25 @@ describe('a deploy installs the commit, never the working tree', () => {
     assert.equal(read(fx.rt('openclaw/bin/mesh-agent.js')), '// agent v1\n');
   });
 });
+
+describe('managed Mission Control has one staged update path', () => {
+  it('refuses the old MC writer before changing the checkout, other components or the served release', () => {
+    const fx = makeNode('managed-mc', {
+      'bin/mesh-agent.js': '// agent v0\n',
+      'mission-control/package.json': '{"name":"mission-control"}\n',
+      'mission-control/src/app/page.tsx': "export default () => 'v0';\n",
+    });
+    write(fx.home, '.openclaw/runtime/mission-control/owned-release/marker', 'served release stays intact');
+    fs.symlinkSync(fx.rt('.openclaw/runtime/mission-control/owned-release'), fx.rt('.openclaw/runtime/mission-control/current'));
+    write(fx.home, '.openclaw/workspace/projects/mission-control/src/app/page.tsx', 'legacy unchanged');
+    const next = fx.commit('v1', { 'bin/mesh-agent.js': '// agent v1\n', 'mission-control/src/app/page.tsx': "export default () => 'v1';\n" });
+    const run = fx.deploy(['--from', fx.S0, '--to', next]);
+    assert.equal(run.status, 1, run.stdout);
+    assert.match(run.stdout, /Mission Control uses managed staged releases/);
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), fx.S0);
+    assert.equal(read(fx.rt('.openclaw/runtime/mission-control/current/marker')), 'served release stays intact');
+    assert.equal(read(fx.rt('.openclaw/workspace/projects/mission-control/src/app/page.tsx')), 'legacy unchanged');
+    assert.ok(!fs.existsSync(fx.rt('openclaw/bin/mesh-agent.js')));
+    assert.deepEqual(fx.calls(), []);
+  });
+});

@@ -13,6 +13,7 @@ INSTALLED_COUNT=0
 SKIPPED_COUNT=0
 RENDER_ERRORS=0
 LINUX_START_UNITS=()
+export OPENCLAW_MISSION_CONTROL_DIR="${OPENCLAW_MISSION_CONTROL_DIR:-$OPENCLAW_WORKSPACE/projects/mission-control}"
 
 queue_linux_unit() {
   local unit="$1" state
@@ -98,6 +99,7 @@ else
           -e "s|\${HOME}|$HOME|g" \
           -e "s|\${NODE_BIN}|$NODE_BIN|g" \
           -e "s|\${OPENCLAW_WORKSPACE}|$OPENCLAW_WORKSPACE|g" \
+          -e "s|\${OPENCLAW_MISSION_CONTROL_DIR}|$OPENCLAW_MISSION_CONTROL_DIR|g" \
           -e "s|\${OPENCLAW_NATS}|$OPENCLAW_NATS|g" \
           -e "s|\${OPENCLAW_NATS_TOKEN}|$OPENCLAW_NATS_TOKEN|g" \
           -e "s|\${OPENCLAW_NODE_ID}|$OPENCLAW_NODE_ID|g" \
@@ -165,6 +167,7 @@ else
               -e "s|\${HOME}|$HOME|g" \
               -e "s|\${NODE_BIN}|$NODE_BIN|g" \
               -e "s|\${OPENCLAW_WORKSPACE}|$OPENCLAW_WORKSPACE|g" \
+          -e "s|\${OPENCLAW_MISSION_CONTROL_DIR}|$OPENCLAW_MISSION_CONTROL_DIR|g" \
               -e "s|\${OPENCLAW_NATS}|$OPENCLAW_NATS|g" \
               -e "s|\${OPENCLAW_NATS_TOKEN}|$OPENCLAW_NATS_TOKEN|g" \
               -e "s|\${OPENCLAW_NODE_ID}|$OPENCLAW_NODE_ID|g" \
@@ -200,6 +203,7 @@ else
             -e "s|\${HOME}|$HOME|g" \
             -e "s|\${NODE_BIN}|$NODE_BIN|g" \
             -e "s|\${OPENCLAW_WORKSPACE}|$OPENCLAW_WORKSPACE|g" \
+          -e "s|\${OPENCLAW_MISSION_CONTROL_DIR}|$OPENCLAW_MISSION_CONTROL_DIR|g" \
             -e "s|\${OPENCLAW_NATS}|$OPENCLAW_NATS|g" \
             -e "s|\${OPENCLAW_NATS_TOKEN}|$OPENCLAW_NATS_TOKEN|g" \
             -e "s|\${OPENCLAW_NODE_ID}|$OPENCLAW_NODE_ID|g" \
@@ -237,6 +241,9 @@ else
           run systemctl --user restart "$unit"
         else
           run systemctl --user start "$unit"
+        fi
+        if [ "$unit" = openclaw-mission-control.service ] && [ -L "$OPENCLAW_ROOT/runtime/mission-control/current" ]; then
+          run "$NODE_BIN" "$REPO_DIR/bin/deploy-mission-control.mjs" --cleanup --root "$OPENCLAW_ROOT" --workspace "$WORKSPACE"
         fi
         info "  Activated current unit: $unit"
       done

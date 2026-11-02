@@ -889,10 +889,6 @@ function restartService(svc) {
 function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false, includeServices = false,
                   dryRun = false, noRestart = false }) {
   assertCommitted(repoDir);
-  if (!dryRun && gitLine(repoDir, ['rev-parse', 'HEAD']) !== toSha) {
-    info(`Checking out ${toSha.slice(0, 8)}`);
-    git(repoDir, ['checkout', '--detach', '--quiet', toSha]);
-  }
   const changes = diffChanges(repoDir, fromSha, toSha);
   info(`${fromSha.slice(0, 8)} → ${toSha.slice(0, 8)}: ${changes.length} changed file(s)`);
 
@@ -900,6 +896,13 @@ function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false, includ
     filterIds, force,
     listAll: repoPaths => listFiles(repoDir, toSha, repoPaths),
   });
+  if (plans.some(({ comp }) => comp.id === 'mc') && fs.existsSync(path.join(DIRS.OPENCLAW_HOME, 'runtime', 'mission-control', 'current'))) {
+    throw new Error('Mission Control uses managed staged releases; update it with the staged installer instead of mesh-deploy --component mc');
+  }
+  if (!dryRun && gitLine(repoDir, ['rev-parse', 'HEAD']) !== toSha) {
+    info(`Checking out ${toSha.slice(0, 8)}`);
+    git(repoDir, ['checkout', '--detach', '--quiet', toSha]);
+  }
   if (plans.length === 0) ok('No components affected');
   else info(`${plans.length} component(s) to deploy:\n`);
 

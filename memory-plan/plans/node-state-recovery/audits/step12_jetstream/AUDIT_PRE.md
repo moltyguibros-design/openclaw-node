@@ -4222,3 +4222,8 @@ The human's “fix this” follows the completed Claude/Ubuntu review and explic
 ## U2 prospective outline and actual chronology — 2026-11-02
 
 The bounded U2-PRE.json was frozen at07:50UTC before source edits and is linked by current.json; the operator audit PRE subsection was written first. This append records that chronology after implementation, without pretending this ledger append came first. U2 uses existing service, monitor, acceptance and token paths plus shared systemd state parsing; no dependency/topology source or P2 source/workflow change. R1/R2 corrections remain within the same named status-honesty outcome, with every immutable revision/failure retained. Source/runtime feeds and exact verification, limitations and remaining gates are in D336/UBUNTU_REMEDIATION_20261102.md.
+
+
+## U3a prospective outline and chronology — 2026-11-02
+
+U3 was decomposed before source edits into atomic MC staging, configuration preservation and runtime/install-path units. Frozen external U3a-PRE/v2/v3 preserve the initial plan, safer dedicated-current-path refinement before implementation, and later required review corrections/file additions before their changes. This ledger append records that chronology after implementation, not a Git-sequenced claim of prospectivity. Exact implementation, verification, review identities, failure history and carried limitations are in D337 and the bounded audit. This unit supplies only disposable-Ubuntu installer source/runtime proof; no actual Mac/production/native recovery admission or old CI reuse.

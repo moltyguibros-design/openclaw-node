@@ -15,7 +15,7 @@ Heartbeat stays PAUSED; D62/D64/D168/D173-D175/D261 and all native/host/resource
 |---|---|---|---|
 | U1 | Runtime model capability and test isolation | R01, R17, R18 | [x] source/runtime; final-head CI pending |
 | U2 | Linux service lifecycle and truthful acceptance | R02, R03, R05, R08, R14 | [x] source/runtime; final-head CI pending |
-| U3 | Safe runtime updates and installation paths | R07, R12, R13 | [ ] |
+| U3 | Safe runtime updates and installation paths | R07, R12, R13 | [A] U3a source/runtime verified; U3b/U3c pending |
 | U4 | Reproducible patched dependencies | R06, R09 | [ ] |
 | U5 | Capability-aware prerequisites and optional tools | R10, R11, R15 | [ ] |
 | U6 | Distribution and portable lifecycle contracts | R04, R16, R19, R21, R22 | [ ] |
@@ -67,3 +67,17 @@ U2-v5 source patch60,069/SHA256a8784d9cbe7524469068a283ca5c86beb20c774bca37075b1
 v1 complete root2718/2710pass/8skip/0fail289.53s; final v5 targeted154/153pass/1skip/0fail15.15s, not v5 full-head CI. v3 targeted2failures from a real-home setting leak are retained; the fake catalog now owns/restores its model setting. An owned crash fixture's manual restart hit its start-limit; retained. A separate fixture verified manual restart1→0/LIVE with no production limits changed. An actual existing daemon's successful SIGTERM stop/resume and invalid-unit fixture verified the remaining signal/load semantics. No real stack-up/down was run because its separate unsafe bridge/port path remains U3/U6. The consolidation timer backing service has a retained failed result; capability-aware handling remains U5.
 
 External U2-proof.json SHA2568f6c17466eceb74748314d88bf39f46f3222f3ab2341f55508cbdc9dedad8ae3 and raw Ubuntu bundle931,840/SHA256da61d35497ed982e3377da0e9f5182dfbfe1d83ad630a25fe167c176d4b22798 retain the evidence. U3-U7/final immutable review/new own-head CI/receipt remain pending; all P2/Mac/production/native-positive gates and heartbeatPAUSED remain unchanged.
+
+
+## U3 bounded execution outline — 2026-11-02
+
+U2 is locally committed ateaad7f117a05aa26dbc8e86fc274aa21a46a2ea8. U3 is decomposed before edits into U3a (fresh staged Mission Control build/activation preserving data), U3b (preserve existing config/topology/role on ordinary update) and U3c (versioned checkout-independent runtime and recorded installation boundaries). These are atomic parts of the original R07/R12/R13 outcome, not additional unrelated work. Each has its own prospective file outline/runtime evidence/exact Claude source review and local commit. U3a frozen external PRE lists lib/mission-control-deploy.mjs, bin/deploy-mission-control.mjs, components.sh and owned tests. Real production build is isolated from live data; only a successful stage can replace the stable deployment path, with old code/data retained. Dependencies stay at the current lock until U4; final immutable candidate review/ownCI and all historical gates persist.
+
+
+### U3a exact result — 2026-11-02
+
+U3a-v4 patch37,819/SHA25672b4c59ae43f17a71280d853304f948a82a4c5341e3bedaa415b33fac2278fa4 is CLEAR in SAME Claude request34/response35, source/data-only. v1/v2 NOTCLEAR findings remain retained; v3 was an unreviewed intermediate. Final63targeted pass/0fail11.01s cover staging/deletions/failure/current/data, library binding, old mesh writer refusal, retention/archives/free-space refusal and aged/incomplete first-install recovery. Actual v1 npmci/Next16.4.1 production build succeeded69.21s; its MC source/lock are identical to final, so it was reused. New MC unit served3authenticated endpoints200 with same DBinode/token and old build unchanged. Real signing wrapper/shared library signed/verified with an isolated fixture HOME/key; no action published. Build-only cache cleanup recovered313MB. Final output-capture subprocess was verified with an owned real-npm/zero-dependency fixture, explicitly not another Next build. Controlled timestamps36min in the past verify age reconciliation only: UNKNOWN original outcome, no actual interruption/physical freshness claimed.
+
+Updates use one managed staged-installer path. The old mesh MC writer loudly refuses managed layouts before runtime copies; pinned deploy fixture also holds the checkout, while the fetching main path may already fast-forward source (U3c carry-forward). Complete-code cleanup requires specific current PID/cwd or known inactive-unit confirmation, keeps current+previous, and caps pending releases; failed-stage archival is independent so fresh-install recovery works. Unknown/unmarked stages block another changed-source allocation; aged35min stages get qualified records. Legacy data is never pruned. Mac activation/cleanup, symlinked-root handling, bootstrap re-run behavior, runtime/source/uninstall/sync paths, Node/npm identity, dotenv/public build settings and concurrency serialization remain explicit U3c/U4/U6 carry-forwards; no Mac rollout or runtime proof.
+
+External U3a-proof.json SHA2567e18660ef189ae7c087338493e5247dbdee6e0a3f2118d4a1abe52b4cf72fa0a and102,400-byte raw bundlef11c53e51d8befbfd78185fa5e4c6f58bed399d5f232be6c8f5b4bbc4632b39c retain exact observations. U3b/U3c/U4-U7/final immutable-head review/new ownCI/receipt remain pending. Completed P2 and all historical operational gates remain unchanged; heartbeatPAUSED.

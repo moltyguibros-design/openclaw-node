@@ -142,65 +142,16 @@ fi
 
 step "Step 11: Mission Control"
 
-MC_DIR="$WORKSPACE/projects/mission-control"
-if [ ! -d "$MC_DIR/src" ]; then
-  run mkdir -p "$MC_DIR"
-  run rsync -av --exclude='node_modules' --exclude='.next' --exclude='*.db' \
-    "$REPO_DIR/mission-control/" "$MC_DIR/"
-  info "Mission Control source copied"
-else
-  info "Mission Control already exists, updating source..."
-  run rsync -av --exclude='node_modules' --exclude='.next' --exclude='*.db' \
-    "$REPO_DIR/mission-control/" "$MC_DIR/"
-fi
-
+export OPENCLAW_MISSION_CONTROL_DIR="$OPENCLAW_ROOT/runtime/mission-control/current"
+MC_DIR="$OPENCLAW_MISSION_CONTROL_DIR"
 if $SANDBOX; then
-  info "Sandbox: skipping Mission Control dependencies + build"
-elif [ ! -d "$MC_DIR/node_modules" ]; then
-  info "Installing Mission Control dependencies (this may take a minute)..."
-  (cd "$MC_DIR" && run npm install)
-elif $UPDATE_ONLY; then
-  info "Updating Mission Control dependencies..."
-  (cd "$MC_DIR" && run npm install)
+  info "Sandbox: Mission Control build/activation skipped; existing deployment preserved"
+elif $DRY_RUN; then
+  info "[dry-run] would stage, install, build and select Mission Control at $MC_DIR"
 else
-  info "Mission Control dependencies already installed"
+  "$NODE_BIN" "$REPO_DIR/bin/deploy-mission-control.mjs" \
+    --source "$REPO_DIR/mission-control" --root "$OPENCLAW_ROOT" --workspace "$WORKSPACE"
 fi
-
-# Production build — the unit runs `npm start` (= next start), which needs a
-# .next build; without one the unit crash-loops (2026-07-11 audit).
-if ! $SANDBOX && ! $DRY_RUN && [ -d "$MC_DIR/node_modules" ] && [ ! -d "$MC_DIR/.next" ]; then
-  info "Building Mission Control (next build)..."
-  if (cd "$MC_DIR" && npm run build); then
-    info "Mission Control production build ready"
-  else
-    warn "Mission Control build FAILED — the unit cannot serve until fixed (known queued tsc errors)."
-    warn "Interim: cd $MC_DIR && npm run dev   — the acceptance gate reports MC honestly either way"
-  fi
-fi
-
-# Create .env.local for MC if not exists
-if [ ! -f "$MC_DIR/.env.local" ]; then
-  write_file "$MC_DIR/.env.local" << MCENV
-# Mission Control Environment
-WORKSPACE_ROOT=$WORKSPACE
-OPENCLAW_HOME=$OPENCLAW_ROOT
-DB_PATH=$MC_DIR/data/mission-control.db
-
-# NATS (mesh connectivity — resolved from openclaw.env if not set here)
-OPENCLAW_NATS=${OPENCLAW_NATS:-}
-OPENCLAW_NATS_TOKEN=${OPENCLAW_NATS_TOKEN:-}
-OPENCLAW_NATS_AUTH=${OPENCLAW_NATS_AUTH:-token}
-
-# TTS (optional — falls back to Edge TTS if missing)
-GEMINI_API_KEY=${GOOGLE_API_KEY:-}
-MCENV
-  # Holds the NATS token and an API key — never leave it at the default umask.
-  run chmod 600 "$MC_DIR/.env.local"
-  info "Created Mission Control .env.local (mode 600)"
-fi
-
-# Ensure data directory exists for SQLite
-run mkdir -p "$MC_DIR/data"
 
 # ============================================================
 # Step 12: Playwright (web-fetch fallback)
