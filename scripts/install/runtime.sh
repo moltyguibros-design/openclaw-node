@@ -5,7 +5,9 @@ if $DRY_RUN; then
   export OPENCLAW_RUNTIME_DIR="$REPO_DIR"
 else
   export OPENCLAW_SOURCE_DIR="$REPO_DIR"
-  OPENCLAW_RUNTIME_DIR="$("$NODE_BIN" "$REPO_DIR/bin/deploy-runtime.mjs" --source "$REPO_DIR" --root "$OPENCLAW_ROOT")"
+  RUNTIME_RESULT="$("$NODE_BIN" "$REPO_DIR/bin/deploy-runtime.mjs" --source "$REPO_DIR" --root "$OPENCLAW_ROOT" --json)"
+  OPENCLAW_RUNTIME_DIR="$("$NODE_BIN" -e 'process.stdout.write(JSON.parse(process.argv[1]).release)' "$RUNTIME_RESULT")"
+  OPENCLAW_INSTALLATION_ATTEMPT="$("$NODE_BIN" -e 'process.stdout.write(JSON.parse(process.argv[1]).attemptId)' "$RUNTIME_RESULT")"
   export OPENCLAW_RUNTIME_DIR
   REPO_DIR="$OPENCLAW_RUNTIME_DIR"
   export REPO_DIR

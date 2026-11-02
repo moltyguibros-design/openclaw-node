@@ -4243,3 +4243,8 @@ Original PRE02116773 and correction PREbf687a3c were frozen before their edits. 
 ### U3c2b1 prospective/exact result reconciliation
 
 Four paths were frozen before edits by PRE1884e6dc. Author consumer correction stayed within those paths, with all drafts retained. Same Claude54/55 exact CLEAR/own Ubuntu18tests and actual two-consumer/NATS proof satisfy only this bounded identity outcome. External U3c2b1-proof.json SHA256f32ec801d65e12980f1deea5a26dced133094df825b1ca72f6bb95a58ec4a7b7; no final head/CI or operational close.
+
+
+### U3c2b2a prospective/exact result reconciliation
+
+PRE5871594b froze6paths before edits. Required exact Claude56/57 CLEAR and own47tests/whole Ubuntu update metadata proof cover only truthful installer completion. Original partial profile remains unproven; no automatic rollback or final-headCI. External proof SHA2566fc4cea771b87ced0db349c2ee0150e585af8c734825603a4bcff04f1a03d6c8. Prior-record preallocation validation/orphan-stage handling remains U7; current-input versus original receipt qualification remains U6.

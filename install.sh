@@ -143,6 +143,12 @@ source "$REPO_DIR/scripts/install/services.sh"
 source "$REPO_DIR/scripts/install/integrations.sh"
 source "$REPO_DIR/scripts/install/verify.sh"
 
+if ! $DRY_RUN; then
+  "$NODE_BIN" "$REPO_DIR/bin/deploy-runtime.mjs" --complete --root "$OPENCLAW_ROOT" \
+    --runtime "$OPENCLAW_RUNTIME_DIR" --attempt "$OPENCLAW_INSTALLATION_ATTEMPT" \
+    --acceptance "$GATE_STATE" --services-requested "$ENABLE_SERVICES"
+fi
+
 # ============================================================
 # Done!
 # ============================================================

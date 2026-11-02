@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { stageRuntime, bindRuntimeDependencies } from '../lib/runtime-deploy.mjs';
+import { stageRuntime, bindRuntimeDependencies, completeInstallation } from '../lib/runtime-deploy.mjs';
 
 function fixture(t) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime-deploy-'));
@@ -34,6 +34,85 @@ function fixture(t) {
 function run(release) {
   return spawnSync(process.execPath, [path.join(release, 'bin/start.cjs')], { encoding: 'utf8' });
 }
+
+function record(f) {
+  return JSON.parse(fs.readFileSync(path.join(f.root, 'config/installation.json'), 'utf8'));
+}
+
+test('prepared and completed installer attempts retain acceptance qualifications and prior completion', t => {
+  const f = fixture(t), first = f.stage();
+  assert.equal(record(f).schema, 2); assert.equal(record(f).phase, 'prepared');
+  assert.equal(record(f).attemptId, first.attemptId); assert.equal(record(f).previousComplete, null);
+  const incomplete = completeInstallation({ root: f.root, runtime: first.release, attemptId: first.attemptId,
+    acceptance: 'incomplete', servicesRequested: true });
+  assert.equal(incomplete.phase, 'installer-complete'); assert.equal(incomplete.acceptance, 'incomplete');
+  assert.equal(incomplete.verification, 'installer-record');
+  const second = f.stage();
+  assert.equal(second.reused, true); assert.notEqual(second.attemptId, first.attemptId);
+  assert.equal(record(f).phase, 'prepared'); assert.equal(record(f).acceptance, undefined);
+  assert.equal(record(f).previousComplete.acceptance, 'incomplete');
+  assert.equal(record(f).previousComplete.runtime, first.release);
+  const interrupted = f.stage();
+  assert.equal(record(f).phase, 'prepared');
+  assert.equal(record(f).priorSelection.phase, 'prepared');
+  assert.equal(record(f).previousComplete.completedAt, incomplete.completedAt);
+  const skipped = completeInstallation({ root: f.root, runtime: interrupted.release, attemptId: interrupted.attemptId,
+    acceptance: 'skipped', servicesRequested: false });
+  assert.equal(skipped.acceptance, 'skipped'); assert.equal(skipped.servicesRequested, false);
+  f.write('bin/start.cjs', 'console.log("new source");\n');
+  const third = f.stage();
+  const accepted = completeInstallation({ root: f.root, runtime: third.release, attemptId: third.attemptId,
+    acceptance: 'accepted', servicesRequested: true });
+  assert.equal(accepted.acceptance, 'accepted'); assert.equal(accepted.previousComplete.acceptance, 'skipped');
+  assert.equal(fs.statSync(path.join(f.root, 'config/installation.json')).mode & 0o777, 0o600);
+});
+
+test('legacy installation metadata is recorded as unknown rather than completed', t => {
+  const f = fixture(t); fs.mkdirSync(path.join(f.root, 'config'), { recursive: true });
+  fs.writeFileSync(path.join(f.root, 'config/installation.json'), JSON.stringify({ schema: 1, runtime: 'owned-old', digest: 'owned-old', updated: 'owned-old-date' }));
+  f.stage();
+  assert.equal(record(f).priorSelection.phase, 'legacy-unknown');
+  assert.equal(record(f).priorSelection.runtime, 'owned-old');
+  assert.equal(record(f).previousComplete, null);
+  assert.equal(record(f).phase, 'prepared');
+});
+
+test('stale attempts, changed current/code and another lock refuse without recording completion', t => {
+  const f = fixture(t), first = f.stage();
+  const finish = extra => completeInstallation({ root: f.root, runtime: first.release, attemptId: first.attemptId,
+    acceptance: 'incomplete', servicesRequested: true, ...extra });
+  const before = fs.readFileSync(path.join(f.root, 'config/installation.json'));
+  assert.throws(() => finish({ attemptId: 'another-attempt' }), /prepared attempt/);
+  assert.deepEqual(fs.readFileSync(path.join(f.root, 'config/installation.json')), before);
+  const lock = path.join(f.root, 'runtime/node/.deploy-lock'); fs.mkdirSync(lock);
+  fs.writeFileSync(path.join(lock, 'owned-other'), 'retain');
+  assert.throws(() => finish(), /locked/); assert.equal(fs.readFileSync(path.join(lock, 'owned-other'), 'utf8'), 'retain');
+  fs.rmSync(lock, { recursive: true });
+  fs.writeFileSync(path.join(first.release, 'bin/start.cjs'), 'tampered outside installer\n');
+  assert.throws(() => finish(), /content or mode mismatch/);
+  assert.equal(record(f).phase, 'prepared');
+  fs.copyFileSync(path.join(f.source, 'bin/start.cjs'), path.join(first.release, 'bin/start.cjs'));
+  f.write('bin/start.cjs', 'console.log("next release");\n');
+  const next = f.stage(); assert.equal(next.reused, false);
+  assert.throws(() => finish(), /prepared attempt/);
+  assert.equal(record(f).attemptId, next.attemptId);
+});
+
+test('CLI keeps path output and offers structured exact-attempt completion without creating services', t => {
+  const f = fixture(t); f.stage();
+  const cli = fileURLToPath(new URL('../bin/deploy-runtime.mjs', import.meta.url));
+  const invoke = args => spawnSync(process.execPath, [cli, '--root', f.root, ...args], { encoding: 'utf8', timeout: 15_000 });
+  const plain = invoke(['--source', f.source]); assert.equal(plain.status, 0, plain.stderr);
+  assert.equal(plain.stdout.trim(), record(f).runtime);
+  const structured = invoke(['--source', f.source, '--json']); assert.equal(structured.status, 0, structured.stderr);
+  const pending = JSON.parse(structured.stdout); assert.equal(pending.release, record(f).runtime);
+  assert.equal(pending.attemptId, record(f).attemptId);
+  const finished = invoke(['--complete', '--runtime', pending.release, '--attempt', pending.attemptId,
+    '--acceptance', 'incomplete', '--services-requested', 'true', '--json']);
+  assert.equal(finished.status, 0, finished.stderr); assert.equal(JSON.parse(finished.stdout).phase, 'installer-complete');
+  const invalid = invoke(['--complete', '--runtime', pending.release]); assert.notEqual(invalid.status, 0);
+  assert.equal(record(f).acceptance, 'incomplete');
+});
 
 test('runtime code/dependencies survive source removal and exclude private/cache input', t => {
   const f = fixture(t), deployed = f.stage();
