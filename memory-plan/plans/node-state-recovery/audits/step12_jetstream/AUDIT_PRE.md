@@ -4248,3 +4248,8 @@ Four paths were frozen before edits by PRE1884e6dc. Author consumer correction s
 ### U3c2b2a prospective/exact result reconciliation
 
 PRE5871594b froze6paths before edits. Required exact Claude56/57 CLEAR and own47tests/whole Ubuntu update metadata proof cover only truthful installer completion. Original partial profile remains unproven; no automatic rollback or final-headCI. External proof SHA2566fc4cea771b87ced0db349c2ee0150e585af8c734825603a4bcff04f1a03d6c8. Prior-record preallocation validation/orphan-stage handling remains U7; current-input versus original receipt qualification remains U6.
+
+
+### U3c2b2b prospective/exact result reconciliation
+
+PRE205c7d3a froze3paths before edits and explicitly chose refusal rather than inventing rollback activation. Exact Claude58/59 CLEAR,42tests and actual deployed CLI3refusals satisfy that source-boundary outcome. No data/code rollback or prior acceptance borrowed. External proof SHA256d71c27b005ff45efed66258bbd092b482589cc9fe4dac837686575f711d27b94.

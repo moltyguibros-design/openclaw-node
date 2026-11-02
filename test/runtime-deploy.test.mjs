@@ -114,6 +114,41 @@ test('CLI keeps path output and offers structured exact-attempt completion witho
   assert.equal(record(f).acceptance, 'incomplete');
 });
 
+test('retained runtime source refuses before selection or foreign allocation, even without its marker in-parent', t => {
+  const f = fixture(t), first = f.stage();
+  f.write('bin/start.cjs', 'console.log("next code");\n');
+  const current = f.stage(), recordPath = path.join(f.root, 'config/installation.json');
+  const before = fs.readFileSync(recordPath), originalCode = fs.readFileSync(path.join(first.release, 'bin/start.cjs'));
+  const data = path.join(f.root, 'owned-current-data'); fs.writeFileSync(data, 'current data must survive\n');
+  for (const source of [first.release, current.release]) assert.throws(() => f.stage({ source }), /Retained runtime/);
+  const foreignRoot = path.join(f.home, 'foreign-root');
+  assert.throws(() => f.stage({ source: first.release, root: foreignRoot }), /Retained runtime/);
+  assert.equal(fs.existsSync(foreignRoot), false);
+  const receiptPath = path.join(first.release, '.openclaw-node-release.json'), receipt = fs.readFileSync(receiptPath);
+  fs.unlinkSync(receiptPath);
+  try { assert.throws(() => f.stage({ source: first.release }), /source and destination must be separate/); }
+  finally { fs.writeFileSync(receiptPath, receipt, { mode: 0o600 }); }
+  assert.deepEqual(fs.readFileSync(recordPath), before);
+  assert.deepEqual(fs.readFileSync(path.join(first.release, 'bin/start.cjs')), originalCode);
+  assert.equal(fs.readFileSync(data, 'utf8'), 'current data must survive\n');
+  assert.equal(fs.realpathSync(path.join(f.root, 'runtime/node/current')), current.release);
+});
+
+test('matching independent old source never implicitly rolls back a current runtime or acceptance', t => {
+  const f = fixture(t), original = fs.readFileSync(path.join(f.source, 'bin/start.cjs')), first = f.stage();
+  f.write('bin/start.cjs', 'console.log("new selected code");\n');
+  const current = f.stage();
+  completeInstallation({ root: f.root, runtime: current.release, attemptId: current.attemptId,
+    acceptance: 'incomplete', servicesRequested: true });
+  const recordPath = path.join(f.root, 'config/installation.json'), before = fs.readFileSync(recordPath);
+  fs.writeFileSync(path.join(f.source, 'bin/start.cjs'), original);
+  assert.throws(() => f.stage(), /explicit rollback contract/);
+  assert.deepEqual(fs.readFileSync(recordPath), before);
+  assert.equal(fs.realpathSync(path.join(f.root, 'runtime/node/current')), current.release);
+  assert.equal(run(first.release).stdout, '42\n');
+  assert.equal(run(current.release).stdout, 'new selected code\n');
+});
+
 test('runtime code/dependencies survive source removal and exclude private/cache input', t => {
   const f = fixture(t), deployed = f.stage();
   assert.equal(deployed.reused, false);
