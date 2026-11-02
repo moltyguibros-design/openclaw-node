@@ -14,7 +14,7 @@ Heartbeat stays PAUSED; D62/D64/D168/D173-D175/D261 and all native/host/resource
 | Unit | Outcome | Review findings | Status |
 |---|---|---|---|
 | U1 | Runtime model capability and test isolation | R01, R17, R18 | [x] source/runtime; final-head CI pending |
-| U2 | Linux service lifecycle and truthful acceptance | R02, R03, R05, R08, R14 | [ ] |
+| U2 | Linux service lifecycle and truthful acceptance | R02, R03, R05, R08, R14 | [x] source/runtime; final-head CI pending |
 | U3 | Safe runtime updates and installation paths | R07, R12, R13 | [ ] |
 | U4 | Reproducible patched dependencies | R06, R09 | [ ] |
 | U5 | Capability-aware prerequisites and optional tools | R10, R11, R15 | [ ] |
@@ -53,3 +53,17 @@ Author proof: `/Users/moltymac/.codex/outputs/openclaw-recovery/linux-vm-first-t
 - [ ] U2-U7 remain pending under their individual prospective outlines. U2 additionally corrects model-off analysis metadata; missing frontend transcript capabilities remain unproven, not paper-green.
 
 B1-B9, D62/D64/D168/D173-D175/D261, B5/1.2/protected[A]/VERSIONv1.2-pre/B6-B9, all physical-Mac/native-positive/production/reboot/resource gates remain unchanged. Heartbeat stays PAUSED. This Ubuntu repair does not admit the recovery rehearsal.
+
+
+## U2 — Linux lifecycle and truthful acceptance (PRE)
+
+U1 is locally committed atea341dba982b88d849bd7c2bc587bb64eb97afab. U2 addresses R02/R03/R05/R08/R14: render and validate before manager reload; restart only selected active updates and preserve disabled/timer semantics; reflect unobserved acceptance as incomplete; poll for optional gateway logs; initialize the existing private MC token before scheduler use. It additionally corrects no-model injection metadata. No token rotation, source topology/dependency migration or Mac/production operation. File outline and verification are frozen in external U2-PRE.json; existing runtime/helpers are extended, with owned lifecycle/token/watchdog/API regression fixtures and actual Ubuntu process/manager evidence. U3-U7 remain pending; final exact immutable review/ownCI remains a distinct gate.
+
+
+### U2 exact result — 2026-11-02
+
+U2-v5 source patch60,069/SHA256a8784d9cbe7524469068a283ca5c86beb20c774bca37075b1bf712ae28bfdef2 is CLEAR in SAME Claude request28/response29, scoped source/data only. Review-required R1/R2 and all earlier snapshots are retained. Actual Ubuntu Step16 source-prefix update succeeded after reload: eight selected daemon PIDs replaced, zero automatic restarts, disabled services kept off, timer handles retained and token digest unchanged. Step16.5 notification/config work was explicitly excluded pending U3. The shared systemd helper/stack now distinguishes inactive/successful SIGTERM (OFF, actual Code2/Status15), crash/restart (UNSTABLE), and invalid load (DOWN, actual owned bad-setting fixture). Actual normal scheduler tick succeeded; nonempty injection returned200/lexical-only/models_disabled; profile0/new-cache absent. Acceptance --no-mutate reports INCOMPLETE,13PASS/0FAIL/3SKIP/9NA/0BLOCK/missingL4. This is partial capability proof, not whole-node acceptance.
+
+v1 complete root2718/2710pass/8skip/0fail289.53s; final v5 targeted154/153pass/1skip/0fail15.15s, not v5 full-head CI. v3 targeted2failures from a real-home setting leak are retained; the fake catalog now owns/restores its model setting. An owned crash fixture's manual restart hit its start-limit; retained. A separate fixture verified manual restart1→0/LIVE with no production limits changed. An actual existing daemon's successful SIGTERM stop/resume and invalid-unit fixture verified the remaining signal/load semantics. No real stack-up/down was run because its separate unsafe bridge/port path remains U3/U6. The consolidation timer backing service has a retained failed result; capability-aware handling remains U5.
+
+External U2-proof.json SHA2568f6c17466eceb74748314d88bf39f46f3222f3ab2341f55508cbdc9dedad8ae3 and raw Ubuntu bundle931,840/SHA256da61d35497ed982e3377da0e9f5182dfbfe1d83ad630a25fe167c176d4b22798 retain the evidence. U3-U7/final immutable review/new own-head CI/receipt remain pending; all P2/Mac/production/native-positive gates and heartbeatPAUSED remain unchanged.

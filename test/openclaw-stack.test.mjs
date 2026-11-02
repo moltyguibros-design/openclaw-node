@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
 import {
-  scanLaunchdUnits, scanSystemdUnits, probePort, classify, shortId, PORTS, PERIODIC,
+  scanLaunchdUnits, scanSystemdUnits, upLinux, probePort, classify, statusTable, shortId, PORTS, PERIODIC,
 } from '../bin/openclaw-stack.mjs';
 
 let tmp;
@@ -37,6 +37,21 @@ describe('unit discovery', () => {
     assert.equal(shortId('ai.openclaw.workplan-viewer.plist'), 'workplan-viewer');
     assert.equal(shortId('openclaw-node-watch.service'), 'node-watch');
   });
+  it('starts only enabled units and timer handles, preserving disabled/static and timer-backed services', () => {
+    const listing = [
+      'openclaw-mission-control.service enabled', 'openclaw-nats-1.service disabled',
+      'openclaw-gateway.service disabled', 'openclaw-log-rotate.service enabled',
+      'openclaw-log-rotate.timer enabled', 'openclaw-observer.service static',
+    ].join('\n');
+    const units = scanSystemdUnits(() => listing);
+    const started = [];
+    upLinux(units, (_cmd, args) => {
+      if (args[1] === 'is-active') return 'inactive';
+      if (args[1] === 'start') started.push(args[2]);
+      return '';
+    });
+    assert.deepEqual(started, ['openclaw-mission-control.service', 'openclaw-log-rotate.timer']);
+  });
 });
 
 describe('probePort', () => {
@@ -65,9 +80,42 @@ describe('classify — the honesty rules', () => {
     assert.equal(classify({ id: 'gateway' }, { loaded: true, pid: null }), 'DOWN');
     assert.equal(classify({ id: 'gateway' }, { loaded: true, pid: 42 }), 'LIVE');
   });
+  it('enabled units that failed or are restarting cannot read OFF or healthy', () => {
+    assert.equal(classify({ id: 'mission-control' }, { loaded: true, active: 'failed', pid: null, portOk: false, lastExitCode: 1 }), 'UNSTABLE');
+    assert.equal(classify({ id: 'memory-daemon' }, { loaded: true, active: 'activating', pid: null, restarts: 2 }), 'UNSTABLE');
+    assert.equal(classify({ id: 'mesh-agent' }, { loaded: true, active: 'inactive', pid: null }), 'OFF');
+    assert.equal(classify({ id: 'log-rotate', timer: true }, { loaded: true, active: 'active', pid: null }), 'LOADED');
+  });
   it('every port id and periodic id uses the canonical short form', () => {
     for (const id of [...Object.keys(PORTS), ...PERIODIC]) {
       assert.equal(id, shortId(`ai.openclaw.${id}.plist`));
     }
   });
+  it('an unrelated listening port cannot make a stopped unit live, and automatic restarts are visible', () => {
+    assert.equal(classify({ id: 'mission-control' }, { loaded: false, pid: null, portOk: true }), 'OFF');
+    assert.equal(classify({ id: 'mission-control' }, { loaded: true, pid: 42, portOk: true, restarts: 3 }), 'UNSTABLE');
+  });
+});
+
+it('actual manager results distinguish intentional signals, failed units, pending restarts and invalid unit files', async () => {
+  for (const [active, sub, restarts, code, status, result, load, expected] of [
+    ['failed', 'failed', 0, 1, 1, 'exit-code', 'loaded', 'UNSTABLE'],
+    ['failed', 'failed', 0, 0, 0, 'success', 'loaded', 'DOWN'],
+    ['activating', 'auto-restart', 3, 1, 1, 'exit-code', 'loaded', 'UNSTABLE'],
+    ['activating', 'start', 0, 0, 0, 'success', 'loaded', 'UNSTABLE'],
+    ['deactivating', 'stop', 0, 0, 0, 'success', 'loaded', 'UNSTABLE'],
+    ['inactive', 'dead', 0, 2, 15, 'success', 'loaded', 'OFF'],
+    ['inactive', 'dead', 0, 2, 15, 'signal', 'loaded', 'UNSTABLE'],
+    ['inactive', 'dead', 0, 2, 9, 'oom-kill', 'loaded', 'UNSTABLE'],
+    ['inactive', 'dead', 0, 0, 0, 'success', 'bad-setting', 'DOWN'],
+    ['inactive', 'dead', 0, 0, 0, 'success', 'error', 'DOWN'],
+    ['inactive', 'dead', 0, 0, 0, 'success', 'not-found', 'DOWN'],
+  ]) {
+    const rows = await statusTable([{ id: 'memory-daemon', label: 'openclaw-memory-daemon.service', disabled: false }], {
+      platform: 'linux', probe: async () => false,
+      exec: () => `Id=openclaw-memory-daemon.service\nLoadState=${load}\nActiveState=${active}\nSubState=${sub}\nMainPID=0\nNRestarts=${restarts}\nExecMainCode=${code}\nExecMainStatus=${status}\nResult=${result}\nUnitFileState=enabled\n`,
+    });
+    assert.equal(rows[0].status, expected, `${active}/${sub}/${result}/${load}`);
+    assert.equal(['DOWN', 'UNSTABLE', 'UNKNOWN'].includes(rows[0].status), expected !== 'OFF');
+  }
 });

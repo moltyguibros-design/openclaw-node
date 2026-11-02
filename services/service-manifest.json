@@ -62,7 +62,7 @@
   {
     "name": "openclaw-lane-watchdog",
     "role": "both",
-    "autostart": true
+    "autostart": false
   },
   {
     "name": "openclaw-memory-daemon",

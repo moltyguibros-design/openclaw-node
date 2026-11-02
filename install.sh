@@ -139,6 +139,8 @@ echo ""
 echo "╔══════════════════════════════════════════╗"
 if [ "$GATE_STATE" = "accepted" ]; then
   echo "║   Installation Complete — VERIFIED       ║"
+elif [ "$GATE_STATE" = incomplete ]; then
+  echo "║   Installation Complete — PARTIAL        ║"
 else
   echo "║   Installation Complete — NOT VERIFIED   ║"
 fi

@@ -12,6 +12,35 @@ import { resolveNodeConfig } from '../lib/node-acceptance.mjs';
 
 const config = resolveNodeConfig({ OPENCLAW_HOME: '/tmp/acc', OPENCLAW_NODE_ID: 'tn' });
 
+describe('Linux service evidence', () => {
+  function context(states = {}, missing = false) {
+    return { config, path,
+      fsp: { readFile: async () => JSON.stringify({ schema: 1, activeLabels: ['ai.openclaw.nats'] }) },
+      exec: async (_cmd, args) => {
+        if (missing) return { code: 1, stdout: '', stderr: 'user bus unavailable' };
+        const label = args[2];
+        const core = ['openclaw-nats.service', 'openclaw-memory-daemon.service', 'openclaw-mission-control.service'].includes(label);
+        const values = { Id: label, LoadState: 'loaded', ActiveState: core ? 'active' : 'inactive',
+          SubState: core ? 'running' : 'dead', MainPID: core ? '42' : '0', NRestarts: '0',
+          ExecMainStatus: '0', UnitFileState: core ? 'enabled' : 'disabled', ...states[label] };
+        return { code: 0, stdout: Object.entries(values).map(([k, v]) => `${k}=${v}`).join('\n'), stderr: '' };
+      },
+    };
+  }
+  it('requires core PIDs and reports automatic restarts rather than port-only health', async () => {
+    assert.equal((await probeCoreLaunchdServices(context(), { platform: 'linux' })).status, STATUS.WORKING);
+    const unstable = context({ 'openclaw-memory-daemon.service': { NRestarts: '3' } });
+    const result = await probeCoreLaunchdServices(unstable, { platform: 'linux' });
+    assert.equal(result.status, STATUS.BROKEN);
+    assert.match(result.evidence, /restarts=3/);
+  });
+  it('unknown manager state stays unknown and an unexpected NATS instance is broken', async () => {
+    assert.equal((await probeCoreLaunchdServices(context({}, true), { platform: 'linux' })).status, STATUS.UNKNOWN);
+    const conflict = context({ 'openclaw-nats-1.service': { ActiveState: 'activating', SubState: 'auto-restart' } });
+    assert.equal((await probeCoreLaunchdServices(conflict, { platform: 'linux' })).status, STATUS.BROKEN);
+  });
+});
+
 function makeQueryDb(cfg = {}) {
   return (_p, fn) => fn({
     prepare: (sql) => ({

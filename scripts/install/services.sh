@@ -12,6 +12,29 @@ SYSTEMD_DEST="${OPENCLAW_SYSTEMD_DIR:-$HOME/.config/systemd/user}"
 INSTALLED_COUNT=0
 SKIPPED_COUNT=0
 RENDER_ERRORS=0
+LINUX_START_UNITS=()
+
+queue_linux_unit() {
+  local unit="$1" state
+  LINUX_SKIP_RENDER=false
+  $ENABLE_SERVICES || return 0
+  if $UPDATE_ONLY && { [ -e "$SYSTEMD_DEST/$unit" ] || [ -L "$SYSTEMD_DEST/$unit" ]; }; then
+    state="$(systemctl --user is-enabled "$unit" 2>/dev/null || true)"
+    case "$state" in
+      enabled|enabled-runtime) LINUX_START_UNITS+=("$unit|enable") ;;
+      masked|masked-runtime) info "  Preserving masked unit: $unit"; LINUX_SKIP_RENDER=true ;;
+      disabled|static|indirect|linked|linked-runtime)
+        if systemctl --user is-active --quiet "$unit"; then
+          LINUX_START_UNITS+=("$unit|keep")
+        else
+          info "  Preserving inactive $state unit: $unit"
+        fi ;;
+      *) error "Cannot determine prior enablement for $unit: $state"; exit 1 ;;
+    esac
+  elif [ "$SVC_AUTO" = true ]; then
+    LINUX_START_UNITS+=("$unit|enable")
+  fi
+}
 
 # Fail-loud render audit — a unit shipping a live ${VAR} placeholder is broken
 # by construction (the silent-unrendered class, 2026-07-11 audit).
@@ -104,6 +127,23 @@ else
 
     elif [ "$OS" = "linux" ]; then
       run mkdir -p "$SYSTEMD_DEST"
+      if [ "$SVC_TIMER" = true ]; then
+        if [ ! -f "$SYSTEMD_TEMPLATES/${SVC_NAME}.service" ] || [ ! -f "$SYSTEMD_TEMPLATES/${SVC_NAME}.timer" ]; then
+          error "Missing timer/service template for $SVC_NAME"
+          RENDER_ERRORS=$((RENDER_ERRORS + 1))
+          continue
+        fi
+        queue_linux_unit "${SVC_NAME}.timer"
+      else
+        if [ ! -f "$SYSTEMD_TEMPLATES/${SVC_NAME}.service" ]; then
+          error "Missing service template for $SVC_NAME"
+          RENDER_ERRORS=$((RENDER_ERRORS + 1))
+          continue
+        fi
+        queue_linux_unit "${SVC_NAME}.service"
+      fi
+
+      if $LINUX_SKIP_RENDER; then continue; fi
 
       # Handle timer-based services (service + timer)
       if [ "$SVC_TIMER" = "true" ]; then
@@ -141,13 +181,7 @@ else
           fi
           check_rendered "$DEST"
         done
-        if $ENABLE_SERVICES; then
-          run systemctl --user enable "${SVC_NAME}.timer"
-          run systemctl --user start "${SVC_NAME}.timer"
-          info "  Installed + enabled: $SVC_NAME (timer)"
-        else
-          info "  Installed: $SVC_NAME (timer — enable with: systemctl --user enable --now ${SVC_NAME}.timer)"
-        fi
+        info "  Rendered: $SVC_NAME (timer)"
       else
         TEMPLATE="$SYSTEMD_TEMPLATES/${SVC_NAME}.service"
         DEST="$SYSTEMD_DEST/${SVC_NAME}.service"
@@ -181,28 +215,33 @@ else
             "$TEMPLATE" > "$DEST"
         fi
         check_rendered "$DEST"
-        if [ "$SVC_AUTO" = "true" ] && $ENABLE_SERVICES; then
-          run systemctl --user enable "${SVC_NAME}.service"
-          run systemctl --user start "${SVC_NAME}.service"
-          info "  Installed + started: $SVC_NAME"
-        else
-          info "  Installed: $SVC_NAME"
-        fi
+        info "  Rendered: $SVC_NAME"
       fi
       INSTALLED_COUNT=$((INSTALLED_COUNT + 1))
     fi
   done <<< "$SERVICES"
 
-  # Reload systemd if any units were installed
-  if [ "$OS" = "linux" ] && [ "$INSTALLED_COUNT" -gt 0 ]; then
-    run systemctl --user daemon-reload
-    # Enable linger so user services survive logout
-    loginctl enable-linger "$(whoami)" 2>/dev/null || warn "loginctl enable-linger failed — services may stop on logout"
-  fi
-
   if [ "$RENDER_ERRORS" -gt 0 ]; then
     error "$RENDER_ERRORS unit(s) rendered with live placeholders — aborting (fix the template/render mapping)"
     exit 1
+  fi
+
+  if [ "$OS" = linux ] && [ "$INSTALLED_COUNT" -gt 0 ]; then
+    run systemctl --user daemon-reload
+    if $ENABLE_SERVICES; then
+      for entry in "${LINUX_START_UNITS[@]:-}"; do
+        [ -n "$entry" ] || continue
+        unit="${entry%%|*}"; persist="${entry#*|}"
+        if [ "$persist" = enable ]; then run systemctl --user enable "$unit"; fi
+        if $UPDATE_ONLY; then
+          run systemctl --user restart "$unit"
+        else
+          run systemctl --user start "$unit"
+        fi
+        info "  Activated current unit: $unit"
+      done
+      run loginctl enable-linger "$(whoami)" 2>/dev/null || warn "loginctl enable-linger failed — services may stop on logout"
+    fi
   fi
 
   info "Services installed: $INSTALLED_COUNT (skipped $SKIPPED_COUNT — wrong role)"

@@ -68,7 +68,7 @@ run rsync -av --exclude='*.bak' --exclude='*.bak.*' --exclude='routing-eval-test
 for _wsbin in node-watch.mjs node-acceptance.mjs openclaw-notify.mjs \
               obsidian-graph-cache.mjs observer.mjs consolidation-scheduler.mjs \
               hyperagent.mjs embed-probe.mjs scheduler-heartbeat.mjs \
-              nats-legacy-lock.py; do
+              mc-session-init.mjs nats-legacy-lock.py; do
   if [ ! "$REPO_DIR/bin/$_wsbin" -ef "$WORKSPACE/bin/$_wsbin" ]; then
     run cp "$REPO_DIR/bin/$_wsbin" "$WORKSPACE/bin/$_wsbin"
   fi

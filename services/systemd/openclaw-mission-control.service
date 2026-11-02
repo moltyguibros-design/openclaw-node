@@ -4,6 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
+ExecStartPre=${NODE_BIN} ${OPENCLAW_WORKSPACE}/bin/mc-session-init.mjs
 ExecStart=${NPM_BIN} start
 Restart=always
 RestartSec=5
