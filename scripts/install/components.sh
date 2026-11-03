@@ -278,7 +278,7 @@ step "Step 13: Companion Bridge"
 if $SANDBOX; then
   info "Sandbox: skipping companion-bridge"
 elif command -v companion-bridge >/dev/null 2>&1; then
-  info "companion-bridge already installed: $(companion-bridge --version 2>/dev/null || echo 'found')"
+  info "companion-bridge already installed (on PATH)"
 else
   info "Installing companion-bridge (OpenAI-compatible adapter for Claude Code)..."
   if [ "$OS" = "linux" ]; then

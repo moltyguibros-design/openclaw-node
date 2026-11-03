@@ -3,9 +3,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { stageRuntime, withRuntimeTransaction } from '../lib/runtime-deploy.mjs';
 import { archiveRuntime } from '../lib/runtime-retention.mjs';
+
+const verifier = fileURLToPath(new URL('../scripts/install/verify-runtime-archive.py', import.meta.url));
+const reader = fileURLToPath(new URL('./helpers/runtime-retention-process-reader.py', import.meta.url));
+const referenceRefusal = error => error.message === 'Runtime archive refused: Selected release has a current/previous/config/unit/workspace/process reference';
+const shellQuote = value => "'" + value.replaceAll("'", "'\\''") + "'";
 
 function fixture(t) {
   const scratch = fileURLToPath(new URL('../.tmp/', import.meta.url));
@@ -28,7 +33,15 @@ function fixture(t) {
     releases.push(stageRuntime({ root, source, availableBytes: () => 64 * 1024 ** 3 }));
   }
   fs.mkdirSync(path.join(root, 'workspace'));
-  return { home, root, source, releases, names: releases.slice(0, 2).map(r => r.digest), parent: path.join(root, 'runtime/node') };
+  const parent = path.join(root, 'runtime/node'), configPath = path.join(home, 'reader-config.json');
+  const config = { parent, uid: process.getuid(), mode: 'live', node: process.execPath, liveReference: null };
+  const setReader = value => fs.writeFileSync(configPath, JSON.stringify({ ...config, ...value }), { mode: 0o600 });
+  setReader({});
+  fs.writeFileSync(path.join(stub, 'sudo'), `#!/bin/sh\nexec /usr/bin/python3 -I -S -B ${shellQuote(reader)} ${shellQuote(configPath)} "$@"\n`, { mode: 0o755 });
+  const readerArgv = ['-n', '/usr/bin/python3', '-I', '-S', '-B', verifier, '--process-references', parent, '--uid', String(config.uid)];
+  const invokeReader = (args = readerArgv) => spawnSync('/usr/bin/python3', ['-I', '-S', '-B', reader, configPath, ...args], { encoding: 'utf8', timeout: 15000 });
+  const journal = () => fs.readFileSync(path.join(home, 'reader.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  return { home, root, source, releases, names: releases.slice(0, 2).map(r => r.digest), parent, setReader, invokeReader, readerArgv, journal };
 }
 
 const linux = process.platform === 'linux';
@@ -38,11 +51,17 @@ test('archive verifies every file/link and preserves shared dependency bytes bef
   const data = path.join(f.root, 'owned-current.db'); fs.writeFileSync(data, 'owned data remains');
   const result = archiveRuntime({ root: f.root, privilegedProcessReader: true, releases: f.names });
   assert.equal(result.phase, 'complete'); assert.deepEqual(result.pruned, [...f.names].sort());
+  const observations = f.journal();
+  assert.equal(observations.length, 2);
+  for (const record of observations) {
+    assert.equal(record.mode, 'live'); assert.equal(record.scanner_called, true); assert.equal(record.enumerated, true);
+    assert.equal(record.entries.length, 1); assert.match(record.entries[0], /^\/proc\/\d+$/);
+    assert.equal(record.outcome, 'success'); assert.deepEqual(record.selected, []);
+  }
   for (const name of f.names) assert.equal(fs.existsSync(path.join(f.parent, name)), false);
   for (const release of f.releases.slice(2)) assert.equal(fs.existsSync(release.release), true);
   assert.equal(fs.realpathSync(path.join(f.parent, 'current')), current);
   assert.equal(fs.readFileSync(data, 'utf8'), 'owned data remains');
-  const verifier = fileURLToPath(new URL('../scripts/install/verify-runtime-archive.py', import.meta.url));
   const verified = spawnSync('/usr/bin/python3', ['-I', '-S', '-B', verifier, '--verify', result.attempt], { encoding: 'utf8' });
   assert.equal(verified.status, 0, verified.stderr); assert.equal(JSON.parse(verified.stdout).archive_sha256, result.archive_sha256);
   const archive = path.join(result.attempt, 'runtime.tar.gz');
@@ -53,9 +72,9 @@ test('archive verifies every file/link and preserves shared dependency bytes bef
 
 test('current, current previous, installation metadata and workspace references refuse without archive allocation', { skip: !linux }, t => {
   const f = fixture(t);
-  for (const r of f.releases.slice(2)) assert.throws(() => archiveRuntime({ root: f.root, privilegedProcessReader: true, releases: [r.digest] }), /reference/);
+  for (const r of f.releases.slice(2)) assert.throws(() => archiveRuntime({ root: f.root, privilegedProcessReader: true, releases: [r.digest] }), referenceRefusal);
   fs.symlinkSync(path.join(f.releases[0].release, 'node_modules'), path.join(f.root, 'workspace/node_modules'));
-  assert.throws(() => archiveRuntime({ root: f.root, privilegedProcessReader: true, releases: [f.names[0]] }), /reference/);
+  assert.throws(() => archiveRuntime({ root: f.root, privilegedProcessReader: true, releases: [f.names[0]] }), referenceRefusal);
   assert.equal(fs.existsSync(path.join(f.root, 'runtime/node-archives')), false);
 });
 
@@ -127,26 +146,121 @@ test('retained staging/selection leftovers refuse archival without touching thei
 test('active config and non-ASCII installation metadata keep retired code referenced', { skip: !linux }, t => {
   const f = fixture(t), config = path.join(f.root, 'config/owned-policy.json');
   fs.writeFileSync(config, JSON.stringify({ root: f.releases[0].release }));
-  assert.throws(() => archiveRuntime({ root: f.root, privilegedProcessReader: true, releases: f.names }), /reference/);
+  assert.throws(() => archiveRuntime({ root: f.root, privilegedProcessReader: true, releases: f.names }), referenceRefusal);
   fs.unlinkSync(config);
   const envFile = path.join(f.root, 'openclaw.env');
   fs.writeFileSync(envFile, `OWNED_ROOT='${f.releases[0].release}'\n`);
-  assert.throws(() => archiveRuntime({ root: f.root, privilegedProcessReader: true, releases: f.names }), /reference/);
+  assert.throws(() => archiveRuntime({ root: f.root, privilegedProcessReader: true, releases: f.names }), referenceRefusal);
   fs.unlinkSync(envFile);
   const record = path.join(f.root, 'config/installation.json'), value = JSON.parse(fs.readFileSync(record));
   value.previousComplete = { runtime: f.releases[0].release };
   fs.writeFileSync(record, JSON.stringify(value));
-  assert.throws(() => archiveRuntime({ root: f.root, privilegedProcessReader: true, releases: f.names }), /reference/);
+  assert.throws(() => archiveRuntime({ root: f.root, privilegedProcessReader: true, releases: f.names }), referenceRefusal);
   assert.equal(fs.existsSync(f.releases[0].release), true);
 });
 
-test('an owned process using a retired release only through NODE_PATH protects it', { skip: !linux }, async t => {
+test('an owned process using a retired release only through NODE_PATH protects it', { skip: !linux }, t => {
   const f = fixture(t);
-  const child = spawn(process.execPath, ['-e', 'console.log("ready");setTimeout(()=>{},30000)'], {
-    cwd: f.home, env: { ...process.env, NODE_PATH: f.releases[0].release + ':' + path.join(f.home, 'another') }, stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  await new Promise((resolve, reject) => { child.stdout.once('data', resolve); child.once('error', reject); });
-  try { assert.throws(() => archiveRuntime({ root: f.root, privilegedProcessReader: true, releases: f.names }), /reference/); }
-  finally { const exited = new Promise(resolve => child.once('exit', resolve)); child.kill(); await exited; }
+  f.setReader({ liveReference: f.releases[0].release });
+  assert.throws(() => archiveRuntime({ root: f.root, privilegedProcessReader: true, releases: f.names }), referenceRefusal);
+  const [record] = f.journal();
+  assert.equal(record.scanner_called, true); assert.equal(record.enumerated, true);
+  assert.equal(record.mode, 'live'); assert.equal(record.outcome, 'success');
+  assert.equal(record.entries.length, 2); assert.ok(record.entries.includes(`/proc/${record.child_pid}`));
+  assert.deepEqual(record.selected, [f.names[0]]); assert.equal(record.child_reaped, true);
+  assert.throws(() => process.kill(record.child_pid, 0), { code: 'ESRCH' });
   assert.equal(fs.existsSync(f.releases[0].release), true);
+  assert.equal(fs.existsSync(path.join(f.root, 'runtime/node-archives')), false);
+});
+
+function procEntry(f, channel, identity = Array(4).fill(process.getuid())) {
+  const proc = path.join(f.home, 'proc');
+  fs.rmSync(proc, { recursive: true, force: true });
+  const entry = path.join(proc, '12345'); fs.mkdirSync(path.join(entry, 'fd'), { recursive: true });
+  fs.writeFileSync(path.join(entry, 'status'), `Name:\towned\nUid:\t${identity.join('\t')}\n`);
+  for (const field of ['cmdline', 'maps', 'environ']) fs.writeFileSync(path.join(entry, field), 'owned');
+  for (const field of ['cwd', 'exe', 'root']) fs.symlinkSync(f.home, path.join(entry, field));
+  fs.symlinkSync(f.home, path.join(entry, 'fd/4'));
+  if (['cmdline', 'maps', 'environ'].includes(channel)) {
+    fs.writeFileSync(path.join(entry, channel), `owned\0${f.releases[0].release}\0`);
+  } else if (channel) {
+    const link = path.join(entry, channel === 'fd' ? 'fd/4' : channel);
+    fs.unlinkSync(link); fs.symlinkSync(f.releases[0].release, link);
+  }
+  f.setReader({ mode: 'synthetic' });
+  return entry;
+}
+
+test('owned reader exercises every production process-reference channel', { skip: !linux }, t => {
+  const f = fixture(t);
+  for (const channel of ['cmdline', 'maps', 'environ', 'cwd', 'exe', 'root', 'fd']) {
+    procEntry(f, channel);
+    const result = f.invokeReader();
+    assert.equal(result.status, 0, result.stderr); assert.deepEqual(JSON.parse(result.stdout), [f.names[0]], channel);
+    const record = f.journal().at(-1);
+    assert.equal(record.scanner_called, true); assert.equal(record.enumerated, true);
+    assert.equal(record.entries.length, 1); assert.equal(record.outcome, 'success');
+  }
+});
+
+test('owned reader matches each UID field and ignores other UIDs and non-PID entries', { skip: !linux }, t => {
+  const f = fixture(t), uid = process.getuid();
+  for (let i = 0; i < 4; i++) {
+    const identity = Array(4).fill(uid + 1); identity[i] = uid;
+    procEntry(f, 'environ', identity);
+    const result = f.invokeReader();
+    assert.equal(result.status, 0, result.stderr); assert.deepEqual(JSON.parse(result.stdout), [f.names[0]]);
+  }
+  const entry = procEntry(f, 'environ', Array(4).fill(uid + 1));
+  fs.mkdirSync(path.join(f.home, 'proc/not-a-pid'));
+  let result = f.invokeReader(); assert.equal(result.status, 0, result.stderr); assert.deepEqual(JSON.parse(result.stdout), []);
+  fs.writeFileSync(path.join(entry, 'status'), 'Name:\towned\n');
+  result = f.invokeReader(); assert.equal(result.status, 0, result.stderr); assert.deepEqual(JSON.parse(result.stdout), []);
+});
+
+test('owned reader distinguishes a disappeared process from denied metadata', { skip: !linux }, t => {
+  const f = fixture(t), entry = procEntry(f, 'environ');
+  fs.unlinkSync(path.join(entry, 'cmdline'));
+  let result = f.invokeReader(); assert.equal(result.status, 0, result.stderr); assert.deepEqual(JSON.parse(result.stdout), []);
+  fs.writeFileSync(path.join(entry, 'cmdline'), 'owned');
+  fs.chmodSync(path.join(entry, 'maps'), 0);
+  try {
+    result = f.invokeReader(); assert.equal(result.status, 77); assert.match(result.stderr, /PermissionError/);
+    const record = f.journal().at(-1);
+    assert.equal(record.scanner_called, true); assert.equal(record.outcome, 'error'); assert.equal(record.error_type, 'PermissionError');
+  } finally { fs.chmodSync(path.join(entry, 'maps'), 0o600); }
+});
+
+test('owned reader refuses changed command arguments, parent and UID', { skip: !linux }, t => {
+  const f = fixture(t);
+  for (const args of [f.readerArgv.slice(1), [...f.readerArgv, '--extra'], f.readerArgv.map(value => value === f.parent ? f.home : value), [...f.readerArgv.slice(0, -1), String(process.getuid() + 1)]]) {
+    const result = f.invokeReader(args); assert.equal(result.status, 77); assert.match(result.stderr, /Unexpected owned reader argv/);
+  }
+  for (const value of [{ parent: f.home }, { uid: process.getuid() + 1 }, { uid: String(process.getuid()) }]) {
+    f.setReader(value);
+    const result = f.invokeReader(); assert.equal(result.status, 77); assert.match(result.stderr, /parent\/UID mismatch/);
+  }
+  assert.equal(fs.existsSync(path.join(f.home, 'reader.jsonl')), false);
+});
+
+test('a denied reader cannot satisfy the protected-reference assertion', { skip: !linux }, t => {
+  const f = fixture(t); f.setReader({ mode: 'denied' });
+  assert.throws(() => archiveRuntime({ root: f.root, privilegedProcessReader: true, releases: f.names }), error => {
+    assert.match(error.message, /--process-references/); assert.match(error.message, /exit status 77/);
+    assert.equal(referenceRefusal(error), false); return true;
+  });
+  const [record] = f.journal();
+  assert.equal(record.scanner_called, false); assert.equal(record.outcome, 'error'); assert.equal(record.error_type, 'PermissionError');
+  assert.equal(fs.existsSync(path.join(f.root, 'runtime/node-archives')), false);
+  for (const release of f.releases) assert.equal(fs.existsSync(release.release), true);
+});
+
+test('malformed reader data refuses before archive allocation and preserves code', { skip: !linux }, t => {
+  const f = fixture(t); f.setReader({ mode: 'malformed' });
+  assert.throws(() => archiveRuntime({ root: f.root, privilegedProcessReader: true, releases: f.names }), error => {
+    assert.match(error.message, /Expecting value/); assert.equal(referenceRefusal(error), false); return true;
+  });
+  assert.equal(f.journal()[0].outcome, 'malformed-output-control');
+  assert.equal(fs.existsSync(path.join(f.root, 'runtime/node-archives')), false);
+  for (const release of f.releases) assert.equal(fs.existsSync(release.release), true);
 });
