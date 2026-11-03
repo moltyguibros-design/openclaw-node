@@ -34,7 +34,7 @@ if (meshOnly) {
     stdio: 'inherit',
     env: { ...process.env },
   });
-  process.exit(result.status || 0);
+  process.exit(result.status ?? 1);
 } else {
   // Full install or update — runs install.sh
   if (!fs.existsSync(INSTALL_SCRIPT)) {
@@ -49,5 +49,5 @@ if (meshOnly) {
     cwd: PKG_ROOT,
     env: { ...process.env, REPO_DIR: PKG_ROOT },
   });
-  process.exit(result.status || 0);
+  process.exit(result.status ?? 1);
 }
