@@ -236,7 +236,7 @@ else
   # and dies mid-run under `set -e`.
   $SUDO apt-get update -y || die "apt-get update failed."
   $SUDO apt-get install -y \
-    curl git sqlite3 build-essential jq python3 python3-pip python3-venv ca-certificates gnupg \
+    curl git rsync openssl sqlite3 build-essential jq python3 python3-pip python3-venv ca-certificates gnupg \
     || die "apt baseline install failed."
   ok "git, sqlite3, build-essential, jq, python3 installed"
 
@@ -334,6 +334,8 @@ chk "sqlite3"       'command -v sqlite3'
 chk "build tools"   '{ [ "$OS" = macos ] && xcode-select -p; } || command -v cc'
 chk "curl"          'command -v curl'
 chk "jq"            'command -v jq'
+chk "rsync"         'command -v rsync'
+chk "openssl"       'command -v openssl'
 chk "nats-server 2.12.15+" 'nats_ok'
 $BOOTSTRAP_SKIP_LLM || chk "ollama" 'command -v ollama'
 $BOOTSTRAP_SKIP_MESH || chk "tailscale" 'command -v tailscale'

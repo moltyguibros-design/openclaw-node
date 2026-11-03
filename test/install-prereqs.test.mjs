@@ -15,10 +15,12 @@ function executable(file, body) {
 }
 
 function fixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-prereqs-'));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-prereqs-')));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const bin = path.join(root, 'bin');
-  fs.mkdirSync(bin);
+  const home = path.join(root, 'home');
+  const tmp = path.join(root, 'tmp');
+  for (const dir of [bin, home, tmp]) fs.mkdirSync(dir, { mode: 0o700 });
   for (const command of ['id', 'mktemp', 'rm', 'cp', 'chmod', 'tar', 'gzip']) {
     const usr = `/usr/bin/${command}`, system = fs.existsSync(usr) ? usr : `/bin/${command}`;
     fs.symlinkSync(system, path.join(bin, command));
@@ -26,16 +28,17 @@ function fixture(t) {
   fs.symlinkSync('/bin/bash', path.join(bin, 'bash'));
   if (process.platform === 'linux') fs.symlinkSync('/usr/bin/sha256sum', path.join(bin, 'sha256sum'));
   executable(path.join(bin, 'uname'), 'case "$1" in -s) echo Linux;; -m) echo aarch64;; esac');
-  executable(path.join(bin, 'apt-get'), 'exit 0');
+  executable(path.join(bin, 'apt-get'), 'printf "%s\\n" "$*" >> "$OWNED_APT_CALLS"; exit 0');
   executable(path.join(bin, 'sudo'), 'exec "$@"');
   executable(path.join(bin, 'node'), 'echo "${OWNED_NODE_VERSION}"');
   executable(path.join(bin, 'nats-server'), 'echo "nats-server: v${OWNED_NATS_VERSION}"');
   executable(path.join(bin, 'python3'), 'exit 0');
   executable(path.join(bin, 'curl'), 'while [ "$#" -gt 0 ]; do if [ "$1" = --output ]; then shift; cp "$OWNED_ARCHIVE" "$1"; exit $?; fi; shift; done; exit 1');
   executable(path.join(bin, 'install'), 'printf "%s\\n" "$*" >> "$OWNED_INSTALL_CALLS"; cp "$1" "$OWNED_BIN/nats-server"; chmod +x "$OWNED_BIN/nats-server"');
-  for (const command of ['git', 'sqlite3', 'cc', 'jq']) executable(path.join(bin, command), 'exit 0');
+  for (const command of ['git', 'sqlite3', 'cc', 'jq', 'rsync', 'openssl']) executable(path.join(bin, command), 'exit 0');
   if (process.platform === 'darwin') executable(path.join(bin, 'sha256sum'), 'exec /usr/bin/shasum -a 256 "$@"');
-  const env = { ...process.env, PATH: bin, OWNED_BIN: bin,
+  const env = { ...process.env, PATH: bin, HOME: home, TMPDIR: tmp,
+    OWNED_APT_CALLS: path.join(root, 'apt-calls'), OWNED_BIN: bin,
     OWNED_NODE_VERSION: 'v22.12.0', OWNED_NATS_VERSION: '2.12.15',
     OWNED_INSTALL_CALLS: path.join(root, 'install-calls'),
     OPENCLAW_SKIP_LLM: '1', OPENCLAW_SKIP_MESH: '1' };
@@ -43,8 +46,12 @@ function fixture(t) {
 }
 
 function run(f, extra = {}, check = true) {
-  return spawnSync('/bin/bash', [script, ...(check ? ['--check'] : [])],
-    { env: { ...f.env, ...extra }, encoding: 'utf8' });
+  const result = spawnSync('/bin/bash', [script, ...(check ? ['--check'] : [])],
+    { env: { ...f.env, ...extra }, encoding: 'utf8', timeout: 10_000,
+      killSignal: 'SIGKILL', maxBuffer: 1024 * 1024 });
+  assert.ifError(result.error);
+  assert.equal(result.signal, null, result.stderr);
+  return result;
 }
 
 test('check enforces Node 22.12 floor and retains NATS when mesh is skipped', t => {
@@ -106,4 +113,41 @@ test('system dependency step forwards the mesh choice in dry-run and install pat
     assert.equal(result.status, 0, result.stderr);
   }
   assert.deepEqual(fs.readFileSync(forward, 'utf8').trim().split('\n'), ['1/1/--check', '1/1/']);
+});
+
+for (const missing of [['rsync'], ['openssl'], ['rsync', 'openssl']]) {
+  test(`check refuses missing ${missing.join(' and ')}`, t => {
+    const f = fixture(t);
+    for (const command of missing) fs.unlinkSync(path.join(f.bin, command));
+    const result = run(f);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    for (const command of missing) assert.match(result.stdout, new RegExp(`${command}.*MISSING`));
+    assert.equal(fs.existsSync(f.env.OWNED_APT_CALLS), false);
+    assert.equal(fs.existsSync(f.env.OWNED_INSTALL_CALLS), false);
+  });
+
+  test(`Linux baseline refuses APT success with missing ${missing.join(' and ')}`, t => {
+    const f = fixture(t);
+    for (const command of missing) fs.unlinkSync(path.join(f.bin, command));
+    const result = run(f, {}, false);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    for (const command of missing) assert.match(result.stdout, new RegExp(`${command}.*MISSING`));
+    assert.match(fs.readFileSync(f.env.OWNED_APT_CALLS, 'utf8'), /^install -y /m);
+    assert.equal(fs.existsSync(f.env.OWNED_INSTALL_CALLS), false);
+  });
+}
+
+test('Linux baseline requests rsync and openssl before reporting success', t => {
+  const f = fixture(t);
+  const result = run(f, {}, false);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const calls = fs.readFileSync(f.env.OWNED_APT_CALLS, 'utf8').trim().split('\n').map(line => line.split(' '));
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0], ['update', '-y']);
+  assert.deepEqual(calls[1].slice(0, 2), ['install', '-y']);
+  for (const command of ['rsync', 'openssl']) {
+    assert.equal(calls[1].filter(arg => arg === command).length, 1);
+    assert.match(result.stdout, new RegExp(command));
+  }
+  assert.equal(fs.existsSync(f.env.OWNED_INSTALL_CALLS), false);
 });
