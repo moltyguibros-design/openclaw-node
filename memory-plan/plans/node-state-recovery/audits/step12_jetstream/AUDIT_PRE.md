@@ -4265,3 +4265,26 @@ D346 U4 PRE reconciliation: prospective PRE-v3 7e5bd744 froze the exact14 source
 
 
 D347 U5a PRE reconciliation: frozen five-path prospective PRE78dd4554; v1 Claude72/73 required one inherited-setting correction, retained, then exact v2 Claude74/75 CLEAR. Focused23/23 and one Ubuntu model-free whole update rc0/preservation proof a5e7d7c45924b9b5280e09c491ce7eac0d0b18f3c3207759f6147a997c4b6f2e. Acceptance remains INCOMPLETE L4, root suite RED5/2820; no final-head/ownCI/operational clearance.
+
+
+## D348 — Prospective combined111 own-receipt scope (2026-11-04 04:04:02 EST)
+
+Existing recovery1.2 is[A]/v1.2-pre; this is the separate operator-requested combined Ubuntu source receipt. Exact111 own full CI DATA is verified; installationL4/U6/U7/Mac/whole-node/recovery and this future receipt acceptance remain open. Record actual dated proof without borrowing parent green for the future receipt.
+
+Prospective external PRE was written before these seven off-repository projections: /Users/moltymac/.codex/outputs/openclaw-recovery/linux-vm-first-terrain/remediation-20261102/final-combined-111e35e3-own-receipt-candidate-v1/PRE.json (5177 bytes/SHA256 0f450624f94f97001649bea620a80884c60fc59e0ec356608d29c305b337ec9c). It freezes exactly these file deltas:
+
+- `memory-plan/plans/node-state-recovery/COMPONENT_REGISTRY.md`: pure append only; preserve every existing byte/row/status/contract/cell.
+- `memory-plan/plans/node-state-recovery/DECISIONS.md`: pure append only; preserve every existing byte/row/status/contract/cell.
+- `memory-plan/plans/node-state-recovery/INVENTORY.md`: pure append only; preserve every existing byte/row/status/contract/cell.
+- `memory-plan/plans/node-state-recovery/RECOVERY_FRONTIER.md`: pure append only; preserve every existing byte/row/status/contract/cell.
+- `memory-plan/plans/node-state-recovery/audits/step12_jetstream/AUDIT_PRE.md`: pure append only; preserve every existing byte/row/status/contract/cell.
+- `memory-plan/plans/node-state-recovery/audits/step12_jetstream/AUDIT_POST.md`: pure append only; preserve every existing byte/row/status/contract/cell.
+- `memory-plan/plans/node-state-recovery/audits/step12_jetstream/UBUNTU_REMEDIATION_20261102.md`: pure append only; preserve every existing byte/row/status/contract/cell.
+
+Six files receive the identical D348 block (15527 bytes/SHA256 98b6409ffa55687cc934c0cfc95316092010001b572a68b7a49ae06224ad40c9); this AUDIT_PRE receives only this distinct prospective append. No VERSION, measurement-source, P0, registration, enabled workflow, runtime, package, dependency or audit-policy change. The candidate is prepared only; no source application/stage/Git commit, push, PR/CI/VM/host/native/credential/automation operation.
+
+Readiness: immutable111/parentac7668b5/tree951510e5 and current3631sealedrecords/170inputs/full2427source27396562B/modes/Gitblobs/stagedprojection verified. No raw Git-index metadata claim. Closed collector46240 and full DATA consumer67165 remain closed; no new source/fixture/control/native run. Full CI proof /Users/moltymac/.codex/outputs/openclaw-recovery/linux-vm-first-terrain/remediation-20261102/final-combined-111e35e3-full-CI-artifact-data-launch-v3/completion-proof.json (5555 bytes/SHA256 e332f982ca1745cc09afc1508e1f85c0f466814a16df6ac3c5203f787c605434) retains actual primary response/ZIP/report/journal/log/source bindings.
+
+Risks/carry-forwards: Source20/21staticCLEAR does not clear receipt or installation. Exact method32/33staticCLEAR required actual88offlinePASS and fresh external admission before the successful one DATA acquisition; v1NOTCLEAR/v2offlineFAIL stay visible. All six source risks, source/method/completion notes, helper acceptancefalse, broad-exception/capture/timing/interference limits and original failures remain. No local current host/guest freshness, protected identity, tool executable authentication or native-positive claim.
+
+Later gates: static review of this exact frozen projection in SAME Claude session; normal local materialization/commit must equal its exact source/tree/message selection. The actual immutable enabled receipt commit needs explicit exact RECEIPT ENABLING CLEAR before safe no-run transport/fresh primary base ancestry/SAMEcommit normalFF promotion. Receipt OWN new8fresh/fullold+NEWartifact and ENTIREpretoolchain-runner-tree proof remain separate. No original outcome is changed and no next operational unit follows automatically. B5/1.2/protected[A]/v1.2-pre/B6–B9/D62/D64/D168/D173–D175/D261 and all host/resource/session/rootcopy/install/reboot/manual/parent/R7/N1–N6/nativepositive/incident/cleanup/B6payload holds persist. Heartbeat PAUSED; production DISABLED.
