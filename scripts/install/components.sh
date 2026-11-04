@@ -5,7 +5,7 @@
 step "Step 8.6: LLM Backend"
 
 if $SKIP_LLM; then
-  info "Skipped (--skip-llm) — extraction degrades to regex; local agents have no provider"
+  info "Model provisioning deferred; runtime model capability=$OPENCLAW_MODEL_ENABLED"
 elif $DRY_RUN; then
   if llm_url_is_local "$LLM_BASE_URL"; then
     info "[dry-run] would ensure ollama up, RAM-tier LLM_MODEL, model pulled, embedder prefetched"
@@ -142,65 +142,16 @@ fi
 
 step "Step 11: Mission Control"
 
-MC_DIR="$WORKSPACE/projects/mission-control"
-if [ ! -d "$MC_DIR/src" ]; then
-  run mkdir -p "$MC_DIR"
-  run rsync -av --exclude='node_modules' --exclude='.next' --exclude='*.db' \
-    "$REPO_DIR/mission-control/" "$MC_DIR/"
-  info "Mission Control source copied"
-else
-  info "Mission Control already exists, updating source..."
-  run rsync -av --exclude='node_modules' --exclude='.next' --exclude='*.db' \
-    "$REPO_DIR/mission-control/" "$MC_DIR/"
-fi
-
+export OPENCLAW_MISSION_CONTROL_DIR="$OPENCLAW_ROOT/runtime/mission-control/current"
+MC_DIR="$OPENCLAW_MISSION_CONTROL_DIR"
 if $SANDBOX; then
-  info "Sandbox: skipping Mission Control dependencies + build"
-elif [ ! -d "$MC_DIR/node_modules" ]; then
-  info "Installing Mission Control dependencies (this may take a minute)..."
-  (cd "$MC_DIR" && run npm install)
-elif $UPDATE_ONLY; then
-  info "Updating Mission Control dependencies..."
-  (cd "$MC_DIR" && run npm install)
+  info "Sandbox: Mission Control build/activation skipped; existing deployment preserved"
+elif $DRY_RUN; then
+  info "[dry-run] would stage, install, build and select Mission Control at $MC_DIR"
 else
-  info "Mission Control dependencies already installed"
+  "$NODE_BIN" "$REPO_DIR/bin/deploy-mission-control.mjs" \
+    --source "$REPO_DIR/mission-control" --root "$OPENCLAW_ROOT" --workspace "$WORKSPACE"
 fi
-
-# Production build — the unit runs `npm start` (= next start), which needs a
-# .next build; without one the unit crash-loops (2026-07-11 audit).
-if ! $SANDBOX && ! $DRY_RUN && [ -d "$MC_DIR/node_modules" ] && [ ! -d "$MC_DIR/.next" ]; then
-  info "Building Mission Control (next build)..."
-  if (cd "$MC_DIR" && npm run build); then
-    info "Mission Control production build ready"
-  else
-    warn "Mission Control build FAILED — the unit cannot serve until fixed (known queued tsc errors)."
-    warn "Interim: cd $MC_DIR && npm run dev   — the acceptance gate reports MC honestly either way"
-  fi
-fi
-
-# Create .env.local for MC if not exists
-if [ ! -f "$MC_DIR/.env.local" ]; then
-  write_file "$MC_DIR/.env.local" << MCENV
-# Mission Control Environment
-WORKSPACE_ROOT=$WORKSPACE
-OPENCLAW_HOME=$OPENCLAW_ROOT
-DB_PATH=$MC_DIR/data/mission-control.db
-
-# NATS (mesh connectivity — resolved from openclaw.env if not set here)
-OPENCLAW_NATS=${OPENCLAW_NATS:-}
-OPENCLAW_NATS_TOKEN=${OPENCLAW_NATS_TOKEN:-}
-OPENCLAW_NATS_AUTH=${OPENCLAW_NATS_AUTH:-token}
-
-# TTS (optional — falls back to Edge TTS if missing)
-GEMINI_API_KEY=${GOOGLE_API_KEY:-}
-MCENV
-  # Holds the NATS token and an API key — never leave it at the default umask.
-  run chmod 600 "$MC_DIR/.env.local"
-  info "Created Mission Control .env.local (mode 600)"
-fi
-
-# Ensure data directory exists for SQLite
-run mkdir -p "$MC_DIR/data"
 
 # ============================================================
 # Step 12: Playwright (web-fetch fallback)
@@ -210,7 +161,41 @@ step "Step 12: Playwright Browser"
 
 if $SANDBOX; then
   info "Sandbox: skipping Playwright"
-elif [ -e "$WORKSPACE/node_modules/playwright" ]; then
+else
+  PLAYWRIGHT_UBUNTU26_ARM64=false
+  if [ "$OS" = linux ] && [ -r /etc/os-release ]; then
+    PLAYWRIGHT_OS_ID=$(sed -n 's/^ID=//p' /etc/os-release)
+    case "$PLAYWRIGHT_OS_ID" in
+      ubuntu|'"ubuntu"'|"'ubuntu'")
+        PLAYWRIGHT_OS_VERSION=$(sed -n 's/^VERSION_ID=//p' /etc/os-release)
+        case "$PLAYWRIGHT_OS_VERSION" in
+          \"*\"|\'*\')
+            PLAYWRIGHT_OS_VERSION=${PLAYWRIGHT_OS_VERSION#?}
+            PLAYWRIGHT_OS_VERSION=${PLAYWRIGHT_OS_VERSION%?}
+            ;;
+        esac
+        if ! [[ "$PLAYWRIGHT_OS_VERSION" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+          error "Linux OS identity is malformed; browser platform selection refused"
+          exit 1
+        fi
+        if [ "$PLAYWRIGHT_OS_VERSION" = 26.04 ]; then
+          if [ "$(uname -m)" != aarch64 ]; then
+            error "Ubuntu 26.04 browser selection is reviewed only for ARM64; unsupported architecture refused"
+            exit 1
+          fi
+          PLAYWRIGHT_UBUNTU26_ARM64=true
+        fi
+        ;;
+    esac
+  fi
+
+  if $DRY_RUN; then
+    if $PLAYWRIGHT_UBUNTU26_ARM64; then
+      info "[dry-run] would select ubuntu24.04-arm64 Chromium on Ubuntu 26.04 ARM64 without automatic system dependencies if installed Playwright is exactly 1.58.2; would verify a headless launch"
+    else
+      info "[dry-run] would install Chromium ($OS) and verify a headless launch"
+    fi
+  elif [ -e "$WORKSPACE/node_modules/playwright" ]; then
   # playwright is a ROOT dependency; the workspace node_modules tree is a set
   # of symlinks into the root install (workspace.sh link_dependency_tree).
   # Running `npm install --save playwright` INSIDE the workspace was the root
@@ -218,9 +203,70 @@ elif [ -e "$WORKSPACE/node_modules/playwright" ]; then
   # workspace against its own (near-empty) package.json and pruned every
   # symlinked mesh dependency as extraneous. Never npm-install in the workspace.
   info "Playwright available via the shared dependency tree"
-  (cd "$REPO_DIR" && run npx playwright install chromium 2>/dev/null) || warn "Chromium browser install failed"
-else
-  warn "playwright missing from the shared dependency tree — the root 'npm install' did not complete; re-run install.sh"
+  if $PLAYWRIGHT_UBUNTU26_ARM64; then
+    if [ "$("$NODE_BIN" -p 'process.arch' 2>/dev/null)" != arm64 ]; then
+      error "Ubuntu 26.04 ARM64 browser selection requires an ARM64 Node runtime"
+      exit 1
+    fi
+    if ! "$NODE_BIN" - "$REPO_DIR" <<'PLAYWRIGHT_PINS'
+const fs = require('node:fs');
+const path = require('node:path');
+const root = process.argv[2];
+const read = file => JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
+try {
+  const lock = read('package-lock.json').packages;
+  for (const name of ['playwright', 'playwright-core']) {
+    const key = `node_modules/${name}`;
+    if (read(`${key}/package.json`).version !== '1.58.2' || lock[key]?.version !== '1.58.2') throw new Error(`${name} version differs from reviewed 1.58.2`);
+  }
+  const browsers = new Map(read('node_modules/playwright-core/browsers.json').browsers.map(item => [item.name, item.revision]));
+  for (const [name, revision] of [['chromium', '1208'], ['chromium-headless-shell', '1208'], ['ffmpeg', '1011']]) {
+    if (browsers.get(name) !== revision) throw new Error(`${name} revision differs from reviewed ${revision}`);
+  }
+  if (!fs.statSync(path.join(root, 'node_modules/playwright/cli.js')).isFile()) throw new Error('local Playwright CLI missing');
+} catch (error) {
+  console.error(error.message);
+  process.exitCode = 1;
+}
+PLAYWRIGHT_PINS
+    then
+      error "Reviewed Ubuntu 26.04 ARM64 Playwright package/browser pins are unavailable; browser install refused"
+      exit 1
+    fi
+    (cd "$REPO_DIR" && env PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-arm64 \
+      "$NODE_BIN" "$REPO_DIR/node_modules/playwright/cli.js" install chromium) \
+      || { error "Reviewed Ubuntu 26.04 ARM64 Chromium download failed"; exit 1; }
+  elif [ "$OS" = linux ] && [ "${UPDATE_ONLY:-false}" = false ]; then
+    (cd "$REPO_DIR" && run npx playwright install --with-deps chromium) \
+      || { error "Chromium browser or Linux system dependencies failed to install"; exit 1; }
+  else
+    (cd "$REPO_DIR" && run npx playwright install chromium) \
+      || { error "Chromium browser failed to install"; exit 1; }
+  fi
+  if $PLAYWRIGHT_UBUNTU26_ARM64; then
+    (cd "$REPO_DIR" && env PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-arm64 "$NODE_BIN" -e \
+      "require('playwright').chromium.launch({headless:true}).then(b=>b.close()).catch(e=>{console.error(e);process.exitCode=1})") \
+      || {
+        error "Chromium headless launch failed"
+        error "A separately reviewed system-library decision is required; upstream install-deps/apt suggestions are unreviewed for Ubuntu 26.04"
+        exit 1
+      }
+  else
+    (cd "$REPO_DIR" && "$NODE_BIN" -e \
+      "require('playwright').chromium.launch({headless:true}).then(b=>b.close()).catch(e=>{console.error(e);process.exitCode=1})") \
+      || {
+        error "Chromium headless launch failed"
+        if [ "$OS" = linux ] && [ "${UPDATE_ONLY:-false}" = true ]; then
+          error "Install Linux browser prerequisites separately from the runtime source with sudo npx playwright install-deps chromium, then retry"
+        fi
+        exit 1
+      }
+  fi
+  info "Chromium headless launch verified"
+  else
+    error "playwright missing from the shared dependency tree — the root dependency install did not complete"
+    exit 1
+  fi
 fi
 
 # ============================================================
@@ -232,7 +278,7 @@ step "Step 13: Companion Bridge"
 if $SANDBOX; then
   info "Sandbox: skipping companion-bridge"
 elif command -v companion-bridge >/dev/null 2>&1; then
-  info "companion-bridge already installed: $(companion-bridge --version 2>/dev/null || echo 'found')"
+  info "companion-bridge already installed (on PATH)"
 else
   info "Installing companion-bridge (OpenAI-compatible adapter for Claude Code)..."
   if [ "$OS" = "linux" ]; then

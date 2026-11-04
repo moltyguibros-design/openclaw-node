@@ -15,6 +15,7 @@ const MODULES = [
   'llm-host.sh',
   'system-deps.sh',
   'env.sh',
+  'runtime.sh',
   'workspace.sh',
   'config.sh',
   'components.sh',
@@ -139,7 +140,9 @@ test('installer never creates or copies nested mcp-knowledge dependencies', () =
 
 test('installer links scoped packages into both deployed parent trees', () => {
   const workspace = moduleSrc['workspace.sh'];
-  assert.ok(workspace.includes('for scoped_dir in "$pkgdir"*/'));
+  assert.ok(workspace.includes('bin/deploy-runtime.mjs'));
+  assert.ok(workspace.includes('MESH_NM="$OPENCLAW_RUNTIME_DIR/node_modules"'));
+  assert.doesNotMatch(workspace, /npm install --no-save/);
   assert.ok(workspace.includes('link_dependency_tree "$MESH_NM" "$WS_NM"'));
   assert.ok(workspace.includes('link_dependency_tree "$MESH_NM" "$MESH_HOME_NM"'));
   assert.ok(moduleSrc['components.sh'].includes('$WORKSPACE/node_modules/@huggingface/transformers'));

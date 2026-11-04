@@ -4,17 +4,19 @@ After=network.target
 
 [Service]
 Type=simple
+ExecStartPre=${NODE_BIN} ${OPENCLAW_WORKSPACE}/bin/mc-session-init.mjs
 ExecStart=${NPM_BIN} start
 Restart=always
 RestartSec=5
 Environment=HOME=${HOME}
 Environment=PATH=${HOME}/.openclaw/workspace/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
-Environment=NODE_PATH=${HOME}/openclaw/node_modules:${HOME}/openclaw/lib
+Environment=NODE_PATH=${OPENCLAW_REPO_DIR}/node_modules:${OPENCLAW_REPO_DIR}/lib
 Environment=OPENCLAW_NATS=${OPENCLAW_NATS}
 Environment=OPENCLAW_WORKSPACE=${OPENCLAW_WORKSPACE}
+Environment=OPENCLAW_LIB_DIR=${OPENCLAW_WORKSPACE}/lib
 Environment=NODE_ENV=production
 Environment=TZ=America/Montreal
-WorkingDirectory=${OPENCLAW_WORKSPACE}/projects/mission-control
+WorkingDirectory=${OPENCLAW_MISSION_CONTROL_DIR}
 StandardOutput=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-mission-control.log
 StandardError=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-mission-control.err
 

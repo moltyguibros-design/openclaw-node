@@ -1,0 +1,35 @@
+{
+  "date": "2026-10-04",
+  "source_commit": "fecf985879431007809f40bcea76e84d95c6237d",
+  "host_directory": "~/Library/Application Support/OpenClawRecovery/isolated-runtime-fecf9858",
+  "scope": "private, inactive host runtime for synthetic and future isolated restore; no production store or VM changed",
+  "binary_versions": {
+    "node": "v24.13.0",
+    "nats": "0.3.1",
+    "nats-server": "2.12.6"
+  },
+  "binary_sha256": {
+    "node": "aed3321cf1a2ad333514339e8f7fc58a01ed9b6ac0d1325cd052260004928287",
+    "nats": "6be41e7097aac6278c3b9e4f394fc1536996608e921aa14fceae1bf0e800da0f",
+    "nats-server": "c3a71e72f6fc5dd008988f34b57fd2ab1fe69ab18d409f0a0aeebc51160e76e1"
+  },
+  "module_tree": {
+    "packages": ["nats", "nkeys.js", "tweetnacl"],
+    "regular_files": 212,
+    "sha256": "241308e6d7e6406ce800653e3bd4d238503f30e094f681ace3ef5d3b34df1015"
+  },
+  "code_sha256": {
+    "recovery.mjs": "8a9b78e0332997ec6814bcfdad7e7843c62221a771d6d6d5fb90a494f5373eaf",
+    "probe_cold_trees.mjs": "5e9779e11c4a648c311d1415bd7a5eb71864b709a79d91c8fc95ef6232c14100"
+  },
+  "owned_fixture": {
+    "pass": true,
+    "all_owned_servers_stopped": true,
+    "cold_standalone_last": 13,
+    "held_member_last": 8,
+    "offline_assignment_checked": true,
+    "masters_unchanged": true,
+    "stale_archive_baseline_rejected": true
+  },
+  "limitations": "synthetic histories only; no original VM shutdown, production cold master, or isolated restoration of real histories"
+}

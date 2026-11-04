@@ -21,6 +21,9 @@ const CACHE_FILE = path.join(os.tmpdir(), 'openclaw-mesh-probe.json');
 const CACHE_TTL_MS = 60_000;
 
 function meshSkipReason() {
+  if (process.env.OPENCLAW_TEST_MESH_ISOLATED !== '1') {
+    return 'mesh integration requires the isolated root-test runner';
+  }
   try {
     const cached = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf-8'));
     if (Date.now() - cached.ts < CACHE_TTL_MS) return cached.reason;

@@ -73,6 +73,7 @@ def _observe(user_home):
                 continue
             retried.append(pid)
         references = [('fd', entry) for entry in process['vnodes']]
+        references.extend(('fileport', entry) for entry in process.get('fileports', []))
         references.extend(('mmap', entry) for entry in process['mappings'])
         if process['cwd']:
             references.append(('cwd', process['cwd']))
@@ -88,7 +89,10 @@ def _observe(user_home):
                         'start_sec': process['start_sec'],
                         'start_usec': process['start_usec'],
                         'reference': reference, 'fd': entry.get('fd'),
+                        'fileport': entry.get('fileport'),
                         'inode': entry['inode'], 'unlinked': entry['links'] == 0,
+                        'writable': entry.get('writable'),
+                        'may_be_writable': entry.get('may_be_writable'),
                         'match': 'inode' if by_inode else 'path'})
                     matched = True
             if not matched and entry['links'] == 0 and entry['device'] in devices:
@@ -99,7 +103,9 @@ def _observe(user_home):
     exited = [pid for pid in failed if pid not in remaining]
     for store in stores.values():
         store['holders'].sort(key=lambda item: (
-            item['pid'], item['reference'], item['fd'] if item['fd'] is not None else -1))
+            item['pid'], item['reference'],
+            item['fd'] if item['fd'] is not None else -1,
+            item['fileport'] if item['fileport'] is not None else -1))
         del store['inodes']
         del store['realpath']
     return {'scope': 'readable-process-vnode-census',
@@ -112,7 +118,7 @@ def _observe(user_home):
                          'single_instant': False,
                          'process_identity': 'PID and start time stable within each snapshot, not across the full scan',
                          'physical_absence_certified': False,
-                         'reference_types': 'open vnode file descriptors, mapped files and working directory; excludes process root and in-flight descriptors',
+                         'reference_types': 'open vnode file descriptors, vnode fileports, mapped files and working directory; excludes process root, unmapped Mach memory entries and in-flight transferred rights',
                          'path_matching': 'lexical kernel paths; linked paths require a fresh identity match; alternate firmlink or case spelling may be unattributed'},
             'unreadable_pids': unreadable,
             'exited_pids': exited,

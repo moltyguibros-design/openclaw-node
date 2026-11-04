@@ -197,11 +197,13 @@ class RestoreOnlyOwned(unittest.TestCase):
             elif unit == 'mesh-agent':
                 settings['RunAtLoad'] = True
                 settings['KeepAlive'] = False
+                settings['ThrottleInterval'] = 1
             plist.write_bytes(plistlib.dumps(settings))
             plist.chmod(0o600)
             for name in (unit + '.out', unit + '.err'):
                 (self.root / name).touch(mode=0o600)
             self.services[unit] = Launchd(label, plist)
+        self.daemon_bootstrap_started = time.monotonic()
         self.services['mesh-agent'].bootstrap()
         wait_for(lambda: self.services['mesh-agent'].status()['running'])
         self.services[ANCHOR].bootstrap()
@@ -288,11 +290,31 @@ with Journal(root, node_lock=lock) as journal:
         child.wait(timeout=5)
         ready.unlink()
 
-    def command(self):
-        completed = subprocess.run([sys.executable, '-I', '-S', str(HERE / 'restore_only.py'),
-                                    '--owned-root', str(self.root), '--window', 'owned'],
+    def command(self, kickstart_context=None):
+        argv = [sys.executable, '-I', '-S', str(HERE / 'restore_only.py'),
+                '--owned-root', str(self.root), '--window', 'owned']
+        trace = self.root / 'owned-kickstart-trace.json'
+        if kickstart_context is not None:
+            child_source = '''
+import json, os, pathlib, runpy, subprocess, sys
+here, root, report = map(pathlib.Path, sys.argv[1:4])
+context = json.loads(sys.argv[4])
+sys.path.insert(0, str(here))
+from owned_kickstart_trace import traced_popen
+expected = ['/bin/launchctl', 'kickstart', 'gui/' + str(os.getuid()) + '/ai.openclaw.' + root.name + '.mesh-agent']
+subprocess.Popen = traced_popen(expected, report, context)
+sys.argv = [str(here / 'restore_only.py'), '--owned-root', str(root), '--window', 'owned']
+runpy.run_path(sys.argv[0], run_name='__main__')
+'''
+            argv = [sys.executable, '-I', '-S', '-c', child_source, str(HERE), str(self.root), str(trace),
+                    json.dumps(kickstart_context)]
+        completed = subprocess.run(argv,
                                    capture_output=True, text=True, timeout=20)
-        return completed.returncode, json.loads(completed.stdout)
+        result = json.loads(completed.stdout)
+        if kickstart_context is not None:
+            result['owned_kickstart_trace'] = json.loads(trace.read_text()) if trace.exists() else {'missing': True}
+            print('owned kickstart trace: ' + json.dumps(result['owned_kickstart_trace'], sort_keys=True), flush=True)
+        return completed.returncode, result
 
     def fire_timer(self):
         service = self.services[ANCHOR]
@@ -386,14 +408,45 @@ with Journal(root, node_lock=lock) as journal:
 
     def test_loaded_stopped_owned_daemon_is_kickstarted(self):
         self.interrupt()
-        pid = self.services['mesh-agent'].status()['pid']
+        before = self.services['mesh-agent'].status()
+        pid = before['pid']
+        context = {'bootstrap_request_age_before_stop_s': time.monotonic() - self.daemon_bootstrap_started,
+                   'before_stop': before,
+                   'explicit_throttle_interval': plistlib.loads(self.services['mesh-agent'].plist.read_bytes())
+                       .get('ThrottleInterval')}
+        stopped = time.monotonic()
         os.kill(pid, signal.SIGTERM)
         wait_for(lambda: self.services['mesh-agent'].status()['loaded']
                  and not self.services['mesh-agent'].status()['running'])
-        code, result = self.command()
+        context['stop_wait_s'] = time.monotonic() - stopped
+        context['before_restore'] = self.services['mesh-agent'].status()
+        code, result = self.command(kickstart_context=context)
+        self.assertNotEqual(result['owned_kickstart_trace'], {'missing': True}, result)
+        self.assertEqual(result['owned_kickstart_trace']['context']['explicit_throttle_interval'], 1, result)
+        self.assertEqual(result['owned_kickstart_trace']['event'], 'completed', result)
+        self.assertEqual(result['owned_kickstart_trace']['timeout_s'], 10, result)
+        self.assertEqual(result['owned_kickstart_trace']['client_returncode_when_sampled'], 0, result)
         self.assertEqual(code, 0, result)
         self.assertEqual(result['outcome'], 'resolved')
         self.assertTrue(self.services['mesh-agent'].status()['running'])
+        print(json.dumps({'owned_kickstart_fixture': result['owned_kickstart_trace'],
+                          'outcome': result['outcome'], 'gate': result['gate'],
+                          'receipt_status': result['receipt_status']}, sort_keys=True), flush=True)
+
+    def test_owned_timer_refuses_daemon_throttle_before_launchd(self):
+        prior = copy.deepcopy(self.prior)
+        path = self.services[ANCHOR].plist
+        settings = plistlib.loads(path.read_bytes())
+        settings['ThrottleInterval'] = 1
+        path.write_bytes(plistlib.dumps(settings))
+        prior[ANCHOR]['identity'] = static_identity(path)
+        adapter = OwnedLaunchdAdapter.__new__(OwnedLaunchdAdapter)
+        adapter.root, adapter.prior = self.root, prior
+        adapter.label_prefix = 'ai.openclaw.' + self.root.name + '.'
+        with patch.object(adapter, 'service') as service:
+            with self.assertRaisesRegex(Refused, 'owned launchd configuration differs'):
+                adapter.restore(ANCHOR, prior[ANCHOR])
+            service.assert_not_called()
 
     def test_unloaded_owned_timer_is_bootstrapped_without_running_early(self):
         self.interrupt()

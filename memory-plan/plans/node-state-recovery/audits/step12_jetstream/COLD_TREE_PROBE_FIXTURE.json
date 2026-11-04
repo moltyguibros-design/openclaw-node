@@ -1,0 +1,34 @@
+{
+  "scope": "owned isolated direct-store fixture only; no host provenance or production acceptance",
+  "run_at_utc": "2026-10-03T18:49:21.506Z",
+  "probe_source_sha256": "b86c0e2d5c423ec06267dad976098ae0f9780832b97954201e0f122151507ffc",
+  "fixture_source_sha256": "d994657a3fa6f22ef8a028379078c8d501e70d54de99ffb8f22d0fd77993e5ee",
+  "baseline_source_sha256": "3eec4118ca52b97cfc859b63d03ca215a7e40a0d1df15b2dbd90624a6c3bca56",
+  "recovery_source_sha256": "8a9b78e0332997ec6814bcfdad7e7843c62221a771d6d6d5fb90a494f5373eaf",
+  "nats_cli": {
+    "version": "0.3.1",
+    "sha256": "6be41e7097aac6278c3b9e4f394fc1536996608e921aa14fceae1bf0e800da0f"
+  },
+  "nats_server": {
+    "version": "2.12.6",
+    "sha256": "c3a71e72f6fc5dd008988f34b57fd2ab1fe69ab18d409f0a0aeebc51160e76e1"
+  },
+  "private_baselines": 4,
+  "distinct_frozen_masters": 4,
+  "isolated_restore": {
+    "standalone_streams_compared": 3,
+    "survivor_active_streams_compared_each": 2,
+    "offline_assignments_before_held_rejoin": 1,
+    "held_streams_compared_without_routing": 1,
+    "held_streams_compared_after_rejoin": 1,
+    "standalone_final_sequence": 13,
+    "held_final_sequence": 8,
+    "master_hashes_unchanged": true
+  },
+  "stale_archive_baseline_refused": true,
+  "no_success_report_after_refusal": true,
+  "master_hashes_unchanged_after_refusal": true,
+  "private_directory_mode": "0700",
+  "private_report_and_failure_mode": "0600",
+  "owned_servers_stopped": true
+}

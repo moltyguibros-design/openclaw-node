@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { HEARTBEAT_TIMEOUT_MS, runSchedulerHeartbeat, validateHeartbeatEndpoint } from '../bin/scheduler-heartbeat.mjs';
+import { initializeMcSessionToken } from '../lib/mc-session-token.mjs';
+import { mkdtempSync, existsSync, statSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createServer } from 'node:http';
 
 function response(status, body = {}) {
   return {
@@ -51,4 +56,30 @@ test('HTTP auth failure exits through a bounded error without echoing the token'
   }).then(() => null, (error) => error);
   assert.match(err.message, /HTTP 401/);
   assert.doesNotMatch(err.message, /do-not-print-me/);
+});
+
+test('managed startup creates a private stable token before the first scheduler HTTP request', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'mc-startup-token-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const tokenPath = join(dir, 'config', 'mc-session-token');
+  assert.equal(existsSync(tokenPath), false);
+  const token = initializeMcSessionToken({ tokenPath });
+  assert.equal(token.length, 64);
+  assert.equal(statSync(tokenPath).mode & 0o777, 0o600);
+  assert.equal(initializeMcSessionToken({ tokenPath }), token);
+  let requests = 0;
+  const server = createServer((req, res) => {
+    requests++;
+    assert.equal(req.method, 'POST');
+    assert.equal(req.headers.authorization, `Bearer ${token}`);
+    res.setHeader('Content-Type', 'application/json');
+    res.end('{"dispatched":0}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const result = await runSchedulerHeartbeat({ tokenPath,
+    endpoint: `http://127.0.0.1:${server.address().port}/api/scheduler/tick` });
+  assert.equal(result.ok, true);
+  assert.equal(requests, 1);
+  assert.equal(initializeMcSessionToken({ tokenPath }), token);
 });

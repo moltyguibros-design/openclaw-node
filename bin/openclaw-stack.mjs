@@ -19,6 +19,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { assertLegacyNatsWriterAllowed } from '../lib/nats-writer-ownership.mjs';
 import { reexecUnderLegacyNatsLock } from '../lib/nats-legacy-lock.mjs';
+import { readSystemdService } from '../lib/systemd-service.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HOME = os.homedir();
@@ -33,6 +34,9 @@ const MC_URL = process.env.OPENCLAW_MC_URL || 'http://127.0.0.1:3000';
 // while LOADED even with no live pid.
 export const PORTS = {
   'nats': 4222,
+  'nats-1': 4222,
+  'nats-2': 4223,
+  'nats-3': 4224,
   'mission-control': 3000,
   'workplan-viewer': 7892,
   'memory-daemon': 7893,
@@ -66,10 +70,12 @@ export function scanLaunchdUnits(dir = LAUNCH_AGENTS) {
 export function scanSystemdUnits(exec = execFileSync) {
   try {
     const out = String(exec('systemctl', ['--user', 'list-unit-files', 'openclaw-*', '--no-legend', '--plain'], { encoding: 'utf8' }));
-    return out.split('\n').filter(Boolean).map(l => {
+    const units = out.split('\n').filter(Boolean).map(l => {
       const [name, state] = l.trim().split(/\s+/);
-      return { id: shortId(name), label: name, disabled: state === 'masked', timer: name.endsWith('.timer') };
+      return { id: shortId(name), label: name, disabled: !['enabled', 'enabled-runtime'].includes(state), timer: name.endsWith('.timer') };
     });
+    const timers = new Set(units.filter(u => u.timer).map(u => u.label.replace(/\.timer$/, '.service')));
+    return units.map(u => timers.has(u.label) ? { ...u, disabled: true, timerBacked: true } : u);
   } catch { return []; }
 }
 
@@ -94,27 +100,39 @@ function launchctlPids() {
   return pids;
 }
 
-export function classify(unit, { loaded, pid, portOk }) {
+export function classify(unit, { loaded, pid, portOk, restarts = 0, active, lastExitCode = 0, loadState, result }) {
   if (unit.disabled) return 'DISABLED';
-  if (unit.id in PORTS || unit.port) return portOk ? 'LIVE' : (loaded ? 'DOWN' : 'OFF');
+  if (loadState !== undefined && loadState !== 'loaded') return 'DOWN';
+  if (result && result !== 'success') return 'UNSTABLE';
+  if (active === 'inactive' && result === 'success') return 'OFF';
+  if (restarts > 0 || lastExitCode !== 0) return 'UNSTABLE';
+  if (active === 'failed') return 'DOWN';
+  if (active === 'activating' || active === 'deactivating') return 'UNSTABLE';
+  if (active !== undefined && active !== 'active') return 'OFF';
+  if (unit.id in PORTS || unit.port) return portOk && loaded && pid ? 'LIVE' : (loaded ? 'DOWN' : 'OFF');
   if (!loaded) return 'OFF';
   if (pid) return 'LIVE';
   return PERIODIC.has(unit.id) ? 'LOADED' : 'DOWN';
 }
 
-async function statusTable(units) {
-  const pids = process.platform === 'darwin' ? launchctlPids() : new Map();
+export async function statusTable(units, { platform = process.platform, exec = execFileSync, probe = probePort } = {}) {
+  const pids = platform === 'darwin' ? launchctlPids() : new Map();
   const rows = [];
   for (const u of units) {
-    const loaded = process.platform === 'darwin'
+    const systemd = platform === 'darwin' ? null : await readSystemdService({ exec: async (cmd, args) => {
+      try { return { code: 0, stdout: exec(cmd, args, { encoding: 'utf8' }), stderr: '' }; }
+      catch (error) { return { code: error.status, stdout: String(error.stdout || ''), stderr: String(error.stderr || '') }; }
+    } }, u.label);
+    const loaded = platform === 'darwin'
       ? pids.has(u.label)
-      : systemdActive(u.label);
-    const pid = process.platform === 'darwin' ? pids.get(u.label) : null;
+      : systemd.loaded;
+    const pid = platform === 'darwin' ? pids.get(u.label) : systemd.pid;
     const port = PORTS[u.id];
-    const portOk = port ? await probePort(port) : undefined;
-    rows.push({ ...u, loaded, pid, port, portOk, status: classify(u, { loaded, pid, portOk }) });
+    const portOk = port ? await probe(port) : undefined;
+    const status = systemd && !systemd.observable ? 'UNKNOWN' : classify(u, { loaded, pid, portOk, restarts: systemd?.restarts, active: systemd?.active, lastExitCode: systemd?.lastExitCode, loadState: systemd?.loadState, result: systemd?.result });
+    rows.push({ ...u, loaded, pid, port, portOk, status });
   }
-  const bridgeOk = await probePort(PORTS['companion-bridge']);
+  const bridgeOk = await probe(PORTS['companion-bridge']);
   rows.push({
     id: 'companion-bridge', label: '(external repo)', port: 8787, portOk: bridgeOk,
     status: bridgeOk ? 'LIVE' : (fs.existsSync(BRIDGE_DIR) ? 'DOWN' : 'ABSENT'),
@@ -122,9 +140,9 @@ async function statusTable(units) {
   return rows;
 }
 
-function systemdActive(unit) {
+function systemdActive(unit, exec = execFileSync) {
   try {
-    return execFileSync('systemctl', ['--user', 'is-active', unit], { encoding: 'utf8' }).trim() === 'active';
+    return exec('systemctl', ['--user', 'is-active', unit], { encoding: 'utf8' }).trim() === 'active';
   } catch { return false; }
 }
 
@@ -163,13 +181,13 @@ function up(units) {
   return started;
 }
 
-function upLinux(units) {
+export function upLinux(units, exec = execFileSync) {
   const started = [];
   for (const u of units) {
     if (u.disabled) continue;
-    if (!systemdActive(u.label)) {
+    if (!systemdActive(u.label, exec)) {
       try {
-        execFileSync('systemctl', ['--user', 'start', u.label], { stdio: 'pipe' });
+        exec('systemctl', ['--user', 'start', u.label], { stdio: 'pipe' });
         started.push(u.id);
       } catch { /* reported by the probe table */ }
     }
@@ -208,7 +226,7 @@ function down(units) {
 function notifyResult(rows) {
   const live = rows.filter(r => r.status === 'LIVE' || r.status === 'LOADED').length;
   const total = rows.filter(r => r.status !== 'DISABLED' && r.status !== 'ABSENT').length;
-  const bad = rows.filter(r => r.status === 'DOWN' || r.status === 'OFF').map(r => r.id);
+  const bad = rows.filter(r => ['DOWN', 'OFF', 'UNSTABLE', 'UNKNOWN'].includes(r.status)).map(r => r.id);
   const kind = bad.length === 0 ? 'success' : 'warn';
   try {
     execFileSync(process.execPath, [
@@ -243,14 +261,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const rows = await statusTable(units);
     printTable(rows);
     notifyResult(rows);
-    process.exit(rows.some(r => r.status === 'DOWN') ? 1 : 0);
+    process.exit(rows.some(r => ['DOWN', 'UNSTABLE', 'UNKNOWN'].includes(r.status)) ? 1 : 0);
   } else if (cmd === 'down') {
     down(units);
     console.log('stack stopped (disabled units untouched)');
   } else if (cmd === 'status') {
     const rows = await statusTable(units);
     printTable(rows);
-    process.exit(rows.some(r => r.status === 'DOWN') ? 1 : 0);
+    process.exit(rows.some(r => ['DOWN', 'UNSTABLE', 'UNKNOWN'].includes(r.status)) ? 1 : 0);
   } else {
     console.error('usage: openclaw-stack [up|status|down]');
     process.exit(1);

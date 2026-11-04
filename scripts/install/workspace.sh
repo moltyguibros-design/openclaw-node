@@ -68,7 +68,7 @@ run rsync -av --exclude='*.bak' --exclude='*.bak.*' --exclude='routing-eval-test
 for _wsbin in node-watch.mjs node-acceptance.mjs openclaw-notify.mjs \
               obsidian-graph-cache.mjs observer.mjs consolidation-scheduler.mjs \
               hyperagent.mjs embed-probe.mjs scheduler-heartbeat.mjs \
-              nats-legacy-lock.py; do
+              mc-session-init.mjs nats-legacy-lock.py; do
   if [ ! "$REPO_DIR/bin/$_wsbin" -ef "$WORKSPACE/bin/$_wsbin" ]; then
     run cp "$REPO_DIR/bin/$_wsbin" "$WORKSPACE/bin/$_wsbin"
   fi
@@ -92,73 +92,33 @@ if [ -d "$REPO_DIR/packages" ]; then
   info "Event schemas installed to $WORKSPACE/packages/"
 fi
 
-# Symlink shared deps from repo/mesh node_modules → workspace node_modules
-# (ESM static imports don't resolve via NODE_PATH alone). `nats` and `js-yaml`
-# are required by the workspace daemons' import graph (2026-07-11 audit).
-OPENCLAW_MESH_HOME="${OPENCLAW_MESH_HOME:-$HOME/openclaw}"
-MESH_NM="$REPO_DIR/node_modules"
-if [ ! -d "$MESH_NM/better-sqlite3" ]; then
-  MESH_NM="$OPENCLAW_MESH_HOME/node_modules"
-fi
-
-# If native deps still missing, install them at the mesh home
-if [ ! -d "$MESH_NM/better-sqlite3" ]; then
-  info "Installing native dependencies at $OPENCLAW_MESH_HOME/..."
-  run mkdir -p "$OPENCLAW_MESH_HOME"
-  if $DRY_RUN; then
-    info "  [dry-run] would npm init + install better-sqlite3 bindings in $OPENCLAW_MESH_HOME"
-  else
-    (cd "$OPENCLAW_MESH_HOME" && [ ! -f package.json ] && npm init -y >/dev/null 2>&1; npm install --no-save better-sqlite3 bindings 2>/dev/null) || warn "Native dep install failed — SQLite features may not work"
-  fi
-  MESH_NM="$OPENCLAW_MESH_HOME/node_modules"
-fi
-
+OPENCLAW_MESH_HOME="${OPENCLAW_MESH_HOME:-$OPENCLAW_RUNTIME_DIR}"
+MESH_NM="$OPENCLAW_RUNTIME_DIR/node_modules"
 WS_NM="$WORKSPACE/node_modules"
 link_dependency_tree() {
-  local src="$1" dest="$2" pkgdir pkg scoped_dir scoped
-  LINKED_COUNT=0
-  run mkdir -p "$dest"
-  for pkgdir in "$src"/*/; do
-    [ -d "$pkgdir" ] || continue
-    pkg=$(basename "$pkgdir")
-    [ "$pkg" = ".bin" ] && continue
-    if [[ "$pkg" == @* ]]; then
-      run mkdir -p "$dest/$pkg"
-      for scoped_dir in "$pkgdir"*/; do
-        [ -d "$scoped_dir" ] || continue
-        scoped=$(basename "$scoped_dir")
-        if [ ! -e "$dest/$pkg/$scoped" ]; then
-          run ln -sfn "$pkgdir$scoped" "$dest/$pkg/$scoped"
-          LINKED_COUNT=$((LINKED_COUNT + 1))
-        fi
-      done
-    elif [ ! -e "$dest/$pkg" ]; then
-      run ln -sfn "$src/$pkg" "$dest/$pkg"
-      LINKED_COUNT=$((LINKED_COUNT + 1))
-    fi
-  done
+  local src="$1" dest="$2"
+  if $DRY_RUN; then
+    info "[dry-run] would bind $dest to the independent runtime dependency tree"
+  else
+    "$NODE_BIN" "$REPO_DIR/bin/deploy-runtime.mjs" --source "$src" --root "$OPENCLAW_ROOT" --bind "$dest"
+  fi
 }
-
-# The copied daemons and mesh libraries are the root package's runtime code.
-# Their parent node_modules trees resolve to this one installed dependency set.
 link_dependency_tree "$MESH_NM" "$WS_NM"
-info "Shared dependencies symlinked to $WS_NM/ ($LINKED_COUNT new links from $MESH_NM)"
 
-# Mesh daemons and CLI tools → mesh home bin/
 MESH_BIN="$OPENCLAW_MESH_HOME/bin"
 MESH_LIB="$OPENCLAW_MESH_HOME/lib"
-run mkdir -p "$MESH_BIN" "$MESH_LIB"
-run rsync -av "$REPO_DIR/bin/" "$MESH_BIN/"
-run rsync -av --exclude='node_modules' "$REPO_DIR/lib/" "$MESH_LIB/"
-run chmod +x "$MESH_BIN/"*.sh 2>/dev/null || true
-info "Mesh daemons installed to $MESH_BIN/ ($(ls -1 "$REPO_DIR/bin/" | wc -l | tr -d ' ') files)"
-info "Shared libraries installed to $MESH_LIB/"
-
-MESH_HOME_NM="$OPENCLAW_MESH_HOME/node_modules"
-if [ "$MESH_NM" != "$MESH_HOME_NM" ]; then
-  link_dependency_tree "$MESH_NM" "$MESH_HOME_NM"
-  info "Shared dependencies symlinked to $MESH_HOME_NM/ ($LINKED_COUNT new links from $MESH_NM)"
+if [ ! "$REPO_DIR/bin" -ef "$MESH_BIN" ]; then
+  if [ -e "$OPENCLAW_MESH_HOME/.git" ]; then
+    error "Configured mesh home is a Git checkout; select a separate managed runtime before updating"
+    exit 1
+  fi
+  run mkdir -p "$MESH_BIN" "$MESH_LIB"
+  run rsync -av "$REPO_DIR/bin/" "$MESH_BIN/"
+  run rsync -av --exclude='node_modules' "$REPO_DIR/lib/" "$MESH_LIB/"
 fi
+MESH_HOME_NM="$OPENCLAW_MESH_HOME/node_modules"
+link_dependency_tree "$MESH_NM" "$MESH_HOME_NM"
+info "Runtime code and dependencies selected from $OPENCLAW_RUNTIME_DIR"
 
 # ============================================================
 # Step 4: Copy Identity Files
@@ -186,7 +146,10 @@ done
 
 step "Step 5: Soul Definitions"
 
-run rsync -av "$REPO_DIR/souls/" "$OPENCLAW_ROOT/souls/"
+run rsync -av --checksum --exclude='/*/evolution/genes.json' --exclude='/*/evolution/events.jsonl' \
+  "$REPO_DIR/souls/" "$OPENCLAW_ROOT/souls/"
+run rsync -av --ignore-existing --include='*/' --include='/*/evolution/genes.json' \
+  --include='/*/evolution/events.jsonl' --exclude='*' "$REPO_DIR/souls/" "$OPENCLAW_ROOT/souls/"
 info "Souls installed to $OPENCLAW_ROOT/souls/"
 
 # ============================================================
@@ -195,7 +158,7 @@ info "Souls installed to $OPENCLAW_ROOT/souls/"
 
 step "Step 6: Skills"
 
-run rsync -av --exclude='dist/' --exclude='scripts/' "$REPO_DIR/skills/" "$WORKSPACE/skills/"
+run rsync -av --exclude='dist/' "$REPO_DIR/skills/" "$WORKSPACE/skills/"
 info "Skills installed to $WORKSPACE/skills/ ($(ls -d "$REPO_DIR/skills"/*/ 2>/dev/null | grep -v dist | grep -v scripts | wc -l | tr -d ' ') skills)"
 
 # Install skill-specific dependencies (npm/pip where needed)
@@ -204,6 +167,7 @@ if $SANDBOX; then
 else
 info "Installing skill dependencies..."
 for skill_dir in "$WORKSPACE/skills"/*/; do
+  skill_dir="${skill_dir%/}"
   skill_name=$(basename "$skill_dir")
   # npm-based skills
   if [ -f "$skill_dir/package.json" ] && [ ! -d "$skill_dir/node_modules" ]; then
@@ -211,8 +175,18 @@ for skill_dir in "$WORKSPACE/skills"/*/; do
   fi
   # pip-based skills
   if [ -f "$skill_dir/requirements.txt" ]; then
-    run pip3 install --user -r "$skill_dir/requirements.txt" 2>/dev/null || warn "  pip failed: $skill_name"
-    info "  pip: $skill_name"
+    skill_python="$skill_dir/.venv/bin/python"
+    if $DRY_RUN; then
+      info "[dry-run] would create a managed Python environment for $skill_name"
+      info "[dry-run] would install and verify $skill_dir/requirements.txt"
+    else
+      python3 -m venv "$skill_dir/.venv" || { error "Python environment failed: $skill_name"; exit 1; }
+      "$skill_python" -m pip install -r "$skill_dir/requirements.txt" \
+        || { error "Python requirements failed: $skill_name"; exit 1; }
+      "$skill_python" -m pip check \
+        || { error "Python requirements invalid: $skill_name"; exit 1; }
+      info "  Python skill ready: $skill_name ($skill_python)"
+    fi
   fi
 done
 fi

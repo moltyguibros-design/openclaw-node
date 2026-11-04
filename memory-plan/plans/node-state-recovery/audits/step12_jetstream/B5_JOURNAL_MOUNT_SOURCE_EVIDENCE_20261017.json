@@ -1,0 +1,64 @@
+{
+  "scope": "Owned source verification only; no native mount/probe/VM operation or production state change",
+  "at": "2026-10-17 01:10 EDT",
+  "base_head": "5b6c84af013f7bbf682999a956b0f3f2018b179b",
+  "patches": [
+    {
+      "commit": "4bf3576cedba6099b1764f30898dc478cd551f17",
+      "sha256": "a2c5a0df9eebf59acda1b0ee4152d9814e6526596ae9609b78b95e7bbc136821"
+    },
+    {
+      "commit": "323e4da83e6b645dd84d9bfb5275f59d6348874a",
+      "sha256": "6250b496aede029dd17e6b518f539f81c9cd945e09d16c72c07d1911e2ab5171"
+    },
+    {
+      "commit": "acf2e6710c7a313add0fbd0760abf81bdb65a392",
+      "sha256": "93548a7d359b21e1fe11d1517e9bfa5af34bf27b2651ffc54cc6121bd4e63356"
+    }
+  ],
+  "local_correction": "Remembered attach disk numbers authorize absence checks only; eject requires current image inventory binding in both wrapper and probe",
+  "checks": {
+    "native_scripted_mount_suite": {
+      "run": 71,
+      "skipped": 1,
+      "seconds": 36.284,
+      "exit": 0,
+      "skip": "Linux-only platform guard"
+    },
+    "reader_suite": {
+      "run": 30,
+      "exit": 0
+    },
+    "reader_mutations": {
+      "killed": 46,
+      "problems": [],
+      "unmutated_controls": "pass"
+    },
+    "eject_rule_mutations": {
+      "killed": 3,
+      "problems": [],
+      "unmutated_controls": "13 tests pass"
+    }
+  },
+  "files_sha256": {
+    "host_journal_mount.py": "7b472c85e47a0333fe6c2448573321df289c03cd35e86d768d7fdc2caa18fd25",
+    "probe_asif_mount_ownership.py": "016f7b65b6b4ae59bd23cf94ac2f27b1021112af4ae8e6752ecafeddd9c6f928",
+    "stopped_journal_inputs.py": "e77fc2633961704a3b27fa4e6ca0e5600000ae45e878fe5ed9165b4266ea7541",
+    "test_host_journal_mount.py": "289feef49e7390141236695759236c1a1c21e7f7e6762c05a25284212a85a693",
+    "test_stopped_journal_inputs.py": "3a3762c7ebbcaf197ccb71b504a439fbf06a482d03fc3e545119741f32fe1fec"
+  },
+  "logs_sha256": {
+    "b5-mount-final-tests.log": "1c109b552efc381c95b41caeb36277b2bc7f68b800343dc2ec84a0e71e6f9d0e",
+    "b5-reader-metadata-tests.log": "12dd62e69eba451d4dd7eb41ea010e05189d5ad939de7cf2e74fda56205319d4",
+    "b5-reader-metadata-mutants.log": "43598833372de5e349a8ce8e707d709f63beed77274b7ef58a650b93cffc8671",
+    "b5-remembered-disk-mutants.log": "e6c61984c511169a771af943b8dc2e6f99840022922b176a42333e481bedc4e8"
+  },
+  "not_claimed": [
+    "native ASIF mount assumptions",
+    "protected B3 pin provenance or acceptance root",
+    "physical process census or pre-stop writer exclusion",
+    "D62 reboot or D175 timer migration",
+    "source readiness before final Claude review and exact-head CI",
+    "B5 closure or production acceptance"
+  ]
+}

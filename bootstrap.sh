@@ -44,6 +44,15 @@ main() {
 
 REPO="${OPENCLAW_REPO:-moltyguibros-design/openclaw-node}"
 REF="${OPENCLAW_REF:-main}"
+BOOTSTRAP_SKIP_MESH=false
+BOOTSTRAP_SKIP_LLM=false
+for arg in "$@"; do
+  case "$arg" in
+    --skip-mesh) BOOTSTRAP_SKIP_MESH=true ;;
+    --skip-llm) BOOTSTRAP_SKIP_LLM=true ;;
+    --sandbox) BOOTSTRAP_SKIP_MESH=true; BOOTSTRAP_SKIP_LLM=true ;;
+  esac
+done
 
 G='\033[0;32m'; Y='\033[1;33m'; R='\033[0;31m'; B='\033[1m'; N='\033[0m'
 ok()   { echo -e "${G}[+]${N} $*"; }
@@ -105,7 +114,29 @@ if ! have curl && ! have wget; then
 fi
 ok "downloader: $(have curl && echo curl || echo wget)"
 
-node_ok() { have node && [ "$(node -e 'console.log(process.versions.node.split(".")[0])' 2>/dev/null || echo 0)" -ge 22 ]; }
+node_ok() {
+  have node || return 1
+  local version
+  version="$(node -v 2>/dev/null)"
+  [[ "$version" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || return 1
+  [ "${BASH_REMATCH[1]}" -gt 22 ] || {
+    [ "${BASH_REMATCH[1]}" -eq 22 ] && [ "${BASH_REMATCH[2]}" -ge 12 ];
+  }
+}
+nats_version_ok() {
+  local major minor patch
+  [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  IFS=. read -r major minor patch <<< "$1"
+  [ "$major" -gt 2 ] || {
+    [ "$major" -eq 2 ] && { [ "$minor" -gt 12 ] || { [ "$minor" -eq 12 ] && [ "$patch" -ge 15 ]; }; }
+  }
+}
+nats_ok() {
+  have nats-server || return 1
+  local version
+  version="$(nats-server -v 2>/dev/null)"
+  nats_version_ok "${version#nats-server: v}"
+}
 
 # ============================================================
 # macOS
@@ -159,28 +190,33 @@ if [ "$OS" = macos ]; then
     ok "node $(node -v)"
   else
     brew install node@22 </dev/null && brew link --overwrite --force node@22
-    node_ok && ok "node $(node -v)" || err "node 22+ install failed"
+    node_ok && ok "node $(node -v)" || err "node 22.12+ install failed"
   fi
 
   # Report on whether the BINARY landed, never on the package manager's exit
   # code. A formula can install "successfully" and still leave nothing on PATH
   # (keg-only, failed link) -- and a green line that outruns reality is how the
   # original installer hid its own failures.
-  for f in python@3.12 git sqlite jq nats-server ollama; do
+  FORMULAE="python@3.12 git sqlite jq nats-server"
+  $BOOTSTRAP_SKIP_LLM || FORMULAE="$FORMULAE ollama"
+  for f in $FORMULAE; do
     bin="$f"
     case "$f" in python@3.12) bin=python3 ;; sqlite) bin=sqlite3 ;; esac
-    if have "$bin"; then
+    if { [ "$f" = nats-server ] && nats_ok; } || { [ "$f" != nats-server ] && have "$bin"; }; then
       ok "$bin present"
     else
-      brew install "$f" </dev/null
-      if have "$bin"; then ok "$f installed ($bin on PATH)"
+      if [ "$f" = nats-server ] && have nats-server; then brew upgrade nats-server </dev/null
+      else brew install "$f" </dev/null; fi
+      if { [ "$f" = nats-server ] && nats_ok; } || { [ "$f" != nats-server ] && have "$bin"; }; then ok "$f installed ($bin on PATH)"
       else err "$f: $bin still not on PATH after brew install"; fi
     fi
   done
 
   # install.sh derives --cluster-bind from `tailscale ip -4`; without it,
   # multi-machine NATS clustering silently degrades to a single node.
-  if have tailscale; then
+  if $BOOTSTRAP_SKIP_MESH; then
+    ok "tailscale skipped (--skip-mesh)"
+  elif have tailscale; then
     ok "tailscale present"
   else
     brew install --cask tailscale-app </dev/null
@@ -200,7 +236,7 @@ else
   # and dies mid-run under `set -e`.
   $SUDO apt-get update -y || die "apt-get update failed."
   $SUDO apt-get install -y \
-    curl git sqlite3 build-essential jq python3 python3-pip ca-certificates gnupg \
+    curl git rsync openssl sqlite3 build-essential jq python3 python3-pip python3-venv ca-certificates gnupg \
     || die "apt baseline install failed."
   ok "git, sqlite3, build-essential, jq, python3 installed"
 
@@ -214,34 +250,36 @@ else
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
       | $SUDO tee /etc/apt/sources.list.d/nodesource.list >/dev/null
     $SUDO apt-get update -y && $SUDO apt-get install -y nodejs
-    node_ok && ok "node $(node -v)" || err "node 22+ install failed"
+    node_ok && ok "node $(node -v)" || err "node 22.12+ install failed"
   fi
 
-  step "nats-server, ollama, tailscale"
-  if have nats-server; then
-    ok "nats-server present"
+  step "nats-server and selected capabilities"
+  if nats_ok; then
+    ok "nats-server supported version present"
   else
-    V="${OPENCLAW_NATS_SERVER_VERSION:-2.12.6}"
-    case "$(uname -m)" in aarch64|arm64) A=arm64 ;; *) A=amd64 ;; esac
-    # Pinned checksums (upstream SHA256SUMS for v2.12.6). A binary that will run
-    # the mesh bus as a service is verified before it is installed; an override
-    # version must bring its own OPENCLAW_NATS_SERVER_SHA256 or it is refused.
-    case "${V}-${A}" in
-      2.12.6-amd64) EXPECT_SHA="77fe7dd69ff5144126026b78355900be0ab0bb4339dc61a7621dcc9b9e9d07a6" ;;
-      2.12.6-arm64) EXPECT_SHA="fddaf3f223c7af3f4d0a0d2c2fc084406e6b3ec7adfd1b9e6a37fbd03bfe222f" ;;
-      *) EXPECT_SHA="${OPENCLAW_NATS_SERVER_SHA256:-}" ;;
+    V="${OPENCLAW_NATS_SERVER_VERSION:-2.12.15}"
+    nats_version_ok "$V" || die "unsupported nats-server version: $V"
+    case "$(uname -m)" in
+      aarch64|arm64) A=arm64 ;;
+      x86_64|amd64) A=amd64 ;;
+      *) die "unsupported nats-server architecture: $(uname -m)" ;;
     esac
+    if [ "$V" = 2.12.15 ]; then
+      if [ "$A" = arm64 ]; then EXPECT_SHA=b724db99fefbf8f5c808baa82819ee50350aee9734017e4a478f7e545cef3ab6
+      else EXPECT_SHA=58ab8131f819263897e2fc38e503e1b755b63bcafeecc7d12582487df48ca15e; fi
+    else
+      EXPECT_SHA="${OPENCLAW_NATS_SERVER_SHA256:-}"
+    fi
+    [[ "$EXPECT_SHA" =~ ^[a-f0-9]{64}$ ]] || die "nats-server override requires its SHA-256 digest"
     T=$(mktemp -d)
     TGZ="$T/nats-server-v${V}-linux-${A}.tar.gz"
-    if [ -z "$EXPECT_SHA" ]; then
-      err "no pinned checksum for nats-server v${V} (${A}); set OPENCLAW_NATS_SERVER_SHA256 to install it"
-    elif curl -fsSL -o "$TGZ" "https://github.com/nats-io/nats-server/releases/download/v${V}/nats-server-v${V}-linux-${A}.tar.gz"; then
+    if curl -fsSL -o "$TGZ" "https://github.com/nats-io/nats-server/releases/download/v${V}/nats-server-v${V}-linux-${A}.tar.gz"; then
       ACTUAL_SHA=$(sha256sum "$TGZ" | awk '{print $1}')
       if [ "$ACTUAL_SHA" != "$EXPECT_SHA" ]; then
         err "nats-server checksum MISMATCH (got $ACTUAL_SHA, expected $EXPECT_SHA) — not installing"
-      elif tar xzf "$TGZ" -C "$T"; then
+      elif tar xzf "$TGZ" -C "$T" "nats-server-v${V}-linux-${A}/nats-server"; then
         $SUDO install "$T/nats-server-v${V}-linux-${A}/nats-server" /usr/local/bin/nats-server
-        have nats-server && ok "nats-server v$V installed (sha256 verified)" || err "nats-server not on PATH after install"
+        nats_ok && ok "nats-server v$V installed (sha256 verified)" || err "supported nats-server not on PATH after install"
       else
         err "nats-server archive could not be extracted"
       fi
@@ -251,14 +289,18 @@ else
     rm -rf "$T"
   fi
 
-  if have ollama; then
+  if $BOOTSTRAP_SKIP_LLM; then
+    ok "ollama skipped (--skip-llm)"
+  elif have ollama; then
     ok "ollama present"
   else
     curl -fsSL https://ollama.com/install.sh | sh
     have ollama && ok "ollama installed" || warn "ollama not on PATH — extraction degrades to regex"
   fi
 
-  if have tailscale; then
+  if $BOOTSTRAP_SKIP_MESH; then
+    ok "tailscale skipped (--skip-mesh)"
+  elif have tailscale; then
     ok "tailscale present"
   else
     curl -fsSL https://tailscale.com/install.sh | sh
@@ -284,7 +326,7 @@ fi
 step "Verification"
 FAIL=0
 chk() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else err "$1 — MISSING"; FAIL=1; fi; }
-chk "node 22+"      'node_ok'
+chk "node 22.12+"   'node_ok'
 chk "python3 3.8+"  'python3 -c "import sys; sys.exit(0 if sys.version_info>=(3,8) else 1)"'
 chk "PyYAML"        'python3 -c "import yaml"'
 chk "git"           'command -v git'
@@ -292,9 +334,11 @@ chk "sqlite3"       'command -v sqlite3'
 chk "build tools"   '{ [ "$OS" = macos ] && xcode-select -p; } || command -v cc'
 chk "curl"          'command -v curl'
 chk "jq"            'command -v jq'
-chk "nats-server"   'command -v nats-server'
-chk "ollama"        'command -v ollama'
-chk "tailscale"     'command -v tailscale'
+chk "rsync"         'command -v rsync'
+chk "openssl"       'command -v openssl'
+chk "nats-server 2.12.15+" 'nats_ok'
+$BOOTSTRAP_SKIP_LLM || chk "ollama" 'command -v ollama'
+$BOOTSTRAP_SKIP_MESH || chk "tailscale" 'command -v tailscale'
 [ "$OS" = macos ] && chk "homebrew" 'command -v brew'
 
 if [ $FAIL -ne 0 ]; then
@@ -314,9 +358,8 @@ if [ -n "${OPENCLAW_SRC:-}" ]; then
   [ -f "$SRC/install.sh" ] || die "OPENCLAW_SRC=$SRC has no install.sh"
   ok "using existing checkout: $SRC"
 else
-  SRC="$HOME/.openclaw-src/openclaw-node"
-  mkdir -p "$(dirname "$SRC")"
-  rm -rf "$SRC"; mkdir -p "$SRC"
+  (umask 077; mkdir -p "$HOME/.openclaw-src")
+  SRC="$(mktemp -d "$HOME/.openclaw-src/openclaw-node-XXXXXX")"
   # Tarball, not `git clone`: on a virgin Mac `git` is a stub that pops the
   # Xcode GUI prompt, which would stall a piped install.
   curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$REF" \
@@ -328,16 +371,16 @@ fi
 step "Wave 1: running install.sh"
 cd "$SRC" || die "cannot enter $SRC"
 
-# Wave 1 is binaries + a running node. --skip-llm is forced here so the 5-20 GB
-# model pull never starts unannounced; wave 2 below asks first. If the caller
-# already passed --skip-llm they want no models at all, so wave 2 is skipped too.
+# Wave 1 defers downloads without disabling an already provisioned node.
 USER_SKIP_LLM=false
-for a in "$@"; do [ "$a" = "--skip-llm" ] && USER_SKIP_LLM=true; done
+for a in "$@"; do
+  case "$a" in --skip-llm|--sandbox) USER_SKIP_LLM=true ;; esac
+done
 
 if [ $# -gt 0 ]; then
-  bash install.sh --enable-services --skip-llm "$@"
+  bash install.sh --enable-services --skip-model-downloads "$@"
 else
-  bash install.sh --enable-services --skip-llm
+  bash install.sh --enable-services --skip-model-downloads
 fi
 RC=$?
 
@@ -346,7 +389,7 @@ if [ $RC -ne 0 ]; then
   err "install.sh exited $RC — dependencies were fine, the failure is downstream."
   exit $RC
 fi
-ok "wave 1 complete — node installed and running (no models yet)"
+ok "wave 1 complete — model downloads deferred"
 
 # ============================================================
 # Wave 2 — models, only after the user says so
@@ -361,7 +404,7 @@ fi
 
 echo ""
 ok "done. Next:"
-echo "    tailscale up                 # authenticate the mesh (opens a browser)"
+$BOOTSTRAP_SKIP_MESH || echo "    tailscale up                 # authenticate the mesh (opens a browser)"
 echo "    open http://localhost:3000   # Mission Control"
 exit 0
 

@@ -39,12 +39,12 @@ function notifyIntervention(message) {
 const GATEWAY_LOG = process.env.GATEWAY_LOG
   || path.join(process.env.HOME, '.openclaw/logs/gateway.log');
 const GATEWAY_ERR_LOG = process.env.GATEWAY_ERR_LOG
-  || path.join(process.env.HOME, '.openclaw/logs/gateway.err.log');
+  || path.join(process.env.HOME, process.platform === 'linux' ? '.openclaw/logs/gateway.err' : '.openclaw/logs/gateway.err.log');
 
 const LANE_STUCK_THRESHOLD_MS = 5 * 60 * 1000;   // 5 min before intervention
 const POLL_INTERVAL_MS = 15_000;                   // check every 15s
 const COOLDOWN_MS = 60_000;                        // 1 min cooldown after SIGUSR1
-const INCIDENT_LOG = path.join(process.env.HOME, 'openclaw/shared/lane-watchdog.log');
+const INCIDENT_LOG = path.join(process.env.HOME, '.openclaw/logs/lane-watchdog.log');
 
 // --- State ---
 let lastInterventionAt = 0;
@@ -175,49 +175,41 @@ function checkForDeadlock() {
 // --- Log Tailing ---
 function tailLog(filePath, label) {
   let fileSize = 0;
+  let identity;
+  let announced = false;
   try {
     const stat = fs.statSync(filePath);
-    fileSize = stat.size; // Start from current end
+    fileSize = stat.size;
+    identity = `${stat.dev}:${stat.ino}`;
+    announced = true;
+    log(`Tailing ${label}: ${filePath} (from byte ${fileSize})`);
   } catch {
-    log(`WARNING: log file not found: ${filePath}`);
-    return null;
+    log(`Waiting for log file: ${filePath}`);
   }
-
-  log(`Tailing ${label}: ${filePath} (from byte ${fileSize})`);
-
-  const watcher = fs.watch(filePath, { persistent: true }, () => {
-    try {
-      const stat = fs.statSync(filePath);
-      if (stat.size < fileSize) {
-        // Log was rotated
-        fileSize = 0;
-      }
-      if (stat.size > fileSize) {
-        const stream = fs.createReadStream(filePath, {
-          start: fileSize,
-          end: stat.size,
-          encoding: 'utf8'
-        });
-        let buffer = '';
-        stream.on('data', chunk => { buffer += chunk; });
-        stream.on('end', () => {
-          const lines = buffer.split('\n').filter(Boolean);
-          for (const line of lines) {
-            parseLine(line);
-          }
-          fileSize = stat.size;
-        });
-      }
-    } catch (err) {
-      log(`ERROR: reading ${label}: ${err.message}`);
-    }
-  });
-
-  return watcher;
+  const changed = (stat) => {
+    if (!stat.isFile()) return;
+    if (!announced) { log(`Tailing ${label}: ${filePath}`); announced = true; }
+    const nextIdentity = `${stat.dev}:${stat.ino}`;
+    if (identity !== nextIdentity || stat.size < fileSize) fileSize = 0;
+    identity = nextIdentity;
+    const start = fileSize;
+    fileSize = stat.size;
+    if (fileSize <= start) return;
+    const stream = fs.createReadStream(filePath, { start, end: fileSize - 1, encoding: 'utf8' });
+    let buffer = '';
+    stream.on('data', chunk => { buffer += chunk; });
+    stream.on('end', () => {
+      for (const line of buffer.split('\n').filter(Boolean)) parseLine(line);
+    });
+    stream.on('error', error => log(`ERROR: reading ${label}: ${error.message}`));
+  };
+  fs.watchFile(filePath, { persistent: true, interval: POLL_INTERVAL_MS }, changed);
+  return { close: () => fs.unwatchFile(filePath, changed) };
 }
 
 // --- Main ---
 function main() {
+  fs.mkdirSync(path.dirname(INCIDENT_LOG), { recursive: true });
   log('Starting lane watchdog');
   log(`Config: threshold=${LANE_STUCK_THRESHOLD_MS / 1000}s, poll=${POLL_INTERVAL_MS / 1000}s, cooldown=${COOLDOWN_MS / 1000}s`);
 
@@ -229,14 +221,14 @@ function main() {
   }
 
   logWatcher = tailLog(GATEWAY_LOG, 'gateway.log');
-  errWatcher = tailLog(GATEWAY_ERR_LOG, 'gateway.err.log');
+  errWatcher = tailLog(GATEWAY_ERR_LOG, path.basename(GATEWAY_ERR_LOG));
 
   // Graceful shutdown
   for (const sig of ['SIGTERM', 'SIGINT']) {
     process.on(sig, () => {
       log(`Received ${sig}, shutting down`);
-      if (logWatcher) fs.unwatchFile(GATEWAY_LOG);
-      if (errWatcher) fs.unwatchFile(GATEWAY_ERR_LOG);
+      if (logWatcher) logWatcher.close();
+      if (errWatcher) errWatcher.close();
       process.exit(0);
     });
   }

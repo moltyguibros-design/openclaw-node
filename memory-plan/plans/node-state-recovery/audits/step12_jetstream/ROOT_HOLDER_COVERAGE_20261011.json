@@ -1,0 +1,18 @@
+{
+  "type": "owned-root-holder-coverage-characterization",
+  "head": "1c82b757b8ba92a3647a0e8ef8b8cf1d804a83a9",
+  "job": "https://github.com/moltyguibros-design/openclaw-node/actions/runs/38185647477/job/114607266505",
+  "job_conclusion": "success",
+  "probe_sha256": "1baa47fbe92456ec579d3a6dad93c811576898b50c506b7815c9d72006f6dac5",
+  "observed": {
+    "status": "observed",
+    "owned_writable_fileport_seen": true,
+    "unreadable_pid_count": 39,
+    "exited_pid_count": 1,
+    "pid_list_stable": false,
+    "single_instant": false,
+    "physical_absence_certified": false
+  },
+  "scope": "ephemeral macOS CI runner; four disposable store directories and one owned child holding a writable vnode fileport; root process census",
+  "limits": "The probe records counts, not why each PID was unreadable. A successful job proves the probe ran and detected its owned writer, not that root can account for all processes or certify a no-writer interval."
+}

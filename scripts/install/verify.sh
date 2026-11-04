@@ -13,11 +13,10 @@ elif $SKIP_VERIFY; then
 elif $ENABLE_SERVICES; then
   info "Letting services settle (10s)..."
   sleep 10
-  # --skip-llm installs no model on purpose: tell the gate so the LLM axis is
-  # N/A (covered) instead of a FAIL that would reject every documented install.
+  # A partial model-free profile is installable; it cannot prove the whole node.
   GATE_ARGS=""
-  if $SKIP_LLM; then
-    warn "LLM axis skipped (--skip-llm) — the gate will not prove model-backed extraction"
+  if [ "${OPENCLAW_MODEL_ENABLED:-1}" = 0 ]; then
+    warn "Models disabled in the saved profile — model-backed checks remain unproven"
     GATE_ARGS="--skip-axis llm"
   fi
   set +e
@@ -35,7 +34,7 @@ elif $ENABLE_SERVICES; then
     # axis and says so; the second wave (--update --enable-services) re-gates.
     GATE_STATE="incomplete"
     warn "INCOMPLETE — no check failed, but the node is UNPROVEN on the skipped/empty axes (evidence: $OPENCLAW_ROOT/.install-acceptance.md)"
-    warn "Pull models, then re-gate: bash $0 --update --enable-services"
+    warn "Add model capability through explicit wave2 setup, then re-run acceptance."
   else
     error "Acceptance gate FAILED (exit $GATE_RC: 1=REJECTED 2=INCOMPLETE 3=harness error)"
     error "The node is NOT fully operational. Evidence: $OPENCLAW_ROOT/.install-acceptance.md"

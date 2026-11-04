@@ -9,6 +9,7 @@ jobs:
   unit-tests:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         # package.json engines.node is >=22; 20 kept for lower-bound breadth.
         # 18 dropped — EOL (2025-04) + below the floor; it only stayed green
@@ -21,6 +22,90 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - run: npm ci
+      - name: Install OS metadata tools for owned Stage0 fixtures
+        if: matrix.node-version == 22
+        run: sudo apt-get update -qq && sudo apt-get install -y acl attr e2fsprogs
+      - name: Characterize CI audit identity without admission
+        if: matrix.node-version == 22
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENCLAW_IDENTITY_JOB_NAME: "unit-tests (22)"
+          OPENCLAW_IDENTITY_CANARY: "non-secret-audit-canary-20261020"
+        run: |
+          identity_job_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" --jq '.jobs[] | select(.name == "unit-tests (22)") | .id')"
+          "$(command -v python3)" -I -S -B memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_ci_audit_identity.py
+          "$(command -v python3)" -I -S -B memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_ci_audit_identity.py --ci-audit-probe 00000000-0000-0000-0000-000000000003 "$RUNNER_TEMP/ci-audit-identity.json" "$identity_job_id"
+      - name: Retain record-only CI audit identity
+        if: always() && matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-audit-identity-linux-${{ github.sha }}
+          path: ${{ runner.temp }}/ci-audit-identity.json
+          if-no-files-found: error
+      - name: Verify inert root-copy local controls
+        if: matrix.node-version == 22
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          "$(command -v python3)" memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stage0_installer_copy.py
+      - name: Verify inert root-copy bytes and designated faults
+        if: matrix.node-version == 22
+        run: |
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE CI=true GITHUB_ACTIONS=true OPENCLAW_STAGE0_COPY_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            "$(command -v python3)" memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stage0_installer_copy.py --probe "$RUNNER_TEMP/stage0-installer-copy.json"
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE CI=true GITHUB_ACTIONS=true OPENCLAW_STAGE0_COPY_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            "$(command -v python3)" memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_stage0_installer_copy.py --probe "$RUNNER_TEMP/stage0-installer-copy-mutations.json"
+      - name: Retain owned inert root-copy observations
+        if: always() && matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage0-installer-copy-linux-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/stage0-installer-copy.json
+            ${{ runner.temp }}/stage0-installer-copy-mutations.json
+          if-no-files-found: error
+      - name: Prepare inert installer authentication fixture parent
+        if: matrix.node-version == 22
+        run: |
+          stage0_test_parent="$(sudo -n /usr/bin/mktemp -d /var/lib/openclaw-stage0-tests-owned-XXXXXXXX)"
+          sudo -n /usr/bin/chown -- "$(id -u):$(id -g)" "$stage0_test_parent"
+          printf 'OPENCLAW_STAGE0_TEST_PARENT=%s\n' "$stage0_test_parent" >> "$GITHUB_ENV"
+          printf 'OPENCLAW_STAGE0_TEST_PARENT_DEV=%s\n' "$(/usr/bin/stat -c %d "$stage0_test_parent")" >> "$GITHUB_ENV"
+          printf 'OPENCLAW_STAGE0_TEST_PARENT_INO=%s\n' "$(/usr/bin/stat -c %i "$stage0_test_parent")" >> "$GITHUB_ENV"
+      - name: Verify inert installer authentication and designated faults
+        if: matrix.node-version == 22
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stage0_installer_auth.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_stage0_installer_auth.py
+          python3 - <<'PY'
+          import json,os,pathlib,stat,subprocess
+          parent=pathlib.Path(os.environ['OPENCLAW_STAGE0_TEST_PARENT']);info=parent.lstat()
+          assert parent.parent==pathlib.Path('/var/lib') and parent.name.startswith('openclaw-stage0-tests-owned-')
+          assert str(parent)==str(parent.resolve()) and stat.S_ISDIR(info.st_mode)
+          assert info.st_uid==os.getuid() and stat.S_IMODE(info.st_mode)==0o700
+          assert str(info.st_dev)==os.environ['OPENCLAW_STAGE0_TEST_PARENT_DEV']
+          assert str(info.st_ino)==os.environ['OPENCLAW_STAGE0_TEST_PARENT_INO']
+          assert not list(parent.iterdir())
+          subprocess.run(['/usr/bin/sudo','-n','/usr/bin/rmdir','--',str(parent)],check=True)
+          assert not parent.exists()
+          print(json.dumps({'owned_stage0_test_parent':str(parent),'device':info.st_dev,'inode':info.st_ino,'removed':True}))
+          PY
+      - name: Verify inert installer authentication across distinct Linux owners
+        if: matrix.node-version == 22
+        run: |
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE CI=true GITHUB_ACTIONS=true OPENCLAW_STAGE0_AUTH_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            "$(command -v python3)" memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_stage0_installer_auth.py \
+            "$RUNNER_TEMP/stage0-installer-auth.json"
+      - name: Retain owned installer authentication observations
+        if: always() && matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage0-installer-auth-linux-${{ github.sha }}
+          path: ${{ runner.temp }}/stage0-installer-auth.json
+          if-no-files-found: error
       - name: Legacy NATS writer lock fixtures
         run: |
           PYTHONDONTWRITEBYTECODE=1 python3 test/test_nats_legacy_lock.py
@@ -91,11 +176,94 @@ jobs:
           curl -fsSL -o /tmp/nats-cli.zip "https://github.com/nats-io/natscli/releases/download/v0.3.1/nats-0.3.1-linux-amd64.zip"
           echo "f48374be6fc903b954b90b729321772bdd5bc745234edf3d31cd17ab79e85629  /tmp/nats-cli.zip" | sha256sum -c -
           unzip -q /tmp/nats-cli.zip -d /tmp/nats-cli
-          node memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_recovery.mjs /tmp/nats-cli/nats-0.3.1-linux-amd64/nats /usr/local/bin/nats-server
+          NATS_SERVER=/usr/local/bin/nats-server PLACEMENT_GOSSIP_REPORT="$RUNNER_TEMP/placement-gossip.json" node --test memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_placement_gossip.mjs
+          node memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_placement_gossip.mjs
+          node --test memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_placement_failure_evidence.mjs
+          node memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_placement_failure_evidence.mjs
+          PLACEMENT_FAILURE_REPORT="$RUNNER_TEMP/placement-failure.json" node memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_recovery.mjs /tmp/nats-cli/nats-0.3.1-linux-amd64/nats /usr/local/bin/nats-server
           NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_checks.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_journal.py
+          NATS_SERVER=/usr/local/bin/nats-server python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_serving_nats_group.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_owned_group_fixture.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_full_node_baseline.py
           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_managed_launchd.py
-          NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_cluster.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_timeout.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_applied_timeout.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_nats_identity.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_window_pin_binding.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_window_pin_binding.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_capture_anchor.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_approved_release.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_approved_release.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_release_publish.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_release_publish.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_capture_anchor.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_frozen_owner_context.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_frozen_owner_context.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_protected_journal_reader.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_protected_journal_reader.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_owned_kickstart_trace.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_timing.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_preflight_status.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_reconcile.py ProductionReleaseFence
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_abort_cleanup.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_abort_cleanup.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_terminal_abort.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_terminal_abort.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_abort_release.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_abort_release.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_boot_decision.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_boot_decision.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_scoped_process_diagnostic.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_scoped_process_diagnostic.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_boot_process_policy.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_boot_process_policy.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_process_observation_envelope.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_process_observation_envelope.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_process_class_comparator.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_process_class_comparator.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_held_job_negative_comparator.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_held_job_negative_comparator.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_managed_job_observation.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_managed_job_observation.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_managed_job_negative_observation.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_managed_job_negative_observation.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_scripted_entrypoint_consistency.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_scripted_entrypoint_consistency.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_entrypoint_path_scope.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_entrypoint_path_scope.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_cluster_group_readiness.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_cluster_group_readiness.py
+          NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" CLUSTER_STARTUP_PAIR_REPORT="$RUNNER_TEMP/preservation-cluster-controls.json" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_cluster_startup_evidence.py
+          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_cluster_startup_evidence.py
+          PRESERVATION_CLUSTER_REPORT="$RUNNER_TEMP/preservation-cluster-startup.json" NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_cluster.py
+      - name: Retain owned preservation-cluster startup diagnostics
+        if: always() && matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: preservation-cluster-startup-linux-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/preservation-cluster-startup.json
+            ${{ runner.temp }}/preservation-cluster-controls.json
+          if-no-files-found: warn
+      - name: Retain owned placement-gossip report
+        if: always() && matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: placement-gossip-linux-${{ github.sha }}
+          path: ${{ runner.temp }}/placement-gossip.json
+          if-no-files-found: warn
+      - name: Retain owned R3 placement failure report
+        if: always() && matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: placement-failure-linux-${{ github.sha }}
+          path: ${{ runner.temp }}/placement-failure.json
+          if-no-files-found: ignore
       - name: Root unit tests
         # npm test (not bare node --test): the pretest hook builds the
         # event-schemas workspace dist that the broadcast libs fail loud on.
@@ -137,13 +305,71 @@ jobs:
           test "$(grep -c " scripts/install/.*\.sh" /tmp/pack.txt)" = "$(ls scripts/install/*.sh | wc -l | tr -d ' ')"
           grep -q " packages/event-schemas/dist/" /tmp/pack.txt
 
+      - name: Verify the independent root capture-byte anchor on owned resources
+        if: matrix.node-version == 22
+        env:
+          OPENCLAW_ANCHOR_PROBE: "1"
+        run: python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_host_capture_anchor.py "$RUNNER_TEMP/host-capture-anchor.json"
+      - name: Verify frozen owner context across real Linux owners
+        if: matrix.node-version == 22
+        run: |
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE GITHUB_ACTIONS=true OPENCLAW_FROZEN_OWNER_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            "$(command -v python3)" memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_frozen_owner_context.py \
+            "$RUNNER_TEMP/frozen-owner-context.json"
+      - name: Verify exclusive approved-release publication on disposable Linux resources
+        if: matrix.node-version == 22
+        env:
+          OPENCLAW_RELEASE_PUBLISH_PROBE: "1"
+        run: python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_host_release_publish.py "$RUNNER_TEMP/release-publication.json"
+      - name: Retain owned release-publication observations
+        if: always() && matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-publication-linux-${{ github.sha }}
+          path: ${{ runner.temp }}/release-publication.json
+          if-no-files-found: error
+      - name: Retain owned frozen owner-context report
+        if: always() && matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: frozen-owner-context-linux-${{ github.sha }}
+          path: ${{ runner.temp }}/frozen-owner-context.json
+          if-no-files-found: ignore
+      - name: Retain owned independent-root anchor report
+        if: always() && matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: capture-anchor-linux-${{ github.sha }}
+          path: ${{ runner.temp }}/host-capture-anchor.json
+          if-no-files-found: ignore
+
   legacy-writer-lock-macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Verify inert installer authentication and designated faults
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stage0_installer_auth.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_stage0_installer_auth.py
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install owned launchd fixture dependencies
+        run: |
+          case "$(uname -m)" in
+            arm64) nats_arch=arm64; nats_sha=b9b287b786e83e783702214d516042f6397f7c1c4916985c6ec5e6d9d490151c ;;
+            x86_64) nats_arch=amd64; nats_sha=d7bc326ebbaf0a032ae1b03b99e4d863d9320ad010f37a22b2e8306ab3272ca0 ;;
+            *) exit 1 ;;
+          esac
+          nats_fixture_dir="$(mktemp -d)"
+          curl -fL --retry 3 --output "$nats_fixture_dir/nats.tar.gz" \
+            "https://github.com/nats-io/nats-server/releases/download/v2.12.6/nats-server-v2.12.6-darwin-${nats_arch}.tar.gz"
+          printf '%s  %s\n' "$nats_sha" "$nats_fixture_dir/nats.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$nats_fixture_dir/nats.tar.gz" -C "$nats_fixture_dir"
+          echo "$nats_fixture_dir/nats-server-v2.12.6-darwin-${nats_arch}" >> "$GITHUB_PATH"
+          npm ci --ignore-scripts --no-audit --no-fund
       - name: Verify macOS descriptor and subprocess lock behavior
         env:
           PYTHONDONTWRITEBYTECODE: "1"
@@ -153,19 +379,364 @@ jobs:
           /usr/bin/python3 test/test_nats_root_journal.py
           /usr/bin/python3 test/test_nats_user_transfer.py
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_journal.py
+          NATS_SERVER="$(command -v nats-server)" /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_serving_nats_group.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_owned_group_fixture.py
+          OPENCLAW_CI_FULL_NODE_INVENTORY_FIXTURE=1 /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_full_node_baseline.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_asif_extract.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_image_immutable.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_reconcile.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_abort_cleanup.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_abort_cleanup.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_terminal_abort.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_terminal_abort.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_abort_release.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_abort_release.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_boot_decision.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_boot_decision.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_scoped_process_diagnostic.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_scoped_process_diagnostic.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_boot_process_policy.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_boot_process_policy.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_process_observation_envelope.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_process_observation_envelope.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_process_class_comparator.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_process_class_comparator.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_held_job_negative_comparator.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_held_job_negative_comparator.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_managed_job_observation.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_managed_job_observation.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_managed_job_negative_observation.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_managed_job_negative_observation.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_scripted_entrypoint_consistency.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_scripted_entrypoint_consistency.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_entrypoint_path_scope.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_entrypoint_path_scope.py
+          PLACEMENT_GOSSIP_REPORT="$RUNNER_TEMP/placement-gossip.json" node --test memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_placement_gossip.mjs
+          node memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_placement_gossip.mjs
+          node --test memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_placement_failure_evidence.mjs
+          node memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_placement_failure_evidence.mjs
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_cluster_group_readiness.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_cluster_group_readiness.py
+          NATS_SERVER="$(command -v nats-server)" RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" CLUSTER_STARTUP_PAIR_REPORT="$RUNNER_TEMP/preservation-cluster-controls.json" /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_cluster_startup_evidence.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_cluster_startup_evidence.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_release_verify.py
           PYTHONPATH="$PWD/memory-plan/plans/node-state-recovery/audits/step12_jetstream" /usr/bin/python3 -m unittest -q \
             test_preservation_checks.Gates.test_only_exact_tailscale_system_job_can_be_excluded \
             test_preservation_checks.Gates.test_tailscale_exclusion_refuses_loaded_activity_and_plist_triggers \
             test_preservation_checks.Gates.test_tailscale_exclusion_captures_physical_chain_and_refuses_wrapper_drift \
             test_preservation_checks.Gates.test_excluded_root_file_rejects_unprivileged_owner
           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_journal_hold.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_timeout.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_applied_timeout.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_nats_identity.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint_facade.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_window_pin_binding.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_window_pin_binding.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_capture_anchor.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_approved_release.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_approved_release.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_release_publish.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_release_publish.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_capture_anchor.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_frozen_owner_context.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_frozen_owner_context.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_protected_journal_reader.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_host_protected_journal_reader.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_owned_kickstart_trace.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_preflight_status.py
           PYTHONPATH="$PWD/memory-plan/plans/node-state-recovery/audits/step12_jetstream" /usr/bin/python3 -m unittest -q test_restore_only
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_disabled.py
+          OPENCLAW_CI_FULL_NODE_LISTENER_FIXTURE=1 /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_managed_launchd.py
           /usr/bin/python3 test/test_nats_root_admission.py
           /usr/bin/python3 test/test_nats_root_decline.py
           /usr/bin/python3 test/test_nats_macos_proc.py
           /usr/bin/python3 test/test_nats_live_census.py
           /usr/bin/python3 test/test_nats_store_holder_census.py
           node --test test/nats-legacy-lock.test.mjs
+
+      - name: Retain owned preservation-cluster startup controls
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preservation-cluster-startup-macos-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/preservation-cluster-controls.json
+          if-no-files-found: warn
+      - name: Retain owned placement-gossip report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: placement-gossip-macos-${{ github.sha }}
+          path: ${{ runner.temp }}/placement-gossip.json
+          if-no-files-found: warn
+
+  owned-kickstart-fixture-macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify owned configuration and timeout refusals
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_owned_fixture_policy.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_timeout.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_applied_timeout.py
+      - name: Restore the fresh stopped daemon and refuse a changed timer
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: ${{ github.workspace }}/memory-plan/plans/node-state-recovery/audits/step12_jetstream
+        run: |
+          /usr/bin/python3 -m unittest -v \
+            test_restore_only.RestoreOnlyOwned.test_loaded_stopped_owned_daemon_is_kickstarted \
+            test_restore_only.RestoreOnlyOwned.test_owned_timer_refuses_daemon_throttle_before_launchd
+
+  asif-mount-ownership-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify inert installer authentication across distinct macOS owners
+        run: |
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE CI=true GITHUB_ACTIONS=true OPENCLAW_STAGE0_AUTH_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_stage0_installer_auth.py \
+            "$RUNNER_TEMP/stage0-installer-auth.json"
+      - name: Retain owned installer authentication observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage0-installer-auth-macos-${{ github.sha }}
+          path: ${{ runner.temp }}/stage0-installer-auth.json
+          if-no-files-found: error
+      - name: Verify reader ownership tests under user and root callers
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          cd memory-plan/plans/node-state-recovery/audits/step12_jetstream
+          /usr/bin/python3 -m unittest -q \
+            test_host_journal_mount.ReaderSeed.test_writable_seed_uses_a_distinct_nonroot_owner_then_restores_root \
+            test_host_journal_mount.ProbeWritePreparation.test_only_the_fresh_volume_root_is_made_runner_writable_before_seeding \
+            test_host_journal_mount.ProbeGuards.test_root_runner_refuses_before_sudo_for_both_native_modes
+          sudo -n -H /usr/bin/env PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m unittest -q \
+            test_host_journal_mount.ReaderSeed.test_writable_seed_uses_a_distinct_nonroot_owner_then_restores_root \
+            test_host_journal_mount.ProbeWritePreparation.test_only_the_fresh_volume_root_is_made_runner_writable_before_seeding \
+            test_host_journal_mount.ProbeGuards.test_root_runner_refuses_before_sudo_for_both_native_modes
+          /usr/bin/python3 mutate_native_device_binding.py
+          sudo -n -H /usr/bin/env PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 mutate_native_device_binding.py
+      - name: Verify frozen-reader orchestration refusal controls
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_stopped_asif_reader.py
+      - name: Verify frozen owner context across real macOS owners
+        run: |
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE GITHUB_ACTIONS=true OPENCLAW_FROZEN_OWNER_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_frozen_owner_context.py \
+            "$RUNNER_TEMP/frozen-owner-context.json"
+      - name: Characterize ownership on a fresh CI-only ASIF
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          OPENCLAW_OWNERSHIP_PROBE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py \
+            --ci-owned-probe "$RUNNER_TEMP/asif-mount-ownership.json"
+      - name: Verify the complete frozen-journal reader on a fresh CI-only ASIF
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          OPENCLAW_OWNERSHIP_PROBE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py \
+            --ci-owned-reader "$RUNNER_TEMP/stopped-asif-reader.json"
+      - name: Verify the independent root capture-byte anchor on owned resources
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          OPENCLAW_ANCHOR_PROBE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_host_capture_anchor.py \
+            "$RUNNER_TEMP/host-capture-anchor.json"
+      - name: Verify protected semantic reader on a fresh root-owned image copy
+        run: |
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE CI=true GITHUB_ACTIONS=true OPENCLAW_PROTECTED_READER_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_host_protected_journal_reader.py \
+            "$RUNNER_TEMP/protected-journal-reader.json"
+      - name: Verify exclusive approved-release publication on disposable macOS resources
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          OPENCLAW_RELEASE_PUBLISH_PROBE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_host_release_publish.py \
+            "$RUNNER_TEMP/release-publication.json"
+      - name: Retain native observations even when the probe refuses
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asif-mount-ownership-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/asif-mount-ownership.json
+            ${{ runner.temp }}/stopped-asif-reader.json
+            ${{ runner.temp }}/host-capture-anchor.json
+            ${{ runner.temp }}/frozen-owner-context.json
+            ${{ runner.temp }}/protected-journal-reader.json
+            ${{ runner.temp }}/release-publication.json
+          if-no-files-found: error
+      - name: Retain a failed reader's owned image for diagnosis
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stopped-asif-reader-failed-image-${{ github.sha }}
+          path: ${{ runner.temp }}/openclaw-capture-owned-reader-*/capture/powered-off-image.asif
+          if-no-files-found: ignore
+
+  kickstart-timing-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify timing and cleanup controls
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_timing.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_kickstart_timing.py --self-test
+      - name: Measure seven fresh owned launchd targets
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          OPENCLAW_KICKSTART_PROBE: "1"
+        run: |
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_kickstart_timing.py \
+            --ci-owned-probe "$RUNNER_TEMP/kickstart-timing.json"
+      - name: Retain timing observations on refusal
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kickstart-timing-${{ github.sha }}
+          path: ${{ runner.temp }}/kickstart-timing.json
+          if-no-files-found: error
+
+  macos-process-census:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Characterize CI audit identity without admission
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENCLAW_IDENTITY_JOB_NAME: "macos-process-census"
+          OPENCLAW_IDENTITY_CANARY: "non-secret-audit-canary-20261020"
+        run: |
+          identity_job_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" --jq '.jobs[] | select(.name == "macos-process-census") | .id')"
+          /usr/bin/python3 -I -S -B memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_ci_audit_identity.py
+          /usr/bin/python3 -I -S -B memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_ci_audit_identity.py --ci-audit-probe 00000000-0000-0000-0000-000000000003 "$RUNNER_TEMP/ci-audit-identity.json" "$identity_job_id"
+      - name: Retain record-only CI audit identity
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-audit-identity-macos-${{ github.sha }}
+          path: ${{ runner.temp }}/ci-audit-identity.json
+          if-no-files-found: error
+      - name: Measure preregistered saved credentials
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          saved_job_id="$(/usr/bin/python3 -I -S -B - <<'PY_JOB'
+          import json, os, re, signal, urllib.request
+          def refuse(*args):
+              raise TimeoutError()
+          def pairs(items):
+              result = {}
+              for key, value in items:
+                  if key in result: raise ValueError()
+                  result[key] = value
+              return result
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *args): return None
+          phase = 'preflight'
+          try:
+              env = os.environ
+              if env['GITHUB_REPOSITORY'] != 'moltyguibros-design/openclaw-node' or env['GITHUB_JOB'] != 'macos-process-census' or env['GITHUB_EVENT_NAME'] != 'pull_request': raise ValueError()
+              run, attempt = env['GITHUB_RUN_ID'], env['GITHUB_RUN_ATTEMPT']
+              if any(re.fullmatch(r'[1-9][0-9]{0,18}', n) is None or int(n) > 9223372036854775807 for n in (run, attempt)): raise ValueError()
+              with open(env['GITHUB_EVENT_PATH'], 'rb') as source: event_raw = source.read(1048577)
+              if len(event_raw) > 1048576: raise ValueError()
+              event = json.loads(event_raw, object_pairs_hook=pairs)
+              head = event['pull_request']['head']['sha']
+              if re.fullmatch(r'[0-9a-f]{40}', head) is None: raise ValueError()
+              phase = 'token'
+              token = env['GH_TOKEN']
+              if re.fullmatch(r'[\x21-\x7e]{1,4096}', token) is None: raise ValueError()
+              phase = 'request'
+              request = urllib.request.Request('https://api.github.com/repos/moltyguibros-design/openclaw-node/actions/runs/' + run + '/jobs?filter=all&per_page=100', headers={'Authorization':'Bearer ' + token, 'Accept':'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28'})
+              opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect)
+              signal.signal(signal.SIGALRM, refuse)
+              signal.setitimer(signal.ITIMER_REAL, 5)
+              try:
+                  with opener.open(request, timeout=5) as response:
+                      phase = 'response'
+                      raw = response.read(262145)
+              finally:
+                  signal.setitimer(signal.ITIMER_REAL, 0)
+              if len(raw) > 262144: raise ValueError()
+              value = json.loads(raw, object_pairs_hook=pairs)
+              if type(value['total_count']) is not int or not 1 <= value['total_count'] <= 100 or type(value['jobs']) is not list or len(value['jobs']) != value['total_count']: raise ValueError()
+              matches = [j for j in value['jobs'] if j['name'] == 'macos-process-census' and type(j['run_id']) is int and j['run_id'] == int(run) and type(j['run_attempt']) is int and j['run_attempt'] == int(attempt) and j['head_sha'] == head]
+              if len(matches) != 1 or type(matches[0]['id']) is not int or not 0 < matches[0]['id'] <= 9223372036854775807: raise ValueError()
+              print(matches[0]['id'])
+          except Exception:
+              raise SystemExit('saved-credential job selection unavailable: phase=' + phase) from None
+          PY_JOB
+          )"
+          /usr/bin/python3 -I -S -B memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_ci_saved_credential.py
+          /usr/bin/python3 -I -S -B memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_ci_saved_credential.py --ci-saved-probe 00000000-0000-0000-0000-000000000003 "$RUNNER_TEMP/ci-saved-credential-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "$saved_job_id" memory-plan/plans/node-state-recovery/audits/step12_jetstream/ci_saved_credential_execution_registration.json ea858319b6b864420e0f7cc11550ec90c79a9a606de7df2d4fb7185be6ee9283
+      - name: Retain saved credential measurement
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: saved-credential-macos-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/report.json
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/progress.jsonl
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/abi-witness
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/saved-observer
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/sdk-settings.json
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/sdk-libproc.h
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/sdk-proc_info.h
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/sdk-param.h
+            ${{ runner.temp }}/ci-saved-credential-${{ github.run_id }}-${{ github.run_attempt }}/sdk-types.h
+          if-no-files-found: error
+      - name: Verify inert root-copy local controls
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stage0_installer_copy.py
+      - name: Verify inert root-copy bytes and designated faults
+        run: |
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE CI=true GITHUB_ACTIONS=true OPENCLAW_STAGE0_COPY_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stage0_installer_copy.py --probe "$RUNNER_TEMP/stage0-installer-copy.json"
+          sudo -n -H /usr/bin/env -u GITHUB_WORKSPACE CI=true GITHUB_ACTIONS=true OPENCLAW_STAGE0_COPY_PROBE=1 PYTHONDONTWRITEBYTECODE=1 \
+            /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/mutate_stage0_installer_copy.py --probe "$RUNNER_TEMP/stage0-installer-copy-mutations.json"
+      - name: Retain owned inert root-copy observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage0-installer-copy-macos-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/stage0-installer-copy.json
+            ${{ runner.temp }}/stage0-installer-copy-mutations.json
+          if-no-files-found: error
+      - name: Native process and store-holder census
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          /usr/bin/python3 test/test_nats_macos_proc.py
+          /usr/bin/python3 test/test_nats_live_census.py
+          /usr/bin/python3 test/test_nats_store_holder_census.py
+          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_mach_memory_entry.py
 
   mission-control-tests:
     runs-on: ubuntu-latest

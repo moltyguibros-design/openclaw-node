@@ -1,0 +1,24 @@
+{
+  "date": "2026-10-04",
+  "scope": "owner-private host handoff inputs; no VM shutdown or production store copy",
+  "host_root": "~/Library/Application Support/OpenClawRecovery",
+  "root_mode": "0700",
+  "host_spec": {
+    "mode": "0600",
+    "sha256": "da26fb8bc349d288b0ba709f5a1377b03fa1347b61b591c904c9e84b551941aa",
+    "pins": "UTM package, name, UUID, image name, config hash and controller binary hash"
+  },
+  "store_spec": {
+    "mode": "0600",
+    "sha256": "5935ff242d5125ecf73a918708b8de39a70736d731df24312deb4c8551899ea9",
+    "roles": ["standalone", "member1", "member2", "member3"],
+    "data_volume_uuid": "EF14FD3D-7953-4A6D-9596-CB90B6024CD1"
+  },
+  "fresh_read_only_preflight": {
+    "state": "started",
+    "image_holders": 1,
+    "image_size_bytes": 211136020480,
+    "free_bytes": 115174285312
+  },
+  "pending": "real managed writer hold, clean shutdown and host cold-copy acceptance"
+}

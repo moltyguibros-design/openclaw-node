@@ -17,6 +17,8 @@ Environment=LLM_MODEL=${LLM_MODEL}
 Environment=LLM_BASE_URL=${LLM_BASE_URL}
 Environment=OPENCLAW_REPO_DIR=${OPENCLAW_REPO_DIR}
 Environment=TZ=America/Montreal
+EnvironmentFile=-${HOME}/.openclaw/openclaw.env
+UnsetEnvironment=OPENCLAW_MODEL_ENABLED
 WorkingDirectory=${OPENCLAW_WORKSPACE}
 StandardOutput=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-node-watch.log
 StandardError=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-node-watch.err

@@ -50,10 +50,8 @@ let token = null;
 let injectorRef = null;
 
 before(async () => {
-  // Server creates its own injector internally; we pass null deps so it
-  // degrades gracefully (empty results, but happy path / error handling
-  // still exercised). Port 0 = OS-assigned.
-  serverHandle = await startInjectionServer({}, { port: 0, host: '127.0.0.1', log: () => {} });
+  injectorRef = createMockInjector();
+  serverHandle = await startInjectionServer({ injector: injectorRef }, { port: 0, host: '127.0.0.1', log: () => {} });
   token = serverHandle.token;
 });
 
@@ -242,8 +240,8 @@ describe('POST /memory/inject — @memory directives', () => {
   });
 });
 
-describe('POST /memory/inject — happy path (degraded mode w/ null DBs)', () => {
-  it('returns 200 with degraded-mode response when DBs unavailable', async () => {
+describe('POST /memory/inject — injected retrieval contract', () => {
+  it('returns the injected retrieval result', async () => {
     const r = await req('POST', '/memory/inject', {
       body: { prompt: 'test prompt', session_id: 's1', frontend: 'test' },
       headers: { Authorization: `Bearer ${token}` },
@@ -254,6 +252,8 @@ describe('POST /memory/inject — happy path (degraded mode w/ null DBs)', () =>
     assert.ok('items' in r.json);
     assert.ok(typeof r.json.tokens === 'number');
     assert.ok(typeof r.json.elapsed_ms === 'number');
+    assert.equal(r.json.items.concepts, 1);
+    assert.equal(r.json.tokens, 42);
   });
 });
 

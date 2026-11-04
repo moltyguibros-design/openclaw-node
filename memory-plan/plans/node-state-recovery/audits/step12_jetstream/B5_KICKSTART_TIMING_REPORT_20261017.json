@@ -1,0 +1,759 @@
+{
+ "budget": 10.0,
+ "cleanup": {
+  "clean": true,
+  "domain": {
+   "returncode": 0,
+   "stderr": ""
+  },
+  "errors": [],
+  "labels_left": [],
+  "removed": true,
+  "targets": [
+   {
+    "after": {
+     "loaded": false,
+     "pid": null
+    },
+    "before": {
+     "loaded": false,
+     "pid": null
+    },
+    "target": "gui/501/ai.openclaw.owned-kickstart-probe.e8f20265.default"
+   },
+   {
+    "after": {
+     "loaded": false,
+     "pid": null
+    },
+    "before": {
+     "loaded": false,
+     "pid": null
+    },
+    "target": "gui/501/ai.openclaw.owned-kickstart-probe.1e9ddbd5.default"
+   },
+   {
+    "after": {
+     "loaded": false,
+     "pid": null
+    },
+    "before": {
+     "loaded": false,
+     "pid": null
+    },
+    "target": "gui/501/ai.openclaw.owned-kickstart-probe.268718be.default"
+   },
+   {
+    "after": {
+     "loaded": false,
+     "pid": null
+    },
+    "before": {
+     "loaded": false,
+     "pid": null
+    },
+    "target": "gui/501/ai.openclaw.owned-kickstart-probe.75e39a53.default"
+   },
+   {
+    "after": {
+     "loaded": false,
+     "pid": null
+    },
+    "before": {
+     "loaded": false,
+     "pid": null
+    },
+    "target": "gui/501/ai.openclaw.owned-kickstart-probe.54a01df7.t1"
+   },
+   {
+    "after": {
+     "loaded": false,
+     "pid": null
+    },
+    "before": {
+     "loaded": false,
+     "pid": null
+    },
+    "target": "gui/501/ai.openclaw.owned-kickstart-probe.ae057186.t1"
+   },
+   {
+    "after": {
+     "loaded": false,
+     "pid": null
+    },
+    "before": {
+     "loaded": false,
+     "pid": null
+    },
+    "target": "gui/501/ai.openclaw.owned-kickstart-probe.4ae937ff.t0"
+   }
+  ]
+ },
+ "completed": true,
+ "extra": 15.0,
+ "launchd_log": {
+  "lines": [
+   "2026-10-17 13:00:08.333 Df launchd[1:1e8] [gui/501 [100002]:] service inactive: ai.openclaw.owned-kickstart-probe.e8f20265.default",
+   "2026-10-17 13:00:18.494 Df launchd[1:1bb8] [gui/501 [100002]:] service inactive: ai.openclaw.owned-kickstart-probe.e8f20265.default",
+   "2026-10-17 13:00:18.494 Df launchd[1:1bb8] [gui/501 [100002]:] removing service: ai.openclaw.owned-kickstart-probe.e8f20265.default",
+   "2026-10-17 13:00:21.578 Df launchd[1:1e8] [gui/501 [100002]:] service inactive: ai.openclaw.owned-kickstart-probe.1e9ddbd5.default",
+   "2026-10-17 13:00:28.715 Df launchd[1:1e9] [gui/501 [100002]:] service inactive: ai.openclaw.owned-kickstart-probe.1e9ddbd5.default",
+   "2026-10-17 13:00:28.715 Df launchd[1:1e9] [gui/501 [100002]:] removing service: ai.openclaw.owned-kickstart-probe.1e9ddbd5.default",
+   "2026-10-17 13:00:40.835 Df launchd[1:1e8] [gui/501 [100002]:] service inactive: ai.openclaw.owned-kickstart-probe.268718be.default",
+   "2026-10-17 13:00:40.940 Df launchd[1:1e9] [gui/501 [100002]:] service inactive: ai.openclaw.owned-kickstart-probe.268718be.default",
+   "2026-10-17 13:00:40.940 Df launchd[1:1e9] [gui/501 [100002]:] removing service: ai.openclaw.owned-kickstart-probe.268718be.default",
+   "2026-10-17 13:00:41.340 Df launchd[1:1bb8] [gui/501 [100002]:] service inactive: ai.openclaw.owned-kickstart-probe.75e39a53.default",
+   "2026-10-17 13:00:51.509 Df launchd[1:1e9] [gui/501 [100002]:] service inactive: ai.openclaw.owned-kickstart-probe.75e39a53.default",
+   "2026-10-17 13:00:51.509 Df launchd[1:1e9] [gui/501 [100002]:] removing service: ai.openclaw.owned-kickstart-probe.75e39a53.default",
+   "2026-10-17 13:00:52.005 Df launchd[1:1e9] [gui/501 [100002]:] service inactive: ai.openclaw.owned-kickstart-probe.54a01df7.t1",
+   "2026-10-17 13:00:53.126 Df launchd[1:1e8] [gui/501 [100002]:] service inactive: ai.openclaw.owned-kickstart-probe.54a01df7.t1",
+   "2026-10-17 13:00:53.126 Df launchd[1:1e8] [gui/501 [100002]:] removing service: ai.openclaw.owned-kickstart-probe.54a01df7.t1",
+   "2026-10-17 13:00:56.241 Df launchd[1:1bb8] [gui/501 [100002]:] service inactive: ai.openclaw.owned-kickstart-probe.ae057186.t1",
+   "2026-10-17 13:00:56.340 Df launchd[1:1e8] [gui/501 [100002]:] service inactive: ai.openclaw.owned-kickstart-probe.ae057186.t1",
+   "2026-10-17 13:00:56.340 Df launchd[1:1e8] [gui/501 [100002]:] removing service: ai.openclaw.owned-kickstart-probe.ae057186.t1",
+   "2026-10-17 13:00:56.746 Df launchd[1:1e9] [gui/501 [100002]:] service inactive: ai.openclaw.owned-kickstart-probe.4ae937ff.t0",
+   "2026-10-17 13:00:57.876 Df launchd[1:1e9] [gui/501 [100002]:] service inactive: ai.openclaw.owned-kickstart-probe.4ae937ff.t0",
+   "2026-10-17 13:00:57.876 Df launchd[1:1e9] [gui/501 [100002]:] removing service: ai.openclaw.owned-kickstart-probe.4ae937ff.t0"
+  ],
+  "returncode": 0
+ },
+ "os": "ProductName:\t\tmacOS\nProductVersion:\t\t26.6.2\nBuildVersion:\t\t25G83\n",
+ "scope": "owned labels only; no fixture, runtime or production label touched; post-timeout samples, not exact deadline state",
+ "started_utc": "2026-10-17T13:00:07.843224+00:00",
+ "trials": [
+  {
+   "after_bootout": {
+    "loaded": false,
+    "pid": null
+   },
+   "bootout": {
+    "returncode": 0,
+    "stderr": ""
+   },
+   "control_print": {
+    "fields": {
+     "loaded": true,
+     "pid": null,
+     "runs": 1,
+     "state": "not running"
+    },
+    "seconds": 0.008136041999999954
+   },
+   "first": {
+    "pid": 1753,
+    "spawn": 1792242007.952685,
+    "spawn_after_bootstrap": 0.06165194511413574
+   },
+   "hypotheses": {
+    "assumed_interval": 10.0,
+    "limit": "illustrative models; Python instruction/startup bias, observed exit and wall-clock deltas; zero throttle interpreted literally may differ from launchd",
+    "predicted_block": {
+     "exit_observation_origin": 9.991855144500732,
+     "first_instruction_origin": 9.57988715171814,
+     "request_origin": 10.0
+    },
+    "request_after_first_instruction": 0.42011284828186035,
+    "residual": {
+     "exit_observation_origin": 0.024046772499268343,
+     "first_instruction_origin": 0.4360147652818611,
+     "request_origin": 0.015901917000000765
+    }
+   },
+   "kickstart": {
+    "argv": [
+     "/bin/launchctl",
+     "kickstart",
+     "gui/501/ai.openclaw.owned-kickstart-probe.e8f20265.default"
+    ],
+    "at_budget": "alive",
+    "block": 10.015901917,
+    "ended": "returned-late",
+    "issued_after_exit": 0.008144855499267578,
+    "post_timeout_sample_elapsed": 10.006860207999999,
+    "returncode": 0,
+    "returncode_at_budget": null,
+    "returned_at": 1792242018.3890429,
+    "stderr": "",
+    "stdout": ""
+   },
+   "kill": {
+    "at": 1792242008.348584,
+    "exit_seen": 1792242008.364653,
+    "observation": {
+     "fields": {
+      "loaded": true,
+      "pid": null,
+      "runs": 1,
+      "state": "not running"
+     },
+     "poll_seconds": 0.007868207999999988
+    },
+    "runtime": 0.39589881896972656
+   },
+   "label": "ai.openclaw.owned-kickstart-probe.e8f20265.default",
+   "load_average": [
+    42.712890625,
+    30.142578125,
+    13.037109375
+   ],
+   "request_delay": 0.0,
+   "runtime_before_kill": 0.3,
+   "second": {
+    "fields": {
+     "loaded": true,
+     "pid": 1908,
+     "runs": 2,
+     "state": "running"
+    },
+    "spawn": 1792242018.4388359,
+    "spawn_after_exit": 10.074182748794556,
+    "spawn_after_first_spawn": 10.486150741577148,
+    "spawn_after_request": 10.066037893295288,
+    "spawn_before_launchctl_returned": false
+   },
+   "signal_method": "launchctl kill SIGTERM target; differs from fixture os.kill",
+   "throttle_interval": null
+  },
+  {
+   "after_bootout": {
+    "loaded": false,
+    "pid": null
+   },
+   "bootout": {
+    "returncode": 0,
+    "stderr": ""
+   },
+   "control_print": {
+    "fields": {
+     "loaded": true,
+     "pid": null,
+     "runs": 1,
+     "state": "not running"
+    },
+    "seconds": 0.006409167000001048
+   },
+   "first": {
+    "pid": 1914,
+    "spawn": 1792242018.5713658,
+    "spawn_after_bootstrap": 0.03327584266662598
+   },
+   "hypotheses": {
+    "assumed_interval": 10.0,
+    "limit": "illustrative models; Python instruction/startup bias, observed exit and wall-clock deltas; zero throttle interpreted literally may differ from launchd",
+    "predicted_block": {
+     "exit_observation_origin": 9.993580102920532,
+     "first_instruction_origin": 6.952929735183716,
+     "request_origin": 10.0
+    },
+    "request_after_first_instruction": 3.047070264816284,
+    "residual": {
+     "exit_observation_origin": -2.9767262279205333,
+     "first_instruction_origin": 0.06392413981628309,
+     "request_origin": -2.983146125000001
+    }
+   },
+   "kickstart": {
+    "argv": [
+     "/bin/launchctl",
+     "kickstart",
+     "gui/501/ai.openclaw.owned-kickstart-probe.1e9ddbd5.default"
+    ],
+    "at_budget": "returned",
+    "block": 7.016853874999999,
+    "issued_after_exit": 0.0064198970794677734,
+    "returncode": 0,
+    "returned_at": 1792242028.6353998,
+    "stderr": "",
+    "stdout": ""
+   },
+   "kill": {
+    "at": 1792242021.590209,
+    "exit_seen": 1792242021.6120162,
+    "observation": {
+     "fields": {
+      "loaded": true,
+      "pid": null,
+      "runs": 1,
+      "state": "not running"
+     },
+     "poll_seconds": 0.010111750000000086
+    },
+    "runtime": 3.018843173980713
+   },
+   "label": "ai.openclaw.owned-kickstart-probe.1e9ddbd5.default",
+   "load_average": [
+    36.37939453125,
+    29.19921875,
+    12.90185546875
+   ],
+   "request_delay": 0.0,
+   "runtime_before_kill": 3.0,
+   "second": {
+    "fields": {
+     "loaded": true,
+     "pid": 2072,
+     "runs": 2,
+     "state": "running"
+    },
+    "spawn": 1792242028.6683378,
+    "spawn_after_exit": 7.056321620941162,
+    "spawn_after_first_spawn": 10.096971988677979,
+    "spawn_after_request": 7.049901723861694,
+    "spawn_before_launchctl_returned": false
+   },
+   "signal_method": "launchctl kill SIGTERM target; differs from fixture os.kill",
+   "throttle_interval": null
+  },
+  {
+   "after_bootout": {
+    "loaded": false,
+    "pid": null
+   },
+   "bootout": {
+    "returncode": 0,
+    "stderr": ""
+   },
+   "control_print": {
+    "fields": {
+     "loaded": true,
+     "pid": null,
+     "runs": 1,
+     "state": "not running"
+    },
+    "seconds": 0.005647041000003128
+   },
+   "first": {
+    "pid": 2078,
+    "spawn": 1792242028.79687,
+    "spawn_after_bootstrap": 0.03996086120605469
+   },
+   "hypotheses": {
+    "assumed_interval": 10.0,
+    "limit": "illustrative models; Python instruction/startup bias, observed exit and wall-clock deltas; zero throttle interpreted literally may differ from launchd",
+    "predicted_block": {
+     "exit_observation_origin": 9.994342803955078,
+     "first_instruction_origin": 0.0,
+     "request_origin": 10.0
+    },
+    "request_after_first_instruction": 12.073934078216553,
+    "residual": {
+     "exit_observation_origin": -9.98808472095508,
+     "first_instruction_origin": 0.006258082999998749,
+     "request_origin": -9.993741917000001
+    }
+   },
+   "kickstart": {
+    "argv": [
+     "/bin/launchctl",
+     "kickstart",
+     "gui/501/ai.openclaw.owned-kickstart-probe.268718be.default"
+    ],
+    "at_budget": "returned",
+    "block": 0.006258082999998749,
+    "issued_after_exit": 0.005657196044921875,
+    "returncode": 0,
+    "returned_at": 1792242040.877088,
+    "stderr": "",
+    "stdout": ""
+   },
+   "kill": {
+    "at": 1792242040.8495722,
+    "exit_seen": 1792242040.8651469,
+    "observation": {
+     "fields": {
+      "loaded": true,
+      "pid": null,
+      "runs": 1,
+      "state": "not running"
+     },
+     "poll_seconds": 0.006877166999998963
+    },
+    "runtime": 12.052702188491821
+   },
+   "label": "ai.openclaw.owned-kickstart-probe.268718be.default",
+   "load_average": [
+    34.25439453125,
+    28.978515625,
+    13.013671875
+   ],
+   "request_delay": 0.0,
+   "runtime_before_kill": 12.0,
+   "second": {
+    "fields": {
+     "loaded": true,
+     "pid": 2261,
+     "runs": 2,
+     "state": "running"
+    },
+    "spawn": 1792242040.916511,
+    "spawn_after_exit": 0.05136418342590332,
+    "spawn_after_first_spawn": 12.119641065597534,
+    "spawn_after_request": 0.045706987380981445,
+    "spawn_before_launchctl_returned": false
+   },
+   "signal_method": "launchctl kill SIGTERM target; differs from fixture os.kill",
+   "throttle_interval": null
+  },
+  {
+   "after_bootout": {
+    "loaded": false,
+    "pid": null
+   },
+   "bootout": {
+    "returncode": 0,
+    "stderr": ""
+   },
+   "control_print": {
+    "fields": {
+     "loaded": true,
+     "pid": null,
+     "runs": 1,
+     "state": "not running"
+    },
+    "seconds": 0.008736709000004339
+   },
+   "first": {
+    "pid": 2267,
+    "spawn": 1792242041.031292,
+    "spawn_after_bootstrap": 0.04105186462402344
+   },
+   "hypotheses": {
+    "assumed_interval": 10.0,
+    "limit": "illustrative models; Python instruction/startup bias, observed exit and wall-clock deltas; zero throttle interpreted literally may differ from launchd",
+    "predicted_block": {
+     "exit_observation_origin": 8.92220401763916,
+     "first_instruction_origin": 8.581337928771973,
+     "request_origin": 10.0
+    },
+    "request_after_first_instruction": 1.4186620712280273,
+    "residual": {
+     "exit_observation_origin": 0.0884536903608435,
+     "first_instruction_origin": 0.429319779228031,
+     "request_origin": -0.9893422919999963
+    }
+   },
+   "kickstart": {
+    "argv": [
+     "/bin/launchctl",
+     "kickstart",
+     "gui/501/ai.openclaw.owned-kickstart-probe.75e39a53.default"
+    ],
+    "at_budget": "returned",
+    "block": 9.010657708000004,
+    "issued_after_exit": 1.0777959823608398,
+    "returncode": 0,
+    "returned_at": 1792242051.4606662,
+    "stderr": "",
+    "stdout": ""
+   },
+   "kill": {
+    "at": 1792242041.354194,
+    "exit_seen": 1792242041.372158,
+    "observation": {
+     "fields": {
+      "loaded": true,
+      "pid": null,
+      "runs": 1,
+      "state": "not running"
+     },
+     "poll_seconds": 0.008415583000001448
+    },
+    "runtime": 0.32290196418762207
+   },
+   "label": "ai.openclaw.owned-kickstart-probe.75e39a53.default",
+   "load_average": [
+    29.455078125,
+    28.12255859375,
+    12.89599609375
+   ],
+   "request_delay": 1.0,
+   "runtime_before_kill": 0.3,
+   "second": {
+    "fields": {
+     "loaded": true,
+     "pid": 2467,
+     "runs": 2,
+     "state": "running"
+    },
+    "spawn": 1792242051.4962418,
+    "spawn_after_exit": 10.124083757400513,
+    "spawn_after_first_spawn": 10.4649498462677,
+    "spawn_after_request": 9.046287775039673,
+    "spawn_before_launchctl_returned": false
+   },
+   "signal_method": "launchctl kill SIGTERM target; differs from fixture os.kill",
+   "throttle_interval": null
+  },
+  {
+   "after_bootout": {
+    "loaded": false,
+    "pid": null
+   },
+   "bootout": {
+    "returncode": 0,
+    "stderr": ""
+   },
+   "control_print": {
+    "fields": {
+     "loaded": true,
+     "pid": null,
+     "runs": 1,
+     "state": "not running"
+    },
+    "seconds": 0.008150208000003545
+   },
+   "first": {
+    "pid": 2473,
+    "spawn": 1792242051.5770361,
+    "spawn_after_bootstrap": 0.028076171875
+   },
+   "hypotheses": {
+    "assumed_interval": 1.0,
+    "limit": "illustrative models; Python instruction/startup bias, observed exit and wall-clock deltas; zero throttle interpreted literally may differ from launchd",
+    "predicted_block": {
+     "exit_observation_origin": 0.9918389320373535,
+     "first_instruction_origin": 0.5312750339508057,
+     "request_origin": 1.0
+    },
+    "request_after_first_instruction": 0.46872496604919434,
+    "residual": {
+     "exit_observation_origin": 0.024524984962653207,
+     "first_instruction_origin": 0.48508888304920106,
+     "request_origin": 0.016363917000006722
+    }
+   },
+   "kickstart": {
+    "argv": [
+     "/bin/launchctl",
+     "kickstart",
+     "gui/501/ai.openclaw.owned-kickstart-probe.54a01df7.t1"
+    ],
+    "at_budget": "returned",
+    "block": 1.0163639170000067,
+    "issued_after_exit": 0.008161067962646484,
+    "returncode": 0,
+    "returned_at": 1792242053.062162,
+    "stderr": "",
+    "stdout": ""
+   },
+   "kill": {
+    "at": 1792242052.020328,
+    "exit_seen": 1792242052.0376,
+    "observation": {
+     "fields": {
+      "loaded": true,
+      "pid": null,
+      "runs": 1,
+      "state": "not running"
+     },
+     "poll_seconds": 0.008770791999999972
+    },
+    "runtime": 0.44329190254211426
+   },
+   "label": "ai.openclaw.owned-kickstart-probe.54a01df7.t1",
+   "load_average": [
+    26.42822265625,
+    27.5107421875,
+    12.85595703125
+   ],
+   "request_delay": 0.0,
+   "runtime_before_kill": 0.3,
+   "second": {
+    "fields": {
+     "loaded": true,
+     "pid": 2480,
+     "runs": 2,
+     "state": "running"
+    },
+    "spawn": 1792242053.092642,
+    "spawn_after_exit": 1.055042028427124,
+    "spawn_after_first_spawn": 1.5156059265136719,
+    "spawn_after_request": 1.0468809604644775,
+    "spawn_before_launchctl_returned": false
+   },
+   "signal_method": "launchctl kill SIGTERM target; differs from fixture os.kill",
+   "throttle_interval": 1
+  },
+  {
+   "after_bootout": {
+    "loaded": false,
+    "pid": null
+   },
+   "bootout": {
+    "returncode": 0,
+    "stderr": ""
+   },
+   "control_print": {
+    "fields": {
+     "loaded": true,
+     "pid": null,
+     "runs": 1,
+     "state": "not running"
+    },
+    "seconds": 0.00815466699999945
+   },
+   "first": {
+    "pid": 2486,
+    "spawn": 1792242053.18941,
+    "spawn_after_bootstrap": 0.02526402473449707
+   },
+   "hypotheses": {
+    "assumed_interval": 1.0,
+    "limit": "illustrative models; Python instruction/startup bias, observed exit and wall-clock deltas; zero throttle interpreted literally may differ from launchd",
+    "predicted_block": {
+     "exit_observation_origin": 0.9918360710144043,
+     "first_instruction_origin": 0.0,
+     "request_origin": 1.0
+    },
+    "request_after_first_instruction": 3.091515064239502,
+    "residual": {
+     "exit_observation_origin": -0.9820012800144085,
+     "first_instruction_origin": 0.009834790999995846,
+     "request_origin": -0.9901652090000042
+    }
+   },
+   "kickstart": {
+    "argv": [
+     "/bin/launchctl",
+     "kickstart",
+     "gui/501/ai.openclaw.owned-kickstart-probe.ae057186.t1"
+    ],
+    "at_budget": "returned",
+    "block": 0.009834790999995846,
+    "issued_after_exit": 0.008163928985595703,
+    "returncode": 0,
+    "returned_at": 1792242056.290838,
+    "stderr": "",
+    "stdout": ""
+   },
+   "kill": {
+    "at": 1792242056.25664,
+    "exit_seen": 1792242056.272761,
+    "observation": {
+     "fields": {
+      "loaded": true,
+      "pid": null,
+      "runs": 1,
+      "state": "not running"
+     },
+     "poll_seconds": 0.007941125000002103
+    },
+    "runtime": 3.067229986190796
+   },
+   "label": "ai.openclaw.owned-kickstart-probe.ae057186.t1",
+   "load_average": [
+    24.3916015625,
+    27.0703125,
+    12.7861328125
+   ],
+   "request_delay": 0.0,
+   "runtime_before_kill": 3.0,
+   "second": {
+    "fields": {
+     "loaded": true,
+     "pid": 2559,
+     "runs": 2,
+     "state": "running"
+    },
+    "spawn": 1792242056.32756,
+    "spawn_after_exit": 0.05479884147644043,
+    "spawn_after_first_spawn": 3.1381499767303467,
+    "spawn_after_request": 0.04663491249084473,
+    "spawn_before_launchctl_returned": false
+   },
+   "signal_method": "launchctl kill SIGTERM target; differs from fixture os.kill",
+   "throttle_interval": 1
+  },
+  {
+   "after_bootout": {
+    "loaded": false,
+    "pid": null
+   },
+   "bootout": {
+    "returncode": 0,
+    "stderr": ""
+   },
+   "control_print": {
+    "fields": {
+     "loaded": true,
+     "pid": null,
+     "runs": 1,
+     "state": "not running"
+    },
+    "seconds": 0.005291749999997819
+   },
+   "first": {
+    "pid": 2572,
+    "spawn": 1792242056.416172,
+    "spawn_after_bootstrap": 0.03353595733642578
+   },
+   "hypotheses": {
+    "assumed_interval": 0.0,
+    "limit": "illustrative models; Python instruction/startup bias, observed exit and wall-clock deltas; zero throttle interpreted literally may differ from launchd",
+    "predicted_block": {
+     "exit_observation_origin": 0.0,
+     "first_instruction_origin": 0.0,
+     "request_origin": 0.0
+    },
+    "request_after_first_instruction": 0.36380600929260254,
+    "residual": {
+     "exit_observation_origin": 1.007497291,
+     "first_instruction_origin": 1.007497291,
+     "request_origin": 1.007497291
+    }
+   },
+   "kickstart": {
+    "argv": [
+     "/bin/launchctl",
+     "kickstart",
+     "gui/501/ai.openclaw.owned-kickstart-probe.4ae937ff.t0"
+    ],
+    "at_budget": "returned",
+    "block": 1.007497291,
+    "issued_after_exit": 0.005300045013427734,
+    "returncode": 0,
+    "returned_at": 1792242057.787501,
+    "stderr": "",
+    "stdout": ""
+   },
+   "kill": {
+    "at": 1792242056.7630432,
+    "exit_seen": 1792242056.774678,
+    "observation": {
+     "fields": {
+      "loaded": true,
+      "pid": null,
+      "runs": 1,
+      "state": "not running"
+     },
+     "poll_seconds": 0.005455249999997136
+    },
+    "runtime": 0.34687113761901855
+   },
+   "label": "ai.openclaw.owned-kickstart-probe.4ae937ff.t0",
+   "load_average": [
+    24.3916015625,
+    27.0703125,
+    12.7861328125
+   ],
+   "request_delay": 0.0,
+   "runtime_before_kill": 0.3,
+   "second": {
+    "fields": {
+     "loaded": true,
+     "pid": 2595,
+     "runs": 2,
+     "state": "running"
+    },
+    "spawn": 1792242057.817038,
+    "spawn_after_exit": 1.0423600673675537,
+    "spawn_after_first_spawn": 1.4008660316467285,
+    "spawn_after_request": 1.037060022354126,
+    "spawn_before_launchctl_returned": false
+   },
+   "signal_method": "launchctl kill SIGTERM target; differs from fixture os.kill",
+   "throttle_interval": 0
+  }
+ ],
+ "uid": 501
+}

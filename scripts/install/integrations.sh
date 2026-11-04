@@ -26,7 +26,7 @@ fi
 
 if $MESH_AVAILABLE; then
   # Check if mesh is already deployed
-  if [ -x "$HOME/openclaw/bin/mesh" ] || command -v mesh >/dev/null 2>&1; then
+  if [ -f "$OPENCLAW_REPO_DIR/bin/mesh.js" ] || command -v mesh >/dev/null 2>&1; then
     info "Mesh CLI already installed"
     # Update the mesh skill in the managed skills dir
     if [ -f "$REPO_DIR/skills/mesh/SKILL.md" ]; then

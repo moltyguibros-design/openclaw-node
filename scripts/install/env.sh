@@ -6,6 +6,8 @@ if [ -z "$NODE_BIN" ]; then
 fi
 export NODE_BIN
 
+load_env_file "$ENV_FILE"
+
 # ── Resolve nats-server binary (service templates exec ${NATS_SERVER_BIN}) ──
 NATS_SERVER_BIN="$(command -v nats-server 2>/dev/null || echo "")"
 if [ -z "$NATS_SERVER_BIN" ]; then
@@ -21,14 +23,16 @@ fi
 export NATS_SERVER_BIN
 info "nats-server: $NATS_SERVER_BIN"
 
-# ── Repo runtime dependencies ──
-# The mesh daemons exec from the repo tree and require the repo's node_modules
-# (`nats` above all). The npx path ships them; the git-clone path does not.
-if [ ! -d "$REPO_DIR/node_modules/nats" ]; then
-  info "Installing repo runtime dependencies (npm install --omit=dev)..."
-  (cd "$REPO_DIR" && run npm install --omit=dev) || { error "repo npm install failed — mesh daemons cannot run"; exit 1; }
+if $DRY_RUN; then
+  info "[dry-run] would clean-install the canonical runtime lock with npm 11.21.1"
 else
-  info "Repo node_modules present"
+  NPM_VERSION="$(npx --yes --package=npm@11.21.1 npm --version)"
+  if [ "$NPM_VERSION" != "11.21.1" ]; then
+    error "Runtime installation requires npm 11.21.1 (found $NPM_VERSION); prepare the pinned toolchain first"
+    exit 1
+  fi
+  info "Clean-installing canonical runtime dependencies (pinned npm ci --omit=dev)..."
+  (cd "$REPO_DIR" && run npx --yes --package=npm@11.21.1 npm ci --omit=dev) || { error "Canonical runtime dependency install failed"; exit 1; }
 fi
 
 # The memory daemon imports packages/event-schemas/dist and exits at startup
@@ -65,8 +69,8 @@ provider_binary() {
 }
 PROVIDER="${PROVIDER:-${OPENCLAW_PROVIDER:-}}"
 PROVIDER_SOURCE="--provider"
-if [ -z "$PROVIDER" ] && [ -f "$ENV_FILE" ]; then
-  PROVIDER="$(grep -m1 '^MESH_LLM_PROVIDER=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d "\"'" | xargs || true)"
+if [ -z "$PROVIDER" ]; then
+  PROVIDER="${MESH_LLM_PROVIDER:-}"
   PROVIDER_SOURCE="$ENV_FILE"
 fi
 if [ -n "$PROVIDER" ]; then
@@ -93,6 +97,9 @@ export KNOWN_PROVIDERS
 # ── Resolve node role ──
 if [ -z "$NODE_ROLE" ]; then
   NODE_ROLE="${OPENCLAW_NODE_ROLE:-}"
+fi
+if [ -z "$NODE_ROLE" ]; then
+  NODE_ROLE="$(saved_unit_role)"
 fi
 if [ -z "$NODE_ROLE" ]; then
   if [ "$OS" = "macos" ]; then

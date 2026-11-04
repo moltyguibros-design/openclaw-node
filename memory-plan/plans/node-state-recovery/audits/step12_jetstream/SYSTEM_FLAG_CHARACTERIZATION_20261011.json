@@ -1,0 +1,36 @@
+{
+  "scope": "Disposable APFS image and non-root writer on an ephemeral GitHub macOS runner only",
+  "source_head": "2b7303c5b348d098bb5ed9a6508da574c07dd384",
+  "source_script_sha256": "2e8f90ee3caafafc38785c923aa12d7cf168416697ed8da074463e5024b0d1c2",
+  "run_id": 38183140476,
+  "job_id": 114599760183,
+  "job_url": "https://github.com/moltyguibros-design/openclaw-node/actions/runs/38183140476/job/114599760183",
+  "job_conclusion": "success",
+  "probe_result": {
+    "cleanup": {
+      "flag_cleared": true,
+      "image_ejected": true
+    },
+    "content_after": "DM00",
+    "descriptor": {
+      "command": "descriptor",
+      "outcome": "wrote"
+    },
+    "mapping": {
+      "command": "mapping",
+      "outcome": "wrote"
+    },
+    "new_writable_open": {
+      "errno": 1,
+      "outcome": "refused"
+    },
+    "securelevel": "0",
+    "status": "stimulated",
+    "system_flag_after_user_clear": true,
+    "system_flag_after_writes": true,
+    "system_flag_set": true,
+    "user_clear_refused": true,
+    "writer_exit": null
+  },
+  "interpretation": "At securelevel 0, a root-set SF_IMMUTABLE flag blocked a fresh same-user writable open but did not revoke an already-open writable descriptor or shared mapping. Both existing handles changed the file while the flag remained set. The contents were read before root cleared the flag; cleanup then cleared it and ejected the disposable image. This is a negative for using the flag alone as a continuous writer fence."
+}

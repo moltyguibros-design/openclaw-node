@@ -1,0 +1,25 @@
+{
+  "scope": "Disposable files and processes on an ephemeral GitHub macOS runner only",
+  "source_head": "dfe1bc355a0d960150c0310d0c8abe273020f8d3",
+  "source_script_sha256": "4a5581819507bdbfe73568ef5cc1108aa72b01995143c51c931e0593802bd763",
+  "run_id": 38182436994,
+  "job_id": 114597646077,
+  "job_url": "https://github.com/moltyguibros-design/openclaw-node/actions/runs/38182436994/job/114597646077",
+  "job_conclusion": "success",
+  "probe_result": {
+    "control_end_path_seen": true,
+    "control_path_seen": true,
+    "descriptor_path_seen": false,
+    "kernel_writeback_included": false,
+    "last_writer_ack": "control-end",
+    "mapping_flush_called": false,
+    "mapping_path_seen_in_writer_filtered_trace": false,
+    "overrun_reported": false,
+    "status": "stimulated",
+    "tracer_exit": 0,
+    "unnamed_write_lines_including_pipe_acks": 5,
+    "writer_exit": 0,
+    "writer_process_write_lines": 5
+  },
+  "interpretation": "The scoped trace observed file-path controls before and after the owned writer actions, but none of its matching write-call lines named the file opened before tracing. The PID filter excludes kernel write-back, so the mapping field does not assess that path. Pipe acknowledgements contribute to unnamed write lines. This experiment does not prove complete path or writer coverage and cannot certify a production no-writer hold."
+}

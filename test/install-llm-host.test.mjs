@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -193,3 +193,105 @@ test('every LLM-consuming unit renders LLM_MODEL and LLM_BASE_URL', () => {
     assert.match(text, /\$\{LLM_MODEL\}/, `${unit} lacks LLM_MODEL`);
   }
 });
+
+function ownedWave2(t) {
+  const m = machine({ STUB_OS: 'Darwin', STUB_VMM: '0' });
+  t.after(() => rmSync(m.dir, { recursive: true, force: true }));
+  const trace = join(m.dir, 'commands.data');
+  const curlArgs = join(m.dir, 'curl-args.data');
+  const stub = (name, body) => {
+    const file = join(m.dir, name);
+    writeFileSync(file, `#!/bin/bash\n${body}\n`, { mode: 0o755 });
+    return file;
+  };
+  stub('curl', 'printf "curl\\n" >> "$OWNED_TRACE"\nprintf "%s\\n" "$@" >> "$OWNED_CURL_ARGS"\nexit 0');
+  stub('ollama', 'if [ "$1" = list ]; then printf "ollama-list\\n" >> "$OWNED_TRACE"; printf "NAME ID SIZE\\nqwen3:8b owned 1\\n"; exit 0; fi\nprintf "blocked-ollama\\n" >> "$OWNED_TRACE"\nexit 99');
+  for (const name of ['node', 'systemctl', 'sudo', 'brew', 'launchctl']) {
+    stub(name, `printf 'blocked-${name}\\n' >> "$OWNED_TRACE"\nexit 99`);
+  }
+  stub('sed', 'if [ -n "${OWNED_FAIL_KEY:-}" ]; then\n  case "$2" in *"^${OWNED_FAIL_KEY}="*) printf "owned write refused\\n" >&2; exit 73 ;; esac\nfi\nexec /usr/bin/sed "$@"');
+  const initial = 'LLM_MODEL=before\nLLM_BASE_URL=http://localhost:11434\nOPENCLAW_MODEL_ENABLED=0\nOTHER=kept\n';
+  writeFileSync(m.envFile, initial);
+  const run = (args, changes = {}) => spawnSync('bash', [LLM_SETUP, ...args], {
+    env: { ...m.env, REPO_DIR: ROOT, ENV_FILE: m.envFile, OPENCLAW_ROOT: m.dir,
+      WORKSPACE: join(m.dir, 'absent-workspace'), NODE_BIN: join(m.dir, 'node'), OPENCLAW_LLM_HOST: '0',
+      OWNED_TRACE: trace, OWNED_CURL_ARGS: curlArgs, ...changes },
+    encoding: 'utf8', timeout: 10_000,
+  });
+  return { ...m, initial, run, commands: () => existsSync(trace) ? readFileSync(trace, 'utf8') : '',
+    curlArguments: () => existsSync(curlArgs) ? readFileSync(curlArgs, 'utf8') : '' };
+}
+
+const ownedEndpoint = String.raw`http://owned.invalid:1234/v1?first=1&second=2|literal\path`;
+const ownedModel = `modèle&part|"quoted"\\tail`;
+
+test('wave2 saves existing endpoint and model metacharacters literally through its full path', t => {
+  const f = ownedWave2(t), r = f.run(['--endpoint', ownedEndpoint, '--model', ownedModel]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(readFileSync(f.envFile, 'utf8'), `LLM_MODEL=${ownedModel}\nLLM_BASE_URL=${ownedEndpoint}\nOPENCLAW_MODEL_ENABLED=1\nOTHER=kept\n`);
+  assert.equal(f.commands(), 'curl\n');
+  assert.ok(f.curlArguments().includes(`${ownedEndpoint}/v1/models\n`));
+  assert.match(r.stdout, /Model setup complete/);
+});
+
+test('wave2 appends missing settings without merging an unterminated unrelated line', t => {
+  const f = ownedWave2(t);
+  writeFileSync(f.envFile, 'OTHER=kept');
+  const r = f.run(['--endpoint', ownedEndpoint, '--model', ownedModel]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(readFileSync(f.envFile, 'utf8'), `OTHER=kept\nLLM_BASE_URL=${ownedEndpoint}\nLLM_MODEL=${ownedModel}\nOPENCLAW_MODEL_ENABLED=1\n`);
+  assert.equal(f.commands(), 'curl\n');
+});
+
+for (const key of ['LLM_BASE_URL', 'LLM_MODEL', 'OPENCLAW_MODEL_ENABLED']) {
+  test(`wave2 stops on a refused ${key} write without completing setup`, t => {
+    const f = ownedWave2(t);
+    const r = f.run(['--endpoint', ownedEndpoint, '--model', ownedModel], { OWNED_FAIL_KEY: key });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /owned write refused/);
+    assert.doesNotMatch(r.stdout, /Model setup complete/);
+    const expected = key === 'LLM_BASE_URL' ? f.initial
+      : key === 'LLM_MODEL' ? `LLM_MODEL=before\nLLM_BASE_URL=${ownedEndpoint}\nOPENCLAW_MODEL_ENABLED=0\nOTHER=kept\n`
+        : `LLM_MODEL=${ownedModel}\nLLM_BASE_URL=${ownedEndpoint}\nOPENCLAW_MODEL_ENABLED=0\nOTHER=kept\n`;
+    assert.equal(readFileSync(f.envFile, 'utf8'), expected);
+    assert.equal(f.commands(), key === 'OPENCLAW_MODEL_ENABLED' ? 'curl\n' : '');
+    if (key !== 'OPENCLAW_MODEL_ENABLED') assert.doesNotMatch(r.stdout, /recorded in/);
+  });
+}
+
+for (const [label, value] of [['LF', 'http://owned.invalid\nOTHER=corrupt'], ['CR', 'http://owned.invalid\rOTHER=corrupt']]) {
+  test(`wave2 refuses an endpoint containing ${label} before probing or changing settings`, t => {
+    const f = ownedWave2(t), r = f.run(['--endpoint', value, '--model', ownedModel]);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /env values must fit on one line/);
+    assert.equal(readFileSync(f.envFile, 'utf8'), f.initial);
+    assert.equal(f.commands(), '');
+    assert.doesNotMatch(r.stdout, /recorded in|Model setup complete/);
+  });
+}
+
+test('wave2 retains the prior successful URL write when a later multiline model is refused', t => {
+  const f = ownedWave2(t), r = f.run(['--endpoint', ownedEndpoint, '--model', 'first\nOTHER=corrupt']);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /env values must fit on one line/);
+  assert.equal(readFileSync(f.envFile, 'utf8'), `LLM_MODEL=before\nLLM_BASE_URL=${ownedEndpoint}\nOPENCLAW_MODEL_ENABLED=0\nOTHER=kept\n`);
+  assert.equal(f.commands(), '');
+  assert.doesNotMatch(r.stdout, /recorded in|Model setup complete/);
+});
+
+for (const refuse of [false, true]) {
+  test(`wave2 ${refuse ? 'refuses' : 'records'} the already-present local-model setting without a download`, t => {
+    const f = ownedWave2(t), r = f.run(['--yes'], { OWNED_FAIL_KEY: refuse ? 'LLM_MODEL' : '' });
+    assert.equal(r.status, refuse ? 1 : 0, r.stdout + r.stderr);
+    assert.equal(readFileSync(f.envFile, 'utf8'), refuse ? f.initial
+      : 'LLM_MODEL=qwen3:8b\nLLM_BASE_URL=http://localhost:11434\nOPENCLAW_MODEL_ENABLED=1\nOTHER=kept\n');
+    assert.equal(f.commands(), 'curl\ncurl\nollama-list\n');
+    assert.deepEqual(f.curlArguments().split('\n').filter(arg => arg.startsWith('http')), [
+      'http://localhost:11434/api/tags', 'http://localhost:11434/api/tags',
+    ]);
+    assert.doesNotMatch(f.commands(), /blocked-/);
+    assert.ok(f.commands().includes('ollama-list\n'));
+    if (refuse) assert.doesNotMatch(r.stdout, /recorded in|Model setup complete/);
+    else assert.match(r.stdout, /Model setup complete/);
+  });
+}

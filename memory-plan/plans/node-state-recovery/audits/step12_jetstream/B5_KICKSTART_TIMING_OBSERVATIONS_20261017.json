@@ -1,0 +1,224 @@
+{
+  "scope": "one CI-only differentiated timing experiment, not production or exact historical-cause proof",
+  "head": "1695ce9286f645bc1d6fb19e6548dd086c01ddf1",
+  "merge": "3b7475c58f765c2d961db4794af8d03e5b8c9c3d",
+  "run": 39034737877,
+  "job": 117402189372,
+  "artifact": 12101407361,
+  "report": "B5_KICKSTART_TIMING_REPORT_20261017.json",
+  "report_sha256": "0659ef76bc6ee78ec020dbc62619713b392bbf5a4bb882d7f3a9838c7f6bc3f4",
+  "observations": [
+    {
+      "throttle": null,
+      "requested_runtime": 0.3,
+      "measured_instruction_to_signal_request": 0.39589881896972656,
+      "requested_request_delay": 0.0,
+      "observed_request_after_exit_sample": 0.008144855499267578,
+      "client_block": 10.015901917,
+      "client_shape": "alive",
+      "second_instruction_after_request": 10.066037893295288,
+      "load_average": [
+        42.712890625,
+        30.142578125,
+        13.037109375
+      ]
+    },
+    {
+      "throttle": null,
+      "requested_runtime": 3.0,
+      "measured_instruction_to_signal_request": 3.018843173980713,
+      "requested_request_delay": 0.0,
+      "observed_request_after_exit_sample": 0.0064198970794677734,
+      "client_block": 7.016853874999999,
+      "client_shape": "returned",
+      "second_instruction_after_request": 7.049901723861694,
+      "load_average": [
+        36.37939453125,
+        29.19921875,
+        12.90185546875
+      ]
+    },
+    {
+      "throttle": null,
+      "requested_runtime": 12.0,
+      "measured_instruction_to_signal_request": 12.052702188491821,
+      "requested_request_delay": 0.0,
+      "observed_request_after_exit_sample": 0.005657196044921875,
+      "client_block": 0.006258082999998749,
+      "client_shape": "returned",
+      "second_instruction_after_request": 0.045706987380981445,
+      "load_average": [
+        34.25439453125,
+        28.978515625,
+        13.013671875
+      ]
+    },
+    {
+      "throttle": null,
+      "requested_runtime": 0.3,
+      "measured_instruction_to_signal_request": 0.32290196418762207,
+      "requested_request_delay": 1.0,
+      "observed_request_after_exit_sample": 1.0777959823608398,
+      "client_block": 9.010657708000004,
+      "client_shape": "returned",
+      "second_instruction_after_request": 9.046287775039673,
+      "load_average": [
+        29.455078125,
+        28.12255859375,
+        12.89599609375
+      ]
+    },
+    {
+      "throttle": 1,
+      "requested_runtime": 0.3,
+      "measured_instruction_to_signal_request": 0.44329190254211426,
+      "requested_request_delay": 0.0,
+      "observed_request_after_exit_sample": 0.008161067962646484,
+      "client_block": 1.0163639170000067,
+      "client_shape": "returned",
+      "second_instruction_after_request": 1.0468809604644775,
+      "load_average": [
+        26.42822265625,
+        27.5107421875,
+        12.85595703125
+      ]
+    },
+    {
+      "throttle": 1,
+      "requested_runtime": 3.0,
+      "measured_instruction_to_signal_request": 3.067229986190796,
+      "requested_request_delay": 0.0,
+      "observed_request_after_exit_sample": 0.008163928985595703,
+      "client_block": 0.009834790999995846,
+      "client_shape": "returned",
+      "second_instruction_after_request": 0.04663491249084473,
+      "load_average": [
+        24.3916015625,
+        27.0703125,
+        12.7861328125
+      ]
+    },
+    {
+      "throttle": 0,
+      "requested_runtime": 0.3,
+      "measured_instruction_to_signal_request": 0.34687113761901855,
+      "requested_request_delay": 0.0,
+      "observed_request_after_exit_sample": 0.005300045013427734,
+      "client_block": 1.007497291,
+      "client_shape": "returned",
+      "second_instruction_after_request": 1.037060022354126,
+      "load_average": [
+        24.3916015625,
+        27.0703125,
+        12.7861328125
+      ]
+    }
+  ],
+  "cleanup": {
+    "clean": true,
+    "domain": {
+      "returncode": 0,
+      "stderr": ""
+    },
+    "errors": [],
+    "labels_left": [],
+    "removed": true,
+    "targets": [
+      {
+        "after": {
+          "loaded": false,
+          "pid": null
+        },
+        "before": {
+          "loaded": false,
+          "pid": null
+        },
+        "target": "gui/501/ai.openclaw.owned-kickstart-probe.e8f20265.default"
+      },
+      {
+        "after": {
+          "loaded": false,
+          "pid": null
+        },
+        "before": {
+          "loaded": false,
+          "pid": null
+        },
+        "target": "gui/501/ai.openclaw.owned-kickstart-probe.1e9ddbd5.default"
+      },
+      {
+        "after": {
+          "loaded": false,
+          "pid": null
+        },
+        "before": {
+          "loaded": false,
+          "pid": null
+        },
+        "target": "gui/501/ai.openclaw.owned-kickstart-probe.268718be.default"
+      },
+      {
+        "after": {
+          "loaded": false,
+          "pid": null
+        },
+        "before": {
+          "loaded": false,
+          "pid": null
+        },
+        "target": "gui/501/ai.openclaw.owned-kickstart-probe.75e39a53.default"
+      },
+      {
+        "after": {
+          "loaded": false,
+          "pid": null
+        },
+        "before": {
+          "loaded": false,
+          "pid": null
+        },
+        "target": "gui/501/ai.openclaw.owned-kickstart-probe.54a01df7.t1"
+      },
+      {
+        "after": {
+          "loaded": false,
+          "pid": null
+        },
+        "before": {
+          "loaded": false,
+          "pid": null
+        },
+        "target": "gui/501/ai.openclaw.owned-kickstart-probe.ae057186.t1"
+      },
+      {
+        "after": {
+          "loaded": false,
+          "pid": null
+        },
+        "before": {
+          "loaded": false,
+          "pid": null
+        },
+        "target": "gui/501/ai.openclaw.owned-kickstart-probe.4ae937ff.t0"
+      }
+    ]
+  },
+  "bounded_inferences": [
+    "default short-runtime arm reproduces an alive-after10s client followed by successful late return10.016s",
+    "defaultR3 arm7.017s andR12 arm.006s support dependence on prior runtime",
+    "one-second request-delay arm reduced short-default wait to9.011s, disfavoring a request-origin-only model on this run",
+    "explicitThrottle1 short-runtime arm1.016s andR3 arm.010s support a throttle-related wait",
+    "Throttle0 short-runtime arm1.007s, not literal0; implementation semantics/quantization not established",
+    "full-suite6912 trace is consistent with this shape but signal path, job implementation and runner differ"
+  ],
+  "limits": [
+    "first Python instruction is not kernel spawn; observed exit is not exact kernel exit",
+    "wall-clock/Python startup bias and subsecond residuals prevent a universal origin rule",
+    "load averages24\u201343 show this runner was not idle; not normalized or attributed",
+    "exact-target launchctl signal differs from fixture numeric PID signal",
+    "seven single observations are not a distribution or a historical-cause proof",
+    "no clean-exit arm; no full-node/production/VM operation",
+    "source/remedy unchanged: exact-head full CI and Claude review pending"
+  ],
+  "next_gate": "review an evidence-backed owned fixture-only remedy and require exact-head green CI; native stopped-ASIF reader remains downstream"
+}

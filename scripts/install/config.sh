@@ -6,6 +6,77 @@ step "Step 7: Environment Configuration"
 
 "$NODE_BIN" "$REPO_DIR/bin/nats-legacy-writer-check.mjs"
 
+load_env_file "$ENV_FILE"
+backup_installer_config
+PENDING_CLUSTER_DIR=""
+if [ -n "$CLUSTER_PEERS" ]; then
+  step "Validate requested multi-machine NATS configuration"
+  CLUSTER_SERVER_NAME="openclaw-nats-${OPENCLAW_NODE_ID}"
+
+  # The machine's OWN address to bind (D2/D4: the tailnet interface, never all-interfaces).
+  if [ -z "$CLUSTER_BIND" ] && command -v tailscale >/dev/null 2>&1; then
+    CLUSTER_BIND="$(tailscale ip -4 2>/dev/null | head -1)"
+    [ -n "$CLUSTER_BIND" ] && info "Auto-detected Tailscale address for binds: $CLUSTER_BIND"
+  fi
+  if [ -z "$CLUSTER_BIND" ]; then
+    error "--cluster-peers requires --cluster-bind=<this machine's tailnet/LAN IP> (no tailscale auto-detect available). Refusing to bind 0.0.0.0."
+    exit 1
+  fi
+
+  case "$CLUSTER_BIND" in
+    0.0.0.0|::|\[::\]) error "Refusing to bind all interfaces"; exit 1 ;;
+  esac
+
+  # Cluster-route password — shared across the council like the client token.
+  CLUSTER_PASS_GENERATED=false
+  if [ -z "${OPENCLAW_NATS_CLUSTER_PASS:-}" ]; then
+    OPENCLAW_NATS_CLUSTER_PASS="$(openssl rand -hex 32)"
+    CLUSTER_PASS_GENERATED=true
+    info "Generated OPENCLAW_NATS_CLUSTER_PASS (copy it — with OPENCLAW_NATS_TOKEN — to every council machine's openclaw.env)"
+  fi
+  export OPENCLAW_NATS_CLUSTER_PASS
+
+  if [ "$DRY_RUN" = true ]; then
+    info "[dry-run] would render cluster nats.conf (server=$CLUSTER_SERVER_NAME, bind=$CLUSTER_BIND) routing to: $CLUSTER_PEERS"
+  else
+    PENDING_CLUSTER_DIR="$(mktemp -d "$OPENCLAW_ROOT/config/.cluster-XXXXXX")"
+    chmod 700 "$PENDING_CLUSTER_DIR"
+    trap installer_exit_cleanup EXIT
+    if [ -f "$OPENCLAW_ROOT/config/nats-auth.conf" ]; then
+      cp "$OPENCLAW_ROOT/config/nats-auth.conf" "$PENDING_CLUSTER_DIR/nats-auth.conf"
+    else
+      "$NODE_BIN" --input-type=module -e '
+        const { renderAuthorization } = await import(process.argv[2]);
+        process.stdout.write(renderAuthorization({ mode: "token", token: process.env.OPENCLAW_NATS_TOKEN }));
+      ' installer-cluster-validation "$REPO_DIR/bin/nats-auth-render.mjs" > "$PENDING_CLUSTER_DIR/nats-auth.conf"
+    fi
+    chmod 600 "$PENDING_CLUSTER_DIR/nats-auth.conf"
+    KV_REPLICAS="$(OPENCLAW_NATS_SERVER_NAME="$CLUSTER_SERVER_NAME" \
+      OPENCLAW_NATS_TOKEN="$OPENCLAW_NATS_TOKEN" \
+      OPENCLAW_NATS_CLUSTER_PASS="$OPENCLAW_NATS_CLUSTER_PASS" \
+      OPENCLAW_NATS_BIND_ADDR="$CLUSTER_BIND" \
+      CLUSTER_PEERS="$CLUSTER_PEERS" \
+      "$NODE_BIN" -e '
+        const fs = require("fs"), os = require("os");
+        const { renderClusterRoutes, replicasForPeers, parsePeers } = require(process.argv[1]);
+        let t = fs.readFileSync(process.argv[2], "utf8");
+        t = t.replaceAll("${OPENCLAW_NATS_SERVER_NAME}", process.env.OPENCLAW_NATS_SERVER_NAME)
+             .replaceAll("${OPENCLAW_NATS_CLUSTER_PASS}", process.env.OPENCLAW_NATS_CLUSTER_PASS)
+             .replaceAll("${OPENCLAW_NATS_BIND_ADDR}", process.env.OPENCLAW_NATS_BIND_ADDR)
+             .replaceAll("${HOME}", os.homedir())
+             .replace("${OPENCLAW_NATS_CLUSTER_ROUTES}", renderClusterRoutes(process.env.CLUSTER_PEERS, {
+               user: "openclaw-route", pass: process.env.OPENCLAW_NATS_CLUSTER_PASS,
+             }));
+        fs.writeFileSync(process.argv[3], t, { mode: 0o600 });
+        process.stdout.write(String(replicasForPeers(parsePeers(process.env.CLUSTER_PEERS).length)));
+      ' "$REPO_DIR/lib/nats-cluster-config.js" "$REPO_DIR/services/nats/nats-cluster-node.conf" "$PENDING_CLUSTER_DIR/nats.conf")"
+    if ! "$NATS_SERVER_BIN" -t -c "$PENDING_CLUSTER_DIR/nats.conf" > "$PENDING_CLUSTER_DIR/validation.log" 2>&1; then
+      error "Requested cluster configuration is invalid; existing config and env are unchanged"
+      exit 1
+    fi
+  fi
+fi
+
 if $DRY_RUN; then
   info "  [dry-run] would initialize the fresh single-node NATS cohort"
 else
@@ -14,6 +85,7 @@ fi
 
 if [ ! -f "$ENV_FILE" ]; then
   run cp "$REPO_DIR/openclaw.env.example" "$ENV_FILE"
+  load_env_file "$ENV_FILE"
   warn "Created $ENV_FILE — EDIT THIS FILE with your API keys before proceeding!"
   warn "Run: nano $ENV_FILE"
 else
@@ -27,21 +99,8 @@ if [ -f "$ENV_FILE" ]; then
   run chmod 600 "$ENV_FILE"
 fi
 
-# Source env file for config generation (safe key=value parsing — no shell execution)
-if [ -f "$ENV_FILE" ]; then
-  while IFS= read -r line; do
-    # Skip comments and empty lines
-    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-    # Split only on the first '=' to preserve base64 padding etc.
-    key="${line%%=*}"
-    value="${line#*=}"
-    # Trim whitespace
-    key="$(echo "$key" | xargs)"
-    value="$(echo "$value" | xargs)"
-    # Only export valid variable names
-    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && export "$key=$value"
-  done < "$ENV_FILE"
-fi
+export OPENCLAW_NODE_ROLE="$NODE_ROLE"
+set_env_key OPENCLAW_NODE_ROLE "$NODE_ROLE"
 
 # Persist the node id so it is STABLE across re-runs and hostname changes.
 # env.sh derives it from the hostname on every run; without this line a rename
@@ -58,8 +117,8 @@ fi
 if [ -z "${OPENCLAW_NATS_TOKEN:-}" ]; then
   OPENCLAW_NATS_TOKEN="$(openssl rand -hex 32)"
   export OPENCLAW_NATS_TOKEN
-  if [ -f "$ENV_FILE" ]; then
-    echo "OPENCLAW_NATS_TOKEN=$OPENCLAW_NATS_TOKEN" >> "$ENV_FILE"
+  if [ -f "$ENV_FILE" ] && ! $DRY_RUN; then
+    set_env_key OPENCLAW_NATS_TOKEN "$OPENCLAW_NATS_TOKEN"
     info "Generated OPENCLAW_NATS_TOKEN and persisted to $ENV_FILE"
   fi
 fi
@@ -68,14 +127,24 @@ fi
 # organ; the agent provider is whatever env.sh resolved (--provider=, the env
 # file, or a CLI on PATH). No provider is ever written by default: a node with
 # no mind chosen says so and Step 13.5 asks.
+if $SKIP_LLM; then
+  if ${DISABLE_MODELS:-true} || ! grep -q '^OPENCLAW_MODEL_ENABLED=' "$ENV_FILE"; then
+    set_env_key OPENCLAW_MODEL_ENABLED 0
+    OPENCLAW_MODEL_ENABLED=0
+  fi
+elif ! grep -q '^OPENCLAW_MODEL_ENABLED=' "$ENV_FILE"; then
+  set_env_key OPENCLAW_MODEL_ENABLED 1
+  OPENCLAW_MODEL_ENABLED=1
+fi
+export OPENCLAW_MODEL_ENABLED="${OPENCLAW_MODEL_ENABLED:-1}"
 if [ -f "$ENV_FILE" ] && [ -n "${OPENCLAW_PROVIDER:-}" ]; then
   set_env_key MESH_LLM_PROVIDER "$OPENCLAW_PROVIDER"
   info "MESH_LLM_PROVIDER=$OPENCLAW_PROVIDER recorded in $ENV_FILE"
 fi
-if [ -f "$ENV_FILE" ] && ! grep -q '^LLM_MODEL=' "$ENV_FILE"; then
+if [ -f "$ENV_FILE" ] && ! $DRY_RUN && ! grep -q '^LLM_MODEL=' "$ENV_FILE"; then
   echo "LLM_MODEL=qwen3:8b" >> "$ENV_FILE"
 fi
-if [ -f "$ENV_FILE" ] && ! grep -q '^LLM_BASE_URL=' "$ENV_FILE"; then
+if [ -f "$ENV_FILE" ] && ! $DRY_RUN && ! grep -q '^LLM_BASE_URL=' "$ENV_FILE"; then
   echo "LLM_BASE_URL=http://localhost:11434" >> "$ENV_FILE"
 fi
 export MESH_LLM_PROVIDER="${OPENCLAW_PROVIDER:-${MESH_LLM_PROVIDER:-}}"
@@ -101,8 +170,8 @@ generate_config() {
   local basename
   basename=$(basename "$output")
 
-  if [ -f "$output" ] && ! $UPDATE_ONLY; then
-    info "Config $basename already exists, skipping (use --update to overwrite)"
+  if [ -f "$output" ]; then
+    info "Config $basename already exists, keeping it"
     return
   fi
 
@@ -154,73 +223,6 @@ generate_config "$REPO_DIR/services/nats/nats-single.conf" "$OPENCLAW_ROOT/confi
 generate_config "$REPO_DIR/services/nats/nats-1.conf" "$OPENCLAW_ROOT/config/nats-1.conf"
 generate_config "$REPO_DIR/services/nats/nats-2.conf" "$OPENCLAW_ROOT/config/nats-2.conf"
 generate_config "$REPO_DIR/services/nats/nats-3.conf" "$OPENCLAW_ROOT/config/nats-3.conf"
-
-# Multi-MACHINE cluster (federation 1.5, hardened per item 9 / D2-D4). With
-# --cluster-peers=<ip>,<ip> this node joins a real cross-machine NATS cluster:
-# render THIS machine's nats.conf binding its OWN tailnet address (never 0.0.0.0)
-# with credentialed routes to the PEER machines, and set the KV replica target
-# from the council size. No flag → single-node default above, untouched. Real
-# failover can only be proven on separate hardware; this renders what deploys.
-if [ -n "$CLUSTER_PEERS" ]; then
-  step "Multi-machine NATS cluster (peers: $CLUSTER_PEERS)"
-  CLUSTER_SERVER_NAME="openclaw-nats-${OPENCLAW_NODE_ID}"
-
-  # The machine's OWN address to bind (D2/D4: the tailnet interface, never all-interfaces).
-  if [ -z "$CLUSTER_BIND" ] && command -v tailscale >/dev/null 2>&1; then
-    CLUSTER_BIND="$(tailscale ip -4 2>/dev/null | head -1)"
-    [ -n "$CLUSTER_BIND" ] && info "Auto-detected Tailscale address for binds: $CLUSTER_BIND"
-  fi
-  if [ -z "$CLUSTER_BIND" ]; then
-    error "--cluster-peers requires --cluster-bind=<this machine's tailnet/LAN IP> (no tailscale auto-detect available). Refusing to bind 0.0.0.0."
-    exit 1
-  fi
-
-  # Cluster-route password — shared across the council like the client token.
-  if [ -z "${OPENCLAW_NATS_CLUSTER_PASS:-}" ]; then
-    OPENCLAW_NATS_CLUSTER_PASS="$(grep '^OPENCLAW_NATS_CLUSTER_PASS=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2)"
-  fi
-  if [ -z "${OPENCLAW_NATS_CLUSTER_PASS:-}" ]; then
-    OPENCLAW_NATS_CLUSTER_PASS="$(openssl rand -hex 32)"
-    info "Generated OPENCLAW_NATS_CLUSTER_PASS (copy it — with OPENCLAW_NATS_TOKEN — to every council machine's openclaw.env)"
-  fi
-  export OPENCLAW_NATS_CLUSTER_PASS
-
-  if [ "$DRY_RUN" = true ]; then
-    info "[dry-run] would render cluster nats.conf (server=$CLUSTER_SERVER_NAME, bind=$CLUSTER_BIND) routing to: $CLUSTER_PEERS"
-  else
-    KV_REPLICAS="$(OPENCLAW_NATS_SERVER_NAME="$CLUSTER_SERVER_NAME" \
-      OPENCLAW_NATS_TOKEN="$OPENCLAW_NATS_TOKEN" \
-      OPENCLAW_NATS_CLUSTER_PASS="$OPENCLAW_NATS_CLUSTER_PASS" \
-      OPENCLAW_NATS_BIND_ADDR="$CLUSTER_BIND" \
-      CLUSTER_PEERS="$CLUSTER_PEERS" \
-      node -e '
-        const fs = require("fs"), os = require("os");
-        const { renderClusterRoutes, replicasForPeers, parsePeers } = require(process.argv[1]);
-        let t = fs.readFileSync(process.argv[2], "utf8");
-        t = t.replaceAll("${OPENCLAW_NATS_SERVER_NAME}", process.env.OPENCLAW_NATS_SERVER_NAME)
-             .replaceAll("${OPENCLAW_NATS_CLUSTER_PASS}", process.env.OPENCLAW_NATS_CLUSTER_PASS)
-             .replaceAll("${OPENCLAW_NATS_BIND_ADDR}", process.env.OPENCLAW_NATS_BIND_ADDR)
-             .replaceAll("${HOME}", os.homedir())
-             .replace("${OPENCLAW_NATS_CLUSTER_ROUTES}", renderClusterRoutes(process.env.CLUSTER_PEERS, {
-               user: "openclaw-route", pass: process.env.OPENCLAW_NATS_CLUSTER_PASS,
-             }));
-        fs.writeFileSync(process.argv[3], t, { mode: 0o600 });
-        process.stdout.write(String(replicasForPeers(parsePeers(process.env.CLUSTER_PEERS).length)));
-      ' "$REPO_DIR/lib/nats-cluster-config.js" "$REPO_DIR/services/nats/nats-cluster-node.conf" "$OPENCLAW_ROOT/config/nats.conf")"
-    # Persist: replica target, cluster pass, and point every local consumer at the
-    # bound address (the server no longer listens on 127.0.0.1).
-    for kv in "OPENCLAW_KV_REPLICAS=$KV_REPLICAS" "OPENCLAW_NATS_CLUSTER_PASS=$OPENCLAW_NATS_CLUSTER_PASS" "OPENCLAW_NATS=nats://$CLUSTER_BIND:4222"; do
-      key="${kv%%=*}"
-      if grep -q "^$key=" "$ENV_FILE" 2>/dev/null; then
-        run sed -i.bak "s|^$key=.*|$kv|" "$ENV_FILE" && run rm -f "$ENV_FILE.bak"
-      else
-        echo "$kv" >> "$ENV_FILE"
-      fi
-    done
-    info "Rendered cluster nats.conf (binds $CLUSTER_BIND, credentialed routes → $CLUSTER_PEERS) · KV replica target R=$KV_REPLICAS · OPENCLAW_NATS → nats://$CLUSTER_BIND:4222"
-    warn "Start nats-server on ALL machines (cluster must form) BEFORE the daemons, so R=$KV_REPLICAS streams can be created."
-  fi
-fi
 
 generate_config "$REPO_DIR/config/obsidian-sync.json.template" "$OPENCLAW_ROOT/config/obsidian-sync.json"
 generate_config "$REPO_DIR/config/openclaw.json.template" "$OPENCLAW_ROOT/openclaw.json"
@@ -306,9 +308,35 @@ if [ -f "$ENV_FILE" ] && [ "$DRY_RUN" != true ] && ! grep -q '^OPENCLAW_NATS_AUT
 fi
 if $DRY_RUN; then
   info "[dry-run] would render nats-auth.conf ($OPENCLAW_NATS_AUTH mode)"
+elif [ -f "$OPENCLAW_ROOT/config/nats-auth.conf" ]; then
+  info "Existing nats-auth.conf preserved; explicit credential changes use nats-auth-render.mjs"
 elif OPENCLAW_IDENTITY_DIR="$OPENCLAW_ROOT" "$NODE_BIN" "$REPO_DIR/bin/nats-auth-render.mjs" \
        --out "$OPENCLAW_ROOT/config/nats-auth.conf" --mode "$OPENCLAW_NATS_AUTH"; then
   info "Rendered nats-auth.conf ($OPENCLAW_NATS_AUTH mode, mode 600)"
 else
   warn "nats-auth.conf render failed — nats-server will refuse to start until it exists"
+fi
+
+if [ -n "$PENDING_CLUSTER_DIR" ]; then
+  cp "$OPENCLAW_ROOT/config/nats-auth.conf" "$PENDING_CLUSTER_DIR/nats-auth.conf"
+  chmod 600 "$PENDING_CLUSTER_DIR/nats-auth.conf"
+  if ! "$NATS_SERVER_BIN" -t -c "$PENDING_CLUSTER_DIR/nats.conf" > "$PENDING_CLUSTER_DIR/validation.log" 2>&1; then
+    error "Cluster config does not validate with the prepared auth policy; existing topology is unchanged"
+    exit 1
+  fi
+  mv "$PENDING_CLUSTER_DIR/nats.conf" "$OPENCLAW_ROOT/config/nats.conf"
+  set_env_key OPENCLAW_KV_REPLICAS "$KV_REPLICAS"
+  if $CLUSTER_PASS_GENERATED; then
+    set_env_key OPENCLAW_NATS_CLUSTER_PASS "$OPENCLAW_NATS_CLUSTER_PASS"
+  elif ! grep -q '^OPENCLAW_NATS_CLUSTER_PASS=' "$ENV_FILE"; then
+    printf '%s\n' "OPENCLAW_NATS_CLUSTER_PASS=$OPENCLAW_NATS_CLUSTER_PASS" >> "$ENV_FILE"
+  fi
+  export OPENCLAW_NATS="nats://$CLUSTER_BIND:4222"
+  export OPENCLAW_KV_REPLICAS="$KV_REPLICAS"
+  set_env_key OPENCLAW_NATS "$OPENCLAW_NATS"
+  rm -rf "$PENDING_CLUSTER_DIR"
+  PENDING_CLUSTER_DIR=""
+  $_INSTALLER_LOCK_HELD || trap - EXIT
+  info "Validated cluster configuration selected; KV replica target R=$KV_REPLICAS"
+  warn "Start nats-server on all council machines before the daemons; no cluster was started here."
 fi

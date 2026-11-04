@@ -1,0 +1,24 @@
+--- test_recovery.mjs
++++ test_recovery.mjs (owned experiment)
+@@ -664,6 +664,21 @@
+   }
+   treePlan.matchReceipt = path.join(root, 'owned-match.json');
+   ownedMatch(treePlan.matchReceipt, treePlan);
++  const duplicateMaster = path.join(root, 'duplicate-serving-master');
++  copyCold(masters[members.indexOf(survivors[0])], duplicateMaster);
++  freezeTree(duplicateMaster);
++  const duplicatePlan = structuredClone(treePlan);
++  duplicatePlan.cluster.members[1].master = duplicateMaster;
++  duplicatePlan.cluster.members[1].masterSha256 = masterDigest(duplicateMaster);
++  duplicatePlan.matchReceipt = path.join(root, 'duplicate-serving-match.json');
++  ownedMatch(duplicatePlan.matchReceipt, duplicatePlan);
++  const duplicatePlanFile = path.join(root, 'duplicate-serving-plan.json');
++  jsonPrivate(duplicatePlanFile, duplicatePlan);
++  const duplicateTarget = path.join(root, 'duplicate-serving-probe');
++  const duplicateRun = spawnSync(process.execPath, [coldTreeProbe, duplicatePlanFile, duplicateTarget], { encoding: 'utf8', timeout: 120000 });
++  const duplicateOutcome = { status: duplicateRun.status, signal: duplicateRun.signal, success: fs.existsSync(path.join(duplicateTarget, 'probe.json')), failure: fs.existsSync(path.join(duplicateTarget, 'FAILED.json')) ? JSON.parse(fs.readFileSync(path.join(duplicateTarget, 'FAILED.json'))) : null };
++  jsonPrivate(path.join(root, 'duplicate-serving-outcome.json'), duplicateOutcome);
++  console.log('DUPLICATE_SERVING_OUTCOME', JSON.stringify(duplicateOutcome));
+   const treePlanFile = path.join(root, 'cold-tree-plan.json');
+   jsonPrivate(treePlanFile, treePlan);
+   const masterAlias = path.join(root, 'cold-master-alias');

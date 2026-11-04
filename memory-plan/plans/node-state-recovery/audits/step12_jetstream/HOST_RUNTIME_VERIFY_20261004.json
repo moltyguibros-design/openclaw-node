@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-04",
+  "host_release": "~/Library/Application Support/OpenClawRecovery/isolated-runtime-fecf9858",
+  "source_commit": "fecf985879431007809f40bcea76e84d95c6237d",
+  "manifest_sha256": "964baae0d8540a875367f51aa569d06792ba49f1fc06ddcc43359b1c579c343b",
+  "verifier_sha256": "6fedd43b87e64c74d3235c754f94c07afc0d4cc61529a06a7064f52c9086b3de",
+  "first_host_attempt": {
+    "result": "refused",
+    "reason": "node_modules root was 0755 rather than 0700",
+    "success_receipt": false
+  },
+  "correction": "node_modules root changed to 0700; failed receipt retained",
+  "second_host_attempt": {
+    "verified": true,
+    "regular_files": 9,
+    "dependency_files": 212
+  },
+  "negative_control": "wrong pinned manifest hash refused with FAILED.json and no VERIFY.json",
+  "local_test": "owner-private success and changed code, readable dependency directory, undeclared symlink, changed dependency refusals pass on both installed Python runtimes",
+  "scope": "host restore release integrity only; no production VM shutdown, store copy or history acceptance"
+}

@@ -1,0 +1,10 @@
+{
+  "at_utc": "2026-10-04T20:00:18Z",
+  "source_commit": "eeb646030392e70a5f082d60c284b6fcb9662460",
+  "host_directory": "~/Library/Application Support/OpenClawRecovery/tools-eeb64603",
+  "source_manifest_sha256": "282521517494ccc7df472097d8696ded722e5b2b36aab94c73b019bbb8f5ba14",
+  "verified_files": 7,
+  "mode": "directory 0700; regular files 0600, host account owner, link count 1",
+  "scope": "inactive private host preservation tools, including clone disposal; no production VM stop, image copy, store restore or boot control",
+  "review": "Claude read-only no-blocker at dcebda81; production restart interlock and failed-capture cleanup remain open"
+}

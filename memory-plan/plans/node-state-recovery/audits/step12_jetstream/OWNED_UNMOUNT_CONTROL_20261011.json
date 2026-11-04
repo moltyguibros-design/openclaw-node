@@ -1,0 +1,26 @@
+{
+  "type": "owned-apfs-memory-entry-unmount-contrast",
+  "scope": "Two live owned children on the same disposable APFS sparse image, tested in sequence on an ephemeral macOS CI runner; no production state",
+  "source_head": "9eb685be102f49e44d8cd80e28df0e7b09d8b200",
+  "script_sha256": "05c7790cbe4500c35d9d7e156fa593736fe94479231f99761bfb896ff4cd12f4",
+  "child_source_sha256": "beef015c61eaf4dcdabbf688122be5bdee41e511749b2f80bbffc2d96de7f381",
+  "job": "https://github.com/moltyguibros-design/openclaw-node/actions/runs/38193695804/job/114631670220",
+  "job_conclusion": "success",
+  "observed": {
+    "control_child_exit": 0,
+    "control_child_error": "",
+    "control_mounted_after_attempt": false,
+    "control_unmount_output": "Volume OwnedMemoryBoundary on disk8s1 unmounted",
+    "control_unmount_returncode": 0,
+    "entry_child_exit": 0,
+    "entry_child_error": "",
+    "entry_mounted_after_attempt": true,
+    "entry_unmount_output": "Volume OwnedMemoryBoundary on disk8s1 failed to unmount",
+    "entry_unmount_returncode": 1,
+    "remap_outcome": "wrote",
+    "unmount_after_entry_exit_returncode": 0,
+    "content_prefix_after_readonly_reattach": "M000"
+  },
+  "interpretation": "A live child that opened and closed the file without retaining an entry allowed normal unmount. A live child retaining a writable Mach memory entry was followed by normal-unmount refusal and a still-mounted volume; once that child exited, unmount succeeded. The contrast supports attribution to the retained entry on this owned image. A read-only reattach after detach found the changed file prefix.",
+  "limits": "The command emitted a generic failure, not an errno or EBUSY reason. Sequential arms do not establish an if-and-only-if rule for all APFS states or every reference class. This cannot unmount the running guest system/Data volume and does not prove the guest no-writer hold, host boot gate, stopped-VM capture, four-history acceptance or resumption. The one-time CI invocation was removed after recording the result."
+}

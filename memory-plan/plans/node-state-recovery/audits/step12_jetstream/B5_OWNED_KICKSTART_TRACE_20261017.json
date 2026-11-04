@@ -1,0 +1,61 @@
+{
+  "at": "2026-10-17 02:51 EDT",
+  "scope": "Owned test-only diagnostic; not a fix or cause attribution for the CI timeout",
+  "failed_head": "b694b34295576139197693255babd5d76a1e4cd2",
+  "failed_run": 39005360286,
+  "failed_job": 117316604376,
+  "failure": "UndeterminedLaunchdAction after 10 seconds; gate closed, partial, receipt unresolved",
+  "source_review": "Claude Message 85: no material defect on exact b694b342; same-image-path concurrent attach remains a same-uid residual",
+  "local_native_trace": {
+    "client_pid": 36012,
+    "client_returncode_when_sampled": 0,
+    "context": {
+      "before_restore": {
+        "exit_timeout": 5,
+        "last_exit_code": 0,
+        "loaded": true,
+        "pid": null,
+        "running": false,
+        "runs": 1
+      },
+      "before_stop": {
+        "exit_timeout": 5,
+        "loaded": true,
+        "pid": 35955,
+        "running": true,
+        "runs": 1
+      },
+      "bootstrap_request_age_before_stop_s": 0.30106887499999996,
+      "explicit_throttle_interval": null,
+      "stop_wait_s": 0.01207350000000007
+    },
+    "elapsed_s": 9.008384334,
+    "event": "completed",
+    "scope": "owned test client observation; no cause or deadline-state attribution",
+    "stderr_length": 0,
+    "stdout_length": 0,
+    "timeout_s": 10
+  },
+  "controls": {
+    "scripted_process_controls": 6,
+    "trace_mutations_killed": 3,
+    "unmutated_controls": "pass",
+    "owned_native_case": "pass"
+  },
+  "source_sha256": {
+    "owned_kickstart_trace.py": "438ef5724a48c0bfd17bd7921454dd966adffb4bfc86a6f6e53f9dc242ca0e3c",
+    "test_owned_kickstart_trace.py": "f493e865dcf539faa6568c78349c6f0fcf1d8d547e47f8495d13e641e3c1a094",
+    "test_restore_only.py": "19846a0351a1cfb6d824cfb16c3ae81bba94e327225ccf1d01eac8a9afe645ae"
+  },
+  "logs_sha256": {
+    "b5-owned-kickstart-diagnostic-tests.log": "32bfbbb932872816b37db1b8eaf766df6e706ede3ecc6e708aeff0b92552fb3c",
+    "b5-owned-kickstart-trace-mutants.log": "27d77c3923a893b186c3690624482e729fb553c3b31b4cd0758172aa57f07872"
+  },
+  "limits": [
+    "A poll occurs after TimeoutExpired, not at the exact deadline",
+    "No evidence attributes the CI failure to throttling or pipe inheritance",
+    "Diagnostic writes are best effort and can affect observation timing",
+    "The action timeout stays 10 seconds, post-timeout observation 1 second, outer fixture timeout 20 seconds",
+    "No native ASIF probe, production service/VM stop, or production timer change"
+  ]
+}

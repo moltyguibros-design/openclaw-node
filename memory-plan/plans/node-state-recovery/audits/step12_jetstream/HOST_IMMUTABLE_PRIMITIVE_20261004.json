@@ -1,0 +1,25 @@
+{
+  "at_utc": "2026-10-04T20:39:50Z",
+  "source_commit": "09f5b8daa3390c51aeb01bbbb8b7b807f017fd20",
+  "scope": "isolated immutable image flag primitive and disposable ASIF fixture; not wired to production capture, disposal or boot",
+  "fixture": {
+    "guest_mac": "1 passed",
+    "host_mac": "1 passed",
+    "checks": [
+      "pinned open file descriptor receives immutable flag",
+      "new writable open and immutable clone unlink refuse",
+      "pre-existing writable descriptor remains able to write",
+      "clone inherits immutable flag and attaches read-only",
+      "clone-only unlock leaves source immutable",
+      "source unlock restores writable open",
+      "wrong inode and symlink refuse without flagging source"
+    ]
+  },
+  "exact_head_ci": {
+    "run": 37232577479,
+    "result": "four jobs passed at 09f5b8da"
+  },
+  "adversarial_review": "Claude read-only no-blocker at 09f5b8da; caller identity pin, UTM start behavior and crash reconciliation remain unproved",
+  "production_state": "VM running; no source or clone flag changed, no production image copied or service stopped",
+  "remaining_gate": "real disposable UTM start/refusal/recovery test and idempotent clone-first boot reconciliation before production integration"
+}

@@ -890,6 +890,9 @@ configureNats = tracer.wrap('configureNats', configureNats, { tier: 2, category:
 // ── Main ──────────────────────────────────────────────
 
 async function main() {
+  if (fs.existsSync(path.join(process.env.OPENCLAW_ROOT || path.join(os.homedir(), '.openclaw'), 'config', 'installation.json'))) {
+    throw new Error('Managed runtime requires the staged installer; legacy node-init provisioning refused');
+  }
   console.log(`\n${BOLD}${CYAN}╔══════════════════════════════════════╗${RESET}`);
   console.log(`${BOLD}${CYAN}║   OpenClaw Mesh — Join Network       ║${RESET}`);
   console.log(`${BOLD}${CYAN}╚══════════════════════════════════════╝${RESET}\n`);

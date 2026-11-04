@@ -1,0 +1,36 @@
+{
+  "scope": "owned disposable JetStream mechanism experiment; no production origin or history acceptance",
+  "at_utc": "2026-10-12T10:44:45.449Z",
+  "pr_head": "516a58ec907489f14e3d5b66c83c119db90b620f",
+  "test_recovery_sha256": "f85eaa15848cc871680170c7b53836a88bb6a7dbfe012e8fb2e517881c0004e3",
+  "probe_cold_trees_sha256": "213a6aebf5f8e4552994b9007399e890278356e77b39634a154a051b939ad5d6",
+  "experiment_patch_sha256": "8f0125249dda0f9ca980469fe206e507399dd1aa04fb3becc63863dabc6bd736",
+  "nats_cli": {
+    "path": "/opt/homebrew/Cellar/nats/0.3.1/bin/nats",
+    "version": "0.3.1",
+    "sha256": "6be41e7097aac6278c3b9e4f394fc1536996608e921aa14fceae1bf0e800da0f"
+  },
+  "nats_server": {
+    "path": "/opt/homebrew/Cellar/nats-server/2.12.6/bin/nats-server",
+    "version": "nats-server: v2.12.6",
+    "sha256": "c3a71e72f6fc5dd008988f34b57fd2ab1fe69ab18d409f0a0aeebc51160e76e1"
+  },
+  "source_serving_role": "member-1",
+  "target_serving_role": "member-2",
+  "source_master_sha256": "4b0401a1fdd046544f2e710211231e56c1628e37244fcb675d03c568b2ac9d9a",
+  "target_original_master_sha256": "cd244736582b6bdf4a82f0f3493c04b32b78166b4c89ded2490d439c99b05d5e",
+  "target_substituted_master_sha256": "4b0401a1fdd046544f2e710211231e56c1628e37244fcb675d03c568b2ac9d9a",
+  "target_original_baseline_sha256": "9c4658174f0eda53f25de320f3b0bbcf35579e251fd4f323f52fb3a17bf1c3df",
+  "target_substituted_baseline_sha256": "9c4658174f0eda53f25de320f3b0bbcf35579e251fd4f323f52fb3a17bf1c3df",
+  "probe_outcome": {
+    "status": 0,
+    "signal": null,
+    "success": true,
+    "failure": null
+  },
+  "normal_fixture_pass": true,
+  "cleanup": {
+    "allOwnedProcessesExited": true,
+    "failures": []
+  }
+}

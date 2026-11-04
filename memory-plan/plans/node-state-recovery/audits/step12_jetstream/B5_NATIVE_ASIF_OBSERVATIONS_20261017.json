@@ -1,0 +1,104 @@
+{
+  "scope": "one isolated CI-created64MiB ASIF on macOS26.6.2 arm64; no VM/reboot, real histories or production acceptance",
+  "head": "6f7e9371b90ec07b047e4b8abe42bbaf54d4e4f7",
+  "merge": "4f422f18b0b42376a79de3d2a3d295244a7afcd2",
+  "run": 39018959320,
+  "job": 117356737655,
+  "artifact": 12096186192,
+  "runner_image": "macos-26-arm64/20261013.0424.1",
+  "report": "B5_NATIVE_ASIF_COMPLETE_REPORT_20261017.json",
+  "report_sha256": "7097f7d9e28de6dbc4d8cfb368c781affe7e84bbb7451f0a0db3f2ecfe2e09f4",
+  "observations": {
+    "plain-readonly": {
+      "verify_mount": "refused: mount is not noexec",
+      "mount_flags": [
+        "rdonly",
+        "nosuid",
+        "nodev",
+        "removable",
+        "local",
+        "dovolfs",
+        "journaled",
+        "multilabel"
+      ],
+      "image_identity_unchanged": true,
+      "root0600_read_denied": true,
+      "user_read_succeeded": true,
+      "phase_cleanup_and_nonvacuous_disk_absence": true
+    },
+    "wrapper-options": {
+      "verify_mount": "accepted",
+      "mount_flags": [
+        "rdonly",
+        "noexec",
+        "nosuid",
+        "nodev",
+        "removable",
+        "local",
+        "dovolfs",
+        "dontbrowse",
+        "journaled",
+        "multilabel"
+      ],
+      "image_identity_unchanged": true,
+      "root0600_read_denied": true,
+      "user_read_succeeded": true,
+      "phase_cleanup_and_nonvacuous_disk_absence": true
+    },
+    "wrapper-options-ownership-disabled": {
+      "verify_mount": "accepted",
+      "mount_flags": [
+        "rdonly",
+        "noexec",
+        "nosuid",
+        "nodev",
+        "removable",
+        "local",
+        "dovolfs",
+        "dontbrowse",
+        "journaled",
+        "multilabel"
+      ],
+      "image_identity_unchanged": true,
+      "root0600_read_denied": true,
+      "user_read_succeeded": true,
+      "phase_cleanup_and_nonvacuous_disk_absence": true
+    }
+  },
+  "cleanup": {
+    "clean": true,
+    "disks_gone": [],
+    "errors": [],
+    "listed": [],
+    "mounted": [],
+    "remaining": 0,
+    "removed": true,
+    "steps": []
+  },
+  "write_cleanup": [
+    true
+  ],
+  "disable_cleanup": [
+    true
+  ],
+  "blocker": {
+    "id": "B5-native-device-binding",
+    "owner": "Codex",
+    "evidence": "diskutil attach bare disk7/disk8s1 vs hdiutil/DeviceNode /dev paths; current wrapper attach equality refuses before mount",
+    "additional_owned_replay": {
+      "data_volume_result": "disk8s1",
+      "verify_mount_refusal": "private mount point holds another device",
+      "all_commands_mocked": true
+    },
+    "unblock": "review and decisively test strict canonical identity binding in wrapper, retaining exact native raw/DeviceNode/inventory relationships and cleanup absence checks; native integrated fixture required",
+    "downstream_held": "owned stopped-ASIF reader integration, B5 completion/B6"
+  },
+  "limits": [
+    "verify_mount accepted only when called with canonical DeviceNode by the probe; not end-to-end wrapper acceptance",
+    "image before/after equality is per read-only cycle; intervening write/disable phase is outside that comparison",
+    "xattr names were empty before/after; no general xattr-value stability claim",
+    "cleanup inventory observations are sequential, not concurrent physical exclusion",
+    "all-six exact-head CI and Claude review pending; no source-readiness claim",
+    "D62 macOS reboot rehearsal and B5-macOS-access are separate"
+  ]
+}

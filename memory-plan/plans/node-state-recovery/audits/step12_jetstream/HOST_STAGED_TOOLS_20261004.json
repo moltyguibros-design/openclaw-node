@@ -1,0 +1,23 @@
+{
+  "at_utc": "2026-10-04T17:28:07.578591+00:00",
+  "source_commit": "fecf985879431007809f40bcea76e84d95c6237d",
+  "host_directory": "~/Library/Application Support/OpenClawRecovery/tools-fecf9858",
+  "mode": "directory 0700; regular files 0600, owner UID 501, link count 1",
+  "files_sha256": {
+    "host_asif_extract.py": "8b743f1e39614613d116b00208d43cebe69655cbe5f0eaf803bf28d504e06f88",
+    "host_vm_capture.py": "5722c18f7036bad1b128c14972418043e0eea6bdb1164274cd20e829d86aad31",
+    "host_vm_preflight.py": "07c59ec1ed24e15a7a44f3fda5062b78607bf4ee66c197c1cd56154b1e8d468f",
+    "stopped_tree_match.py": "2afc75ee8d1694203cc0a0d2714aee09f6203e591be082bc52ef6fc094009baf"
+  },
+  "host_preflight": {
+    "state": "started",
+    "image_holders": 1,
+    "holders_consistent": true,
+    "image_size_bytes": 211136020480,
+    "free_bytes": 115140853760,
+    "vm_uuid": "79B25660-B7F1-4DDC-B379-52A4EB317DAE",
+    "config_sha256": "de181e164d416eacaf5cefd2ff9ff46330995983397fbb28d9cb746af173f4c5",
+    "utmctl_sha256": "288e61a73f0b70d9986687a8adc0f05bf2009e8f3843754288d2d174551c8ba5"
+  },
+  "scope": "inactive private host tools and read-only running-VM preflight; no shutdown, image copy, cold master or acceptance"
+}

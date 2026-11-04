@@ -1,0 +1,26 @@
+{
+  "at_utc": "2026-10-04T20:17:28Z",
+  "source_commit": "ad58112659a2dac58a645a87ead43d07399f2a4b",
+  "host_tool_package": "~/Library/Application Support/OpenClawRecovery/tools-ad581126",
+  "host_source_manifest_sha256": "d8efb760c9ae97e61c27e1033d6e1f46fad18e24809b1f0d3a376690f2346451",
+  "staged_files_verified": 7,
+  "disposable_fixture": {
+    "guest_mac": "1 passed",
+    "host_mac": "1 passed",
+    "checks": [
+      "successful capture clone refuses disposal while VM is reported running",
+      "changed successful-capture clone refuses disposal",
+      "verified successful-capture clone is removed while VM is stopped",
+      "post-clone failed capture leaves an orphan without CAPTURE.json",
+      "failed-capture cleanup refuses an attached clone",
+      "detached failed clone is removed while original image remains"
+    ]
+  },
+  "exact_head_ci": {
+    "run": 37231113880,
+    "result": "four jobs passed at ad581126"
+  },
+  "adversarial_review": "Claude read-only no-blocker at ad581126",
+  "scope": "inactive private host tools and disposable images only; no production VM stop, image copy, store restore, boot control or cold-master acceptance",
+  "remaining_gate": "continuous UTM hold and mechanical restart interlock consuming clone-absence receipts, plus real stopped-image and JetStream restore acceptance"
+}

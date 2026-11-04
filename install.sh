@@ -6,7 +6,7 @@
 # Usage:
 #   bash install.sh              # Full install
 #   bash install.sh --dry-run    # Show what would happen
-#   bash install.sh --update     # Re-copy scripts/configs, skip deps
+#   bash install.sh --update     # Refresh scripts; preserve configs, skip deps
 #
 # --dry-run behavior:
 #   Echoes every command that would execute (prefixed with [DRY-RUN]) without
@@ -47,7 +47,9 @@ DRY_RUN=false
 UPDATE_ONLY=false
 SKIP_MESH=false
 ENABLE_SERVICES=false
+START_DEFAULT_SERVICES=false
 SKIP_LLM=false
+DISABLE_MODELS=false
 SKIP_VERIFY=false
 SKIP_FRONTEND=false
 VERIFY_FRONTEND=false
@@ -64,7 +66,9 @@ for arg in "$@"; do
     --update)            UPDATE_ONLY=true ;;
     --skip-mesh)         SKIP_MESH=true ;;
     --enable-services)   ENABLE_SERVICES=true ;;
-    --skip-llm)          SKIP_LLM=true ;;
+    --start-default-services) ENABLE_SERVICES=true; START_DEFAULT_SERVICES=true ;;
+    --skip-llm)          SKIP_LLM=true; DISABLE_MODELS=true ;;
+    --skip-model-downloads) SKIP_LLM=true ;;
     --skip-verify)       SKIP_VERIFY=true ;;
     --skip-frontend)     SKIP_FRONTEND=true ;;
     --verify-frontend)   VERIFY_FRONTEND=true ;;
@@ -77,14 +81,15 @@ for arg in "$@"; do
     --help|-h)
       echo "Usage: bash install.sh [--dry-run] [--update] [--skip-mesh] [--skip-llm] [--skip-verify] [--role=lead|worker] [--provider=NAME] [--enable-services]"
       echo "  --dry-run           Show what would happen without making changes"
-      echo "  --update            Re-copy scripts/configs only (skip system deps)"
+      echo "  --update            Refresh scripts, keep existing configs (skip system deps)"
       echo "  --skip-mesh         Skip mesh network setup (used by meta-installer)"
       echo "  --skip-llm          Skip ollama install + model pull + embedder prefetch (extraction degrades to regex)"
+      echo "  --skip-model-downloads Defer model provisioning; preserve an existing model capability"
       echo "  --skip-verify       Skip the final acceptance gate"
       echo "  --skip-frontend     Skip agent-frontend (Claude Code) detection/install"
       echo "  --verify-frontend   Verify frontend auth with one small live call"
       echo "  --sandbox           Wiring-test mode: skip network-heavy installs (implies --skip-llm --skip-mesh)"
-      echo "  --role=lead|worker  Set node role (default: macOS=lead, Linux=worker)"
+      echo "  --role=lead|worker  Set role (otherwise keep saved role; new: macOS=lead, Linux=worker)"
       echo "  --cluster-peers=A,B Join a multi-MACHINE NATS cluster: A,B are the OTHER"
       echo "                      machines' addresses (Tailscale/LAN IPs). Renders THIS"
       echo "                      machine's nats.conf to cluster with them (R=3 failsafe)."
@@ -97,6 +102,8 @@ for arg in "$@"; do
       echo "                      (openclaw-trust-peer --my-pubkey on the lead). Merged into"
       echo "                      the deploy/operator trust allowlists so lead-signed actions verify."
       echo "  --enable-services   Also enable and start services after installing"
+      echo "  --start-default-services Start manifest defaults on an older prepared node;"
+      echo "                      implies --enable-services; masks remain untouched"
       echo "In a VM whose host serves Ollama with the node's model, LLM_BASE_URL points at the host"
       echo "(nothing runs or downloads in the VM). OPENCLAW_LLM_HOST=0 keeps the VM on its own Ollama."
       exit 0
@@ -104,7 +111,18 @@ for arg in "$@"; do
   esac
 done
 
+if grep -q '^OPENCLAW_MODEL_ENABLED=0$' "$ENV_FILE" 2>/dev/null; then
+  SKIP_LLM=true
+fi
+
 source "$REPO_DIR/scripts/install/helpers.sh"
+if [ -f "$OPENCLAW_ROOT/config/installation.json" ] || {
+  [ -f "$ENV_FILE" ] && [ -f "$WORKSPACE/bin/memory-daemon.mjs" ];
+}; then
+  UPDATE_ONLY=true
+  info "Existing node detected; preserving update behavior"
+fi
+acquire_installer_lock
 source "$REPO_DIR/scripts/install/llm-host.sh"
 
 echo ""
@@ -116,6 +134,7 @@ echo ""
 
 source "$REPO_DIR/scripts/install/system-deps.sh"
 source "$REPO_DIR/scripts/install/env.sh"
+source "$REPO_DIR/scripts/install/runtime.sh"
 "$NODE_BIN" "$REPO_DIR/bin/nats-legacy-writer-check.mjs"
 source "$REPO_DIR/scripts/install/workspace.sh"
 source "$REPO_DIR/scripts/install/config.sh"
@@ -123,6 +142,12 @@ source "$REPO_DIR/scripts/install/components.sh"
 source "$REPO_DIR/scripts/install/services.sh"
 source "$REPO_DIR/scripts/install/integrations.sh"
 source "$REPO_DIR/scripts/install/verify.sh"
+
+if ! $DRY_RUN; then
+  "$NODE_BIN" "$REPO_DIR/bin/deploy-runtime.mjs" --complete --root "$OPENCLAW_ROOT" \
+    --runtime "$OPENCLAW_RUNTIME_DIR" --attempt "$OPENCLAW_INSTALLATION_ATTEMPT" \
+    --acceptance "$GATE_STATE" --services-requested "$ENABLE_SERVICES"
+fi
 
 # ============================================================
 # Done!
@@ -132,6 +157,8 @@ echo ""
 echo "╔══════════════════════════════════════════╗"
 if [ "$GATE_STATE" = "accepted" ]; then
   echo "║   Installation Complete — VERIFIED       ║"
+elif [ "$GATE_STATE" = incomplete ]; then
+  echo "║   Installation Complete — PARTIAL        ║"
 else
   echo "║   Installation Complete — NOT VERIFIED   ║"
 fi
