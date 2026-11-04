@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, statSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -183,4 +183,88 @@ test('a quoted-empty client token is replaced rather than shadowing the generate
   assert.match(token, /^[a-f0-9]{64}$/);
   assert.equal(text.match(/^OPENCLAW_NATS_TOKEN=/gm).length, 1);
   assert.ok(readFileSync(join(f.config, 'nats-auth.conf'), 'utf8').includes(JSON.stringify(token)));
+});
+
+const literalWriteCases = [
+  ['ampersand', 'left&right', 'left&right'],
+  ['pipe', 'left|right', 'left|right'],
+  ['backslash', String.raw`C:\owned\value`, String.raw`C:\owned\value`],
+  ['dollar', '$HOME $(touch "__OWNED_DIR__/executed") `touch "__OWNED_DIR__/backtick"`', '$HOME $(touch "__OWNED_DIR__/executed") `touch "__OWNED_DIR__/backtick"`'],
+  ['quotes', `O'Reilly says "yes"`, `O'Reilly says "yes"`],
+  ['Unicode', 'français_日本語', 'français_日本語'],
+  ['empty', '', ''],
+  ['trailing-backslash', 'ends\\', 'ends\\'],
+  ['outer-quotes', '"kept as file data"', 'kept as file data'],
+];
+
+for (const [label, sourceValue, sourceDecoded] of literalWriteCases) {
+  test(`env writer preserves literal ${label} bytes and existing reader semantics`, t => {
+    const f = fixture(t);
+    const value = sourceValue.replaceAll('__OWNED_DIR__', f.home);
+    const decoded = sourceDecoded.replaceAll('__OWNED_DIR__', f.home);
+    const before = '# untouched comment\nOWNED_TARGET=old\nOTHER="bytes & | remain"\nOWNED_TARGET=duplicate\nOWNED_TARGET_SUFFIX=untouched\n';
+    writeFileSync(f.envFile, before);
+    chmodSync(f.envFile, 0o600);
+    const beforeFiles = filesBelow(f.nodeRoot);
+    const result = f.run(`set_env_key OWNED_TARGET "$OWNED_VALUE"
+load_env_file "$ENV_FILE"
+"$NODE_BIN" -e 'process.stdout.write(JSON.stringify(process.env.OWNED_TARGET))'`, { OWNED_VALUE: value });
+    assert.equal(result.status, 0, result.stderr);
+    const expected = `# untouched comment\nOWNED_TARGET=${value}\nOTHER="bytes & | remain"\nOWNED_TARGET=${value}\nOWNED_TARGET_SUFFIX=untouched\n`;
+    assert.equal(readFileSync(f.envFile, 'utf8'), expected);
+    assert.equal(result.stdout, JSON.stringify(decoded));
+    assert.deepEqual(filesBelow(f.nodeRoot), { ...beforeFiles, 'openclaw.env': Buffer.from(expected).toString('base64') });
+    assert.equal(statSync(f.envFile).mode & 0o777, 0o600);
+    assert.equal(readdirSync(f.home).includes('executed'), false);
+    assert.equal(readdirSync(f.home).includes('backtick'), false);
+  });
+}
+
+for (const [label, initial, expected] of [
+  ['unterminated', '# keep\nOTHER=unchanged', '# keep\nOTHER=unchanged\nOWNED_TARGET=a&b|c\\d\n'],
+  ['empty', '', 'OWNED_TARGET=a&b|c\\d\n'],
+  ['missing', null, 'OWNED_TARGET=a&b|c\\d\n'],
+]) {
+  test(`env writer appends a distinct literal key to an ${label} file`, t => {
+    const f = fixture(t);
+    if (initial === null) rmSync(f.envFile);
+    else writeFileSync(f.envFile, initial);
+    const result = f.run('set_env_key OWNED_TARGET "$OWNED_VALUE"', { OWNED_VALUE: String.raw`a&b|c\d` });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readFileSync(f.envFile, 'utf8'), expected);
+  });
+}
+
+for (const missing of [false, true]) {
+  test(`env writer dry-run leaves ${missing ? 'missing' : 'existing'} target unchanged`, t => {
+    const f = fixture(t);
+    if (missing) rmSync(f.envFile);
+    const before = filesBelow(f.home);
+    const result = f.run('set_env_key LLM_MODEL "$OWNED_VALUE"', { DRY_RUN: 'true', OWNED_VALUE: String.raw`a&b|c\d` });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /\[dry-run\]/);
+    assert.deepEqual(filesBelow(f.home), before);
+  });
+}
+
+for (const [label, value] of [['LF', 'first\nOTHER=corrupt'], ['CR', 'first\rOTHER=corrupt']]) {
+  test(`env writer refuses ${label} before changing files`, t => {
+    const f = fixture(t), before = filesBelow(f.home);
+    const result = f.run('set_env_key LLM_MODEL "$OWNED_VALUE"', { OWNED_VALUE: value });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /env values must fit on one line/);
+    assert.deepEqual(filesBelow(f.home), before);
+  });
+}
+
+test('env writer propagates a failed replacement without claiming success', t => {
+  const f = fixture(t), bin = join(f.home, 'fake-bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'sed'), '#!/bin/sh\nprintf "owned replacement refused\\n" >&2\nexit 73\n', { mode: 0o755 });
+  const before = filesBelow(f.nodeRoot);
+  const result = f.run('set_env_key LLM_MODEL "$OWNED_VALUE"\nprintf unexpected-success', { PATH: `${bin}:${f.env.PATH}`, OWNED_VALUE: 'a&b|c' });
+  assert.equal(result.status, 73);
+  assert.match(result.stderr, /owned replacement refused/);
+  assert.doesNotMatch(result.stdout, /unexpected-success/);
+  assert.deepEqual(filesBelow(f.nodeRoot), before);
 });

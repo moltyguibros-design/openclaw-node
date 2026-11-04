@@ -45,13 +45,24 @@ DRY_RUN_ERRORS=0
 # set_env_key VAR VALUE [FILE] — set or replace one KEY=value line in an env
 # file (default $ENV_FILE). Idempotent; honours --dry-run through run().
 set_env_key() {
-  local var="$1" value="$2" file="${3:-$ENV_FILE}"
+  local var="$1" value="$2" file="${3:-$ENV_FILE}" replacement
+  case "$value" in
+    *$'\n'*|*$'\r'*) error "Cannot save ${var}: env values must fit on one line" >&2; return 1 ;;
+  esac
+  if [ "${DRY_RUN:-false}" = true ]; then
+    printf '  [dry-run] would set %s=%s in %s\n' "$var" "$value" "$file"
+    return 0
+  fi
   if grep -q "^${var}=" "$file" 2>/dev/null; then
-    run sed -i.bak "s|^${var}=.*|${var}=${value}|" "$file" && run rm -f "$file.bak"
-  elif [ "${DRY_RUN:-false}" = true ]; then
-    echo "  [dry-run] would set ${var}=${value} in ${file}"
+    replacement=${value//\\/\\\\}
+    replacement=${replacement//&/\\&}
+    replacement=${replacement//|/\\|}
+    run sed -i.bak "s|^${var}=.*|${var}=${replacement}|" "$file" && run rm -f "$file.bak"
   else
-    echo "${var}=${value}" >> "$file"
+    if [ -f "$file" ] && [ -s "$file" ] && [ "$(tail -c 1 "$file")" != "" ]; then
+      printf '\n' >> "$file" || return
+    fi
+    printf '%s=%s\n' "$var" "$value" >> "$file"
   fi
 }
 

@@ -134,9 +134,8 @@ fi
 record_endpoint() {
   # $1 = base URL, $2 = model tag. No download: the model lives on the server.
   if [ -f "$ENV_FILE" ]; then
-    if grep -q '^LLM_BASE_URL=' "$ENV_FILE"; then sed -i.bak "s|^LLM_BASE_URL=.*|LLM_BASE_URL=$1|" "$ENV_FILE"; else echo "LLM_BASE_URL=$1" >> "$ENV_FILE"; fi
-    if grep -q '^LLM_MODEL=' "$ENV_FILE"; then sed -i.bak "s|^LLM_MODEL=.*|LLM_MODEL=$2|" "$ENV_FILE"; else echo "LLM_MODEL=$2" >> "$ENV_FILE"; fi
-    rm -f "$ENV_FILE.bak"
+    set_env_key LLM_BASE_URL "$1" || return
+    set_env_key LLM_MODEL "$2" || return
     ok "LLM_BASE_URL=$1 LLM_MODEL=$2 recorded in $ENV_FILE"
   else
     warn "$ENV_FILE not found — endpoint not recorded"
@@ -149,7 +148,7 @@ record_endpoint() {
 }
 if [ -n "$ENDPOINT" ]; then
   [ -n "$ENDPOINT_MODEL" ] || { error "--endpoint needs --model <tag>"; exit 1; }
-  record_endpoint "$ENDPOINT" "$ENDPOINT_MODEL"
+  record_endpoint "$ENDPOINT" "$ENDPOINT_MODEL" || exit 1
   CHOICE=""
   SKIP_PULL=true
 elif [ "$MODE" = embedder ]; then
@@ -166,14 +165,14 @@ if ! $SKIP_PULL && [ -z "$REC" ]; then
   if { exec 3</dev/tty; } 2>/dev/null; then
     printf "  Use an OpenAI-compatible endpoint instead? (vLLM / LM Studio / hosted) [y/N] "
     read -r ANS <&3 || ANS=n
-    exec 3<&- 2>/dev/null || true
+    { exec 3<&-; } 2>/dev/null || true
     case "$(echo "${ANS:-n}" | tr '[:upper:]' '[:lower:]')" in
       y|yes)
         exec 3</dev/tty
         printf "  Base URL (e.g. http://host:8000): "; read -r ENDPOINT <&3
         printf "  Model tag: "; read -r ENDPOINT_MODEL <&3
-        exec 3<&- 2>/dev/null || true
-        record_endpoint "$ENDPOINT" "$ENDPOINT_MODEL"
+        { exec 3<&-; } 2>/dev/null || true
+        record_endpoint "$ENDPOINT" "$ENDPOINT_MODEL" || exit 1
         SKIP_PULL=true ;;
     esac
   fi
@@ -213,7 +212,7 @@ elif $TTY_OK; then
     e|endpoint)
       printf "  Base URL (e.g. http://host:8000): "; read -r ENDPOINT <&3
       printf "  Model tag: "; read -r ENDPOINT_MODEL <&3
-      record_endpoint "$ENDPOINT" "$ENDPOINT_MODEL"
+      record_endpoint "$ENDPOINT" "$ENDPOINT_MODEL" || exit 1
       SKIP_PULL=true; CHOICE="" ;;
     c|choose)
       echo ""
@@ -244,7 +243,7 @@ else
   warn "use --yes (or OPENCLAW_LLM_AUTO=1) if you actually want it downloaded here."
   CHOICE=""
 fi
-exec 3<&- 2>/dev/null || true
+{ exec 3<&-; } 2>/dev/null || true
 
 if [ -z "$CHOICE" ] && $SKIP_PULL; then
   [ "$MODE" = embedder ] \
@@ -294,11 +293,7 @@ fi
 
 # ---------- record the choice ----------
 if [ -f "$ENV_FILE" ]; then
-  if grep -q '^LLM_MODEL=' "$ENV_FILE"; then
-    sed -i.bak "s|^LLM_MODEL=.*$|LLM_MODEL=$CHOICE|" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
-  else
-    echo "LLM_MODEL=$CHOICE" >> "$ENV_FILE"
-  fi
+  set_env_key LLM_MODEL "$CHOICE" || exit 1
   ok "LLM_MODEL=$CHOICE recorded in $ENV_FILE"
 else
   warn "$ENV_FILE not found — LLM_MODEL not recorded"
@@ -307,14 +302,10 @@ fi  # SKIP_PULL
 
 # ---------- embedder ----------
 if [ "$MODE" != embedder ]; then
-  export OPENCLAW_MODEL_ENABLED=1
   if [ -f "$ENV_FILE" ]; then
-    if grep -q '^OPENCLAW_MODEL_ENABLED=' "$ENV_FILE"; then
-      sed -i.bak 's/^OPENCLAW_MODEL_ENABLED=.*/OPENCLAW_MODEL_ENABLED=1/' "$ENV_FILE" && rm -f "$ENV_FILE.bak"
-    else
-      echo 'OPENCLAW_MODEL_ENABLED=1' >> "$ENV_FILE"
-    fi
+    set_env_key OPENCLAW_MODEL_ENABLED 1 || exit 1
   fi
+  export OPENCLAW_MODEL_ENABLED=1
 fi
 
 if $EMBEDDER_NEEDED && [ -d "$WORKSPACE/node_modules/@huggingface/transformers" ]; then
