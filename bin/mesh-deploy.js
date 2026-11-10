@@ -261,8 +261,7 @@ const MANIFEST = [
     name: 'Mesh CLI Tools',
     description: 'mesh command, health check, repair, deploy, fleet-deploy',
     risk: 'safe',
-    repoPaths: ['bin/mesh.js', 'bin/mesh-deploy.js', 'bin/fleet-deploy.js',
-                'bin/mesh-health.sh', 'bin/mesh-repair.sh'],
+    repoPaths: ['bin/mesh.js', 'bin/mesh-deploy.js', 'bin/fleet-deploy.js'],
     targets: [DIRS.CLI_BIN],
     servicesMac: [],
     servicesLinux: [],
@@ -640,7 +639,7 @@ const MANIFEST = [
     name: 'Log Rotation',
     description: 'Weekly log file rotation (copytruncate)',
     risk: 'safe',
-    repoPaths: ['bin/log-rotate.sh'],
+    repoPaths: ['bin/log-rotate'],
     targets: [DIRS.CLI_BIN],
     servicesMac: ['ai.openclaw.log-rotate'],
     servicesLinux: [],  // Ubuntu uses logrotate.d natively

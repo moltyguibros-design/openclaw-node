@@ -137,7 +137,7 @@ const generateToken = tracer.wrap('generateToken', function generateToken() {
 const { token, payload } = generateToken();
 
 if (ONE_LINER) {
-  console.log(`curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/mesh-install.sh | MESH_JOIN_TOKEN=${token} sh`);
+  console.log(`curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/mesh-install.sh | MESH_JOIN_TOKEN=${token} bash`);
 } else {
   console.log('\n--- Mesh Join Token ---');
   console.log(`Role:     ${payload.role}`);

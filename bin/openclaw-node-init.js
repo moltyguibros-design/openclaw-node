@@ -318,8 +318,8 @@ function checkCommand(cmd) {
 function getNodeVersion() {
   try {
     const v = execSync('node --version', { encoding: 'utf8' }).trim();
-    const major = parseInt(v.replace('v', '').split('.')[0]);
-    return { version: v, major };
+    const [major, minor] = v.replace('v', '').split('.').map(Number);
+    return { version: v, major, minor };
   } catch {
     return null;
   }
@@ -330,10 +330,11 @@ function checkDependencies() {
   const missing = [];
 
   const nodeInfo = getNodeVersion();
-  if (nodeInfo && nodeInfo.major >= 18) {
+  // 22.12 is the first 22.x that loads lib/node-identity.mjs through require() unflagged.
+  if (nodeInfo && (nodeInfo.major > 22 || (nodeInfo.major === 22 && nodeInfo.minor >= 12))) {
     deps.push({ name: 'Node.js', status: 'ok', detail: nodeInfo.version });
   } else if (nodeInfo) {
-    deps.push({ name: 'Node.js', status: 'upgrade', detail: `${nodeInfo.version} (need 18+)` });
+    deps.push({ name: 'Node.js', status: 'upgrade', detail: `${nodeInfo.version} (need 22.12+)` });
     missing.push('node');
   } else {
     deps.push({ name: 'Node.js', status: 'missing', detail: '' });

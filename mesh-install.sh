@@ -2,7 +2,7 @@
 # mesh-install.sh — One-command mesh node bootstrapper.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/mesh-install.sh | MESH_JOIN_TOKEN=<token> sh
+#   curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/mesh-install.sh | MESH_JOIN_TOKEN=<token> bash
 #   MESH_JOIN_TOKEN=<token> bash mesh-install.sh
 #   bash mesh-install.sh --token <token>
 #

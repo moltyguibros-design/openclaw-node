@@ -109,7 +109,7 @@ async function statusTable(units) {
     const loaded = process.platform === 'darwin'
       ? pids.has(u.label)
       : systemdActive(u.label);
-    const pid = process.platform === 'darwin' ? pids.get(u.label) : null;
+    const pid = process.platform === 'darwin' ? pids.get(u.label) : (loaded ? systemdMainPid(u.label) : null);
     const port = PORTS[u.id];
     const portOk = port ? await probePort(port) : undefined;
     rows.push({ ...u, loaded, pid, port, portOk, status: classify(u, { loaded, pid, portOk }) });
@@ -126,6 +126,14 @@ function systemdActive(unit) {
   try {
     return execFileSync('systemctl', ['--user', 'is-active', unit], { encoding: 'utf8' }).trim() === 'active';
   } catch { return false; }
+}
+
+// Without it every active non-port daemon on Linux classified as DOWN (pid was always null).
+function systemdMainPid(unit) {
+  try {
+    const pid = Number(execFileSync('systemctl', ['--user', 'show', '-p', 'MainPID', '--value', unit], { encoding: 'utf8' }).trim());
+    return pid > 0 ? pid : null;
+  } catch { return null; }
 }
 
 function printTable(rows) {
