@@ -152,22 +152,26 @@ function checkPredictions() {
   if (!fs.existsSync(PREDICTIONS)) return;
 
   let content = readFileOr(PREDICTIONS);
-  const predRegex = /^### (\d{4}-\d{2}-\d{2})/gm;
   const now = new Date();
   let expiredCount = 0;
-  let match;
 
-  while ((match = predRegex.exec(content)) !== null) {
-    const predDate = new Date(match[1] + 'T00:00:00');
-    if (isNaN(predDate.getTime())) continue;
-    if (daysBetween(predDate, now) > 7) expiredCount++;
-  }
+  // Per prediction block: a global replace filled the empty Outcome of fresh predictions too
+  // whenever any one prediction was older than 7 days.
+  const blocks = content.split(/^(?=### )/m).map((block) => {
+    const m = block.match(/^### (\d{4}-\d{2}-\d{2})/);
+    if (!m) return block;
+    const predDate = new Date(m[1] + 'T00:00:00');
+    if (isNaN(predDate.getTime()) || daysBetween(predDate, now) <= 7) return block;
+    if (!/^\*\*Outcome:\*\*$/m.test(block)) return block;
+    expiredCount++;
+    return block
+      .replace(/^\*\*Outcome:\*\*$/m, '**Outcome:** [expired — no signal observed within review window]')
+      .replace(/^\*\*Delta:\*\*$/m, '**Delta:** [not measured — prediction expired]')
+      .replace(/^\*\*Lesson:\*\*$/m, '**Lesson:** [auto-expired by memory-maintenance; no observable outcome within 7-day window]');
+  });
 
   if (expiredCount > 0 && !DRY_RUN) {
-    content = content
-      .replace(/^\*\*Outcome:\*\*$/gm, '**Outcome:** [expired — no signal observed within review window]')
-      .replace(/^\*\*Delta:\*\*$/gm, '**Delta:** [not measured — prediction expired]')
-      .replace(/^\*\*Lesson:\*\*$/gm, '**Lesson:** [auto-expired by memory-maintenance; no observable outcome within 7-day window]')
+    content = blocks.join('')
       .replace(/\*\*Last calibration review:\*\*.*/g, `**Last calibration review:** ${today()}`);
     fs.writeFileSync(PREDICTIONS, content);
     log(`Expired ${expiredCount} predictions`);

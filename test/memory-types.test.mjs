@@ -68,4 +68,10 @@ describe('newAliases / canonicalAlias', () => {
   it('canonicalAlias mirrors canonicalizeName', () => {
     assert.equal(canonicalAlias('  THE_HIDDEN  Truth '), 'the hidden truth');
   });
+  it('adds nothing once the record already holds ALIAS_CAP aliases', () => {
+    const full = Array.from({ length: ALIAS_CAP }, (_, i) => `alias ${i}`);
+    assert.deepEqual(newAliases('Name', full, ['brand new']), []);
+    const oneShort = full.slice(1);
+    assert.deepEqual(newAliases('Name', oneShort, ['first', 'second']), ['first']);
+  });
 });

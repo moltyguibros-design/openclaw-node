@@ -349,7 +349,7 @@ async function main() {
   const nodeId = process.env.OPENCLAW_NODE_ID || os.hostname();
 
   const nc = await connect(natsConnectOpts({ servers: process.env.NATS_URL }));
-  console.log(`[promoter] connected to ${natsUrl} as node ${nodeId}`);
+  console.log(`[promoter] connected to ${nc.getServer()} as node ${nodeId}`);
 
   const promoter = await createPromoter(nc, nodeId, {
     policyPath: process.env.PROMOTION_POLICY || undefined,

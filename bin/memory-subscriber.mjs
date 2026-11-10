@@ -265,7 +265,7 @@ async function main() {
   const nodeId = process.env.OPENCLAW_NODE_ID || os.hostname();
 
   const nc = await connect(natsConnectOpts({ servers: process.env.NATS_URL }));
-  console.log(`[subscriber] connected to ${natsUrl} as node ${nodeId}`);
+  console.log(`[subscriber] connected to ${nc.getServer()} as node ${nodeId}`);
 
   const subscriber = await createSubscriber(nc, nodeId, {
     onIngest: (event, parsed, provenance) => {

@@ -145,3 +145,31 @@ for (const authorized of [true, false]) {
     }
   });
 }
+
+test('prediction closure expires only stale predictions whose outcome is still empty', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'maint-predictions-'));
+  const day = (offset) => new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10);
+  const predictions = [
+    '# Predictions', '',
+    `### ${day(-30)} stale and still open`, '**Outcome:**', '**Delta:**', '**Lesson:**', '',
+    `### ${day(-30)} stale but already closed`, '**Outcome:** shipped on time', '**Delta:** 0', '**Lesson:** fine', '',
+    `### ${day(-1)} fresh and open`, '**Outcome:**', '**Delta:**', '**Lesson:**', '',
+  ].join('\n');
+  fs.mkdirSync(path.join(root, 'memory'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'memory', 'predictions.md'), predictions);
+  try {
+    const result = await promisify(execFile)(process.execPath, [MAINT, '--force', '--verbose'], {
+      // MC is unreachable on port 9: only the local checks matter here.
+      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root, MC_URL: 'http://127.0.0.1:9' },
+      timeout: 15000,
+    }).catch((error) => error);
+    const after = fs.readFileSync(path.join(root, 'memory', 'predictions.md'), 'utf8');
+    const block = (title) => after.slice(after.indexOf(title)).split('\n### ')[0];
+    assert.match(block('stale and still open'), /\*\*Outcome:\*\* \[expired/);
+    assert.match(block('stale but already closed'), /\*\*Outcome:\*\* shipped on time/);
+    assert.match(block('fresh and open'), /^\*\*Outcome:\*\*$/m, 'a 1-day-old prediction stays open');
+    assert.match(result.stdout, /PREDICTIONS: 1 expired/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

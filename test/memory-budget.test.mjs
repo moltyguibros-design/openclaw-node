@@ -275,6 +275,26 @@ describe('createBudget', () => {
 });
 
 describe('mergeFacts parenthetical regression', () => {
+  it('a speaker-tagged fact appended in a batch can be merged by a later fact in that batch', () => {
+    const base = 'the mesh lead runs the NATS JetStream cluster with three replicas on the VM hosts';
+    const result = mergeFacts('# Memory\n\n## Recent\n', [
+      { fact: `${base} today`, category: 'fact', speaker: 'user' },
+      { fact: `${base} tonight`, category: 'fact', speaker: 'user' },
+    ], 5000);
+    assert.equal(result.added, 1);
+    assert.equal(result.merged, 1);
+    assert.ok(result.content.includes('tonight'), 'the merge replaced the appended line');
+    assert.ok(!result.content.includes(`${base} today`), 'the superseded text is gone');
+  });
+
+  it('`$` sequences in a merged fact are kept literally', () => {
+    const content = '# Memory\n\n## Recent\n- the deploy script prints the build cost in dollars per run\n';
+    const fact = 'the deploy script prints the total build cost in $& dollars per run'; // similarity 0.83: merge band
+    const result = mergeFacts(content, [{ fact, category: 'fact' }], 5000);
+    assert.equal(result.merged, 1);
+    assert.ok(result.content.includes('$& dollars'), result.content);
+  });
+
   it('10 sequential merges on similar facts stay clean (no parenthetical accumulation)', () => {
     // Use long facts with minimal variation so bigram similarity stays above 0.7
     let content = '# Memory\n\n## Recent\n- always prefer using the NATS JetStream cluster for all messaging needs, config round 1\n';
