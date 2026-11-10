@@ -1945,9 +1945,11 @@ const server = http.createServer(async (req, res) => {
       if (!rel) return json(res, { error: 'missing ?path=' }, 400);
       // Fully siloed: resolve ONLY within the plan's own dir (no path traversal).
       const full = safeJoin(plan.dir, rel);
-      if (!full || !fs.existsSync(full)) return json(res, { error: 'not found' }, 404);
+      let isFile = false;
+      try { isFile = !!full && fs.statSync(full).isFile(); } catch { /* missing → 404 */ }
+      if (!isFile) return json(res, { error: 'not found' }, 404);
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-      fs.createReadStream(full).pipe(res);
+      fs.createReadStream(full).on('error', () => res.destroy()).pipe(res);
       return;
     }
 

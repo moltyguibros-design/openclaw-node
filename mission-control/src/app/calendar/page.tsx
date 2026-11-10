@@ -254,7 +254,7 @@ export default function CalendarPage() {
     if (!draggedTaskId) return;
     const dateStr = format(date, "yyyy-MM-dd");
     await updateTask(draggedTaskId, {
-      scheduledDate: dateStr,
+      scheduled_date: dateStr,
     } as Record<string, unknown>);
     setDraggedTaskId(null);
   };

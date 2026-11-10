@@ -23,14 +23,19 @@ PLAN="$REPO/memory-plan/plans/$ID"
 DATE="$(date '+%Y-%m-%d')"
 mkdir -p "$PLAN/audits" "$PLAN/tick-logs"
 
+sed_escape() { printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'; }
+GOAL_ESC="$(sed_escape "$GOAL")"
+REPO_ESC="$(sed_escape "$REPO")"
+HOME_ESC="$(sed_escape "$HOME")"
+
 for t in "$TPL"/*.template.*; do
   name="$(basename "$t")"
   dest="${name/.template/}"
   sed -e "s|{{PLAN_ID}}|$ID|g" \
-      -e "s|{{GOAL}}|$GOAL|g" \
+      -e "s|{{GOAL}}|$GOAL_ESC|g" \
       -e "s|{{DATE}}|$DATE|g" \
-      -e "s|{{REPO}}|$REPO|g" \
-      -e "s|{{HOME}}|$HOME|g" \
+      -e "s|{{REPO}}|$REPO_ESC|g" \
+      -e "s|{{HOME}}|$HOME_ESC|g" \
       "$t" > "$PLAN/$dest"
   echo "scaffolded plans/$ID/$dest"
 done
