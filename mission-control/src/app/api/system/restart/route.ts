@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { execSync } from "child_process";
+import fs from "fs";
+import path from "path";
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +18,7 @@ export async function POST() {
     // Clear Next.js cache for a clean restart
     if (isDev) {
       try {
-        const cwd = process.cwd();
-        execSync(`rm -rf ${cwd}/.next/cache`, { timeout: 5000 });
+        fs.rmSync(path.join(process.cwd(), ".next", "cache"), { recursive: true, force: true });
       } catch { /* Intentional: cache clear before process exit */ }
     }
 

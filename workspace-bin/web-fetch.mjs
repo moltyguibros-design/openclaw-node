@@ -39,25 +39,40 @@ function inCidr4(ip, cidr) {
 const PRIVATE_V4 = ['0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16',
   '172.16.0.0/12', '192.0.0.0/24', '192.168.0.0/16', '198.18.0.0/15', '224.0.0.0/4', '240.0.0.0/4'];
 
+/** Expands a valid IPv6 literal ("::" and a dotted IPv4 tail included) to 8 numeric hextets. */
+function ipv6Hextets(ip) {
+  let s = ip.toLowerCase().split('%')[0];
+  const dotted = s.match(/^(.*:)(\d+\.\d+\.\d+\.\d+)$/);
+  if (dotted) {
+    const n = ipv4ToInt(dotted[2]);
+    s = `${dotted[1]}${(n >>> 16).toString(16)}:${(n & 0xffff).toString(16)}`;
+  }
+  const [head, tail] = s.split('::');
+  const h = head ? head.split(':') : [];
+  if (tail === undefined) return h.map(x => parseInt(x, 16));
+  const t = tail ? tail.split(':') : [];
+  return [...h, ...Array(8 - h.length - t.length).fill('0'), ...t].map(x => parseInt(x, 16));
+}
+
 /** True for loopback, link-local, RFC1918/ULA, multicast, unspecified and mapped forms. */
 export function isPrivateIp(ip) {
   const v = net.isIP(ip);
   if (v === 4) return PRIVATE_V4.some(c => inCidr4(ip, c));
   if (v !== 6) return true; // not an IP at all → treat as unsafe
-  const lower = ip.toLowerCase();
-  const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return isPrivateIp(mapped[1]);
-  if (lower === '::' || lower === '::1') return true;
-  if (/^f[cd]/.test(lower)) return true;          // fc00::/7 unique-local
-  if (/^fe[89ab]/.test(lower)) return true;        // fe80::/10 link-local
-  if (/^ff/.test(lower)) return true;              // multicast
-  if (lower.startsWith('64:ff9b:')) {              // NAT64 — check the embedded v4
-    const tail = lower.split(':').slice(-2);
-    if (tail.length === 2 && tail.every(h => /^[0-9a-f]{1,4}$/.test(h))) {
-      const n = (parseInt(tail[0], 16) << 16) + parseInt(tail[1], 16);
-      return isPrivateIp([n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.'));
-    }
-  }
+  // Judged numerically: the URL parser rewrites [::ffff:127.0.0.1] as [::ffff:7f00:1],
+  // so a match on the dotted spelling alone let mapped loopback/metadata addresses through.
+  const x = ipv6Hextets(ip);
+  const embeddedV4 = () => [x[6] >> 8, x[6] & 255, x[7] >> 8, x[7] & 255].join('.');
+  const zeroUpTo = (n) => x.slice(0, n).every(h => h === 0);
+  // ::ffff:a.b.c.d (mapped) and ::a.b.c.d (IPv4-compatible, which covers :: and ::1)
+  if (zeroUpTo(5) && (x[5] === 0xffff || x[5] === 0)) return isPrivateIp(embeddedV4());
+  // ::ffff:0:a.b.c.d (IPv4-translated)
+  if (zeroUpTo(4) && x[4] === 0xffff && x[5] === 0) return isPrivateIp(embeddedV4());
+  // 64:ff9b::/96 NAT64 — check the embedded v4
+  if (x[0] === 0x64 && x[1] === 0xff9b && x.slice(2, 6).every(h => h === 0)) return isPrivateIp(embeddedV4());
+  if ((x[0] & 0xfe00) === 0xfc00) return true;     // fc00::/7 unique-local
+  if ((x[0] & 0xffc0) === 0xfe80) return true;     // fe80::/10 link-local
+  if ((x[0] & 0xff00) === 0xff00) return true;     // multicast
   return false;
 }
 
