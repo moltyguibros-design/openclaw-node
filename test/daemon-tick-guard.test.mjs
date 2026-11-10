@@ -43,6 +43,30 @@ test('overlapping guarded tick fires skip, runs the body once', async () => {
   assert.equal(maxConcurrent, 1);
 });
 
+test('the orphan\'s finally leaves the current run marked in flight', async () => {
+  const releases = [];
+  let clock = 0;
+  const realNow = Date.now;
+  Date.now = () => clock;
+  try {
+    const guarded = createConcurrencyGuard(() => new Promise((r) => releases.push(r)), { maxAgeMs: 100 });
+    const orphan = guarded();          // started at t=0
+    clock = 200;
+    const current = guarded();         // age 200 > 100 → force-clear, run #2 starts at t=200
+    releases[0]();
+    await orphan;                      // the orphan settles while run #2 is in flight
+    clock = 250;                       // run #2 is 50ms old: inside maxAgeMs
+    const third = guarded();
+    assert.equal(releases.length, 2, 'a third run started while run #2 was still in flight');
+    assert.deepEqual(await third, { skipped: true, reason: 'in_flight' });
+    releases[1]();
+    await current;
+  } finally {
+    Date.now = realNow;
+    releases.forEach((r) => r()); // a failed assertion must not leave a run pending
+  }
+});
+
 test('daemon imports the shared concurrency guard', () => {
   assert.match(daemonSrc, /import \{ createConcurrencyGuard \} from '\.\.\/lib\/concurrency-guard\.mjs';/);
 });

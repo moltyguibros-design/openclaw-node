@@ -20,7 +20,7 @@ const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-bridge');
 const fs = require('fs');
 const path = require('path');
-const { readTasks, updateTaskInPlace, isoTimestamp, ACTIVE_TASKS_PATH } = require('../lib/kanban-io');
+const { readTasks, updateTaskInPlace: updateTaskInPlaceAsync, isoTimestamp, ACTIVE_TASKS_PATH } = require('../lib/kanban-io');
 
 const sc = StringCodec();
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
@@ -56,6 +56,15 @@ const HEARTBEAT_CHECK_INTERVAL = 30000;  // check every 30s
 const _logger = require('../lib/logger').createLogger('mesh-bridge');
 _logger.attachTracer(tracer);
 const { info: log, warn, error: logError, debug } = _logger;
+
+// kanban-io's updateTaskInPlace is async and rejects on a lock timeout or a card that
+// is no longer in active-tasks.md. Call sites here fire and forget, and on Node >=22
+// an unhandled rejection terminates the bridge, so failures are logged instead.
+function updateTaskInPlace(...args) {
+  return updateTaskInPlaceAsync(...args).catch((err) => {
+    logError(`kanban update failed: ${err.message}`);
+  });
+}
 
 // ── NATS Helpers ────────────────────────────────────
 
@@ -103,7 +112,13 @@ async function reconcile() {
 
   for (const task of inflight) {
     try {
-      const meshTask = await natsRequest('mesh.tasks.get', { task_id: task.task_id });
+      // The daemon refuses an unknown id ("Task <id> not found") and natsRequest throws
+      // on refusals; read that one refusal as "absent" so the branch below handles it
+      // instead of tracking a purged task forever (and stalling serial dispatch).
+      const meshTask = await natsRequest('mesh.tasks.get', { task_id: task.task_id }).catch((err) => {
+        if (err.message === `Task ${task.task_id} not found`) return null;
+        throw err;
+      });
 
       if (!meshTask) {
         // Task doesn't exist in daemon KV. Two possible causes:

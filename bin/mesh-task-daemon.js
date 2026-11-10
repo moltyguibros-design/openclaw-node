@@ -38,8 +38,7 @@ const { createTask, TaskStore, TASK_STATUS, TASK_TERMINAL, DEFAULT_MAX_REJECTION
 const { validateMetricCommand } = require('../lib/exec-safety');
 const { createSession, CollabStore, COLLAB_STATUS, COLLAB_KV_BUCKET, COLLAB_MODE, isModeImplemented } = require('../lib/mesh-collab');
 const { createPlan, autoRoutePlan, PlanStore, PLAN_STATUS, SUBTASK_STATUS, PLANS_KV_BUCKET } = require('../lib/mesh-plans');
-const { findRole, findRoleByScope, validateRequiredOutputs, checkForbiddenPatterns } = require('../lib/role-loader');
-const os = require('os');
+const { findRole, findRoleByScope, validateRequiredOutputs } = require('../lib/role-loader');
 const path = require('path');
 
 // Role search directories
@@ -493,6 +492,7 @@ async function handleFail(msg) {
   // Phase F: Escalation — if the task has a role with escalation mapping,
   // create an escalation task before cascading failure through the plan.
   let escalated = false;
+  let escalationTaskId = null;
   if (task.role) {
     const role = findRole(task.role, ROLE_DIRS);
     if (role && role.escalation) {
@@ -526,6 +526,7 @@ async function handleFail(msg) {
         publishEvent('submitted', escalationTask);
         log(`ESCALATED ${task_id} → ${escalationTask.task_id} (target role: ${escalationTarget})`);
         escalated = true;
+        escalationTaskId = escalationTask.task_id;
       }
     }
   }
@@ -535,7 +536,7 @@ async function handleFail(msg) {
   // and this was critical, it still aborts. The escalation is a parallel attempt.)
   await checkPlanProgress(task_id, 'failed');
 
-  respond(msg, { ...task, escalated, escalation_task_id: escalated ? `ESC-${task_id}-${Date.now()}` : null });
+  respond(msg, { ...task, escalated, escalation_task_id: escalationTaskId });
 }
 
 /**

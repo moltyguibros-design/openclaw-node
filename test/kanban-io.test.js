@@ -136,4 +136,23 @@ describe('updateTaskInPlace — object serialization', () => {
       try { fs.unlinkSync(tmpFile); } catch {}
     }
   });
+
+  it('keeps multi-line values on one line so the task block stays parseable', async () => {
+    const tmpFile = path.join(os.tmpdir(), `kanban-test-nl-${process.pid}.md`);
+    fs.writeFileSync(tmpFile, `## Live Tasks\n- task_id: nl1\n  title: Newline test\n  status: running\n  updated_at: 2026-01-01\n`);
+    try {
+      await updateTaskInPlace(tmpFile, 'nl1', {
+        next_action: 'Collab completed:\n- first finding\n- status: done',
+        description: 'line one\nline two',
+      });
+      await updateTaskInPlace(tmpFile, 'nl1', { next_action: 'second update' });
+      const [task] = parseTasks(fs.readFileSync(tmpFile, 'utf8'));
+      assert.equal(task.status, 'running', 'a "status:" inside the summary must not become a field');
+      assert.equal(task.next_action, 'second update');
+      assert.equal(task.description, 'line one\nline two');
+      assert.ok(!fs.readFileSync(tmpFile, 'utf8').includes('first finding'), 'no orphaned continuation lines');
+    } finally {
+      try { fs.unlinkSync(tmpFile); } catch {}
+    }
+  });
 });
