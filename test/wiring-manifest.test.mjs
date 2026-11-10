@@ -146,7 +146,7 @@ describe('production wiring manifest', () => {
       assert.match(stripped, callPattern,
         `${factory} must be INVOKED (call position) in ${calledIn} — not just imported. ` +
         `If the factory was renamed, update REQUIRED_PRODUCTION_WIRES. ` +
-        `If intentionally inert, document the gap in memory-plan/STUB_AUDIT.md and remove the row. ` +
+        `If intentionally inert, document the gap in memory-plan/plans/legacy/STUB_AUDIT.md and remove the row. ` +
         `See F-N1 + F-P110 + F-Q412.`);
     });
   }

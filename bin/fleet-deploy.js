@@ -1,15 +1,11 @@
 /**
  * fleet-deploy.js — Lead-side fleet deploy orchestrator.
  *
- * This replaces the SSH remote block in mesh-deploy-v2.js.
  * Instead of SSH-ing to each node, it:
  *   1. Reads MESH_NODES KV to discover the fleet
  *   2. Publishes mesh.deploy.trigger on NATS
  *   3. Watches MESH_DEPLOY_RESULTS KV for results
  *   4. Prints results as they arrive
- *
- * Integrate into mesh-deploy-v2.js by replacing the "Remote deploy" section
- * with: await fleetDeploy(opts)
  *
  * Can also be called standalone: node fleet-deploy.js [options]
  */

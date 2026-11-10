@@ -38,7 +38,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { createIdentityRegistry, IDENTITY_REGISTRY_FILE } from '../lib/node-identity.mjs';
 import { atomicWriteFileSync } from '../lib/atomic-write.mjs';
 import { assertLegacyNatsWriterAllowed } from '../lib/nats-writer-ownership.mjs';
