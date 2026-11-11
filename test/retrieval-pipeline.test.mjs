@@ -300,6 +300,41 @@ describe('getChunksForSessions (D8: session-relevance ranking)', () => {
     for (let i = 0; i < 20; i++) insert.run('s1', i, 'user', 't' + i, 't' + i);
     assert.strictEqual(getChunksForSessions(kDb, ['s1'], 5).length, 5);
   });
+
+  it('reads only rows that can make the cut', () => {
+    const insert = kDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet) VALUES (?, ?, ?, ?, ?)`);
+    for (const sid of ['a', 'b']) {
+      for (let i = 0; i < 200; i++) insert.run(sid, i, 'user', sid + i, sid + i);
+    }
+    let read = 0;
+    const counting = {
+      prepare: (sql) => {
+        const s = kDb.prepare(sql);
+        return { all: (...args) => { const rows = s.all(...args); read += rows.length; return rows; } };
+      },
+    };
+    const results = getChunksForSessions(counting, ['a', 'b'], 5);
+    assert.deepStrictEqual(results.map(r => r.turn_index), [199, 198, 197, 196, 195]);
+    assert.ok(results.every(r => r.session_id === 'a'));
+    assert.ok(read <= 5, `read ${read} rows for a limit of 5`);
+  });
+
+  it('spills over to the next session when the first runs out', () => {
+    const insert = kDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet) VALUES (?, ?, ?, ?, ?)`);
+    for (let i = 0; i < 2; i++) insert.run('a', i, 'user', 'a' + i, 'a' + i);
+    for (let i = 0; i < 10; i++) insert.run('b', i, 'user', 'b' + i, 'b' + i);
+    const results = getChunksForSessions(kDb, ['a', 'b'], 5);
+    assert.deepStrictEqual(results.map(r => r.snippet), ['a1', 'a0', 'b9', 'b8', 'b7']);
+    assert.deepStrictEqual(results.map(r => r.score), [1, 1, 0.5, 0.5, 0.5]);
+  });
+
+  it('keeps insertion order for chunks sharing a turn_index', () => {
+    const insert = kDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet) VALUES (?, ?, ?, ?, ?)`);
+    insert.run('s1', 3, 'user', 'first', 'first');
+    insert.run('s1', 3, 'assistant', 'second', 'second');
+    const results = getChunksForSessions(kDb, ['s1'], 10);
+    assert.deepStrictEqual(results.map(r => r.snippet), ['first', 'second']);
+  });
 });
 
 describe('entitySearch', () => {
