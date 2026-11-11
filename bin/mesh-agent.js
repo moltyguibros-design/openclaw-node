@@ -1609,6 +1609,7 @@ async function executeCollabTask(task) {
   const roundSub = nc.subscribe(`mesh.collab.${sessionId}.node.${NODE_ID}.round`);
   let roundsDone = false;
   let lastKnownSessionStatus = null; // tracks why rounds ended (completed/aborted/converged)
+  let lastRound = 0;
 
   // Join the session using the discovered session_id
   let session;
@@ -1690,6 +1691,7 @@ async function executeCollabTask(task) {
       const roundData = JSON.parse(sc.decode(roundMsg.data));
       const { round_number, shared_intel, directed_input, my_scope, my_role, mode, current_turn,
               round_role, circling_phase, circling_step, circling_subround } = roundData;
+      if (round_number > lastRound) lastRound = round_number;
 
       // Sequential mode safety guard: skip if it's not our turn.
       if (mode === 'sequential' && current_turn && current_turn !== NODE_ID) {
@@ -1872,7 +1874,7 @@ async function executeCollabTask(task) {
   const successful = ['completed', 'converged'].includes(lastKnownSessionStatus);
   await recordHyperagentTask(task, {
     outcome: successful ? 'success' : 'failure',
-    iterations: Math.max(1, session.current_round || 1),
+    iterations: Math.max(1, lastRound),
     startedAt,
     sessionId,
     notes: `Collaboration session ${sessionId} ended with status ${lastKnownSessionStatus || 'unknown'}.`,
@@ -2489,13 +2491,13 @@ if (require.main === module) {
 // Test surface (no NATS): the prompt builders + harness injectors, and the Foreman
 // completion gate + supervision wrapper (they spawn the task's provider, nothing else).
 module.exports = { buildCirclingPrompt, buildCollabPrompt, buildInitialPrompt, buildRetryPrompt, injectRules, injectRole, injectMemory, injectHyperagentStrategy, recallForTask, readNodeMemory, recordHyperagentTask, deriveExecutionClass, foremanVerify, superviseTask };
-// Review-gate and worker-error surfaces (test/mesh-agent-review-gate.test.js,
-// test/mesh-agent-terminal-task.test.js): the real merge/review handlers and the
-// real daemon client and error path, against a real git workspace, with only the
-// NATS connection injected.
+// Review-gate, worker-error and collab-round surfaces (test/mesh-agent-review-gate.test.js,
+// test/mesh-agent-terminal-task.test.js, test/mesh-agent-collab-rounds.test.js): the real
+// merge/review handlers, the real daemon client and error path, and the real collab round
+// loop, against a real git workspace, with only the NATS connection injected.
 module.exports.__test = {
   setContext(ctx) { if (ctx.nc !== undefined) nc = ctx.nc; },
   mergeIfApproved, onReviewApproved, onReviewRejected, reconcileKeptBranches,
-  natsRequest, createWorktree, onWorkerError,
+  natsRequest, createWorktree, onWorkerError, executeCollabTask,
 };
 // deploy-v7f0130b
