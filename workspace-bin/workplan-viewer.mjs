@@ -163,7 +163,7 @@ const notifyState = new Map();
 function pollNotifications() {
   for (const plan of PLANS) {
     let s;
-    try { s = planSummary(plan); } catch { continue; }
+    try { s = planSummary(plan, { dirty: false }); } catch { continue; }
     const cur = { version: s.version, blocked: !!s.blocked, closed: s.closed_steps };
     const prev = notifyState.get(plan.id);
     notifyState.set(plan.id, cur);
@@ -405,7 +405,7 @@ function planAudits(plan) {
   return out;
 }
 
-function planSummary(plan) {
+function planSummary(plan, { dirty = true } = {}) {
   const rows = inventoryRows(plan);
   const closed = rows.filter(r => r.state === 'x').length;
   const active = rows.filter(r => r.state === 'A').length;
@@ -426,7 +426,7 @@ function planSummary(plan) {
     current_step: (rows.find(r => r.state === 'A') || rows.find(r => r.state === ' ') || null),
     latest_log: latestLog(plan)?.split('/').pop() || null,
     docs_mtime: planDocsMtime(plan),
-    tree_dirty: treeDirty(plan),
+    tree_dirty: dirty ? treeDirty(plan) : null,
     external_action: blockExternalAction(plan),
   };
 }
@@ -1721,7 +1721,7 @@ const server = http.createServer(async (req, res) => {
     const loadedLabels = await getAllLoadedLabels();
     const plans = PLANS.map(p => {
       const cfg = readAutomationConfig(p);
-      const summary = planSummary(p);
+      const summary = planSummary(p, { dirty: false });
       return { ...summary, scheduler_loaded: loadedLabels.has(cfg.plist_label) };
     });
     return json(res, { roots: ROOTS, plans });

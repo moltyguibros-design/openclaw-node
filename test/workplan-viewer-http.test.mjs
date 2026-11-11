@@ -21,6 +21,7 @@ async function fixture(t) {
   fs.mkdirSync(path.join(root, 'bin'));
   fs.writeFileSync(tokenFile, master, { mode: 0o600 });
   fs.writeFileSync(path.join(root, 'bin/launchctl'), '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+  fs.writeFileSync(path.join(root, 'bin/git'), '#!/bin/sh\necho "$@" >> "' + path.join(root, 'git-calls') + '"\n', { mode: 0o700 });
   fs.writeFileSync(path.join(plan, 'VERSION'), 'v1.0\n');
   fs.writeFileSync(path.join(plan, 'INVENTORY.md'), '# Fixture\n');
   fs.writeFileSync(path.join(plan, 'tick-logs/sample.log'), 'FIXTURE_LOG\n');
@@ -251,6 +252,19 @@ test('default automation config points at the repo that holds memory-plan/plans'
   assert.equal(config.tick_command, path.join(repo, 'workspace-bin', 'fixture-tick.sh'));
   assert.equal(config.working_dir, repo);
   assert.equal(fs.existsSync(path.join(f.plan, 'automation.json')), false);
+});
+
+test('only the per-plan state route spends a git status on tree_dirty', async t => {
+  const f = await fixture(t);
+  const calls = path.join(f.root, 'git-calls');
+  const plans = await f.request('/api/plans', { token: f.master });
+  assert.equal(plans.status, 200);
+  assert.equal(JSON.parse(plans.text).plans[0].tree_dirty, null);
+  assert.equal(fs.existsSync(calls), false);
+  const state = await f.request('/api/plans/fixture/state', { token: f.master });
+  assert.equal(state.status, 200);
+  assert.equal(JSON.parse(state.text).tree_dirty, false);
+  assert.equal(fs.readFileSync(calls, 'utf8').trim().split('\n').length, 1);
 });
 
 test('session exchange, streamed logs, revocation and file rotation work through HTTP', async t => {
