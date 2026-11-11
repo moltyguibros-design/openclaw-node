@@ -658,6 +658,13 @@ describe('node-watch runner', () => {
     assert.equal(second['net.nats'].code, first['net.nats'].code);
     assert.equal(second['net.nats'].line, first['net.nats'].line);
   });
+
+  it('a composite target that reuses a probe keeps its own provenance', () => {
+    const sm = buildSourceMap(createRuntimeContext(config, { mutate: false }), [target('ops.hyperagent'), target('net.nats')]);
+    assert.equal(sm['ops.hyperagent'].file, 'lib/node-watch.mjs');
+    assert.match(sm['ops.hyperagent'].code, /daemon-throttle\.json/);
+    assert.equal(sm['net.nats'].file, 'lib/node-acceptance-probes.mjs');
+  });
 });
 
 // ── memory ingest/extraction regressions ─────────────────────────────────────
