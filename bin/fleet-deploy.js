@@ -267,6 +267,8 @@ async function fleetDeploy(nc, opts) {
                 warn(`  ${nodeId}: ${w}`);
               }
             }
+          } else if (result.status === 'skipped') {
+            info(`${nodeId} — skipped: ${result.log || 'not applicable to this node'}`);
           } else {
             fail(`${nodeId} — ${result.status} after ${dur}s`);
             if (result.errors) {
@@ -295,12 +297,14 @@ async function fleetDeploy(nc, opts) {
 
   // Summary — count actual success vs failure from collected results
   const succeeded = [...nodeResults.values()].filter(r => r.status === 'success').length;
-  const failed = [...nodeResults.values()].filter(r => r.status !== 'success').length;
+  const skipped = [...nodeResults.values()].filter(r => r.status === 'skipped').length;
+  const failed = [...nodeResults.values()].filter(r => r.status !== 'success' && r.status !== 'skipped').length;
 
   header('Fleet Deploy Summary');
   console.log(`  SHA:       ${sha}`);
   console.log(`  Reported:  ${nodeResults.size}/${expectedNodes.size}`);
   console.log(`  Succeeded: ${C.green(succeeded.toString())}`);
+  if (skipped > 0) console.log(`  Skipped:   ${C.yellow(skipped.toString())} (nothing to deploy on that node)`);
   if (failed > 0) console.log(`  Failed:    ${C.red(failed.toString())}`);
   if (missing.length > 0) console.log(`  Pending:   ${C.yellow(missing.length.toString())} (will auto-catch-up)`);
   console.log('');
