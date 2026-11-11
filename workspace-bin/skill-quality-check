@@ -102,11 +102,23 @@ json.dump({'prev': prev, 'curr': curr}, sys.stdout)
   if [ -d "$(dirname "$EVENTS_FILE")" ]; then
     TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     python3 -c "
-import json, sys
+import json, sys, time
 
 data = json.load(sys.stdin)
+parent = None
+with open(sys.argv[1]) as f:
+    lines = [l.strip() for l in f if l.strip()]
+if lines:
+    try:
+        last = json.loads(lines[-1])
+        if isinstance(last, dict) and isinstance(last.get('id'), str):
+            parent = last['id']
+    except ValueError:
+        pass
 event = {
     'type': 'EvolutionEvent',
+    'id': f'evt_{int(time.time() * 1000)}',
+    'parent': parent,
     'timestamp': data['timestamp'],
     'category': 'quality_audit',
     'summary': data['summary'],
@@ -116,7 +128,7 @@ event = {
     }
 }
 print(json.dumps(event))
-" < <(python3 -c "
+" "$EVENTS_FILE" < <(python3 -c "
 import json, sys
 json.dump({
     'timestamp': sys.argv[1],
