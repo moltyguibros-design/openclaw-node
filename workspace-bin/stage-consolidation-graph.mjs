@@ -108,9 +108,11 @@ export function scanGraph(release, typescript) {
   return { sources: [...seen].sort().map(file => path.relative(release, file)), edges, packages: Object.fromEntries(bare), child: { executable: 'process.execPath', script: notification, foreground: true } };
 }
 
-function checkLock(release) {
-  const sourceLock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json')));
-  const stageLock = JSON.parse(fs.readFileSync(path.join(release, 'package-lock.json')));
+function readLock(dir) {
+  return JSON.parse(fs.readFileSync(path.join(dir, 'package-lock.json')));
+}
+
+export function checkLock(sourceLock, stageLock) {
   const sourceByName = new Map();
   for (const [key, value] of Object.entries(sourceLock.packages)) {
     if (!key.startsWith('node_modules/')) continue;
@@ -141,7 +143,7 @@ export function verifyRelease(release, nodeBinary, expectedAbi) {
   if (expectedAbi) assert.equal(node.abi, expectedAbi, 'release native ABI differs from selected launcher');
   const dependencyFiles = files(path.join(release, 'node_modules'));
   const sourceFiles = [path.join(release, 'package.json'), ...files(path.join(release, 'bin')), ...files(path.join(release, 'lib')), ...files(path.join(release, 'packages'))];
-  const dependencies = checkLock(release);
+  const dependencies = checkLock(readLock(root), readLock(release));
   const manifest = {
     version: 1,
     entry,
