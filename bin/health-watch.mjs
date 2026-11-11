@@ -4,15 +4,15 @@
  * bin/health-watch.mjs — Long-running health watcher daemon for OpenClaw memory infrastructure.
  *
  * Runs runHealthCheck() at a configurable interval (default 60s) and routes alerts to
- * three destinations: file (.daemon-health.md), NATS (mesh.health.alerts), and macOS
- * banner (via memory-plan-notify.sh). Alerts fire on state transitions only (not every poll),
+ * three destinations: file (.daemon-health.md), NATS (mesh.health.alerts), and desktop
+ * banner (via bin/openclaw-notify.mjs). Alerts fire on state transitions only (not every poll),
  * with a repeat alert every 5 minutes while unhealthy.
  *
  * Env vars:
  *   HEALTH_WATCH_INTERVAL_SEC — poll interval in seconds (default: 60)
  *   HEALTH_ALERT_TARGETS — CSV of: file, nats, banner (default: file,nats,banner)
  *   OPENCLAW_WORKSPACE — workspace root (default: ~/.openclaw/workspace)
- *   NATS_URL — NATS server URL for alert publishing (default: nats://localhost:4222)
+ *   NATS_URL — URL override for alert publishing (default: OPENCLAW_NATS via lib/nats-resolve.js)
  */
 
 import {
@@ -28,6 +28,7 @@ import { isIP } from 'node:net';
 import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 
 // URL + credentials (token or nkey) from the one resolver; NATS_URL is a URL override only.
 const { natsConnectOpts } = createRequire(import.meta.url)('../lib/nats-resolve.js');
@@ -41,9 +42,7 @@ const WORKSPACE_PATH = process.env.OPENCLAW_WORKSPACE
 const HEALTH_FILE = path.join(WORKSPACE_PATH, '.daemon-health.md');
 const NATS_ALERT_SUBJECT = 'mesh.health.alerts';
 const REPEAT_ALERT_SEC = 300; // re-alert every 5 min while unhealthy
-const NOTIFY_CLI = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname), 'openclaw-notify.mjs',
-);
+const NOTIFY_CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), 'openclaw-notify.mjs');
 const MC_DIAGNOSTICS_URL = `${process.env.OPENCLAW_MC_URL || 'http://127.0.0.1:3000'}/diagnostics`;
 
 // ---------------------------------------------------------------------------

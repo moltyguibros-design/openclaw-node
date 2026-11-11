@@ -160,7 +160,7 @@ config, store, JetStream health, or absence of unlisted/unmanaged processes.
 
 ## Honest coverage today
 
-- **Implemented (live or reused):** every element above except the three marked UNKNOWN-stub.
+- **Implemented (live or reused):** every element above.
 - **UNKNOWN-stub (no probe yet — reports UNKNOWN, never green):** none — all targets now have a probe.
   (Vault link integrity wraps the read-only `checkVaultLinks`; calendar reads `/api/scheduler/status`;
   cloud-LLM reachability is wired through companion-bridge — see above.)
