@@ -120,4 +120,12 @@ describe('the worker stops cleanly on a task the daemon ended', () => {
     assert.equal(rows.length, 1);
     assert.match(rows[0].meta_notes, /^Unhandled worker error: boom/);
   });
+
+  it('re-creates the worktree when the task branch was kept without its directory', () => {
+    const first = agent.__test.createWorktree('T-3');
+    git(WORKSPACE, 'worktree', 'remove', '--force', first);
+    assert.equal(git(WORKSPACE, 'branch', '--list', 'mesh/T-3'), 'mesh/T-3');
+    const again = agent.__test.createWorktree('T-3');
+    assert.ok(again && fs.existsSync(again), 'a kept branch does not block a re-claim');
+  });
 });

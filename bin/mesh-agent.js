@@ -681,12 +681,13 @@ function createWorktree(taskId) {
         warn(`git worktree remove failed for ${worktreePath}: ${err.message} — cleaning up manually`);
         fs.rmSync(worktreePath, { recursive: true, force: true });
       }
-      // Also clean up the branch if it exists
-      forgetLease(taskId);
-      try {
-        execFileSync('git', ['branch', '-D', branch], { cwd: WORKSPACE, timeout: 5000, stdio: 'ignore' });
-      } catch { /* Intentional: branch may not exist after worktree cleanup */ }
     }
+    // A branch kept without its directory (pending_review keep, then a rejection
+    // notice missed while offline) would make `worktree add -b` refuse.
+    forgetLease(taskId);
+    try {
+      execFileSync('git', ['branch', '-D', branch], { cwd: WORKSPACE, timeout: 5000, stdio: 'ignore' });
+    } catch { /* Intentional: no such branch */ }
 
     // Create new worktree branched off HEAD
     execFileSync('git', ['worktree', 'add', '-b', branch, worktreePath, 'HEAD'], {
