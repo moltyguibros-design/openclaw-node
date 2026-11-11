@@ -213,7 +213,7 @@ function renderConfigTemplate(template, envText) {
   for (const line of envText.split('\n')) {
     if (/^\s*(#|$)/.test(line) || !line.includes('=')) continue;
     const key = line.slice(0, line.indexOf('=')).trim();
-    // The installer trims with xargs, which also drops surrounding quotes.
+    // Same trim + one surrounding quote pair as scripts/install/config.sh.
     const value = line.slice(line.indexOf('=') + 1).trim().replace(/^(["'])(.*)\1$/, '$2');
     if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) vars[key] = value;
   }

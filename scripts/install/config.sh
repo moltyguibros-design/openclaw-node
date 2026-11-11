@@ -35,9 +35,13 @@ if [ -f "$ENV_FILE" ]; then
     # Split only on the first '=' to preserve base64 padding etc.
     key="${line%%=*}"
     value="${line#*=}"
-    # Trim whitespace
-    key="$(echo "$key" | xargs)"
-    value="$(echo "$value" | xargs)"
+    # Trim whitespace and one pair of surrounding quotes, as mesh-deploy's
+    # renderConfigTemplate does; xargs aborted the install on a lone ' or ".
+    key="${key#"${key%%[![:space:]]*}"}"; key="${key%"${key##*[![:space:]]}"}"
+    value="${value#"${value%%[![:space:]]*}"}"; value="${value%"${value##*[![:space:]]}"}"
+    case "$value" in
+      \"*\"|\'*\') value="${value:1:${#value}-2}" ;;
+    esac
     # Only export valid variable names
     [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && export "$key=$value"
   done < "$ENV_FILE"

@@ -310,6 +310,22 @@ test('env.sh reads the persisted role and config.sh persists the resolved one', 
   assert.match(moduleSrc['config.sh'], /set_env_key OPENCLAW_NODE_ROLE "\$NODE_ROLE"\nfi\nexport OPENCLAW_NODE_ROLE="\$NODE_ROLE"/);
 });
 
+// config.sh trimmed env values with xargs, which exits 1 on a lone quote, so a
+// value like "Gui's node" killed every install at Step 7 under set -e.
+test('config.sh env-file parse keeps quotes, spacing and backslashes like renderConfigTemplate', () => {
+  const cfg = moduleSrc['config.sh'];
+  const start = cfg.indexOf('# Source env file for config generation');
+  const end = cfg.indexOf('# Persist the node id');
+  assert.ok(start > 0 && end > start, 'env-file loop must exist in config.sh');
+  const root = mkdtempSync(join(tmpdir(), 'openclaw-envparse-'));
+  const envFile = join(root, 'openclaw.env');
+  writeFileSync(envFile, [`NAME=Gui's node`, 'Q="quoted value"', "S='single'", '  SPACED  =  a  b  ', 'B=a\\b', ''].join('\n'));
+  const script = `set -euo pipefail\n${cfg.slice(start, end)}\nprintf '%s|%s|%s|%s|%s' "$NAME" "$Q" "$S" "$SPACED" "$B"`;
+  const r = spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { PATH: process.env.PATH, ENV_FILE: envFile } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "Gui's node|quoted value|single|a  b|a\\b");
+});
+
 // P7-0: the deploy/operator trust allowlists must be seeded with the RAW base64
 // identity pubkey (what trustedDeployKeys() compares), not the SPKI PEM text of
 // identity.pub — that mismatch made strict signed deploy refuse every trigger on
