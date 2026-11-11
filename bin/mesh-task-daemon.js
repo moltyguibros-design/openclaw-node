@@ -860,7 +860,9 @@ async function detectStalls() {
       `Stall detected: no agent heartbeat for ${silentMin}m, alive check failed`,
       task.attempts
     );
-    if (releasedTask) publishEvent('released', releasedTask);
+    // Null: another path ended the task meanwhile and already moved its plan.
+    if (!releasedTask) continue;
+    publishEvent('released', releasedTask);
 
     // Update plan progress if this task belongs to a plan
     await checkPlanProgress(task.task_id, 'failed');
@@ -924,7 +926,8 @@ async function enforceBudgets() {
       `Budget exceeded: ${elapsed}m elapsed, ${task.budget_minutes}m budget`,
       task.attempts
     );
-    if (failedTask) publishEvent('failed', failedTask);
+    if (!failedTask) continue;
+    publishEvent('failed', failedTask);
 
     // Clean up any collab session for this task
     if (collabStore && task.collab_session_id) {
@@ -2933,5 +2936,7 @@ if (require.main === module) {
     handlePlanCreate: (msg) => handlePlanCreate(msg),
     handlePlanApprove: (msg) => handlePlanApprove(msg),
     processProposals: () => processProposals(),
+    detectStalls: () => detectStalls(),
+    enforceBudgets: () => enforceBudgets(),
   };
 }

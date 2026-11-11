@@ -310,6 +310,63 @@ describe('a plan subtask that ends without completing fails its subtask and move
   });
 });
 
+describe('a stall or budget sweep leaves a subtask that completed under it alone', () => {
+  const LONG_AGO = () => new Date(Date.now() - 10 * 60_000).toISOString();
+
+  /** P-S1 running on w1 and silent for 10 minutes; returns its lease token. */
+  async function silentRunningS1(h) {
+    const claim = await h.rpc('handleClaim', { node_id: 'w1' });
+    assert.equal(claim.data.task_id, 'P-S1');
+    const { lease_token } = claim.data;
+    assert.equal((await h.rpc('handleStart', { task_id: 'P-S1', node_id: 'w1', lease_token })).ok, true);
+    await h.store.put({ ...(await h.store.get('P-S1')), started_at: LONG_AGO(), last_activity: LONG_AGO(), claimed_at: LONG_AGO(), lease_expires_at: null });
+    return lease_token;
+  }
+
+  const complete = (h, lease_token) =>
+    h.rpc('handleComplete', { task_id: 'P-S1', node_id: 'w1', lease_token, result: { success: true } });
+
+  it('detectStalls: the agent completes while its alive check is in flight', async () => {
+    const h = harness();
+    const planId = await approvedPlan(h, { failure_policy: 'continue_best_effort' });
+    const lease_token = await silentRunningS1(h);
+    const published = [];
+    daemon.__test.setContext({
+      nc: {
+        publish(subject) { published.push(subject); },
+        async request(subject) {
+          if (subject === 'mesh.agent.w1.alive') assert.equal((await complete(h, lease_token)).ok, true);
+          throw new Error('TIMEOUT');
+        },
+      },
+    });
+
+    await daemon.__test.detectStalls();
+
+    assert.equal((await h.store.get('P-S1')).status, 'completed');
+    assert.deepEqual(await planState(h, planId), { status: 'executing', subtasks: ['P-S1:completed', 'P-S2:queued'] });
+    assert.equal(published.includes('mesh.agent.w1.stall'), false);
+  });
+
+  it('enforceBudgets: the over-budget snapshot is stale and the task has completed', async () => {
+    const h = harness();
+    const planId = await approvedPlan(h, { failure_policy: 'continue_best_effort' });
+    const lease_token = await silentRunningS1(h);
+    const snapshot = { ...(await h.store.get('P-S1')), budget_minutes: 1 };
+    assert.equal((await complete(h, lease_token)).ok, true);
+    const stale = Object.create(h.store);
+    stale.findOverBudget = async () => [snapshot];
+    const published = [];
+    daemon.__test.setContext({ store: stale, nc: { publish(subject) { published.push(subject); } } });
+
+    await daemon.__test.enforceBudgets();
+
+    assert.equal((await h.store.get('P-S1')).status, 'completed');
+    assert.deepEqual(await planState(h, planId), { status: 'executing', subtasks: ['P-S1:completed', 'P-S2:queued'] });
+    assert.equal(published.includes('mesh.agent.w1.budget_exceeded'), false);
+  });
+});
+
 describe('handleSubmit builds the collab session before it stores the task', () => {
   it('an envelope-level preferred_mode picks the session mode when the spec names none', async () => {
     const h = harness();
