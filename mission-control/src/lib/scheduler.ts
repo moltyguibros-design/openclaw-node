@@ -1,4 +1,4 @@
-import { eq, and, ne, or, lte, like, desc, isNull } from "drizzle-orm";
+import { eq, and, ne, or, like, desc, isNull } from "drizzle-orm";
 import { CronExpressionParser } from "cron-parser";
 import { writeFileSync, mkdirSync } from "fs";
 import path from "path";
@@ -114,7 +114,7 @@ export interface SchedulerStatus {
 export function schedulerStatus(graceMinutes = 30): SchedulerStatus {
   const db = getDb();
   const now = new Date();
-  const cutoff = new Date(now.getTime() - graceMinutes * 60_000).toISOString();
+  const cutoffMs = now.getTime() - graceMinutes * 60_000;
 
   const atQueued = db
     .select({ id: tasks.id, triggerAt: tasks.triggerAt })
@@ -129,7 +129,7 @@ export function schedulerStatus(graceMinutes = 30): SchedulerStatus {
   const ready = db.select({ id: tasks.id }).from(tasks).where(eq(tasks.status, "ready")).all();
   const running = db.select({ id: tasks.id }).from(tasks).where(eq(tasks.status, "running")).all();
 
-  const overdue = atQueued.filter((t) => t.triggerAt && t.triggerAt <= cutoff);
+  const overdue = atQueued.filter((t) => t.triggerAt !== null && Date.parse(t.triggerAt) <= cutoffMs);
 
   return {
     now: now.toISOString(),
@@ -163,17 +163,14 @@ export function schedulerTick(): TickResult {
   // --- Phase 1: Trigger evaluation ---
 
   // 1a. One-shot triggers: trigger_kind="at", status="queued", trigger_at <= now
+  // trigger_at from the dialog is a zone-less datetime-local value; compare
+  // instants (Date.parse reads it in the server zone, ISO-Z values as UTC).
   const atTasks = db
     .select()
     .from(tasks)
-    .where(
-      and(
-        eq(tasks.triggerKind, "at"),
-        eq(tasks.status, "queued"),
-        lte(tasks.triggerAt, now.toISOString())
-      )
-    )
-    .all();
+    .where(and(eq(tasks.triggerKind, "at"), eq(tasks.status, "queued")))
+    .all()
+    .filter((t) => t.triggerAt !== null && Date.parse(t.triggerAt) <= now.getTime());
 
   for (const t of atTasks) {
     db.update(tasks)
