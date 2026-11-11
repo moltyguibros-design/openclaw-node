@@ -347,3 +347,40 @@ test('llm-setup keeps the embedder failure reason and offers a model-free retry'
   assert.match(llm, /if \[ "\$MODE" != embedder \] && \[ -z "\$ENDPOINT" \]; then\n\s+have ollama \|\|/);
   assert.match(llm, /elif \[ "\$MODE" = embedder \]; then\n\s+# --embedder-only/);
 });
+
+// A re-run of install.sh (--update included) rsynced souls/ over ~/.openclaw/souls and reset
+// every soul's approved genes and evolution log to the repo seed. mesh-deploy's souls
+// component already treats those two files as seed-only.
+test('installer seeds but never overwrites learned soul genes/events', (t) => {
+  if (spawnSync('rsync', ['--version']).status !== 0) {
+    t.skip('rsync not on PATH');
+    return;
+  }
+  const repo = mkdtempSync(join(tmpdir(), 'oc-souls-repo-'));
+  const root = mkdtempSync(join(tmpdir(), 'oc-souls-root-'));
+  const put = (base, rel, body) => {
+    mkdirSync(dirname(join(base, rel)), { recursive: true });
+    writeFileSync(join(base, rel), body);
+  };
+  put(repo, 'souls/daedalus/evolution/genes.json', '{"genes":"seed"}\n');
+  put(repo, 'souls/daedalus/evolution/events.jsonl', '{"event":"seed"}\n');
+  put(repo, 'souls/daedalus/SOUL.md', 'soul v2 longer\n');
+  put(repo, 'souls/newcomer/evolution/genes.json', '{"genes":"newcomer seed"}\n');
+  put(root, 'souls/daedalus/evolution/genes.json', '{"genes":"learned on this node"}\n');
+  put(root, 'souls/daedalus/evolution/events.jsonl', '{"event":"learned on this node"}\n');
+  put(root, 'souls/daedalus/SOUL.md', 'soul v1\n');
+
+  const lines = moduleSrc['workspace.sh'].split('\n').filter((l) => l.startsWith('run rsync') && l.includes('/souls/'));
+  assert.ok(lines.length > 0, 'workspace.sh has a souls rsync');
+  const r = spawnSync('bash', ['-c', 'run() { "$@"; }\n' + lines.join('\n')], {
+    encoding: 'utf8',
+    env: { ...process.env, REPO_DIR: repo, OPENCLAW_ROOT: root },
+  });
+  assert.equal(r.status, 0, r.stderr);
+
+  const read = (rel) => readFileSync(join(root, rel), 'utf8');
+  assert.equal(read('souls/daedalus/evolution/genes.json'), '{"genes":"learned on this node"}\n');
+  assert.equal(read('souls/daedalus/evolution/events.jsonl'), '{"event":"learned on this node"}\n');
+  assert.equal(read('souls/daedalus/SOUL.md'), 'soul v2 longer\n');
+  assert.equal(read('souls/newcomer/evolution/genes.json'), '{"genes":"newcomer seed"}\n');
+});

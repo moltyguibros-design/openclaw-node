@@ -188,7 +188,10 @@ done
 
 step "Step 5: Soul Definitions"
 
-run rsync -av "$REPO_DIR/souls/" "$OPENCLAW_ROOT/souls/"
+# Evolved genes and evolution events are learned on the node; the repo copy only seeds a
+# soul that has none (the same contract as mesh-deploy's souls seedOnly).
+run rsync -av --exclude='/*/evolution/genes.json' --exclude='/*/evolution/events.jsonl' "$REPO_DIR/souls/" "$OPENCLAW_ROOT/souls/"
+run rsync -a --ignore-existing "$REPO_DIR/souls/" "$OPENCLAW_ROOT/souls/"
 info "Souls installed to $OPENCLAW_ROOT/souls/"
 
 # ============================================================
