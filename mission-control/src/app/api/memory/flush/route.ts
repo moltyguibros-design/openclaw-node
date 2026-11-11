@@ -97,7 +97,7 @@ export async function GET() {
       .get() as Record<string, unknown> | undefined;
 
     const totalItems = rawDb
-      .prepare("SELECT COUNT(*) as count FROM memory_items WHERE status = 'active'")
+      .prepare("SELECT COUNT(*) as count FROM memory_items WHERE status = 'active' AND valid_to IS NULL")
       .get() as { count: number };
 
     return NextResponse.json({
