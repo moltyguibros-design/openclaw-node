@@ -122,3 +122,47 @@ describe('collab telemetry', () => {
     assert.equal(rows[0].iterations, 2);
   });
 });
+
+const WORK = 'The limiter keeps a sliding window per key and resets it on expiry. '.repeat(8);
+const REFLECTION = '===CIRCLING_REFLECTION===\ntype: workArtifact\nsummary: done\nconfidence: 0.9\nvote: converged\n===END_REFLECTION===\n';
+const single = (type, body) => `${body}\n${REFLECTION.replace('type: workArtifact', `type: ${type}`)}`;
+const pair = (secondType) => `${WORK}\n===CIRCLING_ARTIFACT===\ntype: workArtifact\n===END_ARTIFACT===\n`
+  + `the second artifact\n===CIRCLING_ARTIFACT===\ntype: ${secondType}\n===END_ARTIFACT===\n${REFLECTION}`;
+
+describe('circling submission guard (D14 smoke #4)', () => {
+  beforeEach(freshWorkspace);
+
+  // The daemon's circling round notifications carry my_role and no round_role.
+  async function submit(taskId, roundFields, output) {
+    const round = { round_number: 1, mode: 'circling_strategy', my_scope: [], shared_intel: '', directed_input: 'prior artifacts', circling_subround: 1, ...roundFields };
+    const reflections = fakeBus([round], 1);
+    await agent.__test.executeCollabTask(collabTask(taskId, 'circling_strategy', output));
+    assert.equal(reflections.length, 1);
+    return reflections[0];
+  }
+
+  it('a finalization worker without its completionDiff is a parse failure', async () => {
+    const r = await submit('CF-1', { my_role: 'worker', circling_phase: 'finalization', circling_step: 0 }, single('workArtifact', WORK));
+    assert.equal(r.parse_failed, true);
+    assert.equal(r.vote, 'parse_error');
+    assert.equal(r.summary, 'multi-artifact round missing completionDiff');
+  });
+
+  it('a step-2 worker without its reconciliationDoc is a parse failure', async () => {
+    const r = await submit('CF-2', { my_role: 'worker', circling_phase: 'circling', circling_step: 2 }, single('workArtifact', WORK));
+    assert.equal(r.parse_failed, true);
+    assert.equal(r.summary, 'multi-artifact round missing reconciliationDoc');
+  });
+
+  it('a finalization worker with both artifacts submits normally', async () => {
+    const r = await submit('CF-3', { my_role: 'worker', circling_phase: 'finalization', circling_step: 0 }, pair('completionDiff'));
+    assert.equal(r.parse_failed, false);
+    assert.deepEqual(r.circling_artifacts.map((a) => a.type), ['workArtifact', 'completionDiff']);
+  });
+
+  it('a finalization reviewer owes only its sign-off', async () => {
+    const r = await submit('CF-4', { my_role: 'reviewer', circling_phase: 'finalization', circling_step: 0 }, single('reviewSignoff', 'Signed off: the reset path is covered.'));
+    assert.equal(r.parse_failed, false);
+    assert.equal(r.vote, 'converged');
+  });
+});

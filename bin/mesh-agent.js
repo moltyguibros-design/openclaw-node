@@ -1762,7 +1762,7 @@ async function executeCollabTask(task) {
           if (wa != null && wa.length > 0 && wa.length < MIN_WORK_ARTIFACT_CHARS) {
             failReason = `degenerate workArtifact (< ${MIN_WORK_ARTIFACT_CHARS} chars, preamble-only)`;
           }
-          const isWorkerMulti = round_role === 'worker' && (circling_step === 2 || circling_phase === 'finalization');
+          const isWorkerMulti = my_role === 'worker' && (circling_step === 2 || circling_phase === 'finalization');
           if (!failReason && isWorkerMulti) {
             const secondType = circling_phase === 'finalization' ? 'completionDiff' : 'reconciliationDoc';
             if (!wa || wa.length < MIN_WORK_ARTIFACT_CHARS) {
