@@ -2,6 +2,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import Database from 'better-sqlite3';
 import { buildProbes, parseIsolatedEmbedResult, VERDICT as PROBE_VERDICT } from '../lib/node-acceptance-probes.mjs';
 import { runAcceptance, resolveNodeConfig, VERDICT } from '../lib/node-acceptance.mjs';
 
@@ -172,6 +173,29 @@ describe('node-acceptance probes — memory + gold round-trip', () => {
   it('MEM-L2-INGEST FAIL when ingest does not land', async () => {
     const ctx = baseCtx({ queryDb: () => 0 });
     assert.equal((await probeById(ctx, 'MEM-L2-INGEST').run()).status, VERDICT.FAIL);
+  });
+  it('MEM-L2-INGEST teardown removes the synthetic session concept_edges', async () => {
+    const db = new Database(':memory:');
+    try {
+      db.exec(`
+        CREATE TABLE mentions (session_id TEXT);
+        CREATE TABLE decisions (session_id TEXT);
+        CREATE TABLE messages (session_id TEXT);
+        CREATE TABLE sessions (id TEXT);
+        CREATE TABLE entities (name TEXT);
+        CREATE TABLE concept_edges (source TEXT, target TEXT, edge_type TEXT, session_id TEXT);
+      `);
+      const edge = db.prepare('INSERT INTO concept_edges VALUES (?, ?, ?, ?)');
+      edge.run('ACCPROBETESTRUN', 'SQLite', 'uses', 'acc-probe-testrun');
+      edge.run('SQLite', 'NATS', 'pairs_with', 'acc-probe-testrun');
+      edge.run('Alpha', 'Beta', 'uses', 'real-session');
+      const ctx = baseCtx({ writeDb: (_p, fn) => fn(db), queryDb: () => 4 });
+      await probeById(ctx, 'MEM-L2-INGEST').run();
+      for (const fn of ctx.teardown) await fn();
+      assert.deepEqual(db.prepare('SELECT source FROM concept_edges').all(), [{ source: 'Alpha' }]);
+    } finally {
+      db.close();
+    }
   });
   it('MEM-L2-INJECT PASS on well-formed 200', async () => {
     const ctx = baseCtx({ httpPost: async () => ({ status: 200, json: { block: 'mem', items: { concepts: 1, decisions: 2, snippets: 3 }, tokens: 40, elapsed_ms: 9 } }) });
