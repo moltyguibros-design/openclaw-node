@@ -335,8 +335,8 @@ def print_table(results: list[dict], verbose: bool = False):
                 if check_data["points"] < check_data["max"]:
                     issues.append(f"{check_name}: {check_data['message']}")
 
-        issue_str = "; ".join(issues[:2]) if issues else f"{C.DIM}clean{C.RESET}"
-        if len(issue_str) > 60:
+        issue_str = "; ".join(issues if verbose else issues[:2]) if issues else f"{C.DIM}clean{C.RESET}"
+        if not verbose and len(issue_str) > 60:
             issue_str = issue_str[:57] + "..."
 
         print(f"  {r['name']:<35} {r['score']:>5}  {gc}{r['grade']:>5}{C.RESET}  {issue_str}")

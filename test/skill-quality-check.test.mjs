@@ -71,6 +71,17 @@ describe('skill-quality-check', { skip: !HAVE_PY && 'python3 not available' }, (
     assert.equal(getLastEventId(), ev.id);
   });
 
+  it('records regressions without the REGRESSIONS: report prefix', t => {
+    const w = workspace(t, { prevGrade: 'A', currGrade: 'B' });
+    const r = run(w.ws);
+    assert.match(r.stdout, /^REGRESSIONS: x: A->B$/m);
+    assert.deepEqual(lastEvent(w.events).changes.regressions, ['x: A->B']);
+  });
+
+  it('has no unread PREV_AVG', () => {
+    assert.doesNotMatch(readFileSync(SCRIPT, 'utf8'), /PREV_AVG/);
+  });
+
   it('starts a chain with a null parent when events.jsonl is new', t => {
     const w = workspace(t, { prevGrade: 'B', currGrade: 'A' });
     run(w.ws);

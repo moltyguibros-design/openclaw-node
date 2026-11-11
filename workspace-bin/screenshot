@@ -13,20 +13,21 @@ SCREENSHOT_DIR="$WORKSPACE/.tmp/screenshots"
 mkdir -p "$SCREENSHOT_DIR"
 
 # Defaults
-DELAY=""
+DISPLAY_NUM=""
 DELAY_SECS=0
 CLIPBOARD=false
 OUTPUT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --display|-D) shift 2 ;;  # display selection (macOS only, ignored on Linux)
+    --display|-D) DISPLAY_NUM="$2"; shift 2 ;;  # macOS only; ignored on Linux
     --delay|-T) DELAY_SECS="$2"; shift 2 ;;
     --clipboard|-c) CLIPBOARD=true; shift ;;
     --help|-h)
-      echo "Usage: screenshot [--delay N] [--clipboard] [output_path]"
+      echo "Usage: screenshot [--display N] [--delay N] [--clipboard] [output_path]"
       echo ""
       echo "Options:"
+      echo "  --display N   macOS: capture display N (1 = main)"
       echo "  --delay N     Wait N seconds before capture"
       echo "  --clipboard   Also copy to clipboard"
       echo "  output_path   Custom output path (default: .tmp/screenshots/<timestamp>.png)"
@@ -55,6 +56,7 @@ OS=$(detect_os)
 capture_macos() {
   local args=(-x)  # silent
   [[ "$DELAY_SECS" -gt 0 ]] && args+=("-T$DELAY_SECS")
+  [[ -n "$DISPLAY_NUM" ]] && args+=("-D$DISPLAY_NUM")
   $CLIPBOARD && args+=(-c)
   args+=("$OUTPUT")
   screencapture "${args[@]}" 2>/dev/null

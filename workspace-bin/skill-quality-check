@@ -29,8 +29,6 @@ print(' '.join(parts))
 
 # Compare against cache
 if [ -f "$CACHE_FILE" ]; then
-  PREV_AVG=$(python3 -c "import json,sys; print(json.load(sys.stdin)['average_score'])" < "$CACHE_FILE" 2>/dev/null || echo "0")
-
   # Find regressions (skills that dropped grade) — data passed via stdin, not string interpolation
   REGRESSIONS=$(python3 -c "
 import json, sys
@@ -123,7 +121,7 @@ event = {
     'category': 'quality_audit',
     'summary': data['summary'],
     'changes': {
-        'regressions': data['regressions'].split(', ') if data['regressions'] != 'OK' else [],
+        'regressions': data['regressions'].removeprefix('REGRESSIONS: ').split(', ') if data['regressions'] != 'OK' else [],
         'improvements': data['improvements'].split(',') if data['improvements'] != 'none' else []
     }
 }

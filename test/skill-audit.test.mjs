@@ -43,4 +43,26 @@ describe('skill-audit', { skip: !HAVE_PY && 'python3 not available' }, () => {
     assert.deepEqual(out.skills.map(s => s.name), ['weather']);
     assert.match(out.skills[0].grade, /^[A-F]$/);
   });
+
+  it('--verbose lists every failing check in the table', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'skill-audit-'));
+    mkdirSync(join(dir, 'bare'));
+    writeFileSync(join(dir, 'bare', 'SKILL.md'), 'hi\n');
+    const audit = (...extra) => spawnSync('python3', ['-B', SCRIPT, '--skills-dir', dir, ...extra], { encoding: 'utf8' });
+
+    const json = audit('--json');
+    assert.equal(json.status, 0, json.stderr);
+    const failing = Object.entries(JSON.parse(json.stdout).skills[0].checks)
+      .filter(([, c]) => c.points < c.max)
+      .map(([name]) => name);
+    assert.ok(failing.length >= 3, `failing checks: ${failing}`);
+    const third = failing[2];
+
+    const plain = audit();
+    const verbose = audit('--verbose');
+    assert.equal(plain.status, 0, plain.stderr);
+    assert.equal(verbose.status, 0, verbose.stderr);
+    assert.doesNotMatch(plain.stdout, new RegExp(`${third}:`));
+    for (const name of failing) assert.match(verbose.stdout, new RegExp(`${name}:`));
+  });
 });
