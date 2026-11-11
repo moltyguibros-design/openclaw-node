@@ -58,7 +58,7 @@ def detect(text: str) -> DetectionResult:
     r.markdown_artifacts = find_matches(text, PATTERNS["markdown_artifacts"])
     r.citation_bugs = find_matches(text, PATTERNS["citation_bugs"])
     r.knowledge_cutoff = find_matches(text, PATTERNS["knowledge_cutoff"])
-    r.curly_quotes = len(re.findall(r'[""'']', text))
+    r.curly_quotes = len(re.findall("[\u201c\u201d\u2018\u2019]", text))
     r.em_dashes = text.count("—") + text.count(" -- ")
     
     r.total_issues = (
