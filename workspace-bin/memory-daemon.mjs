@@ -1771,6 +1771,7 @@ async function main() {
     // Initialize agnostic extraction trigger (mesh.memory.extract_request)
     try {
       extractionTrigger = createExtractionTrigger(natsConn, NODE_ID, {
+        log,
         onExtract: async (payload) => {
           log(`[nats] extraction requested by ${payload.triggered_by || 'unknown'}`);
           if (sm.state !== STATES.ACTIVE && sm.state !== STATES.IDLE) {
