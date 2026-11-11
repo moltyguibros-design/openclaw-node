@@ -96,4 +96,9 @@ describe("hyperagent-read (readonly evidence layer)", () => {
     const { isReadonly } = await import("@/lib/hyperagent-read");
     expect(isReadonly()).toBe(true);
   });
+
+  it("config STATE_DB_PATH honours OPENCLAW_STATE_DB, so the Memory Content page reads the same db", async () => {
+    const { STATE_DB_PATH } = await import("@/lib/config");
+    expect(STATE_DB_PATH).toBe(dbPath);
+  });
 });

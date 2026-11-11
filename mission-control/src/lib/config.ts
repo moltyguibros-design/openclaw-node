@@ -21,7 +21,9 @@ export const MEMORY_MD = path.join(WORKSPACE_ROOT, "MEMORY.md");
 // real Obsidian vault (obsidian-sync.json memoryVaultPath, same resolution as
 // lib/obsidian-vault.mjs getVaultPath), falling back to legacy obsidian-local.
 export const STATE_DB_PATH =
-  process.env.STATE_DB_PATH || path.join(path.dirname(WORKSPACE_ROOT), "state.db");
+  process.env.OPENCLAW_STATE_DB ||
+  process.env.STATE_DB_PATH ||
+  path.join(path.dirname(WORKSPACE_ROOT), "state.db");
 
 function configuredMemoryVaultPath(): string | null {
   try {
