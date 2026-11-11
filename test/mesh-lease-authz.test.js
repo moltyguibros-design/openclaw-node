@@ -298,3 +298,18 @@ describe('handleSubmit builds the collab session before it stores the task', () 
     assert.equal(h.events.length, 0, 'no submitted event for a refused task');
   });
 });
+
+describe('handleClaim: one live task per node', () => {
+  for (const started of [false, true]) {
+    it(`a node holding a ${started ? 'running' : 'claimed'} task is refused a second one`, async () => {
+      const h = harness();
+      const { lease_token } = await claimedTask(h, { id: 'T-1', owner: 'w' });
+      if (started) assert.equal((await h.rpc('handleStart', { task_id: 'T-1', node_id: 'w', lease_token })).ok, true);
+      assert.equal((await h.rpc('handleSubmit', { task_id: 'T-2', title: 'next', metric: 'npm test' })).ok, true);
+      const reply = await h.rpc('handleClaim', { node_id: 'w' });
+      assert.equal(reply.ok, false);
+      assert.match(reply.error, /already has an active task: T-1/);
+      assert.equal((await h.store.get('T-2')).status, 'queued');
+    });
+  }
+});

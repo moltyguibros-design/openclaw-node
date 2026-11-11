@@ -263,3 +263,51 @@ describe("lease + fencing token (P4-5)", () => {
     assert.match(t.result.summary, /Lease expired 3×/);
   });
 });
+
+describe("live-task scans read the bucket once", () => {
+  function countingStore() {
+    const kv = mockKv();
+    const keys = kv.keys;
+    const counter = { scans: 0 };
+    kv.keys = async () => { counter.scans++; return keys(); };
+    return { store: new TaskStore(kv), counter };
+  }
+  const tenMinAgo = () => new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const live = (id, status, extra) => ({ ...createTask({ task_id: id, title: id }), status, owner: "w1", ...extra });
+
+  it("list({ statuses }) keeps only the listed statuses", async () => {
+    const { store } = countingStore();
+    await seed(store, live("R", TASK_STATUS.RUNNING));
+    await seed(store, live("C", TASK_STATUS.CLAIMED));
+    await seed(store, live("D", TASK_STATUS.COMPLETED));
+    const ids = (await store.list({ statuses: [TASK_STATUS.RUNNING, TASK_STATUS.CLAIMED] })).map(t => t.task_id);
+    assert.deepEqual(ids.sort(), ["C", "R"]);
+  });
+
+  it("findStalled finds running and claimed tasks in one scan", async () => {
+    const { store, counter } = countingStore();
+    await seed(store, live("R", TASK_STATUS.RUNNING, { last_activity: tenMinAgo() }));
+    await seed(store, live("C", TASK_STATUS.CLAIMED, { last_activity: tenMinAgo() }));
+    counter.scans = 0;
+    assert.deepEqual((await store.findStalled(5)).map(t => t.task_id).sort(), ["C", "R"]);
+    assert.equal(counter.scans, 1);
+  });
+
+  it("findOverBudget finds running and claimed tasks in one scan", async () => {
+    const { store, counter } = countingStore();
+    await seed(store, live("R", TASK_STATUS.RUNNING, { budget_deadline: tenMinAgo() }));
+    await seed(store, live("C", TASK_STATUS.CLAIMED, { budget_deadline: tenMinAgo() }));
+    counter.scans = 0;
+    assert.deepEqual((await store.findOverBudget()).map(t => t.task_id).sort(), ["C", "R"]);
+    assert.equal(counter.scans, 1);
+  });
+
+  it("reapExpiredLeases scans once", async () => {
+    const { store, counter } = countingStore();
+    await seed(store, live("R", TASK_STATUS.RUNNING, { lease_token: "t1", lease_expires_at: tenMinAgo() }));
+    await seed(store, live("C", TASK_STATUS.CLAIMED, { lease_token: "t2", lease_expires_at: tenMinAgo() }));
+    counter.scans = 0;
+    assert.deepEqual((await store.reapExpiredLeases()).requeued.sort(), ["C", "R"]);
+    assert.equal(counter.scans, 1);
+  });
+});

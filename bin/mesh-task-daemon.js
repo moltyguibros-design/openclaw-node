@@ -296,10 +296,9 @@ async function handleClaim(msg) {
   }
 
   // Check if this node already has a running task
-  const running = await store.list({ status: TASK_STATUS.RUNNING, owner: node_id });
-  const claimed = await store.list({ status: TASK_STATUS.CLAIMED, owner: node_id });
-  if (running.length > 0 || claimed.length > 0) {
-    return respondError(msg, `Node ${node_id} already has an active task: ${(running[0] || claimed[0]).task_id}`);
+  const active = await store.list({ statuses: [TASK_STATUS.RUNNING, TASK_STATUS.CLAIMED], owner: node_id });
+  if (active.length > 0) {
+    return respondError(msg, `Node ${node_id} already has an active task: ${active[0].task_id}`);
   }
 
   const task = await store.claim(node_id);
