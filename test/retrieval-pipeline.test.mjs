@@ -459,6 +459,23 @@ describe('R19 (repair 5.2): channel failures are observable, never silent', () =
     }
   });
 
+  it('a failing FTS or vector channel reports through the sink', async () => {
+    const reports = [];
+    setChannelErrorSink((channel, err) => reports.push({ channel, message: err.message }));
+    const knowledgeDb = new Database(':memory:'); // no session_chunks tables
+    try {
+      const pipeline = createRetrievalPipeline({ knowledgeDb });
+      const result = await pipeline.retrieve('anything');
+      assert.deepStrictEqual(result, []);
+      assert.deepStrictEqual(reports.map(r => r.channel).sort(), ['fts', 'vec']);
+    } finally {
+      knowledgeDb.close();
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
+  });
+
   it('a throwing sink never breaks the channel', () => {
     setChannelErrorSink(() => { throw new Error('bad sink'); });
     try {
