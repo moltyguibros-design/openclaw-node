@@ -305,6 +305,15 @@ async function gatherLocalHealth(): Promise<NodeHealth> {
         }
       }
     } catch (err) { console.warn(`[mesh/nodes] launchctl service check failed: ${(err as Error).message}`); }
+  } else {
+    // mesh-deploy installs the Linux units as systemd user units (~/.config/systemd/user).
+    const raw = await execSafe("systemctl --user list-units 'openclaw-*' --type=service --all --no-legend --plain");
+    for (const line of raw.split("\n")) {
+      const [unit, , active] = line.trim().split(/\s+/);
+      if (!unit?.endsWith(".service")) continue;
+      const name = unit.replace(/^openclaw-/, "").replace(/\.service$/, "");
+      services.push({ name, status: active === "active" ? "active" : active === "failed" ? "error" : "stopped" });
+    }
   }
 
   const natsUrl = process.env.OPENCLAW_NATS || (() => {

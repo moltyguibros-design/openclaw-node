@@ -9,6 +9,7 @@ import path from "path";
 
 const cfg = { nodeId: "test-node" };
 let tailscaleStatus: Record<string, unknown> = {};
+let systemctlUnits = "";
 
 const cp = vi.hoisted(() => ({
   execSync: vi.fn(() => {
@@ -44,7 +45,7 @@ vi.mock("@/lib/config", () => ({
 interface RouteNode {
   nodeId: string;
   status: string;
-  health: { nodeId: string } | null;
+  health: { nodeId: string; services: Array<{ name: string; status: string }> } | null;
 }
 
 interface RouteBody {
@@ -66,7 +67,12 @@ beforeEach(() => {
   cp.exec.mockReset();
   cp.exec.mockImplementation(
     (cmd: string, _opts: unknown, cb: (err: Error | null, out: { stdout: string; stderr: string }) => void) => {
-      const stdout = cmd === "tailscale status --json" ? JSON.stringify(tailscaleStatus) : "";
+      const stdout =
+        cmd === "tailscale status --json"
+          ? JSON.stringify(tailscaleStatus)
+          : cmd.startsWith("systemctl --user list-units")
+            ? systemctlUnits
+            : "";
       setTimeout(() => cb(null, { stdout, stderr: "" }), 20);
     },
   );
@@ -74,6 +80,7 @@ beforeEach(() => {
   process.env.HOME = home;
   cfg.nodeId = "test-node";
   tailscaleStatus = {};
+  systemctlUnits = "";
 });
 
 afterEach(() => {
@@ -127,5 +134,20 @@ describe("GET /api/mesh/nodes", () => {
     const nodes = await nodesFor("calos.lan", { Self: { HostName: "calos" } });
     expect(nodes["calos"].health?.nodeId).toBe("calos.lan");
     expect(nodes["calos"].status).toBe("online");
+  });
+
+  it.skipIf(process.platform === "darwin")("reports systemd user units in the local fallback on Linux", async () => {
+    systemctlUnits = [
+      "openclaw-mesh-agent.service loaded active running Mesh agent",
+      "openclaw-gateway.service loaded failed failed Gateway",
+      "openclaw-observer.service loaded inactive dead Observer",
+    ].join("\n");
+    const nodes = await nodesFor("test-node", {});
+    expect(nodes["test-node"].health?.services).toEqual([
+      { name: "mesh-agent", status: "active" },
+      { name: "gateway", status: "error" },
+      { name: "observer", status: "stopped" },
+    ]);
+    expect(nodes["test-node"].status).toBe("degraded");
   });
 });
