@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { runAcceptance, computeGate, VERDICT } from '../lib/node-acceptance.mjs';
+
+const BIN = fileURLToPath(new URL('../bin/node-acceptance.mjs', import.meta.url));
 
 const allHealthy = {
   daemon: { ok: true, detail: 'pid=1', latency_ms: 1 },
@@ -55,6 +59,19 @@ describe('node-acceptance gate', () => {
       runAcceptance({ profile: 'single-node', axis: 'TYPO_AXIS', probes: [], healthCheckFn: async () => allHealthy }),
       /unknown axis 'TYPO_AXIS'/,
     );
+  });
+
+  it('throws on an unknown profile instead of grading it with single-node layers', async () => {
+    await assert.rejects(
+      runAcceptance({ profile: 'single-nod', probes: [], healthCheckFn: async () => allHealthy }),
+      /unknown profile 'single-nod'/,
+    );
+  });
+
+  it('a bad CLI flag exits 3 (harness error), not 1 (REJECTED)', () => {
+    const r = spawnSync(process.execPath, [BIN, '--bogus'], { encoding: 'utf8' });
+    assert.equal(r.status, 3, r.stderr);
+    assert.match(r.stderr, /Usage: node-acceptance\.mjs/);
   });
 
   // --skip-axis (install --skip-llm): the LLM axis is deliberately absent, so

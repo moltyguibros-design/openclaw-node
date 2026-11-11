@@ -22,21 +22,30 @@ import os from 'node:os';
 import { parseArgs } from 'node:util';
 import { runAcceptance, formatTable, formatReport } from '../lib/node-acceptance.mjs';
 
-const { values } = parseArgs({
-  options: {
-    profile: { type: 'string', default: 'single-node' },
-    axis: { type: 'string' },
-    json: { type: 'boolean', default: false },
-    report: { type: 'string' },
-    quiet: { type: 'boolean', default: false },
-    'no-mutate': { type: 'boolean', default: false },
-    deep: { type: 'boolean', default: false },
-    // --skip-axis llm: the installer's --skip-llm wave — models are deliberately
-    // not provisioned yet, so LLM checks are N/A (still counted as covered), not
-    // FAIL. Without this the documented one-command install could never accept.
-    'skip-axis': { type: 'string', multiple: true, default: [] },
-  },
-});
+let values;
+try {
+  ({ values } = parseArgs({
+    options: {
+      profile: { type: 'string', default: 'single-node' },
+      axis: { type: 'string' },
+      json: { type: 'boolean', default: false },
+      report: { type: 'string' },
+      quiet: { type: 'boolean', default: false },
+      'no-mutate': { type: 'boolean', default: false },
+      deep: { type: 'boolean', default: false },
+      // --skip-axis llm: the installer's --skip-llm wave — models are deliberately
+      // not provisioned yet, so LLM checks are N/A (still counted as covered), not
+      // FAIL. Without this the documented one-command install could never accept.
+      'skip-axis': { type: 'string', multiple: true, default: [] },
+    },
+  }));
+} catch (err) {
+  // An uncaught throw here would exit 1, which reads as a REJECTED node.
+  process.stderr.write(`[node-acceptance] ${err.message}\n`
+    + 'Usage: node-acceptance.mjs [--profile single-node|federated] [--axis <axis>] [--skip-axis <axis>]'
+    + ' [--no-mutate] [--deep] [--json] [--report <path>] [--quiet]\n');
+  process.exit(3);
+}
 
 const DEFAULT_REPORT = path.join(os.homedir(), '.openclaw', '.node-acceptance.md');
 
