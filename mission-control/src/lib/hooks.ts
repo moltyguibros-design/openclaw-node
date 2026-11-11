@@ -702,6 +702,7 @@ export async function interveneSession(params: {
   const data = await res.json();
   await mutate("/api/cowork/sessions");
   await mutate("/api/tasks");
+  if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
   return data;
 }
 
