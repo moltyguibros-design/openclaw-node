@@ -142,6 +142,7 @@ else
           check_rendered "$DEST"
         done
         if $ENABLE_SERVICES; then
+          run systemctl --user daemon-reload
           run systemctl --user enable "${SVC_NAME}.timer"
           run systemctl --user start "${SVC_NAME}.timer"
           info "  Installed + enabled: $SVC_NAME (timer)"
@@ -182,8 +183,10 @@ else
         fi
         check_rendered "$DEST"
         if [ "$SVC_AUTO" = "true" ] && $ENABLE_SERVICES; then
+          run systemctl --user daemon-reload
           run systemctl --user enable "${SVC_NAME}.service"
-          run systemctl --user start "${SVC_NAME}.service"
+          # start is a no-op on a running unit; restart applies the re-rendered unit and new code, as unload/load does on macOS.
+          run systemctl --user restart "${SVC_NAME}.service"
           info "  Installed + started: $SVC_NAME"
         else
           info "  Installed: $SVC_NAME"

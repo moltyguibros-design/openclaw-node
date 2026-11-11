@@ -91,6 +91,15 @@ test('the 3 unit-render dry-run guards live in services.sh', () => {
   assert.equal(installSrc.match(guard), null);
 });
 
+// --update --enable-services on Linux used `start`, a no-op on a running unit,
+// so re-rendered units and new code waited for a reboot (macOS unloads/loads).
+test('Linux --enable-services restarts re-rendered autostart units', () => {
+  const svc = moduleSrc['services.sh'];
+  assert.doesNotMatch(svc, /systemctl --user start "\$\{SVC_NAME\}\.service"/, 'start is a no-op on a running unit');
+  assert.match(svc, /run systemctl --user daemon-reload\n\s+run systemctl --user enable "\$\{SVC_NAME\}\.service"\n(\s+#[^\n]*\n)?\s+run systemctl --user restart "\$\{SVC_NAME\}\.service"/);
+  assert.match(svc, /run systemctl --user daemon-reload\n\s+run systemctl --user enable "\$\{SVC_NAME\}\.timer"/);
+});
+
 test('cluster dry-run guard and cluster security live in config.sh', () => {
   const cfg = moduleSrc['config.sh'];
   assert.ok(cfg.includes('[dry-run] would render cluster nats.conf'));
