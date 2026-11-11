@@ -41,7 +41,7 @@ async function exited(bridge, timeoutMs = 10_000) {
   return bridge.result;
 }
 
-async function fixture(t, interval = 100, requestMux = false) {
+async function fixture(t, interval = 100, requestMux = false, owner = 'mesh') {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mesh-bridge-drain-'));
   const children = [];
   let nc;
@@ -56,7 +56,7 @@ async function fixture(t, interval = 100, requestMux = false) {
   await fs.mkdir(memory, { recursive: true, mode: 0o700 });
   const kanban = path.join(memory, 'active-tasks.md');
   const original = requestMux
-    ? '# Owned fixture\n\n## Live Tasks\n\n- task_id: owned-missing-card\n  title: Owned stale running card\n  status: running\n  execution: mesh\n  owner: mesh\n'
+    ? `# Owned fixture\n\n## Live Tasks\n\n- task_id: owned-missing-card\n  title: Owned stale running card\n  status: running\n  execution: mesh\n  owner: ${owner}\n`
     : '# Owned fixture\n\n## Live Tasks\n\n- task_id: owned-local-card\n  title: Preserve this local card\n  status: waiting-user\n  execution: local\n';
   await fs.writeFile(kanban, original, { mode: 0o600 });
   const port = await freePort();
@@ -181,6 +181,13 @@ test('bridge planned drain closes its prior request subscription normally', { sk
   bridge.proc.kill('SIGTERM');
   assert.deepEqual(await exited(bridge), { code: 0, signal: null }, bridge.output);
   assert.equal((bridge.output.match(/Bridge stopped\./g) || []).length, 1);
+  await assertKanban();
+});
+
+test('bridge reconcile looks up a running card the claim re-owned to a node id', { skip, timeout: 20_000 }, async (t) => {
+  const { bridge, assertKanban } = await fixture(t, 100, true, 'claimed-node-1');
+  bridge.proc.kill('SIGTERM');
+  assert.deepEqual(await exited(bridge), { code: 0, signal: null }, bridge.output);
   await assertKanban();
 });
 

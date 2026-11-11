@@ -85,7 +85,7 @@ async function natsRequest(subject, payload, timeoutMs = 10000) {
 
 // ── Startup Reconciliation ──────────────────────────
 // On restart, recover state for any tasks that were in-flight when we crashed.
-// Scans kanban for status:running + owner:mesh-agent, checks daemon KV for
+// Scans kanban for execution:mesh cards in submitted/running, checks daemon KV for
 // actual state. Processes completed/failed results we missed, resumes tracking
 // for still-running tasks. Fixes #2 and #10 from the pipeline audit.
 
@@ -98,10 +98,10 @@ async function reconcile() {
     return;
   }
 
+  // A claimed card's owner is the claiming node id, not 'mesh'; the daemon lookup below decides.
   const inflight = tasks.filter(t =>
     t.execution === 'mesh' &&
-    (t.status === 'running' || t.status === 'submitted') &&
-    (t.owner === 'mesh-agent' || t.owner === 'mesh')
+    (t.status === 'running' || t.status === 'submitted')
   );
   if (inflight.length === 0) {
     log('RECONCILE: no orphaned mesh tasks found');
