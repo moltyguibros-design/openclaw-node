@@ -25,6 +25,7 @@ import {
   Layers,
 } from "lucide-react";
 import { createTask, updateTask, deleteTask, type Task } from "@/lib/hooks";
+import { extractEstimate } from "@/lib/task-description";
 
 function isMetaTask(task: Task): boolean {
   return task.type === "project" || task.type === "pipeline" || task.type === "phase";
@@ -35,16 +36,6 @@ const TYPE_ICONS: Record<string, typeof FolderKanban> = {
   pipeline: GitBranch,
   phase: Layers,
 };
-
-/** Extract estimated hours from description (e.g. "DEV · 5.0h · M1/D3" → "5.0h") */
-function extractEstimate(description: string | null): string | null {
-  if (!description) return null;
-  const parts = description.split(" · ");
-  for (const p of parts) {
-    if (/^\d+(\.\d+)?h$/.test(p.trim())) return p.trim();
-  }
-  return null;
-}
 
 const STATUS_COLORS: Record<string, string> = {
   ready: "bg-orange-500/20 text-orange-400",

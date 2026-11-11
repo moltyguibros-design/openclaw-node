@@ -49,6 +49,7 @@ import {
 } from "@/lib/hooks";
 import { UnifiedTaskDialog } from "@/components/board/unified-task-dialog";
 import { barDragUpdate } from "@/lib/roadmap-drag";
+import { DEPT_COLORS, extractDept, extractEstimate } from "@/lib/task-description";
 
 // --- Constants ---
 
@@ -73,44 +74,6 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 type ZoomLevel = "day" | "week" | "month" | "quarter";
-
-// Department color map (matches import-pipeline-v2.js)
-const DEPT_COLORS: Record<string, string> = {
-  DEV: "#3B82F6",
-  CHAIN: "#8B5CF6",
-  ART: "#EC4899",
-  DESIGN: "#F59E0B",
-  NARR: "#14B8A6",
-  QA: "#10B981",
-  INFRA: "#6B7280",
-  MKT: "#EF4444",
-  COMM: "#06B6D4",
-  BIZ: "#22C55E",
-  LEGAL: "#F97316",
-  HIRE: "#A855F7",
-};
-
-/** Extract estimated hours from description (e.g. "DEV · 5.0h · M1/D3" → "5.0h") */
-function extractEstimate(description: string | null): string | null {
-  if (!description) return null;
-  const parts = description.split(" · ");
-  for (const p of parts) {
-    if (/^\d+(\.\d+)?h$/.test(p.trim())) return p.trim();
-  }
-  return null;
-}
-
-/** Extract department from a task's description field (e.g. "DEV" or "⚠️ CRITICAL PATH — DEV") */
-function extractDept(description: string | null): string | null {
-  if (!description) return null;
-  // Check for "CRITICAL PATH — DEPT" or "IMPORTANT — DEPT" pattern
-  const tagMatch = description.match(/(?:CRITICAL PATH|IMPORTANT)\s*[—–-]\s*(\w+)/);
-  if (tagMatch) return tagMatch[1];
-  // Otherwise treat the whole description as dept if it matches a known dept
-  const trimmed = description.trim();
-  if (DEPT_COLORS[trimmed]) return trimmed;
-  return null;
-}
 
 // --- Helper: build tree structure from flat list ---
 
