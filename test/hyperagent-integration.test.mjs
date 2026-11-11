@@ -4,12 +4,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hyperagent-cli-'));
 const cli = path.resolve('bin/hyperagent.mjs');
 const env = {
   ...process.env,
   OPENCLAW_HOME: home,
+  OPENCLAW_STATE_DB: path.join(home, 'state.db'),
   OPENCLAW_NODE_ID: 'integration-node',
   OPENCLAW_SOUL_ID: 'integration-soul',
 };
@@ -124,6 +126,71 @@ describe('cohort provenance through the real producer funnel', () => {
       delete process.env.OPENCLAW_STATE_DB;
       delete process.env.OPENCLAW_HA_RUN_ID;
       fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 3 });
+    }
+  });
+});
+
+// With no identity exported in the operator's shell, the CLI must resolve the
+// node, soul and store the mesh-agent writer used, or reflect/consult/log work
+// on another identity's rows in another database. The writer runs in a child so
+// its load-time node id comes from the same env the CLI sees.
+describe('CLI identity and store match the mesh-agent telemetry writer', () => {
+  it('reflects rows recorded by recordHyperagentTask with no identity env', async () => {
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-ident-'));
+    const cliHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-ident-home-'));
+    const dbPath = path.join(scratch, 'state.db');
+    const bare = { ...process.env };
+    delete bare.OPENCLAW_NODE_ID;
+    delete bare.MESH_NODE_ID;
+    delete bare.OPENCLAW_SOUL_ID;
+    delete bare.OPENCLAW_HA_RUN_ID;
+    const sharedEnv = { ...bare, OPENCLAW_STATE_DB: dbPath };
+    try {
+      const writer = spawnSync(process.execPath, ['-e', `
+        const { recordHyperagentTask } = require(process.argv[1]);
+        (async () => {
+          for (let i = 0; i < 5; i++) {
+            await recordHyperagentTask(
+              { task_id: 'identity-' + i, title: 'identity', domain: 'integration', llm_provider: 'shell' },
+              { outcome: 'success', iterations: 1, startedAt: Date.now(), notes: 'identity ' + i });
+          }
+        })();
+      `, path.resolve('bin/mesh-agent.js')], {
+        env: { ...sharedEnv, OPENCLAW_HOME: scratch, HOME: scratch },
+        encoding: 'utf8',
+        timeout: 30000,
+      });
+      assert.equal(writer.status, 0, writer.stderr);
+
+      const cliEnv = { ...sharedEnv, OPENCLAW_HOME: cliHome };
+      const reflected = spawnSync(process.execPath, [cli, 'reflect'], { env: cliEnv, encoding: 'utf8' });
+      assert.equal(reflected.status, 0, reflected.stderr);
+      assert.match(reflected.stdout, /reflection \d+ created \(5 tasks\)/);
+
+      const logged = spawnSync(process.execPath, [cli, 'log', '--stdin'], {
+        env: cliEnv,
+        input: JSON.stringify({ task_id: 'identity-cli', domain: 'integration', outcome: 'success' }),
+        encoding: 'utf8',
+      });
+      assert.equal(logged.status, 0, logged.stderr);
+
+      const expected = createRequire(import.meta.url)('../lib/node-id.js').resolveNodeId(bare);
+      const { createHyperAgentStore } = await import('../lib/hyperagent-store.mjs');
+      const store = createHyperAgentStore({ dbPath });
+      try {
+        const rows = store.getTelemetry({ last: 10 });
+        assert.equal(rows.length, 6);
+        assert.equal(rows[0].task_id, 'identity-cli');
+        for (const row of rows) {
+          assert.equal(row.node_id, expected, row.task_id);
+          assert.equal(row.soul_id, expected, row.task_id);
+        }
+      } finally {
+        store.close();
+      }
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 3 });
+      fs.rmSync(cliHome, { recursive: true, force: true, maxRetries: 3 });
     }
   });
 });

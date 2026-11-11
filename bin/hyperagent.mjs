@@ -33,8 +33,11 @@ const tracer = createTracer('hyperagent');
 
 const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
 
-const NODE_ID = process.env.OPENCLAW_NODE_ID || os.hostname();
-const SOUL_ID = process.env.OPENCLAW_SOUL_ID || 'unknown';
+const STATE_DB = process.env.OPENCLAW_STATE_DB || path.join(OPENCLAW_HOME, 'state.db');
+
+// Same identity as the mesh-agent telemetry writer, or reflect/consult read another node's rows.
+const NODE_ID = require('../lib/node-id').resolveNodeId();
+const SOUL_ID = process.env.OPENCLAW_SOUL_ID || NODE_ID;
 
 // ── Helpers ────────────────────────────────────
 
@@ -79,7 +82,7 @@ function printTable(rows, columns) {
 
 function cmdStatus(store) {
   const stats = store.getStats();
-  console.log(`HyperAgent Protocol — ${OPENCLAW_HOME}`);
+  console.log(`HyperAgent Protocol — ${STATE_DB}`);
   console.log(`  Telemetry entries: ${stats.telemetry}`);
   console.log(`  Active strategies: ${stats.strategies}`);
   console.log(`  Reflections:       ${stats.reflections}`);
@@ -423,14 +426,15 @@ commands:
 
 env:
   OPENCLAW_HOME      base dir (default: ~/.openclaw)
-  OPENCLAW_NODE_ID   node identifier (default: hostname)
-  OPENCLAW_SOUL_ID   soul identifier (default: unknown)`);
+  OPENCLAW_STATE_DB  store path (default: $OPENCLAW_HOME/state.db)
+  OPENCLAW_NODE_ID   node identifier (default: MESH_NODE_ID, else short lowercased hostname)
+  OPENCLAW_SOUL_ID   soul identifier (default: the node identifier)`);
   process.exit(0);
 }
 
 let store;
 try {
-  store = createHyperAgentStore({ dbPath: path.join(OPENCLAW_HOME, 'state.db') });
+  store = createHyperAgentStore({ dbPath: STATE_DB });
 } catch (err) {
   die(`failed to open store: ${err.message}`);
 }
