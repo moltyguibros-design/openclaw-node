@@ -294,7 +294,7 @@ describe('obsidian-digest', () => {
       assert.ok(content.includes('No sessions recorded.'));
     });
 
-    it('is idempotent — regenerating overwrites cleanly', async () => {
+    it('is idempotent — regenerating leaves the note byte-identical', async () => {
       const sessionNote = '---\ntype: session\ndate: 2026-06-01\n---\n\n# S';
       await writeFile(join(vaultDir, 'sessions', 'test.md'), sessionNote);
 
@@ -304,9 +304,25 @@ describe('obsidian-digest', () => {
       const r2 = await generateDailyDigest({ vaultPath: vaultDir, date: '2026-06-01' });
       const c2 = await readFile(r2.filePath, 'utf-8');
 
-      // generated_at will differ but structure should be same
       assert.equal(r1.sessions, r2.sessions);
       assert.equal(r1.concepts, r2.concepts);
+      assert.equal(c2, c1);
+    });
+
+    it('does not rewrite an unchanged digest, but does rewrite a changed one', async () => {
+      const r1 = await generateDailyDigest({ vaultPath: vaultDir, date: '2026-06-01' });
+      const pinned = (await readFile(r1.filePath, 'utf-8'))
+        .replace(/^generated_at: .*$/m, 'generated_at: 2000-01-01T00:00:00.000Z');
+      await writeFile(r1.filePath, pinned);
+
+      await generateDailyDigest({ vaultPath: vaultDir, date: '2026-06-01' });
+      assert.equal(await readFile(r1.filePath, 'utf-8'), pinned);
+
+      await writeFile(join(vaultDir, 'sessions', 'new.md'), '---\ntype: session\ndate: 2026-06-01\n---\n\n# S');
+      await generateDailyDigest({ vaultPath: vaultDir, date: '2026-06-01' });
+      const c3 = await readFile(r1.filePath, 'utf-8');
+      assert.ok(c3.includes('sessions: 1'));
+      assert.ok(!c3.includes('2000-01-01'));
     });
   });
 
