@@ -11,7 +11,10 @@ import {
   createMemoryInjector,
   recallScore,
   writeBackReconsolidation,
+  curateForRecall,
+  RECALL_CAPS,
 } from '../lib/memory-injector.mjs';
+import { formatMemoryBlock } from '../lib/memory-formatter.mjs';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -397,5 +400,29 @@ describe('writeBackReconsolidation — actually writes (F-C8)', () => {
     const row = db.prepare('SELECT last_recalled FROM entities WHERE name = ?').get('NATS');
     assert.equal(row.last_recalled, null);
     db.close();
+  });
+});
+
+describe('curateForRecall — related_sessions caps sessions, not chunks', () => {
+  const snippets = [
+    { sessionId: 'A', snippet: 'a1', score: 0.05 },
+    { sessionId: 'A', snippet: 'a2', score: 0.04 },
+    { sessionId: 'A', snippet: 'a3', score: 0.03 },
+    { sessionId: 'B', snippet: 'b1', score: 0.02 },
+    { sessionId: 'C', snippet: 'c1', score: 0.01 },
+    { sessionId: 'D', snippet: 'd1', score: 0.005 },
+  ];
+
+  it('keeps the best snippet of each of the top sessions', () => {
+    const result = curateForRecall({ concepts: [], decisions: [], snippets });
+    assert.equal(RECALL_CAPS.related_sessions, 3);
+    assert.deepEqual(result.snippets.map(s => s.snippet), ['a1', 'b1', 'c1']);
+  });
+
+  it('the rendered block names every curated session', () => {
+    const block = formatMemoryBlock(curateForRecall({ concepts: [], decisions: [], snippets }));
+    assert.match(block, /\[A\]: a1/);
+    assert.match(block, /\[B\]: b1/);
+    assert.match(block, /\[C\]: c1/);
   });
 });
