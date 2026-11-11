@@ -43,7 +43,7 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { getActivityState, getSessionInfo } = require('../lib/agent-activity');
+const { getSessionInfo } = require('../lib/agent-activity');
 const { loadAllRules, matchRules, formatRulesForPrompt, detectFrameworks, activateFrameworkRules } = require('../lib/rule-loader');
 const { loadHarnessRules, runMeshHarness, runPostCommitValidation, formatHarnessForPrompt } = require('../lib/mesh-harness');
 const { validateMetricCommand } = require('../lib/exec-safety');
@@ -1031,26 +1031,11 @@ function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null)
       setTimeout(() => signalGroup('SIGKILL'), 5000).unref();
     }, timeoutMs ?? (task.budget_minutes || 30) * 60 * 1000);
 
-    // Heartbeat: signal daemon with activity state.
-    // getActivityState reads Claude JSONL files — only useful for Claude provider.
-    // For other providers, send a basic heartbeat (process alive = active).
+    // Heartbeat: renews the lease and keeps the daemon's stall detector quiet.
     let lastHeartbeatWarn = 0;
-    const isClaude = provider.name === 'claude';
     const heartbeatTimer = setInterval(async () => {
       try {
-        const payload = { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token };
-        if (isClaude) {
-          const activity = await getActivityState(cleanCwd);
-          if (activity) {
-            payload.activity_state = activity.state;
-            payload.activity_timestamp = activity.timestamp?.toISOString();
-          }
-        } else {
-          // Non-Claude: process is running → active
-          payload.activity_state = 'active';
-          payload.activity_timestamp = new Date().toISOString();
-        }
-        await natsRequest('mesh.tasks.heartbeat', payload);
+        await natsRequest('mesh.tasks.heartbeat', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token });
       } catch (err) {
         if (!lastHeartbeatWarn || Date.now() - lastHeartbeatWarn > 60000) {
           warn(`heartbeat: ${err.message}`);
