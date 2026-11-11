@@ -10,6 +10,15 @@ DEFAULT_VAULT="$WORKSPACE/memory-vault"
 
 export PATH="$HOME/.bun/bin:$PATH"
 
+# The installer accepts clawvault anywhere on PATH; `npm install -g` lands in the global prefix, not .npm-global.
+if [ ! -x "$CLAWVAULT_BIN" ]; then
+  CLAWVAULT_BIN="$(command -v clawvault || true)"
+  if [ -z "$CLAWVAULT_BIN" ]; then
+    echo "clawvault-local: clawvault not found in $WORKSPACE/.npm-global/bin or on PATH" >&2
+    exit 127
+  fi
+fi
+
 if [ "$#" -eq 0 ]; then
   exec "$CLAWVAULT_BIN" status --vault "$DEFAULT_VAULT"
 fi
