@@ -136,6 +136,11 @@ const generateToken = tracer.wrap('generateToken', function generateToken() {
 
 const { token, payload } = generateToken();
 
+// stderr keeps the --one-liner stdout clean; not a refusal, since an SSH tunnel can make loopback valid.
+if (/^nats:\/\/(127\.\d+\.\d+\.\d+|localhost|\[::1\])(:|\/|$)/i.test(payload.nats)) {
+  console.error(`WARNING: the token's NATS URL is ${payload.nats} (loopback). A worker would connect to its own machine, and a single-node lead's bus listens on 127.0.0.1 only. Workers need a bus bound to an address they can reach (install.sh --cluster-peers=... --cluster-bind=...); reissue with OPENCLAW_NATS=nats://<lead-tailnet-ip>:4222 node bin/mesh-join-token.js.`);
+}
+
 if (ONE_LINER) {
   console.log(`curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/mesh-install.sh | MESH_JOIN_TOKEN=${token} bash`);
 } else {
