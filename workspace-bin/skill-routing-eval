@@ -23,6 +23,7 @@ import os
 import json
 import argparse
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -57,10 +58,13 @@ class C:
 
 # ─── Matching Engine ─────────────────────────────────────────────────────────
 
-def tokenize(text: str) -> set:
+# evaluate() scores every query against every skill, so each trigger string is
+# tokenized once per query; the cache makes that once per string.
+@lru_cache(maxsize=None)
+def tokenize(text: str) -> frozenset:
     """Lowercase, extract word tokens, remove stop words and single chars."""
     words = re.findall(r'\b[a-z0-9]+\b', text.lower())
-    return set(w for w in words if w not in STOP_WORDS and len(w) > 1)
+    return frozenset(w for w in words if w not in STOP_WORDS and len(w) > 1)
 
 
 def jaccard_score(a: set, b: set) -> float:
