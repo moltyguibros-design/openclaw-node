@@ -1116,12 +1116,12 @@ The package installs these commands (npm `bin`); after a global install they're 
 
 ## Environment Variables
 
-See `openclaw.env.example` for all available configuration. Key variables:
+`openclaw.env.example` seeds `~/.openclaw/openclaw.env` (install.sh appends the generated values); the canonical set is [docs/NODE_SPEC.md](docs/NODE_SPEC.md) §3. Key variables:
 
 | Variable | Required | Description |
 |---|---|---|
 | `OPENCLAW_NODE_ID` | Optional | Unique name for this node (auto-detected from hostname if unset) |
-| `OPENCLAW_TIMEZONE` | Yes | Timezone (e.g. `America/Montreal`) |
+| `OPENCLAW_TIMEZONE` | Optional | Timezone (default `America/Montreal`) |
 | `ANTHROPIC_API_KEY` | Optional | For Claude-powered features |
 | `OPENAI_API_KEY` | Optional | For OpenAI-powered features |
 | `GOOGLE_API_KEY` | Optional | For Mission Control TTS voice |

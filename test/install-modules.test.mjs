@@ -566,3 +566,10 @@ test('INSTALL_TEST_PROTOCOL T2 greps the stderr file each memory-daemon unit wri
   // The '/.tmp/' prefix keeps memory-daemon.err from matching inside openclaw-memory-daemon.err.
   for (const f of [linuxErr, macErr]) assert.ok(grepLine.includes(`/.tmp/${f}`), `T2 grep misses ${f}`);
 });
+
+test('README env table agrees with the installer defaults', () => {
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
+  assert.match(moduleSrc['config.sh'], /OPENCLAW_TIMEZONE="\$\{OPENCLAW_TIMEZONE:-America\/Montreal\}"/);
+  assert.doesNotMatch(readme, /^\| `OPENCLAW_TIMEZONE` \| Yes \|/m, 'a defaulted key is not required');
+  assert.doesNotMatch(readme, /for all available configuration/);
+});
