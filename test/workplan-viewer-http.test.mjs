@@ -103,7 +103,10 @@ test('all private routes reject anonymous access before effects; the shell expos
   assert.match(shell.headers['content-security-policy'], /script-src 'self'/);
   assert.match(shell.headers['content-security-policy'], /frame-ancestors 'none'/);
   assert.equal(shell.headers['access-control-allow-origin'], undefined);
-  assert.equal((await f.request('/viewer-client.js')).status, 200);
+  const client = await f.request('/viewer-client.js');
+  assert.equal(client.status, 200);
+  assert.ok(!client.text.includes('\\\\n'), 'client strings must not contain a literal backslash-n');
+  assert.ok(!client.text.includes('memory-plan/BLOCKED.md'), 'BLOCKED.md lives in the plan silo');
   assert.equal((await f.request('/viewer-session.mjs')).status, 200);
 });
 

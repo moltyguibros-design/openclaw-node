@@ -219,7 +219,7 @@ setInterval(refreshState, 10000);
 // Header pause/resume button.
 $('header-pause-btn').addEventListener('click', async () => {
   if (state.lastBlocked) {
-    if (!confirm('Resume the plan?\\n\\nDeletes BLOCKED.md so the next tick runs.')) return;
+    if (!confirm('Resume the plan?\n\nDeletes BLOCKED.md so the next tick runs.')) return;
     await doUnblock();
   } else {
     // Quick pause: prompt for trigger, use simple defaults.
@@ -555,7 +555,7 @@ async function renderBlock() {
       (state.lastLocked
         ? '<div class="note"><strong>Note:</strong> a tick is currently still running. Pausing only prevents future ticks — the in-flight tick will finish on its own (it does not check the block file mid-run).</div>'
         : '') +
-      '<div class="meta-row">file: memory-plan/BLOCKED.md · trigger: ' + esc(trigger) + '</div>' +
+      '<div class="meta-row">file: memory-plan/plans/' + esc(state.planId) + '/BLOCKED.md · trigger: ' + esc(trigger) + '</div>' +
       '<div class="actions">' +
         '<button class="primary" id="btn-resume">▶ Resume (delete BLOCKED.md)</button>' +
         '<button class="danger" id="btn-edit-block">Edit reason</button>' +
@@ -563,7 +563,7 @@ async function renderBlock() {
       '<div id="block-toast"></div>' +
       '<div class="doc-render">' + esc(data.content || '(empty)') + '</div>';
     $('btn-resume').addEventListener('click', async () => {
-      if (!confirm('Resume the plan?\\n\\nDeletes BLOCKED.md so the next tick runs. If the scheduler was auto-unloaded by a previous fast-exit, it will also be reloaded.')) return;
+      if (!confirm('Resume the plan?\n\nDeletes BLOCKED.md so the next tick runs. If the scheduler was auto-unloaded by a previous fast-exit, it will also be reloaded.')) return;
       const res = await doUnblock();
       if (res.error) showToast('block-toast', 'Error: ' + res.error, true);
       else {
@@ -592,7 +592,7 @@ async function renderBlock() {
     $('btn-pause').addEventListener('click', async () => {
       const trigger = $('block-trigger').value.trim() || 'operator pause';
       const detail  = $('block-detail').value;
-      if (!confirm('Pause future ticks?\n\nWrites memory-plan/BLOCKED.md. The current tick (if any) continues.')) return;
+      if (!confirm('Pause future ticks?\n\nWrites memory-plan/plans/' + state.planId + '/BLOCKED.md. The current tick (if any) continues.')) return;
       const res = await doBlock({ trigger, detail });
       showToast('block-toast', res.error ? 'Error: ' + res.error : 'Paused — BLOCKED.md written.', !!res.error);
     });
@@ -877,8 +877,8 @@ async function renderAutomation() {
       const newMode = btn.dataset.mode;
       if (newMode === effMode) return;
       const msg = newMode === 'chain'
-        ? 'Switch to CHAIN mode? Next tick fires as soon as the previous one exits (min ' + esc(currentThrottle) + 's gap).\\n\\nThe scheduler will reload now.'
-        : 'Switch to INTERVAL mode? Next tick fires every ' + Math.round(currentInterval / 60) + ' min on a fixed cadence.\\n\\nThe scheduler will reload now.';
+        ? 'Switch to CHAIN mode? Next tick fires as soon as the previous one exits (min ' + esc(currentThrottle) + 's gap).\n\nThe scheduler will reload now.'
+        : 'Switch to INTERVAL mode? Next tick fires every ' + Math.round(currentInterval / 60) + ' min on a fixed cadence.\n\nThe scheduler will reload now.';
       if (!confirm(msg)) return;
       const r2 = await viewerClient.request('/api/plans/' + state.planId + '/automation/config', {
         method: 'PUT',
@@ -975,7 +975,7 @@ async function renderAutomation() {
   });
   const runOnceBtn = $('btn-run-once');
   if (runOnceBtn) runOnceBtn.addEventListener('click', async () => {
-    if (!confirm('Run one tick now?\\n\\nSpawns the wrapper directly (no launchd involvement). Use this to cold-start without committing to a schedule.')) return;
+    if (!confirm('Run one tick now?\n\nSpawns the wrapper directly (no launchd involvement). Use this to cold-start without committing to a schedule.')) return;
     const r2 = await viewerClient.request('/api/plans/' + state.planId + '/automation/run-once', { method: 'POST' });
     const res = await r2.json();
     if (res.error) showToast('action-toast', 'Error: ' + res.error, true);
