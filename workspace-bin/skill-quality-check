@@ -121,7 +121,7 @@ event = {
     'category': 'quality_audit',
     'summary': data['summary'],
     'changes': {
-        'regressions': data['regressions'].removeprefix('REGRESSIONS: ').split(', ') if data['regressions'] != 'OK' else [],
+        'regressions': data['regressions'][len('REGRESSIONS: '):].split(', ') if data['regressions'] != 'OK' else [],
         'improvements': data['improvements'].split(',') if data['improvements'] != 'none' else []
     }
 }
