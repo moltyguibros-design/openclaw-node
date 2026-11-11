@@ -657,14 +657,12 @@ async function handleCancel(msg) {
   const { task_id, reason } = params;
   if (!task_id) return respondError(msg, 'task_id is required');
 
-  const task = await store.get(task_id);
-  if (!task) return respondError(msg, `Task ${task_id} not found`);
-  if (!(await authorize(msg, params, task, { action: 'cancel' }))) return;
+  const existing = await store.get(task_id);
+  if (!existing) return respondError(msg, `Task ${task_id} not found`);
+  if (!(await authorize(msg, params, existing, { action: 'cancel' }))) return;
 
-  task.status = TASK_STATUS.CANCELLED;
-  task.completed_at = new Date().toISOString();
-  task.result = { success: false, summary: reason || 'cancelled' };
-  await store.put(task);
+  const task = await store.markCancelled(task_id, reason || 'cancelled');
+  if (!task) return respondUnchanged(msg, task_id);
 
   log(`CANCEL ${task_id}: ${reason || 'no reason'}`);
   publishEvent('cancelled', task);
@@ -2932,6 +2930,7 @@ if (require.main === module) {
     handleHeartbeat: (msg) => handleHeartbeat(msg),
     handleRelease: (msg) => handleRelease(msg),
     handleTaskReject: (msg) => handleTaskReject(msg),
+    handleCancel: (msg) => handleCancel(msg),
     handleTaskMerged: (msg) => handleTaskMerged(msg),
     handlePlanCreate: (msg) => handlePlanCreate(msg),
     handlePlanApprove: (msg) => handlePlanApprove(msg),

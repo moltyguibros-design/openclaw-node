@@ -367,6 +367,30 @@ describe('a stall or budget sweep leaves a subtask that completed under it alone
   });
 });
 
+describe('handleCancel keeps a completed task as it is', () => {
+  const cancel = (h, task_id) => h.rpc('handleCancel', signOperatorRequest({ task_id, reason: 'stop' }, { identity: operator, nodeId: 'operator' }));
+
+  it('a completed task with a kept branch is refused and keeps its result', async () => {
+    const h = harness();
+    await h.store.put({ ...createTask({ task_id: 'T-done', title: 'done work' }), status: 'completed', owner: 'victim', result: { success: true, sha: 'abc123', merged: false } });
+    const reply = await cancel(h, 'T-done');
+    assert.equal(reply.ok, false);
+    assert.equal(reply.code, 'TASK_TERMINAL');
+    const stored = await h.store.get('T-done');
+    assert.equal(stored.status, 'completed');
+    assert.equal(stored.result.sha, 'abc123');
+  });
+
+  it('a queued task still cancels', async () => {
+    const h = harness();
+    assert.equal((await h.rpc('handleSubmit', { task_id: 'T-q', title: 'q', metric: 'npm test' })).ok, true);
+    const reply = await cancel(h, 'T-q');
+    assert.equal(reply.ok, true, reply.error);
+    assert.equal(reply.data.status, 'cancelled');
+    assert.equal((await h.store.get('T-q')).result.summary, 'stop');
+  });
+});
+
 describe('handleSubmit builds the collab session before it stores the task', () => {
   it('an envelope-level preferred_mode picks the session mode when the spec names none', async () => {
     const h = harness();
