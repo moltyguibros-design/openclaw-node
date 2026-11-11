@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -163,6 +163,44 @@ test('wave 2 treats an already-recorded remote endpoint the same way', () => {
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /LLM endpoint\s+: http:\/\/192\.168\.64\.1:11434/);
+});
+
+const wave2 = (m, args) => {
+  const r = spawnSync('bash', [LLM_SETUP, ...args], {
+    env: { ...m.env, ENV_FILE: m.envFile, OPENCLAW_ROOT: m.dir, REPO_DIR: ROOT, NODE_BIN: process.execPath },
+    encoding: 'utf8',
+  });
+  return { ...r, out: r.stdout.replace(/\x1b\[[0-9;]*m/g, '') };
+};
+
+test('wave 2 sizes the embedder from the transformers.js cache, not the Python HF cache', () => {
+  const cached = machine(UTM_VM);
+  const onnx = join(cached.dir, 'workspace/node_modules/@huggingface/transformers/.cache/Xenova/bge-m3/onnx');
+  mkdirSync(onnx, { recursive: true });
+  writeFileSync(join(onnx, 'model.onnx'), '');
+  const hit = wave2(cached, ['--check']);
+  assert.equal(hit.status, 0, hit.out + hit.stderr);
+  assert.match(hit.out, /Embedder\s+: already cached/);
+  assert.match(hit.out, /Total download : ~0 GB/);
+
+  const pythonOnly = machine(UTM_VM);
+  mkdirSync(join(pythonOnly.dir, '.cache/huggingface/hub'), { recursive: true });
+  writeFileSync(join(pythonOnly.dir, '.cache/huggingface/hub/config.json'), '{"_name_or_path": "BAAI/bge-m3"}');
+  const miss = wave2(pythonOnly, ['--check']);
+  assert.equal(miss.status, 0, miss.out + miss.stderr);
+  assert.match(miss.out, /Embedder\s+: Xenova\/bge-m3\s+\(~2 GB/);
+  assert.match(miss.out, /Total download : ~2 GB/);
+});
+
+test('wave 2 summary names the model once', () => {
+  const m = machine({ STUB_VMM: '0' });
+  const r = wave2(m, ['--endpoint', 'http://192.0.2.7:8000', '--model', 'm1']);
+  assert.equal(r.status, 0, r.out + r.stderr);
+  assert.match(r.out, /Wave 2 complete — model: endpoint http:\/\/192\.0\.2\.7:8000 \(m1\)$/m);
+  assert.match(readFileSync(m.envFile, 'utf8'), /^LLM_MODEL=m1$/m);
+  const retry = wave2(machine({ STUB_VMM: '0' }), ['--embedder-only']);
+  assert.equal(retry.status, 0, retry.out + retry.stderr);
+  assert.match(retry.out, /Wave 2 complete — model: unchanged$/m);
 });
 
 test('the install wiring: config.sh bridges before rendering; only a local URL starts or pulls ollama', () => {

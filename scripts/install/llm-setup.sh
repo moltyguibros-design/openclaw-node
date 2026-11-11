@@ -95,8 +95,11 @@ else                            REC="";        REC_GB=0
 fi
 
 CURRENT=$(grep -m1 '^LLM_MODEL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
+# transformers.js caches beside its package (core.mjs sets no cacheDir), reached through the
+# workspace link. Presence only sizes the download: a half-written cache file also exists, so
+# the warm-up below runs regardless.
 EMBEDDER_NEEDED=true
-[ -d "$HOME/.cache/huggingface" ] && grep -qri 'bge-m3' "$HOME/.cache/huggingface" 2>/dev/null && EMBEDDER_NEEDED=false
+[ -n "$(find "$WORKSPACE/node_modules/@huggingface/transformers/.cache/Xenova/bge-m3" -name '*.onnx*' -print -quit 2>/dev/null)" ] && EMBEDDER_NEEDED=false
 
 echo ""
 echo "  Detected RAM   : ${RAM_GB} GB"
@@ -301,7 +304,7 @@ fi
 fi  # SKIP_PULL
 
 # ---------- embedder ----------
-if $EMBEDDER_NEEDED && [ -d "$WORKSPACE/node_modules/@huggingface/transformers" ]; then
+if [ -d "$WORKSPACE/node_modules/@huggingface/transformers" ]; then
   step "Prefetching embedder Xenova/bge-m3 (~2 GB, one-time)"
   # Keep the reason. core.mjs raises a precise error (403, offline, no disk,
   # missing dep) and the old `else warn ...` threw it away, so a failed prefetch
@@ -327,7 +330,10 @@ elif $EMBEDDER_NEEDED; then
 fi
 
 echo ""
-ok "Wave 2 complete — model: ${CHOICE:-${ENDPOINT:+endpoint $ENDPOINT ($ENDPOINT_MODEL)}}${CHOICE:-${ENDPOINT:-unchanged}}"
+if [ -n "$CHOICE" ]; then MODEL_SUMMARY="$CHOICE"
+elif [ -n "$ENDPOINT" ]; then MODEL_SUMMARY="endpoint $ENDPOINT ($ENDPOINT_MODEL)"
+else MODEL_SUMMARY=unchanged; fi
+ok "Wave 2 complete — model: $MODEL_SUMMARY"
 info "Restart the services so they pick it up:"
 echo "    bash $REPO_DIR/install.sh --update --enable-services"
 echo ""
