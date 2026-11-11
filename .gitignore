@@ -34,3 +34,7 @@ memory-plan/plans/*/.tick.lock/
 memory-plan/plans/*/TIMELINE.md
 automation.json
 .codex/
+
+# Memory daemon output when OPENCLAW_WORKSPACE is unset and it falls back to a checkout
+/.daemon-state-*.md
+/memory/
