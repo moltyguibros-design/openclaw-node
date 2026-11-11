@@ -194,7 +194,7 @@ export async function processResults(resultsList, dryRun = false) {
       // Append failures to lessons
       if (r.result === 'failure' && r.errorPattern) {
         const today = new Date().toISOString().split('T')[0];
-        const entry = `[error] Sub-agent ${r.soulId} failed: ${r.errorPattern} (auto-extracted, ${today})\n`;
+        const entry = `[error] Sub-agent ${r.soulId} failed: ${r.errorPattern} (auto-extracted) (${today})\n`;
         try {
           fs.appendFileSync(LESSONS_FILE, entry);
         } catch { /* lessons file might not exist */ }
