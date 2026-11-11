@@ -1789,9 +1789,10 @@ async function executeCollabTask(task) {
       let artifacts = [];
       try {
         if (worktreePath) {
+          // Untrimmed: the first record's status column can start with a space.
           const status = require('child_process').execSync('git status --porcelain', {
             cwd: worktreePath, timeout: 5000, encoding: 'utf-8',
-          }).trim();
+          });
           artifacts = status.split('\n').filter(Boolean).map(line => line.slice(3));
         }
       } catch { /* best effort */ }

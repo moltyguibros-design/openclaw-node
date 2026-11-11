@@ -45,6 +45,14 @@ registerProvider('collab-stub', {
   buildArgs(prompt, model, task) { return ['-e', 'process.stdout.write(process.argv[1])', task.stub_output]; },
 });
 
+// Like collab-stub, but first edits README in the worktree it was given (left unstaged, as a real worker leaves it).
+registerProvider('collab-edit-stub', {
+  binary: process.execPath,
+  buildArgs(prompt, model, task, targetDir) {
+    return ['-e', "require('fs').appendFileSync(require('path').join(process.argv[1], 'README'), 'x\\n'); process.stdout.write(process.argv[2])", targetDir, task.stub_output];
+  },
+});
+
 after(() => fs.rmSync(TMP, { recursive: true, force: true }));
 
 function freshWorkspace() {
@@ -120,6 +128,17 @@ describe('collab telemetry', () => {
     assert.equal(rows.length, 1);
     assert.equal(rows[0].outcome, 'success');
     assert.equal(rows[0].iterations, 2);
+  });
+});
+
+describe('collab reflection artifacts', () => {
+  beforeEach(freshWorkspace);
+
+  it('name an unstaged edit by its full path', async () => {
+    const reflections = fakeBus([{ round_number: 1, mode: 'parallel', my_role: 'worker', my_scope: [], shared_intel: '' }], 1);
+    await agent.__test.executeCollabTask({ ...collabTask('C-art', 'parallel', 'edited'), llm_provider: 'collab-edit-stub' });
+    assert.equal(reflections.length, 1);
+    assert.deepEqual(reflections[0].artifacts, ['README']);
   });
 });
 
