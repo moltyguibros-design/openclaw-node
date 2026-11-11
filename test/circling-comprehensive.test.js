@@ -855,4 +855,27 @@ describe('Schema: circling defaults', () => {
     const s = createSession('t', { mode: 'circling_strategy' });
     assert.deepEqual(s.circling.artifact_failures, {});
   });
+
+  it('circling_strategy max_nodes defaults to 3', () => {
+    assert.equal(createSession('t', { mode: 'circling_strategy' }).max_nodes, 3);
+  });
+
+  it('circling_strategy clamps an explicit max_nodes above 3', () => {
+    assert.equal(createSession('t', { mode: 'circling_strategy', max_nodes: 5 }).max_nodes, 3);
+  });
+
+  it('parallel max_nodes stays unlimited by default', () => {
+    assert.equal(createSession('t', { mode: 'parallel' }).max_nodes, null);
+  });
+
+  it('a default circling session refuses a 4th node', async () => {
+    const store = new CollabStore(new MockKV());
+    const session = createSession('t', { mode: 'circling_strategy' });
+    await store.put(session);
+    for (const id of ['n1', 'n2', 'n3']) {
+      assert.ok(await store.addNode(session.session_id, id), `${id} joins`);
+    }
+    assert.equal(await store.addNode(session.session_id, 'n4'), null);
+    assert.equal((await store.get(session.session_id)).nodes.length, 3);
+  });
 });
