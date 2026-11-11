@@ -437,7 +437,7 @@ export function serializeTasksMarkdown(tasks: ParsedTask[]): string {
     const lines: string[] = [];
     lines.push(`- task_id: ${t.id}`);
     lines.push(`  title: ${one(t.title)}`);
-    lines.push(`  status: ${t.status}`);
+    lines.push(`  status: ${one(t.status)}`);
     lines.push(`  owner: ${one(t.owner ?? "main")}`);
 
     if (t.successCriteria.length > 0) {
@@ -466,7 +466,7 @@ export function serializeTasksMarkdown(tasks: ParsedTask[]): string {
       lines.push(`  project: ${one(t.project)}`);
     }
     if (t.type && t.type !== "task") {
-      lines.push(`  type: ${t.type}`);
+      lines.push(`  type: ${one(t.type)}`);
     }
     if (t.parentId) {
       lines.push(`  parent_id: ${one(t.parentId)}`);
@@ -488,7 +488,7 @@ export function serializeTasksMarkdown(tasks: ParsedTask[]): string {
       lines.push(`  needs_approval: false`);
     }
     if (t.triggerKind !== "none") {
-      lines.push(`  trigger_kind: ${t.triggerKind}`);
+      lines.push(`  trigger_kind: ${one(t.triggerKind)}`);
     }
     if (t.triggerAt) {
       lines.push(`  trigger_at: ${one(t.triggerAt)}`);

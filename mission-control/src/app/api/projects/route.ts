@@ -56,9 +56,9 @@ export async function POST(request: NextRequest) {
     const db = getDb();
     const body = await request.json();
 
-    if (!body.id || !body.title) {
+    if (!body.id || !body.title || typeof body.id !== "string" || /[\r\n]/.test(body.id)) {
       return NextResponse.json(
-        { error: "id and title are required" },
+        { error: "id (single-line string) and title are required" },
         { status: 400 }
       );
     }

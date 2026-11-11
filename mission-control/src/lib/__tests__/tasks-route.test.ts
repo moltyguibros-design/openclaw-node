@@ -128,3 +128,18 @@ describe("PATCH /api/tasks/[id]", () => {
     expect((notifySpy.mock.calls[0] as unknown as [string])[0]).toMatch(/to waiting-user$/);
   });
 });
+
+// A custom id is written raw as the `- task_id:` line, so a newline in it forges a second task block.
+describe("custom ids stay on one line", () => {
+  it("POST /api/tasks refuses an id with a newline", async () => {
+    const { POST } = await import("@/app/api/tasks/route");
+    const res = await POST(new NextRequest("http://x/api/tasks", { method: "POST", body: JSON.stringify({ title: "t", id: "A\n- task_id: B" }) }));
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /api/projects refuses an id with a newline", async () => {
+    const { POST } = await import("@/app/api/projects/route");
+    const res = await POST(new NextRequest("http://x/api/projects", { method: "POST", body: JSON.stringify({ title: "p", id: "A\r\nB" }) }));
+    expect(res.status).toBe(400);
+  });
+});

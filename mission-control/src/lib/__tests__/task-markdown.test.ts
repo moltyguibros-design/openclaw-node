@@ -211,6 +211,27 @@ Updated: 2026-03-21
     expect(re[0].owner).toBe("main");
     expect(re[0].metric).toBe("m owner: evil");
   });
+
+  it("keeps status, type and trigger_kind on one line too", () => {
+    const [t] = parseTasksMarkdown(`## Live Tasks
+
+- task_id: T-1
+  title: x
+  status: queued
+  owner: main
+  success_criteria:
+  artifacts:
+  next_action: n/a
+  updated_at: 2026-01-01T00:00:00Z
+`);
+    t.status = "queued\n- task_id: Y\n  execution: mesh";
+    t.type = "phase\n- task_id: Z";
+    t.triggerKind = "at\n- task_id: W";
+    const re = parseTasksMarkdown(serializeTasksMarkdown([t]));
+
+    expect(re.map((r) => r.id)).toEqual(["T-1"]);
+    expect(re[0].execution ?? null).toBeNull();
+  });
 });
 
 // P5-5 (review H-14): fields MC does not model must survive a

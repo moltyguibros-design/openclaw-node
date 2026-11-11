@@ -156,6 +156,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    // The id is written raw as the `- task_id:` line of active-tasks.md.
+    if (typeof body.id === "string" && /[\r\n]/.test(body.id)) {
+      return NextResponse.json({ error: "id must be a single line" }, { status: 400 });
+    }
 
     const status = body.status || "not started";
     const now = new Date();
