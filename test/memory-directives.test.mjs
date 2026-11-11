@@ -328,6 +328,49 @@ describe('wrapGemini with directives', () => {
     // Directive stripped from content
     assert.equal(result._content, 'test');
   });
+
+  it('keys directives on the LAST user turn of a multi-turn request', async () => {
+    const { wrapGemini } = await import('../lib/publishers/gemini-wrapper.mjs');
+    let retrieveCalled = false;
+    const injector = {
+      retrieve: async () => { retrieveCalled = true; return { concepts: [{ name: 'NATS', type: 'tool' }], decisions: [], snippets: [] }; },
+    };
+    const model = {
+      generateContent: async (content) => ({ response: { text: () => 'ok' }, _content: content }),
+    };
+    wrapGemini(model, { publish: async () => {} }, { injector });
+    const result = await model.generateContent({
+      contents: [
+        { role: 'user', parts: [{ text: 'first question about NATS' }] },
+        { role: 'model', parts: [{ text: 'answer' }] },
+        { role: 'user', parts: [{ text: '@memory off latest question' }] },
+      ],
+    });
+    assert.equal(retrieveCalled, false);
+    assert.equal(result._content.contents.length, 3);
+    assert.equal(result._content.contents[2].parts[0].text, 'latest question');
+    assert.equal(result._content.contents[0].parts[0].text, 'first question about NATS');
+  });
+
+  it('retrieves on the LAST user turn of a multi-turn request', async () => {
+    const { wrapGemini } = await import('../lib/publishers/gemini-wrapper.mjs');
+    let capturedQuery = null;
+    const injector = {
+      retrieve: async (query) => { capturedQuery = query; return { concepts: [], decisions: [], snippets: [] }; },
+    };
+    const model = {
+      generateContent: async (content) => ({ response: { text: () => 'ok' }, _content: content }),
+    };
+    wrapGemini(model, { publish: async () => {} }, { injector });
+    await model.generateContent({
+      contents: [
+        { role: 'user', parts: [{ text: 'first' }] },
+        { role: 'model', parts: [{ text: 'a' }] },
+        { role: 'user', parts: [{ text: 'latest about NATS' }] },
+      ],
+    });
+    assert.equal(capturedQuery, 'latest about NATS');
+  });
 });
 
 describe('wrapMiniMax with directives', () => {
