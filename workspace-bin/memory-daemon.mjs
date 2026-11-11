@@ -40,7 +40,7 @@ const { createTracer } = require('../lib/tracer');
 const tracer = createTracer('memory-daemon');
 
 // --- Hermes-inspired modules ---
-import { shouldFlush, USE_LLM_EXTRACTION } from '../lib/pre-compression-flush.mjs';
+import { USE_LLM_EXTRACTION } from '../lib/pre-compression-flush.mjs';
 import { createBudget } from '../lib/memory-budget.mjs';
 import { createSessionTraceEmitter } from './session-trace-emitter.mjs';
 import { createLocalEventLog, buildMemoryEvent } from '../lib/local-event-log.mjs';
@@ -272,6 +272,7 @@ function _detectActivity(sources, activityWindowMs) {
   let newestMtime = 0;
   let newestSource = null;
   let newestFormat = null;
+  const recentFiles = [];
 
   for (const source of sources) {
     if (!fs.existsSync(source.path)) {
@@ -296,7 +297,7 @@ function _detectActivity(sources, activityWindowMs) {
       try {
         const stat = fs.statSync(full);
         const mtime = stat.mtimeMs;
-        if (mtime > cutoff) active = true;
+        if (mtime > cutoff) { active = true; recentFiles.push(full); }
         if (mtime > newestMtime) {
           newestMtime = mtime;
           newestSession = path.basename(f, '.jsonl');
@@ -307,7 +308,7 @@ function _detectActivity(sources, activityWindowMs) {
     }
   }
 
-  const result = { active, newestSession, newestMtime, newestSource, newestFormat };
+  const result = { active, newestSession, newestMtime, newestSource, newestFormat, recentFiles };
   if (process.env.OPENCLAW_LOG_LEVEL === 'debug') {
     const ageMs = newestMtime ? Math.round(Date.now() - newestMtime) : -1;
     console.log(`[memory-daemon] Activity: source=${newestSource || 'none'} age=${ageMs}ms`);
@@ -1981,24 +1982,13 @@ async function main() {
       }
 
       // 4.5. Phase 1.5: Session trace emission (real-time JSONL → observability feed)
-      // Scan ALL transcript sources for recently-modified JSONL files.
-      // Multiple agents may be active simultaneously (Claude Code + gateway + etc.)
+      // Every recently-modified JSONL across ALL sources, as found by step 1's
+      // scan: multiple agents may be active at once (Claude Code + gateway + etc.).
+      // processNewEntries reads by offset, so a file that turned recent during
+      // the transitions above is caught up on the next tick.
       if (sm.state === STATES.ACTIVE) {
-        const recentCutoff = Date.now() - (config.intervals?.activityWindowMs || 900000);
-        for (const source of loadTranscriptSources()) {
-          if (!fs.existsSync(source.path)) continue;
-          try {
-            const files = fs.readdirSync(source.path).filter(f => f.endsWith('.jsonl'));
-            for (const f of files) {
-              const full = path.join(source.path, f);
-              try {
-                const fstat = fs.statSync(full);
-                if (fstat.mtimeMs > recentCutoff) {
-                  traceEmitter.processNewEntries(full);
-                }
-              } catch { /* skip unreadable files */ }
-            }
-          } catch { /* skip unreadable dirs */ }
+        for (const full of activity.recentFiles) {
+          try { traceEmitter.processNewEntries(full); } catch { /* skip unreadable files */ }
         }
       }
 

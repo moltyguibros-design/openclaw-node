@@ -128,3 +128,13 @@ test('session imports take source and format from the transcript\'s own source d
   assert.equal(sourceOfJsonl(sources, '/elsewhere/x.jsonl'), null);
   assert.doesNotMatch(src, /activity\.newest(Source|Format)/, 'the newest file\'s source labels a different transcript');
 });
+
+test('a tick scans the transcript dirs once and the dead shouldFlush import is gone', () => {
+  assert.doesNotMatch(src, /import\s*\{[^}]*\bshouldFlush\b[^}]*\}\s*from '\.\.\/lib\/pre-compression-flush\.mjs'/);
+  const start = src.indexOf('async function tick()');
+  const end = src.indexOf('// 5. HyperAgent maintenance', start);
+  assert.ok(start > 0 && end > start, 'could not bound the tick body');
+  const body = src.slice(start, end);
+  assert.ok(!body.includes('readdirSync('), 'Phase 1.5 must reuse detectActivity\'s scan, not rescan every source');
+  assert.equal((body.match(/loadTranscriptSources\(\)/g) || []).length, 1);
+});
