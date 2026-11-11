@@ -1,4 +1,4 @@
-import { eq, and, ne, or, like, desc, isNull } from "drizzle-orm";
+import { eq, and, ne, or, isNull } from "drizzle-orm";
 import { CronExpressionParser } from "cron-parser";
 import { writeFileSync, mkdirSync } from "fs";
 import path from "path";
@@ -10,6 +10,7 @@ import { logActivity } from "./activity";
 import { WORKSPACE_ROOT, AGENT_NAME, DISPATCH_SIGNAL_FILE } from "./config";
 import { gatewayNotify } from "./gateway-notify";
 import { traceCall } from "./tracer";
+import { generateTaskId } from "./task-id";
 
 
 export interface Wave {
@@ -241,7 +242,7 @@ export function schedulerTick(): TickResult {
     .all();
 
   for (const t of recurringDone) {
-    const newId = generateNextId(db, now);
+    const newId = generateTaskId(db, now);
 
     // Compute next trigger_at for cron-based recurring tasks
     let nextTriggerAt: string | null = null;
@@ -432,29 +433,4 @@ export function schedulerTick(): TickResult {
     traceCall("scheduler", "schedulerTick", _start, undefined, err);
     throw err;
   }
-}
-
-function generateNextId(
-  db: ReturnType<typeof getDb>,
-  date: Date
-): string {
-  const dateStr =
-    date.getFullYear().toString() +
-    (date.getMonth() + 1).toString().padStart(2, "0") +
-    date.getDate().toString().padStart(2, "0");
-
-  const prefix = `T-${dateStr}-`;
-  const row = db
-    .select({ id: tasks.id })
-    .from(tasks)
-    .where(like(tasks.id, `${prefix}%`))
-    .orderBy(desc(tasks.id))
-    .limit(1)
-    .get();
-
-  let nextSeq = 1;
-  if (row) {
-    nextSeq = (parseInt(row.id.slice(prefix.length), 10) || 0) + 1;
-  }
-  return `${prefix}${nextSeq.toString().padStart(3, "0")}`;
 }

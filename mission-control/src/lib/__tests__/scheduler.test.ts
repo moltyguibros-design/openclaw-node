@@ -87,6 +87,16 @@ test("a recurring cron task recreated inside its slot's window waits for the nex
   expect(schedulerTick().triggered).toContain(newId);
 });
 
+test("a recreated recurring task takes the numeric next id past 999 for the day", async () => {
+  vi.setSystemTime(new Date("2026-11-11T15:00:00.000Z"));
+  const { insert, schedulerTick } = await load();
+  insert({ id: "T-20261111-999", status: "done", kanbanColumn: "done" });
+  insert({ id: "T-20261111-1000", status: "done", kanbanColumn: "done" });
+  insert({ id: "R-1", status: "done", kanbanColumn: "done", isRecurring: 1 });
+
+  expect(schedulerTick().recurring).toEqual(["T-20261111-1001"]);
+});
+
 test("an ISO-Z trigger in the past still fires and counts as overdue past the grace window", async () => {
   vi.setSystemTime(new Date("2026-11-11T15:00:00.000Z"));
   const { insert, schedulerTick, schedulerStatus } = await load();
