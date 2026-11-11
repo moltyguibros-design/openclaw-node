@@ -518,8 +518,9 @@ Full walkthrough: [docs/MULTI_NODE_DEPLOY.md](docs/MULTI_NODE_DEPLOY.md). *Hones
 config/auth mechanism is built and drill-verified; real machine-loss failover awaits a
 multi-machine T7 run.*
 
-> The older Tailscale auto-mesh (installer Step 17, `npx openclaw-mesh`) still exists but is the
-> legacy path, slated for retirement (D4).
+> The old standalone `npx openclaw-mesh` fleet layer is retired (federation D4) and must not be
+> run: that npm name now belongs to an unrelated third party. Installer Step 17 only installs the
+> mesh skill; the mesh itself is this repo's `bin/mesh*.js` and the rendered service units.
 
 ### Mesh commands
 

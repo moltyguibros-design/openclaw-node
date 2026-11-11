@@ -221,6 +221,13 @@ test('INSTALL_TEST_PROTOCOL T4 matches the D11 worker guard and the mesh CLI', (
   assert.doesNotMatch(protocol, /inherit `ollama`/);
 });
 
+test('the retired npx openclaw-mesh layer is neither advertised nor run', () => {
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
+  assert.doesNotMatch(readme, /`npx openclaw-mesh`\) still exists/);
+  const code = moduleSrc['integrations.sh'].split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.doesNotMatch(code, /npx\s+(--yes\s+)?openclaw-mesh/);
+});
+
 test('installer links scoped packages into both deployed parent trees', () => {
   const workspace = moduleSrc['workspace.sh'];
   assert.ok(workspace.includes('for scoped_dir in "$pkgdir"*/'));
