@@ -115,31 +115,36 @@ For deploying across real machines, each machine runs one NATS node. The config 
 
 ### 1. Per-node config
 
-Copy `services/nats/nats-1.conf` to each machine and modify:
-
-**Machine A** (e.g., `10.0.1.10`):
+Render `services/nats/nats-cluster-node.conf` on each machine with
+`install.sh --cluster-peers=<other two> --cluster-bind=<own IP>` (docs/MULTI_NODE_DEPLOY.md §2.2).
+Machine A's result (`10.0.1.10`):
 ```
-server_name: openclaw-nats-1
-listen: 0.0.0.0:4222
-http_port: 8222
+server_name: openclaw-nats-<node id>
+listen: 10.0.1.10:4222
+http: 127.0.0.1:8222
+include "nats-auth.conf"
 
 jetstream {
-  store_dir: ~/.openclaw/nats/jetstream
+  store_dir: <home>/.openclaw/nats/jetstream
   max_mem: 256MB
-  max_file: 1GB
+  max_file: 2GB
 }
 
 cluster {
   name: openclaw-cluster
-  listen: 0.0.0.0:6222
+  listen: 10.0.1.10:6222
+  authorization {
+    user: "openclaw-route"
+    password: "<OPENCLAW_NATS_CLUSTER_PASS>"
+  }
   routes = [
-    nats-route://10.0.1.11:6222
-    nats-route://10.0.1.12:6222
+    nats-route://openclaw-route:<OPENCLAW_NATS_CLUSTER_PASS>@10.0.1.11:6222
+    nats-route://openclaw-route:<OPENCLAW_NATS_CLUSTER_PASS>@10.0.1.12:6222
   ]
 }
 ```
 
-**Machine B** (`10.0.1.11`) and **Machine C** (`10.0.1.12`): same structure, routes point to the other two machines. All use the same ports (4222/6222/8222) since they're on separate hosts.
+**Machine B** (`10.0.1.11`) and **Machine C** (`10.0.1.12`): same structure, routes point to the other two machines. Each binds 4222/6222 on its own address; the 8222 monitor stays on loopback.
 
 ### 2. Firewall rules
 
@@ -149,7 +154,6 @@ Open the following ports between all three machines:
 |------|----------|---------|
 | 4222 | TCP | NATS client connections |
 | 6222 | TCP | NATS cluster gossip + replication |
-| 8222 | TCP | HTTP monitoring (optional, restrict to admin network) |
 
 ### 3. systemd service (Linux)
 
