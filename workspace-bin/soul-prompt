@@ -216,8 +216,11 @@ print(f'Trust: {trust} | Tier: {tier} | Autonomy: {autonomy} | Track record: {su
 fi
 
 # 7b. Circuit breaker check
-CB_OUT=$("$WORKSPACE/bin/trust-registry" check "${SOUL_ID}" 2>/dev/null) || true
-if echo "$CB_OUT" | grep -q "OPEN"; then
+# Exit 1 is the only "blocked" answer: HALF_OPEN with a probe allowed exits 0,
+# and a missing registry (127) must not warn.
+CB_RC=0
+"$WORKSPACE/bin/trust-registry" check "${SOUL_ID}" >/dev/null 2>&1 || CB_RC=$?
+if [[ "$CB_RC" -eq 1 ]]; then
   echo "---"
   echo ""
   echo "# ⚡ Circuit Breaker Warning"
