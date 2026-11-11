@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     }
 
     // List mode
-    const items = getItemsWithSource(limit, offset);
+    const items = getItemsWithSource(limit, offset, category);
     return NextResponse.json({ items, limit, offset });
   } catch (err) {
     console.error("GET /api/memory/items error:", err);

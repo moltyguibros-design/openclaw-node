@@ -240,7 +240,7 @@ export function getActiveItems(category?: string) {
 /**
  * Get items with their source document info.
  */
-export function getItemsWithSource(limit = 50, offset = 0) {
+export function getItemsWithSource(limit = 50, offset = 0, category?: string) {
   const raw = getRawDb();
   return raw
     .prepare(
@@ -251,11 +251,11 @@ export function getItemsWithSource(limit = 50, offset = 0) {
         md.date AS source_date
       FROM memory_items mi
       LEFT JOIN memory_docs md ON md.id = mi.source_doc_id
-      WHERE mi.status = 'active'
+      WHERE mi.status = 'active' AND (@category IS NULL OR mi.category = @category)
       ORDER BY mi.created_at DESC
-      LIMIT ? OFFSET ?`
+      LIMIT @limit OFFSET @offset`
     )
-    .all(limit, offset);
+    .all({ category: category ?? null, limit, offset });
 }
 
 /**
