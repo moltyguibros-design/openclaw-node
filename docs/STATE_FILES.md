@@ -36,8 +36,8 @@ default `~/.openclaw/workspace/`). They are **not** committed to any git repo.
 
 ### `memory/YYYY-MM-DD.md`
 
-- **Owner:** `memory-daemon.mjs` → `runPhase0Bootstrap()` (creates today's file with a `# YYYY-MM-DD — Daily Log` header); agent sessions append notes to it (workspace `AGENTS.md`, "Daily notes").
-- **Format:** Markdown. The daemon writes only the header; the rest is free-form notes.
+- **Owner:** created by whichever writer runs first that day: `memory-daemon.mjs` → `runPhase0Bootstrap()` (`# YYYY-MM-DD — Daily Log` header), or on install day `scripts/install/components.sh` Step 15 (`# YYYY-MM-DD` + a "Node initialized on <host>" line). Appended by the Claude Code Stop hook `session-stop.sh` (installed into the workspace's `.claude/hooks/` and wired by `config/claude-settings.json`) and by agent sessions writing notes (workspace `AGENTS.md`, "Daily notes").
+- **Format:** Markdown: a date header, `### Session ended HH:MM:SS UTC` blocks from the Stop hook (commits in the last hour, uncommitted file count), and free-form notes.
 - **Lifetime:** Persistent. One file per day, append-only within the day.
 - **History:** Until redesign step 4.9 (2026-06-01) the hourly daily-log writer also appended timestamped blocks (session recap excerpts, active task state, git diff summaries); that writer was deleted then.
 - **Consumers:**
