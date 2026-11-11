@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, or } from "drizzle-orm";
-import { getDb } from "@/lib/db";
+import { getDb, getRawDb } from "@/lib/db";
 import { tasks, dependencies } from "@/lib/db/schema";
 import { statusToKanban, kanbanToStatus } from "@/lib/parsers/task-markdown";
 import { syncTasksToMarkdown } from "@/lib/sync/tasks";
@@ -67,6 +67,7 @@ export async function DELETE(
     // Recursively collect all descendant IDs (handles project → phase → task)
     const idsToDelete: string[] = [];
     const rows: { id: string; execution: string | null; status: string }[] = [];
+    const seen = new Set<string>([id]);
     function collectDescendants(parentId: string) {
       const children = db
         .select({ id: tasks.id, execution: tasks.execution, status: tasks.status })
@@ -74,6 +75,8 @@ export async function DELETE(
         .where(eq(tasks.parentId, parentId))
         .all();
       for (const child of children) {
+        if (seen.has(child.id)) continue;
+        seen.add(child.id);
         collectDescendants(child.id); // depth-first: grandchildren first
         idsToDelete.push(child.id);
         rows.push(child);
@@ -205,7 +208,16 @@ export async function PATCH(
       update.type = body.type;
     }
     if (body.parent_id !== undefined) {
-      update.parentId = body.parent_id || null;
+      const parentId = body.parent_id || null;
+      if (parentId && parentId !== existing.parentId) {
+        const loops = getRawDb()
+          .prepare("WITH RECURSIVE sub(id) AS (SELECT ? UNION SELECT t.id FROM tasks t JOIN sub ON t.parent_id = sub.id) SELECT 1 FROM sub WHERE id = ? LIMIT 1")
+          .get(id, parentId);
+        if (loops) {
+          return NextResponse.json({ error: "parent_id would create a cycle" }, { status: 400 });
+        }
+      }
+      update.parentId = parentId;
     }
     if (body.start_date !== undefined) {
       update.startDate = body.start_date || null;

@@ -161,6 +161,9 @@ export async function POST(request: NextRequest) {
     const now = new Date();
     // Allow custom IDs for projects/pipelines/phases; auto-generate for tasks
     const taskId = body.id || generateTaskId(db, now);
+    if (body.parent_id && body.parent_id === taskId) {
+      return NextResponse.json({ error: "A task cannot be its own parent" }, { status: 400 });
+    }
 
     db.insert(tasks)
       .values({

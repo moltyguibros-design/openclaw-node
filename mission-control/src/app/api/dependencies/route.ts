@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
         .prepare(
           `WITH RECURSIVE tree AS (
             SELECT id FROM tasks WHERE id = ?
-            UNION ALL
+            UNION
             SELECT t.id FROM tasks t JOIN tree ON t.parent_id = tree.id
           )
           SELECT d.* FROM dependencies d
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
       .prepare(
         `WITH RECURSIVE reachable AS (
           SELECT target_id AS id FROM dependencies WHERE source_id = ?
-          UNION ALL
+          UNION
           SELECT d.target_id FROM dependencies d JOIN reachable r ON d.source_id = r.id
         )
         SELECT 1 FROM reachable WHERE id = ? LIMIT 1`

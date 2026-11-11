@@ -60,6 +60,52 @@ describe("DELETE /api/tasks/[id]", () => {
     const cancels = requestSpy.mock.calls.filter((c) => (c as unknown[])[0] === "mesh.tasks.cancel");
     expect(cancels.map((c) => JSON.parse((c as unknown[])[1] as string).task_id)).toEqual(["C"]);
   });
+
+  // collectDescendants recursed through a parent_id cycle until the stack overflowed (500).
+  it("deletes a parent_id cycle instead of overflowing the stack", async () => {
+    await insertTask({ id: "A", status: "queued", parentId: "B" });
+    await insertTask({ id: "B", status: "queued", parentId: "A" });
+    const { DELETE } = await import("@/app/api/tasks/[id]/route");
+
+    const res = await DELETE(new NextRequest("http://x/api/tasks/A", { method: "DELETE" }), params("A"));
+
+    expect(res.status).toBe(200);
+    const { getRawDb } = await import("@/lib/db");
+    expect(getRawDb().prepare("SELECT COUNT(*) AS n FROM tasks").get()).toEqual({ n: 0 });
+  });
+});
+
+describe("parent_id cycles", () => {
+  it("PATCH refuses a parent that is the task itself or one of its descendants", async () => {
+    await insertTask({ id: "P", status: "queued" });
+    await insertTask({ id: "C", status: "queued", parentId: "P" });
+    const { PATCH } = await import("@/app/api/tasks/[id]/route");
+    const patch = (parent: string) =>
+      PATCH(new NextRequest("http://x/api/tasks/P", { method: "PATCH", body: JSON.stringify({ parent_id: parent }) }), params("P"));
+
+    expect((await patch("C")).status).toBe(400);
+    expect((await patch("P")).status).toBe(400);
+    const { getRawDb } = await import("@/lib/db");
+    expect(getRawDb().prepare("SELECT parent_id FROM tasks WHERE id = 'P'").get()).toEqual({ parent_id: null });
+  });
+
+  it("POST refuses a custom id equal to its parent_id", async () => {
+    const { POST } = await import("@/app/api/tasks/route");
+    const res = await POST(new NextRequest("http://x/api/tasks", { method: "POST", body: JSON.stringify({ title: "t", id: "X", parent_id: "X" }) }));
+    expect(res.status).toBe(400);
+  });
+
+  // UNION ALL never terminates on a cycle; a synchronous SQLite call cannot be timed out, so this runs only with the fix.
+  it("the subtree query terminates on a cycle already in the table", async () => {
+    await insertTask({ id: "A", status: "queued", parentId: "B" });
+    await insertTask({ id: "B", status: "queued", parentId: "A" });
+    const { GET } = await import("@/app/api/tasks/[id]/tree/route");
+
+    const res = await GET(new NextRequest("http://x/api/tasks/A/tree"), params("A"));
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { id: string }[]).map((r) => r.id).sort()).toEqual(["A", "B"]);
+  });
 });
 
 describe("PATCH /api/tasks/[id]", () => {
