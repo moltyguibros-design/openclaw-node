@@ -307,6 +307,13 @@ describe('POST /memory/inject — emitted events', () => {
     assert.equal(injected.data.frontend.length, 100);
     assert.equal('session_id' in injected.data, false);
   });
+
+  it('a prompt over 200 chars still yields a valid memory.retrieved', async () => {
+    await inject({ prompt: 'word '.repeat(80) });
+    const retrieved = events.find((e) => e.event_type === 'memory.retrieved');
+    assert.ok(retrieved, 'memory.retrieved emitted');
+    assert.ok(retrieved.data.query.length <= 200, `query is ${retrieved.data.query.length} chars`);
+  });
 });
 
 describe('Unknown routes', () => {
