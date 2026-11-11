@@ -2,7 +2,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
+import * as sqliteVec from 'sqlite-vec';
 import { buildProbes, createRuntimeContext, parseIsolatedEmbedResult, VERDICT as PROBE_VERDICT } from '../lib/node-acceptance-probes.mjs';
 import { runAcceptance, resolveNodeConfig, VERDICT } from '../lib/node-acceptance.mjs';
 
@@ -223,6 +226,52 @@ describe('node-acceptance probes — memory + gold round-trip', () => {
     });
     const r = await probeById(ctx, 'MEM-L4-ROUNDTRIP').run();
     assert.equal(r.status, VERDICT.PASS);
+  });
+  it('MEM-L4-ROUNDTRIP teardown removes the synthetic session vectors', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'acc-knowledge-'));
+    const file = path.join(dir, 'k.db');
+    const openVec = () => { const d = new Database(file); sqliteVec.load(d); return d; };
+    try {
+      const setup = openVec();
+      setup.exec(`
+        CREATE TABLE session_documents (session_id TEXT PRIMARY KEY);
+        CREATE TABLE session_chunks (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT);
+        CREATE VIRTUAL TABLE session_chunk_vectors USING vec0(embedding float[2]);
+      `);
+      const chunkIds = {};
+      for (const [sid, n] of [['acc-probe-testrun', 2], ['real-session', 1]]) {
+        setup.prepare('INSERT INTO session_documents VALUES (?)').run(sid);
+        chunkIds[sid] = [];
+        for (let i = 0; i < n; i++) {
+          const id = Number(setup.prepare('INSERT INTO session_chunks (session_id) VALUES (?)').run(sid).lastInsertRowid);
+          setup.prepare(`INSERT INTO session_chunk_vectors VALUES (${id}, ?)`).run(Buffer.from(new Float32Array([0.5, 0.5]).buffer));
+          chunkIds[sid].push(id);
+        }
+      }
+      setup.close();
+
+      const ctx = baseCtx({
+        writeDb: (p, fn) => {
+          if (!p.endsWith('.knowledge.db')) return undefined;
+          const d = new Database(file);
+          try { return fn(d); } finally { d.close(); }
+        },
+        queryDb: () => 3,
+        httpPost: async () => ({ status: 200, json: { block: 'codename ACCPROBETESTRUN' } }),
+      });
+      await probeById(ctx, 'MEM-L4-ROUNDTRIP').run();
+      for (const fn of ctx.teardown) await fn();
+
+      const check = openVec();
+      try {
+        assert.deepEqual(check.prepare('SELECT rowid FROM session_chunk_vectors').all().map((r) => r.rowid), chunkIds['real-session']);
+        assert.deepEqual(check.prepare('SELECT session_id FROM session_chunks').all(), [{ session_id: 'real-session' }]);
+      } finally {
+        check.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
   it('MEM-L4-ROUNDTRIP BLOCK when no transcript source dir', async () => {
     const ctx = baseCtx({ fsp: { ...baseCtx().fsp, readFile: async () => '[]' } });
