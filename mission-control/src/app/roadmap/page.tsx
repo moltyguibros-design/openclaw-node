@@ -48,6 +48,7 @@ import {
   type Task,
 } from "@/lib/hooks";
 import { UnifiedTaskDialog } from "@/components/board/unified-task-dialog";
+import { barDragUpdate } from "@/lib/roadmap-drag";
 
 // --- Constants ---
 
@@ -636,16 +637,10 @@ export default function RoadmapPage() {
 
   const handleBarDrag = useCallback(
     async (taskId: string, newLeft: number, newWidth: number) => {
-      const startDays = Math.round(newLeft / dayWidth);
-      const durationDays = Math.max(Math.round(newWidth / dayWidth), 1);
-      const newStart = addDays(viewStart, startDays);
-      const newEnd = addDays(newStart, durationDays);
-      await updateTask(taskId, {
-        start_date: format(newStart, "yyyy-MM-dd"),
-        end_date: format(newEnd, "yyyy-MM-dd"),
-      } as Record<string, unknown>);
+      const node = allNodes.find((n) => n.id === taskId);
+      await updateTask(taskId, barDragUpdate(node, newLeft, newWidth, viewStart, dayWidth) as Record<string, unknown>);
     },
-    [viewStart, dayWidth]
+    [viewStart, dayWidth, allNodes]
   );
 
   const handleAddDep = async (targetId: string) => {
@@ -1635,6 +1630,13 @@ function GanttBar({ id, left, width, color, label, type, status, onDragEnd, onDo
 
     const handleUp = (e: MouseEvent) => {
       const dx = e.clientX - dragging.startX;
+      // A click or double-click is not a drag: PATCHing here would persist the bar's drawn geometry.
+      if (Math.abs(dx) < 3) {
+        setCurrentLeft(dragging.origLeft);
+        setCurrentWidth(dragging.origWidth);
+        setDragging(null);
+        return;
+      }
       if (dragging.mode === "move") {
         onDragEnd(id, dragging.origLeft + dx, currentWidth);
       } else {
