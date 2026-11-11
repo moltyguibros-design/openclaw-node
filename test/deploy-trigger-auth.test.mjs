@@ -84,7 +84,7 @@ describe('deploy-trigger-auth', () => {
     assert.match(res.reason, /too-old/);
   });
 
-  it('non-strict (default) allows an unsigned trigger — backward compatible', () => {
+  it('non-strict (explicit opt-out) allows an unsigned trigger, with a warning', () => {
     let warned = false;
     const res = verifyDeployTrigger(trigger(), { requireSigned: false, log: () => { warned = true; } });
     assert.deepEqual(res, { ok: true, reason: 'unsigned-allowed' });

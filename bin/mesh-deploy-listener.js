@@ -473,9 +473,10 @@ async function main() {
   console.log(`[deploy-listener] Listening on mesh.deploy.trigger`);
 
   // C2 fix (deep review 2026-07-03): authenticate the trigger before running
-  // `git reset --hard` + deploy. Opt-in via OPENCLAW_REQUIRE_SIGNED_DEPLOY=1
-  // (+ OPENCLAW_DEPLOY_TRUSTED_KEYS); default off preserves current behavior
-  // but warns on unsigned triggers. ESM helper loaded dynamically (this is CJS).
+  // `git reset --hard` + deploy. Strict by default: the signer must be in
+  // OPENCLAW_DEPLOY_TRUSTED_KEYS (none configured = every trigger rejected); only
+  // OPENCLAW_REQUIRE_SIGNED_DEPLOY=0 accepts unsigned triggers, with a warning.
+  // ESM helper loaded dynamically (this is CJS).
   const { verifyDeployTrigger } = await import('../lib/deploy-trigger-auth.mjs');
 
   (async () => {
