@@ -100,4 +100,32 @@ describe("GET /api/mesh/nodes", () => {
     expect(body.meshStatus.localNodeId).toBe("test-node");
     expect(body.nodes.map((n) => n.nodeId).sort()).toEqual(["peer-a", "test-node"]);
   });
+
+  async function nodesFor(nodeId: string, status: Record<string, unknown>): Promise<Record<string, RouteNode>> {
+    cfg.nodeId = nodeId;
+    tailscaleStatus = status;
+    const res = await (await loadGet())();
+    const body: RouteBody = await res.json();
+    return Object.fromEntries(body.nodes.map((n) => [n.nodeId, n]));
+  }
+
+  it("does not give an offline peer whose name extends the local id this node's health", async () => {
+    const nodes = await nodesFor("moltymac", { Peer: { a: { HostName: "moltymacs-virtual-machine" } } });
+    expect(nodes["moltymac"].status).toBe("online");
+    expect(nodes["moltymacs-virtual-machine"].health).toBeNull();
+    expect(nodes["moltymacs-virtual-machine"].status).toBe("offline");
+  });
+
+  it("does not give an offline peer whose name is a prefix of the local id this node's health", async () => {
+    const nodes = await nodesFor("moltymacs-virtual-machine", { Peer: { a: { HostName: "moltymac" } } });
+    expect(nodes["moltymacs-virtual-machine"].status).toBe("online");
+    expect(nodes["moltymac"].health).toBeNull();
+    expect(nodes["moltymac"].status).toBe("offline");
+  });
+
+  it("still treats the short hostname of an FQDN node id as local", async () => {
+    const nodes = await nodesFor("calos.lan", { Self: { HostName: "calos" } });
+    expect(nodes["calos"].health?.nodeId).toBe("calos.lan");
+    expect(nodes["calos"].status).toBe("online");
+  });
 });

@@ -143,7 +143,8 @@ function normalizeNodeId(id: string): string {
     .replace(/^-|-$/g, "");      // trim leading/trailing dashes
 }
 
-const localNormalized = normalizeNodeId(NODE_ID);
+// Exact ids only: the fleet has prefix-sharing names (moltymac / moltymacs-virtual-machine).
+const localIds = new Set([normalizeNodeId(NODE_ID), normalizeNodeId(NODE_ID.split(".")[0])]);
 
 /** Discover all node IDs from available sources */
 async function discoverNodes(kv: KV | null): Promise<string[]> {
@@ -422,7 +423,7 @@ export const GET = withTrace("mesh", "GET /api/mesh/nodes", async () => {
     // When NATS is completely down, at least show real data for the local node.
     // Always regenerate for local node if data is stale (>30s) or missing.
     const nn = normalizeNodeId(nodeId);
-    const isLocal = nn === localNormalized || nn.startsWith(localNormalized) || localNormalized.startsWith(nn);
+    const isLocal = localIds.has(nn);
     const localCacheAge = nodeCache.has(nodeId) ? (now - nodeCache.get(nodeId)!.fetchedAt) / 1000 : Infinity;
     if (isLocal && (!health || localCacheAge > 30)) {
       health = await gatherLocalHealth();
