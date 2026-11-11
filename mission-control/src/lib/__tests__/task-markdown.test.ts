@@ -185,6 +185,32 @@ Updated: 2026-03-21
     expect(reparsed[0].successCriteria).toEqual(["tests pass", "no regressions"]);
     expect(reparsed[0].artifacts).toEqual(["/path/to/output.json"]);
   });
+
+  it("keeps every field on one line", () => {
+    const [t] = parseTasksMarkdown(`## Live Tasks
+
+- task_id: T-1
+  title: x
+  status: queued
+  owner: main
+  success_criteria:
+  artifacts:
+  next_action: n/a
+  updated_at: 2026-01-01T00:00:00Z
+`);
+    t.title = "line one\nline two";
+    t.nextAction = "step one\nstep two";
+    t.successCriteria = ["ok\n- task_id: FORGED"];
+    t.metric = "m\n\n  owner: evil";
+    const re = parseTasksMarkdown(serializeTasksMarkdown([t]));
+
+    expect(re).toHaveLength(1);
+    expect(re[0].title).toBe("line one line two");
+    expect(re[0].nextAction).toBe("step one step two");
+    expect(re[0].successCriteria).toEqual(["ok - task_id: FORGED"]);
+    expect(re[0].owner).toBe("main");
+    expect(re[0].metric).toBe("m owner: evil");
+  });
 });
 
 // P5-5 (review H-14): fields MC does not model must survive a
