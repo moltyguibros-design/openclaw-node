@@ -72,13 +72,37 @@ test('daemon imports the shared concurrency guard', () => {
 });
 
 test('daemon wraps tick in the guard with a deadlock force-clear', () => {
-  assert.match(daemonSrc, /const guardedTick = createConcurrencyGuard\(tick, \{ maxAgeMs: 30 \* 60_000, log \}\)/);
+  assert.match(daemonSrc, /const guardedTick = createConcurrencyGuard\(trackedTick, \{ maxAgeMs: 30 \* 60_000, log \}\)/);
 });
 
-test('no call site invokes tick() bare — both go through guardedTick, tracked for fencing', () => {
+test('no call site invokes tick() bare, and only a started run is tracked for fencing', () => {
   assert.doesNotMatch(daemonSrc, /await tick\(\)/);
-  const tracked = daemonSrc.match(/inFlightTick = guardedTick\(\)/g) || [];
-  assert.equal(tracked.length, 2, 'both call sites must assign inFlightTick so shutdown can fence');
+  assert.doesNotMatch(daemonSrc, /inFlightTick = guardedTick\(\)/, 'a skipped call must not overwrite the fenced run');
+  assert.match(daemonSrc, /inFlightTick = run;/);
+  assert.match(daemonSrc, /if \(inFlightTick === run\) inFlightTick = null/);
+});
+
+test('a skipped fire leaves the in-flight run tracked; the run clears it when it ends', async () => {
+  let inFlightTick = null;
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const tick = async () => { await gate; };
+  const trackedTick = () => {
+    const run = tick();
+    inFlightTick = run;
+    return run.finally(() => { if (inFlightTick === run) inFlightTick = null; });
+  };
+  const guardedTick = createConcurrencyGuard(trackedTick, { maxAgeMs: 30 * 60_000 });
+
+  const first = guardedTick();
+  const runA = inFlightTick;
+  assert.ok(runA, 'the started run is tracked');
+  assert.deepEqual(await guardedTick(), { skipped: true, reason: 'in_flight' });
+  assert.equal(inFlightTick, runA, 'the skipped fire must not replace or clear the tracked run');
+
+  release();
+  await first;
+  assert.equal(inFlightTick, null);
 });
 
 test('shutdown fences the in-flight tick before closing handles and owns the exit (R15, repair 4.1)', () => {

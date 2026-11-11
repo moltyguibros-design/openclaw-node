@@ -2012,19 +2012,22 @@ async function main() {
 
   // R3 fix: ticks routinely outlive pollMs (LLM extraction, Phase 0 bootstrap);
   // unguarded overlap re-runs the same throttled work off stale on-disk state.
-  const guardedTick = createConcurrencyGuard(tick, { maxAgeMs: 30 * 60_000, log });
+  // Only a run that actually started is fenced: a skipped call must not
+  // replace (and then null) the in-flight run shutdown waits for.
+  const trackedTick = () => {
+    const run = tick();
+    inFlightTick = run;
+    return run.finally(() => { if (inFlightTick === run) inFlightTick = null; });
+  };
+  const guardedTick = createConcurrencyGuard(trackedTick, { maxAgeMs: 30 * 60_000, log });
 
   // Run first tick immediately
-  inFlightTick = guardedTick();
-  await inFlightTick;
-  inFlightTick = null;
+  await guardedTick();
 
   // Schedule recurring ticks. Shutdown owns the exit (R15, repair 4.1).
   tickInterval = setInterval(async () => {
     if (!running) return;
-    inFlightTick = guardedTick();
-    const result = await inFlightTick;
-    inFlightTick = null;
+    const result = await guardedTick();
     if (result?.skipped) log('tick skipped (in-flight)');
   }, config.intervals.pollMs);
 
