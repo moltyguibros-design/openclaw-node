@@ -193,6 +193,45 @@ describe('node-acceptance probes — memory + gold round-trip', () => {
     const r = await probeById(ctx, 'MEM-L4-ROUNDTRIP').run();
     assert.equal(r.status, VERDICT.FAIL);
   });
+  function sourcesCtx(sources, written, over = {}) {
+    const base = baseCtx();
+    return baseCtx({
+      fsp: {
+        ...base.fsp,
+        readFile: async (p) => {
+          if (p === base.config.injectToken) return 'TESTTOKEN';
+          if (p === base.config.transcriptSources) return JSON.stringify({ sources });
+          return '';
+        },
+        writeFile: async (p) => { written.push(p); },
+      },
+      ...over,
+    });
+  }
+  it('MEM-L4-ROUNDTRIP skips disabled transcript sources', async () => {
+    const written = [];
+    const ctx = sourcesCtx([
+      { name: 'off', path: '/tmp/acc-disabled', format: 'claude-code', enabled: false },
+      { name: 'on', path: '/tmp/acc-src', format: 'claude-code', enabled: true },
+    ], written, {
+      queryDb: () => 3,
+      httpPost: async () => ({ status: 200, json: { block: 'codename ACCPROBETESTRUN uses SQLite' } }),
+    });
+    const r = await probeById(ctx, 'MEM-L4-ROUNDTRIP').run();
+    assert.equal(written.length, 1);
+    assert.ok(written[0].startsWith('/tmp/acc-src/'), written[0]);
+    assert.equal(r.status, VERDICT.PASS);
+  });
+  it('MEM-L4-ROUNDTRIP BLOCK when every transcript source is disabled', async () => {
+    const written = [];
+    const ctx = sourcesCtx([
+      { name: 'off', path: '/tmp/acc-disabled', format: 'claude-code', enabled: false },
+    ], written, { queryDb: () => 0 });
+    ctx.config.roundtripPollMs = 50;
+    const r = await probeById(ctx, 'MEM-L4-ROUNDTRIP').run();
+    assert.equal(r.status, VERDICT.BLOCK);
+    assert.deepEqual(written, []);
+  });
 });
 
 describe('node-acceptance orchestration', () => {
