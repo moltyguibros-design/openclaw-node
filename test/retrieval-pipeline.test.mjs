@@ -185,6 +185,13 @@ describe('findMatchingEntities', () => {
     const results = findMatchingEntities(db, 'completely unrelated topic');
     assert.strictEqual(results.length, 0);
   });
+
+  it('matches a short name standing alone after an occurrence inside a word', () => {
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO entities (name, type, first_seen, last_seen, mention_count) VALUES (?, ?, ?, ?, ?)`).run('Go', 'technology', now, now, 3);
+    assert.ok(findMatchingEntities(db, 'going to rewrite it in Go').some(r => r.name === 'Go'));
+    assert.ok(!findMatchingEntities(db, 'going to rewrite it').some(r => r.name === 'Go'));
+  });
 });
 
 describe('findMatchingThemes', () => {
@@ -201,6 +208,13 @@ describe('findMatchingThemes', () => {
   it('returns empty for no matches', () => {
     const results = findMatchingThemes(db, 'completely unrelated');
     assert.strictEqual(results.length, 0);
+  });
+
+  it('matches a short label only as a discrete token', () => {
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO themes (label, first_seen, last_seen) VALUES (?, ?, ?)`).run('AI', now, now);
+    assert.ok(!findMatchingThemes(db, 'please maintain the build script').some(r => r.label === 'AI'));
+    assert.ok(findMatchingThemes(db, 'ask the AI about it').some(r => r.label === 'AI'));
   });
 });
 
