@@ -29,7 +29,7 @@
  */
 
 import os from 'node:os';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { parseArgs } from 'node:util';
 
 const GB = 1024 * 1024 * 1024;
@@ -69,9 +69,7 @@ function checkOllama() {
 
 function pullModel(modelTag) {
   return new Promise((resolve) => {
-    const child = execFile('ollama', ['pull', modelTag], { timeout: 0 });
-    child.stdout?.on('data', (d) => process.stdout.write(d));
-    child.stderr?.on('data', (d) => process.stderr.write(d));
+    const child = spawn('ollama', ['pull', modelTag], { stdio: 'inherit' });
     child.on('exit', (code) => resolve({ ok: code === 0, code }));
     child.on('error', (err) => resolve({ ok: false, error: err.message }));
   });
@@ -121,6 +119,8 @@ Options:
         ? { tier: rec.tier.name, model: rec.tier.model, size_gb: rec.tier.size_gb }
         : { tier: null, reason: rec.reason },
     }, null, 2));
+    // exitCode, not exit(): an immediate exit can truncate the JSON on a piped stdout
+    if (!rec.tier) { process.exitCode = 2; return; }
   } else {
     console.log('System profile');
     console.log(`  Platform:        ${platform} ${arch}`);
