@@ -209,6 +209,18 @@ test('INSTALL_TEST_PROTOCOL T1 and NODE_SPEC describe what the installer leaves 
   assert.doesNotMatch(nodeSpec, /^\s+identity\/\s/m, 'the keypair is identity.key/identity.pub in OPENCLAW_ROOT, not a directory');
 });
 
+test('INSTALL_TEST_PROTOCOL T4 matches the D11 worker guard and the mesh CLI', () => {
+  const protocol = readFileSync(join(ROOT, 'docs/INSTALL_TEST_PROTOCOL.md'), 'utf8');
+  const { isOpenClawWorkerProvider } = createRequire(join(ROOT, 'package.json'))('./lib/llm-providers.js');
+  assert.equal(isOpenClawWorkerProvider('shell', {}), false);
+  assert.equal(isOpenClawWorkerProvider('ollama', {}), false);
+  const shellAgents = protocol.split('\n').filter((l) => /MESH_LLM_PROVIDER=shell .*mesh-agent\.js/.test(l));
+  assert.ok(shellAgents.length > 0);
+  for (const line of shellAgents) assert.ok(line.includes('MESH_ALLOW_MOCK_WORKERS=1'), `shell agents are declined without the mock flag: ${line}`);
+  assert.doesNotMatch(protocol, /mesh\.js tasks show/, 'mesh tasks has no show subcommand');
+  assert.doesNotMatch(protocol, /inherit `ollama`/);
+});
+
 test('installer links scoped packages into both deployed parent trees', () => {
   const workspace = moduleSrc['workspace.sh'];
   assert.ok(workspace.includes('for scoped_dir in "$pkgdir"*/'));

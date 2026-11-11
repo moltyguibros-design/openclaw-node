@@ -85,13 +85,13 @@ curl -s -X POST 127.0.0.1:7893/memory/inject -H 'Content-Type: application/json'
 
 ## T4 — Functional federation path (one mock circling session)
 
-No cloud auth needed — `MESH_LLM_PROVIDER=shell` mocks the LLM (proven in federation step 2.1):
+No cloud auth needed — `MESH_LLM_PROVIDER=shell` mocks the LLM; the D11 guard admits it as a collab worker only with `MESH_ALLOW_MOCK_WORKERS=1` (the same env bin/fed-chaos.mjs uses):
 
 ```bash
 export OPENCLAW_NATS=nats://127.0.0.1:4222
 export OPENCLAW_NATS_TOKEN=$(sed -n 's/^OPENCLAW_NATS_TOKEN=//p' ~/.openclaw/openclaw.env)
 for n in alpha bravo charlie; do
-  OPENCLAW_NODE_ID=$n MESH_LLM_PROVIDER=shell node bin/mesh-agent.js >/tmp/agent-$n.log 2>&1 &
+  OPENCLAW_NODE_ID=$n MESH_LLM_PROVIDER=shell MESH_ALLOW_MOCK_WORKERS=1 node bin/mesh-agent.js >/tmp/agent-$n.log 2>&1 &
 done
 node bin/openclaw-grappe.mjs form --id wg-test --mode adversarial --members alpha,bravo,charlie
 cat > /tmp/circ-test.yaml <<'Y'
@@ -106,13 +106,13 @@ Y
 node bin/mesh.js submit /tmp/circ-test.yaml
 # Watch the task daemon log for: COLLAB SESSION auto-created → roles assigned (1 worker + 2 reviewers)
 # → barriers 3/3 → finalization → status=completed
-node bin/mesh.js tasks show install-test-001
+node bin/mesh.js tasks --status completed    # install-test-001 must be listed
 pkill -f "mesh-agent.js"    # cleanup
 ```
 
 **PASS T4** = session reaches `completed` with a converged vote. This closes Gap B empirically.
-(Real-LLM variant: drop `MESH_LLM_PROVIDER=shell` — agents inherit `ollama` from the env; budget
-15–35 min GPU per session.)
+(Real-LLM variant: drop `MESH_LLM_PROVIDER=shell MESH_ALLOW_MOCK_WORKERS=1` — agents inherit the seated
+advanced-LLM provider (claude, openai, …) from the env; a local-model provider such as ollama is declined for collab work (D11).)
 
 ## T5 — The honest map
 
