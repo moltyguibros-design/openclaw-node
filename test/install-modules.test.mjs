@@ -100,6 +100,15 @@ test('cluster dry-run guard and cluster security live in config.sh', () => {
   assert.ok(cfg.includes('OPENCLAW_DEPLOY_TRUSTED_KEYS'));
 });
 
+test('NATS cluster plists come only from services/launchd, pointed at the rendered configs', () => {
+  assert.deepEqual(readdirSync(join(ROOT, 'services/nats')).filter((f) => f.endsWith('.plist')), []);
+  assert.ok(!readFileSync(join(ROOT, 'docs/NATS_CLUSTER.md'), 'utf8').includes('services/nats/ai.openclaw.nats-'));
+  for (const n of [1, 2, 3]) {
+    const plist = readFileSync(join(ROOT, `services/launchd/ai.openclaw.nats-${n}.plist`), 'utf8');
+    assert.ok(plist.includes(`\${HOME}/.openclaw/config/nats-${n}.conf`), `nats-${n} plist must run the rendered config`);
+  }
+});
+
 test('preserved behaviors sit in their modules', () => {
   assert.ok(moduleSrc['env.sh'].includes('claude_project_path() {'));
   assert.ok(moduleSrc['env.sh'].includes("sed 's|[/.]|-|g'"));

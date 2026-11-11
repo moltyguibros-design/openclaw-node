@@ -26,7 +26,7 @@ All three nodes form a full-mesh cluster named `openclaw-cluster`. JetStream str
 
 ## Local Dev Setup (macOS, launchd)
 
-Config files and plists live in `services/nats/` in the repo.
+Config templates live in `services/nats/`; `install.sh` renders them, plus the `nats-auth.conf` they include, to `~/.openclaw/config/nats-{1,2,3}.conf`. The launchd templates are `services/launchd/ai.openclaw.nats-{1,2,3}.plist`. Always start from the rendered configs, never the repo templates (see MULTI_NODE_DEPLOY.md).
 
 ### 1. Create data directories
 
@@ -37,13 +37,13 @@ mkdir -p ~/.openclaw/logs
 
 ### 2. Install the plists
 
-Before installing, replace `${OPENCLAW_REPO}` and `${HOME}` placeholders in each plist with absolute paths:
+Run `install.sh` first: it renders `~/.openclaw/config/nats-{1,2,3}.conf` and `~/.openclaw/config/nats-auth.conf`. Then render the launchd templates, replacing the `${HOME}` placeholder:
 
 ```bash
-REPO="$(cd "$(dirname "$0")/../.." && pwd)"  # or set manually
+REPO=/path/to/openclaw-node   # your checkout
 for n in 1 2 3; do
-  sed "s|\${OPENCLAW_REPO}|$REPO|g; s|\${HOME}|$HOME|g" \
-    "$REPO/services/nats/ai.openclaw.nats-$n.plist" \
+  sed "s|\${HOME}|$HOME|g" \
+    "$REPO/services/launchd/ai.openclaw.nats-$n.plist" \
     > ~/Library/LaunchAgents/ai.openclaw.nats-$n.plist
 done
 ```
