@@ -1023,7 +1023,7 @@ bin/
 lib/
 └── mesh-tasks.js                  # PROPOSED + REJECTED task statuses
 test/
-├── mesh-tasks-status.test.js      # 7 unit tests (status enum, defaults)
+├── mesh-tasks-status.test.js      # unit tests (status enum, defaults)
 └── distributed-mc.test.js         # 9 integration tests (needs NATS + daemon)
 ```
 
@@ -1074,10 +1074,10 @@ No configuration needed on the lead — it works exactly as before. Workers just
 ```bash
 # MC KV-sync unit tests (no dependencies — run anywhere)
 cd mission-control && npx vitest run src/lib/__tests__/mesh-kv-sync.test.ts   # 17 tests: CAS, authority, merge, proposals
-# (cd mission-control && npm run test:unit runs the full MC unit suite — 82 tests)
+# (cd mission-control && npm run test:unit runs the full MC unit suite)
 
 # Mesh task-status unit tests
-node --test test/mesh-tasks-status.test.js   # 7 tests: status enum, task creation
+node --test test/mesh-tasks-status.test.js   # status enum, task creation
 # (npm run test:unit at the repo root runs the whole suite — 1700+ tests)
 
 # Integration tests (needs live NATS + mesh-task-daemon)

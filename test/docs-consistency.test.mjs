@@ -29,3 +29,16 @@ test('README knowledge-server tables name every tool and KNOWLEDGE_* variable th
   const configTable = section(readme, '### Configuration', knowledge).text;
   for (const v of vars) assert.ok(configTable.includes(`| \`${v}\` |`), `README config table lacks ${v}`);
 });
+
+test('TEST.md names the CI Node matrix and lists no tested module as a coverage gap', () => {
+  const testMd = read('TEST.md');
+  const matrix = read('.github/workflows/test.yml').match(/node-version: \[([\d, ]+)\]/)[1];
+  assert.ok(testMd.includes(`Root unit tests on Node ${matrix}\n`), `TEST.md CI line must match the [${matrix}] matrix`);
+  assert.doesNotMatch(testMd, /Node 18/);
+  const testFiles = readdirSync(new URL('../test/', import.meta.url));
+  const gaps = section(testMd, '## Coverage Gaps (known)').text;
+  for (const [, mod] of gaps.matchAll(/^\| `(?:bin|lib)\/([\w-]+)\.m?js` \|/gm)) {
+    const covering = testFiles.find((f) => f.startsWith(`${mod}.test.`) || f.startsWith(`${mod}-lifecycle.test.`));
+    assert.equal(covering, undefined, `${mod} is listed as untested but test/${covering} exists`);
+  }
+});
