@@ -296,7 +296,7 @@ export default function SoulsPage() {
     fetch("/api/souls")
       .then((res) => res.json())
       .then((data) => {
-        setSouls(data);
+        setSouls(Array.isArray(data) ? data : []);
         setLoading(false);
       });
   }, []);

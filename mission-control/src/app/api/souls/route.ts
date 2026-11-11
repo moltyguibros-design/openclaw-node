@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { isSafeId } from "@/lib/safe-path";
 
 const SOULS_DIR = path.join(os.homedir(), ".openclaw/souls");
 const REGISTRY_PATH = path.join(SOULS_DIR, "registry.json");
@@ -28,18 +29,22 @@ interface SoulRegistry {
 }
 
 async function loadRegistry(): Promise<SoulRegistry> {
+  let content: string;
   try {
-    const content = await fs.readFile(REGISTRY_PATH, "utf-8");
-    return JSON.parse(content);
-  } catch {
-    // If registry doesn't exist, return empty registry
-    return { version: "1.0.0", souls: [] };
+    content = await fs.readFile(REGISTRY_PATH, "utf-8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { version: "1.0.0", souls: [] };
+    throw err;
   }
+  // A corrupt registry must fail the request: read as empty, POST would overwrite it with one soul.
+  return JSON.parse(content);
 }
 
 async function saveRegistry(registry: SoulRegistry): Promise<void> {
   await fs.mkdir(SOULS_DIR, { recursive: true });
-  await fs.writeFile(REGISTRY_PATH, JSON.stringify(registry, null, 2));
+  const tmp = `${REGISTRY_PATH}.${crypto.randomUUID()}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(registry, null, 2));
+  await fs.rename(tmp, REGISTRY_PATH);
 }
 
 // GET /api/souls - List all souls
@@ -72,6 +77,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    if (!isSafeId(body?.id)) {
+      return NextResponse.json({ error: "invalid soul id" }, { status: 400 });
+    }
     const registry = await loadRegistry();
 
     // Check if soul already exists
@@ -115,6 +123,9 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
+    if (body?.id !== undefined && body.id !== soulId) {
+      return NextResponse.json({ error: "soul id cannot change" }, { status: 400 });
+    }
     const registry = await loadRegistry();
     const soulIndex = registry.souls.findIndex((s) => s.id === soulId);
 
