@@ -66,10 +66,15 @@ export function scanLaunchdUnits(dir = LAUNCH_AGENTS) {
 export function scanSystemdUnits(exec = execFileSync) {
   try {
     const out = String(exec('systemctl', ['--user', 'list-unit-files', 'openclaw-*', '--no-legend', '--plain'], { encoding: 'utf8' }));
-    return out.split('\n').filter(Boolean).map(l => {
+    const units = out.split('\n').filter(Boolean).map(l => {
       const [name, state] = l.trim().split(/\s+/);
       return { id: shortId(name), label: name, disabled: state === 'masked', timer: name.endsWith('.timer') };
     });
+    // The .service behind a timer is its oneshot job: `systemctl start` runs it to completion.
+    // `up` starts the timer and the status row is the timer's; `down` still stops both.
+    const timers = new Set(units.filter(u => u.timer).map(u => u.id));
+    for (const u of units) u.timerJob = !u.timer && timers.has(u.id);
+    return units;
   } catch { return []; }
 }
 
@@ -106,6 +111,7 @@ async function statusTable(units) {
   const pids = process.platform === 'darwin' ? launchctlPids() : new Map();
   const rows = [];
   for (const u of units) {
+    if (u.timerJob) continue;
     const loaded = process.platform === 'darwin'
       ? pids.has(u.label)
       : systemdActive(u.label);
@@ -174,7 +180,7 @@ function up(units) {
 function upLinux(units) {
   const started = [];
   for (const u of units) {
-    if (u.disabled) continue;
+    if (u.disabled || u.timerJob) continue;
     if (!systemdActive(u.label)) {
       try {
         execFileSync('systemctl', ['--user', 'start', u.label], { stdio: 'pipe' });
