@@ -644,6 +644,7 @@ async function handleRelease(msg) {
   log(`RELEASED ${task_id}: ${reason || 'no reason'} (needs human triage)`);
   publishEvent('released', task);
   await cleanupTaskCollabSession(task, `Parent task ${task_id} released: ${reason || 'human triage'}`);
+  await checkPlanProgress(task_id, 'failed');
   respond(msg, task);
 }
 
@@ -731,7 +732,7 @@ async function handleTaskReject(msg) {
   if (task.status === TASK_STATUS.FAILED) {
     log(`REJECTED ${task_id} (${task.rejection_count}× — cap ${MAX_REJECTIONS} reached): ${reason || 'no reason'} — FAILED, not re-queued`);
     publishEvent('failed', task);
-    await updatePlanSubtaskStatus(task_id, 'failed');
+    await checkPlanProgress(task_id, 'failed');
   } else {
     log(`REJECTED ${task_id} (${task.rejection_count}/${MAX_REJECTIONS}): ${reason || 'no reason'} — re-queued for retry`);
     publishEvent('rejected', task);
@@ -2927,6 +2928,7 @@ if (require.main === module) {
     handleAttempt: (msg) => handleAttempt(msg),
     handleHeartbeat: (msg) => handleHeartbeat(msg),
     handleRelease: (msg) => handleRelease(msg),
+    handleTaskReject: (msg) => handleTaskReject(msg),
     handleTaskMerged: (msg) => handleTaskMerged(msg),
     handlePlanCreate: (msg) => handlePlanCreate(msg),
     handlePlanApprove: (msg) => handlePlanApprove(msg),

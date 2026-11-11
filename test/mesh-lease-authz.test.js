@@ -31,7 +31,7 @@ const operator = getOrCreateIdentity(path.join(TMP, 'operator'));
 process.env.OPENCLAW_OPERATOR_TRUSTED_KEYS = operator.publicKeyBase64;
 
 const daemon = require('../bin/mesh-task-daemon.js');
-const { createTask, TaskStore } = require('../lib/mesh-tasks');
+const { createTask, TaskStore, DEFAULT_MAX_REJECTIONS } = require('../lib/mesh-tasks');
 const { PlanStore } = require('../lib/mesh-plans');
 const { CollabStore } = require('../lib/mesh-collab');
 
@@ -187,27 +187,27 @@ describe('F1/R1: a stranger cannot act as the owner with what get/list/events ex
   });
 });
 
-describe('F1: a forged submit cannot touch a plan', () => {
-  /** An approved, executing plan: P-S1 dispatched as a mesh task, P-S2 pending behind it. */
-  async function approvedPlan(h, { failure_policy = 'abort_on_first_fail' } = {}) {
-    // The parent is the planner's own claimed task (dispatch copies its routing
-    // fields onto every subtask, so it must not exclude anyone).
-    const parent = await h.rpc('handleSubmit', { task_id: 'PARENT', title: 'parent' });
-    assert.equal(parent.ok, true, parent.error);
-    assert.equal((await h.rpc('handleClaim', { node_id: 'planner' })).data.task_id, 'PARENT');
-    const created = await h.rpc('handlePlanCreate', {
-      parent_task_id: 'PARENT', title: 'plan', failure_policy,
-      subtasks: [
-        { subtask_id: 'P-S1', title: 's1', metric: 'npm test', delegation: { mode: 'solo_mesh' } },
-        { subtask_id: 'P-S2', title: 's2', metric: 'npm test', depends_on: ['P-S1'], delegation: { mode: 'solo_mesh' } },
-      ],
-    });
-    assert.equal(created.ok, true, created.error);
-    const approved = await h.rpc('handlePlanApprove', signOperatorRequest({ plan_id: created.data.plan_id }, { identity: operator, nodeId: 'operator' }));
-    assert.equal(approved.ok, true, approved.error);
-    return created.data.plan_id;
-  }
+/** An approved, executing plan: P-S1 dispatched as a mesh task, P-S2 pending behind it. */
+async function approvedPlan(h, { failure_policy = 'abort_on_first_fail', s1Metric = 'npm test' } = {}) {
+  // The parent is the planner's own claimed task (dispatch copies its routing
+  // fields onto every subtask, so it must not exclude anyone).
+  const parent = await h.rpc('handleSubmit', { task_id: 'PARENT', title: 'parent' });
+  assert.equal(parent.ok, true, parent.error);
+  assert.equal((await h.rpc('handleClaim', { node_id: 'planner' })).data.task_id, 'PARENT');
+  const created = await h.rpc('handlePlanCreate', {
+    parent_task_id: 'PARENT', title: 'plan', failure_policy,
+    subtasks: [
+      { subtask_id: 'P-S1', title: 's1', metric: s1Metric, delegation: { mode: 'solo_mesh' } },
+      { subtask_id: 'P-S2', title: 's2', metric: 'npm test', depends_on: ['P-S1'], delegation: { mode: 'solo_mesh' } },
+    ],
+  });
+  assert.equal(created.ok, true, created.error);
+  const approved = await h.rpc('handlePlanApprove', signOperatorRequest({ plan_id: created.data.plan_id }, { identity: operator, nodeId: 'operator' }));
+  assert.equal(approved.ok, true, approved.error);
+  return created.data.plan_id;
+}
 
+describe('F1: a forged submit cannot touch a plan', () => {
   it('the plan fixture is live: executing, P-S1 queued, P-S2 pending', async () => {
     const h = harness();
     const planId = await approvedPlan(h);
@@ -278,6 +278,35 @@ describe('F1: a forged submit cannot touch a plan', () => {
 
     assert.deepEqual(await planState(h, planId), { status: 'executing', subtasks: ['P-S1:completed', 'P-S2:queued'] });
     assert.equal((await h.store.get('P-S2')).plan_id, planId, 'wave 1 dispatched with its back-reference');
+  });
+});
+
+describe('a plan subtask that ends without completing fails its subtask and moves the plan', () => {
+  for (const [failure_policy, status] of [['continue_best_effort', 'completed'], ['abort_on_first_fail', 'aborted']]) {
+    it(`a worker release (${failure_policy})`, async () => {
+      const h = harness();
+      const planId = await approvedPlan(h, { failure_policy });
+      const claim = await h.rpc('handleClaim', { node_id: 'w' });
+      assert.equal(claim.data.task_id, 'P-S1');
+      const reply = await h.rpc('handleRelease', { task_id: 'P-S1', node_id: 'w', lease_token: claim.data.lease_token, reason: 'exhausted' });
+      assert.equal(reply.ok, true, reply.error);
+      assert.deepEqual(await planState(h, planId), { status, subtasks: ['P-S1:failed', 'P-S2:blocked'] });
+    });
+  }
+
+  it('a review rejection that reaches the cap', async () => {
+    const h = harness();
+    const planId = await approvedPlan(h, { failure_policy: 'continue_best_effort', s1Metric: null });
+    const claim = await h.rpc('handleClaim', { node_id: 'w' });
+    assert.equal(claim.data.task_id, 'P-S1');
+    const done = await h.rpc('handleComplete', { task_id: 'P-S1', node_id: 'w', lease_token: claim.data.lease_token, result: { success: true } });
+    assert.equal(done.data.status, 'pending_review');
+    await h.store.put({ ...(await h.store.get('P-S1')), rejection_count: DEFAULT_MAX_REJECTIONS - 1 });
+
+    const reply = await h.rpc('handleTaskReject', signOperatorRequest({ task_id: 'P-S1', reason: 'no' }, { identity: operator, nodeId: 'operator' }));
+    assert.equal(reply.ok, true, reply.error);
+    assert.equal(reply.data.status, 'failed');
+    assert.deepEqual(await planState(h, planId), { status: 'completed', subtasks: ['P-S1:failed', 'P-S2:blocked'] });
   });
 });
 
