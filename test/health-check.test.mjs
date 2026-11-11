@@ -68,6 +68,13 @@ describe('runHealthCheck', () => {
       assert.equal(result[name].ok, false, `${name} should fail`);
     }
   });
+
+  it('leaves no timers behind', async () => {
+    const timers = () => process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length;
+    const before = timers();
+    await runHealthCheck(allMockOpts(mockOk));
+    assert.equal(timers(), before);
+  });
 });
 
 describe('parseLaunchctlPid', () => {

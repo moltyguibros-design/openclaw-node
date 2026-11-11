@@ -299,9 +299,7 @@ export function createHealthWatch(opts = {}) {
     if (statusChanged || repeatDue) {
       const alertPromises = [];
       if (targets.includes('nats')) alertPromises.push(alertNats(status, result));
-      if (targets.includes('banner') && (statusChanged || repeatDue)) {
-        alertPromises.push(alertBanner(status));
-      }
+      if (targets.includes('banner')) alertPromises.push(alertBanner(status));
       await Promise.allSettled(alertPromises);
       lastAlertTime = now;
     }

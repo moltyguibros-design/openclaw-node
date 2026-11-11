@@ -2,7 +2,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { buildProbes, parseIsolatedEmbedResult } from '../lib/node-acceptance-probes.mjs';
+import { buildProbes, parseIsolatedEmbedResult, VERDICT as PROBE_VERDICT } from '../lib/node-acceptance-probes.mjs';
 import { runAcceptance, resolveNodeConfig, VERDICT } from '../lib/node-acceptance.mjs';
 
 // A fully-mocked runtime context — no live system is touched.
@@ -60,6 +60,12 @@ function mockNc() {
 }
 
 const probeById = (ctx, id) => buildProbes(ctx).find((p) => p.id === id);
+
+describe('node-acceptance probes — VERDICT', () => {
+  it('re-exports the engine VERDICT rather than a second copy', () => {
+    assert.equal(PROBE_VERDICT, VERDICT);
+  });
+});
 
 describe('node-acceptance probes — L0 presence', () => {
   it('L0-DB PASS when all DBs present + non-empty', async () => {
