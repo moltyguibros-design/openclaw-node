@@ -10,13 +10,14 @@
  *   node bin/llm-benchmark.mjs [--base-url URL] [--model NAME] [--turns N]
  *
  * Requires a local OpenAI-compatible LLM server running. Default is Ollama:
- *   brew install ollama && ollama pull qwen3:8b-instruct-q4_K_M
+ *   brew install ollama && ollama pull qwen3:8b
  *   ollama serve  # listens on http://localhost:11434
  * Operators may also use mlx-lm, llama-server, or vLLM by passing --base-url.
  */
 
 import { parseArgs } from 'node:util';
 import { createLlmClient, DEFAULT_BASE_URL, DEFAULT_MODEL } from '../lib/llm-client.mjs';
+import { extractJsonFromText } from '../lib/extraction-prompt.mjs';
 
 // --- Synthetic session generator ---
 
@@ -101,7 +102,7 @@ export async function runBenchmark(client, turns) {
   let parsed = null;
   let parseError = null;
   try {
-    parsed = JSON.parse(result.content);
+    parsed = JSON.parse(extractJsonFromText(result.content));
   } catch (e) {
     parseError = e.message;
   }
@@ -200,7 +201,14 @@ async function main() {
   process.exit(result.pass ? 0 : 1);
 }
 
-main().catch(err => {
-  console.error('Benchmark failed:', err.message);
-  process.exit(1);
-});
+const isMain = process.argv[1] && (
+  process.argv[1].endsWith('llm-benchmark.mjs') ||
+  process.argv[1].endsWith('llm-benchmark')
+);
+
+if (isMain) {
+  main().catch(err => {
+    console.error('Benchmark failed:', err.message);
+    process.exit(1);
+  });
+}
