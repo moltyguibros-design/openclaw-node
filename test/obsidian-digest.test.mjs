@@ -184,6 +184,21 @@ describe('obsidian-digest', () => {
       assert.ok(body.includes('Use NATS for events'));
     });
 
+    it('links only the concepts the session note linked (repair 2.9 link-only-existing)', () => {
+      const body = buildDigestBody({
+        title: 'Test',
+        sessions: [
+          { filename: '2026-06-01-a-abc12345.md', frontmatter: { concepts: ['[[foo]]', 'bar'] }, body: '' },
+          { filename: '2026-06-01-b-def67890.md', frontmatter: { concepts: [[['baz']]] }, body: '' },
+        ],
+        concepts: [],
+        allDecisions: [],
+      });
+      assert.ok(body.includes('concepts: [[foo]], bar'));
+      assert.ok(!body.includes('[[bar]]'), 'a plain-text concept must not become a dangling link');
+      assert.ok(body.includes('concepts: [[baz]]'), 'legacy unquoted [[x]] (nested YAML array) stays a link');
+    });
+
     it('handles no sessions', () => {
       const body = buildDigestBody({
         title: 'Test',
