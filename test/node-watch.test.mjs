@@ -607,6 +607,26 @@ describe('node-watch HTML dropdown view', () => {
     assert.ok(html.includes('JSON.parse'), 'embeds report data for detail rendering');
     assert.ok(html.includes('<!doctype html>'), 'self-contained page');
   });
+
+  it('detail script parses the embedded data and renders the preselected item', () => {
+    const report = {
+      ...fakeReport,
+      results: [...fakeReport.results,
+        { id: 'e', family: 'ops', label: 'L "q" </script><b>x\\y  ', signal: 's', status: 'OFF', detail: 'a\nb', evidence: '', latency_ms: 0 }],
+    };
+    const html = formatHtml(report);
+    assert.equal(html.split('</script>').length - 1, 1, 'a label cannot close the script element');
+    const body = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+    let shown = '';
+    const document = {
+      getElementById: (id) => (id === 'items'
+        ? { addEventListener() {}, value: '' }
+        : { set innerHTML(v) { shown = v; }, set textContent(_v) {} }),
+    };
+    const R = new Function('document', `${body};return R;`)(document);
+    assert.deepEqual(R, report.results);
+    assert.ok(shown.includes('Inject server'), 'the first BROKEN item is rendered');
+  });
 });
 
 describe('node-watch runner', () => {
