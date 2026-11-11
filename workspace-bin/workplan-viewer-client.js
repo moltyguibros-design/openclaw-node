@@ -1,4 +1,4 @@
-import { createViewerClient } from '/viewer-session.mjs';
+import { createViewerClient, registryStatusClass } from '/viewer-session.mjs';
 const viewerClient = createViewerClient({ onUnauthorized: () => location.reload() });
 
 const $ = (id) => document.getElementById(id);
@@ -158,11 +158,7 @@ async function renderPlan() {
     for (const fam of registry.families) {
       html += '<div class="reg-family">' + esc(fam.family) + '</div>';
       for (const c of fam.components) {
-        const s = (c.status || '').toUpperCase();
-        let cls = 'idle';
-        if (s.includes('ABSENT') || s.includes('INERT')) cls = 'bad';
-        else if (s.includes('STALE') || s.includes('DEGRADED')) cls = 'warn';
-        else if (s.includes('LIVE')) cls = 'ok';
+        const cls = registryStatusClass(c.status);
         html += '<div class="reg-row"><span class="reg-name">' + esc(c.title) + '</span>' +
           '<span class="badge ' + cls + '">' + esc(c.status || '?') + '</span></div>';
       }
