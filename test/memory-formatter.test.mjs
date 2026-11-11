@@ -161,6 +161,14 @@ describe('injectIntoSystemMessage', () => {
   it('returns system content unchanged when memory block is empty', () => {
     assert.equal(injectIntoSystemMessage('System prompt', ''), 'System prompt');
   });
+
+  it('prepends a text block to block-array system content', () => {
+    const sys = [{ type: 'text', text: 'S', cache_control: { type: 'ephemeral' } }];
+    assert.deepEqual(injectIntoSystemMessage(sys, '[memory: test]\n[end memory]'), [
+      { type: 'text', text: '[memory: test]\n[end memory]' },
+      sys[0],
+    ]);
+  });
 });
 
 // ─── extractLastUserPrompt ───────────────────────────────────────────────────
@@ -229,6 +237,17 @@ describe('injectIntoMessages', () => {
     const copy = JSON.parse(JSON.stringify(original));
     injectIntoMessages(original, '[memory: test]\n[end memory]');
     assert.deepEqual(original, copy);
+  });
+
+  it('keeps a content-parts system message as parts', () => {
+    const part = { type: 'text', text: 'Sys' };
+    const result = injectIntoMessages(
+      [{ role: 'system', content: [part] }, { role: 'user', content: 'Hello' }],
+      '[memory: test]\n[end memory]',
+    );
+    assert.ok(Array.isArray(result[0].content));
+    assert.deepEqual(result[0].content.at(-1), part);
+    assert.equal(result[0].content[0].text, '[memory: test]\n[end memory]');
   });
 });
 
@@ -346,6 +365,34 @@ describe('wrapAnthropic with injector', () => {
     assert.ok(capturedArgs.system.includes('[memory: recent relevant context]'));
     assert.ok(capturedArgs.system.includes('AnthropicConcept (concept)'));
     assert.ok(capturedArgs.system.includes('You are helpful.'));
+  });
+
+  it('keeps a block-array system prompt as blocks', async () => {
+    let capturedArgs = null;
+    const mockClient = {
+      messages: {
+        create: async (opts) => {
+          capturedArgs = opts;
+          return { content: [{ text: 'response' }] };
+        },
+      },
+    };
+    const mockInjector = {
+      retrieve: async () => ({ concepts: [{ name: 'AnthropicConcept', type: 'concept' }], decisions: [], snippets: [] }),
+    };
+    const block = { type: 'text', text: 'You are careful.', cache_control: { type: 'ephemeral' } };
+
+    const wrapped = wrapAnthropic(mockClient, { publish: async () => {} }, { injector: mockInjector });
+    await wrapped.messages.create({
+      model: 'claude-opus-4',
+      system: [block],
+      messages: [{ role: 'user', content: 'test prompt' }],
+    });
+
+    assert.ok(Array.isArray(capturedArgs.system));
+    assert.ok(capturedArgs.system[0].text.includes('[memory: recent relevant context]'));
+    assert.deepEqual(capturedArgs.system[1], block);
+    assert.ok(!JSON.stringify(capturedArgs.system).includes('[object Object]'));
   });
 });
 
