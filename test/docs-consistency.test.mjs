@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const read = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
 
@@ -41,4 +43,15 @@ test('TEST.md names the CI Node matrix and lists no tested module as a coverage 
     const covering = testFiles.find((f) => f.startsWith(`${mod}.test.`) || f.startsWith(`${mod}-lifecycle.test.`));
     assert.equal(covering, undefined, `${mod} is listed as untested but test/${covering} exists`);
   }
+});
+
+test('README hooks table says validate-push.sh refuses force pushes, as the hook does', () => {
+  const hook = fileURLToPath(new URL('../.claude/hooks/validate-push.sh', import.meta.url));
+  const r = spawnSync('bash', [hook], { input: JSON.stringify({ tool_input: { command: 'git push origin main --force' } }), encoding: 'utf8' });
+  assert.equal(r.status, 2, r.stderr);
+  const row = read('README.md').split('\n').find((l) => l.startsWith('| `validate-push.sh` |'));
+  assert.match(row, /Refuses force-push \(exit 2\)/);
+  const sessionRow = read('README.md').split('\n').find((l) => l.startsWith('| `session-start.sh` |'));
+  assert.match(read('.claude/hooks/session-start.sh'), /\.daemon-state-\$\{_NODE_ID\}\.md/);
+  assert.match(sessionRow, /\.daemon-state-<node>\.md/);
 });

@@ -915,9 +915,9 @@ Full implementation reference: `docs/circling-strategy-implementationV3.md` (its
 
 | Hook | Trigger | What it does |
 |---|---|---|
-| `session-start.sh` | SessionStart | Loads git state, active tasks, companion state, last session recap |
+| `session-start.sh` | SessionStart | Loads git state, active tasks, the per-node daemon state (`.daemon-state-<node>.md`), last session recap |
 | `validate-commit.sh` | PreToolUse (Bash) | Blocks secrets, validates JSON, warns on bare TODOs, checks commit format |
-| `validate-push.sh` | PreToolUse (Bash) | Warns on force-push and protected branch pushes |
+| `validate-push.sh` | PreToolUse (Bash) | Refuses force-push (exit 2); warns on protected-branch pushes |
 | `pre-compact.sh` | PreCompact | No-op stub (PreCompact wiring retained; the state-preservation write was removed in redesign Step 0.6, pending Block 4 rewiring) |
 | `session-stop.sh` | Stop | Logs session end to daily memory file |
 | `log-agent.sh` | SubagentStart | Audit trail of every subagent spawn |
