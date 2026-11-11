@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { existsSync, unlinkSync, readFileSync, mkdirSync } from 'node:fs';
+import { existsSync, unlinkSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -401,6 +401,53 @@ describe('runExtraction', () => {
     assert.equal(calls, 1);
     assert.equal(result.failed, 0);
     assert.deepEqual(loadCheckpoint(checkpointPath).failed, []);
+  });
+
+  it('graph refresh keeps the extraction store concept_edges', async () => {
+    const sessionDbPath = join(testDir, 'sessions.db');
+    const graphDbPath = join(testDir, 'graph-cache.db');
+    const vaultDir = join(testDir, 'vault');
+    mkdirSync(join(vaultDir, 'concepts'), { recursive: true });
+    writeFileSync(join(vaultDir, 'concepts', 'nats.md'), 'NATS links to [[jetstream]].\n');
+    createSessionDb(sessionDbPath, [
+      { id: 's1', messages: [{ role: 'user', content: 'How does NATS use JetStream?' }] },
+    ]);
+
+    const priorDb = process.env.GRAPH_CACHE_DB_PATH;
+    const priorVault = process.env.OBSIDIAN_VAULT_PATH;
+    process.env.GRAPH_CACHE_DB_PATH = graphDbPath;
+    process.env.OBSIDIAN_VAULT_PATH = vaultDir;
+    try {
+      const result = await runExtraction({
+        sessionDbPath,
+        extractionDbPath: join(testDir, 'extraction.db'),
+        checkpointPath: join(testDir, 'checkpoint.json'),
+        llmClient: createMockLlmClient([VALID_EXTRACTION]),
+        extractionStore: {
+          ...createMockExtractionStore(),
+          getConceptEdges: () => [{ source: 'NATS', target: 'JetStream', edge_type: 'uses' }],
+        },
+        extractFn: async () => VALID_EXTRACTION,
+        skipNotes: true,
+        skipGraph: false,
+      });
+      assert.equal(result.processed, 1);
+    } finally {
+      if (priorDb === undefined) delete process.env.GRAPH_CACHE_DB_PATH;
+      else process.env.GRAPH_CACHE_DB_PATH = priorDb;
+      if (priorVault === undefined) delete process.env.OBSIDIAN_VAULT_PATH;
+      else process.env.OBSIDIAN_VAULT_PATH = priorVault;
+    }
+
+    const graphDb = new Database(graphDbPath, { readonly: true });
+    try {
+      const { cnt } = graphDb.prepare(
+        "SELECT count(*) AS cnt FROM concept_graph_edges WHERE edge_type = 'uses'"
+      ).get();
+      assert.equal(cnt, 1);
+    } finally {
+      graphDb.close();
+    }
   });
 
   it('returns zero results when session DB does not exist', async () => {

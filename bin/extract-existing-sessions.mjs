@@ -299,10 +299,18 @@ export async function runExtraction(opts = {}) {
     try {
       process.stderr.write(`[extract-backfill] refreshing graph cache...\n`);
       const { createGraphCache } = await import('../bin/obsidian-graph-cache.mjs');
-      const cache = createGraphCache();
-      await cache.refreshCache();
-      const stats = cache.getStats();
-      cache.close();
+      // refreshCache is full-replace: without the store it drops the LLM
+      // concept_edges the memory daemon merges in.
+      const edgeStore = opts.extractionStore || createExtractionStore({ dbPath: extractionDbPath });
+      const cache = createGraphCache({ extractionStore: edgeStore });
+      let stats;
+      try {
+        await cache.refreshCache();
+        stats = cache.getStats();
+      } finally {
+        cache.close();
+        if (!opts.extractionStore) edgeStore.close();
+      }
       process.stderr.write(
         `[extract-backfill] graph cache refreshed: ${stats.nodeCount} nodes, ${stats.edgeCount} edges\n`
       );
