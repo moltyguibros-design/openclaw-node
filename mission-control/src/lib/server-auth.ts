@@ -91,6 +91,11 @@ export function decide(
     return { action: "deny", status: 403, reason: "origin" };
   }
 
+  // An emptied token file reads as "", and timingSafeEqualStr("", "") is true: an empty cookie would pass.
+  if (!sessionToken) {
+    return { action: "deny", status: 401, reason: "token" };
+  }
+
   const cookieOk = input.cookieToken != null && timingSafeEqualStr(input.cookieToken, sessionToken);
   const bearerOk = input.bearerToken != null && timingSafeEqualStr(input.bearerToken, sessionToken);
 

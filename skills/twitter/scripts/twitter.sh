@@ -60,6 +60,17 @@ oauth_header() {
     "oauth_version=1.0"
   )
 
+  # RFC 5849 3.4.1.2-3: the base string URI excludes the query; its pairs are signed as parameters.
+  local base_url="${url%%\?*}"
+  if [[ "$url" == *\?* ]]; then
+    local -a query_pairs
+    local pair
+    IFS='&' read -ra query_pairs <<< "${url#*\?}"
+    for pair in "${query_pairs[@]}"; do
+      params+=("$(pct_encode "${pair%%=*}")=$(pct_encode "${pair#*=}")")
+    done
+  fi
+
   # Add body params if present (for form-encoded POST)
   if [[ -n "$body_params" ]]; then
     while IFS= read -r line; do
@@ -69,13 +80,13 @@ oauth_header() {
 
   # Sort and join
   local sorted
-  sorted=$(printf '%s\n' "${params[@]}" | sort)
+  sorted=$(printf '%s\n' "${params[@]}" | LC_ALL=C sort)
   local param_string
   param_string=$(printf '%s\n' "$sorted" | paste -sd '&' -)
 
   # Signature base string
   local sig_base
-  sig_base="${method}&$(pct_encode "$url")&$(pct_encode "$param_string")"
+  sig_base="${method}&$(pct_encode "$base_url")&$(pct_encode "$param_string")"
 
   # Signing key
   local signing_key

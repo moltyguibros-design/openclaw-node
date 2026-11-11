@@ -18,10 +18,11 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { resolveNodeId } from '../lib/node-id.js';
 
 const WORKSPACE = process.env.OPENCLAW_WORKSPACE
   || path.join(os.homedir(), '.openclaw', 'workspace');
-const NODE_ID = process.env.OPENCLAW_NODE_ID || os.hostname();
+const NODE_ID = resolveNodeId();
 
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');

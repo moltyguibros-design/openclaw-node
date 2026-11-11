@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
         .prepare(
           `WITH RECURSIVE tree AS (
             SELECT id, type, status FROM tasks WHERE id = ?
-            UNION ALL
+            UNION
             SELECT t.id, t.type, t.status FROM tasks t JOIN tree ON t.parent_id = tree.id
           )
           SELECT status, COUNT(*) as count FROM tree
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
         .prepare(
           `WITH RECURSIVE tree AS (
             SELECT id, start_date, end_date FROM tasks WHERE id = ?
-            UNION ALL
+            UNION
             SELECT t.id, t.start_date, t.end_date FROM tasks t JOIN tree ON t.parent_id = tree.id
           )
           SELECT MIN(start_date) as min_date, MAX(end_date) as max_date FROM tree`
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
         .prepare(
           `WITH RECURSIVE tree AS (
             SELECT id FROM tasks WHERE id = ?
-            UNION ALL
+            UNION
             SELECT t.id FROM tasks t JOIN tree ON t.parent_id = tree.id
           )
           SELECT DATE(t.updated_at) as date, COUNT(*) as count

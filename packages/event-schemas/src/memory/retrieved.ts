@@ -14,6 +14,9 @@ export const MemoryRetrievedSchema = EventEnvelopeSchema.extend({
     concept_names: z.array(z.string().max(200)).max(20).optional(),
     decision_texts: z.array(z.string().max(500)).max(10).optional(),
     duration_ms: z.number().int().nonnegative(),
+    // The inject request's client tag and session, when given.
+    frontend: z.string().max(100).optional(),
+    session_id: z.string().max(200).optional(),
   }),
 });
 

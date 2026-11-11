@@ -80,7 +80,11 @@ function parseArgs(args) {
   const positional = [];
   let i = 0;
   while (i < args.length) {
-    if (args[i].startsWith('--') && args[i + 1] && !args[i + 1].startsWith('--')) {
+    // --json takes no value: it used to need one, so `history <id> --json` left it a positional.
+    if (args[i] === '--json') {
+      flags.json = true;
+      i++;
+    } else if (args[i].startsWith('--') && args[i + 1] && !args[i + 1].startsWith('--')) {
       flags[args[i].slice(2)] = args[i + 1];
       i += 2;
     } else {

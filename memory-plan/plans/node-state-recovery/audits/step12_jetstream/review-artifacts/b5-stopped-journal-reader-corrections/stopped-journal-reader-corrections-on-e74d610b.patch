@@ -1,0 +1,521 @@
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_journal_inputs.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_journal_inputs.py
+index d28ceec..1575f87 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_journal_inputs.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_journal_inputs.py
+@@ -1,19 +1,25 @@
+ #!/usr/bin/env python3
+ """Pure reader of the user journal and the four NATS configs inside a stopped guest Data volume (B5).
+ 
+-`root` is the Data volume root: an owned fixture today, later a read-only mount of the stopped
+-image (no mount wrapper here). It must not change while it is read: each path component and
+-file is checked before use, which is no lock. Journal files and directories must carry the owner
+-and 0600/0700 modes Journal gives them; config modes are not constrained, their owner and single
+-link are. Nothing is created, locked or written, and
++`root` is the Data volume root, given as a literal absolute path: an owned fixture today, later a
++read-only mount of the stopped image (no mount wrapper here; its ownership and mount options are
++tracked separately). A guest path P is read at root/P[1:], which holds only below /Users, the
++firmlink into the Data volume; the home form allows nothing else. The tree must not change while
++it is read: each path component and file is checked before use, which is no lock.
++
++Journal files, locks and directories must carry the owner, single link and 0600/0700 modes
++Journal gives them; lock files are present and empty, as Journal's O_CREAT open leaves them.
++Config modes are recorded, not constrained; their owner and single link are. Every directory
++listing, file and the total read are bounded. Nothing is created, locked or written, and
+ preservation_journal.Journal is never constructed: its constructor creates and locks
+ ~/.openclaw/preservation of whatever host runs it, and its recovery path writes.
+ 
+ Every path is fixed by the one home all four committed store paths already name. The journal
+ window is the unique direct child of the fixed journal parent whose last record carries the
+-committed checkpoint digest; the node receipt is consistency evidence only, never the selector.
+-The B3 pin table is the caller's: it is never read from the image or rebuilt from the
+-checkpoint's identities. The NATS binary is the one the journal baseline names for all four
++committed checkpoint digest; every other window must be its finished ancestor through the
++baseline predecessor links Journal writes. The node receipt is consistency evidence only, never
++the selector. The B3 pin table is the caller's: it is never read from the image or rebuilt from
++the checkpoint's identities. The NATS binary is the one the journal baseline names for all four
+ units; no pin binds it beyond that. Selection trusts the pinned commitment, so D189's residuals
+ stand unchanged: a same-uid pre-stop CHECKPOINT rewrite and recommit, or a coordinated CAPTURE
+ rewrite, selects whatever window matches the rewritten digest.
+@@ -37,6 +43,10 @@ RECORD = re.compile(r'\d{6}\.json')
+ PRESERVATION = '/.openclaw/preservation'
+ PRESERVATION_ENTRIES = frozenset(('journals', 'node.lock', 'node.lock.state.json'))
+ RECEIPT_KEYS = frozenset(('journal_root', 'baseline', 'status', 'phase', 'holder'))
++# Entries per directory (so windows, and records per window) and bytes read in all. A full-node
++# window is about a hundred records of at most tens of KiB, so both leave wide headroom.
++MAX_ENTRIES = 1024
++MAX_TOTAL = 256 << 20
+ 
+ 
+ def committed_home(manifest):
+@@ -72,15 +82,22 @@ def private_dir(path):
+ 
+ 
+ def names(path):
+-    """Directory entries, Finder metadata aside (finder_metadata refuses a foreign or linked one)."""
+-    return sorted(name for name in os.listdir(path) if not finder_metadata(path / name))
++    """At most MAX_ENTRIES directory entries, Finder metadata aside (finder_metadata refuses a foreign one)."""
++    found = []
++    with os.scandir(path) as entries:
++        for entry in entries:
++            if not finder_metadata(path / entry.name):
++                found.append(entry.name)
++                require(len(found) <= MAX_ENTRIES, 'stopped image directory holds too many entries: ' + path.name)
++    return sorted(found)
+ 
+ 
+-def content(path, mode):
+-    """Exact bytes of one owned, single-link regular file of at most LIMIT bytes.
++def content(path, mode, budget):
++    """Exact bytes and lstat of one owned, single-link regular file of at most LIMIT bytes.
+ 
+     The entry is checked before it is opened, so a link, FIFO or device node in the guest image is
+-    never opened; the opened file must then be that same inode.
++    never opened; the opened file must then be that same inode. `budget` is the one-item list of
++    bytes the whole read may still take.
+     """
+     info = path.lstat()
+     require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and owned(info, mode),
+@@ -97,11 +114,22 @@ def content(path, mode):
+     finally:
+         os.close(fd)
+     require(len(raw) <= LIMIT, 'stopped image file exceeds its size bound: ' + path.name)
+-    return raw
++    budget[0] -= len(raw)
++    require(budget[0] >= 0, 'stopped image reads exceed their total bound at: ' + path.name)
++    return raw, info
++
++
++def lock(path, budget):
++    """A Journal lock file: created empty by its O_CREAT open and never written."""
++    require(content(path, 0o600, budget)[0] == b'', 'journal lock file is not empty: ' + path.name)
+ 
+ 
+ def canonical(raw, what):
+-    """JSON in Journal's own encoding, so the image holds exactly the bytes the guest wrote."""
++    """JSON in Journal's own encoding, so the image holds exactly the bytes the guest wrote.
++
++    Byte equality refuses duplicate keys, and encoded() refuses NaN and the infinities as Journal
++    itself does when it writes (allow_nan=False).
++    """
+     try:
+         value = json.loads(raw)
+         exact = raw == encoded(value)
+@@ -111,17 +139,18 @@ def canonical(raw, what):
+     return value
+ 
+ 
+-def read_window(path):
+-    """One window's records as Journal wrote them: named in sequence, canonical and hash-chained."""
++def read_window(path, budget):
++    """One window's records as Journal wrote them: locked, named in sequence, canonical, hash-chained."""
+     private_dir(path)
+     entries = names(path)
+     # Journal writes a record through a .pending- file and its rename; anything else is foreign.
+     require(all(name == '.lock' or RECORD.fullmatch(name) for name in entries),
+             'journal window holds an unknown or pending entry: ' + path.name)
++    lock(path / '.lock', budget)
+     records, previous = [], None
+     for index, name in enumerate(name for name in entries if RECORD.fullmatch(name)):
+         require(name == '%06d.json' % index, 'journal window sequence has a gap: ' + path.name)
+-        row = canonical(content(path / name, 0o600), 'journal record')
++        row = canonical(content(path / name, 0o600, budget)[0], 'journal record')
+         try:
+             digest = hashlib.sha256(encoded({key: value for key, value in row.items()
+                                              if key != 'sha256'})).hexdigest()
+@@ -136,44 +165,72 @@ def read_window(path):
+     return records
+ 
+ 
++def lineage(windows, window, parent):
++    """The committed window, then each finished ancestor its baseline predecessor links name.
++
++    Journal links a new window to the finished head of the one its receipt last named, and refuses
++    a new window without a receipt while any window exists, so every other window is an ancestor.
++    """
++    chain = [window]
++    while windows[chain[-1]][0].get('predecessor') is not None:
++        link = windows[chain[-1]][0]['predecessor']
++        named = [name for name, rows in windows.items()
++                 if isinstance(link, dict) and set(link) == {'root', 'head'}
++                 and link.get('root') == parent + name
++                 and link.get('head') == rows[-1]['sha256']]
++        # The membership test only bounds the walk: a cycle would need a hash fixed point.
++        require(len(named) == 1 and named[0] not in chain,
++                'journal predecessor is not another window head: ' + chain[-1])
++        require(windows[named[0]][-1].get('event') in TERMINAL,
++                'journal predecessor is unfinished: ' + named[0])
++        chain.append(named[0])
++    require(set(chain) == set(windows), 'a journal window is outside the committed window lineage')
++    return chain
++
++
+ def read_inputs(root, commitment):
+-    """The committed window's records, the four config bytes, the baseline binary and the home.
++    """The committed window's records, lineage, config bytes and modes, baseline binary and home.
+ 
+     `commitment` is the pinned require_committed() result. Reads only below `root`, at paths
+     fixed by the committed home, and returns no pin table.
+     """
+     root = pathlib.Path(root)
+     home = committed_home(commitment['manifest'])
++    budget = [MAX_TOTAL]
+     try:
++        require(root.resolve(strict=True) == root, 'stopped image root is not a literal absolute path')
+         preservation = directory(root, home + PRESERVATION)
+         private_dir(preservation)
++        # Presence is the reads' own: the lock and receipt below, the journal parent after them.
+         require(set(names(preservation)) <= PRESERVATION_ENTRIES,
+                 'preservation directory holds a pending, corrupt-receipt or unknown entry')
++        lock(preservation / 'node.lock', budget)
+         journals = preservation / 'journals'
+         private_dir(journals)
++        digest = commitment['checkpoint']['checkpoint_sha256']
+         windows = {}
+         for name in names(journals):
+             require(WINDOW.fullmatch(name), 'unexpected entry in the journal parent')
+-            windows[name] = read_window(journals / name)
+-        digest = commitment['checkpoint']['checkpoint_sha256']
++            rows = read_window(journals / name, budget)
++            # Only the committed window is kept whole; the lineage needs each other's ends.
++            windows[name] = rows if rows[-1]['sha256'] == digest else [rows[0], rows[-1]]
+         chosen = [name for name, rows in windows.items() if rows[-1]['sha256'] == digest]
+         require(len(chosen) == 1, 'no unique journal window ends in the committed checkpoint digest')
+         window = chosen[0]
+         records = windows[window]
+-        # As the guest Journal itself, which refuses a new window while another is unfinished.
+-        require(all(rows[-1].get('event') in TERMINAL for name, rows in windows.items() if name != window),
+-                'another journal window is unfinished')
+-        receipt = canonical(content(preservation / 'node.lock.state.json', 0o600), 'node receipt')
++        ancestry = lineage(windows, window, home + PRESERVATION + '/journals/')
++        receipt = canonical(content(preservation / 'node.lock.state.json', 0o600, budget)[0], 'node receipt')
+         require(isinstance(receipt, dict) and set(receipt) == RECEIPT_KEYS
+                 and receipt.get('journal_root') == home + PRESERVATION + '/journals/' + window
+                 and receipt.get('status') == 'unresolved'
+                 and receipt.get('phase') == 'initialized'
+                 and receipt.get('baseline') == records[0],
+                 'node receipt does not name the committed window as its unresolved recovery')
+-        configs = {}
++        configs, modes = {}, {}
+         for unit in ROLES:
+             path = config_path(home, unit)
+-            configs[path] = content(directory(root, path.rsplit('/', 1)[0]) / (unit + '.conf'), None)
++            configs[path], info = content(directory(root, path.rsplit('/', 1)[0]) / (unit + '.conf'), None, budget)
++            modes[path] = stat.S_IMODE(info.st_mode)
+     except OSError as error:
+         raise Refused('stopped image journal or config is absent or unreadable') from error
+     try:
+@@ -181,8 +238,8 @@ def read_inputs(root, commitment):
+     except (KeyError, TypeError, IndexError) as error:
+         raise Refused('journal baseline lacks the NATS argv') from error
+     require(len(binaries) == 1, 'NATS units name different binaries in the journal baseline')
+-    return {'home': home, 'window': window, 'records': records, 'configs': configs,
+-            'binary': binaries.pop()}
++    return {'home': home, 'window': window, 'lineage': ancestry, 'records': records,
++            'configs': configs, 'config_modes': modes, 'binary': binaries.pop()}
+ 
+ 
+ def verify_stopped_journal(capture_dir, root, *, table):
+@@ -200,4 +257,5 @@ def verify_stopped_journal(capture_dir, root, *, table):
+     summary = verify_frozen_checkpoint(capture_dir, found['records'], table=table,
+                                        configs=found['configs'], binary=found['binary'],
+                                        home=found['home'])
+-    return {**summary, 'window': found['window']}
++    return {**summary, 'window': found['window'], 'lineage': found['lineage'],
++            'config_modes': found['config_modes']}
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
+index 8e2ec53..0209efe 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_stopped_journal_inputs.py
+@@ -12,6 +12,7 @@ import hashlib
+ import json
+ import os
+ import pathlib
++import re
+ import secrets
+ import shutil
+ import stat
+@@ -67,7 +68,8 @@ class StoppedImage(host.HostCheckpoint):
+     def setUp(self):
+         super().setUp()
+         self.journal.close()
+-        self.data = self.temp / 'data'
++        # The reader takes only a literal root; macOS temporary directories sit below /var -> /private/var.
++        self.data = self.temp.resolve() / 'data'
+         self.node_lock = preservation(self.data) / 'node.lock'
+         self.root = window_dir(self.data)
+         self.journal = guest.Journal(self.root, self.prior, boot='boot-a', node_lock=self.node_lock,
+@@ -94,7 +96,7 @@ class StoppedImage(host.HostCheckpoint):
+ 
+     def image(self):
+         """A fresh copy of the stopped Data root for one forgery."""
+-        path = self.temp / ('image-' + secrets.token_hex(4))
++        path = self.temp.resolve() / ('image-' + secrets.token_hex(4))
+         shutil.copytree(self.data, path, symlinks=True)
+         return path
+ 
+@@ -111,11 +113,32 @@ class StoppedImage(host.HostCheckpoint):
+             host.write_private(path / ('%06d.json' % index), encoded(row))
+         return path
+ 
+-    def finished(self, count=3, event='resolved'):
++    def finished(self, count=3, event='resolved', predecessor=None):
+         """A hash-chained window ending in the terminal record an earlier recovery appends."""
+         rows = copy.deepcopy(self.records[:count])
++        rows[0]['predecessor'] = predecessor
+         return guest.rechain(rows + [{'event': event, 'boot': 'boot-a', 'at': '2026-10-14T16:00:00+00:00'}], 0)
+ 
++    def link(self, name, rows, **changes):
++        """The baseline predecessor field Journal writes for the window it follows."""
++        return {'root': GUEST_JOURNALS + name, 'head': rows[-1]['sha256'], **changes}
++
++    def rebased(self, image, **baseline):
++        """The committed window re-hashed from a changed baseline, its receipt and digest to match.
++
++        Reader-level only: a real Journal records its predecessor's host-resolved path, which a
++        host fixture cannot relocate without re-hashing the window and its execution hold.
++        """
++        rows = copy.deepcopy(self.records)
++        rows[0].update(baseline)
++        rows = guest.rechain(rows, 0)
++        for index, row in enumerate(rows):
++            self.replace(window_dir(image) / ('%06d.json' % index), encoded(row))
++        self.set_receipt(preservation(image), baseline=rows[0])
++        commitment = copy.deepcopy(self.commitment)
++        commitment['checkpoint']['checkpoint_sha256'] = rows[-1]['sha256']
++        return commitment
++
+     def read(self, root=None, commitment=None):
+         return read_inputs(root or self.data, commitment or self.commitment)
+ 
+@@ -137,8 +160,9 @@ class Authentic(StoppedImage):
+         with mock.patch('os.open', spy), mock.patch.object(
+                 preservation_journal.Journal, '__init__', side_effect=AssertionError('Journal constructed')):
+             found = self.read()
+-        self.assertEqual(set(found), {'home', 'window', 'records', 'configs', 'binary'})
+-        self.assertEqual((found['home'], found['window']), (HOME, 'window-1'))
++        self.assertEqual(set(found), {'home', 'window', 'lineage', 'records', 'configs', 'config_modes', 'binary'})
++        self.assertEqual((found['home'], found['window'], found['lineage']), (HOME, 'window-1', ['window-1']))
++        self.assertEqual(found['config_modes'], {path: 0o600 for path in self.configs})
+         self.assertEqual(found['records'], self.records)
+         self.assertEqual(found['records'][-1]['sha256'], self.commitment['checkpoint']['checkpoint_sha256'])
+         self.assertEqual(found['configs'], self.configs)
+@@ -152,19 +176,30 @@ class Authentic(StoppedImage):
+         with mock.patch.object(preservation_journal.Journal, '__init__',
+                                side_effect=AssertionError('Journal constructed')):
+             summary = verify_stopped_journal(self.capture, self.data, table=self.table)
+-        self.assertEqual(summary['window'], 'window-1')
++        self.assertEqual((summary['window'], summary['lineage']), ('window-1', ['window-1']))
++        self.assertEqual(summary['config_modes'], {path: 0o600 for path in self.configs})
+         self.assertEqual(summary['checkpoint_sha256'], self.record['sha256'])
+         self.assertEqual(summary['pre_head'], self.commitment['manifest']['journal_head'])
+         self.assertEqual(summary['session'], guest.SESSION)
+         self.assertEqual(snapshot(self.data), before)
+ 
+-    def test_finished_sibling_windows_and_finder_metadata_are_accepted(self):
++    def test_finished_ancestor_windows_and_finder_metadata_are_accepted(self):
+         image = self.image()
+-        self.window(image, 'window-0', self.finished())
+-        self.window(image, 'window-2', self.finished(5, 'sealed'))
++        first = self.finished()
++        self.window(image, 'window-a', first)
++        second = self.finished(5, 'sealed', predecessor=self.link('window-a', first))
++        self.window(image, 'window-b', second)
++        commitment = self.rebased(image, predecessor=self.link('window-b', second))
+         for path in (preservation(image), preservation(image) / 'journals', window_dir(image)):
+             host.write_private(path / '.DS_Store', b'owned finder metadata')
+-        self.assertEqual(self.read(image)['window'], 'window-1')
++        found = self.read(image, commitment)
++        self.assertEqual((found['window'], found['lineage']), ('window-1', ['window-1', 'window-b', 'window-a']))
++
++    def test_config_modes_are_recorded_not_constrained(self):
++        image = self.image()
++        config_file(image, 'nats-2').chmod(0o644)
++        self.assertEqual(self.read(image)['config_modes'],
++                         {path: 0o644 if path.endswith('/nats-2.conf') else 0o600 for path in self.configs})
+ 
+ 
+ class Refusals(StoppedImage):
+@@ -192,6 +227,19 @@ class Refusals(StoppedImage):
+             self.rejects('not one fixed home', image, self.committed(
+                 store_paths=dotted, store_relative_paths={role: path[1:] for role, path in dotted.items()}))
+ 
++    def test_root_is_a_literal_absolute_path(self):
++        image = self.image()
++        link = image.with_name(image.name + '-link')
++        link.symlink_to(image)
++        self.addCleanup(os.chdir, os.getcwd())
++        os.chdir(image.parent)
++        for name, root in (('symlink', link), ('dot-dot', image / '..' / image.name),
++                           ('relative', pathlib.Path(image.name))):
++            with self.subTest(name):
++                self.rejects('stopped image root is not a literal absolute path', root)
++        with self.subTest('absent'):
++            self.rejects('absent or unreadable', image.with_name('absent'))
++
+     def test_every_path_component_must_be_a_real_directory(self):
+         for name in ('.openclaw', 'config'):
+             with self.subTest(name):
+@@ -229,6 +277,38 @@ class Refusals(StoppedImage):
+             (preservation(image) / 'node.lock.state.json').unlink()
+             self.rejects('absent or unreadable', image)
+ 
++    def test_lock_files_are_present_empty_owner_private_files(self):
++        def written(path):
++            self.replace(path, b'written')
++
++        def readable(path):
++            path.chmod(0o644)
++
++        def fifo(path):
++            path.unlink()
++            os.mkfifo(path, 0o600)
++
++        def symlinked(path):
++            path.unlink()
++            path.symlink_to('/dev/null')
++
++        def hardlinked(path):
++            os.link(path, self.temp / ('outside-' + secrets.token_hex(4)))
++
++        for where, target in (('window', lambda root: window_dir(root) / '.lock'),
++                              ('node', lambda root: preservation(root) / 'node.lock')):
++            for name, forge, pattern in (
++                    ('absent', pathlib.Path.unlink, 'absent or unreadable'),
++                    ('written', written, 'journal lock file is not empty: '),
++                    ('readable by others', readable, 'not an owned single-link regular file: '),
++                    ('fifo', fifo, 'not an owned single-link regular file: '),
++                    ('symlink', symlinked, 'not an owned single-link regular file: '),
++                    ('hard link', hardlinked, 'not an owned single-link regular file: ')):
++                with self.subTest(where + ' lock ' + name):
++                    image = self.image()
++                    forge(target(image))
++                    self.rejects(pattern if name == 'absent' else pattern + re.escape(target(image).name), image)
++
+     def test_window_holds_only_its_lock_and_records_named_in_sequence(self):
+         last = '%06d.json' % self.record['sequence']
+         for name in ('.pending-' + 'c' * 32, 'notes.txt'):
+@@ -251,11 +331,30 @@ class Refusals(StoppedImage):
+                 image = self.image()
+                 self.replace(window_dir(image) / '000003.json', forged)
+                 self.rejects('journal record is not canonical journal JSON', image)
+-        with self.subTest('receipt'):
++        receipt = (preservation(self.data) / 'node.lock.state.json').read_bytes()
++        for name, forged in (('receipt indented', json.dumps(json.loads(receipt), indent=1, sort_keys=True).encode()),
++                             # A parser keeping the first of duplicate keys would read 'restored'.
++                             ('receipt duplicate key, first value differs', b'{"status":"restored",' + receipt[1:])):
++            with self.subTest(name):
++                image = self.image()
++                self.replace(preservation(image) / 'node.lock.state.json', forged)
++                self.rejects('node receipt is not canonical journal JSON', image)
++
++    def test_nan_and_the_infinities_are_refused_as_the_journal_encoding_refuses_them(self):
++        receipt = (preservation(self.data) / 'node.lock.state.json').read_bytes()
++        holder = encoded(json.loads(receipt)['holder'])
++        self.assertEqual(receipt.count(holder), 1)
++        # The holder is the one receipt field the reader does not interpret, so only encoding refuses.
++        for token in (b'NaN', b'Infinity', b'-Infinity', b'1e999'):
++            with self.subTest(token.decode()):
++                image = self.image()
++                self.replace(preservation(image) / 'node.lock.state.json',
++                             receipt.replace(holder, b'{"boot":"boot-a","pid":' + token + b'}'))
++                self.rejects('node receipt is not canonical journal JSON', image)
++        with self.subTest('record member'):
+             image = self.image()
+-            path = preservation(image) / 'node.lock.state.json'
+-            self.replace(path, json.dumps(json.loads(path.read_bytes()), indent=1, sort_keys=True).encode())
+-            self.rejects('node receipt is not canonical journal JSON', image)
++            self.replace(window_dir(image) / '000003.json', encoded(self.records[3])[:-1] + b',"zz":NaN}')
++            self.rejects('journal record is not canonical journal JSON', image)
+ 
+     def test_every_window_is_hash_chained(self):
+         unsigned = guest.rechain(self.records[:4], 0)
+@@ -265,9 +364,11 @@ class Refusals(StoppedImage):
+                            ('sequence', finished[:-1] + [rehashed(finished[-1], sequence=9)]),
+                            ('previous link', finished[:-1] + [rehashed(finished[-1], previous='0' * 64)])):
+             with self.subTest(name):
++                # A linked ancestor, so only its own chain rule can refuse it.
+                 image = self.image()
+                 self.window(image, 'window-0', rows)
+-                self.rejects('journal chain differs: window-0', image)
++                self.rejects('journal chain differs: window-0', image,
++                             self.rebased(image, predecessor=self.link('window-0', rows)))
+ 
+     def test_selection_needs_exactly_one_window_with_the_committed_digest(self):
+         last = '%06d.json' % self.record['sequence']
+@@ -285,10 +386,36 @@ class Refusals(StoppedImage):
+             shutil.copytree(window_dir(image), window_dir(image, 'window-2'), symlinks=True)
+             self.rejects('no unique journal window ends in the committed checkpoint digest', image)
+ 
+-    def test_other_windows_must_be_finished(self):
+-        image = self.image()
+-        self.window(image, 'window-0', guest.rechain(self.records[:4], 0))
+-        self.rejects('another journal window is unfinished', image)
++    def test_every_other_window_is_a_finished_ancestor_of_the_committed_one(self):
++        ancestor = self.finished()
++        unfinished = guest.rechain(self.records[:4], 0)
++        for name, rows in (('an unlinked finished window', ancestor), ('an unlinked unfinished window', unfinished)):
++            with self.subTest(name):
++                image = self.image()
++                self.window(image, 'window-0', rows)
++                self.rejects('a journal window is outside the committed window lineage', image)
++        with self.subTest('a linked ancestor beside an unlinked window'):
++            image = self.image()
++            self.window(image, 'window-0', ancestor)
++            self.window(image, 'window-2', self.finished(4))
++            self.rejects('a journal window is outside the committed window lineage', image,
++                         self.rebased(image, predecessor=self.link('window-0', ancestor)))
++        for name, link in (('the host path of its predecessor', self.link('window-0', ancestor,
++                                                                          root=str(window_dir(self.data, 'window-0')))),
++                           ('a head that is not the window head', self.link('window-0', ancestor,
++                                                                           head=ancestor[-2]['sha256'])),
++                           ('an extra link field', self.link('window-0', ancestor, scope=FULL_NODE_SCOPE)),
++                           ('an absent window', self.link('window-9', ancestor))):
++            with self.subTest(name):
++                image = self.image()
++                self.window(image, 'window-0', ancestor)
++                self.rejects('journal predecessor is not another window head: window-1', image,
++                             self.rebased(image, predecessor=link))
++        with self.subTest('an unfinished predecessor'):
++            image = self.image()
++            self.window(image, 'window-0', unfinished)
++            self.rejects('journal predecessor is unfinished: window-0', image,
++                         self.rebased(image, predecessor=self.link('window-0', unfinished)))
+ 
+     def test_receipt_must_name_the_committed_window_as_unresolved(self):
+         for name, changes in (('another window', {'journal_root': GUEST_JOURNALS + 'window-0'}),
+@@ -361,17 +488,26 @@ class Refusals(StoppedImage):
+             self.rejects('changed while it was read: nats-2.conf', image)
+         self.assertTrue(swapped)
+ 
++    def test_directory_entries_and_total_reads_are_bounded(self):
++        self.assertEqual((stopped_journal_inputs.MAX_ENTRIES, stopped_journal_inputs.MAX_TOTAL), (1024, 256 << 20))
++        # The committed window lists its records and lock: one more entry than records.
++        with mock.patch.object(stopped_journal_inputs, 'MAX_ENTRIES', len(self.records)):
++            self.rejects('stopped image directory holds too many entries: window-1')
++        with mock.patch.object(stopped_journal_inputs, 'MAX_ENTRIES', len(self.records) + 1):
++            self.assertEqual(self.read()['window'], 'window-1')
++        # Every file of the fixture is read exactly once.
++        total = sum(path.stat().st_size for path in self.data.rglob('*') if path.is_file())
++        with mock.patch.object(stopped_journal_inputs, 'MAX_TOTAL', total - 1):
++            self.rejects('stopped image reads exceed their total bound at: ')
++        with mock.patch.object(stopped_journal_inputs, 'MAX_TOTAL', total):
++            self.assertEqual(self.read()['window'], 'window-1')
++
+     def test_baseline_must_name_one_binary_for_all_four_units(self):
+         image = self.image()
+-        rows = copy.deepcopy(self.records)
+-        rows[0]['prior']['nats-2']['identity']['argv'][0] = '/usr/local/bin/nats-server'
+-        rows = guest.rechain(rows, 0)
+-        for index, row in enumerate(rows):
+-            self.replace(window_dir(image) / ('%06d.json' % index), encoded(row))
+-        self.set_receipt(preservation(image), baseline=rows[0])
+-        commitment = copy.deepcopy(self.commitment)
+-        commitment['checkpoint']['checkpoint_sha256'] = rows[-1]['sha256']
+-        self.rejects('NATS units name different binaries in the journal baseline', image, commitment)
++        prior = copy.deepcopy(self.records[0]['prior'])
++        prior['nats-2']['identity']['argv'][0] = '/usr/local/bin/nats-server'
++        self.rejects('NATS units name different binaries in the journal baseline', image,
++                     self.rebased(image, prior=prior))
+ 
+ 
+ class Composition(StoppedImage):

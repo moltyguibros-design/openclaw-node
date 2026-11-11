@@ -85,6 +85,12 @@ describe('obsidian-graph-cache', () => {
     const cache = createGraphCache({ db, vaultPath: tmpDir });
     await cache.refreshCache();
 
+    // Spreading activation calls queryNeighbors per frontier node per step, so it
+    // must reuse statements prepared once at construction.
+    const realPrepare = db.prepare.bind(db);
+    let prepares = 0;
+    db.prepare = (...a) => { prepares++; return realPrepare(...a); };
+
     const result = cache.queryNeighbors('alpha');
     // alpha→beta, alpha→gamma (outgoing) + beta→alpha (incoming)
     assert.equal(result.edges.length, 3);
@@ -96,6 +102,7 @@ describe('obsidian-graph-cache', () => {
     const incoming = cache.queryNeighbors('alpha', { direction: 'incoming' });
     assert.equal(incoming.edges.length, 1);
     assert.equal(incoming.edges[0].source_id, 'beta');
+    assert.equal(prepares, 0, 'queryNeighbors prepared SQL per call');
     cache.close();
   });
 

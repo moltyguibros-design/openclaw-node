@@ -31,7 +31,7 @@ const operator = getOrCreateIdentity(path.join(TMP, 'operator'));
 process.env.OPENCLAW_OPERATOR_TRUSTED_KEYS = operator.publicKeyBase64;
 
 const daemon = require('../bin/mesh-task-daemon.js');
-const { createTask, TaskStore } = require('../lib/mesh-tasks');
+const { createTask, TaskStore, DEFAULT_MAX_REJECTIONS } = require('../lib/mesh-tasks');
 const { PlanStore } = require('../lib/mesh-plans');
 const { CollabStore } = require('../lib/mesh-collab');
 
@@ -54,7 +54,8 @@ function harness() {
     publish(subject, data) { events.push({ subject, raw: sc.decode(data) }); },
     request: async () => { throw new Error('no agent on the test bus'); },
   };
-  daemon.__test.setContext({ nc, store, planStore, collabStore: new CollabStore(new MockKV()) });
+  const collabStore = new CollabStore(new MockKV());
+  daemon.__test.setContext({ nc, store, planStore, collabStore });
   async function rpc(handler, payload) {
     let reply;
     await daemon.__test[handler]({
@@ -63,7 +64,7 @@ function harness() {
     });
     return reply;
   }
-  return { store, planStore, events, rpc };
+  return { store, planStore, collabStore, events, rpc };
 }
 
 /** Submit + claim as `owner`; returns the claim reply (the only place the token may appear). */
@@ -84,6 +85,11 @@ async function whatAStrangerSees(h, taskId) {
     .filter((e) => e.task_id === taskId && e.task)
     .map((e) => e.task.lease_token);
   return [got.lease_token, listed.lease_token, ...broadcast];
+}
+
+async function planState(h, planId) {
+  const plan = await h.planStore.get(planId);
+  return { status: plan.status, subtasks: plan.subtasks.map((s) => `${s.subtask_id}:${s.status}`) };
 }
 
 describe('F1/R1: the lease token reaches only the claimer', () => {
@@ -181,32 +187,27 @@ describe('F1/R1: a stranger cannot act as the owner with what get/list/events ex
   });
 });
 
+/** An approved, executing plan: P-S1 dispatched as a mesh task, P-S2 pending behind it. */
+async function approvedPlan(h, { failure_policy = 'abort_on_first_fail', s1Metric = 'npm test' } = {}) {
+  // The parent is the planner's own claimed task (dispatch copies its routing
+  // fields onto every subtask, so it must not exclude anyone).
+  const parent = await h.rpc('handleSubmit', { task_id: 'PARENT', title: 'parent' });
+  assert.equal(parent.ok, true, parent.error);
+  assert.equal((await h.rpc('handleClaim', { node_id: 'planner' })).data.task_id, 'PARENT');
+  const created = await h.rpc('handlePlanCreate', {
+    parent_task_id: 'PARENT', title: 'plan', failure_policy,
+    subtasks: [
+      { subtask_id: 'P-S1', title: 's1', metric: s1Metric, delegation: { mode: 'solo_mesh' } },
+      { subtask_id: 'P-S2', title: 's2', metric: 'npm test', depends_on: ['P-S1'], delegation: { mode: 'solo_mesh' } },
+    ],
+  });
+  assert.equal(created.ok, true, created.error);
+  const approved = await h.rpc('handlePlanApprove', signOperatorRequest({ plan_id: created.data.plan_id }, { identity: operator, nodeId: 'operator' }));
+  assert.equal(approved.ok, true, approved.error);
+  return created.data.plan_id;
+}
+
 describe('F1: a forged submit cannot touch a plan', () => {
-  /** An approved, executing plan: P-S1 dispatched as a mesh task, P-S2 pending behind it. */
-  async function approvedPlan(h, { failure_policy = 'abort_on_first_fail' } = {}) {
-    // The parent is the planner's own claimed task (dispatch copies its routing
-    // fields onto every subtask, so it must not exclude anyone).
-    const parent = await h.rpc('handleSubmit', { task_id: 'PARENT', title: 'parent' });
-    assert.equal(parent.ok, true, parent.error);
-    assert.equal((await h.rpc('handleClaim', { node_id: 'planner' })).data.task_id, 'PARENT');
-    const created = await h.rpc('handlePlanCreate', {
-      parent_task_id: 'PARENT', title: 'plan', failure_policy,
-      subtasks: [
-        { subtask_id: 'P-S1', title: 's1', metric: 'npm test', delegation: { mode: 'solo_mesh' } },
-        { subtask_id: 'P-S2', title: 's2', metric: 'npm test', depends_on: ['P-S1'], delegation: { mode: 'solo_mesh' } },
-      ],
-    });
-    assert.equal(created.ok, true, created.error);
-    const approved = await h.rpc('handlePlanApprove', signOperatorRequest({ plan_id: created.data.plan_id }, { identity: operator, nodeId: 'operator' }));
-    assert.equal(approved.ok, true, approved.error);
-    return created.data.plan_id;
-  }
-
-  async function planState(h, planId) {
-    const plan = await h.planStore.get(planId);
-    return { status: plan.status, subtasks: plan.subtasks.map((s) => `${s.subtask_id}:${s.status}`) };
-  }
-
   it('the plan fixture is live: executing, P-S1 queued, P-S2 pending', async () => {
     const h = harness();
     const planId = await approvedPlan(h);
@@ -263,6 +264,19 @@ describe('F1: a forged submit cannot touch a plan', () => {
     assert.deepEqual(await planState(h, planId), before);
   });
 
+  it('a KV proposal with a refused metric is rejected; an allowed one is still queued', async () => {
+    const h = harness();
+    await h.store.put({ ...createTask({ task_id: 'PROP-BADMETRIC', title: 'p', metric: 'curl http://evil' }), status: 'proposed', origin: 'worker-x' });
+    await h.store.put({ ...createTask({ task_id: 'PROP-OKMETRIC', title: 'p', metric: 'npm test' }), status: 'proposed', origin: 'worker-x' });
+
+    await daemon.__test.processProposals();
+
+    const bad = await h.store.get('PROP-BADMETRIC');
+    assert.equal(bad.status, 'rejected');
+    assert.match(bad.result.summary, /Metric refused/);
+    assert.equal((await h.store.get('PROP-OKMETRIC')).status, 'queued');
+  });
+
   it("the daemon's own dispatch still links the subtask and advances the plan", async () => {
     const h = harness();
     const planId = await approvedPlan(h);
@@ -277,5 +291,212 @@ describe('F1: a forged submit cannot touch a plan', () => {
 
     assert.deepEqual(await planState(h, planId), { status: 'executing', subtasks: ['P-S1:completed', 'P-S2:queued'] });
     assert.equal((await h.store.get('P-S2')).plan_id, planId, 'wave 1 dispatched with its back-reference');
+  });
+});
+
+describe('a plan subtask that ends without completing fails its subtask and moves the plan', () => {
+  for (const [failure_policy, status] of [['continue_best_effort', 'completed'], ['abort_on_first_fail', 'aborted']]) {
+    it(`a worker release (${failure_policy})`, async () => {
+      const h = harness();
+      const planId = await approvedPlan(h, { failure_policy });
+      const claim = await h.rpc('handleClaim', { node_id: 'w' });
+      assert.equal(claim.data.task_id, 'P-S1');
+      const reply = await h.rpc('handleRelease', { task_id: 'P-S1', node_id: 'w', lease_token: claim.data.lease_token, reason: 'exhausted' });
+      assert.equal(reply.ok, true, reply.error);
+      assert.deepEqual(await planState(h, planId), { status, subtasks: ['P-S1:failed', 'P-S2:blocked'] });
+    });
+  }
+
+  it('a review rejection that reaches the cap', async () => {
+    const h = harness();
+    const planId = await approvedPlan(h, { failure_policy: 'continue_best_effort', s1Metric: null });
+    const claim = await h.rpc('handleClaim', { node_id: 'w' });
+    assert.equal(claim.data.task_id, 'P-S1');
+    const done = await h.rpc('handleComplete', { task_id: 'P-S1', node_id: 'w', lease_token: claim.data.lease_token, result: { success: true } });
+    assert.equal(done.data.status, 'pending_review');
+    await h.store.put({ ...(await h.store.get('P-S1')), rejection_count: DEFAULT_MAX_REJECTIONS - 1 });
+
+    const reply = await h.rpc('handleTaskReject', signOperatorRequest({ task_id: 'P-S1', reason: 'no' }, { identity: operator, nodeId: 'operator' }));
+    assert.equal(reply.ok, true, reply.error);
+    assert.equal(reply.data.status, 'failed');
+    assert.deepEqual(await planState(h, planId), { status: 'completed', subtasks: ['P-S1:failed', 'P-S2:blocked'] });
+  });
+});
+
+describe('a stall or budget sweep leaves a subtask that completed under it alone', () => {
+  const LONG_AGO = () => new Date(Date.now() - 10 * 60_000).toISOString();
+
+  /** P-S1 running on w1 and silent for 10 minutes; returns its lease token. */
+  async function silentRunningS1(h) {
+    const claim = await h.rpc('handleClaim', { node_id: 'w1' });
+    assert.equal(claim.data.task_id, 'P-S1');
+    const { lease_token } = claim.data;
+    assert.equal((await h.rpc('handleStart', { task_id: 'P-S1', node_id: 'w1', lease_token })).ok, true);
+    await h.store.put({ ...(await h.store.get('P-S1')), started_at: LONG_AGO(), last_activity: LONG_AGO(), claimed_at: LONG_AGO(), lease_expires_at: null });
+    return lease_token;
+  }
+
+  const complete = (h, lease_token) =>
+    h.rpc('handleComplete', { task_id: 'P-S1', node_id: 'w1', lease_token, result: { success: true } });
+
+  it('detectStalls: the agent completes while its alive check is in flight', async () => {
+    const h = harness();
+    const planId = await approvedPlan(h, { failure_policy: 'continue_best_effort' });
+    const lease_token = await silentRunningS1(h);
+    const published = [];
+    daemon.__test.setContext({
+      nc: {
+        publish(subject) { published.push(subject); },
+        async request(subject) {
+          if (subject === 'mesh.agent.w1.alive') assert.equal((await complete(h, lease_token)).ok, true);
+          throw new Error('TIMEOUT');
+        },
+      },
+    });
+
+    await daemon.__test.detectStalls();
+
+    assert.equal((await h.store.get('P-S1')).status, 'completed');
+    assert.deepEqual(await planState(h, planId), { status: 'executing', subtasks: ['P-S1:completed', 'P-S2:queued'] });
+    assert.equal(published.includes('mesh.agent.w1.stall'), false);
+  });
+
+  it('enforceBudgets: the over-budget snapshot is stale and the task has completed', async () => {
+    const h = harness();
+    const planId = await approvedPlan(h, { failure_policy: 'continue_best_effort' });
+    const lease_token = await silentRunningS1(h);
+    const snapshot = { ...(await h.store.get('P-S1')), budget_minutes: 1 };
+    assert.equal((await complete(h, lease_token)).ok, true);
+    const stale = Object.create(h.store);
+    stale.findOverBudget = async () => [snapshot];
+    const published = [];
+    daemon.__test.setContext({ store: stale, nc: { publish(subject) { published.push(subject); } } });
+
+    await daemon.__test.enforceBudgets();
+
+    assert.equal((await h.store.get('P-S1')).status, 'completed');
+    assert.deepEqual(await planState(h, planId), { status: 'executing', subtasks: ['P-S1:completed', 'P-S2:queued'] });
+    assert.equal(published.includes('mesh.agent.w1.budget_exceeded'), false);
+  });
+});
+
+describe('handleCancel keeps a completed task as it is', () => {
+  const cancel = (h, task_id) => h.rpc('handleCancel', signOperatorRequest({ task_id, reason: 'stop' }, { identity: operator, nodeId: 'operator' }));
+
+  it('a completed task with a kept branch is refused and keeps its result', async () => {
+    const h = harness();
+    await h.store.put({ ...createTask({ task_id: 'T-done', title: 'done work' }), status: 'completed', owner: 'victim', result: { success: true, sha: 'abc123', merged: false } });
+    const reply = await cancel(h, 'T-done');
+    assert.equal(reply.ok, false);
+    assert.equal(reply.code, 'TASK_TERMINAL');
+    const stored = await h.store.get('T-done');
+    assert.equal(stored.status, 'completed');
+    assert.equal(stored.result.sha, 'abc123');
+  });
+
+  it('a queued task still cancels', async () => {
+    const h = harness();
+    assert.equal((await h.rpc('handleSubmit', { task_id: 'T-q', title: 'q', metric: 'npm test' })).ok, true);
+    const reply = await cancel(h, 'T-q');
+    assert.equal(reply.ok, true, reply.error);
+    assert.equal(reply.data.status, 'cancelled');
+    assert.equal((await h.store.get('T-q')).result.summary, 'stop');
+  });
+});
+
+describe('handleSubmit builds the collab session before it stores the task', () => {
+  it('an envelope-level preferred_mode picks the session mode when the spec names none', async () => {
+    const h = harness();
+    const reply = await h.rpc('handleSubmit', { task_id: 'C-1', title: 'c', preferred_mode: 'adversarial', collaboration: {} });
+    assert.equal(reply.ok, true, reply.error);
+    assert.equal((await h.collabStore.findByTaskId('C-1')).mode, 'circling_strategy');
+  });
+
+  it('an unknown collab mode is refused and leaves no orphan task behind', async () => {
+    const h = harness();
+    const reply = await h.rpc('handleSubmit', { task_id: 'C-2', title: 'c', collaboration: { mode: 'vibes' } });
+    assert.equal(reply.ok, false);
+    assert.match(reply.error, /unknown mode 'vibes'/);
+    assert.equal(await h.store.get('C-2'), null);
+    assert.equal(h.events.length, 0, 'no submitted event for a refused task');
+  });
+});
+
+describe('handleClaim: one live task per node', () => {
+  for (const started of [false, true]) {
+    it(`a node holding a ${started ? 'running' : 'claimed'} task is refused a second one`, async () => {
+      const h = harness();
+      const { lease_token } = await claimedTask(h, { id: 'T-1', owner: 'w' });
+      if (started) assert.equal((await h.rpc('handleStart', { task_id: 'T-1', node_id: 'w', lease_token })).ok, true);
+      assert.equal((await h.rpc('handleSubmit', { task_id: 'T-2', title: 'next', metric: 'npm test' })).ok, true);
+      const reply = await h.rpc('handleClaim', { node_id: 'w' });
+      assert.equal(reply.ok, false);
+      assert.match(reply.error, /already has an active task: T-1/);
+      assert.equal((await h.store.get('T-2')).status, 'queued');
+    });
+  }
+});
+
+describe('a collab_mesh plan subtask moves its plan when its session ends it', () => {
+  /** An approved plan whose only subtask P-C1 is dispatched as a collab task; returns its ids. */
+  async function collabPlan(h) {
+    assert.equal((await h.rpc('handleSubmit', { task_id: 'PARENT', title: 'parent' })).ok, true);
+    assert.equal((await h.rpc('handleClaim', { node_id: 'planner' })).data.task_id, 'PARENT');
+    const created = await h.rpc('handlePlanCreate', {
+      parent_task_id: 'PARENT', title: 'plan', failure_policy: 'abort_on_first_fail',
+      subtasks: [{
+        subtask_id: 'P-C1', title: 'c1', metric: 'npm test',
+        delegation: {
+          mode: 'collab_mesh',
+          collaboration: { mode: 'parallel', min_nodes: 2, max_nodes: 3, join_window_s: 30, max_rounds: 1, convergence: { type: 'majority' } },
+        },
+      }],
+    });
+    assert.equal(created.ok, true, created.error);
+    const planId = created.data.plan_id;
+    const approved = await h.rpc('handlePlanApprove', signOperatorRequest({ plan_id: planId }, { identity: operator, nodeId: 'operator' }));
+    assert.equal(approved.ok, true, approved.error);
+    const sid = (await h.store.get('P-C1')).collab_session_id;
+    assert.ok(sid, 'the subtask was dispatched with a collab session');
+    assert.deepEqual(await planState(h, planId), { status: 'executing', subtasks: ['P-C1:queued'] });
+    return { planId, sid };
+  }
+
+  const closeRecruiting = (h, sid) => h.collabStore._updateWithCAS(sid, (s) => ({ ...s, recruiting_deadline: new Date(0).toISOString() }));
+
+  it('a session that fails to recruit releases the task and fails the subtask', async () => {
+    const h = harness();
+    const { planId, sid } = await collabPlan(h);
+    await closeRecruiting(h, sid);
+    assert.equal(await daemon.__test.startRecruitedSession(sid), true);
+    assert.equal((await h.store.get('P-C1')).status, 'released');
+    assert.deepEqual(await planState(h, planId), { status: 'aborted', subtasks: ['P-C1:failed'] });
+  });
+
+  it('a session that loses members before round 1 fails the task and the subtask', async () => {
+    const h = harness();
+    const { planId, sid } = await collabPlan(h);
+    await h.collabStore.addNode(sid, 'a');
+    await h.collabStore.addNode(sid, 'b');
+    await h.collabStore.setNodeStatus(sid, 'b', 'dead');
+    await closeRecruiting(h, sid);
+    assert.equal(await daemon.__test.startRecruitedSession(sid), true);
+    assert.equal((await h.store.get('P-C1')).status, 'failed');
+    assert.deepEqual(await planState(h, planId), { status: 'aborted', subtasks: ['P-C1:failed'] });
+  });
+
+  it('a converged session completes the task, the subtask and the plan', async () => {
+    const h = harness();
+    const { planId, sid } = await collabPlan(h);
+    await h.collabStore.addNode(sid, 'a');
+    await h.collabStore.addNode(sid, 'b');
+    await h.collabStore.startRound(sid);
+    for (const node_id of ['a', 'b']) {
+      assert.ok(await h.collabStore.submitReflection(sid, { node_id, summary: 'done', vote: 'converged', confidence: 0.9 }));
+    }
+    await daemon.__test.evaluateRound(sid);
+    assert.equal((await h.store.get('P-C1')).status, 'completed');
+    assert.deepEqual(await planState(h, planId), { status: 'completed', subtasks: ['P-C1:completed'] });
+    assert.equal((await h.store.get('PARENT')).status, 'completed', 'the finished plan closes its parent task');
   });
 });

@@ -173,8 +173,7 @@ if ! $SANDBOX && ! $DRY_RUN && [ -d "$MC_DIR/node_modules" ] && [ ! -d "$MC_DIR/
   if (cd "$MC_DIR" && npm run build); then
     info "Mission Control production build ready"
   else
-    warn "Mission Control build FAILED — the unit cannot serve until fixed (known queued tsc errors)."
-    warn "Interim: cd $MC_DIR && npm run dev   — the acceptance gate reports MC honestly either way"
+    warn "Mission Control build FAILED — the unit cannot serve until fixed (see the next build output above)."
   fi
 fi
 

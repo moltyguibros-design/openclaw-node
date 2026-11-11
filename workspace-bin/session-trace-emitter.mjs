@@ -134,17 +134,13 @@ export function createSessionTraceEmitter(tracer) {
 
       if (stat.size <= state.lastSize) return; // No new data
 
-      // Read only the new portion
       const fd = fs.openSync(jsonlPath, 'r');
       try {
-        const newBytes = stat.size - state.lastSize;
-        // Cap at 64KB per tick to avoid blocking
-        const readSize = Math.min(newBytes, 65536);
-        const offset = stat.size - readSize;
-        const buffer = Buffer.alloc(readSize);
-        fs.readSync(fd, buffer, 0, readSize, offset);
-
-        const chunk = buffer.toString('utf8');
+        const buffer = Buffer.alloc(stat.size - state.lastSize);
+        fs.readSync(fd, buffer, 0, buffer.length, state.lastSize);
+        const lastNl = buffer.lastIndexOf(0x0a);
+        if (lastNl < 0) return; // only a partial line so far
+        const chunk = buffer.toString('utf8', 0, lastNl);
         const lines = chunk.split('\n').filter(Boolean);
 
         let emitted = 0;
@@ -175,7 +171,7 @@ export function createSessionTraceEmitter(tracer) {
           emitted++;
         }
 
-        state.lastSize = stat.size;
+        state.lastSize += lastNl + 1;
 
         if (emitted > 0) {
           console.log(`[session-trace] Emitted ${emitted} events from ${jsonlPath.split('/').pop()}`);

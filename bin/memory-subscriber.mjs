@@ -15,13 +15,14 @@
  *
  * Environment:
  *   NATS_URL           — NATS server URL (default: nats://localhost:4222)
- *   OPENCLAW_NODE_ID   — Node identifier (default: os.hostname())
+ *   OPENCLAW_NODE_ID   — Node identifier (default: lib/node-id resolveNodeId())
  */
 
-import os from 'node:os';
+import { resolveNodeId } from '../lib/node-id.js';
 import { createRequire } from 'node:module';
 import { ensureSharedStream, SHARED_STREAM_NAME } from '../lib/shared-event-stream.mjs';
 import { createBackoff } from './memory-promoter.mjs';
+import { canonicalNodeId } from '../lib/local-event-log.mjs';
 
 const _require = createRequire(import.meta.url);
 const { natsConnectOpts } = _require('../lib/nats-resolve.js');
@@ -183,7 +184,7 @@ export async function createSubscriber(nc, nodeId, opts = {}) {
   const jsm = await nc.jetstreamManager();
   const backoff = createBackoff(opts.backoffOpts);
 
-  const consumerName = `subscriber-${nodeId}`;
+  const consumerName = `subscriber-${canonicalNodeId(nodeId)}`;
 
   // Ensure durable consumer on shared stream
   try {
@@ -262,10 +263,10 @@ export async function createSubscriber(nc, nodeId, opts = {}) {
 async function main() {
   const { connect } = _require('nats');
 
-  const nodeId = process.env.OPENCLAW_NODE_ID || os.hostname();
+  const nodeId = resolveNodeId();
 
   const nc = await connect(natsConnectOpts({ servers: process.env.NATS_URL }));
-  console.log(`[subscriber] connected to ${natsUrl} as node ${nodeId}`);
+  console.log(`[subscriber] connected to ${nc.getServer()} as node ${nodeId}`);
 
   const subscriber = await createSubscriber(nc, nodeId, {
     onIngest: (event, parsed, provenance) => {

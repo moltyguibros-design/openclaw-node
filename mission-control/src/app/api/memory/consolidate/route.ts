@@ -12,9 +12,11 @@ import { NextResponse } from "next/server";
 import { getRawDb, getDb } from "@/lib/db";
 import { memoryAudit } from "@/lib/db/schema";
 
-function tokenJaccard(a: string, b: string): number {
-  const tokensA = new Set(a.toLowerCase().split(/\s+/).filter(t => t.length > 2));
-  const tokensB = new Set(b.toLowerCase().split(/\s+/).filter(t => t.length > 2));
+function tokenize(text: string): Set<string> {
+  return new Set(text.toLowerCase().split(/\s+/).filter(t => t.length > 2));
+}
+
+function tokenJaccard(tokensA: Set<string>, tokensB: Set<string>): number {
   if (tokensA.size === 0 || tokensB.size === 0) return 0;
   let intersection = 0;
   for (const t of tokensA) {
@@ -54,49 +56,52 @@ export async function POST() {
   }
 
   const archivedIds = new Set<number>();
+  const archiveStmt = raw.prepare(
+    "UPDATE memory_items SET status = 'archived', superseded_by = ? WHERE id = ?"
+  );
 
-  for (const [, facts] of byCategory) {
-    for (let i = 0; i < facts.length; i++) {
-      if (archivedIds.has(facts[i].id)) continue;
+  raw.transaction(() => {
+    for (const [, facts] of byCategory) {
+      const tokens = facts.map(f => tokenize(f.fact_text));
+      for (let i = 0; i < facts.length; i++) {
+        if (archivedIds.has(facts[i].id)) continue;
 
-      for (let j = i + 1; j < facts.length; j++) {
-        if (archivedIds.has(facts[j].id)) continue;
+        for (let j = i + 1; j < facts.length; j++) {
+          if (archivedIds.has(facts[j].id)) continue;
 
-        const similarity = tokenJaccard(facts[i].fact_text, facts[j].fact_text);
-        if (similarity >= 0.8) {
-          // Keep higher confidence (or newer if equal)
-          const [keep, archive] =
-            facts[i].confidence >= facts[j].confidence
-              ? [facts[i], facts[j]]
-              : [facts[j], facts[i]];
+          const similarity = tokenJaccard(tokens[i], tokens[j]);
+          if (similarity >= 0.8) {
+            // Keep higher confidence (or newer if equal)
+            const [keep, archive] =
+              facts[i].confidence >= facts[j].confidence
+                ? [facts[i], facts[j]]
+                : [facts[j], facts[i]];
 
-          // Archive the duplicate
-          raw.prepare(
-            "UPDATE memory_items SET status = 'archived', superseded_by = ? WHERE id = ?"
-          ).run(keep.id, archive.id);
+            archiveStmt.run(keep.id, archive.id);
+            archivedIds.add(archive.id);
 
-          archivedIds.add(archive.id);
+            db.insert(memoryAudit)
+              .values({
+                operation: "consolidate",
+                itemId: archive.id,
+                detail: JSON.stringify({
+                  keptId: keep.id,
+                  similarity: similarity.toFixed(2),
+                  keptText: keep.fact_text.slice(0, 80),
+                  archivedText: archive.fact_text.slice(0, 80),
+                }),
+              })
+              .run();
 
-          // Audit
-          db.insert(memoryAudit)
-            .values({
-              operation: "consolidate",
-              itemId: archive.id,
-              detail: JSON.stringify({
-                keptId: keep.id,
-                similarity: similarity.toFixed(2),
-                keptText: keep.fact_text.slice(0, 80),
-                archivedText: archive.fact_text.slice(0, 80),
-              }),
-            })
-            .run();
-
-          mergedPairs.push({ kept: keep.id, archived: archive.id, similarity });
-          merged++;
+            mergedPairs.push({ kept: keep.id, archived: archive.id, similarity });
+            merged++;
+            // facts[i] is archived now; comparing it further would re-archive it or point later rows at it.
+            if (archive === facts[i]) break;
+          }
         }
       }
     }
-  }
+  })();
 
   return NextResponse.json({
     merged,

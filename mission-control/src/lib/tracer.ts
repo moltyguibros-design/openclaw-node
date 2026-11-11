@@ -3,6 +3,12 @@ import { getDb } from "./db";
 import { observabilityEvents, type NewObservabilityEvent } from "./db/schema";
 import { getNats, sc } from "./nats";
 import { NODE_ID } from "./config";
+import { lt } from "drizzle-orm";
+
+const RETENTION_MS = 86_400_000;
+const PRUNE_EVERY_MS = 3_600_000;
+// runMigrations prunes at startup; this keeps the 24h retention true while MC stays up.
+let lastPruneAt = Date.now();
 
 /** Summarize URL search params for trace logging (max 120 chars) */
 function summarizeParams(url: URL): string {
@@ -101,6 +107,11 @@ function insertEvent(event: NewObservabilityEvent) {
   try {
     const db = getDb();
     db.insert(observabilityEvents).values(event).run();
+    const now = Date.now();
+    if (now - lastPruneAt >= PRUNE_EVERY_MS) {
+      lastPruneAt = now;
+      db.delete(observabilityEvents).where(lt(observabilityEvents.timestamp, now - RETENTION_MS)).run();
+    }
   } catch (err) {
     console.error(`[tracer] insertEvent failed: ${(err as Error).message}`);
   }

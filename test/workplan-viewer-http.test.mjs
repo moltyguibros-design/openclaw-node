@@ -7,12 +7,12 @@ import http from 'node:http';
 import net from 'node:net';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const script = fileURLToPath(new URL('../workspace-bin/workplan-viewer.mjs', import.meta.url));
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function fixture(t) {
+async function fixture(t, { prepare = () => ({}) } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'viewer-http-'));
   const plan = path.join(root, 'plans/fixture');
   const tokenFile = path.join(root, 'token');
@@ -21,6 +21,7 @@ async function fixture(t) {
   fs.mkdirSync(path.join(root, 'bin'));
   fs.writeFileSync(tokenFile, master, { mode: 0o600 });
   fs.writeFileSync(path.join(root, 'bin/launchctl'), '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+  fs.writeFileSync(path.join(root, 'bin/git'), '#!/bin/sh\necho "$@" >> "' + path.join(root, 'git-calls') + '"\n', { mode: 0o700 });
   fs.writeFileSync(path.join(plan, 'VERSION'), 'v1.0\n');
   fs.writeFileSync(path.join(plan, 'INVENTORY.md'), '# Fixture\n');
   fs.writeFileSync(path.join(plan, 'tick-logs/sample.log'), 'FIXTURE_LOG\n');
@@ -33,10 +34,11 @@ async function fixture(t) {
   const port = reservation.address().port;
   await new Promise(resolve => reservation.close(resolve));
   const origin = `http://127.0.0.1:${port}`;
+  const extraEnv = prepare(root, plan);
   const child = spawn(process.execPath, [script], { cwd: root,
     env: { ...process.env, HOME: root, WORKPLAN_ROOTS: path.join(root, 'plans'),
       WORKPLAN_VIEWER_TOKEN_FILE: tokenFile, WORKPLAN_VIEWER_PORT: String(port),
-      MEMORY_PLAN_NOTIFY: 'off', PATH: path.join(root, 'bin') + path.delimiter + process.env.PATH },
+      MEMORY_PLAN_NOTIFY: 'off', PATH: path.join(root, 'bin') + path.delimiter + process.env.PATH, ...extraEnv },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -102,7 +104,10 @@ test('all private routes reject anonymous access before effects; the shell expos
   assert.match(shell.headers['content-security-policy'], /script-src 'self'/);
   assert.match(shell.headers['content-security-policy'], /frame-ancestors 'none'/);
   assert.equal(shell.headers['access-control-allow-origin'], undefined);
-  assert.equal((await f.request('/viewer-client.js')).status, 200);
+  const client = await f.request('/viewer-client.js');
+  assert.equal(client.status, 200);
+  assert.ok(!client.text.includes('\\\\n'), 'client strings must not contain a literal backslash-n');
+  assert.ok(!client.text.includes('memory-plan/BLOCKED.md'), 'BLOCKED.md lives in the plan silo');
   assert.equal((await f.request('/viewer-session.mjs')).status, 200);
 });
 
@@ -241,6 +246,31 @@ test('authenticated controls preserve errors and execute only the fixture comman
   assert.ok(!f.output().includes(f.master));
 });
 
+test('default automation config points at the repo that holds memory-plan/plans', async t => {
+  const f = await fixture(t);
+  const r = await f.request('/api/plans/fixture/automation', { token: f.master });
+  assert.equal(r.status, 200);
+  const { config } = JSON.parse(r.text);
+  const repo = path.dirname(f.root);
+  assert.equal(config._persisted, false);
+  assert.equal(config.tick_command, path.join(repo, 'workspace-bin', 'fixture-tick.sh'));
+  assert.equal(config.working_dir, repo);
+  assert.equal(fs.existsSync(path.join(f.plan, 'automation.json')), false);
+});
+
+test('only the per-plan state route spends a git status on tree_dirty', async t => {
+  const f = await fixture(t);
+  const calls = path.join(f.root, 'git-calls');
+  const plans = await f.request('/api/plans', { token: f.master });
+  assert.equal(plans.status, 200);
+  assert.equal(JSON.parse(plans.text).plans[0].tree_dirty, null);
+  assert.equal(fs.existsSync(calls), false);
+  const state = await f.request('/api/plans/fixture/state', { token: f.master });
+  assert.equal(state.status, 200);
+  assert.equal(JSON.parse(state.text).tree_dirty, false);
+  assert.equal(fs.readFileSync(calls, 'utf8').trim().split('\n').length, 1);
+});
+
 test('session exchange, streamed logs, revocation and file rotation work through HTTP', async t => {
   const f = await fixture(t);
   const login = () => f.request('/api/session', { method: 'POST', headers: { Origin: f.origin, 'Sec-Fetch-Site': 'same-origin' }, body: { token: f.master } });
@@ -285,4 +315,85 @@ test('a pinned stream keeps its original file when the selected name is replaced
   assert.ok(!text.includes('PRIVATE_OUTSIDE_LOG_ROOT'));
   await reader.cancel();
   assert.equal((await f.request('/api/plans/fixture/stream?log=sample.log', { token: f.master })).status, 404);
+});
+
+async function sseEvents(t, f, route) {
+  const controller = new AbortController();
+  const response = await fetch(f.origin + route, { headers: { Authorization: `Bearer ${f.master}` }, signal: controller.signal });
+  assert.equal(response.status, 200);
+  const events = [];
+  const decoder = new TextDecoder();
+  let pending = '';
+  const pump = (async () => {
+    try {
+      for await (const chunk of response.body) {
+        pending += decoder.decode(chunk, { stream: true });
+        let end;
+        while ((end = pending.indexOf('\n\n')) !== -1) {
+          const block = pending.slice(0, end);
+          pending = pending.slice(end + 2);
+          const event = block.match(/^event: (.*)$/m)?.[1];
+          if (event) events.push({ event, data: block.match(/^data: (.*)$/m)?.[1] });
+        }
+      }
+    } catch {}
+  })();
+  const close = async () => { controller.abort(); await pump; };
+  t.after(close);
+  async function waitFor(predicate, ms = 3000) {
+    for (const deadline = Date.now() + ms; Date.now() < deadline; await sleep(25)) {
+      const hit = events.find(predicate);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  return { events, waitFor, close };
+}
+
+test('global streams share one session-transcript scan instead of re-listing it on every poll', async t => {
+  let sessions, counter;
+  const f = await fixture(t, { prepare(root, plan) {
+    const old = new Date(Date.now() - 3600000);
+    fs.utimesSync(path.join(plan, 'tick-logs/sample.log'), old, old);
+    const suffix = path.join('.claude/projects', fs.realpathSync(root).replace(/[/.]/g, '-'));
+    sessions = path.join(root, suffix);
+    fs.mkdirSync(sessions, { recursive: true });
+    for (const name of ['a', 'c', 'd']) {
+      fs.writeFileSync(path.join(sessions, name + '.jsonl'), '');
+      fs.utimesSync(path.join(sessions, name + '.jsonl'), old, old);
+    }
+    counter = path.join(root, 'session-scans');
+    const hook = path.join(root, 'count-scans.mjs');
+    fs.writeFileSync(hook, `import fs from 'node:fs';
+const readdirSync = fs.readdirSync;
+fs.readdirSync = function (dir, ...rest) {
+  if (String(dir).endsWith(${JSON.stringify(suffix)})) fs.appendFileSync(${JSON.stringify(counter)}, '.');
+  return readdirSync.call(this, dir, ...rest);
+};
+`);
+    return { NODE_OPTIONS: '--import ' + pathToFileURL(hook).href };
+  } });
+  const activity = await sseEvents(t, f, '/api/global/activity-stream');
+  const live = await sseEvents(t, f, '/api/global/stream');
+  assert.ok(await activity.waitFor(e => e.event === 'reset'), f.output());
+  assert.ok(await live.waitFor(e => e.event === 'file'), f.output());
+  await sleep(3000);
+  const scans = fs.readFileSync(counter, 'utf8').length;
+  assert.ok(scans >= 1 && scans <= 4, `session dir listed ${scans} times in ~3s`);
+  fs.writeFileSync(path.join(sessions, 'b.jsonl'), '');
+  const switched = await activity.waitFor(e => e.event === 'reset' && JSON.parse(e.data).source === 'b.jsonl', 3500);
+  assert.ok(switched, 'a newer session transcript is picked up within the cache window');
+});
+
+test('a log stream keeps a multi-byte character split across writes', async t => {
+  const f = await fixture(t);
+  const file = path.join(f.plan, 'tick-logs/sample.log');
+  fs.writeFileSync(file, Buffer.concat([Buffer.from('FIXTURE_LOG\n'), Buffer.from([0xc3])]));
+  const stream = await sseEvents(t, f, '/api/plans/fixture/stream?log=sample.log');
+  const appends = () => stream.events.filter(e => e.event === 'append');
+  const text = () => appends().map(e => JSON.parse(e.data)).join('');
+  assert.ok(await stream.waitFor(() => appends().length === 1), f.output());
+  fs.appendFileSync(file, Buffer.from([0xa9, 0x58, 0x0a]));
+  assert.ok(await stream.waitFor(() => appends().length === 2), JSON.stringify(text()));
+  assert.equal(text(), 'FIXTURE_LOG\néX\n');
 });

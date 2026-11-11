@@ -3,7 +3,9 @@ import fs from "fs";
 import os from "os";
 
 export const WORKSPACE_ROOT =
-  process.env.WORKSPACE_ROOT || "/Users/moltymac/.openclaw/workspace";
+  process.env.WORKSPACE_ROOT ||
+  process.env.OPENCLAW_WORKSPACE ||
+  path.join(os.homedir(), ".openclaw", "workspace");
 
 export const DB_PATH =
   process.env.DB_PATH ||
@@ -19,7 +21,9 @@ export const MEMORY_MD = path.join(WORKSPACE_ROOT, "MEMORY.md");
 // real Obsidian vault (obsidian-sync.json memoryVaultPath, same resolution as
 // lib/obsidian-vault.mjs getVaultPath), falling back to legacy obsidian-local.
 export const STATE_DB_PATH =
-  process.env.STATE_DB_PATH || path.join(path.dirname(WORKSPACE_ROOT), "state.db");
+  process.env.OPENCLAW_STATE_DB ||
+  process.env.STATE_DB_PATH ||
+  path.join(path.dirname(WORKSPACE_ROOT), "state.db");
 
 function configuredMemoryVaultPath(): string | null {
   try {
@@ -103,6 +107,31 @@ import { hostname } from "os";
 
 /** This node's unique identifier in the mesh */
 export const NODE_ID = process.env.OPENCLAW_NODE_ID || hostname();
+
+/**
+ * The id the memory daemon names `.daemon-state-<id>.md` with. Its unit gets
+ * OPENCLAW_NODE_ID rendered from openclaw.env, which MC's unit does not pass,
+ * so read that file before falling back to lib/node-id.js's hostname rule.
+ */
+export function resolveDaemonNodeId(
+  env: Record<string, string | undefined> = process.env,
+  host: string = hostname(),
+  envFile: string = path.join(os.homedir(), ".openclaw", "openclaw.env"),
+): string {
+  const fromEnv = (env.OPENCLAW_NODE_ID || "").trim();
+  if (fromEnv) return fromEnv;
+  let fromFile = "";
+  try {
+    const hits = [...fs.readFileSync(envFile, "utf8").matchAll(/^\s*OPENCLAW_NODE_ID\s*=(.*)$/gm)];
+    fromFile = (hits.pop()?.[1] ?? "").trim().replace(/^["']|["']$/g, "");
+  } catch {
+    // no openclaw.env on this node
+  }
+  if (fromFile) return fromFile;
+  const legacy = (env.MESH_NODE_ID || "").trim();
+  if (legacy) return legacy;
+  return host.split(".")[0].toLowerCase().replace(/[^a-z0-9-]/g, "") || "node";
+}
 
 /** This node's role: "lead" (full authority) or "worker" (read + propose) */
 export const NODE_ROLE: "lead" | "worker" =

@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 // WAL size threshold: 50MB — above this, force a checkpoint
 const WAL_WARN_BYTES = 50 * 1024 * 1024;
-// Checkpoint must complete within 10s or we skip it
+// better-sqlite3 checkpoints synchronously and cannot be interrupted; a slower one is only logged
 const CHECKPOINT_TIMEOUT_MS = 10_000;
 
 /**
@@ -33,7 +33,7 @@ export async function GET() {
     );
   }
 
-  // Auto-checkpoint if WAL is bloated (with timeout guard)
+  // Auto-checkpoint if WAL is bloated (PASSIVE: never waits on readers or writers)
   let checkpointResult = null;
   if (health.walSizeBytes && health.walSizeBytes > WAL_WARN_BYTES) {
     const start = Date.now();

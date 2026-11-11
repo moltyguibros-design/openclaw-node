@@ -91,7 +91,7 @@ describe('broadcast-offerer constants', () => {
 // ─── generateRelevanceSummary ───────────────────────────────────────────────
 
 describe('generateRelevanceSummary', () => {
-  it('returns data-only summary when no requestAnalysis provided', async () => {
+  it('returns data-only summary when no llmClient provided', async () => {
     const broadcast = { themes: ['memory', 'retrieval'], entities: ['NATS'] };
     const result = { snippet: 'Test snippet content', session_id: 'sess-1', score: 0.75 };
 
@@ -106,7 +106,7 @@ describe('generateRelevanceSummary', () => {
     const result = { snippet: 'Test', session_id: 'sess-1', score: 0.6 };
 
     const mockAnalysis = async () => ({ mode: 'fallback', reason: 'ollama-busy-extraction' });
-    const summary = await generateRelevanceSummary(broadcast, result, { requestAnalysis: mockAnalysis });
+    const summary = await generateRelevanceSummary(broadcast, result, { llmClient: { generateAnalysis: mockAnalysis } });
     assert.ok(summary.includes('Relevant to:'));
   });
 
@@ -114,23 +114,26 @@ describe('generateRelevanceSummary', () => {
     const broadcast = { themes: ['memory'], entities: ['NATS'] };
     const result = { snippet: 'Test snippet', session_id: 'sess-1', score: 0.8 };
 
-    const mockAnalysis = async (run) => {
-      const mockClient = {
-        generate: async () => 'This snippet discusses NATS-based memory retrieval.',
-      };
-      const value = await run(mockClient);
-      return { mode: 'llm', value };
+    let captured = null;
+    const llmClient = {
+      generateAnalysis: async (messages, o) => {
+        captured = { messages, o };
+        return { mode: 'llm', value: { content: 'This snippet discusses NATS-based memory retrieval.' } };
+      },
     };
-    const summary = await generateRelevanceSummary(broadcast, result, { requestAnalysis: mockAnalysis });
+    const summary = await generateRelevanceSummary(broadcast, result, { llmClient });
     assert.ok(summary.includes('NATS-based memory retrieval'));
+    assert.equal(captured.o.waitTimeoutMs, 3000);
+    assert.equal(captured.o.maxTokens, 150);
+    assert.ok(captured.messages[1].content.includes('Test snippet'));
   });
 
-  it('falls back gracefully on requestAnalysis error', async () => {
+  it('falls back gracefully on generateAnalysis error', async () => {
     const broadcast = { themes: ['theme1'], entities: [] };
     const result = { snippet: 'snippet', session_id: 's1', score: 0.5 };
 
     const mockAnalysis = async () => { throw new Error('queue crash'); };
-    const summary = await generateRelevanceSummary(broadcast, result, { requestAnalysis: mockAnalysis });
+    const summary = await generateRelevanceSummary(broadcast, result, { llmClient: { generateAnalysis: mockAnalysis } });
     assert.ok(summary.includes('Relevant to:'));
   });
 
@@ -140,11 +143,8 @@ describe('generateRelevanceSummary', () => {
     const result = { snippet: 'snip', session_id: 's1', score: 0.8 };
     const stats = { summariesLlm: 0, summariesFallback: 0 };
 
-    const mockAnalysis = async (run) => {
-      const value = await run({ generate: async () => 'LLM-generated summary text' });
-      return { mode: 'llm', value };
-    };
-    await generateRelevanceSummary(broadcast, result, { requestAnalysis: mockAnalysis, stats });
+    const mockAnalysis = async () => ({ mode: 'llm', value: { content: 'LLM-generated summary text' } });
+    await generateRelevanceSummary(broadcast, result, { llmClient: { generateAnalysis: mockAnalysis }, stats });
     assert.equal(stats.summariesLlm, 1);
     assert.equal(stats.summariesFallback, 0);
   });
@@ -155,7 +155,7 @@ describe('generateRelevanceSummary', () => {
     const stats = { summariesLlm: 0, summariesFallback: 0 };
 
     const mockAnalysis = async () => ({ mode: 'fallback', reason: 'ollama-busy' });
-    await generateRelevanceSummary(broadcast, result, { requestAnalysis: mockAnalysis, stats });
+    await generateRelevanceSummary(broadcast, result, { llmClient: { generateAnalysis: mockAnalysis }, stats });
     assert.equal(stats.summariesLlm, 0);
     assert.equal(stats.summariesFallback, 1);
   });
@@ -166,12 +166,12 @@ describe('generateRelevanceSummary', () => {
     const stats = { summariesLlm: 0, summariesFallback: 0 };
 
     const mockAnalysis = async () => { throw new Error('queue crash'); };
-    await generateRelevanceSummary(broadcast, result, { requestAnalysis: mockAnalysis, stats });
+    await generateRelevanceSummary(broadcast, result, { llmClient: { generateAnalysis: mockAnalysis }, stats });
     assert.equal(stats.summariesLlm, 0);
     assert.equal(stats.summariesFallback, 1);
   });
 
-  it('F-M6: increments summariesFallback when no requestAnalysis provided', async () => {
+  it('F-M6: increments summariesFallback when no llmClient provided', async () => {
     const broadcast = { themes: ['t'], entities: [] };
     const result = { snippet: 'snip', session_id: 's1', score: 0.5 };
     const stats = { summariesLlm: 0, summariesFallback: 0 };
@@ -188,7 +188,7 @@ describe('generateRelevanceSummary', () => {
     const log = (msg) => logged.push(msg);
 
     const mockAnalysis = async () => ({ mode: 'fallback', reason: 'ollama-busy-extraction' });
-    await generateRelevanceSummary(broadcast, result, { requestAnalysis: mockAnalysis, log });
+    await generateRelevanceSummary(broadcast, result, { llmClient: { generateAnalysis: mockAnalysis }, log });
     assert.ok(logged.some(m => m.includes('ollama-busy-extraction')),
       `expected a log entry mentioning the fallback reason; got: ${JSON.stringify(logged)}`);
   });

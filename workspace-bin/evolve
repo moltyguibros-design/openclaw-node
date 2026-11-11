@@ -291,21 +291,17 @@ def save_baseline(genome_label, fitness):
     return baseline
 
 
-def git_commit(genome_path, mutation_titles, fitness_before, fitness_after):
+def git_commit(genome_path, mutation_titles, fitness, model):
     """Commit genome changes with evolution metadata."""
     title_summary = ", ".join(f'"{t}"' for t in mutation_titles[:2])
     if len(mutation_titles) > 2:
         title_summary += f" +{len(mutation_titles) - 2} more"
 
-    delta = round(fitness_after["score"] - fitness_before["score"], 3)
-    delta_str = f"{delta:+.3f}" if delta != 0 else "0.000"
-
     msg = (
         f"evolve({genome_path.stem.lower()}): {title_summary}\n\n"
-        f"Fitness: {fitness_before['score']:.3f} [{fitness_before['grade']}] → "
-        f"{fitness_after['score']:.3f} [{fitness_after['grade']}]  ({delta_str})\n\n"
+        f"Fitness at mutation: {fitness['score']:.3f} [{fitness['grade']}] over {fitness['window_days']}d\n\n"
         f"AlphaEvolve-style mutation — genome evolved via LLM-proposed semantic changes.\n\n"
-        f"Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+        f"Co-Authored-By: {model} <noreply@anthropic.com>"
     )
 
     try:
@@ -316,7 +312,7 @@ def git_commit(genome_path, mutation_titles, fitness_before, fitness_after):
             capture_output=True,
         )
         subprocess.run(
-            ["git", "commit", "-m", msg],
+            ["git", "commit", "-m", msg, "--", str(genome_path)],
             cwd=str(WORKSPACE),
             check=True,
             capture_output=True,
@@ -412,7 +408,7 @@ def main():
 
     # ── Step 1: Fitness ────────────────────────────────────────────────────
     sys.path.insert(0, str(WORKSPACE / "bin"))
-    from fitness_score import compute_fitness, print_report
+    from fitness_score import compute_fitness
 
     print("\n╔══════════════════════════════════════╗")
     print("║       DAEDALUS GENOME EVOLUTION      ║")
@@ -512,24 +508,18 @@ def main():
         print("\n  No mutations were successfully applied.")
         return
 
-    # ── Step 7: Re-score ──────────────────────────────────────────────────
-    fitness_after = compute_fitness(days=args.days)
-    delta = round(fitness_after["score"] - fitness["score"], 3)
-    arrow = "▲" if delta > 0 else ("▼" if delta < 0 else "→")
-    print(f"\n  Post-mutation fitness: {fitness_after['score']:.3f} [{fitness_after['grade']}]  {arrow} {delta:+.3f}")
-
-    # ── Step 8: Commit ────────────────────────────────────────────────────
+    # ── Step 7: Commit ────────────────────────────────────────────────────
     if not args.no_commit:
         do_commit = input("\n  Commit to git? [Y/n] ").strip().lower()
         if do_commit not in ("n", "no"):
-            ok = git_commit(genome_path, applied_titles, fitness, fitness_after)
+            ok = git_commit(genome_path, applied_titles, fitness, model)
             if ok:
                 print("  ✓ Committed.")
             else:
                 print("  ✗ Commit failed — changes saved to disk, commit manually.")
 
-    # ── Step 9: Save baseline ─────────────────────────────────────────────
-    save_baseline(genome_label, fitness_after)
+    # ── Step 8: Save baseline ─────────────────────────────────────────────
+    save_baseline(genome_label, fitness)
     print(f"  ✓ Baseline updated → {BASELINE_FILE.relative_to(WORKSPACE)}")
 
     print(f"\n  Done. {len(applied_titles)} mutation(s) applied to {genome_path.name}.")

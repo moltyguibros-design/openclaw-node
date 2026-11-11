@@ -5,8 +5,8 @@
  * Reads sessions from the session-store SQLite database, chunks their turns,
  * and indexes embeddings into the mcp-knowledge database via indexSessionTurns().
  *
- * Resumable: tracks progress in a checkpoint file. Already-indexed sessions
- * (by content hash) are skipped automatically by indexSessionTurns().
+ * Resumable: tracks progress in a checkpoint file; sessions already in the
+ * checkpoint are skipped. Later growth is indexed by the daemon's knowledge-index-job.
  *
  * Usage:
  *   node bin/embed-existing-sessions.mjs
@@ -25,7 +25,7 @@ import { initDatabase, indexSessionTurns } from '../lib/mcp-knowledge/core.mjs';
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
 const DEFAULT_SESSION_DB = join(homedir(), '.openclaw/state.db');
-const DEFAULT_KNOWLEDGE_DB = process.env.KNOWLEDGE_DB
+export const DEFAULT_KNOWLEDGE_DB = process.env.KNOWLEDGE_DB
   || join(process.env.KNOWLEDGE_ROOT || join(homedir(), '.openclaw/workspace'), '.knowledge.db');
 const DEFAULT_CHECKPOINT = join(homedir(), '.openclaw/.embed-migration-checkpoint.json');
 

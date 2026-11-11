@@ -15,11 +15,11 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function BurndownPage() {
   const { projects } = useProjects();
-  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  // undefined = not picked yet (fall back to the first project); null = "All tasks".
+  const [selectedProject, setSelectedProject] = useState<string | null | undefined>(undefined);
 
-  // Derived, not state-synced: falls back to the first project until the user
-  // picks one (avoids a setState-in-effect render cascade).
-  const effectiveProject = selectedProject ?? projects[0]?.id ?? null;
+  // Derived, not state-synced (avoids a setState-in-effect render cascade).
+  const effectiveProject = selectedProject === undefined ? (projects[0]?.id ?? null) : selectedProject;
 
   const { burndown } = useBurndown(effectiveProject);
 

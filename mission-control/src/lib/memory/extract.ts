@@ -9,7 +9,7 @@
  * This module handles the DB writes and auditing.
  */
 
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { getDb, getRawDb } from "../db";
 import { memoryItems, memoryAudit, memoryDocs } from "../db/schema";
 import { processFactEntities, extractEntitiesFromFact } from "./entities";
@@ -225,6 +225,7 @@ export function getActiveItems(category?: string) {
       .where(
         and(
           eq(memoryItems.status, "active"),
+          isNull(memoryItems.validTo),
           eq(memoryItems.category, category)
         )
       )
@@ -233,14 +234,14 @@ export function getActiveItems(category?: string) {
   return db
     .select()
     .from(memoryItems)
-    .where(eq(memoryItems.status, "active"))
+    .where(and(eq(memoryItems.status, "active"), isNull(memoryItems.validTo)))
     .all();
 }
 
 /**
  * Get items with their source document info.
  */
-export function getItemsWithSource(limit = 50, offset = 0) {
+export function getItemsWithSource(limit = 50, offset = 0, category?: string) {
   const raw = getRawDb();
   return raw
     .prepare(
@@ -251,11 +252,11 @@ export function getItemsWithSource(limit = 50, offset = 0) {
         md.date AS source_date
       FROM memory_items mi
       LEFT JOIN memory_docs md ON md.id = mi.source_doc_id
-      WHERE mi.status = 'active'
+      WHERE mi.status = 'active' AND mi.valid_to IS NULL AND (@category IS NULL OR mi.category = @category)
       ORDER BY mi.created_at DESC
-      LIMIT ? OFFSET ?`
+      LIMIT @limit OFFSET @offset`
     )
-    .all(limit, offset);
+    .all({ category: category ?? null, limit, offset });
 }
 
 /**
@@ -271,7 +272,7 @@ export function searchItems(query: string, category?: string, limit = 20) {
         `SELECT mi.*, rank
         FROM memory_items_fts
         JOIN memory_items mi ON mi.id = memory_items_fts.rowid
-        WHERE memory_items_fts MATCH ? AND mi.category = ? AND mi.status = 'active'
+        WHERE memory_items_fts MATCH ? AND mi.category = ? AND mi.status = 'active' AND mi.valid_to IS NULL
         ORDER BY rank
         LIMIT ?`
       )
@@ -283,7 +284,7 @@ export function searchItems(query: string, category?: string, limit = 20) {
       `SELECT mi.*, rank
       FROM memory_items_fts
       JOIN memory_items mi ON mi.id = memory_items_fts.rowid
-      WHERE memory_items_fts MATCH ? AND mi.status = 'active'
+      WHERE memory_items_fts MATCH ? AND mi.status = 'active' AND mi.valid_to IS NULL
       ORDER BY rank
       LIMIT ?`
     )
@@ -327,7 +328,7 @@ export function getExtractionStats() {
   const raw = getRawDb();
 
   const totalActive = raw
-    .prepare("SELECT COUNT(*) as count FROM memory_items WHERE status = 'active'")
+    .prepare("SELECT COUNT(*) as count FROM memory_items WHERE status = 'active' AND valid_to IS NULL")
     .get() as { count: number };
 
   const totalArchived = raw
@@ -336,7 +337,7 @@ export function getExtractionStats() {
 
   const byCategory = raw
     .prepare(
-      "SELECT category, COUNT(*) as count FROM memory_items WHERE status = 'active' GROUP BY category ORDER BY count DESC"
+      "SELECT category, COUNT(*) as count FROM memory_items WHERE status = 'active' AND valid_to IS NULL GROUP BY category ORDER BY count DESC"
     )
     .all();
 

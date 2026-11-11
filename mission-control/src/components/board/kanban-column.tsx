@@ -34,7 +34,7 @@ interface KanbanColumnProps {
   childrenMap: Record<string, Task[]>;
   onTaskClick: (task: Task) => void;
   onMoveTask: (taskId: string, targetColumn: string) => void;
-  onClearDone?: () => void;
+  onClearDone?: (visibleTasks: Task[]) => void;
   label?: string;
   dotColor?: string;
   highlight?: boolean;
@@ -150,7 +150,7 @@ export function KanbanColumn({
           {/* Clear done button */}
           {onClearDone && filteredTasks.length > 0 && (
             <button
-              onClick={onClearDone}
+              onClick={() => onClearDone(filteredTasks)}
               className="ml-auto flex items-center gap-1 px-2 py-0.5 text-[10px] text-muted-foreground hover:text-red-400 rounded hover:bg-red-500/10 transition-colors"
               title="Archive visible done tasks"
             >

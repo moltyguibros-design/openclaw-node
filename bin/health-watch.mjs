@@ -4,15 +4,15 @@
  * bin/health-watch.mjs — Long-running health watcher daemon for OpenClaw memory infrastructure.
  *
  * Runs runHealthCheck() at a configurable interval (default 60s) and routes alerts to
- * three destinations: file (.daemon-health.md), NATS (mesh.health.alerts), and macOS
- * banner (via memory-plan-notify.sh). Alerts fire on state transitions only (not every poll),
+ * three destinations: file (.daemon-health.md), NATS (mesh.health.alerts), and desktop
+ * banner (via bin/openclaw-notify.mjs). Alerts fire on state transitions only (not every poll),
  * with a repeat alert every 5 minutes while unhealthy.
  *
  * Env vars:
  *   HEALTH_WATCH_INTERVAL_SEC — poll interval in seconds (default: 60)
  *   HEALTH_ALERT_TARGETS — CSV of: file, nats, banner (default: file,nats,banner)
  *   OPENCLAW_WORKSPACE — workspace root (default: ~/.openclaw/workspace)
- *   NATS_URL — NATS server URL for alert publishing (default: nats://localhost:4222)
+ *   NATS_URL — URL override for alert publishing (default: OPENCLAW_NATS via lib/nats-resolve.js)
  */
 
 import {
@@ -28,6 +28,8 @@ import { isIP } from 'node:net';
 import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { resolveNodeId } from '../lib/node-id.js';
 
 // URL + credentials (token or nkey) from the one resolver; NATS_URL is a URL override only.
 const { natsConnectOpts } = createRequire(import.meta.url)('../lib/nats-resolve.js');
@@ -41,9 +43,7 @@ const WORKSPACE_PATH = process.env.OPENCLAW_WORKSPACE
 const HEALTH_FILE = path.join(WORKSPACE_PATH, '.daemon-health.md');
 const NATS_ALERT_SUBJECT = 'mesh.health.alerts';
 const REPEAT_ALERT_SEC = 300; // re-alert every 5 min while unhealthy
-const NOTIFY_CLI = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname), 'openclaw-notify.mjs',
-);
+const NOTIFY_CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), 'openclaw-notify.mjs');
 const MC_DIAGNOSTICS_URL = `${process.env.OPENCLAW_MC_URL || 'http://127.0.0.1:3000'}/diagnostics`;
 
 // ---------------------------------------------------------------------------
@@ -65,7 +65,7 @@ async function alertNats(status, result) {
     const sc = StringCodec();
     const payload = JSON.stringify({
       status,
-      node_id: process.env.OPENCLAW_NODE_ID || os.hostname(),
+      node_id: resolveNodeId(),
       timestamp: new Date().toISOString(),
       components: result,
     });
@@ -224,16 +224,16 @@ export function formatQueueSection(qs) {
 
 /**
  * Derive a queue-level status for the watcher's overall alerting.
- *   stuck      — auto-restart was attempted; warn loudly
- *   degraded   — recent fallbacks or slow alarms
+ *   stuck      — >=3 consecutive extraction timeouts (the queue's F-H17 rule; auto-restart is attempted)
+ *   degraded   — >=3 consecutive analysis timeouts, or recent fallbacks or slow alarms
  *   healthy    — no recent issues
  */
 export function deriveQueueStatus(qs) {
   if (!qs) return 'healthy';
-  if (qs.consecutive_timeouts.extraction >= 3 || qs.consecutive_timeouts.analysis >= 3) return 'stuck';
+  if (qs.consecutive_timeouts.extraction >= 3) return 'stuck';
   const recentFallback = qs.recent_fallbacks.find(f => Date.now() - f.ts < 5 * 60 * 1000);
   const recentSlow = qs.recent_slow_alarms.find(a => Date.now() - a.ts < 5 * 60 * 1000);
-  if (recentFallback || recentSlow) return 'degraded';
+  if (qs.consecutive_timeouts.analysis >= 3 || recentFallback || recentSlow) return 'degraded';
   return 'healthy';
 }
 
@@ -248,7 +248,8 @@ export function deriveQueueStatus(qs) {
  * @param {number} [opts.intervalSec] — poll interval in seconds
  * @param {string[]} [opts.targets] — alert destinations
  * @param {Function} [opts.healthCheckFn] — override for testing
- * @param {Function} [opts.onTick] — callback after each poll: (status, result) => void
+ * @param {Function} [opts.onTick] — callback after each poll: (status, result, queueState) => void
+ * @param {string} [opts.queueSnapshotPath] — daemon queue snapshot (default: ollama-queue QUEUE_STATE_PATH)
  * @returns {{ start: Function, stop: Function }}
  */
 export function createHealthWatch(opts = {}) {
@@ -269,12 +270,12 @@ export function createHealthWatch(opts = {}) {
     const componentStatus = deriveStatus(result);
 
     // Augment with queue health
-    const queueState = await getQueueHealth();
+    const queueState = await getQueueHealth(opts.queueSnapshotPath);
     const queueStatus = deriveQueueStatus(queueState);
 
     // Stuck queue → attempt auto-restart of Ollama (best-effort)
     if (queueStatus === 'stuck') {
-      await maybeAutoRestartOllama();
+      await maybeAutoRestartOllama(opts.queueSnapshotPath);
     }
 
     // Compose overall status: stuck queue > unhealthy component > degraded queue > healthy
@@ -299,9 +300,7 @@ export function createHealthWatch(opts = {}) {
     if (statusChanged || repeatDue) {
       const alertPromises = [];
       if (targets.includes('nats')) alertPromises.push(alertNats(status, result));
-      if (targets.includes('banner') && (statusChanged || repeatDue)) {
-        alertPromises.push(alertBanner(status));
-      }
+      if (targets.includes('banner')) alertPromises.push(alertBanner(status));
       await Promise.allSettled(alertPromises);
       lastAlertTime = now;
     }

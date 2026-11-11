@@ -128,7 +128,7 @@ service failure keeps BROKEN even when another service or policy is unobservable
 | Element | Watch signal | Probe |
 |---|---|---|
 | OpenClaw gateway | fresh session JSONLs produced | live |
-| companion-bridge :8787 | HTTP responds (OFF if on-demand/down) | live |
+| companion-bridge :8787 | HTTP responds below 500 (BROKEN on 5xx; OFF if on-demand/down) | live |
 
 ### Operations & planning surfaces
 | Element | Watch signal | Probe |
@@ -160,7 +160,7 @@ config, store, JetStream health, or absence of unlisted/unmanaged processes.
 
 ## Honest coverage today
 
-- **Implemented (live or reused):** every element above except the three marked UNKNOWN-stub.
+- **Implemented (live or reused):** every element above.
 - **UNKNOWN-stub (no probe yet — reports UNKNOWN, never green):** none — all targets now have a probe.
   (Vault link integrity wraps the read-only `checkVaultLinks`; calendar reads `/api/scheduler/status`;
   cloud-LLM reachability is wired through companion-bridge — see above.)

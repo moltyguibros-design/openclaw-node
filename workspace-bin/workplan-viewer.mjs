@@ -28,6 +28,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { StringDecoder } from 'node:string_decoder';
 import { execFile, spawnSync } from 'node:child_process';
 import { createViewerAuth, checkViewerRequest, viewerTokenPath } from '../lib/workplan-viewer-auth.mjs';
 
@@ -163,7 +164,7 @@ const notifyState = new Map();
 function pollNotifications() {
   for (const plan of PLANS) {
     let s;
-    try { s = planSummary(plan); } catch { continue; }
+    try { s = planSummary(plan, { dirty: false }); } catch { continue; }
     const cur = { version: s.version, blocked: !!s.blocked, closed: s.closed_steps };
     const prev = notifyState.get(plan.id);
     notifyState.set(plan.id, cur);
@@ -405,7 +406,7 @@ function planAudits(plan) {
   return out;
 }
 
-function planSummary(plan) {
+function planSummary(plan, { dirty = true } = {}) {
   const rows = inventoryRows(plan);
   const closed = rows.filter(r => r.state === 'x').length;
   const active = rows.filter(r => r.state === 'A').length;
@@ -426,7 +427,7 @@ function planSummary(plan) {
     current_step: (rows.find(r => r.state === 'A') || rows.find(r => r.state === ' ') || null),
     latest_log: latestLog(plan)?.split('/').pop() || null,
     docs_mtime: planDocsMtime(plan),
-    tree_dirty: treeDirty(plan),
+    tree_dirty: dirty ? treeDirty(plan) : null,
     external_action: blockExternalAction(plan),
   };
 }
@@ -449,7 +450,8 @@ function planSummary(plan) {
 const LAUNCH_AGENTS = path.join(os.homedir(), 'Library/LaunchAgents');
 
 function deriveAutomationDefaults(plan) {
-  const repo = plan.root;
+  // plan.root is <repo>/memory-plan/plans, the layout plan-tick.sh assumes.
+  const repo = path.resolve(plan.root, '..', '..');
   const id = plan.id;
   const label = `ai.openclaw.${id}-tick`;
   const cmd = path.join(repo, 'workspace-bin', `${id}-tick.sh`);
@@ -1375,14 +1377,23 @@ function jsonlPathFor(logPath) {
 const SESSION_DIR = path.join(os.homedir(), '.claude', 'projects',
   process.cwd().replace(/[/.]/g, '-'));
 
+// Every open stream polls this several times a second and it stats every
+// transcript the repo ever had, so one pick is shared for a short window.
+const SESSION_PICK_TTL_MS = 2000;
+let sessionPick = { at: 0, fp: null };
 function newestSessionJsonl() {
+  const now = Date.now();
+  if (now - sessionPick.at < SESSION_PICK_TTL_MS) return sessionPick.fp;
+  let fp = null;
   try {
     const picks = fs.readdirSync(SESSION_DIR)
       .filter(f => f.endsWith('.jsonl'))
-      .map(f => { const fp = path.join(SESSION_DIR, f); return { fp, m: fs.statSync(fp).mtimeMs }; })
+      .map(f => { const p = path.join(SESSION_DIR, f); return { fp: p, m: fs.statSync(p).mtimeMs }; })
       .sort((a, b) => b.m - a.m);
-    return picks.length ? picks[0].fp : null;
-  } catch { return null; }
+    if (picks.length) fp = picks[0].fp;
+  } catch {}
+  sessionPick = { at: now, fp };
+  return fp;
 }
 
 // A tick log only counts as the *live* source while it's actively being
@@ -1488,7 +1499,7 @@ function sseActivity(req, res, resolve) {
   let currentJsonl = src.path;
   let sourceKind = src.kind;
   let sourcePlan = src.plan || null;
-  let position = 0, closed = false, buffer = '';
+  let position = 0, closed = false, buffer = '', decoder;
 
   const send = (event, data) => {
     if (closed) return;
@@ -1506,6 +1517,7 @@ function sseActivity(req, res, resolve) {
     }
   };
   const emitFull = () => {
+    decoder = new StringDecoder('utf8');
     if (!currentJsonl || !fs.existsSync(currentJsonl)) {
       send('info', { msg: 'No activity yet — no tick is running, and no interactive session was found for this repo.' });
       return;
@@ -1520,14 +1532,14 @@ function sseActivity(req, res, resolve) {
       fs.readSync(fd, buf, 0, SESSION_TAIL_BYTES, start);
       fs.closeSync(fd);
       position = stat.size;
-      let s = buf.toString('utf8');
+      let s = decoder.write(buf);
       const i = s.indexOf('\n'); if (i !== -1) s = s.slice(i + 1);
       processChunk(s);
       return;
     }
-    const data = fs.readFileSync(currentJsonl, 'utf8');
-    position = Buffer.byteLength(data, 'utf8');
-    processChunk(data);
+    const data = fs.readFileSync(currentJsonl);
+    position = data.length;
+    processChunk(decoder.write(data));
   };
   emitFull();
 
@@ -1547,7 +1559,7 @@ function sseActivity(req, res, resolve) {
         fs.readSync(fd, buf, 0, buf.length, position);
         fs.closeSync(fd);
         position = stat.size;
-        processChunk(buf.toString('utf8'));
+        processChunk(decoder.write(buf));
       } else if (stat.size < position) {
         position = 0; buffer = ''; emitFull();
       }
@@ -1566,7 +1578,7 @@ function sseLive(req, res, resolve, allowSwitch) {
   const pinnedFd = cur.fd;
   let currentPath = cur.path;
   let mode = cur.mode;
-  let position = 0, closed = false, buffer = '';
+  let position = 0, closed = false, buffer = '', decoder;
 
   const send = (event, data) => {
     if (closed) return;
@@ -1585,6 +1597,7 @@ function sseLive(req, res, resolve, allowSwitch) {
     if (lines) send('append', JSON.stringify(lines));
   };
   const emitFull = () => {
+    decoder = new StringDecoder('utf8');
     if (!currentPath || (pinnedFd === undefined && !fs.existsSync(currentPath))) {
       send('file', '— no activity yet');
       send('append', JSON.stringify('No tick is running, and no interactive session was found for this repo.\n'));
@@ -1600,21 +1613,20 @@ function sseLive(req, res, resolve, allowSwitch) {
       fs.readSync(fd, buf, 0, len, start);
       if (pinnedFd === undefined) fs.closeSync(fd);
       position = stat.size;
-      let s = buf.toString('utf8');
+      let s = decoder.write(buf);
       if (start > 0) { const i = s.indexOf('\n'); if (i !== -1) s = s.slice(i + 1); }
       send('file', path.basename(currentPath) + ' · interactive session');
       renderJsonl(s);
       return;
     }
-    let buf;
+    let bytes;
     if (pinnedFd !== undefined) {
       const data = Buffer.alloc(fs.fstatSync(pinnedFd).size);
-      const count = fs.readSync(pinnedFd, data, 0, data.length, 0);
-      buf = data.subarray(0, count).toString('utf8');
-    } else buf = fs.readFileSync(currentPath, 'utf8');
-    position = Buffer.byteLength(buf, 'utf8');
+      bytes = data.subarray(0, fs.readSync(pinnedFd, data, 0, data.length, 0));
+    } else bytes = fs.readFileSync(currentPath);
+    position = bytes.length;
     send('file', path.basename(currentPath));
-    send('append', JSON.stringify(buf));
+    send('append', JSON.stringify(decoder.write(bytes)));
   };
   emitFull();
 
@@ -1637,8 +1649,9 @@ function sseLive(req, res, resolve, allowSwitch) {
         fs.readSync(fd, buf, 0, buf.length, position);
         if (pinnedFd === undefined) fs.closeSync(fd);
         position = stat.size;
-        if (mode === 'pretty') renderJsonl(buf.toString('utf8'));
-        else send('append', JSON.stringify(buf.toString('utf8')));
+        const text = decoder.write(buf);
+        if (mode === 'pretty') renderJsonl(text);
+        else if (text) send('append', JSON.stringify(text));
       } else if (stat.size < position) {
         send('switch', path.basename(currentPath));
         position = 0; buffer = ''; emitFull();
@@ -1720,7 +1733,7 @@ const server = http.createServer(async (req, res) => {
     const loadedLabels = await getAllLoadedLabels();
     const plans = PLANS.map(p => {
       const cfg = readAutomationConfig(p);
-      const summary = planSummary(p);
+      const summary = planSummary(p, { dirty: false });
       return { ...summary, scheduler_loaded: loadedLabels.has(cfg.plist_label) };
     });
     return json(res, { roots: ROOTS, plans });
@@ -1945,9 +1958,11 @@ const server = http.createServer(async (req, res) => {
       if (!rel) return json(res, { error: 'missing ?path=' }, 400);
       // Fully siloed: resolve ONLY within the plan's own dir (no path traversal).
       const full = safeJoin(plan.dir, rel);
-      if (!full || !fs.existsSync(full)) return json(res, { error: 'not found' }, 404);
+      let isFile = false;
+      try { isFile = !!full && fs.statSync(full).isFile(); } catch { /* missing → 404 */ }
+      if (!isFile) return json(res, { error: 'not found' }, 404);
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-      fs.createReadStream(full).pipe(res);
+      fs.createReadStream(full).on('error', () => res.destroy()).pipe(res);
       return;
     }
 

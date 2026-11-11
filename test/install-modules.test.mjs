@@ -59,7 +59,8 @@ test('install.sh passes bash -n', () => {
 });
 
 test('every module passes bash -n', () => {
-  for (const m of MODULES) {
+  const scripts = readdirSync(join(ROOT, 'scripts/install')).filter((f) => f.endsWith('.sh')).sort();
+  for (const m of scripts) {
     const r = bashN(join(ROOT, 'scripts/install', m));
     assert.equal(r.status, 0, `${m}: ${r.stderr}`);
   }
@@ -91,6 +92,45 @@ test('the 3 unit-render dry-run guards live in services.sh', () => {
   assert.equal(installSrc.match(guard), null);
 });
 
+// Bare envsubst blanked every $VAR, so the NATS units shipped
+// `ExecReload=/bin/kill -HUP ` and check_rendered (which looks for ${VAR}) missed it.
+test('unit renders hand envsubst the placeholder list, so $MAINPID survives', (t) => {
+  const svc = moduleSrc['services.sh'];
+  assert.equal(svc.match(/envsubst < "\$TEMPLATE"/g), null);
+  const unitVars = svc.match(/UNIT_VARS='([^']*)'/)?.[1];
+  assert.ok(unitVars, 'services.sh must define UNIT_VARS');
+  const templates = [
+    ...readdirSync(join(ROOT, 'services/systemd')).map((f) => join(ROOT, 'services/systemd', f)),
+    ...readdirSync(join(ROOT, 'services/launchd')).filter((f) => /^ai\.openclaw\..*\.plist$/.test(f)).map((f) => join(ROOT, 'services/launchd', f)),
+  ];
+  for (const f of templates) {
+    for (const [v] of readFileSync(f, 'utf8').matchAll(/\$\{[A-Za-z_][A-Za-z0-9_]*\}/g)) {
+      assert.ok(unitVars.split(' ').includes(v), `${v} in ${f} is missing from UNIT_VARS`);
+    }
+  }
+  if (spawnSync('sh', ['-c', 'command -v envsubst']).status !== 0) {
+    t.diagnostic('envsubst not installed; render check skipped');
+    return;
+  }
+  const r = spawnSync('envsubst', [unitVars], {
+    encoding: 'utf8',
+    input: readFileSync(join(ROOT, 'services/systemd/openclaw-nats.service'), 'utf8'),
+    env: { PATH: process.env.PATH, HOME: '/h', NATS_SERVER_BIN: '/x/nats-server' },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes('ExecReload=/bin/kill -HUP $MAINPID'), r.stdout);
+  assert.ok(r.stdout.includes('ExecStart=/x/nats-server --config /h/.openclaw/config/nats.conf'), r.stdout);
+});
+
+// --update --enable-services on Linux used `start`, a no-op on a running unit,
+// so re-rendered units and new code waited for a reboot (macOS unloads/loads).
+test('Linux --enable-services restarts re-rendered autostart units', () => {
+  const svc = moduleSrc['services.sh'];
+  assert.doesNotMatch(svc, /systemctl --user start "\$\{SVC_NAME\}\.service"/, 'start is a no-op on a running unit');
+  assert.match(svc, /run systemctl --user daemon-reload\n\s+run systemctl --user enable "\$\{SVC_NAME\}\.service"\n(\s+#[^\n]*\n)?\s+run systemctl --user restart "\$\{SVC_NAME\}\.service"/);
+  assert.match(svc, /run systemctl --user daemon-reload\n\s+run systemctl --user enable "\$\{SVC_NAME\}\.timer"/);
+});
+
 test('cluster dry-run guard and cluster security live in config.sh', () => {
   const cfg = moduleSrc['config.sh'];
   assert.ok(cfg.includes('[dry-run] would render cluster nats.conf'));
@@ -98,6 +138,15 @@ test('cluster dry-run guard and cluster security live in config.sh', () => {
   assert.ok(cfg.includes('tailscale ip -4'));
   assert.ok(cfg.includes('OPENCLAW_NATS_CLUSTER_PASS="$(openssl rand -hex 32)"'));
   assert.ok(cfg.includes('OPENCLAW_DEPLOY_TRUSTED_KEYS'));
+});
+
+test('NATS cluster plists come only from services/launchd, pointed at the rendered configs', () => {
+  assert.deepEqual(readdirSync(join(ROOT, 'services/nats')).filter((f) => f.endsWith('.plist')), []);
+  assert.ok(!readFileSync(join(ROOT, 'docs/NATS_CLUSTER.md'), 'utf8').includes('services/nats/ai.openclaw.nats-'));
+  for (const n of [1, 2, 3]) {
+    const plist = readFileSync(join(ROOT, `services/launchd/ai.openclaw.nats-${n}.plist`), 'utf8');
+    assert.ok(plist.includes(`\${HOME}/.openclaw/config/nats-${n}.conf`), `nats-${n} plist must run the rendered config`);
+  }
 });
 
 test('preserved behaviors sit in their modules', () => {
@@ -122,10 +171,24 @@ test('mcp-knowledge is owned by the root dependency workspace', () => {
   assert.equal(rootLock.packages['node_modules/@openclaw/mcp-knowledge'].link, true);
   assert.equal(existsSync(join(ROOT, 'lib/mcp-knowledge/package-lock.json')), false);
 
+  const mcpPackage = JSON.parse(readFileSync(join(ROOT, 'lib/mcp-knowledge/package.json'), 'utf8'));
+  for (const [dep, range] of Object.entries(mcpPackage.dependencies)) {
+    assert.equal(range, rootPackage.dependencies[dep], `lib/mcp-knowledge ${dep} drifts from the root range`);
+  }
+  assert.equal(mcpPackage.engines.node, rootPackage.engines.node);
+  assert.deepEqual(rootLock.packages['lib/mcp-knowledge'].dependencies, mcpPackage.dependencies);
+  assert.deepEqual(rootLock.packages['lib/mcp-knowledge'].engines, mcpPackage.engines);
+
   const rootRequire = createRequire(join(ROOT, 'package.json'));
   const sharp = rootRequire('sharp');
   assert.ok(Number(sharp.versions.sharp.split('.')[1]) >= 35, `Sharp ${sharp.versions.sharp} is below 0.35`);
   assert.equal(existsSync(join(ROOT, 'lib/mcp-knowledge/node_modules/sharp')), false);
+});
+
+test('the nkey codec dependency is declared at the root, pinned to the version nats uses', () => {
+  assert.equal(rootPackage.dependencies['nkeys.js'], rootLock.packages['node_modules/nats'].dependencies['nkeys.js']);
+  assert.equal(rootLock.packages[''].dependencies['nkeys.js'], rootPackage.dependencies['nkeys.js']);
+  assert.equal(rootLock.packages['node_modules/nkeys.js'].version, rootPackage.dependencies['nkeys.js']);
 });
 
 test('installer never creates or copies nested mcp-knowledge dependencies', () => {
@@ -135,6 +198,35 @@ test('installer never creates or copies nested mcp-knowledge dependencies', () =
   assert.doesNotMatch(workspace, /cd \"\$MESH_LIB\/mcp-knowledge\"/);
   assert.ok(workspace.includes("run rsync -av --exclude='node_modules' \\\n  \"$REPO_DIR/lib/\" \"$WORKSPACE/lib/\""));
   assert.ok(workspace.includes("run rsync -av --exclude='node_modules' \"$REPO_DIR/lib/\" \"$MESH_LIB/\""));
+});
+
+test('INSTALL_TEST_PROTOCOL T1 and NODE_SPEC describe what the installer leaves on disk', () => {
+  const protocol = readFileSync(join(ROOT, 'docs/INSTALL_TEST_PROTOCOL.md'), 'utf8');
+  const nodeSpec = readFileSync(join(ROOT, 'docs/NODE_SPEC.md'), 'utf8');
+  assert.doesNotMatch(protocol, /mcp-knowledge\/node_modules/, 'T1.3 must not require the nested tree the installer never creates');
+  assert.doesNotMatch(protocol, /provider=ollama/, 'MESH_LLM_PROVIDER has no default');
+  assert.match(moduleSrc['config.sh'], /OPENCLAW_IDENTITY_DIR="\$OPENCLAW_ROOT"/);
+  assert.match(protocol, /~\/\.openclaw\/identity\.key/);
+  assert.doesNotMatch(nodeSpec, /^\s+identity\/\s/m, 'the keypair is identity.key/identity.pub in OPENCLAW_ROOT, not a directory');
+});
+
+test('INSTALL_TEST_PROTOCOL T4 matches the D11 worker guard and the mesh CLI', () => {
+  const protocol = readFileSync(join(ROOT, 'docs/INSTALL_TEST_PROTOCOL.md'), 'utf8');
+  const { isOpenClawWorkerProvider } = createRequire(join(ROOT, 'package.json'))('./lib/llm-providers.js');
+  assert.equal(isOpenClawWorkerProvider('shell', {}), false);
+  assert.equal(isOpenClawWorkerProvider('ollama', {}), false);
+  const shellAgents = protocol.split('\n').filter((l) => /MESH_LLM_PROVIDER=shell .*mesh-agent\.js/.test(l));
+  assert.ok(shellAgents.length > 0);
+  for (const line of shellAgents) assert.ok(line.includes('MESH_ALLOW_MOCK_WORKERS=1'), `shell agents are declined without the mock flag: ${line}`);
+  assert.doesNotMatch(protocol, /mesh\.js tasks show/, 'mesh tasks has no show subcommand');
+  assert.doesNotMatch(protocol, /inherit `ollama`/);
+});
+
+test('the retired npx openclaw-mesh layer is neither advertised nor run', () => {
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
+  assert.doesNotMatch(readme, /`npx openclaw-mesh`\) still exists/);
+  const code = moduleSrc['integrations.sh'].split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.doesNotMatch(code, /npx\s+(--yes\s+)?openclaw-mesh/);
 });
 
 test('installer links scoped packages into both deployed parent trees', () => {
@@ -154,6 +246,17 @@ test('scheduler heartbeat helper is installer-owned and both units invoke it', (
   assert.doesNotMatch(heartbeatLaunchd, /\/usr\/bin\/curl/);
   assert.doesNotMatch(heartbeatSystemd, /\/usr\/bin\/curl/);
   assert.doesNotMatch(`${heartbeatLaunchd}\n${heartbeatSystemd}`, /Authorization|Bearer/);
+});
+
+test('every launchd nats unit execs the installer-resolved nats-server', () => {
+  const dir = join(ROOT, 'services/launchd');
+  const units = readdirSync(dir).filter((f) => /^ai\.openclaw\.nats(-\d)?\.plist$/.test(f));
+  assert.equal(units.length, 4);
+  for (const f of units) {
+    const src = readFileSync(join(dir, f), 'utf8');
+    assert.match(src, /<key>ProgramArguments<\/key>\s*<array>\s*<string>\$\{NATS_SERVER_BIN\}<\/string>/, f);
+    assert.ok(!src.includes('/opt/homebrew/bin/nats-server'), f);
+  }
 });
 
 // mesh-install.sh treats the join-token payload as untrusted: an expired token
@@ -197,6 +300,71 @@ test('install.sh --dry-run writes nothing under $HOME', () => {
   assert.deepEqual(files, [], `dry-run created files: ${files.join(', ')}\n--- tail ---\n${r.stdout.slice(-1500)}`);
   assert.equal(r.status, 0, `dry-run must complete: exit ${r.status}\n${r.stdout.slice(-2000)}\n${r.stderr.slice(-500)}`);
   assert.doesNotMatch(r.stdout, /SOURCE MISSING/);
+});
+
+// config.sh appended a generated token and the LLM defaults to an EXISTING env
+// file with no dry-run guard; the empty-HOME run above has no env file to hit.
+test('install.sh --dry-run leaves an existing env file untouched', () => {
+  const home = mkdtempSync(join(tmpdir(), 'openclaw-dry-env-'));
+  mkdirSync(join(home, '.openclaw'), { recursive: true });
+  const envFile = join(home, '.openclaw', 'openclaw.env');
+  writeFileSync(envFile, 'OTHER=kept\n');
+  const env = { ...process.env, HOME: home, OPENCLAW_HOME: join(home, '.openclaw') };
+  delete env.OPENCLAW_NATS_TOKEN;
+  const r = spawnSync('bash', [INSTALL_SH, '--dry-run', '--sandbox'], { encoding: 'utf8', timeout: 300_000, env });
+  assert.equal(readFileSync(envFile, 'utf8'), 'OTHER=kept\n');
+  assert.equal(r.status, 0, `dry-run must complete: exit ${r.status}\n${r.stdout.slice(-2000)}\n${r.stderr.slice(-500)}`);
+});
+
+// The Linux launcher render bypassed the dry-run guard (wrote the .desktop, or
+// aborted on a headless box), and DRY_RUN_ERRORS never became the documented exit 1.
+test('dry-run guards the Linux launcher render and exits 1 on a missing source', () => {
+  const svc = moduleSrc['services.sh'];
+  const guard = svc.indexOf('[dry-run] would install $DESKTOP_DIR/openclaw-stack.desktop');
+  assert.ok(guard > svc.indexOf('DESKTOP_DIR='), 'guard must follow DESKTOP_DIR=');
+  assert.ok(guard < svc.indexOf('envsubst < "$REPO_DIR/services/launcher/openclaw-stack.desktop"'), 'guard must precede the render');
+  assert.match(installSrc, /if \$DRY_RUN && \[ "\$DRY_RUN_ERRORS" -gt 0 \]; then\n[^\n]*\n\s+exit 1/);
+});
+
+// The role was never persisted, and env.sh resolved it before the env file was
+// read: a Linux node installed with --role=lead went back to worker on every
+// --update that omitted --role.
+test('env.sh reads the persisted role and config.sh persists the resolved one', () => {
+  const env = moduleSrc['env.sh'];
+  const start = env.indexOf('# ── Resolve node role ──');
+  const end = env.indexOf('# Lead pubkey handed');
+  assert.ok(start > 0 && end > start, 'role block must exist in env.sh');
+  const block = env.slice(start, end);
+  const root = mkdtempSync(join(tmpdir(), 'openclaw-role-'));
+  const envFile = join(root, 'openclaw.env');
+  writeFileSync(envFile, 'OPENCLAW_NODE_ROLE=lead\n');
+  const script = `
+    set -euo pipefail
+    info() { :; }; error() { echo "$*" >&2; }
+    NODE_ROLE=""; OS=linux; ENV_FILE="${envFile}"
+    ${block}
+    printf '%s|%s' "$NODE_ROLE" "$OPENCLAW_NODE_ROLE"
+  `;
+  const r = spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { PATH: process.env.PATH } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, 'lead|lead');
+  assert.match(moduleSrc['config.sh'], /set_env_key OPENCLAW_NODE_ROLE "\$NODE_ROLE"\nfi\nexport OPENCLAW_NODE_ROLE="\$NODE_ROLE"/);
+});
+
+// config.sh trimmed env values with xargs, which exits 1 on a lone quote, so a
+// value like "Gui's node" killed every install at Step 7 under set -e.
+test('config.sh env-file parse keeps quotes, spacing and backslashes like renderConfigTemplate', () => {
+  const cfg = moduleSrc['config.sh'];
+  const start = cfg.indexOf('# Source env file for config generation');
+  const end = cfg.indexOf('# Persist the node id');
+  assert.ok(start > 0 && end > start, 'env-file loop must exist in config.sh');
+  const root = mkdtempSync(join(tmpdir(), 'openclaw-envparse-'));
+  const envFile = join(root, 'openclaw.env');
+  writeFileSync(envFile, [`NAME=Gui's node`, 'Q="quoted value"', "S='single'", '  SPACED  =  a  b  ', 'B=a\\b', ''].join('\n'));
+  const script = `set -euo pipefail\n${cfg.slice(start, end)}\nprintf '%s|%s|%s|%s|%s' "$NAME" "$Q" "$S" "$SPACED" "$B"`;
+  const r = spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { PATH: process.env.PATH, ENV_FILE: envFile } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "Gui's node|quoted value|single|a  b|a\\b");
 });
 
 // P7-0: the deploy/operator trust allowlists must be seeded with the RAW base64
@@ -277,6 +445,21 @@ test('bootstrap.sh is pipe-safe: one main() parsed in full before anything runs'
   assert.match(moduleSrc['prereqs.sh'] ?? readFileSync(join(ROOT, 'scripts/install/prereqs.sh'), 'utf8'), /Tailscale\.app\/Contents\/MacOS\/Tailscale/);
 });
 
+// install.sh reaches prereqs.sh directly (system-deps.sh), so a node installed
+// without bootstrap.sh must get the same verified bus binary.
+test('prereqs.sh verifies nats-server with the same pinned SHA256 as bootstrap.sh', () => {
+  const prereqs = readFileSync(join(ROOT, 'scripts/install/prereqs.sh'), 'utf8');
+  const bootstrap = readFileSync(join(ROOT, 'bootstrap.sh'), 'utf8');
+  const re = /(2\.12\.6-(?:amd64|arm64))\) EXPECT_SHA="([0-9a-f]{64})"/g;
+  const pins = (src) => [...src.matchAll(re)].map((m) => m.slice(1));
+  assert.equal(pins(bootstrap).length, 2);
+  assert.deepEqual(pins(prereqs), pins(bootstrap));
+  assert.doesNotMatch(prereqs, /nats-server[^\n]*\|\s*tar/);
+  assert.match(prereqs, /\*\) EXPECT_SHA="\$\{OPENCLAW_NATS_SERVER_SHA256:-\}"/);
+  assert.match(prereqs, /sha256sum "\$TGZ"/);
+  assert.match(prereqs, /if \[ "\$ACTUAL_SHA" != "\$EXPECT_SHA" \]; then\n\s*error "nats-server checksum MISMATCH/);
+});
+
 // The same virgin-Mac run: install.sh never compiled packages/event-schemas
 // (dist/ is gitignored, the tarball ships .ts only, --omit=dev brings no tsc),
 // so the memory daemon exited at startup. env.sh must build it and refuse to
@@ -331,4 +514,74 @@ test('llm-setup keeps the embedder failure reason and offers a model-free retry'
   // The retry needs neither ollama nor a model pull.
   assert.match(llm, /if \[ "\$MODE" != embedder \] && \[ -z "\$ENDPOINT" \]; then\n\s+have ollama \|\|/);
   assert.match(llm, /elif \[ "\$MODE" = embedder \]; then\n\s+# --embedder-only/);
+});
+
+// A re-run of install.sh (--update included) rsynced souls/ over ~/.openclaw/souls and reset
+// every soul's approved genes and evolution log to the repo seed. mesh-deploy's souls
+// component already treats those two files as seed-only.
+test('installer seeds but never overwrites learned soul genes/events', (t) => {
+  if (spawnSync('rsync', ['--version']).status !== 0) {
+    t.skip('rsync not on PATH');
+    return;
+  }
+  const repo = mkdtempSync(join(tmpdir(), 'oc-souls-repo-'));
+  const root = mkdtempSync(join(tmpdir(), 'oc-souls-root-'));
+  const put = (base, rel, body) => {
+    mkdirSync(dirname(join(base, rel)), { recursive: true });
+    writeFileSync(join(base, rel), body);
+  };
+  put(repo, 'souls/daedalus/evolution/genes.json', '{"genes":"seed"}\n');
+  put(repo, 'souls/daedalus/evolution/events.jsonl', '{"event":"seed"}\n');
+  put(repo, 'souls/daedalus/SOUL.md', 'soul v2 longer\n');
+  put(repo, 'souls/newcomer/evolution/genes.json', '{"genes":"newcomer seed"}\n');
+  put(root, 'souls/daedalus/evolution/genes.json', '{"genes":"learned on this node"}\n');
+  put(root, 'souls/daedalus/evolution/events.jsonl', '{"event":"learned on this node"}\n');
+  put(root, 'souls/daedalus/SOUL.md', 'soul v1\n');
+
+  const lines = moduleSrc['workspace.sh'].split('\n').filter((l) => l.startsWith('run rsync') && l.includes('/souls/'));
+  assert.ok(lines.length > 0, 'workspace.sh has a souls rsync');
+  const r = spawnSync('bash', ['-c', 'run() { "$@"; }\n' + lines.join('\n')], {
+    encoding: 'utf8',
+    env: { ...process.env, REPO_DIR: repo, OPENCLAW_ROOT: root },
+  });
+  assert.equal(r.status, 0, r.stderr);
+
+  const read = (rel) => readFileSync(join(root, rel), 'utf8');
+  assert.equal(read('souls/daedalus/evolution/genes.json'), '{"genes":"learned on this node"}\n');
+  assert.equal(read('souls/daedalus/evolution/events.jsonl'), '{"event":"learned on this node"}\n');
+  assert.equal(read('souls/daedalus/SOUL.md'), 'soul v2 longer\n');
+  assert.equal(read('souls/newcomer/evolution/genes.json'), '{"genes":"newcomer seed"}\n');
+});
+
+test('documented node-watch invocations only use flags node-watch accepts', () => {
+  const cli = readFileSync(join(ROOT, 'bin/node-watch.mjs'), 'utf8');
+  const optionsBlock = cli.slice(cli.indexOf('options: {'), cli.indexOf('\n    },\n'));
+  const accepted = new Set([...optionsBlock.matchAll(/^\s+'?([a-z-]+)'?: \{ type:/gm)].map((m) => m[1]));
+  assert.ok(accepted.has('watch') && accepted.has('quiet'), 'the parseArgs options block was found');
+  for (const doc of ['install.sh', 'docs/NODE_SPEC.md', 'docs/INSTALL_TEST_PROTOCOL.md']) {
+    const text = readFileSync(join(ROOT, doc), 'utf8');
+    for (const m of text.matchAll(/node-watch\.mjs((?:[ \t]+--[a-z-]+)+)/g)) {
+      for (const flag of m[1].trim().split(/\s+/)) {
+        assert.ok(accepted.has(flag.slice(2)), `${doc}: node-watch.mjs has no ${flag} flag`);
+      }
+    }
+  }
+});
+
+test('INSTALL_TEST_PROTOCOL T2 greps the stderr file each memory-daemon unit writes', () => {
+  const doc = readFileSync(join(ROOT, 'docs/INSTALL_TEST_PROTOCOL.md'), 'utf8');
+  const unit = readFileSync(join(ROOT, 'services/systemd/openclaw-memory-daemon.service'), 'utf8');
+  const plist = readFileSync(join(ROOT, 'services/launchd/ai.openclaw.memory-daemon.plist'), 'utf8');
+  const linuxErr = unit.match(/^StandardError=append:\$\{OPENCLAW_WORKSPACE\}\/\.tmp\/(\S+)$/m)[1];
+  const macErr = plist.match(/<key>StandardErrorPath<\/key>\s*<string>\$\{OPENCLAW_WORKSPACE\}\/\.tmp\/([^<]+)<\/string>/)[1];
+  const grepLine = doc.split('\n').find((l) => l.startsWith('grep -c ERR_MODULE_NOT_FOUND'));
+  // The '/.tmp/' prefix keeps memory-daemon.err from matching inside openclaw-memory-daemon.err.
+  for (const f of [linuxErr, macErr]) assert.ok(grepLine.includes(`/.tmp/${f}`), `T2 grep misses ${f}`);
+});
+
+test('README env table agrees with the installer defaults', () => {
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
+  assert.match(moduleSrc['config.sh'], /OPENCLAW_TIMEZONE="\$\{OPENCLAW_TIMEZONE:-America\/Montreal\}"/);
+  assert.doesNotMatch(readme, /^\| `OPENCLAW_TIMEZONE` \| Yes \|/m, 'a defaulted key is not required');
+  assert.doesNotMatch(readme, /for all available configuration/);
 });

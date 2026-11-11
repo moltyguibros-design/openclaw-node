@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 
 import {
@@ -76,6 +77,95 @@ describe('createNatsPublisher', () => {
     assert.equal(published.length, 1);
     assert.equal(published[0].data.triggered_by, 'test-source');
     assert.equal(published[0].data.node_id, 'test-node');
+  });
+
+  it('falls back to lib/node-id resolveNodeId (MESH_NODE_ID) instead of the raw hostname', async () => {
+    const saved = { OPENCLAW_NODE_ID: process.env.OPENCLAW_NODE_ID, MESH_NODE_ID: process.env.MESH_NODE_ID };
+    delete process.env.OPENCLAW_NODE_ID;
+    process.env.MESH_NODE_ID = 'legacy-node';
+    try {
+      const published = [];
+      const mockNc = {
+        publish(subject, data) {
+          published.push({ subject, data: JSON.parse(new TextDecoder().decode(data)) });
+        },
+        async drain() {},
+      };
+      const publisher = createNatsPublisher({ nc: mockNc });
+      await publisher.publish('t');
+      assert.equal(published[0].data.node_id, 'legacy-node');
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  async function withLocalServer(onSocket, run) {
+    const sockets = new Set();
+    const server = net.createServer((socket) => {
+      sockets.add(socket);
+      socket.on('error', () => {});
+      onSocket(socket);
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const savedUrl = process.env.NATS_URL;
+    delete process.env.NATS_URL;
+    try {
+      await run(`nats://127.0.0.1:${server.address().port}`);
+    } finally {
+      if (savedUrl === undefined) delete process.env.NATS_URL;
+      else process.env.NATS_URL = savedUrl;
+      for (const socket of sockets) socket.destroy();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+
+  it('dials again after a failed first connect', async () => {
+    let dials = 0;
+    await withLocalServer((socket) => { dials++; socket.destroy(); }, async (natsUrl) => {
+      const publisher = createNatsPublisher({ natsUrl, nodeId: 't' });
+      await publisher.publish();
+      const firstDials = dials;
+      await publisher.publish();
+      assert.ok(firstDials >= 1);
+      assert.ok(dials > firstDials, 'second publish must dial instead of reusing the failed connect');
+      await publisher.close();
+    });
+  });
+
+  it('replaces a managed connection that has closed', async () => {
+    const pubsPerConnection = [];
+    // A repeated auth error makes nats.js abort reconnecting and close the connection.
+    const onSocket = (socket) => {
+      const index = pubsPerConnection.push(0) - 1;
+      socket.write('INFO {"server_id":"fake","version":"2.10.0","proto":1,"max_payload":1048576}\r\n');
+      socket.on('data', (chunk) => {
+        const text = chunk.toString();
+        if (text.includes('PING\r\n')) socket.write('PONG\r\n');
+        if (!text.includes('PUB mesh.memory.extract_request')) return;
+        pubsPerConnection[index]++;
+        if (index === 0) socket.write("-ERR 'Authorization Violation'\r\n-ERR 'Authorization Violation'\r\n");
+      });
+    };
+    const until = async (done, step = async () => {}) => {
+      const deadline = Date.now() + 3000;
+      while (!done() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        await step();
+      }
+    };
+    await withLocalServer(onSocket, async (natsUrl) => {
+      const publisher = createNatsPublisher({ natsUrl, nodeId: 't' });
+      await publisher.publish();
+      await until(() => pubsPerConnection[0] === 1);
+      assert.deepEqual(pubsPerConnection, [1]);
+      await until(() => pubsPerConnection[1] >= 1, () => publisher.publish());
+      assert.equal(pubsPerConnection.length, 2, 'a publish after the close must dial a new connection');
+      assert.ok(pubsPerConnection[1] >= 1);
+      await publisher.close();
+    });
   });
 });
 
@@ -185,6 +275,11 @@ describe('wrapMiniMax', () => {
     await new Promise(r => setTimeout(r, 10));
     assert.equal(publishCalls.length, 1);
     assert.equal(publishCalls[0], 'minimax-wrapper');
+  });
+
+  it('names itself in the guard error through the shared wrapper body', () => {
+    assert.throws(() => wrapMiniMax({}, { publish() {} }), /^Error: wrapMiniMax: client must have chat\.completions\.create/);
+    assert.throws(() => wrapOpenAI({}, { publish() {} }), /^Error: wrapOpenAI: client must have chat\.completions\.create/);
   });
 });
 

@@ -5,6 +5,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   parsePeers, peerToRoute, renderClusterRoutes,
   replicasForPeers, clampReplicas, resolveKvReplicas, CLUSTER_PORT,
@@ -61,4 +62,24 @@ test('item 9: routes carry cluster credentials when provided', () => {
     '    nats-route://openclaw-route:pw@100.64.0.2:6222\n    nats-route://openclaw-route:pw@100.64.0.3:6222');
   // no credentials → unchanged legacy form
   assert.equal(peerToRoute('100.64.0.2'), 'nats-route://100.64.0.2:6222');
+});
+
+test('cluster docs show the authenticated own-address config the template renders', () => {
+  const read = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
+  const template = read('services/nats/nats-cluster-node.conf');
+  assert.match(template, /^http: 127\.0\.0\.1:8222$/m);
+  assert.match(template, /^include "nats-auth\.conf"$/m);
+  for (const doc of ['docs/MULTI_NODE_DEPLOY.md', 'docs/NATS_CLUSTER.md']) {
+    const blocks = [...read(doc).matchAll(/```[^\n]*\n([\s\S]*?)```/g)].map((m) => m[1]).filter((b) => /\bcluster\s*\{/.test(b));
+    assert.ok(blocks.length > 0, doc);
+    for (const b of blocks) {
+      assert.doesNotMatch(b, /listen:\s*0\.0\.0\.0/, doc);
+      assert.doesNotMatch(b, /http_port:\s*8222/, doc);
+      assert.match(b, /^http: 127\.0\.0\.1:8222$/m, doc);
+      assert.match(b, /include "nats-auth\.conf"/, doc);
+      assert.match(b, /authorization\s*\{/, doc);
+      assert.match(b, /nats-route:\/\/openclaw-route:/, doc);
+    }
+  }
+  assert.doesNotMatch(read('docs/MULTI_NODE_DEPLOY.md'), /binds `0\.0\.0\.0`/);
 });

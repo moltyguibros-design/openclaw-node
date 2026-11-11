@@ -43,7 +43,7 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { getActivityState, getSessionInfo } = require('../lib/agent-activity');
+const { getSessionInfo } = require('../lib/agent-activity');
 const { loadAllRules, matchRules, formatRulesForPrompt, detectFrameworks, activateFrameworkRules } = require('../lib/rule-loader');
 const { loadHarnessRules, runMeshHarness, runPostCommitValidation, formatHarnessForPrompt } = require('../lib/mesh-harness');
 const { validateMetricCommand } = require('../lib/exec-safety');
@@ -149,6 +149,14 @@ function injectHyperagentStrategy(parts, task) {
   parts.push(`## Approved Strategy (HyperAgent #${strategy.id})`);
   parts.push(strategy.content);
   parts.push('Use this as the starting approach, adapting it when the task evidence requires.');
+  parts.push('');
+}
+
+function injectRejection(parts, task) {
+  if (!task?.rejection_reason) return;
+  parts.push('## Previous Review');
+  parts.push(`A reviewer rejected an earlier run of this task (rejection ${task.rejection_count || 1}): ${task.rejection_reason}`);
+  parts.push('Address this feedback; do not resubmit the same work.');
   parts.push('');
 }
 
@@ -557,6 +565,7 @@ function buildInitialPrompt(task) {
   injectRole(parts, task.role);
   injectMemory(parts, task);
   injectHyperagentStrategy(parts, task);
+  injectRejection(parts, task);
 
   parts.push('## Instructions');
   parts.push('- Read the relevant files before making changes.');
@@ -629,6 +638,7 @@ function buildRetryPrompt(task, previousAttempts, attemptNumber) {
   injectRole(parts, task.role);
   injectMemory(parts, task);
   injectHyperagentStrategy(parts, task);
+  injectRejection(parts, task);
 
   parts.push('## Instructions');
   parts.push('- Do NOT repeat a failed approach. Try something different.');
@@ -671,12 +681,13 @@ function createWorktree(taskId) {
         warn(`git worktree remove failed for ${worktreePath}: ${err.message} — cleaning up manually`);
         fs.rmSync(worktreePath, { recursive: true, force: true });
       }
-      // Also clean up the branch if it exists
-      forgetLease(taskId);
-      try {
-        execFileSync('git', ['branch', '-D', branch], { cwd: WORKSPACE, timeout: 5000, stdio: 'ignore' });
-      } catch { /* Intentional: branch may not exist after worktree cleanup */ }
     }
+    // A branch kept without its directory (pending_review keep, then a rejection
+    // notice missed while offline) would make `worktree add -b` refuse.
+    forgetLease(taskId);
+    try {
+      execFileSync('git', ['branch', '-D', branch], { cwd: WORKSPACE, timeout: 5000, stdio: 'ignore' });
+    } catch { /* Intentional: no such branch */ }
 
     // Create new worktree branched off HEAD
     execFileSync('git', ['worktree', 'add', '-b', branch, worktreePath, 'HEAD'], {
@@ -695,11 +706,6 @@ function createWorktree(taskId) {
   }
 }
 
-/**
- * Clean up a worktree after task completion or failure.
- * @param {string} worktreePath
- * @param {boolean} keep - If true, leave the branch for manual review
- */
 /**
  * Commit any changes in the worktree onto its `mesh/<taskId>` branch.
  * Returns { committed, sha, branch } or null if nothing to commit.
@@ -1010,33 +1016,26 @@ function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null)
       cwd: cleanCwd,
       env: cleanEnv,
       stdio: ['ignore', 'pipe', 'pipe'],  // stdin must be 'ignore' — some CLIs block on piped stdin
-      // Kill if it exceeds the budget; the verifier passes what is left of the task deadline (F14.5).
-      timeout: timeoutMs ?? (task.budget_minutes || 30) * 60 * 1000,
-      // Own process group: a Foreman STOP must end the CLI and everything it spawned.
+      // Own process group: a Foreman STOP and the budget timeout must end the CLI and everything it spawned.
       detached: true,
     });
     if (supervisor) supervisor.attach(child);
 
-    // Heartbeat: signal daemon with activity state.
-    // getActivityState reads Claude JSONL files — only useful for Claude provider.
-    // For other providers, send a basic heartbeat (process alive = active).
+    // Kill the whole group if it exceeds the budget; the verifier passes what is left of the task
+    // deadline (F14.5). spawn's own `timeout` signals only the CLI's pid.
+    const signalGroup = (signal) => {
+      try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* gone */ } }
+    };
+    const budgetTimer = setTimeout(() => {
+      signalGroup('SIGTERM');
+      setTimeout(() => signalGroup('SIGKILL'), 5000).unref();
+    }, timeoutMs ?? (task.budget_minutes || 30) * 60 * 1000);
+
+    // Heartbeat: renews the lease and keeps the daemon's stall detector quiet.
     let lastHeartbeatWarn = 0;
-    const isClaude = provider.name === 'claude';
     const heartbeatTimer = setInterval(async () => {
       try {
-        const payload = { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token };
-        if (isClaude) {
-          const activity = await getActivityState(cleanCwd);
-          if (activity) {
-            payload.activity_state = activity.state;
-            payload.activity_timestamp = activity.timestamp?.toISOString();
-          }
-        } else {
-          // Non-Claude: process is running → active
-          payload.activity_state = 'active';
-          payload.activity_timestamp = new Date().toISOString();
-        }
-        await natsRequest('mesh.tasks.heartbeat', payload);
+        await natsRequest('mesh.tasks.heartbeat', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token });
       } catch (err) {
         if (!lastHeartbeatWarn || Date.now() - lastHeartbeatWarn > 60000) {
           warn(`heartbeat: ${err.message}`);
@@ -1054,6 +1053,7 @@ function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null)
 
     child.on('close', (code, signal) => {
       clearInterval(heartbeatTimer);
+      clearTimeout(budgetTimer);
       if (supervisor) supervisor.workerExited({ exitCode: code, signal });
       // Sanitize before any parsing: terminal control codes + thinking blocks
       // must never reach the artifact pipeline (2.4 finding 6).
@@ -1062,6 +1062,7 @@ function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null)
 
     child.on('error', (err) => {
       clearInterval(heartbeatTimer);
+      clearTimeout(budgetTimer);
       if (supervisor) supervisor.workerExited({ exitCode: 1, signal: null });
       resolve({ exitCode: 1, stdout: '', stderr: err.message, provider: provider.name, model });
     });
@@ -1588,6 +1589,7 @@ async function executeCollabTask(task) {
   const roundSub = nc.subscribe(`mesh.collab.${sessionId}.node.${NODE_ID}.round`);
   let roundsDone = false;
   let lastKnownSessionStatus = null; // tracks why rounds ended (completed/aborted/converged)
+  let lastRound = 0;
 
   // Join the session using the discovered session_id
   let session;
@@ -1669,6 +1671,7 @@ async function executeCollabTask(task) {
       const roundData = JSON.parse(sc.decode(roundMsg.data));
       const { round_number, shared_intel, directed_input, my_scope, my_role, mode, current_turn,
               round_role, circling_phase, circling_step, circling_subround } = roundData;
+      if (round_number > lastRound) lastRound = round_number;
 
       // Sequential mode safety guard: skip if it's not our turn.
       if (mode === 'sequential' && current_turn && current_turn !== NODE_ID) {
@@ -1739,7 +1742,7 @@ async function executeCollabTask(task) {
           if (wa != null && wa.length > 0 && wa.length < MIN_WORK_ARTIFACT_CHARS) {
             failReason = `degenerate workArtifact (< ${MIN_WORK_ARTIFACT_CHARS} chars, preamble-only)`;
           }
-          const isWorkerMulti = round_role === 'worker' && (circling_step === 2 || circling_phase === 'finalization');
+          const isWorkerMulti = my_role === 'worker' && (circling_step === 2 || circling_phase === 'finalization');
           if (!failReason && isWorkerMulti) {
             const secondType = circling_phase === 'finalization' ? 'completionDiff' : 'reconciliationDoc';
             if (!wa || wa.length < MIN_WORK_ARTIFACT_CHARS) {
@@ -1771,9 +1774,10 @@ async function executeCollabTask(task) {
       let artifacts = [];
       try {
         if (worktreePath) {
+          // Untrimmed: the first record's status column can start with a space.
           const status = require('child_process').execSync('git status --porcelain', {
             cwd: worktreePath, timeout: 5000, encoding: 'utf-8',
-          }).trim();
+          });
           artifacts = status.split('\n').filter(Boolean).map(line => line.slice(3));
         }
       } catch { /* best effort */ }
@@ -1851,7 +1855,7 @@ async function executeCollabTask(task) {
   const successful = ['completed', 'converged'].includes(lastKnownSessionStatus);
   await recordHyperagentTask(task, {
     outcome: successful ? 'success' : 'failure',
-    iterations: Math.max(1, session.current_round || 1),
+    iterations: Math.max(1, lastRound),
     startedAt,
     sessionId,
     notes: `Collaboration session ${sessionId} ended with status ${lastKnownSessionStatus || 'unknown'}.`,
@@ -2190,24 +2194,22 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
 // A task the daemon already ended (budget auto-fail, stall release, cancel)
 // surfaces here as the TASK_TERMINAL refusal of the worker's next call. That
 // is a stop, not a crash: wind down like the release path, so the worktree,
-// the agent state and the telemetry are not left on a dead task.
+// the agent state and the telemetry are not left on a dead task. Any other
+// error abandons the task the same way.
 async function onWorkerError(task, startedAt, err) {
-  if (task && err.code === TASK_TERMINAL) {
-    log(`STOPPED: ${task.task_id} — ${err.message}`);
-    const worktreePath = path.join(WORKTREE_BASE, task.task_id);
-    if (fs.existsSync(worktreePath)) {
-      commitWorktree(worktreePath, task.task_id, `partial: the daemon ended this task (${err.taskStatus})`);
-      cleanupWorktree(worktreePath, true);
-    }
-    writeAgentState('idle', null);
-    await recordHyperagentTask(task, { outcome: 'failure', iterations: 1, startedAt, notes: `Stopped: ${err.message}${err.foremanNote || ''}` });
-    return;
-  }
-  log(`ERROR: ${err.message}`);
+  const terminal = Boolean(task) && err.code === TASK_TERMINAL;
+  log(terminal ? `STOPPED: ${task.task_id} — ${err.message}` : `ERROR: ${err.message}`);
   if (!task) return;
+  // createWorktree's own id check: the error may be its refusal of an unsafe id.
+  const worktreePath = /^[\w][\w.-]{0,127}$/.test(task.task_id) ? path.join(WORKTREE_BASE, task.task_id) : null;
+  if (worktreePath && fs.existsSync(worktreePath)) {
+    commitWorktree(worktreePath, task.task_id, terminal ? `partial: the daemon ended this task (${err.taskStatus})` : 'partial: abandoned after a worker error');
+    cleanupWorktree(worktreePath, true);
+  }
+  writeAgentState('idle', null);
   await recordHyperagentTask(task, {
     outcome: 'failure', iterations: 1, startedAt,
-    notes: `Unhandled worker error: ${err.message}${err.foremanNote || ''}`,
+    notes: `${terminal ? 'Stopped' : 'Unhandled worker error'}: ${err.message}${err.foremanNote || ''}`,
   });
 }
 
@@ -2468,13 +2470,13 @@ if (require.main === module) {
 // Test surface (no NATS): the prompt builders + harness injectors, and the Foreman
 // completion gate + supervision wrapper (they spawn the task's provider, nothing else).
 module.exports = { buildCirclingPrompt, buildCollabPrompt, buildInitialPrompt, buildRetryPrompt, injectRules, injectRole, injectMemory, injectHyperagentStrategy, recallForTask, readNodeMemory, recordHyperagentTask, deriveExecutionClass, foremanVerify, superviseTask };
-// Review-gate and worker-error surfaces (test/mesh-agent-review-gate.test.js,
-// test/mesh-agent-terminal-task.test.js): the real merge/review handlers and the
-// real daemon client and error path, against a real git workspace, with only the
-// NATS connection injected.
+// Review-gate, worker-error and collab-round surfaces (test/mesh-agent-review-gate.test.js,
+// test/mesh-agent-terminal-task.test.js, test/mesh-agent-collab-rounds.test.js): the real
+// merge/review handlers, the real daemon client and error path, and the real collab round
+// loop, against a real git workspace, with only the NATS connection injected.
 module.exports.__test = {
   setContext(ctx) { if (ctx.nc !== undefined) nc = ctx.nc; },
   mergeIfApproved, onReviewApproved, onReviewRejected, reconcileKeptBranches,
-  natsRequest, createWorktree, onWorkerError,
+  natsRequest, createWorktree, onWorkerError, executeCollabTask,
 };
 // deploy-v7f0130b

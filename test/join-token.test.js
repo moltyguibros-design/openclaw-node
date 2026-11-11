@@ -59,6 +59,7 @@ test('bin/mesh-join-token.js emits a v4 payload carrying the lead pubkey and aut
   const { payload } = decodeJoinToken(token);
   assert.equal(payload.v, CURRENT_VERSION);
   assert.equal(payload.nats, 'nats://10.9.9.9:4222');
+  assert.doesNotMatch(r.stderr, /loopback/);
   assert.equal(payload.lead_node_id, 'lead-x');
   assert.equal(payload.nats_auth, 'nkey');
   const pub = fs.readFileSync(path.join(home, '.openclaw', 'identity.pub'), 'utf8');
@@ -67,5 +68,20 @@ test('bin/mesh-join-token.js emits a v4 payload carrying the lead pubkey and aut
   assert.doesNotMatch(JSON.stringify(payload), /shared-secret-token/, 'the bus token never rides in the join token');
   const secret = fs.readFileSync(path.join(home, '.openclaw', '.mesh-secret'), 'utf8').trim();
   assert.equal(verifyJoinTokenHmac(token, secret), true);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('bin/mesh-join-token.js warns on stderr when the token would carry a loopback NATS URL', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-jt-'));
+  fs.mkdirSync(path.join(home, '.openclaw'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.openclaw', 'openclaw.env'), 'OPENCLAW_NATS=nats://127.0.0.1:4222\nOPENCLAW_NODE_ID=lead-x\n');
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'bin/mesh-join-token.js'), '--no-ssh', '--one-liner'], {
+    encoding: 'utf8', env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('OPENCLAW_'))), HOME: home, OPENCLAW_IDENTITY_DIR: path.join(home, '.openclaw'), OPENCLAW_NODE_ID: 'lead-x' },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const token = r.stdout.match(/MESH_JOIN_TOKEN=([A-Za-z0-9_.-]+)/)[1];
+  assert.equal(decodeJoinToken(token).payload.nats, 'nats://127.0.0.1:4222');
+  assert.match(r.stderr, /loopback/);
+  assert.doesNotMatch(r.stdout, /loopback/);
   fs.rmSync(home, { recursive: true, force: true });
 });

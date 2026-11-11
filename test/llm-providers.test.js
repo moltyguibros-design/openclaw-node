@@ -105,3 +105,23 @@ describe('shell provider buildArgs', () => {
     );
   });
 });
+
+describe('claude provider --add-dir scope', () => {
+  const addDirs = (scope) => {
+    const args = PROVIDERS.claude.buildArgs('p', null, { scope }, '/home/u/proj');
+    return args.flatMap((a, i) => (a === '--add-dir' ? [args[i + 1]] : []));
+  };
+
+  it('grants a directory inside the target', () => {
+    assert.deepEqual(addDirs(['src/lib/a.js']), ['/home/u/proj', '/home/u/proj/src/lib']);
+  });
+
+  it('never grants the target\'s parent or a sibling sharing its name prefix', () => {
+    assert.deepEqual(addDirs(['.', './', '../proj-secrets/x', '../../etc/passwd']), ['/home/u/proj']);
+  });
+
+  it('allows a /tmp scope but not a /tmpfoo lookalike', () => {
+    assert.deepEqual(addDirs(['/tmp/work/f']), ['/home/u/proj', '/tmp/work']);
+    assert.deepEqual(addDirs(['/tmpfoo/f']), ['/home/u/proj']);
+  });
+});

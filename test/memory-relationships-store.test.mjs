@@ -40,3 +40,22 @@ test('P2: graph refresh merges the typed relationships as edges (not mentions-on
   assert.ok(typed.length >= 2, 'graph now carries non-mentions typed edges');
   gc.close && gc.close();
 });
+
+test('P2: typed edges land on slug node ids (reachable from vault concept nodes and slug seeds)', async () => {
+  const vault = mkdtempSync(join(tmpdir(), 'vault-'));
+  writeFileSync(join(vault, 'nats-jetstream.md'), '# NATS JetStream\n');
+  writeFileSync(join(vault, 'ollama.md'), '# Ollama\n');
+  const mockStore = { getConceptEdges: () => [
+    { source: 'NATS JetStream', target: 'Ollama', edge_type: 'depends_on' },
+    { source: 'NATS', target: 'nats', edge_type: 'related' },
+  ] };
+  const gc = createGraphCache({ dbPath: tmpDb(), vaultPath: vault, extractionStore: mockStore });
+  const res = await gc.refreshCache();
+  const out = gc.queryNeighbors('nats-jetstream', { direction: 'outgoing' }).edges;
+  assert.ok(out.some(e => e.target_id === 'ollama' && e.edge_type === 'depends_on'),
+    `typed edge reachable from the slug node (got ${JSON.stringify(out)})`);
+  const ids = new Set(gc.getNodes().map(n => n.id));
+  assert.ok(!ids.has('NATS JetStream') && !ids.has('Ollama'), 'no raw-name parallel nodes');
+  assert.equal(res.mergedEdges, 1, 'an edge whose ends slug to the same node is skipped');
+  gc.close && gc.close();
+});

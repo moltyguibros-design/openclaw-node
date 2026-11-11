@@ -21,6 +21,7 @@ import {
 import { ChevronLeft, ChevronRight, Plus, Clock, User } from "lucide-react";
 import { useTasks, updateTask, type Task } from "@/lib/hooks";
 import { UnifiedTaskDialog } from "@/components/board/unified-task-dialog";
+import { extractDept, extractEstimate } from "@/lib/task-description";
 
 const STATUS_COLORS: Record<string, string> = {
   running: "bg-green-500/80",
@@ -55,17 +56,6 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   week: "Week",
   day: "Day",
 };
-
-function extractEstimate(desc: string | null): string | null {
-  if (!desc) return null;
-  const m = desc.match(/(\d+(?:\.\d+)?h)/);
-  return m ? m[1] : null;
-}
-
-function extractDept(desc: string | null): string | null {
-  if (!desc) return null;
-  return desc.split(" · ")[0]?.trim() || null;
-}
 
 export default function CalendarPage() {
   const { tasks, isLoading } = useTasks();
@@ -254,7 +244,7 @@ export default function CalendarPage() {
     if (!draggedTaskId) return;
     const dateStr = format(date, "yyyy-MM-dd");
     await updateTask(draggedTaskId, {
-      scheduledDate: dateStr,
+      scheduled_date: dateStr,
     } as Record<string, unknown>);
     setDraggedTaskId(null);
   };

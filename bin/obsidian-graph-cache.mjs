@@ -13,6 +13,7 @@
  * Depends on:
  *   - lib/obsidian-graph.mjs (buildGraph)
  *   - lib/obsidian-vault.mjs (getVaultPath)
+ *   - lib/obsidian-summarizer.mjs (slugifyName for typed-edge node ids)
  *   - better-sqlite3 (existing dependency)
  */
 
@@ -23,6 +24,7 @@ import { openStore, closeStore, getVersion, setVersion } from '../lib/sqlite-sto
 import { buildGraph } from '../lib/obsidian-graph.mjs';
 import { createConcurrencyGuard } from '../lib/concurrency-guard.mjs';
 import { getVaultPath } from '../lib/obsidian-vault.mjs';
+import { slugifyName } from '../lib/obsidian-summarizer.mjs';
 
 /** Default database path */
 export const DEFAULT_DB_PATH = join(homedir(), '.openclaw', 'graph-cache.db');
@@ -101,6 +103,11 @@ export function createGraphCache(opts = {}) {
     'INSERT OR REPLACE INTO graph_cache_meta (key, value) VALUES (?, ?)'
   );
   const getMeta = db.prepare('SELECT value FROM graph_cache_meta WHERE key = ?');
+  const EDGE_SELECT = 'SELECT source_id, target_id, edge_type, weight FROM concept_graph_edges';
+  const edgesOutgoing = db.prepare(`${EDGE_SELECT} WHERE source_id = ?`);
+  const edgesIncoming = db.prepare(`${EDGE_SELECT} WHERE target_id = ?`);
+  const edgesBoth = db.prepare(`${EDGE_SELECT} WHERE source_id = ? OR target_id = ?`);
+  const getNode = db.prepare('SELECT id, label, last_activated_at, weight FROM concept_graph_nodes WHERE id = ?');
 
   let intervalHandle = null;
   let fsWatcher = null;
@@ -132,11 +139,14 @@ export function createGraphCache(opts = {}) {
       // must not break the vault refresh (survives full-replace: re-added each refresh).
       if (extractionStore && typeof extractionStore.getConceptEdges === 'function') {
         try {
+          // Store names are LLM display names; vault nodes and activation seeds are slugs.
           for (const e of extractionStore.getConceptEdges()) {
-            if (!e.source || !e.target) continue;
-            if (!graph.nodes.has(e.source)) insertNode.run(e.source, e.source, null, 1.0);
-            if (!graph.nodes.has(e.target)) insertNode.run(e.target, e.target, null, 1.0);
-            insertEdge.run(e.source, e.target, e.edge_type || 'related', 1.0);
+            const source = e.source ? slugifyName(e.source) : '';
+            const target = e.target ? slugifyName(e.target) : '';
+            if (!source || !target || source === target) continue;
+            if (!graph.nodes.has(source)) insertNode.run(source, e.source, null, 1.0);
+            if (!graph.nodes.has(target)) insertNode.run(target, e.target, null, 1.0);
+            insertEdge.run(source, target, e.edge_type || 'related', 1.0);
             mergedEdges++;
           }
         } catch { /* vault refresh must not fail on the store */ }
@@ -160,21 +170,9 @@ export function createGraphCache(opts = {}) {
    */
   function queryNeighbors(nodeId, queryOpts = {}) {
     const direction = queryOpts.direction || 'both';
-    let edgeRows;
-
-    if (direction === 'outgoing') {
-      edgeRows = db.prepare(
-        'SELECT source_id, target_id, edge_type, weight FROM concept_graph_edges WHERE source_id = ?'
-      ).all(nodeId);
-    } else if (direction === 'incoming') {
-      edgeRows = db.prepare(
-        'SELECT source_id, target_id, edge_type, weight FROM concept_graph_edges WHERE target_id = ?'
-      ).all(nodeId);
-    } else {
-      edgeRows = db.prepare(
-        'SELECT source_id, target_id, edge_type, weight FROM concept_graph_edges WHERE source_id = ? OR target_id = ?'
-      ).all(nodeId, nodeId);
-    }
+    const edgeRows = direction === 'outgoing' ? edgesOutgoing.all(nodeId)
+      : direction === 'incoming' ? edgesIncoming.all(nodeId)
+      : edgesBoth.all(nodeId, nodeId);
 
     const neighborIds = new Set();
     for (const row of edgeRows) {
@@ -184,9 +182,7 @@ export function createGraphCache(opts = {}) {
 
     const neighbors = [];
     for (const nid of neighborIds) {
-      const node = db.prepare(
-        'SELECT id, label, last_activated_at, weight FROM concept_graph_nodes WHERE id = ?'
-      ).get(nid);
+      const node = getNode.get(nid);
       if (node) neighbors.push(node);
     }
 

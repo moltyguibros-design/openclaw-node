@@ -1,0 +1,328 @@
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py
+index 8a592f6..f6a617f 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py
+@@ -692,5 +692,323 @@ class Frozen(CaptureCheckpoint):
+                     self.verify(records, digest, **inputs)
+ 
+ 
++KEEP = object()
++
++
++class Decisive(CaptureCheckpoint):
++    """One cohort or verifier rule per test, each refusing a forgery that only that rule catches.
++
++    Every test first shows its construction path accepting the authentic case, so the refusal can
++    come only from the forged difference, and deleting the rule makes the forgery pass. Writer-path
++    cases reach the shared capture_cohort() before any live check, so they pin the frozen
++    verifier's rule as well.
++    """
++
++    def index(self, rows, test):
++        return next(index for index, row in enumerate(rows) if test(row))
++
++    def receipt_of(self, rows, unit, action='disable-and-unload'):
++        return self.index(rows, lambda row: row['event'] == 'verified' and row.get('unit') == unit
++                          and row.get('action') == action)
++
++    def relinked(self, rows, start, keep_sequence=False):
++        rows = copy.deepcopy(rows)
++        for index in range(start, len(rows)):
++            row = rows[index]
++            row.pop('sha256')
++            if not keep_sequence:
++                row['sequence'] = index
++            row['previous'] = rows[index - 1]['sha256'] if index else None
++            row['sha256'] = hashlib.sha256(encoded(row)).hexdigest()
++        return rows
++
++    def reforged(self, rows, manifest, start, keep_sequence=False):
++        """A forger who relinks from start and re-derives the manifest head and checkpoint fields."""
++        rows = self.relinked(rows, start, keep_sequence)
++        head = rows[-2]['sha256']
++        again = canonical({**json.loads(manifest), 'journal_head': head})
++        rows[-1].update(pre_head=head, manifest_sha256=hashlib.sha256(again).hexdigest(),
++                        baseline_sha256=rows[0]['sha256'])
++        return self.relinked(rows, len(rows) - 1, keep_sequence), again
++
++    def custom_stop(self, unit, action='disable-and-unload', user=True, system=KEEP):
++        """forged_stop with a chosen action and per-domain override result for its own label."""
++        label = 'ai.openclaw.' + unit
++        intent = self.journal.append('intent', unit=unit, action=action)
++        if label in self.loaded['loaded']['gui']:
++            self.loaded['loaded']['gui'].remove(label)
++        self.loaded['overrides']['gui'][label] = True
++        if user:
++            self.loaded['overrides']['user'][label] = True
++        if system is not KEEP:
++            self.loaded['overrides']['system'][label] = system
++        self.journal.append('verified', intent=intent['sequence'], unit=unit, action=action,
++                            evidence={**self.stop_evidence(unit), 'execution_hold': CERTIFICATE,
++                                      'entrypoint_loaded': copy.deepcopy(self.loaded['loaded']),
++                                      'entrypoint_overrides': copy.deepcopy(self.loaded['overrides'])})
++
++    def forged_window(self, order=(*STOP_ORDER, *SERVING_NATS), custom=None):
++        self.anchor(CERTIFICATE)
++        for unit in order:
++            (custom or {}).get(unit, self.forged_stop)(unit)
++
++    def accepted(self, **inputs):
++        """The writer appends the checkpoint and the frozen verifier accepts the durable journal."""
++        manifest = inputs.pop('manifest', None) or self.manifest()
++        record = self.checkpoint(manifest=manifest, **inputs)
++        records = self.journal._read()
++        self.assertEqual(self.verify(records, record['sha256'], manifest=manifest)['checkpoint_sha256'],
++                         record['sha256'])
++        return records, manifest
++
++    def rebased(self, change):
++        """setUp again with the baseline launchd state changed before the journal opens."""
++        original = full_entrypoint_evidence
++        def changed(prior):
++            evidence = original(prior)
++            change(evidence)
++            return evidence
++        with patch.object(sys.modules[__name__], 'full_entrypoint_evidence', changed):
++            self.setUp()
++
++    def test_chain_rows_must_link_to_their_predecessor(self):
++        records, record, manifest = self.authentic()
++        self.verify(records, record['sha256'], manifest=manifest)
++        receipt = self.receipt_of(records, 'observer')
++        # Each row hashes only itself: the next row's previous link is what binds it to the chain,
++        # so a row rewritten after commitment keeps the committed digest of the terminal record.
++        for name, change in (('content', {'at': 'substituted after commitment'}),
++                             ('link', {'previous': records[1]['sha256']})):
++            with self.subTest(change=name):
++                rows = copy.deepcopy(records)
++                rows[receipt].update(change)
++                rows[receipt].pop('sha256')
++                rows[receipt]['sha256'] = hashlib.sha256(encoded(rows[receipt])).hexdigest()
++                with self.assertRaisesRegex(Refused, '^capture journal chain differs$'):
++                    self.verify(rows, record['sha256'], manifest=manifest)
++
++    def test_chain_sequence_must_be_the_row_index(self):
++        records, _, manifest = self.authentic()
++        rows, again = self.reforged(records, manifest, 1, keep_sequence=True)
++        self.verify(rows, manifest=again)
++        rows = copy.deepcopy(records)
++        intent = self.index(rows, lambda row: row['event'] == 'intent' and row['unit'] == 'mesh-deploy-listener')
++        rows[intent]['sequence'] = rows[self.receipt_of(rows, 'mesh-deploy-listener')]['intent'] = 1000 + intent
++        rows, again = self.reforged(rows, manifest, intent, keep_sequence=True)
++        with self.assertRaisesRegex(Refused, '^capture journal chain differs$'):
++            self.verify(rows, manifest=again)
++
++    def test_execution_hold_must_leave_launchd_state_unchanged(self):
++        self.forged_window()
++        self.accepted()
++        with self.subTest(writer='member1 re-enabled during the hold'):
++            # The hold's receipt and every later one record member1 re-enabled during the hold.
++            self.setUp()
++            for domain in ('gui', 'user'):
++                self.loaded['overrides'][domain]['ai.openclaw.nats-1'] = False
++            self.forged_window()
++            self.refused('^capture checkpoint execution hold changed launchd state$', self.checkpoint)
++        self.setUp()
++        records, _, manifest = self.authentic()
++        anchor = self.receipt_of(records, 'scheduler-heartbeat', 'close-execution-hold')
++        observer = self.receipt_of(records, 'observer')
++        def reenabled(rows):
++            for row in rows[anchor:-1]:
++                if row['event'] == 'verified':
++                    for domain in ('gui', 'user'):
++                        row['evidence']['entrypoint_overrides'][domain]['ai.openclaw.nats-1'] = False
++            for domain in ('gui', 'user'):
++                rows[-1]['entrypoint_overrides'][domain]['ai.openclaw.nats-1'] = False
++        def unloaded_early(rows):
++            for row in rows[anchor:observer]:
++                if row['event'] == 'verified':
++                    row['evidence']['entrypoint_loaded']['gui'].remove('ai.openclaw.observer')
++        for change in (reenabled, unloaded_early):
++            with self.subTest(change=change.__name__):
++                rows = copy.deepcopy(records)
++                change(rows)
++                rows, again = self.reforged(rows, manifest, anchor)
++                with self.assertRaisesRegex(Refused, '^capture checkpoint execution hold changed launchd state$'):
++                    self.verify(rows, manifest=again)
++
++    MEMBER1_CHANGES = (('loaded', True), ('running', True), ('disabled', False))
++
++    def test_member1_observation_must_be_unchanged_in_every_field(self):
++        for field, value in self.MEMBER1_CHANGES:
++            with self.subTest(writer=field):
++                self.setUp()
++                self.build()
++                def observe(unit, saved, field=field, value=value):
++                    return {**saved, field: value, 'verified': True} if unit == 'nats-1' else self.observe(unit, saved)
++                self.refused('^capture checkpoint observation is not stopped or held unchanged: nats-1$',
++                             lambda: self.checkpoint(observe=observe))
++        self.setUp()
++        self.build()
++        self.accepted()
++
++    def test_frozen_member1_observation_must_be_unchanged_in_every_field(self):
++        self.build()
++        records, manifest = self.accepted()
++        self.assertEqual({key: records[-1]['observations']['nats-1'][key] for key in ('loaded', 'running', 'disabled')},
++                         {'loaded': False, 'running': False, 'disabled': True})
++        for field, value in self.MEMBER1_CHANGES:
++            with self.subTest(frozen=field):
++                rows = copy.deepcopy(records)
++                rows[-1]['observations']['nats-1'][field] = value
++                with self.assertRaisesRegex(Refused, '^capture checkpoint observations do not show the stopped and held cohort$'):
++                    self.verify(self.relinked(rows, len(rows) - 1), manifest=manifest)
++
++    def test_receipts_and_publication_close_their_own_intent(self):
++        records, _, manifest = self.authentic()
++        self.assertEqual([(row['event'], row.get('unit')) for row in records[:6]],
++                         [('baseline', None), ('intent', 'scheduler-heartbeat'), ('hold-published', None),
++                          ('verified', 'scheduler-heartbeat'), ('intent', 'mesh-deploy-listener'),
++                          ('verified', 'mesh-deploy-listener')])
++        rows, again = self.reforged(records, manifest, 1)
++        self.verify(rows, manifest=again)
++        receipt = self.receipt_of(records, 'observer')
++        cases = [('receipt does not close the open intent', receipt, {'intent': 999}),
++                 ('receipt does not close the open intent', receipt, {'unit': 'gateway'}),
++                 ('receipt does not close the open intent', receipt, {'action': 'stop'}),
++                 ('execution hold publication differs', 2, {'intent': 999})]
++        for pattern, index, change in cases:
++            with self.subTest(index=index, change=change):
++                rows = copy.deepcopy(records)
++                rows[index].update(change)
++                rows, again = self.reforged(rows, manifest, index)
++                with self.assertRaisesRegex(Refused, '^capture checkpoint ' + pattern + '$'):
++                    self.verify(rows, manifest=again)
++        with self.subTest(publication='inside the listener window'):
++            # The anchor closes unpublished; its publication names the listener's open intent.
++            rows = copy.deepcopy(records[:-1])
++            publication = rows.pop(2)
++            publication['intent'] = 3
++            rows.insert(4, publication)
++            rows[5]['intent'] = 3
++            rows, again = self.reforged(rows + [copy.deepcopy(records[-1])], manifest, 1)
++            with self.assertRaisesRegex(Refused, '^capture checkpoint execution hold publication differs$'):
++                self.verify(rows, manifest=again)
++
++    def test_anchor_is_the_scheduler_close_execution_hold(self):
++        records, _, manifest = self.authentic()
++        receipt = self.receipt_of(records, 'scheduler-heartbeat', 'close-execution-hold')
++        for field, value in (('unit', 'nats-1'), ('action', 'protective-execution-hold')):
++            with self.subTest(field=field):
++                rows = copy.deepcopy(records)
++                rows[1][field] = rows[receipt][field] = value
++                rows, again = self.reforged(rows, manifest, 1)
++                with self.assertRaisesRegex(Refused, '^capture checkpoint has no unique published first execution hold$'):
++                    self.verify(rows, manifest=again)
++
++    def test_stops_are_one_disable_and_unload_each_listener_first(self):
++        self.forged_window()
++        self.accepted()
++        order = list(STOP_ORDER)
++        self.assertEqual(order[0], 'mesh-deploy-listener')
++        after = order.index('observer') + 1
++        cases = (
++            ('stop order differs: listener, other jobs, then serving NATS',
++             {'order': (order[1], order[0], *order[2:], *SERVING_NATS)}),
++            ('stops are not one persistent stop per prior-loaded unit',
++             {'order': (*order[:after], 'observer', *order[after:], *SERVING_NATS)}),
++            ('stops are not one persistent stop per prior-loaded unit',
++             {'custom': {'observer': lambda unit: self.custom_stop(unit, action='unload')}}),
++        )
++        for pattern, window in cases:
++            with self.subTest(pattern=pattern, window=sorted(window)):
++                self.setUp()
++                self.forged_window(**window)
++                self.refused('^capture checkpoint ' + pattern + '$', self.checkpoint)
++
++    def test_each_stop_disables_its_own_label_in_every_domain(self):
++        label = 'ai.openclaw.observer'
++        def system(value):
++            return lambda evidence: evidence['overrides']['system'].__setitem__(label, value)
++        cases = (
++            # Baseline, the authentic stop on it, then the forged stop only one domain rule refuses.
++            ('user override left unset', lambda evidence: None, self.forged_stop,
++             lambda unit: self.custom_stop(unit, user=False)),
++            ('system override left enabled', system(False), lambda unit: self.custom_stop(unit, system=True),
++             self.forged_stop),
++            ('system override cleared', system(True), self.forged_stop,
++             lambda unit: self.custom_stop(unit, system=None)),
++        )
++        for name, baseline, honest, forged in cases:
++            with self.subTest(case=name):
++                self.rebased(baseline)
++                self.forged_window(custom={'observer': honest})
++                self.accepted()
++                self.rebased(baseline)
++                self.forged_window(custom={'observer': forged})
++                self.refused('^capture checkpoint launchd continuity differs at the stop of observer$',
++                             self.checkpoint)
++
++    def test_checkpoint_entrypoint_state_and_observed_units_are_rederived(self):
++        records, _, manifest = self.authentic()
++        cases = (
++            ('fields differ from the frozen journal, arm, manifest or pins',
++             lambda row: row['entrypoint_overrides']['gui'].__setitem__('ai.openclaw.nats-1', False)),
++            ('observations do not show the stopped and held cohort',
++             lambda row: row['observations'].__setitem__('unknown-unit', {'verified': True})),
++        )
++        for pattern, change in cases:
++            with self.subTest(pattern=pattern):
++                rows = copy.deepcopy(records)
++                change(rows[-1])
++                with self.assertRaisesRegex(Refused, '^capture checkpoint ' + pattern + '$'):
++                    self.verify(self.relinked(rows, len(rows) - 1), manifest=manifest)
++
++    def test_baseline_must_be_the_full_node_inventory(self):
++        records, _, manifest = self.authentic()
++        def rebaselined(change):
++            rows = copy.deepcopy(records)
++            change(rows)
++            rows = self.relinked(rows, 0)
++            rows[1]['hold']['baseline'] = rows[0]['sha256']
++            return self.reforged(rows, manifest, 1)
++        rows, again = rebaselined(lambda rows: None)
++        self.verify(rows, manifest=again)
++        def member1_enabled(rows):
++            # Every recorded override state agrees that member1 was never disabled.
++            for row in rows:
++                for state in (row.get('entrypoint_inventory', {}).get('overrides'),
++                              row.get('evidence', {}).get('entrypoint_overrides'),
++                              row.get('entrypoint_overrides')):
++                    if state is not None:
++                        for domain in ('gui', 'user'):
++                            state[domain]['ai.openclaw.nats-1'] = None
++        cases = (('^capture checkpoint requires a full-node baseline$', lambda rows: rows[0].pop('scope')),
++                 ('^full-node disabled overrides differ from the baseline$', member1_enabled))
++        for pattern, change in cases:
++            with self.subTest(pattern=pattern):
++                rows, again = rebaselined(change)
++                with self.assertRaisesRegex(Refused, pattern):
++                    self.verify(rows, manifest=again)
++
++    def test_manifest_roles_are_exactly_the_bound_roles(self):
++        self.build()
++        base = json.loads(self.manifest())
++        extra = self.manifest(stores={**base['stores'], 'member4': base['stores']['member2']},
++                              store_paths={**base['store_paths'], 'member4': '/Users/owned/elsewhere'},
++                              store_relative_paths={**base['store_relative_paths'], 'member4': 'Users/owned/elsewhere'})
++        self.refused('^guest manifest roles differ from the bound identities$',
++                     lambda: self.checkpoint(manifest=extra))
++        self.accepted()
++
++    def test_durable_record_beyond_memory_refuses_without_overwrite(self):
++        self.build()
++        rows = self.journal.records
++        extra = {'sequence': len(rows), 'previous': rows[-1]['sha256'], 'event': 'intent', 'boot': 'boot-a',
++                 'at': 'x', 'unit': 'nats-1', 'action': 'disable-and-unload'}
++        extra['sha256'] = hashlib.sha256(encoded(extra)).hexdigest()
++        path = self.root / ('%06d.json' % len(rows))
++        path.write_bytes(encoded(extra))
++        path.chmod(0o600)
++        self.refused('^capture checkpoint requires the exact durable journal$', self.checkpoint)
++        self.assertEqual(path.read_bytes(), encoded(extra))
++        path.unlink()
++        self.accepted()
++
++
+ if __name__ == '__main__':
+     unittest.main()

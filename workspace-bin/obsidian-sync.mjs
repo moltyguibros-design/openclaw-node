@@ -780,9 +780,10 @@ const SHAREABLE_TAGS = new Set(['error', 'pattern', 'correction']);
  * Parse lesson entries from a lessons.md file.
  * Returns [{tag, text, date, sourceNode}].
  */
-function parseLessons(content, sourceNode) {
+export function parseLessons(content, sourceNode) {
   const lessons = [];
-  const lineRegex = /^\[(\w+)\]\s+(.+?)(?:\s+\((\d{4}-\d{2}-\d{2})\))?$/;
+  // subagent-audit wrote "(auto-extracted, YYYY-MM-DD)" before it matched MEMORY_SPEC §2.5; those lines stay on nodes.
+  const lineRegex = /^\[(\w+)\]\s+(.+?)(?:\s+\((?:auto-extracted,\s*)?(\d{4}-\d{2}-\d{2})\))?$/;
 
   for (const line of content.split('\n')) {
     const match = line.trim().match(lineRegex);

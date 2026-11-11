@@ -43,18 +43,66 @@ test('overlapping guarded tick fires skip, runs the body once', async () => {
   assert.equal(maxConcurrent, 1);
 });
 
+test('the orphan\'s finally leaves the current run marked in flight', async () => {
+  const releases = [];
+  let clock = 0;
+  const realNow = Date.now;
+  Date.now = () => clock;
+  try {
+    const guarded = createConcurrencyGuard(() => new Promise((r) => releases.push(r)), { maxAgeMs: 100 });
+    const orphan = guarded();          // started at t=0
+    clock = 200;
+    const current = guarded();         // age 200 > 100 → force-clear, run #2 starts at t=200
+    releases[0]();
+    await orphan;                      // the orphan settles while run #2 is in flight
+    clock = 250;                       // run #2 is 50ms old: inside maxAgeMs
+    const third = guarded();
+    assert.equal(releases.length, 2, 'a third run started while run #2 was still in flight');
+    assert.deepEqual(await third, { skipped: true, reason: 'in_flight' });
+    releases[1]();
+    await current;
+  } finally {
+    Date.now = realNow;
+    releases.forEach((r) => r()); // a failed assertion must not leave a run pending
+  }
+});
+
 test('daemon imports the shared concurrency guard', () => {
   assert.match(daemonSrc, /import \{ createConcurrencyGuard \} from '\.\.\/lib\/concurrency-guard\.mjs';/);
 });
 
 test('daemon wraps tick in the guard with a deadlock force-clear', () => {
-  assert.match(daemonSrc, /const guardedTick = createConcurrencyGuard\(tick, \{ maxAgeMs: 30 \* 60_000, log \}\)/);
+  assert.match(daemonSrc, /const guardedTick = createConcurrencyGuard\(trackedTick, \{ maxAgeMs: 30 \* 60_000, log \}\)/);
 });
 
-test('no call site invokes tick() bare — both go through guardedTick, tracked for fencing', () => {
+test('no call site invokes tick() bare, and only a started run is tracked for fencing', () => {
   assert.doesNotMatch(daemonSrc, /await tick\(\)/);
-  const tracked = daemonSrc.match(/inFlightTick = guardedTick\(\)/g) || [];
-  assert.equal(tracked.length, 2, 'both call sites must assign inFlightTick so shutdown can fence');
+  assert.doesNotMatch(daemonSrc, /inFlightTick = guardedTick\(\)/, 'a skipped call must not overwrite the fenced run');
+  assert.match(daemonSrc, /inFlightTick = run;/);
+  assert.match(daemonSrc, /if \(inFlightTick === run\) inFlightTick = null/);
+});
+
+test('a skipped fire leaves the in-flight run tracked; the run clears it when it ends', async () => {
+  let inFlightTick = null;
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const tick = async () => { await gate; };
+  const trackedTick = () => {
+    const run = tick();
+    inFlightTick = run;
+    return run.finally(() => { if (inFlightTick === run) inFlightTick = null; });
+  };
+  const guardedTick = createConcurrencyGuard(trackedTick, { maxAgeMs: 30 * 60_000 });
+
+  const first = guardedTick();
+  const runA = inFlightTick;
+  assert.ok(runA, 'the started run is tracked');
+  assert.deepEqual(await guardedTick(), { skipped: true, reason: 'in_flight' });
+  assert.equal(inFlightTick, runA, 'the skipped fire must not replace or clear the tracked run');
+
+  release();
+  await first;
+  assert.equal(inFlightTick, null);
 });
 
 test('shutdown fences the in-flight tick before closing handles and owns the exit (R15, repair 4.1)', () => {
@@ -107,4 +155,34 @@ test('the session-size floor is a named 1KB constant, not a bare 50KB (repair 4.
 
 test('synthesized events carry session_id (R10, repair 2.10)', () => {
   assert.match(daemonSrc, /buildMemoryEvent\('memory\.synthesized', sessionId, 'memory', \{\n    session_id: sessionId,/);
+});
+
+test('the NATS retry timer never reads `running` before it is initialized', () => {
+  const decl = daemonSrc.indexOf('let running = true;');
+  const armed = daemonSrc.indexOf('natsRetryTimer = setInterval(');
+  assert.ok(decl > 0 && armed > 0);
+  assert.ok(decl < armed, '`running` must be initialized before the NATS retry timer can fire');
+});
+
+test('the daemon owns the maintenance cadence: Phase 2 forces the run, Phase 0 stamps it', () => {
+  assert.match(daemonSrc, /runSubprocess\('node', \[maint, '--force'\], 60000\)/);
+  const phase0 = daemonSrc.match(/async function runPhase0Bootstrap[\s\S]*?\n}\n/)[0];
+  assert.match(phase0, /throttle\.lastMaintenance = Date\.now\(\);[\s\S]*saveThrottleState\(throttle\)/);
+});
+
+test('runSubprocess is traced with wrapAsync, so a failed or slow run is recorded', () => {
+  assert.match(daemonSrc, /runSubprocess = tracer\.wrapAsync\('runSubprocess', runSubprocess, \{ tier: 2 \}\);/);
+  assert.doesNotMatch(daemonSrc, /runSubprocess = tracer\.wrap\(/);
+});
+
+test('an event log set by a NATS retry reaches the inject server and the memory budget', () => {
+  assert.doesNotMatch(daemonSrc, /eventLog: localEventLog/);
+  assert.equal((daemonSrc.match(/eventLog: liveEventLog/g) || []).length, 2);
+  assert.match(daemonSrc, /const liveEventLog = \{ publishLocal: \(event\) => \(localEventLog \? localEventLog\.publishLocal\(event\) : Promise\.resolve\(\)\) \};/);
+});
+
+test('memory.ingested reports the messages a re-import added, not the whole session', () => {
+  assert.match(daemonSrc, /messages_added: Math\.max\(0, messageCount - previousCount\)/);
+  assert.doesNotMatch(daemonSrc, /messages_added: messageCount,/);
+  assert.equal((daemonSrc.match(/emitIngestEvent\([^)]*previousCount\)/g) || []).length, 4);
 });

@@ -14,8 +14,10 @@
  *   - Cancels any tasks claimed/running by the node (releases back to queue)
  *   - Publishes mesh.health.<nodeId> with status=removed
  *   - Removes node from MESH_NODES KV bucket (if it exists)
- *   - (Local mode only) Stops and removes the launchd/systemd service
+ *   - (Local mode only) Stops and removes the mesh-agent, deploy-listener and
+ *     health-publisher launchd/systemd services
  *   - (Local mode only) Optionally removes ~/.openclaw/ and ~/openclaw/
+ *   - Prints the trust-peer command the lead runs to revoke the node's bus identity
  *
  * Usage:
  *   node bin/mesh-node-remove.js                    # remove local node
@@ -108,29 +110,10 @@ const cleanNatsState = tracer.wrapAsync('cleanNatsState', async function cleanNa
 
     // 1. Release/cancel tasks owned by this node
     try {
+      // Required only once nats is known to load: lib/mesh-tasks requires it.
+      const { TaskStore } = require('../lib/mesh-tasks');
       const kv = await js.views.kv('MESH_TASKS');
-      const keys = await kv.keys();
-      const allKeys = [];
-      for await (const k of keys) allKeys.push(k);
-
-      let released = 0;
-      for (const k of allKeys) {
-        const entry = await kv.get(k);
-        if (!entry || !entry.value) continue;
-        const task = JSON.parse(new TextDecoder().decode(entry.value));
-
-        if (task.owner === nodeId && (task.status === 'claimed' || task.status === 'running')) {
-          task.status = 'queued';
-          task.owner = null;
-          task.claimed_at = null;
-          task.started_at = null;
-          task.budget_deadline = null;
-          task.last_activity = null;
-          task.updated_at = new Date().toISOString();
-          await kv.put(k, JSON.stringify(task));
-          released++;
-        }
-      }
+      const released = (await new TaskStore(kv).requeueOwnedBy(nodeId)).length;
 
       if (released > 0) {
         ok(`Released ${released} task(s) back to queue`);
@@ -169,36 +152,44 @@ const cleanNatsState = tracer.wrapAsync('cleanNatsState', async function cleanNa
 
 // ── Local Service Removal ────────────────────────────
 
+// Every unit node-init installs, plus the health publisher a full install adds:
+// a unit left behind keeps the node on the bus (and crash-loops after --purge).
+const LAUNCHD_LABELS = ['ai.openclaw.mesh-agent', 'ai.openclaw.mesh-deploy-listener', 'ai.openclaw.mesh-health-publisher'];
+const SYSTEMD_UNITS = ['openclaw-mesh-agent', 'openclaw-mesh-deploy-listener', 'openclaw-mesh-health-publisher'];
+
 const removeLocalService = tracer.wrap('removeLocalService', function removeLocalService() {
   const platform = os.platform();
 
   if (platform === 'darwin') {
-    // launchd
-    const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', 'ai.openclaw.mesh-agent.plist');
-    if (fs.existsSync(plistPath)) {
+    for (const label of LAUNCHD_LABELS) {
+      const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
+      if (!fs.existsSync(plistPath)) continue;
       try {
         execSync(`launchctl unload "${plistPath}" 2>/dev/null || true`, { stdio: 'pipe' });
         fs.unlinkSync(plistPath);
-        ok('Launchd service stopped and removed');
+        ok(`${label} stopped and removed`);
       } catch (e) {
-        warn(`Service removal warning: ${e.message}`);
+        warn(`Service removal warning (${label}): ${e.message}`);
       }
-    } else {
-      ok('No launchd service to remove');
     }
   } else if (platform === 'linux') {
-    // systemd
-    try {
-      execSync('systemctl --user stop openclaw-mesh-agent 2>/dev/null || true', { stdio: 'pipe' });
-      execSync('systemctl --user disable openclaw-mesh-agent 2>/dev/null || true', { stdio: 'pipe' });
-      const servicePath = path.join(os.homedir(), '.config', 'systemd', 'user', 'openclaw-mesh-agent.service');
-      if (fs.existsSync(servicePath)) {
-        fs.unlinkSync(servicePath);
-        execSync('systemctl --user daemon-reload', { stdio: 'pipe' });
+    const unitDir = path.join(os.homedir(), '.config', 'systemd', 'user');
+    for (const unit of SYSTEMD_UNITS) {
+      try {
+        execSync(`systemctl --user disable --now ${unit} 2>/dev/null || true`, { stdio: 'pipe' });
+        const servicePath = path.join(unitDir, `${unit}.service`);
+        if (fs.existsSync(servicePath)) {
+          fs.unlinkSync(servicePath);
+          ok(`${unit} stopped, disabled, and removed`);
+        }
+      } catch (e) {
+        warn(`Service removal warning (${unit}): ${e.message}`);
       }
-      ok('Systemd service stopped, disabled, and removed');
+    }
+    try {
+      execSync('systemctl --user daemon-reload', { stdio: 'pipe' });
     } catch (e) {
-      warn(`Service removal warning: ${e.message}`);
+      warn(`daemon-reload: ${e.message}`);
     }
   }
 }, { tier: 2, category: 'lifecycle' });
@@ -267,6 +258,9 @@ async function main() {
   console.log(`\n${BOLD}${GREEN}═══════════════════════════════════════${RESET}`);
   console.log(`${BOLD}${GREEN}  Node "${NODE_ID}" removed from mesh.${RESET}`);
   console.log(`${BOLD}${GREEN}═══════════════════════════════════════${RESET}\n`);
+
+  console.log('Its identity stays trusted on the bus until the lead runs:');
+  console.log(`  node bin/openclaw-trust-peer.mjs --remove ${NODE_ID} --sync-nats\n`);
 
   if (!LOCAL_MODE) {
     console.log('Note: This only cleaned mesh state. If the node is still');

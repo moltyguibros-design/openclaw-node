@@ -256,3 +256,82 @@ describe('runMeshHarness', () => {
     assert.ok(result.violations.some(v => v.rule === 'block-rm-rf'));
   });
 });
+
+// ── preCommitSecretScan ─────────────────────────
+
+describe('preCommitSecretScan', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const { execFileSync } = require('child_process');
+  const { preCommitSecretScan } = require('../lib/mesh-harness');
+
+  // A worker's edits are still unstaged when the harness runs (commitWorktree
+  // stages them afterwards), so the scan must see unstaged and untracked files.
+  function repoWith(files) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-harness-scan-'));
+    const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.invalid');
+    git('config', 'user.name', 'test');
+    fs.writeFileSync(path.join(dir, 'README.md'), 'clean\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'init');
+    for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), content);
+    return { dir, git };
+  }
+
+  it('blocks a secret in an untracked, unstaged file and leaves the index untouched', (t) => {
+    // Assembled at runtime so this fixture is not itself a secret-shaped line in the diff.
+    const { dir, git } = repoWith({ 'config.js': `const ${'pass' + 'word'} = "hunter2-not-real";\n` });
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const result = preCommitSecretScan(dir);
+    assert.strictEqual(result.blocked, true);
+    assert.ok(result.findings.some(f => f.includes('password')));
+    assert.strictEqual(git('diff', '--cached', '--name-only').toString(), '');
+  });
+
+  it('passes a clean change', (t) => {
+    const { dir } = repoWith({ 'notes.md': 'nothing sensitive here\n' });
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    assert.strictEqual(preCommitSecretScan(dir).blocked, false);
+  });
+});
+
+// ── postCommitValidate ──────────────────────────
+
+describe('postCommitValidate (shipped git-conventional-commits rule)', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const { execFileSync } = require('child_process');
+  const { postCommitValidate } = require('../lib/mesh-harness');
+
+  const rules = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'harness-rules.json'), 'utf8'));
+  const command = rules.find(r => r.id === 'git-conventional-commits').mesh_validate_command;
+
+  function repoWithSubject(subject) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-harness-postcommit-'));
+    const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.invalid');
+    git('config', 'user.name', 'test');
+    git('commit', '-q', '--allow-empty', '-m', subject);
+    return dir;
+  }
+
+  for (const subject of ['mesh(T-1): work', 'fix(auth): correct token refresh', 'chore: bump deps']) {
+    it(`passes "${subject}"`, (t) => {
+      const dir = repoWithSubject(subject);
+      t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+      const result = postCommitValidate(dir, command);
+      assert.strictEqual(result.passed, true, result.output);
+    });
+  }
+
+  it('fails a non-conventional subject', (t) => {
+    const dir = repoWithSubject('bad message');
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const result = postCommitValidate(dir, command);
+    assert.strictEqual(result.passed, false);
+    assert.doesNotMatch(result.output, /blocked/);
+  });
+});

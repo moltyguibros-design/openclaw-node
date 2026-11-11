@@ -49,7 +49,7 @@ class SecurityAudit:
     
     def check_config_not_in_sync(self) -> bool:
         """Check that config isn't in cloud sync folders."""
-        clawdbot_path = Path('~/.clawdbot').expanduser().resolve()
+        config_dir = Path('~/.openclaw').expanduser().resolve()
         
         sync_folders = [
             Path('~/Library/Mobile Documents').expanduser(),  # iCloud
@@ -61,12 +61,12 @@ class SecurityAudit:
         for sync_folder in sync_folders:
             if sync_folder.exists():
                 try:
-                    if clawdbot_path.is_relative_to(sync_folder):
+                    if config_dir.is_relative_to(sync_folder):
                         self.issues.append({
                             'check': 'Config not in cloud sync',
                             'status': 'fail',
-                            'message': f'~/.clawdbot is inside {sync_folder}!',
-                            'fix': 'Move ~/.clawdbot outside of cloud sync folders'
+                            'message': f'~/.openclaw is inside {sync_folder}!',
+                            'fix': 'Move ~/.openclaw outside of cloud sync folders'
                         })
                         return False
                 except ValueError:
@@ -77,12 +77,12 @@ class SecurityAudit:
     
     def check_gateway_config(self) -> bool:
         """Check gateway security settings."""
-        config_path = Path('~/.clawdbot/clawdbot.json').expanduser()
+        config_path = Path('~/.openclaw/openclaw.json').expanduser()
         if not config_path.exists():
             self.warnings.append({
                 'check': 'Gateway config',
                 'status': 'skip',
-                'message': 'clawdbot.json not found'
+                'message': 'openclaw.json not found'
             })
             return True
         
@@ -138,7 +138,7 @@ class SecurityAudit:
     
     def check_telegram_policy(self) -> bool:
         """Check Telegram DM/group policies."""
-        config_path = Path('~/.clawdbot/clawdbot.json').expanduser()
+        config_path = Path('~/.openclaw/openclaw.json').expanduser()
         if not config_path.exists():
             return True
         
@@ -226,8 +226,9 @@ class SecurityAudit:
         """Run all security checks."""
         
         # File permissions
-        self.check_dir_permissions('~/.clawdbot', 0o700, 'Clawdbot directory permissions')
-        self.check_file_permissions('~/.clawdbot/clawdbot.json', 0o600, 'Config file permissions')
+        self.check_dir_permissions('~/.openclaw', 0o700, 'OpenClaw directory permissions')
+        self.check_file_permissions('~/.openclaw/openclaw.json', 0o600, 'Config file permissions')
+        self.check_file_permissions('~/.openclaw/openclaw.env', 0o600, 'Secrets file permissions')
         
         # Config location
         if not quick:

@@ -23,8 +23,11 @@
  *   mesh.tasks.list          — list tasks with optional filter (request/reply)
  *   mesh.tasks.get           — get a single task by ID (request/reply)
  *   mesh.tasks.cancel        — cancel a task (request/reply)
+ *   mesh.tasks.approve / reject / merged — review gate and merge report (request/reply)
+ *   mesh.collab.*            — create, join, leave, status, find, reflect, recruiting, gate.approve, gate.reject
+ *   mesh.plans.*             — create, get, list, approve, abort, subtask.update
  *
- * Enforcement loops run every 30s: budget check + stall detection.
+ * Enforcement loops run every 30s: proposal processing, budget check, lease reaping + stall detection.
  *
  * Usage:
  *   node mesh-task-daemon.js          # foreground
@@ -38,8 +41,7 @@ const { createTask, TaskStore, TASK_STATUS, TASK_TERMINAL, DEFAULT_MAX_REJECTION
 const { validateMetricCommand } = require('../lib/exec-safety');
 const { createSession, CollabStore, COLLAB_STATUS, COLLAB_KV_BUCKET, COLLAB_MODE, isModeImplemented } = require('../lib/mesh-collab');
 const { createPlan, autoRoutePlan, PlanStore, PLAN_STATUS, SUBTASK_STATUS, PLANS_KV_BUCKET } = require('../lib/mesh-plans');
-const { findRole, findRoleByScope, validateRequiredOutputs, checkForbiddenPatterns } = require('../lib/role-loader');
-const os = require('os');
+const { findRole, findRoleByScope, validateRequiredOutputs } = require('../lib/role-loader');
 const path = require('path');
 
 // Role search directories
@@ -190,9 +192,9 @@ async function handleSubmit(msg) {
     return respondError(msg, `Submit refused: ${owned.join(', ')} can only be set by the daemon`);
   }
 
-  // Server-side metric gate. The worker re-checks before running, but the
-  // daemon is the only place every submit path (NATS, kanban bridge, proposals)
-  // converges, so a bad metric must be refused here, fail-closed.
+  // Server-side metric gate, fail-closed (processProposals applies it to KV
+  // proposals). Plan subtasks, escalations and Mission Control's lead-side KV
+  // write are not gated here; the worker's evaluateMetric re-check covers them.
   if (params.metric) {
     const check = validateMetricCommand(params.metric);
     if (!check.allowed) {
@@ -208,18 +210,28 @@ async function handleSubmit(msg) {
   }
 
   const task = createTask(params);
+
+  // Built before the first put: createSession throws on an unknown mode, and a
+  // stored collab task with no session is claimed and failed as "Collab session not found".
+  // 3.4: envelope-level preferred_mode (createTask does not keep it) is a fallback for the spec's own.
+  let session = null;
+  if (task.collaboration && collabStore) {
+    const spec = params.preferred_mode && !task.collaboration.preferred_mode && !task.collaboration.mode
+      ? { ...task.collaboration, preferred_mode: params.preferred_mode }
+      : task.collaboration;
+    try {
+      session = createSession(task.task_id, spec);
+    } catch (err) {
+      return respondError(msg, err.message);
+    }
+  }
+
   await store.put(task);
 
   log(`SUBMIT ${task.task_id}: "${task.title}" (budget: ${task.budget_minutes}m, metric: ${task.metric || 'none'})`);
   publishEvent('submitted', task);
 
-  // Auto-create collab session if task has collaboration spec.
-  // 3.4: envelope-level task.preferred_mode is a fallback for the spec's own.
-  if (task.collaboration && collabStore) {
-    const spec = task.preferred_mode && !task.collaboration.preferred_mode && !task.collaboration.mode
-      ? { ...task.collaboration, preferred_mode: task.preferred_mode }
-      : task.collaboration;
-    const session = createSession(task.task_id, spec);
+  if (session) {
     await collabStore.put(session);
 
     // Store session_id back in task for agent discovery
@@ -287,10 +299,9 @@ async function handleClaim(msg) {
   }
 
   // Check if this node already has a running task
-  const running = await store.list({ status: TASK_STATUS.RUNNING, owner: node_id });
-  const claimed = await store.list({ status: TASK_STATUS.CLAIMED, owner: node_id });
-  if (running.length > 0 || claimed.length > 0) {
-    return respondError(msg, `Node ${node_id} already has an active task: ${(running[0] || claimed[0]).task_id}`);
+  const active = await store.list({ statuses: [TASK_STATUS.RUNNING, TASK_STATUS.CLAIMED], owner: node_id });
+  if (active.length > 0) {
+    return respondError(msg, `Node ${node_id} already has an active task: ${active[0].task_id}`);
   }
 
   const task = await store.claim(node_id);
@@ -493,6 +504,7 @@ async function handleFail(msg) {
   // Phase F: Escalation — if the task has a role with escalation mapping,
   // create an escalation task before cascading failure through the plan.
   let escalated = false;
+  let escalationTaskId = null;
   if (task.role) {
     const role = findRole(task.role, ROLE_DIRS);
     if (role && role.escalation) {
@@ -526,6 +538,7 @@ async function handleFail(msg) {
         publishEvent('submitted', escalationTask);
         log(`ESCALATED ${task_id} → ${escalationTask.task_id} (target role: ${escalationTarget})`);
         escalated = true;
+        escalationTaskId = escalationTask.task_id;
       }
     }
   }
@@ -535,7 +548,7 @@ async function handleFail(msg) {
   // and this was critical, it still aborts. The escalation is a parallel attempt.)
   await checkPlanProgress(task_id, 'failed');
 
-  respond(msg, { ...task, escalated, escalation_task_id: escalated ? `ESC-${task_id}-${Date.now()}` : null });
+  respond(msg, { ...task, escalated, escalation_task_id: escalationTaskId });
 }
 
 /**
@@ -631,6 +644,7 @@ async function handleRelease(msg) {
   log(`RELEASED ${task_id}: ${reason || 'no reason'} (needs human triage)`);
   publishEvent('released', task);
   await cleanupTaskCollabSession(task, `Parent task ${task_id} released: ${reason || 'human triage'}`);
+  await checkPlanProgress(task_id, 'failed');
   respond(msg, task);
 }
 
@@ -643,14 +657,12 @@ async function handleCancel(msg) {
   const { task_id, reason } = params;
   if (!task_id) return respondError(msg, 'task_id is required');
 
-  const task = await store.get(task_id);
-  if (!task) return respondError(msg, `Task ${task_id} not found`);
-  if (!(await authorize(msg, params, task, { action: 'cancel' }))) return;
+  const existing = await store.get(task_id);
+  if (!existing) return respondError(msg, `Task ${task_id} not found`);
+  if (!(await authorize(msg, params, existing, { action: 'cancel' }))) return;
 
-  task.status = TASK_STATUS.CANCELLED;
-  task.completed_at = new Date().toISOString();
-  task.result = { success: false, summary: reason || 'cancelled' };
-  await store.put(task);
+  const task = await store.markCancelled(task_id, reason || 'cancelled');
+  if (!task) return respondUnchanged(msg, task_id);
 
   log(`CANCEL ${task_id}: ${reason || 'no reason'}`);
   publishEvent('cancelled', task);
@@ -718,7 +730,7 @@ async function handleTaskReject(msg) {
   if (task.status === TASK_STATUS.FAILED) {
     log(`REJECTED ${task_id} (${task.rejection_count}× — cap ${MAX_REJECTIONS} reached): ${reason || 'no reason'} — FAILED, not re-queued`);
     publishEvent('failed', task);
-    await updatePlanSubtaskStatus(task_id, 'failed');
+    await checkPlanProgress(task_id, 'failed');
   } else {
     log(`REJECTED ${task_id} (${task.rejection_count}/${MAX_REJECTIONS}): ${reason || 'no reason'} — re-queued for retry`);
     publishEvent('rejected', task);
@@ -846,7 +858,9 @@ async function detectStalls() {
       `Stall detected: no agent heartbeat for ${silentMin}m, alive check failed`,
       task.attempts
     );
-    if (releasedTask) publishEvent('released', releasedTask);
+    // Null: another path ended the task meanwhile and already moved its plan.
+    if (!releasedTask) continue;
+    publishEvent('released', releasedTask);
 
     // Update plan progress if this task belongs to a plan
     await checkPlanProgress(task.task_id, 'failed');
@@ -889,6 +903,18 @@ async function processProposals() {
       continue;
     }
 
+    if (task.metric) {
+      const check = validateMetricCommand(task.metric);
+      if (!check.allowed) {
+        task.status = TASK_STATUS.REJECTED;
+        task.result = { success: false, summary: `Metric refused: ${check.reason}` };
+        await store.put(task);
+        log(`REJECTED proposal ${task.task_id} from ${task.origin}: metric refused — ${check.reason}`);
+        publishEvent('rejected', task);
+        continue;
+      }
+    }
+
     // Accept: transition to queued
     task.status = TASK_STATUS.QUEUED;
     await store.put(task);
@@ -910,7 +936,8 @@ async function enforceBudgets() {
       `Budget exceeded: ${elapsed}m elapsed, ${task.budget_minutes}m budget`,
       task.attempts
     );
-    if (failedTask) publishEvent('failed', failedTask);
+    if (!failedTask) continue;
+    publishEvent('failed', failedTask);
 
     // Clean up any collab session for this task
     if (collabStore && task.collab_session_id) {
@@ -1230,8 +1257,6 @@ async function handleCollabReflect(msg) {
     }
   // Sequential mode: advance turn, notify next node or evaluate round
   // Parallel mode: check if all reflections are in → evaluate convergence
-  // NOTE: Node.js single-threaded event loop prevents concurrent execution of this
-  // handler — no mutex needed. advanceTurn() is safe without CAS here.
   } else if (session.mode === 'sequential') {
     const nextNodeId = await collabStore.advanceTurn(session_id);
     if (nextNodeId) {
@@ -1312,8 +1337,9 @@ async function evaluateCooperativeRound(sessionId, session, currentRound) {
       outcome: 'cooperative_rounds_done', rounds: coop.integrations.length, integrators: coop.integrator_order,
     });
     publishCollabEvent('completed', done);
-    await store.markCompleted(session.task_id, done.result);
+    const settled = await store.markCompleted(session.task_id, done.result);
     publishEvent('completed', await store.get(session.task_id));
+    if (settled) await checkPlanProgress(session.task_id, 'completed');
     return;
   }
 
@@ -1334,8 +1360,9 @@ async function evaluateCooperativeRound(sessionId, session, currentRound) {
     log(`COOPERATIVE ABORT ${sessionId}: no alive integrator candidates remain (order: ${order.join(' → ')})`);
     await collabStore.markAborted(sessionId, 'No alive integrator candidates remain');
     publishCollabEvent('aborted', await collabStore.get(sessionId));
-    await store.markFailed(session.task_id, 'Cooperative session lost all integrator candidates');
+    const settled = await store.markFailed(session.task_id, 'Cooperative session lost all integrator candidates');
     publishEvent('failed', await store.get(session.task_id));
+    if (settled) await checkPlanProgress(session.task_id, 'failed');
     return;
   }
   // CAS, not a blind put: this session object predates the audit appends above —
@@ -1348,7 +1375,7 @@ async function evaluateCooperativeRound(sessionId, session, currentRound) {
     log(`COOPERATIVE ${sessionId}: rotation skipped dead node(s) ${skipped.join(', ')} → ${next}`);
     await collabStore.appendAudit(sessionId, 'cooperative_rotation_skipped_dead', { skipped, next });
   }
-  log(`COOPERATIVE ${sessionId}: next integrator=${coop.current_integrator}, starting round ${session.current_round + 1}`);
+  log(`COOPERATIVE ${sessionId}: next integrator=${next}, starting round ${session.current_round + 1}`);
   await startCollabRound(sessionId);
 }
 
@@ -1404,8 +1431,9 @@ async function evaluateCollaborativeRound(sessionId, session, currentRound) {
     });
     await collabStore.markAborted(sessionId, `Merge gate failed: ${gateFailure}`);
     publishCollabEvent('aborted', await collabStore.get(sessionId));
-    await store.markFailed(session.task_id, `Collaborative merge gate failed: ${gateFailure}`);
+    const settled = await store.markFailed(session.task_id, `Collaborative merge gate failed: ${gateFailure}`);
     publishEvent('failed', await store.get(session.task_id));
+    if (settled) await checkPlanProgress(session.task_id, 'failed');
     return;
   }
 
@@ -1432,8 +1460,9 @@ async function evaluateCollaborativeRound(sessionId, session, currentRound) {
   const done = await collabStore.get(sessionId);
   await collabStore.appendAudit(sessionId, 'session_completed', { outcome: 'collaborative_merged', merger: collab.merger_node_id });
   publishCollabEvent('completed', done);
-  await store.markCompleted(session.task_id, done.result);
+  const settled = await store.markCompleted(session.task_id, done.result);
   publishEvent('completed', await store.get(session.task_id));
+  if (settled) await checkPlanProgress(session.task_id, 'completed');
 }
 
 /**
@@ -1519,7 +1548,8 @@ async function startCollabRound(sessionId) {
         recruited: session.recruited_count,
       });
       publishCollabEvent('aborted', session);
-      await store.markFailed(session.task_id, `Collab aborted: too few active nodes (${session.nodes.length} < ${session.min_nodes})`);
+      const settled = await store.markFailed(session.task_id, `Collab aborted: too few active nodes (${session.nodes.length} < ${session.min_nodes})`);
+      if (settled) await checkPlanProgress(session.task_id, 'failed');
     }
     return;
   }
@@ -1694,9 +1724,10 @@ async function evaluateRound(sessionId) {
 
     // Complete the parent task
     const completedSession = await collabStore.get(sessionId);
-    await store.markCompleted(freshSession.task_id, completedSession.result);
+    const settled = await store.markCompleted(freshSession.task_id, completedSession.result);
     publishEvent('completed', await store.get(freshSession.task_id));
     publishCollabEvent('completed', completedSession);
+    if (settled) await checkPlanProgress(freshSession.task_id, 'completed');
 
   } else if (maxReached) {
     log(`COLLAB MAX ROUNDS ${sessionId}: ${session.current_round}/${session.max_rounds}. Completing with current artifacts.`);
@@ -1723,12 +1754,13 @@ async function evaluateRound(sessionId) {
 
     // Complete parent task (flagged for review since not truly converged)
     const updatedSession = await collabStore.get(sessionId);
-    await store.markCompleted(session.task_id, {
+    const settled = await store.markCompleted(session.task_id, {
       ...updatedSession.result,
       max_rounds_reached: true,
     });
     publishEvent('completed', await store.get(session.task_id));
     publishCollabEvent('completed', updatedSession);
+    if (settled) await checkPlanProgress(session.task_id, 'completed');
 
   } else {
     // Not converged, not maxed out → next round
@@ -1758,7 +1790,18 @@ async function startCirclingStep(sessionId) {
   // (each step gets its own round to keep reflections organized)
   const round = await collabStore.startRound(sessionId);
   if (!round) {
-    log(`CIRCLING ERROR: startRound failed for ${sessionId} (aborted?)`);
+    const aborted = await collabStore.get(sessionId);
+    if (aborted && aborted.status === COLLAB_STATUS.ABORTED) {
+      log(`CIRCLING ABORTED ${sessionId}: too few active nodes (${aborted.nodes.length} < ${aborted.min_nodes})`);
+      await collabStore.appendAudit(sessionId, 'session_aborted', {
+        reason: 'insufficient_nodes', active: aborted.nodes.length, min_required: aborted.min_nodes,
+      });
+      publishCollabEvent('aborted', aborted);
+      const settled = await store.markReleased(aborted.task_id, `Circling session aborted: too few active nodes (${aborted.nodes.length} < ${aborted.min_nodes})`);
+      if (settled) await checkPlanProgress(aborted.task_id, 'failed');
+    } else {
+      log(`CIRCLING ERROR: startRound failed for ${sessionId}`);
+    }
     return;
   }
 
@@ -1867,7 +1910,8 @@ async function handleCirclingStepTimeout(sessionId, stepSnapshot) {
     log(`CIRCLING STEP TIMEOUT: ${sessionId} — no active nodes remain. Aborting.`);
     await collabStore.markAborted(sessionId, `All nodes timed out at ${phase}/SR${current_subround}/Step${current_step}`);
     publishCollabEvent('aborted', await collabStore.get(sessionId));
-    await store.markReleased(session.task_id, `Circling session aborted: all nodes timed out`);
+    const settled = await store.markReleased(session.task_id, `Circling session aborted: all nodes timed out`);
+    if (settled) await checkPlanProgress(session.task_id, 'failed');
   }
 }
 
@@ -1931,9 +1975,10 @@ async function completeCirclingSession(sessionId) {
 
   // Complete parent task
   const completedSession = await collabStore.get(sessionId);
-  await store.markCompleted(session.task_id, completedSession.result);
+  const settled = await store.markCompleted(session.task_id, completedSession.result);
   publishEvent('completed', await store.get(session.task_id));
   publishCollabEvent('completed', completedSession);
+  if (settled) await checkPlanProgress(session.task_id, 'completed');
 }
 
 /**
@@ -1970,9 +2015,10 @@ async function handleCirclingGateApprove(msg) {
       circling_final_artifact: finalArtifact,
     });
     const completedSession = await collabStore.get(session_id);
-    await store.markCompleted(session.task_id, completedSession.result);
+    const settled = await store.markCompleted(session.task_id, completedSession.result);
     publishEvent('completed', await store.get(session.task_id));
     publishCollabEvent('completed', completedSession);
+    if (settled) await checkPlanProgress(session.task_id, 'completed');
   } else {
     // Mid-protocol gate (tier 3) — resume next step
     await startCirclingStep(session_id);
@@ -2043,7 +2089,8 @@ async function startRecruitedSession(session_id) {
     log(`COLLAB RECRUIT FAILED ${session.session_id}: only ${session.nodes.length}/${session.min_nodes} nodes. Aborting.`);
     await collabStore.markAborted(session.session_id, `Not enough nodes: ${session.nodes.length} < ${session.min_nodes}`);
     publishCollabEvent('aborted', await collabStore.get(session.session_id));
-    await store.markReleased(session.task_id, `Collab session failed to recruit: ${session.nodes.length}/${session.min_nodes} nodes`);
+    const settled = await store.markReleased(session.task_id, `Collab session failed to recruit: ${session.nodes.length}/${session.min_nodes} nodes`);
+    if (settled) await checkPlanProgress(session.task_id, 'failed');
     return true;
   }
 
@@ -2066,7 +2113,8 @@ async function startRecruitedSession(session_id) {
       log(`COLLAB RECRUIT FAILED ${session.session_id}: circling requires 1 worker + 2 reviewers, got ${session.nodes.length} nodes (worker: ${hasWorker}, reviewers: ${reviewerCount}). Aborting.`);
       await collabStore.markAborted(session.session_id, `Circling requires 1 worker + 2 reviewers; got ${session.nodes.length} nodes`);
       publishCollabEvent('aborted', await collabStore.get(session.session_id));
-      await store.markReleased(session.task_id, `Circling session failed: insufficient role distribution`);
+      const settled = await store.markReleased(session.task_id, `Circling session failed: insufficient role distribution`);
+      if (settled) await checkPlanProgress(session.task_id, 'failed');
       return true;
     }
     // Assign all role IDs if not yet assigned
@@ -2106,7 +2154,8 @@ async function startRecruitedSession(session_id) {
     log(`COLLAB RECRUIT FAILED ${session.session_id}: mode '${session.mode}' has no daemon protocol yet. Aborting (not silently downgrading to parallel).`);
     await collabStore.markAborted(session.session_id, `Mode '${session.mode}' not yet implemented`);
     publishCollabEvent('aborted', await collabStore.get(session.session_id));
-    await store.markReleased(session.task_id, `Collab mode '${session.mode}' not yet implemented`);
+    const settled = await store.markReleased(session.task_id, `Collab mode '${session.mode}' not yet implemented`);
+    if (settled) await checkPlanProgress(session.task_id, 'failed');
   }
   return true;
 }
@@ -2189,8 +2238,9 @@ async function sweepCollabRoundTimeouts() {
         log(`COLLAB ROUND TIMEOUT ${session.session_id}: only ${alive}/${fresh.min_nodes} members alive — aborting`);
         await collabStore.markAborted(session.session_id, `Round ${fresh.current_round} timed out; ${alive}/${fresh.min_nodes} members alive`);
         publishCollabEvent('aborted', await collabStore.get(session.session_id));
-        await store.markFailed(fresh.task_id, `Collab round timed out with too few members (${alive}/${fresh.min_nodes})`);
+        const settled = await store.markFailed(fresh.task_id, `Collab round timed out with too few members (${alive}/${fresh.min_nodes})`);
         publishEvent('failed', await store.get(fresh.task_id));
+        if (settled) await checkPlanProgress(fresh.task_id, 'failed');
       } else {
         // Evaluate with the quorum that DID reflect — the claim in evaluateRound
         // keeps this single-fire even if a straggler reflection races the sweep.
@@ -2497,7 +2547,9 @@ async function updatePlanSubtaskStatus(taskId, newStatus) {
 
 /**
  * When a mesh task completes, check if it belongs to a plan and update accordingly.
- * Called after handleComplete/handleFail and from detectStalls/enforceBudgets.
+ * Called after handleComplete/handleFail, from detectStalls/enforceBudgets, and
+ * after every daemon-driven terminal transition of a collab parent task (those
+ * never pass through handleComplete/handleFail).
  */
 async function checkPlanProgress(taskId, status) {
   let plan = null;
@@ -2875,6 +2927,7 @@ if (require.main === module) {
     handleCollabJoinDispatch: async (session) =>
       collabStore.isRecruitingDone(session) ? startRecruitedSession(session.session_id) : false,
     evaluateRound: (id) => evaluateRound(id),
+    handleCirclingStepTimeout: (id, snap) => handleCirclingStepTimeout(id, snap),
     sweepCollabRoundTimeouts: () => sweepCollabRoundTimeouts(),
     handleFail: (msg) => handleFail(msg),
     // F1/R1 (test/mesh-lease-authz.test.js): the handlers a stranger on the bus reaches.
@@ -2888,9 +2941,13 @@ if (require.main === module) {
     handleAttempt: (msg) => handleAttempt(msg),
     handleHeartbeat: (msg) => handleHeartbeat(msg),
     handleRelease: (msg) => handleRelease(msg),
+    handleTaskReject: (msg) => handleTaskReject(msg),
+    handleCancel: (msg) => handleCancel(msg),
     handleTaskMerged: (msg) => handleTaskMerged(msg),
     handlePlanCreate: (msg) => handlePlanCreate(msg),
     handlePlanApprove: (msg) => handlePlanApprove(msg),
     processProposals: () => processProposals(),
+    detectStalls: () => detectStalls(),
+    enforceBudgets: () => enforceBudgets(),
   };
 }

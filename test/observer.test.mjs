@@ -104,6 +104,29 @@ describe('scanMemoryActivity — incremental, offset-tracked', () => {
     const feed = readActivity(await readFile(activityPath, 'utf8'));
     assert.equal(feed.count, 2);
   });
+
+  it('keeps the byte offset aligned when the log holds multi-byte characters', async () => {
+    const logPath = path.join(tmp, 'daemon-utf8.log');
+    const activityPath = path.join(tmp, 'activity-utf8.jsonl');
+    const logPosPath = path.join(tmp, 'pos-utf8.json');
+    // '→' and '—' are 3 bytes each: a char-indexed slice by the byte offset overshoots.
+    const noise = '[2026-07-04, 11:59:00]   State: ACTIVE → IDLE — idle 300s\n'.repeat(40);
+    fs.writeFileSync(logPath, noise + '[2026-07-04, 12:00:00]   Phase 2: interval synthesis [regex]: 5 facts found\n');
+    assert.equal((await scanMemoryActivity({ daemonLogPath: logPath, activityPath, logPosPath })).appended, 1);
+    fs.appendFileSync(logPath, '[2026-07-04, 12:01:00]   Phase 2: knowledge-index: 2 sessions indexed (10 chunks)\n');
+    assert.equal((await scanMemoryActivity({ daemonLogPath: logPath, activityPath, logPosPath })).appended, 1,
+      'the line appended after multi-byte text is seen');
+  });
+
+  it('leaves a partially written last line for the next scan', async () => {
+    const logPath = path.join(tmp, 'daemon-partial.log');
+    const activityPath = path.join(tmp, 'activity-partial.jsonl');
+    const logPosPath = path.join(tmp, 'pos-partial.json');
+    fs.writeFileSync(logPath, '[2026-07-04, 12:00:00]   Phase 2: interval synth');
+    assert.equal((await scanMemoryActivity({ daemonLogPath: logPath, activityPath, logPosPath })).appended, 0);
+    fs.appendFileSync(logPath, 'esis [regex]: 5 facts found\n');
+    assert.equal((await scanMemoryActivity({ daemonLogPath: logPath, activityPath, logPosPath })).appended, 1);
+  });
 });
 
 describe('readTimeline — per-layer uptime', () => {

@@ -300,7 +300,7 @@ if (isMain) {
 
 Options:
   --queries PATH         Path to query set JSON (default: memory-plan/eval/gulf1-queries.json)
-  --db PATH              Path to knowledge database (default: auto-detect)
+  --db PATH              Path to knowledge database (default: $KNOWLEDGE_DB, else $KNOWLEDGE_ROOT/.knowledge.db, else ~/.openclaw/workspace/.knowledge.db)
   --extraction-db PATH   Path to extraction store database (default: auto-detect)
   --graph-db PATH        Path to graph cache database (default: auto-detect)
   --out PATH             Output markdown file (default: memory-plan/eval/tuning-results.md)
@@ -328,9 +328,10 @@ Options:
     process.stderr.write(`[tuning] Knowledge DB: ${opts.db}\n`);
   } else {
     try {
-      const { initDatabase, DB_PATH } = await import('../lib/mcp-knowledge/core.mjs');
-      knowledgeDb = initDatabase(DB_PATH);
-      process.stderr.write(`[tuning] Knowledge DB: ${DB_PATH}\n`);
+      const { initDatabase } = await import('../lib/mcp-knowledge/core.mjs');
+      const { DEFAULT_KNOWLEDGE_DB } = await import('./embed-existing-sessions.mjs');
+      knowledgeDb = initDatabase(DEFAULT_KNOWLEDGE_DB);
+      process.stderr.write(`[tuning] Knowledge DB: ${DEFAULT_KNOWLEDGE_DB}\n`);
     } catch {
       process.stderr.write('[tuning] WARNING: No knowledge DB found. FTS5 and vector channels disabled.\n');
     }

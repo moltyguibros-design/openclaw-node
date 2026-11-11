@@ -16,7 +16,7 @@ Inter-node L3 is specified but deferred (§8).
 node bin/node-acceptance.mjs            # full single-node gate, hard-tests every component
 npm run node-check                      # same, via package script
 openclaw-node-check                     # same, after `npm i -g` / link (bin entry)
-node bin/node-acceptance.mjs --axis llm # one axis: memory | llm | network | storage
+node bin/node-acceptance.mjs --axis llm # one axis: memory | llm | network | storage | federation
 node bin/node-acceptance.mjs --no-mutate# skip probes that write synthetic data
 node bin/node-acceptance.mjs --deep     # include invasive probes (e.g. extract-trigger)
 node bin/node-acceptance.mjs --json --report /path/report.md
@@ -74,7 +74,7 @@ cardinal failure (same rule the tick-chain runs on, PROTOCOL §7).
 | `single-node` (default) | L0, L1, L2, L4; L3 → `N/A` | Accept one deployed node (today's reality). |
 | `federated` (future) | + L3 against a real or `spawn-node` peer | Accept a node's links to other nodes (§8). |
 
-The harness also accepts `--axis memory|llm|network|storage|e2e` to run one axis in isolation.
+The harness also accepts `--axis memory|llm|network|storage|federation` to run one axis in isolation.
 
 ---
 
@@ -106,7 +106,7 @@ accepted  ⇔  (no FAIL) ∧ (no BLOCK) ∧ (every required check is PASS)
 ```
 
 The harness runs **all** layers (no early abort) so one report shows the full picture, then computes the
-gate. Exit code: `0` accepted, `1` rejected.
+gate. Exit code: `0` accepted, `1` rejected, `2` incomplete, `3` harness error.
 
 ---
 
@@ -201,16 +201,16 @@ bin/node-acceptance.mjs [--profile single-node|federated] [--axis <axis>] [--jso
 - Each check is a pure async fn returning
   `{ id, layer, axis, status, required, threshold, evidence, detail, latency_ms }`.
 - Runs all layers (no early abort), then computes the §3 gate.
-- Exit `0` accepted · `1` rejected.
+- Exit `0` accepted · `1` rejected · `2` incomplete · `3` harness error.
 - **Reality-first (§4.5):** every value is re-probed live. The harness trusts no doc, including this one
   and COMPONENT_REGISTRY.
-- **Composition, not duplication:** reuses `lib/health-check.mjs` for L1 liveness, `ollama-queue`
-  snapshot for LLM-L2-4, `node-identity` for L3 (future), `spawn-node` for the `federated` peer.
+- **Composition, not duplication:** reuses `lib/health-check.mjs` for L1 liveness; LLM-L2-4 (`ollama-queue`
+  snapshot) is not built yet; `node-identity` for L3 (future), `spawn-node` for the `federated` peer.
 
 ### 7.2 Output
 
 Human table (default) + `--json` machine object. Always writes a dated report to
-`~/.openclaw/.node-acceptance.md` (sibling of `.daemon-health.md`) and `--report` if given. The report
+`~/.openclaw/.node-acceptance.md` and `--report` if given. The report
 embeds the captured evidence verbatim — it **is** the §5 runtime-evidence artifact for a deploy.
 
 ```

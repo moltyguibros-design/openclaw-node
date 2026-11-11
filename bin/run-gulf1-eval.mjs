@@ -21,8 +21,8 @@ import {
   searchSessions,
   searchSessionsFts,
   hybridSearchSessions,
-  DB_PATH,
 } from '../lib/mcp-knowledge/core.mjs';
+import { DEFAULT_KNOWLEDGE_DB } from './embed-existing-sessions.mjs';
 
 // ─── Query Set Parsing ───────────────────────────────────────────────────────
 
@@ -263,7 +263,7 @@ if (isMain) {
 
 Options:
   --queries PATH   Path to query set JSON (default: memory-plan/eval/gulf1-queries.json)
-  --db PATH        Path to knowledge database (default: auto-detect)
+  --db PATH        Path to knowledge database (default: $KNOWLEDGE_DB, else $KNOWLEDGE_ROOT/.knowledge.db, else ~/.openclaw/workspace/.knowledge.db)
   --out PATH       Output markdown file (default: memory-plan/eval/gulf1-results.md)
   --limit N        Top-N results per mode (default: 5)
   -h, --help       Show this help
@@ -272,7 +272,7 @@ Options:
   }
 
   const limit = parseInt(opts.limit, 10) || 5;
-  const dbPath = opts.db || DB_PATH;
+  const dbPath = opts.db || DEFAULT_KNOWLEDGE_DB;
 
   process.stderr.write(`[gulf1-eval] Loading query set from ${opts.queries}\n`);
   const queryJson = await readFile(opts.queries, 'utf-8');

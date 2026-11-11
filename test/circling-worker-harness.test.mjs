@@ -40,3 +40,48 @@ test('directed input still follows the injected harness context', () => {
   assert.ok(prompt.indexOf('ACME-42') < prompt.indexOf('THE-WORK-ARTIFACT-TO-REVIEW'),
     'harness memory is injected before the directed input material');
 });
+
+const BRANCH_TASK = { title: 'Build ManaToken', scope: [], role: null };
+const branch = (circling_phase, circling_step, my_role) =>
+  buildCirclingPrompt(BRANCH_TASK, { circling_phase, circling_step, circling_subround: 1, my_role });
+
+test('init: worker drafts v0, reviewer writes a reviewStrategy, full vote set', () => {
+  const w = branch('init', 0, 'worker');
+  assert.ok(w.includes('WORKER (Central Authority)') && w.includes('initial work artifact'));
+  assert.ok(w.includes('vote: [continue|converged|blocked]'));
+  const r = branch('init', 0, 'reviewer');
+  assert.ok(r.includes('## Your Role: REVIEWER') && r.includes('reviewStrategy'));
+});
+
+test('step 1: worker analyzes strategies (single artifact), reviewer produces findings', () => {
+  const w = branch('circling', 1, 'worker');
+  assert.ok(w.includes('Analyze Review Strategies') && w.includes('Do NOT touch the work artifact'));
+  assert.ok(!w.includes('===CIRCLING_ARTIFACT==='));
+  const r = branch('circling', 1, 'reviewer');
+  assert.ok(r.includes('Review the Work Artifact') && r.includes('actionable findings'));
+});
+
+test('step 2: worker emits TWO delimited artifacts, reviewer refines (single artifact)', () => {
+  const w = branch('circling', 2, 'worker');
+  assert.ok(w.includes('Judge Reviews') && w.includes('TWO artifacts') && w.includes('===CIRCLING_ARTIFACT==='));
+  const r = branch('circling', 2, 'reviewer');
+  assert.ok(r.includes('Refine Your Strategy') && r.includes('REFINED reviewStrategy'));
+  assert.ok(!r.includes('===CIRCLING_ARTIFACT==='));
+});
+
+test('finalization restricts the vote to converged|blocked for both roles', () => {
+  const w = branch('finalization', 0, 'worker');
+  assert.ok(w.includes('Final Delivery') && w.includes('completionDiff') && w.includes('TWO artifacts') && w.includes('===CIRCLING_ARTIFACT==='));
+  const r = branch('finalization', 0, 'reviewer');
+  assert.ok(r.includes('Final Sign-Off'));
+  for (const p of [w, r]) {
+    assert.ok(p.includes('vote: [converged|blocked]'));
+    assert.ok(!p.includes('continue|converged|blocked'));
+  }
+});
+
+test('every phase carries the anti-preamble rule', () => {
+  for (const [phase, step] of [['init', 0], ['circling', 1], ['circling', 2], ['finalization', 0]]) {
+    assert.ok(branch(phase, step, 'worker').includes('Begin your output with the artifact content DIRECTLY'), phase);
+  }
+});

@@ -10,6 +10,9 @@ import {
   DEFAULT_INTERVAL_SEC,
   ALERT_TARGETS_DEFAULT,
 } from '../lib/health-check.mjs';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createHealthWatch } from '../bin/health-watch.mjs';
 
 // ---------------------------------------------------------------------------
@@ -67,6 +70,13 @@ describe('runHealthCheck', () => {
     for (const name of COMPONENT_NAMES) {
       assert.equal(result[name].ok, false, `${name} should fail`);
     }
+  });
+
+  it('leaves no timers behind', async () => {
+    const timers = () => process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length;
+    const before = timers();
+    await runHealthCheck(allMockOpts(mockOk));
+    assert.equal(timers(), before);
   });
 });
 
@@ -155,19 +165,23 @@ describe('parseAlertTargets', () => {
   });
 });
 
+function allOkResult() {
+  const result = {};
+  for (const name of COMPONENT_NAMES) {
+    result[name] = { ok: true, detail: 'mock', latency_ms: 0 };
+  }
+  return result;
+}
+
 describe('createHealthWatch', () => {
   it('start and stop lifecycle works without error', async () => {
     let tickCount = 0;
+    const dir = mkdtempSync(join(tmpdir(), 'health-watch-life-'));
     const watcher = createHealthWatch({
       intervalSec: 0.05, // 50ms for fast test
       targets: [], // no alerts
-      healthCheckFn: async () => {
-        const result = {};
-        for (const name of COMPONENT_NAMES) {
-          result[name] = { ok: true, detail: 'mock', latency_ms: 0 };
-        }
-        return result;
-      },
+      queueSnapshotPath: join(dir, 'absent.json'),
+      healthCheckFn: async () => allOkResult(),
       onTick(status) {
         tickCount++;
       },
@@ -177,8 +191,40 @@ describe('createHealthWatch', () => {
     // Wait for at least 2 ticks
     await new Promise(resolve => setTimeout(resolve, 200));
     watcher.stop();
+    rmSync(dir, { recursive: true, force: true });
 
     assert.ok(tickCount >= 1, `expected at least 1 tick, got ${tickCount}`);
+  });
+
+  it('reads the injected queue snapshot', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'health-watch-queue-'));
+    const file = join(dir, 'queue.json');
+    // Degraded, never stuck: a stuck snapshot could reach the keep_alive:0 POST.
+    writeFileSync(file, JSON.stringify({
+      ts: Date.now(),
+      queue_depth: 7,
+      consecutive_timeouts: { extraction: 0, analysis: 0 },
+      recent_fallbacks: [{ ts: Date.now(), reason: 'test' }],
+      recent_slow_alarms: [],
+    }));
+    let watcher;
+    try {
+      const tick = await new Promise((resolve) => {
+        watcher = createHealthWatch({
+          intervalSec: 60,
+          targets: [],
+          queueSnapshotPath: file,
+          healthCheckFn: async () => allOkResult(),
+          onTick(status, _result, qs) { resolve({ status, qs }); },
+        });
+        watcher.start();
+      });
+      assert.equal(tick.status, 'degraded');
+      assert.equal(tick.qs?.queue_depth, 7);
+    } finally {
+      watcher?.stop();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

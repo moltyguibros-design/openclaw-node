@@ -359,6 +359,24 @@ describe('node-identity', () => {
       assert.equal(result.ok, true);
       assert.equal(reg.get('newnode').pubkey, id.publicKeyBase64);
     });
+
+    it('refuses a corrupt registry file instead of starting empty', async () => {
+      const { createIdentityRegistry } = await import('../lib/node-identity.mjs');
+      const p = tmpDir + '/corrupt-reg.json';
+      const bad = '{"alice": {"pubkey": "x"},';
+      fs.writeFileSync(p, bad);
+      assert.throws(() => createIdentityRegistry({ path: p, mode: 'strict' }), /identity registry/);
+      assert.equal(fs.readFileSync(p, 'utf8'), bad);
+    });
+
+    it('refuses a registry file that is valid JSON but not an object', async () => {
+      const { createIdentityRegistry } = await import('../lib/node-identity.mjs');
+      for (const body of ['null', '[]', '"x"']) {
+        const p = tmpDir + '/not-object-reg.json';
+        fs.writeFileSync(p, body);
+        assert.throws(() => createIdentityRegistry({ path: p, mode: 'strict' }), /not a JSON object/, body);
+      }
+    });
   });
 
   describe('verifyEvent — replay protection (seenIds)', () => {

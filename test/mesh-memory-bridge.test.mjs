@@ -52,3 +52,10 @@ test('P1: recallForTask returns null when disabled / no task (clean fallback, ne
 test('P1: readNodeMemory is mtime-cached and returns the node index', () => {
   assert.match(m.readNodeMemory(), /ZED-9/);
 });
+
+test('a review rejection reason reaches both solo prompt builders', () => {
+  const rejected = { ...task, rejection_count: 1, rejection_reason: 'REJ-77: migration drops the audit column' };
+  assert.match(m.buildInitialPrompt(rejected), /REJ-77: migration drops the audit column/);
+  assert.match(m.buildRetryPrompt(rejected, [], 2), /REJ-77/);
+  assert.doesNotMatch(m.buildInitialPrompt(task), /Previous Review/);
+});

@@ -279,8 +279,9 @@ npm install
 ### 2.2 NATS cluster config
 
 **Automated (recommended).** On each machine, point the installer at the OTHER machines'
-addresses — it renders that machine's `~/.openclaw/config/nats.conf` (binds `0.0.0.0`, routes
-to the peers) and records the R=3 replica target (`OPENCLAW_KV_REPLICAS`) in `openclaw.env`:
+addresses — it renders that machine's `~/.openclaw/config/nats.conf` (binds its own
+`--cluster-bind` address, credentialed routes to the peers) and records the R=3 replica target
+(`OPENCLAW_KV_REPLICAS`) in `openclaw.env`:
 
 ```bash
 # Machine A (100.64.0.1) — peers are B and C:
@@ -304,35 +305,40 @@ This replaces the single-node `nats.conf` with the cross-machine cluster config 
 ALL machines first (so the cluster forms and can hold 3 replicas), THEN start the daemons — a
 stream can't be created at R=3 until ≥3 cluster members are up.
 
-**Manual (what the automated path produces).** Each machine's config, routes → peer IPs:
-
-**Machine A** (e.g., `10.0.1.10`):
+**Manual (what the automated path produces).** `install.sh` fills in
+`services/nats/nats-cluster-node.conf`; the `nats-auth.conf` it includes is written beside it by
+`node bin/nats-auth-render.mjs`. Machine A (`10.0.1.10`):
 ```
-# /etc/openclaw/nats.conf
-server_name: openclaw-nats-1
-listen: 0.0.0.0:4222
-http_port: 8222
+server_name: openclaw-nats-<node id>
+listen: 10.0.1.10:4222
+http: 127.0.0.1:8222
+include "nats-auth.conf"
 
 jetstream {
-  store_dir: /var/lib/openclaw/nats/jetstream
+  store_dir: <home>/.openclaw/nats/jetstream
   max_mem: 256MB
-  max_file: 1GB
+  max_file: 2GB
 }
 
 cluster {
   name: openclaw-cluster
-  listen: 0.0.0.0:6222
+  listen: 10.0.1.10:6222
+  authorization {
+    user: "openclaw-route"
+    password: "<OPENCLAW_NATS_CLUSTER_PASS>"
+  }
   routes = [
-    nats-route://10.0.1.11:6222
-    nats-route://10.0.1.12:6222
+    nats-route://openclaw-route:<OPENCLAW_NATS_CLUSTER_PASS>@10.0.1.11:6222
+    nats-route://openclaw-route:<OPENCLAW_NATS_CLUSTER_PASS>@10.0.1.12:6222
   ]
 }
 ```
 
-**Machine B** (`10.0.1.11`): same, but routes point to A and C.
-**Machine C** (`10.0.1.12`): same, but routes point to A and B.
+**Machine B** (`10.0.1.11`) and **Machine C** (`10.0.1.12`): same, with their own address in both
+`listen` lines and routes to the other two.
 
-All machines use port 4222 (client), 6222 (cluster), 8222 (monitor) since they are on separate hosts.
+Clients use 4222 and routes use 6222 on each machine's own address; the 8222 monitor answers on
+loopback only.
 
 ### 2.3 Firewall rules
 
@@ -342,11 +348,10 @@ Open between all three machines:
 |------|----------|---------|
 | 4222 | TCP | NATS client connections |
 | 6222 | TCP | NATS cluster gossip + replication |
-| 8222 | TCP | HTTP monitoring (restrict to admin network) |
 
 ```bash
 # UFW (Ubuntu/Debian)
-sudo ufw allow from 10.0.1.0/24 to any port 4222,6222,8222 proto tcp
+sudo ufw allow from 10.0.1.0/24 to any port 4222,6222 proto tcp
 
 # firewalld (RHEL/CentOS)
 sudo firewall-cmd --permanent --add-rich-rule='
@@ -355,9 +360,6 @@ sudo firewall-cmd --permanent --add-rich-rule='
 sudo firewall-cmd --permanent --add-rich-rule='
   rule family="ipv4" source address="10.0.1.0/24"
   port port="6222" protocol="tcp" accept'
-sudo firewall-cmd --permanent --add-rich-rule='
-  rule family="ipv4" source address="10.0.1.0/24"
-  port port="8222" protocol="tcp" accept'
 sudo firewall-cmd --reload
 ```
 
@@ -473,13 +475,11 @@ sudo systemctl start openclaw-daemon
 
 ```bash
 # All three NATS nodes see each other
-for host in 10.0.1.10 10.0.1.11 10.0.1.12; do
-  echo "--- $host ---"
-  curl -s http://$host:8222/routez | python3 -c "
+# the monitor is loopback-only: run this on each machine
+curl -s http://127.0.0.1:8222/routez | python3 -c "
 import sys, json; d = json.load(sys.stdin)
 print(f'  Routes: {len(d.get(\"routes\", []))} (expect 2)')
 "
-done
 ```
 
 ### 3.2 Shared stream R=3

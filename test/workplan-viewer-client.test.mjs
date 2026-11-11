@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createViewerClient } from '../lib/workplan-viewer-client.mjs';
+import { createViewerClient, registryStatusClass } from '../lib/workplan-viewer-client.mjs';
 
 const ORIGIN = 'http://127.0.0.1:7892';
 const KEY = 'workplan-viewer-session';
@@ -449,4 +449,19 @@ test('a late 401 from an old session cannot invalidate a fresh login', async () 
   await assert.rejects(pending, { status: 401 });
   assert.equal(client.hasSession(), true);
   assert.equal(notifications, 0);
+});
+
+test('registry statuses from the template vocabulary get a colour, not the idle gray', () => {
+  for (const [status, cls] of [
+    ['DEAD', 'bad'],
+    ['UNBUILT on the node / code-verified', 'bad'],
+    ['ABSENT (runtime) / LIVE (repo)', 'bad'],
+    ['INERT (currently off)', 'bad'],
+    ['LIVE-DEGRADED', 'warn'],
+    ['LIVE-STALE', 'warn'],
+    ['LIVE', 'ok'],
+    ['LIVE — met the deadline', 'ok'],
+    ['NOT STARTED', 'idle'],
+    [null, 'idle'],
+  ]) assert.equal(registryStatusClass(status), cls, String(status));
 });

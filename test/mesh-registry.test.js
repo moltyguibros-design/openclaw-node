@@ -118,6 +118,18 @@ describe('MeshRegistry', () => {
     assert.equal(registry.nodeId, 'test-node');
   });
 
+  it('defaults the node id to resolveNodeId()', async () => {
+    const prev = process.env.OPENCLAW_NODE_ID;
+    process.env.OPENCLAW_NODE_ID = 'env-node';
+    try {
+      const r = new MeshRegistry(await mockNats.connect());
+      assert.equal(r.nodeId, 'env-node');
+    } finally {
+      if (prev === undefined) delete process.env.OPENCLAW_NODE_ID;
+      else process.env.OPENCLAW_NODE_ID = prev;
+    }
+  });
+
   it('registers a tool manifest to KV', async () => {
     const manifest = {
       name: 'discord-reader',

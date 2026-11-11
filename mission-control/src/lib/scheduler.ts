@@ -1,4 +1,4 @@
-import { eq, and, ne, or, lte, like, desc, isNull } from "drizzle-orm";
+import { eq, and, ne, or, isNull } from "drizzle-orm";
 import { CronExpressionParser } from "cron-parser";
 import { writeFileSync, mkdirSync } from "fs";
 import path from "path";
@@ -10,6 +10,7 @@ import { logActivity } from "./activity";
 import { WORKSPACE_ROOT, AGENT_NAME, DISPATCH_SIGNAL_FILE } from "./config";
 import { gatewayNotify } from "./gateway-notify";
 import { traceCall } from "./tracer";
+import { generateTaskId } from "./task-id";
 
 
 export interface Wave {
@@ -114,7 +115,7 @@ export interface SchedulerStatus {
 export function schedulerStatus(graceMinutes = 30): SchedulerStatus {
   const db = getDb();
   const now = new Date();
-  const cutoff = new Date(now.getTime() - graceMinutes * 60_000).toISOString();
+  const cutoffMs = now.getTime() - graceMinutes * 60_000;
 
   const atQueued = db
     .select({ id: tasks.id, triggerAt: tasks.triggerAt })
@@ -129,7 +130,7 @@ export function schedulerStatus(graceMinutes = 30): SchedulerStatus {
   const ready = db.select({ id: tasks.id }).from(tasks).where(eq(tasks.status, "ready")).all();
   const running = db.select({ id: tasks.id }).from(tasks).where(eq(tasks.status, "running")).all();
 
-  const overdue = atQueued.filter((t) => t.triggerAt && t.triggerAt <= cutoff);
+  const overdue = atQueued.filter((t) => t.triggerAt !== null && Date.parse(t.triggerAt) <= cutoffMs);
 
   return {
     now: now.toISOString(),
@@ -163,17 +164,14 @@ export function schedulerTick(): TickResult {
   // --- Phase 1: Trigger evaluation ---
 
   // 1a. One-shot triggers: trigger_kind="at", status="queued", trigger_at <= now
+  // trigger_at from the dialog is a zone-less datetime-local value; compare
+  // instants (Date.parse reads it in the server zone, ISO-Z values as UTC).
   const atTasks = db
     .select()
     .from(tasks)
-    .where(
-      and(
-        eq(tasks.triggerKind, "at"),
-        eq(tasks.status, "queued"),
-        lte(tasks.triggerAt, now.toISOString())
-      )
-    )
-    .all();
+    .where(and(eq(tasks.triggerKind, "at"), eq(tasks.status, "queued")))
+    .all()
+    .filter((t) => t.triggerAt !== null && Date.parse(t.triggerAt) <= now.getTime());
 
   for (const t of atTasks) {
     db.update(tasks)
@@ -205,8 +203,13 @@ export function schedulerTick(): TickResult {
       });
       const prev = interval.prev().toDate();
       const diffMs = now.getTime() - prev.getTime();
-      // 20-min window matches heartbeat interval
-      if (diffMs >= 0 && diffMs < 20 * 60 * 1000) {
+      // A row recreated by Phase 1c is born after the occurrence that fired its
+      // predecessor; it waits for the next one instead of firing it again.
+      if (
+        diffMs >= 0 &&
+        diffMs < 20 * 60 * 1000 &&
+        prev.getTime() >= Date.parse(t.createdAt)
+      ) {
         db.update(tasks)
           .set({
             status: "ready",
@@ -239,7 +242,7 @@ export function schedulerTick(): TickResult {
     .all();
 
   for (const t of recurringDone) {
-    const newId = generateNextId(db, now);
+    const newId = generateTaskId(db, now);
 
     // Compute next trigger_at for cron-based recurring tasks
     let nextTriggerAt: string | null = null;
@@ -430,29 +433,4 @@ export function schedulerTick(): TickResult {
     traceCall("scheduler", "schedulerTick", _start, undefined, err);
     throw err;
   }
-}
-
-function generateNextId(
-  db: ReturnType<typeof getDb>,
-  date: Date
-): string {
-  const dateStr =
-    date.getFullYear().toString() +
-    (date.getMonth() + 1).toString().padStart(2, "0") +
-    date.getDate().toString().padStart(2, "0");
-
-  const prefix = `T-${dateStr}-`;
-  const row = db
-    .select({ id: tasks.id })
-    .from(tasks)
-    .where(like(tasks.id, `${prefix}%`))
-    .orderBy(desc(tasks.id))
-    .limit(1)
-    .get();
-
-  let nextSeq = 1;
-  if (row) {
-    nextSeq = (parseInt(row.id.slice(prefix.length), 10) || 0) + 1;
-  }
-  return `${prefix}${nextSeq.toString().padStart(3, "0")}`;
 }

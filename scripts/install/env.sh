@@ -94,6 +94,9 @@ export KNOWN_PROVIDERS
 if [ -z "$NODE_ROLE" ]; then
   NODE_ROLE="${OPENCLAW_NODE_ROLE:-}"
 fi
+if [ -z "$NODE_ROLE" ] && [ -f "$ENV_FILE" ]; then
+  NODE_ROLE="$(grep -m1 '^OPENCLAW_NODE_ROLE=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d "\"'" | xargs || true)"
+fi
 if [ -z "$NODE_ROLE" ]; then
   if [ "$OS" = "macos" ]; then
     NODE_ROLE="lead"

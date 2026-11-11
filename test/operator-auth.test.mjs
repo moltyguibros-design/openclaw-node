@@ -75,6 +75,18 @@ describe('signOperatorRequest / verifyOperatorRequest', () => {
     assert.deepEqual(again, { ok: false, reason: 'replay' });
   });
 
+  it('an untrusted signer cannot evict a trusted id from the replay cache', () => {
+    const seen = createSeenEventCache(2);
+    const req = signOperatorRequest({ task_id: 'T-1' }, { identity: lead, nodeId: 'lead' });
+    assert.equal(verifyOperatorRequest(req, { trustedKeys: leadKeys(), seenIds: seen }).ok, true);
+    for (let i = 0; i < 2; i++) {
+      const flood = signOperatorRequest({ task_id: `T-flood-${i}` }, { identity: peer, nodeId: 'peer' });
+      assert.equal(verifyOperatorRequest(flood, { trustedKeys: leadKeys(), seenIds: seen }).reason, 'untrusted-signer');
+    }
+    assert.equal(seen.size(), 1);
+    assert.deepEqual(verifyOperatorRequest(req, { trustedKeys: leadKeys(), seenIds: seen }), { ok: false, reason: 'replay' });
+  });
+
   it('refuses a stale request (outside the 5-minute window)', () => {
     const req = signOperatorRequest({ task_id: 'T-1' }, { identity: lead, nodeId: 'lead', now: Date.now() - 10 * 60_000 });
     const r = verifyOperatorRequest(req, { trustedKeys: leadKeys(), seenIds: null });

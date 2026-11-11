@@ -223,10 +223,28 @@ describe('Boundary event schemas (Block 1 vocabulary)', () => {
       token_count: 1200,
       blocks_count: 3,
       duration_ms: 45,
+      frontend: 'openclaw-context-engine',
+      session_id: 'agent:main:s1',
     });
     const result = MemoryInjectedSchema.parse(event);
     assert.equal(result.data.token_count, 1200);
     assert.equal(result.data.blocks_count, 3);
+    assert.equal(result.data.frontend, 'openclaw-context-engine');
+    assert.equal(result.data.session_id, 'agent:main:s1');
+  });
+
+  it('keeps frontend and session_id on memory.retrieved', () => {
+    const event = makeMemEvent('memory.retrieved', {
+      query_hash: 'h',
+      channels_hit: 0,
+      results_count: 0,
+      duration_ms: 1,
+      frontend: 'openclaw-context-engine',
+      session_id: 'agent:main:s1',
+    });
+    const result = MemoryRetrievedSchema.parse(event);
+    assert.equal(result.data.frontend, 'openclaw-context-engine');
+    assert.equal(result.data.session_id, 'agent:main:s1');
   });
 
   it('validates memory.synthesized', () => {

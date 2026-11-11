@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getNats, sc } from "@/lib/nats";
 import { getDb } from "@/lib/db";
-import { tasks, clusterMembers } from "@/lib/db/schema";
+import { tasks, clusters, clusterMembers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { generateTaskId } from "@/lib/task-id";
 import { statusToKanban } from "@/lib/parsers/task-markdown";
@@ -43,6 +43,13 @@ export async function POST(request: NextRequest) {
   let nodeIds: string[] = [];
 
   if (clusterId) {
+    const cluster = db.select().from(clusters).where(eq(clusters.id, clusterId)).get();
+    if (!cluster || cluster.status !== "active") {
+      return NextResponse.json(
+        { error: `Cluster "${clusterId}" is not active` },
+        { status: 400 }
+      );
+    }
     const members = db
       .select()
       .from(clusterMembers)
@@ -52,11 +59,9 @@ export async function POST(request: NextRequest) {
   }
 
   if (Array.isArray(manualNodes) && manualNodes.length > 0) {
-    // Pre-existing behavior: entries missing both keys flow through as
-    // undefined rather than being filtered.
-    const manualIds = manualNodes.map(
-      (n: { node_id?: string; nodeId?: string }) => n.node_id || n.nodeId
-    ) as string[];
+    const manualIds = manualNodes
+      .map((n: { node_id?: string; nodeId?: string }) => n.node_id || n.nodeId)
+      .filter((x): x is string => typeof x === "string" && x.length > 0);
     nodeIds = [...new Set([...nodeIds, ...manualIds])];
   }
 

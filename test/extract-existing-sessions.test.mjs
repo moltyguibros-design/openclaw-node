@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { existsSync, unlinkSync, readFileSync, mkdirSync } from 'node:fs';
+import { existsSync, unlinkSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -102,6 +102,7 @@ describe('loadCheckpoint', () => {
     const cp = loadCheckpoint('/nonexistent/path.json');
     assert.deepEqual(cp.completed, []);
     assert.deepEqual(cp.failed, []);
+    assert.deepEqual(cp.attempts, {});
     assert.equal(cp.startedAt, null);
   });
 });
@@ -310,6 +311,143 @@ describe('runExtraction', () => {
     const cp = loadCheckpoint(checkpointPath);
     assert.ok(cp.failed.includes('fail-session'));
     assert.ok(cp.completed.includes('ok-session'));
+  });
+
+  it('moves a sticky-transient session to failed after 5 runs', async () => {
+    const sessionDbPath = join(testDir, 'sessions.db');
+    const checkpointPath = join(testDir, 'checkpoint.json');
+    createSessionDb(sessionDbPath, [
+      { id: 's1', messages: [{ role: 'user', content: 'Oversized tail' }] },
+    ]);
+
+    const run = () => runExtraction({
+      sessionDbPath,
+      extractionDbPath: join(testDir, 'extraction.db'),
+      checkpointPath,
+      llmClient: createMockLlmClient([VALID_EXTRACTION]),
+      extractionStore: createMockExtractionStore(),
+      extractFn: async () => {
+        throw Object.assign(new Error('This operation was aborted'), { name: 'AbortError' });
+      },
+      skipNotes: true,
+      skipGraph: true,
+    });
+
+    for (let n = 1; n <= 4; n++) {
+      await run();
+      const cp = loadCheckpoint(checkpointPath);
+      assert.deepEqual(cp.failed, [], `run ${n} should leave s1 retryable`);
+      assert.equal(cp.attempts.s1, n);
+    }
+
+    await run();
+    const cp = loadCheckpoint(checkpointPath);
+    assert.ok(cp.failed.includes('s1'));
+    assert.equal(cp.attempts.s1, undefined);
+  });
+
+  it('clears the attempt counter when a previously failing session succeeds', async () => {
+    const sessionDbPath = join(testDir, 'sessions.db');
+    const checkpointPath = join(testDir, 'checkpoint.json');
+    createSessionDb(sessionDbPath, [
+      { id: 's1', messages: [{ role: 'user', content: 'Flaky' }] },
+    ]);
+    saveCheckpoint(checkpointPath, {
+      completed: [],
+      failed: [],
+      attempts: { s1: 2 },
+      startedAt: new Date().toISOString(),
+    });
+
+    await runExtraction({
+      sessionDbPath,
+      extractionDbPath: join(testDir, 'extraction.db'),
+      checkpointPath,
+      llmClient: createMockLlmClient([VALID_EXTRACTION]),
+      extractionStore: createMockExtractionStore(),
+      extractFn: async () => VALID_EXTRACTION,
+      skipNotes: true,
+      skipGraph: true,
+    });
+
+    const cp = loadCheckpoint(checkpointPath);
+    assert.ok(cp.completed.includes('s1'));
+    assert.equal(cp.attempts.s1, undefined);
+  });
+
+  it('stops the run on a 404 (missing model) without marking sessions failed', async () => {
+    const sessionDbPath = join(testDir, 'sessions.db');
+    const checkpointPath = join(testDir, 'checkpoint.json');
+    createSessionDb(sessionDbPath, [
+      { id: 's1', messages: [{ role: 'user', content: 'First' }] },
+      { id: 's2', messages: [{ role: 'user', content: 'Second' }] },
+    ]);
+
+    let calls = 0;
+    const result = await runExtraction({
+      sessionDbPath,
+      extractionDbPath: join(testDir, 'extraction.db'),
+      checkpointPath,
+      llmClient: createMockLlmClient([VALID_EXTRACTION]),
+      extractionStore: createMockExtractionStore(),
+      extractFn: async () => {
+        calls++;
+        throw new Error('LLM server returned 404: {"error":"model \'qwen3:8b\' not found"}');
+      },
+      skipNotes: true,
+      skipGraph: true,
+    });
+
+    assert.equal(calls, 1);
+    assert.equal(result.failed, 0);
+    assert.deepEqual(loadCheckpoint(checkpointPath).failed, []);
+  });
+
+  it('graph refresh keeps the extraction store concept_edges', async () => {
+    const sessionDbPath = join(testDir, 'sessions.db');
+    const graphDbPath = join(testDir, 'graph-cache.db');
+    const vaultDir = join(testDir, 'vault');
+    mkdirSync(join(vaultDir, 'concepts'), { recursive: true });
+    writeFileSync(join(vaultDir, 'concepts', 'nats.md'), 'NATS links to [[jetstream]].\n');
+    createSessionDb(sessionDbPath, [
+      { id: 's1', messages: [{ role: 'user', content: 'How does NATS use JetStream?' }] },
+    ]);
+
+    const priorDb = process.env.GRAPH_CACHE_DB_PATH;
+    const priorVault = process.env.OBSIDIAN_VAULT_PATH;
+    process.env.GRAPH_CACHE_DB_PATH = graphDbPath;
+    process.env.OBSIDIAN_VAULT_PATH = vaultDir;
+    try {
+      const result = await runExtraction({
+        sessionDbPath,
+        extractionDbPath: join(testDir, 'extraction.db'),
+        checkpointPath: join(testDir, 'checkpoint.json'),
+        llmClient: createMockLlmClient([VALID_EXTRACTION]),
+        extractionStore: {
+          ...createMockExtractionStore(),
+          getConceptEdges: () => [{ source: 'NATS', target: 'JetStream', edge_type: 'uses' }],
+        },
+        extractFn: async () => VALID_EXTRACTION,
+        skipNotes: true,
+        skipGraph: false,
+      });
+      assert.equal(result.processed, 1);
+    } finally {
+      if (priorDb === undefined) delete process.env.GRAPH_CACHE_DB_PATH;
+      else process.env.GRAPH_CACHE_DB_PATH = priorDb;
+      if (priorVault === undefined) delete process.env.OBSIDIAN_VAULT_PATH;
+      else process.env.OBSIDIAN_VAULT_PATH = priorVault;
+    }
+
+    const graphDb = new Database(graphDbPath, { readonly: true });
+    try {
+      const { cnt } = graphDb.prepare(
+        "SELECT count(*) AS cnt FROM concept_graph_edges WHERE edge_type = 'uses'"
+      ).get();
+      assert.equal(cnt, 1);
+    } finally {
+      graphDb.close();
+    }
   });
 
   it('returns zero results when session DB does not exist', async () => {

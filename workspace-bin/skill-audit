@@ -15,12 +15,9 @@ No external dependencies — stdlib only.
 from __future__ import annotations
 
 import sys
-import os
 import json
 import argparse
-import subprocess
 from pathlib import Path
-from typing import Optional
 
 # Add bin/ to path for lib imports
 sys.path.insert(0, str(Path(__file__).parent.resolve()))
@@ -30,7 +27,6 @@ from lib.frontmatter import parse_frontmatter
 
 VERSION = "1.0.0"
 DEFAULT_SKILLS_DIR = Path.home() / ".openclaw" / "workspace" / "skills"
-SCANNER_PATH = DEFAULT_SKILLS_DIR / "openclaw-skill-scanner" / "scanner.py"
 
 GRADE_THRESHOLDS = {"A": 90, "B": 75, "C": 50, "D": 25, "F": 0}
 GRADE_ORDER = ["A", "B", "C", "D", "F"]
@@ -303,25 +299,6 @@ def audit_skill(skill_path: Path) -> dict:
     }
 
 
-def get_security_score(skill_name: str) -> Optional[dict]:
-    """Shell out to scanner.py for security risk score."""
-    if not SCANNER_PATH.exists():
-        return None
-    try:
-        result = subprocess.run(
-            [sys.executable, str(SCANNER_PATH), "--skill", skill_name, "--json"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0:
-            data = json.loads(result.stdout)
-            if isinstance(data, list) and data:
-                return data[0]
-            return data
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
-        pass
-    return None
-
-
 # ─── Output Formatters ────────────────────────────────────────────────────────
 
 def print_table(results: list[dict], verbose: bool = False):
@@ -358,8 +335,8 @@ def print_table(results: list[dict], verbose: bool = False):
                 if check_data["points"] < check_data["max"]:
                     issues.append(f"{check_name}: {check_data['message']}")
 
-        issue_str = "; ".join(issues[:2]) if issues else f"{C.DIM}clean{C.RESET}"
-        if len(issue_str) > 60:
+        issue_str = "; ".join(issues if verbose else issues[:2]) if issues else f"{C.DIM}clean{C.RESET}"
+        if not verbose and len(issue_str) > 60:
             issue_str = issue_str[:57] + "..."
 
         print(f"  {r['name']:<35} {r['score']:>5}  {gc}{r['grade']:>5}{C.RESET}  {issue_str}")

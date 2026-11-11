@@ -23,6 +23,15 @@ const MESH_INIT_SCRIPT = path.join(PKG_ROOT, 'bin', 'openclaw-node-init.js');
 const args = process.argv.slice(2);
 const meshOnly = args.includes('--mesh-only');
 
+// spawnSync reports a signal-killed or never-spawned child as status null.
+function exitWith(result) {
+  if (result.error) {
+    console.error('ERROR:', result.error.message);
+    process.exit(1);
+  }
+  process.exit(result.status ?? 1);
+}
+
 if (meshOnly) {
   // Mesh-only join — lightweight, no full install
   if (!fs.existsSync(MESH_INIT_SCRIPT)) {
@@ -34,7 +43,7 @@ if (meshOnly) {
     stdio: 'inherit',
     env: { ...process.env },
   });
-  process.exit(result.status || 0);
+  exitWith(result);
 } else {
   // Full install or update — runs install.sh
   if (!fs.existsSync(INSTALL_SCRIPT)) {
@@ -47,7 +56,6 @@ if (meshOnly) {
   const result = spawnSync('bash', [INSTALL_SCRIPT, ...args], {
     stdio: 'inherit',
     cwd: PKG_ROOT,
-    env: { ...process.env, REPO_DIR: PKG_ROOT },
   });
-  process.exit(result.status || 0);
+  exitWith(result);
 }

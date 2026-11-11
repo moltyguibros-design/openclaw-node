@@ -62,7 +62,8 @@ function discordRequest(method, endpoint, token, _retryDepth = 0) {
             reject(new Error(`Discord API: rate limited ${_retryDepth} times on ${endpoint}`));
             return;
           }
-          const retryAfter = JSON.parse(data).retry_after || 1;
+          let retryAfter = 1;
+          try { retryAfter = JSON.parse(data).retry_after || 1; } catch { /* keep the 1s default */ }
           setTimeout(() => {
             discordRequest(method, endpoint, token, _retryDepth + 1).then(resolve).catch(reject);
           }, retryAfter * 1000);
@@ -87,6 +88,12 @@ function discordRequest(method, endpoint, token, _retryDepth = 0) {
 
 // ── Tool Handlers ───────────────────────────────────
 
+function snowflake(name, value) {
+  const id = String(value);
+  if (!/^\d{17,20}$/.test(id)) throw new Error(`${name} must be a Discord snowflake id`);
+  return id;
+}
+
 function createHandlers(token) {
   return {
     /**
@@ -101,9 +108,9 @@ function createHandlers(token) {
       if (!channelId) throw new Error('channelId is required');
 
       const clampedLimit = Math.min(Math.max(1, limit), 100);
-      let endpoint = `/channels/${channelId}/messages?limit=${clampedLimit}`;
-      if (before) endpoint += `&before=${before}`;
-      if (after) endpoint += `&after=${after}`;
+      let endpoint = `/channels/${snowflake('channelId', channelId)}/messages?limit=${clampedLimit}`;
+      if (before) endpoint += `&before=${snowflake('before', before)}`;
+      if (after) endpoint += `&after=${snowflake('after', after)}`;
 
       const messages = await discordRequest('GET', endpoint, token);
 
@@ -130,9 +137,9 @@ function createHandlers(token) {
       const { guildId, query, channelId, authorId, limit = 25 } = params;
       if (!guildId || !query) throw new Error('guildId and query are required');
 
-      let endpoint = `/guilds/${guildId}/messages/search?content=${encodeURIComponent(query)}`;
-      if (channelId) endpoint += `&channel_id=${channelId}`;
-      if (authorId) endpoint += `&author_id=${authorId}`;
+      let endpoint = `/guilds/${snowflake('guildId', guildId)}/messages/search?content=${encodeURIComponent(query)}`;
+      if (channelId) endpoint += `&channel_id=${snowflake('channelId', channelId)}`;
+      if (authorId) endpoint += `&author_id=${snowflake('authorId', authorId)}`;
       endpoint += `&limit=${Math.min(Math.max(1, limit), 25)}`;
 
       const result = await discordRequest('GET', endpoint, token);
@@ -159,7 +166,7 @@ function createHandlers(token) {
       const { guildId } = params;
       if (!guildId) throw new Error('guildId is required');
 
-      const channels = await discordRequest('GET', `/guilds/${guildId}/channels`, token);
+      const channels = await discordRequest('GET', `/guilds/${snowflake('guildId', guildId)}/channels`, token);
 
       return channels
         .filter(c => [0, 2, 5, 15].includes(c.type)) // text, voice, announcement, forum
@@ -182,7 +189,7 @@ function createHandlers(token) {
       const { channelId } = params;
       if (!channelId) throw new Error('channelId is required');
 
-      const c = await discordRequest('GET', `/channels/${channelId}`, token);
+      const c = await discordRequest('GET', `/channels/${snowflake('channelId', channelId)}`, token);
 
       return {
         id: c.id,

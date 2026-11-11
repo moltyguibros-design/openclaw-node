@@ -2,9 +2,7 @@
 
 import { useState, useEffect } from "react";
 import useSWR from "swr";
-import { useClusters } from "@/lib/hooks";
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { fetcher, useClusters } from "@/lib/hooks";
 
 type ExecutionMode = "local" | "mesh" | "collab";
 

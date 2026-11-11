@@ -20,7 +20,7 @@ const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-bridge');
 const fs = require('fs');
 const path = require('path');
-const { readTasks, updateTaskInPlace, isoTimestamp, ACTIVE_TASKS_PATH } = require('../lib/kanban-io');
+const { readTasks, updateTaskInPlace: updateTaskInPlaceAsync, appendTaskBlock, isoTimestamp, ACTIVE_TASKS_PATH } = require('../lib/kanban-io');
 
 const sc = StringCodec();
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
@@ -57,6 +57,15 @@ const _logger = require('../lib/logger').createLogger('mesh-bridge');
 _logger.attachTracer(tracer);
 const { info: log, warn, error: logError, debug } = _logger;
 
+// kanban-io's updateTaskInPlace is async and rejects on a lock timeout or a card that
+// is no longer in active-tasks.md. Call sites here fire and forget, and on Node >=22
+// an unhandled rejection terminates the bridge, so failures are logged instead.
+function updateTaskInPlace(...args) {
+  return updateTaskInPlaceAsync(...args).catch((err) => {
+    logError(`kanban update failed: ${err.message}`);
+  });
+}
+
 // ── NATS Helpers ────────────────────────────────────
 
 async function natsRequest(subject, payload, timeoutMs = 10000) {
@@ -76,7 +85,7 @@ async function natsRequest(subject, payload, timeoutMs = 10000) {
 
 // ── Startup Reconciliation ──────────────────────────
 // On restart, recover state for any tasks that were in-flight when we crashed.
-// Scans kanban for status:running + owner:mesh-agent, checks daemon KV for
+// Scans kanban for execution:mesh cards in submitted/running, checks daemon KV for
 // actual state. Processes completed/failed results we missed, resumes tracking
 // for still-running tasks. Fixes #2 and #10 from the pipeline audit.
 
@@ -89,10 +98,10 @@ async function reconcile() {
     return;
   }
 
+  // A claimed card's owner is the claiming node id, not 'mesh'; the daemon lookup below decides.
   const inflight = tasks.filter(t =>
     t.execution === 'mesh' &&
-    (t.status === 'running' || t.status === 'submitted') &&
-    (t.owner === 'mesh-agent' || t.owner === 'mesh')
+    (t.status === 'running' || t.status === 'submitted')
   );
   if (inflight.length === 0) {
     log('RECONCILE: no orphaned mesh tasks found');
@@ -103,7 +112,13 @@ async function reconcile() {
 
   for (const task of inflight) {
     try {
-      const meshTask = await natsRequest('mesh.tasks.get', { task_id: task.task_id });
+      // The daemon refuses an unknown id ("Task <id> not found") and natsRequest throws
+      // on refusals; read that one refusal as "absent" so the branch below handles it
+      // instead of tracking a purged task forever (and stalling serial dispatch).
+      const meshTask = await natsRequest('mesh.tasks.get', { task_id: task.task_id }).catch((err) => {
+        if (err.message === `Task ${task.task_id} not found`) return null;
+        throw err;
+      });
 
       if (!meshTask) {
         // Task doesn't exist in daemon KV. Two possible causes:
@@ -450,44 +465,31 @@ function handlePlanEvent(eventType, data) {
  * For local/soul/human delegation modes only — mesh subtasks use the existing mesh dispatch.
  */
 function materializeSubtask(plan, subtask) {
-  try {
-    const tasks = readTasks(ACTIVE_TASKS_PATH);
+  const mode = subtask.delegation?.mode || 'local';
+  const soulId = subtask.delegation?.soul_id || null;
 
-    // Check if already materialized
-    if (tasks.find(t => t.task_id === subtask.subtask_id)) {
-      log(`  SKIP: ${subtask.subtask_id} already in kanban`);
-      return;
-    }
+  const taskEntry = {
+    task_id: subtask.subtask_id,
+    title: subtask.title,
+    status: mode === 'human' ? 'blocked' : 'queued',
+    owner: mode === 'soul' ? 'Daedalus' : null,
+    soul_id: soulId,
+    success_criteria: subtask.success_criteria || [],
+    artifacts: [],
+    next_action: mode === 'human'
+      ? 'Needs Gui input'
+      : `Plan subtask (${mode}${soulId ? `: ${soulId}` : ''})`,
+    parent_id: plan.parent_task_id,
+    project: null, // inherited from parent via MC
+    description: `${subtask.description || ''}\n\n_Delegation: ${mode}${soulId ? ` → ${soulId}` : ''} | Plan: ${plan.plan_id} | Budget: ${subtask.budget_minutes}m_`,
+    updated_at: isoTimestamp(),
+  };
 
-    const mode = subtask.delegation?.mode || 'local';
-    const soulId = subtask.delegation?.soul_id || null;
-
-    const taskEntry = {
-      task_id: subtask.subtask_id,
-      title: subtask.title,
-      status: mode === 'human' ? 'blocked' : 'queued',
-      owner: mode === 'soul' ? 'Daedalus' : null,
-      soul_id: soulId,
-      success_criteria: subtask.success_criteria || [],
-      artifacts: [],
-      next_action: mode === 'human'
-        ? 'Needs Gui input'
-        : `Plan subtask (${mode}${soulId ? `: ${soulId}` : ''})`,
-      parent_id: plan.parent_task_id,
-      project: null, // inherited from parent via MC
-      description: `${subtask.description || ''}\n\n_Delegation: ${mode}${soulId ? ` → ${soulId}` : ''} | Plan: ${plan.plan_id} | Budget: ${subtask.budget_minutes}m_`,
-      updated_at: isoTimestamp(),
-    };
-
-    // Append to active-tasks.md
-    const content = fs.readFileSync(ACTIVE_TASKS_PATH, 'utf-8');
-    const yamlEntry = formatTaskYaml(taskEntry);
-    fs.writeFileSync(ACTIVE_TASKS_PATH, content + '\n' + yamlEntry);
-
-    log(`  MATERIALIZED: ${subtask.subtask_id} → kanban (${mode})`);
-  } catch (err) {
-    log(`  ERROR materializing ${subtask.subtask_id}: ${err.message}`);
-  }
+  return appendTaskBlock(ACTIVE_TASKS_PATH, subtask.subtask_id, formatTaskYaml(taskEntry))
+    .then((added) => log(added
+      ? `  MATERIALIZED: ${subtask.subtask_id} → kanban (${mode})`
+      : `  SKIP: ${subtask.subtask_id} already in kanban`))
+    .catch((err) => log(`  ERROR materializing ${subtask.subtask_id}: ${err.message}`));
 }
 
 /**
@@ -507,9 +509,9 @@ function formatTaskYaml(task) {
     }
   }
   lines.push(`  artifacts:`);
-  if (task.next_action) lines.push(`  next_action: "${task.next_action.replace(/"/g, '\\"')}"`);
+  if (task.next_action) lines.push(`  next_action: ${task.next_action.replace(/\s*\r?\n\s*/g, ' ')}`);
   if (task.parent_id) lines.push(`  parent_id: ${task.parent_id}`);
-  if (task.description) lines.push(`  description: "${task.description.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`);
+  if (task.description) lines.push(`  description: ${task.description.replace(/\r?\n/g, '\\n')}`);
   lines.push(`  updated_at: ${task.updated_at}`);
   return lines.join('\n');
 }
@@ -747,7 +749,7 @@ handleFailed = tracer.wrap('handleFailed', handleFailed, { tier: 1, category: 's
 handleCancelled = tracer.wrap('handleCancelled', handleCancelled, { tier: 1, category: 'state_transition' });
 handleCollabEvent = tracer.wrap('handleCollabEvent', handleCollabEvent, { tier: 1, category: 'state_transition' });
 handlePlanEvent = tracer.wrap('handlePlanEvent', handlePlanEvent, { tier: 1, category: 'state_transition' });
-materializeSubtask = tracer.wrap('materializeSubtask', materializeSubtask, { tier: 1, category: 'state_transition' });
+materializeSubtask = tracer.wrapAsync('materializeSubtask', materializeSubtask, { tier: 1, category: 'state_transition' });
 checkStaleness = tracer.wrap('checkStaleness', checkStaleness, { tier: 2 });
 writeLog = tracer.wrap('writeLog', writeLog, { tier: 3 });
 

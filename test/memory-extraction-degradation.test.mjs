@@ -45,6 +45,21 @@ test('P0: regex fallback does NOT contaminate a structured MEMORY.md — it dive
   assert.match(readFileSync(fallback, 'utf8'), /\[user\]|\[assistant\]/, 'the speaker-tagged facts live in the fallback');
 });
 
+for (const [name, content] of [
+  ['with no entities yet', '# Memory\n\n## Recent Decisions\n- D11 — grappe workers require an advanced LLM (confidence: 0.9)\n\n## Active Themes\n- federation (3×)\n'],
+  ['that is the empty-store sentinel', '# Memory\n\nNo structured data extracted yet.\n'],
+]) {
+  test(`P0: a structured MEMORY.md ${name} is diverted too`, async () => {
+    const { jsonl, memoryMd } = setup();
+    writeFileSync(memoryMd, content);
+    const result = await runFlush(jsonl, memoryMd, { charBudget: 2200 });
+    assert.equal(readFileSync(memoryMd, 'utf8'), content);
+    assert.equal(result.mode, 'regex-diverted');
+    const fallback = memoryMd.replace(/\.md$/, '') + '.regex-fallback.md';
+    assert.match(readFileSync(fallback, 'utf8'), /\[user\]|\[assistant\]/);
+  });
+}
+
 test('P0: on a non-structured MEMORY.md the regex path writes normally (legacy preserved)', async () => {
   const { jsonl, memoryMd } = setup();
   writeFileSync(memoryMd, '# Memory\n\nsome freeform notes\n');

@@ -85,6 +85,7 @@ const REQUIRED_PRODUCTION_WIRES = [
   { factory: 'withKanbanLockSync',       calledIn: 'mission-control/src/lib/sync/tasks.ts' }, // MC takes the kanban lock (P5-5)
   // Phase 6 — remaining plan items.
   { factory: 'reapExpiredLeases',        calledIn: 'bin/mesh-task-daemon.js' },       // dead-worker requeue (P4-5)
+  { factory: 'requeueOwnedBy',           calledIn: 'bin/mesh-node-remove.js' },       // node removal requeues under CAS
   { factory: 'renderServiceTemplate',    calledIn: 'bin/openclaw-node-init.js' },     // one service definition (P4-8)
   // The flush runs OFF the daemon's main thread since the flush-worker change
   // (audits/flush_worker): the daemon invokes runFlushInWorker at every flush
@@ -146,7 +147,7 @@ describe('production wiring manifest', () => {
       assert.match(stripped, callPattern,
         `${factory} must be INVOKED (call position) in ${calledIn} — not just imported. ` +
         `If the factory was renamed, update REQUIRED_PRODUCTION_WIRES. ` +
-        `If intentionally inert, document the gap in memory-plan/STUB_AUDIT.md and remove the row. ` +
+        `If intentionally inert, document the gap in memory-plan/plans/legacy/STUB_AUDIT.md and remove the row. ` +
         `See F-N1 + F-P110 + F-Q412.`);
     });
   }

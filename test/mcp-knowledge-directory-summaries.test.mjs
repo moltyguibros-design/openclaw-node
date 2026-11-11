@@ -222,7 +222,7 @@ describe('buildDirectorySummaries', () => {
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM directory_summaries WHERE generator='llm'").get().n, 6);
   });
 
-  it('falls back to deterministic when the LLM fails or answers garbage, and stops calling a dead model', async () => {
+  it('falls back to deterministic when the LLM fails or answers garbage, stops calling a dead model, and does not re-ask a rejected directory until it changes', async () => {
     const dead = realLlm((body, send) => send(500, 'model requires more system memory than is available'));
     const r = await buildDirectorySummaries(db, { llmClient: dead, log: () => {} });
     assert.equal(dead.asked.length, 1, 'one failure stops LLM attempts for the pass');
@@ -232,8 +232,15 @@ describe('buildDirectorySummaries', () => {
     seedDocs(db, [{ path: 'memory/2026-09-03.md', title: 'Daily 3', text: 'x' }]);
     const r2 = await buildDirectorySummaries(db, { llmClient: garbage });
     assert.equal(r2.llm, 0);
-    assert.equal(getDirectorySummary(db, 'memory').generator, 'deterministic');
+    assert.equal(getDirectorySummary(db, 'memory').generator, 'llm-rejected');
     assert.match(getDirectorySummary(db, 'memory').abstract, /Daily 3/);
+    const asked = garbage.asked.length;
+    const r3 = await buildDirectorySummaries(db, { llmClient: garbage });
+    assert.equal(garbage.asked.length, asked, 'a rejected answer is not re-asked while the directory is unchanged');
+    assert.equal(r3.unchanged, r3.total);
+    seedDocs(db, [{ path: 'memory/2026-09-04.md', title: 'Daily 4', text: 'x' }]);
+    await buildDirectorySummaries(db, { llmClient: garbage });
+    assert.equal(garbage.asked.length, asked + 2, 'a changed directory and its parent are asked again');
   });
 
   it('treats a queue fallback as no model: deterministic for the rest of the pass', async () => {

@@ -9,11 +9,10 @@ import { logActivity } from "@/lib/activity";
 import { schedulerTick } from "@/lib/scheduler";
 import { generateTaskId } from "@/lib/task-id";
 import { getNats, sc } from "@/lib/nats";
-import { WORKSPACE_ROOT, AGENT_NAME } from "@/lib/config";
+import { WORKSPACE_ROOT, AGENT_NAME, resolveDaemonNodeId } from "@/lib/config";
 import path from "path";
-import os from "os";
 
-const NODE_ID = process.env.OPENCLAW_NODE_ID || os.hostname();
+const NODE_ID = resolveDaemonNodeId();
 
 /**
  * Parse .daemon-state-${NODE_ID}.md to extract current active task.
@@ -157,11 +156,18 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    // The id is written raw as the `- task_id:` line of active-tasks.md.
+    if (typeof body.id === "string" && /[\r\n]/.test(body.id)) {
+      return NextResponse.json({ error: "id must be a single line" }, { status: 400 });
+    }
 
     const status = body.status || "not started";
     const now = new Date();
     // Allow custom IDs for projects/pipelines/phases; auto-generate for tasks
     const taskId = body.id || generateTaskId(db, now);
+    if (body.parent_id && body.parent_id === taskId) {
+      return NextResponse.json({ error: "A task cannot be its own parent" }, { status: 400 });
+    }
 
     db.insert(tasks)
       .values({

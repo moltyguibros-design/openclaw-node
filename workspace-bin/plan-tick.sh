@@ -98,7 +98,9 @@ mkdir -p "${TICK_LOG_DIR}"
 
 # Single-tick lock (mkdir atomicity; macOS has no flock). Reap stale >60min.
 if [ -d "${LOCK_DIR}" ]; then
-  LOCK_AGE=$(( $(date +%s) - $(stat -f %m "${LOCK_DIR}" 2>/dev/null || echo 0) ))
+  # GNU first: GNU `stat -f` prints filesystem info to stdout before failing; BSD rejects -c silently.
+  LOCK_MTIME=$(stat -c %Y "${LOCK_DIR}" 2>/dev/null || stat -f %m "${LOCK_DIR}" 2>/dev/null || echo 0)
+  LOCK_AGE=$(( $(date +%s) - LOCK_MTIME ))
   if [ "${LOCK_AGE}" -lt 3600 ]; then
     log "skip: another tick is already running (lock age=${LOCK_AGE}s)"; exit 0
   fi
@@ -222,7 +224,7 @@ ln -sfn "$(basename "${TICK_LOG}")" "${CURRENT_LINK}"
   printf '## Next step: %s\n' "${NEXT}"
   printf '## ─── live claude work ───\n'
   set +e
-  cat "${PROMPT_FILE}" | claude \
+  claude \
     --print \
     --permission-mode acceptEdits \
     --allowedTools "Bash(node:*),Bash(nats:*),Bash(/opt/homebrew/bin/nats:*),Bash(curl:*),Bash(lsof:*),Bash(npm:*),Bash(git:*),Bash(jq:*),Bash(launchctl:*)" \
@@ -230,6 +232,7 @@ ln -sfn "$(basename "${TICK_LOG}")" "${CURRENT_LINK}"
     --add-dir "${HOME}/.openclaw" \
     --output-format stream-json \
     --verbose \
+    < "${PROMPT_FILE}" \
     | tee "${TICK_RAW}" \
     | { [ -x "${PRETTY}" ] && "${PRETTY}" || cat; }
   CLAUDE_RC=${PIPESTATUS[0]}
@@ -261,9 +264,15 @@ fi
 # is green. A refused close writes BLOCKED.md so the chain stops and the operator
 # decides; nothing is auto-reverted.
 close_gate() {
-  local reasons=() cmd
-  if ! git -C "${REPO}" log -1 --format='%B' 2>/dev/null | grep -qE '^Runtime-Evidence:'; then
-    reasons+=("closing commit (${LATEST_COMMIT}) carries no Runtime-Evidence: trailer")
+  local reasons=() cmd close_sha
+  # The closing commit is the one that last touched VERSION (as plan-lint grades it),
+  # not HEAD: HEAD may be an earlier close, or a later commit from elsewhere.
+  if ! git -C "${REPO}" diff --quiet HEAD -- "${VERSION_FILE}" 2>/dev/null; then
+    reasons+=("VERSION ${POST_VERSION} is not committed")
+  fi
+  close_sha=$(git -C "${REPO}" log -1 --format='%H' -- "${VERSION_FILE}" 2>/dev/null || true)
+  if [ -z "${close_sha}" ] || ! git -C "${REPO}" log -1 --format='%B' "${close_sha}" 2>/dev/null | grep -qE '^Runtime-Evidence:'; then
+    reasons+=("closing commit (${close_sha:0:7}) carries no Runtime-Evidence: trailer")
   fi
   cmd="${WORKPLAN_CLOSE_CHECK:-npm test}"
   if [ "${cmd}" = "none" ]; then

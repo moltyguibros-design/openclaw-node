@@ -16,13 +16,29 @@ import {
   evaluatePromotionCandidates,
 } from '../lib/consolidation.mjs';
 import { runConsolidationCycle } from '../bin/consolidate.mjs';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 // Never let a cycle default to the REAL vault (getVaultPath) — fixture notes
 // were landing in production ~/.openclaw/obsidian-local (memory review 2026-07-04).
 const TEST_VAULT = mkdtempSync(join(tmpdir(), 'consolidation-vault-'));
+
+describe('consolidate CLI --dry-run', () => {
+  it('refuses instead of running a writing cycle against state.db', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'consolidate-dry-'));
+    const dbPath = join(dir, 'state.db');
+    const r = spawnSync(process.execPath, [
+      fileURLToPath(new URL('../bin/consolidate.mjs', import.meta.url)),
+      '--dry-run', '--no-events', '--db', dbPath, '--vault-path', join(dir, 'vault'),
+    ], { env: { ...process.env, HOME: dir }, encoding: 'utf8' });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /--dry-run is not implemented/);
+    assert.equal(existsSync(dbPath), false);
+  });
+});
 
 describe('consolidation event publication lifetime', () => {
   it('awaits both actual cycle publications before returning, retaining best-effort rejection', async () => {
@@ -131,6 +147,7 @@ function createTestDb() {
       decision TEXT NOT NULL,
       rationale TEXT NOT NULL,
       confidence REAL NOT NULL DEFAULT 0.5,
+      superseded_by INTEGER,
       created_at TEXT NOT NULL,
       salience REAL DEFAULT 0.5,
       last_recalled TEXT,
@@ -549,6 +566,25 @@ describe('evaluatePromotionCandidates', () => {
     assert.equal(result.decisionCandidates.length, 1);
     assert.equal(result.decisionCandidates[0].decision, 'High-conf decision');
 
+    db.close();
+  });
+
+  it('a superseded decision is not a promotion candidate', () => {
+    const db = createTestDb();
+    const insert = db.prepare(`
+      INSERT INTO decisions (session_id, decision, rationale, confidence, created_at, salience, source_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    insert.run('s1', 'old plan', 'first take', 0.99, new Date().toISOString(), 0.5, 'local');
+    insert.run('s2', 'new plan', 'revised', 0.99, new Date().toISOString(), 0.5, 'local');
+    db.prepare(`
+      UPDATE decisions SET superseded_by = (SELECT id FROM decisions WHERE decision = 'new plan')
+      WHERE decision = 'old plan'
+    `).run();
+
+    const result = evaluatePromotionCandidates(db);
+
+    assert.deepEqual(result.decisionCandidates.map(d => d.decision), ['new plan']);
     db.close();
   });
 });

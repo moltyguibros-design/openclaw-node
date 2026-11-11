@@ -61,7 +61,7 @@ cmd_status() {
 cmd_open() {
   local note_path="$1"
   # Try API first
-  if api_call POST "/open/${note_path}" > /dev/null 2>&1; then
+  if api_call POST "/open/${note_path}" -f > /dev/null 2>&1; then
     echo "Opened: $note_path"
   else
     # Fallback to URI scheme
@@ -77,7 +77,7 @@ cmd_read() {
 
 cmd_search() {
   local query="$1"
-  api_call POST "/search/simple/" -d "{\"query\": \"$query\"}"
+  api_call POST "/search/simple/" -G --data-urlencode "query=$query"
 }
 
 cmd_command() {

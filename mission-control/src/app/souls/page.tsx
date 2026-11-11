@@ -257,6 +257,7 @@ touch ~/.openclaw/souls/my-soul/evolution/events.jsonl`}
           <div className="px-4 pb-4 border-t border-border pt-3">
             <pre className="text-xs bg-muted rounded p-3 overflow-auto">
 {`curl -X POST http://localhost:3000/api/souls \\
+  -H @<(printf 'Authorization: Bearer %s' "$(cat ~/.openclaw/config/mc-session-token)") \\
   -H "Content-Type: application/json" \\
   -d '{
     "id": "my-soul",
@@ -296,7 +297,7 @@ export default function SoulsPage() {
     fetch("/api/souls")
       .then((res) => res.json())
       .then((data) => {
-        setSouls(data);
+        setSouls(Array.isArray(data) ? data : []);
         setLoading(false);
       });
   }, []);

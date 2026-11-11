@@ -1,7 +1,7 @@
 import { test, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_ANALYSIS_TIMEOUT } from '../lib/llm-client.mjs';
@@ -17,7 +17,7 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 // Replicates the workflow's three asserts against doctored pack listings. The
 // drift-lock test pins the YAML so the replica can't silently diverge.
 
-const MODULES = ['components', 'config', 'env', 'helpers', 'integrations', 'services', 'system-deps', 'verify', 'workspace'];
+const MODULES = readdirSync(join(REPO, 'scripts/install')).filter(f => f.endsWith('.sh')).map(f => f.slice(0, -3));
 const goodListing = () => [
   'npm notice 6.0kB install.sh',
   ...MODULES.map(m => `npm notice 9.3kB scripts/install/${m}.sh`),
@@ -27,7 +27,7 @@ const goodListing = () => [
 
 function smokePasses(listing) {
   const hasInstall = / install\.sh/.test(listing);
-  const moduleCount = (listing.match(/ scripts\/install\/.*\.sh/g) || []).length === 9;
+  const moduleCount = (listing.match(/ scripts\/install\/.*\.sh/g) || []).length === MODULES.length;
   const hasDist = / packages\/event-schemas\/dist\//.test(listing);
   return hasInstall && moduleCount && hasDist;
 }
@@ -37,6 +37,7 @@ describe('tarball-smoke gate rejects doctored listings', () => {
     assert.equal(smokePasses(goodListing()), true);
   });
   it('rejects a listing missing one installer module', () => {
+    assert.ok(MODULES.includes('env'), 'env.sh left the tree — pick another module to drop');
     assert.equal(smokePasses(goodListing().replace(/^.*scripts\/install\/env\.sh$/m, '')), false);
   });
   it('rejects a listing missing install.sh', () => {
@@ -49,7 +50,29 @@ describe('tarball-smoke gate rejects doctored listings', () => {
     const yml = readFileSync(join(REPO, '.github/workflows/test.yml'), 'utf8');
     assert.ok(yml.includes('grep -q " install.sh"'), 'install.sh grep changed — re-sync smokePasses()');
     assert.ok(yml.includes('grep -c " scripts/install/.*\\.sh"'), 'module-count grep changed — re-sync smokePasses()');
+    assert.ok(yml.includes('$(ls scripts/install/*.sh | wc -l'), 'module count is no longer compared against the tree — re-sync smokePasses()');
     assert.ok(yml.includes('grep -q " packages/event-schemas/dist/"'), 'dist grep changed — re-sync smokePasses()');
+  });
+});
+
+// ── 1b. Root test scripts build the workspace dist first ────────────────────
+// npm runs `pretest` only for `npm test`, and packages/*/dist/ is gitignored:
+// a script that calls node --test directly fails on a fresh clone.
+
+describe('root test scripts build the workspace dist first', () => {
+  const { scripts } = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8'));
+  it('pretest still builds the workspaces', () => {
+    assert.ok(scripts.pretest.includes('--workspaces --if-present build'), scripts.pretest);
+  });
+  for (const name of ['test:unit', 'test:strict', 'test:all']) {
+    it(`${name} goes through npm test or builds first`, () => {
+      const s = scripts[name];
+      assert.ok(/(^|\s)npm test(\s|$)/.test(s) || s.includes('npm run --workspaces --if-present build'),
+        `${name} = ${s} skips the pretest build`);
+    });
+  }
+  it('test:all does not re-run distributed-mc, which the root glob already covers', () => {
+    assert.ok(!scripts['test:all'].includes('test:integration'), scripts['test:all']);
   });
 });
 
@@ -103,9 +126,28 @@ describe('mission-control eslint gate is not vacuous', { skip: MC_SKIP }, () => 
       } catch (e) {
         status = e.status;
       }
-      assert.equal(status, 1, 'eslint accepted a duplicate-key error — the gate would too');
+      assert.equal(status, 1, 'eslint accepted a seeded @ts-ignore (ban-ts-comment error) — the gate would too');
     } finally {
       rmSync(scratch, { force: true });
     }
+  });
+});
+
+// ── 4. CI mesh tier cannot skip silently ────────────────────────────────────
+// A daemon that never answers used to leave the readiness loop green, and
+// without OPENCLAW_REQUIRE_MESH the census only skips — the whole mesh tier
+// could vanish from a green run.
+
+describe('CI requires the mesh tier and fails on a dead daemon', () => {
+  const yml = readFileSync(join(REPO, '.github/workflows/test.yml'), 'utf8');
+  it('the readiness loop fails the step when the daemon never answers', () => {
+    assert.ok(yml.includes('[ "$ready" != 1 ]'), 'readiness loop no longer fails the step on a dead daemon');
+  });
+  it('the root unit tests run with OPENCLAW_REQUIRE_MESH=1', () => {
+    const start = yml.indexOf('- name: Root unit tests');
+    assert.ok(start >= 0, 'Root unit tests step not found');
+    const next = yml.indexOf('- name:', start + 1);
+    const block = yml.slice(start, next < 0 ? undefined : next);
+    assert.match(block, /OPENCLAW_REQUIRE_MESH:\s*"1"/);
   });
 });

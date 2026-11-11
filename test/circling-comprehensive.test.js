@@ -10,7 +10,7 @@
  *   2. State (lib/mesh-collab.js) — storeArtifact blob/exception, compileDirectedInput finalization,
  *      adaptive convergence edge cases
  *   3. Orchestration (daemon logic) — timeout handler, sweep logic, step lifecycle
- *   4. Prompt (buildCirclingPrompt) — all 8 role/phase/step branches, anti-preamble, finalization vote
+ *   4. Prompt — see test/circling-worker-harness.test.mjs (drives the real buildCirclingPrompt)
  *   5. Bridge (gate message) — step_started event, gate formatting
  *
  * Run: node --test test/circling-comprehensive.test.js
@@ -426,7 +426,7 @@ describe('Daemon: handleCirclingStepTimeout simulation', () => {
     assert.deepEqual(result.deadNodes, ['node-revB'], 'node-revB should be marked dead');
   });
 
-  it('all nodes timed out: marks all dead, barrier passes (0/0)', async () => {
+  it('all nodes timed out: marks all dead, barrier does not pass (abort)', async () => {
     const { store, sessionId } = await makeActiveSession();
     await store.advanceCirclingStep(sessionId);
     await store.startRound(sessionId);
@@ -435,11 +435,8 @@ describe('Daemon: handleCirclingStepTimeout simulation', () => {
     const snapshot = { phase: 'circling', subround: 1, step: 1 };
     const result = await simulateTimeout(store, sessionId, snapshot);
 
-    // isCirclingStepComplete returns true with 0 active nodes (0 reflections >= 0 active)
-    // The daemon would then advanceCirclingStep, which would proceed with degraded state.
-    // In the real daemon, subsequent steps would also time out → eventually abort.
     assert.equal(result.deadNodes.length, 3, 'all 3 nodes should be marked dead');
-    assert.equal(result.action, 'advance', 'barrier passes with 0/0 active/submitted');
+    assert.equal(result.action, 'abort', 'a step with no live member must not pass its barrier');
   });
 });
 
@@ -507,161 +504,43 @@ describe('Daemon: sweepCirclingStepTimeouts simulation', () => {
 
     assert.equal(shouldSweepFire(session, 10 * 60 * 1000, false), false);
   });
-});
 
-// ═══════════════════════════════════════════════════════
-// 4. PROMPT — buildCirclingPrompt all branches
-// ═══════════════════════════════════════════════════════
-
-describe('buildCirclingPrompt: all branches', () => {
-  // We can't import buildCirclingPrompt directly (mesh-agent.js has many deps),
-  // so we replicate the prompt logic for verification. This tests the prompt
-  // contract: what each branch SHOULD contain.
-
-  /**
-   * Minimal reimplementation of buildCirclingPrompt for testing.
-   * Mirrors mesh-agent.js lines 730-900.
-   */
-  function buildCirclingPromptTest(task, circlingData) {
-    const { circling_phase, circling_step, circling_subround, directed_input, my_role } = circlingData;
-    const isWorker = my_role === 'worker';
-    const parts = [];
-
-    parts.push(`# Task: ${task.title}`);
-    parts.push('');
-
-    switch (circling_phase) {
-      case 'init':
-        if (isWorker) {
-          parts.push('## Your Role: WORKER (Central Authority)');
-          parts.push('');
-          parts.push('Produce your initial work artifact (v0).');
-        } else {
-          parts.push('## Your Role: REVIEWER');
-          parts.push('');
-          parts.push('Produce your **reviewStrategy**.');
-        }
-        break;
-      case 'circling':
-        if (circling_step === 1) {
-          if (isWorker) {
-            parts.push('## Your Role: WORKER — Analyze Review Strategies');
-            parts.push('Do NOT touch the work artifact in this step.');
-          } else {
-            parts.push('## Your Role: REVIEWER — Review the Work Artifact');
-            parts.push('Produce concrete, actionable findings.');
-          }
-        } else if (circling_step === 2) {
-          if (isWorker) {
-            parts.push('## Your Role: WORKER — Judge Reviews & Update Artifact');
-            parts.push('You must output TWO artifacts.');
-          } else {
-            parts.push('## Your Role: REVIEWER — Refine Your Strategy');
-            parts.push('Produce your REFINED reviewStrategy.');
-          }
-        }
-        break;
-      case 'finalization':
-        if (isWorker) {
-          parts.push('## Your Role: WORKER — Final Delivery');
-          parts.push('Produce your FINAL formatted work artifact.');
-          parts.push('Also produce a completionDiff.');
-          parts.push('You must output TWO artifacts.');
-        } else {
-          parts.push('## Your Role: REVIEWER — Final Sign-Off');
-          parts.push('vote "converged" or "blocked"');
-        }
-        break;
-    }
-
-    // Vote restriction
-    if (circling_phase === 'finalization') {
-      parts.push('vote: [converged|blocked]');
-    } else {
-      parts.push('vote: [continue|converged|blocked]');
-    }
-
-    // Anti-preamble
-    parts.push('Begin your output with the artifact content DIRECTLY.');
-
-    // Multi-artifact format flag
-    const isMultiArtifact = isWorker && (circling_step === 2 || circling_phase === 'finalization');
-    if (isMultiArtifact) {
-      parts.push('===CIRCLING_ARTIFACT===');
-    }
-
-    return parts.join('\n');
+  async function atConvergedStep2(automationTier) {
+    const { store, sessionId } = await makeActiveSession({ automation_tier: automationTier });
+    const s = await store.get(sessionId);
+    s.circling.phase = 'circling';
+    s.circling.current_subround = 1;
+    s.circling.current_step = 2;
+    s.circling.step_started_at = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    s.rounds = [{
+      round_number: 1,
+      reflections: ['node-worker', 'node-revA', 'node-revB'].map(node_id => ({
+        node_id, circling_step: 2, vote: 'converged',
+      })),
+    }];
+    await store.put(s);
+    return { store, sessionId, startedAt: s.circling.step_started_at };
   }
 
-  const task = { title: 'Build ManaToken' };
+  it('a tier-2 gate clears step_started_at so the sweep cannot fire during the wait', async () => {
+    const { store, sessionId } = await atConvergedStep2(2);
+    const r = await store.advanceCirclingStep(sessionId);
+    assert.equal(r.needsGate, true);
+    assert.equal(r.phase, 'finalization');
 
-  // Init phase
-  it('init/worker: produces workArtifact v0', () => {
-    const prompt = buildCirclingPromptTest(task, { circling_phase: 'init', circling_step: 0, my_role: 'worker' });
-    assert.ok(prompt.includes('WORKER (Central Authority)'));
-    assert.ok(prompt.includes('initial work artifact'));
-    assert.ok(prompt.includes('continue|converged|blocked'));
+    const after = await store.get(sessionId);
+    assert.equal(after.circling.step_started_at, null);
+    assert.equal(shouldSweepFire(after, 10 * 60 * 1000, false), false);
   });
 
-  it('init/reviewer: produces reviewStrategy', () => {
-    const prompt = buildCirclingPromptTest(task, { circling_phase: 'init', circling_step: 0, my_role: 'reviewer' });
-    assert.ok(prompt.includes('REVIEWER'));
-    assert.ok(prompt.includes('reviewStrategy'));
-  });
+  it('a tier-1 transition (no gate) leaves step_started_at alone', async () => {
+    const { store, sessionId, startedAt } = await atConvergedStep2(1);
+    const r = await store.advanceCirclingStep(sessionId);
+    assert.equal(r.needsGate, false);
+    assert.equal(r.phase, 'finalization');
 
-  // Circling Step 1
-  it('step1/worker: analyzes strategies, no artifact touch', () => {
-    const prompt = buildCirclingPromptTest(task, { circling_phase: 'circling', circling_step: 1, my_role: 'worker' });
-    assert.ok(prompt.includes('Analyze Review Strategies'));
-    assert.ok(prompt.includes('Do NOT touch the work artifact'));
-    assert.ok(!prompt.includes('===CIRCLING_ARTIFACT==='), 'single-artifact: no explicit delimiter in instructions');
-  });
-
-  it('step1/reviewer: reviews workArtifact, produces findings', () => {
-    const prompt = buildCirclingPromptTest(task, { circling_phase: 'circling', circling_step: 1, my_role: 'reviewer' });
-    assert.ok(prompt.includes('Review the Work Artifact'));
-    assert.ok(prompt.includes('actionable findings'));
-  });
-
-  // Circling Step 2
-  it('step2/worker: judges reviews, multi-artifact output', () => {
-    const prompt = buildCirclingPromptTest(task, { circling_phase: 'circling', circling_step: 2, my_role: 'worker' });
-    assert.ok(prompt.includes('Judge Reviews'));
-    assert.ok(prompt.includes('TWO artifacts'));
-    assert.ok(prompt.includes('===CIRCLING_ARTIFACT==='), 'multi-artifact format');
-  });
-
-  it('step2/reviewer: refines strategy', () => {
-    const prompt = buildCirclingPromptTest(task, { circling_phase: 'circling', circling_step: 2, my_role: 'reviewer' });
-    assert.ok(prompt.includes('Refine Your Strategy'));
-    assert.ok(prompt.includes('REFINED reviewStrategy'));
-    assert.ok(!prompt.includes('===CIRCLING_ARTIFACT==='), 'single-artifact: no multi-artifact delimiter');
-  });
-
-  // Finalization
-  it('finalization/worker: final artifact + completionDiff, multi-artifact', () => {
-    const prompt = buildCirclingPromptTest(task, { circling_phase: 'finalization', circling_step: 0, my_role: 'worker' });
-    assert.ok(prompt.includes('Final Delivery'));
-    assert.ok(prompt.includes('completionDiff'));
-    assert.ok(prompt.includes('TWO artifacts'));
-    assert.ok(prompt.includes('===CIRCLING_ARTIFACT==='));
-    assert.ok(prompt.includes('converged|blocked'), 'finalization should restrict votes');
-    assert.ok(!prompt.includes('continue|converged|blocked'), 'finalization should NOT include continue');
-  });
-
-  it('finalization/reviewer: vote converged or blocked only', () => {
-    const prompt = buildCirclingPromptTest(task, { circling_phase: 'finalization', circling_step: 0, my_role: 'reviewer' });
-    assert.ok(prompt.includes('Final Sign-Off'));
-    assert.ok(prompt.includes('converged|blocked'));
-    assert.ok(!prompt.includes('continue|converged|blocked'));
-  });
-
-  // Anti-preamble (all phases)
-  it('all phases include anti-preamble instruction', () => {
-    for (const phase of ['init', 'circling', 'finalization']) {
-      const prompt = buildCirclingPromptTest(task, { circling_phase: phase, circling_step: phase === 'circling' ? 1 : 0, my_role: 'worker' });
-      assert.ok(prompt.includes('Begin your output with the artifact content DIRECTLY'), `missing anti-preamble in ${phase}`);
-    }
+    const after = await store.get(sessionId);
+    assert.equal(after.circling.step_started_at, startedAt);
   });
 });
 
@@ -819,5 +698,28 @@ describe('Schema: circling defaults', () => {
   it('artifact_failures initialized empty', () => {
     const s = createSession('t', { mode: 'circling_strategy' });
     assert.deepEqual(s.circling.artifact_failures, {});
+  });
+
+  it('circling_strategy max_nodes defaults to 3', () => {
+    assert.equal(createSession('t', { mode: 'circling_strategy' }).max_nodes, 3);
+  });
+
+  it('circling_strategy clamps an explicit max_nodes above 3', () => {
+    assert.equal(createSession('t', { mode: 'circling_strategy', max_nodes: 5 }).max_nodes, 3);
+  });
+
+  it('parallel max_nodes stays unlimited by default', () => {
+    assert.equal(createSession('t', { mode: 'parallel' }).max_nodes, null);
+  });
+
+  it('a default circling session refuses a 4th node', async () => {
+    const store = new CollabStore(new MockKV());
+    const session = createSession('t', { mode: 'circling_strategy' });
+    await store.put(session);
+    for (const id of ['n1', 'n2', 'n3']) {
+      assert.ok(await store.addNode(session.session_id, id), `${id} joins`);
+    }
+    assert.equal(await store.addNode(session.session_id, 'n4'), null);
+    assert.equal((await store.get(session.session_id)).nodes.length, 3);
   });
 });

@@ -209,6 +209,37 @@ describe('createExtractionTrigger', () => {
     assert.strictEqual(published[0].data.triggered_by, 'idle-timer');
   });
 
+  for (const [label, onExtract] of [
+    ['an async callback rejection', async () => { throw new Error('async boom'); }],
+    ['a sync callback throw', () => { throw new Error('sync boom'); }],
+  ]) {
+    it(`logs ${label} instead of leaving it unhandled or calling it malformed`, async () => {
+      const mockMsg = { data: new TextEncoder().encode(JSON.stringify({ triggered_by: 'test' })) };
+      const mockNc = {
+        subscribe() { return createMockSub([mockMsg]); },
+        publish() {},
+      };
+      const logs = [];
+      const unhandled = [];
+      const onUnhandled = (reason) => { unhandled.push(reason); };
+      process.on('unhandledRejection', onUnhandled);
+      const trigger = createExtractionTrigger(mockNc, 'node-A', {
+        onExtract,
+        log: (m) => logs.push(m),
+        idleThresholdSec: 99999,
+      });
+      try {
+        await trigger.start();
+        await new Promise(r => setTimeout(r, 50));
+        assert.ok(logs.some((m) => /extract callback failed: (async|sync) boom/.test(m)), `callback failure must be logged (got ${JSON.stringify(logs)})`);
+        assert.deepEqual(unhandled, []);
+      } finally {
+        trigger.stop();
+        process.off('unhandledRejection', onUnhandled);
+      }
+    });
+  }
+
   it('stop prevents further idle timer fires', async () => {
     const published = [];
     const mockNc = {

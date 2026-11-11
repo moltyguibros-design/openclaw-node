@@ -95,3 +95,119 @@ test("startup retries after a real migration write lock is released", async () =
     fs.rmSync(root, { recursive: true, force: true });
   }
 }, 15000);
+
+test.each([false, true])("a populated pre-migration memory_items/cluster_members schema upgrades (FTS triggers present: %s)", async withFts => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-startup-legacy-"));
+  const dbPath = path.join(root, "mission-control.db");
+  const fixture = new Database(dbPath);
+  fixture.exec(`
+    CREATE TABLE memory_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, fact_text TEXT NOT NULL, confidence INTEGER,
+      source_doc_id INTEGER, category TEXT, status TEXT, gate_decision TEXT, gate_reason TEXT,
+      extraction_source TEXT, last_accessed TEXT, created_at TEXT NOT NULL
+    );
+    CREATE TABLE cluster_members (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, cluster_id TEXT NOT NULL, node_id TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'worker', joined_at TEXT, UNIQUE(cluster_id, node_id)
+    );
+    INSERT INTO cluster_members (cluster_id, node_id, joined_at) VALUES ('c1', 'n1', '2026-02-02');
+  `);
+  if (withFts) {
+    fixture.exec(`
+      CREATE VIRTUAL TABLE memory_items_fts USING fts5(fact_text, category, content='memory_items', content_rowid='id');
+      CREATE TRIGGER memory_items_ai AFTER INSERT ON memory_items BEGIN
+        INSERT INTO memory_items_fts(rowid, fact_text, category) VALUES (new.id, new.fact_text, new.category);
+      END;
+      CREATE TRIGGER memory_items_au AFTER UPDATE ON memory_items BEGIN
+        INSERT INTO memory_items_fts(memory_items_fts, rowid, fact_text, category) VALUES ('delete', old.id, old.fact_text, old.category);
+        INSERT INTO memory_items_fts(rowid, fact_text, category) VALUES (new.id, new.fact_text, new.category);
+      END;
+    `);
+  }
+  fixture.exec("INSERT INTO memory_items (fact_text, created_at) VALUES ('kept', '2026-01-01 00:00:00')");
+  fixture.close();
+  vi.stubEnv("DB_PATH", dbPath);
+  vi.stubEnv("WORKSPACE_ROOT", root);
+  vi.resetModules();
+  let db: Database.Database | undefined;
+  try {
+    const { getRawDb, dbHealth } = await import("@/lib/db");
+    db = getRawDb();
+    expect(dbHealth().ok).toBe(true);
+    expect(db.prepare("SELECT valid_from FROM memory_items").get()).toEqual({ valid_from: "2026-01-01 00:00:00" });
+    expect(db.prepare("SELECT created_at FROM cluster_members").get()).toEqual({ created_at: "2026-02-02" });
+    if (withFts) {
+      expect(db.prepare("SELECT rowid FROM memory_items_fts WHERE memory_items_fts MATCH 'kept'").all()).toEqual([{ rowid: 1 }]);
+    }
+  } finally {
+    db?.close();
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a legacy auto_start=1 task still needs approval after startup", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-startup-autostart-"));
+  const dbPath = path.join(root, "mission-control.db");
+  const fixture = new Database(dbPath);
+  fixture.exec(`
+    CREATE TABLE tasks (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL, kanban_column TEXT NOT NULL,
+      owner TEXT, success_criteria TEXT, artifacts TEXT, next_action TEXT, updated_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')), sort_order INTEGER DEFAULT 0,
+      auto_start INTEGER, auto_start_after TEXT
+    );
+    INSERT INTO tasks (id, title, status, kanban_column, updated_at, auto_start, auto_start_after)
+    VALUES ('T-1', 'legacy', 'queued', 'backlog', '2026-01-01', 1, '2026-01-02T00:00:00Z');
+  `);
+  fixture.close();
+  vi.stubEnv("DB_PATH", dbPath);
+  vi.stubEnv("WORKSPACE_ROOT", root);
+  vi.resetModules();
+  let db: Database.Database | undefined;
+  try {
+    const { getRawDb } = await import("@/lib/db");
+    db = getRawDb();
+    expect(db.prepare("SELECT needs_approval, trigger_kind, trigger_at FROM tasks").get())
+      .toEqual({ needs_approval: 1, trigger_kind: "none", trigger_at: null });
+  } finally {
+    db?.close();
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("observability_events created first by obs-db still gets its indexes", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-startup-obs-"));
+  const dbPath = path.join(root, "mission-control.db");
+  const fixture = new Database(dbPath);
+  fixture.exec(`
+    CREATE TABLE observability_events (
+      id TEXT PRIMARY KEY, timestamp INTEGER NOT NULL, node_id TEXT NOT NULL, module TEXT NOT NULL,
+      function TEXT NOT NULL, tier INTEGER NOT NULL DEFAULT 2, category TEXT NOT NULL,
+      args_summary TEXT, result_summary TEXT, duration_ms INTEGER, error TEXT, meta TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  fixture.close();
+  vi.stubEnv("DB_PATH", dbPath);
+  vi.stubEnv("WORKSPACE_ROOT", root);
+  vi.resetModules();
+  let db: Database.Database | undefined;
+  try {
+    const { getRawDb } = await import("@/lib/db");
+    db = getRawDb();
+    const names = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='observability_events' AND name LIKE 'idx_obs_%' ORDER BY name")
+      .all()
+      .map(r => (r as { name: string }).name);
+    expect(names).toEqual(["idx_obs_category", "idx_obs_module", "idx_obs_node", "idx_obs_timestamp"]);
+  } finally {
+    db?.close();
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

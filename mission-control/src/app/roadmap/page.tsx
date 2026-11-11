@@ -48,6 +48,8 @@ import {
   type Task,
 } from "@/lib/hooks";
 import { UnifiedTaskDialog } from "@/components/board/unified-task-dialog";
+import { barDragUpdate } from "@/lib/roadmap-drag";
+import { DEPT_COLORS, extractDept, extractEstimate } from "@/lib/task-description";
 
 // --- Constants ---
 
@@ -72,44 +74,6 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 type ZoomLevel = "day" | "week" | "month" | "quarter";
-
-// Department color map (matches import-pipeline-v2.js)
-const DEPT_COLORS: Record<string, string> = {
-  DEV: "#3B82F6",
-  CHAIN: "#8B5CF6",
-  ART: "#EC4899",
-  DESIGN: "#F59E0B",
-  NARR: "#14B8A6",
-  QA: "#10B981",
-  INFRA: "#6B7280",
-  MKT: "#EF4444",
-  COMM: "#06B6D4",
-  BIZ: "#22C55E",
-  LEGAL: "#F97316",
-  HIRE: "#A855F7",
-};
-
-/** Extract estimated hours from description (e.g. "DEV · 5.0h · M1/D3" → "5.0h") */
-function extractEstimate(description: string | null): string | null {
-  if (!description) return null;
-  const parts = description.split(" · ");
-  for (const p of parts) {
-    if (/^\d+(\.\d+)?h$/.test(p.trim())) return p.trim();
-  }
-  return null;
-}
-
-/** Extract department from a task's description field (e.g. "DEV" or "⚠️ CRITICAL PATH — DEV") */
-function extractDept(description: string | null): string | null {
-  if (!description) return null;
-  // Check for "CRITICAL PATH — DEPT" or "IMPORTANT — DEPT" pattern
-  const tagMatch = description.match(/(?:CRITICAL PATH|IMPORTANT)\s*[—–-]\s*(\w+)/);
-  if (tagMatch) return tagMatch[1];
-  // Otherwise treat the whole description as dept if it matches a known dept
-  const trimmed = description.trim();
-  if (DEPT_COLORS[trimmed]) return trimmed;
-  return null;
-}
 
 // --- Helper: build tree structure from flat list ---
 
@@ -636,16 +600,10 @@ export default function RoadmapPage() {
 
   const handleBarDrag = useCallback(
     async (taskId: string, newLeft: number, newWidth: number) => {
-      const startDays = Math.round(newLeft / dayWidth);
-      const durationDays = Math.max(Math.round(newWidth / dayWidth), 1);
-      const newStart = addDays(viewStart, startDays);
-      const newEnd = addDays(newStart, durationDays);
-      await updateTask(taskId, {
-        start_date: format(newStart, "yyyy-MM-dd"),
-        end_date: format(newEnd, "yyyy-MM-dd"),
-      } as Record<string, unknown>);
+      const node = allNodes.find((n) => n.id === taskId);
+      await updateTask(taskId, barDragUpdate(node, newLeft, newWidth, viewStart, dayWidth) as Record<string, unknown>);
     },
-    [viewStart, dayWidth]
+    [viewStart, dayWidth, allNodes]
   );
 
   const handleAddDep = async (targetId: string) => {
@@ -1635,6 +1593,13 @@ function GanttBar({ id, left, width, color, label, type, status, onDragEnd, onDo
 
     const handleUp = (e: MouseEvent) => {
       const dx = e.clientX - dragging.startX;
+      // A click or double-click is not a drag: PATCHing here would persist the bar's drawn geometry.
+      if (Math.abs(dx) < 3) {
+        setCurrentLeft(dragging.origLeft);
+        setCurrentWidth(dragging.origWidth);
+        setDragging(null);
+        return;
+      }
       if (dragging.mode === "move") {
         onDragEnd(id, dragging.origLeft + dx, currentWidth);
       } else {

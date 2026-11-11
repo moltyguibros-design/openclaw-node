@@ -5,6 +5,9 @@
 set -euo pipefail
 
 API_BASE="http://localhost:3000/api"
+MC_TOKEN_FILE="${OPENCLAW_MC_TOKEN_FILE:-$HOME/.openclaw/config/mc-session-token}"
+# The token goes through a header file, never curl's argv (ps exposes argv).
+mc_curl() { curl -s -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$MC_TOKEN_FILE")") "$@"; }
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
@@ -14,7 +17,7 @@ echo
 
 # Test 1: Soul Registry
 echo "Test 1: Soul Registry"
-SOUL_COUNT=$(curl -s ${API_BASE}/souls | jq '. | length')
+SOUL_COUNT=$(mc_curl ${API_BASE}/souls | jq '. | length')
 if [[ "$SOUL_COUNT" -ge 3 ]]; then
   echo -e "${GREEN}✓ Soul registry has $SOUL_COUNT souls${NC}"
 else
@@ -26,7 +29,7 @@ fi
 echo
 echo "Test 2: Task Handoff"
 TASK_ID="TEST-$(date +%s)"
-curl -s -X POST ${API_BASE}/tasks -H "Content-Type: application/json" -d "{
+mc_curl -X POST ${API_BASE}/tasks -H "Content-Type: application/json" -d "{
   \"id\": \"$TASK_ID\",
   \"title\": \"Test handoff workflow\",
   \"status\": \"running\",
@@ -35,7 +38,7 @@ curl -s -X POST ${API_BASE}/tasks -H "Content-Type: application/json" -d "{
   \"soulId\": \"daedalus\"
 }" > /dev/null
 
-HANDOFF_RESULT=$(curl -s -X POST ${API_BASE}/tasks/${TASK_ID}/handoff \
+HANDOFF_RESULT=$(mc_curl -X POST ${API_BASE}/tasks/${TASK_ID}/handoff \
   -H "Content-Type: application/json" \
   -d '{"toSoul":"blockchain-auditor","reason":"Test handoff"}' | jq -r '.success')
 
@@ -59,7 +62,7 @@ fi
 echo
 echo "Test 3: Evolution System"
 EVENT_ID="evt_test_$(date +%s)"
-curl -s -X POST ${API_BASE}/souls/blockchain-auditor/evolution \
+mc_curl -X POST ${API_BASE}/souls/blockchain-auditor/evolution \
   -H "Content-Type: application/json" \
   -d "{
     \"eventId\": \"$EVENT_ID\",
@@ -78,7 +81,7 @@ curl -s -X POST ${API_BASE}/souls/blockchain-auditor/evolution \
     \"reviewStatus\": \"pending\"
   }" > /dev/null
 
-PENDING_COUNT=$(curl -s "${API_BASE}/souls/blockchain-auditor/evolution?status=pending" | jq '. | length')
+PENDING_COUNT=$(mc_curl "${API_BASE}/souls/blockchain-auditor/evolution?status=pending" | jq '. | length')
 if [[ "$PENDING_COUNT" -ge 1 ]]; then
   echo -e "${GREEN}✓ Evolution event created (${PENDING_COUNT} pending)${NC}"
 else
@@ -89,7 +92,7 @@ fi
 # Test 4: Evolution Approval
 echo
 echo "Test 4: Evolution Approval"
-APPROVAL_RESULT=$(curl -s -X PATCH "${API_BASE}/souls/blockchain-auditor/evolution?eventId=${EVENT_ID}" \
+APPROVAL_RESULT=$(mc_curl -X PATCH "${API_BASE}/souls/blockchain-auditor/evolution?eventId=${EVENT_ID}" \
   -H "Content-Type: application/json" \
   -d '{"action":"approve","reviewedBy":"daedalus"}' | jq -r '.success')
 

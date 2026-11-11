@@ -45,16 +45,17 @@ export const DEFAULT_TAIL_COUNT = 20;
 // ─── Checkpoint helpers ──────────────────────────────────────────────────────
 
 export function loadCheckpoint(path) {
-  if (!existsSync(path)) return { completed: [], failed: [], startedAt: null };
+  if (!existsSync(path)) return { completed: [], failed: [], attempts: {}, startedAt: null };
   try {
     const raw = JSON.parse(readFileSync(path, 'utf-8'));
     return {
       completed: raw.completed || [],
       failed: raw.failed || [],
+      attempts: raw.attempts || {},
       startedAt: raw.startedAt || null,
     };
   } catch {
-    return { completed: [], failed: [], startedAt: null };
+    return { completed: [], failed: [], attempts: {}, startedAt: null };
   }
 }
 
@@ -67,6 +68,7 @@ export function saveCheckpoint(cpPath, checkpoint) {
   atomicWriteFileSync(cpPath, JSON.stringify({
     completed: checkpoint.completed,
     failed: checkpoint.failed,
+    attempts: checkpoint.attempts || {},
     startedAt: checkpoint.startedAt,
     lastUpdated: new Date().toISOString(),
   }, null, 2) + '\n', { mkdirp: true });
@@ -112,7 +114,7 @@ export async function runExtraction(opts = {}) {
       );
       return { processed: 0, skipped: 0, failed: 0, total: 0 };
     }
-    process.stderr.write(`[extract-backfill] LLM server OK (model: ${health.model})\n`);
+    process.stderr.write(`[extract-backfill] LLM server OK (model: ${client.model})\n`);
   }
 
   // Open session store (read-only)
@@ -190,6 +192,7 @@ export async function runExtraction(opts = {}) {
 
         completedSet.add(session.id);
         checkpoint.completed.push(session.id);
+        delete checkpoint.attempts[session.id];
       } catch (err) {
         // F-N106 / F-Q303 / F-Q304 fix: classify transient vs permanent
         // failures. Old transient regex matched "fetch failed" anywhere in
@@ -225,19 +228,24 @@ export async function runExtraction(opts = {}) {
           /SQLITE_BUSY|queue full/i.test(msg)
         );
 
+        // 404: the server has no such model (unpulled/mistyped LLM_MODEL) or
+        // endpoint. Every session would fail alike, so end the run unmarked.
+        const isRunLevel = /^LLM server returned 404:/.test(msg);
+        if (isQueueShutdown || isRunLevel) {
+          process.stderr.write(
+            `[extract-backfill] STOPPING during session ${session.id}: ${isRunLevel ? msg : 'queue shutdown'}\n`
+          );
+          stopped = true;  // exit the outer loop
+          break;
+        }
+
         // Per-session attempt counter to escape sticky-transient loops.
         checkpoint.attempts = checkpoint.attempts || {};
         const attemptCount = (checkpoint.attempts[session.id] || 0) + 1;
         checkpoint.attempts[session.id] = attemptCount;
         const tooManyAttempts = attemptCount >= 5;
 
-        if (isQueueShutdown) {
-          process.stderr.write(
-            `[extract-backfill] STOPPING: queue shutdown during session ${session.id}\n`
-          );
-          stopped = true;  // exit the outer loop
-          break;
-        } else if (isTransient && !tooManyAttempts) {
+        if (isTransient && !tooManyAttempts) {
           process.stderr.write(
             `[extract-backfill] TRANSIENT (attempt ${attemptCount}): session ${session.id}: ${msg}\n`
           );
@@ -291,10 +299,18 @@ export async function runExtraction(opts = {}) {
     try {
       process.stderr.write(`[extract-backfill] refreshing graph cache...\n`);
       const { createGraphCache } = await import('../bin/obsidian-graph-cache.mjs');
-      const cache = createGraphCache();
-      await cache.refreshCache();
-      const stats = cache.getStats();
-      cache.close();
+      // refreshCache is full-replace: without the store it drops the LLM
+      // concept_edges the memory daemon merges in.
+      const edgeStore = opts.extractionStore || createExtractionStore({ dbPath: extractionDbPath });
+      const cache = createGraphCache({ extractionStore: edgeStore });
+      let stats;
+      try {
+        await cache.refreshCache();
+        stats = cache.getStats();
+      } finally {
+        cache.close();
+        if (!opts.extractionStore) edgeStore.close();
+      }
       process.stderr.write(
         `[extract-backfill] graph cache refreshed: ${stats.nodeCount} nodes, ${stats.edgeCount} edges\n`
       );

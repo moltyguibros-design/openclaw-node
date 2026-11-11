@@ -4,11 +4,16 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
-  WATCH_TARGETS, runWatch, formatHtml, STATUS,
+  WATCH_TARGETS, runWatch, formatHtml, STATUS, watchTransitions, buildSourceMap,
   parseLaunchdPrint, gradeMeshServices, gradeRequiredServices, gradeGateway, probeCoreLaunchdServices, probeMeshServices,
 } from '../lib/node-watch.mjs';
 import { resolveNodeConfig } from '../lib/node-acceptance.mjs';
+import { createRuntimeContext } from '../lib/node-acceptance-probes.mjs';
+
+const BIN = fileURLToPath(new URL('../bin/node-watch.mjs', import.meta.url));
 
 const config = resolveNodeConfig({ OPENCLAW_HOME: '/tmp/acc', OPENCLAW_NODE_ID: 'tn' });
 
@@ -240,8 +245,34 @@ describe('node-watch honesty invariants', () => {
     const probes = { 'LLM-L2-GEN': { slow: true, run: async () => ({ status: 'PASS', detail: 'ran' }) } };
     const skipped = await target('llm.local_gen').run(envFor(makeCtx(), { probes, includeHeavy: false }));
     assert.equal(skipped.status, STATUS.UNKNOWN);
+    assert.equal(skipped.notProbed, true);
     const probed = await target('llm.local_gen').run(envFor(makeCtx(), { probes, includeHeavy: true }));
     assert.equal(probed.status, STATUS.WORKING);
+    assert.equal(probed.notProbed, undefined);
+  });
+
+  it('light/deep alternation neither fabricates a BROKEN nor hides a recovery', async () => {
+    const light = await runWatch({
+      ctx: makeCtx(), config,
+      healthCheckFn: async () => ({}),
+      probes: {},
+      includeHeavy: false,
+      targets: [target('obs.links')],
+    });
+    assert.equal(light.results[0].notProbed, true);
+    const broken = { results: [{ id: 'obs.links', status: STATUS.BROKEN }] };
+    const working = { results: [{ id: 'obs.links', status: STATUS.WORKING }] };
+    let s = watchTransitions(null, broken);
+    assert.deepEqual([s.broke, s.recovered], [[], []]);
+    s = watchTransitions(s.next, light);
+    assert.equal(s.next.get('obs.links'), STATUS.BROKEN);
+    s = watchTransitions(s.next, broken);
+    assert.deepEqual(s.broke, []);
+    s = watchTransitions(s.next, light);
+    s = watchTransitions(s.next, working);
+    assert.deepEqual(s.recovered, ['obs.links']);
+    s = watchTransitions(s.next, broken);
+    assert.deepEqual(s.broke, ['obs.links']);
   });
 
   it('reused acceptance verdicts map PASS→WORKING, FAIL→BROKEN', async () => {
@@ -288,6 +319,11 @@ describe('node-watch OFF semantics (intentionally not active ≠ broken)', () =>
   it('companion-bridge is OFF when not listening (on-demand), not BROKEN', async () => {
     const ctx = makeCtx({ httpGet: async () => { throw new Error('ECONNREFUSED'); } });
     assert.equal((await target('runtime.bridge').run(envFor(ctx))).status, STATUS.OFF);
+  });
+
+  it('companion-bridge: a 5xx is BROKEN, the unrouted-root 404 is WORKING', async () => {
+    assert.equal((await target('runtime.bridge').run(envFor(makeCtx({ httpGet: async () => ({ status: 503 }) })))).status, STATUS.BROKEN);
+    assert.equal((await target('runtime.bridge').run(envFor(makeCtx({ httpGet: async () => ({ status: 404 }) })))).status, STATUS.WORKING);
   });
 
   it('federation is OFF when no identity-registry (not deployed)', async () => {
@@ -474,6 +510,39 @@ describe('node-watch observed verdicts', () => {
     assert.equal((await target('ops.roadmap').run(envFor(up))).status, STATUS.WORKING);
   });
 
+  it('quorum, bridge and viewer targets probe the endpoints the node env configures', async () => {
+    const seen = [];
+    const recording = (cfg) => makeCtx({ config: cfg, httpGet: async (u) => { seen.push(u); throw new Error('ECONNREFUSED'); } });
+    const cfg = resolveNodeConfig({ OPENCLAW_HOME: '/tmp/acc', NATS_MONITOR_URL: 'http://127.0.0.1:18222' });
+    await target('fed.cluster.quorum').run(envFor(recording(cfg)));
+    assert.deepEqual(seen, ['http://127.0.0.1:18222/jsz']);
+    const saved = { ADAPTER_PORT: process.env.ADAPTER_PORT, WORKPLAN_VIEWER_PORT: process.env.WORKPLAN_VIEWER_PORT };
+    try {
+      process.env.ADAPTER_PORT = '18787';
+      process.env.WORKPLAN_VIEWER_PORT = '17892';
+      seen.length = 0;
+      await target('runtime.bridge').run(envFor(recording(config)));
+      await target('ops.roadmap').run(envFor(recording(config)));
+      assert.deepEqual(seen, ['http://127.0.0.1:18787/', 'http://127.0.0.1:17892/api/plans']);
+    } finally {
+      for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    }
+  });
+
+  it('deploy-drift diff skips node_modules, which the deploy never syncs', async () => {
+    const saved = process.env.OPENCLAW_REPO_DIR;
+    delete process.env.OPENCLAW_REPO_DIR;
+    try {
+      let argv;
+      const ctx = makeCtx({ exec: async (cmd, a) => { argv = [cmd, ...a]; return { code: 0, stdout: '', stderr: '' }; } });
+      assert.equal((await target('fabric.deploy_drift').run(envFor(ctx))).status, STATUS.WORKING);
+      assert.deepEqual(argv.slice(0, 4), ['diff', '-rq', '-x', 'node_modules']);
+      assert.deepEqual(argv.slice(5), [config.workspaceLib]);
+    } finally {
+      if (saved !== undefined) process.env.OPENCLAW_REPO_DIR = saved;
+    }
+  });
+
   it('cloud LLM via bridge: WORKING when /health reports a served session', async () => {
     const ctx = makeCtx({ httpGet: async () => ({ status: 200, json: { status: 'ok', companion: 'http://localhost:3457', model: 'm', sessions: [{ lifetimeTurns: 5, zombieRetryCount: 0, contextTrackingHealthy: true }] } }) });
     assert.equal((await target('llm.cloud').run(envFor(ctx))).status, STATUS.WORKING);
@@ -543,6 +612,26 @@ describe('node-watch HTML dropdown view', () => {
     assert.ok(html.includes('JSON.parse'), 'embeds report data for detail rendering');
     assert.ok(html.includes('<!doctype html>'), 'self-contained page');
   });
+
+  it('detail script parses the embedded data and renders the preselected item', () => {
+    const report = {
+      ...fakeReport,
+      results: [...fakeReport.results,
+        { id: 'e', family: 'ops', label: 'L "q" </script><b>x\\y  ', signal: 's', status: 'OFF', detail: 'a\nb', evidence: '', latency_ms: 0 }],
+    };
+    const html = formatHtml(report);
+    assert.equal(html.split('</script>').length - 1, 1, 'a label cannot close the script element');
+    const body = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+    let shown = '';
+    const document = {
+      getElementById: (id) => (id === 'items'
+        ? { addEventListener() {}, value: '' }
+        : { set innerHTML(v) { shown = v; }, set textContent(_v) {} }),
+    };
+    const R = new Function('document', `${body};return R;`)(document);
+    assert.deepEqual(R, report.results);
+    assert.ok(shown.includes('Inject server'), 'the first BROKEN item is rendered');
+  });
 });
 
 describe('node-watch runner', () => {
@@ -563,6 +652,23 @@ describe('node-watch runner', () => {
     assert.equal(ctx._cleaned, true);
     // honesty: nothing WORKING beyond what was observed
     assert.ok(report.results.find((r) => r.id === 'obs.links').status !== STATUS.WORKING);
+    assert.ok(report.results.every((r) => r.code && r.source), 'every result keeps its source provenance');
+  });
+
+  it('source provenance stays resolved once a later context cannot build probes', () => {
+    const first = buildSourceMap(createRuntimeContext(config, { mutate: false }), [target('net.nats')]);
+    assert.equal(first['net.nats'].file, 'lib/node-acceptance-probes.mjs');
+    const second = buildSourceMap(makeCtx(), [target('net.nats')]);
+    assert.equal(second['net.nats'].file, 'lib/node-acceptance-probes.mjs');
+    assert.equal(second['net.nats'].code, first['net.nats'].code);
+    assert.equal(second['net.nats'].line, first['net.nats'].line);
+  });
+
+  it('a composite target that reuses a probe keeps its own provenance', () => {
+    const sm = buildSourceMap(createRuntimeContext(config, { mutate: false }), [target('ops.hyperagent'), target('net.nats')]);
+    assert.equal(sm['ops.hyperagent'].file, 'lib/node-watch.mjs');
+    assert.match(sm['ops.hyperagent'].code, /daemon-throttle\.json/);
+    assert.equal(sm['net.nats'].file, 'lib/node-acceptance-probes.mjs');
   });
 });
 
@@ -758,5 +864,18 @@ describe('mem.ingest configured-source parity', () => {
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('node-watch CLI exit contract', () => {
+  it('a bad flag exits 3 (harness error), not 1 (BROKEN)', () => {
+    const r = spawnSync(process.execPath, [BIN, '--bogus'], { encoding: 'utf8' });
+    assert.equal(r.status, 3, r.stderr);
+    assert.match(r.stderr, /Usage: node-watch\.mjs/);
+  });
+  it('an unknown --axis in --watch mode exits 3 instead of looping on tick errors', () => {
+    const r = spawnSync(process.execPath, [BIN, '--watch', '--quiet', '--axis', 'TYPO_AXIS'], { encoding: 'utf8', timeout: 10_000 });
+    assert.equal(r.status, 3, r.stderr);
+    assert.match(r.stderr, /unknown axis 'TYPO_AXIS'/);
   });
 });

@@ -12,6 +12,9 @@ SYSTEMD_DEST="${OPENCLAW_SYSTEMD_DIR:-$HOME/.config/systemd/user}"
 INSTALLED_COUNT=0
 SKIPPED_COUNT=0
 RENDER_ERRORS=0
+# The sed fallback's placeholder list. Bare envsubst also blanks systemd's own
+# runtime variables ($MAINPID in the NATS units' ExecReload).
+UNIT_VARS='${HOME} ${NODE_BIN} ${OPENCLAW_WORKSPACE} ${OPENCLAW_NATS} ${OPENCLAW_NATS_TOKEN} ${OPENCLAW_NODE_ID} ${OPENCLAW_NODE_ROLE} ${OPENCLAW_DEPLOY_TRUSTED_KEYS} ${OPENCLAW_REPO_DIR} ${NPM_BIN} ${NATS_SERVER_BIN} ${MESH_LLM_PROVIDER} ${LLM_MODEL} ${LLM_BASE_URL} ${MESH_FOREMAN_ENFORCE}'
 
 # Fail-loud render audit — a unit shipping a live ${VAR} placeholder is broken
 # by construction (the silent-unrendered class, 2026-07-11 audit).
@@ -66,7 +69,7 @@ else
       fi
 
       if command -v envsubst >/dev/null 2>&1; then
-        envsubst < "$TEMPLATE" > "$DEST"
+        envsubst "$UNIT_VARS" < "$TEMPLATE" > "$DEST"
       else
         # NOTE: sed delimiter is |. If OPENCLAW_NATS_TOKEN ever contains |
         # (unlikely — tokens are hex/base64), this substitution will break.
@@ -119,7 +122,7 @@ else
             continue
           fi
           if command -v envsubst >/dev/null 2>&1; then
-            envsubst < "$TEMPLATE" > "$DEST"
+            envsubst "$UNIT_VARS" < "$TEMPLATE" > "$DEST"
           else
             sed \
               -e "s|\${HOME}|$HOME|g" \
@@ -142,6 +145,7 @@ else
           check_rendered "$DEST"
         done
         if $ENABLE_SERVICES; then
+          run systemctl --user daemon-reload
           run systemctl --user enable "${SVC_NAME}.timer"
           run systemctl --user start "${SVC_NAME}.timer"
           info "  Installed + enabled: $SVC_NAME (timer)"
@@ -160,7 +164,7 @@ else
           continue
         fi
         if command -v envsubst >/dev/null 2>&1; then
-          envsubst < "$TEMPLATE" > "$DEST"
+          envsubst "$UNIT_VARS" < "$TEMPLATE" > "$DEST"
         else
           sed \
             -e "s|\${HOME}|$HOME|g" \
@@ -182,8 +186,10 @@ else
         fi
         check_rendered "$DEST"
         if [ "$SVC_AUTO" = "true" ] && $ENABLE_SERVICES; then
+          run systemctl --user daemon-reload
           run systemctl --user enable "${SVC_NAME}.service"
-          run systemctl --user start "${SVC_NAME}.service"
+          # start is a no-op on a running unit; restart applies the re-rendered unit and new code, as unload/load does on macOS.
+          run systemctl --user restart "${SVC_NAME}.service"
           info "  Installed + started: $SVC_NAME"
         else
           info "  Installed: $SVC_NAME"
@@ -306,7 +312,9 @@ elif [ "$OS" = "macos" ]; then
 elif [ "$OS" = "linux" ]; then
   DESKTOP_DIR="$HOME/.local/share/applications"
   run mkdir -p "$DESKTOP_DIR"
-  if command -v envsubst >/dev/null 2>&1; then
+  if $DRY_RUN; then
+    echo "  [dry-run] would install $DESKTOP_DIR/openclaw-stack.desktop"
+  elif command -v envsubst >/dev/null 2>&1; then
     NODE_BIN="$NODE_BIN" OPENCLAW_REPO_DIR="$REPO_DIR" HOME="$HOME" \
       envsubst < "$REPO_DIR/services/launcher/openclaw-stack.desktop" > "$DESKTOP_DIR/openclaw-stack.desktop"
   else

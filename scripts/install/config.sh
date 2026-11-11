@@ -35,9 +35,13 @@ if [ -f "$ENV_FILE" ]; then
     # Split only on the first '=' to preserve base64 padding etc.
     key="${line%%=*}"
     value="${line#*=}"
-    # Trim whitespace
-    key="$(echo "$key" | xargs)"
-    value="$(echo "$value" | xargs)"
+    # Trim whitespace and one pair of surrounding quotes, as mesh-deploy's
+    # renderConfigTemplate does; xargs aborted the install on a lone ' or ".
+    key="${key#"${key%%[![:space:]]*}"}"; key="${key%"${key##*[![:space:]]}"}"
+    value="${value#"${value%%[![:space:]]*}"}"; value="${value%"${value##*[![:space:]]}"}"
+    case "$value" in
+      \"*\"|\'*\') value="${value:1:${#value}-2}" ;;
+    esac
     # Only export valid variable names
     [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && export "$key=$value"
   done < "$ENV_FILE"
@@ -53,14 +57,26 @@ if [ -f "$ENV_FILE" ] && [ "$DRY_RUN" != true ] && ! grep -q '^OPENCLAW_NODE_ID=
   info "Persisted OPENCLAW_NODE_ID=$OPENCLAW_NODE_ID to $ENV_FILE (stable node identity)"
 fi
 
+# The role too: unpersisted, every --update without --role fell back to the
+# platform default (a Linux lead re-rendered as a worker), and the loop above
+# could export a file value that disagrees with the NODE_ROLE services.sh filters on.
+if [ -f "$ENV_FILE" ]; then
+  set_env_key OPENCLAW_NODE_ROLE "$NODE_ROLE"
+fi
+export OPENCLAW_NODE_ROLE="$NODE_ROLE"
+
 # Generate OPENCLAW_NATS_TOKEN if not set — server-side auth token (D2, federation step 1.1).
 # Clients already resolve+send it via lib/nats-resolve.js; this closes the server-side gap.
 if [ -z "${OPENCLAW_NATS_TOKEN:-}" ]; then
   OPENCLAW_NATS_TOKEN="$(openssl rand -hex 32)"
   export OPENCLAW_NATS_TOKEN
   if [ -f "$ENV_FILE" ]; then
-    echo "OPENCLAW_NATS_TOKEN=$OPENCLAW_NATS_TOKEN" >> "$ENV_FILE"
-    info "Generated OPENCLAW_NATS_TOKEN and persisted to $ENV_FILE"
+    if $DRY_RUN; then
+      echo "  [dry-run] would persist a generated OPENCLAW_NATS_TOKEN to $ENV_FILE"
+    else
+      echo "OPENCLAW_NATS_TOKEN=$OPENCLAW_NATS_TOKEN" >> "$ENV_FILE"
+      info "Generated OPENCLAW_NATS_TOKEN and persisted to $ENV_FILE"
+    fi
   fi
 fi
 
@@ -73,10 +89,10 @@ if [ -f "$ENV_FILE" ] && [ -n "${OPENCLAW_PROVIDER:-}" ]; then
   info "MESH_LLM_PROVIDER=$OPENCLAW_PROVIDER recorded in $ENV_FILE"
 fi
 if [ -f "$ENV_FILE" ] && ! grep -q '^LLM_MODEL=' "$ENV_FILE"; then
-  echo "LLM_MODEL=qwen3:8b" >> "$ENV_FILE"
+  set_env_key LLM_MODEL qwen3:8b
 fi
 if [ -f "$ENV_FILE" ] && ! grep -q '^LLM_BASE_URL=' "$ENV_FILE"; then
-  echo "LLM_BASE_URL=http://localhost:11434" >> "$ENV_FILE"
+  set_env_key LLM_BASE_URL http://localhost:11434
 fi
 export MESH_LLM_PROVIDER="${OPENCLAW_PROVIDER:-${MESH_LLM_PROVIDER:-}}"
 export LLM_MODEL="${LLM_MODEL:-qwen3:8b}"

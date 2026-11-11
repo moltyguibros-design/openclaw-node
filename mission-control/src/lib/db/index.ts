@@ -230,21 +230,6 @@ function runMigrations(sqlite: Database.Database) {
     sqlite.exec("ALTER TABLE tasks ADD COLUMN mesh_node TEXT");
   }
 
-  // Data migration: convert old auto_start columns to new scheduling schema
-  if (colNames.includes("auto_start")) {
-    sqlite.exec(`
-      UPDATE tasks SET
-        needs_approval = CASE WHEN auto_start = 1 THEN 0 ELSE 1 END,
-        trigger_kind = CASE
-          WHEN auto_start = 1 AND auto_start_after IS NOT NULL THEN 'at'
-          WHEN auto_start = 1 THEN 'none'
-          ELSE 'none'
-        END,
-        trigger_at = auto_start_after
-      WHERE auto_start IS NOT NULL AND needs_approval IS NULL
-    `);
-  }
-
   // Dependencies table (DAG edges)
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS dependencies (
@@ -282,6 +267,7 @@ function runMigrations(sqlite: Database.Database) {
       gate_reason TEXT,
       extraction_source TEXT,
       last_accessed TEXT,
+      valid_from TEXT DEFAULT (datetime('now')),
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -298,6 +284,22 @@ function runMigrations(sqlite: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_items_source ON memory_items(source_doc_id);
     CREATE INDEX IF NOT EXISTS idx_audit_operation ON memory_audit(operation);
   `);
+
+  // --- Temporal columns on memory_items ---
+  // Before the FTS triggers: on a legacy DB without them, the backfill UPDATE would
+  // fire memory_items_au against rows the new FTS index never held (SQLITE_CORRUPT_VTAB).
+  const itemCols = sqlite.prepare("PRAGMA table_info(memory_items)").all() as { name: string }[];
+  const itemColNames = itemCols.map((c) => c.name);
+  if (!itemColNames.includes("superseded_by")) {
+    sqlite.exec("ALTER TABLE memory_items ADD COLUMN superseded_by INTEGER");
+  }
+  if (!itemColNames.includes("valid_from")) {
+    sqlite.exec("ALTER TABLE memory_items ADD COLUMN valid_from TEXT");
+    sqlite.exec("UPDATE memory_items SET valid_from = created_at WHERE valid_from IS NULL");
+  }
+  if (!itemColNames.includes("valid_to")) {
+    sqlite.exec("ALTER TABLE memory_items ADD COLUMN valid_to TEXT");
+  }
 
   // FTS5 index for memory items (fact-level search)
   sqlite.exec(`
@@ -377,19 +379,6 @@ function runMigrations(sqlite: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_entity_items_item ON memory_entity_items(item_id);
   `);
 
-  // --- Temporal columns on memory_items ---
-  const itemCols = sqlite.prepare("PRAGMA table_info(memory_items)").all() as { name: string }[];
-  const itemColNames = itemCols.map((c) => c.name);
-  if (!itemColNames.includes("superseded_by")) {
-    sqlite.exec("ALTER TABLE memory_items ADD COLUMN superseded_by INTEGER");
-  }
-  if (!itemColNames.includes("valid_from")) {
-    sqlite.exec("ALTER TABLE memory_items ADD COLUMN valid_from TEXT DEFAULT (datetime('now'))");
-  }
-  if (!itemColNames.includes("valid_to")) {
-    sqlite.exec("ALTER TABLE memory_items ADD COLUMN valid_to TEXT");
-  }
-
   // Add cross-soul propagation columns to soul_evolution_log if missing
   const evolCols = sqlite.prepare("PRAGMA table_info(soul_evolution_log)").all() as { name: string }[];
   const evolColNames = evolCols.map((c) => c.name);
@@ -451,10 +440,10 @@ function runMigrations(sqlite: Database.Database) {
   const cmCols = sqlite.prepare("PRAGMA table_info(cluster_members)").all() as Array<{ name: string }>;
   const cmColNames = cmCols.map((c) => c.name);
   if (!cmColNames.includes("created_at")) {
-    sqlite.exec("ALTER TABLE cluster_members ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now'))");
-    if (cmColNames.includes("joined_at")) {
-      sqlite.exec("UPDATE cluster_members SET created_at = joined_at WHERE joined_at IS NOT NULL");
-    }
+    sqlite.exec("ALTER TABLE cluster_members ADD COLUMN created_at TEXT NOT NULL DEFAULT ''");
+    sqlite.exec(cmColNames.includes("joined_at")
+      ? "UPDATE cluster_members SET created_at = COALESCE(joined_at, datetime('now'))"
+      : "UPDATE cluster_members SET created_at = datetime('now')");
   }
 
   // Normalize: set execution='local' for pre-existing rows where it's NULL
@@ -506,12 +495,16 @@ function runMigrations(sqlite: Database.Database) {
         meta TEXT,
         created_at TEXT DEFAULT (datetime('now'))
       );
-      CREATE INDEX IF NOT EXISTS idx_obs_timestamp ON observability_events(timestamp DESC);
-      CREATE INDEX IF NOT EXISTS idx_obs_module ON observability_events(module);
-      CREATE INDEX IF NOT EXISTS idx_obs_node ON observability_events(node_id);
-      CREATE INDEX IF NOT EXISTS idx_obs_category ON observability_events(category);
     `);
   }
+  // Outside the table-absent branch: lib/obs-db.js creates the table without indexes
+  // when a traced daemon opens this DB before Mission Control first migrates.
+  sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS idx_obs_timestamp ON observability_events(timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_obs_module ON observability_events(module);
+    CREATE INDEX IF NOT EXISTS idx_obs_node ON observability_events(node_id);
+    CREATE INDEX IF NOT EXISTS idx_obs_category ON observability_events(category);
+  `);
 
   // Cleanup: delete observability events older than 24h
   // Wrapped in recovery — this is the most likely corruption point (heavy writes + index use)

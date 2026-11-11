@@ -23,31 +23,34 @@ node --test test/mesh-plans.test.js
 
 - **Root tests** (`test/`): Node.js built-in test runner (`node:test`) + `assert/strict`
 - **Mission Control** (`mission-control/src/lib/__tests__/`): Vitest + `expect`
-- No external test dependencies for root tests — zero install, runs everywhere Node 18+ is available
+- No external test dependencies for root tests — runs on the CI matrix (Node 20 and 22)
 
 ## Root Tests (`test/`)
 
+The tables list representative files, not the whole suite: `test/*.test.*` and
+`mission-control/src/lib/__tests__/*.test.ts` are the full set.
+
 ### Unit Tests
 
-| File | Module | Tests | What it covers |
-|------|--------|-------|----------------|
-| `mesh-plans.test.js` | `lib/mesh-plans.js` | 32 | Plan creation, wave computation (DAG), delegation routing decision tree, PlanStore CRUD + lifecycle |
-| `mesh-registry.test.js` | `lib/mesh-registry.js` | 9 | Tool registration to KV, NATS subscriptions, listTools, shutdown cleanup, remote call |
-| `nats-resolve.test.js` | `lib/nats-resolve.js` | 10 | 4-step URL/token resolution chain (env var, openclaw.env, .mesh-config, fallback), natsConnectOpts |
-| `agent-activity.test.js` | `lib/agent-activity.js` | 16 | Path encoding, JSONL session file discovery, activity state detection, cost/summary extraction |
-| `memory-budget.test.mjs` | `lib/memory-budget.mjs` | 19 | Freeze/thaw lifecycle, character budget enforcement, trimming, event emission, stats |
-| `kanban-io.test.js` | `lib/kanban-io.js` | 13 | Markdown task parsing, field updates, file locking |
-| `llm-providers.test.js` | `lib/llm-providers.js` | 15 | Provider factory, arg building, env cleaning |
-| `mesh-harness.test.js` | `lib/mesh-harness.js` | 10+ | Rule loading by scope, output scanning, enforcement |
-| `mesh-tasks-status.test.js` | `lib/mesh-tasks.js` | 7 | Task status enum, createTask defaults |
-| `collab-unit.test.js` | `lib/mesh-collab.js` | 30 | Session lifecycle, dead node handling, convergence (unanimous/majority/quorum), turn advancement |
-| `collab-circling.test.js` | `lib/mesh-collab.js` | 25+ | Circling strategy mode, artifact management, phase transitions |
-| `hyperagent-store.test.js` | `lib/hyperagent-store.mjs` | 28 | Store operations, strategy persistence, reflection lifecycle |
-| `plan-templates.test.js` | `lib/plan-templates.js` | 10+ | Template definitions, variable substitution |
-| `role-loader.test.js` | `lib/role-loader.js` | 20+ | YAML parsing, role finding, validation, forbidden patterns |
-| `rule-loader.test.js` | `lib/rule-loader.js` | 15+ | Frontmatter parsing, glob matching, rule priority sorting |
-| `field-roundtrip.test.js` | Field serialization | 5 | Serialize/parse round-trip for task fields |
-| `regression-bugs.test.js` | Various | 11 | Regression suite for previously fixed bugs |
+| File | Module | What it covers |
+|------|--------|----------------|
+| `mesh-plans.test.js` | `lib/mesh-plans.js` | Plan creation, wave computation (DAG), delegation routing decision tree, PlanStore CRUD + lifecycle |
+| `mesh-registry.test.js` | `lib/mesh-registry.js` | Tool registration to KV, NATS subscriptions, listTools, shutdown cleanup, remote call |
+| `nats-resolve.test.js` | `lib/nats-resolve.js` | 4-step URL/token resolution chain (env var, openclaw.env, .mesh-config, fallback), natsConnectOpts |
+| `agent-activity.test.js` | `lib/agent-activity.js` | Path encoding, JSONL session file discovery, activity state detection, cost/summary extraction |
+| `memory-budget.test.mjs` | `lib/memory-budget.mjs` | Freeze/thaw lifecycle, character budget enforcement, trimming, event emission, stats |
+| `kanban-io.test.js` | `lib/kanban-io.js` | Markdown task parsing, field updates, file locking |
+| `llm-providers.test.js` | `lib/llm-providers.js` | Provider factory, arg building, env cleaning |
+| `mesh-harness.test.js` | `lib/mesh-harness.js` | Rule loading by scope, output scanning, enforcement |
+| `mesh-tasks-status.test.js` | `lib/mesh-tasks.js` | Task status enum, createTask defaults |
+| `collab-unit.test.js` | `lib/mesh-collab.js` | Session lifecycle, dead node handling, convergence (unanimous/majority/quorum), turn advancement |
+| `collab-circling.test.js` | `lib/mesh-collab.js` | Circling strategy mode, artifact management, phase transitions |
+| `hyperagent-store.test.js` | `lib/hyperagent-store.mjs` | Store operations, strategy persistence, reflection lifecycle |
+| `plan-templates.test.js` | `lib/plan-templates.js` | Template definitions, variable substitution |
+| `role-loader.test.js` | `lib/role-loader.js` | YAML parsing, role finding, validation, forbidden patterns |
+| `rule-loader.test.js` | `lib/rule-loader.js` | Frontmatter parsing, glob matching, rule priority sorting |
+| `field-roundtrip.test.js` | Field serialization | Serialize/parse round-trip for task fields |
+| `regression-bugs.test.js` | Various | Regression suite for previously fixed bugs |
 
 ### Integration Tests (require NATS)
 
@@ -61,14 +64,14 @@ node --test test/mesh-plans.test.js
 
 ## Mission Control Tests (`mission-control/src/lib/__tests__/`)
 
-| File | Module | Tests | What it covers |
-|------|--------|-------|----------------|
-| `wikilinks.test.ts` | `memory/wikilinks.ts` | 18 | `[[wikilink]]` extraction, task ID extraction, file ref extraction, resolution maps, cross-reference dedup |
-| `daily-log.test.ts` | `parsers/daily-log.ts` | 9 | Date extraction from filename, H1 title fallback, directory listing, chronological sort |
-| `memory-md.test.ts` | `parsers/memory-md.ts` | 8 | H1 title extraction, `##` section parsing state machine, empty sections, full content preservation |
-| `task-markdown.test.ts` | `parsers/task-markdown.ts` | 25 | Task YAML parsing, status mapping, mesh fields, collaboration fields, serialization round-trip |
-| `status-kanban.test.ts` | `parsers/task-markdown.ts` | 8 | Status-to-kanban mapping, kanban-to-status reverse mapping |
-| `mesh-kv-sync.test.ts` | `sync/mesh-kv.ts` | 20 | KV-to-DB sync, CAS writes, watcher notifications, conflict resolution |
+| File | Module | What it covers |
+|------|--------|----------------|
+| `wikilinks.test.ts` | `memory/wikilinks.ts` | `[[wikilink]]` extraction, task ID extraction, file ref extraction, resolution maps, cross-reference dedup |
+| `daily-log.test.ts` | `parsers/daily-log.ts` | Date extraction from filename, H1 title fallback, directory listing, chronological sort |
+| `memory-md.test.ts` | `parsers/memory-md.ts` | H1 title extraction, `##` section parsing state machine, empty sections, full content preservation |
+| `task-markdown.test.ts` | `parsers/task-markdown.ts` | Task YAML parsing, status mapping, mesh fields, collaboration fields, serialization round-trip |
+| `status-kanban.test.ts` | `parsers/task-markdown.ts` | Status-to-kanban mapping, kanban-to-status reverse mapping |
+| `mesh-kv-sync.test.ts` | `sync/mesh-kv.ts` | KV-to-DB sync, CAS writes, watcher notifications, conflict resolution |
 
 ## Mock Patterns
 
@@ -163,24 +166,18 @@ Run: `cd mission-control && npx vitest run src/lib/__tests__/my-module.test.ts`
 ## CI
 
 GitHub Actions runs on every push/PR to `main`:
-- Root unit tests on Node 18, 20, 22
+- Root unit tests on Node 20, 22
 - MC tests on Node 22
 
 See `.github/workflows/test.yml`.
 
 ## Coverage Gaps (known)
 
-These modules have no direct unit tests. Integration tests cover some indirectly.
+These modules have no direct unit tests, or only for one helper. Integration tests cover some indirectly.
 
 | Module | Reason |
 |--------|--------|
-| `bin/mesh-task-daemon.js` | 1948 LOC daemon — too coupled to NATS for unit tests. Covered by `distributed-mc.test.js` |
-| `bin/mesh-agent.js` | 1648 LOC agent wrapper — tested via `collab-agent-lifecycle.test.js` |
-| `bin/mesh-bridge.js` | Bidirectional sync — needs live NATS |
-| `lib/session-store.mjs` | Session persistence — needs filesystem integration tests |
-| `lib/transcript-parser.mjs` | JSONL parsing — needs fixture files |
-| `lib/pre-compression-flush.mjs` | Compression pipeline — needs fixture files |
 | `mission-control/.../memory/entities.ts` | NLP-like entity extraction |
-| `mission-control/.../memory/extract.ts` | Heuristic-based fact extraction |
+| `mission-control/.../memory/extract.ts` | Heuristic-based fact extraction (only `getItemsWithSource` is unit-tested) |
 | `mission-control/.../scheduler.ts` | Cron evaluation, timezone handling |
-| `mission-control/.../hooks.ts` | 845 LOC lifecycle hooks |
+| `mission-control/.../hooks.ts` | Lifecycle hooks (only `memoryContentKey` is unit-tested) |

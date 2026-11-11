@@ -15,6 +15,7 @@ TPL="$REPO/memory-plan/canonical/templates"
 ID="${1:-}"
 GOAL="${2:-<one-line goal — fill me in>}"
 [[ "$ID" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "usage: new-plan.sh <kebab-case-id> [\"one-line goal\"]" >&2; exit 1; }
+[[ "$ID" != plan ]] || { echo "refusing: id 'plan' would make the engine plan-tick.sh its own tick shim" >&2; exit 1; }
 [[ -d "$TPL" ]] || { echo "no templates dir: $TPL" >&2; exit 1; }
 
 PLAN="$REPO/memory-plan/plans/$ID"
@@ -23,14 +24,19 @@ PLAN="$REPO/memory-plan/plans/$ID"
 DATE="$(date '+%Y-%m-%d')"
 mkdir -p "$PLAN/audits" "$PLAN/tick-logs"
 
+sed_escape() { printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'; }
+GOAL_ESC="$(sed_escape "$GOAL")"
+REPO_ESC="$(sed_escape "$REPO")"
+HOME_ESC="$(sed_escape "$HOME")"
+
 for t in "$TPL"/*.template.*; do
   name="$(basename "$t")"
   dest="${name/.template/}"
   sed -e "s|{{PLAN_ID}}|$ID|g" \
-      -e "s|{{GOAL}}|$GOAL|g" \
+      -e "s|{{GOAL}}|$GOAL_ESC|g" \
       -e "s|{{DATE}}|$DATE|g" \
-      -e "s|{{REPO}}|$REPO|g" \
-      -e "s|{{HOME}}|$HOME|g" \
+      -e "s|{{REPO}}|$REPO_ESC|g" \
+      -e "s|{{HOME}}|$HOME_ESC|g" \
       "$t" > "$PLAN/$dest"
   echo "scaffolded plans/$ID/$dest"
 done

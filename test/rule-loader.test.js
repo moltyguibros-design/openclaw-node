@@ -239,6 +239,18 @@ describe('formatRulesForPrompt', () => {
     assert.ok(output.includes('truncated'));
     assert.ok(!output.includes('### short'));
   });
+
+  it('reports how many rules were left out after some were included', () => {
+    const rules = [
+      { id: 'kept', tier: 'universal', body: 'short' },
+      { id: 'long', tier: 'universal', body: 'x'.repeat(MAX_RULES_CHARS) },
+      { id: 'after', tier: 'universal', body: 'hello' },
+    ];
+
+    const output = formatRulesForPrompt(rules);
+    assert.ok(output.includes('### kept'));
+    assert.match(output, /_\[2 more rules truncated/);
+  });
 });
 
 // ── detectFrameworks ──────────────────────────────

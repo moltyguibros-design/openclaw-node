@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
 import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -430,5 +432,27 @@ console.log('LOCAL_COMPLETION '+result.ok);`;
     assert.equal(result.skipped, true);
     assert.ok(result.reason.includes('extraction'));
     assert.ok(logs.some(l => l.includes('skipping')));
+  });
+
+  it('CLI --daemon stays up without NATS until SIGTERM', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'consolidation-daemon-'));
+    const child = spawn(process.execPath, [
+      fileURLToPath(new URL('../bin/consolidation-scheduler.mjs', import.meta.url)),
+      '--daemon', '--no-events', '--interval', '3600000',
+    ], { stdio: 'ignore', env: { ...process.env, HOME: dir } });
+    const exited = once(child, 'exit');
+    try {
+      const early = await Promise.race([
+        exited.then(() => 'exited'),
+        new Promise(r => setTimeout(() => r('alive'), 1000)),
+      ]);
+      assert.equal(early, 'alive', `daemon exited early with code ${child.exitCode}`);
+      child.kill('SIGTERM');
+      const [code] = await exited;
+      assert.equal(code, 0);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

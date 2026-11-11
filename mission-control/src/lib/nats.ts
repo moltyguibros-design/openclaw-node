@@ -1,8 +1,5 @@
 import { connect, NatsConnection, StringCodec, type KV } from "nats";
-import { readFileSync, existsSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
-import { natsAuthOptions, resolveNatsAuthMode } from "./nats-auth";
+import { natsAuthOptions, resolveEnvKey, resolveNatsAuthMode } from "./nats-auth";
 
 // ── Singleton state (globalThis survives Next.js hot-reload) ─────────────
 // In dev mode, Turbopack re-evaluates modules on change, wiping module-level
@@ -24,45 +21,19 @@ const CONNECT_TIMEOUT_MS = 10_000;
 const NATS_FALLBACK = "nats://127.0.0.1:4222";
 
 /**
- * Resolve NATS URL using the same 3-step chain as mesh.js and agent.js:
- *   1. $OPENCLAW_NATS env var (set by launchd/systemd service definitions)
- *   2. ~/.openclaw/openclaw.env file (user-editable, persists across sessions)
- *   3. Hardcoded IP fallback (not hostname — MagicDNS is unreliable)
+ * env → $OPENCLAW_HOME/openclaw.env → fixed IP (not a hostname: MagicDNS is unreliable).
+ * Same resolver as the auth mode (nats-auth.ts), so URL, token and mode always come from one file.
  */
 function resolveNatsUrl(): string {
-  if (process.env.OPENCLAW_NATS) return process.env.OPENCLAW_NATS;
-  try {
-    const envFile = join(homedir(), ".openclaw", "openclaw.env");
-    if (existsSync(envFile)) {
-      const content = readFileSync(envFile, "utf8");
-      const match = content.match(/^\s*OPENCLAW_NATS\s*=\s*(.+)/m);
-      if (match && match[1].trim()) return match[1].trim();
-    }
-  } catch {
-    // File unreadable — fall through
-  }
-  return NATS_FALLBACK;
+  return resolveEnvKey("OPENCLAW_NATS") || NATS_FALLBACK;
 }
 
 /**
- * Resolve the NATS auth token using the same chain (env → openclaw.env → none).
- * Returns null when no token is configured (auth disabled — backward compatible).
- * Without this, MC connects tokenless and an authenticated bus rejects it with an
- * Authorization Violation, so every KV read silently returns natsAvailable:false.
+ * Null when no token is configured (auth disabled). Without it, an authenticated bus
+ * rejects MC with an Authorization Violation and every KV read returns natsAvailable:false.
  */
 function resolveNatsToken(): string | null {
-  if (process.env.OPENCLAW_NATS_TOKEN) return process.env.OPENCLAW_NATS_TOKEN;
-  try {
-    const envFile = join(homedir(), ".openclaw", "openclaw.env");
-    if (existsSync(envFile)) {
-      const content = readFileSync(envFile, "utf8");
-      const match = content.match(/^\s*OPENCLAW_NATS_TOKEN\s*=\s*(.+)/m);
-      if (match && match[1].trim()) return match[1].trim();
-    }
-  } catch {
-    // File unreadable — fall through
-  }
-  return null;
+  return resolveEnvKey("OPENCLAW_NATS_TOKEN");
 }
 
 const NATS_URL = resolveNatsUrl();

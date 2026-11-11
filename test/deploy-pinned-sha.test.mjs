@@ -513,3 +513,20 @@ describe('a deploy installs the commit, never the working tree', () => {
     assert.equal(read(fx.rt('openclaw/bin/mesh-agent.js')), '// agent v1\n');
   });
 });
+
+describe('--dry-run writes nothing into the workspace', () => {
+  let fx, run;
+  before(() => {
+    fx = makeNode('dry-run', { 'workspace-docs/SOUL.md': '# soul v0\n' });
+    write(fx.home, '.openclaw/workspace/SOUL.md', '# soul, edited on this node\n');
+    const S1 = fx.commit('v1', { 'workspace-docs/SOUL.md': '# soul v1\n' });
+    run = fx.deploy(['--from', fx.S0, '--to', S1, '--dry-run']);
+  });
+
+  it('reports the local edit without saving a .repo copy', () => {
+    ranOk(run);
+    assert.match(run.stdout, /SOUL\.md differs from repo version/);
+    assert.ok(!fs.existsSync(fx.rt('.openclaw/workspace/SOUL.md.repo')));
+    assert.equal(read(fx.rt('.openclaw/workspace/SOUL.md')), '# soul, edited on this node\n');
+  });
+});

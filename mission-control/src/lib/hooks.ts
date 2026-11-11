@@ -1,7 +1,15 @@
 import useSWR, { mutate } from "swr";
 import { useEffect, useRef } from "react";
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+// SWR sets `error` only when the fetcher throws; API routes answer failures with a JSON {error} body.
+export async function fetcher(url: string) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `HTTP ${res.status}`);
+  }
+  return res.json();
+}
 
 export interface Task {
   id: string;
@@ -89,7 +97,7 @@ export async function createTask(task: {
   title: string;
   status?: string;
   owner?: string;
-  nextAction?: string;
+  next_action?: string;
   scheduled_date?: string;
   project?: string;
   [key: string]: unknown;
@@ -694,6 +702,7 @@ export async function interveneSession(params: {
   const data = await res.json();
   await mutate("/api/cowork/sessions");
   await mutate("/api/tasks");
+  if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
   return data;
 }
 
@@ -946,13 +955,18 @@ export interface MemoryEntity { name: string; type: string; mention_count: numbe
 export interface MemoryDecision { decision: string; rationale: string; confidence: number; session_id: string; created_at: string; }
 export interface MemoryTheme { label: string; hierarchy: string[]; mention_count: number; last_seen: string; }
 
-export function useMemoryContent(q?: string, session?: string) {
+export function memoryContentKey(q?: string, session?: string): string | null {
+  // repair 6.4: a session-less watcher panel (q undefined) fetches nothing;
+  // the /memory-content page's q="" is the unscoped top-N view and must fetch.
+  if (q === undefined && !session) return null;
   const params = new URLSearchParams();
   if (q) params.set("q", q);
   if (session) params.set("session", session);
-  // repair 6.4: no scope -> no fetch. Session-less detail panels were
-  // pulling the full top-50 content every 10s and never rendering it.
-  const key = q || session ? `/api/memory-content?${params.toString()}` : null;
+  return `/api/memory-content?${params.toString()}`;
+}
+
+export function useMemoryContent(q?: string, session?: string) {
+  const key = memoryContentKey(q, session);
   const { data, error, isLoading } = useSWR<{
     entities: MemoryEntity[];
     decisions: MemoryDecision[];

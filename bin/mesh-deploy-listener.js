@@ -100,8 +100,13 @@ function writeDeployMarker(marker) {
  *   - latest already failed `maxAttempts` times here → no (operator's turn).
  *   - latest was skipped here (not for this role, or catch-up would have
  *     moved the tree backward) → no.
+ *   - latest was a targeted deploy whose `nodes` name neither this node nor
+ *     'all' → no.
  */
-function shouldCatchUp({ currentSha, latestSha, lastDeploy, maxAttempts = MAX_DEPLOY_ATTEMPTS }) {
+function shouldCatchUp({ currentSha, latestSha, lastDeploy, maxAttempts = MAX_DEPLOY_ATTEMPTS, targetNodes, nodeId }) {
+  if (Array.isArray(targetNodes) && !targetNodes.includes('all') && !targetNodes.includes(nodeId)) {
+    return { deploy: false, reason: `latest ${latestSha} targets ${targetNodes.join(', ')}, not this node` };
+  }
   const same = (a, b) => !!a && !!b && (a.startsWith(b) || b.startsWith(a));
   const lastForLatest = lastDeploy && same(lastDeploy.sha, latestSha) ? lastDeploy : null;
   if (lastForLatest && lastForLatest.status === 'failed' && (lastForLatest.attempts || 0) >= maxAttempts) {
@@ -413,7 +418,7 @@ async function checkAndCatchUp(resultsKv, nodesKv) {
     // P4-9: "HEAD == latest" is not "deployed" — a merged-but-failed deploy
     // leaves the tree there too. The local marker breaks the tie, and caps
     // automatic retries of a sha that keeps failing on this node.
-    const verdict = shouldCatchUp({ currentSha, latestSha: sha, lastDeploy: readDeployMarker() });
+    const verdict = shouldCatchUp({ currentSha, latestSha: sha, lastDeploy: readDeployMarker(), targetNodes: marker.nodes, nodeId: NODE_ID });
     console.log(`[deploy-listener] Catch-up: ${verdict.reason}`);
     if (verdict.deploy) {
       await executeDeploy(
@@ -473,9 +478,10 @@ async function main() {
   console.log(`[deploy-listener] Listening on mesh.deploy.trigger`);
 
   // C2 fix (deep review 2026-07-03): authenticate the trigger before running
-  // `git reset --hard` + deploy. Opt-in via OPENCLAW_REQUIRE_SIGNED_DEPLOY=1
-  // (+ OPENCLAW_DEPLOY_TRUSTED_KEYS); default off preserves current behavior
-  // but warns on unsigned triggers. ESM helper loaded dynamically (this is CJS).
+  // `git reset --hard` + deploy. Strict by default: the signer must be in
+  // OPENCLAW_DEPLOY_TRUSTED_KEYS (none configured = every trigger rejected); only
+  // OPENCLAW_REQUIRE_SIGNED_DEPLOY=0 accepts unsigned triggers, with a warning.
+  // ESM helper loaded dynamically (this is CJS).
   const { verifyDeployTrigger } = await import('../lib/deploy-trigger-auth.mjs');
 
   (async () => {

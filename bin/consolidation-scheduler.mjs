@@ -12,10 +12,10 @@
  *   - Standalone: reads the daemon's fresh exported queue-state snapshot
  *
  * Usage:
- *   node bin/consolidation-scheduler.mjs [--db <path>] [--vault-path <path>] [--interval <ms>]
+ *   node bin/consolidation-scheduler.mjs [--db <path>] [--vault-path <path>] [--interval <ms>] [--daemon] [--no-events]
  */
 
-import os from 'os';
+import { resolveNodeId } from '../lib/node-id.js';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
@@ -197,6 +197,7 @@ export async function runScheduledCycle(opts = {}) {
  * @param {number} [opts.hardCapMs]
  * @param {(msg: string) => void} [opts.log] — logger
  * @param {(opts: object) => Promise<object>} [opts.runCycle] — injectable cycle function (for testing)
+ * @param {boolean} [opts.keepAlive] — keep the interval ref'd (CLI --daemon; NATS may be absent)
  * @returns {{ start: () => void, stop: () => Promise<void>, runOnce: () => Promise<object> }}
  */
 export function createConsolidationScheduler(opts = {}) {
@@ -259,8 +260,9 @@ export function createConsolidationScheduler(opts = {}) {
     timer = setInterval(() => {
       runOnce().catch(err => log(`[consolidation-scheduler] error: ${err.message}`));
     }, intervalMs);
-    // Unref so the timer doesn't prevent process exit
-    if (timer.unref) timer.unref();
+    // Embedded in the memory daemon the timer must not hold the process open;
+    // the CLI --daemon has nothing else holding it when NATS is absent.
+    if (!opts.keepAlive) timer.unref();
   }
 
   async function stop() {
@@ -287,9 +289,9 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
   const noEvents = args.includes('--no-events');
 
   const natsUrl = process.env.NATS_URL || undefined; // URL override only; resolver supplies URL + credentials
-  const nodeId = process.env.OPENCLAW_NODE_ID || os.hostname();
+  const nodeId = resolveNodeId();
 
-  const cliOpts = { nodeId };
+  const cliOpts = { nodeId, keepAlive: daemon };
   if (dbIdx !== -1 && args[dbIdx + 1]) cliOpts.dbPath = args[dbIdx + 1];
   if (vaultIdx !== -1 && args[vaultIdx + 1]) cliOpts.vaultPath = args[vaultIdx + 1];
   if (intervalIdx !== -1 && args[intervalIdx + 1]) cliOpts.intervalMs = Number(args[intervalIdx + 1]);

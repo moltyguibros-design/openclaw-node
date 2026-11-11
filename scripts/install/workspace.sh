@@ -62,13 +62,15 @@ run rsync -av --exclude='*.bak' --exclude='*.bak.*' --exclude='routing-eval-test
 # these live in repo bin/ (not workspace-bin/) and must land at that path too.
 # openclaw-notify.mjs rides along: the viewer, the notify shim, and node-watch
 # all resolve it next to themselves (or at ../bin/) in the deployed tree.
+# consolidate.mjs (consolidation-scheduler's import) and memory-subscriber.mjs +
+# memory-promoter.mjs (the daemon's federation import) are siblings they load at runtime.
 # -ef guard: when the workspace copy is a symlink/same inode as the repo file
 # (live-dev setups), macOS cp exits 1 ("are identical") and set -e kills the
 # install (observed 2026-07-14 on the VM). Same file = already deployed = skip.
 for _wsbin in node-watch.mjs node-acceptance.mjs openclaw-notify.mjs \
               obsidian-graph-cache.mjs observer.mjs consolidation-scheduler.mjs \
-              hyperagent.mjs embed-probe.mjs scheduler-heartbeat.mjs \
-              nats-legacy-lock.py; do
+              consolidate.mjs hyperagent.mjs embed-probe.mjs scheduler-heartbeat.mjs \
+              memory-subscriber.mjs memory-promoter.mjs nats-legacy-lock.py; do
   if [ ! "$REPO_DIR/bin/$_wsbin" -ef "$WORKSPACE/bin/$_wsbin" ]; then
     run cp "$REPO_DIR/bin/$_wsbin" "$WORKSPACE/bin/$_wsbin"
   fi
@@ -186,7 +188,10 @@ done
 
 step "Step 5: Soul Definitions"
 
-run rsync -av "$REPO_DIR/souls/" "$OPENCLAW_ROOT/souls/"
+# Evolved genes and evolution events are learned on the node; the repo copy only seeds a
+# soul that has none (the same contract as mesh-deploy's souls seedOnly).
+run rsync -av --exclude='/*/evolution/genes.json' --exclude='/*/evolution/events.jsonl' "$REPO_DIR/souls/" "$OPENCLAW_ROOT/souls/"
+run rsync -a --ignore-existing "$REPO_DIR/souls/" "$OPENCLAW_ROOT/souls/"
 info "Souls installed to $OPENCLAW_ROOT/souls/"
 
 # ============================================================
@@ -195,8 +200,11 @@ info "Souls installed to $OPENCLAW_ROOT/souls/"
 
 step "Step 6: Skills"
 
-run rsync -av --exclude='dist/' --exclude='scripts/' "$REPO_DIR/skills/" "$WORKSPACE/skills/"
-info "Skills installed to $WORKSPACE/skills/ ($(ls -d "$REPO_DIR/skills"/*/ 2>/dev/null | grep -v dist | grep -v scripts | wc -l | tr -d ' ') skills)"
+# Leading "/" anchors each exclude to skills/ itself: unanchored, 'scripts/' also dropped
+# every skill's own scripts/ dir. _quarantine never ships (skills/_quarantine/README.md),
+# matching mesh-deploy's skills component.
+run rsync -av --exclude='/dist/' --exclude='/scripts/' --exclude='/_quarantine/' "$REPO_DIR/skills/" "$WORKSPACE/skills/"
+info "Skills installed to $WORKSPACE/skills/ ($(ls -d "$REPO_DIR/skills"/*/ 2>/dev/null | grep -Ev '/(dist|scripts|_quarantine)/$' | wc -l | tr -d ' ') skills)"
 
 # Install skill-specific dependencies (npm/pip where needed)
 if $SANDBOX; then

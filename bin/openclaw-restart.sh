@@ -30,8 +30,10 @@ status_launchd() {
   local label="$1"
   if launchctl list "$label" >/dev/null 2>&1; then
     local pid
-    pid=$(launchctl list "$label" 2>/dev/null | tail -1 | awk '{print $1}')
-    if [ "$pid" != "-" ] && [ -n "$pid" ]; then
+    # `launchctl list <label>` prints a dict, not the table row; the PID line is
+    # absent when the job is not running.
+    pid=$(launchctl list "$label" 2>/dev/null | sed -n 's/.*"PID"[[:space:]]*=[[:space:]]*\([0-9][0-9]*\);.*/\1/p')
+    if [ -n "$pid" ]; then
       echo "running (pid=$pid)"
     else
       echo "registered (not running)"

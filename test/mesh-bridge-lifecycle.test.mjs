@@ -12,6 +12,7 @@ import { freePort, natsServerBin, startNatsServer } from './helpers/nats-server.
 
 const require = createRequire(import.meta.url);
 const { connect } = require('nats');
+const { parseTasks } = require('../lib/kanban-io');
 const entry = process.env.BRIDGE_TEST_ENTRY || fileURLToPath(new URL('../bin/mesh-bridge.js', import.meta.url));
 const skip = natsServerBin() ? false : 'nats-server not found on PATH';
 const livePorts = [4222, 4223, 4224, 6222, 6223, 6224, 8222, 8223, 8224];
@@ -41,7 +42,7 @@ async function exited(bridge, timeoutMs = 10_000) {
   return bridge.result;
 }
 
-async function fixture(t, interval = 100, requestMux = false) {
+async function fixture(t, interval = 100, requestMux = false, owner = 'mesh') {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mesh-bridge-drain-'));
   const children = [];
   let nc;
@@ -56,7 +57,7 @@ async function fixture(t, interval = 100, requestMux = false) {
   await fs.mkdir(memory, { recursive: true, mode: 0o700 });
   const kanban = path.join(memory, 'active-tasks.md');
   const original = requestMux
-    ? '# Owned fixture\n\n## Live Tasks\n\n- task_id: owned-missing-card\n  title: Owned stale running card\n  status: running\n  execution: mesh\n  owner: mesh\n'
+    ? `# Owned fixture\n\n## Live Tasks\n\n- task_id: owned-missing-card\n  title: Owned stale running card\n  status: running\n  execution: mesh\n  owner: ${owner}\n`
     : '# Owned fixture\n\n## Live Tasks\n\n- task_id: owned-local-card\n  title: Preserve this local card\n  status: waiting-user\n  execution: local\n';
   await fs.writeFile(kanban, original, { mode: 0o600 });
   const port = await freePort();
@@ -112,7 +113,7 @@ async function fixture(t, interval = 100, requestMux = false) {
     assert.ok(bridge.output.includes('RECONCILE: done. Tracking 0 in-flight task(s)'), bridge.output);
   } else assert.ok(bridge.output.includes('RECONCILE: no orphaned mesh tasks found'), bridge.output);
   const assertKanban = async () => assert.equal(await fs.readFile(kanban, 'utf8'), original);
-  return { bridge, server, assertKanban };
+  return { bridge, server, assertKanban, kanban, bus: { servers: env.OPENCLAW_NATS, token } };
 }
 
 for (const signal of ['SIGTERM', 'SIGINT']) {
@@ -181,6 +182,36 @@ test('bridge planned drain closes its prior request subscription normally', { sk
   bridge.proc.kill('SIGTERM');
   assert.deepEqual(await exited(bridge), { code: 0, signal: null }, bridge.output);
   assert.equal((bridge.output.match(/Bridge stopped\./g) || []).length, 1);
+  await assertKanban();
+});
+
+test('bridge materializes a plan subtask unquoted, with its description intact', { skip, timeout: 20_000 }, async (t) => {
+  const { bridge, kanban, bus } = await fixture(t);
+  const nc = await connect({ ...bus, maxReconnectAttempts: 0 });
+  try {
+    nc.publish('mesh.events.plan.wave_started', Buffer.from(JSON.stringify({
+      event: 'plan.wave_started',
+      plan: { plan_id: 'p1', subtasks: [{ subtask_id: 'p1-s1', title: 'Sub', status: 'queued', delegation: { mode: 'local' }, description: 'say "hi"\nnext', budget_minutes: 5 }] },
+    })));
+    await nc.flush();
+  } finally {
+    await nc.close();
+  }
+  await until(async () => (await fs.readFile(kanban, 'utf8')).includes('p1-s1'));
+  const tasks = parseTasks(await fs.readFile(kanban, 'utf8'));
+  assert.deepEqual(tasks.map(x => x.task_id), ['owned-local-card', 'p1-s1']);
+  const sub = tasks[1];
+  assert.equal(sub.next_action, 'Plan subtask (local)');
+  assert.ok(sub.description.startsWith('say "hi"\nnext'), sub.description);
+  assert.ok(!sub.description.includes('\\"'), sub.description);
+  bridge.proc.kill('SIGTERM');
+  assert.deepEqual(await exited(bridge), { code: 0, signal: null }, bridge.output);
+});
+
+test('bridge reconcile looks up a running card the claim re-owned to a node id', { skip, timeout: 20_000 }, async (t) => {
+  const { bridge, assertKanban } = await fixture(t, 100, true, 'claimed-node-1');
+  bridge.proc.kill('SIGTERM');
+  assert.deepEqual(await exited(bridge), { code: 0, signal: null }, bridge.output);
   await assertKanban();
 });
 

@@ -13,8 +13,8 @@ import {
   searchSessions,
   searchSessionsFts,
   hybridSearchSessions,
-  DB_PATH,
 } from '../lib/mcp-knowledge/core.mjs';
+import { DEFAULT_KNOWLEDGE_DB } from './embed-existing-sessions.mjs';
 
 const { values, positionals } = parseArgs({
   options: {
@@ -46,7 +46,7 @@ Options:
 
 const query = positionals.join(' ');
 const limit = parseInt(values.limit, 10) || 10;
-const dbPath = values.db || DB_PATH;
+const dbPath = values.db || DEFAULT_KNOWLEDGE_DB;
 
 // Determine search mode (default: hybrid)
 let mode = 'hybrid';

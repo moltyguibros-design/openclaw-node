@@ -431,18 +431,22 @@ def main():
 
     profiles_to_compile = ["main", "lite", "heartbeat", "discord", "worker"] if args.all else [args.profile]
 
-    # Fetch entity context block from MC (non-blocking, best-effort)
+    # Fetch entity context block from MC (best-effort). MC requires its session
+    # token on every /api method; same file lib/mc-session-token.mjs reads.
     entity_block = ""
     try:
         import urllib.request
-        req = urllib.request.Request("http://localhost:3000/api/memory/graph?boot=true", method="GET")
+        mc_url = os.environ.get("OPENCLAW_MC_URL", "http://127.0.0.1:3000")
+        req = urllib.request.Request(f"{mc_url}/api/memory/graph?boot=true", method="GET")
         req.add_header("Accept", "application/json")
+        token_path = Path(os.environ.get("OPENCLAW_MC_TOKEN_FILE") or Path.home() / ".openclaw" / "config" / "mc-session-token")
+        req.add_header("Authorization", "Bearer " + token_path.read_text().strip())
         with urllib.request.urlopen(req, timeout=3) as resp:
             import json
             data = json.loads(resp.read().decode())
             entity_block = data.get("block", "")
-    except Exception:
-        pass  # MC not running or graph empty — skip silently
+    except Exception as e:
+        print(f"compile-boot: entity block skipped ({e})", file=sys.stderr)
 
     # Load shared lessons from vault (cross-soul propagation, non-blocking)
     shared_lessons_block = ""

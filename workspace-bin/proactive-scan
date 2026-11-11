@@ -18,8 +18,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKSPACE="${OPENCLAW_WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
-ACTIVE_TASKS="$WORKSPACE/memory/active-tasks.md"
-TRUST_REGISTRY="$WORKSPACE/.tmp/trust-registry.json"
 DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
@@ -31,12 +29,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Collect triggers as JSON via Python (reliable parsing)
-TRIGGERS=$(python3 << 'PYEOF'
+TRIGGERS=$(OPENCLAW_WORKSPACE="$WORKSPACE" python3 << 'PYEOF'
 import json, re, os, subprocess
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-workspace = os.environ.get("OPENCLAW_WORKSPACE", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+workspace = os.environ["OPENCLAW_WORKSPACE"]
 active_tasks = os.path.join(workspace, "memory/active-tasks.md")
 trust_registry = os.path.join(workspace, ".tmp/trust-registry.json")
 triggers = []
@@ -45,7 +43,7 @@ triggers = []
 if os.path.isfile(active_tasks):
     content = open(active_tasks).read()
     blocks = re.split(r'^- task_id:', content, flags=re.MULTILINE)
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
 
     for block in blocks[1:]:
         task_id = block.split('\n')[0].strip()
@@ -58,22 +56,22 @@ if os.path.isfile(active_tasks):
 
         if updated_m:
             ts_raw = updated_m.group(1).strip()
-            # Handle both formats: "2026-02-21 09:15 America/Montreal" and ISO
-            for fmt in ('%Y-%m-%d %H:%M America/Montreal', '%Y-%m-%dT%H:%M:%S.%fZ', '%Y-%m-%d %H:%M'):
-                try:
-                    dt = datetime.strptime(ts_raw.replace('America/Montreal', '').strip(), fmt.replace(' America/Montreal', ''))
-                    if (now - dt) > timedelta(minutes=30):
-                        title = title_m.group(1).strip().strip('"') if title_m else task_id
-                        minutes = int((now - dt).total_seconds() / 60)
-                        triggers.append({
-                            "type": "stale_task",
-                            "description": f"Task {task_id} ({title}) running for {minutes}min without update",
-                            "task_id": task_id,
-                            "action": "check_status_or_escalate"
-                        })
-                    break
-                except ValueError:
-                    continue
+            # "2026-02-21 09:15 America/Montreal" (local wall time) or ISO-8601 UTC "...Z"
+            try:
+                dt = datetime.fromisoformat(ts_raw.replace('America/Montreal', '').strip().replace('Z', '+00:00'))
+            except ValueError:
+                continue
+            if dt.tzinfo is None:
+                dt = dt.astimezone()
+            if (now - dt) > timedelta(minutes=30):
+                title = title_m.group(1).strip().strip('"') if title_m else task_id
+                minutes = int((now - dt).total_seconds() / 60)
+                triggers.append({
+                    "type": "stale_task",
+                    "description": f"Task {task_id} ({title}) running for {minutes}min without update",
+                    "task_id": task_id,
+                    "action": "check_status_or_escalate"
+                })
 
 # --- Check 2: Uncommitted work in project dirs ---
 projects_dir = os.path.join(workspace, "projects")
@@ -109,19 +107,25 @@ if os.path.isfile(trust_registry):
             state = s.get("circuit_state", "closed")
             if state == "open":
                 opened = s.get("circuit_opened_at")
-                cooldown = s.get("cooldown_minutes", 30)
-                if opened:
-                    try:
-                        elapsed = (now - datetime.fromisoformat(opened)).total_seconds() / 60
-                        if elapsed >= cooldown:
-                            triggers.append({
-                                "type": "circuit_recovery",
-                                "description": f"Soul {soul_id} cooldown expired ({int(elapsed)}min). Ready for probe.",
-                                "task_id": None,
-                                "action": "probe_delegation"
-                            })
-                    except (ValueError, TypeError):
-                        pass
+                reason = "cooldown expired"
+            elif state == "half_open":
+                opened = s.get("last_probe_at")
+                reason = "probe never reported"
+            else:
+                continue
+            cooldown = s.get("cooldown_minutes", 30)
+            if opened:
+                try:
+                    elapsed = (now - datetime.fromisoformat(opened)).total_seconds() / 60
+                    if elapsed >= cooldown:
+                        triggers.append({
+                            "type": "circuit_recovery",
+                            "description": f"Soul {soul_id} {reason} ({int(elapsed)}min). Ready for probe.",
+                            "task_id": None,
+                            "action": "probe_delegation"
+                        })
+                except (ValueError, TypeError):
+                    pass
     except (json.JSONDecodeError, OSError):
         pass
 

@@ -145,3 +145,86 @@ for (const authorized of [true, false]) {
     }
   });
 }
+
+test('prediction closure expires only stale predictions whose outcome is still empty', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'maint-predictions-'));
+  const day = (offset) => new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10);
+  const predictions = [
+    '# Predictions', '',
+    `### ${day(-30)} stale and still open`, '**Outcome:**', '**Delta:**', '**Lesson:**', '',
+    `### ${day(-30)} stale but already closed`, '**Outcome:** shipped on time', '**Delta:** 0', '**Lesson:** fine', '',
+    `### ${day(-1)} fresh and open`, '**Outcome:**', '**Delta:**', '**Lesson:**', '',
+  ].join('\n');
+  fs.mkdirSync(path.join(root, 'memory'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'memory', 'predictions.md'), predictions);
+  try {
+    const result = await promisify(execFile)(process.execPath, [MAINT, '--force', '--verbose'], {
+      // MC is unreachable on port 9: only the local checks matter here.
+      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root, MC_URL: 'http://127.0.0.1:9' },
+      timeout: 15000,
+    }).catch((error) => error);
+    const after = fs.readFileSync(path.join(root, 'memory', 'predictions.md'), 'utf8');
+    const block = (title) => after.slice(after.indexOf(title)).split('\n### ')[0];
+    assert.match(block('stale and still open'), /\*\*Outcome:\*\* \[expired/);
+    assert.match(block('stale but already closed'), /\*\*Outcome:\*\* shipped on time/);
+    assert.match(block('fresh and open'), /^\*\*Outcome:\*\*$/m, 'a 1-day-old prediction stays open');
+    assert.match(result.stdout, /PREDICTIONS: 1 expired/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a non-executable clawvault-local is reported as a failed checkpoint, not an uncaught crash', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'maint-clawvault-eacces-'));
+  const tokenPath = path.join(root, 'session-token');
+  fs.writeFileSync(tokenPath, 'fixture-session-token\n', { mode: 0o600 });
+  fs.mkdirSync(path.join(root, 'bin'));
+  // No exec bit at all: execve refuses it with EACCES even for root.
+  fs.writeFileSync(path.join(root, 'bin', 'clawvault-local'), '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'healthy', db: { taskCount: 2 }, stats: { entityCount: 3, activeRelations: 4 }, ok: true }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const result = await promisify(execFile)(process.execPath, [MAINT, '--force', '--verbose'], {
+      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root,
+        MC_URL: `http://127.0.0.1:${server.address().port}`,
+        MC_SESSION_TOKEN_PATH: '', OPENCLAW_MC_TOKEN_FILE: tokenPath },
+      timeout: 15000,
+    }).catch(error => {
+      assert.equal(error.code, 1, error.stderr);
+      return error;
+    });
+    assert.match(result.stdout, /ClawVault checkpoint failed: .*EACCES/);
+    assert.match(result.stdout, /GRAPH: 3 entities, 4 relations/);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a hung clawvault checkpoint is killed at its 10 s timeout instead of outliving the run', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'maint-clawvault-hang-'));
+  const pidFile = path.join(root, 'clawvault.pid');
+  fs.mkdirSync(path.join(root, 'bin'));
+  fs.writeFileSync(path.join(root, 'bin', 'clawvault-local'),
+    `#!/bin/sh\necho $$ > '${pidFile}'\nexec sleep 30\n`, { mode: 0o755 });
+  let pid = null;
+  try {
+    const started = Date.now();
+    const result = await promisify(execFile)(process.execPath, [MAINT, '--force', '--verbose'], {
+      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root, MC_URL: 'http://127.0.0.1:9' },
+      timeout: 25000,
+    }).catch(error => error);
+    assert.ok(Date.now() - started < 20000, 'the CLI must not wait for the full hang');
+    assert.match(result.stdout, /ClawVault checkpoint failed/);
+    pid = Number(fs.readFileSync(pidFile, 'utf8').trim());
+    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, 'the hung checkpoint must not survive the maintenance run');
+    pid = null;
+  } finally {
+    if (pid) try { process.kill(pid, 'SIGKILL'); } catch {}
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -26,7 +26,7 @@ const DAEMON = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   '..', 'workspace-bin', 'memory-daemon.mjs'
 );
-const { handleFlushResult } = await import(DAEMON);
+const { handleFlushResult, sourceOfJsonl } = await import(DAEMON);
 const src = readFileSync(DAEMON, 'utf8');
 
 // ── verdict logic ───────────────────────────────────────────────────────────
@@ -116,4 +116,25 @@ test('the daemon still autostarts by default', () => {
   // and must keep booting exactly as before.
   assert.match(src, /OPENCLAW_MEMORY_DAEMON_NO_AUTOSTART !== '1'/);
   assert.match(src, /if \(process\.env\.OPENCLAW_MEMORY_DAEMON_NO_AUTOSTART !== '1'\) \{\s*\n\s*main\(\)/);
+});
+
+test('session imports take source and format from the transcript\'s own source dir', () => {
+  const sources = [
+    { name: 'claude-code-repo', path: '/h/.claude/projects/-repo/', format: 'claude-code' },
+    { name: 'gateway', path: '/h/.openclaw/agents/main/sessions/', format: 'openclaw-gateway' },
+  ];
+  assert.equal(sourceOfJsonl(sources, '/h/.claude/projects/-repo/abc.jsonl').format, 'claude-code');
+  assert.equal(sourceOfJsonl(sources, '/h/.openclaw/agents/main/sessions/x.jsonl').name, 'gateway');
+  assert.equal(sourceOfJsonl(sources, '/elsewhere/x.jsonl'), null);
+  assert.doesNotMatch(src, /activity\.newest(Source|Format)/, 'the newest file\'s source labels a different transcript');
+});
+
+test('a tick scans the transcript dirs once and the dead shouldFlush import is gone', () => {
+  assert.doesNotMatch(src, /import\s*\{[^}]*\bshouldFlush\b[^}]*\}\s*from '\.\.\/lib\/pre-compression-flush\.mjs'/);
+  const start = src.indexOf('async function tick()');
+  const end = src.indexOf('// 5. HyperAgent maintenance', start);
+  assert.ok(start > 0 && end > start, 'could not bound the tick body');
+  const body = src.slice(start, end);
+  assert.ok(!body.includes('readdirSync('), 'Phase 1.5 must reuse detectActivity\'s scan, not rescan every source');
+  assert.equal((body.match(/loadTranscriptSources\(\)/g) || []).length, 1);
 });

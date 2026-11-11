@@ -39,7 +39,10 @@ export default function SettingsPage() {
 
   useEffect(() => {
     fetch("/api/settings/gateway")
-      .then((r) => r.json())
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`settings ${r.status}`);
+        return r.json();
+      })
       .then((data: GatewaySettings) => {
         setSettings(data);
         setHeartbeatTarget(data.heartbeat?.target || "none");

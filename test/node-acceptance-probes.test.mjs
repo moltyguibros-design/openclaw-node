@@ -2,7 +2,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { buildProbes, parseIsolatedEmbedResult } from '../lib/node-acceptance-probes.mjs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import Database from 'better-sqlite3';
+import * as sqliteVec from 'sqlite-vec';
+import { buildProbes, createRuntimeContext, parseIsolatedEmbedResult, VERDICT as PROBE_VERDICT } from '../lib/node-acceptance-probes.mjs';
 import { runAcceptance, resolveNodeConfig, VERDICT } from '../lib/node-acceptance.mjs';
 
 // A fully-mocked runtime context — no live system is touched.
@@ -60,6 +64,12 @@ function mockNc() {
 }
 
 const probeById = (ctx, id) => buildProbes(ctx).find((p) => p.id === id);
+
+describe('node-acceptance probes — VERDICT', () => {
+  it('re-exports the engine VERDICT rather than a second copy', () => {
+    assert.equal(PROBE_VERDICT, VERDICT);
+  });
+});
 
 describe('node-acceptance probes — L0 presence', () => {
   it('L0-DB PASS when all DBs present + non-empty', async () => {
@@ -125,6 +135,17 @@ describe('node-acceptance probes — LLM backing', () => {
     const ctx = baseCtx({ embed: async () => { throw new Error('model not cached — download first'); } });
     assert.equal((await probeById(ctx, 'LLM-L2-EMBED').run()).status, VERDICT.BLOCK);
   });
+  it('LLM-L2-EMBED gives the isolated child a budget above 60s and under its own timeout', async () => {
+    let got;
+    const ctx = baseCtx({ embed: async (_t, opts) => { got = opts; return new Float32Array(1024).fill(0.1); } });
+    const probe = probeById(ctx, 'LLM-L2-EMBED');
+    await probe.run();
+    assert.ok(got && got.timeoutMs > 60000 && got.timeoutMs < probe.timeoutMs, JSON.stringify(got));
+  });
+  it('the runtime embed forwards its timeout to the isolated child', async () => {
+    const ctx = createRuntimeContext(resolveNodeConfig({ OPENCLAW_HOME: '/tmp/acc-test-home', OPENCLAW_NODE_ID: 'testnode' }));
+    await assert.rejects(ctx.embed('timeout probe', { timeoutMs: 1 }), /SIGTERM/);
+  });
   it('LLM-L2-EXTRACT PASS on schema-valid extraction', async () => {
     assert.equal((await probeById(baseCtx(), 'LLM-L2-EXTRACT').run()).status, VERDICT.PASS);
   });
@@ -167,6 +188,29 @@ describe('node-acceptance probes — memory + gold round-trip', () => {
     const ctx = baseCtx({ queryDb: () => 0 });
     assert.equal((await probeById(ctx, 'MEM-L2-INGEST').run()).status, VERDICT.FAIL);
   });
+  it('MEM-L2-INGEST teardown removes the synthetic session concept_edges', async () => {
+    const db = new Database(':memory:');
+    try {
+      db.exec(`
+        CREATE TABLE mentions (session_id TEXT);
+        CREATE TABLE decisions (session_id TEXT);
+        CREATE TABLE messages (session_id TEXT);
+        CREATE TABLE sessions (id TEXT);
+        CREATE TABLE entities (name TEXT);
+        CREATE TABLE concept_edges (source TEXT, target TEXT, edge_type TEXT, session_id TEXT);
+      `);
+      const edge = db.prepare('INSERT INTO concept_edges VALUES (?, ?, ?, ?)');
+      edge.run('ACCPROBETESTRUN', 'SQLite', 'uses', 'acc-probe-testrun');
+      edge.run('SQLite', 'NATS', 'pairs_with', 'acc-probe-testrun');
+      edge.run('Alpha', 'Beta', 'uses', 'real-session');
+      const ctx = baseCtx({ writeDb: (_p, fn) => fn(db), queryDb: () => 4 });
+      await probeById(ctx, 'MEM-L2-INGEST').run();
+      for (const fn of ctx.teardown) await fn();
+      assert.deepEqual(db.prepare('SELECT source FROM concept_edges').all(), [{ source: 'Alpha' }]);
+    } finally {
+      db.close();
+    }
+  });
   it('MEM-L2-INJECT PASS on well-formed 200', async () => {
     const ctx = baseCtx({ httpPost: async () => ({ status: 200, json: { block: 'mem', items: { concepts: 1, decisions: 2, snippets: 3 }, tokens: 40, elapsed_ms: 9 } }) });
     assert.equal((await probeById(ctx, 'MEM-L2-INJECT').run()).status, VERDICT.PASS);
@@ -183,6 +227,52 @@ describe('node-acceptance probes — memory + gold round-trip', () => {
     const r = await probeById(ctx, 'MEM-L4-ROUNDTRIP').run();
     assert.equal(r.status, VERDICT.PASS);
   });
+  it('MEM-L4-ROUNDTRIP teardown removes the synthetic session vectors', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'acc-knowledge-'));
+    const file = path.join(dir, 'k.db');
+    const openVec = () => { const d = new Database(file); sqliteVec.load(d); return d; };
+    try {
+      const setup = openVec();
+      setup.exec(`
+        CREATE TABLE session_documents (session_id TEXT PRIMARY KEY);
+        CREATE TABLE session_chunks (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT);
+        CREATE VIRTUAL TABLE session_chunk_vectors USING vec0(embedding float[2]);
+      `);
+      const chunkIds = {};
+      for (const [sid, n] of [['acc-probe-testrun', 2], ['real-session', 1]]) {
+        setup.prepare('INSERT INTO session_documents VALUES (?)').run(sid);
+        chunkIds[sid] = [];
+        for (let i = 0; i < n; i++) {
+          const id = Number(setup.prepare('INSERT INTO session_chunks (session_id) VALUES (?)').run(sid).lastInsertRowid);
+          setup.prepare(`INSERT INTO session_chunk_vectors VALUES (${id}, ?)`).run(Buffer.from(new Float32Array([0.5, 0.5]).buffer));
+          chunkIds[sid].push(id);
+        }
+      }
+      setup.close();
+
+      const ctx = baseCtx({
+        writeDb: (p, fn) => {
+          if (!p.endsWith('.knowledge.db')) return undefined;
+          const d = new Database(file);
+          try { return fn(d); } finally { d.close(); }
+        },
+        queryDb: () => 3,
+        httpPost: async () => ({ status: 200, json: { block: 'codename ACCPROBETESTRUN' } }),
+      });
+      await probeById(ctx, 'MEM-L4-ROUNDTRIP').run();
+      for (const fn of ctx.teardown) await fn();
+
+      const check = openVec();
+      try {
+        assert.deepEqual(check.prepare('SELECT rowid FROM session_chunk_vectors').all().map((r) => r.rowid), chunkIds['real-session']);
+        assert.deepEqual(check.prepare('SELECT session_id FROM session_chunks').all(), [{ session_id: 'real-session' }]);
+      } finally {
+        check.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it('MEM-L4-ROUNDTRIP BLOCK when no transcript source dir', async () => {
     const ctx = baseCtx({ fsp: { ...baseCtx().fsp, readFile: async () => '[]' } });
     assert.equal((await probeById(ctx, 'MEM-L4-ROUNDTRIP').run()).status, VERDICT.BLOCK);
@@ -192,6 +282,45 @@ describe('node-acceptance probes — memory + gold round-trip', () => {
     ctx.config.roundtripPollMs = 50; // don't wait the full budget in tests
     const r = await probeById(ctx, 'MEM-L4-ROUNDTRIP').run();
     assert.equal(r.status, VERDICT.FAIL);
+  });
+  function sourcesCtx(sources, written, over = {}) {
+    const base = baseCtx();
+    return baseCtx({
+      fsp: {
+        ...base.fsp,
+        readFile: async (p) => {
+          if (p === base.config.injectToken) return 'TESTTOKEN';
+          if (p === base.config.transcriptSources) return JSON.stringify({ sources });
+          return '';
+        },
+        writeFile: async (p) => { written.push(p); },
+      },
+      ...over,
+    });
+  }
+  it('MEM-L4-ROUNDTRIP skips disabled transcript sources', async () => {
+    const written = [];
+    const ctx = sourcesCtx([
+      { name: 'off', path: '/tmp/acc-disabled', format: 'claude-code', enabled: false },
+      { name: 'on', path: '/tmp/acc-src', format: 'claude-code', enabled: true },
+    ], written, {
+      queryDb: () => 3,
+      httpPost: async () => ({ status: 200, json: { block: 'codename ACCPROBETESTRUN uses SQLite' } }),
+    });
+    const r = await probeById(ctx, 'MEM-L4-ROUNDTRIP').run();
+    assert.equal(written.length, 1);
+    assert.ok(written[0].startsWith('/tmp/acc-src/'), written[0]);
+    assert.equal(r.status, VERDICT.PASS);
+  });
+  it('MEM-L4-ROUNDTRIP BLOCK when every transcript source is disabled', async () => {
+    const written = [];
+    const ctx = sourcesCtx([
+      { name: 'off', path: '/tmp/acc-disabled', format: 'claude-code', enabled: false },
+    ], written, { queryDb: () => 0 });
+    ctx.config.roundtripPollMs = 50;
+    const r = await probeById(ctx, 'MEM-L4-ROUNDTRIP').run();
+    assert.equal(r.status, VERDICT.BLOCK);
+    assert.deepEqual(written, []);
   });
 });
 

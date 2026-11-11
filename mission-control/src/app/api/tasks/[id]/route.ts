@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, or } from "drizzle-orm";
-import { getDb } from "@/lib/db";
+import { getDb, getRawDb } from "@/lib/db";
 import { tasks, dependencies } from "@/lib/db/schema";
 import { statusToKanban, kanbanToStatus } from "@/lib/parsers/task-markdown";
 import { syncTasksToMarkdown } from "@/lib/sync/tasks";
@@ -9,6 +9,7 @@ import { gatewayNotify } from "@/lib/gateway-notify";
 import { AGENT_NAME, HUMAN_NAME } from "@/lib/config";
 import { getNats, sc } from "@/lib/nats";
 import { signOperatorRequest } from "@/lib/mesh-sign";
+import { applyDoneGate } from "@/lib/done-gate";
 
 /**
  * Push a notification message to the OpenClaw TUI via gateway chat.send + abort.
@@ -65,22 +66,28 @@ export async function DELETE(
 
     // Recursively collect all descendant IDs (handles project → phase → task)
     const idsToDelete: string[] = [];
+    const rows: { id: string; execution: string | null; status: string }[] = [];
+    const seen = new Set<string>([id]);
     function collectDescendants(parentId: string) {
       const children = db
-        .select({ id: tasks.id })
+        .select({ id: tasks.id, execution: tasks.execution, status: tasks.status })
         .from(tasks)
         .where(eq(tasks.parentId, parentId))
         .all();
       for (const child of children) {
+        if (seen.has(child.id)) continue;
+        seen.add(child.id);
         collectDescendants(child.id); // depth-first: grandchildren first
         idsToDelete.push(child.id);
+        rows.push(child);
       }
     }
     collectDescendants(id);
     idsToDelete.push(id); // add the root task last
+    rows.push(existing);
 
-    // Cancel mesh task if running
-    await cancelMeshTask(id, existing.execution, existing.status);
+    // A deleted row can no longer receive its mesh result: cancel every running mesh task in the subtree.
+    for (const row of rows) await cancelMeshTask(row.id, row.execution, row.status);
 
     // Delete all collected tasks + their dependency edges
     for (const delId of idsToDelete) {
@@ -171,16 +178,7 @@ export async function PATCH(
       }
     }
 
-    // Done-gate: only the human operator can mark tasks as done (via force_done flag).
-    // Without force_done, redirect done→review so tasks land in waiting-user.
-    const targetStatus = update.status as string | undefined;
-    const targetColumn = update.kanbanColumn as string | undefined;
-    if (!body.force_done) {
-      if (targetStatus === "done" || targetColumn === "done") {
-        update.status = "waiting-user";
-        update.kanbanColumn = "review";
-      }
-    }
+    applyDoneGate(update, body.force_done);
     if (body.owner !== undefined) {
       update.owner = body.owner || null;
     }
@@ -210,7 +208,16 @@ export async function PATCH(
       update.type = body.type;
     }
     if (body.parent_id !== undefined) {
-      update.parentId = body.parent_id || null;
+      const parentId = body.parent_id || null;
+      if (parentId && parentId !== existing.parentId) {
+        const loops = getRawDb()
+          .prepare("WITH RECURSIVE sub(id) AS (SELECT ? UNION SELECT t.id FROM tasks t JOIN sub ON t.parent_id = sub.id) SELECT 1 FROM sub WHERE id = ? LIMIT 1")
+          .get(id, parentId);
+        if (loops) {
+          return NextResponse.json({ error: "parent_id would create a cycle" }, { status: 400 });
+        }
+      }
+      update.parentId = parentId;
     }
     if (body.start_date !== undefined) {
       update.startDate = body.start_date || null;
@@ -305,21 +312,23 @@ export async function PATCH(
     }
 
     // Log activity
-    const movedTo = body.kanban_column || body.kanbanColumn;
+    // Report what was stored: the done-gate may have turned done into waiting-user/review.
+    const movedTo = body.kanban_column || body.kanbanColumn ? (update.kanbanColumn as string) : undefined;
+    const newStatus = body.status ? (update.status as string) : undefined;
     const parts: string[] = [];
     if (movedTo) parts.push(`moved to ${movedTo}`);
-    if (body.status === "done") parts.push("completed");
-    else if (body.status) parts.push(`status → ${body.status}`);
+    if (newStatus === "done") parts.push("completed");
+    else if (newStatus) parts.push(`status → ${newStatus}`);
     if (body.title) parts.push(`renamed to "${body.title}"`);
     const desc = parts.length > 0 ? parts.join(", ") : "updated";
     logActivity(
-      body.status === "done" ? "task_completed" : movedTo ? "task_moved" : "task_updated",
+      newStatus === "done" ? "task_completed" : movedTo ? "task_moved" : "task_updated",
       `${existing.title}: ${desc}`,
       id
     );
 
     // Push notification to TUI only for agent autostart tasks
-    if (movedTo || body.status) {
+    if (movedTo || newStatus) {
       const effectiveOwner = (update.owner as string) ?? existing.owner;
       const effectiveApproval = (update.needsApproval as number) ?? existing.needsApproval;
       const isAgent = effectiveOwner === AGENT_NAME;
@@ -327,7 +336,7 @@ export async function PATCH(
 
       if (isAgent && isAutostart) {
         const fromCol = existing.kanbanColumn || existing.status;
-        const toCol = movedTo || body.status;
+        const toCol = movedTo || newStatus;
         notifyAgent(`MC-Kanban: "${existing.title}" has been moved from ${fromCol} to ${toCol}`);
       }
     }

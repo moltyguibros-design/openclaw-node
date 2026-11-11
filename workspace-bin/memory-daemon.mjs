@@ -40,7 +40,7 @@ const { createTracer } = require('../lib/tracer');
 const tracer = createTracer('memory-daemon');
 
 // --- Hermes-inspired modules ---
-import { shouldFlush, USE_LLM_EXTRACTION } from '../lib/pre-compression-flush.mjs';
+import { USE_LLM_EXTRACTION } from '../lib/pre-compression-flush.mjs';
 import { createBudget } from '../lib/memory-budget.mjs';
 import { createSessionTraceEmitter } from './session-trace-emitter.mjs';
 import { createLocalEventLog, buildMemoryEvent } from '../lib/local-event-log.mjs';
@@ -272,6 +272,7 @@ function _detectActivity(sources, activityWindowMs) {
   let newestMtime = 0;
   let newestSource = null;
   let newestFormat = null;
+  const recentFiles = [];
 
   for (const source of sources) {
     if (!fs.existsSync(source.path)) {
@@ -296,7 +297,7 @@ function _detectActivity(sources, activityWindowMs) {
       try {
         const stat = fs.statSync(full);
         const mtime = stat.mtimeMs;
-        if (mtime > cutoff) active = true;
+        if (mtime > cutoff) { active = true; recentFiles.push(full); }
         if (mtime > newestMtime) {
           newestMtime = mtime;
           newestSession = path.basename(f, '.jsonl');
@@ -307,7 +308,7 @@ function _detectActivity(sources, activityWindowMs) {
     }
   }
 
-  const result = { active, newestSession, newestMtime, newestSource, newestFormat };
+  const result = { active, newestSession, newestMtime, newestSource, newestFormat, recentFiles };
   if (process.env.OPENCLAW_LOG_LEVEL === 'debug') {
     const ageMs = newestMtime ? Math.round(Date.now() - newestMtime) : -1;
     console.log(`[memory-daemon] Activity: source=${newestSource || 'none'} age=${ageMs}ms`);
@@ -429,6 +430,9 @@ class SessionStateMachine {
 
 let memoryBudget = null;
 let localEventLog = null;
+// The inject server and memory budget are built once, possibly before a NATS
+// retry sets localEventLog; they hold this forwarder so a later log reaches them.
+const liveEventLog = { publishLocal: (event) => (localEventLog ? localEventLog.publishLocal(event) : Promise.resolve()) };
 let extractionTrigger = null;
 
 // Serialize runFlush across all trigger paths (D3 port, deep review 2026-07-03).
@@ -481,12 +485,13 @@ function runImportInWorker(jsonlPath, { source, format } = {}) {
   return runMemoryWorker({ kind: 'import', jsonlPath, source, format }, 10 * 60_000);
 }
 
-function emitIngestEvent(sessionId, source, messageCount) {
+function emitIngestEvent(sessionId, source, messageCount, previousCount = 0) {
   if (!localEventLog) return;
   const event = buildMemoryEvent('memory.ingested', sessionId, 'memory', {
     session_id: sessionId,
     source: source || 'unknown',
-    messages_added: messageCount,
+    // Clamped: a parser change can re-count a stored session lower, and the schema rejects a negative delta.
+    messages_added: Math.max(0, messageCount - previousCount),
     total_messages: messageCount,
   }, NODE_ID);
   localEventLog.publishLocal(event).catch(err =>
@@ -623,7 +628,7 @@ function initMemoryBudget(config) {
   if (memoryBudget) return memoryBudget;
   memoryBudget = createBudget(config.workspace || WORKSPACE, {
     charBudget: config.memoryCharBudget || 2200,
-    eventLog: localEventLog,
+    eventLog: liveEventLog,
     nodeId: NODE_ID,
   });
 
@@ -685,6 +690,10 @@ async function runPhase0Bootstrap(sessionId, config) {
       await runSubprocess('node', [maintenance, '--force'], 60000);
       log('  memory-maintenance --force done');
     } catch (e) { log(`  memory-maintenance failed: ${e.message}`); }
+    // Phase 2 forces maintenance on this stamp alone; without it the boot tick runs it twice.
+    const throttle = loadThrottleState();
+    throttle.lastMaintenance = Date.now();
+    saveThrottleState(throttle);
   }
 
   // 5. Compile boot artifacts
@@ -744,7 +753,7 @@ async function runPhase0Bootstrap(sessionId, config) {
         if (!fs.existsSync(source.path)) continue;
         const result = await store.importDirectory(source.path, {
           source: source.name, format: source.format,
-          onImported: (r) => emitIngestEvent(r.sessionId, source.name, r.messageCount),
+          onImported: (r) => emitIngestEvent(r.sessionId, source.name, r.messageCount, r.previousCount),
         });
         totalImported += result.imported;
       }
@@ -814,6 +823,11 @@ function findJsonlBySessionId(sources, sessionId) {
     } catch { /* file doesn't exist in this source */ }
   }
   return null;
+}
+
+function sourceOfJsonl(sources, jsonlPath) {
+  const dir = path.resolve(path.dirname(jsonlPath));
+  return sources.find(s => path.resolve(s.path) === dir) || null;
 }
 
 // ============================================================
@@ -1015,19 +1029,20 @@ async function runPhase2ThrottledWork(config, sessionState) {
   if (now - (throttle.lastLiveImport || 0) >= config.intervals.sessionRecapMs) {
     throttle.lastLiveImport = now;
     stage1.push((async () => {
-      const currentJsonl = findCurrentJsonl(loadTranscriptSources());
+      const sources = loadTranscriptSources();
+      const currentJsonl = findCurrentJsonl(sources);
       if (!currentJsonl) return;
-      const activity = detectActivity(loadTranscriptSources(), config.intervals.activityWindowMs);
+      const src = sourceOfJsonl(sources, currentJsonl);
       // importSession fully re-parses the JSONL and bulk-replaces rows — on the
       // main thread that starved the inject server (same class as the flush);
       // it runs in the memory worker instead.
       const result = await runImportInWorker(currentJsonl, {
-        source: activity.newestSource || 'unknown',
-        format: activity.newestFormat,
+        source: src?.name || 'unknown',
+        format: src?.format,
       });
       if (result.imported) {
         log(`  Phase 2: live session import — ${result.sessionId.slice(0, 8)} (${result.messageCount} msgs)`);
-        emitIngestEvent(result.sessionId, activity.newestSource || 'unknown', result.messageCount);
+        emitIngestEvent(result.sessionId, src?.name || 'unknown', result.messageCount, result.previousCount);
       }
     })().catch(e => log(`  Phase 2: live session import failed: ${e.message}`)));
   }
@@ -1038,7 +1053,7 @@ async function runPhase2ThrottledWork(config, sessionState) {
     const maint = path.join(WORKSPACE, 'bin/memory-maintenance.mjs');
     if (fs.existsSync(maint)) {
       stage1.push(
-        runSubprocess('node', [maint], 60000)
+        runSubprocess('node', [maint, '--force'], 60000)
           .then(() => log('  Phase 2: memory-maintenance done'))
           .catch(e => log(`  Phase 2: memory-maintenance failed: ${e.message}`))
       );
@@ -1072,7 +1087,7 @@ async function runPhase2ThrottledWork(config, sessionState) {
             if (!fs.existsSync(source.path)) continue;
             const result = await store.importDirectory(source.path, {
               source: source.name, format: source.format,
-              onImported: (r) => emitIngestEvent(r.sessionId, source.name, r.messageCount),
+              onImported: (r) => emitIngestEvent(r.sessionId, source.name, r.messageCount, r.previousCount),
             });
             totalImported += result.imported;
           }
@@ -1367,15 +1382,14 @@ async function handleTransitions(transitions, config) {
         try {
           const store = await getSessionStore();
           if (store) {
-            // Detect which transcript source this JSONL came from
-            const activity = detectActivity(loadTranscriptSources(), config.intervals.activityWindowMs);
+            const src = sourceOfJsonl(sources, currentJsonl);
             const result = await store.importSession(currentJsonl, {
-              source: activity.newestSource || 'unknown',
-              format: activity.newestFormat,
+              source: src?.name || 'unknown',
+              format: src?.format,
             });
             if (result.imported) {
               log(`  session-store: archived ${result.sessionId.slice(0, 8)} (${result.messageCount} msgs)`);
-              emitIngestEvent(result.sessionId, activity.newestSource || 'unknown', result.messageCount);
+              emitIngestEvent(result.sessionId, src?.name || 'unknown', result.messageCount, result.previousCount);
             }
           }
         } catch (e) { log(`  session-store archive failed: ${e.message}`); emitErrorEvent('ingest', e); }
@@ -1509,7 +1523,7 @@ runPhase1StatusSync = tracer.wrap('runPhase1StatusSync', runPhase1StatusSync, { 
 runHyperagentMaintenance = tracer.wrapAsync('runHyperagentMaintenance', runHyperagentMaintenance, { tier: 1, category: 'lifecycle' });
 runPhase2ThrottledWork = tracer.wrapAsync('runPhase2ThrottledWork', runPhase2ThrottledWork, { tier: 1, category: 'lifecycle' });
 handleTransitions = tracer.wrapAsync('handleTransitions', handleTransitions, { tier: 1, category: 'state_transition' });
-runSubprocess = tracer.wrap('runSubprocess', runSubprocess, { tier: 2 });
+runSubprocess = tracer.wrapAsync('runSubprocess', runSubprocess, { tier: 2 });
 
 // ============================================================
 // FEDERATION SUBSYSTEMS — OPT-IN (OPENCLAW_FEDERATION=1)
@@ -1704,6 +1718,9 @@ async function main() {
   // R16 fix (repair 4.3): NATS init is retryable. A broker down at boot used
   // to permanently disable the event spine (event log, watcher, extraction
   // trigger) until a manual restart; now the daemon retries every 60s.
+  let running = true;
+  let tickInterval = null;
+  let inFlightTick = null;
   let natsRetryTimer = null;
   async function initNatsSubsystems() {
   try {
@@ -1771,6 +1788,7 @@ async function main() {
     // Initialize agnostic extraction trigger (mesh.memory.extract_request)
     try {
       extractionTrigger = createExtractionTrigger(natsConn, NODE_ID, {
+        log,
         onExtract: async (payload) => {
           log(`[nats] extraction requested by ${payload.triggered_by || 'unknown'}`);
           if (sm.state !== STATES.ACTIVE && sm.state !== STATES.IDLE) {
@@ -1852,7 +1870,7 @@ async function main() {
     try {
       const { startInjectionServer } = await import('../lib/memory-inject-server.mjs');
       injectionServer = await startInjectionServer(
-        { knowledgeDb: getKnowledgeDb(), graphCache: getGraphCache(), llmClient: getLlmClient(), extractionDb: getExtractionStore()?.db, eventLog: localEventLog, nodeId: NODE_ID },
+        { knowledgeDb: getKnowledgeDb(), graphCache: getGraphCache(), llmClient: getLlmClient(), extractionDb: getExtractionStore()?.db, eventLog: liveEventLog, nodeId: NODE_ID },
         { log: (m) => log(`[inject-server] ${m}`) },
       );
     } catch (injErr) {
@@ -1861,9 +1879,6 @@ async function main() {
   }
 
   // Graceful shutdown
-  let running = true;
-  let tickInterval = null;
-  let inFlightTick = null;
   const shutdown = async (signal) => {
     log(`Received ${signal} — shutting down`);
     running = false;
@@ -1967,24 +1982,13 @@ async function main() {
       }
 
       // 4.5. Phase 1.5: Session trace emission (real-time JSONL → observability feed)
-      // Scan ALL transcript sources for recently-modified JSONL files.
-      // Multiple agents may be active simultaneously (Claude Code + gateway + etc.)
+      // Every recently-modified JSONL across ALL sources, as found by step 1's
+      // scan: multiple agents may be active at once (Claude Code + gateway + etc.).
+      // processNewEntries reads by offset, so a file that turned recent during
+      // the transitions above is caught up on the next tick.
       if (sm.state === STATES.ACTIVE) {
-        const recentCutoff = Date.now() - (config.intervals?.activityWindowMs || 900000);
-        for (const source of loadTranscriptSources()) {
-          if (!fs.existsSync(source.path)) continue;
-          try {
-            const files = fs.readdirSync(source.path).filter(f => f.endsWith('.jsonl'));
-            for (const f of files) {
-              const full = path.join(source.path, f);
-              try {
-                const fstat = fs.statSync(full);
-                if (fstat.mtimeMs > recentCutoff) {
-                  traceEmitter.processNewEntries(full);
-                }
-              } catch { /* skip unreadable files */ }
-            }
-          } catch { /* skip unreadable dirs */ }
+        for (const full of activity.recentFiles) {
+          try { traceEmitter.processNewEntries(full); } catch { /* skip unreadable files */ }
         }
       }
 
@@ -2012,19 +2016,22 @@ async function main() {
 
   // R3 fix: ticks routinely outlive pollMs (LLM extraction, Phase 0 bootstrap);
   // unguarded overlap re-runs the same throttled work off stale on-disk state.
-  const guardedTick = createConcurrencyGuard(tick, { maxAgeMs: 30 * 60_000, log });
+  // Only a run that actually started is fenced: a skipped call must not
+  // replace (and then null) the in-flight run shutdown waits for.
+  const trackedTick = () => {
+    const run = tick();
+    inFlightTick = run;
+    return run.finally(() => { if (inFlightTick === run) inFlightTick = null; });
+  };
+  const guardedTick = createConcurrencyGuard(trackedTick, { maxAgeMs: 30 * 60_000, log });
 
   // Run first tick immediately
-  inFlightTick = guardedTick();
-  await inFlightTick;
-  inFlightTick = null;
+  await guardedTick();
 
   // Schedule recurring ticks. Shutdown owns the exit (R15, repair 4.1).
   tickInterval = setInterval(async () => {
     if (!running) return;
-    inFlightTick = guardedTick();
-    const result = await inFlightTick;
-    inFlightTick = null;
+    const result = await guardedTick();
     if (result?.skipped) log('tick skipped (in-flight)');
   }, config.intervals.pollMs);
 
@@ -2038,4 +2045,4 @@ if (process.env.OPENCLAW_MEMORY_DAEMON_NO_AUTOSTART !== '1') {
   });
 }
 
-export { runNodeVaultMaintenance, handleFlushResult };
+export { runNodeVaultMaintenance, handleFlushResult, sourceOfJsonl };

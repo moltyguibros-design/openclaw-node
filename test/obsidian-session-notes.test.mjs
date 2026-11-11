@@ -265,6 +265,20 @@ describe('generateSessionNote', () => {
     assert.ok(content.includes('session_id: nonexistent-session'));
   });
 
+  it('keeps one note per session when its topic drifts between flushes', async () => {
+    const first = await generateSessionNote({ db, sessionId: 'sess-abc12345', vaultPath: tmpDir });
+    db.prepare("UPDATE sessions SET summary = 'A different topic entirely' WHERE id = 'sess-abc12345'").run();
+
+    const second = await generateSessionNote({ db, sessionId: 'sess-abc12345', vaultPath: tmpDir });
+    assert.equal(second.filename, first.filename);
+    assert.deepEqual(await readdir(join(tmpDir, 'sessions')), [first.filename]);
+    assert.match(await readFile(second.filePath, 'utf-8'), /A different topic entirely/);
+
+    const third = await generateSessionNote({ db, sessionId: 'sess-abc12345', vaultPath: tmpDir });
+    assert.equal(third.unchanged, true);
+    assert.equal(third.generated, false);
+  });
+
   it('returns not-generated when db is missing', async () => {
     const result = await generateSessionNote({ db: null, sessionId: 'x' });
     assert.equal(result.generated, false);

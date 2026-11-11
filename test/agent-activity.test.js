@@ -30,12 +30,16 @@ describe('toClaudeProjectPath', () => {
     assert.equal(toClaudeProjectPath('/Users/dev/.worktrees/ao'), '-Users-dev--worktrees-ao');
   });
 
-  it('strips colons (Windows-style paths)', () => {
-    assert.equal(toClaudeProjectPath('C:/Users/dev/project'), 'C-Users-dev-project');
+  it('maps colons to -', () => {
+    assert.equal(toClaudeProjectPath('C:/Users/dev/project'), 'C--Users-dev-project');
   });
 
   it('handles backslash normalization', () => {
-    assert.equal(toClaudeProjectPath('C:\\Users\\dev\\project'), 'C-Users-dev-project');
+    assert.equal(toClaudeProjectPath('C:\\Users\\dev\\project'), 'C--Users-dev-project');
+  });
+
+  it('maps every non-alphanumeric character to -, as Claude Code does', () => {
+    assert.equal(toClaudeProjectPath('/var/folders/ab/x_y/T/mesh-agent-work-n1'), '-var-folders-ab-x-y-T-mesh-agent-work-n1');
   });
 
   it('encodes consecutive dots and slashes', () => {
@@ -186,6 +190,24 @@ describe('getSessionInfo', () => {
       `estimated ${info.cost.estimatedCostUsd} != expected ${expected}`);
   });
 
+  it('counts a response split across content-block lines once', async () => {
+    const origHome = process.env.HOME;
+    process.env.HOME = tmpDir;
+    const sessionFile = path.join(projectDir, 'split-session.jsonl');
+    const usage1 = { input_tokens: 10, output_tokens: 200, cache_read_input_tokens: 1000, cache_creation_input_tokens: 0 };
+    const lines = [
+      { type: 'user', message: { content: 'test' } },
+      { type: 'assistant', requestId: 'req_1', message: { id: 'msg_1', model: 'claude-sonnet-4-6', content: [{ type: 'thinking' }], usage: usage1 } },
+      { type: 'assistant', requestId: 'req_1', message: { id: 'msg_1', model: 'claude-sonnet-4-6', content: [{ type: 'tool_use' }], usage: usage1 } },
+      { type: 'assistant', requestId: 'req_2', message: { id: 'msg_2', model: 'claude-sonnet-4-6', usage: { input_tokens: 5, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } },
+    ];
+    fs.writeFileSync(sessionFile, lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+    const info = await getSessionInfo('/fake/workspace');
+    process.env.HOME = origHome;
+    assert.equal(info.cost.inputTokens, 1015);
+    assert.equal(info.cost.outputTokens, 300);
+  });
+
   it('extracts cost from costUSD field', async () => {
     const origHome = process.env.HOME;
     process.env.HOME = tmpDir;
@@ -212,5 +234,24 @@ describe('getSessionInfo', () => {
     const info = await getSessionInfo('/fake/workspace');
     process.env.HOME = origHome;
     assert.equal(info.summary, 'Fix the login page CSS');
+  });
+
+  it('resolves a symlinked workspace whose project dir is older than 1 h', async () => {
+    const origHome = process.env.HOME;
+    process.env.HOME = tmpDir;
+    const realWork = fs.mkdtempSync(path.join(os.tmpdir(), 'real_work-'));
+    try {
+      const link = path.join(tmpDir, 'link');
+      fs.symlinkSync(realWork, link);
+      const pd = path.join(tmpDir, '.claude', 'projects', fs.realpathSync(realWork).replace(/[^A-Za-z0-9]/g, '-'));
+      fs.mkdirSync(pd, { recursive: true });
+      fs.writeFileSync(path.join(pd, 'old-session.jsonl'), '{"type":"summary","summary":"S"}\n');
+      const t = Date.now() / 1000 - 7200;
+      fs.utimesSync(pd, t, t);
+      assert.equal((await getSessionInfo(link)).summary, 'S');
+    } finally {
+      process.env.HOME = origHome;
+      fs.rmSync(realWork, { recursive: true, force: true });
+    }
   });
 });

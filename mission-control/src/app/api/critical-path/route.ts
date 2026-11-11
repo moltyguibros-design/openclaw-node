@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       .prepare(
         `WITH RECURSIVE tree AS (
           SELECT id, start_date, end_date, type FROM tasks WHERE id = ?
-          UNION ALL
+          UNION
           SELECT t.id, t.start_date, t.end_date, t.type
           FROM tasks t JOIN tree ON t.parent_id = tree.id
         )
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
       .prepare(
         `WITH RECURSIVE tree AS (
           SELECT id FROM tasks WHERE id = ?
-          UNION ALL
+          UNION
           SELECT t.id FROM tasks t JOIN tree ON t.parent_id = tree.id
         )
         SELECT d.source_id, d.target_id FROM dependencies d

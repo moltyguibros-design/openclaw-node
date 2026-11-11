@@ -79,10 +79,12 @@ jobs:
             echo "OPENCLAW_NATS_AUTH=nkey"
           } >> "$GITHUB_ENV"
           # Readiness through the resolver (nkey), and prove a bare connect is refused.
+          ready=0
           for i in $(seq 1 30); do
-            node -e "const {connect}=require('nats');const {natsConnectOpts}=require('./lib/nats-resolve');connect(natsConnectOpts({timeout:2000})).then(nc=>nc.request('mesh.tasks.list',Buffer.from('{\"status\":\"queued\"}'),{timeout:3000}).finally(()=>nc.close())).then(()=>process.exit(0),()=>process.exit(1))" && break
+            node -e "const {connect}=require('nats');const {natsConnectOpts}=require('./lib/nats-resolve');connect(natsConnectOpts({timeout:2000})).then(nc=>nc.request('mesh.tasks.list',Buffer.from('{\"status\":\"queued\"}'),{timeout:3000}).finally(()=>nc.close())).then(()=>process.exit(0),()=>process.exit(1))" && { ready=1; break; }
             sleep 1
           done
+          if [ "$ready" != 1 ]; then echo "::error::mesh-task-daemon never answered mesh.tasks.list"; tail -50 /tmp/mesh-task-daemon.log; exit 1; fi
           node -e "const {connect}=require('nats');connect({servers:'nats://127.0.0.1:4222',timeout:2000,maxReconnectAttempts:0}).then(()=>{console.error('bare connect ACCEPTED — bus is not authenticated');process.exit(1)},e=>{console.log('bare connect refused as expected:',e.message);process.exit(0)})"
           tail -20 /tmp/mesh-task-daemon.log
       - name: JetStream recovery fixtures
@@ -103,6 +105,7 @@ jobs:
         # VISIBLY via the per-file census (see test/helpers/embedder-available.mjs).
         env:
           OPENCLAW_NO_EMBED_MODEL: "1"
+          OPENCLAW_REQUIRE_MESH: "1"
         # On failure, surface the failing `not ok` blocks into the tail of the
         # step log. node:test's TAP reporter prints failures inline (thousands
         # of lines up) and never recaps at the end, so a red run otherwise shows

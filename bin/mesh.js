@@ -412,7 +412,7 @@ async function cmdSubmit(args) {
     // Mark as 'submitted' — NOT 'running'. The card reflects actual mesh state.
     // The bridge event handler promotes to 'running' when mesh.events.claimed fires.
     // This prevents the Schrödinger state where kanban says 'running' before any agent has claimed.
-    updateTaskInPlace(ACTIVE_TASKS_PATH, taskId, { status: 'submitted', owner: 'mesh', updated_at: isoTimestamp() });
+    await updateTaskInPlace(ACTIVE_TASKS_PATH, taskId, { status: 'submitted', owner: 'mesh', updated_at: isoTimestamp() });
     console.log(`Kanban updated: ${taskId} → submitted (will become 'running' on agent claim)`);
     await nc.close();
     return;
@@ -904,12 +904,7 @@ async function cmdPlan(args) {
       // Submit to mesh via NATS
       const nc = await connect({ ...natsConnectOpts(), timeout: 5000 });
       try {
-        const reply = await nc.request(
-          'mesh.plans.create',
-          sc.encode(JSON.stringify(plan)),
-          { timeout: 10000 }
-        );
-        const result = JSON.parse(sc.decode(reply.data));
+        const result = await daemonRequest(nc, 'mesh.plans.create', plan);
         console.log(`Plan created: ${result.plan_id}`);
         console.log(`  Subtasks: ${result.subtasks.length}`);
         console.log(`  Waves: ${result.estimated_waves}`);
@@ -933,12 +928,7 @@ async function cmdPlan(args) {
       const nc = await connect({ ...natsConnectOpts(), timeout: 5000 });
       try {
         const payload = statusFilter ? { status: statusFilter } : {};
-        const reply = await nc.request(
-          'mesh.plans.list',
-          sc.encode(JSON.stringify(payload)),
-          { timeout: 10000 }
-        );
-        const plans = JSON.parse(sc.decode(reply.data));
+        const plans = await daemonRequest(nc, 'mesh.plans.list', payload);
         if (plans.length === 0) {
           console.log('No plans found.');
           return;
@@ -965,16 +955,7 @@ async function cmdPlan(args) {
 
       const nc = await connect({ ...natsConnectOpts(), timeout: 5000 });
       try {
-        const reply = await nc.request(
-          'mesh.plans.get',
-          sc.encode(JSON.stringify({ plan_id: planId })),
-          { timeout: 10000 }
-        );
-        const plan = JSON.parse(sc.decode(reply.data));
-        if (!plan || plan.error) {
-          console.error(plan?.error || `Plan not found: ${planId}`);
-          process.exit(1);
-        }
+        const plan = await daemonRequest(nc, 'mesh.plans.get', { plan_id: planId });
 
         // Header
         console.log(`\nPlan: ${plan.plan_id}`);
@@ -1063,12 +1044,7 @@ async function cmdPlan(args) {
 
       const nc = await connect({ ...natsConnectOpts(), timeout: 5000 });
       try {
-        const reply = await nc.request(
-          'mesh.plans.approve',
-          sc.encode(JSON.stringify(await signOperatorRequest({ plan_id: planId }))),
-          { timeout: 10000 }
-        );
-        const result = JSON.parse(sc.decode(reply.data));
+        const result = await daemonRequest(nc, 'mesh.plans.approve', await signOperatorRequest({ plan_id: planId }));
         console.log(`Plan approved: ${result.plan_id}`);
         console.log(`  Status: ${result.status}`);
         console.log(`  Wave 0 dispatched with ${result.subtasks.filter(s => s.status !== 'pending').length} subtasks`);
@@ -1092,12 +1068,7 @@ async function cmdPlan(args) {
 
       const nc = await connect({ ...natsConnectOpts(), timeout: 5000 });
       try {
-        const reply = await nc.request(
-          'mesh.plans.abort',
-          sc.encode(JSON.stringify(await signOperatorRequest({ plan_id: planId, reason }))),
-          { timeout: 10000 }
-        );
-        const result = JSON.parse(sc.decode(reply.data));
+        const result = await daemonRequest(nc, 'mesh.plans.abort', await signOperatorRequest({ plan_id: planId, reason }));
         console.log(`Plan aborted: ${result.plan_id}`);
       } finally {
         await nc.close();

@@ -201,3 +201,50 @@ describe('node-init join-token trust provisioning', () => {
     });
   });
 });
+
+// mesh-node-remove must undo every unit node-init installs (plus the health
+// publisher a full install adds): a deploy listener left behind keeps the
+// "removed" node on the bus and crash-loops once --purge deletes ~/openclaw.
+describe('mesh-node-remove removes every unit node-init installs', () => {
+  it('stops and deletes the agent, deploy listener and health publisher units, and prints the revoke step', (t) => {
+    const platform = process.platform;
+    if (platform !== 'linux' && platform !== 'darwin') return t.skip(`no service manager on ${platform}`);
+    const initSrc = readFileSync(join(ROOT, 'bin', 'openclaw-node-init.js'), 'utf8');
+    const listName = platform === 'darwin' ? 'LAUNCHD_SERVICES' : 'SYSTEMD_SERVICES';
+    const listSrc = initSrc.match(new RegExp(`const ${listName} = \\[([^\\]]*)\\]`))[1];
+    const installed = [...listSrc.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    assert.equal(installed.length, 2, `${listName} parsed`);
+    const publisher = platform === 'darwin' ? 'ai.openclaw.mesh-health-publisher.plist' : 'openclaw-mesh-health-publisher.service';
+    const units = [...installed, publisher];
+
+    const home = mkdtempSync(join(tmpdir(), 'openclaw-remove-'));
+    try {
+      const unitDir = platform === 'darwin' ? join(home, 'Library', 'LaunchAgents') : join(home, '.config', 'systemd', 'user');
+      mkdirSync(unitDir, { recursive: true });
+      for (const u of units) writeFileSync(join(unitDir, u), 'unit\n');
+      const fakeBin = join(home, 'fakebin');
+      mkdirSync(fakeBin);
+      const callLog = join(home, 'calls.log');
+      for (const tool of ['systemctl', 'launchctl']) {
+        writeFileSync(join(fakeBin, tool), `#!/bin/sh\necho "${tool} $*" >> "${callLog}"\n`, { mode: 0o755 });
+      }
+
+      const r = spawnSync(process.execPath, [join(ROOT, 'bin', 'mesh-node-remove.js'), '--force'], {
+        encoding: 'utf8',
+        timeout: 30000,
+        env: { ...process.env, HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, OPENCLAW_NATS: 'nats://127.0.0.1:1' },
+      });
+      assert.equal(r.status, 0, r.stderr);
+      const left = readdirSync(unitDir);
+      for (const u of units) assert.ok(!left.includes(u), `${u} removed`);
+      const calls = readFileSync(callLog, 'utf8');
+      for (const u of units) {
+        const name = u.replace(/\.(plist|service)$/, '');
+        assert.ok(calls.includes(name), `${name} stopped before its file was deleted`);
+      }
+      assert.match(r.stdout, /openclaw-trust-peer\.mjs --remove \S+ --sync-nats/);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});

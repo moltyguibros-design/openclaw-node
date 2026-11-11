@@ -134,7 +134,7 @@ export async function POST(
   }
 }
 
-// PATCH /api/souls/:id/evolution/:eventId - Approve/reject evolution
+// PATCH /api/souls/:id/evolution?eventId=<id> - Approve/reject evolution
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

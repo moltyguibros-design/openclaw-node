@@ -350,6 +350,37 @@ describe('extractStructured', () => {
     const result = await extractStructured(mockClient, []);
     assert.equal(result.entities.length, 0);
   });
+
+  it('a primed (qwen3) continuation with nested objects keeps every entity', async () => {
+    const mockClient = {
+      model: 'qwen3:8b',
+      generate: async () => ({
+        content: '"entities": [{"name": "NATS", "type": "technology", "salience": 0.9}, '
+          + '{"name": "OpenClaw Gateway", "type": "project", "salience": 0.7}], '
+          + '"themes": [], "actions": [], "decisions": [], "friction_signals": [], "relationships": []}',
+      }),
+    };
+    const result = await extractStructured(mockClient, []);
+    assert.deepEqual(result.entities.map(e => e.name), ['NATS', 'OpenClaw Gateway']);
+  });
+
+  it('rejects a reply whose top level carries no extraction field', async () => {
+    const mockClient = {
+      model: 'llama3.1:8b',
+      generate: async () => ({ content: '{"name": "X", "type": "project"}' }),
+    };
+    await assert.rejects(() => extractStructured(mockClient, []), /no extraction fields/);
+  });
+
+  it('rejects a truncated primed continuation instead of storing one inner object as empty', async () => {
+    const mockClient = {
+      model: 'qwen3:8b',
+      generate: async () => ({
+        content: '"entities": [{"name": "NATS", "type": "technology", "salience": 0.9}], "themes": [',
+      }),
+    };
+    await assert.rejects(() => extractStructured(mockClient, []), /no extraction fields/);
+  });
 });
 
 describe('R42 (repair 3.4): fast path validates before returning', () => {

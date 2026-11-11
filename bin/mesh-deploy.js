@@ -213,7 +213,7 @@ function renderConfigTemplate(template, envText) {
   for (const line of envText.split('\n')) {
     if (/^\s*(#|$)/.test(line) || !line.includes('=')) continue;
     const key = line.slice(0, line.indexOf('=')).trim();
-    // The installer trims with xargs, which also drops surrounding quotes.
+    // Same trim + one surrounding quote pair as scripts/install/config.sh.
     const value = line.slice(line.indexOf('=') + 1).trim().replace(/^(["'])(.*)\1$/, '$2');
     if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) vars[key] = value;
   }
@@ -261,8 +261,7 @@ const MANIFEST = [
     name: 'Mesh CLI Tools',
     description: 'mesh command, health check, repair, deploy, fleet-deploy',
     risk: 'safe',
-    repoPaths: ['bin/mesh.js', 'bin/mesh-deploy.js', 'bin/fleet-deploy.js',
-                'bin/mesh-health.sh', 'bin/mesh-repair.sh'],
+    repoPaths: ['bin/mesh.js', 'bin/mesh-deploy.js', 'bin/fleet-deploy.js'],
     targets: [DIRS.CLI_BIN],
     servicesMac: [],
     servicesLinux: [],
@@ -423,13 +422,21 @@ const MANIFEST = [
     servicesMac: [],
     servicesLinux: [],
     nodeFilter: 'all',
-    preInstall: (changedFiles) => {
+    preInstall: (changedFiles, { repoDir, toSha, dryRun }) => {
       let differs = false;
       for (const f of changedFiles) {
         const basename = path.basename(f);
         const targetPath = path.join(DIRS.WORKSPACE, basename);
         if (fs.existsSync(targetPath)) {
-          const srcPath = path.join(REPO_DIR, f);
+          // A dry run has not checked out toSha: compare against it and write nothing.
+          if (dryRun) {
+            if (!fs.readFileSync(targetPath).equals(git(repoDir, ['show', `${toSha}:${f}`], 'buffer'))) {
+              warn(`${basename} differs from repo version — a deploy would save it as ${basename}.repo and skip this component`);
+              differs = true;
+            }
+            continue;
+          }
+          const srcPath = path.join(repoDir, f);
           const diff = exec(`diff "${targetPath}" "${srcPath}" | head -20`, { ignoreError: true });
           if (diff) {
             warn(`${basename} differs from repo version:`);
@@ -640,7 +647,7 @@ const MANIFEST = [
     name: 'Log Rotation',
     description: 'Weekly log file rotation (copytruncate)',
     risk: 'safe',
-    repoPaths: ['bin/log-rotate.sh'],
+    repoPaths: ['bin/log-rotate'],
     targets: [DIRS.CLI_BIN],
     servicesMac: ['ai.openclaw.log-rotate'],
     servicesLinux: [],  // Ubuntu uses logrotate.d natively
@@ -925,7 +932,7 @@ function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false, includ
     }
 
     // Pre-install hook (backup, merge protection, etc.) — false vetoes the component
-    if (comp.preInstall && comp.preInstall(install) === false) continue;
+    if (comp.preInstall && comp.preInstall(install, { repoDir, toSha, dryRun }) === false) continue;
 
     let installed = 0;
     let removed = 0;

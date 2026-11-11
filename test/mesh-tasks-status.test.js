@@ -148,6 +148,28 @@ describe("markRejected() reject→requeue cap (P4-5)", () => {
   });
 });
 
+describe("markFailed() keeps the attempt history", () => {
+  const running = (id) => ({
+    ...createTask({ task_id: id, title: id }), status: TASK_STATUS.RUNNING, owner: "w1",
+    attempts: [{ approach: "lease expired while held by w0", result: "requeued", keep: false }],
+  });
+
+  it("a fail that reports no attempts leaves the recorded ones in place", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, running("T-F1"));
+    const t = await store.markFailed("T-F1", "boom");
+    assert.equal(t.status, TASK_STATUS.FAILED);
+    assert.deepEqual(t.attempts.map((a) => a.approach), ["lease expired while held by w0"]);
+  });
+
+  it("a fail that reports attempts replaces the list", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, running("T-F2"));
+    const t = await store.markFailed("T-F2", "boom", [{ approach: "a", result: "r", keep: false }]);
+    assert.deepEqual(t.attempts.map((a) => a.approach), ["a"]);
+  });
+});
+
 describe("recordMerge() merge-after-review (P4-4)", () => {
   it("records the merge on a completed task without touching the rest of the result", async () => {
     const store = new TaskStore(mockKv());
@@ -261,5 +283,100 @@ describe("lease + fencing token (P4-5)", () => {
     const t = await store.get("L-4");
     assert.equal(t.status, TASK_STATUS.RELEASED);
     assert.match(t.result.summary, /Lease expired 3×/);
+  });
+});
+
+describe("live-task scans read the bucket once", () => {
+  function countingStore() {
+    const kv = mockKv();
+    const keys = kv.keys;
+    const counter = { scans: 0 };
+    kv.keys = async () => { counter.scans++; return keys(); };
+    return { store: new TaskStore(kv), counter };
+  }
+  const tenMinAgo = () => new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const live = (id, status, extra) => ({ ...createTask({ task_id: id, title: id }), status, owner: "w1", ...extra });
+
+  it("list({ statuses }) keeps only the listed statuses", async () => {
+    const { store } = countingStore();
+    await seed(store, live("R", TASK_STATUS.RUNNING));
+    await seed(store, live("C", TASK_STATUS.CLAIMED));
+    await seed(store, live("D", TASK_STATUS.COMPLETED));
+    const ids = (await store.list({ statuses: [TASK_STATUS.RUNNING, TASK_STATUS.CLAIMED] })).map(t => t.task_id);
+    assert.deepEqual(ids.sort(), ["C", "R"]);
+  });
+
+  it("findStalled finds running and claimed tasks in one scan", async () => {
+    const { store, counter } = countingStore();
+    await seed(store, live("R", TASK_STATUS.RUNNING, { last_activity: tenMinAgo() }));
+    await seed(store, live("C", TASK_STATUS.CLAIMED, { last_activity: tenMinAgo() }));
+    counter.scans = 0;
+    assert.deepEqual((await store.findStalled(5)).map(t => t.task_id).sort(), ["C", "R"]);
+    assert.equal(counter.scans, 1);
+  });
+
+  it("findOverBudget finds running and claimed tasks in one scan", async () => {
+    const { store, counter } = countingStore();
+    await seed(store, live("R", TASK_STATUS.RUNNING, { budget_deadline: tenMinAgo() }));
+    await seed(store, live("C", TASK_STATUS.CLAIMED, { budget_deadline: tenMinAgo() }));
+    counter.scans = 0;
+    assert.deepEqual((await store.findOverBudget()).map(t => t.task_id).sort(), ["C", "R"]);
+    assert.equal(counter.scans, 1);
+  });
+
+  it("reapExpiredLeases scans once", async () => {
+    const { store, counter } = countingStore();
+    await seed(store, live("R", TASK_STATUS.RUNNING, { lease_token: "t1", lease_expires_at: tenMinAgo() }));
+    await seed(store, live("C", TASK_STATUS.CLAIMED, { lease_token: "t2", lease_expires_at: tenMinAgo() }));
+    counter.scans = 0;
+    assert.deepEqual((await store.reapExpiredLeases()).requeued.sort(), ["C", "R"]);
+    assert.equal(counter.scans, 1);
+  });
+});
+
+describe("requeueOwnedBy() (mesh-node-remove)", () => {
+  const leased = (id, status, owner) => ({
+    ...createTask({ task_id: id, title: id }), status, owner,
+    claimed_at: new Date().toISOString(), lease_token: "tok", lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
+  });
+
+  it("re-queues only the node's claimed/running tasks and clears their lease", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, leased("T-a", TASK_STATUS.CLAIMED, "dead"));
+    await seed(store, leased("T-b", TASK_STATUS.RUNNING, "other"));
+    await seed(store, { ...leased("T-c", TASK_STATUS.COMPLETED, "dead"), lease_token: null });
+
+    assert.deepEqual(await store.requeueOwnedBy("dead"), ["T-a"]);
+    const a = await store.get("T-a");
+    assert.equal(a.status, TASK_STATUS.QUEUED);
+    assert.equal(a.owner, null);
+    assert.equal(a.claimed_at, null);
+    assert.equal(a.lease_token, null);
+    assert.equal(a.lease_expires_at, null);
+    assert.equal((await store.get("T-b")).status, TASK_STATUS.RUNNING);
+    assert.equal((await store.get("T-b")).owner, "other");
+    assert.equal((await store.get("T-c")).status, TASK_STATUS.COMPLETED);
+  });
+
+  it("a task the daemon completes mid-requeue stays completed (CAS, not a blind put)", async () => {
+    const kv = mockKv();
+    const get = kv.get;
+    let reads = 0;
+    // The second read of T-a is the CAS read; the daemon completes the task right after it.
+    kv.get = async (k) => {
+      const entry = await get(k);
+      if (k === "T-a" && ++reads === 2) {
+        const done = { ...JSON.parse(sc.decode(entry.value)), status: TASK_STATUS.COMPLETED, completed_at: new Date().toISOString() };
+        await kv.put(k, sc.encode(JSON.stringify(done)));
+      }
+      return entry;
+    };
+    const store = new TaskStore(kv);
+    await seed(store, leased("T-a", TASK_STATUS.RUNNING, "dead"));
+
+    assert.deepEqual(await store.requeueOwnedBy("dead"), []);
+    const a = await store.get("T-a");
+    assert.equal(a.status, TASK_STATUS.COMPLETED);
+    assert.equal(a.owner, "dead");
   });
 });
