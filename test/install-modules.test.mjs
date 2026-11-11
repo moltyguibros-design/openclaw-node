@@ -91,6 +91,36 @@ test('the 3 unit-render dry-run guards live in services.sh', () => {
   assert.equal(installSrc.match(guard), null);
 });
 
+// Bare envsubst blanked every $VAR, so the NATS units shipped
+// `ExecReload=/bin/kill -HUP ` and check_rendered (which looks for ${VAR}) missed it.
+test('unit renders hand envsubst the placeholder list, so $MAINPID survives', (t) => {
+  const svc = moduleSrc['services.sh'];
+  assert.equal(svc.match(/envsubst < "\$TEMPLATE"/g), null);
+  const unitVars = svc.match(/UNIT_VARS='([^']*)'/)?.[1];
+  assert.ok(unitVars, 'services.sh must define UNIT_VARS');
+  const templates = [
+    ...readdirSync(join(ROOT, 'services/systemd')).map((f) => join(ROOT, 'services/systemd', f)),
+    ...readdirSync(join(ROOT, 'services/launchd')).filter((f) => /^ai\.openclaw\..*\.plist$/.test(f)).map((f) => join(ROOT, 'services/launchd', f)),
+  ];
+  for (const f of templates) {
+    for (const [v] of readFileSync(f, 'utf8').matchAll(/\$\{[A-Za-z_][A-Za-z0-9_]*\}/g)) {
+      assert.ok(unitVars.split(' ').includes(v), `${v} in ${f} is missing from UNIT_VARS`);
+    }
+  }
+  if (spawnSync('sh', ['-c', 'command -v envsubst']).status !== 0) {
+    t.diagnostic('envsubst not installed; render check skipped');
+    return;
+  }
+  const r = spawnSync('envsubst', [unitVars], {
+    encoding: 'utf8',
+    input: readFileSync(join(ROOT, 'services/systemd/openclaw-nats.service'), 'utf8'),
+    env: { PATH: process.env.PATH, HOME: '/h', NATS_SERVER_BIN: '/x/nats-server' },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes('ExecReload=/bin/kill -HUP $MAINPID'), r.stdout);
+  assert.ok(r.stdout.includes('ExecStart=/x/nats-server --config /h/.openclaw/config/nats.conf'), r.stdout);
+});
+
 // --update --enable-services on Linux used `start`, a no-op on a running unit,
 // so re-rendered units and new code waited for a reboot (macOS unloads/loads).
 test('Linux --enable-services restarts re-rendered autostart units', () => {

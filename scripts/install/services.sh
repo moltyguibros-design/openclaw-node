@@ -12,6 +12,9 @@ SYSTEMD_DEST="${OPENCLAW_SYSTEMD_DIR:-$HOME/.config/systemd/user}"
 INSTALLED_COUNT=0
 SKIPPED_COUNT=0
 RENDER_ERRORS=0
+# The sed fallback's placeholder list. Bare envsubst also blanks systemd's own
+# runtime variables ($MAINPID in the NATS units' ExecReload).
+UNIT_VARS='${HOME} ${NODE_BIN} ${OPENCLAW_WORKSPACE} ${OPENCLAW_NATS} ${OPENCLAW_NATS_TOKEN} ${OPENCLAW_NODE_ID} ${OPENCLAW_NODE_ROLE} ${OPENCLAW_DEPLOY_TRUSTED_KEYS} ${OPENCLAW_REPO_DIR} ${NPM_BIN} ${NATS_SERVER_BIN} ${MESH_LLM_PROVIDER} ${LLM_MODEL} ${LLM_BASE_URL} ${MESH_FOREMAN_ENFORCE}'
 
 # Fail-loud render audit — a unit shipping a live ${VAR} placeholder is broken
 # by construction (the silent-unrendered class, 2026-07-11 audit).
@@ -66,7 +69,7 @@ else
       fi
 
       if command -v envsubst >/dev/null 2>&1; then
-        envsubst < "$TEMPLATE" > "$DEST"
+        envsubst "$UNIT_VARS" < "$TEMPLATE" > "$DEST"
       else
         # NOTE: sed delimiter is |. If OPENCLAW_NATS_TOKEN ever contains |
         # (unlikely — tokens are hex/base64), this substitution will break.
@@ -119,7 +122,7 @@ else
             continue
           fi
           if command -v envsubst >/dev/null 2>&1; then
-            envsubst < "$TEMPLATE" > "$DEST"
+            envsubst "$UNIT_VARS" < "$TEMPLATE" > "$DEST"
           else
             sed \
               -e "s|\${HOME}|$HOME|g" \
@@ -161,7 +164,7 @@ else
           continue
         fi
         if command -v envsubst >/dev/null 2>&1; then
-          envsubst < "$TEMPLATE" > "$DEST"
+          envsubst "$UNIT_VARS" < "$TEMPLATE" > "$DEST"
         else
           sed \
             -e "s|\${HOME}|$HOME|g" \
