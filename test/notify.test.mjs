@@ -195,6 +195,22 @@ describe('dispatch', () => {
     });
     assert.ok(seen[1].endsWith(' sound name "a\\"b"'), seen[1]);
   });
+  it('osascript fallback escapes backslashes so a message cannot close the string', async () => {
+    let seen = null;
+    await dispatch({ ...evt, message: 'a\\" & (do shell script "id") --' }, DEFAULT_CONFIG, {
+      platform: 'darwin', terminalNotifier: null, sound: 'default',
+      exec: (c, a, o, cb) => { seen = a; cb(null); },
+    });
+    assert.equal(seen[1], 'display notification "a\\\\\\" & (do shell script \\"id\\") --" with title "T"');
+  });
+  it('osascript fallback truncates before escaping so an escape is never cut in half', async () => {
+    let seen = null;
+    await dispatch({ ...evt, message: 'x'.repeat(199) + '"' }, DEFAULT_CONFIG, {
+      platform: 'darwin', terminalNotifier: null, sound: 'default',
+      exec: (c, a, o, cb) => { seen = a; cb(null); },
+    });
+    assert.ok(seen[1].startsWith(`display notification "${'x'.repeat(199)}\\"" with title "T"`), seen[1]);
+  });
   it('delivery failure is reported, not thrown', async () => {
     const d = await dispatch(evt, DEFAULT_CONFIG, { platform: 'darwin', terminalNotifier: '/tn', exec: failExec });
     assert.equal(d.ok, false);
