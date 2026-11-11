@@ -190,6 +190,24 @@ describe('getSessionInfo', () => {
       `estimated ${info.cost.estimatedCostUsd} != expected ${expected}`);
   });
 
+  it('counts a response split across content-block lines once', async () => {
+    const origHome = process.env.HOME;
+    process.env.HOME = tmpDir;
+    const sessionFile = path.join(projectDir, 'split-session.jsonl');
+    const usage1 = { input_tokens: 10, output_tokens: 200, cache_read_input_tokens: 1000, cache_creation_input_tokens: 0 };
+    const lines = [
+      { type: 'user', message: { content: 'test' } },
+      { type: 'assistant', requestId: 'req_1', message: { id: 'msg_1', model: 'claude-sonnet-4-6', content: [{ type: 'thinking' }], usage: usage1 } },
+      { type: 'assistant', requestId: 'req_1', message: { id: 'msg_1', model: 'claude-sonnet-4-6', content: [{ type: 'tool_use' }], usage: usage1 } },
+      { type: 'assistant', requestId: 'req_2', message: { id: 'msg_2', model: 'claude-sonnet-4-6', usage: { input_tokens: 5, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } },
+    ];
+    fs.writeFileSync(sessionFile, lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+    const info = await getSessionInfo('/fake/workspace');
+    process.env.HOME = origHome;
+    assert.equal(info.cost.inputTokens, 1015);
+    assert.equal(info.cost.outputTokens, 300);
+  });
+
   it('extracts cost from costUSD field', async () => {
     const origHome = process.env.HOME;
     process.env.HOME = tmpDir;
