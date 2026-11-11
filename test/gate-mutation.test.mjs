@@ -111,3 +111,22 @@ describe('mission-control eslint gate is not vacuous', { skip: MC_SKIP }, () => 
     }
   });
 });
+
+// ── 4. CI mesh tier cannot skip silently ────────────────────────────────────
+// A daemon that never answers used to leave the readiness loop green, and
+// without OPENCLAW_REQUIRE_MESH the census only skips — the whole mesh tier
+// could vanish from a green run.
+
+describe('CI requires the mesh tier and fails on a dead daemon', () => {
+  const yml = readFileSync(join(REPO, '.github/workflows/test.yml'), 'utf8');
+  it('the readiness loop fails the step when the daemon never answers', () => {
+    assert.ok(yml.includes('[ "$ready" != 1 ]'), 'readiness loop no longer fails the step on a dead daemon');
+  });
+  it('the root unit tests run with OPENCLAW_REQUIRE_MESH=1', () => {
+    const start = yml.indexOf('- name: Root unit tests');
+    assert.ok(start >= 0, 'Root unit tests step not found');
+    const next = yml.indexOf('- name:', start + 1);
+    const block = yml.slice(start, next < 0 ? undefined : next);
+    assert.match(block, /OPENCLAW_REQUIRE_MESH:\s*"1"/);
+  });
+});
