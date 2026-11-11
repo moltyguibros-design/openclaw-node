@@ -18,8 +18,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKSPACE="${OPENCLAW_WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
-ACTIVE_TASKS="$WORKSPACE/memory/active-tasks.md"
-TRUST_REGISTRY="$WORKSPACE/.tmp/trust-registry.json"
 DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
@@ -31,12 +29,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Collect triggers as JSON via Python (reliable parsing)
-TRIGGERS=$(python3 << 'PYEOF'
+TRIGGERS=$(OPENCLAW_WORKSPACE="$WORKSPACE" python3 << 'PYEOF'
 import json, re, os, subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-workspace = os.environ.get("OPENCLAW_WORKSPACE", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+workspace = os.environ["OPENCLAW_WORKSPACE"]
 active_tasks = os.path.join(workspace, "memory/active-tasks.md")
 trust_registry = os.path.join(workspace, ".tmp/trust-registry.json")
 triggers = []
