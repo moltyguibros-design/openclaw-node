@@ -103,8 +103,8 @@ They work with any application that uses the wrapped SDK — no frontend-specifi
 
 ```javascript
 import OpenAI from 'openai';
-import { createNatsPublisher } from 'openclaw-nodedev/lib/publishers/publish-helper.mjs';
-import { wrapOpenAI } from 'openclaw-nodedev/lib/publishers/openai-wrapper.mjs';
+import { createNatsPublisher } from 'openclaw-node-harness/lib/publishers/publish-helper.mjs';
+import { wrapOpenAI } from 'openclaw-node-harness/lib/publishers/openai-wrapper.mjs';
 
 const publisher = createNatsPublisher();
 const client = wrapOpenAI(new OpenAI(), publisher);
@@ -124,8 +124,8 @@ await publisher.close();
 
 ```javascript
 import Anthropic from '@anthropic-ai/sdk';
-import { createNatsPublisher } from 'openclaw-nodedev/lib/publishers/publish-helper.mjs';
-import { wrapAnthropic } from 'openclaw-nodedev/lib/publishers/anthropic-wrapper.mjs';
+import { createNatsPublisher } from 'openclaw-node-harness/lib/publishers/publish-helper.mjs';
+import { wrapAnthropic } from 'openclaw-node-harness/lib/publishers/anthropic-wrapper.mjs';
 
 const publisher = createNatsPublisher();
 const client = wrapAnthropic(new Anthropic(), publisher);
@@ -144,8 +144,8 @@ await publisher.close();
 
 ```javascript
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { createNatsPublisher } from 'openclaw-nodedev/lib/publishers/publish-helper.mjs';
-import { wrapGemini } from 'openclaw-nodedev/lib/publishers/gemini-wrapper.mjs';
+import { createNatsPublisher } from 'openclaw-node-harness/lib/publishers/publish-helper.mjs';
+import { wrapGemini } from 'openclaw-node-harness/lib/publishers/gemini-wrapper.mjs';
 
 const publisher = createNatsPublisher();
 const genAI = new GoogleGenerativeAI(API_KEY);
@@ -160,8 +160,8 @@ await publisher.close();
 ### MiniMax
 
 ```javascript
-import { createNatsPublisher } from 'openclaw-nodedev/lib/publishers/publish-helper.mjs';
-import { wrapMiniMax } from 'openclaw-nodedev/lib/publishers/minimax-wrapper.mjs';
+import { createNatsPublisher } from 'openclaw-node-harness/lib/publishers/publish-helper.mjs';
+import { wrapMiniMax } from 'openclaw-node-harness/lib/publishers/minimax-wrapper.mjs';
 
 const publisher = createNatsPublisher();
 const client = wrapMiniMax(minimaxClient, publisher);

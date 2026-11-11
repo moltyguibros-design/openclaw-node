@@ -209,6 +209,11 @@ describe('wrapMiniMax', () => {
     assert.equal(publishCalls.length, 1);
     assert.equal(publishCalls[0], 'minimax-wrapper');
   });
+
+  it('names itself in the guard error through the shared wrapper body', () => {
+    assert.throws(() => wrapMiniMax({}, { publish() {} }), /^Error: wrapMiniMax: client must have chat\.completions\.create/);
+    assert.throws(() => wrapOpenAI({}, { publish() {} }), /^Error: wrapOpenAI: client must have chat\.completions\.create/);
+  });
 });
 
 // --- CLI tool test ---
