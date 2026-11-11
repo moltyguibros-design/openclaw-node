@@ -384,3 +384,16 @@ fs.readdirSync = function (dir, ...rest) {
   const switched = await activity.waitFor(e => e.event === 'reset' && JSON.parse(e.data).source === 'b.jsonl', 3500);
   assert.ok(switched, 'a newer session transcript is picked up within the cache window');
 });
+
+test('a log stream keeps a multi-byte character split across writes', async t => {
+  const f = await fixture(t);
+  const file = path.join(f.plan, 'tick-logs/sample.log');
+  fs.writeFileSync(file, Buffer.concat([Buffer.from('FIXTURE_LOG\n'), Buffer.from([0xc3])]));
+  const stream = await sseEvents(t, f, '/api/plans/fixture/stream?log=sample.log');
+  const appends = () => stream.events.filter(e => e.event === 'append');
+  const text = () => appends().map(e => JSON.parse(e.data)).join('');
+  assert.ok(await stream.waitFor(() => appends().length === 1), f.output());
+  fs.appendFileSync(file, Buffer.from([0xa9, 0x58, 0x0a]));
+  assert.ok(await stream.waitFor(() => appends().length === 2), JSON.stringify(text()));
+  assert.equal(text(), 'FIXTURE_LOG\néX\n');
+});

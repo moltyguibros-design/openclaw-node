@@ -28,6 +28,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { StringDecoder } from 'node:string_decoder';
 import { execFile, spawnSync } from 'node:child_process';
 import { createViewerAuth, checkViewerRequest, viewerTokenPath } from '../lib/workplan-viewer-auth.mjs';
 
@@ -1498,7 +1499,7 @@ function sseActivity(req, res, resolve) {
   let currentJsonl = src.path;
   let sourceKind = src.kind;
   let sourcePlan = src.plan || null;
-  let position = 0, closed = false, buffer = '';
+  let position = 0, closed = false, buffer = '', decoder;
 
   const send = (event, data) => {
     if (closed) return;
@@ -1516,6 +1517,7 @@ function sseActivity(req, res, resolve) {
     }
   };
   const emitFull = () => {
+    decoder = new StringDecoder('utf8');
     if (!currentJsonl || !fs.existsSync(currentJsonl)) {
       send('info', { msg: 'No activity yet — no tick is running, and no interactive session was found for this repo.' });
       return;
@@ -1530,14 +1532,14 @@ function sseActivity(req, res, resolve) {
       fs.readSync(fd, buf, 0, SESSION_TAIL_BYTES, start);
       fs.closeSync(fd);
       position = stat.size;
-      let s = buf.toString('utf8');
+      let s = decoder.write(buf);
       const i = s.indexOf('\n'); if (i !== -1) s = s.slice(i + 1);
       processChunk(s);
       return;
     }
-    const data = fs.readFileSync(currentJsonl, 'utf8');
-    position = Buffer.byteLength(data, 'utf8');
-    processChunk(data);
+    const data = fs.readFileSync(currentJsonl);
+    position = data.length;
+    processChunk(decoder.write(data));
   };
   emitFull();
 
@@ -1557,7 +1559,7 @@ function sseActivity(req, res, resolve) {
         fs.readSync(fd, buf, 0, buf.length, position);
         fs.closeSync(fd);
         position = stat.size;
-        processChunk(buf.toString('utf8'));
+        processChunk(decoder.write(buf));
       } else if (stat.size < position) {
         position = 0; buffer = ''; emitFull();
       }
@@ -1576,7 +1578,7 @@ function sseLive(req, res, resolve, allowSwitch) {
   const pinnedFd = cur.fd;
   let currentPath = cur.path;
   let mode = cur.mode;
-  let position = 0, closed = false, buffer = '';
+  let position = 0, closed = false, buffer = '', decoder;
 
   const send = (event, data) => {
     if (closed) return;
@@ -1595,6 +1597,7 @@ function sseLive(req, res, resolve, allowSwitch) {
     if (lines) send('append', JSON.stringify(lines));
   };
   const emitFull = () => {
+    decoder = new StringDecoder('utf8');
     if (!currentPath || (pinnedFd === undefined && !fs.existsSync(currentPath))) {
       send('file', '— no activity yet');
       send('append', JSON.stringify('No tick is running, and no interactive session was found for this repo.\n'));
@@ -1610,21 +1613,20 @@ function sseLive(req, res, resolve, allowSwitch) {
       fs.readSync(fd, buf, 0, len, start);
       if (pinnedFd === undefined) fs.closeSync(fd);
       position = stat.size;
-      let s = buf.toString('utf8');
+      let s = decoder.write(buf);
       if (start > 0) { const i = s.indexOf('\n'); if (i !== -1) s = s.slice(i + 1); }
       send('file', path.basename(currentPath) + ' · interactive session');
       renderJsonl(s);
       return;
     }
-    let buf;
+    let bytes;
     if (pinnedFd !== undefined) {
       const data = Buffer.alloc(fs.fstatSync(pinnedFd).size);
-      const count = fs.readSync(pinnedFd, data, 0, data.length, 0);
-      buf = data.subarray(0, count).toString('utf8');
-    } else buf = fs.readFileSync(currentPath, 'utf8');
-    position = Buffer.byteLength(buf, 'utf8');
+      bytes = data.subarray(0, fs.readSync(pinnedFd, data, 0, data.length, 0));
+    } else bytes = fs.readFileSync(currentPath);
+    position = bytes.length;
     send('file', path.basename(currentPath));
-    send('append', JSON.stringify(buf));
+    send('append', JSON.stringify(decoder.write(bytes)));
   };
   emitFull();
 
@@ -1647,8 +1649,9 @@ function sseLive(req, res, resolve, allowSwitch) {
         fs.readSync(fd, buf, 0, buf.length, position);
         if (pinnedFd === undefined) fs.closeSync(fd);
         position = stat.size;
-        if (mode === 'pretty') renderJsonl(buf.toString('utf8'));
-        else send('append', JSON.stringify(buf.toString('utf8')));
+        const text = decoder.write(buf);
+        if (mode === 'pretty') renderJsonl(text);
+        else if (text) send('append', JSON.stringify(text));
       } else if (stat.size < position) {
         send('switch', path.basename(currentPath));
         position = 0; buffer = ''; emitFull();
