@@ -241,6 +241,18 @@ test('authenticated controls preserve errors and execute only the fixture comman
   assert.ok(!f.output().includes(f.master));
 });
 
+test('default automation config points at the repo that holds memory-plan/plans', async t => {
+  const f = await fixture(t);
+  const r = await f.request('/api/plans/fixture/automation', { token: f.master });
+  assert.equal(r.status, 200);
+  const { config } = JSON.parse(r.text);
+  const repo = path.dirname(f.root);
+  assert.equal(config._persisted, false);
+  assert.equal(config.tick_command, path.join(repo, 'workspace-bin', 'fixture-tick.sh'));
+  assert.equal(config.working_dir, repo);
+  assert.equal(fs.existsSync(path.join(f.plan, 'automation.json')), false);
+});
+
 test('session exchange, streamed logs, revocation and file rotation work through HTTP', async t => {
   const f = await fixture(t);
   const login = () => f.request('/api/session', { method: 'POST', headers: { Origin: f.origin, 'Sec-Fetch-Site': 'same-origin' }, body: { token: f.master } });

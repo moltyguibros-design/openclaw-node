@@ -449,7 +449,8 @@ function planSummary(plan) {
 const LAUNCH_AGENTS = path.join(os.homedir(), 'Library/LaunchAgents');
 
 function deriveAutomationDefaults(plan) {
-  const repo = plan.root;
+  // plan.root is <repo>/memory-plan/plans, the layout plan-tick.sh assumes.
+  const repo = path.resolve(plan.root, '..', '..');
   const id = plan.id;
   const label = `ai.openclaw.${id}-tick`;
   const cmd = path.join(repo, 'workspace-bin', `${id}-tick.sh`);
