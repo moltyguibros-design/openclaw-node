@@ -244,7 +244,7 @@ The installer deploys the vault scaffold with 22 domain folders (`00-meta` … `
 3. Save the key to `~/.openclaw/workspace/projects/arcane-vault/.obsidian-api-key`
 4. The memory daemon will sync workspace files to the vault every 30 minutes
 
-If not using Obsidian, the sync is disabled by default in `config/obsidian-sync.json.template` (`"enabled": false`), which the installer renders to `~/.openclaw/workspace/config/obsidian-sync.json`.
+If not using Obsidian, the sync is disabled by default in `config/obsidian-sync.json.template` (`"enabled": false`), which the installer renders to `~/.openclaw/config/obsidian-sync.json`.
 
 ## HyperAgent Protocol
 

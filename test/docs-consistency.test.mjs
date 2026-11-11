@@ -55,3 +55,11 @@ test('README hooks table says validate-push.sh refuses force pushes, as the hook
   assert.match(read('.claude/hooks/session-start.sh'), /\.daemon-state-\$\{_NODE_ID\}\.md/);
   assert.match(sessionRow, /\.daemon-state-<node>\.md/);
 });
+
+test('README names the obsidian-sync.json path the installer writes and the readers open', () => {
+  assert.match(read('scripts/install/config.sh'), /"\$OPENCLAW_ROOT\/config\/obsidian-sync\.json"/);
+  assert.match(read('lib/obsidian-vault.mjs'), /join\(homedir\(\), '\.openclaw', 'config', 'obsidian-sync\.json'\)/);
+  const readme = read('README.md');
+  assert.ok(readme.includes('`~/.openclaw/config/obsidian-sync.json`'));
+  assert.doesNotMatch(readme, /workspace\/config\/obsidian-sync\.json/);
+});
