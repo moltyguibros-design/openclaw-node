@@ -2194,24 +2194,22 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
 // A task the daemon already ended (budget auto-fail, stall release, cancel)
 // surfaces here as the TASK_TERMINAL refusal of the worker's next call. That
 // is a stop, not a crash: wind down like the release path, so the worktree,
-// the agent state and the telemetry are not left on a dead task.
+// the agent state and the telemetry are not left on a dead task. Any other
+// error abandons the task the same way.
 async function onWorkerError(task, startedAt, err) {
-  if (task && err.code === TASK_TERMINAL) {
-    log(`STOPPED: ${task.task_id} — ${err.message}`);
-    const worktreePath = path.join(WORKTREE_BASE, task.task_id);
-    if (fs.existsSync(worktreePath)) {
-      commitWorktree(worktreePath, task.task_id, `partial: the daemon ended this task (${err.taskStatus})`);
-      cleanupWorktree(worktreePath, true);
-    }
-    writeAgentState('idle', null);
-    await recordHyperagentTask(task, { outcome: 'failure', iterations: 1, startedAt, notes: `Stopped: ${err.message}${err.foremanNote || ''}` });
-    return;
-  }
-  log(`ERROR: ${err.message}`);
+  const terminal = Boolean(task) && err.code === TASK_TERMINAL;
+  log(terminal ? `STOPPED: ${task.task_id} — ${err.message}` : `ERROR: ${err.message}`);
   if (!task) return;
+  // createWorktree's own id check: the error may be its refusal of an unsafe id.
+  const worktreePath = /^[\w][\w.-]{0,127}$/.test(task.task_id) ? path.join(WORKTREE_BASE, task.task_id) : null;
+  if (worktreePath && fs.existsSync(worktreePath)) {
+    commitWorktree(worktreePath, task.task_id, terminal ? `partial: the daemon ended this task (${err.taskStatus})` : 'partial: abandoned after a worker error');
+    cleanupWorktree(worktreePath, true);
+  }
+  writeAgentState('idle', null);
   await recordHyperagentTask(task, {
     outcome: 'failure', iterations: 1, startedAt,
-    notes: `Unhandled worker error: ${err.message}${err.foremanNote || ''}`,
+    notes: `${terminal ? 'Stopped' : 'Unhandled worker error'}: ${err.message}${err.foremanNote || ''}`,
   });
 }
 

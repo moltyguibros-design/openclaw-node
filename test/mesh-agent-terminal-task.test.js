@@ -113,12 +113,33 @@ describe('the worker stops cleanly on a task the daemon ended', () => {
     assert.match(rows[0].meta_notes, /^Stopped: Task T-1 is already failed \(Budget exceeded/);
   });
 
-  it('any other error is still reported as an unhandled worker error', async () => {
-    agent.__test.createWorktree('T-2');
-    await agent.__test.onWorkerError({ task_id: 'T-2', title: 'work' }, Date.now(), new Error('boom'));
+  it('any other error (a NATS timeout) is reported as an unhandled worker error and winds down the same way', async () => {
+    const worktree = agent.__test.createWorktree('T-2');
+    fs.writeFileSync(path.join(worktree, 'partial.txt'), 'half done\n');
+    fs.writeFileSync(AGENT_STATE, JSON.stringify({ status: 'working', taskId: 'T-2' }));
+    agent.__test.setContext({ nc: { async request() { throw Object.assign(new Error('TIMEOUT'), { code: 'TIMEOUT' }); } } });
+    const err = await agent.__test.natsRequest('mesh.tasks.attempt', { task_id: 'T-2' }).catch((e) => e);
+
+    await agent.__test.onWorkerError({ task_id: 'T-2', title: 'work' }, Date.now(), err);
+
     const rows = await telemetryFor('T-2');
     assert.equal(rows.length, 1);
-    assert.match(rows[0].meta_notes, /^Unhandled worker error: boom/);
+    assert.match(rows[0].meta_notes, /^Unhandled worker error: TIMEOUT/);
+    assert.equal(fs.existsSync(worktree), false, 'the worktree is removed');
+    assert.match(git(WORKSPACE, 'log', '-1', '--format=%s', 'mesh/T-2'), /partial: abandoned after a worker error/);
+    assert.equal(git(WORKSPACE, 'show', 'mesh/T-2:partial.txt'), 'half done');
+    assert.equal(JSON.parse(fs.readFileSync(AGENT_STATE, 'utf8')).status, 'idle');
+  });
+
+  it('an unsafe task id never touches a directory outside the worktree base', async () => {
+    const head = git(WORKSPACE, 'rev-parse', 'HEAD');
+    fs.writeFileSync(path.join(WORKSPACE, 'untracked.txt'), 'mine\n');
+    const status = git(WORKSPACE, 'status', '--porcelain');
+
+    await agent.__test.onWorkerError({ task_id: '../workspace', title: 'x' }, Date.now(), new Error('Invalid taskId: contains unsafe characters'));
+
+    assert.equal(git(WORKSPACE, 'rev-parse', 'HEAD'), head);
+    assert.equal(git(WORKSPACE, 'status', '--porcelain'), status);
   });
 
   it('re-creates the worktree when the task branch was kept without its directory', () => {
