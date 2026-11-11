@@ -248,6 +248,17 @@ test('scheduler heartbeat helper is installer-owned and both units invoke it', (
   assert.doesNotMatch(`${heartbeatLaunchd}\n${heartbeatSystemd}`, /Authorization|Bearer/);
 });
 
+test('every launchd nats unit execs the installer-resolved nats-server', () => {
+  const dir = join(ROOT, 'services/launchd');
+  const units = readdirSync(dir).filter((f) => /^ai\.openclaw\.nats(-\d)?\.plist$/.test(f));
+  assert.equal(units.length, 4);
+  for (const f of units) {
+    const src = readFileSync(join(dir, f), 'utf8');
+    assert.match(src, /<key>ProgramArguments<\/key>\s*<array>\s*<string>\$\{NATS_SERVER_BIN\}<\/string>/, f);
+    assert.ok(!src.includes('/opt/homebrew/bin/nats-server'), f);
+  }
+});
+
 // mesh-install.sh treats the join-token payload as untrusted: an expired token
 // or one steering the clone at a foreign repo must die before touching the
 // machine (no node install, no git clone). Both checks run at script top level,
