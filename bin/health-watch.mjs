@@ -224,16 +224,16 @@ export function formatQueueSection(qs) {
 
 /**
  * Derive a queue-level status for the watcher's overall alerting.
- *   stuck      — auto-restart was attempted; warn loudly
- *   degraded   — recent fallbacks or slow alarms
+ *   stuck      — >=3 consecutive extraction timeouts (the queue's F-H17 rule; auto-restart is attempted)
+ *   degraded   — >=3 consecutive analysis timeouts, or recent fallbacks or slow alarms
  *   healthy    — no recent issues
  */
 export function deriveQueueStatus(qs) {
   if (!qs) return 'healthy';
-  if (qs.consecutive_timeouts.extraction >= 3 || qs.consecutive_timeouts.analysis >= 3) return 'stuck';
+  if (qs.consecutive_timeouts.extraction >= 3) return 'stuck';
   const recentFallback = qs.recent_fallbacks.find(f => Date.now() - f.ts < 5 * 60 * 1000);
   const recentSlow = qs.recent_slow_alarms.find(a => Date.now() - a.ts < 5 * 60 * 1000);
-  if (recentFallback || recentSlow) return 'degraded';
+  if (qs.consecutive_timeouts.analysis >= 3 || recentFallback || recentSlow) return 'degraded';
   return 'healthy';
 }
 
