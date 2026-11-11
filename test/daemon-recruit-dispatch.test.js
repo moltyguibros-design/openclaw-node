@@ -34,15 +34,17 @@ function makeContext() {
   const collabStore = new CollabStore(new MockKV());
   const released = [];
   const failed = [];
+  const completed = [];
   const published = [];
   const store = {
     async get() { return { title: 'repro task', description: 'd', scope: [] }; },
     async markReleased(taskId, reason) { released.push({ taskId, reason }); },
     async markFailed(taskId, reason) { failed.push({ taskId, reason }); },
+    async markCompleted(taskId, result) { completed.push({ taskId, result }); },
   };
   const nc = { publish(subject) { published.push(subject); }, request: async () => ({}) };
   daemon.__test.setContext({ collabStore, store, nc });
-  return { collabStore, released, failed, published };
+  return { collabStore, released, failed, completed, published };
 }
 
 async function recruitedSession(collabStore, collabSpec, nodeIds) {
@@ -122,6 +124,60 @@ describe('startRecruitedSession — the ONE dispatch both close paths share', ()
     const twice = await ctx.collabStore.get(s.session_id);
     assert.equal(twice.rounds.length, once.rounds.length, 'no double round');
     assert.deepEqual(twice.cooperative.integrator_order, once.cooperative.integrator_order);
+  });
+});
+
+// A circling step whose members time out must end the session AND its parent
+// task. Marking every non-submitter dead left the barrier at 0 >= 0, so the
+// "all nodes timed out" abort never ran: the step advanced, startRound aborted
+// the session below min_nodes, and startCirclingStep only logged, leaving the
+// parent task held until stall/lease handling (or, from finalization, marked
+// it COMPLETED with no live member).
+describe('circling step timeout', () => {
+  let ctx;
+  beforeEach(() => { ctx = makeContext(); });
+
+  async function circlingSession({ phase = 'circling', step = 1 } = {}) {
+    const session = createSession('task-circ', { mode: 'circling_strategy', min_nodes: 3, max_nodes: 3, automation_tier: 1 });
+    await ctx.collabStore.put(session);
+    for (const id of ['w', 'a', 'b']) await ctx.collabStore.addNode(session.session_id, id, 'worker');
+    const s = await ctx.collabStore.get(session.session_id);
+    s.status = COLLAB_STATUS.ACTIVE;
+    Object.assign(s.circling, {
+      phase, current_subround: 1, current_step: step,
+      worker_node_id: 'w', reviewerA_node_id: 'a', reviewerB_node_id: 'b',
+    });
+    await ctx.collabStore.put(s);
+    await ctx.collabStore.startRound(s.session_id);
+    return s.session_id;
+  }
+
+  const assertAbortedAndReleased = async (id) => {
+    assert.equal((await ctx.collabStore.get(id)).status, COLLAB_STATUS.ABORTED);
+    assert.deepEqual(ctx.released.map((r) => r.taskId), ['task-circ']);
+    assert.ok(ctx.published.includes('mesh.events.collab.aborted'));
+    assert.deepEqual(ctx.completed, []);
+  };
+
+  it('nobody submitted: the session aborts and the parent task is released', async () => {
+    const id = await circlingSession();
+    await daemon.__test.handleCirclingStepTimeout(id, { phase: 'circling', subround: 1, step: 1 });
+    await assertAbortedAndReleased(id);
+  });
+
+  it('one member timed out: the next step drops below min_nodes, aborts and releases the parent', async () => {
+    const id = await circlingSession();
+    for (const node_id of ['w', 'a']) {
+      assert.ok(await ctx.collabStore.submitReflection(id, { node_id, summary: 's', vote: 'continue', circling_step: 1 }));
+    }
+    await daemon.__test.handleCirclingStepTimeout(id, { phase: 'circling', subround: 1, step: 1 });
+    await assertAbortedAndReleased(id);
+  });
+
+  it('nobody submitted in finalization: released, never completed', async () => {
+    const id = await circlingSession({ phase: 'finalization', step: 0 });
+    await daemon.__test.handleCirclingStepTimeout(id, { phase: 'finalization', subround: 1, step: 0 });
+    await assertAbortedAndReleased(id);
   });
 });
 

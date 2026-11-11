@@ -1775,7 +1775,18 @@ async function startCirclingStep(sessionId) {
   // (each step gets its own round to keep reflections organized)
   const round = await collabStore.startRound(sessionId);
   if (!round) {
-    log(`CIRCLING ERROR: startRound failed for ${sessionId} (aborted?)`);
+    const aborted = await collabStore.get(sessionId);
+    if (aborted && aborted.status === COLLAB_STATUS.ABORTED) {
+      log(`CIRCLING ABORTED ${sessionId}: too few active nodes (${aborted.nodes.length} < ${aborted.min_nodes})`);
+      await collabStore.appendAudit(sessionId, 'session_aborted', {
+        reason: 'insufficient_nodes', active: aborted.nodes.length, min_required: aborted.min_nodes,
+      });
+      publishCollabEvent('aborted', aborted);
+      const settled = await store.markReleased(aborted.task_id, `Circling session aborted: too few active nodes (${aborted.nodes.length} < ${aborted.min_nodes})`);
+      if (settled) await checkPlanProgress(aborted.task_id, 'failed');
+    } else {
+      log(`CIRCLING ERROR: startRound failed for ${sessionId}`);
+    }
     return;
   }
 
@@ -2901,6 +2912,7 @@ if (require.main === module) {
     handleCollabJoinDispatch: async (session) =>
       collabStore.isRecruitingDone(session) ? startRecruitedSession(session.session_id) : false,
     evaluateRound: (id) => evaluateRound(id),
+    handleCirclingStepTimeout: (id, snap) => handleCirclingStepTimeout(id, snap),
     sweepCollabRoundTimeouts: () => sweepCollabRoundTimeouts(),
     handleFail: (msg) => handleFail(msg),
     // F1/R1 (test/mesh-lease-authz.test.js): the handlers a stranger on the bus reaches.

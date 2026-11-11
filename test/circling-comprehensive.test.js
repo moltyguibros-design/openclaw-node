@@ -426,7 +426,7 @@ describe('Daemon: handleCirclingStepTimeout simulation', () => {
     assert.deepEqual(result.deadNodes, ['node-revB'], 'node-revB should be marked dead');
   });
 
-  it('all nodes timed out: marks all dead, barrier passes (0/0)', async () => {
+  it('all nodes timed out: marks all dead, barrier does not pass (abort)', async () => {
     const { store, sessionId } = await makeActiveSession();
     await store.advanceCirclingStep(sessionId);
     await store.startRound(sessionId);
@@ -435,11 +435,8 @@ describe('Daemon: handleCirclingStepTimeout simulation', () => {
     const snapshot = { phase: 'circling', subround: 1, step: 1 };
     const result = await simulateTimeout(store, sessionId, snapshot);
 
-    // isCirclingStepComplete returns true with 0 active nodes (0 reflections >= 0 active)
-    // The daemon would then advanceCirclingStep, which would proceed with degraded state.
-    // In the real daemon, subsequent steps would also time out → eventually abort.
     assert.equal(result.deadNodes.length, 3, 'all 3 nodes should be marked dead');
-    assert.equal(result.action, 'advance', 'barrier passes with 0/0 active/submitted');
+    assert.equal(result.action, 'abort', 'a step with no live member must not pass its barrier');
   });
 });
 
