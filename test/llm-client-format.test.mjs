@@ -44,3 +44,15 @@ test('parseWithPrimer restores the consumed brace only when primed', () => {
   const echoed = '{"entities": []}';
   assert.deepEqual(parseWithPrimer(echoed, true), { entities: [] });
 });
+
+const NESTED_CONTINUATION = '"entities": [{"name": "NATS", "type": "technology", "salience": 0.9}, '
+  + '{"name": "OpenClaw Gateway", "type": "project", "salience": 0.7}], "themes": [], "decisions": []}';
+
+test('parseWithPrimer restores the brace before parsing a continuation with nested objects', () => {
+  assert.equal(parseWithPrimer(NESTED_CONTINUATION, true).entities.length, 2);
+  assert.equal(parseWithPrimer(NESTED_CONTINUATION + '\n\nDone.', true).entities.length, 2);
+  const fresh = '<think></think>\n{"entities": [{"name": "X", "type": "concept", "salience": 0.5}]}';
+  assert.equal(parseWithPrimer(fresh, true).entities.length, 1);
+  const fenced = '```json\n{"entities": [{"name": "X", "type": "concept", "salience": 0.5}]}\n```';
+  assert.equal(parseWithPrimer(fenced, true).entities.length, 1);
+});
