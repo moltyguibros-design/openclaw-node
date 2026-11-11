@@ -28,7 +28,7 @@ Run `bash install.sh` (no flags), then:
 ```bash
 # 1. Env has the functional parameters (NODE_SPEC §3)
 grep -E '^(OPENCLAW_NATS|OPENCLAW_NATS_TOKEN|MESH_LLM_PROVIDER|LLM_MODEL|LLM_BASE_URL)=' ~/.openclaw/openclaw.env
-# PASS: all 5 present, token is 64 hex chars, provider=ollama
+# PASS: all 5 present, token is 64 hex chars, provider = the one chosen at install (--provider= or the Step 13.5 prompt)
 
 # 2. No unrendered placeholders anywhere (install aborts on unit placeholders; double-check)
 grep -RoE '\$\{[A-Za-z_]+\}' ~/Library/LaunchAgents/ai.openclaw.*.plist ~/.openclaw/config/*.conf 2>/dev/null
@@ -36,14 +36,14 @@ grep -RoE '\$\{[A-Za-z_]+\}' ~/Library/LaunchAgents/ai.openclaw.*.plist ~/.openc
 
 # 3. The three memory-daemon import kills are closed
 ls ~/.openclaw/workspace/lib/mcp-knowledge/core.mjs \
-   ~/.openclaw/workspace/lib/mcp-knowledge/node_modules \
+   ~/.openclaw/workspace/node_modules/@huggingface/transformers \
    ~/.openclaw/workspace/bin/obsidian-graph-cache.mjs \
    ~/.openclaw/workspace/node_modules/nats
 # PASS: all exist
 
 # 4. Repo deps + identity + bus config
-ls "$REPO_DIR/node_modules/nats" ~/.openclaw/config/nats.conf ~/.openclaw/identity 2>/dev/null
-# PASS: all exist (identity dir contains the ed25519 keypair)
+ls "$REPO_DIR/node_modules/nats" ~/.openclaw/config/nats.conf ~/.openclaw/identity.key ~/.openclaw/identity.pub 2>/dev/null
+# PASS: all exist (identity.key / identity.pub are the ed25519 node keypair)
 
 # 5. Every manifest unit rendered (role-filtered count printed by install)
 ls ~/Library/LaunchAgents/ai.openclaw.*.plist | wc -l   # macOS lead: 19 files

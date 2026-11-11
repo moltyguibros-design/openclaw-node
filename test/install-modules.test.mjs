@@ -199,6 +199,16 @@ test('installer never creates or copies nested mcp-knowledge dependencies', () =
   assert.ok(workspace.includes("run rsync -av --exclude='node_modules' \"$REPO_DIR/lib/\" \"$MESH_LIB/\""));
 });
 
+test('INSTALL_TEST_PROTOCOL T1 and NODE_SPEC describe what the installer leaves on disk', () => {
+  const protocol = readFileSync(join(ROOT, 'docs/INSTALL_TEST_PROTOCOL.md'), 'utf8');
+  const nodeSpec = readFileSync(join(ROOT, 'docs/NODE_SPEC.md'), 'utf8');
+  assert.doesNotMatch(protocol, /mcp-knowledge\/node_modules/, 'T1.3 must not require the nested tree the installer never creates');
+  assert.doesNotMatch(protocol, /provider=ollama/, 'MESH_LLM_PROVIDER has no default');
+  assert.match(moduleSrc['config.sh'], /OPENCLAW_IDENTITY_DIR="\$OPENCLAW_ROOT"/);
+  assert.match(protocol, /~\/\.openclaw\/identity\.key/);
+  assert.doesNotMatch(nodeSpec, /^\s+identity\/\s/m, 'the keypair is identity.key/identity.pub in OPENCLAW_ROOT, not a directory');
+});
+
 test('installer links scoped packages into both deployed parent trees', () => {
   const workspace = moduleSrc['workspace.sh'];
   assert.ok(workspace.includes('for scoped_dir in "$pkgdir"*/'));

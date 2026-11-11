@@ -90,7 +90,7 @@ Written to `~/.openclaw/openclaw.env` by install (generated where marked ⚙; RA
   config/{daemon,transcript-sources,obsidian-sync,notify}.json
   config/nats.conf              single-node bus (rendered, token embedded)   ← DEFAULT BUS
   config/nats-{1,2,3}.conf      R=3 cluster (rendered; operator-gated upgrade, fed. 1.5)
-  identity/                     ed25519 node keypair
+  identity.key, identity.pub    ed25519 node keypair
   nats/jetstream/               JetStream store (absolute path — no tilde)
   logs/  notifications/  souls/  rules/  plan-templates/  share/
   workspace/                    the agent workspace (OPENCLAW_WORKSPACE)
