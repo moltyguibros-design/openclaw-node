@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { atomicWriteFile } from '../lib/atomic-write.mjs';
-import { runWatch, formatTable, formatReport, formatHtml, STATUS } from '../lib/node-watch.mjs';
+import { runWatch, formatTable, formatReport, formatHtml, STATUS, watchTransitions } from '../lib/node-watch.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -75,25 +75,16 @@ async function once(mode, includeHeavy) {
 
 // Status-transition notifications (watch mode only): a ledgered desktop popup
 // on WORKING→BROKEN and BROKEN→WORKING, click-linking to the MC watch page.
-// Only ids present in consecutive reports are compared, so the light/deep probe
-// subsets never fabricate a transition. First report seeds silently.
+// A heavy target skipped on a light tick keeps its last observed status
+// (watchTransitions), so light/deep alternation never fabricates a BROKEN or
+// hides a recovery. First report seeds silently.
 const NOTIFY_CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), 'openclaw-notify.mjs');
 const MC_WATCH_URL = `${process.env.OPENCLAW_MC_URL || 'http://127.0.0.1:3000'}/node-watch`;
 let prevStatuses = null;
 
 function notifyTransitions(report) {
-  const cur = new Map(report.results.map((r) => [r.id, r.status]));
-  const prev = prevStatuses;
-  prevStatuses = cur;
-  if (!prev) return;
-  const broke = [];
-  const recovered = [];
-  for (const [id, status] of cur) {
-    const was = prev.get(id);
-    if (!was || was === status) continue;
-    if (status === STATUS.BROKEN) broke.push(id);
-    else if (was === STATUS.BROKEN && status === STATUS.WORKING) recovered.push(id);
-  }
+  const { next, broke, recovered } = watchTransitions(prevStatuses, report);
+  prevStatuses = next;
   const fire = (source, kind, title, message) => {
     try {
       execFile(process.execPath, [

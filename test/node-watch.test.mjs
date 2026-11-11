@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
 import {
-  WATCH_TARGETS, runWatch, formatHtml, STATUS,
+  WATCH_TARGETS, runWatch, formatHtml, STATUS, watchTransitions,
   parseLaunchdPrint, gradeMeshServices, gradeRequiredServices, gradeGateway, probeCoreLaunchdServices, probeMeshServices,
 } from '../lib/node-watch.mjs';
 import { resolveNodeConfig } from '../lib/node-acceptance.mjs';
@@ -240,8 +240,34 @@ describe('node-watch honesty invariants', () => {
     const probes = { 'LLM-L2-GEN': { slow: true, run: async () => ({ status: 'PASS', detail: 'ran' }) } };
     const skipped = await target('llm.local_gen').run(envFor(makeCtx(), { probes, includeHeavy: false }));
     assert.equal(skipped.status, STATUS.UNKNOWN);
+    assert.equal(skipped.notProbed, true);
     const probed = await target('llm.local_gen').run(envFor(makeCtx(), { probes, includeHeavy: true }));
     assert.equal(probed.status, STATUS.WORKING);
+    assert.equal(probed.notProbed, undefined);
+  });
+
+  it('light/deep alternation neither fabricates a BROKEN nor hides a recovery', async () => {
+    const light = await runWatch({
+      ctx: makeCtx(), config,
+      healthCheckFn: async () => ({}),
+      probes: {},
+      includeHeavy: false,
+      targets: [target('obs.links')],
+    });
+    assert.equal(light.results[0].notProbed, true);
+    const broken = { results: [{ id: 'obs.links', status: STATUS.BROKEN }] };
+    const working = { results: [{ id: 'obs.links', status: STATUS.WORKING }] };
+    let s = watchTransitions(null, broken);
+    assert.deepEqual([s.broke, s.recovered], [[], []]);
+    s = watchTransitions(s.next, light);
+    assert.equal(s.next.get('obs.links'), STATUS.BROKEN);
+    s = watchTransitions(s.next, broken);
+    assert.deepEqual(s.broke, []);
+    s = watchTransitions(s.next, light);
+    s = watchTransitions(s.next, working);
+    assert.deepEqual(s.recovered, ['obs.links']);
+    s = watchTransitions(s.next, broken);
+    assert.deepEqual(s.broke, ['obs.links']);
   });
 
   it('reused acceptance verdicts map PASS→WORKING, FAIL→BROKEN', async () => {
