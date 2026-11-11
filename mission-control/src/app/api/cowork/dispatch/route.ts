@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getNats, sc } from "@/lib/nats";
 import { getDb } from "@/lib/db";
-import { tasks, clusterMembers } from "@/lib/db/schema";
+import { tasks, clusters, clusterMembers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { generateTaskId } from "@/lib/task-id";
 import { statusToKanban } from "@/lib/parsers/task-markdown";
@@ -43,6 +43,13 @@ export async function POST(request: NextRequest) {
   let nodeIds: string[] = [];
 
   if (clusterId) {
+    const cluster = db.select().from(clusters).where(eq(clusters.id, clusterId)).get();
+    if (!cluster || cluster.status !== "active") {
+      return NextResponse.json(
+        { error: `Cluster "${clusterId}" is not active` },
+        { status: 400 }
+      );
+    }
     const members = db
       .select()
       .from(clusterMembers)

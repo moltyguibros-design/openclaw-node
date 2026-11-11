@@ -98,9 +98,8 @@ export async function POST(request: NextRequest) {
 
   const db = getDb();
 
-  // Check duplicate
   const existing = db.select().from(clusters).where(eq(clusters.id, id)).get();
-  if (existing) {
+  if (existing && existing.status !== "archived") {
     return NextResponse.json(
       { error: `Cluster "${id}" already exists` },
       { status: 409 }
@@ -108,21 +107,26 @@ export async function POST(request: NextRequest) {
   }
 
   const now = new Date().toISOString();
+  const row = {
+    name,
+    description: description || null,
+    color: color || null,
+    defaultMode: defaultMode || "parallel",
+    defaultConvergence: defaultConvergence || "unanimous",
+    convergenceThreshold: convergenceThreshold ?? 66,
+    maxRounds: maxRounds ?? 5,
+    status: "active",
+    updatedAt: now,
+  };
 
-  db.insert(clusters)
-    .values({
-      id,
-      name,
-      description: description || null,
-      color: color || null,
-      defaultMode: defaultMode || "parallel",
-      defaultConvergence: defaultConvergence || "unanimous",
-      convergenceThreshold: convergenceThreshold ?? 66,
-      maxRounds: maxRounds ?? 5,
-      status: "active",
-      updatedAt: now,
-    })
-    .run();
+  if (existing) {
+    // Re-creating an archived slug revives its row; the archived member rows
+    // would otherwise rejoin and collide with UNIQUE(cluster_id, node_id).
+    db.delete(clusterMembers).where(eq(clusterMembers.clusterId, id)).run();
+    db.update(clusters).set(row).where(eq(clusters.id, id)).run();
+  } else {
+    db.insert(clusters).values({ id, ...row }).run();
+  }
 
   // Insert members
   if (Array.isArray(members)) {
