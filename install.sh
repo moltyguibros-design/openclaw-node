@@ -153,7 +153,7 @@ echo ""
 
 if [ "$GATE_STATE" = "accepted" ]; then
   echo "The node is running. Useful next:"
-  echo "  Watch it:            $NODE_BIN $WORKSPACE/bin/node-watch.mjs --once"
+  echo "  Watch it:            $NODE_BIN $WORKSPACE/bin/node-watch.mjs"
   echo "  Dashboard:           http://localhost:3000"
   echo "  Grappe quickstart:   docs/NODE_SPEC.md §6 (3 local agents + one circling task)"
 else

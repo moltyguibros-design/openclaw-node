@@ -118,7 +118,7 @@ pkill -f "mesh-agent.js"    # cleanup
 
 ```bash
 node ~/.openclaw/workspace/bin/node-acceptance.mjs            # exit 0 = ACCEPTED
-node ~/.openclaw/workspace/bin/node-watch.mjs --once          # WORKING/BROKEN/OFF/UNKNOWN table
+node ~/.openclaw/workspace/bin/node-watch.mjs                 # WORKING/BROKEN/OFF/UNKNOWN table
 ```
 **PASS T5** = acceptance exit 0 AND node-watch shows no BROKEN on core axes (mem.*, net.*, llm.*
 — MC may honestly read BROKEN until its build is fixed; that must be a *known named* exception,

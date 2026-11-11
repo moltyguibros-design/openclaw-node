@@ -511,3 +511,18 @@ test('installer seeds but never overwrites learned soul genes/events', (t) => {
   assert.equal(read('souls/daedalus/SOUL.md'), 'soul v2 longer\n');
   assert.equal(read('souls/newcomer/evolution/genes.json'), '{"genes":"newcomer seed"}\n');
 });
+
+test('documented node-watch invocations only use flags node-watch accepts', () => {
+  const cli = readFileSync(join(ROOT, 'bin/node-watch.mjs'), 'utf8');
+  const optionsBlock = cli.slice(cli.indexOf('options: {'), cli.indexOf('\n    },\n'));
+  const accepted = new Set([...optionsBlock.matchAll(/^\s+'?([a-z-]+)'?: \{ type:/gm)].map((m) => m[1]));
+  assert.ok(accepted.has('watch') && accepted.has('quiet'), 'the parseArgs options block was found');
+  for (const doc of ['install.sh', 'docs/NODE_SPEC.md', 'docs/INSTALL_TEST_PROTOCOL.md']) {
+    const text = readFileSync(join(ROOT, doc), 'utf8');
+    for (const m of text.matchAll(/node-watch\.mjs((?:[ \t]+--[a-z-]+)+)/g)) {
+      for (const flag of m[1].trim().split(/\s+/)) {
+        assert.ok(accepted.has(flag.slice(2)), `${doc}: node-watch.mjs has no ${flag} flag`);
+      }
+    }
+  }
+});

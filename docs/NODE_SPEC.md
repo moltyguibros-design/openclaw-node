@@ -161,7 +161,7 @@ non-zero with the failing axis named**. No echo-banner-and-hope. Re-verify any t
 
 ```bash
 node ~/.openclaw/workspace/bin/node-acceptance.mjs            # full gate, evidence → ~/.openclaw/.node-acceptance.md
-node ~/.openclaw/workspace/bin/node-watch.mjs --once          # live WORKING/BROKEN/OFF/UNKNOWN map
+node ~/.openclaw/workspace/bin/node-watch.mjs                 # live WORKING/BROKEN/OFF/UNKNOWN map
 ```
 
 Known-dishonest areas the gate will name on some machines: MC production build (blocked by queued
