@@ -36,6 +36,38 @@ describe('validate-push hook — force push is refused, not warned (review Phase
   });
 });
 
+describe('git pre-push hook — non-fast-forward refused from any tool', () => {
+  const hook = path.join(REPO, 'config', 'git-hooks', 'pre-push');
+  const Z = '0'.repeat(40);
+  let repo, A, B, C;
+  before(() => {
+    repo = path.join(tmp, 'push-repo');
+    fs.mkdirSync(repo);
+    const git = (...args) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'core.hooksPath=/dev/null', ...args],
+      { cwd: repo, encoding: 'utf8' }).stdout.trim();
+    git('init', '-q');
+    const commit = (msg) => { git('commit', '-q', '--allow-empty', '-m', msg); return git('rev-parse', 'HEAD'); };
+    A = commit('a');
+    B = commit('b');
+    git('checkout', '-q', A);
+    C = commit('c');
+  });
+  const push = (line) => spawnSync('bash', [hook, 'origin', 'url'], { cwd: repo, input: `${line}\n`, encoding: 'utf8' });
+  it('refuses a ref update that drops remote commits', () => {
+    const r = push(`refs/heads/main ${C} refs/heads/main ${B}`);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /non-fast-forward/);
+  });
+  it('refuses when the remote tip is not in local history', () => {
+    assert.equal(push(`refs/heads/main ${C} refs/heads/main ${'1'.repeat(40)}`).status, 1);
+  });
+  it('allows a fast-forward, a new ref and a deletion', () => {
+    assert.equal(push(`refs/heads/main ${B} refs/heads/main ${A}`).status, 0);
+    assert.equal(push(`refs/heads/new ${C} refs/heads/new ${Z}`).status, 0);
+    assert.equal(push(`(delete) ${Z} refs/heads/old ${A}`).status, 0);
+  });
+});
+
 describe('validate-commit hook — gitleaks judged by exit code, not its text', () => {
   const hook = path.join(REPO, '.claude', 'hooks', 'validate-commit.sh');
   // A real trufflehog on PATH would take the tool-error fallback instead of the regex scan.

@@ -1,8 +1,21 @@
 #!/usr/bin/env bash
-# Git pre-push hook — delegates to Claude Code hook for consistent validation.
+# Git pre-push hook — refuses a non-fast-forward (force) update of any remote ref,
+# then delegates to the Claude Code hook for the protected-branch warning.
 # Installed by openclaw-node installer. LLM-agnostic: works regardless of AI tool.
 
 HOOK_DIR="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/hooks"
+
+# git gives "<local ref> <local sha> <remote ref> <remote sha>" per ref on stdin; the
+# command line (--force, a +refspec) is not visible here, so judge the update itself.
+# An all-zero local sha is a deletion, an all-zero remote sha a new ref.
+while read -r _local_ref local_sha remote_ref remote_sha; do
+  case "$local_sha" in *[!0]*) ;; *) continue ;; esac
+  case "$remote_sha" in *[!0]*) ;; *) continue ;; esac
+  if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+    echo "BLOCKED by pre-push: $remote_ref would be rewritten (non-fast-forward); push a new commit instead." >&2
+    exit 1
+  fi
+done
 
 if [ -x "${HOOK_DIR}/validate-push.sh" ]; then
   echo '{"tool_input":{"command":"git push"}}' | bash "${HOOK_DIR}/validate-push.sh"
