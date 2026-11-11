@@ -178,3 +178,36 @@ test("a legacy auto_start=1 task still needs approval after startup", async () =
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("observability_events created first by obs-db still gets its indexes", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-startup-obs-"));
+  const dbPath = path.join(root, "mission-control.db");
+  const fixture = new Database(dbPath);
+  fixture.exec(`
+    CREATE TABLE observability_events (
+      id TEXT PRIMARY KEY, timestamp INTEGER NOT NULL, node_id TEXT NOT NULL, module TEXT NOT NULL,
+      function TEXT NOT NULL, tier INTEGER NOT NULL DEFAULT 2, category TEXT NOT NULL,
+      args_summary TEXT, result_summary TEXT, duration_ms INTEGER, error TEXT, meta TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  fixture.close();
+  vi.stubEnv("DB_PATH", dbPath);
+  vi.stubEnv("WORKSPACE_ROOT", root);
+  vi.resetModules();
+  let db: Database.Database | undefined;
+  try {
+    const { getRawDb } = await import("@/lib/db");
+    db = getRawDb();
+    const names = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='observability_events' AND name LIKE 'idx_obs_%' ORDER BY name")
+      .all()
+      .map(r => (r as { name: string }).name);
+    expect(names).toEqual(["idx_obs_category", "idx_obs_module", "idx_obs_node", "idx_obs_timestamp"]);
+  } finally {
+    db?.close();
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

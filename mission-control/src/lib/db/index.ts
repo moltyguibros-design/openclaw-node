@@ -495,12 +495,16 @@ function runMigrations(sqlite: Database.Database) {
         meta TEXT,
         created_at TEXT DEFAULT (datetime('now'))
       );
-      CREATE INDEX IF NOT EXISTS idx_obs_timestamp ON observability_events(timestamp DESC);
-      CREATE INDEX IF NOT EXISTS idx_obs_module ON observability_events(module);
-      CREATE INDEX IF NOT EXISTS idx_obs_node ON observability_events(node_id);
-      CREATE INDEX IF NOT EXISTS idx_obs_category ON observability_events(category);
     `);
   }
+  // Outside the table-absent branch: lib/obs-db.js creates the table without indexes
+  // when a traced daemon opens this DB before Mission Control first migrates.
+  sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS idx_obs_timestamp ON observability_events(timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_obs_module ON observability_events(module);
+    CREATE INDEX IF NOT EXISTS idx_obs_node ON observability_events(node_id);
+    CREATE INDEX IF NOT EXISTS idx_obs_category ON observability_events(category);
+  `);
 
   // Cleanup: delete observability events older than 24h
   // Wrapped in recovery — this is the most likely corruption point (heavy writes + index use)
