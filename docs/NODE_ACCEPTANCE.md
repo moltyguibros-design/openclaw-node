@@ -16,7 +16,7 @@ Inter-node L3 is specified but deferred (§8).
 node bin/node-acceptance.mjs            # full single-node gate, hard-tests every component
 npm run node-check                      # same, via package script
 openclaw-node-check                     # same, after `npm i -g` / link (bin entry)
-node bin/node-acceptance.mjs --axis llm # one axis: memory | llm | network | storage
+node bin/node-acceptance.mjs --axis llm # one axis: memory | llm | network | storage | federation
 node bin/node-acceptance.mjs --no-mutate# skip probes that write synthetic data
 node bin/node-acceptance.mjs --deep     # include invasive probes (e.g. extract-trigger)
 node bin/node-acceptance.mjs --json --report /path/report.md
@@ -74,7 +74,7 @@ cardinal failure (same rule the tick-chain runs on, PROTOCOL §7).
 | `single-node` (default) | L0, L1, L2, L4; L3 → `N/A` | Accept one deployed node (today's reality). |
 | `federated` (future) | + L3 against a real or `spawn-node` peer | Accept a node's links to other nodes (§8). |
 
-The harness also accepts `--axis memory|llm|network|storage|e2e` to run one axis in isolation.
+The harness also accepts `--axis memory|llm|network|storage|federation` to run one axis in isolation.
 
 ---
 

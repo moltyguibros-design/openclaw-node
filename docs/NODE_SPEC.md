@@ -121,6 +121,7 @@ Written to `~/.openclaw/openclaw.env` by install (generated where marked ⚙; RA
 | openclaw-scheduler-heartbeat | yes (timer 60s) | Mission Control | ticks MC's scheduler API |
 | openclaw-mission-control | yes | npm, production build (see gate) | the dashboard on :3000 |
 | openclaw-gateway | **no** (product not vendored) | global `openclaw` pkg + auth | external gateway surface; enable after `npm i -g openclaw` |
+| openclaw-lane-watchdog | yes | gateway logs (`~/.openclaw/logs/gateway.log`, `gateway.err.log`) | watches the gateway's logs for lane deadlocks; SIGUSR1s the gateway to reset its lanes |
 | openclaw-log-rotate | yes (timer weekly) | nothing | rotates `~/.openclaw/logs` + workspace `.tmp` |
 
 **Ports:** 4222 bus (+8222 monitor; cluster adds 4223-4/6222-4/8223-4) · 3000 MC · 7893 memory-inject · 11434 ollama · 8787 companion-bridge · 18789 gateway. All loopback.
@@ -156,14 +157,14 @@ node bin/mesh.js submit <task.yaml>     # collaboration.mode: circling_strategy
 ## §7 What "functionally running" means (the gate)
 
 `install.sh` ends by executing `node-acceptance.mjs` (when services were enabled): every axis —
-memory, LLM, network/bus, storage, runtime, ops — must probe WORKING or the install **exits
-non-zero with the failing axis named**. No echo-banner-and-hope. Re-verify any time:
+memory, LLM, network/bus, storage — must probe WORKING or the install **exits
+non-zero with the failing axis named**. The federation axis (coordinator + raft quorum) is
+advisory: a node with no coordinator is still ACCEPTED. No echo-banner-and-hope. Re-verify any time:
 
 ```bash
 node ~/.openclaw/workspace/bin/node-acceptance.mjs            # full gate, evidence → ~/.openclaw/.node-acceptance.md
 node ~/.openclaw/workspace/bin/node-watch.mjs                 # live WORKING/BROKEN/OFF/UNKNOWN map
 ```
 
-Known-dishonest areas the gate will name on some machines: MC production build (blocked by queued
-tsc errors — MC probes read BROKEN until fixed; `npm run dev` is the interim), and sub-floor-RAM
-machines (extraction honestly degrades to regex and the llm axis says so).
+Known-degraded areas the gate will name on some machines: sub-floor-RAM machines (extraction
+honestly degrades to regex and the llm axis says so).

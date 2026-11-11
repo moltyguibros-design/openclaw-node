@@ -120,9 +120,7 @@ advanced-LLM provider (claude, openai, …) from the env; a local-model provider
 node ~/.openclaw/workspace/bin/node-acceptance.mjs            # exit 0 = ACCEPTED
 node ~/.openclaw/workspace/bin/node-watch.mjs                 # WORKING/BROKEN/OFF/UNKNOWN table
 ```
-**PASS T5** = acceptance exit 0 AND node-watch shows no BROKEN on core axes (mem.*, net.*, llm.*
-— MC may honestly read BROKEN until its build is fixed; that must be a *known named* exception,
-never an unexplained one).
+**PASS T5** = acceptance exit 0 AND node-watch shows no BROKEN on core axes (mem.*, net.*, llm.*).
 
 ## T6 — Idempotency + update safety
 
@@ -152,5 +150,5 @@ On a VM or spare machine with nothing but the OS (+ macOS: brew & node):
 | memory-daemon crash-loop | `.tmp/memory-daemon.err` — ERR_MODULE_NOT_FOUND means copy/symlink rules regressed (T1.3) |
 | extraction says regex | ollama down or model missing: `curl :11434/api/tags`; `ollama pull $LLM_MODEL` |
 | mesh daemons crash-loop | `Cannot find module 'nats'` → repo `npm install` regressed; CONNECTION_REFUSED → bus (net axis) |
-| MC BROKEN | `.next` build missing/failed — known queued tsc errors; `npm run dev` interim |
+| MC BROKEN | `.next` build missing/failed — read the installer's `next build` error (components.sh builds only when `.next` is absent); never substitute `npm run dev` for the supervised service |
 | agents release every task | provider: check `MESH_LLM_PROVIDER` in the *rendered* unit/env, not the template |

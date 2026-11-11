@@ -63,3 +63,33 @@ test('README names the obsidian-sync.json path the installer writes and the read
   assert.ok(readme.includes('`~/.openclaw/config/obsidian-sync.json`'));
   assert.doesNotMatch(readme, /workspace\/config\/obsidian-sync\.json/);
 });
+
+test('NODE_SPEC and NODE_ACCEPTANCE match the service manifest, the probe axes and the MC build', () => {
+  const nodeSpec = read('docs/NODE_SPEC.md');
+  const topology = section(nodeSpec, '## §5 Service topology (what runs, what it needs)').text;
+  const units = new Set();
+  for (const [, cell] of topology.matchAll(/^\| (?:\*\*)?(openclaw-[\w/-]+)/gm)) {
+    const m = cell.match(/^(.*-)(\d(?:\/\d)+)$/);
+    if (m) for (const n of m[2].split('/')) units.add(m[1] + n);
+    else units.add(cell);
+  }
+  for (const { name } of JSON.parse(read('services/service-manifest.json'))) {
+    assert.ok(units.has(name), `NODE_SPEC §5 has no row for ${name}`);
+  }
+
+  const axes = new Set([...read('lib/node-acceptance-probes.mjs').matchAll(/axis: '([a-z]+)'/g)].map((m) => m[1]));
+  assert.ok(axes.has('federation'), 'probe axis parse');
+  const gate = section(nodeSpec, '## §7 What "functionally running" means (the gate)').text.toLowerCase();
+  const acceptance = read('docs/NODE_ACCEPTANCE.md').split('\n').filter((l) => /# one axis:|accepts `--axis/.test(l));
+  assert.equal(acceptance.length, 2);
+  for (const axis of axes) {
+    assert.ok(gate.includes(axis), `NODE_SPEC §7 does not name the ${axis} axis`);
+    for (const line of acceptance) assert.ok(line.includes(axis), `NODE_ACCEPTANCE --axis list lacks ${axis}: ${line}`);
+  }
+  assert.doesNotMatch(gate, /runtime, ops/);
+
+  for (const f of ['docs/NODE_SPEC.md', 'docs/INSTALL_TEST_PROTOCOL.md', 'scripts/install/components.sh']) {
+    assert.doesNotMatch(read(f), /queued tsc/, `${f}: CI builds Mission Control on every push`);
+  }
+  assert.match(read('.github/workflows/test.yml'), /cd mission-control && npm run build/);
+});
