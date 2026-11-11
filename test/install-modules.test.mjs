@@ -131,10 +131,24 @@ test('mcp-knowledge is owned by the root dependency workspace', () => {
   assert.equal(rootLock.packages['node_modules/@openclaw/mcp-knowledge'].link, true);
   assert.equal(existsSync(join(ROOT, 'lib/mcp-knowledge/package-lock.json')), false);
 
+  const mcpPackage = JSON.parse(readFileSync(join(ROOT, 'lib/mcp-knowledge/package.json'), 'utf8'));
+  for (const [dep, range] of Object.entries(mcpPackage.dependencies)) {
+    assert.equal(range, rootPackage.dependencies[dep], `lib/mcp-knowledge ${dep} drifts from the root range`);
+  }
+  assert.equal(mcpPackage.engines.node, rootPackage.engines.node);
+  assert.deepEqual(rootLock.packages['lib/mcp-knowledge'].dependencies, mcpPackage.dependencies);
+  assert.deepEqual(rootLock.packages['lib/mcp-knowledge'].engines, mcpPackage.engines);
+
   const rootRequire = createRequire(join(ROOT, 'package.json'));
   const sharp = rootRequire('sharp');
   assert.ok(Number(sharp.versions.sharp.split('.')[1]) >= 35, `Sharp ${sharp.versions.sharp} is below 0.35`);
   assert.equal(existsSync(join(ROOT, 'lib/mcp-knowledge/node_modules/sharp')), false);
+});
+
+test('the nkey codec dependency is declared at the root, pinned to the version nats uses', () => {
+  assert.equal(rootPackage.dependencies['nkeys.js'], rootLock.packages['node_modules/nats'].dependencies['nkeys.js']);
+  assert.equal(rootLock.packages[''].dependencies['nkeys.js'], rootPackage.dependencies['nkeys.js']);
+  assert.equal(rootLock.packages['node_modules/nkeys.js'].version, rootPackage.dependencies['nkeys.js']);
 });
 
 test('installer never creates or copies nested mcp-knowledge dependencies', () => {
