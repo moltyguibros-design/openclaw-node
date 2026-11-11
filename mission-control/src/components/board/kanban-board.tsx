@@ -323,9 +323,8 @@ export function KanbanBoard() {
                 highlight={bulkMode}
                 bulkMode={bulkMode}
                 bulkSelection={bulkSelection}
-                onClearDone={col === "done" ? async () => {
-                  // Archive all visible done tasks
-                  for (const t of columns.done) {
+                onClearDone={col === "done" ? async (visibleTasks) => {
+                  for (const t of visibleTasks) {
                     await updateTask(t.id, { status: "archived" } as Record<string, unknown>);
                   }
                 } : undefined}
