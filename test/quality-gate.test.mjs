@@ -10,7 +10,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -60,5 +60,46 @@ describe('quality-gate --check-all', () => {
     r = gate(ws);
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /checking 2 file\(s\)/);
+  });
+
+  it('passes a staged deletion without an input warning', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'quality-gate-'));
+    git(ws, 'init', '-q');
+    writeFileSync(join(ws, 'gone.txt'), 'one\n');
+    git(ws, 'add', 'gone.txt');
+    git(ws, 'commit', '-q', '-m', 'init');
+    git(ws, 'rm', '-q', 'gone.txt');
+    const r = gate(ws);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.doesNotMatch(r.stdout, /WARN \[input\]/);
+  });
+});
+
+describe('quality-gate --files', () => {
+  const run = (ws, args, cwd) => spawnSync('bash', [SCRIPT, ...args], {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, OPENCLAW_WORKSPACE: ws },
+  });
+  const ws = mkdtempSync(join(tmpdir(), 'quality-gate-files-'));
+  mkdirSync(join(ws, 'src'));
+  writeFileSync(join(ws, 'src', 'a.js'), 'eval("x")\n');
+
+  for (const [label, args, cwd] of [
+    ['a workspace-relative path', ['--files', 'src/a.js'], ws],
+    ['an absolute path', ['--files', join(ws, 'src', 'a.js')], tmpdir()],
+    ['a cwd-relative path', ['--files', 'a.js'], join(ws, 'src')],
+  ]) {
+    it(`checks ${label}`, () => {
+      const r = run(ws, args, cwd);
+      assert.equal(r.status, 2, r.stdout + r.stderr);
+      assert.match(r.stdout, /WARN \[security\]: Suspicious pattern in .*src\/a\.js/);
+    });
+  }
+
+  it('warns about an input that resolves nowhere instead of passing it', () => {
+    const r = run(ws, ['--files', 'nope.js'], ws);
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stdout, /WARN \[input\]: nope\.js not found/);
   });
 });

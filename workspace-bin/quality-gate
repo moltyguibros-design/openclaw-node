@@ -60,10 +60,29 @@ fi
 
 echo "Quality gate: checking ${#FILES[@]} file(s)..."
 
+# The gates read "$WORKSPACE/$f": accept absolute and cwd-relative paths too,
+# and report an input that resolves nowhere instead of passing it unchecked.
+# --check-all is exempt from that report: git lists deleted files.
+full() { case "$1" in /*) printf '%s\n' "$1" ;; *) printf '%s\n' "$WORKSPACE/$1" ;; esac; }
+NORM=()
+for f in "${FILES[@]}"; do
+  case "$f" in
+    /*) ;;
+    *) [ -f "$WORKSPACE/$f" ] || [ ! -f "$PWD/$f" ] || f="$PWD/$f" ;;
+  esac
+  case "$f" in "$WORKSPACE"/*) f="${f#"$WORKSPACE"/}" ;; esac
+  if [ ! -f "$(full "$f")" ] && ! $CHECK_ALL; then
+    echo "  WARN [input]: $f not found under $WORKSPACE or $PWD; not checked"
+    WARNINGS=$((WARNINGS + 1))
+  fi
+  NORM+=("$f")
+done
+FILES=("${NORM[@]}")
+
 # --- Gate 1: Security patterns ---
 SECURITY_PATTERNS='(eval\(|execSync\(|dangerouslySetInnerHTML|PRIVATE_KEY\s*=|SECRET_KEY\s*=|password\s*=\s*["\x27][^"\x27])'
 for f in "${FILES[@]}"; do
-  FULL="$WORKSPACE/$f"
+  FULL="$(full "$f")"
   [ -f "$FULL" ] || continue
   MATCHES=$(grep -nE "$SECURITY_PATTERNS" "$FULL" 2>/dev/null || true)
   if [ -n "$MATCHES" ]; then
@@ -111,7 +130,7 @@ for f in "${FILES[@]}"; do
   BASE="${f%.*}"
   EXT="${f##*.}"
   for PATTERN in "${BASE}.test.${EXT}" "${BASE}.spec.${EXT}"; do
-    if [ -f "$WORKSPACE/$PATTERN" ]; then
+    if [ -f "$(full "$PATTERN")" ]; then
       echo "  INFO [test]: Test file exists for $f -> $PATTERN (consider running)"
       break
     fi
@@ -127,7 +146,7 @@ done
 if [ ${#SOL_FILES[@]} -gt 0 ]; then
   echo "  Checking Solidity files..."
   for f in "${SOL_FILES[@]}"; do
-    FULL="$WORKSPACE/$f"
+    FULL="$(full "$f")"
     [ -f "$FULL" ] || continue
     # Check for low-level calls without success check
     if grep -qE '\.call\{|\.call\(' "$FULL" 2>/dev/null; then
