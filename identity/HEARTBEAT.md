@@ -37,7 +37,7 @@ AGENTS.md points here. All heartbeat logic lives here.
 
 ## MANDATORY: Memory Maintenance (every heartbeat)
 
-1. Run `bin/memory-maintenance --force --verbose`
+1. Run `bin/memory-maintenance.mjs --force --verbose`
 2. Read `.tmp/maintenance-results` — if any warnings, report to Gui
 3. Specific attention:
    - ARCHIVAL: daily files >30 days → archived automatically
