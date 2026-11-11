@@ -77,6 +77,29 @@ describe('createNatsPublisher', () => {
     assert.equal(published[0].data.triggered_by, 'test-source');
     assert.equal(published[0].data.node_id, 'test-node');
   });
+
+  it('falls back to lib/node-id resolveNodeId (MESH_NODE_ID) instead of the raw hostname', async () => {
+    const saved = { OPENCLAW_NODE_ID: process.env.OPENCLAW_NODE_ID, MESH_NODE_ID: process.env.MESH_NODE_ID };
+    delete process.env.OPENCLAW_NODE_ID;
+    process.env.MESH_NODE_ID = 'legacy-node';
+    try {
+      const published = [];
+      const mockNc = {
+        publish(subject, data) {
+          published.push({ subject, data: JSON.parse(new TextDecoder().decode(data)) });
+        },
+        async drain() {},
+      };
+      const publisher = createNatsPublisher({ nc: mockNc });
+      await publisher.publish('t');
+      assert.equal(published[0].data.node_id, 'legacy-node');
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
 });
 
 // --- SDK wrapper tests ---

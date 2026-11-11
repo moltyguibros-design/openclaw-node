@@ -23,6 +23,7 @@ import path from 'path';
 import os from 'os';
 import { createHash } from 'crypto';
 import { createRequire } from 'node:module';
+import { resolveNodeId } from '../lib/node-id.js';
 import {
   initConsolidationTables,
   decayWeights,
@@ -107,7 +108,7 @@ export async function runConsolidationCycle(opts = {}) {
   const ownDb = !opts.db;
   const signal = opts.signal || null;
   const eventLog = opts.eventLog || null;
-  const nodeId = opts.nodeId || process.env.OPENCLAW_NODE_ID || os.hostname();
+  const nodeId = opts.nodeId || resolveNodeId();
 
   // Helper: returns true if the cycle should stop. We check this between
   // every step so a hard-cap fires deterministically rather than racing
@@ -283,7 +284,7 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
   const noEvents = args.includes('--no-events');
 
   const natsUrl = process.env.NATS_URL || undefined; // URL override only; resolver supplies URL + credentials
-  const nodeId = process.env.OPENCLAW_NODE_ID || os.hostname();
+  const nodeId = resolveNodeId();
 
   const opts = { nodeId };
   if (dbIdx !== -1 && args[dbIdx + 1]) opts.dbPath = args[dbIdx + 1];

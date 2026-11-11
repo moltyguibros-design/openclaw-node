@@ -15,7 +15,7 @@
  *   node bin/consolidation-scheduler.mjs [--db <path>] [--vault-path <path>] [--interval <ms>]
  */
 
-import os from 'os';
+import { resolveNodeId } from '../lib/node-id.js';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
@@ -287,7 +287,7 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
   const noEvents = args.includes('--no-events');
 
   const natsUrl = process.env.NATS_URL || undefined; // URL override only; resolver supplies URL + credentials
-  const nodeId = process.env.OPENCLAW_NODE_ID || os.hostname();
+  const nodeId = resolveNodeId();
 
   const cliOpts = { nodeId };
   if (dbIdx !== -1 && args[dbIdx + 1]) cliOpts.dbPath = args[dbIdx + 1];

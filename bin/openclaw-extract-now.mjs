@@ -10,10 +10,10 @@
  *
  * Env:
  *   NATS_URL                 — NATS server (default: nats://localhost:4222)
- *   OPENCLAW_NODE_ID         — Node identifier (default: os.hostname())
+ *   OPENCLAW_NODE_ID         — Node identifier (default: lib/node-id resolveNodeId())
  */
 
-import os from 'node:os';
+import { resolveNodeId } from '../lib/node-id.js';
 import { parseArgs } from 'node:util';
 import { createRequire } from 'node:module';
 import { connect } from 'nats';
@@ -32,7 +32,7 @@ const { natsConnectOpts } = createRequire(import.meta.url)('../lib/nats-resolve.
  */
 export async function runExtractNow(opts = {}) {
   const natsUrl = opts.natsUrl || process.env.NATS_URL || undefined;
-  const nodeId = opts.nodeId || process.env.OPENCLAW_NODE_ID || os.hostname();
+  const nodeId = opts.nodeId || resolveNodeId();
   const triggeredBy = opts.triggeredBy || 'manual';
 
   try {
