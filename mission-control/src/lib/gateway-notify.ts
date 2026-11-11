@@ -6,9 +6,10 @@
 import { randomUUID } from "crypto";
 import { readFileSync } from "fs";
 import path from "path";
+import os from "os";
 import { traceCall } from "./tracer";
 
-const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(process.env.HOME || "/Users/moltymac", ".openclaw");
+const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(os.homedir(), ".openclaw");
 const CONFIG_PATH = path.join(OPENCLAW_HOME, "openclaw.json");
 
 const SESSION_KEY = "agent:main:main";

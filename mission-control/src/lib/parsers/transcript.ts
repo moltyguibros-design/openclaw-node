@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { WORKSPACE_ROOT } from "../config";
 
 /**
  * Represents a single activity event extracted from the JSONL transcript.
@@ -24,14 +25,13 @@ function toAgentProjectPath(workspacePath: string): string {
 }
 
 const HOME = process.env.HOME || os.homedir();
-const WORKSPACE = process.env.WORKSPACE_ROOT || path.join(HOME, ".openclaw/workspace");
 
 /**
  * Transcript source directories — scans ALL frontend transcript stores.
  */
 const TRANSCRIPT_DIRS = [
   // Agent CLI workspace sessions (cross-platform path encoding)
-  path.join(HOME, ".claude/projects", toAgentProjectPath(WORKSPACE)),
+  path.join(HOME, ".claude/projects", toAgentProjectPath(WORKSPACE_ROOT)),
   // OpenClaw Gateway sessions (Discord, Telegram, etc.)
   path.join(HOME, ".openclaw/agents/main/sessions"),
 ];
@@ -198,8 +198,8 @@ export function getRecentTranscriptActivity(limit: number = 50): TranscriptEvent
  */
 function shortenPath(fp: string): string {
   const prefixes = [
-    "/Users/moltymac/.openclaw/workspace/",
-    "/Users/moltymac/",
+    `${WORKSPACE_ROOT}/`,
+    `${HOME}/`,
   ];
   for (const prefix of prefixes) {
     if (fp.startsWith(prefix)) {

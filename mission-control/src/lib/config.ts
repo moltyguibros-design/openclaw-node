@@ -3,7 +3,9 @@ import fs from "fs";
 import os from "os";
 
 export const WORKSPACE_ROOT =
-  process.env.WORKSPACE_ROOT || "/Users/moltymac/.openclaw/workspace";
+  process.env.WORKSPACE_ROOT ||
+  process.env.OPENCLAW_WORKSPACE ||
+  path.join(os.homedir(), ".openclaw", "workspace");
 
 export const DB_PATH =
   process.env.DB_PATH ||
