@@ -519,6 +519,20 @@ describe('node-watch observed verdicts', () => {
     }
   });
 
+  it('deploy-drift diff skips node_modules, which the deploy never syncs', async () => {
+    const saved = process.env.OPENCLAW_REPO_DIR;
+    delete process.env.OPENCLAW_REPO_DIR;
+    try {
+      let argv;
+      const ctx = makeCtx({ exec: async (cmd, a) => { argv = [cmd, ...a]; return { code: 0, stdout: '', stderr: '' }; } });
+      assert.equal((await target('fabric.deploy_drift').run(envFor(ctx))).status, STATUS.WORKING);
+      assert.deepEqual(argv.slice(0, 4), ['diff', '-rq', '-x', 'node_modules']);
+      assert.deepEqual(argv.slice(5), [config.workspaceLib]);
+    } finally {
+      if (saved !== undefined) process.env.OPENCLAW_REPO_DIR = saved;
+    }
+  });
+
   it('cloud LLM via bridge: WORKING when /health reports a served session', async () => {
     const ctx = makeCtx({ httpGet: async () => ({ status: 200, json: { status: 'ok', companion: 'http://localhost:3457', model: 'm', sessions: [{ lifetimeTurns: 5, zombieRetryCount: 0, contextTrackingHealthy: true }] } }) });
     assert.equal((await target('llm.cloud').run(envFor(ctx))).status, STATUS.WORKING);
