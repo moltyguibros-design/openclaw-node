@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getOrCreateIdentity } from '../lib/node-identity.mjs';
+import { getOrCreateIdentity, createSeenEventCache } from '../lib/node-identity.mjs';
 import {
   signDeployTrigger,
   verifyDeployTrigger,
@@ -105,6 +105,24 @@ describe('deploy-trigger-auth', () => {
     const replayed = verifyDeployTrigger(signed, opts);
     assert.equal(replayed.ok, false);
     assert.equal(replayed.reason, 'replay');
+  });
+
+  it('strict mode: an untrusted signer cannot evict a trusted id from the replay cache', () => {
+    const otherDir = mkdtempSync(join(tmpdir(), 'deploy-auth-other-'));
+    try {
+      const seen = createSeenEventCache(2);
+      const opts = { requireSigned: true, trustedKeys: [id.publicKeyBase64], seenIds: seen };
+      const signed = signDeployTrigger(trigger(), { identityDir: dir });
+      assert.equal(verifyDeployTrigger(signed, opts).ok, true);
+      for (let i = 0; i < 2; i++) {
+        const flood = signDeployTrigger(trigger(), { identityDir: otherDir });
+        assert.equal(verifyDeployTrigger(flood, opts).reason, 'untrusted-signer');
+      }
+      assert.equal(seen.size(), 1);
+      assert.deepEqual(verifyDeployTrigger(signed, opts), { ok: false, reason: 'replay' });
+    } finally {
+      rmSync(otherDir, { recursive: true, force: true });
+    }
   });
 
   it('strict mode REJECTS a trigger older than the deploy freshness window (15min default)', () => {
