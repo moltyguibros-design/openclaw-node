@@ -180,3 +180,9 @@ test('an event log set by a NATS retry reaches the inject server and the memory 
   assert.equal((daemonSrc.match(/eventLog: liveEventLog/g) || []).length, 2);
   assert.match(daemonSrc, /const liveEventLog = \{ publishLocal: \(event\) => \(localEventLog \? localEventLog\.publishLocal\(event\) : Promise\.resolve\(\)\) \};/);
 });
+
+test('memory.ingested reports the messages a re-import added, not the whole session', () => {
+  assert.match(daemonSrc, /messages_added: Math\.max\(0, messageCount - previousCount\)/);
+  assert.doesNotMatch(daemonSrc, /messages_added: messageCount,/);
+  assert.equal((daemonSrc.match(/emitIngestEvent\([^)]*previousCount\)/g) || []).length, 4);
+});

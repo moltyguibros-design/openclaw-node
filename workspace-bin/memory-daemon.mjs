@@ -484,12 +484,13 @@ function runImportInWorker(jsonlPath, { source, format } = {}) {
   return runMemoryWorker({ kind: 'import', jsonlPath, source, format }, 10 * 60_000);
 }
 
-function emitIngestEvent(sessionId, source, messageCount) {
+function emitIngestEvent(sessionId, source, messageCount, previousCount = 0) {
   if (!localEventLog) return;
   const event = buildMemoryEvent('memory.ingested', sessionId, 'memory', {
     session_id: sessionId,
     source: source || 'unknown',
-    messages_added: messageCount,
+    // Clamped: a parser change can re-count a stored session lower, and the schema rejects a negative delta.
+    messages_added: Math.max(0, messageCount - previousCount),
     total_messages: messageCount,
   }, NODE_ID);
   localEventLog.publishLocal(event).catch(err =>
@@ -751,7 +752,7 @@ async function runPhase0Bootstrap(sessionId, config) {
         if (!fs.existsSync(source.path)) continue;
         const result = await store.importDirectory(source.path, {
           source: source.name, format: source.format,
-          onImported: (r) => emitIngestEvent(r.sessionId, source.name, r.messageCount),
+          onImported: (r) => emitIngestEvent(r.sessionId, source.name, r.messageCount, r.previousCount),
         });
         totalImported += result.imported;
       }
@@ -1040,7 +1041,7 @@ async function runPhase2ThrottledWork(config, sessionState) {
       });
       if (result.imported) {
         log(`  Phase 2: live session import — ${result.sessionId.slice(0, 8)} (${result.messageCount} msgs)`);
-        emitIngestEvent(result.sessionId, src?.name || 'unknown', result.messageCount);
+        emitIngestEvent(result.sessionId, src?.name || 'unknown', result.messageCount, result.previousCount);
       }
     })().catch(e => log(`  Phase 2: live session import failed: ${e.message}`)));
   }
@@ -1085,7 +1086,7 @@ async function runPhase2ThrottledWork(config, sessionState) {
             if (!fs.existsSync(source.path)) continue;
             const result = await store.importDirectory(source.path, {
               source: source.name, format: source.format,
-              onImported: (r) => emitIngestEvent(r.sessionId, source.name, r.messageCount),
+              onImported: (r) => emitIngestEvent(r.sessionId, source.name, r.messageCount, r.previousCount),
             });
             totalImported += result.imported;
           }
@@ -1387,7 +1388,7 @@ async function handleTransitions(transitions, config) {
             });
             if (result.imported) {
               log(`  session-store: archived ${result.sessionId.slice(0, 8)} (${result.messageCount} msgs)`);
-              emitIngestEvent(result.sessionId, src?.name || 'unknown', result.messageCount);
+              emitIngestEvent(result.sessionId, src?.name || 'unknown', result.messageCount, result.previousCount);
             }
           }
         } catch (e) { log(`  session-store archive failed: ${e.message}`); emitErrorEvent('ingest', e); }

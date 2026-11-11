@@ -109,6 +109,7 @@ describe('importSession', () => {
     const first = await store.importSession(p);
     assert.equal(first.imported, true);
     assert.equal(first.messageCount, 2);
+    assert.equal(first.previousCount, 0);
 
     // Simulate session growth: rewrite JSONL with 4 messages
     writeJsonl('growing.jsonl', [
@@ -120,6 +121,7 @@ describe('importSession', () => {
     const second = await store.importSession(p);
     assert.equal(second.imported, true);
     assert.equal(second.messageCount, 4); // full re-import, not a delta graft
+    assert.equal(second.previousCount, 2);
 
     // Verify total messages in DB
     const db = new Database(DB_PATH, { readonly: true });
