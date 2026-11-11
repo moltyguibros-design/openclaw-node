@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { buildProbes, parseIsolatedEmbedResult, VERDICT as PROBE_VERDICT } from '../lib/node-acceptance-probes.mjs';
+import { buildProbes, createRuntimeContext, parseIsolatedEmbedResult, VERDICT as PROBE_VERDICT } from '../lib/node-acceptance-probes.mjs';
 import { runAcceptance, resolveNodeConfig, VERDICT } from '../lib/node-acceptance.mjs';
 
 // A fully-mocked runtime context — no live system is touched.
@@ -131,6 +131,17 @@ describe('node-acceptance probes — LLM backing', () => {
   it('LLM-L2-EMBED BLOCK when model not cached', async () => {
     const ctx = baseCtx({ embed: async () => { throw new Error('model not cached — download first'); } });
     assert.equal((await probeById(ctx, 'LLM-L2-EMBED').run()).status, VERDICT.BLOCK);
+  });
+  it('LLM-L2-EMBED gives the isolated child a budget above 60s and under its own timeout', async () => {
+    let got;
+    const ctx = baseCtx({ embed: async (_t, opts) => { got = opts; return new Float32Array(1024).fill(0.1); } });
+    const probe = probeById(ctx, 'LLM-L2-EMBED');
+    await probe.run();
+    assert.ok(got && got.timeoutMs > 60000 && got.timeoutMs < probe.timeoutMs, JSON.stringify(got));
+  });
+  it('the runtime embed forwards its timeout to the isolated child', async () => {
+    const ctx = createRuntimeContext(resolveNodeConfig({ OPENCLAW_HOME: '/tmp/acc-test-home', OPENCLAW_NODE_ID: 'testnode' }));
+    await assert.rejects(ctx.embed('timeout probe', { timeoutMs: 1 }), /SIGTERM/);
   });
   it('LLM-L2-EXTRACT PASS on schema-valid extraction', async () => {
     assert.equal((await probeById(baseCtx(), 'LLM-L2-EXTRACT').run()).status, VERDICT.PASS);
