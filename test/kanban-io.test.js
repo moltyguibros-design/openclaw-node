@@ -113,6 +113,16 @@ describe('parseTasks — mesh routing fields', () => {
     ));
     assert.equal(tasks[0].collab_result, null);
   });
+
+  it('circling_* display lines end an array and are not returned', () => {
+    const tasks = parseTasks(mkContent(
+      '- task_id: t13\n  title: Test\n  status: running\n  scope:\n    - a.js\n    - b.js\n' +
+      '  circling_phase: circling\n    - stray\n  circling_nodes: ["a"]\n  budget_minutes: 45\n  updated_at: 2026-01-01'
+    ));
+    assert.deepEqual(tasks[0].scope, ['a.js', 'b.js']);
+    assert.equal(tasks[0].budget_minutes, 45);
+    assert.deepEqual(Object.keys(tasks[0]).filter(k => k.startsWith('circling_')), []);
+  });
 });
 
 describe('updateTaskInPlace — object serialization', () => {
