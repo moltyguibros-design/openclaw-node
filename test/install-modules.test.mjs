@@ -231,6 +231,31 @@ test('install.sh --dry-run writes nothing under $HOME', () => {
   assert.doesNotMatch(r.stdout, /SOURCE MISSING/);
 });
 
+// The role was never persisted, and env.sh resolved it before the env file was
+// read: a Linux node installed with --role=lead went back to worker on every
+// --update that omitted --role.
+test('env.sh reads the persisted role and config.sh persists the resolved one', () => {
+  const env = moduleSrc['env.sh'];
+  const start = env.indexOf('# ── Resolve node role ──');
+  const end = env.indexOf('# Lead pubkey handed');
+  assert.ok(start > 0 && end > start, 'role block must exist in env.sh');
+  const block = env.slice(start, end);
+  const root = mkdtempSync(join(tmpdir(), 'openclaw-role-'));
+  const envFile = join(root, 'openclaw.env');
+  writeFileSync(envFile, 'OPENCLAW_NODE_ROLE=lead\n');
+  const script = `
+    set -euo pipefail
+    info() { :; }; error() { echo "$*" >&2; }
+    NODE_ROLE=""; OS=linux; ENV_FILE="${envFile}"
+    ${block}
+    printf '%s|%s' "$NODE_ROLE" "$OPENCLAW_NODE_ROLE"
+  `;
+  const r = spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { PATH: process.env.PATH } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, 'lead|lead');
+  assert.match(moduleSrc['config.sh'], /set_env_key OPENCLAW_NODE_ROLE "\$NODE_ROLE"\nfi\nexport OPENCLAW_NODE_ROLE="\$NODE_ROLE"/);
+});
+
 // P7-0: the deploy/operator trust allowlists must be seeded with the RAW base64
 // identity pubkey (what trustedDeployKeys() compares), not the SPKI PEM text of
 // identity.pub — that mismatch made strict signed deploy refuse every trigger on

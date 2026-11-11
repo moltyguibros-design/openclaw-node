@@ -53,6 +53,14 @@ if [ -f "$ENV_FILE" ] && [ "$DRY_RUN" != true ] && ! grep -q '^OPENCLAW_NODE_ID=
   info "Persisted OPENCLAW_NODE_ID=$OPENCLAW_NODE_ID to $ENV_FILE (stable node identity)"
 fi
 
+# The role too: unpersisted, every --update without --role fell back to the
+# platform default (a Linux lead re-rendered as a worker), and the loop above
+# could export a file value that disagrees with the NODE_ROLE services.sh filters on.
+if [ -f "$ENV_FILE" ]; then
+  set_env_key OPENCLAW_NODE_ROLE "$NODE_ROLE"
+fi
+export OPENCLAW_NODE_ROLE="$NODE_ROLE"
+
 # Generate OPENCLAW_NATS_TOKEN if not set — server-side auth token (D2, federation step 1.1).
 # Clients already resolve+send it via lib/nats-resolve.js; this closes the server-side gap.
 if [ -z "${OPENCLAW_NATS_TOKEN:-}" ]; then
