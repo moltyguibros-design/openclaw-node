@@ -129,7 +129,7 @@ Every API route follows the same pattern:
 try { ... } catch (err) { console.error("METHOD /api/path error:", err); }
 ```
 
-Some routes (mesh/nodes, observability/events, workspace/files, workspace/read, memory/doc) are additionally wrapped with `withTrace()` for structured observability.
+Some routes (mesh/nodes, workspace/files, workspace/read, memory/doc) are additionally wrapped with `withTrace()` for structured observability.
 
 ### Complete API Route Error Log Inventory
 
