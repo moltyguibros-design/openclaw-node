@@ -187,6 +187,14 @@ describe('dispatch', () => {
     release(null);
     assert.equal((await active).clickable, false);
   });
+  it('osascript fallback escapes the sound name like title and message', async () => {
+    let seen = null;
+    await dispatch(evt, DEFAULT_CONFIG, {
+      platform: 'darwin', terminalNotifier: null, sound: 'a"b',
+      exec: (c, a, o, cb) => { seen = a; cb(null); },
+    });
+    assert.ok(seen[1].endsWith(' sound name "a\\"b"'), seen[1]);
+  });
   it('delivery failure is reported, not thrown', async () => {
     const d = await dispatch(evt, DEFAULT_CONFIG, { platform: 'darwin', terminalNotifier: '/tn', exec: failExec });
     assert.equal(d.ok, false);
@@ -226,6 +234,18 @@ describe('notify (end to end, mocked dispatch)', () => {
     const { events } = readLedger({}, paths);
     assert.equal(events[0].id, evt.id);
     assert.equal(events[0].delivery.clickable, true);
+  });
+  it('a caller-supplied sound (the CLI --sound) overrides the per-kind default', async () => {
+    let seen = null;
+    const exec = (cmd, args, o, cb) => { seen = args; cb(null); };
+    await notify({ kind: 'success', title: 'T', sound: 'Ping' }, { paths, platform: 'darwin', terminalNotifier: '/tn', exec });
+    assert.equal(seen[seen.indexOf('-sound') + 1], 'Ping');
+  });
+  it('a bare --sound (parsed as true) keeps the per-kind default', async () => {
+    let seen = null;
+    const exec = (cmd, args, o, cb) => { seen = args; cb(null); };
+    await notify({ kind: 'success', title: 'T', sound: true }, { paths, platform: 'darwin', terminalNotifier: '/tn', exec });
+    assert.equal(seen[seen.indexOf('-sound') + 1], DEFAULT_CONFIG.sounds.success);
   });
   it('unknown kind coerces to info', async () => {
     const evt = await notify({ kind: 'nope', title: 'T' }, { paths, platform: 'win32' });
