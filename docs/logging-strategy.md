@@ -129,7 +129,7 @@ Every API route follows the same pattern:
 try { ... } catch (err) { console.error("METHOD /api/path error:", err); }
 ```
 
-All routes additionally wrapped with `withTrace()` for structured observability.
+Some routes (mesh/nodes, observability/events, workspace/files, workspace/read, memory/doc) are additionally wrapped with `withTrace()` for structured observability.
 
 ### Complete API Route Error Log Inventory
 
@@ -148,8 +148,6 @@ All routes additionally wrapped with `withTrace()` for structured observability.
 |-------|-------------|
 | `POST /api/memory/flush` | `POST /api/memory/flush error:` |
 | `GET /api/memory/flush` | `GET /api/memory/flush error:` |
-| `GET /api/memory/graph` | `[memory/graph] GET error:` |
-| `POST /api/memory/graph` | `[memory/graph] POST error:` |
 | `GET /api/memory/search` | `GET /api/memory/search error:` |
 | `GET /api/memory/wikilinks` | `GET /api/memory/wikilinks error:` |
 | `GET /api/memory/list` | `GET /api/memory/list error:` |
@@ -190,7 +188,6 @@ All routes additionally wrapped with `withTrace()` for structured observability.
 | Route | Log Message |
 |-------|-------------|
 | `GET /api/mesh/nodes` | `[mesh/nodes] error:` |
-| `GET /api/mesh/identity` | `[mesh/identity] error:` |
 
 #### Other
 | Route | Log Message |

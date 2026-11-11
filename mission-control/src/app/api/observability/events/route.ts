@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  * - error: if "true", only events with errors
  * - limit: default 200, max 1000
  *
- * Returns JSON array ordered by timestamp DESC.
+ * Returns { events: [...] } ordered by timestamp DESC.
  */
 export const GET = withTrace("observability", "GET /api/observability/events", async (request: NextRequest) => {
   try {
