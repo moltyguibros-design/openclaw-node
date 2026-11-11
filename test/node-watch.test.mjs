@@ -5,10 +5,11 @@ import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
 import {
-  WATCH_TARGETS, runWatch, formatHtml, STATUS, watchTransitions,
+  WATCH_TARGETS, runWatch, formatHtml, STATUS, watchTransitions, buildSourceMap,
   parseLaunchdPrint, gradeMeshServices, gradeRequiredServices, gradeGateway, probeCoreLaunchdServices, probeMeshServices,
 } from '../lib/node-watch.mjs';
 import { resolveNodeConfig } from '../lib/node-acceptance.mjs';
+import { createRuntimeContext } from '../lib/node-acceptance-probes.mjs';
 
 const config = resolveNodeConfig({ OPENCLAW_HOME: '/tmp/acc', OPENCLAW_NODE_ID: 'tn' });
 
@@ -622,6 +623,16 @@ describe('node-watch runner', () => {
     assert.equal(ctx._cleaned, true);
     // honesty: nothing WORKING beyond what was observed
     assert.ok(report.results.find((r) => r.id === 'obs.links').status !== STATUS.WORKING);
+    assert.ok(report.results.every((r) => r.code && r.source), 'every result keeps its source provenance');
+  });
+
+  it('source provenance stays resolved once a later context cannot build probes', () => {
+    const first = buildSourceMap(createRuntimeContext(config, { mutate: false }), [target('net.nats')]);
+    assert.equal(first['net.nats'].file, 'lib/node-acceptance-probes.mjs');
+    const second = buildSourceMap(makeCtx(), [target('net.nats')]);
+    assert.equal(second['net.nats'].file, 'lib/node-acceptance-probes.mjs');
+    assert.equal(second['net.nats'].code, first['net.nats'].code);
+    assert.equal(second['net.nats'].line, first['net.nats'].line);
   });
 });
 
