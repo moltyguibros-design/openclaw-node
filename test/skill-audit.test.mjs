@@ -66,3 +66,30 @@ describe('skill-audit', { skip: !HAVE_PY && 'python3 not available' }, () => {
     for (const name of failing) assert.match(verbose.stdout, new RegExp(`${name}:`));
   });
 });
+
+describe('skill-batch-fix', { skip: !HAVE_PY && 'python3 not available' }, () => {
+  const BATCH = join(ROOT, 'workspace-bin', 'skill-batch-fix');
+
+  it('leaves a block-scalar (>-) description as written under --apply', () => {
+    const home = mkdtempSync(join(tmpdir(), 'skill-batch-fix-'));
+    const dir = join(home, '.openclaw', 'workspace', 'skills', 'humanizer');
+    mkdirSync(dir, { recursive: true });
+    const original = [
+      '---',
+      'name: humanizer',
+      'description: >-',
+      '  Rewrite stiff text so it reads naturally.',
+      '  Keeps meaning intact.',
+      '---',
+      '# Humanizer',
+      '',
+    ].join('\n');
+    writeFileSync(join(dir, 'SKILL.md'), original);
+    const r = spawnSync('python3',
+      ['-B', BATCH, '--apply', '--skill', 'humanizer', '--fix', 'description', '--json'],
+      { encoding: 'utf8', env: { ...process.env, HOME: home } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout)[0].fixes, []);
+    assert.equal(readFileSync(join(dir, 'SKILL.md'), 'utf8'), original);
+  });
+});
