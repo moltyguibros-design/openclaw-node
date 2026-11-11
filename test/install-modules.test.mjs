@@ -277,6 +277,21 @@ test('bootstrap.sh is pipe-safe: one main() parsed in full before anything runs'
   assert.match(moduleSrc['prereqs.sh'] ?? readFileSync(join(ROOT, 'scripts/install/prereqs.sh'), 'utf8'), /Tailscale\.app\/Contents\/MacOS\/Tailscale/);
 });
 
+// install.sh reaches prereqs.sh directly (system-deps.sh), so a node installed
+// without bootstrap.sh must get the same verified bus binary.
+test('prereqs.sh verifies nats-server with the same pinned SHA256 as bootstrap.sh', () => {
+  const prereqs = readFileSync(join(ROOT, 'scripts/install/prereqs.sh'), 'utf8');
+  const bootstrap = readFileSync(join(ROOT, 'bootstrap.sh'), 'utf8');
+  const re = /(2\.12\.6-(?:amd64|arm64))\) EXPECT_SHA="([0-9a-f]{64})"/g;
+  const pins = (src) => [...src.matchAll(re)].map((m) => m.slice(1));
+  assert.equal(pins(bootstrap).length, 2);
+  assert.deepEqual(pins(prereqs), pins(bootstrap));
+  assert.doesNotMatch(prereqs, /nats-server[^\n]*\|\s*tar/);
+  assert.match(prereqs, /\*\) EXPECT_SHA="\$\{OPENCLAW_NATS_SERVER_SHA256:-\}"/);
+  assert.match(prereqs, /sha256sum "\$TGZ"/);
+  assert.match(prereqs, /if \[ "\$ACTUAL_SHA" != "\$EXPECT_SHA" \]; then\n\s*error "nats-server checksum MISMATCH/);
+});
+
 // The same virgin-Mac run: install.sh never compiled packages/event-schemas
 // (dist/ is gitignored, the tarball ships .ts only, --omit=dev brings no tsc),
 // so the memory daemon exited at startup. env.sh must build it and refuse to
