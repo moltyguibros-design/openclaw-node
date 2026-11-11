@@ -674,6 +674,35 @@ describe('HyperAgentStore: integrity regressions', () => {
     assert.equal(closed.eval_telemetry_count, 1);
   }));
 
+  it('chains previous hypotheses past an expired reflection', async () => withFreshStore((fresh, dbPath) => {
+    const identity = { node_id: 'node-a', soul_id: 'alpha' };
+    const reflect = (i) => {
+      fresh.logTelemetry({
+        ...identity, domain: 'testing', outcome: 'success', iterations: 1,
+        meta_notes: `Reflection window ${i} source task with enough detail to synthesize.`,
+      });
+      const last = fresh.getLastReflection(identity);
+      const stats = fresh.computeStats(last ? last.telemetry_to_id : 0, identity);
+      return fresh.putReflection({
+        ...identity, telemetry_from_id: stats.fromId, telemetry_to_id: stats.toId,
+        telemetry_count: stats.totalTasks, raw_stats: stats,
+      });
+    };
+
+    const r1 = reflect(1);
+    fresh.synthesizeReflection(r1.id, { hypotheses: ['real-h'] });
+    const r2 = reflect(2);
+    const Database = require('better-sqlite3');
+    const db = new Database(dbPath);
+    db.prepare("UPDATE ha_reflections SET created_at = datetime('now', '-25 hours') WHERE id = ?").run(r2.id);
+    db.close();
+    assert.equal(fresh.expireStalePending(), 1);
+    const r3 = reflect(3);
+
+    assert.deepEqual(JSON.parse(fresh.getPreviousReflection(r3.id).hypotheses), ['real-h']);
+    assert.notEqual(fresh.listReflections(identity).find((row) => row.id === r2.id).hypotheses, null);
+  }));
+
   it('rejects invalid numeric telemetry', async () => withFreshStore((fresh) => {
     assert.throws(() => fresh.logTelemetry({
       node_id: 'node-a', soul_id: 'alpha', domain: 'testing', outcome: 'success', iterations: -1,
