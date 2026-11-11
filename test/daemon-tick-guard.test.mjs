@@ -174,3 +174,9 @@ test('runSubprocess is traced with wrapAsync, so a failed or slow run is recorde
   assert.match(daemonSrc, /runSubprocess = tracer\.wrapAsync\('runSubprocess', runSubprocess, \{ tier: 2 \}\);/);
   assert.doesNotMatch(daemonSrc, /runSubprocess = tracer\.wrap\(/);
 });
+
+test('an event log set by a NATS retry reaches the inject server and the memory budget', () => {
+  assert.doesNotMatch(daemonSrc, /eventLog: localEventLog/);
+  assert.equal((daemonSrc.match(/eventLog: liveEventLog/g) || []).length, 2);
+  assert.match(daemonSrc, /const liveEventLog = \{ publishLocal: \(event\) => \(localEventLog \? localEventLog\.publishLocal\(event\) : Promise\.resolve\(\)\) \};/);
+});

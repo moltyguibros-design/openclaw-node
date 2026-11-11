@@ -429,6 +429,9 @@ class SessionStateMachine {
 
 let memoryBudget = null;
 let localEventLog = null;
+// The inject server and memory budget are built once, possibly before a NATS
+// retry sets localEventLog; they hold this forwarder so a later log reaches them.
+const liveEventLog = { publishLocal: (event) => (localEventLog ? localEventLog.publishLocal(event) : Promise.resolve()) };
 let extractionTrigger = null;
 
 // Serialize runFlush across all trigger paths (D3 port, deep review 2026-07-03).
@@ -623,7 +626,7 @@ function initMemoryBudget(config) {
   if (memoryBudget) return memoryBudget;
   memoryBudget = createBudget(config.workspace || WORKSPACE, {
     charBudget: config.memoryCharBudget || 2200,
-    eventLog: localEventLog,
+    eventLog: liveEventLog,
     nodeId: NODE_ID,
   });
 
@@ -1865,7 +1868,7 @@ async function main() {
     try {
       const { startInjectionServer } = await import('../lib/memory-inject-server.mjs');
       injectionServer = await startInjectionServer(
-        { knowledgeDb: getKnowledgeDb(), graphCache: getGraphCache(), llmClient: getLlmClient(), extractionDb: getExtractionStore()?.db, eventLog: localEventLog, nodeId: NODE_ID },
+        { knowledgeDb: getKnowledgeDb(), graphCache: getGraphCache(), llmClient: getLlmClient(), extractionDb: getExtractionStore()?.db, eventLog: liveEventLog, nodeId: NODE_ID },
         { log: (m) => log(`[inject-server] ${m}`) },
       );
     } catch (injErr) {
