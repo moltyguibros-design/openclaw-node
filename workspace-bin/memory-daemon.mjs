@@ -1709,6 +1709,9 @@ async function main() {
   // R16 fix (repair 4.3): NATS init is retryable. A broker down at boot used
   // to permanently disable the event spine (event log, watcher, extraction
   // trigger) until a manual restart; now the daemon retries every 60s.
+  let running = true;
+  let tickInterval = null;
+  let inFlightTick = null;
   let natsRetryTimer = null;
   async function initNatsSubsystems() {
   try {
@@ -1867,9 +1870,6 @@ async function main() {
   }
 
   // Graceful shutdown
-  let running = true;
-  let tickInterval = null;
-  let inFlightTick = null;
   const shutdown = async (signal) => {
     log(`Received ${signal} — shutting down`);
     running = false;

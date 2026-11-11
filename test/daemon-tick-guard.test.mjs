@@ -156,3 +156,10 @@ test('the session-size floor is a named 1KB constant, not a bare 50KB (repair 4.
 test('synthesized events carry session_id (R10, repair 2.10)', () => {
   assert.match(daemonSrc, /buildMemoryEvent\('memory\.synthesized', sessionId, 'memory', \{\n    session_id: sessionId,/);
 });
+
+test('the NATS retry timer never reads `running` before it is initialized', () => {
+  const decl = daemonSrc.indexOf('let running = true;');
+  const armed = daemonSrc.indexOf('natsRetryTimer = setInterval(');
+  assert.ok(decl > 0 && armed > 0);
+  assert.ok(decl < armed, '`running` must be initialized before the NATS retry timer can fire');
+});
