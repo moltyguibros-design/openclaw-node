@@ -135,8 +135,13 @@ function showDock() {
   document.querySelectorAll('.dock-pane').forEach(p =>
     p.classList.toggle('active', p.id === (state.gtab === 'gprogress' ? 'pane-progress' : 'pane-live')));
   $('live-controls').style.display = state.gtab === 'glive' ? '' : 'none';
-  if (state.gtab === 'glive') connectActivityLive();
-  else connectActivityProgress();
+  if (state.gtab === 'glive') {
+    if (state.progressSource) { state.progressSource.close(); state.progressSource = null; }
+    connectActivityLive();
+  } else {
+    if (state.evtSource) { state.evtSource.close(); state.evtSource = null; }
+    connectActivityProgress();
+  }
 }
 
 // ── Master Plan tab ─────────────────────────────────────────────────────────────

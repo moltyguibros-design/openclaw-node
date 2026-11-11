@@ -1376,14 +1376,23 @@ function jsonlPathFor(logPath) {
 const SESSION_DIR = path.join(os.homedir(), '.claude', 'projects',
   process.cwd().replace(/[/.]/g, '-'));
 
+// Every open stream polls this several times a second and it stats every
+// transcript the repo ever had, so one pick is shared for a short window.
+const SESSION_PICK_TTL_MS = 2000;
+let sessionPick = { at: 0, fp: null };
 function newestSessionJsonl() {
+  const now = Date.now();
+  if (now - sessionPick.at < SESSION_PICK_TTL_MS) return sessionPick.fp;
+  let fp = null;
   try {
     const picks = fs.readdirSync(SESSION_DIR)
       .filter(f => f.endsWith('.jsonl'))
-      .map(f => { const fp = path.join(SESSION_DIR, f); return { fp, m: fs.statSync(fp).mtimeMs }; })
+      .map(f => { const p = path.join(SESSION_DIR, f); return { fp: p, m: fs.statSync(p).mtimeMs }; })
       .sort((a, b) => b.m - a.m);
-    return picks.length ? picks[0].fp : null;
-  } catch { return null; }
+    if (picks.length) fp = picks[0].fp;
+  } catch {}
+  sessionPick = { at: now, fp };
+  return fp;
 }
 
 // A tick log only counts as the *live* source while it's actively being

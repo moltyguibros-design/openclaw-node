@@ -7,12 +7,12 @@ import http from 'node:http';
 import net from 'node:net';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const script = fileURLToPath(new URL('../workspace-bin/workplan-viewer.mjs', import.meta.url));
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function fixture(t) {
+async function fixture(t, { prepare = () => ({}) } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'viewer-http-'));
   const plan = path.join(root, 'plans/fixture');
   const tokenFile = path.join(root, 'token');
@@ -34,10 +34,11 @@ async function fixture(t) {
   const port = reservation.address().port;
   await new Promise(resolve => reservation.close(resolve));
   const origin = `http://127.0.0.1:${port}`;
+  const extraEnv = prepare(root, plan);
   const child = spawn(process.execPath, [script], { cwd: root,
     env: { ...process.env, HOME: root, WORKPLAN_ROOTS: path.join(root, 'plans'),
       WORKPLAN_VIEWER_TOKEN_FILE: tokenFile, WORKPLAN_VIEWER_PORT: String(port),
-      MEMORY_PLAN_NOTIFY: 'off', PATH: path.join(root, 'bin') + path.delimiter + process.env.PATH },
+      MEMORY_PLAN_NOTIFY: 'off', PATH: path.join(root, 'bin') + path.delimiter + process.env.PATH, ...extraEnv },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -314,4 +315,72 @@ test('a pinned stream keeps its original file when the selected name is replaced
   assert.ok(!text.includes('PRIVATE_OUTSIDE_LOG_ROOT'));
   await reader.cancel();
   assert.equal((await f.request('/api/plans/fixture/stream?log=sample.log', { token: f.master })).status, 404);
+});
+
+async function sseEvents(t, f, route) {
+  const controller = new AbortController();
+  const response = await fetch(f.origin + route, { headers: { Authorization: `Bearer ${f.master}` }, signal: controller.signal });
+  assert.equal(response.status, 200);
+  const events = [];
+  const decoder = new TextDecoder();
+  let pending = '';
+  const pump = (async () => {
+    try {
+      for await (const chunk of response.body) {
+        pending += decoder.decode(chunk, { stream: true });
+        let end;
+        while ((end = pending.indexOf('\n\n')) !== -1) {
+          const block = pending.slice(0, end);
+          pending = pending.slice(end + 2);
+          const event = block.match(/^event: (.*)$/m)?.[1];
+          if (event) events.push({ event, data: block.match(/^data: (.*)$/m)?.[1] });
+        }
+      }
+    } catch {}
+  })();
+  const close = async () => { controller.abort(); await pump; };
+  t.after(close);
+  async function waitFor(predicate, ms = 3000) {
+    for (const deadline = Date.now() + ms; Date.now() < deadline; await sleep(25)) {
+      const hit = events.find(predicate);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  return { events, waitFor, close };
+}
+
+test('global streams share one session-transcript scan instead of re-listing it on every poll', async t => {
+  let sessions, counter;
+  const f = await fixture(t, { prepare(root, plan) {
+    const old = new Date(Date.now() - 3600000);
+    fs.utimesSync(path.join(plan, 'tick-logs/sample.log'), old, old);
+    const suffix = path.join('.claude/projects', fs.realpathSync(root).replace(/[/.]/g, '-'));
+    sessions = path.join(root, suffix);
+    fs.mkdirSync(sessions, { recursive: true });
+    for (const name of ['a', 'c', 'd']) {
+      fs.writeFileSync(path.join(sessions, name + '.jsonl'), '');
+      fs.utimesSync(path.join(sessions, name + '.jsonl'), old, old);
+    }
+    counter = path.join(root, 'session-scans');
+    const hook = path.join(root, 'count-scans.mjs');
+    fs.writeFileSync(hook, `import fs from 'node:fs';
+const readdirSync = fs.readdirSync;
+fs.readdirSync = function (dir, ...rest) {
+  if (String(dir).endsWith(${JSON.stringify(suffix)})) fs.appendFileSync(${JSON.stringify(counter)}, '.');
+  return readdirSync.call(this, dir, ...rest);
+};
+`);
+    return { NODE_OPTIONS: '--import ' + pathToFileURL(hook).href };
+  } });
+  const activity = await sseEvents(t, f, '/api/global/activity-stream');
+  const live = await sseEvents(t, f, '/api/global/stream');
+  assert.ok(await activity.waitFor(e => e.event === 'reset'), f.output());
+  assert.ok(await live.waitFor(e => e.event === 'file'), f.output());
+  await sleep(3000);
+  const scans = fs.readFileSync(counter, 'utf8').length;
+  assert.ok(scans >= 1 && scans <= 4, `session dir listed ${scans} times in ~3s`);
+  fs.writeFileSync(path.join(sessions, 'b.jsonl'), '');
+  const switched = await activity.waitFor(e => e.event === 'reset' && JSON.parse(e.data).source === 'b.jsonl', 3500);
+  assert.ok(switched, 'a newer session transcript is picked up within the cache window');
 });
