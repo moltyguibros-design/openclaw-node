@@ -163,3 +163,9 @@ test('the NATS retry timer never reads `running` before it is initialized', () =
   assert.ok(decl > 0 && armed > 0);
   assert.ok(decl < armed, '`running` must be initialized before the NATS retry timer can fire');
 });
+
+test('the daemon owns the maintenance cadence: Phase 2 forces the run, Phase 0 stamps it', () => {
+  assert.match(daemonSrc, /runSubprocess\('node', \[maint, '--force'\], 60000\)/);
+  const phase0 = daemonSrc.match(/async function runPhase0Bootstrap[\s\S]*?\n}\n/)[0];
+  assert.match(phase0, /throttle\.lastMaintenance = Date\.now\(\);[\s\S]*saveThrottleState\(throttle\)/);
+});

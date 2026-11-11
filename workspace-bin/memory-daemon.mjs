@@ -685,6 +685,10 @@ async function runPhase0Bootstrap(sessionId, config) {
       await runSubprocess('node', [maintenance, '--force'], 60000);
       log('  memory-maintenance --force done');
     } catch (e) { log(`  memory-maintenance failed: ${e.message}`); }
+    // Phase 2 forces maintenance on this stamp alone; without it the boot tick runs it twice.
+    const throttle = loadThrottleState();
+    throttle.lastMaintenance = Date.now();
+    saveThrottleState(throttle);
   }
 
   // 5. Compile boot artifacts
@@ -1044,7 +1048,7 @@ async function runPhase2ThrottledWork(config, sessionState) {
     const maint = path.join(WORKSPACE, 'bin/memory-maintenance.mjs');
     if (fs.existsSync(maint)) {
       stage1.push(
-        runSubprocess('node', [maint], 60000)
+        runSubprocess('node', [maint, '--force'], 60000)
           .then(() => log('  Phase 2: memory-maintenance done'))
           .catch(e => log(`  Phase 2: memory-maintenance failed: ${e.message}`))
       );
