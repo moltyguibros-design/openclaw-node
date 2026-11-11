@@ -1518,7 +1518,7 @@ runPhase1StatusSync = tracer.wrap('runPhase1StatusSync', runPhase1StatusSync, { 
 runHyperagentMaintenance = tracer.wrapAsync('runHyperagentMaintenance', runHyperagentMaintenance, { tier: 1, category: 'lifecycle' });
 runPhase2ThrottledWork = tracer.wrapAsync('runPhase2ThrottledWork', runPhase2ThrottledWork, { tier: 1, category: 'lifecycle' });
 handleTransitions = tracer.wrapAsync('handleTransitions', handleTransitions, { tier: 1, category: 'state_transition' });
-runSubprocess = tracer.wrap('runSubprocess', runSubprocess, { tier: 2 });
+runSubprocess = tracer.wrapAsync('runSubprocess', runSubprocess, { tier: 2 });
 
 // ============================================================
 // FEDERATION SUBSYSTEMS — OPT-IN (OPENCLAW_FEDERATION=1)

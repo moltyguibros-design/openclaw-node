@@ -169,3 +169,8 @@ test('the daemon owns the maintenance cadence: Phase 2 forces the run, Phase 0 s
   const phase0 = daemonSrc.match(/async function runPhase0Bootstrap[\s\S]*?\n}\n/)[0];
   assert.match(phase0, /throttle\.lastMaintenance = Date\.now\(\);[\s\S]*saveThrottleState\(throttle\)/);
 });
+
+test('runSubprocess is traced with wrapAsync, so a failed or slow run is recorded', () => {
+  assert.match(daemonSrc, /runSubprocess = tracer\.wrapAsync\('runSubprocess', runSubprocess, \{ tier: 2 \}\);/);
+  assert.doesNotMatch(daemonSrc, /runSubprocess = tracer\.wrap\(/);
+});
