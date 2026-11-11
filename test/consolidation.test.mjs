@@ -147,6 +147,7 @@ function createTestDb() {
       decision TEXT NOT NULL,
       rationale TEXT NOT NULL,
       confidence REAL NOT NULL DEFAULT 0.5,
+      superseded_by INTEGER,
       created_at TEXT NOT NULL,
       salience REAL DEFAULT 0.5,
       last_recalled TEXT,
@@ -565,6 +566,25 @@ describe('evaluatePromotionCandidates', () => {
     assert.equal(result.decisionCandidates.length, 1);
     assert.equal(result.decisionCandidates[0].decision, 'High-conf decision');
 
+    db.close();
+  });
+
+  it('a superseded decision is not a promotion candidate', () => {
+    const db = createTestDb();
+    const insert = db.prepare(`
+      INSERT INTO decisions (session_id, decision, rationale, confidence, created_at, salience, source_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    insert.run('s1', 'old plan', 'first take', 0.99, new Date().toISOString(), 0.5, 'local');
+    insert.run('s2', 'new plan', 'revised', 0.99, new Date().toISOString(), 0.5, 'local');
+    db.prepare(`
+      UPDATE decisions SET superseded_by = (SELECT id FROM decisions WHERE decision = 'new plan')
+      WHERE decision = 'old plan'
+    `).run();
+
+    const result = evaluatePromotionCandidates(db);
+
+    assert.deepEqual(result.decisionCandidates.map(d => d.decision), ['new plan']);
     db.close();
   });
 });
