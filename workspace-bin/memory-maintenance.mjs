@@ -14,7 +14,7 @@
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import path from 'path';
-import { execFile, spawn } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import http from 'http';
 import os from 'os';
@@ -252,15 +252,11 @@ async function checkClawVault() {
   if (runningMatch) workingOn = runningMatch[1];
 
   try {
-    const proc = spawn(CLAWVAULT, ['checkpoint', '--working-on', workingOn, '--focus', 'memory-maintenance'], {
+    await execFileAsync(CLAWVAULT, ['checkpoint', '--working-on', workingOn, '--focus', 'memory-maintenance'], {
       cwd: WORKSPACE,
-      stdio: 'ignore',
-      detached: true,
+      timeout: 10000,
     });
-    proc.unref();
-    // Kill after 10s
-    setTimeout(() => { try { proc.kill(); } catch {} }, 10000);
-    log('ClawVault checkpoint dispatched (background, 10s timeout)');
+    log('ClawVault checkpoint done');
     actions++;
   } catch (e) {
     log(`ClawVault checkpoint failed: ${e.message}`);
