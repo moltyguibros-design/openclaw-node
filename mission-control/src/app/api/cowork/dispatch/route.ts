@@ -52,11 +52,9 @@ export async function POST(request: NextRequest) {
   }
 
   if (Array.isArray(manualNodes) && manualNodes.length > 0) {
-    // Pre-existing behavior: entries missing both keys flow through as
-    // undefined rather than being filtered.
-    const manualIds = manualNodes.map(
-      (n: { node_id?: string; nodeId?: string }) => n.node_id || n.nodeId
-    ) as string[];
+    const manualIds = manualNodes
+      .map((n: { node_id?: string; nodeId?: string }) => n.node_id || n.nodeId)
+      .filter((x): x is string => typeof x === "string" && x.length > 0);
     nodeIds = [...new Set([...nodeIds, ...manualIds])];
   }
 
