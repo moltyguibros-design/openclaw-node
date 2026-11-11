@@ -311,3 +311,50 @@ describe("live-task scans read the bucket once", () => {
     assert.equal(counter.scans, 1);
   });
 });
+
+describe("requeueOwnedBy() (mesh-node-remove)", () => {
+  const leased = (id, status, owner) => ({
+    ...createTask({ task_id: id, title: id }), status, owner,
+    claimed_at: new Date().toISOString(), lease_token: "tok", lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
+  });
+
+  it("re-queues only the node's claimed/running tasks and clears their lease", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, leased("T-a", TASK_STATUS.CLAIMED, "dead"));
+    await seed(store, leased("T-b", TASK_STATUS.RUNNING, "other"));
+    await seed(store, { ...leased("T-c", TASK_STATUS.COMPLETED, "dead"), lease_token: null });
+
+    assert.deepEqual(await store.requeueOwnedBy("dead"), ["T-a"]);
+    const a = await store.get("T-a");
+    assert.equal(a.status, TASK_STATUS.QUEUED);
+    assert.equal(a.owner, null);
+    assert.equal(a.claimed_at, null);
+    assert.equal(a.lease_token, null);
+    assert.equal(a.lease_expires_at, null);
+    assert.equal((await store.get("T-b")).status, TASK_STATUS.RUNNING);
+    assert.equal((await store.get("T-b")).owner, "other");
+    assert.equal((await store.get("T-c")).status, TASK_STATUS.COMPLETED);
+  });
+
+  it("a task the daemon completes mid-requeue stays completed (CAS, not a blind put)", async () => {
+    const kv = mockKv();
+    const get = kv.get;
+    let reads = 0;
+    // The second read of T-a is the CAS read; the daemon completes the task right after it.
+    kv.get = async (k) => {
+      const entry = await get(k);
+      if (k === "T-a" && ++reads === 2) {
+        const done = { ...JSON.parse(sc.decode(entry.value)), status: TASK_STATUS.COMPLETED, completed_at: new Date().toISOString() };
+        await kv.put(k, sc.encode(JSON.stringify(done)));
+      }
+      return entry;
+    };
+    const store = new TaskStore(kv);
+    await seed(store, leased("T-a", TASK_STATUS.RUNNING, "dead"));
+
+    assert.deepEqual(await store.requeueOwnedBy("dead"), []);
+    const a = await store.get("T-a");
+    assert.equal(a.status, TASK_STATUS.COMPLETED);
+    assert.equal(a.owner, "dead");
+  });
+});

@@ -85,6 +85,7 @@ const REQUIRED_PRODUCTION_WIRES = [
   { factory: 'withKanbanLockSync',       calledIn: 'mission-control/src/lib/sync/tasks.ts' }, // MC takes the kanban lock (P5-5)
   // Phase 6 — remaining plan items.
   { factory: 'reapExpiredLeases',        calledIn: 'bin/mesh-task-daemon.js' },       // dead-worker requeue (P4-5)
+  { factory: 'requeueOwnedBy',           calledIn: 'bin/mesh-node-remove.js' },       // node removal requeues under CAS
   { factory: 'renderServiceTemplate',    calledIn: 'bin/openclaw-node-init.js' },     // one service definition (P4-8)
   // The flush runs OFF the daemon's main thread since the flush-worker change
   // (audits/flush_worker): the daemon invokes runFlushInWorker at every flush

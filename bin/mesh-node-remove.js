@@ -108,29 +108,10 @@ const cleanNatsState = tracer.wrapAsync('cleanNatsState', async function cleanNa
 
     // 1. Release/cancel tasks owned by this node
     try {
+      // Required only once nats is known to load: lib/mesh-tasks requires it.
+      const { TaskStore } = require('../lib/mesh-tasks');
       const kv = await js.views.kv('MESH_TASKS');
-      const keys = await kv.keys();
-      const allKeys = [];
-      for await (const k of keys) allKeys.push(k);
-
-      let released = 0;
-      for (const k of allKeys) {
-        const entry = await kv.get(k);
-        if (!entry || !entry.value) continue;
-        const task = JSON.parse(new TextDecoder().decode(entry.value));
-
-        if (task.owner === nodeId && (task.status === 'claimed' || task.status === 'running')) {
-          task.status = 'queued';
-          task.owner = null;
-          task.claimed_at = null;
-          task.started_at = null;
-          task.budget_deadline = null;
-          task.last_activity = null;
-          task.updated_at = new Date().toISOString();
-          await kv.put(k, JSON.stringify(task));
-          released++;
-        }
-      }
+      const released = (await new TaskStore(kv).requeueOwnedBy(nodeId)).length;
 
       if (released > 0) {
         ok(`Released ${released} task(s) back to queue`);
