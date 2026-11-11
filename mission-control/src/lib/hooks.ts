@@ -1,7 +1,15 @@
 import useSWR, { mutate } from "swr";
 import { useEffect, useRef } from "react";
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+// SWR sets `error` only when the fetcher throws; API routes answer failures with a JSON {error} body.
+export async function fetcher(url: string) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `HTTP ${res.status}`);
+  }
+  return res.json();
+}
 
 export interface Task {
   id: string;
