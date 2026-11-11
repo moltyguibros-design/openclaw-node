@@ -9,11 +9,10 @@ import { logActivity } from "@/lib/activity";
 import { schedulerTick } from "@/lib/scheduler";
 import { generateTaskId } from "@/lib/task-id";
 import { getNats, sc } from "@/lib/nats";
-import { WORKSPACE_ROOT, AGENT_NAME } from "@/lib/config";
+import { WORKSPACE_ROOT, AGENT_NAME, resolveDaemonNodeId } from "@/lib/config";
 import path from "path";
-import os from "os";
 
-const NODE_ID = process.env.OPENCLAW_NODE_ID || os.hostname();
+const NODE_ID = resolveDaemonNodeId();
 
 /**
  * Parse .daemon-state-${NODE_ID}.md to extract current active task.

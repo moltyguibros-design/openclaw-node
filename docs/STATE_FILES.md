@@ -22,7 +22,7 @@ default `~/.openclaw/workspace/`). They are **not** committed to any git repo.
   - `session-start.sh` — reads at session start, injects into Claude context
   - `daily-log-writer.mjs` — reads to detect active session
   - `mission-control/src/app/api/tasks/route.ts` — reads for `__LIVE_SESSION__` card synthesis
-- **NODE_ID source:** `$OPENCLAW_NODE_ID` env var, fallback `os.hostname()`
+- **NODE_ID source:** `lib/node-id.js` `resolveNodeId()`: `$OPENCLAW_NODE_ID` (rendered into the daemon unit from `~/.openclaw/openclaw.env`), else `$MESH_NODE_ID`, else the short hostname lowercased with `[^a-z0-9-]` removed. Readers without the daemon's env (Mission Control, `session-start.sh`) read `OPENCLAW_NODE_ID` from `openclaw.env` first.
 - **History:** Renamed from `.companion-state.md` in Step 0.2 to avoid collision with companion-bridge.
 
 ### `MEMORY.md`

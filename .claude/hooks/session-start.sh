@@ -29,7 +29,12 @@ if [ -f "$TASKS" ]; then
 fi
 
 # Daemon state (per-node, written by memory-daemon)
-_NODE_ID="${OPENCLAW_NODE_ID:-$(hostname)}"
+_NODE_ID="${OPENCLAW_NODE_ID:-}"
+ENV_FILE="${HOME}/.openclaw/openclaw.env"
+if [ -z "$_NODE_ID" ] && [ -f "$ENV_FILE" ]; then
+  _NODE_ID="$(sed -n 's/^[[:space:]]*OPENCLAW_NODE_ID[[:space:]]*=//p' "$ENV_FILE" | tail -n 1 | tr -d "\"'[:space:]")"
+fi
+[ -n "$_NODE_ID" ] || _NODE_ID="$(hostname -s | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')"
 STATE="${WORKSPACE}/.daemon-state-${_NODE_ID}.md"
 if [ -f "$STATE" ]; then
   echo "Session state:"
