@@ -389,8 +389,10 @@ async function main() {
         console.error("[health-publisher] publish failed:", msg);
       }
 
-      // Exponential backoff: skip 2^min(N,6) ticks (max ~64 ticks / ~16 min at 15s)
-      const backoffTicks = Math.pow(2, Math.min(consecutiveFailures, 6));
+      // Backoff capped at 4 skipped ticks (a retry every 75s): a longer gap
+      // outlives the 120s KV TTL, so the node would read as offline long after
+      // the bus recovered.
+      const backoffTicks = Math.pow(2, Math.min(consecutiveFailures, 2));
       skipTicksRemaining = backoffTicks;
       console.error(`[health-publisher] backoff: skipping next ${backoffTicks} ticks (failures=${consecutiveFailures})`);
     }
