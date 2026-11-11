@@ -321,6 +321,11 @@ describe('node-watch OFF semantics (intentionally not active ≠ broken)', () =>
     assert.equal((await target('runtime.bridge').run(envFor(ctx))).status, STATUS.OFF);
   });
 
+  it('companion-bridge: a 5xx is BROKEN, the unrouted-root 404 is WORKING', async () => {
+    assert.equal((await target('runtime.bridge').run(envFor(makeCtx({ httpGet: async () => ({ status: 503 }) })))).status, STATUS.BROKEN);
+    assert.equal((await target('runtime.bridge').run(envFor(makeCtx({ httpGet: async () => ({ status: 404 }) })))).status, STATUS.WORKING);
+  });
+
   it('federation is OFF when no identity-registry (not deployed)', async () => {
     const ctx = makeCtx({ fsp: { ...makeCtx().fsp, access: async () => { throw new Error('ENOENT'); } } });
     assert.equal((await target('net.federation').run(envFor(ctx))).status, STATUS.OFF);

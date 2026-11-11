@@ -128,7 +128,7 @@ service failure keeps BROKEN even when another service or policy is unobservable
 | Element | Watch signal | Probe |
 |---|---|---|
 | OpenClaw gateway | fresh session JSONLs produced | live |
-| companion-bridge :8787 | HTTP responds (OFF if on-demand/down) | live |
+| companion-bridge :8787 | HTTP responds below 500 (BROKEN on 5xx; OFF if on-demand/down) | live |
 
 ### Operations & planning surfaces
 | Element | Watch signal | Probe |
