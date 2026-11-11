@@ -816,6 +816,11 @@ function findJsonlBySessionId(sources, sessionId) {
   return null;
 }
 
+function sourceOfJsonl(sources, jsonlPath) {
+  const dir = path.resolve(path.dirname(jsonlPath));
+  return sources.find(s => path.resolve(s.path) === dir) || null;
+}
+
 // ============================================================
 // PHASE 1: STATUS SYNC
 // Updates .daemon-state-${NODE_ID}.md from active-tasks.md (~5ms)
@@ -1015,19 +1020,20 @@ async function runPhase2ThrottledWork(config, sessionState) {
   if (now - (throttle.lastLiveImport || 0) >= config.intervals.sessionRecapMs) {
     throttle.lastLiveImport = now;
     stage1.push((async () => {
-      const currentJsonl = findCurrentJsonl(loadTranscriptSources());
+      const sources = loadTranscriptSources();
+      const currentJsonl = findCurrentJsonl(sources);
       if (!currentJsonl) return;
-      const activity = detectActivity(loadTranscriptSources(), config.intervals.activityWindowMs);
+      const src = sourceOfJsonl(sources, currentJsonl);
       // importSession fully re-parses the JSONL and bulk-replaces rows — on the
       // main thread that starved the inject server (same class as the flush);
       // it runs in the memory worker instead.
       const result = await runImportInWorker(currentJsonl, {
-        source: activity.newestSource || 'unknown',
-        format: activity.newestFormat,
+        source: src?.name || 'unknown',
+        format: src?.format,
       });
       if (result.imported) {
         log(`  Phase 2: live session import — ${result.sessionId.slice(0, 8)} (${result.messageCount} msgs)`);
-        emitIngestEvent(result.sessionId, activity.newestSource || 'unknown', result.messageCount);
+        emitIngestEvent(result.sessionId, src?.name || 'unknown', result.messageCount);
       }
     })().catch(e => log(`  Phase 2: live session import failed: ${e.message}`)));
   }
@@ -1367,15 +1373,14 @@ async function handleTransitions(transitions, config) {
         try {
           const store = await getSessionStore();
           if (store) {
-            // Detect which transcript source this JSONL came from
-            const activity = detectActivity(loadTranscriptSources(), config.intervals.activityWindowMs);
+            const src = sourceOfJsonl(sources, currentJsonl);
             const result = await store.importSession(currentJsonl, {
-              source: activity.newestSource || 'unknown',
-              format: activity.newestFormat,
+              source: src?.name || 'unknown',
+              format: src?.format,
             });
             if (result.imported) {
               log(`  session-store: archived ${result.sessionId.slice(0, 8)} (${result.messageCount} msgs)`);
-              emitIngestEvent(result.sessionId, activity.newestSource || 'unknown', result.messageCount);
+              emitIngestEvent(result.sessionId, src?.name || 'unknown', result.messageCount);
             }
           }
         } catch (e) { log(`  session-store archive failed: ${e.message}`); emitErrorEvent('ingest', e); }
@@ -2042,4 +2047,4 @@ if (process.env.OPENCLAW_MEMORY_DAEMON_NO_AUTOSTART !== '1') {
   });
 }
 
-export { runNodeVaultMaintenance, handleFlushResult };
+export { runNodeVaultMaintenance, handleFlushResult, sourceOfJsonl };

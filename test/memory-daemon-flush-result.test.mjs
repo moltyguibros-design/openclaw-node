@@ -26,7 +26,7 @@ const DAEMON = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   '..', 'workspace-bin', 'memory-daemon.mjs'
 );
-const { handleFlushResult } = await import(DAEMON);
+const { handleFlushResult, sourceOfJsonl } = await import(DAEMON);
 const src = readFileSync(DAEMON, 'utf8');
 
 // ── verdict logic ───────────────────────────────────────────────────────────
@@ -116,4 +116,15 @@ test('the daemon still autostarts by default', () => {
   // and must keep booting exactly as before.
   assert.match(src, /OPENCLAW_MEMORY_DAEMON_NO_AUTOSTART !== '1'/);
   assert.match(src, /if \(process\.env\.OPENCLAW_MEMORY_DAEMON_NO_AUTOSTART !== '1'\) \{\s*\n\s*main\(\)/);
+});
+
+test('session imports take source and format from the transcript\'s own source dir', () => {
+  const sources = [
+    { name: 'claude-code-repo', path: '/h/.claude/projects/-repo/', format: 'claude-code' },
+    { name: 'gateway', path: '/h/.openclaw/agents/main/sessions/', format: 'openclaw-gateway' },
+  ];
+  assert.equal(sourceOfJsonl(sources, '/h/.claude/projects/-repo/abc.jsonl').format, 'claude-code');
+  assert.equal(sourceOfJsonl(sources, '/h/.openclaw/agents/main/sessions/x.jsonl').name, 'gateway');
+  assert.equal(sourceOfJsonl(sources, '/elsewhere/x.jsonl'), null);
+  assert.doesNotMatch(src, /activity\.newest(Source|Format)/, 'the newest file\'s source labels a different transcript');
 });
