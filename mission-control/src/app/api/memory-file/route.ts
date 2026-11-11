@@ -40,14 +40,26 @@ export async function GET(request: NextRequest) {
   try {
     const stat = fs.statSync(hit.real);
     if (!stat.isFile()) return NextResponse.json({ error: "not a file" }, { status: 400 });
+    if (tail > 0) {
+      // Read only the trailing window: the injections log rotates at 50 MB, far past MAX_BYTES.
+      const start = Math.max(0, stat.size - MAX_BYTES);
+      const buf = Buffer.alloc(stat.size - start);
+      const fd = fs.openSync(hit.real, "r");
+      let n: number;
+      try {
+        n = fs.readSync(fd, buf, 0, buf.length, start);
+      } finally {
+        fs.closeSync(fd);
+      }
+      let text = buf.subarray(0, n).toString("utf-8");
+      if (start > 0) text = text.slice(text.indexOf("\n") + 1);
+      const content = text.trim().split("\n").slice(-tail).join("\n");
+      return NextResponse.json({ path: hit.real, content, bytes: content.length });
+    }
     if (stat.size > MAX_BYTES) {
       return NextResponse.json({ error: `file too large (>${MAX_BYTES} bytes)`, size: stat.size }, { status: 413 });
     }
-    let content = fs.readFileSync(hit.real, "utf-8");
-    if (tail > 0) {
-      const lines = content.trim().split("\n");
-      content = lines.slice(-tail).join("\n");
-    }
+    const content = fs.readFileSync(hit.real, "utf-8");
     return NextResponse.json({ path: hit.real, content, bytes: content.length });
   } catch (err) {
     return NextResponse.json({ error: String(err), path: hit.real }, { status: 404 });
