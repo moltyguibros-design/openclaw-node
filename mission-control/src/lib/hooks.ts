@@ -946,13 +946,18 @@ export interface MemoryEntity { name: string; type: string; mention_count: numbe
 export interface MemoryDecision { decision: string; rationale: string; confidence: number; session_id: string; created_at: string; }
 export interface MemoryTheme { label: string; hierarchy: string[]; mention_count: number; last_seen: string; }
 
-export function useMemoryContent(q?: string, session?: string) {
+export function memoryContentKey(q?: string, session?: string): string | null {
+  // repair 6.4: a session-less watcher panel (q undefined) fetches nothing;
+  // the /memory-content page's q="" is the unscoped top-N view and must fetch.
+  if (q === undefined && !session) return null;
   const params = new URLSearchParams();
   if (q) params.set("q", q);
   if (session) params.set("session", session);
-  // repair 6.4: no scope -> no fetch. Session-less detail panels were
-  // pulling the full top-50 content every 10s and never rendering it.
-  const key = q || session ? `/api/memory-content?${params.toString()}` : null;
+  return `/api/memory-content?${params.toString()}`;
+}
+
+export function useMemoryContent(q?: string, session?: string) {
+  const key = memoryContentKey(q, session);
   const { data, error, isLoading } = useSWR<{
     entities: MemoryEntity[];
     decisions: MemoryDecision[];
