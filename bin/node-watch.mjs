@@ -21,23 +21,32 @@ import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { atomicWriteFile } from '../lib/atomic-write.mjs';
-import { runWatch, formatTable, formatReport, formatHtml, STATUS, watchTransitions } from '../lib/node-watch.mjs';
+import { runWatch, formatTable, formatReport, formatHtml, STATUS, watchTransitions, WATCH_TARGETS } from '../lib/node-watch.mjs';
 
-const { values } = parseArgs({
-  options: {
-    watch: { type: 'boolean', default: false },
-    interval: { type: 'string', default: '60' },
-    'deep-interval': { type: 'string', default: '900' },
-    deep: { type: 'boolean', default: false },
-    axis: { type: 'string' },
-    json: { type: 'boolean', default: false },
-    html: { type: 'boolean', default: false },
-    report: { type: 'string' },
-    'html-out': { type: 'string' },
-    'json-out': { type: 'string' },
-    quiet: { type: 'boolean', default: false },
-  },
-});
+let values;
+try {
+  ({ values } = parseArgs({
+    options: {
+      watch: { type: 'boolean', default: false },
+      interval: { type: 'string', default: '60' },
+      'deep-interval': { type: 'string', default: '900' },
+      deep: { type: 'boolean', default: false },
+      axis: { type: 'string' },
+      json: { type: 'boolean', default: false },
+      html: { type: 'boolean', default: false },
+      report: { type: 'string' },
+      'html-out': { type: 'string' },
+      'json-out': { type: 'string' },
+      quiet: { type: 'boolean', default: false },
+    },
+  }));
+} catch (err) {
+  // An uncaught throw here would exit 1, which reads as >=1 BROKEN.
+  process.stderr.write(`[node-watch] ${err.message}\n`
+    + 'Usage: node-watch.mjs [--watch] [--interval <s>] [--deep-interval <s>] [--deep] [--axis <family>]'
+    + ' [--json] [--html] [--report <path>] [--html-out <path>] [--json-out <path>] [--quiet]\n');
+  process.exit(3);
+}
 
 const DEFAULT_REPORT = path.join(os.homedir(), '.openclaw', '.node-watch.md');
 const DEFAULT_HTML = path.join(os.homedir(), '.openclaw', '.node-watch.html');
@@ -110,6 +119,11 @@ async function main() {
     const report = await once('once', true); // one-shot runs every check, incl. heavy
     const broken = report.results.some((r) => r.status === STATUS.BROKEN);
     process.exit(broken ? 1 : 0);
+  }
+
+  // runWatch rejects an unknown axis, but tick() would log it and retry forever.
+  if (values.axis && !WATCH_TARGETS.some((t) => t.family === values.axis)) {
+    throw new Error(`unknown axis '${values.axis}' (families: ${[...new Set(WATCH_TARGETS.map((t) => t.family))].join(', ')})`);
   }
 
   const intervalMs = Math.max(5, Number(values.interval) || 60) * 1000;

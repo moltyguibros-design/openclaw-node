@@ -4,12 +4,16 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   WATCH_TARGETS, runWatch, formatHtml, STATUS, watchTransitions, buildSourceMap,
   parseLaunchdPrint, gradeMeshServices, gradeRequiredServices, gradeGateway, probeCoreLaunchdServices, probeMeshServices,
 } from '../lib/node-watch.mjs';
 import { resolveNodeConfig } from '../lib/node-acceptance.mjs';
 import { createRuntimeContext } from '../lib/node-acceptance-probes.mjs';
+
+const BIN = fileURLToPath(new URL('../bin/node-watch.mjs', import.meta.url));
 
 const config = resolveNodeConfig({ OPENCLAW_HOME: '/tmp/acc', OPENCLAW_NODE_ID: 'tn' });
 
@@ -828,5 +832,18 @@ describe('mem.ingest configured-source parity', () => {
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('node-watch CLI exit contract', () => {
+  it('a bad flag exits 3 (harness error), not 1 (BROKEN)', () => {
+    const r = spawnSync(process.execPath, [BIN, '--bogus'], { encoding: 'utf8' });
+    assert.equal(r.status, 3, r.stderr);
+    assert.match(r.stderr, /Usage: node-watch\.mjs/);
+  });
+  it('an unknown --axis in --watch mode exits 3 instead of looping on tick errors', () => {
+    const r = spawnSync(process.execPath, [BIN, '--watch', '--quiet', '--axis', 'TYPO_AXIS'], { encoding: 'utf8', timeout: 10_000 });
+    assert.equal(r.status, 3, r.stderr);
+    assert.match(r.stderr, /unknown axis 'TYPO_AXIS'/);
   });
 });
