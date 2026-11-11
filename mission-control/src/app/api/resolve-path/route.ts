@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { WORKSPACE_ROOT } from "@/lib/config";
 
-const HOME = process.env.HOME || "/Users/moltymac";
+const HOME = os.homedir();
 
 const SEARCH_DIRS = [
   WORKSPACE_ROOT,
