@@ -152,6 +152,14 @@ function injectHyperagentStrategy(parts, task) {
   parts.push('');
 }
 
+function injectRejection(parts, task) {
+  if (!task?.rejection_reason) return;
+  parts.push('## Previous Review');
+  parts.push(`A reviewer rejected an earlier run of this task (rejection ${task.rejection_count || 1}): ${task.rejection_reason}`);
+  parts.push('Address this feedback; do not resubmit the same work.');
+  parts.push('');
+}
+
 // ── Role loading (cached per role ID) ─────────────────
 const ROLE_DIRS = [
   path.join(process.env.HOME, '.openclaw', 'roles'),
@@ -557,6 +565,7 @@ function buildInitialPrompt(task) {
   injectRole(parts, task.role);
   injectMemory(parts, task);
   injectHyperagentStrategy(parts, task);
+  injectRejection(parts, task);
 
   parts.push('## Instructions');
   parts.push('- Read the relevant files before making changes.');
@@ -629,6 +638,7 @@ function buildRetryPrompt(task, previousAttempts, attemptNumber) {
   injectRole(parts, task.role);
   injectMemory(parts, task);
   injectHyperagentStrategy(parts, task);
+  injectRejection(parts, task);
 
   parts.push('## Instructions');
   parts.push('- Do NOT repeat a failed approach. Try something different.');
