@@ -177,7 +177,8 @@ describe('P1 #3 — collaborative merge-review votes are BINDING', () => {
 });
 
 describe('P1 #5 — cooperative rotation skips the dead; degraded is loud', () => {
-  it('next integrator in order is dead → rotation lands on the next ALIVE node', async () => {
+  it('next integrator in order is dead → rotation lands on the next ALIVE node', async (t) => {
+    const logs = t.mock.method(console, 'log', () => {});
     const ctx = makeContext();
     const s = await activeSession(ctx.collabStore, { mode: 'cooperative' }, ['a', 'b', 'c'], {
       setup: (sess) => {
@@ -191,6 +192,8 @@ describe('P1 #5 — cooperative rotation skips the dead; degraded is loud', () =
     await daemon.__test.evaluateRound(s.session_id);
     const after = await ctx.collabStore.get(s.session_id);
     assert.equal(after.cooperative.current_integrator, 'c', 'skipped dead b → c');
+    // The log line used the pre-rotation snapshot and named the previous integrator.
+    assert.ok(logs.mock.calls.some(c => /COOPERATIVE .*: next integrator=c,/.test(String(c.arguments[0]))));
   });
 
   it('missing integrator reflection → integration marked degraded (never silent)', async () => {

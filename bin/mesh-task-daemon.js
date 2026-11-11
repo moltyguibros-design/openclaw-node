@@ -23,8 +23,11 @@
  *   mesh.tasks.list          — list tasks with optional filter (request/reply)
  *   mesh.tasks.get           — get a single task by ID (request/reply)
  *   mesh.tasks.cancel        — cancel a task (request/reply)
+ *   mesh.tasks.approve / reject / merged — review gate and merge report (request/reply)
+ *   mesh.collab.*            — create, join, leave, status, find, reflect, recruiting, gate.approve, gate.reject
+ *   mesh.plans.*             — create, get, list, approve, abort, subtask.update
  *
- * Enforcement loops run every 30s: budget check + stall detection.
+ * Enforcement loops run every 30s: proposal processing, budget check, lease reaping + stall detection.
  *
  * Usage:
  *   node mesh-task-daemon.js          # foreground
@@ -1240,8 +1243,6 @@ async function handleCollabReflect(msg) {
     }
   // Sequential mode: advance turn, notify next node or evaluate round
   // Parallel mode: check if all reflections are in → evaluate convergence
-  // NOTE: Node.js single-threaded event loop prevents concurrent execution of this
-  // handler — no mutex needed. advanceTurn() is safe without CAS here.
   } else if (session.mode === 'sequential') {
     const nextNodeId = await collabStore.advanceTurn(session_id);
     if (nextNodeId) {
@@ -1360,7 +1361,7 @@ async function evaluateCooperativeRound(sessionId, session, currentRound) {
     log(`COOPERATIVE ${sessionId}: rotation skipped dead node(s) ${skipped.join(', ')} → ${next}`);
     await collabStore.appendAudit(sessionId, 'cooperative_rotation_skipped_dead', { skipped, next });
   }
-  log(`COOPERATIVE ${sessionId}: next integrator=${coop.current_integrator}, starting round ${session.current_round + 1}`);
+  log(`COOPERATIVE ${sessionId}: next integrator=${next}, starting round ${session.current_round + 1}`);
   await startCollabRound(sessionId);
 }
 

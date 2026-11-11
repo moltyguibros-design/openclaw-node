@@ -707,11 +707,6 @@ function createWorktree(taskId) {
 }
 
 /**
- * Clean up a worktree after task completion or failure.
- * @param {string} worktreePath
- * @param {boolean} keep - If true, leave the branch for manual review
- */
-/**
  * Commit any changes in the worktree onto its `mesh/<taskId>` branch.
  * Returns { committed, sha, branch } or null if nothing to commit.
  *
