@@ -59,7 +59,8 @@ test('install.sh passes bash -n', () => {
 });
 
 test('every module passes bash -n', () => {
-  for (const m of MODULES) {
+  const scripts = readdirSync(join(ROOT, 'scripts/install')).filter((f) => f.endsWith('.sh')).sort();
+  for (const m of scripts) {
     const r = bashN(join(ROOT, 'scripts/install', m));
     assert.equal(r.status, 0, `${m}: ${r.stderr}`);
   }
