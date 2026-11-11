@@ -16,13 +16,29 @@ import {
   evaluatePromotionCandidates,
 } from '../lib/consolidation.mjs';
 import { runConsolidationCycle } from '../bin/consolidate.mjs';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 // Never let a cycle default to the REAL vault (getVaultPath) — fixture notes
 // were landing in production ~/.openclaw/obsidian-local (memory review 2026-07-04).
 const TEST_VAULT = mkdtempSync(join(tmpdir(), 'consolidation-vault-'));
+
+describe('consolidate CLI --dry-run', () => {
+  it('refuses instead of running a writing cycle against state.db', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'consolidate-dry-'));
+    const dbPath = join(dir, 'state.db');
+    const r = spawnSync(process.execPath, [
+      fileURLToPath(new URL('../bin/consolidate.mjs', import.meta.url)),
+      '--dry-run', '--no-events', '--db', dbPath, '--vault-path', join(dir, 'vault'),
+    ], { env: { ...process.env, HOME: dir }, encoding: 'utf8' });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /--dry-run is not implemented/);
+    assert.equal(existsSync(dbPath), false);
+  });
+});
 
 describe('consolidation event publication lifetime', () => {
   it('awaits both actual cycle publications before returning, retaining best-effort rejection', async () => {

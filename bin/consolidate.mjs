@@ -15,7 +15,7 @@
  *   7. Evaluate promotion candidates
  *
  * Usage:
- *   node bin/consolidate.mjs [--db <path>] [--vault-path <path>] [--dry-run]
+ *   node bin/consolidate.mjs [--db <path>] [--vault-path <path>] [--no-events]
  */
 
 import { openStore } from '../lib/sqlite-store.mjs';
@@ -90,7 +90,7 @@ function decayedEventData(decay, prune, durationMs) {
  * @param {object} [opts]
  * @param {string} [opts.dbPath] — path to extraction store DB
  * @param {string} [opts.vaultPath] — Obsidian vault path
- * @param {boolean} [opts.dryRun] — skip writes, just report what would happen
+ * @param {boolean} [opts.dryRun] — skip only the vault-surface writers (session/decision/theme notes, daily digest); decay, prune, reinforce, concept summaries, events and the promotion fingerprint still write
  * @param {object} [opts.db] — pre-opened database (for testing)
  * @param {object} [opts.client] — LLM client for summary generation
  * @param {AbortSignal} [opts.signal] — F-N100: hard-cap cancellation
@@ -274,9 +274,12 @@ export async function runConsolidationCycle(opts = {}) {
 // ── CLI Entry ────────────────────────────────
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('/consolidate.mjs')) {
   const args = process.argv.slice(2);
+  if (args.includes('--dry-run')) {
+    console.error('consolidate: --dry-run is not implemented (decay, prune and summaries would still write state.db and the vault); refusing.');
+    process.exit(2);
+  }
   const dbIdx = args.indexOf('--db');
   const vaultIdx = args.indexOf('--vault-path');
-  const dryRun = args.includes('--dry-run');
   const noEvents = args.includes('--no-events');
 
   const natsUrl = process.env.NATS_URL || undefined; // URL override only; resolver supplies URL + credentials
@@ -285,7 +288,6 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
   const opts = { nodeId };
   if (dbIdx !== -1 && args[dbIdx + 1]) opts.dbPath = args[dbIdx + 1];
   if (vaultIdx !== -1 && args[vaultIdx + 1]) opts.vaultPath = args[vaultIdx + 1];
-  if (dryRun) opts.dryRun = true;
 
   let nc = null;
 
