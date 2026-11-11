@@ -26,9 +26,11 @@ Storage: .tmp/trust-registry.json
 """
 
 import argparse
+import fcntl
 import json
 import os
 import sys
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -73,7 +75,19 @@ def load_registry():
 
 def save_registry(data):
     REGISTRY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    REGISTRY_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    # Readers that catch a half-written file fall back to an empty registry
+    # and would save that over every soul's history.
+    tmp = REGISTRY_FILE.with_name(f"{REGISTRY_FILE.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, REGISTRY_FILE)
+
+
+@contextmanager
+def registry_lock():
+    REGISTRY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(REGISTRY_FILE.with_name("trust-registry.lock"), "a") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        yield
 
 
 # ── Trust computation ─────────────────────────────────────────────────────────
@@ -460,13 +474,16 @@ def main():
     elif args.command == "score":
         cmd_score(args)
     elif args.command == "update":
-        cmd_update(args)
+        with registry_lock():
+            cmd_update(args)
     elif args.command == "recommend":
         cmd_recommend(args)
     elif args.command == "reset":
-        cmd_reset(args)
+        with registry_lock():
+            cmd_reset(args)
     elif args.command == "check":
-        cmd_check(args)
+        with registry_lock():
+            cmd_check(args)
     elif args.command == "status":
         cmd_cb_status(args)
     else:

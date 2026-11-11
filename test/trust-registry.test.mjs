@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const script = fileURLToPath(new URL('../workspace-bin/trust-registry', import.meta.url));
@@ -52,4 +52,57 @@ test('a half-open soul without last_probe_at allows a probe', t => {
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /new probe allowed/);
   assert.ok(read().souls.s1.last_probe_at);
+});
+
+test('update waits for the registry lock held by another writer', async t => {
+  const { ws, bin, run, read } = fixture(t, { souls: {}, delegations: [] });
+  const holder = spawn('python3', ['-c', [
+    'import fcntl, time',
+    `fh = open(${JSON.stringify(path.join(ws, '.tmp', 'trust-registry.lock'))}, "a")`,
+    'fcntl.flock(fh, fcntl.LOCK_EX)',
+    'print("locked", flush=True)',
+    'time.sleep(1.0)',
+  ].join('\n')]);
+  t.after(() => holder.kill());
+  await new Promise((resolve, reject) => {
+    holder.stdout.on('data', d => { if (String(d).includes('locked')) resolve(); });
+    holder.on('error', reject);
+    holder.on('exit', () => reject(new Error('lock holder exited before locking')));
+  });
+  const started = Date.now();
+  const status = await new Promise(resolve => {
+    spawn('python3', [bin, 'update', 's1', '--result', 'success']).on('exit', resolve);
+  });
+  const elapsed = Date.now() - started;
+  assert.equal(status, 0);
+  assert.ok(elapsed >= 800, `update finished in ${elapsed}ms while the lock was held`);
+  assert.equal(read().souls.s1.tasks_total, 1);
+  assert.equal(run('check', 's1').status, 0);
+});
+
+test('a reader never sees a half-written registry while it is being saved', t => {
+  const delegations = Array.from({ length: 500 }, (_, i) => ({ soul_id: 's1', result: 'success', turns: i, task: 'x'.repeat(150) }));
+  const { root, bin, file } = fixture(t, { souls: { s1: { tasks_total: 1 } }, delegations });
+  const done = path.join(root, 'writer-done');
+  const writer = spawn('python3', ['-c', [
+    'import importlib.util',
+    'from importlib.machinery import SourceFileLoader',
+    `loader = SourceFileLoader("trust_registry", ${JSON.stringify(bin)})`,
+    'tr = importlib.util.module_from_spec(importlib.util.spec_from_loader("trust_registry", loader))',
+    'loader.exec_module(tr)',
+    'data = tr.load_registry()',
+    'for _ in range(400): tr.save_registry(data)',
+    `open(${JSON.stringify(done)}, "w").close()`,
+  ].join('\n')], { stdio: 'inherit' });
+  t.after(() => writer.kill());
+  const deadline = Date.now() + 30_000;
+  let reads = 0;
+  let failures = 0;
+  while (!fs.existsSync(done) && Date.now() < deadline) {
+    reads++;
+    try { JSON.parse(fs.readFileSync(file, 'utf8')); } catch { failures++; }
+  }
+  assert.ok(fs.existsSync(done), 'writer did not finish');
+  assert.ok(reads > 0);
+  assert.equal(failures, 0, `${failures} of ${reads} reads saw a torn registry`);
 });
