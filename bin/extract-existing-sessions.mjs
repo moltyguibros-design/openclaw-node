@@ -45,16 +45,17 @@ export const DEFAULT_TAIL_COUNT = 20;
 // ─── Checkpoint helpers ──────────────────────────────────────────────────────
 
 export function loadCheckpoint(path) {
-  if (!existsSync(path)) return { completed: [], failed: [], startedAt: null };
+  if (!existsSync(path)) return { completed: [], failed: [], attempts: {}, startedAt: null };
   try {
     const raw = JSON.parse(readFileSync(path, 'utf-8'));
     return {
       completed: raw.completed || [],
       failed: raw.failed || [],
+      attempts: raw.attempts || {},
       startedAt: raw.startedAt || null,
     };
   } catch {
-    return { completed: [], failed: [], startedAt: null };
+    return { completed: [], failed: [], attempts: {}, startedAt: null };
   }
 }
 
@@ -67,6 +68,7 @@ export function saveCheckpoint(cpPath, checkpoint) {
   atomicWriteFileSync(cpPath, JSON.stringify({
     completed: checkpoint.completed,
     failed: checkpoint.failed,
+    attempts: checkpoint.attempts || {},
     startedAt: checkpoint.startedAt,
     lastUpdated: new Date().toISOString(),
   }, null, 2) + '\n', { mkdirp: true });
@@ -190,6 +192,7 @@ export async function runExtraction(opts = {}) {
 
         completedSet.add(session.id);
         checkpoint.completed.push(session.id);
+        delete checkpoint.attempts[session.id];
       } catch (err) {
         // F-N106 / F-Q303 / F-Q304 fix: classify transient vs permanent
         // failures. Old transient regex matched "fetch failed" anywhere in

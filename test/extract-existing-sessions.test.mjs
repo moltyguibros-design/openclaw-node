@@ -102,6 +102,7 @@ describe('loadCheckpoint', () => {
     const cp = loadCheckpoint('/nonexistent/path.json');
     assert.deepEqual(cp.completed, []);
     assert.deepEqual(cp.failed, []);
+    assert.deepEqual(cp.attempts, {});
     assert.equal(cp.startedAt, null);
   });
 });
@@ -310,6 +311,68 @@ describe('runExtraction', () => {
     const cp = loadCheckpoint(checkpointPath);
     assert.ok(cp.failed.includes('fail-session'));
     assert.ok(cp.completed.includes('ok-session'));
+  });
+
+  it('moves a sticky-transient session to failed after 5 runs', async () => {
+    const sessionDbPath = join(testDir, 'sessions.db');
+    const checkpointPath = join(testDir, 'checkpoint.json');
+    createSessionDb(sessionDbPath, [
+      { id: 's1', messages: [{ role: 'user', content: 'Oversized tail' }] },
+    ]);
+
+    const run = () => runExtraction({
+      sessionDbPath,
+      extractionDbPath: join(testDir, 'extraction.db'),
+      checkpointPath,
+      llmClient: createMockLlmClient([VALID_EXTRACTION]),
+      extractionStore: createMockExtractionStore(),
+      extractFn: async () => {
+        throw Object.assign(new Error('This operation was aborted'), { name: 'AbortError' });
+      },
+      skipNotes: true,
+      skipGraph: true,
+    });
+
+    for (let n = 1; n <= 4; n++) {
+      await run();
+      const cp = loadCheckpoint(checkpointPath);
+      assert.deepEqual(cp.failed, [], `run ${n} should leave s1 retryable`);
+      assert.equal(cp.attempts.s1, n);
+    }
+
+    await run();
+    const cp = loadCheckpoint(checkpointPath);
+    assert.ok(cp.failed.includes('s1'));
+    assert.equal(cp.attempts.s1, undefined);
+  });
+
+  it('clears the attempt counter when a previously failing session succeeds', async () => {
+    const sessionDbPath = join(testDir, 'sessions.db');
+    const checkpointPath = join(testDir, 'checkpoint.json');
+    createSessionDb(sessionDbPath, [
+      { id: 's1', messages: [{ role: 'user', content: 'Flaky' }] },
+    ]);
+    saveCheckpoint(checkpointPath, {
+      completed: [],
+      failed: [],
+      attempts: { s1: 2 },
+      startedAt: new Date().toISOString(),
+    });
+
+    await runExtraction({
+      sessionDbPath,
+      extractionDbPath: join(testDir, 'extraction.db'),
+      checkpointPath,
+      llmClient: createMockLlmClient([VALID_EXTRACTION]),
+      extractionStore: createMockExtractionStore(),
+      extractFn: async () => VALID_EXTRACTION,
+      skipNotes: true,
+      skipGraph: true,
+    });
+
+    const cp = loadCheckpoint(checkpointPath);
+    assert.ok(cp.completed.includes('s1'));
+    assert.equal(cp.attempts.s1, undefined);
   });
 
   it('returns zero results when session DB does not exist', async () => {
