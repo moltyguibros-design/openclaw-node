@@ -1021,12 +1021,20 @@ function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null)
       cwd: cleanCwd,
       env: cleanEnv,
       stdio: ['ignore', 'pipe', 'pipe'],  // stdin must be 'ignore' — some CLIs block on piped stdin
-      // Kill if it exceeds the budget; the verifier passes what is left of the task deadline (F14.5).
-      timeout: timeoutMs ?? (task.budget_minutes || 30) * 60 * 1000,
-      // Own process group: a Foreman STOP must end the CLI and everything it spawned.
+      // Own process group: a Foreman STOP and the budget timeout must end the CLI and everything it spawned.
       detached: true,
     });
     if (supervisor) supervisor.attach(child);
+
+    // Kill the whole group if it exceeds the budget; the verifier passes what is left of the task
+    // deadline (F14.5). spawn's own `timeout` signals only the CLI's pid.
+    const signalGroup = (signal) => {
+      try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* gone */ } }
+    };
+    const budgetTimer = setTimeout(() => {
+      signalGroup('SIGTERM');
+      setTimeout(() => signalGroup('SIGKILL'), 5000).unref();
+    }, timeoutMs ?? (task.budget_minutes || 30) * 60 * 1000);
 
     // Heartbeat: signal daemon with activity state.
     // getActivityState reads Claude JSONL files — only useful for Claude provider.
@@ -1065,6 +1073,7 @@ function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null)
 
     child.on('close', (code, signal) => {
       clearInterval(heartbeatTimer);
+      clearTimeout(budgetTimer);
       if (supervisor) supervisor.workerExited({ exitCode: code, signal });
       // Sanitize before any parsing: terminal control codes + thinking blocks
       // must never reach the artifact pipeline (2.4 finding 6).
@@ -1073,6 +1082,7 @@ function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null)
 
     child.on('error', (err) => {
       clearInterval(heartbeatTimer);
+      clearTimeout(budgetTimer);
       if (supervisor) supervisor.workerExited({ exitCode: 1, signal: null });
       resolve({ exitCode: 1, stdout: '', stderr: err.message, provider: provider.name, model });
     });

@@ -60,6 +60,13 @@ switch (mode) {
     require('child_process').execFileSync('git', ['-C', dir, 'commit', '-q', '-m', 'verifier: checkpoint']);
     say('Committed a checkpoint to compare against.'); say('FOREMAN_VERDICT: PASS'); break;
   case 'slow-pass': setTimeout(() => say('FOREMAN_VERDICT: PASS'), 15000); break;
+  case 'slow-pass-child': {
+    // A tool the CLI started, holding the CLI's stdout: only a signal to the group reaches it.
+    const c = require('child_process').spawn('sleep', ['30'], { stdio: 'inherit' });
+    fs.writeFileSync(path.join(dir, '..', path.basename(dir) + '.grandchild.pid'), String(c.pid));
+    setTimeout(() => say('FOREMAN_VERDICT: PASS'), 15000);
+    break;
+  }
 }
 `;
 
@@ -259,7 +266,23 @@ describe('foremanVerify — a stopped verifier, a committing verifier, and the t
     assert.match(result.attemptRecord.approach, /Foreman verifier returned no verdict line/);
     assert.deepEqual(verifications(supervisor), [['verifier', false]]);
   });
+
+  it('the deadline ends everything the verifier spawned, not only the CLI', async () => {
+    const started = Date.now();
+    const dir = worktree();
+    const { result } = await gate({ dir, mode: 'slow-pass-child', taskFields: { budget_deadline: new Date(Date.now() + 3_000).toISOString() } });
+    const pid = Number(fs.readFileSync(path.join(dir, '..', `${path.basename(dir)}.grandchild.pid`), 'utf8'));
+    assert.ok(Date.now() - started < 12_000, `a surviving grandchild held the verifier open (${Date.now() - started} ms)`);
+    assert.equal(running(pid), false, 'the grandchild outlived the deadline');
+    assert.match(result.attemptRecord.approach, /Foreman verifier returned no verdict line/);
+  });
 });
+
+/** Alive and not a zombie (an orphan's reaping depends on the container's init). */
+function running(pid) {
+  try { process.kill(pid, 0); } catch { return false; }
+  try { return !execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).trim().startsWith('Z'); } catch { return false; }
+}
 
 describe('foremanVerify — shadow and off complete as before', () => {
   it('shadow mode completes without a verifier', async () => {
