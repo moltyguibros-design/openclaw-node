@@ -61,6 +61,32 @@ test("a zone-less datetime-local trigger fires at that local wall-clock time, no
   expect(status("T-at")).toBe("ready");
 });
 
+test("a recurring cron task recreated inside its slot's window waits for the next occurrence", async () => {
+  vi.setSystemTime(new Date("2026-11-11T15:01:00.000Z"));
+  const { insert, schedulerTick, setStatus } = await load();
+  insert({
+    id: "T-cron",
+    triggerKind: "cron",
+    triggerCron: "0 10 * * *",
+    triggerTz: "America/Montreal",
+    isRecurring: 1,
+    createdAt: "2026-11-10T12:00:00.000Z",
+  });
+
+  expect(schedulerTick().triggered).toContain("T-cron");
+
+  setStatus("T-cron", "done");
+  vi.setSystemTime(new Date("2026-11-11T15:02:00.000Z"));
+  const [newId] = schedulerTick().recurring;
+  expect(newId).toBeDefined();
+
+  vi.setSystemTime(new Date("2026-11-11T15:03:00.000Z"));
+  expect(schedulerTick().triggered).not.toContain(newId);
+
+  vi.setSystemTime(new Date("2026-11-12T15:01:00.000Z"));
+  expect(schedulerTick().triggered).toContain(newId);
+});
+
 test("an ISO-Z trigger in the past still fires and counts as overdue past the grace window", async () => {
   vi.setSystemTime(new Date("2026-11-11T15:00:00.000Z"));
   const { insert, schedulerTick, schedulerStatus } = await load();

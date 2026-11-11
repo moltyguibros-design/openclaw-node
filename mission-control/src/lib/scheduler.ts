@@ -202,8 +202,13 @@ export function schedulerTick(): TickResult {
       });
       const prev = interval.prev().toDate();
       const diffMs = now.getTime() - prev.getTime();
-      // 20-min window matches heartbeat interval
-      if (diffMs >= 0 && diffMs < 20 * 60 * 1000) {
+      // A row recreated by Phase 1c is born after the occurrence that fired its
+      // predecessor; it waits for the next one instead of firing it again.
+      if (
+        diffMs >= 0 &&
+        diffMs < 20 * 60 * 1000 &&
+        prev.getTime() >= Date.parse(t.createdAt)
+      ) {
         db.update(tasks)
           .set({
             status: "ready",
