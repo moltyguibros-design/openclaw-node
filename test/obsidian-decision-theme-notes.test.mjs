@@ -48,6 +48,13 @@ describe('decision notes (repair 2.9)', () => {
     assert.match(note, /\[\[sessions\/2026-06-02-verify-s1\]\]/);
   });
 
+  it('frontmatter salience is rounded to 2 decimals like the concept writer', () => {
+    const note = buildDecisionNote({
+      decision: 'd', confidence: 0.9, salience: 0.123456, created_at: '2026-06-02T00:00:00Z', session_id: 's',
+    });
+    assert.match(note, /\nsalience: 0\.12\n/);
+  });
+
   it('frontmatter is valid YAML — related is a flat string array (Obsidian/Dataview readable)', () => {
     const note = buildDecisionNote(
       { decision: 'Use NATS', rationale: 'Simpler ops', confidence: 0.9, salience: 0.6, created_at: '2026-06-02T19:00:00Z', session_id: 's1' },
@@ -82,6 +89,12 @@ describe('decision notes (repair 2.9)', () => {
     const r2 = await generateDecisionNotes({ db, vaultPath: vault });
     assert.equal(r2.generated, 0);
     assert.equal(r2.unchanged, 2);
+
+    // One consolidation decay step (0.8 -> 0.7992) must not rewrite the notes.
+    db.prepare('UPDATE decisions SET salience = salience * 0.999').run();
+    const r3 = await generateDecisionNotes({ db, vaultPath: vault });
+    assert.equal(r3.generated, 0);
+    assert.equal(r3.unchanged, 2);
 
     db.close();
     await rm(vault, { recursive: true, force: true });
