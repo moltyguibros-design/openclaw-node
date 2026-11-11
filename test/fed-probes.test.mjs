@@ -131,6 +131,11 @@ test('session liveness: none active → OFF; active advancing → WORKING; stall
   assert.equal(gradeSessionLiveness({ sessions: [{ status: 'active', lastActivityMs: now - 1000 }], now }).status, FED_STATUS.WORKING);
   assert.equal(gradeSessionLiveness({ sessions: [{ status: 'active', lastActivityMs: now - 20 * 60000 }], now }).status, FED_STATUS.BROKEN);
 });
+test('session liveness: a circling step is graded against its 30 min step budget, not the 15 min round one', () => {
+  const now = 10_000_000;
+  assert.equal(gradeSessionLiveness({ sessions: [{ status: 'active', circling: true, lastActivityMs: now - 20 * 60000 }], now }).status, FED_STATUS.WORKING);
+  assert.equal(gradeSessionLiveness({ sessions: [{ status: 'active', circling: true, lastActivityMs: now - 40 * 60000 }], now }).status, FED_STATUS.BROKEN);
+});
 test('session liveness: KV unreadable → UNKNOWN', () => {
   assert.equal(gradeSessionLiveness({ sessions: null, now: Date.now() }).status, FED_STATUS.UNKNOWN);
 });
