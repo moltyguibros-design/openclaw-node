@@ -166,3 +166,34 @@ describe('updateTaskInPlace — object serialization', () => {
     }
   });
 });
+
+describe('appendTaskBlock', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  const { appendTaskBlock } = require('../lib/kanban-io');
+  const block = (id) => `- task_id: ${id}\n  title: B\n  status: queued\n  next_action: Plan subtask (local)\n  description: x\\ny\n  updated_at: t`;
+
+  it('appends under the lock, once per task id, and never while the lock is held', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kanban-append-'));
+    const tmpFile = path.join(dir, 'active-tasks.md');
+    fs.writeFileSync(tmpFile, '## Live Tasks\n- task_id: a1\n  title: A\n  status: queued\n');
+    try {
+      assert.equal(await appendTaskBlock(tmpFile, 'b1', block('b1')), true);
+      const tasks = parseTasks(fs.readFileSync(tmpFile, 'utf8'));
+      assert.deepEqual(tasks.map(t => t.task_id), ['a1', 'b1']);
+      assert.equal(tasks[1].next_action, 'Plan subtask (local)');
+      assert.equal(tasks[1].description, 'x\ny');
+
+      const before = fs.readFileSync(tmpFile, 'utf8');
+      assert.equal(await appendTaskBlock(tmpFile, 'b1', block('b1')), false);
+      assert.equal(fs.readFileSync(tmpFile, 'utf8'), before);
+
+      fs.mkdirSync(tmpFile + '.lk');
+      await assert.rejects(appendTaskBlock(tmpFile, 'c1', block('c1')), /lock acquisition timeout/);
+      assert.equal(fs.readFileSync(tmpFile, 'utf8'), before);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -20,7 +20,7 @@ const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-bridge');
 const fs = require('fs');
 const path = require('path');
-const { readTasks, updateTaskInPlace: updateTaskInPlaceAsync, isoTimestamp, ACTIVE_TASKS_PATH } = require('../lib/kanban-io');
+const { readTasks, updateTaskInPlace: updateTaskInPlaceAsync, appendTaskBlock, isoTimestamp, ACTIVE_TASKS_PATH } = require('../lib/kanban-io');
 
 const sc = StringCodec();
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
@@ -465,44 +465,31 @@ function handlePlanEvent(eventType, data) {
  * For local/soul/human delegation modes only — mesh subtasks use the existing mesh dispatch.
  */
 function materializeSubtask(plan, subtask) {
-  try {
-    const tasks = readTasks(ACTIVE_TASKS_PATH);
+  const mode = subtask.delegation?.mode || 'local';
+  const soulId = subtask.delegation?.soul_id || null;
 
-    // Check if already materialized
-    if (tasks.find(t => t.task_id === subtask.subtask_id)) {
-      log(`  SKIP: ${subtask.subtask_id} already in kanban`);
-      return;
-    }
+  const taskEntry = {
+    task_id: subtask.subtask_id,
+    title: subtask.title,
+    status: mode === 'human' ? 'blocked' : 'queued',
+    owner: mode === 'soul' ? 'Daedalus' : null,
+    soul_id: soulId,
+    success_criteria: subtask.success_criteria || [],
+    artifacts: [],
+    next_action: mode === 'human'
+      ? 'Needs Gui input'
+      : `Plan subtask (${mode}${soulId ? `: ${soulId}` : ''})`,
+    parent_id: plan.parent_task_id,
+    project: null, // inherited from parent via MC
+    description: `${subtask.description || ''}\n\n_Delegation: ${mode}${soulId ? ` → ${soulId}` : ''} | Plan: ${plan.plan_id} | Budget: ${subtask.budget_minutes}m_`,
+    updated_at: isoTimestamp(),
+  };
 
-    const mode = subtask.delegation?.mode || 'local';
-    const soulId = subtask.delegation?.soul_id || null;
-
-    const taskEntry = {
-      task_id: subtask.subtask_id,
-      title: subtask.title,
-      status: mode === 'human' ? 'blocked' : 'queued',
-      owner: mode === 'soul' ? 'Daedalus' : null,
-      soul_id: soulId,
-      success_criteria: subtask.success_criteria || [],
-      artifacts: [],
-      next_action: mode === 'human'
-        ? 'Needs Gui input'
-        : `Plan subtask (${mode}${soulId ? `: ${soulId}` : ''})`,
-      parent_id: plan.parent_task_id,
-      project: null, // inherited from parent via MC
-      description: `${subtask.description || ''}\n\n_Delegation: ${mode}${soulId ? ` → ${soulId}` : ''} | Plan: ${plan.plan_id} | Budget: ${subtask.budget_minutes}m_`,
-      updated_at: isoTimestamp(),
-    };
-
-    // Append to active-tasks.md
-    const content = fs.readFileSync(ACTIVE_TASKS_PATH, 'utf-8');
-    const yamlEntry = formatTaskYaml(taskEntry);
-    fs.writeFileSync(ACTIVE_TASKS_PATH, content + '\n' + yamlEntry);
-
-    log(`  MATERIALIZED: ${subtask.subtask_id} → kanban (${mode})`);
-  } catch (err) {
-    log(`  ERROR materializing ${subtask.subtask_id}: ${err.message}`);
-  }
+  return appendTaskBlock(ACTIVE_TASKS_PATH, subtask.subtask_id, formatTaskYaml(taskEntry))
+    .then((added) => log(added
+      ? `  MATERIALIZED: ${subtask.subtask_id} → kanban (${mode})`
+      : `  SKIP: ${subtask.subtask_id} already in kanban`))
+    .catch((err) => log(`  ERROR materializing ${subtask.subtask_id}: ${err.message}`));
 }
 
 /**
@@ -522,9 +509,9 @@ function formatTaskYaml(task) {
     }
   }
   lines.push(`  artifacts:`);
-  if (task.next_action) lines.push(`  next_action: "${task.next_action.replace(/"/g, '\\"')}"`);
+  if (task.next_action) lines.push(`  next_action: ${task.next_action.replace(/\s*\r?\n\s*/g, ' ')}`);
   if (task.parent_id) lines.push(`  parent_id: ${task.parent_id}`);
-  if (task.description) lines.push(`  description: "${task.description.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`);
+  if (task.description) lines.push(`  description: ${task.description.replace(/\r?\n/g, '\\n')}`);
   lines.push(`  updated_at: ${task.updated_at}`);
   return lines.join('\n');
 }
@@ -762,7 +749,7 @@ handleFailed = tracer.wrap('handleFailed', handleFailed, { tier: 1, category: 's
 handleCancelled = tracer.wrap('handleCancelled', handleCancelled, { tier: 1, category: 'state_transition' });
 handleCollabEvent = tracer.wrap('handleCollabEvent', handleCollabEvent, { tier: 1, category: 'state_transition' });
 handlePlanEvent = tracer.wrap('handlePlanEvent', handlePlanEvent, { tier: 1, category: 'state_transition' });
-materializeSubtask = tracer.wrap('materializeSubtask', materializeSubtask, { tier: 1, category: 'state_transition' });
+materializeSubtask = tracer.wrapAsync('materializeSubtask', materializeSubtask, { tier: 1, category: 'state_transition' });
 checkStaleness = tracer.wrap('checkStaleness', checkStaleness, { tier: 2 });
 writeLog = tracer.wrap('writeLog', writeLog, { tier: 3 });
 

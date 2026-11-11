@@ -12,6 +12,7 @@ import { freePort, natsServerBin, startNatsServer } from './helpers/nats-server.
 
 const require = createRequire(import.meta.url);
 const { connect } = require('nats');
+const { parseTasks } = require('../lib/kanban-io');
 const entry = process.env.BRIDGE_TEST_ENTRY || fileURLToPath(new URL('../bin/mesh-bridge.js', import.meta.url));
 const skip = natsServerBin() ? false : 'nats-server not found on PATH';
 const livePorts = [4222, 4223, 4224, 6222, 6223, 6224, 8222, 8223, 8224];
@@ -112,7 +113,7 @@ async function fixture(t, interval = 100, requestMux = false, owner = 'mesh') {
     assert.ok(bridge.output.includes('RECONCILE: done. Tracking 0 in-flight task(s)'), bridge.output);
   } else assert.ok(bridge.output.includes('RECONCILE: no orphaned mesh tasks found'), bridge.output);
   const assertKanban = async () => assert.equal(await fs.readFile(kanban, 'utf8'), original);
-  return { bridge, server, assertKanban };
+  return { bridge, server, assertKanban, kanban, bus: { servers: env.OPENCLAW_NATS, token } };
 }
 
 for (const signal of ['SIGTERM', 'SIGINT']) {
@@ -182,6 +183,29 @@ test('bridge planned drain closes its prior request subscription normally', { sk
   assert.deepEqual(await exited(bridge), { code: 0, signal: null }, bridge.output);
   assert.equal((bridge.output.match(/Bridge stopped\./g) || []).length, 1);
   await assertKanban();
+});
+
+test('bridge materializes a plan subtask unquoted, with its description intact', { skip, timeout: 20_000 }, async (t) => {
+  const { bridge, kanban, bus } = await fixture(t);
+  const nc = await connect({ ...bus, maxReconnectAttempts: 0 });
+  try {
+    nc.publish('mesh.events.plan.wave_started', Buffer.from(JSON.stringify({
+      event: 'plan.wave_started',
+      plan: { plan_id: 'p1', subtasks: [{ subtask_id: 'p1-s1', title: 'Sub', status: 'queued', delegation: { mode: 'local' }, description: 'say "hi"\nnext', budget_minutes: 5 }] },
+    })));
+    await nc.flush();
+  } finally {
+    await nc.close();
+  }
+  await until(async () => (await fs.readFile(kanban, 'utf8')).includes('p1-s1'));
+  const tasks = parseTasks(await fs.readFile(kanban, 'utf8'));
+  assert.deepEqual(tasks.map(x => x.task_id), ['owned-local-card', 'p1-s1']);
+  const sub = tasks[1];
+  assert.equal(sub.next_action, 'Plan subtask (local)');
+  assert.ok(sub.description.startsWith('say "hi"\nnext'), sub.description);
+  assert.ok(!sub.description.includes('\\"'), sub.description);
+  bridge.proc.kill('SIGTERM');
+  assert.deepEqual(await exited(bridge), { code: 0, signal: null }, bridge.output);
 });
 
 test('bridge reconcile looks up a running card the claim re-owned to a node id', { skip, timeout: 20_000 }, async (t) => {
