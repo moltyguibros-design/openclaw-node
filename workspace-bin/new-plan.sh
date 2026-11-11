@@ -15,6 +15,7 @@ TPL="$REPO/memory-plan/canonical/templates"
 ID="${1:-}"
 GOAL="${2:-<one-line goal — fill me in>}"
 [[ "$ID" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "usage: new-plan.sh <kebab-case-id> [\"one-line goal\"]" >&2; exit 1; }
+[[ "$ID" != plan ]] || { echo "refusing: id 'plan' would make the engine plan-tick.sh its own tick shim" >&2; exit 1; }
 [[ -d "$TPL" ]] || { echo "no templates dir: $TPL" >&2; exit 1; }
 
 PLAN="$REPO/memory-plan/plans/$ID"

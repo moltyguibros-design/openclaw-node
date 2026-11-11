@@ -369,3 +369,37 @@ describe('plan-tick close gate — the commit that closed VERSION must carry the
     assert.equal(block, null, block ?? '');
   });
 });
+
+describe('new-plan.sh — refuses an id whose shim would be the engine', () => {
+  let root;
+  const scaffold = (id) =>
+    spawnSync('bash', [path.join(root, 'workspace-bin', 'new-plan.sh'), id], { encoding: 'utf8' });
+
+  before(() => {
+    root = path.join(tmp, 'newplanrepo');
+    const bin = path.join(root, 'workspace-bin');
+    const tpl = path.join(root, 'memory-plan', 'canonical', 'templates');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.mkdirSync(tpl, { recursive: true });
+    for (const s of ['new-plan.sh', 'plan-tick.sh']) fs.copyFileSync(path.join(REPO, 'workspace-bin', s), path.join(bin, s));
+    for (const s of ['sync-canonical.sh', 'plan-lint.sh']) {
+      fs.writeFileSync(path.join(bin, s), '#!/bin/bash\nexit 0\n');
+      fs.chmodSync(path.join(bin, s), 0o755);
+    }
+    fs.copyFileSync(path.join(REPO, 'memory-plan', 'canonical', 'templates', 'automation.template.json'),
+      path.join(tpl, 'automation.template.json'));
+  });
+
+  it("id 'plan' is refused before anything is scaffolded", () => {
+    const r = scaffold('plan');
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /refusing: id 'plan'/);
+    assert.equal(fs.existsSync(path.join(root, 'memory-plan', 'plans', 'plan')), false);
+  });
+
+  it('an ordinary id gets its own shim fronting the engine', () => {
+    const r = scaffold('demo');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(fs.readFileSync(path.join(root, 'workspace-bin', 'demo-tick.sh'), 'utf8'), /plan-tick\.sh" demo "\$@"/);
+  });
+});
