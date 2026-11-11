@@ -235,8 +235,8 @@ function main() {
   for (const sig of ['SIGTERM', 'SIGINT']) {
     process.on(sig, () => {
       log(`Received ${sig}, shutting down`);
-      if (logWatcher) fs.unwatchFile(GATEWAY_LOG);
-      if (errWatcher) fs.unwatchFile(GATEWAY_ERR_LOG);
+      if (logWatcher) logWatcher.close();
+      if (errWatcher) errWatcher.close();
       process.exit(0);
     });
   }
