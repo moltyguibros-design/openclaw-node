@@ -42,6 +42,7 @@ test('endpoint is restricted to the exact loopback scheduler route', () => {
   assert.throws(() => validateHeartbeatEndpoint('https://127.0.0.1/api/scheduler/tick'), /loopback HTTP/);
   assert.throws(() => validateHeartbeatEndpoint('http://example.com/api/scheduler/tick'), /loopback HTTP/);
   assert.throws(() => validateHeartbeatEndpoint('http://127.0.0.1:3000/api/tasks'), /loopback HTTP/);
+  assert.throws(() => validateHeartbeatEndpoint('http://[::1]:3000/api/scheduler/tick'), /loopback HTTP/);
 });
 
 test('HTTP auth failure exits through a bounded error without echoing the token', async () => {

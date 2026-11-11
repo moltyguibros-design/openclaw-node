@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const DEFAULT_ENDPOINT = 'http://127.0.0.1:3000/api/scheduler/tick';
 const DEFAULT_TOKEN_PATH = path.join(os.homedir(), '.openclaw', 'config', 'mc-session-token');
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost']);
 export const HEARTBEAT_TIMEOUT_MS = 30_000;
 
 export function validateHeartbeatEndpoint(value) {
