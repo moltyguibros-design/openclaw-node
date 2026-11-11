@@ -103,6 +103,11 @@ export function createGraphCache(opts = {}) {
     'INSERT OR REPLACE INTO graph_cache_meta (key, value) VALUES (?, ?)'
   );
   const getMeta = db.prepare('SELECT value FROM graph_cache_meta WHERE key = ?');
+  const EDGE_SELECT = 'SELECT source_id, target_id, edge_type, weight FROM concept_graph_edges';
+  const edgesOutgoing = db.prepare(`${EDGE_SELECT} WHERE source_id = ?`);
+  const edgesIncoming = db.prepare(`${EDGE_SELECT} WHERE target_id = ?`);
+  const edgesBoth = db.prepare(`${EDGE_SELECT} WHERE source_id = ? OR target_id = ?`);
+  const getNode = db.prepare('SELECT id, label, last_activated_at, weight FROM concept_graph_nodes WHERE id = ?');
 
   let intervalHandle = null;
   let fsWatcher = null;
@@ -165,21 +170,9 @@ export function createGraphCache(opts = {}) {
    */
   function queryNeighbors(nodeId, queryOpts = {}) {
     const direction = queryOpts.direction || 'both';
-    let edgeRows;
-
-    if (direction === 'outgoing') {
-      edgeRows = db.prepare(
-        'SELECT source_id, target_id, edge_type, weight FROM concept_graph_edges WHERE source_id = ?'
-      ).all(nodeId);
-    } else if (direction === 'incoming') {
-      edgeRows = db.prepare(
-        'SELECT source_id, target_id, edge_type, weight FROM concept_graph_edges WHERE target_id = ?'
-      ).all(nodeId);
-    } else {
-      edgeRows = db.prepare(
-        'SELECT source_id, target_id, edge_type, weight FROM concept_graph_edges WHERE source_id = ? OR target_id = ?'
-      ).all(nodeId, nodeId);
-    }
+    const edgeRows = direction === 'outgoing' ? edgesOutgoing.all(nodeId)
+      : direction === 'incoming' ? edgesIncoming.all(nodeId)
+      : edgesBoth.all(nodeId, nodeId);
 
     const neighborIds = new Set();
     for (const row of edgeRows) {
@@ -189,9 +182,7 @@ export function createGraphCache(opts = {}) {
 
     const neighbors = [];
     for (const nid of neighborIds) {
-      const node = db.prepare(
-        'SELECT id, label, last_activated_at, weight FROM concept_graph_nodes WHERE id = ?'
-      ).get(nid);
+      const node = getNode.get(nid);
       if (node) neighbors.push(node);
     }
 
