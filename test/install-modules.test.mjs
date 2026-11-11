@@ -555,3 +555,14 @@ test('documented node-watch invocations only use flags node-watch accepts', () =
     }
   }
 });
+
+test('INSTALL_TEST_PROTOCOL T2 greps the stderr file each memory-daemon unit writes', () => {
+  const doc = readFileSync(join(ROOT, 'docs/INSTALL_TEST_PROTOCOL.md'), 'utf8');
+  const unit = readFileSync(join(ROOT, 'services/systemd/openclaw-memory-daemon.service'), 'utf8');
+  const plist = readFileSync(join(ROOT, 'services/launchd/ai.openclaw.memory-daemon.plist'), 'utf8');
+  const linuxErr = unit.match(/^StandardError=append:\$\{OPENCLAW_WORKSPACE\}\/\.tmp\/(\S+)$/m)[1];
+  const macErr = plist.match(/<key>StandardErrorPath<\/key>\s*<string>\$\{OPENCLAW_WORKSPACE\}\/\.tmp\/([^<]+)<\/string>/)[1];
+  const grepLine = doc.split('\n').find((l) => l.startsWith('grep -c ERR_MODULE_NOT_FOUND'));
+  // The '/.tmp/' prefix keeps memory-daemon.err from matching inside openclaw-memory-daemon.err.
+  for (const f of [linuxErr, macErr]) assert.ok(grepLine.includes(`/.tmp/${f}`), `T2 grep misses ${f}`);
+});

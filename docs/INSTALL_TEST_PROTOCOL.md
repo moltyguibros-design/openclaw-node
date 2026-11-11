@@ -64,8 +64,9 @@ for i in 1 2; do ps -eo pid,etime,comm | grep -E 'mesh-task-daemon|memory-daemon
 # PASS: same PIDs both samples, etime increasing (a crash-looper resets etime)
 
 # memory-daemon booted past its imports (the 2026-07-11 regression)
-grep -c ERR_MODULE_NOT_FOUND ~/.openclaw/workspace/.tmp/memory-daemon.err 2>/dev/null
-# PASS: 0 (or file absent)
+# stderr: memory-daemon.err (launchd plist, install-daemon) · openclaw-memory-daemon.err (install.sh systemd unit)
+grep -c ERR_MODULE_NOT_FOUND ~/.openclaw/workspace/.tmp/memory-daemon.err ~/.openclaw/workspace/.tmp/openclaw-memory-daemon.err 2>/dev/null
+# PASS: every printed count is 0 (or file absent)
 ```
 
 ## T3 — Functional memory path (end-to-end)
@@ -147,7 +148,7 @@ On a VM or spare machine with nothing but the OS (+ macOS: brew & node):
 | Symptom | First place to look |
 |---|---|
 | gate REJECTED, net axis | `~/.openclaw/logs/nats.err` (store_dir? token?); `launchctl list \| grep nats` |
-| memory-daemon crash-loop | `.tmp/memory-daemon.err` — ERR_MODULE_NOT_FOUND means copy/symlink rules regressed (T1.3) |
+| memory-daemon crash-loop | `.tmp/memory-daemon.err` (macOS) / `.tmp/openclaw-memory-daemon.err` (Linux systemd) — ERR_MODULE_NOT_FOUND means copy/symlink rules regressed (T1.3) |
 | extraction says regex | ollama down or model missing: `curl :11434/api/tags`; `ollama pull $LLM_MODEL` |
 | mesh daemons crash-loop | `Cannot find module 'nats'` → repo `npm install` regressed; CONNECTION_REFUSED → bus (net axis) |
 | MC BROKEN | `.next` build missing/failed — read the installer's `next build` error (components.sh builds only when `.next` is absent); never substitute `npm run dev` for the supervised service |
