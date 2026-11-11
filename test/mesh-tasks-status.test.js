@@ -148,6 +148,28 @@ describe("markRejected() reject→requeue cap (P4-5)", () => {
   });
 });
 
+describe("markFailed() keeps the attempt history", () => {
+  const running = (id) => ({
+    ...createTask({ task_id: id, title: id }), status: TASK_STATUS.RUNNING, owner: "w1",
+    attempts: [{ approach: "lease expired while held by w0", result: "requeued", keep: false }],
+  });
+
+  it("a fail that reports no attempts leaves the recorded ones in place", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, running("T-F1"));
+    const t = await store.markFailed("T-F1", "boom");
+    assert.equal(t.status, TASK_STATUS.FAILED);
+    assert.deepEqual(t.attempts.map((a) => a.approach), ["lease expired while held by w0"]);
+  });
+
+  it("a fail that reports attempts replaces the list", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, running("T-F2"));
+    const t = await store.markFailed("T-F2", "boom", [{ approach: "a", result: "r", keep: false }]);
+    assert.deepEqual(t.attempts.map((a) => a.approach), ["a"]);
+  });
+});
+
 describe("recordMerge() merge-after-review (P4-4)", () => {
   it("records the merge on a completed task without touching the rest of the result", async () => {
     const store = new TaskStore(mockKv());
