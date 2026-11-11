@@ -54,7 +54,8 @@ function harness() {
     publish(subject, data) { events.push({ subject, raw: sc.decode(data) }); },
     request: async () => { throw new Error('no agent on the test bus'); },
   };
-  daemon.__test.setContext({ nc, store, planStore, collabStore: new CollabStore(new MockKV()) });
+  const collabStore = new CollabStore(new MockKV());
+  daemon.__test.setContext({ nc, store, planStore, collabStore });
   async function rpc(handler, payload) {
     let reply;
     await daemon.__test[handler]({
@@ -63,7 +64,7 @@ function harness() {
     });
     return reply;
   }
-  return { store, planStore, events, rpc };
+  return { store, planStore, collabStore, events, rpc };
 }
 
 /** Submit + claim as `owner`; returns the claim reply (the only place the token may appear). */
@@ -277,5 +278,23 @@ describe('F1: a forged submit cannot touch a plan', () => {
 
     assert.deepEqual(await planState(h, planId), { status: 'executing', subtasks: ['P-S1:completed', 'P-S2:queued'] });
     assert.equal((await h.store.get('P-S2')).plan_id, planId, 'wave 1 dispatched with its back-reference');
+  });
+});
+
+describe('handleSubmit builds the collab session before it stores the task', () => {
+  it('an envelope-level preferred_mode picks the session mode when the spec names none', async () => {
+    const h = harness();
+    const reply = await h.rpc('handleSubmit', { task_id: 'C-1', title: 'c', preferred_mode: 'adversarial', collaboration: {} });
+    assert.equal(reply.ok, true, reply.error);
+    assert.equal((await h.collabStore.findByTaskId('C-1')).mode, 'circling_strategy');
+  });
+
+  it('an unknown collab mode is refused and leaves no orphan task behind', async () => {
+    const h = harness();
+    const reply = await h.rpc('handleSubmit', { task_id: 'C-2', title: 'c', collaboration: { mode: 'vibes' } });
+    assert.equal(reply.ok, false);
+    assert.match(reply.error, /unknown mode 'vibes'/);
+    assert.equal(await h.store.get('C-2'), null);
+    assert.equal(h.events.length, 0, 'no submitted event for a refused task');
   });
 });

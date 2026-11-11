@@ -207,18 +207,28 @@ async function handleSubmit(msg) {
   }
 
   const task = createTask(params);
+
+  // Built before the first put: createSession throws on an unknown mode, and a
+  // stored collab task with no session is claimed and failed as "Collab session not found".
+  // 3.4: envelope-level preferred_mode (createTask does not keep it) is a fallback for the spec's own.
+  let session = null;
+  if (task.collaboration && collabStore) {
+    const spec = params.preferred_mode && !task.collaboration.preferred_mode && !task.collaboration.mode
+      ? { ...task.collaboration, preferred_mode: params.preferred_mode }
+      : task.collaboration;
+    try {
+      session = createSession(task.task_id, spec);
+    } catch (err) {
+      return respondError(msg, err.message);
+    }
+  }
+
   await store.put(task);
 
   log(`SUBMIT ${task.task_id}: "${task.title}" (budget: ${task.budget_minutes}m, metric: ${task.metric || 'none'})`);
   publishEvent('submitted', task);
 
-  // Auto-create collab session if task has collaboration spec.
-  // 3.4: envelope-level task.preferred_mode is a fallback for the spec's own.
-  if (task.collaboration && collabStore) {
-    const spec = task.preferred_mode && !task.collaboration.preferred_mode && !task.collaboration.mode
-      ? { ...task.collaboration, preferred_mode: task.preferred_mode }
-      : task.collaboration;
-    const session = createSession(task.task_id, spec);
+  if (session) {
     await collabStore.put(session);
 
     // Store session_id back in task for agent discovery
