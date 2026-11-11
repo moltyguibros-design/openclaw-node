@@ -110,14 +110,9 @@ done
 # Remove mesh sudoers
 [ -f "/etc/sudoers.d/openclaw-mesh" ] && sudo rm -f "/etc/sudoers.d/openclaw-mesh" && info "Removed mesh sudoers rules"
 
-# Stop Mission Control if running
-if command -v lsof >/dev/null 2>&1; then
-  MC_PID=$(lsof -ti:3000 2>/dev/null || true)
-  if [ -n "$MC_PID" ]; then
-    info "Stopping Mission Control (PID $MC_PID)..."
-    kill "$MC_PID" 2>/dev/null || true
-  fi
-fi
+# The stack launchers live outside $OPENCLAW_ROOT, so --purge does not reach them either.
+rm -rf "$HOME/Applications/OpenClaw Stack.app"
+rm -f "$HOME/.local/share/applications/openclaw-stack.desktop"
 
 if $PURGE; then
   warn "PURGE mode: removing ALL OpenClaw data"
@@ -139,7 +134,8 @@ else
   rm -rf "$WORKSPACE/projects/mission-control/node_modules"
   rm -rf "$WORKSPACE/projects/mission-control/.next"
   rm -rf "$WORKSPACE/.boot"
-  rm -rf "$HOME/openclaw/bin"
+  rm -rf "$WORKSPACE/lib" "$WORKSPACE/packages" "$WORKSPACE/node_modules"
+  rm -rf "$HOME/openclaw/bin" "$HOME/openclaw/lib"
   rm -rf "$HOME/.openclaw/skills/mesh"
   info "Removed scripts, skills, mesh CLI, and build artifacts"
   info "Memory data preserved at $WORKSPACE/memory/"
