@@ -61,7 +61,7 @@ class HiveFenceClient:
     def __init__(self, api_base: str = API_BASE, timeout: int = 10):
         self.api_base = api_base
         self.timeout = timeout
-        self.cache_file = os.path.expanduser("~/.clawdbot/hivefence_cache.json")
+        self.cache_file = os.path.expanduser("~/.openclaw/hivefence_cache.json")
         self._patterns_cache: List[ThreatPattern] = []
         self._cache_loaded = False
     

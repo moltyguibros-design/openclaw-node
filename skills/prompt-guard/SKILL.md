@@ -88,7 +88,7 @@ Response: "I cannot display tokens, secrets, or credentials. This is a security 
 
 **Token rotation:** If a credential is EVER exposed, rotate immediately. No exceptions.
 
-**Config protection:** `~/.clawdbot/` chmod 700, `clawdbot.json` chmod 600, never sync to cloud/git.
+**Config protection:** `~/.openclaw/` chmod 700, `openclaw.json` and `openclaw.env` chmod 600, never sync to cloud/git.
 
 ---
 
@@ -130,11 +130,11 @@ prompt_guard:
     path: memory/security-log.md
     include_message: true
   hivefence:
-    enabled: true
+    enabled: false
     api_url: https://hivefence-api.seojoon-kim.workers.dev/api/v1
-    auto_report: true
-    auto_fetch: true
-    cache_path: ~/.clawdbot/hivefence_cache.json
+    auto_report: false
+    auto_fetch: false
+    cache_path: ~/.openclaw/hivefence_cache.json
 ```
 
 ---
@@ -167,7 +167,7 @@ python3 scripts/audit.py --quick | --fix          # Quick check / auto-fix
 
 ## Security Checklist
 
-**10-min hardening:** `~/.clawdbot/` 700, `clawdbot.json` 600, rotate exposed tokens, gateway bind loopback.
+**10-min hardening:** `~/.openclaw/` 700, `openclaw.json` and `openclaw.env` 600, rotate exposed tokens, gateway bind loopback.
 
 **30-min review:** DM allowlist, group policies, 2FA on providers, no config in cloud sync.
 
