@@ -88,11 +88,17 @@ export async function GET(request: NextRequest) {
           )
           .all(...(like ? [like, limit] : [limit])) as Record<string, unknown>[]);
 
+    // A superseded decision (extraction-store v6) is history, not current memory; the
+    // column is absent until the daemon has migrated this state.db to v6.
+    const inForce = (d.pragma("table_info(decisions)") as { name: string }[]).some((c) => c.name === "superseded_by")
+      ? "superseded_by IS NULL"
+      : "1 = 1";
+
     // DECISIONS — the richest content: decision text + rationale + confidence.
     const decisions = (d
       .prepare(
         `SELECT decision, rationale, confidence, session_id, created_at FROM decisions
-         ${session ? "WHERE session_id = ?" : like ? "WHERE decision LIKE ? OR rationale LIKE ?" : ""}
+         ${session ? "WHERE session_id = ?" : like ? `WHERE ${inForce} AND (decision LIKE ? OR rationale LIKE ?)` : `WHERE ${inForce}`}
          ORDER BY created_at DESC, confidence DESC LIMIT ?`,
       )
       .all(...(session ? [session, limit] : like ? [like, like, limit] : [limit])) as Record<string, unknown>[]);
@@ -119,7 +125,7 @@ export async function GET(request: NextRequest) {
 
     const counts = {
       entities: (d.prepare("SELECT COUNT(*) c FROM entities").get() as { c: number }).c,
-      decisions: (d.prepare("SELECT COUNT(*) c FROM decisions").get() as { c: number }).c,
+      decisions: (d.prepare(`SELECT COUNT(*) c FROM decisions WHERE ${inForce}`).get() as { c: number }).c,
       themes: (d.prepare("SELECT COUNT(*) c FROM themes").get() as { c: number }).c,
     };
 
