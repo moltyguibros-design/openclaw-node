@@ -43,15 +43,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# If check-all, gather uncommitted changes
+# If check-all, gather uncommitted changes. No mapfile and no empty "${arr[@]}"
+# expansion: macOS's stock /bin/bash 3.2 lacks the first and, under set -u,
+# rejects the second.
 if $CHECK_ALL; then
-  mapfile -t STAGED < <(git -C "$WORKSPACE" diff --cached --name-only 2>/dev/null || true)
-  mapfile -t UNSTAGED < <(git -C "$WORKSPACE" diff --name-only HEAD 2>/dev/null || true)
-  FILES=("${STAGED[@]}" "${UNSTAGED[@]}")
-  # Deduplicate
-  if [ ${#FILES[@]} -gt 0 ]; then
-    mapfile -t FILES < <(printf '%s\n' "${FILES[@]}" | sort -u)
-  fi
+  FILES=()
+  while IFS= read -r f; do
+    FILES+=("$f")
+  done < <({ git -C "$WORKSPACE" diff --cached --name-only; git -C "$WORKSPACE" diff --name-only HEAD; } 2>/dev/null | sort -u)
 fi
 
 if [ ${#FILES[@]} -eq 0 ]; then
