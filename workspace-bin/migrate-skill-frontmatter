@@ -259,6 +259,9 @@ def main():
         sys.exit(1)
 
     if not HAS_YAML:
+        if args.apply:
+            print("Error: --apply needs PyYAML; the basic parser drops lists, nested metadata and folded scalars. Install with: pip3 install pyyaml", file=sys.stderr)
+            sys.exit(1)
         print(f"{C.YELLOW}Warning: PyYAML not installed. Using basic parser (less reliable).{C.RESET}")
         print(f"Install with: pip3 install pyyaml\n")
 
