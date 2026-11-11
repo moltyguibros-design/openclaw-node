@@ -500,6 +500,25 @@ describe('node-watch observed verdicts', () => {
     assert.equal((await target('ops.roadmap').run(envFor(up))).status, STATUS.WORKING);
   });
 
+  it('quorum, bridge and viewer targets probe the endpoints the node env configures', async () => {
+    const seen = [];
+    const recording = (cfg) => makeCtx({ config: cfg, httpGet: async (u) => { seen.push(u); throw new Error('ECONNREFUSED'); } });
+    const cfg = resolveNodeConfig({ OPENCLAW_HOME: '/tmp/acc', NATS_MONITOR_URL: 'http://127.0.0.1:18222' });
+    await target('fed.cluster.quorum').run(envFor(recording(cfg)));
+    assert.deepEqual(seen, ['http://127.0.0.1:18222/jsz']);
+    const saved = { ADAPTER_PORT: process.env.ADAPTER_PORT, WORKPLAN_VIEWER_PORT: process.env.WORKPLAN_VIEWER_PORT };
+    try {
+      process.env.ADAPTER_PORT = '18787';
+      process.env.WORKPLAN_VIEWER_PORT = '17892';
+      seen.length = 0;
+      await target('runtime.bridge').run(envFor(recording(config)));
+      await target('ops.roadmap').run(envFor(recording(config)));
+      assert.deepEqual(seen, ['http://127.0.0.1:18787/', 'http://127.0.0.1:17892/api/plans']);
+    } finally {
+      for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    }
+  });
+
   it('cloud LLM via bridge: WORKING when /health reports a served session', async () => {
     const ctx = makeCtx({ httpGet: async () => ({ status: 200, json: { status: 'ok', companion: 'http://localhost:3457', model: 'm', sessions: [{ lifetimeTurns: 5, zombieRetryCount: 0, contextTrackingHealthy: true }] } }) });
     assert.equal((await target('llm.cloud').run(envFor(ctx))).status, STATUS.WORKING);
