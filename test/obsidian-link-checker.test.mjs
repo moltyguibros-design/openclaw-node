@@ -74,13 +74,23 @@ describe('checkReferentialCoverage', () => {
 
     const db = new Database(':memory:');
     db.exec(`CREATE TABLE entities (id INTEGER PRIMARY KEY, name TEXT, mention_count INTEGER)`);
-    db.exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, decision TEXT, created_at TEXT, salience REAL)`);
+    db.exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, session_id TEXT, decision TEXT, rationale TEXT, confidence REAL, created_at TEXT, salience REAL)`);
     db.exec(`CREATE TABLE themes (id INTEGER PRIMARY KEY, label TEXT, mention_count INTEGER)`);
     db.prepare(`INSERT INTO entities (name, mention_count) VALUES (?, ?)`).run('Covered Entity', 9);
     db.prepare(`INSERT INTO entities (name, mention_count) VALUES (?, ?)`).run('Missing Entity', 7);
     db.prepare(`INSERT INTO entities (name, mention_count) VALUES (?, ?)`).run('Below Threshold', 2);
+    // Decay drives live decision salience far below the retired 0.4 gate; the
+    // generator still writes these, so coverage must count them.
+    const addDecision = db.prepare('INSERT INTO decisions (session_id, decision, rationale, confidence, created_at, salience) VALUES (?,?,?,?,?,?)');
+    addDecision.run('s1', 'Decayed but real decision', 'r', 0.9, '2026-06-02T10:00:00Z', 0.02);
+    addDecision.run('s1', 'Decayed and unwritten decision', 'r', 0.8, '2026-06-03T10:00:00Z', 0.01);
+    addDecision.run('s1', 'Below the junk floor', 'r', 0.9, '2026-06-04T10:00:00Z', 0);
+    await mkdir(join(vault, 'decisions'), { recursive: true });
+    await writeFile(join(vault, 'decisions', '2026-06-02-decayed-but-real-decision.md'), '# D\n');
 
     const cov = checkReferentialCoverage({ db, vaultPath: vault, threshold: 5 });
+
+    assert.deepEqual(cov.decisions, { eligible: 2, withNote: 1, pct: 50 });
 
     assert.equal(cov.concepts.eligible, 2);
     assert.equal(cov.concepts.withNote, 1);
