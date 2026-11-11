@@ -422,13 +422,21 @@ const MANIFEST = [
     servicesMac: [],
     servicesLinux: [],
     nodeFilter: 'all',
-    preInstall: (changedFiles) => {
+    preInstall: (changedFiles, { repoDir, toSha, dryRun }) => {
       let differs = false;
       for (const f of changedFiles) {
         const basename = path.basename(f);
         const targetPath = path.join(DIRS.WORKSPACE, basename);
         if (fs.existsSync(targetPath)) {
-          const srcPath = path.join(REPO_DIR, f);
+          // A dry run has not checked out toSha: compare against it and write nothing.
+          if (dryRun) {
+            if (!fs.readFileSync(targetPath).equals(git(repoDir, ['show', `${toSha}:${f}`], 'buffer'))) {
+              warn(`${basename} differs from repo version — a deploy would save it as ${basename}.repo and skip this component`);
+              differs = true;
+            }
+            continue;
+          }
+          const srcPath = path.join(repoDir, f);
           const diff = exec(`diff "${targetPath}" "${srcPath}" | head -20`, { ignoreError: true });
           if (diff) {
             warn(`${basename} differs from repo version:`);
@@ -924,7 +932,7 @@ function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false, includ
     }
 
     // Pre-install hook (backup, merge protection, etc.) — false vetoes the component
-    if (comp.preInstall && comp.preInstall(install) === false) continue;
+    if (comp.preInstall && comp.preInstall(install, { repoDir, toSha, dryRun }) === false) continue;
 
     let installed = 0;
     let removed = 0;
