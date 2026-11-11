@@ -146,3 +146,35 @@ test.each([false, true])("a populated pre-migration memory_items/cluster_members
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a legacy auto_start=1 task still needs approval after startup", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-startup-autostart-"));
+  const dbPath = path.join(root, "mission-control.db");
+  const fixture = new Database(dbPath);
+  fixture.exec(`
+    CREATE TABLE tasks (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL, kanban_column TEXT NOT NULL,
+      owner TEXT, success_criteria TEXT, artifacts TEXT, next_action TEXT, updated_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')), sort_order INTEGER DEFAULT 0,
+      auto_start INTEGER, auto_start_after TEXT
+    );
+    INSERT INTO tasks (id, title, status, kanban_column, updated_at, auto_start, auto_start_after)
+    VALUES ('T-1', 'legacy', 'queued', 'backlog', '2026-01-01', 1, '2026-01-02T00:00:00Z');
+  `);
+  fixture.close();
+  vi.stubEnv("DB_PATH", dbPath);
+  vi.stubEnv("WORKSPACE_ROOT", root);
+  vi.resetModules();
+  let db: Database.Database | undefined;
+  try {
+    const { getRawDb } = await import("@/lib/db");
+    db = getRawDb();
+    expect(db.prepare("SELECT needs_approval, trigger_kind, trigger_at FROM tasks").get())
+      .toEqual({ needs_approval: 1, trigger_kind: "none", trigger_at: null });
+  } finally {
+    db?.close();
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

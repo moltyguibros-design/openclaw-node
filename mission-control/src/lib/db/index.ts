@@ -230,21 +230,6 @@ function runMigrations(sqlite: Database.Database) {
     sqlite.exec("ALTER TABLE tasks ADD COLUMN mesh_node TEXT");
   }
 
-  // Data migration: convert old auto_start columns to new scheduling schema
-  if (colNames.includes("auto_start")) {
-    sqlite.exec(`
-      UPDATE tasks SET
-        needs_approval = CASE WHEN auto_start = 1 THEN 0 ELSE 1 END,
-        trigger_kind = CASE
-          WHEN auto_start = 1 AND auto_start_after IS NOT NULL THEN 'at'
-          WHEN auto_start = 1 THEN 'none'
-          ELSE 'none'
-        END,
-        trigger_at = auto_start_after
-      WHERE auto_start IS NOT NULL AND needs_approval IS NULL
-    `);
-  }
-
   // Dependencies table (DAG edges)
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS dependencies (
