@@ -14,6 +14,14 @@ const CONFIG_PATH = path.join(OPENCLAW_HOME, "openclaw.json");
 
 const SESSION_KEY = "agent:main:main";
 
+interface GatewayFrame {
+  type?: string;
+  event?: string;
+  ok?: boolean;
+  payload?: { type?: string; runId?: string };
+  error?: { message?: string };
+}
+
 interface GatewayConfig {
   port: number;
   host: string;
@@ -55,7 +63,8 @@ export function gatewayNotify(text: string): Promise<boolean> {
     const ws = new WebSocket(`ws://${config.host}:${config.port}/ws`);
 
     ws.onmessage = (e: MessageEvent) => {
-      const d = JSON.parse(String(e.data));
+      let d: GatewayFrame;
+      try { d = JSON.parse(String(e.data)); } catch { return; }
 
       if (d.type === "event" && d.event === "connect.challenge") {
         ws.send(JSON.stringify({
@@ -103,6 +112,10 @@ export function gatewayNotify(text: string): Promise<boolean> {
 
       if (d.type === "res" && d.ok === false) {
         console.error("gateway-notify error:", d.error?.message);
+        clearTimeout(timeout);
+        try { ws.close(); } catch {}
+        traceCall("gateway-notify", "gatewayNotify", _start, undefined, d.error?.message || "gateway rejected request");
+        resolve(false);
       }
     };
 
@@ -114,6 +127,7 @@ export function gatewayNotify(text: string): Promise<boolean> {
 
     ws.onclose = () => {
       clearTimeout(timeout);
+      resolve(false);
     };
   });
 }
