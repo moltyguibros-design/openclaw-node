@@ -89,7 +89,7 @@ export async function createTask(task: {
   title: string;
   status?: string;
   owner?: string;
-  nextAction?: string;
+  next_action?: string;
   scheduled_date?: string;
   project?: string;
   [key: string]: unknown;
