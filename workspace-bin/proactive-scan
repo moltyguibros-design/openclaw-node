@@ -107,19 +107,25 @@ if os.path.isfile(trust_registry):
             state = s.get("circuit_state", "closed")
             if state == "open":
                 opened = s.get("circuit_opened_at")
-                cooldown = s.get("cooldown_minutes", 30)
-                if opened:
-                    try:
-                        elapsed = (now - datetime.fromisoformat(opened)).total_seconds() / 60
-                        if elapsed >= cooldown:
-                            triggers.append({
-                                "type": "circuit_recovery",
-                                "description": f"Soul {soul_id} cooldown expired ({int(elapsed)}min). Ready for probe.",
-                                "task_id": None,
-                                "action": "probe_delegation"
-                            })
-                    except (ValueError, TypeError):
-                        pass
+                reason = "cooldown expired"
+            elif state == "half_open":
+                opened = s.get("last_probe_at")
+                reason = "probe never reported"
+            else:
+                continue
+            cooldown = s.get("cooldown_minutes", 30)
+            if opened:
+                try:
+                    elapsed = (now - datetime.fromisoformat(opened)).total_seconds() / 60
+                    if elapsed >= cooldown:
+                        triggers.append({
+                            "type": "circuit_recovery",
+                            "description": f"Soul {soul_id} {reason} ({int(elapsed)}min). Ready for probe.",
+                            "task_id": None,
+                            "action": "probe_delegation"
+                        })
+                except (ValueError, TypeError):
+                    pass
     except (json.JSONDecodeError, OSError):
         pass
 

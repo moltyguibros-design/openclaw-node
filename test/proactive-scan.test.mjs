@@ -44,6 +44,16 @@ test('without OPENCLAW_WORKSPACE the workspace does not depend on the cwd', t =>
   assert.match(r.stdout, /circuit_recovery/);
 });
 
+test('a half-open soul whose probe never reported is surfaced for recovery', t => {
+  const { ws, bin } = fixture(t);
+  fs.writeFileSync(path.join(ws, '.tmp', 'trust-registry.json'), JSON.stringify({
+    souls: { s2: { circuit_state: 'half_open', last_probe_at: '2020-01-01T00:00:00', cooldown_minutes: 30 } },
+  }));
+  const r = scan(bin, ws);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /Soul s2 probe never reported/);
+});
+
 test('OPENCLAW_WORKSPACE overrides the script location', t => {
   const { root, ws, bin } = fixture(t);
   const elsewhere = path.join(root, 'elsewhere', 'bin', 'proactive-scan');

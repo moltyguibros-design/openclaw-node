@@ -376,6 +376,18 @@ def cmd_check(args):
             sys.exit(0)
 
     if cb_state == "half_open":
+        # A probe that never reports back (never run, or classified unknown)
+        # would otherwise hold the soul in half_open forever.
+        cooldown = s.get("cooldown_minutes", 30)
+        try:
+            probe_age = (datetime.now() - datetime.fromisoformat(s.get("last_probe_at"))).total_seconds() / 60
+        except (ValueError, TypeError):
+            probe_age = cooldown
+        if probe_age >= cooldown:
+            s["last_probe_at"] = datetime.now().isoformat()
+            save_registry(reg)
+            print(f"  {soul_id}: HALF_OPEN (previous probe never reported, new probe allowed)")
+            sys.exit(0)
         print(f"  {soul_id}: HALF_OPEN (probe in progress)")
         sys.exit(1)
 
