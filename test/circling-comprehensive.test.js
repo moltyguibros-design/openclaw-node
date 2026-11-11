@@ -504,6 +504,44 @@ describe('Daemon: sweepCirclingStepTimeouts simulation', () => {
 
     assert.equal(shouldSweepFire(session, 10 * 60 * 1000, false), false);
   });
+
+  async function atConvergedStep2(automationTier) {
+    const { store, sessionId } = await makeActiveSession({ automation_tier: automationTier });
+    const s = await store.get(sessionId);
+    s.circling.phase = 'circling';
+    s.circling.current_subround = 1;
+    s.circling.current_step = 2;
+    s.circling.step_started_at = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    s.rounds = [{
+      round_number: 1,
+      reflections: ['node-worker', 'node-revA', 'node-revB'].map(node_id => ({
+        node_id, circling_step: 2, vote: 'converged',
+      })),
+    }];
+    await store.put(s);
+    return { store, sessionId, startedAt: s.circling.step_started_at };
+  }
+
+  it('a tier-2 gate clears step_started_at so the sweep cannot fire during the wait', async () => {
+    const { store, sessionId } = await atConvergedStep2(2);
+    const r = await store.advanceCirclingStep(sessionId);
+    assert.equal(r.needsGate, true);
+    assert.equal(r.phase, 'finalization');
+
+    const after = await store.get(sessionId);
+    assert.equal(after.circling.step_started_at, null);
+    assert.equal(shouldSweepFire(after, 10 * 60 * 1000, false), false);
+  });
+
+  it('a tier-1 transition (no gate) leaves step_started_at alone', async () => {
+    const { store, sessionId, startedAt } = await atConvergedStep2(1);
+    const r = await store.advanceCirclingStep(sessionId);
+    assert.equal(r.needsGate, false);
+    assert.equal(r.phase, 'finalization');
+
+    const after = await store.get(sessionId);
+    assert.equal(after.circling.step_started_at, startedAt);
+  });
 });
 
 // ═══════════════════════════════════════════════════════
