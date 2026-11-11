@@ -7,6 +7,7 @@ import {
   useClusters,
   useTasks,
   addClusterMember,
+  fetcher,
 } from "@/lib/hooks";
 import { SessionCard } from "@/components/cowork/session-card";
 import { ClusterCard } from "@/components/cowork/cluster-card";
@@ -14,8 +15,6 @@ import { CreateClusterDialog } from "@/components/cowork/create-cluster-dialog";
 import { DispatchForm } from "@/components/cowork/dispatch-form";
 import useSWR from "swr";
 import { RolePicker } from "@/components/cowork/role-picker";
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 type Tab = "sessions" | "clusters" | "dispatch";
 

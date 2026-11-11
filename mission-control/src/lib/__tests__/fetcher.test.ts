@@ -32,8 +32,8 @@ const sourceFiles = (dir: string): string[] =>
     return /\.tsx?$/.test(e.name) ? [rel] : [];
   });
 
-test("components use the shared fetcher instead of defining their own", () => {
-  const ownFetcher = ["components"]
+test("pages and components use the shared fetcher instead of defining their own", () => {
+  const ownFetcher = ["app", "components"]
     .flatMap(sourceFiles)
     .filter((rel) => /\b(const|function)\s+fetcher\b/.test(fs.readFileSync(path.join(src, rel), "utf-8")));
   expect(ownFetcher).toEqual([]);
