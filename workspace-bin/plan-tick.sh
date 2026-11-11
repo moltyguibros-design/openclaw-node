@@ -264,9 +264,15 @@ fi
 # is green. A refused close writes BLOCKED.md so the chain stops and the operator
 # decides; nothing is auto-reverted.
 close_gate() {
-  local reasons=() cmd
-  if ! git -C "${REPO}" log -1 --format='%B' 2>/dev/null | grep -qE '^Runtime-Evidence:'; then
-    reasons+=("closing commit (${LATEST_COMMIT}) carries no Runtime-Evidence: trailer")
+  local reasons=() cmd close_sha
+  # The closing commit is the one that last touched VERSION (as plan-lint grades it),
+  # not HEAD: HEAD may be an earlier close, or a later commit from elsewhere.
+  if ! git -C "${REPO}" diff --quiet HEAD -- "${VERSION_FILE}" 2>/dev/null; then
+    reasons+=("VERSION ${POST_VERSION} is not committed")
+  fi
+  close_sha=$(git -C "${REPO}" log -1 --format='%H' -- "${VERSION_FILE}" 2>/dev/null || true)
+  if [ -z "${close_sha}" ] || ! git -C "${REPO}" log -1 --format='%B' "${close_sha}" 2>/dev/null | grep -qE '^Runtime-Evidence:'; then
+    reasons+=("closing commit (${close_sha:0:7}) carries no Runtime-Evidence: trailer")
   fi
   cmd="${WORKPLAN_CLOSE_CHECK:-npm test}"
   if [ "${cmd}" = "none" ]; then

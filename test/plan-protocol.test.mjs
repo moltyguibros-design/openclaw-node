@@ -306,3 +306,66 @@ describe('plan-tick conformance gate — fails closed when plan-lint never reach
     assert.match(tick('--preflight').stdout, /\[tgate\] conformance: tgate 9P\/0W\/0F → CONFORMANT$/m);
   });
 });
+
+describe('plan-tick close gate — the commit that closed VERSION must carry the trailer', () => {
+  const ID = 'tclose';
+  const GIT = 'git -c user.name=t -c user.email=t@t';
+  let n = 0;
+
+  function closeTick(claudeBody) {
+    const root = path.join(tmp, `closerepo${++n}`);
+    const plan = path.join(root, 'memory-plan', 'plans', ID);
+    fs.mkdirSync(plan, { recursive: true });
+    fs.mkdirSync(path.join(root, 'workspace-bin'));
+    fs.copyFileSync(path.join(REPO, 'workspace-bin', 'plan-tick.sh'), path.join(root, 'workspace-bin', 'plan-tick.sh'));
+    fs.writeFileSync(path.join(root, 'workspace-bin', 'plan-lint.sh'),
+      '#!/bin/bash\necho "summary: 1 PASS · 0 WARN · 0 FAIL → CONFORMANT"\n');
+    fs.writeFileSync(path.join(plan, 'INVENTORY.md'), '| 1 | 1.1 | v1.1 | [ ] | open step |\n');
+    fs.writeFileSync(path.join(plan, 'VERSION'), 'v1.0\n');
+    fs.writeFileSync(path.join(plan, 'TICK_PROMPT.md'), 'tick\n');
+    const sh = (cmd) => assert.equal(spawnSync('bash', ['-c', cmd], { cwd: root }).status, 0, cmd);
+    sh('git init -q .');
+    sh(`git add -A && ${GIT} commit -q -m $'seed\\n\\nRuntime-Evidence: seed'`);
+
+    const bin = path.join(tmp, `closebin${n}`);
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/bash\ncat >/dev/null\n${claudeBody}\n`);
+    fs.chmodSync(path.join(bin, 'claude'), 0o755);
+    const home = path.join(tmp, `closehome${n}`);
+    fs.mkdirSync(home);
+    // Not process.env: this suite runs inside a real tick's close gate, and
+    // WORKPLAN_CLOSE_CHECK=none keeps the stub tick from running the suite again.
+    const env = { PATH: `${bin}:${process.env.PATH}`, HOME: home, TMPDIR: tmp, WORKPLAN_CLOSE_CHECK: 'none' };
+    const r = spawnSync('bash', [path.join(root, 'workspace-bin', 'plan-tick.sh'), ID], { encoding: 'utf8', env });
+    const blockPath = path.join(plan, 'BLOCKED.md');
+    return { r, block: fs.existsSync(blockPath) ? fs.readFileSync(blockPath, 'utf8') : null };
+  }
+
+  it('refuses a close whose VERSION bump was never committed', () => {
+    const { r, block } = closeTick(`printf 'v1.1\\n' > memory-plan/plans/${ID}/VERSION`);
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.ok(block, 'no BLOCKED.md for an uncommitted close');
+    assert.match(block, /VERSION v1\.1 is not committed/);
+  });
+
+  it('checks the commit that closed VERSION, not a later commit at HEAD', () => {
+    const { r, block } = closeTick([
+      `printf 'v1.1\\n' > memory-plan/plans/${ID}/VERSION`,
+      `${GIT} commit -qam 'v1.1 close'`,
+      `${GIT} commit -q --allow-empty -m $'later\\n\\nRuntime-Evidence: unrelated'`,
+    ].join('\n'));
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.ok(block, 'no BLOCKED.md for a close without a trailer');
+    assert.match(block, /closing commit \([0-9a-f]{7}\) carries no Runtime-Evidence: trailer/);
+    assert.doesNotMatch(block, /is not committed/);
+  });
+
+  it('accepts a committed close that carries the trailer', () => {
+    const { r, block } = closeTick([
+      `printf 'v1.1\\n' > memory-plan/plans/${ID}/VERSION`,
+      `${GIT} commit -qam $'v1.1 close\\n\\nRuntime-Evidence: observed'`,
+    ].join('\n'));
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(block, null, block ?? '');
+  });
+});
