@@ -185,28 +185,20 @@ fi
 WORKSPACE="$(cd "$(dirname "$0")/.." && pwd)"
 TRUST_REGISTRY="${WORKSPACE}/.tmp/trust-registry.json"
 if [[ -f "$TRUST_REGISTRY" ]]; then
-  TRUST_INFO=$(python3 -c "
-import json, sys
-reg = json.load(open('${TRUST_REGISTRY}'))
-s = reg.get('souls', {}).get('${SOUL_ID}', {})
-total = s.get('tasks_total', 0)
-succeeded = s.get('tasks_succeeded', 0)
-if total == 0:
-    trust = 0.5
-else:
-    success_rate = succeeded / total
-    verified = s.get('tasks_verified', 0)
-    avg_turns = s.get('avg_turns', 10.0)
-    ver_rate = verified / max(1, succeeded)
-    eff = max(0.0, 1.0 - min(1.0, avg_turns / 20.0))
-    trust = round(success_rate * 0.50 + ver_rate * 0.30 + eff * 0.20, 3)
-if total >= 25 and trust >= 0.80: tier = 'expert'
-elif total >= 10 and trust >= 0.65: tier = 'proven'
-elif total >= 3 and trust >= 0.50: tier = 'developing'
-else: tier = 'new'
-autonomy = {'new': 'atomic', 'developing': 'guided', 'proven': 'open-ended', 'expert': 'full'}[tier]
-print(f'Trust: {trust} | Tier: {tier} | Autonomy: {autonomy} | Track record: {succeeded}/{total}')
-" 2>/dev/null || echo "Trust: 0.500 | Tier: new | Autonomy: atomic | Track record: 0/0")
+  # trust-registry owns the scoring; -B keeps the import from writing a
+  # __pycache__ into the workspace bin/.
+  TRUST_INFO=$(python3 -B - "${WORKSPACE}/bin/trust-registry" "$SOUL_ID" 2>/dev/null <<'PY' || echo "Trust: 0.500 | Tier: new | Autonomy: atomic | Track record: 0/0"
+import sys, importlib.util
+from importlib.machinery import SourceFileLoader
+loader = SourceFileLoader('trust_registry', sys.argv[1])
+tr = importlib.util.module_from_spec(importlib.util.spec_from_loader('trust_registry', loader))
+loader.exec_module(tr)
+s = tr.load_registry()['souls'].get(sys.argv[2], {})
+trust = tr.compute_trust(s)
+tier = tr.compute_tier(s, trust)
+print(f"Trust: {trust:.3f} | Tier: {tier} | Autonomy: {tr.TIERS[tier]['max_autonomy']} | Track record: {s.get('tasks_succeeded', 0)}/{s.get('tasks_total', 0)}")
+PY
+)
   echo "---"
   echo ""
   echo "# Delegation Trust"
