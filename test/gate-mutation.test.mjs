@@ -55,6 +55,27 @@ describe('tarball-smoke gate rejects doctored listings', () => {
   });
 });
 
+// ── 1b. Root test scripts build the workspace dist first ────────────────────
+// npm runs `pretest` only for `npm test`, and packages/*/dist/ is gitignored:
+// a script that calls node --test directly fails on a fresh clone.
+
+describe('root test scripts build the workspace dist first', () => {
+  const { scripts } = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8'));
+  it('pretest still builds the workspaces', () => {
+    assert.ok(scripts.pretest.includes('--workspaces --if-present build'), scripts.pretest);
+  });
+  for (const name of ['test:unit', 'test:strict', 'test:all']) {
+    it(`${name} goes through npm test or builds first`, () => {
+      const s = scripts[name];
+      assert.ok(/(^|\s)npm test(\s|$)/.test(s) || s.includes('npm run --workspaces --if-present build'),
+        `${name} = ${s} skips the pretest build`);
+    });
+  }
+  it('test:all does not re-run distributed-mc, which the root glob already covers', () => {
+    assert.ok(!scripts['test:all'].includes('test:integration'), scripts['test:all']);
+  });
+});
+
 // ── 2. Inject probe budget vs server design ─────────────────────────────────
 // The relationship that rotted once: the probe's HTTP budget must clear the
 // inject server's DESIGNED worst case (analysis fallback wait + retrieval),
