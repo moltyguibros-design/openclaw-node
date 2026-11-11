@@ -90,7 +90,7 @@ describe('isTransient classification (verified via retry behavior)', () => {
     await assert.rejects(
       () => requestExtraction(async () => {
         runs++;
-        const err = new Error('LLM server returned HTTP 500: bad');
+        const err = new Error('LLM server returned 500: bad');
         throw err;
       })
     );
@@ -125,10 +125,43 @@ describe('isTransient classification (verified via retry behavior)', () => {
     await assert.rejects(
       () => requestExtraction(async () => {
         runs++;
-        throw new Error('LLM server returned HTTP 502: Bad Gateway');
+        throw new Error('LLM server returned 502: Bad Gateway');
       })
     );
     assert.equal(runs, 4, '502 should retry 3 times → 4 total attempts');
+  });
+
+  it('DOES retry on the real llm-client 503 shape (Ollama "server busy")', async () => {
+    let runs = 0;
+    await assert.rejects(
+      () => requestExtraction(async () => {
+        runs++;
+        throw new Error('LLM server returned 503: {"error":"server busy, please try again.  maximum pending requests exceeded"}');
+      })
+    );
+    assert.equal(runs, 4);
+  });
+
+  it('does NOT retry an Ollama 500 whose body says terminated', async () => {
+    let runs = 0;
+    await assert.rejects(
+      () => requestExtraction(async () => {
+        runs++;
+        throw new Error('LLM server returned 500: {"error":"llama runner process has terminated: signal: killed"}');
+      })
+    );
+    assert.equal(runs, 1);
+  });
+
+  it('DOES retry a bare "terminated" (undici mid-body socket close)', async () => {
+    let runs = 0;
+    await assert.rejects(
+      () => requestExtraction(async () => {
+        runs++;
+        throw new Error('terminated');
+      })
+    );
+    assert.equal(runs, 4);
   });
 
   it('DOES retry on ECONNRESET', async () => {
