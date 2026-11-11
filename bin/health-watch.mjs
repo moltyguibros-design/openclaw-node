@@ -29,6 +29,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { resolveNodeId } from '../lib/node-id.js';
 
 // URL + credentials (token or nkey) from the one resolver; NATS_URL is a URL override only.
 const { natsConnectOpts } = createRequire(import.meta.url)('../lib/nats-resolve.js');
@@ -64,7 +65,7 @@ async function alertNats(status, result) {
     const sc = StringCodec();
     const payload = JSON.stringify({
       status,
-      node_id: process.env.OPENCLAW_NODE_ID || os.hostname(),
+      node_id: resolveNodeId(),
       timestamp: new Date().toISOString(),
       components: result,
     });

@@ -3,7 +3,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { runAcceptance, computeGate, VERDICT } from '../lib/node-acceptance.mjs';
+import { createRequire } from 'node:module';
+import { runAcceptance, computeGate, resolveNodeConfig, VERDICT } from '../lib/node-acceptance.mjs';
 
 const BIN = fileURLToPath(new URL('../bin/node-acceptance.mjs', import.meta.url));
 
@@ -108,5 +109,16 @@ describe('node-acceptance gate', () => {
     const r = await runAcceptance({ profile: 'single-node', axis: 'internode', probes: [], healthCheckFn: async () => allHealthy });
     assert.equal(r.gate.state, 'INCOMPLETE');
     assert.equal(r.gate.exitCode, 2);
+  });
+});
+
+describe('node-acceptance config', () => {
+  // NET-L2-STREAM looks up localEventStreamName(nodeId): it must be the id the
+  // memory daemon created its stream under, not the raw hostname.
+  it('resolveNodeConfig derives nodeId through lib/node-id', () => {
+    const { resolveNodeId } = createRequire(import.meta.url)('../lib/node-id.js');
+    assert.equal(resolveNodeConfig({ MESH_NODE_ID: 'legacy-id' }).nodeId, 'legacy-id');
+    assert.equal(resolveNodeConfig({ OPENCLAW_NODE_ID: 'x', MESH_NODE_ID: 'legacy-id' }).nodeId, 'x');
+    assert.equal(resolveNodeConfig({}).nodeId, resolveNodeId({}));
   });
 });
