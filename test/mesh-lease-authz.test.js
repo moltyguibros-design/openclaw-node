@@ -264,6 +264,19 @@ describe('F1: a forged submit cannot touch a plan', () => {
     assert.deepEqual(await planState(h, planId), before);
   });
 
+  it('a KV proposal with a refused metric is rejected; an allowed one is still queued', async () => {
+    const h = harness();
+    await h.store.put({ ...createTask({ task_id: 'PROP-BADMETRIC', title: 'p', metric: 'curl http://evil' }), status: 'proposed', origin: 'worker-x' });
+    await h.store.put({ ...createTask({ task_id: 'PROP-OKMETRIC', title: 'p', metric: 'npm test' }), status: 'proposed', origin: 'worker-x' });
+
+    await daemon.__test.processProposals();
+
+    const bad = await h.store.get('PROP-BADMETRIC');
+    assert.equal(bad.status, 'rejected');
+    assert.match(bad.result.summary, /Metric refused/);
+    assert.equal((await h.store.get('PROP-OKMETRIC')).status, 'queued');
+  });
+
   it("the daemon's own dispatch still links the subtask and advances the plan", async () => {
     const h = harness();
     const planId = await approvedPlan(h);

@@ -192,9 +192,9 @@ async function handleSubmit(msg) {
     return respondError(msg, `Submit refused: ${owned.join(', ')} can only be set by the daemon`);
   }
 
-  // Server-side metric gate. The worker re-checks before running, but the
-  // daemon is the only place every submit path (NATS, kanban bridge, proposals)
-  // converges, so a bad metric must be refused here, fail-closed.
+  // Server-side metric gate, fail-closed (processProposals applies it to KV
+  // proposals). Plan subtasks, escalations and Mission Control's lead-side KV
+  // write are not gated here; the worker's evaluateMetric re-check covers them.
   if (params.metric) {
     const check = validateMetricCommand(params.metric);
     if (!check.allowed) {
@@ -901,6 +901,18 @@ async function processProposals() {
       log(`REJECTED proposal ${task.task_id} from ${task.origin}: sets daemon-owned ${owned.join(', ')}`);
       publishEvent('rejected', task);
       continue;
+    }
+
+    if (task.metric) {
+      const check = validateMetricCommand(task.metric);
+      if (!check.allowed) {
+        task.status = TASK_STATUS.REJECTED;
+        task.result = { success: false, summary: `Metric refused: ${check.reason}` };
+        await store.put(task);
+        log(`REJECTED proposal ${task.task_id} from ${task.origin}: metric refused — ${check.reason}`);
+        publishEvent('rejected', task);
+        continue;
+      }
     }
 
     // Accept: transition to queued
