@@ -247,7 +247,8 @@ export function deriveQueueStatus(qs) {
  * @param {number} [opts.intervalSec] — poll interval in seconds
  * @param {string[]} [opts.targets] — alert destinations
  * @param {Function} [opts.healthCheckFn] — override for testing
- * @param {Function} [opts.onTick] — callback after each poll: (status, result) => void
+ * @param {Function} [opts.onTick] — callback after each poll: (status, result, queueState) => void
+ * @param {string} [opts.queueSnapshotPath] — daemon queue snapshot (default: ollama-queue QUEUE_STATE_PATH)
  * @returns {{ start: Function, stop: Function }}
  */
 export function createHealthWatch(opts = {}) {
@@ -268,12 +269,12 @@ export function createHealthWatch(opts = {}) {
     const componentStatus = deriveStatus(result);
 
     // Augment with queue health
-    const queueState = await getQueueHealth();
+    const queueState = await getQueueHealth(opts.queueSnapshotPath);
     const queueStatus = deriveQueueStatus(queueState);
 
     // Stuck queue → attempt auto-restart of Ollama (best-effort)
     if (queueStatus === 'stuck') {
-      await maybeAutoRestartOllama();
+      await maybeAutoRestartOllama(opts.queueSnapshotPath);
     }
 
     // Compose overall status: stuck queue > unhealthy component > degraded queue > healthy
