@@ -375,6 +375,34 @@ describe('runExtraction', () => {
     assert.equal(cp.attempts.s1, undefined);
   });
 
+  it('stops the run on a 404 (missing model) without marking sessions failed', async () => {
+    const sessionDbPath = join(testDir, 'sessions.db');
+    const checkpointPath = join(testDir, 'checkpoint.json');
+    createSessionDb(sessionDbPath, [
+      { id: 's1', messages: [{ role: 'user', content: 'First' }] },
+      { id: 's2', messages: [{ role: 'user', content: 'Second' }] },
+    ]);
+
+    let calls = 0;
+    const result = await runExtraction({
+      sessionDbPath,
+      extractionDbPath: join(testDir, 'extraction.db'),
+      checkpointPath,
+      llmClient: createMockLlmClient([VALID_EXTRACTION]),
+      extractionStore: createMockExtractionStore(),
+      extractFn: async () => {
+        calls++;
+        throw new Error('LLM server returned 404: {"error":"model \'qwen3:8b\' not found"}');
+      },
+      skipNotes: true,
+      skipGraph: true,
+    });
+
+    assert.equal(calls, 1);
+    assert.equal(result.failed, 0);
+    assert.deepEqual(loadCheckpoint(checkpointPath).failed, []);
+  });
+
   it('returns zero results when session DB does not exist', async () => {
     const result = await runExtraction({
       sessionDbPath: join(testDir, 'nonexistent.db'),

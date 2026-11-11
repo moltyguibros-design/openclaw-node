@@ -114,7 +114,7 @@ export async function runExtraction(opts = {}) {
       );
       return { processed: 0, skipped: 0, failed: 0, total: 0 };
     }
-    process.stderr.write(`[extract-backfill] LLM server OK (model: ${health.model})\n`);
+    process.stderr.write(`[extract-backfill] LLM server OK (model: ${client.model})\n`);
   }
 
   // Open session store (read-only)
@@ -228,19 +228,24 @@ export async function runExtraction(opts = {}) {
           /SQLITE_BUSY|queue full/i.test(msg)
         );
 
+        // 404: the server has no such model (unpulled/mistyped LLM_MODEL) or
+        // endpoint. Every session would fail alike, so end the run unmarked.
+        const isRunLevel = /^LLM server returned 404:/.test(msg);
+        if (isQueueShutdown || isRunLevel) {
+          process.stderr.write(
+            `[extract-backfill] STOPPING during session ${session.id}: ${isRunLevel ? msg : 'queue shutdown'}\n`
+          );
+          stopped = true;  // exit the outer loop
+          break;
+        }
+
         // Per-session attempt counter to escape sticky-transient loops.
         checkpoint.attempts = checkpoint.attempts || {};
         const attemptCount = (checkpoint.attempts[session.id] || 0) + 1;
         checkpoint.attempts[session.id] = attemptCount;
         const tooManyAttempts = attemptCount >= 5;
 
-        if (isQueueShutdown) {
-          process.stderr.write(
-            `[extract-backfill] STOPPING: queue shutdown during session ${session.id}\n`
-          );
-          stopped = true;  // exit the outer loop
-          break;
-        } else if (isTransient && !tooManyAttempts) {
+        if (isTransient && !tooManyAttempts) {
           process.stderr.write(
             `[extract-backfill] TRANSIENT (attempt ${attemptCount}): session ${session.id}: ${msg}\n`
           );
