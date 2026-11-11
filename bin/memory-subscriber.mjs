@@ -22,6 +22,7 @@ import os from 'node:os';
 import { createRequire } from 'node:module';
 import { ensureSharedStream, SHARED_STREAM_NAME } from '../lib/shared-event-stream.mjs';
 import { createBackoff } from './memory-promoter.mjs';
+import { canonicalNodeId } from '../lib/local-event-log.mjs';
 
 const _require = createRequire(import.meta.url);
 const { natsConnectOpts } = _require('../lib/nats-resolve.js');
@@ -183,7 +184,7 @@ export async function createSubscriber(nc, nodeId, opts = {}) {
   const jsm = await nc.jetstreamManager();
   const backoff = createBackoff(opts.backoffOpts);
 
-  const consumerName = `subscriber-${nodeId}`;
+  const consumerName = `subscriber-${canonicalNodeId(nodeId)}`;
 
   // Ensure durable consumer on shared stream
   try {

@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  createSubscriber,
   evaluateIngestionPolicy,
   parseSharedSubject,
 } from '../bin/memory-subscriber.mjs';
@@ -123,5 +124,33 @@ describe('createBackoff import reuse', () => {
     assert.strictEqual(backoff.getDelay(), 1000);
     backoff.reset();
     assert.strictEqual(backoff.getDelay(), 500);
+  });
+});
+
+describe('createSubscriber consumer identity', () => {
+  it('names the durable consumer from the canonical node id (JetStream rejects dots)', async () => {
+    let durable = null;
+    const nc = {
+      jetstreamManager: async () => ({
+        streams: { info: async () => ({ config: {} }) },
+        consumers: {
+          info: async () => { throw new Error('consumer not found'); },
+          add: async (_stream, cfg) => { durable = cfg.durable_name; },
+        },
+      }),
+      jetstream: () => ({
+        consumers: {
+          get: async () => ({
+            consume: async () => ({ stop() {}, async *[Symbol.asyncIterator]() {} }),
+          }),
+        },
+      }),
+    };
+    const sub = await createSubscriber(nc, 'MoltyMacs-Virtual-Machine.local', {
+      onIngest: (event, parsed, provenance) => { void event; void parsed; void provenance; },
+      onError: () => {},
+    });
+    await sub.stop();
+    assert.equal(durable, 'subscriber-moltymacs-virtual-machine');
   });
 });
