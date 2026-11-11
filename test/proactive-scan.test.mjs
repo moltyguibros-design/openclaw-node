@@ -23,12 +23,40 @@ function fixture(t) {
   return { root, ws, bin };
 }
 
-function scan(bin, cwd, workspace) {
-  const env = { ...process.env };
+function scan(bin, cwd, workspace, extraEnv = {}) {
+  const env = { ...process.env, ...extraEnv };
   delete env.OPENCLAW_WORKSPACE;
   if (workspace) env.OPENCLAW_WORKSPACE = workspace;
   return spawnSync('bash', [bin, '--dry-run'], { cwd, env, encoding: 'utf8' });
 }
+
+function scanRunningTask(t, updatedAt, tz) {
+  const { ws, bin } = fixture(t);
+  fs.mkdirSync(path.join(ws, 'memory'), { recursive: true });
+  fs.writeFileSync(path.join(ws, 'memory', 'active-tasks.md'),
+    `- task_id: T1\n  title: "t"\n  status: running\n  updated_at: ${updatedAt}\n`);
+  const r = scan(bin, ws, undefined, { TZ: tz });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  return r.stdout;
+}
+
+test('an ISO-UTC updated_at an hour old is stale in a negative-offset zone', t => {
+  const out = scanRunningTask(t, new Date(Date.now() - 3600_000).toISOString(), 'America/Montreal');
+  assert.match(out, /stale_task/);
+  assert.match(out, /Task T1 \(t\) running for 6[01]min/);
+});
+
+test('an ISO-UTC updated_at without fractional seconds is parsed', t => {
+  assert.match(scanRunningTask(t, '2020-01-01T00:00:00Z', 'America/Montreal'), /stale_task/);
+});
+
+test('an ISO-UTC updated_at five minutes old is not stale in a positive-offset zone', t => {
+  assert.doesNotMatch(scanRunningTask(t, new Date(Date.now() - 5 * 60_000).toISOString(), 'Asia/Tokyo'), /stale_task/);
+});
+
+test('a Montreal wall-time updated_at is still parsed', t => {
+  assert.match(scanRunningTask(t, '2020-01-01 09:15 America/Montreal', 'America/Montreal'), /stale_task/);
+});
 
 test('without OPENCLAW_WORKSPACE the scan reads the workspace that holds the script, run from the workspace', t => {
   const { ws, bin } = fixture(t);

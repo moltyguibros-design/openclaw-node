@@ -31,7 +31,7 @@ done
 # Collect triggers as JSON via Python (reliable parsing)
 TRIGGERS=$(OPENCLAW_WORKSPACE="$WORKSPACE" python3 << 'PYEOF'
 import json, re, os, subprocess
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 workspace = os.environ["OPENCLAW_WORKSPACE"]
@@ -43,7 +43,7 @@ triggers = []
 if os.path.isfile(active_tasks):
     content = open(active_tasks).read()
     blocks = re.split(r'^- task_id:', content, flags=re.MULTILINE)
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
 
     for block in blocks[1:]:
         task_id = block.split('\n')[0].strip()
@@ -56,22 +56,22 @@ if os.path.isfile(active_tasks):
 
         if updated_m:
             ts_raw = updated_m.group(1).strip()
-            # Handle both formats: "2026-02-21 09:15 America/Montreal" and ISO
-            for fmt in ('%Y-%m-%d %H:%M America/Montreal', '%Y-%m-%dT%H:%M:%S.%fZ', '%Y-%m-%d %H:%M'):
-                try:
-                    dt = datetime.strptime(ts_raw.replace('America/Montreal', '').strip(), fmt.replace(' America/Montreal', ''))
-                    if (now - dt) > timedelta(minutes=30):
-                        title = title_m.group(1).strip().strip('"') if title_m else task_id
-                        minutes = int((now - dt).total_seconds() / 60)
-                        triggers.append({
-                            "type": "stale_task",
-                            "description": f"Task {task_id} ({title}) running for {minutes}min without update",
-                            "task_id": task_id,
-                            "action": "check_status_or_escalate"
-                        })
-                    break
-                except ValueError:
-                    continue
+            # "2026-02-21 09:15 America/Montreal" (local wall time) or ISO-8601 UTC "...Z"
+            try:
+                dt = datetime.fromisoformat(ts_raw.replace('America/Montreal', '').strip().replace('Z', '+00:00'))
+            except ValueError:
+                continue
+            if dt.tzinfo is None:
+                dt = dt.astimezone()
+            if (now - dt) > timedelta(minutes=30):
+                title = title_m.group(1).strip().strip('"') if title_m else task_id
+                minutes = int((now - dt).total_seconds() / 60)
+                triggers.append({
+                    "type": "stale_task",
+                    "description": f"Task {task_id} ({title}) running for {minutes}min without update",
+                    "task_id": task_id,
+                    "action": "check_status_or_escalate"
+                })
 
 # --- Check 2: Uncommitted work in project dirs ---
 projects_dir = os.path.join(workspace, "projects")
