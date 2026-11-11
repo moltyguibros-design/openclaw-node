@@ -9,9 +9,9 @@
 #   bash install.sh --update     # Re-copy scripts/configs, skip deps
 #
 # --dry-run behavior:
-#   Echoes every command that would execute (prefixed with [DRY-RUN]) without
+#   Echoes every command that would execute (prefixed with [dry-run]) without
 #   modifying the filesystem. Also verifies that all source paths exist —
-#   a missing source prints [DRY-RUN ERROR] so path bugs (like SCRIPT_DIR)
+#   a missing source prints [dry-run] SOURCE MISSING so path bugs (like SCRIPT_DIR)
 #   are caught without running the install. Does NOT check destination
 #   writability (that requires actual fs calls). Exit code 0 on success,
 #   1 if any source path is missing.
@@ -123,6 +123,11 @@ source "$REPO_DIR/scripts/install/components.sh"
 source "$REPO_DIR/scripts/install/services.sh"
 source "$REPO_DIR/scripts/install/integrations.sh"
 source "$REPO_DIR/scripts/install/verify.sh"
+
+if $DRY_RUN && [ "$DRY_RUN_ERRORS" -gt 0 ]; then
+  error "[dry-run] $DRY_RUN_ERRORS source path(s) missing (see SOURCE MISSING above)"
+  exit 1
+fi
 
 # ============================================================
 # Done!

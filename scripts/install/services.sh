@@ -309,7 +309,9 @@ elif [ "$OS" = "macos" ]; then
 elif [ "$OS" = "linux" ]; then
   DESKTOP_DIR="$HOME/.local/share/applications"
   run mkdir -p "$DESKTOP_DIR"
-  if command -v envsubst >/dev/null 2>&1; then
+  if $DRY_RUN; then
+    echo "  [dry-run] would install $DESKTOP_DIR/openclaw-stack.desktop"
+  elif command -v envsubst >/dev/null 2>&1; then
     NODE_BIN="$NODE_BIN" OPENCLAW_REPO_DIR="$REPO_DIR" HOME="$HOME" \
       envsubst < "$REPO_DIR/services/launcher/openclaw-stack.desktop" > "$DESKTOP_DIR/openclaw-stack.desktop"
   else

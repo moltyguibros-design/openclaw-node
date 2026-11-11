@@ -67,8 +67,12 @@ if [ -z "${OPENCLAW_NATS_TOKEN:-}" ]; then
   OPENCLAW_NATS_TOKEN="$(openssl rand -hex 32)"
   export OPENCLAW_NATS_TOKEN
   if [ -f "$ENV_FILE" ]; then
-    echo "OPENCLAW_NATS_TOKEN=$OPENCLAW_NATS_TOKEN" >> "$ENV_FILE"
-    info "Generated OPENCLAW_NATS_TOKEN and persisted to $ENV_FILE"
+    if $DRY_RUN; then
+      echo "  [dry-run] would persist a generated OPENCLAW_NATS_TOKEN to $ENV_FILE"
+    else
+      echo "OPENCLAW_NATS_TOKEN=$OPENCLAW_NATS_TOKEN" >> "$ENV_FILE"
+      info "Generated OPENCLAW_NATS_TOKEN and persisted to $ENV_FILE"
+    fi
   fi
 fi
 
@@ -81,10 +85,10 @@ if [ -f "$ENV_FILE" ] && [ -n "${OPENCLAW_PROVIDER:-}" ]; then
   info "MESH_LLM_PROVIDER=$OPENCLAW_PROVIDER recorded in $ENV_FILE"
 fi
 if [ -f "$ENV_FILE" ] && ! grep -q '^LLM_MODEL=' "$ENV_FILE"; then
-  echo "LLM_MODEL=qwen3:8b" >> "$ENV_FILE"
+  set_env_key LLM_MODEL qwen3:8b
 fi
 if [ -f "$ENV_FILE" ] && ! grep -q '^LLM_BASE_URL=' "$ENV_FILE"; then
-  echo "LLM_BASE_URL=http://localhost:11434" >> "$ENV_FILE"
+  set_env_key LLM_BASE_URL http://localhost:11434
 fi
 export MESH_LLM_PROVIDER="${OPENCLAW_PROVIDER:-${MESH_LLM_PROVIDER:-}}"
 export LLM_MODEL="${LLM_MODEL:-qwen3:8b}"

@@ -231,6 +231,30 @@ test('install.sh --dry-run writes nothing under $HOME', () => {
   assert.doesNotMatch(r.stdout, /SOURCE MISSING/);
 });
 
+// config.sh appended a generated token and the LLM defaults to an EXISTING env
+// file with no dry-run guard; the empty-HOME run above has no env file to hit.
+test('install.sh --dry-run leaves an existing env file untouched', () => {
+  const home = mkdtempSync(join(tmpdir(), 'openclaw-dry-env-'));
+  mkdirSync(join(home, '.openclaw'), { recursive: true });
+  const envFile = join(home, '.openclaw', 'openclaw.env');
+  writeFileSync(envFile, 'OTHER=kept\n');
+  const env = { ...process.env, HOME: home, OPENCLAW_HOME: join(home, '.openclaw') };
+  delete env.OPENCLAW_NATS_TOKEN;
+  const r = spawnSync('bash', [INSTALL_SH, '--dry-run', '--sandbox'], { encoding: 'utf8', timeout: 300_000, env });
+  assert.equal(readFileSync(envFile, 'utf8'), 'OTHER=kept\n');
+  assert.equal(r.status, 0, `dry-run must complete: exit ${r.status}\n${r.stdout.slice(-2000)}\n${r.stderr.slice(-500)}`);
+});
+
+// The Linux launcher render bypassed the dry-run guard (wrote the .desktop, or
+// aborted on a headless box), and DRY_RUN_ERRORS never became the documented exit 1.
+test('dry-run guards the Linux launcher render and exits 1 on a missing source', () => {
+  const svc = moduleSrc['services.sh'];
+  const guard = svc.indexOf('[dry-run] would install $DESKTOP_DIR/openclaw-stack.desktop');
+  assert.ok(guard > svc.indexOf('DESKTOP_DIR='), 'guard must follow DESKTOP_DIR=');
+  assert.ok(guard < svc.indexOf('envsubst < "$REPO_DIR/services/launcher/openclaw-stack.desktop"'), 'guard must precede the render');
+  assert.match(installSrc, /if \$DRY_RUN && \[ "\$DRY_RUN_ERRORS" -gt 0 \]; then\n[^\n]*\n\s+exit 1/);
+});
+
 // The role was never persisted, and env.sh resolved it before the env file was
 // read: a Linux node installed with --role=lead went back to worker on every
 // --update that omitted --role.
