@@ -6,6 +6,7 @@ import { statusToKanban, kanbanToStatus, parseTasksMarkdown, serializeTasksMarkd
 import { syncTasksToMarkdown, syncTasksFromMarkdown } from "@/lib/sync/tasks";
 import { schedulerTick, computeWaves } from "@/lib/scheduler";
 import { getNats } from "@/lib/nats";
+import { applyDoneGate } from "@/lib/done-gate";
 import fs from "fs";
 import { ACTIVE_TASKS_MD, WORKSPACE_ROOT } from "@/lib/config";
 
@@ -130,17 +131,9 @@ export async function POST() {
       createdAt: now,
     }).run();
 
-    // Simulate what the PATCH API does: setting done without force_done
-    const targetStatus = "done";
-    const redirected = targetStatus === "done"; // would be redirected
-    const effectiveStatus = redirected ? "waiting-user" : "done";
-    const effectiveColumn = redirected ? "review" : "done";
-
-    db.update(tasks).set({
-      status: effectiveStatus,
-      kanbanColumn: effectiveColumn,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(tasks.id, doneGateTaskId)).run();
+    const update: Record<string, unknown> = { status: "done", kanbanColumn: "done", updatedAt: new Date().toISOString() };
+    applyDoneGate(update, undefined);
+    db.update(tasks).set(update).where(eq(tasks.id, doneGateTaskId)).run();
 
     const row = db.select().from(tasks).where(eq(tasks.id, doneGateTaskId)).get();
     const ok = !!row && row.status === "waiting-user" && row.kanbanColumn === "review";
@@ -162,12 +155,9 @@ export async function POST() {
       createdAt: now,
     }).run();
 
-    // With force_done, no redirect
-    db.update(tasks).set({
-      status: "done",
-      kanbanColumn: "done",
-      updatedAt: new Date().toISOString(),
-    }).where(eq(tasks.id, doneGateTaskId + "_force")).run();
+    const update: Record<string, unknown> = { status: "done", kanbanColumn: "done", updatedAt: new Date().toISOString() };
+    applyDoneGate(update, true);
+    db.update(tasks).set(update).where(eq(tasks.id, doneGateTaskId + "_force")).run();
 
     const row = db.select().from(tasks).where(eq(tasks.id, doneGateTaskId + "_force")).get();
     const ok = !!row && row.status === "done" && row.kanbanColumn === "done";
@@ -231,11 +221,11 @@ export async function POST() {
 
   results.push(await runTest("Sync", "DB -> Markdown -> DB round-trip preserves tasks", async () => {
     // Count tasks before
-    const before = (raw.prepare("SELECT COUNT(*) as c FROM tasks WHERE id NOT LIKE '__TEST__%' AND id != '__LIVE_SESSION__'").get() as { c: number }).c;
+    const before = (raw.prepare("SELECT COUNT(*) as c FROM tasks WHERE id NOT GLOB '__TEST__*' AND id != '__LIVE_SESSION__'").get() as { c: number }).c;
     // Force a sync cycle
     syncTasksToMarkdown(db);
     syncTasksFromMarkdown(db);
-    const after = (raw.prepare("SELECT COUNT(*) as c FROM tasks WHERE id NOT LIKE '__TEST__%' AND id != '__LIVE_SESSION__'").get() as { c: number }).c;
+    const after = (raw.prepare("SELECT COUNT(*) as c FROM tasks WHERE id NOT GLOB '__TEST__*' AND id != '__LIVE_SESSION__'").get() as { c: number }).c;
     // Should be same count (or close — live session may change)
     const diff = Math.abs(after - before);
     return { ok: diff <= 2, detail: `before=${before}, after=${after}, diff=${diff}` };
@@ -847,7 +837,6 @@ export async function POST() {
   // ═══════════════════════════════════════════════════════════
 
   const triggerAtId = `${TEST_PREFIX}trig_at_${Date.now()}`;
-  const triggerCronId = `${TEST_PREFIX}trig_cron_${Date.now()}`;
   const recurringId = `${TEST_PREFIX}recur_${Date.now()}`;
 
   results.push(await runTest("Trigger Dispatch", "At-trigger fires when time has passed", async () => {
@@ -939,7 +928,6 @@ export async function POST() {
 
   // Cleanup trigger tests
   db.delete(tasks).where(eq(tasks.id, triggerAtId)).run();
-  db.delete(tasks).where(eq(tasks.id, triggerCronId)).run();
 
   // ═══════════════════════════════════════════════════════════
   // SUITE 16: DB Schema Integrity

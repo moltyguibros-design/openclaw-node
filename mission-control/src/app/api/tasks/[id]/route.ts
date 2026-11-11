@@ -9,6 +9,7 @@ import { gatewayNotify } from "@/lib/gateway-notify";
 import { AGENT_NAME, HUMAN_NAME } from "@/lib/config";
 import { getNats, sc } from "@/lib/nats";
 import { signOperatorRequest } from "@/lib/mesh-sign";
+import { applyDoneGate } from "@/lib/done-gate";
 
 /**
  * Push a notification message to the OpenClaw TUI via gateway chat.send + abort.
@@ -171,16 +172,7 @@ export async function PATCH(
       }
     }
 
-    // Done-gate: only the human operator can mark tasks as done (via force_done flag).
-    // Without force_done, redirect done→review so tasks land in waiting-user.
-    const targetStatus = update.status as string | undefined;
-    const targetColumn = update.kanbanColumn as string | undefined;
-    if (!body.force_done) {
-      if (targetStatus === "done" || targetColumn === "done") {
-        update.status = "waiting-user";
-        update.kanbanColumn = "review";
-      }
-    }
+    applyDoneGate(update, body.force_done);
     if (body.owner !== undefined) {
       update.owner = body.owner || null;
     }
