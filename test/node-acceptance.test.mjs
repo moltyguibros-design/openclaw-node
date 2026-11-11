@@ -110,6 +110,13 @@ describe('node-acceptance gate', () => {
     assert.equal(r.gate.state, 'INCOMPLETE');
     assert.equal(r.gate.exitCode, 2);
   });
+
+  it('an axis whose rows are all optional SKIPs is INCOMPLETE, never ACCEPTED', async () => {
+    const probes = [{ id: 'FED-X', layer: 'L2', axis: 'federation', required: false, run: async () => ({ status: VERDICT.SKIP, detail: 'bus unobservable' }) }];
+    const r = await runAcceptance({ profile: 'single-node', axis: 'federation', probes, healthCheckFn: async () => allHealthy });
+    assert.equal(r.gate.state, 'INCOMPLETE');
+    assert.equal(r.gate.exitCode, 2);
+  });
 });
 
 describe('node-acceptance config', () => {
