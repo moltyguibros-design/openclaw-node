@@ -296,3 +296,42 @@ describe('preCommitSecretScan', () => {
     assert.strictEqual(preCommitSecretScan(dir).blocked, false);
   });
 });
+
+// ── postCommitValidate ──────────────────────────
+
+describe('postCommitValidate (shipped git-conventional-commits rule)', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const { execFileSync } = require('child_process');
+  const { postCommitValidate } = require('../lib/mesh-harness');
+
+  const rules = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'harness-rules.json'), 'utf8'));
+  const command = rules.find(r => r.id === 'git-conventional-commits').mesh_validate_command;
+
+  function repoWithSubject(subject) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-harness-postcommit-'));
+    const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.invalid');
+    git('config', 'user.name', 'test');
+    git('commit', '-q', '--allow-empty', '-m', subject);
+    return dir;
+  }
+
+  for (const subject of ['mesh(T-1): work', 'fix(auth): correct token refresh', 'chore: bump deps']) {
+    it(`passes "${subject}"`, (t) => {
+      const dir = repoWithSubject(subject);
+      t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+      const result = postCommitValidate(dir, command);
+      assert.strictEqual(result.passed, true, result.output);
+    });
+  }
+
+  it('fails a non-conventional subject', (t) => {
+    const dir = repoWithSubject('bad message');
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const result = postCommitValidate(dir, command);
+    assert.strictEqual(result.passed, false);
+    assert.doesNotMatch(result.output, /blocked/);
+  });
+});
