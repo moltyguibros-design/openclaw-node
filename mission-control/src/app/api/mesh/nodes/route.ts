@@ -6,10 +6,13 @@ import { tasks } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { withTrace } from "@/lib/tracer";
 import { NODE_ID, NODE_PLATFORM, NODE_ROLE } from "@/lib/config";
-import { execSync } from "child_process";
+import { exec } from "child_process";
+import { promisify } from "util";
 import os from "os";
 import path from "path";
 import fs from "fs";
+
+const execAsync = promisify(exec);
 
 export const dynamic = "force-dynamic";
 
@@ -160,7 +163,7 @@ async function discoverNodes(kv: KV | null): Promise<string[]> {
 
   // Source 2: Tailscale peers
   try {
-    const raw = execSafe("tailscale status --json");
+    const raw = await execSafe("tailscale status --json");
     if (raw) {
       const status = JSON.parse(raw);
       // Add self
@@ -222,17 +225,17 @@ async function discoverNodes(kv: KV | null): Promise<string[]> {
 // When NATS is down, gather local system info directly so the THIS node
 // still shows real data instead of "offline".
 
-function execSafe(cmd: string): string {
-  try { return execSync(cmd, { timeout: 5000, encoding: "utf-8" }).trim(); } catch { return ""; }
+async function execSafe(cmd: string): Promise<string> {
+  try { return (await execAsync(cmd, { timeout: 5000 })).stdout.trim(); } catch { return ""; }
 }
 
-function gatherLocalHealth(): NodeHealth {
+async function gatherLocalHealth(): Promise<NodeHealth> {
   const mem = { total: Math.round(os.totalmem() / 1024 / 1024), free: Math.round(os.freemem() / 1024 / 1024) };
   const cpuLoad = Math.round((os.loadavg()[0] / os.cpus().length) * 100);
 
   let diskPercent = 0;
   try {
-    const df = execSafe("df -h /");
+    const df = await execSafe("df -h /");
     const match = df.match(/(\d+)%/);
     if (match) diskPercent = parseInt(match[1], 10);
   } catch (err) { console.warn(`[mesh/nodes] disk usage check failed: ${(err as Error).message}`); }
@@ -256,8 +259,8 @@ function gatherLocalHealth(): NodeHealth {
     dnsName: string;
   } | null = null;
   try {
-    tailscaleIp = execSafe("tailscale ip -4") || "unknown";
-    const raw = execSafe("tailscale status --json");
+    tailscaleIp = (await execSafe("tailscale ip -4")) || "unknown";
+    const raw = await execSafe("tailscale status --json");
     if (raw) {
       const status = JSON.parse(raw);
       const peers: LocalTailscalePeer[] = [];
@@ -288,7 +291,7 @@ function gatherLocalHealth(): NodeHealth {
   const services: Array<{ name: string; status: string; pid?: number }> = [];
   if (process.platform === "darwin") {
     try {
-      const raw = execSafe("launchctl list");
+      const raw = await execSafe("launchctl list");
       for (const line of raw.split("\n")) {
         if (!line.includes("openclaw")) continue;
         const parts = line.split("\t");
@@ -356,7 +359,7 @@ function gatherLocalHealth(): NodeHealth {
     stats: { tasksToday: 0, successRate: 1.0, tokenSpendTodayUsd: 0 },
     tailscale: tailscaleData,
     nats: { serverUrl: natsUrl, connected: false, serverVersion: "unknown", isHost: false },
-    deployVersion: execSafe("cd ~/openclaw && git rev-parse --short HEAD 2>/dev/null") || "unknown",
+    deployVersion: (await execSafe("cd ~/openclaw && git rev-parse --short HEAD 2>/dev/null")) || "unknown",
     reportedAt: new Date().toISOString(),
     // Local fallback blob drifts from the mesh NodeHealth contract
     // (peer field names, extra dnsName/agent.name) — cast, don't reshape.
@@ -422,7 +425,7 @@ export const GET = withTrace("mesh", "GET /api/mesh/nodes", async () => {
     const isLocal = nn === localNormalized || nn.startsWith(localNormalized) || localNormalized.startsWith(nn);
     const localCacheAge = nodeCache.has(nodeId) ? (now - nodeCache.get(nodeId)!.fetchedAt) / 1000 : Infinity;
     if (isLocal && (!health || localCacheAge > 30)) {
-      health = gatherLocalHealth();
+      health = await gatherLocalHealth();
       nodeCache.set(nodeId, { health, fetchedAt: now });
     }
 
