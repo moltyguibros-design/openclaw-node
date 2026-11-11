@@ -1322,8 +1322,9 @@ async function evaluateCooperativeRound(sessionId, session, currentRound) {
       outcome: 'cooperative_rounds_done', rounds: coop.integrations.length, integrators: coop.integrator_order,
     });
     publishCollabEvent('completed', done);
-    await store.markCompleted(session.task_id, done.result);
+    const settled = await store.markCompleted(session.task_id, done.result);
     publishEvent('completed', await store.get(session.task_id));
+    if (settled) await checkPlanProgress(session.task_id, 'completed');
     return;
   }
 
@@ -1344,8 +1345,9 @@ async function evaluateCooperativeRound(sessionId, session, currentRound) {
     log(`COOPERATIVE ABORT ${sessionId}: no alive integrator candidates remain (order: ${order.join(' → ')})`);
     await collabStore.markAborted(sessionId, 'No alive integrator candidates remain');
     publishCollabEvent('aborted', await collabStore.get(sessionId));
-    await store.markFailed(session.task_id, 'Cooperative session lost all integrator candidates');
+    const settled = await store.markFailed(session.task_id, 'Cooperative session lost all integrator candidates');
     publishEvent('failed', await store.get(session.task_id));
+    if (settled) await checkPlanProgress(session.task_id, 'failed');
     return;
   }
   // CAS, not a blind put: this session object predates the audit appends above —
@@ -1414,8 +1416,9 @@ async function evaluateCollaborativeRound(sessionId, session, currentRound) {
     });
     await collabStore.markAborted(sessionId, `Merge gate failed: ${gateFailure}`);
     publishCollabEvent('aborted', await collabStore.get(sessionId));
-    await store.markFailed(session.task_id, `Collaborative merge gate failed: ${gateFailure}`);
+    const settled = await store.markFailed(session.task_id, `Collaborative merge gate failed: ${gateFailure}`);
     publishEvent('failed', await store.get(session.task_id));
+    if (settled) await checkPlanProgress(session.task_id, 'failed');
     return;
   }
 
@@ -1442,8 +1445,9 @@ async function evaluateCollaborativeRound(sessionId, session, currentRound) {
   const done = await collabStore.get(sessionId);
   await collabStore.appendAudit(sessionId, 'session_completed', { outcome: 'collaborative_merged', merger: collab.merger_node_id });
   publishCollabEvent('completed', done);
-  await store.markCompleted(session.task_id, done.result);
+  const settled = await store.markCompleted(session.task_id, done.result);
   publishEvent('completed', await store.get(session.task_id));
+  if (settled) await checkPlanProgress(session.task_id, 'completed');
 }
 
 /**
@@ -1529,7 +1533,8 @@ async function startCollabRound(sessionId) {
         recruited: session.recruited_count,
       });
       publishCollabEvent('aborted', session);
-      await store.markFailed(session.task_id, `Collab aborted: too few active nodes (${session.nodes.length} < ${session.min_nodes})`);
+      const settled = await store.markFailed(session.task_id, `Collab aborted: too few active nodes (${session.nodes.length} < ${session.min_nodes})`);
+      if (settled) await checkPlanProgress(session.task_id, 'failed');
     }
     return;
   }
@@ -1704,9 +1709,10 @@ async function evaluateRound(sessionId) {
 
     // Complete the parent task
     const completedSession = await collabStore.get(sessionId);
-    await store.markCompleted(freshSession.task_id, completedSession.result);
+    const settled = await store.markCompleted(freshSession.task_id, completedSession.result);
     publishEvent('completed', await store.get(freshSession.task_id));
     publishCollabEvent('completed', completedSession);
+    if (settled) await checkPlanProgress(freshSession.task_id, 'completed');
 
   } else if (maxReached) {
     log(`COLLAB MAX ROUNDS ${sessionId}: ${session.current_round}/${session.max_rounds}. Completing with current artifacts.`);
@@ -1733,12 +1739,13 @@ async function evaluateRound(sessionId) {
 
     // Complete parent task (flagged for review since not truly converged)
     const updatedSession = await collabStore.get(sessionId);
-    await store.markCompleted(session.task_id, {
+    const settled = await store.markCompleted(session.task_id, {
       ...updatedSession.result,
       max_rounds_reached: true,
     });
     publishEvent('completed', await store.get(session.task_id));
     publishCollabEvent('completed', updatedSession);
+    if (settled) await checkPlanProgress(session.task_id, 'completed');
 
   } else {
     // Not converged, not maxed out → next round
@@ -1877,7 +1884,8 @@ async function handleCirclingStepTimeout(sessionId, stepSnapshot) {
     log(`CIRCLING STEP TIMEOUT: ${sessionId} — no active nodes remain. Aborting.`);
     await collabStore.markAborted(sessionId, `All nodes timed out at ${phase}/SR${current_subround}/Step${current_step}`);
     publishCollabEvent('aborted', await collabStore.get(sessionId));
-    await store.markReleased(session.task_id, `Circling session aborted: all nodes timed out`);
+    const settled = await store.markReleased(session.task_id, `Circling session aborted: all nodes timed out`);
+    if (settled) await checkPlanProgress(session.task_id, 'failed');
   }
 }
 
@@ -1941,9 +1949,10 @@ async function completeCirclingSession(sessionId) {
 
   // Complete parent task
   const completedSession = await collabStore.get(sessionId);
-  await store.markCompleted(session.task_id, completedSession.result);
+  const settled = await store.markCompleted(session.task_id, completedSession.result);
   publishEvent('completed', await store.get(session.task_id));
   publishCollabEvent('completed', completedSession);
+  if (settled) await checkPlanProgress(session.task_id, 'completed');
 }
 
 /**
@@ -1980,9 +1989,10 @@ async function handleCirclingGateApprove(msg) {
       circling_final_artifact: finalArtifact,
     });
     const completedSession = await collabStore.get(session_id);
-    await store.markCompleted(session.task_id, completedSession.result);
+    const settled = await store.markCompleted(session.task_id, completedSession.result);
     publishEvent('completed', await store.get(session.task_id));
     publishCollabEvent('completed', completedSession);
+    if (settled) await checkPlanProgress(session.task_id, 'completed');
   } else {
     // Mid-protocol gate (tier 3) — resume next step
     await startCirclingStep(session_id);
@@ -2053,7 +2063,8 @@ async function startRecruitedSession(session_id) {
     log(`COLLAB RECRUIT FAILED ${session.session_id}: only ${session.nodes.length}/${session.min_nodes} nodes. Aborting.`);
     await collabStore.markAborted(session.session_id, `Not enough nodes: ${session.nodes.length} < ${session.min_nodes}`);
     publishCollabEvent('aborted', await collabStore.get(session.session_id));
-    await store.markReleased(session.task_id, `Collab session failed to recruit: ${session.nodes.length}/${session.min_nodes} nodes`);
+    const settled = await store.markReleased(session.task_id, `Collab session failed to recruit: ${session.nodes.length}/${session.min_nodes} nodes`);
+    if (settled) await checkPlanProgress(session.task_id, 'failed');
     return true;
   }
 
@@ -2076,7 +2087,8 @@ async function startRecruitedSession(session_id) {
       log(`COLLAB RECRUIT FAILED ${session.session_id}: circling requires 1 worker + 2 reviewers, got ${session.nodes.length} nodes (worker: ${hasWorker}, reviewers: ${reviewerCount}). Aborting.`);
       await collabStore.markAborted(session.session_id, `Circling requires 1 worker + 2 reviewers; got ${session.nodes.length} nodes`);
       publishCollabEvent('aborted', await collabStore.get(session.session_id));
-      await store.markReleased(session.task_id, `Circling session failed: insufficient role distribution`);
+      const settled = await store.markReleased(session.task_id, `Circling session failed: insufficient role distribution`);
+      if (settled) await checkPlanProgress(session.task_id, 'failed');
       return true;
     }
     // Assign all role IDs if not yet assigned
@@ -2116,7 +2128,8 @@ async function startRecruitedSession(session_id) {
     log(`COLLAB RECRUIT FAILED ${session.session_id}: mode '${session.mode}' has no daemon protocol yet. Aborting (not silently downgrading to parallel).`);
     await collabStore.markAborted(session.session_id, `Mode '${session.mode}' not yet implemented`);
     publishCollabEvent('aborted', await collabStore.get(session.session_id));
-    await store.markReleased(session.task_id, `Collab mode '${session.mode}' not yet implemented`);
+    const settled = await store.markReleased(session.task_id, `Collab mode '${session.mode}' not yet implemented`);
+    if (settled) await checkPlanProgress(session.task_id, 'failed');
   }
   return true;
 }
@@ -2199,8 +2212,9 @@ async function sweepCollabRoundTimeouts() {
         log(`COLLAB ROUND TIMEOUT ${session.session_id}: only ${alive}/${fresh.min_nodes} members alive — aborting`);
         await collabStore.markAborted(session.session_id, `Round ${fresh.current_round} timed out; ${alive}/${fresh.min_nodes} members alive`);
         publishCollabEvent('aborted', await collabStore.get(session.session_id));
-        await store.markFailed(fresh.task_id, `Collab round timed out with too few members (${alive}/${fresh.min_nodes})`);
+        const settled = await store.markFailed(fresh.task_id, `Collab round timed out with too few members (${alive}/${fresh.min_nodes})`);
         publishEvent('failed', await store.get(fresh.task_id));
+        if (settled) await checkPlanProgress(fresh.task_id, 'failed');
       } else {
         // Evaluate with the quorum that DID reflect — the claim in evaluateRound
         // keeps this single-fire even if a straggler reflection races the sweep.
@@ -2507,7 +2521,9 @@ async function updatePlanSubtaskStatus(taskId, newStatus) {
 
 /**
  * When a mesh task completes, check if it belongs to a plan and update accordingly.
- * Called after handleComplete/handleFail and from detectStalls/enforceBudgets.
+ * Called after handleComplete/handleFail, from detectStalls/enforceBudgets, and
+ * after every daemon-driven terminal transition of a collab parent task (those
+ * never pass through handleComplete/handleFail).
  */
 async function checkPlanProgress(taskId, status) {
   let plan = null;

@@ -87,6 +87,11 @@ async function whatAStrangerSees(h, taskId) {
   return [got.lease_token, listed.lease_token, ...broadcast];
 }
 
+async function planState(h, planId) {
+  const plan = await h.planStore.get(planId);
+  return { status: plan.status, subtasks: plan.subtasks.map((s) => `${s.subtask_id}:${s.status}`) };
+}
+
 describe('F1/R1: the lease token reaches only the claimer', () => {
   it('the claim reply carries it — the worker fences every later call with it', async () => {
     const h = harness();
@@ -203,11 +208,6 @@ describe('F1: a forged submit cannot touch a plan', () => {
     return created.data.plan_id;
   }
 
-  async function planState(h, planId) {
-    const plan = await h.planStore.get(planId);
-    return { status: plan.status, subtasks: plan.subtasks.map((s) => `${s.subtask_id}:${s.status}`) };
-  }
-
   it('the plan fixture is live: executing, P-S1 queued, P-S2 pending', async () => {
     const h = harness();
     const planId = await approvedPlan(h);
@@ -312,4 +312,68 @@ describe('handleClaim: one live task per node', () => {
       assert.equal((await h.store.get('T-2')).status, 'queued');
     });
   }
+});
+
+describe('a collab_mesh plan subtask moves its plan when its session ends it', () => {
+  /** An approved plan whose only subtask P-C1 is dispatched as a collab task; returns its ids. */
+  async function collabPlan(h) {
+    assert.equal((await h.rpc('handleSubmit', { task_id: 'PARENT', title: 'parent' })).ok, true);
+    assert.equal((await h.rpc('handleClaim', { node_id: 'planner' })).data.task_id, 'PARENT');
+    const created = await h.rpc('handlePlanCreate', {
+      parent_task_id: 'PARENT', title: 'plan', failure_policy: 'abort_on_first_fail',
+      subtasks: [{
+        subtask_id: 'P-C1', title: 'c1', metric: 'npm test',
+        delegation: {
+          mode: 'collab_mesh',
+          collaboration: { mode: 'parallel', min_nodes: 2, max_nodes: 3, join_window_s: 30, max_rounds: 1, convergence: { type: 'majority' } },
+        },
+      }],
+    });
+    assert.equal(created.ok, true, created.error);
+    const planId = created.data.plan_id;
+    const approved = await h.rpc('handlePlanApprove', signOperatorRequest({ plan_id: planId }, { identity: operator, nodeId: 'operator' }));
+    assert.equal(approved.ok, true, approved.error);
+    const sid = (await h.store.get('P-C1')).collab_session_id;
+    assert.ok(sid, 'the subtask was dispatched with a collab session');
+    assert.deepEqual(await planState(h, planId), { status: 'executing', subtasks: ['P-C1:queued'] });
+    return { planId, sid };
+  }
+
+  const closeRecruiting = (h, sid) => h.collabStore._updateWithCAS(sid, (s) => ({ ...s, recruiting_deadline: new Date(0).toISOString() }));
+
+  it('a session that fails to recruit releases the task and fails the subtask', async () => {
+    const h = harness();
+    const { planId, sid } = await collabPlan(h);
+    await closeRecruiting(h, sid);
+    assert.equal(await daemon.__test.startRecruitedSession(sid), true);
+    assert.equal((await h.store.get('P-C1')).status, 'released');
+    assert.deepEqual(await planState(h, planId), { status: 'aborted', subtasks: ['P-C1:failed'] });
+  });
+
+  it('a session that loses members before round 1 fails the task and the subtask', async () => {
+    const h = harness();
+    const { planId, sid } = await collabPlan(h);
+    await h.collabStore.addNode(sid, 'a');
+    await h.collabStore.addNode(sid, 'b');
+    await h.collabStore.setNodeStatus(sid, 'b', 'dead');
+    await closeRecruiting(h, sid);
+    assert.equal(await daemon.__test.startRecruitedSession(sid), true);
+    assert.equal((await h.store.get('P-C1')).status, 'failed');
+    assert.deepEqual(await planState(h, planId), { status: 'aborted', subtasks: ['P-C1:failed'] });
+  });
+
+  it('a converged session completes the task, the subtask and the plan', async () => {
+    const h = harness();
+    const { planId, sid } = await collabPlan(h);
+    await h.collabStore.addNode(sid, 'a');
+    await h.collabStore.addNode(sid, 'b');
+    await h.collabStore.startRound(sid);
+    for (const node_id of ['a', 'b']) {
+      assert.ok(await h.collabStore.submitReflection(sid, { node_id, summary: 'done', vote: 'converged', confidence: 0.9 }));
+    }
+    await daemon.__test.evaluateRound(sid);
+    assert.equal((await h.store.get('P-C1')).status, 'completed');
+    assert.deepEqual(await planState(h, planId), { status: 'completed', subtasks: ['P-C1:completed'] });
+    assert.equal((await h.store.get('PARENT')).status, 'completed', 'the finished plan closes its parent task');
+  });
 });
