@@ -4,10 +4,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { readFile } from 'node:fs/promises';
+import Database from 'better-sqlite3';
 import {
   sampleLayers, appendSample, scanMemoryActivity, extractActivity,
   readTimeline, readActivity, GAP_THRESHOLD_MS, WORKING_WINDOW_MS, CORE_SERVICES,
-  coreServiceRoster, coreServices,
+  coreServiceRoster, coreServices, readLastExtraction,
 } from '../lib/observer.mjs';
 import { cliSummaryLines, stampLine } from '../bin/consolidation-scheduler.mjs';
 
@@ -42,6 +43,36 @@ describe('sampleLayers', () => {
     const s = sampleLayers({ now, boot: 1, daemonStatePath: dsPath, roster: { up: [], down: CORE_SERVICES }, lastExtraction: null });
     assert.equal(s.interaction.active, false, 'idle past the window => not active even if state says ACTIVE');
     assert.equal(s.memory.working, false);
+  });
+});
+
+describe('readLastExtraction', () => {
+  // Stands in for the sqlite3 CLI: prints the scalar, or exits non-zero on an SQL error.
+  const sqliteCli = (cmd, [flag, dbPath, sql]) => {
+    assert.equal(cmd, 'sqlite3');
+    assert.equal(flag, '-readonly');
+    const db = new Database(dbPath, { readonly: true });
+    try { return `${db.prepare(sql).pluck().get() ?? ''}\n`; } finally { db.close(); }
+  };
+
+  it('reads the last extraction run, not the first sighting of a re-seen mention', () => {
+    const dbPath = path.join(tmp, 'state.db');
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE mentions (entity_id INTEGER, session_id TEXT, created_at TEXT NOT NULL);
+      CREATE TABLE extraction_state (session_id TEXT PRIMARY KEY, content_hash TEXT NOT NULL, message_count INTEGER, extracted_at TEXT NOT NULL);
+      INSERT INTO mentions VALUES (1, 's1', '2026-07-04T00:00:00.000Z');
+      INSERT INTO extraction_state VALUES ('s1', 'h', 40, '2026-07-04T09:00:00.000Z');`);
+    db.close();
+    assert.equal(readLastExtraction(dbPath, sqliteCli), '2026-07-04T09:00:00.000Z');
+  });
+
+  it('falls back to mentions when the store has no extraction_state table', () => {
+    const dbPath = path.join(tmp, 'old.db');
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE mentions (entity_id INTEGER, session_id TEXT, created_at TEXT NOT NULL);
+      INSERT INTO mentions VALUES (1, 's1', '2026-07-04T00:00:00.000Z');`);
+    db.close();
+    assert.equal(readLastExtraction(dbPath, sqliteCli), '2026-07-04T00:00:00.000Z');
   });
 });
 
