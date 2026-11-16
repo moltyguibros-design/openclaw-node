@@ -681,3 +681,65 @@ describe('workspace agent docs come from identity/, as install.sh installs them'
     assert.ok(!fs.existsSync(fx.rt('.openclaw/identity')), 'identity docs were copied into a directory nothing reads');
   });
 });
+
+describe('a deploy updates the workspace runtime the memory daemon and node-watch run from', () => {
+  const UNITS = 'openclaw-memory-daemon openclaw-node-watch';
+  let fx, S1, S2;
+  const ws = rel => fx.rt(path.join('.openclaw/workspace', rel));
+  before(() => {
+    fx = makeNode('workspace-runtime', {
+      'lib/memory-store.mjs': '// v0\n',
+      'workspace-bin/session-recap': '#!/bin/sh\n# v0\n',
+      'workspace-bin/archive-transcripts.sh': '# timer v0\n',
+      'bin/node-watch.mjs': '// v0\n',
+      'bin/observer.mjs': '// timer v0\n',
+    });
+  });
+
+  it('lib/ reaches the workspace lib, and the daemons that import it restart', () => {
+    S1 = fx.commit('v1: lib', { 'lib/memory-store.mjs': '// v1\n' });
+    const run = fx.deploy(['--from', fx.S0, '--to', S1], { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: UNITS });
+    ranOk(run);
+    assert.equal(read(ws('lib/memory-store.mjs')), '// v1\n');
+    assert.equal(read(fx.rt('openclaw/lib/memory-store.mjs')), '// v1\n');
+    for (const svc of ['openclaw-memory-daemon', 'openclaw-node-watch']) {
+      assert.ok(resultOf(run).restarted.includes(svc), `${svc} kept the old lib: ${run.stdout}`);
+    }
+  });
+
+  it('workspace scripts reach the workspace bin; the timer cohort is never rewritten', () => {
+    fs.rmSync(fx.callLog, { force: true });
+    S2 = fx.commit('v2: scripts', {
+      'workspace-bin/session-recap': '#!/bin/sh\n# v2\n',
+      'workspace-bin/archive-transcripts.sh': '# timer v2\n',
+      'bin/node-watch.mjs': '// v2\n',
+      'bin/observer.mjs': '// timer v2\n',
+    });
+    write(fx.home, '.openclaw/workspace/bin/observer.mjs', '// fenced by the timer handoff\n');
+    const run = fx.deploy(['--from', S1, '--to', S2], { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: UNITS });
+    ranOk(run);
+    assert.equal(read(ws('bin/session-recap')), '#!/bin/sh\n# v2\n');
+    assert.equal(read(ws('bin/node-watch.mjs')), '// v2\n');
+    assert.equal(read(ws('bin/observer.mjs')), '// fenced by the timer handoff\n');
+    assert.ok(!fs.existsSync(ws('bin/archive-transcripts.sh')));
+    assert.ok(resultOf(run).restarted.includes('openclaw-node-watch'), run.stdout);
+  });
+
+  it('refuses to write through a workspace lib symlinked outside the checkout', () => {
+    const elsewhere = path.join(path.dirname(fx.home), 'elsewhere-lib');
+    fs.mkdirSync(elsewhere, { recursive: true });
+    fs.rmSync(ws('lib'), { recursive: true, force: true });
+    fs.symlinkSync(elsewhere, ws('lib'));
+    const S3 = fx.commit('v3: lib', { 'lib/memory-store.mjs': '// v3\n' });
+    const run = fx.deploy(['--from', S2, '--to', S3], { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: UNITS });
+    assert.equal(run.status, 1, run.stdout);
+    assert.match(run.stdout, /DEPLOY_ERROR .*refusing to write through symlinked/);
+    assert.deepEqual(fs.readdirSync(elsewhere), []);
+
+    // Linked to the checkout itself: the checkout already is the runtime.
+    fs.rmSync(ws('lib'));
+    fs.symlinkSync(path.join(fx.node, 'lib'), ws('lib'));
+    ranOk(fx.deploy(['--from', S2, '--to', S3], { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: UNITS }));
+    assert.equal(git(fx.node, 'status', '--porcelain'), '', 'the deploy wrote into the checkout');
+  });
+});

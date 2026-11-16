@@ -86,6 +86,7 @@ const DIRS = {
   OPENCLAW_HOME:    path.join(HOME, '.openclaw'),
   WORKSPACE:        path.join(HOME, '.openclaw', 'workspace'),
   WORKSPACE_BIN:    path.join(HOME, '.openclaw', 'workspace', 'bin'),
+  WORKSPACE_LIB:    path.join(HOME, '.openclaw', 'workspace', 'lib'),
   CLI_BIN:          path.join(HOME, 'openclaw', 'bin'),
   CLI_LIB:          path.join(HOME, 'openclaw', 'lib'),
   MC_PROJECT:       path.join(HOME, '.openclaw', 'workspace', 'projects', 'mission-control'),
@@ -295,13 +296,18 @@ const MANIFEST = [
     description: 'nats-resolve.js, agent-activity.js, kanban-io.js, mesh-registry.js, mesh-tasks.js',
     risk: 'safe',
     repoPaths: ['lib/'],
-    targets: [DIRS.CLI_LIB],
-    // Every daemon that runs from the checkout and loads ../lib at runtime.
+    // The workspace daemons (memory daemon, node-watch) import their own
+    // ../lib under the workspace, which install.sh copies from lib/ too.
+    targets: [DIRS.CLI_LIB, DIRS.WORKSPACE_LIB],
+    guardedTargets: [DIRS.WORKSPACE_LIB],
+    // Every daemon that loads one of those lib trees at runtime.
     servicesMac: ['ai.openclaw.mesh-task-daemon', 'ai.openclaw.mesh-bridge',
                   'ai.openclaw.mesh-agent', 'ai.openclaw.mesh-health-publisher',
-                  'ai.openclaw.mesh-tool-discord'],
+                  'ai.openclaw.mesh-tool-discord', 'ai.openclaw.memory-daemon',
+                  'ai.openclaw.node-watch'],
     servicesLinux: ['openclaw-mesh-task-daemon', 'openclaw-mesh-bridge', 'openclaw-mesh-agent',
-                    'openclaw-mesh-health-publisher', 'openclaw-mesh-tool-discord'],
+                    'openclaw-mesh-health-publisher', 'openclaw-mesh-tool-discord',
+                    'openclaw-memory-daemon', 'openclaw-node-watch'],
     restartsListener: true,
     nodeFilter: 'all',
   },
@@ -351,6 +357,32 @@ const MANIFEST = [
     servicesMac: ['ai.openclaw.memory-daemon'],
     servicesLinux: ['openclaw-memory-daemon'],
     nodeFilter: 'lead',
+  },
+
+  {
+    id: 'workspace-bin',
+    name: 'Workspace Scripts',
+    description: 'workspace-bin/ and the repo bin/ files install.sh copies into the workspace bin',
+    risk: 'safe',
+    // The set scripts/install/workspace.sh Step 3 installs.
+    repoPaths: ['workspace-bin/', ...['node-watch.mjs', 'node-acceptance.mjs', 'openclaw-notify.mjs',
+      'obsidian-graph-cache.mjs', 'observer.mjs', 'consolidation-scheduler.mjs', 'consolidate.mjs',
+      'hyperagent.mjs', 'embed-probe.mjs', 'scheduler-heartbeat.mjs', 'memory-subscriber.mjs',
+      'memory-promoter.mjs', 'nats-legacy-lock.py'].map(f => `bin/${f}`)],
+    exclude: [
+      // Owned by 'memory-daemon' and 'boot'.
+      'workspace-bin/memory-daemon.mjs', 'workspace-bin/memory-maintenance.mjs', 'workspace-bin/compile-boot',
+      'workspace-bin/routing-eval-tests.json',
+      // The timer cohort and its sources keep their reviewed handoff
+      // (workspace-bin/timer-hold-control.py TIMERS): a deploy never rewrites them.
+      'workspace-bin/archive-transcripts.sh', 'bin/scheduler-heartbeat.mjs',
+      'bin/consolidation-scheduler.mjs', 'bin/consolidate.mjs', 'bin/observer.mjs',
+    ],
+    targets: [DIRS.WORKSPACE_BIN],
+    guardedTargets: [DIRS.WORKSPACE_BIN],
+    servicesMac: ['ai.openclaw.memory-daemon', 'ai.openclaw.node-watch'],
+    servicesLinux: ['openclaw-memory-daemon', 'openclaw-node-watch'],
+    nodeFilter: 'all',
   },
 
   {
@@ -794,6 +826,29 @@ function planComponents(changes, { filterIds = [], force = false, listAll }) {
 }
 
 /**
+ * The targets a component may write. A guarded target (the workspace lib and
+ * bin) that is a symlink is never written through: one that resolves to the
+ * component's own checkout dir already is the deployed tree and is skipped;
+ * any other is refused, since writing through it changes a tree this deploy
+ * does not own.
+ */
+function writableTargets(comp, repoDir) {
+  return comp.targets.filter(target => {
+    if (!(comp.guardedTargets || []).includes(target)) return true;
+    let link;
+    try { link = fs.lstatSync(target).isSymbolicLink(); } catch { return true; }
+    if (!link) return true;
+    const own = comp.repoPaths.length === 1 && comp.repoPaths[0].endsWith('/')
+      ? path.join(repoDir, comp.repoPaths[0]) : null;
+    if (own && fs.existsSync(own) && fs.realpathSync(target) === fs.realpathSync(own)) {
+      skip(`  ${target} links to the checkout — nothing to copy`);
+      return false;
+    }
+    throw new Error(`refusing to write through symlinked ${target} (→ ${fs.realpathSync(target)})`);
+  });
+}
+
+/**
  * Copy a component's files from the checked-out tree to its targets.
  */
 function installFiles(comp, repoDir, files, dryRun) {
@@ -973,8 +1028,9 @@ function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false, includ
     if (comp.install) {
       comp.install(dryRun);
     } else {
-      installed = installFiles(comp, repoDir, install, dryRun);
-      removed = removeFiles(comp, repoDir, fromSha, remove, dryRun);
+      const writable = { ...comp, targets: writableTargets(comp, repoDir) };
+      installed = installFiles(writable, repoDir, install, dryRun);
+      removed = removeFiles(writable, repoDir, fromSha, remove, dryRun);
       if (!dryRun) ok(`    Installed ${installed}, removed ${removed} file(s)`);
     }
 
