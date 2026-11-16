@@ -321,8 +321,8 @@ hyperagent reflect [--force]               # trigger reflection
 hyperagent reflect --pending               # get pending synthesis (JSON)
 hyperagent reflect --write-synthesis --stdin   # atomically write synthesis + proposals
 hyperagent proposals                       # list proposals
-hyperagent approve <id>                    # approve (human gate)
-hyperagent reject <id> [reason]            # reject
+hyperagent approve <id> --reviewer <name>  # approve (human gate; records the named reviewer)
+hyperagent reject <id> --reviewer <name> [reason]  # reject
 hyperagent observe <id> [--window 60]      # start non-causal observation window
 hyperagent seed-strategy --stdin            # import strategy JSON safely via stdin
 ```

@@ -16,8 +16,8 @@
  *   hyperagent reflect [--force]
  *   hyperagent reflect --write-synthesis <json>
  *   hyperagent proposals
- *   hyperagent approve <id>
- *   hyperagent reject <id> [reason]
+ *   hyperagent approve <id> --reviewer <name>
+ *   hyperagent reject <id> --reviewer <name> [reason]
  *   hyperagent observe <id> [--window 60]
  */
 
@@ -368,23 +368,33 @@ function cmdProposals(store) {
   ]);
 }
 
+// reviewed_by is provenance, not authentication: it records the name the
+// reviewer gave, never an assumed 'human' (any agent or cron can run this CLI).
+function reviewerArgs(args, usage) {
+  const idx = args.indexOf('--reviewer');
+  const reviewer = idx === -1 ? null : args[idx + 1];
+  if (!reviewer || reviewer.startsWith('--')) die(`--reviewer <name> is required\nusage: ${usage}`);
+  const rest = args.filter((_, i) => i !== idx && i !== idx + 1);
+  const id = parseInt(rest[0]);
+  if (!id) die(`usage: ${usage}`);
+  return { id, reviewer, rest: rest.slice(1) };
+}
+
 function cmdApprove(store, args) {
-  const id = parseInt(args[0]);
-  if (!id) die('usage: hyperagent approve <id>');
+  const { id, reviewer } = reviewerArgs(args, 'hyperagent approve <id> --reviewer <name>');
 
-  const result = store.approveProposal(id, 'human');
+  const result = store.approveProposal(id, reviewer);
 
-  console.log(`approved: id=${result.id} type=${result.proposal_type} "${result.title}"`);
+  console.log(`approved: id=${result.id} type=${result.proposal_type} "${result.title}" by ${result.reviewed_by}`);
 }
 
 function cmdReject(store, args) {
-  const id = parseInt(args[0]);
-  if (!id) die('usage: hyperagent reject <id> [reason]');
+  const { id, reviewer, rest } = reviewerArgs(args, 'hyperagent reject <id> --reviewer <name> [reason]');
 
-  const reason = args.slice(1).join(' ') || null;
-  const result = store.rejectProposal(id, 'human', reason);
+  const reason = rest.join(' ') || null;
+  const result = store.rejectProposal(id, reviewer, reason);
 
-  console.log(`rejected: id=${result.id} "${result.title}"`);
+  console.log(`rejected: id=${result.id} "${result.title}" by ${result.reviewed_by}`);
 }
 
 function cmdObserve(store, args) {
@@ -420,8 +430,8 @@ commands:
   reflect --pending              get pending reflection for synthesis (JSON)
   reflect --write-synthesis <json|--stdin>  write LLM synthesis
   proposals                      list proposals
-  approve <id>                   approve proposal
-  reject <id> [reason]           reject proposal
+  approve <id> --reviewer <name>          approve proposal, recording the reviewer
+  reject <id> --reviewer <name> [reason]  reject proposal, recording the reviewer
   observe <id> [--window 60]     collect a non-causal observation window
 
 env:

@@ -79,9 +79,34 @@ describe('hyperagent CLI integration', () => {
     const proposals = run(['proposals']);
     const proposalId = Number(proposals.stdout.match(/^\s*(\d+)\s+pending/m)?.[1]);
     assert.ok(proposalId > 0, proposals.stdout);
-    const approved = run(['approve', String(proposalId)]);
+    // reviewed_by used to be stamped 'human' for whoever ran the CLI; the
+    // reviewer must now be named, and is recorded verbatim.
+    const unnamed = run(['approve', String(proposalId)]);
+    assert.notEqual(unnamed.status, 0);
+    assert.match(unnamed.stderr, /--reviewer <name> is required/);
+    assert.match(run(['proposals']).stdout, new RegExp(`^\\s*${proposalId}\\s+pending`, 'm'));
+
+    const approved = run(['approve', '--reviewer', 'alice', String(proposalId)]);
     assert.equal(approved.status, 0, approved.stderr);
+    assert.match(approved.stdout, /by alice$/m);
     assert.match(run(['consult', '--domain', 'integration']).stdout, /Keep integration tasks focused/);
+  });
+
+  it('reject records the named reviewer and keeps the reason', () => {
+    const require = createRequire(import.meta.url);
+    const Database = require('better-sqlite3');
+    const db = new Database(env.OPENCLAW_STATE_DB);
+    const { lastInsertRowid: id } = db.prepare(`INSERT INTO ha_proposals
+      (reflection_id, node_id, soul_id, title, description, proposal_type, diff_content)
+      VALUES ((SELECT max(id) FROM ha_reflections), 'integration-node', 'integration-soul', 'r', 'r',
+        'strategy_new', '{"domain":"x","content":"rejected content"}')`).run();
+    db.close();
+    assert.notEqual(run(['reject', String(id), 'not', 'useful']).status, 0);
+    const rejected = run(['reject', String(id), '--reviewer', 'bob', 'not', 'useful']);
+    assert.equal(rejected.status, 0, rejected.stderr);
+    const row = new Database(env.OPENCLAW_STATE_DB, { readonly: true })
+      .prepare('SELECT status, reviewed_by, review_reason FROM ha_proposals WHERE id = ?').get(id);
+    assert.deepEqual(row, { status: 'rejected', reviewed_by: 'bob', review_reason: 'not useful' });
   });
 });
 
