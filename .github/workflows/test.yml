@@ -106,6 +106,7 @@ jobs:
         env:
           OPENCLAW_NO_EMBED_MODEL: "1"
           OPENCLAW_REQUIRE_MESH: "1"
+          OPENCLAW_TEST_MESH: "1"
         # On failure, surface the failing `not ok` blocks into the tail of the
         # step log. node:test's TAP reporter prints failures inline (thousands
         # of lines up) and never recaps at the end, so a red run otherwise shows

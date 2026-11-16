@@ -149,5 +149,6 @@ describe('CI requires the mesh tier and fails on a dead daemon', () => {
     const next = yml.indexOf('- name:', start + 1);
     const block = yml.slice(start, next < 0 ? undefined : next);
     assert.match(block, /OPENCLAW_REQUIRE_MESH:\s*"1"/);
+    assert.match(block, /OPENCLAW_TEST_MESH:\s*"1"/, 'the mesh tier only runs when opted in');
   });
 });
