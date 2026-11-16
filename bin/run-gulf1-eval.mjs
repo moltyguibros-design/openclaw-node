@@ -15,7 +15,9 @@
 
 import { parseArgs } from 'node:util';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
+import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import {
   initDatabase,
   searchSessions,
@@ -23,6 +25,12 @@ import {
   hybridSearchSessions,
 } from '../lib/mcp-knowledge/core.mjs';
 import { DEFAULT_KNOWLEDGE_DB } from './embed-existing-sessions.mjs';
+
+// The query set lives in the closed plan's archive (read-only); results go
+// outside it, so a rerun never rewrites the append-only record.
+export const DEFAULT_QUERIES = fileURLToPath(new URL('../memory-plan/plans/legacy/eval/gulf1-queries.json', import.meta.url));
+export const DEFAULT_EVAL_OUT_DIR = join(homedir(), '.openclaw', 'eval');
+const DEFAULT_OUT = join(DEFAULT_EVAL_OUT_DIR, 'gulf1-results.md');
 
 // ─── Query Set Parsing ───────────────────────────────────────────────────────
 
@@ -250,9 +258,9 @@ const isMain = process.argv[1] && (
 if (isMain) {
   const { values: opts } = parseArgs({
     options: {
-      queries: { type: 'string', default: 'memory-plan/eval/gulf1-queries.json' },
+      queries: { type: 'string', default: DEFAULT_QUERIES },
       db: { type: 'string' },
-      out: { type: 'string', default: 'memory-plan/eval/gulf1-results.md' },
+      out: { type: 'string', default: DEFAULT_OUT },
       limit: { type: 'string', default: '5' },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -262,9 +270,9 @@ if (isMain) {
     process.stdout.write(`Usage: run-gulf1-eval [--queries path] [--db path] [--out path] [--limit N]
 
 Options:
-  --queries PATH   Path to query set JSON (default: memory-plan/eval/gulf1-queries.json)
+  --queries PATH   Path to query set JSON (default: ${DEFAULT_QUERIES})
   --db PATH        Path to knowledge database (default: $KNOWLEDGE_DB, else $KNOWLEDGE_ROOT/.knowledge.db, else ~/.openclaw/workspace/.knowledge.db)
-  --out PATH       Output markdown file (default: memory-plan/eval/gulf1-results.md)
+  --out PATH       Output markdown file (default: ${DEFAULT_OUT})
   --limit N        Top-N results per mode (default: 5)
   -h, --help       Show this help
 `);

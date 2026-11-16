@@ -13,9 +13,11 @@
 
 import { parseArgs } from 'node:util';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
-import { parseQuerySet } from './run-gulf1-eval.mjs';
+import { dirname, join } from 'node:path';
+import { parseQuerySet, DEFAULT_QUERIES, DEFAULT_EVAL_OUT_DIR } from './run-gulf1-eval.mjs';
 import { createRetrievalPipeline } from '../lib/retrieval-pipeline.mjs';
+
+const DEFAULT_OUT = join(DEFAULT_EVAL_OUT_DIR, 'tuning-results.md');
 
 // ─── Default Configurations ──────────────────────────────────────────────────
 
@@ -285,11 +287,11 @@ const isMain = process.argv[1] && (
 if (isMain) {
   const { values: opts } = parseArgs({
     options: {
-      queries: { type: 'string', default: 'memory-plan/eval/gulf1-queries.json' },
+      queries: { type: 'string', default: DEFAULT_QUERIES },
       db: { type: 'string' },
       'extraction-db': { type: 'string' },
       'graph-db': { type: 'string' },
-      out: { type: 'string', default: 'memory-plan/eval/tuning-results.md' },
+      out: { type: 'string', default: DEFAULT_OUT },
       limit: { type: 'string', default: '5' },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -299,11 +301,11 @@ if (isMain) {
     process.stdout.write(`Usage: run-tuning-harness [--queries path] [--db path] [--extraction-db path] [--graph-db path] [--out path] [--limit N]
 
 Options:
-  --queries PATH         Path to query set JSON (default: memory-plan/eval/gulf1-queries.json)
+  --queries PATH         Path to query set JSON (default: ${DEFAULT_QUERIES})
   --db PATH              Path to knowledge database (default: $KNOWLEDGE_DB, else $KNOWLEDGE_ROOT/.knowledge.db, else ~/.openclaw/workspace/.knowledge.db)
   --extraction-db PATH   Path to extraction store database (default: auto-detect)
   --graph-db PATH        Path to graph cache database (default: auto-detect)
-  --out PATH             Output markdown file (default: memory-plan/eval/tuning-results.md)
+  --out PATH             Output markdown file (default: ${DEFAULT_OUT})
   --limit N              Top-K results per query per config (default: 5)
   -h, --help             Show this help
 `);
