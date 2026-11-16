@@ -1235,13 +1235,16 @@ function isAllowedMetric(cmd) {
  * Run the task's metric command. Returns { passed, output }.
  */
 function evaluateMetric(metric, cwd) {
-  if (!isAllowedMetric(metric)) {
-    log(`WARNING: Metric command blocked by security filter: ${metric}`);
-    return Promise.resolve({ passed: false, output: 'Metric command blocked by security filter' });
+  const dir = cwd || WORKSPACE;
+  const check = validateMetricCommand(metric, { cwd: dir });
+  if (!check.allowed) {
+    log(`WARNING: Metric command blocked by security filter: ${metric} (${check.reason})`);
+    return Promise.resolve({ passed: false, output: `Metric command blocked by security filter: ${check.reason}` });
   }
   return new Promise((resolve) => {
-    const child = spawn('bash', ['-c', metric], {
-      cwd: cwd || WORKSPACE,
+    const [program, ...args] = check.argv;
+    const child = spawn(program, args, {
+      cwd: dir,
       env: process.env,
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 60000, // 60s max for metric evaluation
@@ -2801,5 +2804,6 @@ module.exports.__test = {
   onRecruit, checkRecruitingSessions,
   claimAndRun,
   runLLM,
+  evaluateMetric,
 };
 // deploy-v7f0130b
