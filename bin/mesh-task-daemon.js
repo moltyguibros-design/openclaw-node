@@ -2535,32 +2535,61 @@ async function handlePlanSubtaskUpdate(msg) {
  * Check if next wave subtasks are ready and dispatch them.
  */
 async function advancePlanWave(planId) {
-  const plan = await planStore.get(planId);
-  if (!plan || plan.status !== PLAN_STATUS.EXECUTING) return;
-
-  // Check if plan is fully done
-  if (planStore.isPlanComplete(plan)) {
-    await planStore.markCompleted(planId);
-    const completedPlan = await planStore.get(planId);
-    log(`PLAN COMPLETED ${planId}: all ${plan.subtasks.length} subtasks done`);
+  // Plan handlers and the sweep timers run concurrently, so every plan write
+  // below is a compare-and-swap on a fresh read; a blind put of a stale copy
+  // undid a sibling subtask's completion. The completion CAS re-checks
+  // completeness, so only one caller completes the plan and its parent.
+  const completedPlan = await planStore._updateWithCAS(planId, (p) => {
+    if (p.status !== PLAN_STATUS.EXECUTING || !planStore.isPlanComplete(p)) return null;
+    p.status = PLAN_STATUS.COMPLETED;
+    p.completed_at = new Date().toISOString();
+    return p;
+  });
+  if (completedPlan) {
+    log(`PLAN COMPLETED ${planId}: all ${completedPlan.subtasks.length} subtasks done`);
     publishPlanEvent('completed', completedPlan);
 
     // Mark parent task as waiting-user (Gui reviews)
-    const parentTask = await store.get(plan.parent_task_id);
+    const parentTask = await store.get(completedPlan.parent_task_id);
     if (parentTask && parentTask.status !== TASK_STATUS.COMPLETED) {
-      await store.markCompleted(plan.parent_task_id, {
-        success: !planStore.hasFailures(plan),
-        summary: `Plan ${planId} completed (${plan.subtasks.length} subtasks)`,
+      await store.markCompleted(completedPlan.parent_task_id, {
+        success: !planStore.hasFailures(completedPlan),
+        summary: `Plan ${planId} completed (${completedPlan.subtasks.length} subtasks)`,
         plan_id: planId,
       });
-      publishEvent('completed', await store.get(plan.parent_task_id));
+      publishEvent('completed', await store.get(completedPlan.parent_task_id));
     }
     return;
   }
 
-  // Get next wave subtasks
-  const ready = planStore.getNextWaveSubtasks(plan);
-  if (ready.length === 0) return;
+  // Claim the ready subtasks in one CAS before dispatching anything: their
+  // plan-side fields are known up front (a mesh task's id is its subtask id),
+  // and a second caller then finds them no longer pending instead of
+  // dispatching them again.
+  let ready = [];
+  const plan = await planStore._updateWithCAS(planId, (p) => {
+    ready = planStore.getNextWaveSubtasks(p);
+    if (ready.length === 0) return null;
+    for (const st of ready) {
+      st.status = SUBTASK_STATUS.QUEUED;
+      switch (st.delegation.mode) {
+        case 'solo_mesh':
+        case 'collab_mesh':
+          st.mesh_task_id = st.subtask_id;
+          break;
+        case 'local':
+        case 'soul':
+          st.kanban_task_id = st.subtask_id;
+          break;
+        case 'human':
+          st.status = SUBTASK_STATUS.BLOCKED;
+          st.kanban_task_id = st.subtask_id;
+          break;
+      }
+    }
+    return p;
+  });
+  if (!plan) return;
 
   const waveNum = ready[0].wave;
   log(`PLAN WAVE ${planId} W${waveNum}: dispatching ${ready.length} subtasks`);
@@ -2579,8 +2608,6 @@ async function advancePlanWave(planId) {
   }
 
   for (const st of ready) {
-    st.status = SUBTASK_STATUS.QUEUED;
-
     // Dispatch based on delegation mode
     switch (st.delegation.mode) {
       case 'solo_mesh':
@@ -2608,7 +2635,6 @@ async function advancePlanWave(planId) {
         });
         if (subtaskRole) log(`  → AUTO-ROLE ${st.subtask_id}: ${subtaskRole} (matched from scope)`);
         await store.put(meshTask);
-        st.mesh_task_id = meshTask.task_id;
         publishEvent('submitted', meshTask);
 
         // Auto-create collab session if needed
@@ -2642,21 +2668,16 @@ async function advancePlanWave(planId) {
       case 'soul': {
         // These are handled via kanban (active-tasks.md) by mesh-bridge
         // Just mark as queued — bridge will materialize in kanban
-        st.kanban_task_id = st.subtask_id;
         log(`  → LOCAL ${st.subtask_id}: "${st.title}" (${st.delegation.mode}${st.delegation.soul_id ? `: ${st.delegation.soul_id}` : ''})`);
         break;
       }
 
       case 'human': {
-        st.status = SUBTASK_STATUS.BLOCKED;
-        st.kanban_task_id = st.subtask_id;
         log(`  → HUMAN ${st.subtask_id}: "${st.title}" (needs Gui)`);
         break;
       }
     }
   }
-
-  await planStore.put(plan);
 
   publishPlanEvent('wave_started', plan);
 }
@@ -2668,13 +2689,15 @@ async function advancePlanWave(planId) {
 async function updatePlanSubtaskStatus(taskId, newStatus) {
   const task = await store.get(taskId);
   if (!task || !task.plan_id) return;
-  const plan = await planStore.get(task.plan_id);
-  if (!plan) return;
-  const st = plan.subtasks.find(s => s.mesh_task_id === taskId || s.subtask_id === taskId);
-  if (!st) return;
-  st.status = newStatus;
-  await planStore.put(plan);
-  log(`PLAN SUBTASK ${st.subtask_id} → ${newStatus} (no wave advance)`);
+  let subtaskId = null;
+  const plan = await planStore._updateWithCAS(task.plan_id, (p) => {
+    const st = p.subtasks.find(s => s.mesh_task_id === taskId || s.subtask_id === taskId);
+    if (!st) return null;
+    st.status = newStatus;
+    subtaskId = st.subtask_id;
+    return p;
+  });
+  if (plan) log(`PLAN SUBTASK ${subtaskId} → ${newStatus} (no wave advance)`);
 }
 
 // ── Plan Progress on Task Completion ────────────────
@@ -2686,57 +2709,67 @@ async function updatePlanSubtaskStatus(taskId, newStatus) {
  * never pass through handleComplete/handleFail).
  */
 async function checkPlanProgress(taskId, status) {
-  let plan = null;
-  let st = null;
-
   // Only the task's own plan_id links it to a plan, and only the daemon sets
   // it. The pre-back-reference fallback that matched a bare task_id against
   // every executing plan is gone: a forged task named after a pending subtask
   // completed or aborted that plan through it (review 2026-09-15 F1).
   const task = await store.get(taskId);
-  if (task && task.plan_id) {
-    plan = await planStore.get(task.plan_id);
-    if (plan) {
-      // Match by mesh_task_id, subtask_id, OR the task's subtask_id field
-      // (escalation tasks carry the original subtask_id for plan recovery)
-      st = plan.subtasks.find(s =>
-        s.mesh_task_id === taskId ||
-        s.subtask_id === taskId ||
-        (task.subtask_id && s.subtask_id === task.subtask_id)
-      );
-    }
-  }
+  if (!task || !task.plan_id) return;
 
-  if (!plan || !st) return;
+  // Match by mesh_task_id, subtask_id, OR the task's subtask_id field
+  // (escalation tasks carry the original subtask_id for plan recovery)
+  const matches = (s) =>
+    s.mesh_task_id === taskId ||
+    s.subtask_id === taskId ||
+    (task.subtask_id && s.subtask_id === task.subtask_id);
+  const isEscalation = !!task.tags?.includes('escalation');
 
-  // Escalation recovery: if a subtask was FAILED/BLOCKED but an escalation task
-  // completes successfully for it, override status to COMPLETED and unblock dependents.
-  const isEscalationRecovery = (
-    status === 'completed' &&
-    (st.status === SUBTASK_STATUS.FAILED || st.status === SUBTASK_STATUS.BLOCKED) &&
-    task && task.tags && task.tags.includes('escalation')
-  );
+  // One CAS for the whole transition (status, recovery unblocks, failure
+  // cascade): a blind put of a copy read before a sibling's update reverted
+  // that sibling. The mutator can run again on a conflict, so it only fills
+  // these from the fresh plan it is given.
+  let outcome = null;
+  let st = null;
+  let unblocked = [];
+  let blockedIds = new Set();
+  const plan = await planStore._updateWithCAS(task.plan_id, (p) => {
+    unblocked = [];
+    blockedIds = new Set();
+    st = p.subtasks.find(matches);
+    if (!st) return null;
 
-  if (isEscalationRecovery) {
-    log(`ESCALATION RECOVERY ${plan.plan_id}: subtask ${st.subtask_id} recovered by ${taskId}`);
-    st.status = SUBTASK_STATUS.COMPLETED;
-    st.result = { success: true, summary: `Recovered by escalation task ${taskId}` };
-    // Unblock any dependents that were blocked by the original failure
-    for (const dep of plan.subtasks) {
-      if (dep.status === SUBTASK_STATUS.BLOCKED && dep.depends_on.includes(st.subtask_id)) {
-        dep.status = SUBTASK_STATUS.PENDING;
-        dep.result = null;
-        log(`  UNBLOCKED: ${dep.subtask_id} (dependency ${st.subtask_id} recovered)`);
+    // Escalation recovery: if a subtask was FAILED/BLOCKED but an escalation task
+    // completes successfully for it, override status to COMPLETED and unblock dependents.
+    if (status === 'completed' && isEscalation &&
+        (st.status === SUBTASK_STATUS.FAILED || st.status === SUBTASK_STATUS.BLOCKED)) {
+      st.status = SUBTASK_STATUS.COMPLETED;
+      st.result = { success: true, summary: `Recovered by escalation task ${taskId}` };
+      for (const dep of p.subtasks) {
+        if (dep.status === SUBTASK_STATUS.BLOCKED && dep.depends_on.includes(st.subtask_id)) {
+          dep.status = SUBTASK_STATUS.PENDING;
+          dep.result = null;
+          unblocked.push(dep.subtask_id);
+        }
       }
+      outcome = 'recovered';
+      return p;
     }
-    await planStore.put(plan);
+
+    st.status = status === 'completed' ? SUBTASK_STATUS.COMPLETED : SUBTASK_STATUS.FAILED;
+    // Cascade: block all transitive dependents
+    if (st.status === SUBTASK_STATUS.FAILED) blockedIds = cascadeFailure(p, st.subtask_id);
+    outcome = st.status;
+    return p;
+  });
+  if (!plan) return;
+
+  if (outcome === 'recovered') {
+    log(`ESCALATION RECOVERY ${plan.plan_id}: subtask ${st.subtask_id} recovered by ${taskId}`);
+    for (const id of unblocked) log(`  UNBLOCKED: ${id} (dependency ${st.subtask_id} recovered)`);
     publishPlanEvent('subtask_recovered', plan);
     await advancePlanWave(plan.plan_id);
     return;
   }
-
-  st.status = status === 'completed' ? SUBTASK_STATUS.COMPLETED : SUBTASK_STATUS.FAILED;
-  await planStore.put(plan);
 
   log(`PLAN PROGRESS ${plan.plan_id}: subtask ${st.subtask_id} → ${st.status}`);
 
@@ -2747,45 +2780,39 @@ async function checkPlanProgress(taskId, status) {
   }
 
   // Subtask failed — apply failure policy
-  if (st.status === SUBTASK_STATUS.FAILED) {
-    publishPlanEvent('subtask_failed', plan);
+  publishPlanEvent('subtask_failed', plan);
 
-    // Cascade: block all transitive dependents
-    const blockedIds = cascadeFailure(plan, st.subtask_id);
-    await planStore.put(plan);
+  const policy = plan.failure_policy || 'continue_best_effort';
 
-    const policy = plan.failure_policy || 'continue_best_effort';
+  if (policy === 'abort_on_first_fail') {
+    await abortPlan(plan.plan_id, `Subtask ${st.subtask_id} failed (abort_on_first_fail)`);
+    return;
+  }
 
-    if (policy === 'abort_on_first_fail') {
-      await abortPlan(plan.plan_id, `Subtask ${st.subtask_id} failed (abort_on_first_fail)`);
+  if (policy === 'abort_on_critical_fail') {
+    // Check direct failure
+    if (st.critical) {
+      await abortPlan(plan.plan_id, `Critical subtask ${st.subtask_id} failed (abort_on_critical_fail)`);
       return;
     }
 
-    if (policy === 'abort_on_critical_fail') {
-      // Check direct failure
-      if (st.critical) {
-        await abortPlan(plan.plan_id, `Critical subtask ${st.subtask_id} failed (abort_on_critical_fail)`);
-        return;
-      }
-
-      // Check if cascade blocked any critical subtasks — a blocked critical is
-      // functionally equivalent to a failed critical (the plan can't achieve its goal)
-      const blockedCritical = plan.subtasks.filter(
-        s => blockedIds.has(s.subtask_id) && s.critical
+    // Check if cascade blocked any critical subtasks — a blocked critical is
+    // functionally equivalent to a failed critical (the plan can't achieve its goal)
+    const blockedCritical = plan.subtasks.filter(
+      s => blockedIds.has(s.subtask_id) && s.critical
+    );
+    if (blockedCritical.length > 0) {
+      const ids = blockedCritical.map(s => s.subtask_id).join(', ');
+      await abortPlan(
+        plan.plan_id,
+        `Critical subtask(s) ${ids} blocked by failed dependency ${st.subtask_id} (abort_on_critical_fail)`
       );
-      if (blockedCritical.length > 0) {
-        const ids = blockedCritical.map(s => s.subtask_id).join(', ');
-        await abortPlan(
-          plan.plan_id,
-          `Critical subtask(s) ${ids} blocked by failed dependency ${st.subtask_id} (abort_on_critical_fail)`
-        );
-        return;
-      }
+      return;
     }
-
-    // continue_best_effort: try to advance independent branches
-    await advancePlanWave(plan.plan_id);
   }
+
+  // continue_best_effort: try to advance independent branches
+  await advancePlanWave(plan.plan_id);
 }
 
 /**
