@@ -72,7 +72,7 @@ The harness writes one JSON object per line to `~/.openclaw/dogfood-metrics.json
 | `broadcast` | `context.broadcast.>` observed | `event_id`, `themes`, `entities`, `intensity`, `dedup_key` |
 | `offer` | `context.offer.>` observed | `event_id`, `responding_to`, `artifact_count` |
 | `accepted` | `context.accepted.>` observed | `event_id`, `responding_to_broadcast`, `accepted_artifacts` |
-| `signature_failure` | Bad signature on incoming event | `event_id`, `reason` |
+| `signature_failure` | An acceptor's `signature_rejected` counter rose (from `context.acceptor.stats.<node>`, published by each acceptor on every rejection and every minute) | `count`, `reason`, `acceptor_started_at` |
 | `dead_peer` | Dead-peer detection in health alert | `alert` |
 
 ### Example JSONL
@@ -81,7 +81,7 @@ The harness writes one JSON object per line to `~/.openclaw/dogfood-metrics.json
 {"ts":"2026-05-26T14:00:00.000Z","type":"harness_start","data":{"node_ids":["alpha","bravo","charlie"],"metrics_path":"~/.openclaw/dogfood-metrics.jsonl"}}
 {"ts":"2026-05-26T14:01:23.456Z","type":"broadcast","node_id":"alpha","data":{"event_id":"abc-123","themes":["memory","federation"],"entities":["NATS"],"intensity":"interested","dedup_key":"sha256..."}}
 {"ts":"2026-05-26T14:01:24.789Z","type":"offer","node_id":"bravo","data":{"event_id":"def-456","responding_to":"abc-123","artifact_count":2}}
-{"ts":"2026-05-26T14:01:30.012Z","type":"accepted","node_id":"alpha","data":{"event_id":"ghi-789","responding_to_broadcast":"abc-123","accepted_artifacts":1}}
+{"ts":"2026-05-26T14:01:30.012Z","type":"accepted","node_id":"alpha","data":{"event_id":"ghi-789","responding_to_broadcast":"def-456","accepted_artifacts":1}}
 ```
 
 ---
@@ -96,9 +96,9 @@ Run `node bin/dogfood-council.mjs --stats` to see a summary:
 | Offers received | Total `context.offer` events observed |
 | Accepted | Total `context.accepted` events observed |
 | Offer-to-acceptance ratio | `accepted / broadcasts` (0.0 - 1.0; higher = more useful offers) |
-| Avg round-trip (ms) | Mean time from broadcast to corresponding accepted event |
+| Avg round-trip (ms) | Mean time from broadcast to the accepted event answering one of its offers (accepted → offer → broadcast) |
 | Round-trip samples | How many broadcast→accepted pairs contributed to the average |
-| Signature failures | Events with bad or tampered ed25519 signatures |
+| Signature failures | Offers the acceptors rejected for a bad, missing or mismatched signature, as their published counters report |
 | Dead-peer events | Peer-offline detections from health alerts |
 | Duration (sec) | Total harness observation window |
 

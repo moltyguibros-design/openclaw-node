@@ -30,6 +30,7 @@ import { createWriteStream, readFileSync, existsSync } from 'node:fs';
 import { appendFile, readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { spawnNode, readNodeConfig } from './spawn-node.mjs';
+import { ACCEPTOR_STATS_SUBJECT_PREFIX } from '../lib/broadcast-acceptor.mjs';
 import { createRequire } from 'node:module';
 
 const { natsConnectOpts } = createRequire(import.meta.url)('../lib/nats-resolve.js');
@@ -50,6 +51,7 @@ export const MONITORED_SUBJECTS = Object.freeze([
   'context.broadcast.>',
   'context.offer.>',
   'context.accepted.>',
+  `${ACCEPTOR_STATS_SUBJECT_PREFIX}.>`,
   'mesh.health.alerts',
 ]);
 
@@ -149,6 +151,8 @@ export function aggregateFromLines(lines) {
 
   /** @type {Map<string, string>} broadcastEventId → broadcastTs */
   const broadcastTimestamps = new Map();
+  /** @type {Map<string, string>} offerEventId → broadcastEventId */
+  const offerToBroadcast = new Map();
 
   for (const line of lines) {
     let entry;
@@ -175,14 +179,19 @@ export function aggregateFromLines(lines) {
       case METRIC_TYPES.OFFER:
         offerCount++;
         perNode[nodeId].offers++;
+        if (entry.data?.event_id && entry.data?.responding_to) {
+          offerToBroadcast.set(entry.data.event_id, entry.data.responding_to);
+        }
         break;
 
       case METRIC_TYPES.ACCEPTED:
         acceptedCount++;
         perNode[nodeId].accepted++;
         // Calculate round-trip if we have the original broadcast timestamp
+        // context.accepted answers an offer (its responding_to is the offer's event_id): resolve offer → broadcast.
         if (entry.data?.responding_to_broadcast) {
-          const bcastTs = broadcastTimestamps.get(entry.data.responding_to_broadcast);
+          const ref = entry.data.responding_to_broadcast;
+          const bcastTs = broadcastTimestamps.get(ref) ?? broadcastTimestamps.get(offerToBroadcast.get(ref));
           if (bcastTs) {
             const rt = calculateRoundTripMs(bcastTs, entry.ts);
             if (rt >= 0) roundTrips.push(rt);
@@ -190,10 +199,12 @@ export function aggregateFromLines(lines) {
         }
         break;
 
-      case METRIC_TYPES.SIGNATURE_FAILURE:
-        signatureFailures++;
-        perNode[nodeId].sig_failures++;
+      case METRIC_TYPES.SIGNATURE_FAILURE: {
+        const n = Number(entry.data?.count) || 1;
+        signatureFailures += n;
+        perNode[nodeId].sig_failures += n;
         break;
+      }
 
       case METRIC_TYPES.DEAD_PEER:
         deadPeerEvents++;
@@ -275,6 +286,9 @@ export function createMetricCollector(nc, opts = {}) {
   const subscriptions = [];
   const lines = [];
   let stopped = false;
+  const collectorStartedMs = Date.now();
+  /** @type {Map<string, { started_at: string, count: number }>} node → last acceptor counter seen */
+  const sigCounters = new Map();
 
   /**
    * Record a metric entry — append to JSONL and track in-memory.
@@ -315,19 +329,13 @@ export function createMetricCollector(nc, opts = {}) {
         dedup_key: data.data?.dedup_key,
       }, sourceNode);
     } else if (subject.startsWith('context.offer.')) {
-      // Check for signature failure indicator
-      if (data._signature_rejected) {
-        await recordMetric(METRIC_TYPES.SIGNATURE_FAILURE, {
-          event_id: data.event_id,
-          reason: 'bad_signature',
-        }, sourceNode);
-      } else {
-        await recordMetric(METRIC_TYPES.OFFER, {
-          event_id: data.event_id,
-          responding_to: data.data?.responding_to,
-          artifact_count: data.data?.artifacts?.length || 0,
-        }, sourceNode);
-      }
+      await recordMetric(METRIC_TYPES.OFFER, {
+        event_id: data.event_id,
+        responding_to: data.data?.responding_to,
+        artifact_count: data.data?.artifacts?.length || 0,
+      }, sourceNode);
+    } else if (subject.startsWith(`${ACCEPTOR_STATS_SUBJECT_PREFIX}.`)) {
+      await recordSignatureRejections(subject.slice(ACCEPTOR_STATS_SUBJECT_PREFIX.length + 1), data);
     } else if (subject.startsWith('context.accepted.')) {
       await recordMetric(METRIC_TYPES.ACCEPTED, {
         event_id: data.event_id,
@@ -342,6 +350,29 @@ export function createMetricCollector(nc, opts = {}) {
           alert: data.data || {},
         }, sourceNode);
       }
+    }
+  }
+
+  /**
+   * Acceptors publish a running signature_rejected counter; record the increase
+   * since the last report from the same acceptor instance. An acceptor already
+   * running when the collector started is baselined at its first report, since
+   * its earlier rejections predate this run.
+   */
+  async function recordSignatureRejections(nodeId, data) {
+    const count = Number(data.signature_rejected);
+    if (!Number.isInteger(count) || count < 0 || typeof data.started_at !== 'string') return;
+    const prev = sigCounters.get(nodeId);
+    let base;
+    if (prev && prev.started_at === data.started_at) base = prev.count;
+    else base = Date.parse(data.started_at) >= collectorStartedMs ? 0 : count;
+    sigCounters.set(nodeId, { started_at: data.started_at, count: Math.max(count, base) });
+    if (count > base) {
+      await recordMetric(METRIC_TYPES.SIGNATURE_FAILURE, {
+        count: count - base,
+        reason: 'acceptor_rejected',
+        acceptor_started_at: data.started_at,
+      }, nodeId);
     }
   }
 
