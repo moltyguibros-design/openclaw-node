@@ -93,7 +93,9 @@ async function plan(h) {
   const owners = {};
   for (const node_id of ['w1', 'w2']) {
     const claim = await h.rpc('handleClaim', { node_id });
-    owners[claim.data.task_id] = { task_id: claim.data.task_id, node_id, lease_token: claim.data.lease_token };
+    // A dispatched subtask's task id is namespaced by its plan; key owners by subtask id.
+    const subtaskId = claim.data.task_id.slice(created.data.plan_id.length + 1);
+    owners[subtaskId] = { task_id: claim.data.task_id, node_id, lease_token: claim.data.lease_token };
   }
   return { planId: created.data.plan_id, owners };
 }
@@ -111,7 +113,7 @@ describe('plan updates are compare-and-swap (mesh-core~2#10)', () => {
     // task, S2 completes on its own handler (they run concurrently in the daemon).
     let raced = false;
     h.taskKv.onPut = async (key) => {
-      if (key !== 'S3' || raced) return;
+      if (key !== `${planId}-S3` || raced) return;
       raced = true;
       const r = await h.rpc('handleComplete', { ...owners.S2, result: { success: true } });
       assert.equal(r.data.status, 'completed');
@@ -130,8 +132,8 @@ describe('plan updates are compare-and-swap (mesh-core~2#10)', () => {
     await h.rpc('handleComplete', { ...owners.S1, result: { success: true } });
     await h.rpc('handleComplete', { ...owners.S2, result: { success: true } });
     const claim = await h.rpc('handleClaim', { node_id: 'w3' });
-    assert.equal(claim.data.task_id, 'S3');
-    await h.rpc('handleComplete', { task_id: 'S3', node_id: 'w3', lease_token: claim.data.lease_token, result: { success: true } });
+    assert.equal(claim.data.task_id, `${planId}-S3`);
+    await h.rpc('handleComplete', { task_id: `${planId}-S3`, node_id: 'w3', lease_token: claim.data.lease_token, result: { success: true } });
     assert.equal((await h.planStore.get(planId)).status, 'completed');
     assert.equal((await h.store.get('PARENT')).status, 'completed');
     assert.equal(h.published.filter((s) => s === 'mesh.events.plan.completed').length, 1);

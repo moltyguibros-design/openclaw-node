@@ -87,15 +87,16 @@ async function planInFlight(h, failure_policy = 'continue_best_effort') {
   assert.equal((await h.rpc('handlePlanApprove', signed({ plan_id: planId }))).ok, true);
 
   const claim = await h.rpc('handleClaim', { node_id: 'worker-a' });
-  assert.equal(claim.data.task_id, 'P-A');
-  const worker = { task_id: 'P-A', node_id: 'worker-a', lease_token: claim.data.lease_token };
+  assert.equal(claim.data.task_id, `${planId}-P-A`);
+  const worker = { task_id: `${planId}-P-A`, node_id: 'worker-a', lease_token: claim.data.lease_token };
   assert.equal((await h.rpc('handleStart', worker)).ok, true);
-  return { planId, worker, sid: (await h.store.get('P-C')).collab_session_id };
+  return { planId, worker, sid: (await h.store.get(`${planId}-P-C`)).collab_session_id };
 }
 
-async function statuses(h) {
+// A dispatched subtask's task id is namespaced by its plan.
+async function statuses(h, planId) {
   const out = {};
-  for (const id of ['P-A', 'P-B', 'P-C']) out[id] = (await h.store.get(id)).status;
+  for (const id of ['P-A', 'P-B', 'P-C']) out[id] = (await h.store.get(`${planId}-${id}`)).status;
   return out;
 }
 
@@ -108,8 +109,8 @@ describe('aborting a plan stops the work it dispatched (mesh-core~2#11)', () => 
     assert.equal(reply.ok, true, reply.error);
     assert.equal(reply.data.status, 'aborted');
 
-    assert.deepEqual(await statuses(h), { 'P-A': 'cancelled', 'P-B': 'cancelled', 'P-C': 'cancelled' });
-    assert.match((await h.store.get('P-B')).result.summary, /aborted: wrong approach/);
+    assert.deepEqual(await statuses(h, planId), { 'P-A': 'cancelled', 'P-B': 'cancelled', 'P-C': 'cancelled' });
+    assert.match((await h.store.get(`${planId}-P-B`)).result.summary, /aborted: wrong approach/);
     assert.equal((await h.collabStore.get(sid)).status, 'aborted');
 
     const claim = await h.rpc('handleClaim', { node_id: 'worker-b' });
@@ -122,10 +123,10 @@ describe('aborting a plan stops the work it dispatched (mesh-core~2#11)', () => 
 
   it('a failure-policy abort cancels the sibling subtasks too', async () => {
     const h = harness();
-    const { worker } = await planInFlight(h, 'abort_on_first_fail');
+    const { planId, worker } = await planInFlight(h, 'abort_on_first_fail');
     const failed = await h.rpc('handleFail', { ...worker, reason: 'broke' });
     assert.equal(failed.ok, true, failed.error);
-    assert.deepEqual(await statuses(h), { 'P-A': 'failed', 'P-B': 'cancelled', 'P-C': 'cancelled' });
+    assert.deepEqual(await statuses(h, planId), { 'P-A': 'failed', 'P-B': 'cancelled', 'P-C': 'cancelled' });
   });
 
   it('an unsigned abort changes nothing', async () => {
@@ -133,6 +134,6 @@ describe('aborting a plan stops the work it dispatched (mesh-core~2#11)', () => 
     const { planId } = await planInFlight(h);
     const reply = await h.rpc('handlePlanAbort', { plan_id: planId });
     assert.equal(reply.ok, false);
-    assert.deepEqual(await statuses(h), { 'P-A': 'running', 'P-B': 'queued', 'P-C': 'queued' });
+    assert.deepEqual(await statuses(h, planId), { 'P-A': 'running', 'P-B': 'queued', 'P-C': 'queued' });
   });
 });
