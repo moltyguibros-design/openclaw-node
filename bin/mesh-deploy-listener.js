@@ -20,7 +20,7 @@
  */
 
 const { connect, StringCodec } = require('nats');
-const { execFile, execFileSync } = require('child_process');
+const { execFile, execFileSync, spawn } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
@@ -279,6 +279,7 @@ async function runDeploy(trigger, { forwardOnly = false } = {}) {
 
     result.log = stdout.slice(-5000);
     result.componentsDeployed = deployed.components;
+    result.deferredRestart = deployed.deferredRestart || [];
     result.sha = git('rev-parse', '--short', 'HEAD');
     const ids = deployed.components.map(c => c.id).join(', ');
     console.log(`[deploy-listener] Success — now at ${result.sha} (${ids || 'no component changed'})`);
@@ -312,6 +313,34 @@ async function runDeploy(trigger, { forwardOnly = false } = {}) {
   }
   result.preSha = preSha ? preSha.slice(0, 7) : null;
   return result;
+}
+
+// This process cannot restart its own unit in-band: systemd would kill the
+// cgroup (and launchd the job) that runs the restart command. A transient
+// systemd timer, or a setsid'd child on macOS, outlives this process and
+// restarts it once the result is written.
+const SELF_RESTART_DELAY_S = 10;
+function scheduleSelfRestart(services, { platform = os.platform(), spawnFn = spawn, uid = process.getuid?.() } = {}) {
+  const scheduled = [];
+  for (const svc of services || []) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(svc) || !/mesh-deploy-listener$/.test(svc)) {
+      console.warn(`[deploy-listener] not scheduling a restart of ${JSON.stringify(svc).slice(0, 60)}`);
+      continue;
+    }
+    const [cmd, args] = platform === 'darwin'
+      ? ['/bin/sh', ['-c', `sleep ${SELF_RESTART_DELAY_S}; exec launchctl kickstart -k "$1"`, 'sh', `gui/${uid}/${svc}`]]
+      : ['systemd-run', ['--user', `--on-active=${SELF_RESTART_DELAY_S}s`, '--', 'systemctl', '--user', 'restart', svc]];
+    try {
+      const child = spawnFn(cmd, args, { detached: true, stdio: 'ignore' });
+      child.on?.('error', err => console.error(`[deploy-listener] schedule restart of ${svc}: ${err.message}`));
+      child.unref?.();
+      scheduled.push(svc);
+      console.log(`[deploy-listener] ${svc} restarts in ${SELF_RESTART_DELAY_S}s to load the deployed code`);
+    } catch (err) {
+      console.error(`[deploy-listener] schedule restart of ${svc}: ${err.message} — restart it by hand`);
+    }
+  }
+  return scheduled;
 }
 
 async function executeDeploy(trigger, resultsKv, nodesKv, opts = {}) {
@@ -380,6 +409,11 @@ async function executeDeploy(trigger, resultsKv, nodesKv, opts = {}) {
           console.log(`[deploy-listener] Updated node registry: deployVersion=${result.sha.slice(0,7)}`);
         }
       } catch (err) { console.warn(`[deploy-listener] update node deploy version: ${err.message}`); }
+    }
+
+    // Last: the result is written and the registry updated before the restart lands.
+    if (result.status === 'success' && result.deferredRestart?.length) {
+      scheduleSelfRestart(result.deferredRestart);
     }
   } finally {
     deploying = false;
@@ -555,7 +589,7 @@ async function main() {
   console.log(`[deploy-listener] ═══ Ready ═══`);
 }
 
-module.exports = { shouldCatchUp, runDeploy };
+module.exports = { shouldCatchUp, runDeploy, scheduleSelfRestart };
 
 if (require.main === module) {
   main().catch(err => {

@@ -530,3 +530,88 @@ describe('--dry-run writes nothing into the workspace', () => {
     assert.equal(read(fx.rt('.openclaw/workspace/SOUL.md')), '# soul, edited on this node\n');
   });
 });
+
+describe('a lib/ deploy restarts every daemon that loads lib, and the listener only from outside itself', () => {
+  const LIB_UNITS = 'openclaw-mesh-task-daemon openclaw-mesh-bridge openclaw-mesh-agent ' +
+    'openclaw-mesh-health-publisher openclaw-mesh-tool-discord openclaw-mesh-deploy-listener';
+  let fx;
+  before(() => {
+    fx = makeNode('lib-restarts', { 'bin/mesh-agent.js': '// agent v0\n', 'lib/shared.js': '// v0\n' });
+    for (const svc of ['mesh-health-publisher', 'mesh-tool-discord', 'mesh-deploy-listener']) {
+      write(fx.home, `Library/LaunchAgents/ai.openclaw.${svc}.plist`, '<plist/>\n');
+    }
+  });
+
+  it('systemd, pinned (the listener\'s child): health publisher and Discord tool restart; the listener restart is deferred', () => {
+    fs.rmSync(fx.callLog, { force: true });
+    const S1 = fx.commit('v1: lib', { 'lib/shared.js': '// v1\n' });
+    const run = fx.deploy(['--from', fx.S0, '--to', S1], { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: LIB_UNITS });
+    ranOk(run);
+    const systemctl = fx.calls().filter(l => l.startsWith('systemctl '));
+    for (const svc of ['openclaw-mesh-health-publisher', 'openclaw-mesh-tool-discord']) {
+      assert.ok(systemctl.includes(`systemctl --user try-restart ${svc}`), `${svc} kept the old lib:\n${systemctl.join('\n')}`);
+    }
+    assert.deepEqual(systemctl.filter(l => /restart openclaw-mesh-deploy-listener$/.test(l)), [],
+      'a pinned deploy restarted the listener that runs it');
+    assert.deepEqual(resultOf(run).deferredRestart, ['openclaw-mesh-deploy-listener']);
+  });
+
+  it('launchd, pinned: the same, with launchd labels', () => {
+    fs.rmSync(fx.callLog, { force: true });
+    const S1 = git(fx.node, 'rev-parse', 'HEAD');
+    const S2 = fx.commit('v2: lib', { 'lib/shared.js': '// v2\n' });
+    const run = fx.deploy(['--from', S1, '--to', S2], { DEPLOY_TEST_PLATFORM: 'darwin' });
+    ranOk(run);
+    const uid = process.getuid();
+    const launchctl = fx.calls().filter(l => l.startsWith('launchctl kickstart'));
+    for (const svc of ['mesh-health-publisher', 'mesh-tool-discord']) {
+      assert.ok(launchctl.includes(`launchctl kickstart -k gui/${uid}/ai.openclaw.${svc}`), launchctl.join('\n'));
+    }
+    assert.ok(!launchctl.some(l => l.endsWith('ai.openclaw.mesh-deploy-listener')), launchctl.join('\n'));
+    assert.deepEqual(resultOf(run).deferredRestart, ['ai.openclaw.mesh-deploy-listener']);
+  });
+
+  it('a deploy run from a shell (not the listener) restarts the listener in place', () => {
+    fs.rmSync(fx.callLog, { force: true });
+    git(fx.node, 'checkout', '-q', 'main');
+    fx.commit('v3: listener', { 'bin/mesh-deploy-listener.js': '// listener v3\n' });
+    const run = fx.deploy([], { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: LIB_UNITS });
+    ranOk(run);
+    assert.ok(resultOf(run).restarted.includes('openclaw-mesh-deploy-listener'), run.stdout);
+    assert.deepEqual(resultOf(run).deferredRestart, []);
+  });
+});
+
+describe('the listener schedules its own restart outside its own process tree', () => {
+  const require = createRequire(import.meta.url);
+  const { scheduleSelfRestart } = require('../bin/mesh-deploy-listener.js');
+  const recorder = () => {
+    const spawned = [];
+    const spawnFn = (cmd, args, opts) => { spawned.push({ cmd, args, opts }); return { on() {}, unref() {} }; };
+    return { spawned, spawnFn };
+  };
+
+  it('systemd: a transient timer restarts the unit after a delay', () => {
+    const { spawned, spawnFn } = recorder();
+    assert.deepEqual(scheduleSelfRestart(['openclaw-mesh-deploy-listener'], { platform: 'linux', spawnFn }), ['openclaw-mesh-deploy-listener']);
+    assert.equal(spawned.length, 1);
+    assert.equal(spawned[0].cmd, 'systemd-run');
+    assert.deepEqual(spawned[0].args, ['--user', '--on-active=10s', '--', 'systemctl', '--user', 'restart', 'openclaw-mesh-deploy-listener']);
+    assert.equal(spawned[0].opts.detached, true);
+  });
+
+  it('launchd: a detached child kickstarts the job after a delay', () => {
+    const { spawned, spawnFn } = recorder();
+    scheduleSelfRestart(['ai.openclaw.mesh-deploy-listener'], { platform: 'darwin', spawnFn, uid: 501 });
+    assert.equal(spawned[0].cmd, '/bin/sh');
+    assert.match(spawned[0].args[1], /^sleep 10; exec launchctl kickstart -k "\$1"$/);
+    assert.equal(spawned[0].args.at(-1), 'gui/501/ai.openclaw.mesh-deploy-listener');
+    assert.equal(spawned[0].opts.detached, true);
+  });
+
+  it('restarts nothing but the listener itself', () => {
+    const { spawned, spawnFn } = recorder();
+    assert.deepEqual(scheduleSelfRestart(['openclaw-mesh-agent', 'x; rm -rf /'], { platform: 'linux', spawnFn }), []);
+    assert.equal(spawned.length, 0);
+  });
+});

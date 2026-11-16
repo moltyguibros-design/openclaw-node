@@ -227,6 +227,14 @@ function renderConfigTemplate(template, envText) {
   return template.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name) => vars[name] ?? '');
 }
 
+// The deploy listener runs bin/mesh-deploy-listener.js and ../lib from the
+// checkout. A component with restartsListener restarts it — but never in-band
+// from a pinned deploy (`--to`): that is the listener's own child, and a
+// restart of its unit would kill the deploy mid-run. A pinned deploy reports
+// it in DEPLOY_RESULT.deferredRestart, and the listener schedules its own
+// delayed restart once the result is written.
+const LISTENER_SERVICE = IS_MAC ? 'ai.openclaw.mesh-deploy-listener' : 'openclaw-mesh-deploy-listener';
+
 // ═══════════════════════════════════════════════════════════════════════════
 // COMPONENT MANIFEST — every deployable piece of OpenClaw
 // ═══════════════════════════════════════════════════════════════════════════
@@ -251,6 +259,7 @@ const MANIFEST = [
                   'ai.openclaw.mesh-agent', 'ai.openclaw.mesh-health-publisher'],
     servicesLinux: ['openclaw-mesh-task-daemon', 'openclaw-mesh-bridge',
                     'openclaw-mesh-agent', 'openclaw-mesh-health-publisher'],
+    restartsListener: true,
     nodeFilter: 'all',  // Every node gets daemon binaries; services are per-role
     validate: () => {
       // The Linux agent unit is started by hand (autostart false); the health
@@ -285,9 +294,13 @@ const MANIFEST = [
     risk: 'safe',
     repoPaths: ['lib/'],
     targets: [DIRS.CLI_LIB],
+    // Every daemon that runs from the checkout and loads ../lib at runtime.
     servicesMac: ['ai.openclaw.mesh-task-daemon', 'ai.openclaw.mesh-bridge',
-                  'ai.openclaw.mesh-agent'],
-    servicesLinux: ['openclaw-mesh-task-daemon', 'openclaw-mesh-bridge', 'openclaw-mesh-agent'],
+                  'ai.openclaw.mesh-agent', 'ai.openclaw.mesh-health-publisher',
+                  'ai.openclaw.mesh-tool-discord'],
+    servicesLinux: ['openclaw-mesh-task-daemon', 'openclaw-mesh-bridge', 'openclaw-mesh-agent',
+                    'openclaw-mesh-health-publisher', 'openclaw-mesh-tool-discord'],
+    restartsListener: true,
     nodeFilter: 'all',
   },
 
@@ -851,7 +864,7 @@ function removeFiles(comp, repoDir, fromSha, files, dryRun) {
  * deploy whose new code is not running did not succeed, and the listener rolls
  * it back.
  */
-function restartService(svc) {
+function restartService(svc, { probeOnly = false } = {}) {
   try {
     if (IS_MAC) {
       const plistPath = path.join(DIRS.SERVICES_MAC, `${svc}.plist`);
@@ -869,6 +882,7 @@ function restartService(svc) {
         skip(`  ${svc} not running${state === 'not running' ? '' : ` (${state || 'not loaded'})`} — left stopped`);
         return false;
       }
+      if (probeOnly) return true;
       exec(`launchctl kickstart -k ${target}`);
     } else {
       const loadState = exec(`systemctl --user show -p LoadState --value ${svc}`);
@@ -883,6 +897,7 @@ function restartService(svc) {
         skip(`  ${svc} not running (${activeState || 'unknown'}) — left stopped`);
         return false;
       }
+      if (probeOnly) return true;
       exec(`systemctl --user try-restart ${svc}`);
     }
   } catch (err) {
@@ -900,7 +915,7 @@ function restartService(svc) {
  * Throws on any failed step. Never fetches: the caller brought toSha in.
  */
 function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false, includeServices = false,
-                  dryRun = false, noRestart = false }) {
+                  dryRun = false, noRestart = false, pinned = false }) {
   assertCommitted(repoDir);
   if (!dryRun && gitLine(repoDir, ['rev-parse', 'HEAD']) !== toSha) {
     info(`Checking out ${toSha.slice(0, 8)}`);
@@ -918,6 +933,7 @@ function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false, includ
 
   const deployed = [];
   const services = [];
+  let listenerAffected = false;
   for (const { comp, install, remove } of plans) {
     const risk = comp.risk === 'safe' ? C.green('●')
       : comp.risk === 'careful' ? C.yellow('●')
@@ -957,9 +973,20 @@ function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false, includ
     for (const svc of (IS_MAC ? comp.servicesMac : comp.servicesLinux) || []) {
       if (!services.includes(svc)) services.push(svc);
     }
+    if (comp.restartsListener) listenerAffected = true;
     if (comp.notes && dryRun) console.log(`    ${C.dim('Note: ' + comp.notes)}`);
     console.log('');
     deployed.push({ comp, installed, removed });
+  }
+
+  const deferredRestart = [];
+  if (listenerAffected && pinned && !dryRun && !noRestart) {
+    if (restartService(LISTENER_SERVICE, { probeOnly: true })) {
+      deferredRestart.push(LISTENER_SERVICE);
+      info(`${LISTENER_SERVICE} restart deferred to the listener (it runs this deploy)`);
+    }
+  } else if (listenerAffected) {
+    services.push(LISTENER_SERVICE);
   }
 
   const restarted = [];
@@ -989,6 +1016,7 @@ function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false, includ
     changedFiles: changes.length,
     components: deployed.map(({ comp, installed, removed }) => ({ id: comp.id, installed, removed })),
     restarted,
+    deferredRestart,
   };
 }
 
@@ -1204,7 +1232,7 @@ async function main() {
     if (!toSha) throw new Error(`--to ${toArg} is not a commit in ${REPO_DIR} (pinned mode never fetches)`);
     const fromSha = fromArg ? resolveCommit(REPO_DIR, fromArg) : deployedBase(REPO_DIR);
     if (!fromSha) throw new Error(`--from ${fromArg} is not a commit in ${REPO_DIR}`);
-    const result = deploy({ repoDir: REPO_DIR, fromSha, toSha, filterIds, force: forceAll, includeServices, dryRun, noRestart });
+    const result = deploy({ repoDir: REPO_DIR, fromSha, toSha, filterIds, force: forceAll, includeServices, dryRun, noRestart, pinned: true });
     console.log(`DEPLOY_RESULT ${JSON.stringify(result)}`);
     return;
   }
