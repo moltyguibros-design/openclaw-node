@@ -20,7 +20,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const require = createRequire(import.meta.url);
-const { CollabStore, COLLAB_MODE, createSession } = require('../lib/mesh-collab');
+const { CollabStore, COLLAB_MODE, createSession, issueMemberToken } = require('../lib/mesh-collab');
+
+// The daemon accepts a reflection only with the member's join token.
+const TOKENS = Object.fromEntries(['worker', 'reviewerA', 'reviewerB'].map((id) => [id, issueMemberToken()]));
 const daemon = require('../bin/mesh-task-daemon.js');
 const { StringCodec } = require('nats');
 const sc = StringCodec();
@@ -64,9 +67,9 @@ async function makeSessionAtStep1(collab, sessionIdSuffix = '') {
   const session = createSession(`task-retry-test${sessionIdSuffix}`, spec);
   session.status = 'active';
   session.nodes = [
-    { node_id: 'worker',    role: 'worker',    status: 'active' },
-    { node_id: 'reviewerA', role: 'reviewerA', status: 'active' },
-    { node_id: 'reviewerB', role: 'reviewerB', status: 'active' },
+    { node_id: 'worker',    role: 'worker',    status: 'active', token_hash: TOKENS.worker.hash },
+    { node_id: 'reviewerA', role: 'reviewerA', status: 'active', token_hash: TOKENS.reviewerA.hash },
+    { node_id: 'reviewerB', role: 'reviewerB', status: 'active', token_hash: TOKENS.reviewerB.hash },
   ];
   session.circling.worker_node_id = 'worker';
   session.circling.reviewerA_node_id = 'reviewerA';
@@ -100,7 +103,7 @@ function useStore(collab) {
 async function reflect(collab, sessionId, reflection) {
   let reply;
   await daemon.__test.handleCollabReflect({
-    data: sc.encode(JSON.stringify({ session_id: sessionId, ...reflection })),
+    data: sc.encode(JSON.stringify({ session_id: sessionId, member_token: TOKENS[reflection.node_id]?.token, ...reflection })),
     respond(data) { reply = JSON.parse(sc.decode(data)); },
   });
   return { reply, retried: reply.data?.status === 'retried', session: await collab.get(sessionId) };

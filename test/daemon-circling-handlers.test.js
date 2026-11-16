@@ -25,7 +25,14 @@ const assert = require('node:assert/strict');
 const { StringCodec } = require('nats');
 
 const daemon = require('../bin/mesh-task-daemon.js');
-const { createSession, CollabStore, COLLAB_STATUS } = require('../lib/mesh-collab');
+const { createSession, issueMemberToken, CollabStore, COLLAB_STATUS } = require('../lib/mesh-collab');
+
+// The daemon accepts a reflection only with the member's join token.
+const TOKENS = new Map();
+const tokenFor = (nodeId) => {
+  if (!TOKENS.has(nodeId)) TOKENS.set(nodeId, issueMemberToken());
+  return TOKENS.get(nodeId);
+};
 
 const sc = StringCodec();
 
@@ -45,7 +52,8 @@ function harness() {
   const released = [];
   const store = {
     async get(taskId) { return { task_id: taskId, title: 'circling task', description: 'do the thing', scope: [] }; },
-    async markCompleted(taskId, result) { completed.push({ taskId, result }); return false; },
+    // The daemon publishes 'completed' only for a transition that happened.
+    async markCompleted(taskId, result) { completed.push({ taskId, result }); return { task_id: taskId, status: 'completed', result }; },
     async markReleased(taskId, reason) { released.push({ taskId, reason }); return false; },
   };
   const nc = {
@@ -56,7 +64,7 @@ function harness() {
   async function reflect(payload) {
     let reply;
     await daemon.__test.handleCollabReflect({
-      data: sc.encode(JSON.stringify(payload)),
+      data: sc.encode(JSON.stringify({ member_token: tokenFor(payload.node_id).token, ...payload })),
       respond(data) { reply = JSON.parse(sc.decode(data)); },
     });
     return reply;
@@ -85,9 +93,9 @@ function makeCirclingSession(overrides = {}) {
 async function makeActiveSession(collabStore, overrides = {}) {
   const session = makeCirclingSession(overrides);
   await collabStore.put(session);
-  await collabStore.addNode(session.session_id, 'node-worker', 'worker');
-  await collabStore.addNode(session.session_id, 'node-revA', 'reviewer');
-  await collabStore.addNode(session.session_id, 'node-revB', 'reviewer');
+  for (const [id, role] of [['node-worker', 'worker'], ['node-revA', 'reviewer'], ['node-revB', 'reviewer']]) {
+    await collabStore.addNode(session.session_id, id, role, '*', { tokenHash: tokenFor(id).hash });
+  }
 
   const s = await collabStore.get(session.session_id);
   s.circling.worker_node_id = 'node-worker';
