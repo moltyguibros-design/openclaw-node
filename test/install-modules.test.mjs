@@ -702,6 +702,15 @@ test('installer archives the retired files it once shipped, never backups or ope
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /left in place/);
   assert.equal(readFileSync(join(archive, 'daily-log-writer.mjs'), 'utf8'), 'daily-log-writer.mjs\n', 'an archived copy is never overwritten');
+
+  // A mesh home that is the checkout itself is never pruned.
+  mkdirSync(join(repo, 'bin'));
+  writeFileSync(join(repo, 'bin', 'daily-log-writer.mjs'), 'in the checkout\n');
+  r = spawnSync('bash', ['-c', `source "${join(ROOT, 'scripts/install/helpers.sh')}"; retire_shipped_files mesh-bin "$1"`, 'x', join(repo, 'bin')], {
+    encoding: 'utf8', env: { ...process.env, DRY_RUN: 'false', REPO_DIR: repo, OPENCLAW_ROOT: root },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(existsSync(join(repo, 'bin', 'daily-log-writer.mjs')));
 });
 
 test('the retired list names only files the repo no longer ships, and both deploy dirs are pruned', () => {

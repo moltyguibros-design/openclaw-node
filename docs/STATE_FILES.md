@@ -134,7 +134,7 @@ recreates what it needs on next tick.
 - **Lifetime:** Persistent. Grows with session history. WAL mode enables concurrent reads.
 - **Consumers:**
   - `memory-daemon.mjs` — imports sessions on IDLE→ENDED transition
-  - `session-search.mjs` — CLI search tool
+  - `workspace-bin/session-search.mjs` — CLI search tool (state.db FTS, `--import`/`--stats`)
   - `hyperagent-store.mjs` — HyperAgent protocol reads/writes
 
 ### `.knowledge.db`
@@ -142,7 +142,9 @@ recreates what it needs on next tick.
 - **Owner:** `lib/mcp-knowledge/core.mjs` (MCP knowledge server)
 - **Format:** SQLite with WAL + sqlite-vec extension. Stores document chunks with 384-dim embeddings (Xenova/all-MiniLM-L6-v2 via `@huggingface/transformers`).
 - **Lifetime:** Persistent. Rebuilt on reindex. Stores embedded workspace documents for semantic search.
-- **Consumers:** MCP knowledge server (registered in `.mcp.json`). Accessed via MCP tool calls from Claude sessions.
+- **Consumers:**
+  - MCP knowledge server (registered in `.mcp.json`). Accessed via MCP tool calls from Claude sessions.
+  - `bin/knowledge-session-search.mjs` (installed to `~/openclaw/bin/`) — CLI semantic / hybrid / FTS search over the indexed session turns (`session_chunks`). `--fts` input is reduced to AND-joined keywords, so a natural-language question still matches.
 
 ---
 

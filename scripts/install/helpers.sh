@@ -72,6 +72,9 @@ write_file() {
 retire_shipped_files() {
   local group="$1" dir="$2" key name
   local archive="$OPENCLAW_ROOT/retired/$(date +%Y-%m-%d)/$group"
+  [ -d "$dir" ] || return 0
+  # A mesh home that is the checkout itself: git already removed what it retired.
+  case "$(cd "$dir" && pwd -P)/" in "$(cd "$REPO_DIR" && pwd -P)/"*) return 0 ;; esac
   while read -r key name; do
     [ "$key" = "$group" ] || continue
     case "$name" in ''|*/*|.*|*.bak*) continue ;; esac

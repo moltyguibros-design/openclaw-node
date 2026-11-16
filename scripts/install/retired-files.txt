@@ -10,6 +10,7 @@ workspace-bin brainstorm-server
 workspace-bin daily-log-writer.mjs
 workspace-bin mesh-bridge.mjs
 workspace-bin lane-watchdog.js
+mesh-bin session-search.mjs
 # sync-to-harness: its "dry run" rewrote ~/openclaw (the deploy checkout) with
 # --delete and pushed to main.
 workspace-bin sync-to-harness

@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
 /**
- * session-search — CLI tool for searching indexed session turns.
+ * knowledge-session-search — search the session turns indexed in .knowledge.db
+ * (session_chunks). Not workspace-bin/session-search.mjs, which searches state.db.
  *
  * Usage:
- *   node bin/session-search.mjs "query text" [--semantic|--hybrid|--fts] [--limit N] [--db PATH]
+ *   node bin/knowledge-session-search.mjs "query text" [--semantic|--hybrid|--fts] [--limit N] [--db PATH]
  */
 
 import { parseArgs } from 'node:util';
@@ -12,6 +13,7 @@ import {
   initDatabase,
   searchSessions,
   searchSessionsFts,
+  ftsSafeQuery,
   hybridSearchSessions,
 } from '../lib/mcp-knowledge/core.mjs';
 import { DEFAULT_KNOWLEDGE_DB } from './embed-existing-sessions.mjs';
@@ -29,7 +31,7 @@ const { values, positionals } = parseArgs({
 });
 
 if (values.help || positionals.length === 0) {
-  process.stdout.write(`Usage: session-search <query> [--semantic|--hybrid|--fts] [--limit N] [--db PATH]
+  process.stdout.write(`Usage: knowledge-session-search <query> [--semantic|--hybrid|--fts] [--limit N] [--db PATH]
 
 Search modes:
   --semantic   Vector similarity search only
@@ -59,7 +61,8 @@ let results;
 if (mode === 'semantic') {
   results = await searchSessions(db, query, limit);
 } else if (mode === 'fts') {
-  results = searchSessionsFts(db, query, limit);
+  const ftsQuery = ftsSafeQuery(query);
+  results = ftsQuery ? searchSessionsFts(db, ftsQuery, limit) : [];
 } else {
   results = await hybridSearchSessions(db, query, limit);
 }

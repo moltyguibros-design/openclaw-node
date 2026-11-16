@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'session-search.mjs');
+const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'knowledge-session-search.mjs');
 
-describe('session-search CLI default knowledge DB', () => {
+describe('knowledge-session-search CLI default knowledge DB', () => {
   let cwdDir;
   let homeDir;
 
