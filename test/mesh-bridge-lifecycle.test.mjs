@@ -189,8 +189,10 @@ test('bridge materializes a plan subtask unquoted, with its description intact',
   const { bridge, kanban, bus } = await fixture(t);
   const nc = await connect({ ...bus, maxReconnectAttempts: 0 });
   try {
+    // The daemon's publishPlanEvent shape: the subject carries the plan prefix, the event name does not.
     nc.publish('mesh.events.plan.wave_started', Buffer.from(JSON.stringify({
-      event: 'plan.wave_started',
+      event: 'wave_started',
+      plan_id: 'p1',
       plan: { plan_id: 'p1', subtasks: [{ subtask_id: 'p1-s1', title: 'Sub', status: 'queued', delegation: { mode: 'local' }, description: 'say "hi"\nnext', budget_minutes: 5 }] },
     })));
     await nc.flush();
@@ -202,6 +204,7 @@ test('bridge materializes a plan subtask unquoted, with its description intact',
   assert.deepEqual(tasks.map(x => x.task_id), ['owned-local-card', 'p1-s1']);
   const sub = tasks[1];
   assert.equal(sub.next_action, 'Plan subtask (local)');
+  assert.equal(sub.plan_id, 'p1', 'the card names its plan so its completion can be reported');
   assert.ok(sub.description.startsWith('say "hi"\nnext'), sub.description);
   assert.ok(!sub.description.includes('\\"'), sub.description);
   bridge.proc.kill('SIGTERM');

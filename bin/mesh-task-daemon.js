@@ -2395,7 +2395,9 @@ async function handlePlanCreate(msg) {
 
   let plan = createPlan(params);
 
-  // Auto-route subtasks that don't have explicit delegation
+  // Route subtasks whose delegation is unset or 'auto'. createPlan defaults a
+  // missing delegation to local, so a bus caller wanting routing asks for 'auto'
+  // (mesh plan create does).
   plan = autoRoutePlan(plan);
 
   await planStore.put(plan);
@@ -2497,7 +2499,8 @@ async function abortPlan(planId, reason) {
 
 /**
  * mesh.plans.subtask.update — Update a subtask's status.
- * Called by mesh-bridge when a task completes/fails.
+ * Called by mesh-bridge when the kanban card of a local, soul or human subtask
+ * reaches done (mesh subtasks report through their mesh task).
  * Expects: { plan_id, subtask_id, status, result?, mesh_task_id?, kanban_task_id?, owner? }
  */
 async function handlePlanSubtaskUpdate(msg) {

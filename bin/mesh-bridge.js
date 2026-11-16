@@ -483,6 +483,7 @@ function materializeSubtask(plan, subtask) {
       ? 'Needs Gui input'
       : `Plan subtask (${mode}${soulId ? `: ${soulId}` : ''})`,
     parent_id: plan.parent_task_id,
+    plan_id: plan.plan_id,
     project: null, // inherited from parent via MC
     description: `${subtask.description || ''}\n\n_Delegation: ${mode}${soulId ? ` → ${soulId}` : ''} | Plan: ${plan.plan_id} | Budget: ${subtask.budget_minutes}m_`,
     updated_at: isoTimestamp(),
@@ -493,6 +494,53 @@ function materializeSubtask(plan, subtask) {
       ? `  MATERIALIZED: ${subtask.subtask_id} → kanban (${mode})`
       : `  SKIP: ${subtask.subtask_id} already in kanban`))
     .catch((err) => log(`  ERROR materializing ${subtask.subtask_id}: ${err.message}`));
+}
+
+// ── Plan subtasks: Kanban → Mesh ────────────────────
+//
+// Nothing else reports a local, soul or human subtask: its card is the only
+// record of the work, so a plan holding one stayed executing forever. When
+// such a card (materializeSubtask stamps it with plan_id) reaches done, the
+// bridge reports it with a signed mesh.plans.subtask.update, the operator
+// action the daemon requires, signed with this node's identity.
+
+const reportedSubtasks = new Set();
+let _operatorAuth = null;
+
+async function signOperatorRequest(payload) {
+  if (!_operatorAuth) _operatorAuth = await import('../lib/operator-auth.mjs');
+  return _operatorAuth.signOperatorRequest(payload);
+}
+
+async function reportPlanSubtasks() {
+  let tasks;
+  try {
+    tasks = readTasks(ACTIVE_TASKS_PATH);
+  } catch {
+    return;
+  }
+  for (const card of tasks) {
+    if (!card.plan_id || card.status !== 'done') continue;
+    const key = `${card.plan_id}/${card.task_id}`;
+    if (reportedSubtasks.has(key)) continue;
+    try {
+      // After a restart the done cards are still on the board; ask the daemon first.
+      const plan = await natsRequest('mesh.plans.get', { plan_id: card.plan_id });
+      const st = (plan?.subtasks || []).find(s => s.subtask_id === card.task_id);
+      if (st && st.status !== 'completed') {
+        await natsRequest('mesh.plans.subtask.update', await signOperatorRequest({
+          plan_id: card.plan_id,
+          subtask_id: card.task_id,
+          status: 'completed',
+          result: { success: true, summary: `Kanban card ${card.task_id} marked done` },
+        }));
+        log(`PLAN SUBTASK REPORTED: ${key} → completed`);
+      }
+      reportedSubtasks.add(key);
+    } catch (err) {
+      log(`PLAN SUBTASK REPORT FAILED: ${key}: ${err.message} (retrying next poll)`);
+    }
+  }
 }
 
 /**
@@ -514,6 +562,7 @@ function formatTaskYaml(task) {
   lines.push(`  artifacts:`);
   if (task.next_action) lines.push(`  next_action: ${task.next_action.replace(/\s*\r?\n\s*/g, ' ')}`);
   if (task.parent_id) lines.push(`  parent_id: ${task.parent_id}`);
+  if (task.plan_id) lines.push(`  plan_id: ${task.plan_id}`);
   if (task.description) lines.push(`  description: ${task.description.replace(/\r?\n/g, '\\n')}`);
   lines.push(`  updated_at: ${task.updated_at}`);
   return lines.join('\n');
@@ -807,9 +856,12 @@ async function main() {
     for await (const msg of sub) {
       try {
         const payload = JSON.parse(sc.decode(msg.data));
-        // Route plan events separately (they use plan_id, not task_id)
-        if (payload.event && payload.event.startsWith('plan.')) {
-          handlePlanEvent(payload.event, payload.plan || payload);
+        // Route plan events separately (they use plan_id, not task_id). The
+        // daemon publishes them on mesh.events.plan.<type> with event '<type>',
+        // so the subject, not the event name, marks them; matching a 'plan.'
+        // event name dropped every real one and no subtask was materialized.
+        if (msg.subject.startsWith('mesh.events.plan.')) {
+          handlePlanEvent(`plan.${msg.subject.slice('mesh.events.plan.'.length)}`, payload.plan || payload);
         } else {
           handleEvent(payload.event, payload.task_id, payload.task);
         }
@@ -837,6 +889,8 @@ async function main() {
   while (running) {
     debug(`Dispatch poll: dispatched=${dispatched.size}`);
     try {
+      await reportPlanSubtasks();
+
       // Only dispatch if no active tasks in the mesh from this bridge
       if (dispatched.size === 0) {
         const task = findDispatchable();
