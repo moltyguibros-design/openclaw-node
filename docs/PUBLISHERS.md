@@ -40,16 +40,18 @@ Three tiers of integration, from tightest to loosest:
 
 ### Claude Code
 
-**Not wired by default.** The `PreCompact` hook the installer registers (`.claude/hooks/pre-compact.sh`)
-is a no-op stub: its state write was removed in redesign Step 0.6 and its rewiring is still pending
-(README "Lifecycle Hooks"). The publisher ships as `hooks/claude-code/pre-compact.sh`, which calls
-`bin/openclaw-extract-now.mjs`, but nothing invokes it and `hooks/` is not in the npm package. Until it
-is wired, Claude Code sessions are covered by the Tier 3 idle timer or a manual
-`node bin/openclaw-extract-now.mjs`.
+Claude Code calls `.claude/hooks/pre-compact.sh` before context compaction.
+OpenClaw ships a hook that fires an extraction event at this lifecycle point.
 
-**How it works once wired** (a Claude Code `PreCompact` hook running `bash <clone>/hooks/claude-code/pre-compact.sh`):
+**Setup:** `install.sh` deploys `.claude/hooks/pre-compact.sh` to the workspace's `.claude/hooks/`
+with the checkout's path written into it, and wires it to PreCompact through
+`config/claude-settings.json`. In a repo checkout the hook finds `bin/` two levels up;
+`OPENCLAW_REPO_DIR` overrides both.
+
+**How it works:**
 1. Claude Code triggers the PreCompact hook
-2. `hooks/claude-code/pre-compact.sh` runs `node bin/openclaw-extract-now.mjs --triggered-by=claude-code-pre-compact`
+2. `pre-compact.sh` starts `node bin/openclaw-extract-now.mjs --triggered-by=claude-code-pre-compact`
+   detached, so compaction never waits on the bus
 3. The CLI connects to NATS, publishes the extraction event, exits
 4. The memory daemon receives the event and runs extraction
 

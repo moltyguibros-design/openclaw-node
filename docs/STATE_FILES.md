@@ -179,7 +179,7 @@ They were deleted in Step 0.6.
 
 | File | Former owner | Removed in | Notes |
 |------|-------------|------------|-------|
-| `~/.openclaw/workspace/.pre-compact-state.md` | `pre-compact.sh` | Step 0.6 | Hook retained as no-op stub for Block 4 rewiring |
+| `~/.openclaw/workspace/.pre-compact-state.md` | `pre-compact.sh` | Step 0.6 | The hook now publishes an extraction request instead; it writes no state file |
 | `~/.openclaw/workspace/.tmp/session-fingerprint.json` | `session-recap` | Step 0.6 | ~80 lines of dead code removed (extractFingerprint, writeFingerprint) |
 | `~/.openclaw/workspace/.tmp/frontend-activity` | `auto-checkpoint` | Step 0.6 | Touch-based activity signal; daemon uses JSONL mtime instead |
 | `confidence` field on `extractFacts` return | `pre-compression-flush.mjs` | Step 0.6 | Computed but never consumed; return shape is now `{ fact, category, speaker }` |

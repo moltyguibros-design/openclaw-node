@@ -235,6 +235,11 @@ for hook in session-start validate-commit validate-push pre-compact session-stop
     run chmod +x "$HOOK_DST"
   fi
 done
+# The PreCompact hook runs the extraction trigger from this checkout.
+if [ -f "${CLAUDE_DIR}/hooks/pre-compact.sh" ]; then
+  run sed -i.bak "s|^DEPLOYED_REPO_DIR=\"\"\$|DEPLOYED_REPO_DIR=\"${REPO_DIR}\"|" "${CLAUDE_DIR}/hooks/pre-compact.sh"
+  run rm -f "${CLAUDE_DIR}/hooks/pre-compact.sh.bak"
+fi
 info "Deployed Claude Code hooks"
 
 # Deploy git hooks (LLM-agnostic enforcement) — only into an explicitly named

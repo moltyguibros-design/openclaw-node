@@ -1068,3 +1068,32 @@ exit 0
   assert.match(unit, /^Environment=PATH=\$\{NODE_BIN_DIR\}:/m);
   assert.match(moduleSrc['env.sh'], /export NODE_BIN_DIR="\$\(dirname "\$NODE_BIN"\)"/);
 });
+
+// The PreCompact hook the installer deploys (and wires in config/claude-settings.json)
+// was a no-op stub, so no extraction fired on compaction. It now runs the trigger
+// CLI from the checkout, both as the repo copy and as the deployed copy.
+test('the deployed PreCompact hook fires the extraction trigger from the checkout', async () => {
+  const integ = moduleSrc['integrations.sh'];
+  const block = integ.slice(integ.indexOf('# Deploy hook scripts'), integ.indexOf('info "Deployed Claude Code hooks"'));
+  assert.ok(block.includes('pre-compact'), 'the hook deploy step must be found');
+  assert.match(readFileSync(join(ROOT, 'config/claude-settings.json'), 'utf8'), /"command": "bash \.claude\/hooks\/pre-compact\.sh"/);
+
+  const root = mkdtempSync(join(tmpdir(), 'openclaw-precompact-'));
+  const claudeDir = join(root, 'workspace', '.claude');
+  mkdirSync(join(claudeDir, 'hooks'), { recursive: true });
+  mkdirSync(join(root, 'fakebin'));
+  writeFileSync(join(root, 'fakebin', 'node'), `#!/bin/sh\necho "$*" >> "${join(root, 'node.log')}"\n`, { mode: 0o755 });
+  const deploy = spawnSync('bash', ['-c', `set -euo pipefail; run() { "$@"; }; REPO_DIR="${ROOT}"; CLAUDE_DIR="${claudeDir}"\n${block}`], { encoding: 'utf8' });
+  assert.equal(deploy.status, 0, deploy.stderr);
+
+  const env = { ...process.env, PATH: `${join(root, 'fakebin')}:${process.env.PATH}` };
+  delete env.OPENCLAW_REPO_DIR;
+  const expected = `${join(ROOT, 'bin', 'openclaw-extract-now.mjs')} --triggered-by=claude-code-pre-compact`;
+  for (const hook of [join(claudeDir, 'hooks', 'pre-compact.sh'), join(ROOT, '.claude', 'hooks', 'pre-compact.sh')]) {
+    writeFileSync(join(root, 'node.log'), '');
+    const r = spawnSync('bash', [hook], { encoding: 'utf8', env, cwd: root });
+    assert.equal(r.status, 0, r.stderr);
+    for (let i = 0; i < 100 && !readFileSync(join(root, 'node.log'), 'utf8'); i++) await new Promise((res) => setTimeout(res, 50));
+    assert.equal(readFileSync(join(root, 'node.log'), 'utf8').trim(), expected, hook);
+  }
+});
