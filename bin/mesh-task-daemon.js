@@ -1101,6 +1101,7 @@ async function handleCollabLeave(msg) {
     if (!memberAuthorized(msg, current, node_id, params.member_token, 'leave')) return;
   }
 
+  const before = await collabStore.get(session_id);
   const session = await collabStore.removeNode(session_id, node_id);
   if (!session) return respondError(msg, `Session ${session_id} not found`);
 
@@ -1111,6 +1112,11 @@ async function handleCollabLeave(msg) {
   if (session.status === COLLAB_STATUS.ACTIVE && session.nodes.length < session.min_nodes) {
     await collabStore.markAborted(session_id, `Below min_nodes: ${session.nodes.length} < ${session.min_nodes}`);
     publishCollabEvent('aborted', session);
+  } else if (session.status === COLLAB_STATUS.ACTIVE && session.mode === COLLAB_MODE.SEQUENTIAL && before?.current_turn === node_id) {
+    // The leaver held the turn: removeNode handed it on, so notify the next member
+    // or, past the last turn, evaluate the round.
+    if (session.current_turn) await notifySequentialTurn(session_id, session.current_turn);
+    else await evaluateRound(session_id);
   } else if (session.status === COLLAB_STATUS.ACTIVE) {
     // Re-check if the round is now complete (removed node excluded from quorum)
     const updated = await collabStore.get(session_id);
@@ -2321,44 +2327,94 @@ async function sweepCirclingStepTimeouts() {
   }
 }
 
-// Round timeout for the barrier modes (P1 #4): circling has step timers, but a
-// cooperative/collaborative round used to hang FOREVER on one crashed member.
+// Round timeout (P1 #4): circling has step timers; every other live mode used to
+// hang FOREVER on one crashed or withdrawn member. Barrier modes (parallel, review,
+// cooperative, collaborative) time the round; sequential times the current turn.
+// The limit is not a work cap: a member past it is dropped only when its agent no
+// longer answers the alive check for this task, so a long round by a live worker
+// runs on, bounded by the task's budget.
 const COLLAB_ROUND_TIMEOUT_MS = parseInt(process.env.MESH_COLLAB_ROUND_TIMEOUT_MS || '', 10) || 15 * 60_000;
+const BARRIER_TIMEOUT_MODES = new Set([COLLAB_MODE.PARALLEL, COLLAB_MODE.REVIEW, COLLAB_MODE.COOPERATIVE, COLLAB_MODE.COLLABORATIVE]);
+
+async function memberStillWorking(nodeId, taskId) {
+  try {
+    const reply = await nc.request(`mesh.agent.${nodeId}.alive`, sc.encode(JSON.stringify({ task_id: taskId })), { timeout: 5000 });
+    return JSON.parse(sc.decode(reply.data)).alive === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Marks `missing` dead; returns false when the session was aborted for too few members. */
+async function dropTimedOutMembers(session, missing, auditEvent, auditData) {
+  await collabStore.appendAudit(session.session_id, auditEvent, { ...auditData, marked_dead: missing });
+  await collabStore.markNodesDead(session.session_id, missing);
+
+  const fresh = await collabStore.get(session.session_id);
+  const alive = fresh.nodes.filter(n => n.status !== 'dead').length;
+  if (alive >= fresh.min_nodes) return true;
+  log(`COLLAB ROUND TIMEOUT ${session.session_id}: only ${alive}/${fresh.min_nodes} members alive — aborting`);
+  await collabStore.markAborted(session.session_id, `Round ${fresh.current_round} timed out; ${alive}/${fresh.min_nodes} members alive`);
+  publishCollabEvent('aborted', await collabStore.get(session.session_id));
+  const settled = await store.markFailed(fresh.task_id, `Collab round timed out with too few members (${alive}/${fresh.min_nodes})`);
+  publishEvent('failed', await store.get(fresh.task_id));
+  if (settled) await checkPlanProgress(fresh.task_id, 'failed');
+  return false;
+}
+
+async function sweepSequentialTurn(session, round) {
+  const turn = session.current_turn;
+  if (!turn || round.reflections.some(r => r.node_id === turn)) return;
+  const member = session.nodes.find(n => n.node_id === turn);
+  const gone = !member || member.status === 'dead';
+  const elapsed = Date.now() - new Date(session.turn_started_at || round.started_at).getTime();
+  if (!gone && elapsed <= COLLAB_ROUND_TIMEOUT_MS) return;
+  if (!gone && await memberStillWorking(turn, session.task_id)) {
+    log(`COLLAB TURN ${session.session_id} R${session.current_round}: ${turn} past ${(elapsed / 60000).toFixed(1)}m but still working`);
+    return;
+  }
+
+  log(`COLLAB TURN TIMEOUT ${session.session_id} R${session.current_round}: ${turn} ${gone ? 'is gone' : `silent for ${(elapsed / 60000).toFixed(1)}m`} — passing the turn on`);
+  const missing = member && member.status !== 'dead' ? [turn] : [];
+  if (!(await dropTimedOutMembers(session, missing, 'turn_timeout', { round: session.current_round, node_id: turn, elapsed_ms: elapsed }))) return;
+  const next = await collabStore.advanceTurn(session.session_id);
+  if (next) await notifySequentialTurn(session.session_id, next);
+  else await evaluateRound(session.session_id);
+}
 
 async function sweepCollabRoundTimeouts() {
   try {
     const active = await collabStore.list({ status: COLLAB_STATUS.ACTIVE });
     for (const session of active) {
-      if (session.mode !== COLLAB_MODE.COOPERATIVE && session.mode !== COLLAB_MODE.COLLABORATIVE) continue;
       const round = session.rounds[session.rounds.length - 1];
       if (!round || round.completed_at || round.evaluated || !round.started_at) continue;
+      if (session.mode === COLLAB_MODE.SEQUENTIAL) {
+        await sweepSequentialTurn(session, round);
+        continue;
+      }
+      if (!BARRIER_TIMEOUT_MODES.has(session.mode)) continue;
       const elapsed = Date.now() - new Date(round.started_at).getTime();
       if (elapsed <= COLLAB_ROUND_TIMEOUT_MS) continue;
 
       const reflected = new Set(round.reflections.map(r => r.node_id));
-      const missing = session.nodes
+      const waitingOn = session.nodes
         .filter(n => n.status !== 'dead' && !reflected.has(n.node_id))
         .map(n => n.node_id);
-      log(`COLLAB ROUND TIMEOUT ${session.session_id} (${session.mode}) R${session.current_round}: ${(elapsed / 60000).toFixed(1)}m elapsed, non-reflected: ${missing.join(', ') || 'none'}`);
-      await collabStore.appendAudit(session.session_id, 'round_timeout', {
-        round: session.current_round, elapsed_ms: elapsed, marked_dead: missing,
-      });
-      await collabStore.markNodesDead(session.session_id, missing);
-
-      const fresh = await collabStore.get(session.session_id);
-      const alive = fresh.nodes.filter(n => n.status !== 'dead').length;
-      if (alive < fresh.min_nodes) {
-        log(`COLLAB ROUND TIMEOUT ${session.session_id}: only ${alive}/${fresh.min_nodes} members alive — aborting`);
-        await collabStore.markAborted(session.session_id, `Round ${fresh.current_round} timed out; ${alive}/${fresh.min_nodes} members alive`);
-        publishCollabEvent('aborted', await collabStore.get(session.session_id));
-        const settled = await store.markFailed(fresh.task_id, `Collab round timed out with too few members (${alive}/${fresh.min_nodes})`);
-        publishEvent('failed', await store.get(fresh.task_id));
-        if (settled) await checkPlanProgress(fresh.task_id, 'failed');
-      } else {
-        // Evaluate with the quorum that DID reflect — the claim in evaluateRound
-        // keeps this single-fire even if a straggler reflection races the sweep.
-        await evaluateRound(session.session_id);
+      const missing = [];
+      for (const id of waitingOn) {
+        if (!(await memberStillWorking(id, session.task_id))) missing.push(id);
       }
+      if (waitingOn.length > 0 && missing.length === 0) {
+        log(`COLLAB ROUND ${session.session_id} (${session.mode}) R${session.current_round}: ${(elapsed / 60000).toFixed(1)}m elapsed, ${waitingOn.join(', ')} still working`);
+        continue;
+      }
+      log(`COLLAB ROUND TIMEOUT ${session.session_id} (${session.mode}) R${session.current_round}: ${(elapsed / 60000).toFixed(1)}m elapsed, non-reflected: ${missing.join(', ') || 'none'}`);
+      if (!(await dropTimedOutMembers(session, missing, 'round_timeout', { round: session.current_round, elapsed_ms: elapsed }))) continue;
+      // Members still working close the barrier themselves when they reflect.
+      if (missing.length < waitingOn.length) continue;
+      // Evaluate with the quorum that DID reflect — the claim in evaluateRound
+      // keeps this single-fire even if a straggler reflection races the sweep.
+      await evaluateRound(session.session_id);
     }
   } catch (err) {
     log(`COLLAB ROUND SWEEP ERROR: ${err.message}`);
@@ -3088,6 +3144,7 @@ if (require.main === module) {
     evaluateRound: (id) => evaluateRound(id),
     handleCirclingStepTimeout: (id, snap) => handleCirclingStepTimeout(id, snap),
     sweepCollabRoundTimeouts: () => sweepCollabRoundTimeouts(),
+    handleCollabLeave: (msg) => handleCollabLeave(msg),
     handleFail: (msg) => handleFail(msg),
     // F1/R1 (test/mesh-lease-authz.test.js): the handlers a stranger on the bus reaches.
     // Also owner calls on a task that already ended (test/daemon-terminal-task.test.js).

@@ -45,8 +45,9 @@ function recruitingTask(extra = {}) {
   };
 }
 
-function fakeBus(task) {
+function fakeBus(task, { join = null } = {}) {
   const calls = [];
+  calls.unsubscribed = 0;
   agent.__test.setContext({
     nc: {
       async request(subject, data) {
@@ -58,11 +59,11 @@ function fakeBus(task) {
         } else if (subject === 'mesh.tasks.get') {
           reply = task;
         } else if (subject === 'mesh.collab.join') {
-          reply = null;
+          reply = join;
         }
         return { data: sc.encode(JSON.stringify({ ok: true, data: reply })) };
       },
-      subscribe() { return { unsubscribe() {}, async *[Symbol.asyncIterator]() {} }; },
+      subscribe() { return { unsubscribe() { calls.unsubscribed += 1; }, async *[Symbol.asyncIterator]() {} }; },
     },
   });
   return calls;
@@ -122,6 +123,22 @@ describe('D11 decline on a local-model node', () => {
     await agent.__test.checkRecruitingSessions();
 
     assert.equal(calls.filter((c) => c.subject === 'mesh.collab.join').length, 1, 'the node joins');
+  });
+});
+
+describe('collab member without worktree isolation (mesh-core #9)', () => {
+  it('leaves the session it joined and drops its round subscription', async () => {
+    // MESH_WORKSPACE is not a git repository here, so createWorktree fails.
+    const task = recruitingTask({ llm_provider: 'claude' });
+    const calls = fakeBus(task, { join: { session_id: task.collab_session_id, status: 'active', nodes: [{ node_id: 'node-local' }] } });
+    await agent.__test.executeCollabTask(task);
+
+    const leave = calls.find((c) => c.subject === 'mesh.collab.leave');
+    assert.ok(leave, 'the member withdraws from the session');
+    assert.equal(leave.payload.session_id, task.collab_session_id);
+    assert.equal(leave.payload.node_id, 'node-local');
+    assert.equal(calls.unsubscribed, 1);
+    assert.equal(calls.filter((c) => c.subject === 'mesh.collab.reflect').length, 0);
   });
 });
 

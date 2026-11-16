@@ -1858,9 +1858,9 @@ async function executeCollabTask(task) {
   await prepareHyperagentStrategy(task);
 
   // Create worktree for isolation — FAIL-CLOSED (D14 rerun): a member that
-  // cannot get isolation withdraws before rounds start; the session's
-  // deadline sweep handles the missing member. Contaminated shared-tree
-  // contributions are worse than a member loss.
+  // cannot get isolation leaves the session it already joined (if it was the
+  // Nth joiner, rounds have already started), so no barrier waits on it.
+  // Contaminated shared-tree contributions are worse than a member loss.
   const worktreePath = createWorktree(`${task.task_id}-${NODE_ID}`);
   if (!worktreePath) {
     log(`ISOLATION FAILED: withdrawing ${NODE_ID} from collab ${sessionId} (fail-closed, no shared-workspace fallback)`);
@@ -1868,8 +1868,14 @@ async function executeCollabTask(task) {
       task_id: task.task_id,
       node_id: NODE_ID,
       lease_token: task.lease_token,
-      reason: `Worktree isolation failed for collab member ${NODE_ID} (MESH_WORKSPACE=${WORKSPACE} — must be a git repository). Fail-closed: member withdrew before rounds.`,
+      reason: `Worktree isolation failed for collab member ${NODE_ID} (MESH_WORKSPACE=${WORKSPACE} — must be a git repository). Fail-closed: member withdrew.`,
     }).catch(err => warn(`mesh.tasks.fail: ${err.message}`));
+    roundSub.unsubscribe();
+    await natsRequest('mesh.collab.leave', {
+      session_id: sessionId,
+      node_id: NODE_ID,
+      reason: 'worktree isolation failed',
+    }).catch(err => warn(`mesh.collab.leave: ${err.message}`));
     writeAgentState('idle', null);
     return;
   }
