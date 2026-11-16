@@ -26,7 +26,9 @@ PROMPT_FILE="${PLAN_DIR}/TICK_PROMPT.md"
 BLOCK_FILE="${PLAN_DIR}/BLOCKED.md"
 VERSION_FILE="${PLAN_DIR}/VERSION"
 INVENTORY_FILE="${PLAN_DIR}/INVENTORY.md"
-LOCK_DIR="${PLAN_DIR}/.tick.lock"
+# One lock for every plan: all ticks share this working tree and git index, so a
+# per-plan lock let two chains commit each other's staged files.
+LOCK_DIR="${REPO}/memory-plan/.tick.lock"
 DIGEST_FILE="${HOME}/.openclaw/workspace/memory/${PLAN_ID}-progress.md"
 
 MODE="run"
@@ -97,17 +99,19 @@ command -v claude >/dev/null 2>&1 || { log "FATAL: claude CLI not on PATH"; exit
 mkdir -p "${TICK_LOG_DIR}"
 
 # Single-tick lock (mkdir atomicity; macOS has no flock). Reap stale >60min.
+# The `plan` file names the holder so the viewer can show which plan is ticking.
 if [ -d "${LOCK_DIR}" ]; then
   # GNU first: GNU `stat -f` prints filesystem info to stdout before failing; BSD rejects -c silently.
   LOCK_MTIME=$(stat -c %Y "${LOCK_DIR}" 2>/dev/null || stat -f %m "${LOCK_DIR}" 2>/dev/null || echo 0)
   LOCK_AGE=$(( $(date +%s) - LOCK_MTIME ))
   if [ "${LOCK_AGE}" -lt 3600 ]; then
-    log "skip: another tick is already running (lock age=${LOCK_AGE}s)"; exit 0
+    log "skip: another tick is already running ($(cat "${LOCK_DIR}/plan" 2>/dev/null || echo '?'), lock age=${LOCK_AGE}s)"; exit 0
   fi
-  log "info: reaping stale lock (age=${LOCK_AGE}s)"; rmdir "${LOCK_DIR}" 2>/dev/null || rm -rf "${LOCK_DIR}"
+  log "info: reaping stale lock (age=${LOCK_AGE}s)"; rm -rf "${LOCK_DIR}"
 fi
 mkdir "${LOCK_DIR}" 2>/dev/null || { log "skip: lock race lost"; exit 0; }
-trap 'rmdir "${LOCK_DIR}" 2>/dev/null || true' EXIT
+trap 'rm -rf "${LOCK_DIR}" 2>/dev/null || true' EXIT
+printf '%s\n' "${PLAN_ID}" > "${LOCK_DIR}/plan"
 
 maybe_autopause() {
   local reason="$1"
@@ -147,11 +151,20 @@ fi
 cd "${REPO}"
 # Untracked files are NOT dirt: a stray scratch dir or a concurrent session's new
 # files must not trip the stall-block for a chain that never touched them.
+# Only dirt inside this plan's own silo is this plan's stall. Tracked edits
+# elsewhere (the operator's, or another plan's) skip the tick without blocking
+# or pausing it, so a chain re-polls until the tree is clean again.
 DIRTY=$(git status --porcelain | grep -v '^??' || true)
 if [ -n "${DIRTY}" ]; then
+  OWN_DIRTY=$(git status --porcelain -- "memory-plan/plans/${PLAN_ID}/" | grep -v '^??' || true)
   case "${VERSION}" in
     *-pre|*-mid) log "info: tree dirty but VERSION=${VERSION} (in-flight); proceeding" ;;
-    *) log "skip: tree dirty on clean VERSION=${VERSION} — unexpected; not invoking claude"
+    *) if [ -z "${OWN_DIRTY}" ]; then
+         log "skip: tracked changes outside memory-plan/plans/${PLAN_ID}/ — not this plan's stall; not invoking claude"
+         printf '%s\n' "${DIRTY}" | sed 's/^/        /'
+         exit 0
+       fi
+       log "skip: tree dirty on clean VERSION=${VERSION} — unexpected; not invoking claude"
        printf '%s\n' "${DIRTY}" | sed 's/^/        /'
        write_stall_block "${VERSION}" "${DIRTY}"
        maybe_autopause "dirty tree on clean VERSION"; exit 0 ;;

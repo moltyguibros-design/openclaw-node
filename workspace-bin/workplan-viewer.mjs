@@ -193,7 +193,14 @@ function readVersion(plan) {
 }
 
 const isBlocked = (p) => fs.existsSync(path.join(p.dir, 'BLOCKED.md'));
-const isLocked  = (p) => fs.existsSync(path.join(p.dir, '.tick.lock'));
+// plan-tick.sh holds one lock for the whole repo at memory-plan/.tick.lock (plan.root
+// is <repo>/memory-plan/plans); its `plan` file names the plan that holds it.
+const tickLockDir = (p) => path.join(p.root, '..', '.tick.lock');
+const tickLockHolder = (p) => {
+  try { return fs.readFileSync(path.join(tickLockDir(p), 'plan'), 'utf8').trim(); }
+  catch { return fs.existsSync(tickLockDir(p)) ? '?' : null; }
+};
+const isLocked  = (p) => tickLockHolder(p) === p.id;
 // Newest-content signal for the plan: max mtime across its top-level *.md +
 // VERSION, plus the tick-logs/audits dir mtimes (file add/remove). The client
 // re-renders the active panel only when this changes — live updates, no flicker.
@@ -1954,8 +1961,9 @@ const server = http.createServer(async (req, res) => {
         return json(res, { error: 'tick command not found: ' + cfg.tick_command }, 400);
       }
       // Reject if the lock is already held — would just skip-fast.
-      if (fs.existsSync(path.join(plan.dir, '.tick.lock'))) {
-        return json(res, { error: 'a tick is already running (lock held)' }, 409);
+      const holder = tickLockHolder(plan);
+      if (holder) {
+        return json(res, { error: `a tick is already running (lock held by ${holder})` }, 409);
       }
       // Reject if blocked — clearer than running and immediately exiting.
       if (fs.existsSync(path.join(plan.dir, 'BLOCKED.md'))) {

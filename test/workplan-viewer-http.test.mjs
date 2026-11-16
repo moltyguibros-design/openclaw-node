@@ -266,6 +266,27 @@ test('a plan close_check reaches the tick as WORKPLAN_CLOSE_CHECK from the plist
   assert.equal(fs.readFileSync(seen, 'utf8'), config.close_check);
 });
 
+test("the repo-level tick lock refuses run-once and shows only on the plan that holds it", async t => {
+  const f = await fixture(t);
+  const opts = { token: f.master };
+  const lock = path.join(f.root, '.tick.lock');
+  fs.mkdirSync(lock);
+  fs.writeFileSync(path.join(lock, 'plan'), 'other\n');
+  fs.writeFileSync(path.join(f.root, 'tick-run.sh'), '#!/bin/sh\nprintf ran > "' + path.join(f.root, 'ran') + '"\n', { mode: 0o700 });
+  const config = { tick_command: path.join(f.root, 'tick-run.sh'), working_dir: f.root,
+    plist_label: 'fixture-only', plist_path: path.join(f.root, 'fixture.plist'),
+    stdout_path: path.join(f.root, 'stdout'), stderr_path: path.join(f.root, 'stderr'), interval_seconds: 1800 };
+  assert.equal((await f.request('/api/plans/fixture/automation/config', { ...opts, method: 'PUT', body: config })).status, 200);
+  const refused = await f.request('/api/plans/fixture/automation/run-once', { ...opts, method: 'POST' });
+  assert.equal(refused.status, 409);
+  assert.match(JSON.parse(refused.text).error, /lock held by other/);
+  assert.equal(JSON.parse((await f.request('/api/plans/fixture/state', opts)).text).locked, false);
+  fs.writeFileSync(path.join(lock, 'plan'), 'fixture\n');
+  assert.equal(JSON.parse((await f.request('/api/plans/fixture/state', opts)).text).locked, true);
+  await sleep(100);
+  assert.equal(fs.existsSync(path.join(f.root, 'ran')), false);
+});
+
 test('default automation config points at the repo that holds memory-plan/plans', async t => {
   const f = await fixture(t);
   const r = await f.request('/api/plans/fixture/automation', { token: f.master });

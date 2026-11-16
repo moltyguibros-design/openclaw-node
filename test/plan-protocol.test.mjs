@@ -370,6 +370,75 @@ describe('plan-tick close gate — the commit that closed VERSION must carry the
   });
 });
 
+describe('plan-tick shares one repo lock and blames only its own silo for dirt', () => {
+  const GIT = 'git -c user.name=t -c user.email=t@t';
+  let n = 0;
+
+  function repo(id) {
+    const root = path.join(tmp, `lockrepo${++n}`);
+    const plan = path.join(root, 'memory-plan', 'plans', id);
+    fs.mkdirSync(plan, { recursive: true });
+    fs.mkdirSync(path.join(root, 'workspace-bin'));
+    fs.mkdirSync(path.join(root, 'lib'));
+    fs.copyFileSync(path.join(REPO, 'workspace-bin', 'plan-tick.sh'), path.join(root, 'workspace-bin', 'plan-tick.sh'));
+    fs.writeFileSync(path.join(root, 'workspace-bin', 'plan-lint.sh'),
+      '#!/bin/bash\necho "summary: 1 PASS · 0 WARN · 0 FAIL → CONFORMANT"\n');
+    fs.writeFileSync(path.join(plan, 'INVENTORY.md'), '| 1 | 1.1 | v1.1 | [ ] | open step |\n');
+    fs.writeFileSync(path.join(plan, 'VERSION'), 'v1.0\n');
+    fs.writeFileSync(path.join(plan, 'TICK_PROMPT.md'), 'tick\n');
+    fs.writeFileSync(path.join(root, 'lib', 'code.js'), 'one\n');
+    const sh = (cmd) => assert.equal(spawnSync('bash', ['-c', cmd], { cwd: root }).status, 0, cmd);
+    sh(`git init -q . && git add -A && ${GIT} commit -q -m seed`);
+    const bin = path.join(tmp, `lockbin${n}`);
+    fs.mkdirSync(bin);
+    const seen = path.join(tmp, `lockseen${n}`);
+    fs.writeFileSync(path.join(bin, 'claude'),
+      `#!/bin/bash\ncat >/dev/null\ncat memory-plan/.tick.lock/plan > '${seen}'\n`);
+    fs.chmodSync(path.join(bin, 'claude'), 0o755);
+    const home = path.join(tmp, `lockhome${n}`);
+    fs.mkdirSync(home);
+    const env = { PATH: `${bin}:${process.env.PATH}`, HOME: home, TMPDIR: tmp, WORKPLAN_CLOSE_CHECK: 'none' };
+    const tick = () => spawnSync('bash', [path.join(root, 'workspace-bin', 'plan-tick.sh'), id], { encoding: 'utf8', env });
+    return { root, plan, seen, tick, blockPath: path.join(plan, 'BLOCKED.md') };
+  }
+
+  it('tracked edits outside the silo skip the tick without writing BLOCKED.md', () => {
+    const f = repo('pdirt');
+    fs.writeFileSync(path.join(f.root, 'lib', 'code.js'), 'operator edit\n');
+    const r = f.tick();
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /skip: tracked changes outside memory-plan\/plans\/pdirt\//);
+    assert.equal(fs.existsSync(f.blockPath), false, 'a plan was blocked for dirt it never touched');
+    assert.equal(fs.existsSync(f.seen), false, 'claude ran on a dirty tree');
+  });
+
+  it('tracked edits inside the silo on a clean VERSION still write the stall block', () => {
+    const f = repo('pown');
+    fs.appendFileSync(path.join(f.plan, 'INVENTORY.md'), '| 2 | 1.2 | v1.2 | [ ] | half-done |\n');
+    const r = f.tick();
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(fs.readFileSync(f.blockPath, 'utf8'), /silent stall — tree dirty on clean VERSION=v1\.0/);
+  });
+
+  it("another plan's live tick holds the lock for every plan", () => {
+    const f = repo('pwait');
+    fs.mkdirSync(path.join(f.root, 'memory-plan', '.tick.lock'));
+    fs.writeFileSync(path.join(f.root, 'memory-plan', '.tick.lock', 'plan'), 'other\n');
+    const r = f.tick();
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /skip: another tick is already running \(other, lock age=/);
+    assert.equal(fs.existsSync(f.seen), false, 'two plans ticked at once in one working tree');
+  });
+
+  it('a tick names itself in the repo lock and releases it on exit', () => {
+    const f = repo('pruns');
+    const r = f.tick();
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(fs.readFileSync(f.seen, 'utf8'), 'pruns\n');
+    assert.equal(fs.existsSync(path.join(f.root, 'memory-plan', '.tick.lock')), false);
+  });
+});
+
 describe('new-plan.sh — refuses an id whose shim would be the engine', () => {
   let root;
   const scaffold = (id) =>
