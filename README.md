@@ -673,7 +673,7 @@ The rule loader is a zero-dependency engine that:
 | Framework | `typescript.md` | `tsconfig.json` |
 | Framework | `unity.md` | `ProjectSettings/ProjectVersion.txt` (+ `ProjectSettings/`, `Assets/`) |
 
-> Universal rules ship into `~/.openclaw/rules/`; framework rules (solidity/typescript/unity) live in `config/rules/framework/` and are copied into `~/.openclaw/rules/` by the installer only when the matching framework is detected.
+> Universal rules ship into `~/.openclaw/rules/`; framework rules (solidity/typescript/unity) live in `config/rules/framework/` and are copied into `~/.openclaw/rules/` by the installer only when the matching framework is detected in the project named with `--project=PATH` (which also receives the OpenClaw git hooks). Without `--project`, neither happens.
 
 ### Rule Injection into Agents
 

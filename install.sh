@@ -57,6 +57,7 @@ CLUSTER_PEERS=""
 CLUSTER_BIND=""
 LEAD_PUBKEY=""
 PROVIDER=""
+PROJECT_DIR=""
 
 for arg in "$@"; do
   case "$arg" in
@@ -74,8 +75,9 @@ for arg in "$@"; do
     --cluster-bind=*)    CLUSTER_BIND="${arg#--cluster-bind=}" ;;
     --lead-pubkey=*)     LEAD_PUBKEY="${arg#--lead-pubkey=}" ;;
     --provider=*)        PROVIDER="${arg#--provider=}" ;;
+    --project=*)         PROJECT_DIR="${arg#--project=}" ;;
     --help|-h)
-      echo "Usage: bash install.sh [--dry-run] [--update] [--skip-mesh] [--skip-llm] [--skip-verify] [--role=lead|worker] [--provider=NAME] [--enable-services]"
+      echo "Usage: bash install.sh [--dry-run] [--update] [--skip-mesh] [--skip-llm] [--skip-verify] [--role=lead|worker] [--provider=NAME] [--project=PATH] [--enable-services]"
       echo "  --dry-run           Show what would happen without making changes"
       echo "  --update            Re-copy scripts and units, keep existing configs (skip system deps)"
       echo "  --skip-mesh         Skip mesh network setup (used by meta-installer)"
@@ -96,6 +98,9 @@ for arg in "$@"; do
       echo "  --lead-pubkey=B64   Worker joins: the lead's raw base64 identity pubkey"
       echo "                      (openclaw-trust-peer --my-pubkey on the lead). Merged into"
       echo "                      the deploy/operator trust allowlists so lead-signed actions verify."
+      echo "  --project=PATH      Project repo to tailor: install framework rules matching it and"
+      echo "                      copy the OpenClaw git hooks into its .git/hooks. Without it,"
+      echo "                      neither happens (only universal rules are installed)."
       echo "  --enable-services   Also enable and start services after installing"
       echo "In a VM whose host serves Ollama with the node's model, LLM_BASE_URL points at the host"
       echo "(nothing runs or downloads in the VM). OPENCLAW_LLM_HOST=0 keeps the VM on its own Ollama."
@@ -103,6 +108,14 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+if [ -n "$PROJECT_DIR" ]; then
+  if [ ! -d "$PROJECT_DIR" ]; then
+    echo "--project: not a directory: $PROJECT_DIR" >&2
+    exit 1
+  fi
+  PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+fi
 
 source "$REPO_DIR/scripts/install/helpers.sh"
 source "$REPO_DIR/scripts/install/llm-host.sh"

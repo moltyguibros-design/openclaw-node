@@ -115,28 +115,22 @@ for rule in security test-standards design-docs git-hygiene; do
   install_rule "${REPO_DIR}/config/rules/universal/${rule}.md" "${RULES_DIR}/${rule}.md" "${rule}.md"
 done
 
-# Detect frameworks and install matching rules
-if [ -f "package.json" ] || [ -f "${WORKSPACE}/../../package.json" ]; then
-  PKG_FILE="package.json"
-  [ ! -f "$PKG_FILE" ] && PKG_FILE="${WORKSPACE}/../../package.json"
-
-  if [ -f "$PKG_FILE" ]; then
-    # Solidity detection
-    if grep -q '"hardhat"' "$PKG_FILE" 2>/dev/null || [ -f "hardhat.config.js" ] || [ -f "hardhat.config.ts" ] || [ -f "foundry.toml" ]; then
-      install_rule "${REPO_DIR}/config/rules/framework/solidity.md" "${RULES_DIR}/solidity.md" "solidity.md"
-      [ ! -f "${RULES_DIR}/solidity.md.new" ] || true  # install_rule handles logging
-    fi
-
-    # TypeScript detection
-    if [ -f "tsconfig.json" ] || [ -f "${WORKSPACE}/../../tsconfig.json" ]; then
-      install_rule "${REPO_DIR}/config/rules/framework/typescript.md" "${RULES_DIR}/typescript.md" "typescript.md"
-    fi
-
-    # Unity detection
-    if [ -d "ProjectSettings" ] || [ -d "Assets" ]; then
-      install_rule "${REPO_DIR}/config/rules/framework/unity.md" "${RULES_DIR}/unity.md" "unity.md"
-    fi
+# Framework rules follow an explicitly named project (--project=PATH). The
+# installer's cwd is PKG_ROOT under npx and arbitrary otherwise, and $HOME is
+# not a project, so neither is ever a detection input.
+if [ -n "$PROJECT_DIR" ]; then
+  if [ -f "$PROJECT_DIR/package.json" ] && grep -q '"hardhat"' "$PROJECT_DIR/package.json" 2>/dev/null \
+     || [ -f "$PROJECT_DIR/hardhat.config.js" ] || [ -f "$PROJECT_DIR/hardhat.config.ts" ] || [ -f "$PROJECT_DIR/foundry.toml" ]; then
+    install_rule "${REPO_DIR}/config/rules/framework/solidity.md" "${RULES_DIR}/solidity.md" "solidity.md"
   fi
+  if [ -f "$PROJECT_DIR/tsconfig.json" ]; then
+    install_rule "${REPO_DIR}/config/rules/framework/typescript.md" "${RULES_DIR}/typescript.md" "typescript.md"
+  fi
+  if [ -d "$PROJECT_DIR/ProjectSettings" ] || [ -d "$PROJECT_DIR/Assets" ]; then
+    install_rule "${REPO_DIR}/config/rules/framework/unity.md" "${RULES_DIR}/unity.md" "unity.md"
+  fi
+else
+  info "No --project given: framework rules skipped (universal rules only)"
 fi
 
 info "Rules directory: ${RULES_DIR} ($(ls -1 "$RULES_DIR" 2>/dev/null | wc -l | tr -d ' ') rules)"
@@ -237,18 +231,21 @@ for hook in session-start validate-commit validate-push pre-compact session-stop
 done
 info "Deployed Claude Code hooks"
 
-# Deploy git hooks (LLM-agnostic enforcement)
-if [ -d ".git/hooks" ] || [ -d "${WORKSPACE}/../../.git/hooks" ]; then
-  GIT_HOOKS_DIR=".git/hooks"
-  [ ! -d "$GIT_HOOKS_DIR" ] && GIT_HOOKS_DIR="${WORKSPACE}/../../.git/hooks"
-
-  for ghook in pre-commit pre-push; do
-    GHOOK_SRC="${REPO_DIR}/config/git-hooks/${ghook}"
-    GHOOK_DST="${GIT_HOOKS_DIR}/${ghook}"
-    if [ -f "$GHOOK_SRC" ] && [ ! -f "$GHOOK_DST" ]; then
-      run cp "$GHOOK_SRC" "$GHOOK_DST"
-      run chmod +x "$GHOOK_DST"
-      info "Installed git hook: ${ghook}"
-    fi
-  done
+# Deploy git hooks (LLM-agnostic enforcement) — only into an explicitly named
+# project; cwd or $HOME/.git would put them into an unrelated repository.
+if [ -n "$PROJECT_DIR" ]; then
+  GIT_HOOKS_DIR="${PROJECT_DIR}/.git/hooks"
+  if [ -d "$GIT_HOOKS_DIR" ]; then
+    for ghook in pre-commit pre-push; do
+      GHOOK_SRC="${REPO_DIR}/config/git-hooks/${ghook}"
+      GHOOK_DST="${GIT_HOOKS_DIR}/${ghook}"
+      if [ -f "$GHOOK_SRC" ] && [ ! -f "$GHOOK_DST" ]; then
+        run cp "$GHOOK_SRC" "$GHOOK_DST"
+        run chmod +x "$GHOOK_DST"
+        info "Installed git hook: ${ghook}"
+      fi
+    done
+  else
+    warn "--project ${PROJECT_DIR} has no .git/hooks — git hooks not installed"
+  fi
 fi

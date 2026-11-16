@@ -52,8 +52,13 @@ if (meshOnly) {
     process.exit(1);
   }
 
-  // Forward args (--update, --dry-run, --enable-services, etc.)
-  const result = spawnSync('bash', [INSTALL_SCRIPT, ...args], {
+  // Forward args (--update, --dry-run, --enable-services, etc.). install.sh runs
+  // with cwd=PKG_ROOT, so a relative --project is resolved against the caller's
+  // cwd here.
+  const forwarded = args.map((a) => (a.startsWith('--project=')
+    ? `--project=${path.resolve(a.slice('--project='.length))}`
+    : a));
+  const result = spawnSync('bash', [INSTALL_SCRIPT, ...forwarded], {
     stdio: 'inherit',
     cwd: PKG_ROOT,
   });

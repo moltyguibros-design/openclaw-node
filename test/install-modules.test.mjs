@@ -38,6 +38,7 @@ const FLAGS = [
   '--cluster-bind=',
   '--lead-pubkey=',
   '--provider=',
+  '--project=',
 ];
 
 const installSrc = readFileSync(INSTALL_SH, 'utf8');
@@ -891,4 +892,57 @@ test('unit templates and the daemon installer render TZ from OPENCLAW_TIMEZONE',
       .replace(/process\.env\.OPENCLAW_TIMEZONE \|\| process\.env\.TZ \|\| (['"])America\/Montreal\1/g, '');
     assert.doesNotMatch(code, /America\\?\/Montreal/, `${f} pins the zone instead of reading OPENCLAW_TIMEZONE`);
   }
+});
+
+// Steps 18/20 used to read framework markers from the installer's cwd (or
+// $HOME) and copy git hooks into cwd's or $HOME's .git/hooks, so hooks landed
+// in unrelated repositories. Both now follow --project=PATH only.
+function runIntegrations({ cwd, home, project }) {
+  const script = [
+    `REPO_DIR=${JSON.stringify(ROOT)}`,
+    `OPENCLAW_ROOT=${JSON.stringify(join(home, '.openclaw'))}`,
+    'WORKSPACE="$OPENCLAW_ROOT/workspace"',
+    'DRY_RUN=false; SKIP_MESH=true',
+    `PROJECT_DIR=${JSON.stringify(project ?? '')}`,
+    'mkdir -p "$WORKSPACE"',
+    `source ${JSON.stringify(join(ROOT, 'scripts/install/helpers.sh'))}`,
+    `source ${JSON.stringify(join(ROOT, 'scripts/install/integrations.sh'))}`,
+  ].join('\n');
+  return spawnSync('bash', ['-c', script], { cwd, encoding: 'utf8', env: { ...process.env, HOME: home } });
+}
+
+function fakeRepo(root) {
+  mkdirSync(join(root, '.git', 'hooks'), { recursive: true });
+  writeFileSync(join(root, 'package.json'), '{"devDependencies":{"hardhat":"1"}}');
+  writeFileSync(join(root, 'tsconfig.json'), '{}');
+  return root;
+}
+
+test('installer touches neither cwd nor $HOME repos without --project', () => {
+  const base = mkdtempSync(join(tmpdir(), 'openclaw-proj-'));
+  const home = fakeRepo(join(base, 'home'));
+  const cwd = fakeRepo(join(base, 'cwd'));
+  const r = runIntegrations({ cwd, home });
+  assert.equal(r.status, 0, r.stderr);
+  for (const repo of [home, cwd]) {
+    assert.deepEqual(readdirSync(join(repo, '.git', 'hooks')), [], `${repo} got git hooks`);
+  }
+  const rules = readdirSync(join(home, '.openclaw', 'rules'));
+  assert.ok(rules.includes('security.md'), 'universal rules still install');
+  assert.ok(!rules.includes('typescript.md') && !rules.includes('solidity.md'), `framework rules from cwd: ${rules}`);
+});
+
+test('--project drives framework rules and git hooks', () => {
+  const base = mkdtempSync(join(tmpdir(), 'openclaw-proj-'));
+  const home = join(base, 'home');
+  mkdirSync(home, { recursive: true });
+  const project = fakeRepo(join(base, 'project'));
+  const cwd = fakeRepo(join(base, 'cwd'));
+  const r = runIntegrations({ cwd, home, project });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(readdirSync(join(project, '.git', 'hooks')).sort(), ['pre-commit', 'pre-push']);
+  assert.deepEqual(readdirSync(join(cwd, '.git', 'hooks')), []);
+  const rules = readdirSync(join(home, '.openclaw', 'rules'));
+  assert.ok(rules.includes('typescript.md') && rules.includes('solidity.md'), `rules: ${rules}`);
+  assert.ok(!rules.includes('unity.md'));
 });
