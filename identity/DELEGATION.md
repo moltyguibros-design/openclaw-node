@@ -26,7 +26,7 @@ When spawning a sub-agent as a specific soul (e.g., blockchain-auditor, lore-wri
 **Use soul-aware when:** task matches a specialist's domain, you want learned genes applied, or a handoff doc exists.
 **Use generic when:** general-purpose tasks, quick searches, soul identity would add noise.
 
-Mission Control (optional): `POST /api/souls/<soul-id>/prompt` returns the same preamble and logs the spawn.
+Mission Control (optional): `bin/mc-api POST /api/souls/<soul-id>/prompt '{}'` returns the same preamble and logs the spawn.
 
 ## Contract Template
 
@@ -123,7 +123,7 @@ Scheduler dispatches in dependency waves via `computeWaves()`:
 - Wave 0 = all independent tasks (concurrent, capacity-permitting)
 - Wave 1+ = wait for prior wave
 - Capacity: light=0.5, normal=1.0, heavy=2.0, MAX=2.0
-- Debug: `GET /api/scheduler/waves`
+- Debug: `bin/mc-api /api/scheduler/waves`
 
 ## Quality Gate
 

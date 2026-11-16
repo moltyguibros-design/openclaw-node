@@ -29,7 +29,7 @@ Before doing anything else, read in this order (static identity first, dynamic s
 7. Read `memory/YYYY-MM-DD.md` (today) for recent context
 8. **If in MAIN SESSION** (direct chat with your human): Also read `MEMORY.md`
 9. Run `clawvault-local wake` (if available) to recover active context and handoffs.
-10. **Check Mission Control is running** — curl -s localhost:3000/api/tasks. If down, start it (`cd projects/mission-control && npm run dev` in background). If still fails, flag immediately.
+10. **Check Mission Control is running** — `bin/mc-api /api/tasks` (it sends the session token; exit 7 = down, exit 22 = refused). If down, restart the managed service (`launchctl kickstart -k gui/$(id -u)/ai.openclaw.mission-control` on macOS, `systemctl --user restart openclaw-mission-control` on Linux) — never a dev server from the project dir, which collides with it on :3000. If still fails, flag immediately.
 
 **Lazy-loaded (read only when relevant):**
 - `TOOLS.md` — environment-specific notes (TTS voices, SSH hosts, etc.)

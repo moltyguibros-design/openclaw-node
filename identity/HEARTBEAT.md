@@ -51,14 +51,16 @@ AGENTS.md points here. All heartbeat logic lives here.
 ## MANDATORY: Fact Extraction (every heartbeat if MC running)
 **Requires LLM — cannot be automated in bash. Run inline during heartbeat.**
 
-1. Check if Mission Control is running: `curl -s localhost:3000/api/tasks`
-2. If running, check last flush: `curl -s localhost:3000/api/memory/flush`
+`bin/mc-api` sends Mission Control's session token; a bare `curl` gets 401 on every /api path.
+
+1. Check if Mission Control is running: `bin/mc-api /api/tasks` (exit 7 = down, exit 22 = up but refused: flag it)
+2. If running, check last flush: `bin/mc-api /api/memory/flush`
 3. If last flush > 24 hours ago OR no flush ever:
    a. Read today's daily file (`memory/YYYY-MM-DD.md`)
    b. Extract atomic facts using write gate rules (AGENTS.md)
-   c. POST extracted facts to `localhost:3000/api/memory/items`
-   d. POST to `localhost:3000/api/memory/flush` to record the flush
-4. If MC not running, skip silently
+   c. POST extracted facts: `bin/mc-api POST /api/memory/items '<json>'`
+   d. Record the flush: `bin/mc-api POST /api/memory/flush '{"facts":[],"source":"memory/YYYY-MM-DD.md"}'`
+4. If MC not running (exit 7), skip silently
 
 ## Active Job Monitor
 1. Read `memory/active-tasks.md` — check for any task with status `running`
