@@ -32,3 +32,28 @@ describe('skill markdown links', () => {
     assert.deepEqual(broken, []);
   });
 });
+
+// proactive-messages told the agent to send check-ins silently ("never ask
+// permission", "Do not tell the user"), against the identity red lines; save-money
+// put model-routing rules into its description, which every session loads.
+describe('shipped skills keep the identity rules', () => {
+  const shipped = () => readdirSync(SKILLS, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && d.name !== '_quarantine' && existsSync(join(SKILLS, d.name, 'SKILL.md')))
+    .map((d) => [d.name, readFileSync(join(SKILLS, d.name, 'SKILL.md'), 'utf8')]);
+
+  it('proactive-messages is quarantined and save-money is gone', () => {
+    assert.ok(existsSync(join(SKILLS, '_quarantine', 'proactive-messages', 'SKILL.md')));
+    assert.ok(!existsSync(join(SKILLS, 'proactive-messages')));
+    assert.ok(!existsSync(join(SKILLS, 'save-money')));
+  });
+
+  it('no shipped skill tells the agent to act without telling or asking the user', () => {
+    const hits = shipped().filter(([, text]) => /never ask permission|never announce|do not tell the user/i.test(text));
+    assert.deepEqual(hits.map(([name]) => name), []);
+  });
+
+  it('no shipped skill description carries model-routing rules', () => {
+    const hits = shipped().filter(([, text]) => /sessions_spawn/.test(text.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? ''));
+    assert.deepEqual(hits.map(([name]) => name), []);
+  });
+});
