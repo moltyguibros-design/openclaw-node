@@ -6,7 +6,7 @@
 # Usage:
 #   bash install.sh              # Full install
 #   bash install.sh --dry-run    # Show what would happen
-#   bash install.sh --update     # Re-copy scripts/configs, skip deps
+#   bash install.sh --update     # Re-copy scripts, skip deps (existing configs kept; renders go to <file>.new)
 #
 # --dry-run behavior:
 #   Echoes every command that would execute (prefixed with [dry-run]) without
@@ -77,7 +77,7 @@ for arg in "$@"; do
     --help|-h)
       echo "Usage: bash install.sh [--dry-run] [--update] [--skip-mesh] [--skip-llm] [--skip-verify] [--role=lead|worker] [--provider=NAME] [--enable-services]"
       echo "  --dry-run           Show what would happen without making changes"
-      echo "  --update            Re-copy scripts/configs only (skip system deps)"
+      echo "  --update            Re-copy scripts and units, keep existing configs (skip system deps)"
       echo "  --skip-mesh         Skip mesh network setup (used by meta-installer)"
       echo "  --skip-llm          Skip ollama install + model pull + embedder prefetch (extraction degrades to regex)"
       echo "  --skip-verify       Skip the final acceptance gate"

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
@@ -434,6 +434,45 @@ test('env.sh reads the persisted role and config.sh persists the resolved one', 
 
 // config.sh trimmed env values with xargs, which exits 1 on a lone quote, so a
 // value like "Gui's node" killed every install at Step 7 under set -e.
+test('config.sh never overwrites a rendered config, --update or not: the render goes to <file>.new', () => {
+  const cfg = moduleSrc['config.sh'];
+  const start = cfg.indexOf('generate_config() {');
+  const fn = cfg.slice(start, cfg.indexOf('\n}\n', start) + 3);
+  const dir = mkdtempSync(join(tmpdir(), 'oc-genconfig-'));
+  const template = join(dir, 'openclaw.json.template');
+  const out = join(dir, 'openclaw.json');
+  writeFileSync(template, '{"node":"${OPENCLAW_NODE_ID}","auth":{"profiles":{}}}\n');
+  const gen = (update) => spawnSync('bash', ['-c', `set -eo pipefail
+info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }; run() { "$@"; }
+${fn}
+generate_config "$1" "$2"`, 'x', template, out], {
+    encoding: 'utf8',
+    env: { ...process.env, DRY_RUN: 'false', UPDATE_ONLY: String(update), OPENCLAW_NODE_ID: 'n1', HOME: dir, WORKSPACE: dir, REPO_DIR: dir },
+  });
+  const fresh = '{"node":"n1","auth":{"profiles":{}}}\n';
+  let r = gen(false);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(out, 'utf8'), fresh);
+  assert.equal(statSync(out).mode & 0o777, 0o600);
+
+  r = gen(true);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /openclaw\.json up to date/);
+  assert.ok(!existsSync(`${out}.new`), 'an unchanged render leaves no .new');
+
+  const operator = '{"node":"n1","auth":{"profiles":{"default":{"provider":"configured"}}}}\n';
+  writeFileSync(out, operator);
+  for (const update of [true, false]) {
+    r = gen(update);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(out, 'utf8'), operator, `--update=${update} overwrote the operator's config`);
+    assert.equal(readFileSync(`${out}.new`, 'utf8'), fresh);
+    assert.equal(statSync(`${out}.new`).mode & 0o777, 0o600);
+    assert.match(r.stdout, /WARN Config openclaw\.json differs .* openclaw\.json\.new/);
+  }
+  assert.match(cfg, /\[ -n "\$CLUSTER_PEERS" \] \|\| generate_config "\$REPO_DIR\/services\/nats\/nats-single\.conf"/);
+});
+
 test('config.sh env-file parse keeps quotes, spacing and backslashes like renderConfigTemplate', () => {
   const cfg = moduleSrc['config.sh'];
   const start = cfg.indexOf('# Source env file for config generation');

@@ -117,19 +117,24 @@ generate_config() {
   local basename
   basename=$(basename "$output")
 
-  if [ -f "$output" ] && ! $UPDATE_ONLY; then
-    info "Config $basename already exists, skipping (use --update to overwrite)"
-    return
-  fi
+  # These files are the node's own once rendered: the operator adds gateway auth
+  # profiles, registers transcript sources, enables obsidian sync, a cluster node
+  # carries its own nats.conf. An existing one is never overwritten, --update or
+  # not; the fresh render goes beside it as <file>.new for a manual merge.
+  local dest="$output"
+  [ -f "$output" ] && dest="$output.new"
 
   # P4-3: the redirect below bypassed run(); --dry-run rendered real configs.
   if $DRY_RUN; then
-    info "  [dry-run] would render $template -> $output"
+    info "  [dry-run] would render $template -> $dest"
     return
   fi
 
+  local old_umask
+  old_umask=$(umask)
+  umask 077
   if command -v envsubst >/dev/null 2>&1; then
-    envsubst < "$template" > "$output"
+    envsubst < "$template" > "$dest"
   else
     # Fallback: manual sed substitution
     sed \
@@ -150,9 +155,19 @@ generate_config() {
       -e "s|\${CLAUDE_PROJECT_WORKSPACE}|${CLAUDE_PROJECT_WORKSPACE}|g" \
       -e "s|\${CLAUDE_PROJECT_HOME}|${CLAUDE_PROJECT_HOME}|g" \
       -e "s|\${CLAUDE_PROJECT_REPO}|${CLAUDE_PROJECT_REPO}|g" \
-      "$template" > "$output"
+      "$template" > "$dest"
   fi
-  run chmod 600 "$output"
+  umask "$old_umask"
+  run chmod 600 "$dest"
+  if [ "$dest" != "$output" ]; then
+    if cmp -s "$dest" "$output"; then
+      rm -f "$dest"
+      info "Config $basename up to date"
+    else
+      warn "Config $basename differs from its template render: kept as is, render saved as $basename.new (merge by hand)"
+    fi
+    return
+  fi
   info "Generated $basename (mode 600)"
 }
 
@@ -166,7 +181,8 @@ generate_config "$REPO_DIR/config/transcript-sources.json.template" "$OPENCLAW_R
 # node runs; nats-{1,2,3} are the R=3 cluster (operator-gated, federation 1.5).
 "$NODE_BIN" "$REPO_DIR/bin/nats-legacy-writer-check.mjs"
 run mkdir -p "$OPENCLAW_ROOT/nats"
-generate_config "$REPO_DIR/services/nats/nats-single.conf" "$OPENCLAW_ROOT/config/nats.conf"
+# --cluster-peers renders this machine's nats.conf below instead.
+[ -n "$CLUSTER_PEERS" ] || generate_config "$REPO_DIR/services/nats/nats-single.conf" "$OPENCLAW_ROOT/config/nats.conf"
 generate_config "$REPO_DIR/services/nats/nats-1.conf" "$OPENCLAW_ROOT/config/nats-1.conf"
 generate_config "$REPO_DIR/services/nats/nats-2.conf" "$OPENCLAW_ROOT/config/nats-2.conf"
 generate_config "$REPO_DIR/services/nats/nats-3.conf" "$OPENCLAW_ROOT/config/nats-3.conf"

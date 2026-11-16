@@ -140,7 +140,7 @@ The installer will:
 
 ## Updating
 
-Pull latest and re-run with `--update` to refresh scripts and configs without reinstalling system deps:
+Pull latest and re-run with `--update` to refresh scripts and units without reinstalling system deps. Rendered configs you already have (`openclaw.json`, `daemon.json`, `transcript-sources.json`, `obsidian-sync.json`, `nats*.conf`) are never overwritten: when the template renders differently, the render is saved beside the file as `<file>.new` with a warning, for you to merge by hand.
 
 ```bash
 cd openclaw-node
