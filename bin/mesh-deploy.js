@@ -421,8 +421,9 @@ const MANIFEST = [
     risk: 'safe',
     repoPaths: ['skills/'],
     // Quarantined skills must never reach a node (skills/_quarantine/README.md):
-    // neither installed nor, through the diff, removed. dist/ and scripts/ are
-    // packaging, not skills: install.sh's Step 6 rsync leaves them out too.
+    // neither installed nor, through the diff, removed. skills/dist/ (build
+    // bundles, gitignored) and the top-level skills/scripts/ are not skills,
+    // matching the installer's rsync excludes.
     exclude: ['skills/_quarantine/', 'skills/dist/', 'skills/scripts/'],
     targets: [DIRS.SKILLS],
     servicesMac: [],

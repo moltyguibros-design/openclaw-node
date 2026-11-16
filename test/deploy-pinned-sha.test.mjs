@@ -336,6 +336,7 @@ describe('`mesh deploy --force` on a live node leaves what the node owns alone',
       'skills/dist/demo.skill': 'packaged\n',
       'skills/scripts/golden.sh': '#!/bin/sh\n',
       'skills/_quarantine/memorylayer/SKILL.md': '# quarantined: ships memory to a SaaS\n',
+      'skills/demo/scripts/run.sh': '#!/bin/sh\n',
     });
     // What earlier deploys left in the managed dir, beside an operator's own skill
     // and the mesh skill integrations.sh installs there on purpose.
@@ -368,10 +369,11 @@ describe('`mesh deploy --force` on a live node leaves what the node owns alone',
     assert.equal(read(fx.rt('.openclaw/souls/newcomer/evolution/genes.json')), '{"genes":"newcomer seed"}\n');
   });
 
-  it('ships skills to the workspace dir install.sh uses, without dist/ or scripts/', () => {
+  it('ships skills to the workspace dir install.sh uses, without dist/ or the top-level scripts/', () => {
     assert.ok(fs.existsSync(fx.rt('.openclaw/workspace/skills/mesh/SKILL.md')));
     assert.ok(!fs.existsSync(fx.rt('.openclaw/workspace/skills/dist')), 'skills/dist shipped');
     assert.ok(!fs.existsSync(fx.rt('.openclaw/workspace/skills/scripts')), 'skills/scripts shipped');
+    assert.equal(read(fx.rt('.openclaw/workspace/skills/demo/scripts/run.sh')), '#!/bin/sh\n', 'a skill keeps its own scripts/');
   });
 
   it('archives the stale managed copies it used to deploy, keeping mesh and operator skills', () => {
