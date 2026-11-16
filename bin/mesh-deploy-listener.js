@@ -70,8 +70,8 @@ function resolveNodeRole() {
 }
 const NODE_ROLE = resolveNodeRole();
 
-const { ROLE_COMPONENTS } = require('../lib/mesh-roles');
-const NODE_COMPONENTS = new Set(ROLE_COMPONENTS[NODE_ROLE] || ROLE_COMPONENTS.worker);
+const { FLEET_COMPONENTS } = require('../lib/mesh-roles');
+const NODE_COMPONENTS = new Set(FLEET_COMPONENTS[NODE_ROLE] || FLEET_COMPONENTS.worker);
 
 let deploying = false; // prevent concurrent deploys
 
