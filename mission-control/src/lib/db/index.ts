@@ -241,6 +241,15 @@ function runMigrations(sqlite: Database.Database) {
     );
   `);
 
+  // Each task's active-tasks.md fields as MC last imported or wrote them
+  // (src/lib/sync/tasks.ts): what MC changed since is the diff against this.
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS task_sync_base (
+      id TEXT PRIMARY KEY,
+      fields TEXT NOT NULL
+    );
+  `);
+
   // Indexes for hierarchy and dependency lookups
   sqlite.exec(`
     CREATE INDEX IF NOT EXISTS idx_tasks_parent_id ON tasks(parent_id);
