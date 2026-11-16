@@ -894,6 +894,52 @@ test('unit templates and the daemon installer render TZ from OPENCLAW_TIMEZONE',
   }
 });
 
+// install_rule compared the local copy with the NEW source on a version bump;
+// an unmodified copy always differs from a newer version, so shipped rule
+// updates never landed and every bump wrote .new with a false "modified" warning.
+test('install_rule updates unmodified rules on a version bump and keeps edited ones', () => {
+  const src = moduleSrc['integrations.sh'];
+  const start = src.indexOf('run mkdir -p "$RULES_DIR"\n') + 'run mkdir -p "$RULES_DIR"\n'.length;
+  const fns = src.slice(start, src.indexOf('\n}\n', src.indexOf('install_rule() {')) + 3);
+  const dir = mkdtempSync(join(tmpdir(), 'openclaw-rule-'));
+  const s = join(dir, 'src.md');
+  const d = join(dir, 'rule.md');
+  const install = () => spawnSync('bash', ['-c', [
+    'DRY_RUN=false',
+    `source ${JSON.stringify(join(ROOT, 'scripts/install/helpers.sh'))}`,
+    fns,
+    `install_rule ${JSON.stringify(s)} ${JSON.stringify(d)} rule.md`,
+  ].join('\n')], { encoding: 'utf8' });
+  const ship = (v, body = 'body') => writeFileSync(s, `---\nversion: ${v}\n---\n${body}\n`);
+
+  ship('1.0.0');
+  assert.equal(install().status, 0);
+  assert.ok(existsSync(`${d}.sha`), 'fresh install records the installed hash');
+
+  ship('1.1.0');
+  let r = install();
+  assert.match(readFileSync(d, 'utf8'), /version: 1\.1\.0/, r.stdout);
+  assert.ok(!existsSync(`${d}.new`));
+  assert.doesNotMatch(r.stdout, /modified/);
+
+  writeFileSync(d, readFileSync(d, 'utf8') + 'local edit\n');
+  ship('1.2.0');
+  r = install();
+  assert.match(readFileSync(d, 'utf8'), /version: 1\.1\.0[\s\S]*local edit/);
+  assert.match(readFileSync(`${d}.new`, 'utf8'), /version: 1\.2\.0/);
+  assert.match(r.stdout, /local copy modified/);
+
+  // A copy installed before records existed is backfilled while pristine.
+  writeFileSync(d, readFileSync(s, 'utf8'));
+  rmSync(`${d}.sha`);
+  rmSync(`${d}.new`);
+  install();
+  ship('1.3.0');
+  install();
+  assert.match(readFileSync(d, 'utf8'), /version: 1\.3\.0/);
+  assert.ok(!existsSync(`${d}.new`));
+});
+
 // Steps 18/20 used to read framework markers from the installer's cwd (or
 // $HOME) and copy git hooks into cwd's or $HOME's .git/hooks, so hooks landed
 // in unrelated repositories. Both now follow --project=PATH only.

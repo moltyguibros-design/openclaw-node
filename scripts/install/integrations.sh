@@ -62,51 +62,57 @@ step "Step 18: Path-Scoped Rules"
 RULES_DIR="${OPENCLAW_ROOT}/rules"
 run mkdir -p "$RULES_DIR"
 
+# rule_hash FILE — content hash, empty when no hasher is available.
+rule_hash() {
+  if command -v md5sum &>/dev/null; then
+    md5sum "$1" | cut -d' ' -f1
+  elif command -v md5 &>/dev/null; then
+    md5 -q "$1"
+  fi
+}
+
 # install_rule — version-aware rule deployment.
-# Fresh install: copy. Update: compare versions. If source is newer and local
-# was modified (hash mismatch), save as .new instead of overwriting.
+# Every copy records the installed source's hash in ${dst}.sha. On a version
+# bump the rule is overwritten only when the local copy still matches that
+# record (unmodified); otherwise the new version is saved as .new. Comparing
+# the local copy with the new source can't tell: an unmodified copy always
+# differs from a newer version.
 install_rule() {
   local src="$1" dst="$2" name="$3"
+  local rec="${dst}.sha"
   if [ ! -f "$src" ]; then return; fi
 
   if [ ! -f "$dst" ]; then
     run cp "$src" "$dst"
+    rule_hash "$src" | write_file "$rec"
     info "Installed rule: ${name}"
     return
   fi
 
-  # Both exist — compare version fields
-  local src_ver dst_ver
-  src_ver=$(grep -m1 '^version:' "$src" 2>/dev/null | sed 's/version:[[:space:]]*//' || echo "0.0.0")
-  dst_ver=$(grep -m1 '^version:' "$dst" 2>/dev/null | sed 's/version:[[:space:]]*//' || echo "0.0.0")
+  local src_ver dst_ver dst_hash
+  src_ver=$(grep -m1 '^version:' "$src" 2>/dev/null | sed 's/version:[[:space:]]*//')
+  dst_ver=$(grep -m1 '^version:' "$dst" 2>/dev/null | sed 's/version:[[:space:]]*//')
+  dst_hash=$(rule_hash "$dst")
 
   if [ "$src_ver" = "$dst_ver" ]; then
-    return  # Same version, nothing to do
-  fi
-
-  # Different versions — check if user modified the local copy
-  local src_hash dst_hash
-  if command -v md5sum &>/dev/null; then
-    src_hash=$(md5sum "$src" | cut -d' ' -f1)
-    dst_hash=$(md5sum "$dst" | cut -d' ' -f1)
-  elif command -v md5 &>/dev/null; then
-    src_hash=$(md5 -q "$src")
-    dst_hash=$(md5 -q "$dst")
-  else
-    # Can't compare hashes — save as .new to be safe
-    run cp "$src" "${dst}.new"
-    warn "Rule ${name}: new version ${src_ver} available (saved as ${name}.new)"
+    # Copies installed before records existed get one while still pristine,
+    # so their next version bump can update in place.
+    if [ ! -f "$rec" ] && [ -n "$dst_hash" ] && [ "$dst_hash" = "$(rule_hash "$src")" ]; then
+      echo "$dst_hash" | write_file "$rec"
+    fi
     return
   fi
 
-  if [ "$src_hash" = "$dst_hash" ]; then
-    # Same content despite different version — just update
+  if [ -n "$dst_hash" ] && [ -f "$rec" ] && [ "$dst_hash" = "$(cat "$rec")" ]; then
     run cp "$src" "$dst"
+    rule_hash "$src" | write_file "$rec"
     info "Updated rule: ${name} (${dst_ver} → ${src_ver})"
-  else
-    # User-modified — don't overwrite, save as .new
+  elif [ -f "$rec" ]; then
     run cp "$src" "${dst}.new"
     warn "Rule ${name}: new version ${src_ver} available but local copy modified. Saved as ${name}.new for manual merge."
+  else
+    run cp "$src" "${dst}.new"
+    warn "Rule ${name}: new version ${src_ver} available; no install record proves the local copy unmodified. Saved as ${name}.new for manual merge."
   fi
 }
 
@@ -133,7 +139,7 @@ else
   info "No --project given: framework rules skipped (universal rules only)"
 fi
 
-info "Rules directory: ${RULES_DIR} ($(ls -1 "$RULES_DIR" 2>/dev/null | wc -l | tr -d ' ') rules)"
+info "Rules directory: ${RULES_DIR} ($(find "$RULES_DIR" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ') rules)"
 
 # ============================================================
 # Step 19: Plan Templates
