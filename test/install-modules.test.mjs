@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
@@ -241,6 +241,25 @@ test('installer links scoped packages into both deployed parent trees', () => {
 test('the promotion policy ships beside the workspace lib/ that consolidation loads it from', () => {
   assert.ok(moduleSrc['workspace.sh'].includes('run cp "$REPO_DIR/config/promotion-policy.yaml" "$WORKSPACE/config/promotion-policy.yaml"'));
   assert.ok(moduleSrc['workspace.sh'].includes('run rsync -av --exclude=\'node_modules\' \\\n  "$REPO_DIR/lib/" "$WORKSPACE/lib/"'));
+});
+
+test('the installer makes ~/.openclaw/souls a git repo on main that Mission Control can commit evolutions to', () => {
+  const block = moduleSrc['workspace.sh'].match(/if \[ ! -d "\$OPENCLAW_ROOT\/souls\/\.git" \]; then\n[\s\S]*?\nfi\n/)[0];
+  const root = mkdtempSync(join(tmpdir(), 'souls-git-init-'));
+  try {
+    mkdirSync(join(root, 'souls', 'daedalus', 'evolution'), { recursive: true });
+    writeFileSync(join(root, 'souls', 'daedalus', 'evolution', 'genes.json'), '{"genes":[]}');
+    const script = `run() { "$@"; }\ninfo() { :; }\nOPENCLAW_ROOT=${JSON.stringify(root)}\n${block}${block}`;
+    const r = spawnSync('bash', ['-c', script], { env: { ...process.env, HOME: root }, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const git = (...a) => spawnSync('git', ['-C', join(root, 'souls'), ...a], { env: { ...process.env, HOME: root }, encoding: 'utf8' }).stdout.trim();
+    assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+    assert.equal(git('status', '--porcelain'), '');
+    assert.equal(git('rev-list', '--count', 'HEAD'), '1', 'a second install run leaves the existing history alone');
+    assert.equal(git('config', 'user.email'), 'mission-control@openclaw.local');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('scheduler heartbeat helper is installer-owned and both units invoke it', () => {

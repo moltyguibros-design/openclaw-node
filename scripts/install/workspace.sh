@@ -202,6 +202,18 @@ run rsync -av --exclude='/*/evolution/genes.json' --exclude='/*/evolution/events
 run rsync -a --ignore-existing "$REPO_DIR/souls/" "$OPENCLAW_ROOT/souls/"
 info "Souls installed to $OPENCLAW_ROOT/souls/"
 
+# Mission Control commits every approved evolution to this repo and refuses
+# an approval when souls is not one; the local identity lets those commits
+# succeed on a node with no global git user.
+if [ ! -d "$OPENCLAW_ROOT/souls/.git" ]; then
+  run git -C "$OPENCLAW_ROOT/souls" init -q -b main
+  run git -C "$OPENCLAW_ROOT/souls" config user.name "OpenClaw Mission Control"
+  run git -C "$OPENCLAW_ROOT/souls" config user.email "mission-control@openclaw.local"
+  run git -C "$OPENCLAW_ROOT/souls" add -A
+  run git -C "$OPENCLAW_ROOT/souls" commit -q -m "souls: installed state"
+  info "Souls history initialized at $OPENCLAW_ROOT/souls/.git"
+fi
+
 # ============================================================
 # Step 6: Copy Skills
 # ============================================================

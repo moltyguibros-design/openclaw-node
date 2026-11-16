@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { soulEvolutionLog } from "@/lib/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
@@ -160,6 +160,22 @@ export async function PATCH(
     const db = getDb();
 
     if (action === "approve") {
+      // Approve is the only path that changes genes.json, and only once: a
+      // non-pending row (approved, rejected, unknown) never applies again.
+      const [row] = await db
+        .select()
+        .from(soulEvolutionLog)
+        .where(and(eq(soulEvolutionLog.eventId, eventId), eq(soulEvolutionLog.soulId, soulId)));
+      if (!row) {
+        return NextResponse.json({ error: "Event not found" }, { status: 404 });
+      }
+      if (row.reviewStatus !== "pending") {
+        return NextResponse.json(
+          { error: `event is ${row.reviewStatus}, not pending` },
+          { status: 409 }
+        );
+      }
+
       // Load full event from events.jsonl
       const eventsPath = path.join(
         SOULS_DIR,
@@ -189,22 +205,43 @@ export async function PATCH(
           { status: 400 }
         );
       }
-      // Apply change (update genes.json)
-      const targetPath = path.join(SOULS_DIR, soulId, "evolution", "genes.json");
+      // Any other action changed nothing and then failed at `git commit`
+      // (nothing to commit), leaving the repo on the evolution branch.
+      if (event.proposedChange.action !== "add") {
+        return NextResponse.json(
+          { error: "unsupported proposedChange.action (only add can be applied)" },
+          { status: 400 }
+        );
+      }
 
-      if (event.proposedChange.action === "add") {
-        const existing = JSON.parse(await fs.readFile(targetPath, "utf-8"));
-        if (event.proposedChange.target === "genes.json") {
-          existing.genes.push(event.proposedChange.content);
-        }
-        await fs.writeFile(targetPath, JSON.stringify(existing, null, 2));
+      // Every approval is a commit in the souls repo (the installer git-inits
+      // it). Without one there is no history to apply into, so refuse before
+      // anything is written.
+      const gitOpts = { cwd: SOULS_DIR };
+      const git = async (...args: string[]) =>
+        (await execFileAsync("git", args, gitOpts)).stdout.trim();
+      let baseBranch: string;
+      try {
+        const top = await git("rev-parse", "--show-toplevel");
+        if ((await fs.realpath(top)) !== (await fs.realpath(SOULS_DIR))) throw new Error("not the repo root");
+        baseBranch = await git("rev-parse", "--abbrev-ref", "HEAD");
+      } catch {
+        return NextResponse.json(
+          { error: `${SOULS_DIR} is not a git repository; re-run the installer, which initializes it` },
+          { status: 409 }
+        );
+      }
+      if (baseBranch === "HEAD") {
+        return NextResponse.json(
+          { error: `${SOULS_DIR} is on a detached HEAD; check out a branch first` },
+          { status: 409 }
+        );
       }
 
       // Git commit — use execFile with argument arrays to prevent command injection.
       // Sanitize all user-derived inputs: eventId, soulId, reviewedBy, event.summary
       // could all contain shell metacharacters if crafted maliciously.
       const safeBranch = `evolution/${eventId.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-      const safeTarget = event.proposedChange.target.replace(/[^a-zA-Z0-9._/-]/g, "_");
       const commitMessage = [
         `evolution(${eventId}): ${event.summary}`,
         "",
@@ -212,38 +249,57 @@ export async function PATCH(
         `Soul-ID: ${soulId}`,
         `Reviewer: ${reviewedBy}`,
       ].join("\n");
-      const gitOpts = { cwd: SOULS_DIR };
+      const targetPath = path.join(SOULS_DIR, soulId, "evolution", "genes.json");
+      const original = await fs.readFile(targetPath, "utf-8");
 
+      let branchCreated = false;
+      let commitHash: string;
       try {
-        await execFileAsync("git", ["checkout", "-b", safeBranch], gitOpts);
-        await execFileAsync("git", ["add", `${soulId}/evolution/${safeTarget}`], gitOpts);
-        await execFileAsync("git", ["commit", "-m", commitMessage], gitOpts);
-        // Merge back to main (two separate commands — execFile doesn't support &&)
-        await execFileAsync("git", ["checkout", "main"], gitOpts);
-        await execFileAsync("git", ["merge", safeBranch], gitOpts);
-
-        const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], gitOpts);
-        const commitHash = stdout.trim();
-
-        // Update DB
-        await db
-          .update(soulEvolutionLog)
-          .set({
-            reviewStatus: "approved",
-            commitHash,
-            reviewedBy,
-            reviewedAt: new Date().toISOString(),
-          })
-          .where(eq(soulEvolutionLog.eventId, eventId));
-
-        return NextResponse.json({ success: true, commitHash });
+        await git("checkout", "-b", safeBranch);
+        branchCreated = true;
+        const existing = JSON.parse(original);
+        existing.genes.push(event.proposedChange.content);
+        await fs.writeFile(targetPath, JSON.stringify(existing, null, 2));
+        await git("add", `${soulId}/evolution/genes.json`);
+        await git("commit", "-m", commitMessage);
+        await git("checkout", baseBranch);
+        await git("merge", "--ff-only", safeBranch);
+        await git("branch", "-d", safeBranch);
+        commitHash = await git("rev-parse", "HEAD");
       } catch (gitError) {
         console.error("Git operation failed:", gitError);
+        // Undo in this order: back on the base branch (an uncommitted gene
+        // rides along, a committed one stays on the branch), then the file as
+        // it was and its index entry, then the branch.
+        try {
+          if ((await git("rev-parse", "--abbrev-ref", "HEAD")) !== baseBranch) await git("checkout", baseBranch);
+          await fs.writeFile(targetPath, original);
+          await git("reset", "-q", "--", `${soulId}/evolution/genes.json`);
+          if (branchCreated) await git("branch", "-D", safeBranch);
+        } catch (rollbackError) {
+          console.error("Evolution rollback failed:", rollbackError);
+          return NextResponse.json(
+            { error: `Git operation failed and the rollback did too; check ${SOULS_DIR} (branch ${safeBranch})` },
+            { status: 500 }
+          );
+        }
         return NextResponse.json(
-          { error: "Git operation failed" },
+          { error: "Git operation failed; genes.json was restored" },
           { status: 500 }
         );
       }
+
+      await db
+        .update(soulEvolutionLog)
+        .set({
+          reviewStatus: "approved",
+          commitHash,
+          reviewedBy,
+          reviewedAt: new Date().toISOString(),
+        })
+        .where(eq(soulEvolutionLog.eventId, eventId));
+
+      return NextResponse.json({ success: true, commitHash });
     } else if (action === "reject") {
       await db
         .update(soulEvolutionLog)
