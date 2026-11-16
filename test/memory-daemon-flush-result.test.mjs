@@ -26,7 +26,7 @@ const DAEMON = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   '..', 'workspace-bin', 'memory-daemon.mjs'
 );
-const { handleFlushResult, sourceOfJsonl } = await import(DAEMON);
+const { handleFlushResult, sourceOfJsonl, extractedEventData } = await import(DAEMON);
 const src = readFileSync(DAEMON, 'utf8');
 
 // ── verdict logic ───────────────────────────────────────────────────────────
@@ -138,4 +138,28 @@ test('a tick scans the transcript dirs once and the dead shouldFlush import is g
   const body = src.slice(start, end);
   assert.ok(!body.includes('readdirSync('), 'Phase 1.5 must reuse detectActivity\'s scan, not rescan every source');
   assert.equal((body.match(/loadTranscriptSources\(\)/g) || []).length, 1);
+});
+
+test('a dedup flush is recorded as a tagged noop and stays out of the extraction failure rate', async () => {
+  const { buildMemoryEvent } = await import('../lib/local-event-log.mjs');
+  const { MemoryExtractedSchema } = await import('../packages/event-schemas/dist/index.js');
+  const { toWatcherRecord, createAnomalyDetector } = await import('../lib/memory-watcher.mjs');
+  // The exact extraction block runFlush returns on an unchanged tail (mode 'llm-dedup').
+  const dedup = { session_id: 's', entities_count: 0, themes_count: 0, mentions_count: 0, decisions_count: 0, duration_ms: 0, dedup: true };
+  const event = MemoryExtractedSchema.parse(buildMemoryEvent('memory.extracted', 's', 'memory', extractedEventData('s', dedup), 'node'));
+  assert.equal(event.data.dedup, true);
+  const record = toWatcherRecord(event);
+  assert.equal(record.status, 'noop');
+
+  const detector = createAnomalyDetector({ extractionRateMinSample: 3, extractionRateThreshold: 0.5 });
+  for (let i = 0; i < 5; i++) assert.deepEqual(detector.evaluate({ ...record, ts: new Date().toISOString() }), []);
+  const real = { ...dedup };
+  delete real.dedup;
+  assert.equal(extractedEventData('s', real).dedup, undefined, 'a real zero-count extraction is untagged');
+  const failed = toWatcherRecord(buildMemoryEvent('memory.extracted', 's', 'memory', extractedEventData('s', real), 'node'));
+  detector.evaluate(failed);
+  detector.evaluate(failed);
+  const alerts = detector.evaluate(failed);
+  assert.equal(alerts[0]?.alert_type, 'extraction_failure_rate');
+  assert.deepEqual(alerts[0].window, { total: 3, failures: 3, rate: 1 });
 });

@@ -332,6 +332,7 @@ describe('runFlush with LLM extraction', () => {
     assert.equal(second.flushed, false);
     assert.equal(second.skipped, 1);
     assert.equal(second.extraction.entities_count, 0);
+    assert.equal(second.extraction.dedup, true, 'the daemon tags the event so the watcher keeps it out of the failure rate');
     assert.equal(llmCalls, callsAfterFirst);
     assert.equal(
       store.db.prepare(`SELECT COUNT(*) c FROM mentions WHERE session_id = 'dedup-session'`).get().c,

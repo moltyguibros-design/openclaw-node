@@ -398,9 +398,8 @@ function emitIngestEvent(sessionId, source, messageCount, previousCount = 0) {
   );
 }
 
-function emitExtractEvent(sessionId, extraction) {
-  if (!localEventLog) return;
-  const event = buildMemoryEvent('memory.extracted', sessionId, 'memory', {
+function extractedEventData(sessionId, extraction) {
+  return {
     session_id: sessionId,
     entities_count: extraction.entities_count,
     themes_count: extraction.themes_count,
@@ -412,7 +411,15 @@ function emitExtractEvent(sessionId, extraction) {
     decision_texts: extraction.decision_texts,
     model: DEFAULT_MODEL,
     duration_ms: extraction.duration_ms,
-  }, NODE_ID);
+    // An unchanged tail: recorded (noop, still pipeline liveness) but kept out
+    // of the watcher's extraction_failure_rate window.
+    ...(extraction.dedup ? { dedup: true } : {}),
+  };
+}
+
+function emitExtractEvent(sessionId, extraction) {
+  if (!localEventLog) return;
+  const event = buildMemoryEvent('memory.extracted', sessionId, 'memory', extractedEventData(sessionId, extraction), NODE_ID);
   localEventLog.publishLocal(event).catch(err =>
     log(`[event] memory.extracted emit failed: ${err.message}`)
   );
@@ -1866,4 +1873,4 @@ if (process.env.OPENCLAW_MEMORY_DAEMON_NO_AUTOSTART !== '1') {
   });
 }
 
-export { runNodeVaultMaintenance, handleFlushResult, sourceOfJsonl };
+export { runNodeVaultMaintenance, handleFlushResult, sourceOfJsonl, extractedEventData };
