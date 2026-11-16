@@ -22,7 +22,7 @@
 12. [Tier Gates and Human Intervention](#12-tier-gates-and-human-intervention)
 13. [Test Infrastructure](#13-test-infrastructure)
 14. [Known Gaps and Future Work](#14-known-gaps-and-future-work)
-15. [Changelog: V1 → V2 → V3](#15-changelog)
+15. [Changelog: V1 → V2 → V3](#15-changelog-v1--v2--v3)
 
 ---
 

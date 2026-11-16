@@ -2,6 +2,8 @@
 
 **Date:** 2026-09-06 · **Companion to:** `ADVERSARIAL_REVIEW_2026-09-06.md` · **Branch:** `claude/opencalw-node-adversarial-review-pedrcw`
 
+**Status:** historical. Phases 0–3 landed with PR #6 (2026-09-06), so "nothing here is applied" below no longer holds; this file is not updated as items land. Check `git log` and the `memory-plan/plans/` silos for Phases 4–5, and treat runtime evidence (deploy, restart, observe) as the operator's step until recorded.
+
 This plan turns the review's confirmed findings into an ordered, verifiable fix sequence. It is a plan, not a code change — nothing here is applied. It is structured to run through the repo's own discipline: each phase is a scope batch, each item carries a smallest-fix and a done-contract (test + runtime evidence per MASTER_PLAN §5), and phases are ordered by risk × dependency.
 
 Refuted candidates are excluded and listed at the end so they are not re-investigated.

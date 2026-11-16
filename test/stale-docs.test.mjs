@@ -1,0 +1,29 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const read = (rel) => fs.readFileSync(fileURLToPath(new URL(`../${rel}`, import.meta.url)), 'utf8');
+
+// GitHub's heading slug: lowercase, drop everything but letters, digits, spaces and hyphens, spaces to hyphens.
+const slug = (heading) => heading.trim().toLowerCase().replace(/[^\p{L}\p{N} _-]/gu, '').replace(/ /g, '-');
+
+test('every in-page link of the circling V3 reference resolves to a heading', () => {
+  const doc = read('docs/circling-strategy-implementationV3.md');
+  const anchors = new Set([...doc.matchAll(/^#{1,6} (.+)$/gm)].map((m) => slug(m[1])));
+  const links = [...doc.matchAll(/\]\(#([^)]+)\)/g)].map((m) => m[1]);
+  assert.ok(links.length > 0);
+  for (const link of links) assert.ok(anchors.has(link), `#${link} has no heading`);
+});
+
+test('mission-control/README.md points at the deploy runbook and the token bootstrap', () => {
+  const readme = read('mission-control/README.md');
+  assert.match(readme, /workspace-docs\/RUNBOOK_MC_DEPLOY\.md/);
+  assert.match(readme, /mc-session-token/);
+  assert.doesNotMatch(readme, /create-next-app/);
+});
+
+test('the 2026-09-06 remediation plan says it is historical and what has landed', () => {
+  const head = read('REMEDIATION_PLAN_2026-09-06.md').split('\n').slice(0, 6).join('\n');
+  assert.match(head, /^\*\*Status:\*\* historical\. Phases 0–3 landed/m);
+});
