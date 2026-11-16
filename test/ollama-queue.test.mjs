@@ -26,6 +26,8 @@ import {
   readStateSnapshot,
   snapshotLooksStuck,
   setStateObserver,
+  markExternalJob,
+  clearExternalJob,
   _resetForTesting,
 } from '../lib/ollama-queue.mjs';
 
@@ -331,6 +333,20 @@ describe('getState snapshot', () => {
     await requestExtraction(async () => 'b');
     const s = getState();
     assert.equal(s.totals.runs, 2);
+  });
+  it('records when each job type last finished, queue jobs and worker jobs alike', async () => {
+    assert.deepEqual(getState().last_completed_at, {});
+    const before = Date.now();
+    await requestExtraction(async () => 'a');
+    await requestExtraction(async () => { throw Object.assign(new Error('bad'), { status: 500 }); }).catch(() => {});
+    await requestAnalysis(async () => 'b');
+    markExternalJob('flush-1', { type: 'flush' });
+    assert.equal(getState().last_completed_at.flush, undefined, 'a running worker job has not finished');
+    clearExternalJob('flush-1');
+    const last = getState().last_completed_at;
+    for (const type of ['extraction', 'analysis', 'flush']) {
+      assert.ok(last[type] >= before && last[type] <= Date.now(), `${type}: ${last[type]}`);
+    }
   });
 });
 

@@ -105,6 +105,21 @@ describe('isQueueIdle', () => {
     const result = isQueueIdle(() => state);
     assert.equal(result.idle, true);
   });
+
+  it('holds the extraction and analysis quiet periods from the last completion times', () => {
+    const now = Date.now();
+    const at = (last_completed_at) => isQueueIdle(() => ({
+      current_job: null, queue_depth: 0, external_jobs: [],
+      history: { extraction: { count: 1, avg_ms: 5000 }, analysis: { count: 1, avg_ms: 800 } },
+      recent_fallbacks: [], last_completed_at,
+    }));
+
+    assert.match(at({ extraction: now - 60_000 }).reason, /extraction finished 60s ago \(quiet period 300s\)/);
+    assert.match(at({ flush: now - IDLE_THRESHOLD_MS + 5_000 }).reason, /extraction finished/);
+    assert.match(at({ analysis: now - 10_000 }).reason, /analysis finished 10s ago \(quiet period 60s\)/);
+    assert.equal(at({ extraction: now - IDLE_THRESHOLD_MS - 1_000, analysis: now - ANALYSIS_QUIET_MS - 1_000 }).idle, true);
+    assert.equal(at({ import: now - 1_000 }).idle, true, 'a worker import is not an extraction');
+  });
 });
 
 // ─── isSystemIdle ───────────────────────────────────────────────────────────

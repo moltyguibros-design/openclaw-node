@@ -81,16 +81,22 @@ export function isQueueIdle(getStateFn) {
     return { idle: false, reason: `${external.length} worker ${j.type} job(s) running (elapsed ${j.elapsed_ms}ms)` };
   }
 
-  // Recent extraction activity — check if last extraction was within IDLE_THRESHOLD
-  if (state.history.extraction.count > 0 && state.history.extraction.avg_ms > 0) {
-    // We can't know exact last-completion time from getState(), but if the queue
-    // has no current job and no pending jobs, it's effectively idle now.
-    // The caller should combine this with time-since-last-extraction from the DB.
+  // Quiet periods after the last finished extraction (a queue extraction or a
+  // worker flush) and the last finished analysis. A worker import is a parse,
+  // not an extraction, and holds no quiet period.
+  const now = Date.now();
+  const last = state.last_completed_at || {};
+  const lastExtraction = Math.max(last.extraction || 0, last.flush || 0);
+  if (lastExtraction && now - lastExtraction < IDLE_THRESHOLD_MS) {
+    return { idle: false, reason: `extraction finished ${Math.round((now - lastExtraction) / 1000)}s ago (quiet period ${IDLE_THRESHOLD_MS / 1000}s)` };
+  }
+  if (last.analysis && now - last.analysis < ANALYSIS_QUIET_MS) {
+    return { idle: false, reason: `analysis finished ${Math.round((now - last.analysis) / 1000)}s ago (quiet period ${ANALYSIS_QUIET_MS / 1000}s)` };
   }
 
   // Recent analysis activity — check recent fallbacks/alarms for recency
   const recentAnalysis = state.recent_fallbacks.filter(
-    f => (Date.now() - f.ts) < ANALYSIS_QUIET_MS
+    f => (now - f.ts) < ANALYSIS_QUIET_MS
   );
   if (recentAnalysis.length > 0) {
     return { idle: false, reason: `analysis activity within last ${ANALYSIS_QUIET_MS / 1000}s` };
