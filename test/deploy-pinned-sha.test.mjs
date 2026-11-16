@@ -375,7 +375,7 @@ describe('openclaw.json is rewritten only from a changed template, rendered as t
   const config = () => fx.rt('.openclaw/openclaw.json');
   const backups = () => fs.readdirSync(fx.rt('.openclaw')).filter(f => f.startsWith('openclaw.json.bak.'));
   before(() => {
-    fx = makeNode('config', { 'config/openclaw.json.template': TEMPLATE(0), 'config/harness-rules.json': '{"v":0}\n' });
+    fx = makeNode('config', { 'config/openclaw.json.template': TEMPLATE(0), 'config/daemon.json.template': '{"v":0}\n' });
     // An earlier deploy installed the template; the operator has since configured the gateway.
     write(fx.home, '.openclaw/config/openclaw.json.template', TEMPLATE(0));
     write(fx.home, '.openclaw/openclaw.json', LIVE_CONFIG);
@@ -383,7 +383,7 @@ describe('openclaw.json is rewritten only from a changed template, rendered as t
   });
 
   it('a diff that changes another config/ file leaves openclaw.json alone', () => {
-    S1 = fx.commit('v1: harness rules', { 'config/harness-rules.json': '{"v":1}\n' });
+    S1 = fx.commit('v1: daemon template', { 'config/daemon.json.template': '{"v":1}\n' });
     ranOk(fx.deploy(['--from', fx.S0, '--to', S1]));
     assert.equal(read(config()), LIVE_CONFIG);
     assert.deepEqual(backups(), []);
@@ -613,5 +613,45 @@ describe('the listener schedules its own restart outside its own process tree', 
     const { spawned, spawnFn } = recorder();
     assert.deepEqual(scheduleSelfRestart(['openclaw-mesh-agent', 'x; rm -rf /'], { platform: 'linux', spawnFn }), []);
     assert.equal(spawned.length, 0);
+  });
+});
+
+describe('a deploy that changes config/harness-rules.json merges it into the file mesh-agent reads', () => {
+  const rules = enforcement => JSON.stringify([
+    { id: 'scan', description: 'upstream', content: 'upstream text', mesh_enforcement: enforcement },
+  ], null, 2) + '\n';
+  let fx, run;
+  const live = () => fx.rt('.openclaw/harness-rules.json');
+  before(() => {
+    fx = makeNode('harness', {
+      'bin/harness-sync.js': fs.readFileSync(path.join(REPO, 'bin/harness-sync.js')),
+      'config/harness-rules.json': rules('warn'),
+    });
+    // Installed by install.sh, then edited on this node.
+    write(fx.home, '.openclaw/harness-rules.json', JSON.stringify([
+      { id: 'scan', description: 'upstream', content: 'edited on this node', mesh_enforcement: 'warn' },
+      { id: 'mine', description: 'a rule only this node has' },
+    ], null, 2) + '\n');
+    const S1 = fx.commit('v1: enforce', { 'config/harness-rules.json': rules('block') });
+    run = fx.deploy(['--from', fx.S0, '--to', S1], {
+      DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: 'openclaw-mesh-agent',
+    });
+  });
+
+  it('source-owned fields reach the live rules; the node\'s edits and own rules stay', () => {
+    ranOk(run);
+    const merged = JSON.parse(read(live()));
+    const scan = merged.find(r => r.id === 'scan');
+    assert.equal(scan.mesh_enforcement, 'block', 'the new enforcement never reached the node');
+    assert.equal(scan.content, 'edited on this node');
+    assert.ok(merged.some(r => r.id === 'mine'));
+  });
+
+  it('restarts mesh-agent, which caches the rules', () => {
+    assert.ok(fx.calls().includes('systemctl --user try-restart openclaw-mesh-agent'), fx.calls().join('\n'));
+  });
+
+  it('no longer copies the rules into the unread ~/.openclaw/config', () => {
+    assert.ok(!fs.existsSync(fx.rt('.openclaw/config/harness-rules.json')));
   });
 });

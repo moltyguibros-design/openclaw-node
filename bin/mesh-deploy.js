@@ -233,6 +233,9 @@ function renderConfigTemplate(template, envText) {
 // restart of its unit would kill the deploy mid-run. A pinned deploy reports
 // it in DEPLOY_RESULT.deferredRestart, and the listener schedules its own
 // delayed restart once the result is written.
+// The file mesh-agent loads its harness rules from (bin/mesh-agent.js HARNESS_PATH).
+const HARNESS_RULES_PATH = process.env.OPENCLAW_HARNESS_RULES || path.join(DIRS.OPENCLAW_HOME, 'harness-rules.json');
+
 const LISTENER_SERVICE = IS_MAC ? 'ai.openclaw.mesh-deploy-listener' : 'openclaw-mesh-deploy-listener';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -492,6 +495,32 @@ const MANIFEST = [
     },
   },
 
+  // ── HARNESS RULES ───────────────────────────────────────────────────────
+
+  {
+    id: 'harness-rules',
+    name: 'Harness Rules',
+    description: 'Merges config/harness-rules.json into the copy mesh-agent reads (user edits kept)',
+    risk: 'careful',
+    repoPaths: ['config/harness-rules.json'],
+    // Nothing is copied: the live file is a merge of the repo rules and the
+    // node's edits, written by harness-sync (as install.sh does).
+    targets: [],
+    servicesMac: ['ai.openclaw.mesh-agent'],
+    servicesLinux: ['openclaw-mesh-agent'],
+    nodeFilter: 'all',
+    postInstall: (changedFiles, changes, { repoDir }) => {
+      const src = path.join(repoDir, 'config', 'harness-rules.json');
+      if (!fs.existsSync(src)) return;
+      info(`Merging harness rules into ${HARNESS_RULES_PATH}...`);
+      const out = execFileSync(process.execPath, [
+        path.join(repoDir, 'bin', 'harness-sync.js'), 'apply', '--src', src, '--dst', HARNESS_RULES_PATH,
+      ], { cwd: repoDir, encoding: 'utf8', timeout: 60000, stdio: ['ignore', 'pipe', 'pipe'] });
+      for (const line of out.trim().split('\n').filter(Boolean)) console.log(`    ${C.dim(line)}`);
+      ok('Harness rules merged');
+    },
+  },
+
   // ── CONFIG TEMPLATES ────────────────────────────────────────────────────
 
   {
@@ -500,6 +529,8 @@ const MANIFEST = [
     description: 'Daemon configs, transcript configs, sync settings',
     risk: 'careful',
     repoPaths: ['config/'],
+    // Owned by 'harness-rules': nothing reads a copy under ~/.openclaw/config.
+    exclude: ['config/harness-rules.json'],
     targets: [DIRS.CONFIG],
     servicesMac: [],
     servicesLinux: [],
@@ -968,7 +999,7 @@ function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false, includ
 
     // Post-install hook (npm install, next build, config regen, boot compile, etc.).
     // It also gets the diff: under --force/--component, `install` lists every file.
-    if (comp.postInstall && !dryRun) comp.postInstall([...install, ...remove], changes);
+    if (comp.postInstall && !dryRun) comp.postInstall([...install, ...remove], changes, { repoDir });
 
     for (const svc of (IS_MAC ? comp.servicesMac : comp.servicesLinux) || []) {
       if (!services.includes(svc)) services.push(svc);
