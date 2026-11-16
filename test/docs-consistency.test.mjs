@@ -112,8 +112,9 @@ test('NODE_SPEC and NODE_ACCEPTANCE match the service manifest, the probe axes a
 });
 
 test('operator docs state the Node baseline that package.json engines and the installer require', () => {
-  const major = Number(read('package.json').match(/"node": ">=(\d+)"/)[1]);
-  assert.ok(read('scripts/install/prereqs.sh').includes(`-ge ${major} ]; }`), 'prereqs node_ok baseline');
+  const [, majorText, minorText] = read('package.json').match(/"node": ">=(\d+)\.(\d+)"/);
+  const [major, minor] = [Number(majorText), Number(minorText)];
+  assert.ok(read('scripts/install/prereqs.sh').includes(`[ "$major" -eq ${major} ] && [ "$minor" -ge ${minor} ]`), 'prereqs node_ok baseline');
   const patterns = [/Node(?:\.js)? ?(?:\| )?≥ ?(\d+)/g, /Node(?:\.js)? (\d+)\+/g, /v(\d+)\+/g, /≥ v(\d+)\.0\.0/g, /nvm install (\d+)/g, /setup_(\d+)\.x/g];
   for (const doc of ['docs/NODE_SPEC.md', 'docs/INSTALL_TEST_PROTOCOL.md', 'docs/MULTI_NODE_DEPLOY.md', 'docs/PUBLISHERS.md']) {
     const text = read(doc);
