@@ -1,4 +1,4 @@
-// Department color map (matches import-pipeline-v2.js)
+// Department color map (matches the workspace-only Arcane import pipeline)
 export const DEPT_COLORS: Record<string, string> = {
   DEV: "#3B82F6",
   CHAIN: "#8B5CF6",
