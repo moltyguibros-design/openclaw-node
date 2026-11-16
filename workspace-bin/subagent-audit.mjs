@@ -10,7 +10,8 @@
  *   node bin/subagent-audit.mjs --health-check               # trust registry health
  *
  * Called by memory-daemon:
- *   - Phase 0 (bootstrap): audit previous session's JSONL
+ *   - session end and Phase 0 (bootstrap): audit the ended session's JSONL
+ *     (both may see the same session; LEDGER_FILE keeps each delegation counted once)
  *   - Phase 2 (throttled): --health-check every 30min
  */
 
@@ -28,6 +29,10 @@ const __dirname = path.dirname(__filename);
 const WORKSPACE = process.env.OPENCLAW_WORKSPACE || path.dirname(__dirname);
 const TRUST_REGISTRY = path.join(WORKSPACE, 'bin/trust-registry');
 const LESSONS_FILE = path.join(WORKSPACE, '.learnings/lessons.md');
+// The daemon audits a session at its end and again at the next boot (and after
+// restarts); this ledger of already-counted delegations keeps each one counted once.
+const LEDGER_FILE = path.join(WORKSPACE, '.tmp/subagent-audit-state.json');
+const LEDGER_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 
 // ============================================================
 // JSONL PARSER — Extract Task tool invocations
@@ -68,6 +73,7 @@ export async function auditSession(jsonlPath) {
         const input = block.input || {};
         const soulId = input.name || input.subagent_type || 'unknown';
         pendingTasks.set(block.id, {
+          toolUseId: block.id,
           soulId,
           description: input.description || input.prompt?.slice(0, 100) || 'no description',
           timestamp: obj.timestamp || new Date().toISOString(),
@@ -86,6 +92,7 @@ export async function auditSession(jsonlPath) {
         const turnsEstimate = Math.max(1, Math.floor((lineNum - task.lineNum) / 3));
 
         results.push({
+          toolUseId: task.toolUseId,
           soulId: task.soulId,
           taskDescription: task.description,
           turnsConsumed: turnsEstimate,
@@ -106,6 +113,7 @@ export async function auditSession(jsonlPath) {
       const errorPattern = result === 'failure' ? extractErrorPattern(resultText) : null;
 
       results.push({
+        toolUseId: task.toolUseId,
         soulId: task.soulId,
         taskDescription: task.description,
         turnsConsumed: Math.max(1, Math.floor((lineNum - task.lineNum) / 3)),
@@ -168,10 +176,52 @@ function extractErrorPattern(text) {
 // RESULT PROCESSING — Update trust registry + lessons
 // ============================================================
 
+function loadLedger() {
+  try {
+    const ledger = JSON.parse(fs.readFileSync(LEDGER_FILE, 'utf-8'));
+    if (ledger && typeof ledger.sessions === 'object') return ledger;
+  } catch (e) {
+    if (e.code !== 'ENOENT') console.error(`subagent-audit ledger unreadable, starting fresh: ${e.message}`);
+  }
+  return { sessions: {} };
+}
+
+function saveLedger(ledger) {
+  const cutoff = Date.now() - LEDGER_RETENTION_MS;
+  for (const [id, entry] of Object.entries(ledger.sessions)) {
+    if (!(entry.updatedAt >= cutoff)) delete ledger.sessions[id];
+  }
+  fs.mkdirSync(path.dirname(LEDGER_FILE), { recursive: true });
+  const tmp = `${LEDGER_FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(ledger));
+  fs.renameSync(tmp, LEDGER_FILE);
+}
+
+/**
+ * Audit a session and process only the delegations no earlier audit counted.
+ * @returns {Promise<{ results: DelegationResult[], fresh: DelegationResult[] }>}
+ */
+export async function auditAndProcess(jsonlPath, dryRun = false) {
+  const results = await auditSession(jsonlPath);
+  const sessionKey = path.basename(jsonlPath, '.jsonl');
+  const ledger = loadLedger();
+  const seen = new Set(ledger.sessions[sessionKey]?.ids || []);
+  const fresh = results.filter(r => !r.toolUseId || !seen.has(r.toolUseId));
+  if (dryRun) return { results, fresh };
+  await processResults(fresh);
+  for (const r of fresh) if (r.toolUseId) seen.add(r.toolUseId);
+  ledger.sessions[sessionKey] = { ids: [...seen], updatedAt: Date.now() };
+  saveLedger(ledger);
+  return { results, fresh };
+}
+
+const lessonKey = (line) => line.trim().replace(/\s*\(\d{4}-\d{2}-\d{2}\)$/, '');
+
 /**
  * Process audit results: update trust-registry, append failures to lessons.
  */
 export async function processResults(resultsList, dryRun = false) {
+  let knownLessons = null;
   for (const r of resultsList) {
     if (r.result === 'unknown') continue;
 
@@ -195,8 +245,16 @@ export async function processResults(resultsList, dryRun = false) {
       if (r.result === 'failure' && r.errorPattern) {
         const today = new Date().toISOString().split('T')[0];
         const entry = `[error] Sub-agent ${r.soulId} failed: ${r.errorPattern} (auto-extracted) (${today})\n`;
+        if (!knownLessons) {
+          let existing = '';
+          try { existing = fs.readFileSync(LESSONS_FILE, 'utf-8'); } catch { /* lessons file might not exist */ }
+          knownLessons = new Set(existing.split('\n').filter(l => l.trim()).map(lessonKey));
+        }
+        const key = lessonKey(entry);
+        if (knownLessons.has(key)) continue;
         try {
           fs.appendFileSync(LESSONS_FILE, entry);
+          knownLessons.add(key);
         } catch { /* lessons file might not exist */ }
       }
     }
@@ -239,23 +297,20 @@ if (isMain) {
   if (doHealthCheck) {
     healthCheck(dryRun).catch(e => { console.error(e.message); process.exit(1); });
   } else if (jsonlPath) {
-    auditSession(jsonlPath)
-      .then(async results => {
-        console.log(`Found ${results.length} delegations:`);
+    auditAndProcess(jsonlPath, dryRun)
+      .then(({ results, fresh }) => {
+        console.log(`Found ${results.length} delegations (${results.length - fresh.length} already counted):`);
         for (const r of results) {
           const icon = r.result === 'success' ? '+' : r.result === 'failure' ? '!' : '?';
           console.log(`  [${icon}] ${r.soulId}: ${r.taskDescription} (${r.turnsConsumed} turns, ${r.result})`);
           if (r.errorPattern) console.log(`      Error: ${r.errorPattern}`);
         }
 
-        const actionable = results.filter(r => r.result !== 'unknown');
+        const actionable = fresh.filter(r => r.result !== 'unknown');
         if (actionable.length > 0) {
-          if (dryRun) {
-            console.log(`\nDry run: would update ${actionable.length} trust registry entries`);
-          } else {
-            await processResults(results);
-            console.log(`\nUpdated ${actionable.length} trust registry entries`);
-          }
+          console.log(dryRun
+            ? `\nDry run: would update ${actionable.length} trust registry entries`
+            : `\nUpdated ${actionable.length} trust registry entries`);
         }
       })
       .catch(e => { console.error(e.message); process.exit(1); });
