@@ -154,3 +154,55 @@ describe('createSubscriber consumer identity', () => {
     assert.equal(durable, 'subscriber-moltymacs-virtual-machine');
   });
 });
+
+describe('createSubscriber projection', () => {
+  function fakeShared(messages) {
+    return {
+      jetstreamManager: async () => ({
+        streams: { info: async () => ({ config: {} }) },
+        consumers: { info: async () => ({}), add: async () => {} },
+      }),
+      jetstream: () => ({
+        consumers: {
+          get: async () => ({
+            consume: async () => ({ stop() {}, async *[Symbol.asyncIterator]() { yield* messages; } }),
+          }),
+        },
+      }),
+    };
+  }
+  function message(log) {
+    const data = new TextEncoder().encode(JSON.stringify({ event_id: 'e1', promoted_from: { node_id: 'node-B' } }));
+    return { subject: 'kanban.events.task-1.kanban.created', data, ack: () => log.push('ack'), nak: () => log.push('nak') };
+  }
+  async function settled(log) {
+    while (!log.includes('ack') && !log.includes('nak')) await new Promise((r) => setTimeout(r, 2));
+    await new Promise((r) => setTimeout(r, 20));
+  }
+
+  it('awaits an async onIngest: a rejection naks and is not counted as ingested', async () => {
+    const log = [];
+    const errors = [];
+    const sub = await createSubscriber(fakeShared([message(log)]), 'node-A', {
+      onIngest: async () => { await new Promise((r) => setTimeout(r, 5)); throw new Error('projection down'); },
+      onError: (ctx, err) => errors.push([ctx, err.message]),
+    });
+    await settled(log);
+    await sub.stop();
+    assert.deepEqual(log, ['nak']);
+    assert.deepEqual(errors, [['projection', 'projection down']]);
+    assert.deepEqual(sub.stats, { ingested: 0, skipped: 0, errors: 1 });
+  });
+
+  it('acks only after an async onIngest settles', async () => {
+    const log = [];
+    const sub = await createSubscriber(fakeShared([message(log)]), 'node-A', {
+      onIngest: async () => { await new Promise((r) => setTimeout(r, 5)); log.push('projected'); },
+      onError: () => {},
+    });
+    await settled(log);
+    await sub.stop();
+    assert.deepEqual(log, ['projected', 'ack']);
+    assert.equal(sub.stats.ingested, 1);
+  });
+});

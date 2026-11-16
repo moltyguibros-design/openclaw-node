@@ -7,8 +7,9 @@
  * against the promotion policy, and publishes eligible events to the shared
  * cluster (OPENCLAW_SHARED) with provenance tracking.
  *
- * Includes exponential backoff on shared cluster errors and health-check
- * integration. Single-node operation works fully without the cluster.
+ * Includes exponential backoff on shared cluster errors. queue_for_review
+ * events are counted and logged only; review-queue persistence is deferred
+ * (legacy step 4.2). Single-node operation works fully without the cluster.
  *
  * Usage:
  *   node bin/memory-promoter.mjs

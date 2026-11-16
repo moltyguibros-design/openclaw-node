@@ -7,7 +7,7 @@
  * each incoming event against an ingestion policy, filters out self-originated
  * events, and projects accepted events to local stores with provenance tracking.
  *
- * Mirrors the promoter's architecture (health-check + exponential backoff,
+ * Mirrors the promoter's architecture (exponential backoff,
  * graceful shutdown) but operates in the reverse direction: shared → local.
  *
  * Usage:
@@ -122,7 +122,8 @@ export function evaluateIngestionPolicy(event, nodeId, parsed) {
  *   from JetStream's redelivery queue with no projection — events evaporate.
  *   F-N107 fix: was optional, which made an entire class of "subscriber wired
  *   but no consumer" bugs silent. Throw early so the misconfiguration is
- *   visible at startup.
+ *   visible at startup. May be async: it is awaited before the ack, and a throw
+ *   or rejection naks.
  * @param {object} [opts.backoffOpts] - Backoff controller options
  * @param {function} [opts.onSkip] - Callback(event, result) on skipped event
  * @param {function} [opts.onError] - Callback(context, err) on errors
@@ -227,7 +228,7 @@ export async function createSubscriber(nc, nodeId, opts = {}) {
 
         try {
           // F-N107: opts.onIngest is validated as required at factory init.
-          opts.onIngest(event, parsed, provenance);
+          await opts.onIngest(event, parsed, provenance);
           backoff.reset();
           stats.ingested++;
         } catch (err) {
