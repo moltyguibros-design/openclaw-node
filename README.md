@@ -447,7 +447,7 @@ Environment variables (set in `.mcp.json` env block or shell):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `KNOWLEDGE_ROOT` | `~/.openclaw/workspace` | Directory to scan for markdown files |
+| `KNOWLEDGE_ROOT` | current working directory (`.mcp.json` sets `~/.openclaw/workspace`) | Directory to scan for markdown files |
 | `KNOWLEDGE_DB` | `{KNOWLEDGE_ROOT}/.knowledge.db` | SQLite database path |
 | `KNOWLEDGE_POLL_MS` | `300000` (5 min) | Background re-index interval |
 | `KNOWLEDGE_PORT` | *(unset)* | Set to enable HTTP transport (e.g. `3100`) |

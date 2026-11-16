@@ -42,6 +42,13 @@ test('README says KNOWLEDGE_HOST is the only non-loopback Host the HTTP gate acc
   assert.match(para, /exact address or name the workers dial.*not `0\.0\.0\.0`/);
 });
 
+test('README KNOWLEDGE_ROOT default is the working directory core.mjs falls back to, and .mcp.json sets the workspace', () => {
+  assert.match(read('lib/mcp-knowledge/core.mjs'), /WORKSPACE = process\.env\.KNOWLEDGE_ROOT \|\| process\.cwd\(\);/);
+  assert.equal(JSON.parse(read('.mcp.json')).mcpServers.knowledge.env.KNOWLEDGE_ROOT, '${HOME}/.openclaw/workspace');
+  const row = read('README.md').split('\n').find((l) => l.startsWith('| `KNOWLEDGE_ROOT` |'));
+  assert.match(row, /^\| `KNOWLEDGE_ROOT` \| current working directory \(`\.mcp\.json` sets `~\/\.openclaw\/workspace`\) \|/);
+});
+
 test('TEST.md names the CI Node matrix and lists no tested module as a coverage gap', () => {
   const testMd = read('TEST.md');
   const matrix = read('.github/workflows/test.yml').match(/node-version: \[([\d, ]+)\]/)[1];
