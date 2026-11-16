@@ -314,7 +314,12 @@ wrong route password is rejected with an authentication failure (verified).
 This replaces the single-node `nats.conf` with the cross-machine cluster config from
 `services/nats/nats-cluster-node.conf`. **Order of operations matters:** start `nats-server` on
 ALL machines first (so the cluster forms and can hold 3 replicas), THEN start the daemons — a
-stream can't be created at R=3 until ≥3 cluster members are up.
+stream can't be created at R=3 until ≥3 cluster members are up. Every mesh KV bucket (tasks,
+collab, plans, deploy results, nodes, health, tools) is created at `OPENCLAW_KV_REPLICAS`
+(`lib/mesh-kv.js`). A daemon that starts first waits up to 10 minutes for the cluster to place
+the replicas, then exits for its service manager to restart it; it never falls back to R=1. A
+CLI fails at once. The count applies only when a bucket is created: a bucket that already exists
+at R=1 stays R=1 until it is scaled, e.g. `nats stream edit KV_MESH_TASKS --replicas 3`.
 
 **Manual (what the automated path produces).** `install.sh` fills in
 `services/nats/nats-cluster-node.conf`; the `nats-auth.conf` it includes is written beside it by

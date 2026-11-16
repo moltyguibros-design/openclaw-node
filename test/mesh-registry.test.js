@@ -96,6 +96,7 @@ require.cache[natsResolvePath] = {
     NATS_URL: 'nats://test:4222',
     NATS_TOKEN: null,
     natsConnectOpts: (extra) => ({ servers: 'nats://test:4222', ...extra }),
+    resolveEnvKey: () => null,
   },
 };
 

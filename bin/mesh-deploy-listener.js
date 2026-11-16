@@ -48,6 +48,7 @@ const DEPLOY_TIMEOUT_MS = 20 * 60 * 1000;
 const execFileAsync = promisify(execFile);
 
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
+const { openMeshKv } = require('../lib/mesh-kv');
 const sc = StringCodec();
 
 const RESULTS_BUCKET = 'MESH_DEPLOY_RESULTS';
@@ -528,10 +529,10 @@ async function main() {
 
   // Get KV buckets
   const js = nc.jetstream();
-  const resultsKv = await js.views.kv(RESULTS_BUCKET, { history: 5, ttl: 7 * 24 * 60 * 60 * 1000 });
+  const resultsKv = await openMeshKv(js, RESULTS_BUCKET, { history: 5, ttl: 7 * 24 * 60 * 60 * 1000 });
   let nodesKv = null;
   try {
-    nodesKv = await js.views.kv(NODES_BUCKET, { history: 1 }); // No TTL — node identity persists
+    nodesKv = await openMeshKv(js, NODES_BUCKET, { history: 1 }); // No TTL — node identity persists
   } catch (err) { console.warn(`[deploy-listener] open MESH_NODES bucket: ${err.message}`); }
   if (nodesKv) {
     await registerNode(nodesKv);

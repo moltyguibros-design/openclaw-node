@@ -27,6 +27,7 @@ const tracer = createTracer('mesh-health-publisher');
 
 const NODE_ID = require('../lib/node-id').resolveNodeId();
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
+const { openMeshKv } = require('../lib/mesh-kv');
 const PUBLISH_INTERVAL_MS = 15_000; // 15 seconds
 const HEALTH_BUCKET = "MESH_NODE_HEALTH";
 const KV_TTL_MS = 120_000; // entries expire after 2 minutes if node dies
@@ -340,7 +341,7 @@ async function main() {
 
   // Get or create the KV bucket
   const js = nc.jetstream();
-  const kv = await js.views.kv(HEALTH_BUCKET, {
+  const kv = await openMeshKv(js, HEALTH_BUCKET, {
     history: 1,
     ttl: KV_TTL_MS,
   });

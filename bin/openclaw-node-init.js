@@ -828,12 +828,13 @@ async function discoverTopology(natsUrl, localNodeId) {
     const nc = await nats.connect(require('../lib/nats-resolve').natsConnectOpts({ servers: natsUrl, timeout: 10000 }));
     const sc = nats.StringCodec();
     const js = nc.jetstream();
+    const { openMeshKv } = require('../lib/mesh-kv');
 
     const aliases = {};
 
     // Query MESH_NODE_HEALTH for all known nodes
     try {
-      const kv = await js.views.kv('MESH_NODE_HEALTH');
+      const kv = await openMeshKv(js, 'MESH_NODE_HEALTH', {}, { waitMs: 0 });
       const keys = await kv.keys();
       for await (const key of keys) {
         const entry = await kv.get(key);

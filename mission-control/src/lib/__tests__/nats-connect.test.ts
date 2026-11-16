@@ -36,3 +36,34 @@ test("URL and token come from $OPENCLAW_HOME/openclaw.env, quotes stripped, like
   }
   expect(connect).toHaveBeenCalledWith(expect.objectContaining({ servers: "nats://10.1.2.3:4222", token: "tok" }));
 });
+
+test("a bucket MC creates carries OPENCLAW_KV_REPLICAS from openclaw.env", async () => {
+  home = fs.mkdtempSync(path.join(os.tmpdir(), "mc-nats-connect-"));
+  fs.writeFileSync(path.join(home, "openclaw.env"), "OPENCLAW_KV_REPLICAS=3\n");
+  vi.stubEnv("OPENCLAW_HOME", home);
+  vi.stubEnv("OPENCLAW_KV_REPLICAS", "");
+  const kv = vi.fn(async (bucket: string, opts: unknown) => ({ bucket, opts }));
+  connect.mockImplementationOnce(async () => ({
+    isClosed: () => false,
+    closed: () => new Promise(() => {}),
+    jetstream: () => ({ views: { kv } }),
+  }));
+  for (const k of ["__nats_nc", "__nats_tasksKv", "__nats_collabKv", "__nats_healthKv"]) {
+    delete (globalThis as Record<string, unknown>)[k];
+  }
+  vi.resetModules();
+  const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  try {
+    const { getTasksKv, getCollabKv, getHealthKv } = await import("@/lib/nats");
+    await getTasksKv();
+    await getCollabKv();
+    await getHealthKv();
+  } finally {
+    log.mockRestore();
+    for (const k of ["__nats_tasksKv", "__nats_collabKv", "__nats_healthKv"]) {
+      delete (globalThis as Record<string, unknown>)[k];
+    }
+  }
+  expect(kv).toHaveBeenCalledTimes(3);
+  for (const [, opts] of kv.mock.calls) expect(opts).toEqual(expect.objectContaining({ replicas: 3 }));
+});

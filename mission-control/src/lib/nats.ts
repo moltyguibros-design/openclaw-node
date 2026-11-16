@@ -39,6 +39,16 @@ function resolveNatsToken(): string | null {
 const NATS_URL = resolveNatsUrl();
 const NATS_TOKEN = resolveNatsToken();
 
+/**
+ * OPENCLAW_KV_REPLICAS, clamped to [1, 5] like lib/nats-cluster-config.js. views.kv applies it only
+ * when it creates the bucket, so MC passes it too in case it opens a bucket before the daemons do.
+ * A council still forming refuses the create; the getter returns null and the next call retries.
+ */
+function kvReplicas(): number {
+  const n = Math.trunc(Number(resolveEnvKey("OPENCLAW_KV_REPLICAS") ?? 1));
+  return Number.isFinite(n) ? Math.min(Math.max(n, 1), 5) : 1;
+}
+
 // KV bucket name — nodes write here, MC reads
 const HEALTH_BUCKET = "MESH_NODE_HEALTH";
 const TASKS_BUCKET = "MESH_TASKS";
@@ -120,6 +130,7 @@ export async function getHealthKv(): Promise<KV | null> {
     g.__nats_healthKv = await js.views.kv(HEALTH_BUCKET, {
       history: 1,
       ttl: 120_000,
+      replicas: kvReplicas(),
     });
     return g.__nats_healthKv;
   } catch (err) {
@@ -148,6 +159,7 @@ export async function getCollabKv(): Promise<KV | null> {
     const js = conn.jetstream();
     g.__nats_collabKv = await js.views.kv(COLLAB_BUCKET, {
       history: 1,
+      replicas: kvReplicas(),
     });
     return g.__nats_collabKv;
   } catch (err) {
@@ -176,6 +188,7 @@ export async function getTasksKv(): Promise<KV | null> {
     const js = conn.jetstream();
     g.__nats_tasksKv = await js.views.kv(TASKS_BUCKET, {
       history: 1,
+      replicas: kvReplicas(),
     });
     return g.__nats_tasksKv;
   } catch (err) {

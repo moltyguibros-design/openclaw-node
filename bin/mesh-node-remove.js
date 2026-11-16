@@ -107,12 +107,13 @@ const cleanNatsState = tracer.wrapAsync('cleanNatsState', async function cleanNa
     ok(`NATS connected: ${nc.getServer()}`);
 
     const js = nc.jetstream();
+    const { openMeshKv } = require('../lib/mesh-kv');
 
     // 1. Release/cancel tasks owned by this node
     try {
       // Required only once nats is known to load: lib/mesh-tasks requires it.
       const { TaskStore } = require('../lib/mesh-tasks');
-      const kv = await js.views.kv('MESH_TASKS');
+      const kv = await openMeshKv(js, 'MESH_TASKS', {}, { waitMs: 0 });
       const released = (await new TaskStore(kv).requeueOwnedBy(nodeId)).length;
 
       if (released > 0) {
@@ -126,7 +127,7 @@ const cleanNatsState = tracer.wrapAsync('cleanNatsState', async function cleanNa
 
     // 2. Clean node registry (if MESH_NODES bucket exists)
     try {
-      const nodeKv = await js.views.kv('MESH_NODES');
+      const nodeKv = await openMeshKv(js, 'MESH_NODES', {}, { waitMs: 0 });
       await nodeKv.delete(nodeId);
       ok(`Removed ${nodeId} from MESH_NODES registry`);
     } catch (err) {

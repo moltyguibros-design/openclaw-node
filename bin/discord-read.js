@@ -18,6 +18,7 @@ const { connect, StringCodec } = require('nats');
 const sc = StringCodec();
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
+const { openMeshKv } = require('../lib/mesh-kv');
 const tracer = createTracer('discord-read');
 
 async function natsConnect() {
@@ -36,7 +37,7 @@ async function natsConnect() {
  */
 async function findDiscordToolNode(nc) {
   const js = nc.jetstream();
-  const kv = await js.views.kv('MESH_TOOLS');
+  const kv = await openMeshKv(js, 'MESH_TOOLS', {}, { waitMs: 0 });
 
   const keys = await kv.keys();
   for await (const key of keys) {
@@ -139,7 +140,7 @@ ENVIRONMENT:
   if (cmd === 'tools') {
     // List all mesh tools
     const js = nc.jetstream();
-    const kv = await js.views.kv('MESH_TOOLS');
+    const kv = await openMeshKv(js, 'MESH_TOOLS', {}, { waitMs: 0 });
     const keys = await kv.keys();
     let found = false;
     for await (const key of keys) {

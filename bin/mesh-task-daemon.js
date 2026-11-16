@@ -52,6 +52,7 @@ const ROLE_DIRS = [
 
 const sc = StringCodec();
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
+const { openMeshKv } = require('../lib/mesh-kv');
 const BUDGET_CHECK_INTERVAL = 30000; // 30s
 const STALL_MINUTES = parseInt(process.env.MESH_STALL_MINUTES || '5'); // no heartbeat for this long → stalled
 const MAX_REJECTIONS = parseInt(process.env.MESH_MAX_REJECTIONS || String(DEFAULT_MAX_REJECTIONS)); // reject→requeue cap (P4-5)
@@ -3017,17 +3018,17 @@ async function main() {
 
   // Initialize task store
   const js = nc.jetstream();
-  const kv = await js.views.kv(KV_BUCKET);
+  const kv = await openMeshKv(js, KV_BUCKET);
   store = new TaskStore(kv, { leaseMs: LEASE_MS });
   log(`Task store initialized (bucket: ${KV_BUCKET})`);
 
   // Initialize collab store
-  const collabKv = await js.views.kv(COLLAB_KV_BUCKET);
+  const collabKv = await openMeshKv(js, COLLAB_KV_BUCKET);
   collabStore = new CollabStore(collabKv);
   log(`Collab store initialized (bucket: ${COLLAB_KV_BUCKET})`);
 
   // Initialize plan store
-  const plansKv = await js.views.kv(PLANS_KV_BUCKET);
+  const plansKv = await openMeshKv(js, PLANS_KV_BUCKET);
   planStore = new PlanStore(plansKv);
   log(`Plan store initialized (bucket: ${PLANS_KV_BUCKET})`);
 

@@ -29,6 +29,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { natsConnectOpts } = require('../lib/nats-resolve');
+const { openMeshKv } = require('../lib/mesh-kv');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-cli');
 const LOCAL_NODE = require('../lib/node-id').resolveNodeId();
@@ -458,7 +459,7 @@ async function cmdDeploy(args) {
   // an unsigned marker let anyone with KV write access steer catching-up nodes.
   try {
     const js = nc.jetstream();
-    const resultsKv = await js.views.kv('MESH_DEPLOY_RESULTS', { history: 5, ttl: 7 * 24 * 60 * 60 * 1000 });
+    const resultsKv = await openMeshKv(js, 'MESH_DEPLOY_RESULTS', { history: 5, ttl: 7 * 24 * 60 * 60 * 1000 }, { waitMs: 0 });
     await resultsKv.put('latest', sc.encode(JSON.stringify(signedTrigger)));
   } catch (err) { console.warn(`[mesh] write deploy latest marker: ${err.message}`); }
 
@@ -474,7 +475,7 @@ async function cmdDeploy(args) {
 
   try {
     const js = nc.jetstream();
-    const resultsKv = await js.views.kv('MESH_DEPLOY_RESULTS');
+    const resultsKv = await openMeshKv(js, 'MESH_DEPLOY_RESULTS', {}, { waitMs: 0 });
     // The fleet registry, not the alias table: aliases only ever named the two original VMs.
     const checkNodes = targetNodes.length > 0
       ? targetNodes

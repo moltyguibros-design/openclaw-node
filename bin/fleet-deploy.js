@@ -20,6 +20,7 @@ const tracer = createTracer('fleet-deploy');
 // ── Config ───────────────────────────────────────────────────────────────
 
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
+const { openMeshKv } = require('../lib/mesh-kv');
 const sc = StringCodec();
 const REPO_DIR = process.env.OPENCLAW_REPO_DIR || path.join(os.homedir(), 'openclaw');
 const NODE_ID = require('../lib/node-id').resolveNodeId();
@@ -66,7 +67,7 @@ async function discoverNodes(nc) {
 
   // Try MESH_NODES bucket first (deploy-aware registry)
   try {
-    const kv = await js.views.kv(NODES_BUCKET, { history: 1 }); // No TTL — node identity persists
+    const kv = await openMeshKv(js, NODES_BUCKET, { history: 1 }, { waitMs: 0 }); // No TTL — node identity persists
     const keys = await kv.keys();
     for await (const key of keys) {
       try {
@@ -81,7 +82,7 @@ async function discoverNodes(nc) {
   // Fall back to MESH_NODE_HEALTH if MESH_NODES is empty
   if (nodes.length === 0) {
     try {
-      const kv = await js.views.kv(HEALTH_BUCKET, { history: 1, ttl: 120000 });
+      const kv = await openMeshKv(js, HEALTH_BUCKET, { history: 1, ttl: 120000 }, { waitMs: 0 });
       const keys = await kv.keys();
       for await (const key of keys) {
         try {
@@ -215,7 +216,7 @@ async function fleetDeploy(nc, opts) {
 
   // Get the results KV bucket
   const js = nc.jetstream();
-  const resultsKv = await js.views.kv(RESULTS_BUCKET, { history: 5, ttl: 7 * 24 * 60 * 60 * 1000 });
+  const resultsKv = await openMeshKv(js, RESULTS_BUCKET, { history: 5, ttl: 7 * 24 * 60 * 60 * 1000 }, { waitMs: 0 });
 
   const trigger = {
     sha,
