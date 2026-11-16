@@ -231,7 +231,7 @@ describe('getSessionInfo', () => {
     const lines = [{ type: 'user', message: { content: 'long task' } }];
     // ~400 responses with padding: the file is far larger than any tail window.
     for (let i = 0; i < 400; i++) {
-      const message = { id: `msg_${i}`, model: 'claude-sonnet-4-6', content: [{ type: 'text', text: 'y'.repeat(1000) }], usage: { input_tokens: 1, output_tokens: 2 } };
+      const message = { id: `msg_${i}`, model: 'fixture-model', content: [{ type: 'text', text: 'y'.repeat(1000) }], usage: { input_tokens: 1, output_tokens: 2 } };
       lines.push({ type: 'assistant', requestId: `req_${i}`, message });
       lines.push({ type: 'assistant', requestId: `req_${i}`, message });
     }
