@@ -101,7 +101,7 @@ if (IS_MAC) {
 }
 
 // What a node's clone needs to run bin/mesh-deploy.js.
-const DEPLOY_SCRIPT_FILES = ['bin/mesh-deploy.js', 'lib/tracer.js', 'lib/obs-db.js', 'lib/node-id.js', 'lib/node-aliases.js'];
+const DEPLOY_SCRIPT_FILES = ['bin/mesh-deploy.js', 'lib/mesh-roles.js', 'lib/tracer.js', 'lib/obs-db.js', 'lib/node-id.js', 'lib/node-aliases.js'];
 git(ROOT, 'init', '-q', '--bare', '-b', 'main', ORIGIN);
 git(ROOT, 'init', '-q', '-b', 'main', SEED);
 git(SEED, 'remote', 'add', 'origin', ORIGIN);

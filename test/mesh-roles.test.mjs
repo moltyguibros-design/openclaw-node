@@ -8,11 +8,15 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
-const { ROLE_COMPONENTS, FLEET_COMPONENTS } = require('../lib/mesh-roles.js');
+const { DEPLOY_COMPONENTS, ROLE_COMPONENTS, FLEET_COMPONENTS } = require('../lib/mesh-roles.js');
 
 process.env.OPENCLAW_NODE_ROLE = 'lead';
 process.env.OPENCLAW_REPO_DIR = path.join(os.tmpdir(), `mesh-roles-no-repo-${process.pid}`);
@@ -55,4 +59,48 @@ describe('fleet component filter', () => {
       assert.equal(r.status, 'skipped');
     });
   }
+});
+
+// mesh-deploy.js runs main() on load, so it is exercised as a process: a copy of
+// the script beside an edited mesh-roles.js.
+function runDeployWithRoles(rolesSource) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-roles-manifest-'));
+  for (const rel of ['bin/mesh-deploy.js', 'lib/tracer.js', 'lib/obs-db.js', 'lib/node-id.js', 'lib/node-aliases.js']) {
+    fs.mkdirSync(path.join(dir, path.dirname(rel)), { recursive: true });
+    fs.copyFileSync(path.join(REPO, rel), path.join(dir, rel));
+  }
+  fs.writeFileSync(path.join(dir, 'lib/mesh-roles.js'), rolesSource);
+  const run = spawnSync(process.execPath, [path.join(dir, 'bin/mesh-deploy.js'), '--status'], {
+    encoding: 'utf8',
+    env: { ...process.env, HOME: path.join(dir, 'home'), OPENCLAW_REPO_DIR: path.join(dir, 'no-repo'),
+      NODE_PATH: path.join(REPO, 'node_modules') },
+  });
+  fs.rmSync(dir, { recursive: true, force: true });
+  return run;
+}
+
+describe('mesh-deploy MANIFEST and the role table are one list', () => {
+  it('every MANIFEST id is in the table, and nothing else', () => {
+    const src = fs.readFileSync(path.join(REPO, 'bin/mesh-deploy.js'), 'utf8');
+    const start = src.indexOf('const MANIFEST = [');
+    const block = src.slice(start, src.indexOf('\n];', start));
+    const ids = [...block.matchAll(/^ {4}id: '([^']+)'/gm)].map(m => m[1]);
+    assert.deepEqual(ids, DEPLOY_COMPONENTS.map(c => c.id));
+    assert.doesNotMatch(block, /nodeFilter:/, 'nodeFilter is taken from lib/mesh-roles.js');
+  });
+
+  it('mesh-deploy refuses to run when the table lacks a MANIFEST id', () => {
+    const src = fs.readFileSync(path.join(REPO, 'lib/mesh-roles.js'), 'utf8');
+    const run = runDeployWithRoles(src.replace("  { id: 'log-rotate', nodeFilter: 'lead' },\n", ''));
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr, /MANIFEST and lib\/mesh-roles\.js disagree: not in mesh-roles: log-rotate/);
+  });
+
+  it('mesh-deploy refuses to run when the table names an id the MANIFEST lacks', () => {
+    const src = fs.readFileSync(path.join(REPO, 'lib/mesh-roles.js'), 'utf8');
+    const run = runDeployWithRoles(src.replace("  { id: 'mc', nodeFilter: 'lead' },",
+      "  { id: 'mc', nodeFilter: 'lead' },\n  { id: 'gateway', nodeFilter: 'lead' },"));
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr, /not in MANIFEST: gateway/);
+  });
 });

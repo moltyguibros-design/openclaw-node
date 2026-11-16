@@ -264,7 +264,6 @@ const MANIFEST = [
     servicesLinux: ['openclaw-mesh-task-daemon', 'openclaw-mesh-bridge',
                     'openclaw-mesh-agent', 'openclaw-mesh-health-publisher'],
     restartsListener: true,
-    nodeFilter: 'all',  // Every node gets daemon binaries; services are per-role
     validate: () => {
       // The Linux agent unit is started by hand (autostart false); the health
       // publisher runs on every role.
@@ -284,7 +283,6 @@ const MANIFEST = [
     targets: [DIRS.CLI_BIN],
     servicesMac: [],
     servicesLinux: [],
-    nodeFilter: 'all',
     postInstall: () => {
       const wrapperPath = path.join(DIRS.CLI_BIN, 'mesh');
       if (fs.existsSync(wrapperPath)) fs.chmodSync(wrapperPath, 0o755);
@@ -310,7 +308,6 @@ const MANIFEST = [
                     'openclaw-mesh-health-publisher', 'openclaw-mesh-tool-discord',
                     'openclaw-memory-daemon', 'openclaw-node-watch'],
     restartsListener: true,
-    nodeFilter: 'all',
   },
 
   // ── MISSION CONTROL ─────────────────────────────────────────────────────
@@ -324,7 +321,6 @@ const MANIFEST = [
     targets: [DIRS.MC_PROJECT],
     servicesMac: ['ai.openclaw.mission-control'],
     servicesLinux: ['openclaw-mission-control'],
-    nodeFilter: 'lead',
     postInstall: (changedFiles) => {
       if (changedFiles.some(f => /(^|\/)package(-lock)?\.json$/.test(f))) {
         info('Running npm install for Mission Control...');
@@ -357,7 +353,6 @@ const MANIFEST = [
     targets: [DIRS.WORKSPACE_BIN],
     servicesMac: ['ai.openclaw.memory-daemon'],
     servicesLinux: ['openclaw-memory-daemon'],
-    nodeFilter: 'lead',
   },
 
   {
@@ -383,7 +378,6 @@ const MANIFEST = [
     guardedTargets: [DIRS.WORKSPACE_BIN],
     servicesMac: ['ai.openclaw.memory-daemon', 'ai.openclaw.node-watch'],
     servicesLinux: ['openclaw-memory-daemon', 'openclaw-node-watch'],
-    nodeFilter: 'all',
   },
 
   {
@@ -395,7 +389,6 @@ const MANIFEST = [
     targets: [DIRS.CONFIG],
     servicesMac: ['ai.openclaw.memory-daemon'],
     servicesLinux: ['openclaw-memory-daemon'],
-    nodeFilter: 'lead',
     notes: 'Does NOT overwrite MEMORY.md, memory-vault/, or daily logs — those are user data. ' +
            'Only deploys config templates that control extraction and consolidation behavior.',
   },
@@ -411,7 +404,6 @@ const MANIFEST = [
     targets: [DIRS.SOULS],
     servicesMac: [],
     servicesLinux: [],
-    nodeFilter: 'all',
     // A soul's evolved genes and event log are learned on the node; the repo
     // copy only seeds a soul that has none. The old backup-then-overwrite reset
     // them to the seed on every --force and kept one .pre-deploy copy.
@@ -435,7 +427,6 @@ const MANIFEST = [
     targets: [DIRS.SKILLS],
     servicesMac: [],
     servicesLinux: [],
-    nodeFilter: 'all',
     postInstall: () => retireManagedSkillCopies(),
   },
 
@@ -450,7 +441,6 @@ const MANIFEST = [
     targets: [DIRS.BOOT_SRC],  // = WORKSPACE_BIN (compile-boot lives there)
     servicesMac: [],
     servicesLinux: [],
-    nodeFilter: 'lead',
     postInstall: () => {
       const compilerPath = path.join(DIRS.BOOT_SRC, 'compile-boot');
       if (fs.existsSync(compilerPath)) {
@@ -479,7 +469,6 @@ const MANIFEST = [
     targets: [DIRS.WORKSPACE],
     servicesMac: [],
     servicesLinux: [],
-    nodeFilter: 'all',
     // Per file, as install.sh does: a doc that differs on this node keeps its
     // copy (the repo version is saved beside it as .repo); the others install.
     // The old all-or-nothing veto left every doc behind for one edited one.
@@ -524,7 +513,6 @@ const MANIFEST = [
     targets: [],
     servicesMac: ['ai.openclaw.mesh-agent'],
     servicesLinux: ['openclaw-mesh-agent'],
-    nodeFilter: 'all',
     postInstall: (changedFiles, changes, { repoDir }) => {
       const src = path.join(repoDir, 'config', 'harness-rules.json');
       if (!fs.existsSync(src)) return;
@@ -550,7 +538,6 @@ const MANIFEST = [
     targets: [DIRS.CONFIG],
     servicesMac: [],
     servicesLinux: [],
-    nodeFilter: 'all',
     postInstall: (changedFiles, changes) => {
       const templatePath = path.join(DIRS.CONFIG, 'openclaw.json.template');
       const envPath = path.join(DIRS.OPENCLAW_HOME, 'openclaw.env');
@@ -593,7 +580,6 @@ const MANIFEST = [
     targets: [IS_MAC ? DIRS.SERVICES_MAC : DIRS.SERVICES_LINUX],
     servicesMac: [],
     servicesLinux: [],
-    nodeFilter: 'all',
     preInstall: () => {
       warn('Service definitions require --include-services flag');
       warn('A bad plist/unit can prevent services from starting');
@@ -622,7 +608,6 @@ const MANIFEST = [
     targets: [],
     servicesMac: ['ai.openclaw.gateway'],
     servicesLinux: ['openclaw-gateway'],
-    nodeFilter: 'all',
     detect: () => {
       try {
         const current = exec('openclaw --version 2>/dev/null', { ignoreError: true });
@@ -663,7 +648,6 @@ const MANIFEST = [
     targets: [],
     servicesMac: ['ai.openclaw.gateway'],
     servicesLinux: ['openclaw-gateway'],
-    nodeFilter: 'lead',
     detect: () => {
       try {
         if (fs.existsSync(DIRS.COMPANION)) {
@@ -703,7 +687,6 @@ const MANIFEST = [
     targets: [DIRS.CLI_BIN],
     servicesMac: ['ai.openclaw.lane-watchdog'],
     servicesLinux: ['openclaw-lane-watchdog'],
-    nodeFilter: 'lead',
   },
 
   // ── LOG ROTATION ────────────────────────────────────────────────────────
@@ -717,7 +700,6 @@ const MANIFEST = [
     targets: [DIRS.CLI_BIN],
     servicesMac: ['ai.openclaw.log-rotate'],
     servicesLinux: [],  // Ubuntu uses logrotate.d natively
-    nodeFilter: 'lead',
   },
 
   // ── DISCORD TOOL ────────────────────────────────────────────────────────
@@ -731,9 +713,24 @@ const MANIFEST = [
     targets: [DIRS.CLI_BIN],
     servicesMac: ['ai.openclaw.mesh-tool-discord'],
     servicesLinux: ['openclaw-mesh-tool-discord'],
-    nodeFilter: 'lead',
   },
 ];
+
+// Which role runs each component comes from lib/mesh-roles.js, the list the
+// deploy listener filters fleet triggers through and the health record
+// advertises: an id here that it lacks (or the reverse) is refused, not skipped.
+const { DEPLOY_COMPONENTS } = require('../lib/mesh-roles');
+{
+  const roles = new Map(DEPLOY_COMPONENTS.map(c => [c.id, c]));
+  const unlisted = MANIFEST.filter(c => !roles.has(c.id)).map(c => c.id);
+  const unknown = DEPLOY_COMPONENTS.filter(r => !MANIFEST.some(c => c.id === r.id)).map(r => r.id);
+  if (unlisted.length || unknown.length) {
+    throw new Error('MANIFEST and lib/mesh-roles.js disagree: ' +
+      [unlisted.length && `not in mesh-roles: ${unlisted.join(', ')}`,
+       unknown.length && `not in MANIFEST: ${unknown.join(', ')}`].filter(Boolean).join('; '));
+  }
+  for (const comp of MANIFEST) Object.assign(comp, { nodeFilter: roles.get(comp.id).nodeFilter, localOnly: !!roles.get(comp.id).localOnly });
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DEPLOY ENGINE
@@ -1369,6 +1366,12 @@ async function main() {
   }
 
   // ── Fleet deploy (replaces old SSH remote block) ──
+  const localOnlyIds = filterIds.filter(id => MANIFEST.some(c => c.id === id && c.localOnly));
+  const fleetIds = filterIds.filter(id => !localOnlyIds.includes(id));
+  if (deployRemote && localOnlyIds.length > 0) {
+    warn(`${localOnlyIds.join(', ')}: local-only (not from this repo) — run \`mesh deploy --local --component <id>\` on each node`);
+    if (fleetIds.length === 0) deployRemote = false;
+  }
   if (deployRemote) {
     try {
       const { fleetDeploy } = require('./fleet-deploy');
