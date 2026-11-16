@@ -43,6 +43,7 @@ const tracer = createTracer('memory-daemon');
 import { USE_LLM_EXTRACTION } from '../lib/pre-compression-flush.mjs';
 import { createBudget } from '../lib/memory-budget.mjs';
 import { createSessionTraceEmitter } from './session-trace-emitter.mjs';
+import { SessionTracker, STATES } from '../lib/session-tracker.mjs';
 import { createLocalEventLog, buildMemoryEvent } from '../lib/local-event-log.mjs';
 import { createLlmClient, DEFAULT_MODEL } from '../lib/llm-client.mjs';
 import { createExtractionStore } from '../lib/extraction-store.mjs';
@@ -253,11 +254,10 @@ function _detectActivity(sources, activityWindowMs) {
   const now = Date.now();
   const cutoff = now - activityWindowMs;
   let active = false;
-  let newestSession = null;
   let newestMtime = 0;
   let newestSource = null;
-  let newestFormat = null;
   const recentFiles = [];
+  const activeSessions = [];
 
   for (const source of sources) {
     if (!fs.existsSync(source.path)) {
@@ -282,18 +282,20 @@ function _detectActivity(sources, activityWindowMs) {
       try {
         const stat = fs.statSync(full);
         const mtime = stat.mtimeMs;
-        if (mtime > cutoff) { active = true; recentFiles.push(full); }
+        if (mtime > cutoff) {
+          active = true;
+          recentFiles.push(full);
+          if (stat.size >= MIN_SESSION_BYTES) activeSessions.push({ sessionId: path.basename(f, '.jsonl'), path: full });
+        }
         if (mtime > newestMtime) {
           newestMtime = mtime;
-          newestSession = path.basename(f, '.jsonl');
           newestSource = source.name;
-          newestFormat = source.format || null;
         }
       } catch (err) { console.warn(`[memory-daemon] session file stat failed for ${full}: ${err.message}`); continue; }
     }
   }
 
-  const result = { active, newestSession, newestMtime, newestSource, newestFormat, recentFiles };
+  const result = { active, recentFiles, activeSessions };
   if (process.env.OPENCLAW_LOG_LEVEL === 'debug') {
     const ageMs = newestMtime ? Math.round(Date.now() - newestMtime) : -1;
     console.log(`[memory-daemon] Activity: source=${newestSource || 'none'} age=${ageMs}ms`);
@@ -301,113 +303,6 @@ function _detectActivity(sources, activityWindowMs) {
   return result;
 }
 const detectActivity = tracer.wrap('detectActivity', _detectActivity, { tier: 1 });
-
-// ============================================================
-// SESSION STATE MACHINE
-// ENDED → BOOT → ACTIVE → IDLE → ENDED
-// ============================================================
-
-const STATES = { ENDED: 'ENDED', BOOT: 'BOOT', ACTIVE: 'ACTIVE', IDLE: 'IDLE' };
-
-class SessionStateMachine {
-  #state = STATES.ENDED;
-  #sessionId = null;
-  #lastActivityTime = 0;
-  #bootStartTime = 0;
-  #config;
-
-  constructor(config) {
-    this.#config = config;
-  }
-
-  get state() { return this.#state; }
-  get sessionId() { return this.#sessionId; }
-  get lastActivityTime() { return this.#lastActivityTime; }
-
-  tick(activity) {
-    const now = Date.now();
-    const transitions = [];
-
-    if (activity.active) {
-      this.#lastActivityTime = now;
-    }
-
-    const timeSinceActivity = now - this.#lastActivityTime;
-    const isNewSession = activity.newestSession
-      && activity.newestSession !== this.#sessionId
-      && activity.active;
-
-    switch (this.#state) {
-      case STATES.ENDED:
-        if (activity.active) {
-          this.#sessionId = activity.newestSession;
-          this.#state = STATES.BOOT;
-          this.#bootStartTime = now;
-          transitions.push({ from: STATES.ENDED, to: STATES.BOOT, sessionId: this.#sessionId });
-        }
-        break;
-
-      case STATES.BOOT:
-        // Boot is transient — completeBoot() transitions to ACTIVE
-        // Safety: force to ACTIVE if boot takes >60s
-        if (now - this.#bootStartTime > 60000) {
-          this.#state = STATES.ACTIVE;
-          transitions.push({ from: STATES.BOOT, to: STATES.ACTIVE, sessionId: this.#sessionId });
-        }
-        break;
-
-      case STATES.ACTIVE:
-        if (isNewSession) {
-          // New session while active — end current, boot new
-          transitions.push({ from: STATES.ACTIVE, to: STATES.ENDED, sessionId: this.#sessionId });
-          this.#sessionId = activity.newestSession;
-          this.#state = STATES.BOOT;
-          this.#bootStartTime = now;
-          transitions.push({ from: STATES.ENDED, to: STATES.BOOT, sessionId: this.#sessionId });
-        } else if (timeSinceActivity > this.#config.intervals.activeThresholdMs) {
-          this.#state = STATES.IDLE;
-          transitions.push({ from: STATES.ACTIVE, to: STATES.IDLE, sessionId: this.#sessionId });
-        }
-        break;
-
-      case STATES.IDLE:
-        if (isNewSession) {
-          transitions.push({ from: STATES.IDLE, to: STATES.ENDED, sessionId: this.#sessionId });
-          this.#sessionId = activity.newestSession;
-          this.#state = STATES.BOOT;
-          this.#bootStartTime = now;
-          transitions.push({ from: STATES.ENDED, to: STATES.BOOT, sessionId: this.#sessionId });
-        } else if (activity.active && timeSinceActivity < this.#config.intervals.activeThresholdMs) {
-          this.#state = STATES.ACTIVE;
-          transitions.push({ from: STATES.IDLE, to: STATES.ACTIVE, sessionId: this.#sessionId });
-        } else if (timeSinceActivity > this.#config.intervals.idleThresholdMs) {
-          this.#state = STATES.ENDED;
-          transitions.push({ from: STATES.IDLE, to: STATES.ENDED, sessionId: this.#sessionId });
-          this.#sessionId = null;
-        }
-        break;
-    }
-
-    return transitions;
-  }
-
-  completeBoot() {
-    if (this.#state === STATES.BOOT) {
-      this.#state = STATES.ACTIVE;
-      return { from: STATES.BOOT, to: STATES.ACTIVE, sessionId: this.#sessionId };
-    }
-    return null;
-  }
-
-  // Restore state from daemon-state.json after crash/restart
-  restore(saved) {
-    if (saved && saved.state && STATES[saved.state]) {
-      this.#state = saved.state;
-      this.#sessionId = saved.sessionId || null;
-      this.#lastActivityTime = saved.lastActivityTime || 0;
-    }
-  }
-}
 
 // ============================================================
 // MEMORY BUDGET (Hermes-inspired frozen snapshot)
@@ -652,7 +547,7 @@ function initMemoryBudget(config) {
 // PHASE 0: SESSION-START BOOTSTRAP
 // ============================================================
 
-async function runPhase0Bootstrap(sessionId, config) {
+async function runPhase0Bootstrap(sessionId, config, { othersLive = false } = {}) {
   log(`Phase 0: Bootstrap for session ${sessionId?.slice(0, 8) || 'unknown'}`);
 
   const recap = path.join(WORKSPACE, 'bin/session-recap');
@@ -738,13 +633,16 @@ async function runPhase0Bootstrap(sessionId, config) {
     } catch (e) { log(`  clawvault doctor failed: ${e.message}`); }
   }
 
-  // 9. Freeze MEMORY.md snapshot for deterministic prompt content
-  try {
-    const budget = initMemoryBudget(config);
-    budget.startSession();
-    const stats = budget.getStats();
-    log(`  memory-budget frozen ${stats.meterDisplay}`);
-  } catch (e) { log(`  memory-budget freeze failed: ${e.message}`); }
+  // 9. Freeze MEMORY.md snapshot for deterministic prompt content. A session
+  // that boots beside a live one keeps the snapshot that one is reading.
+  if (!othersLive) {
+    try {
+      const budget = initMemoryBudget(config);
+      budget.startSession();
+      const stats = budget.getStats();
+      log(`  memory-budget frozen ${stats.meterDisplay}`);
+    } catch (e) { log(`  memory-budget freeze failed: ${e.message}`); }
+  }
 
   // 10. Import changed sessions into SQLite archive (memory worker)
   try {
@@ -1199,51 +1097,16 @@ async function runNodeVaultMaintenance(config) {
 // Actions triggered by state machine transitions
 // ============================================================
 
+// Returns the ids of the sessions whose bootstrap finished.
 async function handleTransitions(transitions, config) {
+  const booted = [];
   for (const t of transitions) {
     log(`State: ${t.from} → ${t.to} (session: ${t.sessionId?.slice(0, 8) || '?'})`);
 
-    // ACTIVE → ENDED: Session-end synthesis + quick cleanup before session switch
-    if (t.from === STATES.ACTIVE && t.to === STATES.ENDED) {
-      log('Session switched while active — running session-end synthesis + cleanup');
-
-      // Session-end synthesis: extract + synthesize the ending session (4.4)
-      const sources = loadTranscriptSources();
-      const endingJsonl = findJsonlBySessionId(sources, t.sessionId) || findCurrentJsonl(sources);
-      if (endingJsonl) {
-        try {
-          const memoryMd = path.join(WORKSPACE, 'MEMORY.md');
-          const budget = initMemoryBudget(config);
-          const result = await serializeFlush(() => runFlushInWorker(endingJsonl, memoryMd, {
-            charBudget: budget.charBudget,
-          }));
-          const verdict = handleFlushResult(result, {
-            trigger: 'session-end synthesis',
-            sessionId: t.sessionId,
-            synthesisLabel: 'session_end',
-          });
-          if (!verdict.degraded && result.synthesis) {
-            log(`  session-end synthesis [${result.mode}]: ${result.synthesis.artifacts_written.length} artifacts, ${result.synthesis.duration_ms}ms`);
-          }
-        } catch (e) { log(`  session-end synthesis failed: ${e.message}`); emitErrorEvent('extract', e, t.sessionId); }
-      }
-
-      const recap = path.join(WORKSPACE, 'bin/session-recap');
-      const clawvault = path.join(WORKSPACE, config.clawvaultBin);
-      const tasks = [];
-      if (fs.existsSync(recap)) {
-        tasks.push(runSubprocess('node', [recap], 15000).catch(() => {}));
-      }
-      if (fs.existsSync(clawvault)) {
-        tasks.push(runSubprocess(clawvault, ['observe', '--cron'], 30000).catch(() => {}));
-      }
-      if (tasks.length > 0) await Promise.allSettled(tasks);
-    }
-
     // ENDED → BOOT: Full bootstrap
     if (t.from === STATES.ENDED && t.to === STATES.BOOT) {
-      await runPhase0Bootstrap(t.sessionId, config);
-      return STATES.ACTIVE; // signal to complete boot
+      await runPhase0Bootstrap(t.sessionId, config, { othersLive: t.othersLive });
+      booted.push(t.sessionId);
     }
 
     // ACTIVE → IDLE: Observe + recap + checkpoint + pre-compression flush
@@ -1254,7 +1117,7 @@ async function handleTransitions(transitions, config) {
 
       // Pre-compression flush: extract durable facts before context may be lost
       const sources = loadTranscriptSources();
-      const currentJsonl = findCurrentJsonl(sources);
+      const currentJsonl = findJsonlBySessionId(sources, t.sessionId);
       if (currentJsonl) {
         try {
           // shouldFlush parses the whole transcript — it runs IN the worker
@@ -1297,18 +1160,17 @@ async function handleTransitions(transitions, config) {
 
     // IDLE → ENDED: Full cleanup pipeline
     if (t.from === STATES.IDLE && t.to === STATES.ENDED) {
-      traceEmitter.reset();
+      if (t.jsonlPath) traceEmitter.forget(t.jsonlPath);
       log('Session ended — running full cleanup pipeline');
       const clawvault = path.join(WORKSPACE, config.clawvaultBin);
       const obsSync = path.join(WORKSPACE, 'bin/obsidian-sync.mjs');
       const subagentAudit = path.join(WORKSPACE, 'bin/subagent-audit.mjs');
 
       // 0. Pre-compression flush (final chance to capture facts).
-      // R17 fix (repair 4.4): flush the ENDED session's own transcript —
-      // when the end is caused by a new session appearing, the newest JSONL
-      // is the new session's, not the one being closed.
+      // R17 fix (repair 4.4): flush the ENDED session's own transcript; with
+      // concurrent sessions the newest JSONL belongs to another one.
       const sources = loadTranscriptSources();
-      const currentJsonl = findJsonlBySessionId(sources, t.sessionId) || findCurrentJsonl(sources);
+      const currentJsonl = findJsonlBySessionId(sources, t.sessionId);
       if (currentJsonl) {
         try {
           const memoryMd = path.join(WORKSPACE, 'MEMORY.md');
@@ -1349,8 +1211,8 @@ async function handleTransitions(transitions, config) {
         } catch (e) { log(`  session-store archive failed: ${e.message}`); emitErrorEvent('ingest', e); }
       }
 
-      // 0c. Release frozen MEMORY.md snapshot
-      if (memoryBudget) {
+      // 0c. Release frozen MEMORY.md snapshot (shared by every live session)
+      if (memoryBudget && !t.othersLive) {
         memoryBudget.endSession();
         log('  memory-budget: snapshot released');
       }
@@ -1365,13 +1227,9 @@ async function handleTransitions(transitions, config) {
 
       // 2. Sub-agent audit — extract trust data from this session
       // (R17, repair 4.4: same ended-session targeting as the flush above)
-      if (fs.existsSync(subagentAudit)) {
-        const sources = loadTranscriptSources();
-        const currentJsonl = findJsonlBySessionId(sources, t.sessionId) || findCurrentJsonl(sources);
-        if (currentJsonl) {
-          await runSubprocess('node', [subagentAudit, currentJsonl], 30000).catch(() => {});
-          log('  subagent-audit (end-of-session) done');
-        }
+      if (fs.existsSync(subagentAudit) && currentJsonl) {
+        await runSubprocess('node', [subagentAudit, currentJsonl], 30000).catch(() => {});
+        log('  subagent-audit (end-of-session) done');
       }
 
       // 3. Final Obsidian sync — push all changes including new ClawVault data
@@ -1387,7 +1245,7 @@ async function handleTransitions(transitions, config) {
       }
     }
   }
-  return null;
+  return booted;
 }
 
 // ============================================================
@@ -1435,11 +1293,9 @@ function runSubprocess(cmd, args, timeoutMs = 30000) {
 
 const DAEMON_STATE_FILE = path.join(STATE_DIR, 'daemon-state.json');
 
-function saveDaemonState(sm, throttle) {
+function saveDaemonState(sm) {
   const state = {
-    state: sm.state,
-    sessionId: sm.sessionId,
-    lastActivityTime: sm.lastActivityTime,
+    ...sm.toJSON(),
     pid: process.pid,
     updatedAt: Date.now(),
   };
@@ -1627,7 +1483,7 @@ async function main() {
   log(`Daemon starting (pid: ${process.pid}, workspace: ${WORKSPACE})`);
   log(`Transcript sources: ${sources.map(s => s.name).join(', ')}`);
 
-  const sm = new SessionStateMachine(config);
+  const sm = new SessionTracker(config);
   const stopQueueStateObserver = setStateObserver(() => {
     try { exportStateSnapshot(); } catch (snapErr) { log(`queue snapshot export failed: ${snapErr.message}`); }
   });
@@ -1643,7 +1499,7 @@ async function main() {
   const savedState = loadDaemonState();
   if (savedState) {
     sm.restore(savedState);
-    log(`Restored state: ${sm.state} (session: ${sm.sessionId?.slice(0, 8) || 'none'})`);
+    log(`Restored state: ${sm.state} (sessions: ${sm.sessions.map(x => `${x.sessionId.slice(0, 8)}=${x.state}`).join(', ') || 'none'})`);
   }
 
   // Optional NATS subscription for external compaction signals
@@ -1911,15 +1767,13 @@ async function main() {
       // sessions from extraction for a day, 2026-07-03).
       const activity = detectActivity(loadTranscriptSources(), config.intervals.activityWindowMs);
 
-      // 2. State machine tick
+      // 2. Per-session state machine tick
       const transitions = sm.tick(activity);
 
       // 3. Handle transitions
       if (transitions.length > 0) {
-        const bootResult = await handleTransitions(transitions, config);
-        if (bootResult === STATES.ACTIVE) {
-          sm.completeBoot();
-        }
+        const booted = await handleTransitions(transitions, config);
+        for (const sessionId of booted) sm.completeBoot(sessionId);
       }
 
       // 4. Phase 1: Status sync (when ACTIVE or IDLE)

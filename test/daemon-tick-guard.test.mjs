@@ -134,23 +134,24 @@ test('synthesis trigger labels are truthful per call site (R10, repair 2.11)', (
   const labels = [...daemonSrc.matchAll(/synthesisLabel: '([a-z_]+)'/g)].map((m) => m[1]);
   labels.sort();
   // Phase-2 interval, IDLE→ENDED end, ACTIVE→IDLE pre-compression (its own
-  // label), ACTIVE→ENDED end, NATS-triggered manual.
-  assert.deepEqual(labels, ['idle', 'interval', 'manual', 'session_end', 'session_end']);
+  // label), NATS-triggered manual. Sessions are tracked per transcript, so
+  // there is no ACTIVE→ENDED session-switch end any more.
+  assert.deepEqual(labels, ['idle', 'interval', 'manual', 'session_end']);
 });
 
 test('IDLE→ENDED targets the ended session\'s own JSONL (R17, repair 4.4)', () => {
   const branch = daemonSrc.match(/if \(t\.from === STATES\.IDLE && t\.to === STATES\.ENDED\) \{[\s\S]*?\n    \}\n/)[0];
-  const targeted = branch.match(/findJsonlBySessionId\(sources, t\.sessionId\) \|\| findCurrentJsonl\(sources\)/g) || [];
-  assert.equal(targeted.length, 2, 'flush + subagent-audit must both target the ended session');
-  const bare = branch.match(/= findCurrentJsonl\(sources\)/g) || [];
-  assert.equal(bare.length, 0, 'no bare newest-file lookup may remain in the ended-session path');
+  const targeted = branch.match(/const currentJsonl = findJsonlBySessionId\(sources, t\.sessionId\);/g) || [];
+  assert.equal(targeted.length, 1, 'the ended session\'s own transcript is looked up once');
+  assert.match(branch, /runSubprocess\('node', \[subagentAudit, currentJsonl\]/, 'subagent-audit uses the same transcript as the flush');
+  assert.doesNotMatch(branch, /findCurrentJsonl/, 'with concurrent sessions the newest file belongs to another session');
 });
 
 test('the session-size floor is a named 1KB constant, not a bare 50KB (repair 4.6)', () => {
   assert.doesNotMatch(daemonSrc, /50 \* 1024/);
   assert.match(daemonSrc, /const MIN_SESSION_BYTES = 1024;/);
   const uses = daemonSrc.match(/MIN_SESSION_BYTES/g) || [];
-  assert.equal(uses.length, 4, 'declaration + all three lookup sites (previous/current/by-id)');
+  assert.equal(uses.length, 5, 'declaration + the activity scan + all three lookup sites (previous/current/by-id)');
 });
 
 test('synthesized events carry session_id (R10, repair 2.10)', () => {

@@ -182,10 +182,11 @@ export function createSessionTraceEmitter(tracer) {
     },
 
     /**
-     * Reset tracking state (call on session end).
+     * Stop tracking one transcript (call when its session ends). Other live
+     * transcripts keep their offsets, so their entries are not re-emitted.
      */
-    reset() {
-      _fileState.clear();
+    forget(jsonlPath) {
+      _fileState.delete(jsonlPath);
     },
   };
 }

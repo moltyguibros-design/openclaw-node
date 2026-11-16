@@ -86,13 +86,14 @@ test('a missing result is treated as degraded, never as success', () => {
 
 // ── structural guarantee ────────────────────────────────────────────────────
 
-test('all five flush call sites route through handleFlushResult', () => {
+// Four since the per-session tracker: the ACTIVE→ENDED session-switch flush is gone.
+test('all four flush call sites route through handleFlushResult', () => {
   const flushCalls = src.match(/serializeFlush\(\(\) => runFlushInWorker\(/g) || [];
-  assert.equal(flushCalls.length, 5, 'expected exactly five runFlush trigger paths');
+  assert.equal(flushCalls.length, 4, 'expected exactly four runFlush trigger paths');
 
-  // one definition + five call sites
+  // one definition + four call sites
   const handlerRefs = src.match(/handleFlushResult\(/g) || [];
-  assert.equal(handlerRefs.length, 6, 'every flush call site must call the gate');
+  assert.equal(handlerRefs.length, 5, 'every flush call site must call the gate');
 });
 
 test('no flush call site emits extract/synthesize/degrade around the gate', () => {

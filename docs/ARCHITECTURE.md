@@ -141,7 +141,7 @@ The daemon polls JSONL transcript mtimes from a JSON registry every 30s. Any JSO
 │   │   ├── manifest.yaml          # Section-to-profile mapping
 │   │   └── *.compiled.md          # Profile-specific compiled boots
 │   ├── .tmp/                      # Daemon runtime state (not in git)
-│   │   ├── daemon-state.json      # Persistent state machine {state, sessionId, pid, updatedAt}
+│   │   ├── daemon-state.json      # Persistent state machine {state, sessionId, sessions[], pid, updatedAt}
 │   │   ├── daemon-throttle.json   # Throttle timestamps {lastRecap, lastMaintenance, lastObsidianSync, lastTrustHealth}
 │   │   ├── obsidian-sync-state.json # Hash cache for change detection
 │   │   ├── maintenance-results/   # Last maintenance run details
@@ -215,17 +215,18 @@ Phase 2 — Throttled Background Work:
     Every 30min: obsidian-sync (push workspace → vault, hash-based)
 ```
 
-### Session End (ACTIVE → IDLE → ENDED or ACTIVE → ENDED)
+### Session End (ACTIVE → IDLE → ENDED, per transcript)
 ```
+Each transcript written concurrently is its own session with its own timers
+(lib/session-tracker.mjs); a second session starting never ends the first.
+
 Idle timeout (15min no JSONL writes) → IDLE
   → Final session-recap
   → clawvault-local observe (capture final activity)
 IDLE timeout (5min) → ENDED
+  → end-of-session flush, archive and subagent-audit of that transcript
+  → MEMORY.md snapshot released only when no other session is live
   → clawvault-local sleep
-
-Session switch (ACTIVE → ENDED, new session detected):
-  → Quick cleanup: session-recap + clawvault observe
-  → Immediately transitions to BOOT for the new session
 ```
 
 ### Mission Control Integration
