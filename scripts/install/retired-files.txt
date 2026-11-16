@@ -1,0 +1,15 @@
+# Files the installer once shipped and the repo no longer does. rsync never
+# deletes, so each stays runnable on a node until retire_shipped_files moves it
+# into ~/.openclaw/retired/<date>/<group>/. One "<group> <name>" per line, a bare
+# name in that deployed dir:
+#   workspace-bin  ~/.openclaw/workspace/bin   (from workspace-bin/)
+#   mesh-bin       ~/openclaw/bin              (from bin/)
+# Add a line when you delete or rename a shipped file. *.bak* backups are never
+# listed and never touched.
+workspace-bin brainstorm-server
+workspace-bin daily-log-writer.mjs
+workspace-bin mesh-bridge.mjs
+workspace-bin lane-watchdog.js
+# sync-to-harness: its "dry run" rewrote ~/openclaw (the deploy checkout) with
+# --delete and pushed to main.
+workspace-bin sync-to-harness

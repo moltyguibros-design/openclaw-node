@@ -242,20 +242,21 @@ test('the retired npx openclaw-mesh layer is neither advertised nor run', () => 
   assert.doesNotMatch(code, /npx\s+(--yes\s+)?openclaw-mesh/);
 });
 
-test('sync-to-harness is gone from the repo and an --update removes the installed copy', () => {
+test('sync-to-harness is gone from the repo and an --update moves the installed copy out of bin/', () => {
   assert.equal(existsSync(join(ROOT, 'workspace-bin/sync-to-harness')), false);
-  const src = moduleSrc['workspace.sh'];
-  const start = src.indexOf('RETIRED_WORKSPACE_BIN=(');
-  assert.ok(start >= 0, 'workspace.sh lists retired workspace scripts');
-  const block = src.slice(start, src.indexOf('\ndone\n', start) + '\ndone\n'.length);
-  const ws = mkdtempSync(join(tmpdir(), 'retired-ws-'));
-  mkdirSync(join(ws, 'bin'));
-  writeFileSync(join(ws, 'bin/sync-to-harness'), '#!/bin/sh\n');
-  writeFileSync(join(ws, 'bin/kept'), '#!/bin/sh\n');
-  const r = spawnSync('bash', ['-euc', `run() { "$@"; }\nWORKSPACE="$1"\n${block}`, 'bash', ws], { encoding: 'utf8' });
+  assert.match(readFileSync(join(ROOT, 'scripts/install/retired-files.txt'), 'utf8'), /^workspace-bin sync-to-harness$/m);
+  assert.ok(moduleSrc['workspace.sh'].includes('retire_shipped_files workspace-bin "$WORKSPACE/bin"'));
+  const root = mkdtempSync(join(tmpdir(), 'retired-ws-'));
+  const bin = join(root, 'workspace', 'bin');
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, 'sync-to-harness'), '#!/bin/sh\n');
+  writeFileSync(join(bin, 'kept'), '#!/bin/sh\n');
+  const r = spawnSync('bash', ['-c', `source "${join(ROOT, 'scripts/install/helpers.sh')}"; retire_shipped_files workspace-bin "$1"`, 'x', bin], {
+    encoding: 'utf8', env: { ...process.env, DRY_RUN: 'false', REPO_DIR: ROOT, OPENCLAW_ROOT: root },
+  });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(existsSync(join(ws, 'bin/sync-to-harness')), false);
-  assert.equal(existsSync(join(ws, 'bin/kept')), true);
+  assert.equal(existsSync(join(bin, 'sync-to-harness')), false);
+  assert.equal(existsSync(join(bin, 'kept')), true);
 });
 
 test('skills that ship memory or code off the node are quarantined, and an --update removes installed copies', () => {
@@ -627,6 +628,52 @@ test('installer seeds but never overwrites learned soul genes/events', (t) => {
   assert.equal(read('souls/daedalus/evolution/events.jsonl'), '{"event":"learned on this node"}\n');
   assert.equal(read('souls/daedalus/SOUL.md'), 'soul v2 longer\n');
   assert.equal(read('souls/newcomer/evolution/genes.json'), '{"genes":"newcomer seed"}\n');
+});
+
+test('installer archives the retired files it once shipped, never backups or operator tools', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'oc-retire-repo-'));
+  const root = mkdtempSync(join(tmpdir(), 'oc-retire-root-'));
+  const bin = join(root, 'workspace', 'bin');
+  mkdirSync(join(repo, 'scripts/install'), { recursive: true });
+  writeFileSync(join(repo, 'scripts/install/retired-files.txt'),
+    '# comment\nworkspace-bin daily-log-writer.mjs\nworkspace-bin brainstorm-server\nworkspace-bin old.bak\nworkspace-bin ../escape\nmesh-bin daily-log-writer.mjs\n');
+  mkdirSync(join(bin, 'brainstorm-server'), { recursive: true });
+  writeFileSync(join(bin, 'brainstorm-server', 'index.js'), 'srv\n');
+  for (const f of ['daily-log-writer.mjs', 'daily-log-writer.mjs.bak', 'old.bak', 'my-own-tool']) writeFileSync(join(bin, f), `${f}\n`);
+  writeFileSync(join(root, 'workspace', 'escape'), 'outside\n');
+  const retire = () => spawnSync('bash', ['-c', `source "${join(ROOT, 'scripts/install/helpers.sh')}"; retire_shipped_files workspace-bin "$1"`, 'x', bin], {
+    encoding: 'utf8', env: { ...process.env, DRY_RUN: 'false', REPO_DIR: repo, OPENCLAW_ROOT: root },
+  });
+  let r = retire();
+  assert.equal(r.status, 0, r.stderr);
+  const dated = readdirSync(join(root, 'retired'));
+  assert.equal(dated.length, 1);
+  const archive = join(root, 'retired', dated[0], 'workspace-bin');
+  assert.deepEqual(readdirSync(archive).sort(), ['brainstorm-server', 'daily-log-writer.mjs']);
+  assert.equal(readFileSync(join(archive, 'brainstorm-server', 'index.js'), 'utf8'), 'srv\n');
+  assert.deepEqual(readdirSync(bin).sort(), ['daily-log-writer.mjs.bak', 'my-own-tool', 'old.bak']);
+  assert.ok(existsSync(join(root, 'workspace', 'escape')));
+
+  writeFileSync(join(bin, 'daily-log-writer.mjs'), 'shipped again\n');
+  r = retire();
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /left in place/);
+  assert.equal(readFileSync(join(archive, 'daily-log-writer.mjs'), 'utf8'), 'daily-log-writer.mjs\n', 'an archived copy is never overwritten');
+});
+
+test('the retired list names only files the repo no longer ships, and both deploy dirs are pruned', () => {
+  const entries = readFileSync(join(ROOT, 'scripts/install/retired-files.txt'), 'utf8').split('\n')
+    .filter((l) => l.trim() && !l.startsWith('#')).map((l) => l.trim().split(/\s+/));
+  assert.ok(entries.length > 0);
+  const source = { 'workspace-bin': 'workspace-bin', 'mesh-bin': 'bin' };
+  for (const [group, name] of entries) {
+    assert.ok(source[group], `unknown group ${group}`);
+    assert.ok(!existsSync(join(ROOT, source[group], name)), `${group} ${name} is still shipped`);
+    if (group === 'workspace-bin') assert.ok(!existsSync(join(ROOT, 'bin', name)) || !moduleSrc['workspace.sh'].includes(` ${name}`), `${name} is still copied into the workspace`);
+  }
+  assert.ok(moduleSrc['workspace.sh'].includes('retire_shipped_files workspace-bin "$WORKSPACE/bin"'));
+  assert.ok(moduleSrc['workspace.sh'].includes('retire_shipped_files mesh-bin "$MESH_BIN"'));
+  assert.ok(!readFileSync(join(ROOT, 'docs/OBSERVABILITY.md'), 'utf8').includes('daily-log-writer'));
 });
 
 test('documented node-watch invocations only use flags node-watch accepts', () => {

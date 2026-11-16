@@ -45,16 +45,16 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | Agent Execution Layer | 5 | 4 | 0 | 9 |
 | Security & Enforcement Layer | 4 | 16 | 5 | 25 |
 | Memory System | 2 | 16 | 4 | 22 |
-| Local Workspace Daemons | 4 | 44 | 7 | 55 |
+| Local Workspace Daemons | 3 | 37 | 7 | 47 |
 | Kanban & Scheduler | 2 | 4 | 3 | 9 |
 | HyperAgent Evidence Loop | 2 | 18 | 2 | 22 |
 | Knowledge & Search | 1 | 4 | 3 | 8 |
 | Communication | 1 | 4 | 1 | 6 |
 | Deployment & Provisioning | 3 | 16 | 4 | 23 |
 | LLM Provider Abstraction | 1 | 1 | 0 | 2 |
-| **Total** | **72** | **205** | **47** | **324** |
+| **Total** | **71** | **198** | **47** | **316** |
 
-> Note: Some functions appear in multiple protocol sections when they serve dual roles. The total unique instrumented functions across all source modules is **~324**.
+> Note: Some functions appear in multiple protocol sections when they serve dual roles. The total unique instrumented functions across all source modules is **~316**.
 
 ---
 
@@ -454,7 +454,7 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `loadSyncState` | obsidian-sync | 2 | Loads persistent sync state (last sync times, hashes) — logged to detect stale sync state. |
 | `saveSyncState` | obsidian-sync | 2 | Saves sync state — confirms state persistence for crash recovery. |
 
-### 8.3 Memory Maintenance (14 health checks)
+### 8.3 Memory Maintenance (13 health checks)
 
 | Function | Module | Tier | Why Logged |
 |----------|--------|------|------------|
@@ -466,26 +466,13 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `checkCompanionFreshness` | memory-maintenance | 2 | Checks companion state file freshness — ensures companion context is current. |
 | `checkClawVault` | memory-maintenance | 2 | Validates ClawVault integrity — logged to detect vault corruption. |
 | `checkMissionControl` | memory-maintenance | 2 | Checks MC connectivity and data freshness — logged to detect MC sync failures. |
-| `checkDailyFile` | memory-maintenance | 2 | Verifies today's daily log exists and is current — logged to catch daily log generation failures. |
 | `checkTimestamps` | memory-maintenance | 2 | Validates timestamp consistency across memory files — detects clock skew or file corruption. |
 | `checkErrors` | memory-maintenance | 2 | Scans for error patterns in recent memory — logged to surface recurring issues. |
 | `checkConsolidation` | memory-maintenance | 2 | Checks if memory consolidation is needed — logged to trigger proactive consolidation. |
 | `checkGraphHealth` | memory-maintenance | 2 | Validates knowledge graph connectivity — detects orphaned nodes or broken links. |
 | `checkSharedLessons` | memory-maintenance | 2 | Verifies shared lessons are propagated — logged to ensure cross-workspace lesson sync. |
 
-### 8.4 Daily Log Writer
-
-| Function | Module | Tier | Why Logged |
-|----------|--------|------|------------|
-| `run` | daily-log-writer | 1 | Runs the daily log generation — logs whether a new daily file was created or updated. |
-| `loadState` | daily-log-writer | 2 | Loads writer state (last run, deltas) — logged for continuity across runs. |
-| `saveState` | daily-log-writer | 2 | Persists writer state — confirms durability for crash recovery. |
-| `isSessionActive` | daily-log-writer | 2 | Checks if a session is currently active — determines whether to defer log writing. |
-| `getRecapDelta` | daily-log-writer | 2 | Computes session recap changes since last run — logs delta size for content tracking. |
-| `getTaskDelta` | daily-log-writer | 2 | Computes task state changes since last run — logs task progression for daily summary. |
-| `getGitDelta` | daily-log-writer | 2 | Computes git commit changes since last run — logs commit count for daily summary. |
-
-### 8.5 Subagent Audit
+### 8.4 Subagent Audit
 
 | Function | Module | Tier | Why Logged |
 |----------|--------|------|------------|
@@ -496,7 +483,7 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `processResults` | subagent-audit | 2 | Batch processes subagent results — logs batch size and aggregate quality metrics. |
 | `healthCheck` | subagent-audit | 3 | Checks subagent audit system health — periodic self-check. |
 
-### 8.6 Lane Watchdog (deadlock detection)
+### 8.5 Lane Watchdog (deadlock detection)
 
 | Function | Module | Tier | Why Logged |
 |----------|--------|------|------------|
@@ -504,7 +491,7 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `checkForDeadlock` | lane-watchdog | 1 | Evaluates if a lane is deadlocked — critical safety check; always logged because deadlock requires intervention. |
 | `sendSigusr1` | lane-watchdog | 2 | Sends SIGUSR1 to a deadlocked process — logged because it forces a state dump for debugging. |
 
-### 8.7 Heartbeat Detection
+### 8.6 Heartbeat Detection
 
 | Function | Module | Tier | Why Logged |
 |----------|--------|------|------------|
@@ -758,8 +745,7 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | pair-transport-teams | 15 |
 | memory-daemon | 13 |
 | obsidian-sync | 12 |
-| memory-maintenance | 14 |
-| daily-log-writer | 7 |
+| memory-maintenance | 13 |
 | subagent-audit | 6 |
 | lane-watchdog | 3 |
 | health-publisher | 2 |
@@ -774,6 +760,6 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | discord-read | 1 |
 | discord-tool | 4 |
 | hyperagent CLI | 11 |
-| **Grand Total** | **~330** |
+| **Grand Total** | **~322** |
 
 > The exact count varies slightly due to MeshRegistry and MCP knowledge server having dynamic method counts. All functions listed above are wrapped by `tracer.wrapClass()`, `tracer.wrapAsync()`, or `tracer.wrap()` and emit structured trace events through the unified observability pipeline.
