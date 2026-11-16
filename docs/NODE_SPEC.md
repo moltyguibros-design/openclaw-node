@@ -138,7 +138,7 @@ Written to `~/.openclaw/openclaw.env` by install (generated where marked ⚙; RA
 
 **Optional human steps (feature unlocks, not core):**
 - Agent brain: `install.sh --provider=NAME` (claude · openai · gemini · deepseek · kimi · minimax · aider · ollama), then sign in to that CLI once. The installer asks when no provider is chosen and never installs a vendor CLI unasked.
-- Gateway surface: `npm i -g openclaw`, add auth profile to `~/.openclaw/openclaw.json`, flip `openclaw-gateway` autostart.
+- Gateway surface: `npm i -g openclaw`, add auth profile to `~/.openclaw/openclaw.json`, flip `openclaw-gateway` autostart. The unit runs `$(npm root -g)/openclaw/dist/index.js` as resolved when `install.sh` rendered it; re-run `install.sh --update` after changing your Node install.
 - Discord tool: put `DISCORD_BOT_TOKEN` in the env, flip `openclaw-mesh-tool-discord`.
 - MC voice (TTS): `GOOGLE_API_KEY` in env.
 - Multi-machine: Tailscale + `docs/MULTI_NODE_DEPLOY.md`.

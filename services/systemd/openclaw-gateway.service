@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${NODE_BIN} /usr/local/lib/node_modules/openclaw/dist/index.js gateway --port 18789
+ExecStart=${NODE_BIN} ${OPENCLAW_GATEWAY_JS} gateway --port 18789
 Restart=always
 RestartSec=5
 Environment=HOME=${HOME}

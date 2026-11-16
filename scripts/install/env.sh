@@ -140,3 +140,7 @@ export CLAUDE_PROJECT_REPO="$(claude_project_path "$REPO_DIR")"
 export OPENCLAW_WORKSPACE="$WORKSPACE"
 export OPENCLAW_REPO_DIR="$REPO_DIR"
 export NPM_BIN="$(command -v npm 2>/dev/null || echo "$HOME/.openclaw/workspace/.npm-global/bin/npm")"
+# The gateway unit runs the global openclaw package (`npm i -g openclaw`). npm -g
+# lands in /opt/homebrew/lib on Apple-Silicon Homebrew and /usr/lib on NodeSource,
+# so ask this npm instead of assuming /usr/local/lib (no debug log: --dry-run writes nothing).
+export OPENCLAW_GATEWAY_JS="$("$NPM_BIN" root -g --logs-max=0 2>/dev/null || echo /usr/local/lib/node_modules)/openclaw/dist/index.js"

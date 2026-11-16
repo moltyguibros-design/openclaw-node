@@ -122,6 +122,32 @@ test('unit renders hand envsubst the placeholder list, so $MAINPID survives', (t
   assert.ok(r.stdout.includes('ExecStart=/x/nats-server --config /h/.openclaw/config/nats.conf'), r.stdout);
 });
 
+// The gateway units hardcoded /usr/local/lib/node_modules/openclaw, which is not
+// where npm -g installs on Apple-Silicon Homebrew (/opt/homebrew/lib) or NodeSource (/usr/lib).
+test('gateway units run the openclaw package npm -g actually installed', () => {
+  for (const f of ['services/launchd/ai.openclaw.gateway.plist', 'services/systemd/openclaw-gateway.service']) {
+    const src = readFileSync(join(ROOT, f), 'utf8');
+    assert.ok(src.includes('${OPENCLAW_GATEWAY_JS}'), f);
+    assert.ok(!src.includes('/usr/local/lib/node_modules'), f);
+    assert.ok(!src.includes('2026.3.7'), `${f} carries a hardcoded service version`);
+  }
+  const svc = moduleSrc['services.sh'];
+  assert.ok(svc.match(/UNIT_VARS='([^']*)'/)[1].split(' ').includes('${OPENCLAW_GATEWAY_JS}'));
+  const sedLists = svc.match(/-e "s\|\\\$\{NPM_BIN\}\|/g).length;
+  assert.equal(svc.match(/-e "s\|\\\$\{OPENCLAW_GATEWAY_JS\}\|\$OPENCLAW_GATEWAY_JS\|g"/g)?.length, sedLists, 'every sed fallback renders the gateway path');
+
+  const line = moduleSrc['env.sh'].split('\n').find((l) => l.startsWith('export OPENCLAW_GATEWAY_JS='));
+  assert.ok(line, 'env.sh exports OPENCLAW_GATEWAY_JS');
+  const dir = mkdtempSync(join(tmpdir(), 'oc-gateway-js-'));
+  const npm = join(dir, 'npm');
+  writeFileSync(npm, '#!/bin/sh\n[ "$1 $2 $3" = "root -g --logs-max=0" ] && echo /opt/homebrew/lib/node_modules\n', { mode: 0o755 });
+  const resolve = (npmBin) => spawnSync('bash', ['-c', `${line}\necho "$OPENCLAW_GATEWAY_JS"`], {
+    encoding: 'utf8', env: { PATH: process.env.PATH, NPM_BIN: npmBin },
+  }).stdout.trim();
+  assert.equal(resolve(npm), '/opt/homebrew/lib/node_modules/openclaw/dist/index.js');
+  assert.equal(resolve(join(dir, 'no-npm')), '/usr/local/lib/node_modules/openclaw/dist/index.js');
+});
+
 // --update --enable-services on Linux used `start`, a no-op on a running unit,
 // so re-rendered units and new code waited for a reboot (macOS unloads/loads).
 test('Linux --enable-services restarts re-rendered autostart units', () => {

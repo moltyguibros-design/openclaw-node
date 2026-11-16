@@ -6,7 +6,7 @@
     <string>ai.openclaw.gateway</string>
     
     <key>Comment</key>
-    <string>OpenClaw Gateway (v2026.3.7)</string>
+    <string>OpenClaw Gateway</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -18,7 +18,7 @@
     <key>ProgramArguments</key>
     <array>
       <string>${NODE_BIN}</string>
-      <string>/usr/local/lib/node_modules/openclaw/dist/index.js</string>
+      <string>${OPENCLAW_GATEWAY_JS}</string>
       <string>gateway</string>
       <string>--port</string>
       <string>18789</string>
@@ -52,8 +52,6 @@
     <string>openclaw</string>
     <key>OPENCLAW_SERVICE_KIND</key>
     <string>gateway</string>
-    <key>OPENCLAW_SERVICE_VERSION</key>
-    <string>2026.3.7</string>
     </dict>
   </dict>
 </plist>
