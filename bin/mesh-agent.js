@@ -1488,7 +1488,7 @@ function buildCirclingPrompt(task, circlingData) {
 
   if (isMultiArtifact) {
     // Multi-artifact output format (Worker Step 2 and Finalization)
-    const art1Type = circling_phase === 'finalization' ? 'workArtifact' : 'workArtifact';
+    const art1Type = 'workArtifact';
     const art2Type = circling_phase === 'finalization' ? 'completionDiff' : 'reconciliationDoc';
 
     parts.push('## Output Format (TWO artifacts required)');
@@ -1825,7 +1825,7 @@ async function executeCollabTask(task) {
       try {
         if (worktreePath) {
           // Untrimmed: the first record's status column can start with a space.
-          const status = require('child_process').execSync('git status --porcelain', {
+          const status = execSync('git status --porcelain', {
             cwd: worktreePath, timeout: 5000, encoding: 'utf-8',
           });
           artifacts = status.split('\n').filter(Boolean).map(line => line.slice(3));
@@ -2507,6 +2507,7 @@ async function main() {
   aliveSub.unsubscribe();
   approvedSub.unsubscribe();
   rejectedSub.unsubscribe();
+  recruitSub.unsubscribe();
   draining = true;
   log('Draining NATS...');
   await nc.drain();
