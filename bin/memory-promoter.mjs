@@ -24,7 +24,7 @@ import { resolveNodeId } from '../lib/node-id.js';
 import { createRequire } from 'node:module';
 import { loadPromotionPolicy } from '../lib/promotion-policy.mjs';
 import { ensureSharedStream, SHARED_STREAM_NAME } from '../lib/shared-event-stream.mjs';
-import { canonicalNodeId, localEventStreamName } from '../lib/local-event-log.mjs';
+import { canonicalNodeId, localEventStreamName, localEventSubjectPrefix } from '../lib/local-event-log.mjs';
 
 const _require = createRequire(import.meta.url);
 const { natsConnectOpts } = _require('../lib/nats-resolve.js');
@@ -248,9 +248,11 @@ export async function createPromoter(nc, nodeId, opts = {}) {
   try {
     await jsm.consumers.info(streamName, consumerName);
   } catch {
+    // A legacy stream on `local.>` also holds other nodes' events.
     await jsm.consumers.add(streamName, {
       durable_name: consumerName,
       deliver_policy: 'new',
+      filter_subject: `${localEventSubjectPrefix(canonicalId)}.>`,
     });
   }
 

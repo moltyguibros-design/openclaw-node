@@ -58,7 +58,7 @@ function mockNc() {
     async flush() {},
     async close() {},
     async jetstreamManager() {
-      return { streams: { info: async () => ({ config: { subjects: ['local.>'] }, state: { messages: 5 } }) } };
+      return { streams: { info: async () => ({ config: { subjects: ['local.testnode.>'] }, state: { messages: 5 } }) } };
     },
   };
 }
@@ -166,6 +166,12 @@ describe('node-acceptance probes — network', () => {
   });
   it('NET-L2-STREAM PASS when per-node stream exists', async () => {
     assert.equal((await probeById(baseCtx(), 'NET-L2-STREAM').run()).status, VERDICT.PASS);
+  });
+  it('NET-L2-STREAM FAIL on a legacy stream that claims every node\'s local.> subjects', async () => {
+    const nc = mockNc(); nc.jetstreamManager = async () => ({ streams: { info: async () => ({ config: { subjects: ['local.>'] }, state: { messages: 5 } }) } });
+    const r = await probeById(baseCtx({ natsConnect: async () => nc }), 'NET-L2-STREAM').run();
+    assert.equal(r.status, VERDICT.FAIL);
+    assert.match(r.detail, /not scoped to local\.testnode\.>/);
   });
   it('NET-L2-STREAM FAIL when stream missing', async () => {
     const nc = mockNc(); nc.jetstreamManager = async () => ({ streams: { info: async () => { throw new Error('stream not found'); } } });

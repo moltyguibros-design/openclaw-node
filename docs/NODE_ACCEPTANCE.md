@@ -176,7 +176,7 @@ that a server is listening.
 | NET-L1-1 | port listening | TCP connect `:4222` | connects | socket ok | 7.1 |
 | NET-L1-2 | monitor healthy | `GET :8222/healthz` | HTTP 200 | body | health-check `checkNats` |
 | NET-L1-3 | **JetStream enabled** | `GET :8222/jsz` | returns JS stats (api level, limits) | jsz JSON | 7.1 |
-| NET-L1-4 | per-node stream exists | stream info for `local-events-<NODE_ID>` | stream present, subjects `local.>` | stream config | 1.7 |
+| NET-L1-4 | per-node stream exists | stream info for `local-events-<NODE_ID>` | stream present, subjects exactly `local.<NODE_ID>.>` (a legacy `local.>` stream fails: it blocks every other node's stream) | stream config | 1.7 |
 | NET-L2-1 | **core pub/sub round-trip** | subscribe a probe subject, publish a nonce, await delivery | message received within 1s, payload matches | sent/received nonce + ms | nats-resolve |
 | NET-L2-2 | **JetStream durability** | publish a nonce to the stream, read it back via consumer | the published message is read back intact | seq + payload | 1.7 done-criterion |
 | NET-L2-3 | daemon connected | grep daemon log for `NATS connected` + stream-init line at boot | both lines present, current boot | log lines + ts | 0.4 |

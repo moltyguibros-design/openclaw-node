@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { buildMemoryEvent, canonicalNodeId, localEventStreamName } from '../lib/local-event-log.mjs';
+import { buildMemoryEvent, canonicalNodeId, createLocalEventLog, localEventStreamName, localEventSubjectPrefix } from '../lib/local-event-log.mjs';
 import { MemoryBudget } from '../lib/memory-budget.mjs';
 import {
   MemoryEventSchema,
@@ -109,6 +109,106 @@ describe('local event stream naming', () => {
 
   it('rejects an empty node identity', () => {
     assert.throws(() => localEventStreamName('...'), /nodeId/);
+  });
+});
+
+// ── createLocalEventLog subject partition ───────────────
+
+// A JetStream stand-in that, like the server, refuses a stream whose subjects
+// overlap another stream's, and reports a missing stream with err_code 10059.
+function mockJetStream() {
+  const streams = new Map();
+  const published = [];
+  const overlaps = (a, b) => {
+    const pa = a.split('.'), pb = b.split('.');
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      if (pa[i] === '>' || pb[i] === '>') return true;
+      if (pa[i] === undefined || pb[i] === undefined) return false;
+      if (pa[i] !== '*' && pb[i] !== '*' && pa[i] !== pb[i]) return false;
+    }
+    return true;
+  };
+  const jsm = {
+    streams: {
+      info: async (name) => {
+        if (jsm.infoError) throw jsm.infoError;
+        if (!streams.has(name)) throw Object.assign(new Error('stream not found'), { api_error: { code: 404, err_code: 10059 } });
+        return { config: streams.get(name) };
+      },
+      add: async (cfg) => {
+        for (const other of streams.values()) {
+          if (cfg.subjects.some((s) => other.subjects.some((o) => overlaps(s, o)))) {
+            throw Object.assign(new Error('subjects overlap with an existing stream'), { api_error: { code: 400, err_code: 10065 } });
+          }
+        }
+        streams.set(cfg.name, cfg);
+      },
+    },
+  };
+  const nc = {
+    jetstreamManager: async () => jsm,
+    jetstream: () => ({ publish: async (subject, data) => { published.push(subject); return { seq: published.length }; } }),
+  };
+  return { nc, jsm, streams, published };
+}
+
+describe('createLocalEventLog subject partition', () => {
+  it('gives each node its own subject space, so a second node (or a renamed one) gets its stream', async () => {
+    const { nc, streams, published } = mockJetStream();
+    const a = await createLocalEventLog(nc, 'daedalus');
+    const b = await createLocalEventLog(nc, 'MoltyMacs-Virtual-Machine.local');
+    assert.deepEqual(streams.get('local-events-daedalus').subjects, ['local.daedalus.>']);
+    assert.deepEqual(streams.get('local-events-moltymacs-virtual-machine').subjects, ['local.moltymacs-virtual-machine.>']);
+    assert.equal(localEventSubjectPrefix('MoltyMacs-Virtual-Machine.local'), 'local.moltymacs-virtual-machine');
+
+    const event = buildMemoryEvent('memory.session_started', 'sess-1', 'session',
+      { session_id: 'sess-1', start_time: new Date().toISOString(), session_type: 'daemon' }, 'daedalus');
+    await a.publishLocal(event);
+    await b.publishLocal({ ...event, node_id: 'moltymacs-virtual-machine' });
+    assert.deepEqual(published, [
+      'local.daedalus.session.events.sess-1.memory.session_started',
+      'local.moltymacs-virtual-machine.session.events.sess-1.memory.session_started',
+    ]);
+  });
+
+  it('creates the stream only when it is missing; any other info error surfaces', async () => {
+    const { nc, jsm, streams } = mockJetStream();
+    jsm.infoError = Object.assign(new Error('TIMEOUT'), { code: 'TIMEOUT' });
+    await assert.rejects(createLocalEventLog(nc, 'daedalus'), /TIMEOUT/);
+    assert.equal(streams.size, 0, 'a timeout was treated as "create it"');
+  });
+});
+
+describe('local event consumers read only their node\'s subjects', () => {
+  function consumerNc() {
+    const added = [];
+    const nc = {
+      jetstreamManager: async () => ({
+        streams: { info: async () => ({}), add: async () => ({}) },
+        consumers: {
+          info: async () => { throw Object.assign(new Error('consumer not found'), { api_error: { err_code: 10014 } }); },
+          add: async (stream, cfg) => { added.push({ stream, ...cfg }); },
+        },
+      }),
+      jetstream: () => ({
+        consumers: { get: async () => ({ consume: async () => ({ stop() {}, async *[Symbol.asyncIterator]() {} }) }) },
+      }),
+    };
+    return { nc, added };
+  }
+
+  it('the memory watcher and promoter consumers filter on local.<node>.>', async () => {
+    const { createMemoryWatcher } = await import('../lib/memory-watcher.mjs');
+    const { createPromoter } = await import('../bin/memory-promoter.mjs');
+    const { nc, added } = consumerNc();
+    const watcher = await createMemoryWatcher(nc, 'Daedalus.local', { outputPath: path.join(tmpDir, 'watcher.jsonl') });
+    await watcher.stop();
+    const promoter = await createPromoter(nc, 'Daedalus.local');
+    await promoter.stop();
+    assert.deepEqual(added.map(({ stream, durable_name, filter_subject }) => ({ stream, durable_name, filter_subject })), [
+      { stream: 'local-events-daedalus', durable_name: 'watcher-daedalus', filter_subject: 'local.daedalus.>' },
+      { stream: 'local-events-daedalus', durable_name: 'promoter-daedalus', filter_subject: 'local.daedalus.>' },
+    ]);
   });
 });
 
