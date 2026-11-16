@@ -24,7 +24,7 @@ Three tiers of integration, from tightest to loosest:
 
 - NATS server running (default `nats://localhost:4222`)
 - OpenClaw memory daemon running (`workspace-bin/memory-daemon.mjs`)
-- Node.js 18+ (for CLI tools and SDK wrappers)
+- Node.js 22+ (for CLI tools and SDK wrappers)
 
 ## Environment Variables
 

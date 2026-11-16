@@ -18,7 +18,7 @@ Each node machine needs:
 Verify:
 
 ```bash
-node --version       # ≥ v18.0.0
+node --version       # ≥ v22.0.0
 nats-server --version # ≥ v2.6.0
 ```
 
@@ -272,7 +272,7 @@ On each machine:
 # Install Node.js
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs   # Debian/Ubuntu
-# or: brew install node           # macOS
+# or: brew install node@22       # macOS
 
 # Install nats-server
 # Linux:

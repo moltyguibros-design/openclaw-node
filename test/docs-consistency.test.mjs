@@ -110,3 +110,16 @@ test('NODE_SPEC and NODE_ACCEPTANCE match the service manifest, the probe axes a
   }
   assert.match(read('.github/workflows/test.yml'), /cd mission-control && npm run build/);
 });
+
+test('operator docs state the Node baseline that package.json engines and the installer require', () => {
+  const major = Number(read('package.json').match(/"node": ">=(\d+)"/)[1]);
+  assert.ok(read('scripts/install/prereqs.sh').includes(`-ge ${major} ]; }`), 'prereqs node_ok baseline');
+  const patterns = [/Node(?:\.js)? ?(?:\| )?≥ ?(\d+)/g, /Node(?:\.js)? (\d+)\+/g, /v(\d+)\+/g, /≥ v(\d+)\.0\.0/g, /nvm install (\d+)/g, /setup_(\d+)\.x/g];
+  for (const doc of ['docs/NODE_SPEC.md', 'docs/INSTALL_TEST_PROTOCOL.md', 'docs/MULTI_NODE_DEPLOY.md', 'docs/PUBLISHERS.md']) {
+    const text = read(doc);
+    for (const re of patterns) {
+      for (const [hit, v] of text.matchAll(re)) assert.ok(Number(v) >= major, `${doc}: "${hit}" is below the Node ${major} baseline`);
+    }
+  }
+  assert.doesNotMatch(read('docs/NODE_SPEC.md'), /operator installs \(brew\/nodejs\.org\)/);
+});

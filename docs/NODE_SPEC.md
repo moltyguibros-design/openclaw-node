@@ -29,7 +29,7 @@ those five up.
 
 | Component | macOS source | Linux source | Consumed by |
 |---|---|---|---|
-| Node.js ≥18 (22 LTS) | operator installs (brew/nodejs.org) — install exits with instruction | auto (NodeSource apt) | every daemon |
+| Node.js ≥22 (package.json engines) | brew `node@22` (auto; Homebrew required — prereqs.sh exits without it) | auto (NodeSource node_22.x apt) | every daemon |
 | npm | ships with node | ships with node | MC, skills, repo deps |
 | **repo `node_modules`** (`nats`, `better-sqlite3`, …) | **install.sh runs `npm install` in the repo** | same | all mesh daemons (exec from repo), workspace symlinks |
 | **nats-server ≥2.10** | brew (auto if brew present) | pinned GitHub release binary → `/usr/local/bin` | the bus every subsystem talks through |
@@ -131,7 +131,7 @@ Written to `~/.openclaw/openclaw.env` by install (generated where marked ⚙; RA
 ## §6 Human-in-the-loop walkthrough (the honest list)
 
 **Required humans steps — exactly these, in order:**
-1. macOS only: install Node ≥18 (and Homebrew if you want nats-server/ollama auto-installed). Linux: none.
+1. macOS only: Homebrew must be present (bootstrap.sh installs it on a bare machine); install.sh then installs node@22, nats-server and ollama via brew. Linux: none.
 2. Run `bash install.sh --enable-services` (add `--role=lead|worker` if the default is wrong).
 3. Wait for model pulls (5–18 GB) and the embedder prefetch (~2 GB) — one-time.
 4. **Seat the mind:** run `claude` once interactively to sign in (install already put the CLI in

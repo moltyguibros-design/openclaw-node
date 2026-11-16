@@ -15,7 +15,7 @@ evidence (command + output) for every level you claim.
 
 | Check | Command | Pass |
 |---|---|---|
-| Node ≥18 | `node -v` | v18+ |
+| Node ≥22 | `node -v` | v22+ |
 | nats-server | `command -v nats-server \|\| ls /opt/homebrew/bin/nats-server` | present (install.sh installs on Linux/brew-macOS) |
 | ollama (unless --skip-llm) | `ollama --version` | present or install.sh installs it |
 | Disk | `df -h ~` | ≥20 GB free |
