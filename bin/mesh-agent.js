@@ -51,7 +51,7 @@ const { TASK_TERMINAL } = require('../lib/mesh-tasks');
 const { findRole, formatRoleForPrompt, validateRequiredOutputs } = require('../lib/role-loader');
 
 const sc = StringCodec();
-const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
+const { NATS_URL, natsConnectOpts, resolveEnvKey } = require('../lib/nats-resolve');
 const { resolveProvider, resolveModel, stripLlmOutput, isOpenClawWorkerProvider } = require('../lib/llm-providers');
 // One derivation for every daemon (lib/node-id) — the agent must claim tasks
 // under the same node_id the task daemon authorizes, or ownership checks fail.
@@ -1617,6 +1617,80 @@ function parseCirclingReflection(output) {
 
 // ── Collaborative Task Execution ──────────────────────
 
+// Sessions (or tasks) this node declined: the recruiting poll sees an unfilled
+// session on every pass, so it is logged once and never re-fetched.
+const declinedCollab = new Set();
+
+function collabWorkerEnv() {
+  return { ...process.env, MESH_ALLOW_LOCAL_WORKERS: resolveEnvKey('MESH_ALLOW_LOCAL_WORKERS') || '' };
+}
+
+/** The provider name when this node may not be a worker for `task`, else null. */
+function collabDeclinedProvider(task) {
+  const name = resolveProvider(task, CLI_PROVIDER, ENV_PROVIDER).name;
+  return isOpenClawWorkerProvider(name, collabWorkerEnv()) ? null : name;
+}
+
+function declineCollabOnce(key, task, providerName) {
+  if (declinedCollab.has(key)) return;
+  declinedCollab.add(key);
+  log(`COLLAB DECLINED (D11): provider "${providerName}" is not an OpenClaw advanced-LLM frontend — this node will not join ${task.task_id}. Set MESH_LLM_PROVIDER/task.llm_provider (claude/openai/gemini/deepseek/kimi/minimax/aider), name a vetted local provider in MESH_ALLOW_LOCAL_WORKERS, or MESH_ALLOW_MOCK_WORKERS=1 for choreography testing with 'shell'.`);
+}
+
+/**
+ * One recruit candidate, from the broadcast or the recruiting poll. Returns the
+ * task when this node should join its session, else null.
+ */
+async function recruitCandidate(sessionId, taskId) {
+  if (declinedCollab.has(sessionId)) return null;
+  const task = await natsRequest('mesh.tasks.get', { task_id: taskId }, 5000);
+  if (!task || !task.collaboration) return null;
+  if (task.owner === NODE_ID) return null; // we claimed it, already handling
+  if (task.preferred_nodes && task.preferred_nodes.length > 0 && !task.preferred_nodes.includes(NODE_ID)) return null;
+  if (task.exclude_nodes && task.exclude_nodes.length > 0 && task.exclude_nodes.includes(NODE_ID)) return null;
+  const declinedProvider = collabDeclinedProvider(task);
+  if (declinedProvider) {
+    declineCollabOnce(sessionId, task, declinedProvider);
+    return null;
+  }
+  return task;
+}
+
+async function joinRecruitedTask(task, label, sessionId) {
+  log(`${label}: Joining collab session ${sessionId} for task ${task.task_id}`);
+  currentTaskId = task.task_id;
+  try {
+    await executeCollabTask(task);
+  } finally {
+    currentTaskId = null;
+  }
+}
+
+/** A mesh.collab.*.recruit broadcast. */
+async function onRecruit(recruit) {
+  if (currentTaskId) return; // busy
+  const task = await recruitCandidate(recruit.session_id, recruit.task_id);
+  if (task) await joinRecruitedTask(task, 'RECRUIT', recruit.session_id);
+}
+
+/** Poll for recruiting sessions on idle — catches recruits we missed. */
+async function checkRecruitingSessions() {
+  if (currentTaskId) return; // busy
+  try {
+    const sessions = await natsRequest('mesh.collab.recruiting', {}, 5000);
+    if (!sessions || !Array.isArray(sessions) || sessions.length === 0) return;
+
+    for (const s of sessions) {
+      if (currentTaskId) break; // became busy
+      if (s.node_ids && s.node_ids.includes(NODE_ID)) continue; // already joined
+      if (s.max_nodes && s.current_nodes >= s.max_nodes) continue; // full
+      const task = await recruitCandidate(s.session_id, s.task_id);
+      if (task) await joinRecruitedTask(task, 'RECRUIT POLL', s.session_id);
+    }
+  } catch (err) { warn(`recruiting poll: ${err.message}`); }
+}
+
+
 /**
  * Execute a collaborative task: join session, work in rounds, submit reflections.
  */
@@ -1626,21 +1700,25 @@ async function executeCollabTask(task) {
   log(`COLLAB EXECUTING: ${task.task_id} "${task.title}" (mode: ${collabSpec.mode})`);
 
   // D11: a grappe worker is the node's OpenClaw agent on an ADVANCED LLM — never a
-  // local model. Refuse to run (no silent local fallback) rather than degrade the
-  // grappe to a sub-OpenClaw worker. Mirrors the "refuse silent solo fallback" below.
-  const workerProvider = resolveProvider(task, CLI_PROVIDER, ENV_PROVIDER);
-  if (!isOpenClawWorkerProvider(workerProvider.name)) {
-    // P1 #9a: refusal is a DECLINE — this node stays out of the session (it has
-    // not joined yet), and the recruit deadline / round timeout handles a grappe
-    // that can't fill. It used to publish mesh.tasks.fail, letting ONE
-    // misconfigured node abort every collab task mesh-wide.
-    log(`COLLAB DECLINED (D11): provider "${workerProvider.name}" is not an OpenClaw advanced-LLM frontend — this node will not join ${task.task_id}. Set MESH_LLM_PROVIDER/task.llm_provider (claude/openai/gemini/deepseek/kimi/minimax/aider), or MESH_ALLOW_MOCK_WORKERS=1 for choreography testing with 'shell'.`);
-    debug('state → idle');
+  // local model the operator has not vetted. Refuse to run (no silent local fallback)
+  // rather than degrade the grappe. Recruits are filtered before they get here
+  // (recruitCandidate) and the claim asks the daemon to skip collab tasks, so this
+  // path is a task this node claimed whose own provider it cannot serve.
+  const declinedProvider = collabDeclinedProvider(task);
+  if (declinedProvider) {
+    // P1 #9a: never mesh.tasks.fail — one misconfigured node must not abort a
+    // collab task mesh-wide. A claim it holds is released for triage instead of
+    // idling until the lease expires; no telemetry, since nothing ran.
+    declineCollabOnce(task.collab_session_id || task.task_id, task, declinedProvider);
     writeAgentState('idle', null);
-    await recordHyperagentTask(task, {
-      outcome: 'failure', iterations: 1, startedAt,
-      notes: `Collaboration declined because provider ${workerProvider.name} is not an approved advanced-LLM frontend.`,
-    });
+    if (task.owner === NODE_ID) {
+      await natsRequest('mesh.tasks.release', {
+        task_id: task.task_id,
+        node_id: NODE_ID,
+        lease_token: task.lease_token,
+        reason: `Collab task needs a grappe-worker provider; ${NODE_ID} resolves it to "${declinedProvider}", which D11 declines.`,
+      }).catch(err => warn(`mesh.tasks.release: ${err.message}`));
+    }
     return;
   }
 
@@ -2469,66 +2547,13 @@ async function main() {
   (async () => {
     for await (const msg of recruitSub) {
       try {
-        const recruit = JSON.parse(sc.decode(msg.data));
-        if (currentTaskId) continue; // busy
-
-        // Fetch task to check preferences and get collab spec
-        const task = await natsRequest('mesh.tasks.get', { task_id: recruit.task_id }, 5000);
-        if (!task || !task.collaboration) continue;
-        if (task.owner === NODE_ID) continue; // we claimed it, already handling
-
-        // Check preferred_nodes
-        if (task.preferred_nodes && task.preferred_nodes.length > 0) {
-          if (!task.preferred_nodes.includes(NODE_ID)) continue;
-        }
-        // Check exclude_nodes
-        if (task.exclude_nodes && task.exclude_nodes.length > 0) {
-          if (task.exclude_nodes.includes(NODE_ID)) continue;
-        }
-
-        log(`RECRUIT: Joining collab session ${recruit.session_id} for task ${recruit.task_id}`);
-        currentTaskId = task.task_id;
-        await executeCollabTask(task);
-        currentTaskId = null;
+        await onRecruit(JSON.parse(sc.decode(msg.data)));
       } catch (err) {
         log(`RECRUIT ERROR: ${err.message}`);
-        currentTaskId = null;
       }
     }
   })();
   log(`  Listening: mesh.collab.*.recruit (collab recruiting)`);
-
-  // Also poll for recruiting sessions on idle — catches recruits we missed
-  async function checkRecruitingSessions() {
-    if (currentTaskId) return; // busy
-    try {
-      const sessions = await natsRequest('mesh.collab.recruiting', {}, 5000);
-      if (!sessions || !Array.isArray(sessions) || sessions.length === 0) return;
-
-      for (const s of sessions) {
-        if (currentTaskId) break; // became busy
-        // Skip if we already joined this session
-        if (s.node_ids && s.node_ids.includes(NODE_ID)) continue;
-        // Skip if session is full
-        if (s.max_nodes && s.current_nodes >= s.max_nodes) continue;
-
-        // Fetch task to check preferences
-        const task = await natsRequest('mesh.tasks.get', { task_id: s.task_id }, 5000);
-        if (!task || !task.collaboration) continue;
-        if (task.preferred_nodes && task.preferred_nodes.length > 0) {
-          if (!task.preferred_nodes.includes(NODE_ID)) continue;
-        }
-        if (task.exclude_nodes && task.exclude_nodes.length > 0) {
-          if (task.exclude_nodes.includes(NODE_ID)) continue;
-        }
-
-        log(`RECRUIT POLL: Joining collab session ${s.session_id} for task ${s.task_id}`);
-        currentTaskId = task.task_id;
-        await executeCollabTask(task);
-        currentTaskId = null;
-      }
-    } catch (err) { warn(`recruiting poll: ${err.message}`); }
-  }
 
   let claimedTask = null;
   let claimedAt = 0;
@@ -2542,7 +2567,10 @@ async function main() {
       }
 
       // Claim next available task (longer timeout — KV operations on remote NATS can be slow)
-      const task = await natsRequest('mesh.tasks.claim', { node_id: NODE_ID }, 60000);
+      // accepts_collab: false asks the daemon to leave collab tasks to nodes whose
+      // default provider can be a grappe worker (D11).
+      const acceptsCollab = collabDeclinedProvider(null) === null;
+      const task = await natsRequest('mesh.tasks.claim', { node_id: NODE_ID, accepts_collab: acceptsCollab }, 60000);
 
       if (!task) {
         if (ONCE) {
@@ -2613,5 +2641,6 @@ module.exports.__test = {
   setContext(ctx) { if (ctx.nc !== undefined) nc = ctx.nc; },
   mergeIfApproved, onReviewApproved, onReviewRejected, reconcileKeptBranches,
   natsRequest, createWorktree, onWorkerError, executeCollabTask, executeTask,
+  onRecruit, checkRecruitingSessions,
 };
 // deploy-v7f0130b

@@ -302,11 +302,12 @@ async function cleanupTaskCollabSession(task, reason) {
 
 /**
  * mesh.tasks.claim — Agent requests the next available task.
- * Expects: { node_id }
+ * Expects: { node_id, accepts_collab? } — accepts_collab: false skips collab tasks
+ * (a node whose provider D11 declines as a grappe worker).
  * Returns: the claimed task, or null if nothing available.
  */
 async function handleClaim(msg) {
-  const { node_id } = parseRequest(msg);
+  const { node_id, accepts_collab } = parseRequest(msg);
 
   if (!node_id) {
     return respondError(msg, 'node_id is required');
@@ -318,7 +319,7 @@ async function handleClaim(msg) {
     return respondError(msg, `Node ${node_id} already has an active task: ${active[0].task_id}`);
   }
 
-  const task = await store.claim(node_id);
+  const task = await store.claim(node_id, { acceptsCollab: accepts_collab !== false });
 
   if (task) {
     // Pre-dispatch revalidation: re-read the task we just claimed to confirm
