@@ -1251,7 +1251,7 @@ function buildCollabPrompt(task, roundNumber, sharedIntel, myScope, myRole, roun
   }
 
   if (myScope && myScope !== '*' && Array.isArray(myScope) && myScope[0] !== '*') {
-    const isReviewOnly = Array.isArray(myScope) && myScope.some(s => typeof s === 'string' && s.startsWith('[REVIEW-ONLY]'));
+    const isReviewOnly = isReviewOnlyScope(myScope);
     if (isReviewOnly) {
       parts.push('## Your Scope (REVIEW ONLY)');
       parts.push('You are a **reviewer**. Read and analyze these files but do NOT modify them:');
@@ -1703,6 +1703,38 @@ async function checkRecruitingSessions() {
 }
 
 
+function isReviewOnlyScope(scope) {
+  return Array.isArray(scope) && scope.some(s => typeof s === 'string' && s.startsWith('[REVIEW-ONLY]'));
+}
+
+/** The member's write scope: review-only markers stripped, '*' and none mean the task's scope. */
+function effectiveCollabScope(task, scope) {
+  if (!Array.isArray(scope) || scope.length === 0) return task.scope || [];
+  const stripped = scope.map(s => String(s).replace(/^\[REVIEW-ONLY\] /, ''));
+  return stripped.includes('*') ? (task.scope || []) : stripped;
+}
+
+/**
+ * The solo path's mechanical gates for one collab member's worktree, before its
+ * contribution is committed. Review-only members and circling reviewers never
+ * contribute code; a secret or scope violation drops only this member's work.
+ * Returns the reason to discard, or null when it may merge.
+ */
+function collabMergeBlock(task, worktreePath, { reviewerOnly, scope, llmOutput }) {
+  if (reviewerOnly) return 'review-only member (reviewers do not contribute code)';
+  const harness = runMeshHarness({
+    rules: getHarnessRules(),
+    worktreePath,
+    taskScope: effectiveCollabScope(task, scope),
+    llmOutput,
+    hasMetric: !!task.metric,
+    log,
+    role: getRole(task.role),
+  });
+  const blocking = harness.violations.filter(v => v.rule === 'no-hardcoded-secrets' || v.rule === 'scope-enforcement');
+  return blocking.length > 0 ? blocking.map(v => v.message).join('; ') : null;
+}
+
 /**
  * Execute a collaborative task: join session, work in rounds, submit reflections.
  */
@@ -1782,6 +1814,9 @@ async function executeCollabTask(task) {
   let lastKnownSessionStatus = null; // tracks why rounds ended (completed/aborted/converged)
   let sessionNeedsReview = false;
   let lastRound = 0;
+  let reviewerOnly = false;
+  let lastScope = null;
+  let lastOutput = '';
 
   // Join the session using the discovered session_id
   let session;
@@ -1873,6 +1908,8 @@ async function executeCollabTask(task) {
       }
 
       const isCircling = mode === 'circling_strategy';
+      if (isReviewOnlyScope(my_scope) || (isCircling && my_role === 'reviewer')) reviewerOnly = true;
+      lastScope = my_scope;
       const stepLabel = isCircling
         ? `${circling_phase === 'init' ? 'Init' : circling_phase === 'finalization' ? 'Final' : `SR${circling_subround}/S${circling_step}`}`
         : `R${round_number}`;
@@ -1892,6 +1929,7 @@ async function executeCollabTask(task) {
       // Execute provider (LLM or shell)
       const llmResult = await runLLM(prompt, task, worktreePath);
       const output = llmResult.stdout || '';
+      lastOutput = output;
 
       // Parse reflection — circling uses delimiter-based parser, others use JSON-block parser
       let reflection;
@@ -2032,11 +2070,18 @@ async function executeCollabTask(task) {
   // Uses lastKnownSessionStatus (set during round loop or heartbeat) instead of
   // a fresh network read, which could see stale state due to NATS latency.
   try {
-    if (['completed', 'converged'].includes(lastKnownSessionStatus)) {
+    const blocked = ['completed', 'converged'].includes(lastKnownSessionStatus)
+      ? collabMergeBlock(task, worktreePath, { reviewerOnly, scope: lastScope, llmOutput: lastOutput })
+      : null;
+    if (blocked) {
+      log(`COLLAB MERGE BLOCKED: ${blocked} — discarding ${NODE_ID}'s contribution to ${task.task_id}`);
+      cleanupWorktree(worktreePath, false);
+    } else if (['completed', 'converged'].includes(lastKnownSessionStatus)) {
       // A converged vote is the review for collab work, so that merge is
-      // post-review. A session that ran out of rounds never converged: the
-      // daemon holds the parent in pending_review and the contribution stays
-      // on its branch until the approve notice (onReviewApproved).
+      // post-review; collabMergeBlock applied the solo path's mechanical gates.
+      // A session that ran out of rounds never converged: the daemon holds the
+      // parent in pending_review and the contribution stays on its branch
+      // until the approve notice (onReviewApproved).
       const collabId = collabBranchId(task.task_id);
       const commit = commitWorktree(worktreePath, collabId, `collab contribution from ${NODE_ID}`);
       if (sessionNeedsReview) {
