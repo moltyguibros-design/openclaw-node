@@ -169,6 +169,14 @@ async function showStatus(nc) {
  *   3. Watch MESH_DEPLOY_RESULTS for results (with timeout)
  *   4. Print results as they stream in
  */
+// A detached lead (mesh-deploy --rollback, pinned and off-branch deploys all
+// `checkout --detach`) reports 'HEAD'; listeners would then validate against
+// origin/HEAD, which their `git fetch origin HEAD` never updates.
+function triggerBranch(repoDir) {
+  const b = exec('git rev-parse --abbrev-ref HEAD', { cwd: repoDir });
+  return b === 'HEAD' ? (process.env.OPENCLAW_DEPLOY_BRANCH || 'main') : b;
+}
+
 async function fleetDeploy(nc, opts) {
   const { components, targetNodes, dryRun, force, timeoutMs } = opts;
   const timeout = timeoutMs || 120000; // 2 min default
@@ -186,7 +194,7 @@ async function fleetDeploy(nc, opts) {
 
   // Get the current SHA to deploy
   const sha = exec('git rev-parse --short HEAD', { cwd: REPO_DIR });
-  const rawBranch = exec('git rev-parse --abbrev-ref HEAD', { cwd: REPO_DIR });
+  const rawBranch = triggerBranch(REPO_DIR);
   const branch = rawBranch.replace(/[^a-zA-Z0-9._/-]/g, '');
   if (!branch || branch !== rawBranch) {
     throw new Error(`Unsafe branch name from local git: ${rawBranch}`);
@@ -371,7 +379,7 @@ async function main() {
 }
 
 // Export for integration into mesh-deploy-v2.js
-module.exports = { fleetDeploy, showStatus, discoverNodes };
+module.exports = { fleetDeploy, showStatus, discoverNodes, triggerBranch };
 
 // Standalone mode
 if (require.main === module) {

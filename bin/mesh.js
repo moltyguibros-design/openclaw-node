@@ -487,6 +487,7 @@ async function cmdDeploy(args) {
   try {
     sha = execSync('git rev-parse --short HEAD', { cwd: repoDir, encoding: 'utf8' }).trim();
     branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: repoDir, encoding: 'utf8' }).trim();
+    if (branch === 'HEAD') branch = process.env.OPENCLAW_DEPLOY_BRANCH || 'main';
   } catch {
     console.error(`Error: Cannot read git state from ${repoDir}`);
     process.exit(1);
