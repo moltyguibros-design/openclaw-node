@@ -109,7 +109,7 @@ describe('pure helpers', () => {
 
 describe('context engine', () => {
   it('declares the OpenClaw ≥2026.8.1 transcript semantics', () => {
-    const e = createMemoryContextEngine({ client: mkClient(), logger: logger() });
+    const e = createMemoryContextEngine({ client: mkClient(), logger: logger(), runtimeCompact: async () => ({ ok: true }) });
     assert.equal(e.info.id, ENGINE_ID);
     assert.equal(e.info.ownsCompaction, true);
     assert.equal(e.info.transcriptSemantics.currentTurnFence, 'before-current-turn-entry-v1');
@@ -202,6 +202,15 @@ describe('context engine', () => {
     const broken = createMemoryContextEngine({ client: mkClient(), logger: logger(), runtimeCompact: async () => { throw new Error('nope'); } });
     assert.equal((await broken.compact({ sessionId: 's', sessionFile: '/x' })).compacted, false);
   });
+
+  it('claims compaction only while a host compactor is available', () => {
+    assert.equal(createMemoryContextEngine({ client: mkClient(), logger: logger() }).info.ownsCompaction, false);
+    let ready = false;
+    const lazy = createMemoryContextEngine({ client: mkClient(), logger: logger(), runtimeCompact: async () => ({ ok: true }), hasRuntimeCompaction: () => ready });
+    assert.equal(lazy.info.ownsCompaction, false);
+    ready = true;
+    assert.equal(lazy.info.ownsCompaction, true);
+  });
 });
 
 describe('plugin entry', () => {
@@ -223,8 +232,11 @@ describe('plugin entry', () => {
     const engine = engines.get(ENGINE_ID)();
     const out = await engine.assemble({ sessionId: 's', messages: [userMsg('hello there')], tokenBudget: 100000 });
     assert.match(out.systemPromptAddition, /\[memory:/);
-    // compact without the host SDK installed → honest not-compacted
+    // compact without the host SDK installed → honest not-compacted, and the
+    // engine leaves compaction to the host with one warning
     assert.equal((await engine.compact({ sessionId: 's', sessionFile: '/x' })).compacted, false);
+    assert.equal(engine.info.ownsCompaction, false);
+    assert.equal(log.lines.filter(([lvl, m]) => lvl === 'warn' && /plugin-sdk\/core did not load/.test(m)).length, 1);
     const recall = await tools.get('memory_recall').execute('t1', { query: 'jetstream' });
     assert.match(recall.content[0].text, /\[memory:/);
     const status = await tools.get('memory_status').execute('t2', {});

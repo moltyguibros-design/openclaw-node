@@ -12,7 +12,10 @@ What stays in the daemon: retrieval (the six-channel pipeline), the token
 budget, `@memory` directives, reconsolidation write-back, and **extraction** —
 the daemon already tails `~/.openclaw/agents/*/sessions/*.jsonl` and flushes on
 idle / session end / pre-compaction size, so this plugin records nothing.
-Compaction is delegated to OpenClaw's native compactor.
+Compaction is delegated to OpenClaw's native compactor through
+`openclaw/plugin-sdk/core`. The engine declares `ownsCompaction` only once that
+import has resolved; if it fails, the plugin logs one warning and leaves
+compaction to the host.
 
 ## Install
 
