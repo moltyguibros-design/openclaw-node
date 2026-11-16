@@ -10,7 +10,7 @@ Each node machine needs:
 
 | Dependency | Version | Install |
 |-----------|---------|---------|
-| Node.js | ≥18.0 | [nodejs.org](https://nodejs.org) or `nvm install 18` |
+| Node.js | ≥22 | [nodejs.org](https://nodejs.org) or `nvm install 22` |
 | nats-server | ≥2.6.0 (JetStream) | macOS: `brew install nats-server` · Linux: [nats.io/download](https://nats.io/download/) |
 | nats CLI (optional) | any | `brew install nats-io/nats-tools/nats` or [github.com/nats-io/natscli](https://github.com/nats-io/natscli) |
 | Ollama (optional) | ≥0.24 | [ollama.com](https://ollama.com) — needed for LLM extraction + concept summaries |
@@ -155,10 +155,13 @@ The memory daemon creates the `OPENCLAW_SHARED` JetStream stream (R=3) on startu
 # Run ensureSharedStream against the cluster
 node -e "
 import { connect } from 'nats';
+import natsResolve from './lib/nats-resolve.js';
 import { ensureSharedStream, inspectSharedStream, verifySharedStreamConfig }
   from './lib/shared-event-stream.mjs';
 
-const nc = await connect({ servers: 'nats://localhost:4222' });
+// URL and credentials as the daemons resolve them (OPENCLAW_NATS*, then
+// ~/.openclaw/openclaw.env): a bare connect is refused by the authenticated bus.
+const nc = await connect(natsResolve.natsConnectOpts());
 const info = await ensureSharedStream(nc);
 console.log('Stream created/verified:', info.config.name);
 
@@ -180,25 +183,33 @@ If `R=3 valid: false`, ensure all 3 NATS nodes are clustered before creating the
 
 ### 1.5 Start the daemons
 
-Start each node's memory daemon with the appropriate environment:
+Start each node's memory daemon with the appropriate environment. `OPENCLAW_HOME` is the
+node root (`bin/spawn-node.mjs` prints this line for each node): the daemon keeps its
+`config/daemon.json`, `state.db`, `workspace/` (with `.knowledge.db`), `graph-cache.db` and
+`watcher.jsonl` there, so the three daemons share nothing but the bus. Each needs its own
+`MEMORY_INJECT_PORT`, since they all bind 127.0.0.1. The bus token still comes from
+`OPENCLAW_NATS_TOKEN` or `~/.openclaw/openclaw.env`.
 
 ```bash
 # Node alpha
 OPENCLAW_NODE_ID=alpha \
 OPENCLAW_HOME=$HOME/.openclaw-alpha \
-NATS_URL=nats://localhost:4222 \
+OPENCLAW_NATS=nats://localhost:4222 \
+MEMORY_INJECT_PORT=7900 \
 node workspace-bin/memory-daemon.mjs &
 
 # Node bravo
 OPENCLAW_NODE_ID=bravo \
 OPENCLAW_HOME=$HOME/.openclaw-bravo \
-NATS_URL=nats://localhost:4223 \
+OPENCLAW_NATS=nats://localhost:4223 \
+MEMORY_INJECT_PORT=7901 \
 node workspace-bin/memory-daemon.mjs &
 
 # Node charlie
 OPENCLAW_NODE_ID=charlie \
 OPENCLAW_HOME=$HOME/.openclaw-charlie \
-NATS_URL=nats://localhost:4224 \
+OPENCLAW_NATS=nats://localhost:4224 \
+MEMORY_INJECT_PORT=7902 \
 node workspace-bin/memory-daemon.mjs &
 ```
 
@@ -222,9 +233,9 @@ Or manually trigger a broadcast and observe:
 ```bash
 # Publish a test broadcast from alpha
 node -e "
-import { connect } from 'nats';
-import { StringCodec } from 'nats';
-const nc = await connect({ servers: 'nats://localhost:4222' });
+import { connect, StringCodec } from 'nats';
+import natsResolve from './lib/nats-resolve.js';
+const nc = await connect(natsResolve.natsConnectOpts());
 const sc = StringCodec();
 const js = nc.jetstream();
 const broadcast = {
@@ -259,13 +270,13 @@ On each machine:
 
 ```bash
 # Install Node.js
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs   # Debian/Ubuntu
 # or: brew install node           # macOS
 
 # Install nats-server
 # Linux:
-curl -L https://github.com/nats-io/nats-server/releases/latest/download/nats-server-v2.10.24-linux-amd64.tar.gz | \
+curl -L https://github.com/nats-io/nats-server/releases/download/v2.10.24/nats-server-v2.10.24-linux-amd64.tar.gz | \
   sudo tar -xz -C /usr/local/bin --strip-components=1 --wildcards '*/nats-server'
 # macOS:
 brew install nats-server
@@ -452,7 +463,7 @@ Requires=openclaw-nats.service
 Type=simple
 Environment=OPENCLAW_NODE_ID=%H
 Environment=OPENCLAW_HOME=%h/.openclaw-%H
-Environment=NATS_URL=nats://localhost:4222
+Environment=OPENCLAW_NATS=nats://localhost:4222
 ExecStart=/usr/bin/node /home/user/openclaw-nodedev/workspace-bin/memory-daemon.mjs
 Restart=always
 RestartSec=10
@@ -537,13 +548,15 @@ All three require `nats-server` on PATH. Tests auto-skip if not available.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OPENCLAW_NODE_ID` | `os.hostname()` | Node identifier for event attribution |
-| `OPENCLAW_HOME` | `~/.openclaw` | Root directory for node state |
+| `OPENCLAW_HOME` | `~/.openclaw` | Node root: the memory daemon's config, `state.db`, `workspace/` (unless `OPENCLAW_WORKSPACE` is set), `graph-cache.db` and `watcher.jsonl` |
+| `MEMORY_INJECT_PORT` | `7893` | Loopback port of the memory daemon's inject endpoint (one per daemon on a machine) |
 
 ### NATS connection
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NATS_URL` | `nats://localhost:4222` | NATS server URL |
+| `OPENCLAW_NATS` | `~/.openclaw/openclaw.env`, else `nats://127.0.0.1:4222` | NATS server URL (`lib/nats-resolve.js`) |
+| `OPENCLAW_NATS_TOKEN` | `~/.openclaw/openclaw.env` | Bus credential |
 
 The daemon uses auto-reconnect with infinite retries, 2-second base wait, and 1-second jitter (`NATS_RECONNECT_OPTS` from `lib/federation-resilience.mjs`).
 
@@ -655,7 +668,7 @@ nats stream rm OPENCLAW_SHARED --server nats://localhost:4222 --force
 
 1. Stop all daemons except one
 2. Stop the NATS cluster
-3. Start the remaining daemon with `NATS_URL` unset or pointing to a single NATS instance
+3. Start the remaining daemon with `OPENCLAW_NATS` unset or pointing to a single NATS instance
 4. The daemon gracefully continues without federation — shared stream unavailable, local operation works fully
 
 ### Clean up spawned node trees

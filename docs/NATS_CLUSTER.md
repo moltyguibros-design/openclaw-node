@@ -179,14 +179,15 @@ If nodes are on a Tailscale network, replace IPs in the `routes` array with Tail
 
 ## Connecting OpenClaw Nodes
 
-Once the cluster is running, each openclaw node connects via the `NATS_URL` environment variable or `config/node.json`:
+Once the cluster is running, each openclaw node connects via `OPENCLAW_NATS` (else
+`~/.openclaw/openclaw.env`, as `lib/nats-resolve.js` resolves it, token included):
 
 ```bash
 # Node on machine A (or local dev node 1)
-NATS_URL=nats://localhost:4222 node workspace-bin/memory-daemon.mjs
+OPENCLAW_NATS=nats://localhost:4222 node workspace-bin/memory-daemon.mjs
 
 # Node on machine B
-NATS_URL=nats://10.0.1.11:4222 node workspace-bin/memory-daemon.mjs
+OPENCLAW_NATS=nats://10.0.1.11:4222 node workspace-bin/memory-daemon.mjs
 ```
 
 For spawned dev nodes (Step 10.1):
@@ -196,6 +197,10 @@ node bin/spawn-node.mjs --id alpha --port 7900 --nats-url nats://localhost:4222
 node bin/spawn-node.mjs --id bravo --port 7901 --nats-url nats://localhost:4223
 node bin/spawn-node.mjs --id charlie --port 7902 --nats-url nats://localhost:4224
 ```
+
+Each prints the command that runs its memory daemon: `OPENCLAW_HOME=<node root>` (its own
+config, databases, workspace and watcher log), `OPENCLAW_NATS=<--nats-url>` and
+`MEMORY_INJECT_PORT=<--port>`.
 
 Each node can connect to any cluster member — NATS handles routing internally.
 

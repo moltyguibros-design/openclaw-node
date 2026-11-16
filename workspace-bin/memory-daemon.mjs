@@ -56,6 +56,7 @@ import { loadEventSchemas } from '../lib/event-schemas.mjs';
 import { createMemoryWatcher, runStoreHealthProbes, appendWatcherRecord } from '../lib/memory-watcher.mjs';
 import { initDatabase as initKnowledgeDb } from '../lib/mcp-knowledge/core.mjs';
 import { createGraphCache } from '../bin/obsidian-graph-cache.mjs';
+import { memoryDaemonPaths } from '../lib/memory-daemon-paths.mjs';
 
 const traceEmitter = createSessionTraceEmitter(tracer);
 
@@ -74,7 +75,7 @@ function getExtractionStore() {
   if (!USE_LLM_EXTRACTION) return null;
   if (!_extractionStore) {
     try {
-      _extractionStore = createExtractionStore();
+      _extractionStore = createExtractionStore({ dbPath: PATHS.stateDb });
       log(`Extraction store initialized`);
     } catch (err) {
       log(`extraction-store unavailable: ${err.message}`);
@@ -90,7 +91,7 @@ async function getHyperAgentStore() {
   if (_haStore) return _haStore;
   try {
     const { createHyperAgentStore } = await import('../lib/hyperagent-store.mjs');
-    _haStore = createHyperAgentStore();
+    _haStore = createHyperAgentStore({ dbPath: PATHS.stateDb });
     console.log('[memory-daemon] HyperAgent store initialized');
     return _haStore;
   } catch (err) {
@@ -104,8 +105,7 @@ let _knowledgeDb = null;
 function getKnowledgeDb() {
   if (_knowledgeDb) return _knowledgeDb;
   try {
-    const dbPath = path.join(HOME, '.openclaw/workspace/.knowledge.db');
-    _knowledgeDb = initKnowledgeDb(dbPath);
+    _knowledgeDb = initKnowledgeDb(PATHS.knowledgeDb);
     log('Knowledge DB initialized');
     return _knowledgeDb;
   } catch (err) {
@@ -119,7 +119,7 @@ let _graphCache = null;
 function getGraphCache() {
   if (_graphCache) return _graphCache;
   try {
-    _graphCache = createGraphCache({ extractionStore: getExtractionStore() }); // P2: merge LLM typed edges
+    _graphCache = createGraphCache({ dbPath: PATHS.graphCacheDb, extractionStore: getExtractionStore() }); // P2: merge LLM typed edges
     log('Graph cache initialized');
     return _graphCache;
   } catch (err) {
@@ -140,10 +140,11 @@ const __dirname = path.dirname(__filename);
 // produced ids that failed the event envelope regex and split the node's
 // identity across processes (review I13/P10).
 const NODE_ID = resolveNodeId();
-const WORKSPACE = process.env.OPENCLAW_WORKSPACE || path.dirname(__dirname);
+const PATHS = memoryDaemonPaths();
+const WORKSPACE = PATHS.workspace || path.dirname(__dirname);
 const HOME = os.homedir();
-const CONFIG_PATH = path.join(HOME, '.openclaw/config/daemon.json');
-const TRANSCRIPT_REGISTRY = path.join(HOME, '.openclaw/config/transcript-sources.json');
+const CONFIG_PATH = PATHS.config;
+const TRANSCRIPT_REGISTRY = PATHS.transcriptSources;
 
 function loadConfig() {
   const defaults = {
@@ -238,7 +239,7 @@ function loadTranscriptSources() {
   return [
     { name: 'claude-code', path: path.join(HOME, '.claude/projects', slug), format: 'claude-code' },
     { name: 'claude-home', path: path.join(HOME, '.claude/projects', '-' + path.basename(HOME)), format: 'claude-code' },
-    { name: 'gateway', path: path.join(HOME, '.openclaw/agents/main/sessions'), format: 'openclaw-gateway' },
+    { name: 'gateway', path: PATHS.gatewaySessions, format: 'openclaw-gateway' },
   ];
 }
 
@@ -343,7 +344,7 @@ function runMemoryWorker(data, timeoutMs = FLUSH_WORKER_TIMEOUT_MS) {
     // worker so consolidation cannot start beside a running extraction.
     const jobId = `${data.kind || 'flush'}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     markExternalJob(jobId, { type: data.kind || 'flush', detail: data.jsonlPath ? path.basename(data.jsonlPath) : null });
-    const w = new Worker(FLUSH_WORKER, { workerData: data });
+    const w = new Worker(FLUSH_WORKER, { workerData: { stateDb: PATHS.stateDb, ...data } });
     let settled = false;
     const timer = setTimeout(() => {
       settled = true;
@@ -958,7 +959,7 @@ async function runPhase2ThrottledWork(config, sessionState) {
     stage1.push(
       (async () => {
         try {
-          const stateDbPath = path.join(HOME, '.openclaw/state.db');
+          const stateDbPath = PATHS.stateDb;
           if (!fs.existsSync(stateDbPath)) return;
           // Child process, NOT the flush worker and NOT this thread: the
           // transformers embedder pinned the daemon's microtask queue for
@@ -969,7 +970,7 @@ async function runPhase2ThrottledWork(config, sessionState) {
           const jobArgs = [
             path.join(WORKSPACE, 'bin/knowledge-index-job.mjs'),
             stateDbPath,
-            path.join(HOME, '.openclaw/workspace/.knowledge.db'),
+            PATHS.knowledgeDb,
           ];
           let out = '';
           try {
@@ -1389,8 +1390,8 @@ async function initFederationSubsystems(nc) {
   // DB handles — same resolution as the retired daemon. Knowledge DB lives in
   // the workspace (same path the daemon's own knowledge indexing uses);
   // extraction tables live in state.db (C1 fix — one DB for reads and writes).
-  const dbDir = process.env.OPENCLAW_DB_DIR || path.join(HOME, '.openclaw');
-  const workspaceDir = process.env.OPENCLAW_WORKSPACE || path.join(HOME, '.openclaw', 'workspace');
+  const dbDir = process.env.OPENCLAW_DB_DIR || PATHS.root;
+  const workspaceDir = process.env.OPENCLAW_WORKSPACE || path.join(PATHS.root, 'workspace');
   const knowledgeDbPath = process.env.OPENCLAW_KNOWLEDGE_DB || path.join(workspaceDir, '.knowledge.db');
   const extractionDbPath = process.env.OPENCLAW_EXTRACTION_DB || path.join(dbDir, 'state.db');
   try {
@@ -1514,10 +1515,14 @@ async function main() {
   // live inside the NATS try block and silently died whenever the broker
   // was down at boot, exactly when disk-level visibility matters most.
   const HEALTH_PROBE_INTERVAL = 5 * 60 * 1000;
-  const watcherOutputPath = path.join(os.homedir(), '.openclaw', 'watcher.jsonl');
+  const watcherOutputPath = PATHS.watcherLog;
   const runProbe = async () => {
     try {
-      const probe = await runStoreHealthProbes();
+      const probe = await runStoreHealthProbes({
+        stateDb: PATHS.stateDb, knowledgeDb: PATHS.knowledgeDb, graphCacheDb: PATHS.graphCacheDb,
+        workspaceLib: path.join(PATHS.root, 'workspace', 'lib'),
+        workspaceDaemon: path.join(PATHS.root, 'workspace', 'bin', 'memory-daemon.mjs'),
+      });
       appendWatcherRecord(watcherOutputPath, probe);
       log(`[watcher] health probe: ${Object.entries(probe.stores).filter(([,v]) => v).length} stores checked`);
     } catch (err) {
@@ -1576,6 +1581,7 @@ async function main() {
     if (localEventLog) {
       try {
         memoryWatcher = await createMemoryWatcher(natsConn, NODE_ID, {
+          outputPath: watcherOutputPath,
           log: (m) => log(`[watcher] ${m}`),
         });
       } catch (watchErr) {
@@ -1691,7 +1697,7 @@ async function main() {
       const { startInjectionServer } = await import('../lib/memory-inject-server.mjs');
       injectionServer = await startInjectionServer(
         { knowledgeDb: getKnowledgeDb(), graphCache: getGraphCache(), llmClient: getLlmClient(), extractionDb: getExtractionStore()?.db, eventLog: liveEventLog, nodeId: NODE_ID },
-        { log: (m) => log(`[inject-server] ${m}`) },
+        { port: PATHS.injectPort, log: (m) => log(`[inject-server] ${m}`) },
       );
     } catch (injErr) {
       log(`Memory inject server unavailable (${injErr.message}) — companion-bridge injection will be silent`);

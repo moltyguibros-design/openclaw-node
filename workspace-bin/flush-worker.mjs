@@ -18,19 +18,19 @@
  */
 import { parentPort, workerData } from 'node:worker_threads';
 
-const { kind = 'flush' } = workerData;
+const { kind = 'flush', stateDb } = workerData;
 
 try {
   if (kind === 'import') {
     const { jsonlPath, source, format } = workerData;
     const { SessionStore } = await import('../lib/session-store.mjs');
-    const store = new SessionStore();
+    const store = new SessionStore({ dbPath: stateDb });
     const result = await store.importSession(jsonlPath, { source, format });
     parentPort.postMessage({ ok: true, result });
   } else if (kind === 'importDir') {
     const { sources } = workerData;
     const { SessionStore } = await import('../lib/session-store.mjs');
-    const store = new SessionStore();
+    const store = new SessionStore({ dbPath: stateDb });
     const results = [];
     for (const source of sources) {
       const r = await store.importDirectory(source.path, { source: source.name, format: source.format });
@@ -55,7 +55,7 @@ try {
         llmClient = createLlmClient();
         try {
           const { createExtractionStore } = await import('../lib/extraction-store.mjs');
-          extractionStore = createExtractionStore();
+          extractionStore = createExtractionStore({ dbPath: stateDb });
         } catch {
           // runFlush degrades to the regex path without a store — same behavior
           // the daemon's own getExtractionStore() failure produces.
