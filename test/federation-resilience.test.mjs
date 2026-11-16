@@ -37,6 +37,9 @@ import {
   NATS_RECONNECT_OPTS,
   DEAD_PEER_TIMEOUT_MS,
   OFFER_CLEANUP_INTERVAL_MS,
+  FEDERATION_MAX_DELIVER,
+  FEDERATION_NAK_DELAY_MS,
+  settleFederationMessage,
 } from '../lib/federation-resilience.mjs';
 
 import { spawnNode } from '../bin/spawn-node.mjs';
@@ -210,6 +213,43 @@ describe('federation-resilience: NATS_RECONNECT_OPTS', () => {
     assert.equal(typeof DEAD_PEER_TIMEOUT_MS, 'number');
     assert.ok(DEAD_PEER_TIMEOUT_MS > 0);
     assert.equal(OFFER_CLEANUP_INTERVAL_MS, 60_000);
+  });
+});
+
+describe('federation-resilience: settleFederationMessage', () => {
+  const message = (info) => {
+    const msg = { info, settled: null, ack() { msg.settled = ['ack']; }, nak(ms) { msg.settled = ['nak', ms]; } };
+    return msg;
+  };
+
+  it('acks a processed message', () => {
+    const msg = message({ deliveryCount: 1 });
+    assert.equal(settleFederationMessage(msg, { failed: false }), 'ack');
+    assert.deepEqual(msg.settled, ['ack']);
+  });
+
+  it('forgets a failed event in the replay cache, so its redelivery verifies again', async () => {
+    const { createSeenEventCache, verifyEvent } = await import('../lib/node-identity.mjs');
+    const seenIds = createSeenEventCache();
+    const { privateKey } = crypto.generateKeyPairSync('ed25519');
+    const event = signEvent({ event_id: 'evt-1', node_id: 'peer', timestamp: new Date().toISOString() }, privateKey);
+    assert.equal(verifyEvent(event, { seenIds, requireSigned: false }).ok, true);
+    assert.equal(verifyEvent(event, { seenIds, requireSigned: false }).reason, 'replay');
+
+    const msg = message({ deliveryCount: 2 });
+    assert.equal(settleFederationMessage(msg, { failed: true, eventId: 'evt-1', seenIds }), 'nak');
+    assert.deepEqual(msg.settled, ['nak', 2 * FEDERATION_NAK_DELAY_MS], 'the delay grows per attempt');
+    assert.equal(verifyEvent(event, { seenIds, requireSigned: false }).ok, true, 'the redelivery is not a replay');
+  });
+
+  it('drops (acks) a message at the delivery cap and keeps it in the replay cache', async () => {
+    const { createSeenEventCache } = await import('../lib/node-identity.mjs');
+    const seenIds = createSeenEventCache();
+    seenIds.add('evt-2');
+    const msg = message({ deliveryCount: FEDERATION_MAX_DELIVER });
+    assert.equal(settleFederationMessage(msg, { failed: true, eventId: 'evt-2', seenIds }), 'dropped');
+    assert.deepEqual(msg.settled, ['ack']);
+    assert.equal(seenIds.has('evt-2'), true);
   });
 });
 

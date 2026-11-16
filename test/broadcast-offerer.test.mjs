@@ -5,7 +5,7 @@ process.env.OPENCLAW_REQUIRE_SIGNED = '0';
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { randomUUID } from 'node:crypto';
+import { randomUUID, generateKeyPairSync } from 'node:crypto';
 
 import {
   RELEVANCE_THRESHOLD,
@@ -457,5 +457,74 @@ describe('createOfferer.start', () => {
     // Should have logged degraded mode
     assert.ok(logs.some(l => l.includes('degraded')));
     offerer.stop();
+  });
+});
+
+describe('createOfferer: a failed broadcast is retried, not dropped as a replay', () => {
+  /** A consumer loop fed these deliveries; each records how it was settled. */
+  function deliveringConnection(deliveries) {
+    const nc = mockNatsConnection();
+    const js = nc.jetstream();
+    nc.jetstream = () => ({
+      ...js,
+      subscribe: async () => (async function* () { for (const msg of deliveries) yield msg; })(),
+    });
+    return nc;
+  }
+  // Signed: verifyEvent records only signed events in the replay cache.
+  const { privateKey } = generateKeyPairSync('ed25519');
+  const signedBroadcast = async () => (await import('../lib/node-identity.mjs')).signEvent(makeBroadcast(), privateKey);
+  const settledAll = async (deliveries) => {
+    for (let i = 0; i < 200 && deliveries.some((d) => !d.settled); i++) await new Promise((r) => setTimeout(r, 5));
+  };
+  const delivery = (broadcast, deliveryCount) => {
+    const msg = {
+      data: new TextEncoder().encode(JSON.stringify(broadcast)),
+      info: { deliveryCount },
+      settled: null,
+      ack() { msg.settled = ['ack']; },
+      nak(delay) { msg.settled = ['nak', delay]; },
+    };
+    return msg;
+  };
+
+  it('a transient retrieval failure is redelivered and then offered', async () => {
+    const { createSeenEventCache } = await import('../lib/node-identity.mjs');
+    const broadcast = await signedBroadcast();
+    const deliveries = [delivery(broadcast, 1), delivery(broadcast, 2)];
+    let calls = 0;
+    const offerer = createOfferer(deliveringConnection(deliveries), 'my-node', {
+      log: () => {},
+      seenIds: createSeenEventCache(),
+      retrievalPipeline: { retrieve: async () => { if (++calls === 1) throw new Error('db locked'); return [makeResult(0.9)]; } },
+    });
+    await offerer.start();
+    await settledAll(deliveries);
+    await offerer.stop();
+
+    assert.deepEqual(deliveries[0].settled, ['nak', 5000], 'the failure asks for a delayed redelivery');
+    assert.deepEqual(deliveries[1].settled, ['ack']);
+    assert.equal(offerer.stats.replayRejected, 0, 'the redelivery is not a replay');
+    assert.equal(offerer.stats.offersPublished, 1);
+  });
+
+  it('a failure that keeps failing is dropped at the delivery cap', async () => {
+    const { createSeenEventCache } = await import('../lib/node-identity.mjs');
+    const { FEDERATION_MAX_DELIVER } = await import('../lib/federation-resilience.mjs');
+    const broadcast = await signedBroadcast();
+    const deliveries = Array.from({ length: FEDERATION_MAX_DELIVER }, (_, i) => delivery(broadcast, i + 1));
+    const offerer = createOfferer(deliveringConnection(deliveries), 'my-node', {
+      log: () => {},
+      seenIds: createSeenEventCache(),
+      retrievalPipeline: { retrieve: async () => { throw new Error('always'); } },
+    });
+    await offerer.start();
+    await settledAll(deliveries);
+    await offerer.stop();
+
+    assert.deepEqual(deliveries.slice(0, -1).map((d) => d.settled[0]), Array(FEDERATION_MAX_DELIVER - 1).fill('nak'));
+    assert.deepEqual(deliveries.at(-1).settled, ['ack']);
+    assert.equal(offerer.stats.retriesExhausted, 1);
+    assert.equal(offerer.stats.replayRejected, 0);
   });
 });
