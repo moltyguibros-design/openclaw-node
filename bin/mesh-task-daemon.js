@@ -3172,6 +3172,9 @@ if (require.main === module) {
       collabStore.isRecruitingDone(session) ? startRecruitedSession(session.session_id) : false,
     evaluateRound: (id) => evaluateRound(id),
     handleCirclingStepTimeout: (id, snap) => handleCirclingStepTimeout(id, snap),
+    // test/daemon-circling-handlers.test.js, test/circling-parse-retry.test.mjs
+    handleCollabReflect: (msg) => handleCollabReflect(msg),
+    completeCirclingSession: (id) => completeCirclingSession(id),
     sweepCollabRoundTimeouts: () => sweepCollabRoundTimeouts(),
     handleCollabLeave: (msg) => handleCollabLeave(msg),
     handleFail: (msg) => handleFail(msg),
