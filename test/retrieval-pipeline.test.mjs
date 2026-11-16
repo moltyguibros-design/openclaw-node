@@ -10,6 +10,7 @@ import {
   entitySearch,
   themeEntitySearch,
   decisionFtsSearch,
+  sessionFtsSearch,
   toFtsQuery,
   buildSeeds,
   weightedRRF,
@@ -394,8 +395,14 @@ describe('themeEntitySearch', () => {
 });
 
 describe('toFtsQuery', () => {
-  it('quotes terms and ORs them, dropping sub-2-char terms', () => {
-    assert.equal(toFtsQuery('use NATS for x federation'), '"use" OR "NATS" OR "for" OR "federation"');
+  it('quotes terms and ORs them, dropping sub-2-char terms and stopwords', () => {
+    assert.equal(toFtsQuery('use NATS for x federation'), '"use" OR "NATS" OR "federation"');
+  });
+
+  it('drops stopwords in any case, with punctuation or a curly apostrophe', () => {
+    assert.equal(toFtsQuery('How is NATS configured?'), '"NATS" OR "configured?"');
+    assert.equal(toFtsQuery('What\u2019s the memory daemon doing'), '"memory" OR "daemon"');
+    assert.equal(toFtsQuery('the we about'), '');
   });
 
   it('strips embedded quotes so user text cannot inject FTS syntax', () => {
@@ -405,6 +412,32 @@ describe('toFtsQuery', () => {
   it('returns empty string when no usable terms', () => {
     assert.equal(toFtsQuery('a b'), '');
     assert.equal(toFtsQuery('   '), '');
+  });
+});
+
+describe('sessionFtsSearch (channel 1)', () => {
+  let kDb;
+  beforeEach(() => {
+    kDb = createKnowledgeDb();
+    kDb.exec(`
+      CREATE VIRTUAL TABLE session_chunks_fts USING fts5(text, content='session_chunks', content_rowid='id');
+      CREATE TRIGGER session_chunks_fts_ins AFTER INSERT ON session_chunks BEGIN
+        INSERT INTO session_chunks_fts(rowid, text) VALUES (new.id, new.text);
+      END;
+    `);
+    seedKnowledgeDb(kDb);
+  });
+  afterEach(() => { kDb.close(); });
+
+  it('matches natural-language prompts (not an implicit AND, no syntax error)', async () => {
+    for (const prompt of ['how is SQLite configured', 'How is SQLite configured?', "what's the plan for spreading activation"]) {
+      const results = await sessionFtsSearch(kDb, prompt, 10);
+      assert.ok(results.length > 0, `no FTS hit for ${JSON.stringify(prompt)}`);
+    }
+  });
+
+  it('a stopword-only prompt matches nothing instead of everything', async () => {
+    assert.deepEqual(await sessionFtsSearch(kDb, 'what is the', 10), []);
   });
 });
 
