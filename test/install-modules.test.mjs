@@ -142,7 +142,11 @@ test('cluster dry-run guard and cluster security live in config.sh', () => {
 
 test('NATS cluster plists come only from services/launchd, pointed at the rendered configs', () => {
   assert.deepEqual(readdirSync(join(ROOT, 'services/nats')).filter((f) => f.endsWith('.plist')), []);
-  assert.ok(!readFileSync(join(ROOT, 'docs/NATS_CLUSTER.md'), 'utf8').includes('services/nats/ai.openclaw.nats-'));
+  const guide = readFileSync(join(ROOT, 'docs/NATS_CLUSTER.md'), 'utf8');
+  assert.ok(!guide.includes('services/nats/ai.openclaw.nats-'));
+  // A hand render that fills only ${HOME} leaves ${NATS_SERVER_BIN} in the plist; install.sh renders them all.
+  assert.ok(!/> ~\/Library\/LaunchAgents\/ai\.openclaw\.nats-/.test(guide), 'the guide hand-renders the cluster plists');
+  assert.ok(guide.includes('./install.sh --update'));
   for (const n of [1, 2, 3]) {
     const plist = readFileSync(join(ROOT, `services/launchd/ai.openclaw.nats-${n}.plist`), 'utf8');
     assert.ok(plist.includes(`\${HOME}/.openclaw/config/nats-${n}.conf`), `nats-${n} plist must run the rendered config`);

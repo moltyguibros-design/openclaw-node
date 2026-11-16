@@ -37,16 +37,19 @@ mkdir -p ~/.openclaw/logs
 
 ### 2. Install the plists
 
-Run `install.sh` first: it renders `~/.openclaw/config/nats-{1,2,3}.conf` and `~/.openclaw/config/nats-auth.conf`. Then render the launchd templates, replacing the `${HOME}` placeholder:
+`install.sh` renders everything this layout needs: `~/.openclaw/config/nats-{1,2,3}.conf`,
+the `~/.openclaw/config/nats-auth.conf` they include, and the three plists into
+`~/Library/LaunchAgents/ai.openclaw.nats-{1,2,3}.plist`, with every placeholder filled in
+(`${HOME}`, and `${NATS_SERVER_BIN}` resolved from `PATH`, then `/opt/homebrew/bin`, then
+`/usr/local/bin`). The units are `autostart: false`, so nothing loads them yet. On a node that is
+already installed, re-render them from the current templates with:
 
 ```bash
-REPO=/path/to/openclaw-node   # your checkout
-for n in 1 2 3; do
-  sed "s|\${HOME}|$HOME|g" \
-    "$REPO/services/launchd/ai.openclaw.nats-$n.plist" \
-    > ~/Library/LaunchAgents/ai.openclaw.nats-$n.plist
-done
+./install.sh --update
 ```
+
+Do not hand-copy the repo templates into `~/Library/LaunchAgents`: they still carry the
+placeholders.
 
 ### 3. Start the cluster
 
