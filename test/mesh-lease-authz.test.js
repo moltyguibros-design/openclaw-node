@@ -237,11 +237,11 @@ describe('F1: a forged submit cannot touch a plan', () => {
       const planId = await approvedPlan(h);
       const before = await planState(h, planId);
 
-      const sub = await h.rpc('handleSubmit', { task_id: 'P-S2', title: 'squatter', metric: 'npm test', preferred_nodes: ['attacker'] });
+      const sub = await h.rpc('handleSubmit', { task_id: `${planId}-P-S2`, title: 'squatter', metric: 'npm test', preferred_nodes: ['attacker'] });
       assert.equal(sub.ok, true, 'a plain task with a colliding id is still just a task');
       const claim = await h.rpc('handleClaim', { node_id: 'attacker' });
-      assert.equal(claim.data.task_id, 'P-S2');
-      const reply = await h.rpc(handler, { task_id: 'P-S2', node_id: 'attacker', lease_token: claim.data.lease_token, ...extra });
+      assert.equal(claim.data.task_id, `${planId}-P-S2`);
+      const reply = await h.rpc(handler, { task_id: `${planId}-P-S2`, node_id: 'attacker', lease_token: claim.data.lease_token, ...extra });
       assert.equal(reply.ok, true, `the attacker may finish its own task: ${reply.error}`);
 
       assert.deepEqual(await planState(h, planId), before);
@@ -280,17 +280,49 @@ describe('F1: a forged submit cannot touch a plan', () => {
   it("the daemon's own dispatch still links the subtask and advances the plan", async () => {
     const h = harness();
     const planId = await approvedPlan(h);
-    const s1 = await h.store.get('P-S1');
+    const s1 = await h.store.get(`${planId}-P-S1`);
     assert.equal(s1.plan_id, planId);
     assert.equal(s1.subtask_id, 'P-S1');
 
     const claim = await h.rpc('handleClaim', { node_id: 'worker' });
-    assert.equal(claim.data.task_id, 'P-S1');
-    const done = await h.rpc('handleComplete', { task_id: 'P-S1', node_id: 'worker', lease_token: claim.data.lease_token, result: { success: true } });
+    assert.equal(claim.data.task_id, `${planId}-P-S1`);
+    const done = await h.rpc('handleComplete', { task_id: `${planId}-P-S1`, node_id: 'worker', lease_token: claim.data.lease_token, result: { success: true } });
     assert.equal(done.ok, true, done.error);
 
     assert.deepEqual(await planState(h, planId), { status: 'executing', subtasks: ['P-S1:completed', 'P-S2:queued'] });
-    assert.equal((await h.store.get('P-S2')).plan_id, planId, 'wave 1 dispatched with its back-reference');
+    assert.equal((await h.store.get(`${planId}-P-S2`)).plan_id, planId, 'wave 1 dispatched with its back-reference');
+  });
+});
+
+describe('a plan subtask is dispatched under a task id namespaced by its plan', () => {
+  it('a second plan with the same subtask ids does not overwrite the first plan\'s task', async () => {
+    const h = harness();
+    const plans = [];
+    for (const n of [1, 2]) {
+      assert.equal((await h.rpc('handleSubmit', { task_id: `PARENT-${n}`, title: 'parent' })).ok, true);
+      assert.equal((await h.rpc('handleClaim', { node_id: `planner-${n}` })).data.task_id, `PARENT-${n}`);
+    }
+    for (const n of [1, 2]) {
+      const created = await h.rpc('handlePlanCreate', {
+        parent_task_id: `PARENT-${n}`, title: `plan ${n}`,
+        subtasks: [{ subtask_id: 'reproduce', title: `reproduce ${n}`, metric: 'npm test', delegation: { mode: 'solo_mesh' } }],
+      });
+      assert.equal(created.ok, true, created.error);
+      const approved = await h.rpc('handlePlanApprove', signOperatorRequest({ plan_id: created.data.plan_id }, { identity: operator, nodeId: 'operator' }));
+      assert.equal(approved.ok, true, approved.error);
+      plans.push(created.data.plan_id);
+    }
+    assert.notEqual(plans[0], plans[1]);
+    assert.equal(await h.store.get('reproduce'), null, 'no task is stored under the bare template id');
+    for (const [i, planId] of plans.entries()) {
+      const task = await h.store.get(`${planId}-reproduce`);
+      assert.ok(task, `plan ${i + 1}'s subtask has its own task record`);
+      assert.equal(task.plan_id, planId);
+      assert.equal(task.subtask_id, 'reproduce');
+      assert.equal(task.title, `reproduce ${i + 1}`);
+      const plan = await h.planStore.get(planId);
+      assert.equal(plan.subtasks[0].mesh_task_id, `${planId}-reproduce`);
+    }
   });
 });
 
@@ -300,8 +332,8 @@ describe('a plan subtask that ends without completing fails its subtask and move
       const h = harness();
       const planId = await approvedPlan(h, { failure_policy });
       const claim = await h.rpc('handleClaim', { node_id: 'w' });
-      assert.equal(claim.data.task_id, 'P-S1');
-      const reply = await h.rpc('handleRelease', { task_id: 'P-S1', node_id: 'w', lease_token: claim.data.lease_token, reason: 'exhausted' });
+      assert.equal(claim.data.task_id, `${planId}-P-S1`);
+      const reply = await h.rpc('handleRelease', { task_id: `${planId}-P-S1`, node_id: 'w', lease_token: claim.data.lease_token, reason: 'exhausted' });
       assert.equal(reply.ok, true, reply.error);
       assert.deepEqual(await planState(h, planId), { status, subtasks: ['P-S1:failed', 'P-S2:blocked'] });
     });
@@ -311,12 +343,12 @@ describe('a plan subtask that ends without completing fails its subtask and move
     const h = harness();
     const planId = await approvedPlan(h, { failure_policy: 'continue_best_effort', s1Metric: null });
     const claim = await h.rpc('handleClaim', { node_id: 'w' });
-    assert.equal(claim.data.task_id, 'P-S1');
-    const done = await h.rpc('handleComplete', { task_id: 'P-S1', node_id: 'w', lease_token: claim.data.lease_token, result: { success: true } });
+    assert.equal(claim.data.task_id, `${planId}-P-S1`);
+    const done = await h.rpc('handleComplete', { task_id: `${planId}-P-S1`, node_id: 'w', lease_token: claim.data.lease_token, result: { success: true } });
     assert.equal(done.data.status, 'pending_review');
-    await h.store.put({ ...(await h.store.get('P-S1')), rejection_count: DEFAULT_MAX_REJECTIONS - 1 });
+    await h.store.put({ ...(await h.store.get(`${planId}-P-S1`)), rejection_count: DEFAULT_MAX_REJECTIONS - 1 });
 
-    const reply = await h.rpc('handleTaskReject', signOperatorRequest({ task_id: 'P-S1', reason: 'no' }, { identity: operator, nodeId: 'operator' }));
+    const reply = await h.rpc('handleTaskReject', signOperatorRequest({ task_id: `${planId}-P-S1`, reason: 'no' }, { identity: operator, nodeId: 'operator' }));
     assert.equal(reply.ok, true, reply.error);
     assert.equal(reply.data.status, 'failed');
     assert.deepEqual(await planState(h, planId), { status: 'completed', subtasks: ['P-S1:failed', 'P-S2:blocked'] });
@@ -327,28 +359,28 @@ describe('a stall or budget sweep leaves a subtask that completed under it alone
   const LONG_AGO = () => new Date(Date.now() - 10 * 60_000).toISOString();
 
   /** P-S1 running on w1 and silent for 10 minutes; returns its lease token. */
-  async function silentRunningS1(h) {
+  async function silentRunningS1(h, planId) {
     const claim = await h.rpc('handleClaim', { node_id: 'w1' });
-    assert.equal(claim.data.task_id, 'P-S1');
+    assert.equal(claim.data.task_id, `${planId}-P-S1`);
     const { lease_token } = claim.data;
-    assert.equal((await h.rpc('handleStart', { task_id: 'P-S1', node_id: 'w1', lease_token })).ok, true);
-    await h.store.put({ ...(await h.store.get('P-S1')), started_at: LONG_AGO(), last_activity: LONG_AGO(), claimed_at: LONG_AGO(), lease_expires_at: null });
+    assert.equal((await h.rpc('handleStart', { task_id: `${planId}-P-S1`, node_id: 'w1', lease_token })).ok, true);
+    await h.store.put({ ...(await h.store.get(`${planId}-P-S1`)), started_at: LONG_AGO(), last_activity: LONG_AGO(), claimed_at: LONG_AGO(), lease_expires_at: null });
     return lease_token;
   }
 
-  const complete = (h, lease_token) =>
-    h.rpc('handleComplete', { task_id: 'P-S1', node_id: 'w1', lease_token, result: { success: true } });
+  const complete = (h, planId, lease_token) =>
+    h.rpc('handleComplete', { task_id: `${planId}-P-S1`, node_id: 'w1', lease_token, result: { success: true } });
 
   it('detectStalls: the agent completes while its alive check is in flight', async () => {
     const h = harness();
     const planId = await approvedPlan(h, { failure_policy: 'continue_best_effort' });
-    const lease_token = await silentRunningS1(h);
+    const lease_token = await silentRunningS1(h, planId);
     const published = [];
     daemon.__test.setContext({
       nc: {
         publish(subject) { published.push(subject); },
         async request(subject) {
-          if (subject === 'mesh.agent.w1.alive') assert.equal((await complete(h, lease_token)).ok, true);
+          if (subject === 'mesh.agent.w1.alive') assert.equal((await complete(h, planId, lease_token)).ok, true);
           throw new Error('TIMEOUT');
         },
       },
@@ -356,7 +388,7 @@ describe('a stall or budget sweep leaves a subtask that completed under it alone
 
     await daemon.__test.detectStalls();
 
-    assert.equal((await h.store.get('P-S1')).status, 'completed');
+    assert.equal((await h.store.get(`${planId}-P-S1`)).status, 'completed');
     assert.deepEqual(await planState(h, planId), { status: 'executing', subtasks: ['P-S1:completed', 'P-S2:queued'] });
     assert.equal(published.includes('mesh.agent.w1.stall'), false);
   });
@@ -364,9 +396,9 @@ describe('a stall or budget sweep leaves a subtask that completed under it alone
   it('enforceBudgets: the over-budget snapshot is stale and the task has completed', async () => {
     const h = harness();
     const planId = await approvedPlan(h, { failure_policy: 'continue_best_effort' });
-    const lease_token = await silentRunningS1(h);
-    const snapshot = { ...(await h.store.get('P-S1')), budget_minutes: 1 };
-    assert.equal((await complete(h, lease_token)).ok, true);
+    const lease_token = await silentRunningS1(h, planId);
+    const snapshot = { ...(await h.store.get(`${planId}-P-S1`)), budget_minutes: 1 };
+    assert.equal((await complete(h, planId, lease_token)).ok, true);
     const stale = Object.create(h.store);
     stale.findOverBudget = async () => [snapshot];
     const published = [];
@@ -374,7 +406,7 @@ describe('a stall or budget sweep leaves a subtask that completed under it alone
 
     await daemon.__test.enforceBudgets();
 
-    assert.equal((await h.store.get('P-S1')).status, 'completed');
+    assert.equal((await h.store.get(`${planId}-P-S1`)).status, 'completed');
     assert.deepEqual(await planState(h, planId), { status: 'executing', subtasks: ['P-S1:completed', 'P-S2:queued'] });
     assert.equal(published.includes('mesh.agent.w1.budget_exceeded'), false);
   });
@@ -456,7 +488,7 @@ describe('a collab_mesh plan subtask moves its plan when its session ends it', (
     const planId = created.data.plan_id;
     const approved = await h.rpc('handlePlanApprove', signOperatorRequest({ plan_id: planId }, { identity: operator, nodeId: 'operator' }));
     assert.equal(approved.ok, true, approved.error);
-    const sid = (await h.store.get('P-C1')).collab_session_id;
+    const sid = (await h.store.get(`${planId}-P-C1`)).collab_session_id;
     assert.ok(sid, 'the subtask was dispatched with a collab session');
     assert.deepEqual(await planState(h, planId), { status: 'executing', subtasks: ['P-C1:queued'] });
     return { planId, sid };
@@ -469,7 +501,7 @@ describe('a collab_mesh plan subtask moves its plan when its session ends it', (
     const { planId, sid } = await collabPlan(h);
     await closeRecruiting(h, sid);
     assert.equal(await daemon.__test.startRecruitedSession(sid), true);
-    assert.equal((await h.store.get('P-C1')).status, 'released');
+    assert.equal((await h.store.get(`${planId}-P-C1`)).status, 'released');
     assert.deepEqual(await planState(h, planId), { status: 'aborted', subtasks: ['P-C1:failed'] });
   });
 
@@ -481,7 +513,7 @@ describe('a collab_mesh plan subtask moves its plan when its session ends it', (
     await h.collabStore.setNodeStatus(sid, 'b', 'dead');
     await closeRecruiting(h, sid);
     assert.equal(await daemon.__test.startRecruitedSession(sid), true);
-    assert.equal((await h.store.get('P-C1')).status, 'failed');
+    assert.equal((await h.store.get(`${planId}-P-C1`)).status, 'failed');
     assert.deepEqual(await planState(h, planId), { status: 'aborted', subtasks: ['P-C1:failed'] });
   });
 
@@ -495,7 +527,7 @@ describe('a collab_mesh plan subtask moves its plan when its session ends it', (
       assert.ok(await h.collabStore.submitReflection(sid, { node_id, summary: 'done', vote: 'converged', confidence: 0.9 }));
     }
     await daemon.__test.evaluateRound(sid);
-    assert.equal((await h.store.get('P-C1')).status, 'completed');
+    assert.equal((await h.store.get(`${planId}-P-C1`)).status, 'completed');
     assert.deepEqual(await planState(h, planId), { status: 'completed', subtasks: ['P-C1:completed'] });
     assert.equal((await h.store.get('PARENT')).status, 'completed', 'the finished plan closes its parent task');
   });

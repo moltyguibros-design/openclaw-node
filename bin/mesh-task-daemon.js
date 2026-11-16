@@ -2679,8 +2679,10 @@ async function advancePlanWave(planId) {
           ? (findRoleByScope(st.scope, ROLE_DIRS)?.id || null)
           : null);
 
+        // Namespaced by plan: subtask ids come from templates (reproduce, fix, …), so a
+        // bare id let a second plan overwrite the first plan's task record and branch.
         const meshTask = createTask({
-          task_id: st.subtask_id,
+          task_id: `${planId}-${st.subtask_id}`,
           title: st.title,
           description: st.description,
           budget_minutes: st.budget_minutes,

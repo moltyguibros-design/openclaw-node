@@ -426,8 +426,9 @@ describe('Bug 3 regression: Plan subtask routing field inheritance', { skip: ski
     const approve = await rpc('mesh.plans.approve', signOperatorRequest({ plan_id: plan.data.plan_id }));
     assert.equal(approve.ok, true, `mesh.plans.approve failed: ${approve.error || 'unknown'}`);
 
-    createdTaskIds.push(`${planTaskId}-sub1`);
-    const subtask = await pollUntil('mesh.tasks.get', { task_id: `${planTaskId}-sub1` }, r => r.ok);
+    const subtaskTaskId = `${plan.data.plan_id}-${planTaskId}-sub1`;
+    createdTaskIds.push(subtaskTaskId);
+    const subtask = await pollUntil('mesh.tasks.get', { task_id: subtaskTaskId }, r => r.ok);
     assert.equal(subtask.ok, true, `mesh.tasks.get failed for materialized subtask: ${subtask.error || 'unknown'}`);
     assert.equal(subtask.data.llm_provider, 'shell', 'Subtask should inherit llm_provider');
     assert.equal(subtask.data.llm_model, 'custom-regression', 'Subtask should inherit llm_model');
