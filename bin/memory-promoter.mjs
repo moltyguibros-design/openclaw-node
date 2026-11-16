@@ -23,7 +23,7 @@ import crypto from 'node:crypto';
 import { resolveNodeId } from '../lib/node-id.js';
 import { createRequire } from 'node:module';
 import { loadPromotionPolicy } from '../lib/promotion-policy.mjs';
-import { ensureSharedStream, SHARED_STREAM_NAME } from '../lib/shared-event-stream.mjs';
+import { ensureSharedStream } from '../lib/shared-event-stream.mjs';
 import { canonicalNodeId, localEventStreamName, localEventSubjectPrefix } from '../lib/local-event-log.mjs';
 
 const _require = createRequire(import.meta.url);

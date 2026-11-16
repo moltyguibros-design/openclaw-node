@@ -7,8 +7,8 @@ import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import * as scheduler from '../bin/consolidation-scheduler.mjs';
 import {
-  IDLE_THRESHOLD_MS,
   HARD_CAP_MS,
   ANALYSIS_QUIET_MS,
   DEFAULT_INTERVAL_MS,
@@ -22,10 +22,13 @@ import {
 
 describe('consolidation-scheduler constants', () => {
   it('exports expected constant values', () => {
-    assert.equal(IDLE_THRESHOLD_MS, 5 * 60 * 1000);
     assert.equal(HARD_CAP_MS, 5 * 60 * 1000);
     assert.equal(ANALYSIS_QUIET_MS, 60 * 1000);
     assert.equal(DEFAULT_INTERVAL_MS, 30 * 60 * 1000);
+  });
+
+  it('exports no IDLE_THRESHOLD_MS: there is no time-since-last-extraction gate to configure', () => {
+    assert.equal('IDLE_THRESHOLD_MS' in scheduler, false);
   });
 });
 
