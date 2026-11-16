@@ -67,7 +67,7 @@ describe('skill-quality-check', { skip: !HAVE_PY && 'python3 not available' }, (
       if (prev === undefined) delete process.env.GEP_ASSETS_DIR;
       else process.env.GEP_ASSETS_DIR = prev;
     });
-    const { getLastEventId } = require('../skills/capability-evolver/src/gep/assetStore.js');
+    const { getLastEventId } = require('../skills/_quarantine/capability-evolver/src/gep/assetStore.js');
     assert.equal(getLastEventId(), ev.id);
   });
 
