@@ -123,3 +123,15 @@ test('operator docs state the Node baseline that package.json engines and the in
   }
   assert.doesNotMatch(read('docs/NODE_SPEC.md'), /operator installs \(brew\/nodejs\.org\)/);
 });
+
+test('PUBLISHERS.md calls the Claude Code PreCompact publisher wired only when the installed hook runs it', () => {
+  const hook = read('.claude/hooks/pre-compact.sh').replace(/^\s*#.*$/gm, '');
+  const wired = /hooks\/claude-code\/pre-compact\.sh|openclaw-extract-now/.test(hook);
+  const claudeCode = section(read('docs/PUBLISHERS.md'), '### Claude Code').text;
+  if (wired) {
+    assert.doesNotMatch(claudeCode, /Not wired by default/);
+  } else {
+    assert.match(claudeCode, /Not wired by default/);
+    assert.doesNotMatch(claudeCode, /No manual configuration needed|delegates to/);
+  }
+});
