@@ -21,12 +21,44 @@ import { createPrivateKey } from "crypto";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { nkeyAuthenticator, type Authenticator } from "nats";
-// The nkeys codec is not re-exported by `nats`; nkeys.js is its dependency.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { Codec } = require("nkeys.js/lib/codec.js") as { Codec: { encodeSeed(role: number, src: Uint8Array): Uint8Array } };
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const nkeys = require("nkeys.js") as { Prefix: { User: number }; fromSeed(seed: Uint8Array): { getPublicKey(): string } };
+import { nkeyAuthenticator, nkeys, type Authenticator } from "nats";
+
+// The nkey seed codec is not exported by `nats` (nor by nkeys.js's public
+// entry), so it is vendored, as in lib/nats-nkey.js: prefix + payload +
+// little-endian CRC-16/XMODEM, base32 without padding.
+const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+function crc16(bytes: Uint8Array): number {
+  let crc = 0;
+  for (const b of bytes) {
+    crc ^= b << 8;
+    for (let i = 0; i < 8; i++) crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
+  }
+  return crc;
+}
+
+function base32(bytes: Uint8Array): string {
+  let out = "";
+  let value = 0;
+  let bits = 0;
+  for (const b of bytes) {
+    value = (value << 8) | b;
+    bits += 8;
+    while (bits >= 5) {
+      out += BASE32[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) out += BASE32[(value << (5 - bits)) & 31];
+  return out;
+}
+
+function encodeSeed(role: number, seed32: Uint8Array): string {
+  const body = Buffer.concat([Buffer.from([nkeys.Prefix.Seed | (role >> 5), (role & 31) << 3]), Buffer.from(seed32)]);
+  const check = Buffer.alloc(2);
+  check.writeUInt16LE(crc16(body));
+  return base32(Buffer.concat([body, check]));
+}
 
 export type NatsAuthMode = "token" | "nkey" | "nkey-strict";
 const MODES: NatsAuthMode[] = ["token", "nkey", "nkey-strict"];
@@ -61,7 +93,7 @@ export function nkeyFromPem(pem: string): { seed: string; publicNkey: string } {
   const key = createPrivateKey(pem);
   if (key.asymmetricKeyType !== "ed25519") throw new Error(`identity key must be ed25519, got ${key.asymmetricKeyType}`);
   const seed32 = key.export({ type: "pkcs8", format: "der" }).subarray(-32);
-  const seed = Buffer.from(Codec.encodeSeed(nkeys.Prefix.User, seed32)).toString("utf8");
+  const seed = encodeSeed(nkeys.Prefix.User, seed32);
   const publicNkey = nkeys.fromSeed(new TextEncoder().encode(seed)).getPublicKey();
   return { seed, publicNkey };
 }
