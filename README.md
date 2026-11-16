@@ -237,9 +237,9 @@ The installer auto-detects and installs these:
 
 ## Obsidian Setup
 
-The installer deploys the vault scaffold with 22 domain folders (`00-meta` … `21-legal-regulatory`) plus a per-node `nodes/` area, and the **Local REST API** plugin pre-installed. On first Obsidian launch:
+The installer deploys the vault scaffold with 22 domain folders (`00-meta` … `21-legal-regulatory`) plus a per-node `nodes/` area, and installs the **Local REST API** plugin by downloading a pinned upstream release and verifying its sha256 (`scripts/install/obsidian-rest-api.sh`; the plugin is not vendored in the repo). If that download fails, install the plugin from Obsidian's community plugins. On first Obsidian launch:
 
-1. Obsidian will auto-download 5 missing community plugins (dataview, templater, kanban, git, graph-analysis) — requires internet
+1. Enable community plugins if Obsidian asks; Local REST API is the only plugin the scaffold enables
 2. Generate an API key in the Local REST API plugin settings
 3. Save the key to `~/.openclaw/workspace/projects/arcane-vault/.obsidian-api-key`
 4. The memory daemon will sync workspace files to the vault every 30 minutes

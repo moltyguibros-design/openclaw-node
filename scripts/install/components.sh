@@ -129,8 +129,14 @@ if [ -d "$REPO_DIR/obsidian-vault" ]; then
     run rsync -av "$REPO_DIR/obsidian-vault/" "$VAULT_DIR/"
     # Remove .gitkeep files (only needed for git, not for runtime)
     find "$VAULT_DIR" -name '.gitkeep' -delete 2>/dev/null || true
-    info "Obsidian vault scaffold installed (22 domain folders + plugins)"
-    warn "Obsidian Local REST API plugin included. Set API key in $VAULT_DIR/.obsidian-api-key"
+    info "Obsidian vault scaffold installed (22 domain folders)"
+    if $DRY_RUN; then
+      info "  [dry-run] would download the Obsidian Local REST API plugin (pinned release, sha256-verified)"
+    elif bash "$REPO_DIR/scripts/install/obsidian-rest-api.sh" "$VAULT_DIR"; then
+      warn "Obsidian Local REST API plugin installed. Set API key in $VAULT_DIR/.obsidian-api-key"
+    else
+      warn "Obsidian Local REST API plugin not installed — install it from Obsidian's community plugins"
+    fi
   else
     info "Obsidian vault already exists, skipping"
   fi
