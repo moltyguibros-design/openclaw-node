@@ -112,7 +112,7 @@ write(SEED, 'bin/mesh-agent.js', '// agent v0\n');
 write(SEED, 'skills/demo/SKILL.md', '# demo v0\n');
 write(SEED, 'skills/demo/old-name.md', 'renamed in v1\n');
 write(SEED, 'skills/retired/SKILL.md', '# retired in v1\n');
-write(SEED, 'workspace-docs/SOUL.md', '# soul v0\n');
+write(SEED, 'identity/SOUL.md', '# soul v0\n');
 write(SEED, 'mission-control/package.json', '{ "name": "mission-control" }\n');
 write(SEED, 'mission-control/src/app/page.tsx', "export default () => 'v0';\n");
 const S0 = commit('v0');
@@ -157,7 +157,7 @@ describe('pinned-sha deploy through the listener (bare origin + node clone)', ()
     write(SEED, 'skills/demo/SKILL.md', '# demo v1\n');
     git(SEED, 'mv', 'skills/demo/old-name.md', 'skills/demo/new-name.md');
     git(SEED, 'rm', '-q', 'skills/retired/SKILL.md');
-    write(SEED, 'workspace-docs/SOUL.md', '# soul v1\n');
+    write(SEED, 'identity/SOUL.md', '# soul v1\n');
     write(SEED, 'mission-control/src/app/page.tsx', "export default () => 'v1';\n");
     S1 = commit('v1');
 
@@ -517,9 +517,9 @@ describe('a deploy installs the commit, never the working tree', () => {
 describe('--dry-run writes nothing into the workspace', () => {
   let fx, run;
   before(() => {
-    fx = makeNode('dry-run', { 'workspace-docs/SOUL.md': '# soul v0\n' });
+    fx = makeNode('dry-run', { 'identity/SOUL.md': '# soul v0\n' });
     write(fx.home, '.openclaw/workspace/SOUL.md', '# soul, edited on this node\n');
-    const S1 = fx.commit('v1', { 'workspace-docs/SOUL.md': '# soul v1\n' });
+    const S1 = fx.commit('v1', { 'identity/SOUL.md': '# soul v1\n' });
     run = fx.deploy(['--from', fx.S0, '--to', S1, '--dry-run']);
   });
 
@@ -653,5 +653,31 @@ describe('a deploy that changes config/harness-rules.json merges it into the fil
 
   it('no longer copies the rules into the unread ~/.openclaw/config', () => {
     assert.ok(!fs.existsSync(fx.rt('.openclaw/config/harness-rules.json')));
+  });
+});
+
+describe('workspace agent docs come from identity/, as install.sh installs them', () => {
+  const DOCS = ['CLAUDE', 'SOUL', 'PRINCIPLES', 'AGENTS', 'DELEGATION', 'HEARTBEAT', 'MEMORY_SPEC', 'TOOLS'];
+  let fx, run;
+  const ws = f => fx.rt(path.join('.openclaw/workspace', f));
+  before(() => {
+    fx = makeNode('identity-docs', Object.fromEntries(DOCS.map(d => [`identity/${d}.md`, `# ${d} v0\n`])));
+    write(fx.home, '.openclaw/workspace/AGENTS.md', '# AGENTS, edited on this node\n');
+    run = fx.deploy(['--from', fx.S0, '--to', fx.S0, '--component', 'workspace-docs']);
+  });
+
+  it('installs install.sh\'s eight docs into the workspace', () => {
+    ranOk(run);
+    for (const d of DOCS.filter(d => d !== 'AGENTS')) assert.equal(read(ws(`${d}.md`)), `# ${d} v0\n`, d);
+  });
+
+  it('keeps a node-edited doc and saves the repo copy beside it, without holding back the others', () => {
+    assert.equal(read(ws('AGENTS.md')), '# AGENTS, edited on this node\n');
+    assert.equal(read(ws('AGENTS.md.repo')), '# AGENTS v0\n');
+  });
+
+  it('--force writes nothing into the unread ~/.openclaw/identity', () => {
+    ranOk(fx.deploy(['--from', fx.S0, '--to', fx.S0, '--force']));
+    assert.ok(!fs.existsSync(fx.rt('.openclaw/identity')), 'identity docs were copied into a directory nothing reads');
   });
 });

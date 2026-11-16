@@ -96,7 +96,6 @@ const DIRS = {
   BOOT_SRC:         path.join(HOME, '.openclaw', 'workspace', 'bin'),  // compile-boot lives here
   MEMORY:           path.join(HOME, '.openclaw', 'workspace', 'memory'),
   MEMORY_VAULT:     path.join(HOME, '.openclaw', 'workspace', 'memory-vault'),
-  IDENTITY:         path.join(HOME, '.openclaw', 'identity'),
   SERVICES_MAC:     path.join(HOME, 'Library', 'LaunchAgents'),
   SERVICES_LINUX:   path.join(HOME, '.config', 'systemd', 'user'),
   COMPANION:        path.join(HOME, 'companion-adapter'),
@@ -436,63 +435,45 @@ const MANIFEST = [
   {
     id: 'workspace-docs',
     name: 'Workspace Root Documents',
-    description: 'CLAUDE.md, SOUL.md, AGENTS.md, PRINCIPLES.md, HEARTBEAT.md',
+    description: 'Agent docs from identity/: CLAUDE, SOUL, PRINCIPLES, AGENTS, DELEGATION, HEARTBEAT, MEMORY_SPEC, TOOLS',
     risk: 'careful',
-    repoPaths: ['workspace-docs/CLAUDE.md', 'workspace-docs/SOUL.md',
-                'workspace-docs/AGENTS.md', 'workspace-docs/PRINCIPLES.md'],
+    // The same source and file list as install.sh (scripts/install/workspace.sh
+    // Step 4), so an installed and a deployed node carry the same docs.
+    repoPaths: ['CLAUDE.md', 'SOUL.md', 'PRINCIPLES.md', 'AGENTS.md', 'DELEGATION.md',
+                'HEARTBEAT.md', 'MEMORY_SPEC.md', 'TOOLS.md'].map(f => `identity/${f}`),
     targets: [DIRS.WORKSPACE],
     servicesMac: [],
     servicesLinux: [],
     nodeFilter: 'all',
-    preInstall: (changedFiles, { repoDir, toSha, dryRun }) => {
-      let differs = false;
-      for (const f of changedFiles) {
+    // Per file, as install.sh does: a doc that differs on this node keeps its
+    // copy (the repo version is saved beside it as .repo); the others install.
+    // The old all-or-nothing veto left every doc behind for one edited one.
+    preInstall: (files, { repoDir, toSha, dryRun }) => {
+      const kept = files.filter(f => {
         const basename = path.basename(f);
         const targetPath = path.join(DIRS.WORKSPACE, basename);
-        if (fs.existsSync(targetPath)) {
-          // A dry run has not checked out toSha: compare against it and write nothing.
-          if (dryRun) {
-            if (!fs.readFileSync(targetPath).equals(git(repoDir, ['show', `${toSha}:${f}`], 'buffer'))) {
-              warn(`${basename} differs from repo version — a deploy would save it as ${basename}.repo and skip this component`);
-              differs = true;
-            }
-            continue;
-          }
-          const srcPath = path.join(repoDir, f);
-          const diff = exec(`diff "${targetPath}" "${srcPath}" | head -20`, { ignoreError: true });
-          if (diff) {
-            warn(`${basename} differs from repo version:`);
-            console.log(C.dim(diff.split('\n').map(l => `      ${l}`).join('\n')));
-            info(`Repo version saved to ${basename}.repo — merge manually if needed`);
-            fs.copyFileSync(srcPath, targetPath + '.repo');
-            differs = true;
-          }
+        if (!fs.existsSync(targetPath)) return false;
+        // A dry run has not checked out toSha: compare against it and write nothing.
+        if (dryRun) {
+          if (fs.readFileSync(targetPath).equals(git(repoDir, ['show', `${toSha}:${f}`], 'buffer'))) return false;
+          warn(`${basename} differs from repo version — a deploy would save it as ${basename}.repo and keep this node's copy`);
+          return true;
         }
-      }
-      if (differs) return false; // Don't overwrite
+        const srcPath = path.join(repoDir, f);
+        const diff = exec(`diff "${targetPath}" "${srcPath}" | head -20`, { ignoreError: true });
+        if (!diff) return false;
+        warn(`${basename} differs from repo version:`);
+        console.log(C.dim(diff.split('\n').map(l => `      ${l}`).join('\n')));
+        info(`Repo version saved to ${basename}.repo — merge manually if needed`);
+        fs.copyFileSync(srcPath, targetPath + '.repo');
+        return true;
+      });
+      // installFiles copies the list this hook was handed.
+      for (const f of kept) files.splice(files.indexOf(f), 1);
+      if (kept.length > 0 && files.length === 0) return false;
     },
     notes: 'These files are your agent identity docs. They are NOT auto-overwritten. ' +
            'If the repo has updates, they are saved as .repo files for manual merge.',
-  },
-
-  // ── IDENTITY ────────────────────────────────────────────────────────────
-
-  {
-    id: 'identity',
-    name: 'Node Identity',
-    description: 'Node identity files, mesh enrollment config',
-    risk: 'manual',
-    repoPaths: ['identity/'],
-    targets: [DIRS.IDENTITY],
-    servicesMac: [],
-    servicesLinux: [],
-    nodeFilter: 'all',
-    preInstall: () => {
-      if (fs.existsSync(path.join(DIRS.IDENTITY, 'device.json'))) {
-        skip('Identity files already exist — skipping (use --force to overwrite)');
-        return false;
-      }
-    },
   },
 
   // ── HARNESS RULES ───────────────────────────────────────────────────────
