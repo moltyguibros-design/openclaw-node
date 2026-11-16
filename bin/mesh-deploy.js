@@ -25,8 +25,8 @@
  *   HEAD: the tree moves without a deploy (the lead's repo is a working
  *   checkout whose HEAD `mesh deploy` publishes), and a HEAD-based diff is empty.
  *
- * USAGE:
- *   mesh deploy                         — deploy everything that changed
+ * USAGE (run as node bin/mesh-deploy.js; bin/mesh.js `mesh deploy` only publishes a fleet trigger and takes --force/--component/--node):
+ *   mesh deploy                       — deploy everything that changed
  *   mesh deploy --dry-run               — preview what would happen
  *   mesh deploy --component mc          — reinstall only Mission Control (all its files)
  *   mesh deploy --component all         — reinstall everything (even unchanged)

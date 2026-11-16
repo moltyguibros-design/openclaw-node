@@ -453,6 +453,16 @@ async function cmdDeploy(args) {
     : path.join(os.homedir(), 'openclaw');
   const repoDir = process.env.OPENCLAW_REPO_DIR || defaultRepo;
   const force = args.includes('--force');
+  // bin/mesh-deploy.js documents --dry-run/--status/--rollback/--local under this
+  // same name; here any of them would still publish a real fleet trigger.
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--component' || args[i] === '--node') { i++; continue; }
+    if (args[i] !== '--force') {
+      console.error(`mesh deploy: unknown option ${args[i]} (this command always triggers a real fleet deploy)`);
+      console.error('  --dry-run, --status, --rollback, --local and --to belong to: node bin/mesh-deploy.js');
+      process.exit(2);
+    }
+  }
 
   // Parse --component flags
   const components = [];
