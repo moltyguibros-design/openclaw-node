@@ -937,6 +937,8 @@ async function enforceBudgets() {
 
 // ── Collab Event Publishing ──────────────────────────
 
+// A session's 'completed' goes out before its parent task's 'completed': mesh-bridge
+// stops tracking a task on the task event and would drop the session result after it.
 function publishCollabEvent(eventType, session) {
   log(`COLLAB EVENT: ${eventType} session=${session.session_id}`);
   nc.publish(`mesh.events.collab.${eventType}`, sc.encode(JSON.stringify({
@@ -1694,9 +1696,9 @@ async function evaluateRound(sessionId) {
 
     // Complete the parent task
     const completedSession = await collabStore.get(sessionId);
+    publishCollabEvent('completed', completedSession);
     await store.markCompleted(freshSession.task_id, completedSession.result);
     publishEvent('completed', await store.get(freshSession.task_id));
-    publishCollabEvent('completed', completedSession);
 
   } else if (maxReached) {
     log(`COLLAB MAX ROUNDS ${sessionId}: ${session.current_round}/${session.max_rounds}. Completing with current artifacts.`);
@@ -1723,12 +1725,12 @@ async function evaluateRound(sessionId) {
 
     // Complete parent task (flagged for review since not truly converged)
     const updatedSession = await collabStore.get(sessionId);
+    publishCollabEvent('completed', updatedSession);
     await store.markCompleted(session.task_id, {
       ...updatedSession.result,
       max_rounds_reached: true,
     });
     publishEvent('completed', await store.get(session.task_id));
-    publishCollabEvent('completed', updatedSession);
 
   } else {
     // Not converged, not maxed out → next round
@@ -1931,9 +1933,9 @@ async function completeCirclingSession(sessionId) {
 
   // Complete parent task
   const completedSession = await collabStore.get(sessionId);
+  publishCollabEvent('completed', completedSession);
   await store.markCompleted(session.task_id, completedSession.result);
   publishEvent('completed', await store.get(session.task_id));
-  publishCollabEvent('completed', completedSession);
 }
 
 /**
@@ -1970,9 +1972,9 @@ async function handleCirclingGateApprove(msg) {
       circling_final_artifact: finalArtifact,
     });
     const completedSession = await collabStore.get(session_id);
+    publishCollabEvent('completed', completedSession);
     await store.markCompleted(session.task_id, completedSession.result);
     publishEvent('completed', await store.get(session.task_id));
-    publishCollabEvent('completed', completedSession);
   } else {
     // Mid-protocol gate (tier 3) — resume next step
     await startCirclingStep(session_id);
