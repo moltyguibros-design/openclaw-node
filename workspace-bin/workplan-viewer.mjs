@@ -285,9 +285,31 @@ function tickLogs(plan, limit = 100) {
     });
 }
 
+// The step an audit dir belongs to. An explicit `<!-- step-id: B.S -->` line in
+// its AUDIT_PRE.md or AUDIT_POST.md wins; otherwise the canonical name
+// step<B><S>_<slug> (one block digit, then the step digits: step31 = 3.1,
+// step310 = 3.10). Sequential-era dirs (step01..step10 numbered in closing
+// order) decode to the wrong step by name, so they need the marker.
+const AUDIT_STEP_MARKER = /^<!--\s*step-id:\s*(\d+\.\d+)\s*-->\s*$/m;
+function auditStepId(auditsDir, dirName) {
+  for (const f of ['AUDIT_PRE.md', 'AUDIT_POST.md']) {
+    let text;
+    try { text = fs.readFileSync(path.join(auditsDir, dirName, f), 'utf8'); } catch { continue; }
+    const marker = text.match(AUDIT_STEP_MARKER);
+    if (marker) return marker[1];
+  }
+  const m = dirName.match(/^step(\d)(\d+)_/);
+  return m ? `${m[1]}.${m[2]}` : null;
+}
+
+function auditDirForStep(plan, stepId) {
+  const dir = planAuditsDir(plan);
+  return Object.keys(planAudits(plan)).sort().find(d => auditStepId(dir, d) === stepId) ?? null;
+}
+
 // Interactive step closures: one entry per audits/*/AUDIT_POST.md (a step that
 // reached done), so the History tab reflects work done by hand — not only
-// autonomous tick runs. Dir names are stepNN_slug (NN = block+step digits).
+// autonomous tick runs.
 function auditClosures(plan, limit = 100) {
   const dir = planAuditsDir(plan);
   if (!fs.existsSync(dir)) return [];
@@ -295,8 +317,8 @@ function auditClosures(plan, limit = 100) {
   for (const d of fs.readdirSync(dir)) {
     let stat;
     try { stat = fs.statSync(path.join(dir, d, 'AUDIT_POST.md')); } catch { continue; } // PRE-only / not closed
-    const m = d.match(/^step(\d)(\d+)_(.+)$/);
-    const label = m ? `${m[1]}.${m[2]} ${m[3].replace(/_/g, ' ')}` : d;
+    const stepId = auditStepId(dir, d);
+    const label = stepId ? `${stepId} ${d.replace(/^step\d+_/, '').replace(/_/g, ' ')}` : d;
     out.push({ kind: 'step', name: label, mtime: stat.mtimeMs, size: stat.size });
   }
   return out.sort((a, b) => b.mtime - a.mtime).slice(0, limit);
@@ -1970,10 +1992,8 @@ const server = http.createServer(async (req, res) => {
     if (auditMatch) {
       const idx = Number(auditMatch[1]);
       const rows = inventoryRows(plan);
-      const audits = planAudits(plan);
-      const folderNames = Object.keys(audits).sort();
-      const dirName = folderNames[idx];
       if (!rows[idx]) return json(res, { error: 'step out of range' }, 404);
+      const dirName = auditDirForStep(plan, rows[idx].step);
       if (!dirName)  return json(res, { dirName: null, step: rows[idx], pre: null, post: null });
       const full = path.join(planAuditsDir(plan), dirName);
       const readMaybe = (rel) => {

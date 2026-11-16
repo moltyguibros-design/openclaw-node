@@ -397,3 +397,39 @@ test('a log stream keeps a multi-byte character split across writes', async t =>
   assert.ok(await stream.waitFor(() => appends().length === 2), JSON.stringify(text()));
   assert.equal(text(), 'FIXTURE_LOG\néX\n');
 });
+
+// The Steps tab paired row N with the Nth alphabetical audit dir, so a step
+// showed another step's audit (foreman shifted by one; step310 sorted before
+// step31). Rows now resolve by step id: an explicit step-id marker, else the
+// canonical step<B><S>_ name.
+test('a step resolves its own audit dir by step id, never by row position', async t => {
+  const audits = {
+    'remediation_2026-09-26': null,
+    step11_shadow: null,
+    step12_timeline: null,
+    step31_service_gate: null,
+    step310_first_transition: null,
+    'step05_sequential-era': '<!-- step-id: 2.3 -->',
+  };
+  const f = await fixture(t, { prepare: (root, plan) => {
+    fs.writeFileSync(path.join(plan, 'INVENTORY.md'), [
+      '| Block | Step | Version | Status | Description |', '|---|---|---|---|---|',
+      ...['1.1', '1.2', '3.1', '3.10', '2.3', '0.5'].map(s => `| ${s.split('.')[0]} | ${s} | v1.0 | [x] | step ${s} |`),
+    ].join('\n') + '\n');
+    for (const [d, marker] of Object.entries(audits)) {
+      fs.mkdirSync(path.join(plan, 'audits', d), { recursive: true });
+      fs.writeFileSync(path.join(plan, 'audits', d, 'AUDIT_PRE.md'), `# PRE ${d}\n${marker ?? ''}\n`);
+      fs.writeFileSync(path.join(plan, 'audits', d, 'AUDIT_POST.md'), `# POST ${d}\n`);
+    }
+    return {};
+  } });
+  const expected = ['step11_shadow', 'step12_timeline', 'step31_service_gate', 'step310_first_transition', 'step05_sequential-era', null];
+  for (const [idx, dirName] of expected.entries()) {
+    const r = JSON.parse((await f.request(`/api/plans/fixture/audits/${idx}`, { token: f.master })).text);
+    assert.equal(r.dirName, dirName, `row ${idx} (${r.step?.step})`);
+    if (dirName) assert.equal(r.pre, `# PRE ${dirName}\n${audits[dirName] ?? ''}\n`);
+  }
+  const history = JSON.parse((await f.request('/api/plans/fixture/logs', { token: f.master })).text)
+    .filter(e => e.kind === 'step').map(e => e.name).sort();
+  assert.deepEqual(history, ['1.1 shadow', '1.2 timeline', '2.3 sequential-era', '3.1 service gate', '3.10 first transition', 'remediation_2026-09-26']);
+});
