@@ -559,11 +559,6 @@ function handleEvent(eventType, taskId, meshTask) {
         lastHeartbeat.set(taskId, Date.now());
         return;
       default:
-        // Handle collab events
-        if (eventType.startsWith('collab.')) {
-          handleCollabEvent(eventType, taskId, meshTask);
-          return;
-        }
         // submitted, started — informational only
         log(`EVENT: ${eventType} ${taskId}`);
         return;
@@ -802,8 +797,13 @@ async function main() {
     for await (const msg of sub) {
       try {
         const payload = JSON.parse(sc.decode(msg.data));
-        // Route plan events separately (they use plan_id, not task_id)
-        if (payload.event && payload.event.startsWith('plan.')) {
+        // Collab session events are told apart by subject: the daemon's `event` is the
+        // bare type, so `mesh.events.collab.completed` would otherwise read as the task's
+        // own completion. Their third argument is the session, not a mesh task.
+        if (msg.subject.startsWith('mesh.events.collab.')) {
+          handleCollabEvent(`collab.${payload.event}`, payload.task_id, payload.session);
+        } else if (payload.event && payload.event.startsWith('plan.')) {
+          // Route plan events separately (they use plan_id, not task_id)
           handlePlanEvent(payload.event, payload.plan || payload);
         } else {
           handleEvent(payload.event, payload.task_id, payload.task);

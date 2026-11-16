@@ -475,17 +475,25 @@ describe('Bug 4 regression: collab.completed event metadata', { skip: skipReason
     sessionId = submit.data.collab_session_id;
     createdSessionIds.push(sessionId);
 
-    // Subscribe to collab.completed event
+    // Subscribe to both completions for this task, in arrival order: the session's
+    // must precede the parent task's, or mesh-bridge (which stops tracking the task
+    // on the task event) drops the session result.
+    const completions = [];
     const completedPromise = new Promise((resolve, reject) => {
-      const sub = nc.subscribe('mesh.events.collab.completed');
-      const timer = setTimeout(() => { sub.unsubscribe(); reject(new Error('Timeout waiting for collab.completed')); }, 15000);
+      const sub = nc.subscribe('mesh.events.>');
+      const timer = setTimeout(() => { sub.unsubscribe(); reject(new Error(`Timeout waiting for both completions, saw ${JSON.stringify(completions)}`)); }, 15000);
+      let collabEvent;
       (async () => {
         for await (const msg of sub) {
+          if (msg.subject !== 'mesh.events.collab.completed' && msg.subject !== 'mesh.events.completed') continue;
           const data = JSON.parse(sc.decode(msg.data));
-          if (data.task_id === taskId) {
+          if (data.task_id !== taskId) continue;
+          completions.push(msg.subject);
+          if (msg.subject === 'mesh.events.collab.completed') collabEvent = data;
+          if (completions.length === 2) {
             clearTimeout(timer);
             sub.unsubscribe();
-            resolve(data);
+            resolve(collabEvent);
             return;
           }
         }
@@ -511,6 +519,7 @@ describe('Bug 4 regression: collab.completed event metadata', { skip: skipReason
 
     // Wait for the collab.completed event
     const event = await completedPromise;
+    assert.deepEqual(completions, ['mesh.events.collab.completed', 'mesh.events.completed']);
 
     // The event should carry the full session including result
     assert.ok(event.session_id || event.data?.session_id, 'Event should have session_id');
