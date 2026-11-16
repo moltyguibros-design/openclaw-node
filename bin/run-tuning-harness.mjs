@@ -8,7 +8,11 @@
  * and channel weights) and produces a structured markdown comparison report.
  *
  * Usage:
- *   node bin/run-tuning-harness.mjs [--queries path] [--db path] [--extraction-db path] [--graph-db path] [--out path] [--limit N]
+ *   node bin/run-tuning-harness.mjs [--queries path] [--db path] [--extraction-db path] [--graph-db path] [--out path] [--limit N] [--llm-seeds]
+ *
+ * --llm-seeds runs each query through the inject path's LLM prompt analysis
+ * once and passes its entities/themes as seedTerms, as memory-injector does.
+ * Run once with and once without it to measure what the seeds change.
  */
 
 import { parseArgs } from 'node:util';
@@ -140,7 +144,7 @@ export async function runConfigQueries(pipeline, queries, limit = 5) {
   for (const q of queries) {
     let hits = [];
     try {
-      hits = await pipeline.retrieve(q.query, { k: limit });
+      hits = await pipeline.retrieve(q.query, { k: limit, seedTerms: q.seedTerms });
     } catch { /* pipeline may fail on empty DBs */ }
     results.push({
       queryId: q.id,
@@ -293,6 +297,7 @@ if (isMain) {
       'graph-db': { type: 'string' },
       out: { type: 'string', default: DEFAULT_OUT },
       limit: { type: 'string', default: '5' },
+      'llm-seeds': { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
   });
@@ -307,6 +312,7 @@ Options:
   --graph-db PATH        Path to graph cache database (default: auto-detect)
   --out PATH             Output markdown file (default: ${DEFAULT_OUT})
   --limit N              Top-K results per query per config (default: 5)
+  --llm-seeds            Seed channels 3-5 with the LLM prompt analysis's entities/themes
   -h, --help             Show this help
 `);
     process.exit(0);
@@ -368,6 +374,18 @@ Options:
       process.stderr.write('[tuning] Graph cache: default path\n');
     } catch {
       process.stderr.write('[tuning] WARNING: No graph cache found. Spreading activation channel disabled.\n');
+    }
+  }
+
+  if (opts['llm-seeds']) {
+    const { analyzeQueryWithLlm } = await import('../lib/query-analysis.mjs');
+    const { createLlmClient } = await import('../lib/llm-client.mjs');
+    const { llmSeedTerms } = await import('../lib/memory-injector.mjs');
+    const llmClient = createLlmClient();
+    for (const q of queries) {
+      const analysis = await analyzeQueryWithLlm(q.query, llmClient, { embedFn: async () => null });
+      q.seedTerms = llmSeedTerms(analysis.llmAnalysis);
+      process.stderr.write(`[tuning] ${q.id} seeds (${analysis.analysisMode}): ${q.seedTerms.join(', ') || '—'}\n`);
     }
   }
 
