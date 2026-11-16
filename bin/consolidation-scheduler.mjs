@@ -158,6 +158,9 @@ export async function runScheduledCycle(opts = {}) {
       dbPath: opts.dbPath,
       vaultPath: opts.vaultPath,
       db: opts.db,
+      // Every 30 min, synchronous, inside the hard cap: quick_check, not the
+      // full scan the daemon ran at boot.
+      integrityCheck: 'quick',
       client,
       signal: ac.signal,
       eventLog: opts.eventLog,

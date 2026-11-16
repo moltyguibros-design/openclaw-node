@@ -94,6 +94,7 @@ function decayedEventData(decay, prune, durationMs) {
  * @param {string} [opts.vaultPath] — Obsidian vault path
  * @param {boolean} [opts.dryRun] — skip only the vault-surface writers (session/decision/theme notes, daily/weekly digest); decay, prune, reinforce, concept summaries, events and the promotion fingerprint still write
  * @param {object} [opts.db] — pre-opened database (for testing)
+ * @param {boolean|'quick'} [opts.integrityCheck] — openStore's open-time check (default full)
  * @param {object} [opts.client] — LLM client for summary generation
  * @param {AbortSignal} [opts.signal] — F-N100: hard-cap cancellation
  * @param {number} [opts.maxConcepts] — F-N101: cap per-cycle summary count
@@ -107,7 +108,7 @@ function decayedEventData(decay, prune, durationMs) {
 export async function runConsolidationCycle(opts = {}) {
   const startMs = Date.now();
   const dbPath = opts.dbPath || DEFAULT_DB_PATH;
-  const db = opts.db || openStore(dbPath);
+  const db = opts.db || openStore(dbPath, { integrityCheck: opts.integrityCheck });
   const ownDb = !opts.db;
   const signal = opts.signal || null;
   const eventLog = opts.eventLog || null;

@@ -149,3 +149,59 @@ describe('R21 (repair 5.5): readonly opens get busy_timeout', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe('open-time corruption check: full at boot, quick on recurring opens', () => {
+  async function checksRun(open) {
+    const { default: Database } = await import('better-sqlite3');
+    const seen = [];
+    const original = Database.prototype.pragma;
+    Database.prototype.pragma = function (source, options) {
+      if (/^(integrity|quick)_check$/.test(source)) seen.push(source);
+      return original.call(this, source, options);
+    };
+    try {
+      open().close();
+    } finally {
+      Database.prototype.pragma = original;
+    }
+    return seen;
+  }
+
+  it('runs the full integrity_check by default and quick_check for integrityCheck: quick', async () => {
+    const dbPath = path.join(TMP_DIR, 'checks.db');
+    assert.deepEqual(await checksRun(() => openStore(dbPath)), ['integrity_check']);
+    assert.deepEqual(await checksRun(() => openStore(dbPath, { integrityCheck: 'quick' })), ['quick_check']);
+    assert.deepEqual(await checksRun(() => openStore(dbPath, { integrityCheck: false })), []);
+  });
+
+  it('quick_check still refuses a file that is not a database', () => {
+    const dbPath = path.join(TMP_DIR, 'corrupt-quick.db');
+    fs.writeFileSync(dbPath, 'not a sqlite database');
+    assert.throws(() => openStore(dbPath, { integrityCheck: 'quick' }), /quick check failed|not a database/i);
+  });
+
+  it('the recurring openers ask for quick_check', async () => {
+    const { createExtractionStore } = await import('../lib/extraction-store.mjs');
+    const { SessionStore } = await import('../lib/session-store.mjs');
+    const { initDatabase } = await import('../lib/mcp-knowledge/core.mjs');
+    const dbPath = path.join(TMP_DIR, 'state.db');
+    assert.deepEqual(await checksRun(() => createExtractionStore({ dbPath, integrityCheck: 'quick' })), ['quick_check']);
+    assert.deepEqual(await checksRun(() => new SessionStore({ dbPath, integrityCheck: 'quick' })), ['quick_check']);
+    assert.deepEqual(await checksRun(() => initDatabase(path.join(TMP_DIR, 'k.db'), { integrityCheck: 'quick' })), ['quick_check']);
+
+    const { runScheduledCycle } = await import('../bin/consolidation-scheduler.mjs');
+    let asked;
+    await runScheduledCycle({ hardCapMs: 5000, client: {}, runCycle: async (args) => { asked = args.integrityCheck; return {}; } });
+    assert.equal(asked, 'quick', 'each consolidation cycle opens state.db with quick_check');
+  });
+
+  it('the flush worker and the index job open with quick_check', () => {
+    const worker = fs.readFileSync(new URL('../workspace-bin/flush-worker.mjs', import.meta.url), 'utf8');
+    assert.equal((worker.match(/new SessionStore\(\{ dbPath: stateDb, integrityCheck: 'quick' \}\)/g) || []).length, 2);
+    assert.match(worker, /createExtractionStore\(\{ dbPath: stateDb, integrityCheck: 'quick' \}\)/);
+    const job = fs.readFileSync(new URL('../workspace-bin/knowledge-index-job.mjs', import.meta.url), 'utf8');
+    assert.match(job, /initDatabase\(knowledgePath, \{ integrityCheck: 'quick' \}\)/);
+    assert.match(job, /openStore\(statePath, \{ readonly: true, integrityCheck: 'quick' \}\)/);
+    assert.doesNotMatch(worker + job, /integrityCheck: false/);
+  });
+});

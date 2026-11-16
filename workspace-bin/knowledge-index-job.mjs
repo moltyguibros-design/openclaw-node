@@ -20,10 +20,10 @@ import { initDatabase, indexSessionTurns } from '../lib/mcp-knowledge/core.mjs';
 const [statePath, knowledgePath, batchArg] = process.argv.slice(2);
 const batchLimit = Number(batchArg) || 5;
 
-// R22 (repair 5.6): no integrity scan on the 10-min indexing path; the daemon
-// scans both DBs when it opens them at boot.
-const knowledgeDb = initDatabase(knowledgePath, { integrityCheck: false });
-const stateDb = openStore(statePath, { readonly: true, integrityCheck: false });
+// R22 (repair 5.6): no full integrity scan on the 10-min indexing path; both
+// DBs get quick_check only (the daemon ran the full scan when it opened them at boot).
+const knowledgeDb = initDatabase(knowledgePath, { integrityCheck: 'quick' });
+const stateDb = openStore(statePath, { readonly: true, integrityCheck: 'quick' });
 try {
   const allSessions = stateDb.prepare(
     'SELECT id, source FROM sessions ORDER BY start_time ASC'

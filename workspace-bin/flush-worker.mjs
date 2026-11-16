@@ -24,15 +24,15 @@ try {
   if (kind === 'import') {
     const { jsonlPath, source, format } = workerData;
     const { SessionStore } = await import('../lib/session-store.mjs');
-    // Spawned every 10 min and on every flush: the daemon already scanned
-    // state.db when it opened it at boot.
-    const store = new SessionStore({ dbPath: stateDb, integrityCheck: false });
+    // A worker opens state.db on every import/flush: quick_check, not the full
+    // scan (the daemon's own store ran that once at boot).
+    const store = new SessionStore({ dbPath: stateDb, integrityCheck: 'quick' });
     const result = await store.importSession(jsonlPath, { source, format });
     parentPort.postMessage({ ok: true, result });
   } else if (kind === 'importDir') {
     const { sources } = workerData;
     const { SessionStore } = await import('../lib/session-store.mjs');
-    const store = new SessionStore({ dbPath: stateDb, integrityCheck: false });
+    const store = new SessionStore({ dbPath: stateDb, integrityCheck: 'quick' });
     const results = [];
     for (const source of sources) {
       const r = await store.importDirectory(source.path, { source: source.name, format: source.format });
@@ -57,7 +57,7 @@ try {
         llmClient = createLlmClient();
         try {
           const { createExtractionStore } = await import('../lib/extraction-store.mjs');
-          extractionStore = createExtractionStore({ dbPath: stateDb, integrityCheck: false });
+          extractionStore = createExtractionStore({ dbPath: stateDb, integrityCheck: 'quick' });
         } catch {
           // runFlush degrades to the regex path without a store — same behavior
           // the daemon's own getExtractionStore() failure produces.
