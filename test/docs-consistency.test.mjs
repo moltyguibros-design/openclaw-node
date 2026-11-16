@@ -32,6 +32,16 @@ test('README knowledge-server tables name every tool and KNOWLEDGE_* variable th
   for (const v of vars) assert.ok(configTable.includes(`| \`${v}\` |`), `README config table lacks ${v}`);
 });
 
+test('README says KNOWLEDGE_HOST is the only non-loopback Host the HTTP gate accepts, not 0.0.0.0', () => {
+  const readme = read('README.md');
+  assert.match(read('lib/mcp-knowledge/server.mjs'), /const self = new Set\(\[`\$\{host\}:\$\{port\}`, `localhost:\$\{port\}`/);
+  const row = readme.split('\n').find((l) => l.startsWith('| `KNOWLEDGE_HOST` |'));
+  assert.match(row, /`Host`/);
+  assert.match(row, /not `0\.0\.0\.0`/);
+  const para = readme.split('\n').find((l) => l.startsWith('Mesh worker nodes can reach the lead'));
+  assert.match(para, /exact address or name the workers dial.*not `0\.0\.0\.0`/);
+});
+
 test('TEST.md names the CI Node matrix and lists no tested module as a coverage gap', () => {
   const testMd = read('TEST.md');
   const matrix = read('.github/workflows/test.yml').match(/node-version: \[([\d, ]+)\]/)[1];
