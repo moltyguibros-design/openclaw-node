@@ -252,7 +252,8 @@ function handleCollabEvent(eventType, taskId, data) {
   // Only process events for tasks we dispatched
   if (!dispatched.has(taskId)) return;
 
-  const session = data; // collab events include the session object
+  // Mission Control's operator interventions publish collab events with no session.
+  const session = data || {};
 
   switch (eventType) {
     case 'collab.created':
@@ -291,9 +292,9 @@ function handleCollabEvent(eventType, taskId, data) {
     }
 
     case 'collab.converged':
-      log(`COLLAB CONVERGED: ${taskId} after ${session.current_round} rounds`);
+      log(`COLLAB CONVERGED: ${taskId} after ${session.current_round ?? '?'} rounds`);
       updateTaskInPlace(ACTIVE_TASKS_PATH, taskId, {
-        next_action: `Converged after ${session.current_round} rounds. Collecting artifacts...`,
+        next_action: `Converged after ${session.current_round ?? '?'} rounds. Collecting artifacts...`,
         updated_at: isoTimestamp(),
       });
       break;
@@ -559,6 +560,19 @@ function formatTaskYaml(task) {
 // ── Results: Mesh → Kanban (event-driven) ───────────
 
 /**
+ * Route one mesh.events.> message. The daemon's payload.event is the bare name
+ * ('created', 'completed'); only the subject carries the plan./collab. prefix,
+ * so plan and collab events are told apart by subject (matching a 'plan.'
+ * event name dropped every real plan event and no subtask was materialized).
+ */
+function routeEvent(subject, payload) {
+  const type = subject.slice('mesh.events.'.length);
+  if (type.startsWith('plan.')) handlePlanEvent(type, payload.plan || payload);
+  else if (type.startsWith('collab.')) handleCollabEvent(type, payload.task_id, payload.session);
+  else handleEvent(type, payload.task_id, payload.task);
+}
+
+/**
  * Handle a mesh event. Called immediately when the daemon publishes to mesh.events.>
  */
 function handleEvent(eventType, taskId, meshTask) {
@@ -601,11 +615,6 @@ function handleEvent(eventType, taskId, meshTask) {
         lastHeartbeat.set(taskId, Date.now());
         return;
       default:
-        // Handle collab events
-        if (eventType.startsWith('collab.')) {
-          handleCollabEvent(eventType, taskId, meshTask);
-          return;
-        }
         // submitted, started — informational only
         log(`EVENT: ${eventType} ${taskId}`);
         return;
@@ -843,16 +852,7 @@ async function main() {
   (async () => {
     for await (const msg of sub) {
       try {
-        const payload = JSON.parse(sc.decode(msg.data));
-        // Route plan events separately (they use plan_id, not task_id). The
-        // daemon publishes them on mesh.events.plan.<type> with event '<type>',
-        // so the subject, not the event name, marks them; matching a 'plan.'
-        // event name dropped every real one and no subtask was materialized.
-        if (msg.subject.startsWith('mesh.events.plan.')) {
-          handlePlanEvent(`plan.${msg.subject.slice('mesh.events.plan.'.length)}`, payload.plan || payload);
-        } else {
-          handleEvent(payload.event, payload.task_id, payload.task);
-        }
+        routeEvent(msg.subject, JSON.parse(sc.decode(msg.data)));
       } catch (err) {
         log(`ERROR parsing event: ${err.message}`);
       }
