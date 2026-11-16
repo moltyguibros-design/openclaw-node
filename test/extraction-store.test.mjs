@@ -2,7 +2,7 @@
  * Tests for lib/extraction-store.mjs and the LLM extraction path in pre-compression-flush.mjs.
  */
 
-import { describe, it, beforeEach, afterEach } from 'node:test';
+import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
@@ -270,6 +270,34 @@ describe('runFlush with LLM extraction', () => {
     // Verify MEMORY.md was written with structured content
     const memoryContent = fs.readFileSync(memoryMdPath, 'utf-8');
     assert.ok(memoryContent.includes('NATS JetStream'));
+  });
+
+  it('walks the vault once per flush: the concept backfill no longer runs the full coverage report', async () => {
+    const jsonlPath = path.join(tmpDir, 'walk-session.jsonl');
+    const memoryMdPath = path.join(tmpDir, 'MEMORY-walk.md');
+    const vaultPath = path.join(tmpDir, 'vault-walk');
+    fs.mkdirSync(path.join(vaultPath, 'concepts'), { recursive: true });
+    fs.writeFileSync(jsonlPath, [
+      { type: 'user', message: { role: 'user', content: "Let's configure NATS JetStream with file storage" }, timestamp: '2026-05-22T10:00:00Z' },
+      { type: 'assistant', message: { role: 'assistant', content: "I'll set up JetStream with file-backed storage" }, timestamp: '2026-05-22T10:00:05Z' },
+    ].map((m) => JSON.stringify(m)).join('\n'));
+    const mockClient = {
+      async generate() {
+        return { content: JSON.stringify(mockExtractionResult), usage: null, finishReason: 'stop' };
+      },
+    };
+
+    const readdir = mock.method(fs, 'readdirSync');
+    try {
+      const result = await runFlush(jsonlPath, memoryMdPath, {
+        vaultPath, charBudget: 2200, llmClient: mockClient, extractionStore: store,
+      });
+      assert.equal(result.mode, 'llm');
+      const rootWalks = readdir.mock.calls.filter((c) => path.resolve(String(c.arguments[0])) === vaultPath);
+      assert.equal(rootWalks.length, 1, 'only the end-of-flush integrity check walks the vault');
+    } finally {
+      readdir.mock.restore();
+    }
   });
 
   it('populates turn_index on mentions via runFlush pipeline', async () => {

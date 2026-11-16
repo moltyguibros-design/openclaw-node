@@ -519,6 +519,36 @@ describe('queryConceptData + generateConceptNotes integration', () => {
     }
   });
 
+  it('runs per-entity detail queries only for the concepts inside the budget, prepared once', async () => {
+    const db = seedDb();
+    db.prepare(`INSERT INTO entities (name, type, first_seen, last_seen, mention_count, private)
+      VALUES ('Third Concept', 'concept', '2026-05-11', '2026-05-18', 6, 0)`).run();
+    const vaultPath = join(tmpDir, 'vault-detail-budget');
+    const prepared = [];
+    const executed = [];
+    const spyDb = {
+      prepare(sql) {
+        const stmt = db.prepare(sql);
+        prepared.push(sql);
+        return {
+          get: (...args) => { executed.push(sql); return stmt.get(...args); },
+          all: (...args) => { executed.push(sql); return stmt.all(...args); },
+        };
+      },
+    };
+    const isSalience = (sql) => sql.includes('AVG(salience)');
+
+    try {
+      const result = await generateConceptNotes({ db: spyDb, vaultPath, threshold: 5, client: null, maxConcepts: 2 });
+      assert.equal(result.generated, 2);
+      assert.equal(result.skipped, 1);
+      assert.equal(executed.filter(isSalience).length, 2, 'details only for the 2 budgeted concepts');
+      assert.equal(prepared.filter(isSalience).length, 1, 'detail statements prepared once per call');
+    } finally {
+      db.close();
+    }
+  });
+
   it('spends the budget frontier-first: a noteless concept beats an already-written hub', async () => {
     const db = seedDb();
     const vaultPath = join(tmpDir, 'vault-frontier');
