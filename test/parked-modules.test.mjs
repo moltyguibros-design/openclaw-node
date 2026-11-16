@@ -1,4 +1,4 @@
-// Modules kept as parked federation/digest code carry a PARKED marker and have no
+// Modules kept as parked federation code carry a PARKED marker and have no
 // production caller. If one gets wired, drop its marker (and its row here) so the
 // label never claims a live module is idle.
 import { test } from 'node:test';
@@ -12,7 +12,6 @@ const PARKED = [
   { file: 'lib/kanban-store.mjs', symbol: 'createKanbanStore' },
   { file: 'lib/artifacts.mjs', symbol: 'putArtifact' },
   { file: 'lib/artifacts.mjs', symbol: 'getArtifact' },
-  { file: 'lib/obsidian-digest.mjs', symbol: 'generateWeeklyDigest' },
 ];
 const PRODUCTION_DIRS = ['bin', 'lib', 'workspace-bin', 'scripts', 'skills', 'services', 'mission-control/src', 'packages'];
 const SKIP = new Set(['node_modules', 'dist', '.next', 'test', 'tests', '__tests__']);
@@ -38,9 +37,10 @@ test('parked modules are marked PARKED and have no production caller', () => {
   }
 });
 
-test('the weekly digest is the parked export, not the wired daily one', () => {
+// generateWeeklyDigest was parked until the consolidation cycle wired it
+// (consolidation: write the weekly digest on the first cycle of each ISO week).
+test('the weekly digest carries no PARKED marker now that the consolidation cycle calls it', () => {
   const src = fs.readFileSync(path.join(ROOT, 'lib/obsidian-digest.mjs'), 'utf8');
-  const weekly = src.indexOf('export async function generateWeeklyDigest');
-  const marker = src.lastIndexOf('PARKED:', weekly);
-  assert.ok(marker > src.lastIndexOf('export async function generateDailyDigest', weekly), 'PARKED marker must sit on generateWeeklyDigest');
+  assert.doesNotMatch(src, /PARKED:/);
+  assert.match(fs.readFileSync(path.join(ROOT, 'bin/consolidate.mjs'), 'utf8'), /\bgenerateWeeklyDigest\(/);
 });
