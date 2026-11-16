@@ -8,11 +8,12 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createMemoryClient } from '../packages/openclaw-memory-context-engine/memory-client.js';
+import { createMemoryClient, DEFAULT_TIMEOUT_MS } from '../packages/openclaw-memory-context-engine/memory-client.js';
+import { DEFAULT_ANALYSIS_TIMEOUT } from '../lib/llm-client.mjs';
 import {
   createMemoryContextEngine,
   compileSessionPattern,
@@ -76,6 +77,18 @@ describe('memory-client', () => {
   it('surfaces HTTP errors with status', async () => {
     failNext = 500;
     await assert.rejects(() => mkClient().inject({ prompt: 'x' }), (e) => e.status === 500 && /boom/.test(e.message));
+  });
+  // A 4 s default sat under the daemon's 8 s analysis wall: cold or contended
+  // turns ran without memory while the daemon still did the work.
+  it('the default timeout outlasts the daemon analysis wall plus retrieval, and the docs say so', () => {
+    assert.ok(DEFAULT_TIMEOUT_MS >= DEFAULT_ANALYSIS_TIMEOUT + 3000,
+      `plugin timeout ${DEFAULT_TIMEOUT_MS} ms vs analysis wall ${DEFAULT_ANALYSIS_TIMEOUT} ms`);
+    const pkg = new URL('../packages/openclaw-memory-context-engine/', import.meta.url);
+    const manifest = JSON.parse(readFileSync(new URL('openclaw.plugin.json', pkg), 'utf8'));
+    const hint = Object.values(manifest).find((v) => v && typeof v === 'object' && v.timeoutMs?.placeholder)?.timeoutMs;
+    assert.equal(hint.placeholder, String(DEFAULT_TIMEOUT_MS));
+    assert.doesNotMatch(hint.help, /well under a second/);
+    assert.match(readFileSync(new URL('README.md', pkg), 'utf8'), new RegExp(`\\| \`timeoutMs\` \\| \`${DEFAULT_TIMEOUT_MS}\` \\|`));
   });
 });
 

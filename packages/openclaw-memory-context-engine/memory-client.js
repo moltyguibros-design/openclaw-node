@@ -13,7 +13,11 @@ import { join } from 'node:path';
 
 export const DEFAULT_INJECT_URL = 'http://127.0.0.1:7893';
 export const DEFAULT_TOKEN_PATH = join(homedir(), '.openclaw/config/memory-injection-token');
-export const DEFAULT_TIMEOUT_MS = 4000;
+// Above the daemon's worst case: up to 8 s of LLM query analysis
+// (DEFAULT_ANALYSIS_TIMEOUT) plus embedding and retrieval, ~9-11 s observed.
+// Under it, a cold or contended turn ran without memory while the daemon
+// still finished the work.
+export const DEFAULT_TIMEOUT_MS = 12000;
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 
