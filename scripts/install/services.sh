@@ -27,8 +27,8 @@ check_rendered() {
   fi
 }
 
-# Ensure log directories exist
-run mkdir -p "$OPENCLAW_ROOT/logs" "$WORKSPACE/.tmp"
+# Ensure log directories exist (the transcript-archive plist logs into its archive dir)
+run mkdir -p "$OPENCLAW_ROOT/logs" "$WORKSPACE/.tmp" "$OPENCLAW_ROOT/transcript-archive"
 
 if [ ! -f "$MANIFEST" ]; then
   warn "Service manifest not found at $MANIFEST — skipping service installation"

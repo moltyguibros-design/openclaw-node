@@ -97,5 +97,11 @@
     "role": "both",
     "autostart": true,
     "timer": true
+  },
+  {
+    "name": "openclaw-transcript-archive",
+    "role": "both",
+    "autostart": true,
+    "timer": true
   }
 ]

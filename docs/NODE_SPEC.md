@@ -123,6 +123,7 @@ Written to `~/.openclaw/openclaw.env` by install (generated where marked ⚙; RA
 | openclaw-gateway | **no** (product not vendored) | global `openclaw` pkg + auth | external gateway surface; enable after `npm i -g openclaw` |
 | openclaw-lane-watchdog | yes | gateway logs (`~/.openclaw/logs/gateway.log`, `gateway.err.log`) | watches the gateway's logs for lane deadlocks; SIGUSR1s the gateway to reset its lanes |
 | openclaw-log-rotate | yes (timer weekly) | nothing | rotates `~/.openclaw/logs` + workspace `.tmp` |
+| openclaw-transcript-archive | yes (timer hourly) | rsync | append-only copy of Claude Code + gateway transcripts into `~/.openclaw/transcript-archive`, ahead of their 30-day cleanup |
 
 **Ports:** 4222 bus (+8222 monitor; cluster adds 4223-4/6222-4/8223-4) · 3000 MC · 7893 memory-inject · 11434 ollama · 8787 companion-bridge · 18789 gateway. All loopback.
 
