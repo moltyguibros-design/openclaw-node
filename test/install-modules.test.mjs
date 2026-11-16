@@ -355,17 +355,24 @@ test('scheduler heartbeat helper is installer-owned and both units invoke it', (
   assert.doesNotMatch(`${heartbeatLaunchd}\n${heartbeatSystemd}`, /Authorization|Bearer/);
 });
 
-test('fresh installs schedule transcript-archive on both platforms', () => {
+// The stack, the NATS user transfer and the timer-hold tooling all count
+// transcript-archive among the standard timer jobs; the installer did not.
+test('fresh installs schedule transcript-archive hourly on both platforms', () => {
   const manifest = JSON.parse(readFileSync(join(ROOT, 'services/service-manifest.json'), 'utf8'));
-  const entry = manifest.find((s) => s.name === 'openclaw-transcript-archive');
-  assert.deepEqual(entry, { name: 'openclaw-transcript-archive', role: 'both', autostart: true, timer: true });
-  assert.ok(existsSync(join(ROOT, 'services/launchd/ai.openclaw.transcript-archive.plist')));
+  const entries = manifest.filter((s) => s.name === 'openclaw-transcript-archive');
+  assert.deepEqual(entries, [{ name: 'openclaw-transcript-archive', role: 'both', autostart: true, timer: true }]);
+  const plist = readFileSync(join(ROOT, 'services/launchd/ai.openclaw.transcript-archive.plist'), 'utf8');
+  assert.match(plist, /<key>StartInterval<\/key><integer>3600<\/integer>/);
   const service = readFileSync(join(ROOT, 'services/systemd/openclaw-transcript-archive.service'), 'utf8');
+  assert.match(service, /^Type=oneshot$/m);
   assert.match(service, /^ExecStart=\/bin\/sh \$\{OPENCLAW_WORKSPACE\}\/bin\/archive-transcripts\.sh$/m);
   assert.match(readFileSync(join(ROOT, 'services/systemd/openclaw-transcript-archive.timer'), 'utf8'), /^OnUnitActiveSec=3600$/m);
   assert.ok(existsSync(join(ROOT, 'workspace-bin/archive-transcripts.sh')), 'the installer copies workspace-bin/ to $WORKSPACE/bin/');
-  // The plist writes its stdout/stderr into the archive dir before the script can create it.
-  assert.match(moduleSrc['services.sh'], /mkdir -p [^\n]*"\$OPENCLAW_ROOT\/transcript-archive"/);
+  // launchd will not start a job whose log directory is missing, and the plist
+  // logs into the archive dir before the script can create it.
+  const logDir = plist.match(/<key>StandardErrorPath<\/key><string>\$\{HOME\}\/\.openclaw\/([^<]+)\/[^/<]+<\/string>/)?.[1];
+  assert.equal(logDir, 'transcript-archive');
+  assert.equal((moduleSrc['services.sh'].match(/mkdir -p [^\n]*"\$OPENCLAW_ROOT\/transcript-archive"/g) || []).length, 1);
 });
 
 test('every timer in the service manifest ships its launchd plist and its systemd service + timer', () => {
