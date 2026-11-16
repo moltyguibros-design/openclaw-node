@@ -21,7 +21,7 @@
 #
 # Env overrides:
 #   OPENCLAW_REPO      owner/name to fetch      (default moltyguibros-design/openclaw-node)
-#   OPENCLAW_REF       branch/tag              (default main)
+#   OPENCLAW_REF       branch, tag or commit  (default main)
 #   OPENCLAW_SRC       use an existing checkout instead of downloading
 #   OPENCLAW_NO_INSTALL=1   install deps only, do not run install.sh
 #   plus any install.sh flag passed straight through:
@@ -44,6 +44,8 @@ main() {
 
 REPO="${OPENCLAW_REPO:-moltyguibros-design/openclaw-node}"
 REF="${OPENCLAW_REF:-main}"
+USER_SKIP_LLM=false
+for a in "$@"; do [ "$a" = "--skip-llm" ] && USER_SKIP_LLM=true; done
 
 G='\033[0;32m'; Y='\033[1;33m'; R='\033[0;31m'; B='\033[1m'; N='\033[0m'
 ok()   { echo -e "${G}[+]${N} $*"; }
@@ -204,9 +206,8 @@ else
   have apt-get || die "only Debian/Ubuntu apt is supported on Linux."
 
   step "APT baseline"
-  # Unconditional. install.sh only refreshes lists inside its node-missing
-  # branch, so a box that already ships Node 22 installs against stale lists
-  # and dies mid-run under `set -e`.
+  # Unconditional: refreshing lists only when Node was missing let a box that
+  # already ships Node 22 install against stale lists and die mid-run.
   $SUDO apt-get update -y || die "apt-get update failed."
   $SUDO apt-get install -y \
     curl git sqlite3 build-essential jq python3 python3-pip ca-certificates gnupg \
@@ -302,7 +303,9 @@ chk "build tools"   '{ [ "$OS" = macos ] && xcode-select -p; } || command -v cc'
 chk "curl"          'command -v curl'
 chk "jq"            'command -v jq'
 chk "nats-server"   'command -v nats-server'
-chk "ollama"        'command -v ollama'
+# Still installed under --skip-llm so llm-setup.sh works later, but a box that
+# asked for no LLM is not refused for lacking it (as prereqs.sh does).
+$USER_SKIP_LLM || chk "ollama" 'command -v ollama'
 chk "tailscale"     'command -v tailscale'
 [ "$OS" = macos ] && chk "homebrew" 'command -v brew'
 
@@ -328,7 +331,7 @@ else
   rm -rf "$SRC"; mkdir -p "$SRC"
   # Tarball, not `git clone`: on a virgin Mac `git` is a stub that pops the
   # Xcode GUI prompt, which would stall a piped install.
-  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$REF" \
+  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$REF" \
     | tar xz -C "$SRC" --strip-components=1 \
     || die "could not download $REPO@$REF"
   ok "source at $SRC"
@@ -340,8 +343,6 @@ cd "$SRC" || die "cannot enter $SRC"
 # Wave 1 is binaries + a running node. --skip-llm is forced here so the 5-20 GB
 # model pull never starts unannounced; wave 2 below asks first. If the caller
 # already passed --skip-llm they want no models at all, so wave 2 is skipped too.
-USER_SKIP_LLM=false
-for a in "$@"; do [ "$a" = "--skip-llm" ] && USER_SKIP_LLM=true; done
 
 if [ $# -gt 0 ]; then
   bash install.sh --enable-services --skip-llm "$@"
