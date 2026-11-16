@@ -110,7 +110,8 @@ describe('mesh CLI', () => {
         async keys() { return (async function* () { yield* Object.keys(health); })(); },
         async get(k) { return { value: sc.encode(JSON.stringify(health[k])) }; },
       };
-      const nc = { publish() {}, async close() {}, jetstream: () => ({ views: { kv: async () => kv } }) };
+      // subscribe: the tracer listens for the signed trace-mode switch on every connection.
+      const nc = { publish() {}, subscribe() { return { unsubscribe() {} }; }, async close() {}, jetstream: () => ({ views: { kv: async () => kv } }) };
       return { ...mod, connect: async () => nc };
     };
   `);
