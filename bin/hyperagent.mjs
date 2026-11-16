@@ -10,10 +10,13 @@
  *   hyperagent status
  *   hyperagent log <json>
  *   hyperagent telemetry [--domain X] [--last N]
+ *   hyperagent report --run <run_id> [--json]
  *   hyperagent strategies [--domain X]
+ *   hyperagent consult --domain X [--subdomain Y]
  *   hyperagent strategy <id>
  *   hyperagent seed-strategy <json>
  *   hyperagent reflect [--force]
+ *   hyperagent reflect --pending
  *   hyperagent reflect --write-synthesis <json>
  *   hyperagent proposals
  *   hyperagent approve <id> --reviewer <name>
@@ -422,6 +425,7 @@ commands:
   status                         overview stats
   log <json|--stdin>             log telemetry entry
   telemetry [--domain X] [--last N]  list entries
+  report --run <run_id> [--json] cohort evidence report for one run
   strategies [--domain X]        list active strategies
   consult --domain X [--subdomain Y]  print the best strategy as JSON
   strategy <id>                  show strategy detail

@@ -459,3 +459,17 @@ console.log('LOCAL_COMPLETION '+result.ok);`;
     }
   });
 });
+
+// Both CLIs logged `NATS connected (${natsUrl})`, and natsUrl is undefined
+// unless NATS_URL overrides the resolver, so the log read "(undefined)".
+describe('consolidation CLIs log the resolved NATS server', () => {
+  it('interpolates the resolved connect options, not the raw override', async () => {
+    const { readFileSync } = await import('node:fs');
+    for (const f of ['../bin/consolidate.mjs', '../bin/consolidation-scheduler.mjs']) {
+      const src = readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
+      const line = src.split('\n').find((l) => l.includes('NATS connected ('));
+      assert.match(line, /\$\{connectOpts\.servers\}/, f);
+      assert.match(src, /const connectOpts = natsConnectOpts\(/, f);
+    }
+  });
+});

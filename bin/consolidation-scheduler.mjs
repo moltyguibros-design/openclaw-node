@@ -340,9 +340,10 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
       const { connect } = await import('nats');
       const { createLocalEventLog } = await import('../lib/local-event-log.mjs');
       const { natsConnectOpts } = _require('../lib/nats-resolve.js');
-      nc = await connect(natsConnectOpts({ servers: natsUrl, name: 'consolidation-scheduler', timeout: 5000 }));
+      const connectOpts = natsConnectOpts({ servers: natsUrl, name: 'consolidation-scheduler', timeout: 5000 });
+      nc = await connect(connectOpts);
       cliOpts.eventLog = await createLocalEventLog(nc, nodeId);
-      console.log(`NATS connected (${natsUrl}), events will be emitted.`);
+      console.log(`NATS connected (${connectOpts.servers}), events will be emitted.`);
     } catch (err) {
       console.warn(`NATS unavailable (${err.message}); running without event emission.`);
     }

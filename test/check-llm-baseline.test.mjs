@@ -61,3 +61,14 @@ describe('check-llm-baseline CLI', () => {
     assert.match(r.stdout, /qwen3:8b is installed and ready/);
   });
 });
+
+// The header said exit 2 meant "<8 GB RAM after reservations"; recommend()
+// compares total RAM with FLOOR_GB, so a 14 GB host exits 2 too.
+describe('check-llm-baseline header', () => {
+  it('documents the exit-2 floor the code enforces', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(SCRIPT, 'utf8');
+    const floor = src.match(/^const FLOOR_GB = (\d+);/m)[1];
+    assert.match(src, new RegExp(`^ \\*   2 — system below floor \\(<${floor} GB total RAM\\)`, 'm'));
+  });
+});

@@ -133,3 +133,12 @@ describe('claude provider --add-dir scope', () => {
     assert.deepEqual(addDirs(['/tmpfoo/f']), ['/home/u/proj']);
   });
 });
+
+describe('llm-providers header', () => {
+  it('does not document a default vendor that resolveProvider refuses to pick', () => {
+    const src = require('node:fs').readFileSync(require.resolve('../lib/llm-providers'), 'utf8');
+    const header = src.slice(0, src.indexOf('*/'));
+    assert.doesNotMatch(header, /Default:/);
+    assert.match(header, /No default: resolveProvider\(\) throws/);
+  });
+});

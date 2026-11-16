@@ -219,3 +219,20 @@ describe('CLI identity and store match the mesh-agent telemetry writer', () => {
     }
   });
 });
+
+// The header usage and --help drifted from the dispatch switch (report,
+// consult and reflect --pending missing). Every dispatched command is listed.
+describe('hyperagent usage text', () => {
+  it('header and --help list every dispatched command', () => {
+    const src = fs.readFileSync(cli, 'utf8');
+    const commands = [...src.matchAll(/^\s+case '([a-z-]+)':/gm)].map((m) => m[1]);
+    assert.ok(commands.includes('report') && commands.includes('consult'));
+    const header = src.slice(src.indexOf('Usage:'), src.indexOf('*/'));
+    const help = run(['--help']).stdout;
+    for (const c of commands) {
+      assert.match(header, new RegExp(`hyperagent ${c}\\b`), `header misses ${c}`);
+      assert.match(help, new RegExp(`^  ${c}\\b`, 'm'), `--help misses ${c}`);
+    }
+    assert.match(header, /hyperagent reflect --pending/);
+  });
+});

@@ -15,7 +15,7 @@
  *
  * Exit codes:
  *   0 — system supports at least the floor tier (Qwen3-8B); recommendation printed
- *   2 — system below floor (<8 GB RAM after reservations); local LLM not viable
+ *   2 — system below floor (<16 GB total RAM); local LLM not viable
  *   1 — error (Ollama check failed, etc.)
  *
  * Tier policy (operator-authored, Block 3 §0):
