@@ -100,28 +100,6 @@ The kanban is reactive to the file. The file is the source of truth. No API call
 
 **Post-completion check:** After moving a task to `waiting-user`, ALWAYS re-query for the next dispatched auto-start task. The daemon may have already pushed one. Never declare "no more tasks" without re-checking.
 
-### Task-Start Protocol (required before executing any task)
-
-1. Read task spec. Identify domain + subdomain.
-2. Check `memory/strategies/` for a matching strategy file.
-3. If found: use as starting approach. Set `strategy_used` and `strategy_source: "archive"` in telemetry.
-4. If not found: use best judgment. Set `strategy_source: "heuristic"`.
-5. Assess `session_position`:
-   - position 1–3: ambitious approaches acceptable
-   - position 6+: prefer conservative, high-confidence approaches
-6. Begin execution.
-
-### Task Close Protocol (required after every task, before moving to next)
-
-After completing or escalating a task:
-
-1. Append one JSON line to `memory/performance.jsonl` (see `memory/performance-schema.md`).
-2. Assess and set any applicable `pattern_flags`. Be honest — flags are diagnostic, not punitive.
-3. Write `meta_notes`: what approach, why, key moment, one forward hypothesis. Min 20 words.
-4. If this task is inside a proposal eval window, set `eval_window_for` to the proposal ID.
-5. If `session_position == session_total_planned`, queue a `[meta] reflection` task.
-6. If tasks completed since last reflection >= 5, queue a `[meta] reflection` task.
-
 ### Auto-Start Tasks — HARD RULE (Kanban Daemon)
 
 When a task has `needs_approval: false` (auto-start enabled), the kanban daemon owns dispatch. **This is autonomous execution — Daedalus does the actual work, not just status bookkeeping.**

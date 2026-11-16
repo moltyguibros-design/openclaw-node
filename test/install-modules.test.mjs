@@ -149,6 +149,19 @@ test('NATS cluster plists come only from services/launchd, pointed at the render
   }
 });
 
+test('workspace agent docs have one source: identity/, shipped by both install.sh and mesh-deploy', () => {
+  assert.deepEqual(readdirSync(join(ROOT, 'workspace-docs')).filter((f) => !/^RUNBOOK_.*\.md$/.test(f)), []);
+  const installed = moduleSrc['workspace.sh'].match(/^for f in (.+); do\n  if \[ -f "\$REPO_DIR\/identity\/\$f" \]/m)[1].split(' ');
+  const deploySrc = readFileSync(join(ROOT, 'bin/mesh-deploy.js'), 'utf8');
+  const start = deploySrc.indexOf("id: 'workspace-docs'");
+  const comp = deploySrc.slice(start, deploySrc.indexOf("id: '", start + 1));
+  const shipped = comp.match(/repoPaths: \[([^\]]+)\]\.map\(f => `identity\/\$\{f\}`\)/)[1].match(/'([^']+)'/g).map((q) => q.slice(1, -1));
+  assert.deepEqual(shipped, installed);
+  const agents = readFileSync(join(ROOT, 'identity/AGENTS.md'), 'utf8');
+  assert.ok(!agents.includes('Task-Start Protocol') && !agents.includes('Task Close Protocol'), 'hyperagent D1 removed the telemetry protocol from local prompting');
+  assert.ok(agents.includes('## Skill Enforcement'));
+});
+
 test('preserved behaviors sit in their modules', () => {
   assert.ok(moduleSrc['env.sh'].includes('claude_project_path() {'));
   assert.ok(moduleSrc['env.sh'].includes("sed 's|[/.]|-|g'"));
