@@ -189,7 +189,7 @@ test('workspace agent docs have one source: identity/, shipped by both install.s
   const shipped = comp.match(/repoPaths: \[([^\]]+)\]\.map\(f => `identity\/\$\{f\}`\)/)[1].match(/'([^']+)'/g).map((q) => q.slice(1, -1));
   assert.deepEqual(shipped, installed);
   const agents = readFileSync(join(ROOT, 'identity/AGENTS.md'), 'utf8');
-  assert.ok(!agents.includes('Task-Start Protocol') && !agents.includes('Task Close Protocol'), 'hyperagent D1 removed the telemetry protocol from local prompting');
+  assert.doesNotMatch(agents, /Task-Start Protocol|Task Close Protocol|memory\/performance\.jsonl|\[meta\] reflection/, 'hyperagent D1 removed the telemetry protocol from local prompting');
   assert.ok(agents.includes('## Skill Enforcement'));
 });
 
