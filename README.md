@@ -477,7 +477,7 @@ node test.mjs
 
 ## Mesh Network (Multi-Node)
 
-By default every node runs a single-node loopback NATS bus (`nats://127.0.0.1:4222`) and operates standalone. The multi-node mesh — a Tailscale-linked, R=3-replicated, route-authenticated NATS cluster — is an opt-in upgrade: `install.sh --cluster-peers=… --cluster-bind=…` builds it explicitly (recommended, below). When enabled, nodes execute remote commands (`mesh exec`), dispatch and run tasks across the fleet via the NATS task-daemon, and exchange ad-hoc broadcast messages (`mesh broadcast`).
+By default every node runs a single-node loopback NATS bus (`nats://127.0.0.1:4222`) and operates standalone. The multi-node mesh — a Tailscale-linked, R=3-replicated, route-authenticated NATS cluster — is an opt-in upgrade: `install.sh --cluster-peers=… --cluster-bind=…` builds it explicitly (recommended, below). When enabled, nodes dispatch and run tasks across the fleet via the NATS task-daemon and publish their health to the `MESH_NODE_HEALTH` KV (`mesh status`, `mesh health`).
 
 ### Setup — multi-machine NATS council (recommended)
 
@@ -531,10 +531,9 @@ multi-machine T7 run.*
 ### Mesh commands
 
 ```
-mesh status          # see online nodes
-mesh health --all    # check all nodes
-mesh repair --all    # fix broken services
-mesh exec "cmd"      # run command on remote node
+mesh status          # every node in MESH_NODE_HEALTH
+mesh health --all    # ok / degraded / down per node (--json for scripts)
+mesh submit task.yaml  # run work on the fleet
 ```
 
 ### Architecture

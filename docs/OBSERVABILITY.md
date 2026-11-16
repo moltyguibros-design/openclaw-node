@@ -246,9 +246,7 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | Function | Module | Tier | Why Logged |
 |----------|--------|------|------------|
 | `cmdStatus` | mesh CLI | 1 | Reports mesh node status — provides operator-facing health snapshot of the entire mesh. |
-| `cmdHealth` | mesh CLI | 2 | Detailed health check for a node — logs connectivity, store integrity, and resource usage. |
-| `cmdRepair` | mesh CLI | 2 | Initiates repair operations on a node — logged to track repair actions and their outcomes. |
-| `collectHeartbeats` | mesh CLI | 2 | Gathers heartbeats from all mesh nodes — provides fleet-wide liveness snapshot. |
+| `cmdHealth` | mesh CLI | 2 | Grades this node (or every node) ok / degraded / down from MESH_NODE_HEALTH. |
 | `gatherHealth` | health-publisher | 2 | Collects local health metrics — CPU, memory, disk, NATS status; feeds into health dashboard. |
 | `publish` | health-publisher | 2 | Publishes health data to NATS — makes local health visible to the mesh. |
 | `computeNodeScopes` | mesh-task-daemon | 2 | Computes task routing scopes per node — determines which node handles which task types. |
@@ -261,13 +259,9 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `resolveNatsToken` | nats-resolve | 2 | Resolves authentication token for NATS — logged to diagnose auth failures without exposing the token. |
 | `natsConnectOpts` | nats-resolve | 2 | Builds NATS connection options — logs connection parameters (sans secrets) for troubleshooting. |
 
-### 4.3 Remote Execution (mesh exec)
+### 4.3 Remote Execution (removed)
 
-| Function | Module | Tier | Why Logged |
-|----------|--------|------|------------|
-| `cmdExec` | mesh CLI | 1 | Executes a command on a remote mesh node — logged for security audit and debugging remote failures. |
-| `cmdCapture` | mesh CLI | 2 | Captures output from a remote command — tracks capture size and duration for performance analysis. |
-| `cmdBroadcast` | mesh CLI | 2 | Broadcasts a command to all mesh nodes — logged because it affects the entire fleet simultaneously. |
+`mesh exec`, `mesh capture` and `mesh broadcast` were removed: no node ran a responder for them (federation D4).
 
 ### 4.4 File Sync & Shared Folder
 

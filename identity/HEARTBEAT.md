@@ -93,7 +93,7 @@ AGENTS.md points here. All heartbeat logic lives here.
 
 ## Mesh Health
 1. Run `mesh health --json --all` silently (if mesh available)
-2. If any node degraded/down: `mesh repair --all`, retry, log if still broken
+2. If any node degraded/down: log its `problems` to `~/openclaw/shared/mesh-incidents.log`
 3. If 3 consecutive failures: escalate to user
 
 ## Proactive Work (safe to do without asking)
@@ -147,16 +147,15 @@ Before significant decisions, write a structured prediction:
 Every heartbeat, verify the mesh is operational:
 
 1. Run `mesh health --json --all` silently
-2. Parse the JSON — check if `overall` is `"ok"` for each node
+2. Parse the JSON — check `overall` for each entry in `nodes`
 3. If any node shows `"degraded"` or `"down"`:
-   a. Run `mesh repair --all`
-   b. Wait 10 seconds, then `mesh health --json --all` again
-   c. If still broken, append a timestamped entry to `~/openclaw/shared/mesh-incidents.log`:
+   a. Append a timestamped entry with its `problems` to `~/openclaw/shared/mesh-incidents.log`:
       ```
-      [2026-03-02T14:30:00Z] UNRESOLVED: ubuntu/nats_server down after repair attempt
+      [2026-03-02T14:30:00Z] calos-vmware-virtual-platform degraded: mesh-agent: inactive
       ```
-   d. If the issue persists across 3 consecutive heartbeats, escalate:
-      send a message to the user noting which services are down and what was tried.
+   b. If the issue persists across 3 consecutive heartbeats, escalate:
+      send a message to the user noting which nodes and services are down.
+      There is no `mesh repair`: services are restarted on the node itself.
 4. If all healthy: HEARTBEAT_OK (no output needed)
 
 **Priority**: Run this check BEFORE any task that involves the remote node.
