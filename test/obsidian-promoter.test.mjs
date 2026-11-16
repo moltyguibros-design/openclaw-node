@@ -8,7 +8,6 @@ import yaml from 'js-yaml';
 
 import {
   sharedConceptsDir,
-  getNodeId,
   buildPromotedFrontmatter,
   queryPromotableConcepts,
   promoteConceptNotes,
@@ -110,14 +109,6 @@ describe('sharedConceptsDir', () => {
     assert.equal(sharedConceptsDir(), join('/srv/vault', 'concepts-shared'));
     await writeFile(cfg, '{}');
     assert.equal(sharedConceptsDir(), join(dir, 'ws', 'projects', 'arcane-vault', 'concepts-shared'));
-  });
-});
-
-describe('getNodeId', () => {
-  it('returns a non-empty string (hostname or env)', () => {
-    const nodeId = getNodeId();
-    assert.ok(typeof nodeId === 'string');
-    assert.ok(nodeId.length > 0);
   });
 });
 

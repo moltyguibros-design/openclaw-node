@@ -105,13 +105,14 @@ export const AVAILABLE_PROVIDERS = Object.keys(MODEL_MAP);
 // ── Node Identity (Distributed MC) ──
 import { hostname } from "os";
 
-/** This node's unique identifier in the mesh */
-export const NODE_ID = process.env.OPENCLAW_NODE_ID || hostname();
+/** This node's unique identifier in the mesh: the id every daemon on it uses. */
+export const NODE_ID = resolveDaemonNodeId();
 
 /**
- * The id the memory daemon names `.daemon-state-<id>.md` with. Its unit gets
- * OPENCLAW_NODE_ID rendered from openclaw.env, which MC's unit does not pass,
- * so read that file before falling back to lib/node-id.js's hostname rule.
+ * lib/node-id.js's rule, which the daemons use (and the memory daemon names
+ * `.daemon-state-<id>.md` with). Their units get OPENCLAW_NODE_ID rendered from
+ * openclaw.env, which MC's unit does not pass, so read that file before
+ * falling back to the hostname rule.
  */
 export function resolveDaemonNodeId(
   env: Record<string, string | undefined> = process.env,

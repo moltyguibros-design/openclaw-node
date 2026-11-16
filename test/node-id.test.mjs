@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +30,39 @@ describe('node-id — one derivation everywhere (review I13/P10)', () => {
   it('is never empty', () => {
     assert.equal(resolveNodeId({}, "'''"), 'node');
     assert.equal(resolveNodeId({ OPENCLAW_NODE_ID: '   ' }, ''), 'node');
+  });
+});
+
+describe('every node-id consumer goes through lib/node-id.js', () => {
+  const ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+  it('logger and tracer name the node the way resolveNodeId does, MESH_NODE_ID included', () => {
+    const env = { ...process.env, MESH_NODE_ID: 'Legacy.Mesh-Id' };
+    delete env.OPENCLAW_NODE_ID;
+    const out = execFileSync(process.execPath, ['-e', `
+      const ids = {
+        resolve: require('./lib/node-id').resolveNodeId(),
+        logger: require('./lib/logger').NODE_ID,
+        tracer: require('./lib/tracer').NODE_ID,
+      };
+      process.stdout.write(JSON.stringify(ids));
+    `], { cwd: ROOT, env, encoding: 'utf8' });
+    const ids = JSON.parse(out);
+    assert.equal(ids.resolve, 'Legacy.Mesh-Id');
+    assert.deepEqual(ids, { resolve: ids.resolve, logger: ids.resolve, tracer: ids.resolve });
+  });
+
+  it('no runtime module derives an id from the hostname on its own', () => {
+    const allowed = new Set([
+      'lib/node-id.js',
+      'bin/mesh-join-token.js',          // `lead:` is the lead's hostname, shown for reference only
+      'mission-control/src/lib/config.ts', // resolveDaemonNodeId is lib/node-id.js's rule in TS
+    ]);
+    const files = execFileSync('git', ['ls-files', 'lib', 'bin', 'workspace-bin', 'mission-control/src'], { cwd: ROOT, encoding: 'utf8' })
+      .split('\n').filter((f) => /\.(c?js|mjs|ts|tsx)$/.test(f) && !f.includes('__tests__'));
+    const offenders = files.filter((f) => !allowed.has(f)
+      && /\bhostname\(\)/.test(readFileSync(join(ROOT, f), 'utf8').replace(/^\s*(\*|\/\/).*$/gm, '')));
+    assert.deepEqual(offenders, []);
   });
 });
 

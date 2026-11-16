@@ -1387,17 +1387,6 @@ async function initFederationSubsystems(nc) {
   federationState.started = true;
   log('[federation] OPENCLAW_FEDERATION=1 — initializing federation subsystems');
 
-  // Same nodeId convention as the retired daemon: sanitized so it satisfies
-  // the envelope schema's NODE_ID_RE (F-Q101 — apostrophes/spaces in macOS
-  // hostnames otherwise kill every signed event at parse).
-  let fedNodeId = NODE_ID;
-  try {
-    const { defaultNodeId } = await import('../lib/federation-startup.mjs');
-    fedNodeId = defaultNodeId();
-  } catch (err) {
-    log(`[federation] federation-startup unavailable (${err.message}) — using raw NODE_ID`);
-  }
-
   // DB handles — same resolution as the retired daemon. Knowledge DB lives in
   // the workspace (same path the daemon's own knowledge indexing uses);
   // extraction tables live in state.db (C1 fix — one DB for reads and writes).
@@ -1421,7 +1410,7 @@ async function initFederationSubsystems(nc) {
   // Broadcast trio + identity + registry + replay cache (F-N1/N2/N3).
   try {
     const { startFederation } = await import('../lib/federation-startup.mjs');
-    federationState.federation = await startFederation(nc, fedNodeId, {
+    federationState.federation = await startFederation(nc, NODE_ID, {
       extractionDb: federationState.extractionDb,
       knowledgeDb: federationState.knowledgeDb,
       graphCache: getGraphCache(),
@@ -1438,7 +1427,7 @@ async function initFederationSubsystems(nc) {
   try {
     if (process.env.OPENCLAW_SUBSCRIBER_PROJECTION === 'stub') {
       const { createSubscriber } = await import('../bin/memory-subscriber.mjs');
-      federationState.subscriber = await createSubscriber(nc, fedNodeId, {
+      federationState.subscriber = await createSubscriber(nc, NODE_ID, {
         onIngest: (event, parsed) => {
           log(`[federation] SUBSCRIBER-STUB acked-without-projection ${parsed.category} ${event.event_id}`);
         },

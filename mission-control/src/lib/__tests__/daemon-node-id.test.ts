@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -36,5 +36,22 @@ describe("resolveDaemonNodeId", () => {
   it("falls back to MESH_NODE_ID before the hostname, like lib/node-id.js", () => {
     expect(resolveDaemonNodeId({ MESH_NODE_ID: "legacy" }, "Other.local", path.join(tmpDir, "missing.env")))
       .toBe("legacy");
+  });
+});
+
+describe("NODE_ID", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it("is the id the daemons use, not the raw hostname", async () => {
+    vi.stubEnv("OPENCLAW_NODE_ID", "");
+    vi.stubEnv("HOME", tmpDir);
+    vi.stubEnv("MESH_NODE_ID", "legacy-mesh-id");
+    vi.resetModules();
+    const config = await import("../config");
+    expect(config.NODE_ID).toBe("legacy-mesh-id");
+    expect(config.NODE_ID).toBe(config.resolveDaemonNodeId());
   });
 });
