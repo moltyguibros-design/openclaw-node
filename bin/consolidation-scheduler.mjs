@@ -41,6 +41,9 @@ function notifyCycleFailure(message) {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
+/** Quiet period after the last finished extraction (queue extraction or worker flush). */
+export const IDLE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+
 /** Cancellation deadline; local cleanup still owns the invocation. */
 export const HARD_CAP_MS = 5 * 60 * 1000; // 5 minutes
 
