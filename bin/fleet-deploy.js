@@ -22,8 +22,7 @@ const tracer = createTracer('fleet-deploy');
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
 const sc = StringCodec();
 const REPO_DIR = process.env.OPENCLAW_REPO_DIR || path.join(os.homedir(), 'openclaw');
-const NODE_ID = process.env.OPENCLAW_NODE_ID ||
-  os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+const NODE_ID = require('../lib/node-id').resolveNodeId();
 
 const RESULTS_BUCKET = 'MESH_DEPLOY_RESULTS';
 const NODES_BUCKET = 'MESH_NODES';

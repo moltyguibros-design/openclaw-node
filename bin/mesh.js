@@ -31,7 +31,7 @@ const { natsConnectOpts } = require('../lib/nats-resolve');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-cli');
 const SHARED_DIR = path.join(os.homedir(), 'openclaw', 'shared');
-const LOCAL_NODE = os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+const LOCAL_NODE = require('../lib/node-id').resolveNodeId();
 const sc = StringCodec();
 
 // ─── Known nodes (for --node shortcuts) ──────────────

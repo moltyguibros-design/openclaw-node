@@ -47,7 +47,7 @@ function getArg(flag, defaultVal) {
 
 const TARGET_NODE = getArg('--node', null);
 const LOCAL_MODE = !TARGET_NODE;
-const NODE_ID = TARGET_NODE || os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+const NODE_ID = TARGET_NODE || require('../lib/node-id').resolveNodeId();
 
 // ── Logging ───────────────────────────────────────────
 
