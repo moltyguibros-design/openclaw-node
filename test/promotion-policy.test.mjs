@@ -112,26 +112,42 @@ describe('promotion-policy', () => {
     });
   });
 
-  // A deployed lib/ (~/.openclaw/workspace/lib) has no config/ beside it: the
-  // lib-relative default was ENOENT everywhere but a repo checkout.
+  // A deployed lib/ (~/.openclaw/workspace/lib) used to have no config/ beside
+  // it: the lib-relative default was ENOENT everywhere but a repo checkout.
   describe('resolvePromotionPolicyPath', () => {
-    it('prefers $PROMOTION_POLICY, then ~/.openclaw/config, then the repo copy', async () => {
+    it('takes the first that exists of $PROMOTION_POLICY, ~/.openclaw/config and the copy beside lib/', async () => {
       const home = await mkdtemp(join(tmpdir(), 'promo-home-'));
       try {
-        assert.equal(resolvePromotionPolicyPath({ env: {}, home }), REPO_POLICY_PATH);
+        const envPath = join(home, 'env-policy.yaml');
         const nodePath = join(home, '.openclaw', 'config', 'promotion-policy.yaml');
+        assert.equal(resolvePromotionPolicyPath({ env: {}, home }), REPO_POLICY_PATH);
+        assert.equal(resolvePromotionPolicyPath({ env: { PROMOTION_POLICY: envPath }, home }), REPO_POLICY_PATH, 'a missing $PROMOTION_POLICY falls through');
         await mkdir(dirname(nodePath), { recursive: true });
         await writeFile(nodePath, readFileSync(REPO_POLICY_PATH));
-        assert.equal(resolvePromotionPolicyPath({ env: {}, home }), nodePath);
-        assert.equal(resolvePromotionPolicyPath({ env: { PROMOTION_POLICY: '/x/p.yaml' }, home }), '/x/p.yaml');
+        assert.equal(resolvePromotionPolicyPath({ env: { PROMOTION_POLICY: envPath }, home }), nodePath);
+        await writeFile(envPath, readFileSync(REPO_POLICY_PATH));
+        assert.equal(resolvePromotionPolicyPath({ env: { PROMOTION_POLICY: envPath }, home }), envPath);
       } finally {
         await rm(home, { recursive: true, force: true });
       }
     });
 
-    it('the installer puts the policy where the resolver looks', () => {
+    it('finds nothing when none exists, and loading then fails', async () => {
+      const home = await mkdtemp(join(tmpdir(), 'promo-home-'));
+      try {
+        const resolved = resolvePromotionPolicyPath({ env: {}, home, moduleCopy: join(home, 'missing.yaml') });
+        assert.equal(resolved, null);
+        await assert.rejects(loadPromotionPolicy(resolved), /no promotion policy found/);
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
+    });
+
+    it('both installer steps put the policy where the resolver looks', () => {
       const config = readFileSync(join(ROOT, 'scripts/install/config.sh'), 'utf8');
       assert.match(config, /generate_config "\$REPO_DIR\/config\/promotion-policy\.yaml" "\$OPENCLAW_ROOT\/config\/promotion-policy\.yaml"/);
+      const workspace = readFileSync(join(ROOT, 'scripts/install/workspace.sh'), 'utf8');
+      assert.match(workspace, /run cp "\$REPO_DIR\/config\/promotion-policy\.yaml" "\$WORKSPACE\/config\/promotion-policy\.yaml"/);
     });
   });
 

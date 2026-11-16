@@ -99,7 +99,7 @@ function decayedEventData(decay, prune, durationMs) {
  * @param {number} [opts.maxConcepts] — F-N101: cap per-cycle summary count
  * @param {object} [opts.eventLog] — local event log instance (publishLocal method)
  * @param {string} [opts.nodeId] — node identifier for event emission
- * @param {string} [opts.promotionPolicyPath] — promotion policy YAML (default: config/promotion-policy.yaml beside lib/)
+ * @param {string} [opts.promotionPolicyPath] — promotion policy YAML (default: resolvePromotionPolicyPath — $PROMOTION_POLICY, ~/.openclaw/config, then config/ beside lib/)
  * @param {number} [opts.now] — clock for the weekly digest's week (testing)
  * @returns {Promise<object>} cycle results, including `aborted: true` and
  *   `abortedAt: '<step name>'` when the cycle stopped short.

@@ -610,6 +610,20 @@ describe('promotion thresholds come from the policy file', () => {
     db.close();
   });
 
+  it('without an explicit path the cycle resolves $PROMOTION_POLICY first', async () => {
+    const db = createTestDb();
+    insertEntity(db, 'five-mentions', 'concept', { mentionCount: 5, sourceType: 'local' });
+    const saved = process.env.PROMOTION_POLICY;
+    process.env.PROMOTION_POLICY = policyWith(3);
+    try {
+      const result = await runConsolidationCycle({ vaultPath: TEST_VAULT, db });
+      assert.deepEqual(result.promotionCandidates.entityCandidates.map(e => e.name), ['five-mentions']);
+    } finally {
+      if (saved === undefined) delete process.env.PROMOTION_POLICY; else process.env.PROMOTION_POLICY = saved;
+      db.close();
+    }
+  });
+
   it('a missing policy file fails the cycle instead of falling back to built-in values', async () => {
     const db = createTestDb();
     await assert.rejects(

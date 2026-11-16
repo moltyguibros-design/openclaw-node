@@ -80,8 +80,9 @@ run chmod +x "$WORKSPACE/bin/"*
 run chmod +x "$WORKSPACE/bin/hooks/"* 2>/dev/null || true
 info "Workspace scripts installed to $WORKSPACE/bin/"
 
-# Consolidation reads its promotion thresholds from lib/../config/promotion-policy.yaml
-# and fails the cycle without it, so the policy ships beside the workspace lib/.
+# Consolidation fails its cycle without a promotion policy. The resolver's last
+# fallback is lib/../config/promotion-policy.yaml, so the policy ships beside the
+# workspace lib/ too (config.sh seeds ~/.openclaw/config, which it checks first).
 run mkdir -p "$WORKSPACE/config"
 if [ ! "$REPO_DIR/config/promotion-policy.yaml" -ef "$WORKSPACE/config/promotion-policy.yaml" ]; then
   run cp "$REPO_DIR/config/promotion-policy.yaml" "$WORKSPACE/config/promotion-policy.yaml"
