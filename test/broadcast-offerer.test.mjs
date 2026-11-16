@@ -465,9 +465,13 @@ describe('createOfferer: a failed broadcast is retried, not dropped as a replay'
   function deliveringConnection(deliveries) {
     const nc = mockNatsConnection();
     const js = nc.jetstream();
+    // start() reads the node's durable shared consumer (ensureSharedConsumer).
+    nc.jetstreamManager = async () => ({ consumers: { info: async () => ({}) } });
     nc.jetstream = () => ({
       ...js,
-      subscribe: async () => (async function* () { for (const msg of deliveries) yield msg; })(),
+      consumers: {
+        get: async () => ({ consume: async () => (async function* () { for (const msg of deliveries) yield msg; })() }),
+      },
     });
     return nc;
   }

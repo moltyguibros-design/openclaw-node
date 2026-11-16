@@ -386,6 +386,61 @@ describe('federation-2node: real NATS integration', { skip: SKIP ? 'nats-server 
     acceptor.stop();
   });
 
+  // ─── Test: start() consumes from the stream ──────────────────────────────
+
+  it('offerer and acceptor start() create their durable consumers and consume broadcast → offer', async () => {
+    const { StringCodec } = _require('nats');
+    const sc = StringCodec();
+    const logs = [];
+    const offerer = createOfferer(ncB, NODE_B, {
+      retrievalPipeline: mockRetrieval([
+        { snippet: 'Consumer setup notes', session_id: 'sess-start-1', chunk_id: 1, score: 0.9 },
+      ]),
+      relevanceThreshold: 0,
+      identity: identityB,
+      log: m => logs.push(m),
+    });
+    const acceptor = createAcceptor(ncA, NODE_A, { identity: identityA, log: m => logs.push(m) });
+    await offerer.start();
+    await acceptor.start();
+    try {
+      assert.ok(!logs.some(l => /degraded|failed to subscribe/.test(l)), logs.join('\n'));
+      const jsm = await ncA.jetstreamManager();
+      const offererInfo = await jsm.consumers.info(SHARED_STREAM_NAME, `offerer-${NODE_B}`);
+      assert.equal(offererInfo.config.filter_subject, 'context.broadcast.>');
+      const acceptorInfo = await jsm.consumers.info(SHARED_STREAM_NAME, `acceptor-${NODE_A}`);
+      assert.equal(acceptorInfo.config.filter_subject, 'context.offer.>');
+
+      const broadcastId = crypto.randomUUID();
+      const themes = ['consumers', 'federation'];
+      const signed = signEvent({
+        event_id: broadcastId,
+        event_type: 'context.broadcast',
+        event_version: 1,
+        entity_id: broadcastId,
+        entity_type: 'session',
+        timestamp: new Date().toISOString(),
+        causation_id: null,
+        correlation_id: null,
+        actor: { type: 'system', id: `broadcaster-${NODE_A}` },
+        node_id: NODE_A,
+        idempotency_key: broadcastId,
+        data: { themes, entities: ['JetStream'], intensity: 'actively_seeking', ttl_minutes: 60,
+          dedup_key: computeDedupKey(themes, ['JetStream']) },
+      }, identityA.privateKey);
+      await ncA.jetstream().publish(`context.broadcast.${NODE_A}`, sc.encode(JSON.stringify(signed)), { msgID: broadcastId });
+
+      const deadline = Date.now() + 10_000;
+      while (!(offerer.stats.offersPublished >= 1 && acceptor.stats.offersReceived >= 1)) {
+        assert.ok(Date.now() < deadline, `no round-trip: offerer ${JSON.stringify(offerer.stats)} acceptor ${JSON.stringify(acceptor.stats)}\n${logs.join('\n')}`);
+        await new Promise(r => setTimeout(r, 50));
+      }
+    } finally {
+      await offerer.stop();
+      await acceptor.stop();
+    }
+  });
+
   // ─── Test: Cross-node signature verification ─────────────────────────────
 
   it('node B can verify a signature created by node A (and vice versa)', () => {
