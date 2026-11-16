@@ -16,7 +16,7 @@ Three tiers of integration, from tightest to loosest:
 
 | Tier | Type | Examples | Setup effort |
 |------|------|----------|-------------|
-| 1 | Direct hooks | OpenWebUI, LibreChat, Continue; Claude Code (not wired yet, see below) | Drop-in config/script |
+| 1 | Direct hooks | Claude Code, OpenWebUI, LibreChat, Continue | Drop-in config/script |
 | 2 | SDK wrappers | OpenAI, Anthropic, Gemini, MiniMax (+ OpenAI-compatible: Kimi, DeepSeek, OpenRouter) | 3 lines of code |
 | 3 | Universal fallback | Manual CLI, idle timer | Zero (auto-enabled) |
 
@@ -212,7 +212,7 @@ Some LLM frontends don't expose lifecycle hooks:
 
 | Frontend | Hook support | Recommended tier |
 |----------|-------------|-----------------|
-| Claude Code | PreCompact hook (publisher not wired yet) | Tier 3 (idle timer) until wired |
+| Claude Code | PreCompact hook | Tier 1 (direct) |
 | OpenWebUI | Plugin API | Tier 1 (plugin) |
 | LibreChat | Custom endpoints | Tier 1 (JS import) |
 | Continue | Plugin API | Tier 1 (config) |
