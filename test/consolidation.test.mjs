@@ -16,7 +16,7 @@ import {
   evaluatePromotionCandidates,
 } from '../lib/consolidation.mjs';
 import { runConsolidationCycle } from '../bin/consolidate.mjs';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { mkdtempSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -25,6 +25,8 @@ import { fileURLToPath } from 'node:url';
 // Never let a cycle default to the REAL vault (getVaultPath) — fixture notes
 // were landing in production ~/.openclaw/obsidian-local (memory review 2026-07-04).
 const TEST_VAULT = mkdtempSync(join(tmpdir(), 'consolidation-vault-'));
+// The values config/promotion-policy.yaml ships with.
+const POLICY = { mentionThreshold: 10, confidenceThreshold: 0.95 };
 
 describe('consolidate CLI --dry-run', () => {
   it('refuses instead of running a writing cycle against state.db', () => {
@@ -528,7 +530,7 @@ describe('P5-2: pruneStale — decay is terminal, and what it removes is not des
     const db = createTestDb();
     db.prepare(`INSERT INTO decisions (session_id, decision, rationale, confidence, created_at, salience, source_type)
                 VALUES ('s', 'planted', 'r', 0.99, ?, 0.0, 'local')`).run(new Date().toISOString());
-    assert.equal(evaluatePromotionCandidates(db).decisionCandidates.length, 0);
+    assert.equal(evaluatePromotionCandidates(db, POLICY).decisionCandidates.length, 0);
     db.close();
   });
 });
@@ -540,7 +542,7 @@ describe('evaluatePromotionCandidates', () => {
     insertEntity(db, 'popular', 'concept', { mentionCount: 15, sourceType: 'local' });
     insertEntity(db, 'unpopular', 'concept', { mentionCount: 3, sourceType: 'local' });
 
-    const result = evaluatePromotionCandidates(db);
+    const result = evaluatePromotionCandidates(db, POLICY);
 
     assert.equal(result.entityCandidates.length, 1);
     assert.equal(result.entityCandidates[0].name, 'popular');
@@ -561,7 +563,7 @@ describe('evaluatePromotionCandidates', () => {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run('s2', 'Low-conf decision', 'Weak reasons', 0.5, new Date().toISOString(), 0.5, 'local');
 
-    const result = evaluatePromotionCandidates(db);
+    const result = evaluatePromotionCandidates(db, POLICY);
 
     assert.equal(result.decisionCandidates.length, 1);
     assert.equal(result.decisionCandidates[0].decision, 'High-conf decision');
@@ -582,9 +584,55 @@ describe('evaluatePromotionCandidates', () => {
       WHERE decision = 'old plan'
     `).run();
 
-    const result = evaluatePromotionCandidates(db);
+    const result = evaluatePromotionCandidates(db, POLICY);
 
     assert.deepEqual(result.decisionCandidates.map(d => d.decision), ['new plan']);
+    db.close();
+  });
+});
+
+describe('promotion thresholds come from the policy file', () => {
+  const policyWith = (mentions) => {
+    const dir = mkdtempSync(join(tmpdir(), 'promotion-policy-'));
+    const file = join(dir, 'promotion-policy.yaml');
+    const shipped = readFileSync(fileURLToPath(new URL('../config/promotion-policy.yaml', import.meta.url)), 'utf8');
+    writeFileSync(file, shipped.replace(/concept_mention_count: \d+/, `concept_mention_count: ${mentions}`));
+    return file;
+  };
+
+  it('editing concept_mention_count changes the cycle\'s candidate set', async () => {
+    const db = createTestDb();
+    insertEntity(db, 'five-mentions', 'concept', { mentionCount: 5, sourceType: 'local' });
+    const shipped = await runConsolidationCycle({ vaultPath: TEST_VAULT, db });
+    assert.equal(shipped.promotionCandidates.entityCandidates.length, 0);
+    const tuned = await runConsolidationCycle({ vaultPath: TEST_VAULT, db, promotionPolicyPath: policyWith(3) });
+    assert.deepEqual(tuned.promotionCandidates.entityCandidates.map(e => e.name), ['five-mentions']);
+    db.close();
+  });
+
+  it('a missing policy file fails the cycle instead of falling back to built-in values', async () => {
+    const db = createTestDb();
+    await assert.rejects(
+      runConsolidationCycle({ vaultPath: TEST_VAULT, db, promotionPolicyPath: join(tmpdir(), 'no-such-policy.yaml') }),
+      /promotion step: cannot load promotion policy/,
+    );
+    db.close();
+  });
+
+  it('evaluatePromotionCandidates has no built-in thresholds of its own', () => {
+    const db = createTestDb();
+    assert.throws(() => evaluatePromotionCandidates(db), /needs mentionThreshold and confidenceThreshold/);
+    db.close();
+  });
+
+  it('candidates carry their row id, so the fingerprint keys same-named entities apart', () => {
+    const db = createTestDb();
+    insertEntity(db, 'popular', 'concept', { mentionCount: 15, sourceType: 'local' });
+    db.prepare(`INSERT INTO decisions (session_id, decision, rationale, confidence, created_at, salience, source_type)
+                VALUES ('s', 'sure', 'r', 0.99, ?, 0.5, 'local')`).run(new Date().toISOString());
+    const { entityCandidates, decisionCandidates } = evaluatePromotionCandidates(db, POLICY);
+    assert.ok(Number.isInteger(entityCandidates[0].id));
+    assert.ok(Number.isInteger(decisionCandidates[0].id));
     db.close();
   });
 });

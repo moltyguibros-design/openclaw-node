@@ -238,6 +238,11 @@ test('installer links scoped packages into both deployed parent trees', () => {
   assert.ok(!moduleSrc['components.sh'].includes('$WORKSPACE/lib/mcp-knowledge/node_modules'));
 });
 
+test('the promotion policy ships beside the workspace lib/ that consolidation loads it from', () => {
+  assert.ok(moduleSrc['workspace.sh'].includes('run cp "$REPO_DIR/config/promotion-policy.yaml" "$WORKSPACE/config/promotion-policy.yaml"'));
+  assert.ok(moduleSrc['workspace.sh'].includes('run rsync -av --exclude=\'node_modules\' \\\n  "$REPO_DIR/lib/" "$WORKSPACE/lib/"'));
+});
+
 test('scheduler heartbeat helper is installer-owned and both units invoke it', () => {
   assert.ok(moduleSrc['workspace.sh'].includes('scheduler-heartbeat.mjs'));
   assert.ok(heartbeatLaunchd.includes('${NODE_BIN}'));

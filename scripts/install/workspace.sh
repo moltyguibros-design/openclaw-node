@@ -79,6 +79,14 @@ run chmod +x "$WORKSPACE/bin/"*
 run chmod +x "$WORKSPACE/bin/hooks/"* 2>/dev/null || true
 info "Workspace scripts installed to $WORKSPACE/bin/"
 
+# Consolidation reads its promotion thresholds from lib/../config/promotion-policy.yaml
+# and fails the cycle without it, so the policy ships beside the workspace lib/.
+run mkdir -p "$WORKSPACE/config"
+if [ ! "$REPO_DIR/config/promotion-policy.yaml" -ef "$WORKSPACE/config/promotion-policy.yaml" ]; then
+  run cp "$REPO_DIR/config/promotion-policy.yaml" "$WORKSPACE/config/promotion-policy.yaml"
+fi
+info "Promotion policy installed to $WORKSPACE/config/promotion-policy.yaml"
+
 # Shared libs → ~/.openclaw/workspace/lib/  (workspace daemons import from ../lib/)
 # mcp-knowledge MUST be included — memory-daemon.mjs statically imports it;
 # excluding it killed every fresh install (2026-07-11 audit).

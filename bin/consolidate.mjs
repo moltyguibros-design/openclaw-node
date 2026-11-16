@@ -38,6 +38,7 @@ import {
   summarizeRemovals,
 } from '../lib/consolidation.mjs';
 import { buildMemoryEvent } from '../lib/local-event-log.mjs';
+import { loadPromotionPolicy } from '../lib/promotion-policy.mjs';
 import { backfillSessionNotes } from '../lib/obsidian-session-notes.mjs';
 import { generateDecisionNotes } from '../lib/obsidian-decision-notes.mjs';
 import { generateThemeNotes } from '../lib/obsidian-theme-notes.mjs';
@@ -98,6 +99,7 @@ function decayedEventData(decay, prune, durationMs) {
  * @param {number} [opts.maxConcepts] — F-N101: cap per-cycle summary count
  * @param {object} [opts.eventLog] — local event log instance (publishLocal method)
  * @param {string} [opts.nodeId] — node identifier for event emission
+ * @param {string} [opts.promotionPolicyPath] — promotion policy YAML (default: config/promotion-policy.yaml beside lib/)
  * @returns {Promise<object>} cycle results, including `aborted: true` and
  *   `abortedAt: '<step name>'` when the cycle stopped short.
  */
@@ -223,7 +225,18 @@ export async function runConsolidationCycle(opts = {}) {
     if (!abortInfo) abortInfo = checkpoint('promotion');
     if (!abortInfo) {
       const promoStart = Date.now();
-      promotionResult = evaluatePromotionCandidates(db);
+      // The policy file is the only source of the thresholds; a missing or
+      // invalid file fails the cycle loudly instead of promoting on guesses.
+      let threshold;
+      try {
+        ({ threshold } = await loadPromotionPolicy(opts.promotionPolicyPath));
+      } catch (err) {
+        throw new Error(`promotion step: cannot load promotion policy: ${err.message}`);
+      }
+      promotionResult = evaluatePromotionCandidates(db, {
+        mentionThreshold: threshold.concept_mention_count,
+        confidenceThreshold: threshold.decision_confidence,
+      });
       if (eventLog) {
         const names = promotionResult.entityCandidates.map((e) => e.name).filter(Boolean);
         // R20 fix (repair 5.3): emit-on-change. The same ~100 candidates were
