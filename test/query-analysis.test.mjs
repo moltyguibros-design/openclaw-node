@@ -119,3 +119,25 @@ describe('analyzeQueryWithLlm timings', () => {
     assert.ok(result.timings.llmMs >= 350, `llmMs ${result.timings.llmMs}`);
   });
 });
+
+// Free-form output (no format:json on thinking-family models) can wrap the
+// JSON in prose or a fence; the analysis must still parse it.
+describe('analyzeQueryWithLlm free-form output', () => {
+  const embedFn = async () => new Float32Array(4);
+  const answer = (content) => ({ generateAnalysis: async () => ({ mode: 'llm', value: { content } }) });
+
+  it('parses JSON wrapped in a fence or prose', async () => {
+    const fenced = await analyzeQueryWithLlm('hello', answer('```json\n{"intent":"lookup"}\n```'), { embedFn });
+    assert.equal(fenced.analysisMode, 'llm');
+    assert.deepEqual(fenced.llmAnalysis, { intent: 'lookup' });
+    const prose = await analyzeQueryWithLlm('hello', answer('Here you go: {"intent":"lookup"} done.'), { embedFn });
+    assert.equal(prose.analysisMode, 'llm');
+    assert.deepEqual(prose.llmAnalysis, { intent: 'lookup' });
+  });
+
+  it('still reports unparseable output as malformed', async () => {
+    const r = await analyzeQueryWithLlm('hello', answer('no json here'), { embedFn });
+    assert.equal(r.analysisMode, 'embedding-fallback');
+    assert.equal(r.fallbackReason, 'llm-malformed-json');
+  });
+});
