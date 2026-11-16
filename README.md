@@ -419,8 +419,8 @@ The knowledge server scans markdown files in your workspace, splits them into ch
 | `search_directories(query, limit)` | Rank directories by abstract similarity — find the folder before the file |
 | `reindex(force)` | Re-scan and re-embed changed files (HTTP transport: hidden unless `KNOWLEDGE_ALLOW_REINDEX=1`) |
 | `knowledge_stats()` | Index statistics (doc count, chunk count, directories, model info) |
-| `sql_query(db, sql, params?)` | One read-only SELECT/WITH/VALUES/EXPLAIN against a local DB (`state`, `knowledge`, `mission_control`); writes, PRAGMA and ATTACH rejected; at most 200 rows |
-| `sql_schema(db)` | Tables, indexes and views of one of those DBs, with their CREATE statements |
+| `sql_query(db, sql, params?)` | One read-only SELECT/WITH/VALUES/EXPLAIN against a local DB (`state`, `knowledge`, `mission_control`); writes, PRAGMA and ATTACH rejected; at most 200 rows (HTTP transport: hidden unless `KNOWLEDGE_ALLOW_SQL=1`) |
+| `sql_schema(db)` | Tables, indexes and views of one of those DBs, with their CREATE statements (HTTP transport: hidden unless `KNOWLEDGE_ALLOW_SQL=1`) |
 
 **Directory summaries (L0/L1).** After every index pass the server rebuilds a per-directory abstract
 and overview, bottom-up and hash-gated (an unchanged subtree costs one SELECT). They are
@@ -439,7 +439,7 @@ Any MCP-compatible client can use these tools. The server supports three transpo
 | **HTTP MCP** | `KNOWLEDGE_PORT=3100 node lib/mcp-knowledge/server.mjs` | Remote MCP clients, web UIs |
 | **NATS mesh** *(planned)* | `mesh.tool.{nodeId}.knowledge.*` request/reply — not yet wired (the only mesh tool responder today is `discord-history`) | Mesh workers (use HTTP for now) |
 
-Mesh worker nodes can reach the lead's index over HTTP, so one index on the lead can be queried without shipping the embedding model, database, or knowledge files to every node. This works only once the lead binds a reachable address: `KNOWLEDGE_HOST` defaults to `127.0.0.1`, and the server returns 403 for any `Host` header other than `KNOWLEDGE_HOST:KNOWLEDGE_PORT` or loopback, so set `KNOWLEDGE_HOST` to the exact address or name the workers dial (e.g. the lead's tailnet IP or DNS name, lowercase; not `0.0.0.0`, which binds every interface but makes every remote `Host` a 403), then point the workers at that address and `KNOWLEDGE_PORT`. The HTTP transport has no authentication: everyone who can reach the port gets every listed tool, including `sql_query` over the private state, knowledge and Mission Control databases. (A native NATS `mesh.tool.*.knowledge.*` responder is planned but not yet wired.)
+Mesh worker nodes can reach the lead's index over HTTP, so one index on the lead can be queried without shipping the embedding model, database, or knowledge files to every node. This works only once the lead binds a reachable address: `KNOWLEDGE_HOST` defaults to `127.0.0.1`, and the server returns 403 for any `Host` header other than `KNOWLEDGE_HOST:KNOWLEDGE_PORT` or loopback, so set `KNOWLEDGE_HOST` to the exact address or name the workers dial (e.g. the lead's tailnet IP or DNS name, lowercase; not `0.0.0.0`, which binds every interface but makes every remote `Host` a 403), then point the workers at that address and `KNOWLEDGE_PORT`. The HTTP transport has no authentication: everyone who can reach the port gets every listed tool. `sql_query` and `sql_schema` read the private state and Mission Control databases, so HTTP lists them only with `KNOWLEDGE_ALLOW_SQL=1` (stdio always has them). (A native NATS `mesh.tool.*.knowledge.*` responder is planned but not yet wired.)
 
 ### Configuration
 
@@ -453,6 +453,7 @@ Environment variables (set in `.mcp.json` env block or shell):
 | `KNOWLEDGE_PORT` | *(unset)* | Set to enable HTTP transport (e.g. `3100`) |
 | `KNOWLEDGE_HOST` | `127.0.0.1` | HTTP bind address, and the only non-loopback `Host` the server accepts (use the address clients dial, not `0.0.0.0`) |
 | `KNOWLEDGE_ALLOW_REINDEX` | *(unset)* | `1` lists and allows `reindex` on the HTTP transport |
+| `KNOWLEDGE_ALLOW_SQL` | *(unset)* | `1` lists and allows `sql_query` and `sql_schema` on the HTTP transport |
 | `KNOWLEDGE_MAX_BODY_BYTES` | `1048576` | HTTP request body cap (413 above it) |
 | `KNOWLEDGE_MODEL` | `Xenova/bge-m3` | Embedding model id; must emit 1024-dim vectors (`EMBEDDING_DIM`) |
 | `KNOWLEDGE_SUMMARY_LLM` | *(unset)* | `0` keeps directory summaries deterministic (no model calls) |
