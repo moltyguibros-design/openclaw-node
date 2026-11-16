@@ -187,14 +187,17 @@ function findDispatchable() {
   }
 
   const meshTasks = tasks.filter(t => t.execution === 'mesh');
-  const queued = meshTasks.filter(t => t.status === 'queued');
+  // A card with a trigger (a scheduled or recurring task) is due only once
+  // Mission Control's scheduler flips it to 'ready' at its trigger time;
+  // dispatching it from 'queued' ran a recurring task again on every completion.
+  const queued = meshTasks.filter(t => t.status === 'ready' || (t.status === 'queued' && t.trigger_kind === 'none'));
   const filtered = queued.filter(t => !dispatched.has(t.task_id));
   const candidates = filtered.sort((a, b) => (b.auto_priority || 0) - (a.auto_priority || 0));
 
   const candidate = candidates[0] || null;
   if (!candidate) {
     if (meshTasks.length > 0) {
-      debug(`findDispatchable: ${tasks.length} total, ${meshTasks.length} mesh, ${queued.length} queued, ${filtered.length} undispatched`);
+      debug(`findDispatchable: ${tasks.length} total, ${meshTasks.length} mesh, ${queued.length} due, ${filtered.length} undispatched`);
     } else {
       debug('findDispatchable: no candidates');
     }

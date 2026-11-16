@@ -106,3 +106,73 @@ test("an ISO-Z trigger in the past still fires and counts as overdue past the gr
   expect(schedulerStatus(30).overdueIds).toEqual(["T-iso-old"]);
   expect(schedulerTick().triggered.sort()).toEqual(["T-iso-new", "T-iso-old"]);
 });
+
+// mission-control-lib#4: the recreated row dropped where and how the task runs,
+// so a recurring mesh task came back as a local task with no description.
+test("a recreated recurring task keeps its definition and starts its run state fresh", async () => {
+  vi.setSystemTime(new Date("2026-11-11T15:00:00.000Z"));
+  const { insert, schedulerTick } = await load();
+  const { getDb } = await import("@/lib/db");
+  const { tasks } = await import("@/lib/db/schema");
+  const { eq } = await import("drizzle-orm");
+  insert({
+    id: "R-mesh",
+    status: "done",
+    kanbanColumn: "done",
+    isRecurring: 1,
+    needsApproval: 0,
+    triggerKind: "cron",
+    triggerCron: "0 10 * * *",
+    description: "rotate the logs",
+    execution: "mesh",
+    metric: "npm test",
+    budgetMinutes: 45,
+    scope: '["logs/**"]',
+    collaboration: '{"mode":"parallel"}',
+    preferredNodes: '["node-a"]',
+    excludeNodes: '["node-b"]',
+    clusterId: "cluster-1",
+    color: "#336699",
+    showInCalendar: 1,
+    meshTaskId: "R-mesh",
+    meshNode: "node-a",
+    acknowledgedAt: "2026-11-11T14:00:00.000Z",
+    artifacts: '["logs/run.txt"]',
+    extra: JSON.stringify({ llm_provider: "openai", llm_model: "m-1", collab_result: '{"rounds":2}', circling_step: "2" }),
+  });
+
+  const [newId] = schedulerTick().recurring;
+  const row = getDb().select().from(tasks).where(eq(tasks.id, newId)).get()!;
+  expect(row).toMatchObject({
+    status: "queued",
+    description: "rotate the logs",
+    execution: "mesh",
+    metric: "npm test",
+    budgetMinutes: 45,
+    scope: '["logs/**"]',
+    collaboration: '{"mode":"parallel"}',
+    preferredNodes: '["node-a"]',
+    excludeNodes: '["node-b"]',
+    clusterId: "cluster-1",
+    color: "#336699",
+    showInCalendar: 1,
+    triggerKind: "cron",
+    meshTaskId: null,
+    meshNode: null,
+    acknowledgedAt: null,
+    artifacts: null,
+  });
+  expect(JSON.parse(row.extra!)).toEqual({ llm_provider: "openai", llm_model: "m-1" });
+});
+
+test("a recreated recurring mesh task is not auto-dispatched to the local agent", async () => {
+  vi.setSystemTime(new Date("2026-11-11T15:00:00.000Z"));
+  const { insert, schedulerTick } = await load();
+  insert({ id: "R-mesh", status: "done", kanbanColumn: "done", isRecurring: 1, needsApproval: 0, execution: "mesh" });
+
+  const tick = schedulerTick();
+  const [newId] = tick.recurring;
+  expect(newId).toBeDefined();
+  expect(tick.dispatched).not.toContain(newId);
+  expect(schedulerTick().dispatched).not.toContain(newId);
+});

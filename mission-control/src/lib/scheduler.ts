@@ -143,6 +143,26 @@ export function schedulerStatus(graceMinutes = 30): SchedulerStatus {
   };
 }
 
+// `extra` carries the active-tasks.md fields MC does not model. Of those only
+// the worker routing is part of a task's definition; the rest (collab_result,
+// circling_* progress, ...) is what a run wrote.
+const DEFINITION_EXTRA_KEYS = ["llm_provider", "llm_model", "provider", "model"];
+
+function definitionExtra(raw: string | null): string | null {
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const kept = Object.fromEntries(
+    Object.entries(parsed as Record<string, unknown>).filter(([k]) => DEFINITION_EXTRA_KEYS.includes(k))
+  );
+  return Object.keys(kept).length ? JSON.stringify(kept) : null;
+}
+
 /**
  * Main scheduler tick. Evaluates triggers and dispatches eligible tasks.
  * Designed to be called externally (API route, heartbeat, SWR poll).
@@ -258,6 +278,10 @@ export function schedulerTick(): TickResult {
       }
     }
 
+    // The next run is the same task: every definition field carries over
+    // (where it runs, what it does, how it is checked and routed). Only run
+    // state starts fresh: status, mesh ids, acknowledgement, artifacts, and the
+    // results the bridge writes into `extra`.
     db.insert(tasks)
       .values({
         id: newId,
@@ -271,6 +295,9 @@ export function schedulerTick(): TickResult {
         project: t.project,
         type: t.type,
         parentId: t.parentId,
+        description: t.description,
+        color: t.color,
+        showInCalendar: t.showInCalendar,
         needsApproval: t.needsApproval,
         triggerKind: t.triggerKind,
         triggerAt: nextTriggerAt,
@@ -279,6 +306,15 @@ export function schedulerTick(): TickResult {
         isRecurring: 1,
         capacityClass: t.capacityClass,
         autoPriority: t.autoPriority,
+        execution: t.execution,
+        metric: t.metric,
+        budgetMinutes: t.budgetMinutes,
+        scope: t.scope,
+        collaboration: t.collaboration,
+        preferredNodes: t.preferredNodes,
+        excludeNodes: t.excludeNodes,
+        clusterId: t.clusterId,
+        extra: definitionExtra(t.extra),
         updatedAt: now.toISOString(),
         createdAt: now.toISOString(),
       })
