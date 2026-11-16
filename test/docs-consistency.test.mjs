@@ -136,3 +136,16 @@ test('PUBLISHERS.md calls the Claude Code PreCompact publisher wired only when t
     assert.doesNotMatch(claudeCode, /No manual configuration needed|delegates to/);
   }
 });
+
+test('README Federation section carries the plan status while the federation block stands', () => {
+  const fed = section(read('README.md'), '## Federation (Grappes)').text;
+  let blocked = true;
+  try { read('memory-plan/plans/federation/BLOCKED.md'); } catch { blocked = false; }
+  assert.equal(/Status: BLOCKED \(D15\)/.test(fed), blocked, 'README federation status must match BLOCKED.md');
+  if (!blocked) return;
+  const decisions = read('memory-plan/plans/federation/DECISIONS.md');
+  assert.match(decisions, /^## D15 — /m);
+  assert.match(decisions, /^## D16 — Consensus gating is DEAD/m);
+  assert.match(fed, /\*\*D16\*\*[^\n]*retired consensus gating/);
+  assert.ok(fed.includes('(memory-plan/plans/federation/BLOCKED.md)'));
+});

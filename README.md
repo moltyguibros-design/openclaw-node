@@ -567,6 +567,8 @@ The mesh is optional. Without Tailscale, everything runs as a standalone single 
 
 ## Federation (Grappes)
 
+> **Status: BLOCKED (D15).** The federation plan's premise benchmark failed on reliability (solo 3 · grappe 2), so the plan is blocked: step 3.5, the management grappe and the savant grappe do not proceed. **D16** (operator ruling) retired consensus gating from the forward design: no votes, sign-offs or convergence bars; a federation work unit is a fixed-pass pipeline (draft → reviews ingested → revision) that ships unconditionally. The circling vote and finalization machinery described below remains as built history, and the three-tier design must be re-derived under D16. The block stands until pipeline mode passes a new preregistered benchmark. See [memory-plan/plans/federation/BLOCKED.md](memory-plan/plans/federation/BLOCKED.md) and [DECISIONS D15/D16](memory-plan/plans/federation/DECISIONS.md).
+
 A **grappe** is a set of full OpenClaw nodes joined by signed membership that execute tasks through a shared worker protocol. The unit of federation is a full OpenClaw node — the frontend-agnostic agent plus its local harness, one per machine — not a model or a bare process. Nodes outside any grappe keep full standalone single-node function; federation is an opt-in layer on top.
 
 > **Requirement (D11):** a grappe/cluster member's mind is an **advanced LLM** (Claude / GPT / Kimi / DeepSeek-class), never a raw local model. The local qwen model is the harness's extraction/embedding/probe organ only. **This project is not to be used for anything less than a local OpenClaw driven by an advanced LLM** — the single-box qwen mesh-agent scaffold that proved the choreography is retired as a worker.
