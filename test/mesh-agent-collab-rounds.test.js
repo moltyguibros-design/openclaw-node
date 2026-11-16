@@ -66,7 +66,7 @@ function freshWorkspace() {
 }
 
 /** Delivers `rounds` in order; the session reads as completed once `completeAfter` reflections arrived. */
-function fakeBus(rounds, completeAfter) {
+function fakeBus(rounds, completeAfter, { status: statusExtra = {}, tasks = {} } = {}) {
   const reflections = [];
   agent.__test.setContext({
     nc: {
@@ -79,7 +79,10 @@ function fakeBus(rounds, completeAfter) {
         } else if (subject === 'mesh.collab.reflect') {
           reflections.push(payload);
         } else if (subject === 'mesh.collab.status') {
-          reply = { status: reflections.length >= completeAfter ? 'completed' : 'active' };
+          reply = reflections.length >= completeAfter ? { status: 'completed', ...statusExtra } : { status: 'active' };
+        } else if (subject === 'mesh.tasks.get') {
+          if (!tasks[payload.task_id]) return { data: sc.encode(JSON.stringify({ ok: false, error: `Task ${payload.task_id} not found` })) };
+          reply = tasks[payload.task_id];
         }
         return { data: sc.encode(JSON.stringify({ ok: true, data: reply })) };
       },
@@ -183,5 +186,68 @@ describe('circling submission guard (D14 smoke #4)', () => {
     const r = await submit('CF-4', { my_role: 'reviewer', circling_phase: 'finalization', circling_step: 0 }, single('reviewSignoff', 'Signed off: the reset path is covered.'));
     assert.equal(r.parse_failed, false);
     assert.equal(r.vote, 'converged');
+  });
+});
+
+// mesh-core#16: a session that ran out of rounds never converged, so the daemon
+// holds the parent in pending_review; the member's contribution waits on its
+// branch until the daemon itself reports the review outcome.
+describe('collab contribution after max rounds without convergence', () => {
+  beforeEach(freshWorkspace);
+
+  const round = { round_number: 1, mode: 'parallel', my_role: 'worker', my_scope: [], shared_intel: '' };
+  const branch = 'mesh/C-rev-node-self';
+  const branchSha = () => { try { return git(WORKSPACE, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`); } catch { return null; } };
+  const onMain = (sha) => { try { git(WORKSPACE, 'merge-base', '--is-ancestor', sha, 'main'); return true; } catch { return false; } };
+  const edited = () => ({ ...collabTask('C-rev', 'parallel', 'edited'), llm_provider: 'collab-edit-stub' });
+
+  it('a converged session still merges the contribution', async () => {
+    fakeBus([round], 1);
+    await agent.__test.executeCollabTask(edited());
+    assert.match(fs.readFileSync(path.join(WORKSPACE, 'README'), 'utf-8'), /x/);
+    assert.equal(branchSha(), null);
+  });
+
+  it('a session that needs review keeps the contribution off main', async () => {
+    fakeBus([round], 1, { status: { needs_review: true } });
+    await agent.__test.executeCollabTask(edited());
+    const sha = branchSha();
+    assert.ok(sha, 'the contribution branch is kept');
+    assert.equal(onMain(sha), false, 'unreviewed collab work must not reach main');
+    assert.equal(fs.readFileSync(path.join(WORKSPACE, 'README'), 'utf-8'), 'base\n');
+  });
+
+  it('merges the kept contribution once the daemon reports the parent approved', async () => {
+    fakeBus([round], 1, { status: { needs_review: true } });
+    await agent.__test.executeCollabTask(edited());
+    const sha = branchSha();
+    fakeBus([], 1, { tasks: { 'C-rev': { task_id: 'C-rev', status: 'pending_review', owner: 'node-other', collab_session_id: 'S-C-rev' } } });
+    assert.equal(await agent.__test.onReviewApproved('C-rev'), false, 'a forged approve while review is pending does nothing');
+    assert.equal(onMain(sha), false);
+
+    fakeBus([], 1, { tasks: { 'C-rev': { task_id: 'C-rev', status: 'completed', owner: 'node-other', collab_session_id: 'S-C-rev' } } });
+    assert.equal(await agent.__test.onReviewApproved('C-rev'), true);
+    assert.equal(onMain(sha), true);
+    assert.equal(branchSha(), null);
+  });
+
+  it('drops the kept contribution once the daemon reports the parent rejected', async () => {
+    fakeBus([round], 1, { status: { needs_review: true } });
+    await agent.__test.executeCollabTask(edited());
+    const sha = branchSha();
+    fakeBus([], 1, { tasks: { 'C-rev': { task_id: 'C-rev', status: 'queued', rejection_count: 1, owner: 'node-other', collab_session_id: 'S-C-rev2' } } });
+    assert.equal(await agent.__test.onReviewRejected('C-rev'), true);
+    assert.equal(branchSha(), null);
+    assert.equal(onMain(sha), false);
+  });
+
+  it('startup reconcile merges a contribution approved while offline', async () => {
+    fakeBus([round], 1, { status: { needs_review: true } });
+    await agent.__test.executeCollabTask(edited());
+    const sha = branchSha();
+    fakeBus([], 1, { tasks: { 'C-rev': { task_id: 'C-rev', status: 'completed', owner: 'node-other', collab_session_id: 'S-C-rev' } } });
+    await agent.__test.reconcileKeptBranches();
+    assert.equal(onMain(sha), true);
+    assert.equal(branchSha(), null);
   });
 });

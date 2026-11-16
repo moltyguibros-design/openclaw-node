@@ -892,11 +892,12 @@ describe('Collab max rounds exhaustion (live NATS)', { skip: skipReason }, () =>
     assert.equal(status.data.status, 'completed');
   });
 
-  it('parent task is completed with max_rounds_reached flag', async () => {
+  it('parent task waits in pending_review with max_rounds_reached and a digest', async () => {
     const res = await pollUntil('mesh.tasks.get', { task_id: collabTaskId },
-      r => r.ok && r.data.status === 'completed');
-    assert.equal(res.data.status, 'completed');
+      r => r.ok && r.data.status === 'pending_review');
+    assert.equal(res.data.status, 'pending_review');
     assert.equal(res.data.result.max_rounds_reached, true);
+    assert.equal(res.data.result.review_digest.converged_votes, 0);
   });
 });
 

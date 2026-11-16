@@ -231,29 +231,42 @@ async function handleSubmit(msg) {
   log(`SUBMIT ${task.task_id}: "${task.title}" (budget: ${task.budget_minutes}m, metric: ${task.metric || 'none'})`);
   publishEvent('submitted', task);
 
-  if (session) {
-    await collabStore.put(session);
-
-    // Store session_id back in task for agent discovery
-    task.collab_session_id = session.session_id;
-    await store.put(task);
-
-    log(`  → COLLAB SESSION ${session.session_id} auto-created (mode: ${session.mode})`);
-    publishCollabEvent('created', session);
-
-    // Broadcast recruit signal
-    log(`RECRUIT: broadcasting for session ${session.session_id}`);
-    nc.publish(`mesh.collab.${session.session_id}.recruit`, sc.encode(JSON.stringify({
-      session_id: session.session_id,
-      task_id: task.task_id,
-      mode: session.mode,
-      min_nodes: session.min_nodes,
-      max_nodes: session.max_nodes,
-      task_title: task.title,
-    })));
-  }
+  if (session) await openCollabSession(task, session);
 
   respond(msg, task);
+}
+
+async function openCollabSession(task, session) {
+  await collabStore.put(session);
+
+  // Store session_id back in task for agent discovery
+  task.collab_session_id = session.session_id;
+  await store.put(task);
+
+  log(`  → COLLAB SESSION ${session.session_id} auto-created (mode: ${session.mode})`);
+  publishCollabEvent('created', session);
+
+  // Broadcast recruit signal
+  log(`RECRUIT: broadcasting for session ${session.session_id}`);
+  nc.publish(`mesh.collab.${session.session_id}.recruit`, sc.encode(JSON.stringify({
+    session_id: session.session_id,
+    task_id: task.task_id,
+    mode: session.mode,
+    min_nodes: session.min_nodes,
+    max_nodes: session.max_nodes,
+    task_title: task.title,
+  })));
+}
+
+// Every collab member keeps its own contribution branch while review is
+// pending, so every member hears the outcome, not only the claimer.
+async function reviewRecipients(task) {
+  const ids = new Set(task.owner ? [task.owner] : []);
+  if (task.collab_session_id && collabStore) {
+    const session = await collabStore.get(task.collab_session_id);
+    for (const n of session?.nodes || []) ids.add(n.node_id);
+  }
+  return [...ids];
 }
 
 /**
@@ -694,8 +707,8 @@ async function handleTaskApprove(msg) {
   // Merge-after-review (P4-4): the branch only reaches main now. The owning
   // agent merges and reports via mesh.tasks.merged; if it is offline it
   // reconciles its kept branches on next start.
-  if (task.owner) {
-    nc.publish(`mesh.agent.${task.owner}.approved`, sc.encode(JSON.stringify({ task_id })));
+  for (const node of await reviewRecipients(task)) {
+    nc.publish(`mesh.agent.${node}.approved`, sc.encode(JSON.stringify({ task_id })));
   }
 
   // Now advance plan wave (this was blocked while in pending_review)
@@ -723,8 +736,16 @@ async function handleTaskReject(msg) {
   // The owning agent kept the task branch unmerged while review was pending
   // (P4-4); tell it to drop that branch. Best-effort — the next attempt's
   // worktree creation deletes a stale branch of the same name anyway.
-  if (task.owner) {
-    nc.publish(`mesh.agent.${task.owner}.rejected`, sc.encode(JSON.stringify({ task_id, reason: task.rejection_reason })));
+  for (const node of await reviewRecipients(task)) {
+    nc.publish(`mesh.agent.${node}.rejected`, sc.encode(JSON.stringify({ task_id, reason: task.rejection_reason })));
+  }
+
+  // The old session is completed, so a re-queued collab task needs a fresh
+  // one: a claimer joining the finished session is refused and walks away.
+  if (task.status === TASK_STATUS.QUEUED && task.collaboration && collabStore) {
+    const previous = task.collab_session_id ? await collabStore.get(task.collab_session_id) : null;
+    const spec = previous ? { ...task.collaboration, mode: previous.mode } : task.collaboration;
+    await openCollabSession(task, createSession(task.task_id, spec));
   }
 
   if (task.status === TASK_STATUS.FAILED) {
@@ -1741,32 +1762,89 @@ async function evaluateRound(sessionId) {
       }
     }
 
+    // The members never agreed, so nothing lands on main without a human:
+    // the parent waits in pending_review and each member keeps its
+    // contribution branch until a signed approve (agents read needs_review on
+    // the session), the same gate a solo task without a metric goes through.
+    const digest = notConvergedDigest(session);
     await collabStore.markCompleted(sessionId, {
       artifacts: [...new Set(allArtifacts)],
-      summary: `Max rounds (${session.max_rounds}) reached. ${session.nodes.length} nodes participated.`,
+      summary: `Max rounds (${session.max_rounds}) reached without convergence; needs review. ${digest.text}`,
       node_contributions: contributions,
+      needs_review: true,
+      review_digest: digest,
     });
     await collabStore.appendAudit(sessionId, 'session_completed', {
       outcome: 'max_rounds_reached', rounds: session.current_round,
       max_rounds: session.max_rounds, artifacts: [...new Set(allArtifacts)].length,
       node_count: session.nodes.length, recruited_count: session.recruited_count,
+      review_digest: digest,
     });
 
-    // Complete parent task (flagged for review since not truly converged)
     const updatedSession = await collabStore.get(sessionId);
-    const settled = await store.markCompleted(session.task_id, {
+    const task = await store.markPendingReview(session.task_id, {
       ...updatedSession.result,
+      success: true,
       max_rounds_reached: true,
     });
-    publishEvent('completed', await store.get(session.task_id));
     publishCollabEvent('completed', updatedSession);
-    if (settled) await checkPlanProgress(session.task_id, 'completed');
+    if (task) {
+      log(`PENDING REVIEW ${session.task_id}: collab ${sessionId} did not converge. ${digest.text}`);
+      log(`  Approve: mesh tasks approve ${session.task_id}  |  Reject: mesh tasks reject ${session.task_id} --reason "..."`);
+      publishEvent('pending_review', task);
+      await updatePlanSubtaskStatus(session.task_id, 'pending_review');
+    }
 
   } else {
     // Not converged, not maxed out → next round
     log(`COLLAB ROUND ${sessionId} R${session.current_round} DONE. Not converged. Starting next round.`);
     await startCollabRound(sessionId);
   }
+}
+
+const DIGEST_EXCERPT = 240;
+
+function excerpt(text) {
+  const flat = String(text || '').replace(/\s+/g, ' ').trim();
+  return flat.length > DIGEST_EXCERPT ? `${flat.slice(0, DIGEST_EXCERPT - 1)}…` : flat;
+}
+
+/**
+ * Why a session that hit max_rounds is not done: each member's last-round
+ * vote, confidence and its own account of the work, plus any member that sent
+ * nothing in that round. The reviewer reads this before approving.
+ */
+function notConvergedDigest(session) {
+  const last = session.rounds[session.rounds.length - 1];
+  const reflections = last?.reflections || [];
+  const members = reflections.map((r) => ({
+    node_id: r.node_id,
+    vote: r.parse_failed ? 'parse_failed' : r.vote,
+    confidence: r.confidence ?? null,
+    summary: excerpt(r.summary),
+    learnings: excerpt(r.learnings),
+  }));
+  const silent = session.nodes
+    .map((n) => n.node_id)
+    .filter((id) => !reflections.some((r) => r.node_id === id));
+  const lines = members.map((m) => {
+    const conf = m.confidence == null ? '' : `, confidence ${m.confidence}`;
+    const open = m.learnings ? ` Learnings: ${m.learnings}` : '';
+    return `${m.node_id} voted ${m.vote}${conf}: ${m.summary || '(no summary)'}${open}`;
+  });
+  for (const id of silent) lines.push(`${id} sent no reflection in the final round`);
+  const convergedVotes = members.filter((m) => m.vote === 'converged').length;
+  const type = session.convergence?.type || 'unknown';
+  const rule = type === 'majority' ? `majority >= ${session.convergence.threshold}` : type;
+  return {
+    rounds: session.current_round,
+    max_rounds: session.max_rounds,
+    convergence: rule,
+    converged_votes: convergedVotes,
+    members,
+    silent,
+    text: `Round ${session.current_round}: ${convergedVotes}/${session.nodes.length} voted converged (rule: ${rule}). ${lines.join(' | ')}`,
+  };
 }
 
 // ── Circling Strategy Functions ──────────────────────
@@ -2941,6 +3019,7 @@ if (require.main === module) {
     handleAttempt: (msg) => handleAttempt(msg),
     handleHeartbeat: (msg) => handleHeartbeat(msg),
     handleRelease: (msg) => handleRelease(msg),
+    handleTaskApprove: (msg) => handleTaskApprove(msg),
     handleTaskReject: (msg) => handleTaskReject(msg),
     handleCancel: (msg) => handleCancel(msg),
     handleTaskMerged: (msg) => handleTaskMerged(msg),

@@ -886,8 +886,32 @@ function describeReviewState(task) {
 // work onto main, and a forged `.rejected` destroy work awaiting review (review
 // 2026-09-15 F1). Each one now acts only after the daemon itself reports the
 // matching state for a task this node owns.
+// A collab member's contribution sits on mesh/<task>-<node> whoever claimed the
+// parent, so membership, not ownership, decides which branch is this node's.
+function collabBranchId(taskId) {
+  return `${taskId}-${NODE_ID}`;
+}
+
+function isCollabTask(task) {
+  return !!(task && (task.collab_session_id || task.collaboration));
+}
+
+function collabRejected(task) {
+  return task.rejection_count > 0 && (task.status === 'queued' || task.status === 'failed');
+}
+
+function mergeCollabContribution(taskId) {
+  const id = collabBranchId(taskId);
+  const merge = mergeTaskBranch(id);
+  if (merge.missing) return false;
+  log(`APPROVED ${taskId} — collab contribution mesh/${id} ${merge.merged ? 'merged' : 'kept (merge failed)'}`);
+  if (merge.merged) deleteTaskBranch(id);
+  return true;
+}
+
 async function onReviewApproved(taskId) {
   const task = await natsRequest('mesh.tasks.get', { task_id: taskId }, 5000).catch(() => null);
+  if (isCollabTask(task) && task.status === 'completed') return mergeCollabContribution(taskId);
   if (!task || task.owner !== NODE_ID || task.status !== 'completed') {
     warn(`APPROVED ${taskId} ignored — daemon reports ${describeReviewState(task)}`);
     return false;
@@ -903,6 +927,11 @@ async function onReviewApproved(taskId) {
 // both cases the daemon keeps the owner and counts the rejection.
 async function onReviewRejected(taskId) {
   const task = await natsRequest('mesh.tasks.get', { task_id: taskId }, 5000).catch(() => null);
+  if (isCollabTask(task) && collabRejected(task)) {
+    log(`REJECTED ${taskId} — dropping kept collab contribution`);
+    deleteTaskBranch(collabBranchId(taskId));
+    return true;
+  }
   const rejected = task && task.owner === NODE_ID && task.rejection_count > 0
     && (task.status === 'queued' || task.status === 'failed');
   if (!rejected) {
@@ -934,6 +963,7 @@ async function reconcileKeptBranches() {
   }
   for (const branch of branches) {
     const taskId = branch.slice('mesh/'.length);
+    if (await reconcileCollabBranch(branch, taskId)) continue;
     let task;
     try { task = await natsRequest('mesh.tasks.get', { task_id: taskId }, 5000); } catch { continue; }
     if (!task || task.owner !== NODE_ID) continue;
@@ -946,6 +976,24 @@ async function reconcileKeptBranches() {
       deleteTaskBranch(taskId);
     }
   }
+}
+
+// A kept collab contribution (mesh/<task>-<this node>) follows its parent's
+// review: approved → merge, rejected or ended → drop, pending → leave.
+async function reconcileCollabBranch(branch, branchId) {
+  const suffix = `-${NODE_ID}`;
+  if (!branchId.endsWith(suffix)) return false;
+  const parentId = branchId.slice(0, -suffix.length);
+  let parent;
+  try { parent = await natsRequest('mesh.tasks.get', { task_id: parentId }, 5000); } catch { return false; }
+  if (!isCollabTask(parent)) return false;
+  if (parent.status === 'completed') {
+    log(`RECONCILE: ${branch} approved while offline — merging`);
+    mergeCollabContribution(parentId);
+  } else if (collabRejected(parent) || ['failed', 'released', 'cancelled'].includes(parent.status)) {
+    deleteTaskBranch(branchId);
+  }
+  return true;
 }
 
 /**
@@ -1589,6 +1637,7 @@ async function executeCollabTask(task) {
   const roundSub = nc.subscribe(`mesh.collab.${sessionId}.node.${NODE_ID}.round`);
   let roundsDone = false;
   let lastKnownSessionStatus = null; // tracks why rounds ended (completed/aborted/converged)
+  let sessionNeedsReview = false;
   let lastRound = 0;
 
   // Join the session using the discovered session_id
@@ -1655,6 +1704,7 @@ async function executeCollabTask(task) {
       if (['aborted', 'completed'].includes(status.status)) {
         log(`COLLAB HEARTBEAT: Session ${sessionId} is ${status.status}. Unsubscribing.`);
         lastKnownSessionStatus = status.status;
+        sessionNeedsReview = !!status.needs_review;
         roundsDone = true;
         roundSub.unsubscribe();
       }
@@ -1822,6 +1872,7 @@ async function executeCollabTask(task) {
         if (['converged', 'completed', 'aborted'].includes(status.status)) {
           log(`COLLAB: Session ${sessionId} is ${status.status}. Done.`);
           lastKnownSessionStatus = status.status;
+          sessionNeedsReview = !!status.needs_review;
           roundsDone = true;
         }
       } catch (err) { warn(`collab status check: ${err.message}`); }
@@ -1837,12 +1888,19 @@ async function executeCollabTask(task) {
   // a fresh network read, which could see stale state due to NATS latency.
   try {
     if (['completed', 'converged'].includes(lastKnownSessionStatus)) {
-      // The session's merge-review vote gate (daemon evaluateRound) is the
-      // review for collab work, so merging here is already post-review.
-      const collabId = `${task.task_id}-${NODE_ID}`;
+      // A converged vote is the review for collab work, so that merge is
+      // post-review. A session that ran out of rounds never converged: the
+      // daemon holds the parent in pending_review and the contribution stays
+      // on its branch until the approve notice (onReviewApproved).
+      const collabId = collabBranchId(task.task_id);
       const commit = commitWorktree(worktreePath, collabId, `collab contribution from ${NODE_ID}`);
-      const merge = commit?.committed ? mergeTaskBranch(collabId) : null;
-      cleanupWorktree(worktreePath, !!commit?.committed && !merge?.merged);
+      if (sessionNeedsReview) {
+        if (commit?.committed) log(`Branch ${commit.branch} kept unmerged — collab ${sessionId} did not converge (merge after review)`);
+        cleanupWorktree(worktreePath, !!commit?.committed);
+      } else {
+        const merge = commit?.committed ? mergeTaskBranch(collabId) : null;
+        cleanupWorktree(worktreePath, !!commit?.committed && !merge?.merged);
+      }
     } else {
       log(`COLLAB: Session ${sessionId} ended as ${lastKnownSessionStatus || 'unknown'} — discarding worktree`);
       cleanupWorktree(worktreePath, false);
