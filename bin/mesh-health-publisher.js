@@ -39,6 +39,7 @@ const sc = StringCodec();
 const IS_MAC = os.platform() === "darwin";
 
 const { ROLE_COMPONENTS } = require('../lib/mesh-roles');
+const { launchdServiceStatus, systemdServiceStatus } = require('../lib/service-status');
 
 // ── Circuit Breaker State ───────────────────────────────────────────────
 let consecutiveFailures = 0;
@@ -96,20 +97,7 @@ function getServices() {
     ];
     for (const name of serviceNames) {
       const raw = execSafe(`launchctl list ${name} 2>/dev/null`);
-      if (raw) {
-        const pidMatch = raw.match(/"PID"\s*=\s*(\d+)/);
-        const pid = pidMatch ? parseInt(pidMatch[1], 10) : undefined;
-        services.push({
-          name: name.replace("ai.openclaw.", ""),
-          status: pid ? "active" : "idle",
-          pid,
-        });
-      } else {
-        services.push({
-          name: name.replace("ai.openclaw.", ""),
-          status: "not-found",
-        });
-      }
+      services.push({ name: name.replace("ai.openclaw.", ""), ...launchdServiceStatus(raw) });
     }
   } else {
     // Linux: check both system-level and user-level services
@@ -124,29 +112,14 @@ function getServices() {
       "openclaw-mesh-health-publisher",
       "openclaw-mesh-deploy-listener",
     ];
+    const props = "--property=LoadState,ActiveState,MainPID";
     for (const name of systemServices) {
-      const raw = execSafe(`systemctl is-active ${name} 2>/dev/null`);
-      const pidRaw = execSafe(
-        `systemctl show ${name} --property=MainPID --value 2>/dev/null`
-      );
-      const pid = pidRaw ? parseInt(pidRaw, 10) || undefined : undefined;
-      services.push({
-        name: name.replace("openclaw-", ""),
-        status: raw || "unknown",
-        pid: pid && pid > 0 ? pid : undefined,
-      });
+      const raw = execSafe(`systemctl show ${name} ${props} 2>/dev/null`);
+      services.push({ name: name.replace("openclaw-", ""), ...systemdServiceStatus(raw) });
     }
     for (const name of userServices) {
-      const raw = execSafe(`systemctl --user is-active ${name} 2>/dev/null`);
-      const pidRaw = execSafe(
-        `systemctl --user show ${name} --property=MainPID --value 2>/dev/null`
-      );
-      const pid = pidRaw ? parseInt(pidRaw, 10) || undefined : undefined;
-      services.push({
-        name: name.replace("openclaw-", ""),
-        status: raw || "unknown",
-        pid: pid && pid > 0 ? pid : undefined,
-      });
+      const raw = execSafe(`systemctl --user show ${name} ${props} 2>/dev/null`);
+      services.push({ name: name.replace("openclaw-", ""), ...systemdServiceStatus(raw) });
     }
   }
 
