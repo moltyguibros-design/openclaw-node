@@ -1205,9 +1205,12 @@ function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null)
       clearInterval(heartbeatTimer);
       clearTimeout(budgetTimer);
       if (supervisor) supervisor.workerExited({ exitCode: code, signal });
+      // A provider that reports its own result record (claude's json output) yields the
+      // answer text and the CLI's own cost; everything downstream reads only the text.
+      const parsed = provider.parseOutput ? provider.parseOutput(stdout) : null;
       // Sanitize before any parsing: terminal control codes + thinking blocks
       // must never reach the artifact pipeline (2.4 finding 6).
-      resolve({ exitCode: code, stdout: stripLlmOutput(stdout), stderr, provider: provider.name, model });
+      resolve({ exitCode: code, stdout: stripLlmOutput(parsed ? parsed.text : stdout), stderr, provider: provider.name, model, cost: parsed?.cost ?? null });
     });
 
     child.on('error', (err) => {
@@ -2114,9 +2117,11 @@ async function executeCollabTask(task) {
         }
       } catch { /* best effort */ }
 
-      // Per-round cost from this agent's own session JSONL (same mechanism
-      // the solo path already uses; per-agent work dir keeps it attributable).
-      const roundSessionInfo = await getSessionInfo(AGENT_WORK_DIR).catch(() => null);
+      // Per-round cost: the CLI's own total, else this agent's own session JSONL
+      // (the per-agent work dir keeps it attributable).
+      const roundSessionInfo = llmResult.cost
+        ? { cost: llmResult.cost }
+        : await getSessionInfo(AGENT_WORK_DIR).catch(() => null);
 
       // Submit reflection
       try {
@@ -2329,8 +2334,11 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
 
     log(`${llmResult.provider} exited with code ${llmResult.exitCode}`);
 
-    // Extract cost + summary from JSONL session file (zero-cost observability)
-    const sessionInfo = await getSessionInfo(AGENT_WORK_DIR).catch(() => null);
+    // The CLI's own total when the provider reports one; otherwise an estimate from
+    // the session JSONL.
+    const sessionInfo = llmResult.cost
+      ? { cost: llmResult.cost }
+      : await getSessionInfo(AGENT_WORK_DIR).catch(() => null);
     if (sessionInfo?.cost) {
       log(`Cost: $${sessionInfo.cost.estimatedCostUsd.toFixed(4)} (${sessionInfo.cost.inputTokens} in / ${sessionInfo.cost.outputTokens} out)`);
     }
@@ -2782,5 +2790,6 @@ module.exports.__test = {
   natsRequest, createWorktree, onWorkerError, executeCollabTask, executeTask,
   onRecruit, checkRecruitingSessions,
   claimAndRun,
+  runLLM,
 };
 // deploy-v7f0130b
