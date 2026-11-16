@@ -106,3 +106,41 @@ test('a reader never sees a half-written registry while it is being saved', t =>
   assert.ok(reads > 0);
   assert.equal(failures, 0, `${failures} of ${reads} reads saw a torn registry`);
 });
+
+test('an update repeating a recorded --delegation-id is ignored', t => {
+  const { run, read } = fixture(t, { souls: {}, delegations: [] });
+  for (let i = 0; i < 2; i++) {
+    const r = run('update', 's1', '--result', 'failure', '--delegation-id', 'toolu_a');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  }
+  assert.equal(run('update', 's1', '--result', 'failure', '--delegation-id', 'toolu_b').status, 0);
+  const reg = read();
+  assert.equal(reg.souls.s1.tasks_failed, 2);
+  assert.equal(reg.souls.s1.consecutive_failures, 2);
+  assert.deepEqual(reg.delegations.map(d => d.delegation_id), ['toolu_a', 'toolu_b']);
+});
+
+// memory-daemon audits a session at its end and again at the next bootstrap;
+// without an id each delegation counted twice, so two real failures opened
+// the circuit (>= 3) instead of three.
+test('auditing the same transcript twice records each delegation once', t => {
+  const { root, ws, read } = fixture(t, { souls: {}, delegations: [] });
+  const jsonl = path.join(root, 'session.jsonl');
+  const lines = [];
+  for (const id of ['toolu_1', 'toolu_2']) {
+    lines.push({ message: { content: [{ type: 'tool_use', name: 'Task', id, input: { subagent_type: 'coder', description: id } }] } });
+    lines.push({ message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: true, content: 'Error: build failed badly' }] } });
+  }
+  fs.writeFileSync(jsonl, lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+  const audit = fileURLToPath(new URL('../workspace-bin/subagent-audit.mjs', import.meta.url));
+  for (let i = 0; i < 2; i++) {
+    const r = spawnSync(process.execPath, [audit, jsonl], {
+      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: ws }, encoding: 'utf8',
+    });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  }
+  const soul = read().souls.coder;
+  assert.equal(soul.tasks_total, 2);
+  assert.equal(soul.consecutive_failures, 2);
+  assert.notEqual(soul.circuit_state, 'open');
+});

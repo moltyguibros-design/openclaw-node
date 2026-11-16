@@ -93,6 +93,7 @@ export async function auditSession(jsonlPath) {
 
         results.push({
           toolUseId: task.toolUseId,
+          delegationId: block.tool_use_id,
           soulId: task.soulId,
           taskDescription: task.description,
           turnsConsumed: turnsEstimate,
@@ -114,6 +115,7 @@ export async function auditSession(jsonlPath) {
 
       results.push({
         toolUseId: task.toolUseId,
+        delegationId: obj.tool_use_id,
         soulId: task.soulId,
         taskDescription: task.description,
         turnsConsumed: Math.max(1, Math.floor((lineNum - task.lineNum) / 3)),
@@ -233,6 +235,7 @@ export async function processResults(resultsList, dryRun = false) {
           '--result', r.result,
           '--turns', String(r.turnsConsumed),
           '--task', r.taskDescription.slice(0, 200),
+          ...(r.delegationId ? ['--delegation-id', r.delegationId] : []),
         ], { cwd: WORKSPACE, timeout: 10000 });
       } catch (e) {
         // Trust registry might not exist yet — that's OK

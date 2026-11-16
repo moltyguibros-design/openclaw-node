@@ -16,7 +16,9 @@ Usage:
     --result success|failure \\
     --turns N \\
     [--verified true|false] \\
-    [--task "description"]                          # record a delegation outcome
+    [--task "description"] \\
+    [--delegation-id ID]                            # record a delegation outcome
+                                                     # (an ID already recorded is ignored)
   bin/trust-registry recommend "task description"   # suggest best soul
   bin/trust-registry reset <soul-id>               # reset a soul's record
   bin/trust-registry check <soul-id>               # check if circuit allows delegation
@@ -217,6 +219,13 @@ def cmd_update(args):
     turns = args.turns or 1
     verified = args.verified in ("true", "yes", "1", True) if args.verified else False
     task_desc = args.task or ""
+    delegation_id = args.delegation_id or None
+
+    # The same session can be audited twice (at its end and again at the next
+    # bootstrap); a repeat would double-count and open the circuit early.
+    if delegation_id and any(d.get("delegation_id") == delegation_id for d in reg["delegations"]):
+        print(f"  = Already recorded: delegation {delegation_id} for {soul_id} — ignored")
+        return
 
     if soul_id not in reg["souls"]:
         reg["souls"][soul_id] = {
@@ -249,6 +258,7 @@ def cmd_update(args):
 
     # Record delegation event
     reg["delegations"].append({
+        "delegation_id": delegation_id,
         "soul_id": soul_id,
         "result": result,
         "turns": turns,
@@ -455,6 +465,7 @@ def main():
     p_update.add_argument("--turns", type=int, default=1)
     p_update.add_argument("--verified", default=None)
     p_update.add_argument("--task", default="")
+    p_update.add_argument("--delegation-id", default=None)
 
     p_rec = sub.add_parser("recommend", help="Recommend best soul for a task")
     p_rec.add_argument("query")
