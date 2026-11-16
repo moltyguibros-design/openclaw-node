@@ -278,6 +278,35 @@ export function createConsolidationScheduler(opts = {}) {
   return { start, stop, runOnce };
 }
 
+// ─── CLI Summary ────────────────────────────────────────────────────────────
+
+/** The single-shot run's summary, one line per stage (unstamped). */
+export function cliSummaryLines(result) {
+  const lines = [`Consolidation complete (${result.durationMs}ms)`];
+  const r = result.result;
+  if (!r) return lines;
+  lines.push(`  Decayed: ${r.decayed?.decayedEntities ?? '?'} entities, ${r.decayed?.decayedDecisions ?? '?'} decisions, ${r.decayed?.archivedEntities ?? '?'} entities archived`);
+  if (r.pruned?.skipped) lines.push(`  Pruned: skipped (${r.pruned.skipped})`);
+  else lines.push(`  Pruned: ${r.pruned?.archivedDecisions ?? '?'} decisions archived, ${r.pruned?.prunedThemes ?? '?'} idle themes deleted${r.pruned?.themesSkipped ? ` — idle themes kept (${r.pruned.themesSkipped})` : ''}${r.pruned?.backup ? ` — backup ${r.pruned.backup.path}` : ''}`);
+  lines.push(`  Reinforced: ${r.reinforced?.reinforcedEntities ?? '?'} entities`);
+  lines.push(`  Clusters: ${r.clusters?.clusters?.length ?? '?'} detected`);
+  lines.push(`  Contradictions: ${r.contradictions?.total ?? '?'} found`);
+  lines.push(`  Promotion: ${r.promotionCandidates?.entityCandidates?.length ?? '?'} entities, ${r.promotionCandidates?.decisionCandidates?.length ?? '?'} decisions`);
+  return lines;
+}
+
+// The observer's activity feed (lib/observer.mjs) only records log lines that
+// carry the memory daemon's `[YYYY-MM-DD, HH:MM:SS]` Montreal stamp.
+export function stampLine(msg, date = new Date()) {
+  const ts = date.toLocaleString('en-CA', {
+    timeZone: 'America/Montreal',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hourCycle: 'h23',
+  });
+  return `[${ts}] ${msg}`;
+}
+
 // ─── CLI Entry ──────────────────────────────────────────────────────────────
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('/consolidation-scheduler.mjs')) {
@@ -335,17 +364,7 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
         if (result.skipped) {
           console.log(`Skipped: ${result.reason}`);
         } else if (result.ok) {
-          console.log(`Consolidation complete (${result.durationMs}ms)`);
-          const r = result.result;
-          if (r) {
-            console.log(`  Decayed: ${r.decayed?.decayedEntities ?? '?'} entities, ${r.decayed?.decayedDecisions ?? '?'} decisions, ${r.decayed?.archivedEntities ?? '?'} entities archived`);
-            if (r.pruned?.skipped) console.log(`  Pruned: skipped (${r.pruned.skipped})`);
-            else console.log(`  Pruned: ${r.pruned?.archivedDecisions ?? '?'} decisions archived, ${r.pruned?.prunedThemes ?? '?'} idle themes deleted${r.pruned?.themesSkipped ? ` — idle themes kept (${r.pruned.themesSkipped})` : ''}${r.pruned?.backup ? ` — backup ${r.pruned.backup.path}` : ''}`);
-            console.log(`  Reinforced: ${r.reinforced?.reinforcedEntities ?? '?'} entities`);
-            console.log(`  Clusters: ${r.clusters?.clusters?.length ?? '?'} detected`);
-            console.log(`  Contradictions: ${r.contradictions?.total ?? '?'} found`);
-            console.log(`  Promotion: ${r.promotionCandidates?.entityCandidates?.length ?? '?'} entities, ${r.promotionCandidates?.decisionCandidates?.length ?? '?'} decisions`);
-          }
+          for (const line of cliSummaryLines(result)) console.log(stampLine(line));
         } else {
           console.error(`Consolidation failed: ${result.error} (${result.durationMs}ms)`);
           await cleanup();

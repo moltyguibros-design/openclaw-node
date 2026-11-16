@@ -8,6 +8,7 @@ import {
   sampleLayers, appendSample, scanMemoryActivity, extractActivity,
   readTimeline, readActivity, GAP_THRESHOLD_MS, WORKING_WINDOW_MS, CORE_SERVICES,
 } from '../lib/observer.mjs';
+import { cliSummaryLines, stampLine } from '../bin/consolidation-scheduler.mjs';
 
 let tmp;
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'observer-test-')); });
@@ -126,6 +127,58 @@ describe('scanMemoryActivity — incremental, offset-tracked', () => {
     assert.equal((await scanMemoryActivity({ daemonLogPath: logPath, activityPath, logPosPath })).appended, 0);
     fs.appendFileSync(logPath, 'esis [regex]: 5 facts found\n');
     assert.equal((await scanMemoryActivity({ daemonLogPath: logPath, activityPath, logPosPath })).appended, 1);
+  });
+});
+
+describe('consolidation activity', () => {
+  const cycle = {
+    ok: true, durationMs: 1234,
+    result: {
+      decayed: { decayedEntities: 7, decayedDecisions: 3, archivedEntities: 1 },
+      pruned: { archivedDecisions: 0, prunedThemes: 0 },
+      reinforced: { reinforcedEntities: 2 },
+      clusters: { clusters: [] },
+      contradictions: { total: 0 },
+      promotionCandidates: { entityCandidates: [1, 2], decisionCandidates: [] },
+    },
+  };
+
+  it('records decay + promotion from the standalone timer log beside the daemon log', async () => {
+    const logPath = path.join(tmp, 'memory-daemon.log');
+    const activityPath = path.join(tmp, 'activity.jsonl');
+    const logPosPath = path.join(tmp, 'pos.json');
+    fs.writeFileSync(logPath, '');
+    const at = new Date('2026-07-04T16:00:00Z');
+    const consolidationLog = cliSummaryLines(cycle).map((l) => stampLine(l, at)).join('\n') + '\n';
+    fs.writeFileSync(path.join(tmp, 'consolidation-scheduler.log'), 'Skipped: busy\n' + consolidationLog);
+
+    const a1 = await scanMemoryActivity({ daemonLogPath: logPath, activityPath, logPosPath });
+    const decay = a1.events.find((e) => e.kind === 'consolidation-decay');
+    assert.deepEqual({ entities: decay.entities, decisions: decay.decisions }, { entities: 7, decisions: 3 });
+    assert.equal(decay.ts, '2026-07-04T12:00:00', 'Montreal local, like the daemon log');
+    assert.equal(a1.events.find((e) => e.kind === 'promotion').entities, 2);
+    assert.equal(a1.appended, 2);
+    assert.equal((await scanMemoryActivity({ daemonLogPath: logPath, activityPath, logPosPath })).appended, 0,
+      'the consolidation log keeps its own offset');
+  });
+
+  it("matches the in-process scheduler's cycle-complete line in the daemon log", () => {
+    const ev = extractActivity('[2026-07-04, 12:00:00] [consolidation-scheduler] cycle complete (812ms): decayed 4 entities + 2 decisions, archived 0 entities');
+    assert.equal(ev.length, 1);
+    assert.deepEqual(ev[0], { ts: '2026-07-04T12:00:00', kind: 'consolidation-decay', entities: 4, decisions: 2 });
+  });
+});
+
+describe('appendSample — ledger tail', () => {
+  it('finds the last sample behind trailing gap records in a ledger larger than the tail window', async () => {
+    const ledgerPath = path.join(tmp, 'big.jsonl');
+    const t0 = Date.parse('2026-07-04T00:00:00Z');
+    const filler = JSON.stringify({ event: 'sample', ...mk(t0 - 86_400_000, 1) }) + '\n';
+    fs.writeFileSync(ledgerPath, filler.repeat(Math.ceil(200_000 / filler.length))
+      + JSON.stringify({ event: 'sample', ...mk(t0, 1) }) + '\n'
+      + JSON.stringify({ event: 'gap', ts: new Date(t0).toISOString(), minutes: 1 }) + '\n');
+    const r = await appendSample(mk(t0 + 60_000, 1), { ledgerPath });
+    assert.equal(r.gapInscribed, false, 'compared against the newest sample, not the day-old filler');
   });
 });
 
