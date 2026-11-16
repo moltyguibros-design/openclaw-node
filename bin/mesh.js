@@ -35,32 +35,14 @@ const LOCAL_NODE = os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, '-');
 const sc = StringCodec();
 
 // ─── Known nodes (for --node shortcuts) ──────────────
-const NODE_ALIASES_DEFAULTS = {
-  'ubuntu': 'calos-vmware-virtual-platform',
-  'linux': 'calos-vmware-virtual-platform',
-  'mac': 'moltymacs-virtual-machine-local',
-  'macos': 'moltymacs-virtual-machine-local',
-};
-
-function loadNodeAliases() {
-  const aliasPath = path.join(os.homedir(), '.openclaw', 'mesh-aliases.json');
-  try {
-    if (fs.existsSync(aliasPath)) {
-      const custom = JSON.parse(fs.readFileSync(aliasPath, 'utf8'));
-      return { ...NODE_ALIASES_DEFAULTS, ...custom };
-    }
-  } catch (err) { console.warn(`[mesh] load node aliases: ${err.message}`); }
-  return NODE_ALIASES_DEFAULTS;
-}
+const { loadNodeAliases, resolveNodeName } = require('../lib/node-aliases');
 const NODE_ALIASES = loadNodeAliases();
 
 /**
  * Resolve a node name — accepts aliases, full IDs, or "self"/"local"
  */
 function resolveNode(name) {
-  if (!name || name === 'self' || name === 'local') return LOCAL_NODE;
-  const lower = name.toLowerCase();
-  return NODE_ALIASES[lower] || lower;
+  return resolveNodeName(name, { localId: LOCAL_NODE, aliases: NODE_ALIASES });
 }
 
 /**
@@ -748,12 +730,12 @@ async function cmdDeploy(args) {
   try {
     const js = nc.jetstream();
     const resultsKv = await js.views.kv('MESH_DEPLOY_RESULTS');
+    // The fleet registry, not the alias table: aliases only ever named the two original VMs.
+    const checkNodes = targetNodes.length > 0
+      ? targetNodes
+      : (await require('./fleet-deploy').discoverNodes(nc)).map(n => n.nodeId);
 
     while (Date.now() < deadline) {
-      // Check all nodes
-      const allAliasNodes = [...new Set(Object.values(NODE_ALIASES))];
-      const checkNodes = targetNodes.length > 0 ? targetNodes : allAliasNodes;
-
       for (const nodeId of checkNodes) {
         if (seen.has(nodeId)) continue;
         const key = `${sha}-${nodeId}`;
@@ -1134,8 +1116,10 @@ function cmdHelp() {
     '  mesh deploy --component mesh-daemons    Deploy specific component',
     '',
     'NODE ALIASES:',
-    '  ubuntu, linux   = Ubuntu VM (calos-vmware-virtual-platform)',
-    '  mac, macos      = macOS VM (moltymacs-virtual-machine-local)',
+    '  ubuntu, linux, calos  = Ubuntu VM (calos-vmware-virtual-platform)',
+    '  mac, macos, moltymac  = macOS VM (moltymacs-virtual-machine)',
+    '  self, local           = this node',
+    '  ~/.openclaw/mesh-aliases.json adds more (openclaw-node-init writes it)',
     '',
     'SHARED FOLDER:',
     '  ~/openclaw/shared/  -- auto-synced between all nodes via NATS',

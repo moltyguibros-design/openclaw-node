@@ -35,7 +35,11 @@
  *   mesh deploy --local --to <sha> [--from <sha>]
  *                                       — pinned: no fetch; check out <sha> and apply the
  *                                         diff from <from> (default: last deployed sha)
- *   mesh deploy --node ubuntu           — remote node only
+ *   mesh deploy --node <id>             — only that node (repeatable): an id from
+ *                                         MESH_NODES/MESH_NODE_HEALTH, "self", or an alias
+ *                                         (~/.openclaw/mesh-aliases.json; legacy: ubuntu,
+ *                                         linux, calos, mac, macos, moltymac); unknown ids
+ *                                         are refused
  *   mesh deploy --include-services      — also update launchd/systemd units
  *   mesh deploy --rollback              — revert last deploy
  *   mesh deploy --status                — show what's deployed vs what's in git
@@ -54,6 +58,8 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { createTracer } = require('../lib/tracer');
+const { resolveNodeId } = require('../lib/node-id');
+const { loadNodeAliases, planNodeTargets, unknownNodes } = require('../lib/node-aliases');
 const tracer = createTracer('mesh-deploy');
 
 // ── Constants ────────────────────────────────────────────────────────────
@@ -1008,6 +1014,28 @@ function recordDeploy({ fromSha, toSha, filterIds, deployed }) {
   if (complete || deployed.length > 0) saveDeployState(state);
 }
 
+/** Refuse --node ids the fleet registry has never seen, before anything deploys. */
+async function assertKnownNodes(ids) {
+  const { discoverNodes } = require('./fleet-deploy');
+  const { connect } = require('nats');
+  const { natsConnectOpts } = require('../lib/nats-resolve');
+  let nc;
+  try {
+    nc = await connect(natsConnectOpts({ name: 'deploy-node-check', timeout: 10000 }));
+  } catch (err) {
+    throw new Error(`cannot check --node ${ids.join(', ')} against MESH_NODES/MESH_NODE_HEALTH: ${err.message}`);
+  }
+  try {
+    const nodes = await discoverNodes(nc);
+    const unknown = unknownNodes(ids, nodes);
+    if (unknown.length > 0) {
+      throw new Error(`unknown node ${unknown.join(', ')} — known: ${nodes.map(n => n.nodeId).join(', ') || 'none'}`);
+    }
+  } finally {
+    await nc.close();
+  }
+}
+
 // ── Tracer Instrumentation ───────────────────────────────────────────────
 planComponents = tracer.wrap('planComponents', planComponents, { tier: 2, category: 'lifecycle' });
 installFiles = tracer.wrap('installFiles', installFiles, { tier: 2, category: 'lifecycle' });
@@ -1043,20 +1071,25 @@ async function main() {
   const fromArg = argValue('--from');
   const toArg = argValue('--to');
 
-  // Parse --node flag
-  let deployLocal = true, deployRemote = !localOnly;
+  // --node <id> (repeatable): exactly those nodes. An unknown name used to
+  // match neither alias list and fell through to "this node + every node".
+  const nodeNames = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--node' && args[i + 1]) {
-      const target = args[i + 1].toLowerCase();
-      if (['ubuntu', 'linux', 'calos'].includes(target)) {
-        deployLocal = false;
-        deployRemote = true;
-      } else if (['mac', 'macos', 'moltymac', 'self'].includes(target)) {
-        deployLocal = true;
-        deployRemote = false;
-      }
+      nodeNames.push(args[i + 1]);
       i++;
     }
+  }
+  let deployLocal = true, deployRemote = !localOnly, targetNodes = null;
+  if (nodeNames.length > 0) {
+    const localId = resolveNodeId();
+    const plan = planNodeTargets(nodeNames, { localId, aliases: loadNodeAliases() });
+    if (localOnly && plan.remoteIds.length > 0) {
+      throw new Error(`--local conflicts with --node ${plan.remoteIds.join(', ')} (this node is ${localId})`);
+    }
+    deployLocal = plan.deployLocal;
+    deployRemote = plan.remoteIds.length > 0;
+    targetNodes = deployRemote ? plan.remoteIds : null;
   }
 
   // ── Status mode ──
@@ -1112,6 +1145,8 @@ async function main() {
     return;
   }
 
+  if (targetNodes) await assertKnownNodes(targetNodes);
+
   // ── Rollback mode ──
   if (doRollback) {
     header('Rolling Back Last Deploy');
@@ -1141,7 +1176,7 @@ async function main() {
           // Trigger fleet deploy at the rollback SHA — listeners check it out exactly
           await fleetDeploy(nc, {
             components: null,
-            targetNodes: null,
+            targetNodes,
             dryRun: false,
             force: true,
             timeoutMs: 120000,
@@ -1219,7 +1254,7 @@ async function main() {
       try {
         await fleetDeploy(nc, {
           components: filterIds.length > 0 ? filterIds : null,
-          targetNodes: null,  // all remote nodes
+          targetNodes,  // null: every node but this one
           dryRun,
           force: forceAll,
           timeoutMs: 120000,
