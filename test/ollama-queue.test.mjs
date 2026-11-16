@@ -28,8 +28,10 @@ import {
   setStateObserver,
   markExternalJob,
   clearExternalJob,
+  reportExtractionActivity, applyWorkerLlmMessage,
   _resetForTesting,
 } from '../lib/ollama-queue.mjs';
+import { Worker } from 'node:worker_threads';
 
 beforeEach(() => {
   _resetForTesting();
@@ -625,5 +627,75 @@ describe('cross-process snapshot (R12, repair 3.3)', () => {
     assert.equal(snapshotLooksStuck({ consecutive_timeouts: { analysis: 99, extraction: 0 } }), false,
       'analysis timeouts must not count (F-H17)');
     assert.equal(snapshotLooksStuck(null), false);
+  });
+});
+
+describe('extraction in a worker thread short-circuits analysis (llm-hyperagent#5)', () => {
+  const never = async () => { throw new Error('analysis must not reach the model'); };
+
+  it('a worker-reported LLM extraction makes analysis fall back at once', async () => {
+    assert.equal(applyWorkerLlmMessage('flush-1:llm', { llm: 'start' }), true);
+    const t0 = Date.now();
+    const r = await requestAnalysis(never, { waitTimeoutMs: 5000 });
+    assert.equal(r.mode, 'fallback');
+    assert.equal(r.reason, 'ollama-busy-extraction');
+    assert.ok(Date.now() - t0 < 1000, 'no wait-timeout');
+
+    applyWorkerLlmMessage('flush-1:llm', { llm: 'end' });
+    const after = await requestAnalysis(async () => 'ran', { waitTimeoutMs: 500 });
+    assert.equal(after.mode, 'llm');
+  });
+
+  it("the flush's non-LLM phases do not block analysis", async () => {
+    markExternalJob('flush-2', { type: 'flush' });
+    markExternalJob('import-1', { type: 'import' });
+    const r = await requestAnalysis(async () => 'ran', { waitTimeoutMs: 500 });
+    assert.equal(r.mode, 'llm');
+  });
+
+  it('only {llm} messages are worker LLM signals', () => {
+    assert.equal(applyWorkerLlmMessage('x', { ok: true, result: {} }), false);
+    assert.equal(getState().external_jobs.length, 0);
+  });
+
+  it('reportExtractionActivity posts start/end around each extraction job', async () => {
+    const posted = [];
+    reportExtractionActivity((m) => posted.push(m));
+    await requestExtraction(async () => 'x');
+    await requestAnalysis(async () => 'y', { waitTimeoutMs: 500 });
+    assert.deepEqual(posted, [{ llm: 'start' }, { llm: 'end' }]);
+    setStateObserver(null);
+  });
+
+  it('end to end across a real worker thread', async () => {
+    const queueUrl = new URL('../lib/ollama-queue.mjs', import.meta.url).href;
+    const w = new Worker(`
+      const { parentPort } = require('node:worker_threads');
+      import(${JSON.stringify(queueUrl)}).then(async (q) => {
+        q.reportExtractionActivity((m) => parentPort.postMessage(m));
+        await q.requestExtraction(() => new Promise((r) => parentPort.once('message', r)));
+        parentPort.postMessage({ ok: true });
+      });
+    `, { eval: true });
+    const seen = [];
+    const done = new Promise((resolve) => w.on('message', (m) => {
+      seen.push(m);
+      if (applyWorkerLlmMessage('w:llm', m)) {
+        if (m.llm === 'start') resolve();
+      }
+    }));
+    try {
+      await done;
+      const busy = await requestAnalysis(never, { waitTimeoutMs: 5000 });
+      assert.equal(busy.reason, 'ollama-busy-extraction');
+
+      const finished = new Promise((resolve) => w.on('message', (m) => { if (m.ok) resolve(); }));
+      w.postMessage('go');
+      await finished;
+    } finally {
+      await w.terminate();
+    }
+    assert.deepEqual(seen.map(m => m.llm ?? 'result'), ['start', 'end', 'result']);
+    assert.equal(getState().external_jobs.length, 0);
   });
 });

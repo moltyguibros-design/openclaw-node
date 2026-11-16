@@ -51,7 +51,7 @@ import { createExtractionTrigger } from '../lib/extraction-trigger.mjs';
 import { ensureSharedStream, inspectSharedStream, verifySharedStreamConfig } from '../lib/shared-event-stream.mjs';
 import { NATS_RECONNECT_OPTS } from '../lib/federation-resilience.mjs';
 import { createConcurrencyGuard } from '../lib/concurrency-guard.mjs';
-import { exportStateSnapshot, getState as getOllamaQueueState, setStateObserver, markExternalJob, clearExternalJob, foldWorkerQueueState } from '../lib/ollama-queue.mjs';
+import { exportStateSnapshot, getState as getOllamaQueueState, setStateObserver, markExternalJob, clearExternalJob, foldWorkerQueueState, applyWorkerLlmMessage } from '../lib/ollama-queue.mjs';
 import { loadEventSchemas } from '../lib/event-schemas.mjs';
 import { createMemoryWatcher, runStoreHealthProbes, appendWatcherRecord } from '../lib/memory-watcher.mjs';
 import { initDatabase as initKnowledgeDb } from '../lib/mcp-knowledge/core.mjs';
@@ -345,19 +345,24 @@ function runMemoryWorker(data, timeoutMs = FLUSH_WORKER_TIMEOUT_MS) {
     // process's idle gate. Register the job here for the lifetime of the
     // worker so consolidation cannot start beside a running extraction.
     const jobId = `${data.kind || 'flush'}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    markExternalJob(jobId, { type: data.kind || 'flush', detail: data.jsonlPath ? path.basename(data.jsonlPath) : null });
+    const llmJobId = `${jobId}:llm`;
+    const detail = data.jsonlPath ? path.basename(data.jsonlPath) : null;
+    markExternalJob(jobId, { type: data.kind || 'flush', detail });
     const w = new Worker(FLUSH_WORKER, { workerData: { stateDb: PATHS.stateDb, ...data } });
     let settled = false;
+    const clearJobs = () => { clearExternalJob(jobId); clearExternalJob(llmJobId); };
     const timer = setTimeout(() => {
       settled = true;
-      clearExternalJob(jobId);
+      clearJobs();
       w.terminate();
       reject(new Error(`memory worker (${data.kind || 'flush'}) timed out after ${timeoutMs / 60_000}min`));
     }, timeoutMs);
     timer.unref();
-    const settle = (fn, v) => { if (!settled) { settled = true; clearTimeout(timer); clearExternalJob(jobId); fn(v); } };
-    w.once('message', (m) => {
-      if (!settled) foldWorkerQueueState(m.queue);
+    const settle = (fn, v) => { if (!settled) { settled = true; clearTimeout(timer); clearJobs(); fn(v); } };
+    w.on('message', (m) => {
+      if (settled) return;
+      if (applyWorkerLlmMessage(llmJobId, m, detail)) return;
+      foldWorkerQueueState(m.queue);
       settle(m.ok ? resolve : reject, m.ok ? m.result : new Error(m.error));
     });
     w.once('error', (e) => settle(reject, e));

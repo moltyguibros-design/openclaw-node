@@ -58,6 +58,8 @@ try {
       let llmClient = null;
       let extractionStore = null;
       if (USE_LLM_EXTRACTION) {
+        const { reportExtractionActivity } = await import('../lib/ollama-queue.mjs');
+        reportExtractionActivity((m) => parentPort.postMessage(m));
         const { createLlmClient } = await import('../lib/llm-client.mjs');
         llmClient = createLlmClient();
         try {
