@@ -1023,11 +1023,26 @@ async function onReviewRejected(taskId) {
   return true;
 }
 
+// Partial-work branches of released and budget/stall-failed tasks are kept for
+// post-mortem until an operator deletes them or their tip is older than this
+// (0 keeps them indefinitely).
+const KEPT_BRANCH_MAX_DAYS = Number(process.env.MESH_KEPT_BRANCH_MAX_DAYS ?? 30);
+
+function branchAgeDays(branch) {
+  try {
+    const committed = Number(execFileSync('git', ['log', '-1', '--format=%ct', branch], {
+      cwd: WORKSPACE, timeout: 5000, encoding: 'utf-8', stdio: 'pipe',
+    }).trim());
+    return (Date.now() / 1000 - committed) / 86400;
+  } catch { return 0; }
+}
+
 /**
  * Startup reconciliation: an approval published while this agent was offline
  * is lost (core NATS publish), so every kept `mesh/<taskId>` branch is checked
- * against the daemon — completed → merge now, terminal-and-not-completed →
- * drop, pending_review → leave for the reviewer.
+ * against the daemon — completed → merge now; cancelled or review-rejected →
+ * drop; released or otherwise failed → keep for post-mortem until the age cap;
+ * pending_review → leave for the reviewer.
  */
 async function reconcileKeptBranches() {
   let branches = [];
@@ -1052,7 +1067,11 @@ async function reconcileKeptBranches() {
       const merge = mergeTaskBranch(taskId);
       await reportMerge(taskId, { ...merge, branch, lease_token: keptLease(taskId) });
       if (merge.merged) deleteTaskBranch(taskId);
-    } else if (['failed', 'released', 'cancelled', 'rejected'].includes(task.status)) {
+    } else if (task.status === 'cancelled' || (task.status === 'failed' && task.rejection_count > 0)) {
+      deleteTaskBranch(taskId);
+    } else if (['failed', 'released'].includes(task.status) && KEPT_BRANCH_MAX_DAYS > 0
+        && branchAgeDays(branch) > KEPT_BRANCH_MAX_DAYS) {
+      log(`RECONCILE: ${branch} kept for post-mortem over ${KEPT_BRANCH_MAX_DAYS}d — dropping`);
       deleteTaskBranch(taskId);
     }
   }
@@ -2513,7 +2532,8 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
     reason,
     attempts,
   });
-  // Keep worktree branch on release for post-mortem debugging (don't merge partial work)
+  // Keep worktree branch on release for post-mortem debugging (don't merge partial
+  // work); startup reconcile keeps it until MESH_KEPT_BRANCH_MAX_DAYS.
   cleanupWorktree(worktreePath, true);
   writeAgentState('idle', null);
   const foremanNote = await closeSupervision(supervisor, 'failure');
