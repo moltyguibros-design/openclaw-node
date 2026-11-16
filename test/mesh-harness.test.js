@@ -298,6 +298,50 @@ describe('preCommitSecretScan', () => {
   });
 });
 
+describe('enforceScopeCheck directory-style scope entries', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const { execFileSync } = require('child_process');
+  const { enforceScopeCheck, scopeEntryMatches } = require('../lib/mesh-harness');
+
+  it('a trailing-slash or bare name covers the files under it; globs and exact files are unchanged', () => {
+    assert.strictEqual(scopeEntryMatches('docs/', 'docs/x.md'), true);
+    assert.strictEqual(scopeEntryMatches('src/lib/', 'src/lib/deep/a.ts'), true);
+    assert.strictEqual(scopeEntryMatches('src', 'src/a.js'), true);
+    assert.strictEqual(scopeEntryMatches('src', 'src'), true);
+    assert.strictEqual(scopeEntryMatches('src', 'srcfoo.js'), false);
+    assert.strictEqual(scopeEntryMatches('docs/', 'docs'), false);
+    assert.strictEqual(scopeEntryMatches('src/*.js', 'src/a.js'), true);
+    assert.strictEqual(scopeEntryMatches('src/*.js', 'src/lib/a.js'), false);
+  });
+
+  it('keeps work under docs/ and src, and reverts only what is outside', (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-harness-scope-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.invalid');
+    git('config', 'user.name', 'test');
+    fs.mkdirSync(path.join(dir, 'src/lib'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'docs'));
+    fs.writeFileSync(path.join(dir, 'src/a.js'), 'v1\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'init');
+
+    fs.writeFileSync(path.join(dir, 'src/a.js'), 'v2\n');
+    fs.writeFileSync(path.join(dir, 'src/lib/b.js'), 'new\n');
+    fs.writeFileSync(path.join(dir, 'docs/x.md'), 'doc\n');
+    fs.writeFileSync(path.join(dir, 'srcfoo.js'), 'out\n');
+
+    const result = enforceScopeCheck(dir, ['docs/', 'src']);
+    assert.deepStrictEqual(result.violations, ['srcfoo.js']);
+    assert.strictEqual(fs.readFileSync(path.join(dir, 'src/a.js'), 'utf8'), 'v2\n');
+    assert.ok(fs.existsSync(path.join(dir, 'src/lib/b.js')));
+    assert.ok(fs.existsSync(path.join(dir, 'docs/x.md')));
+    assert.ok(!fs.existsSync(path.join(dir, 'srcfoo.js')));
+  });
+});
+
 // ── postCommitValidate ──────────────────────────
 
 describe('postCommitValidate (shipped git-conventional-commits rule)', () => {
