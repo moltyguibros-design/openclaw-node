@@ -29,7 +29,7 @@ Before doing anything else, read in this order (static identity first, dynamic s
 7. Read `memory/YYYY-MM-DD.md` (today) for recent context
 8. **If in MAIN SESSION** (direct chat with your human): Also read `MEMORY.md`
 9. Run `clawvault-local wake` (if available) to recover active context and handoffs.
-10. **Check Mission Control is running** — `bin/mc-api /api/tasks` (it sends the session token; exit 7 = down, exit 22 = refused). If down, restart the managed service (`launchctl kickstart -k gui/$(id -u)/ai.openclaw.mission-control` on macOS, `systemctl --user restart openclaw-mission-control` on Linux) — never a dev server from the project dir, which collides with it on :3000. If still fails, flag immediately.
+10. **Check Mission Control is healthy** — `node bin/mc-health.mjs`. If it is unhealthy or unreachable, run `node bin/mc-health.mjs --restart` once (a managed launchd/systemd restart with a 15-minute cooldown). If that does not restore health (exit 3), flag immediately. Never start a development server (`npm run dev`): Mission Control is a supervised service and a second copy would fight it for :3000.
 
 **Lazy-loaded (read only when relevant):**
 - `TOOLS.md` — environment-specific notes (TTS voices, SSH hosts, etc.)
