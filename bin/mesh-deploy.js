@@ -81,27 +81,30 @@ const REPO_DIR = process.env.OPENCLAW_REPO_DIR || path.join(HOME, 'openclaw');
 // ~/openclaw-node, or change REPO_DIR default + DIRS to point at the same tree.
 // Until then, mesh-deploy.js is the only sanctioned way to propagate changes.
 
+// The node's workspace as the installer set it (its units pass OPENCLAW_WORKSPACE).
+const WORKSPACE = process.env.OPENCLAW_WORKSPACE || path.join(HOME, '.openclaw', 'workspace');
+
 // Standard directory layout
 const DIRS = {
   OPENCLAW_HOME:    path.join(HOME, '.openclaw'),
-  WORKSPACE:        path.join(HOME, '.openclaw', 'workspace'),
-  WORKSPACE_BIN:    path.join(HOME, '.openclaw', 'workspace', 'bin'),
-  WORKSPACE_LIB:    path.join(HOME, '.openclaw', 'workspace', 'lib'),
+  WORKSPACE,
+  WORKSPACE_BIN:    path.join(WORKSPACE, 'bin'),
+  WORKSPACE_LIB:    path.join(WORKSPACE, 'lib'),
   CLI_BIN:          path.join(HOME, 'openclaw', 'bin'),
   CLI_LIB:          path.join(HOME, 'openclaw', 'lib'),
-  MC_PROJECT:       path.join(HOME, '.openclaw', 'workspace', 'projects', 'mission-control'),
-  SKILLS:           path.join(HOME, '.openclaw', 'workspace', 'skills'),
+  MC_PROJECT:       path.join(WORKSPACE, 'projects', 'mission-control'),
+  SKILLS:           path.join(WORKSPACE, 'skills'),
   MANAGED_SKILLS:   path.join(HOME, '.openclaw', 'skills'),
   SOULS:            path.join(HOME, '.openclaw', 'souls'),
   CONFIG:           path.join(HOME, '.openclaw', 'config'),
-  BOOT:             path.join(HOME, '.openclaw', 'workspace', '.boot'),
-  BOOT_SRC:         path.join(HOME, '.openclaw', 'workspace', 'bin'),  // compile-boot lives here
-  MEMORY:           path.join(HOME, '.openclaw', 'workspace', 'memory'),
-  MEMORY_VAULT:     path.join(HOME, '.openclaw', 'workspace', 'memory-vault'),
+  BOOT:             path.join(WORKSPACE, '.boot'),
+  BOOT_SRC:         path.join(WORKSPACE, 'bin'),  // compile-boot lives here
+  MEMORY:           path.join(WORKSPACE, 'memory'),
+  MEMORY_VAULT:     path.join(WORKSPACE, 'memory-vault'),
   SERVICES_MAC:     path.join(HOME, 'Library', 'LaunchAgents'),
   SERVICES_LINUX:   path.join(HOME, '.config', 'systemd', 'user'),
   COMPANION:        path.join(HOME, 'companion-adapter'),
-  TMP:              path.join(HOME, '.openclaw', 'workspace', '.tmp'),
+  TMP:              path.join(WORKSPACE, '.tmp'),
   DEPLOY_STATE:     path.join(HOME, '.openclaw', '.deploy-state.json'),
 };
 

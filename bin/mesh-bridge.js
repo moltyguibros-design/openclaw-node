@@ -20,13 +20,12 @@ const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-bridge');
 const fs = require('fs');
 const path = require('path');
-const { readTasks, updateTaskInPlace: updateTaskInPlaceAsync, appendTaskBlock, isoTimestamp, ACTIVE_TASKS_PATH } = require('../lib/kanban-io');
+const { readTasks, updateTaskInPlace: updateTaskInPlaceAsync, appendTaskBlock, isoTimestamp, WORKSPACE, ACTIVE_TASKS_PATH } = require('../lib/kanban-io');
 
 const sc = StringCodec();
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
 const DISPATCH_INTERVAL = parseInt(process.env.BRIDGE_DISPATCH_INTERVAL || '10000'); // 10s
-const LOG_DIR = path.join(process.env.HOME, '.openclaw', 'workspace', 'memory', 'mesh-logs');
-const WORKSPACE = path.join(process.env.HOME, '.openclaw', 'workspace');
+const LOG_DIR = path.join(WORKSPACE, 'memory', 'mesh-logs');
 
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');

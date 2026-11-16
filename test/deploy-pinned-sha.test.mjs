@@ -435,6 +435,13 @@ describe('openclaw.json is rewritten only from a changed template, rendered as t
     assert.equal(fileMode(config()), 0o600);
     assert.equal(backups().length, 1, 'nothing existed to back up');
   });
+
+  it('renders the node workspace from OPENCLAW_WORKSPACE, not the default path', () => {
+    fs.rmSync(config());
+    const workspace = fx.rt('custom-workspace');
+    ranOk(fx.deploy(['--from', S2, '--to', S2, '--force'], { OPENCLAW_WORKSPACE: workspace }));
+    assert.equal(JSON.parse(read(config())).workspace, workspace);
+  });
 });
 
 describe('the openclaw CLI is installed only when named, and only at a pinned version', () => {

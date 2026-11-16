@@ -197,3 +197,41 @@ describe('appendTaskBlock', () => {
     }
   });
 });
+
+describe('workspace resolution follows OPENCLAW_WORKSPACE', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  const { spawnSync } = require('child_process');
+  const root = path.join(__dirname, '..');
+
+  it('kanban-io and the bridge use the installer workspace, not ~/.openclaw/workspace', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kanban-ws-'));
+    const env = { PATH: process.env.PATH, HOME: path.join(dir, 'home'), OPENCLAW_WORKSPACE: path.join(dir, 'ws') };
+    if (process.env.NODE_PATH) env.NODE_PATH = process.env.NODE_PATH;
+    try {
+      const io = spawnSync(process.execPath, ['-e',
+        "const k = require('./lib/kanban-io'); console.log(JSON.stringify([k.WORKSPACE, k.ACTIVE_TASKS_PATH]))"],
+      { cwd: root, env, encoding: 'utf8' });
+      assert.equal(io.status, 0, io.stderr);
+      assert.deepEqual(JSON.parse(io.stdout), [env.OPENCLAW_WORKSPACE, path.join(env.OPENCLAW_WORKSPACE, 'memory', 'active-tasks.md')]);
+
+      // Nothing listens on port 1: the bridge logs its paths, then exits on the refused connect.
+      const bridge = spawnSync(process.execPath, [path.join(root, 'bin', 'mesh-bridge.js')],
+        { cwd: dir, env: { ...env, OPENCLAW_NATS: 'nats://127.0.0.1:1' }, encoding: 'utf8', timeout: 30_000 });
+      const out = bridge.stdout + bridge.stderr;
+      assert.ok(out.includes(`Active Tasks:     ${path.join(env.OPENCLAW_WORKSPACE, 'memory', 'active-tasks.md')}`), out);
+      assert.ok(out.includes(`Log Dir:          ${path.join(env.OPENCLAW_WORKSPACE, 'memory', 'mesh-logs')}`), out);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('the launchd bridge and deploy-listener units pass OPENCLAW_WORKSPACE', () => {
+    for (const unit of ['ai.openclaw.mesh-bridge.plist', 'ai.openclaw.mesh-deploy-listener.plist']) {
+      const plist = fs.readFileSync(path.join(root, 'services', 'launchd', unit), 'utf8');
+      const env = plist.match(/<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/)[1];
+      assert.match(env, /<key>OPENCLAW_WORKSPACE<\/key>\s*<string>\$\{OPENCLAW_WORKSPACE\}<\/string>/, unit);
+    }
+  });
+});
