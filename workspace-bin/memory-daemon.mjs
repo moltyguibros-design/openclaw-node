@@ -1360,6 +1360,8 @@ runSubprocess = tracer.wrapAsync('runSubprocess', runSubprocess, { tier: 2 });
 //   - startFederation (lib/federation-startup.mjs): identity + strict trust
 //     registry + seen-event replay cache + broadcaster/offerer/acceptor
 //     (F-N1/N2/N3). Offerer+acceptor need both DBs; broadcast-only otherwise.
+//     The :7893 inject server drives it per prompt (broadcast, acceptance,
+//     [peer-memory] block) and the scheduler below broadcasts after a cycle.
 //   - memory-subscriber (bin/memory-subscriber.mjs): still gated on
 //     OPENCLAW_SUBSCRIBER_PROJECTION=stub (F-P107/F-P113 — no Block 11
 //     projection yet).
@@ -1423,6 +1425,7 @@ async function initFederationSubsystems(nc) {
       extractionDb: federationState.extractionDb,
       knowledgeDb: federationState.knowledgeDb,
       graphCache: getGraphCache(),
+      llmClient: getLlmClient(),
       log: (m) => log(m),
     });
   } catch (err) {
@@ -1463,6 +1466,7 @@ async function initFederationSubsystems(nc) {
       dbPath: extractionDbPath,
       getStateFn: getOllamaQueueState,
       log: (m) => log(m),
+      onCycleComplete: () => federationState.federation?.broadcastConsolidation(),
     });
     if (federationState.extractionDb) {
       federationState.scheduler.start();
@@ -1705,7 +1709,12 @@ async function main() {
     try {
       const { startInjectionServer } = await import('../lib/memory-inject-server.mjs');
       injectionServer = await startInjectionServer(
-        { knowledgeDb: getKnowledgeDb(), graphCache: getGraphCache(), llmClient: getLlmClient(), extractionDb: getExtractionStore()?.db, eventLog: liveEventLog, nodeId: NODE_ID },
+        {
+          knowledgeDb: getKnowledgeDb(), graphCache: getGraphCache(), llmClient: getLlmClient(),
+          extractionDb: getExtractionStore()?.db, eventLog: liveEventLog, nodeId: NODE_ID,
+          // A getter: federation starts with NATS, which can come up after this server.
+          getFederation: () => federationState.federation,
+        },
         { port: PATHS.injectPort, log: (m) => log(`[inject-server] ${m}`) },
       );
     } catch (injErr) {

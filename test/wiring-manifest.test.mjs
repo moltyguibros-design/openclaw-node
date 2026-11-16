@@ -35,6 +35,13 @@ const REQUIRED_PRODUCTION_WIRES = [
   { factory: 'createOfferer',          calledIn: 'lib/federation-startup.mjs' },
   { factory: 'createAcceptor',         calledIn: 'lib/federation-startup.mjs' },
   { factory: 'startFederation',        calledIn: 'workspace-bin/memory-daemon.mjs' },
+  // Built is not driven: each half of the trio's API needs a production caller.
+  { factory: 'maybeBroadcast',         calledIn: 'lib/memory-inject-server.mjs' },
+  { factory: 'checkAcceptance',        calledIn: 'lib/memory-inject-server.mjs' },
+  { factory: 'getTopOffer',            calledIn: 'lib/memory-inject-server.mjs' },
+  { factory: 'broadcastFromConsolidation', calledIn: 'lib/federation-startup.mjs' },
+  { factory: 'broadcastConsolidation', calledIn: 'workspace-bin/memory-daemon.mjs' },
+  { factory: 'createPeerTracker',      calledIn: 'lib/federation-startup.mjs' },
 
   // F-N2: registry + seenIds must be constructed at startup, not left null.
   { factory: 'createIdentityRegistry', calledIn: 'lib/federation-startup.mjs' },

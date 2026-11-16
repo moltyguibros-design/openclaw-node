@@ -198,6 +198,7 @@ export async function runScheduledCycle(opts = {}) {
  * @param {(msg: string) => void} [opts.log] — logger
  * @param {(opts: object) => Promise<object>} [opts.runCycle] — injectable cycle function (for testing)
  * @param {boolean} [opts.keepAlive] — keep the interval ref'd (CLI --daemon; NATS may be absent)
+ * @param {(result: object) => Promise<unknown>} [opts.onCycleComplete] — after each successful cycle
  * @returns {{ start: () => void, stop: () => Promise<void>, runOnce: () => Promise<object> }}
  */
 export function createConsolidationScheduler(opts = {}) {
@@ -235,6 +236,13 @@ export function createConsolidationScheduler(opts = {}) {
       for (const r of cycleRemovals(result.result)) log(`[consolidation-scheduler] ${formatRemoval(r)}`);
       const summary = summarizeRemovals(result.result);
       log(`[consolidation-scheduler] cycle complete (${result.durationMs}ms)${summary ? `: ${summary}` : ''}`);
+      if (opts.onCycleComplete) {
+        try {
+          await opts.onCycleComplete(result.result);
+        } catch (err) {
+          log(`[consolidation-scheduler] post-cycle hook failed: ${err.message}`);
+        }
+      }
     } else {
       log(`[consolidation-scheduler] cycle failed: ${result.error} (${result.durationMs}ms)`);
       await (opts.notifyFailure || notifyCycleFailure)(`${result.error} (${result.durationMs}ms)`);
