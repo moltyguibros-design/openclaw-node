@@ -166,7 +166,8 @@ async function cmdStatus() {
  * mesh submit <task.yaml|-> — submit a task to the mesh.
  *
  * Reads YAML from a file or stdin, publishes to mesh.tasks.submit.
- * Also accepts --id <task-id> to submit a task from active-tasks.md.
+ * Also accepts --id <task-id> to hand a queued active-tasks.md card to the mesh
+ * bridge (sets execution: mesh and wakes the bridge, which dispatches it).
  */
 async function cmdSubmit(args) {
   // js-yaml is the repo's declared YAML parser; the `yaml` module this required
@@ -183,27 +184,15 @@ async function cmdSubmit(args) {
     if (!task) { console.error(`Task ${taskId} not found in active-tasks.md`); process.exit(1); }
     if (task.status !== 'queued') { console.error(`Task ${taskId} is ${task.status}, not queued`); process.exit(1); }
 
+    // The bridge only follows tasks it dispatched itself, so a direct daemon submit
+    // left the card stuck at 'submitted' with its claim, result and log dropped.
+    // Hand the card to the bridge instead: it submits, tracks and writes back.
+    await updateTaskInPlace(ACTIVE_TASKS_PATH, taskId, { execution: 'mesh', updated_at: isoTimestamp() });
     const nc = await natsConnect();
-    const submitted = await daemonRequest(nc, 'mesh.tasks.submit', {
-      task_id: task.task_id,
-      title: task.title,
-      description: task.description || '',
-      budget_minutes: task.budget_minutes || 30,
-      metric: task.metric || null,
-      success_criteria: task.success_criteria || [],
-      scope: task.scope || [],
-      priority: task.auto_priority || 0,
-      llm_provider: task.provider || task.llm_provider || null,
-      llm_model: task.model || task.llm_model || null,
-      preferred_nodes: task.preferred_nodes || [],
-      exclude_nodes: task.exclude_nodes || [],
-    });
-    console.log(`Submitted: ${submitted.task_id} [${submitted.status}]`);
-    // Mark as 'submitted' — NOT 'running'. The card reflects actual mesh state.
-    // The bridge event handler promotes to 'running' when mesh.events.claimed fires.
-    // This prevents the Schrödinger state where kanban says 'running' before any agent has claimed.
-    await updateTaskInPlace(ACTIVE_TASKS_PATH, taskId, { status: 'submitted', owner: 'mesh', updated_at: isoTimestamp() });
-    console.log(`Kanban updated: ${taskId} → submitted (will become 'running' on agent claim)`);
+    nc.publish('mesh.bridge.wake');
+    await nc.flush();
+    console.log(`Queued for mesh: ${taskId} (execution: mesh). The mesh bridge submits it and tracks it to completion.`);
+    console.log('Needs a running mesh-bridge; the card stays queued until one picks it up.');
     await nc.close();
     return;
   }
@@ -835,7 +824,7 @@ function cmdHelp() {
     'USAGE:',
     '  mesh status                             Every node in MESH_NODE_HEALTH',
     '  mesh submit <task.yaml>                 Submit a task YAML to the mesh',
-    '  mesh submit --id <task-id>              Submit a kanban card by ID',
+    '  mesh submit --id <task-id>              Queue a kanban card for the mesh bridge',
     '  cat task.yaml | mesh submit             Submit from stdin',
     '  mesh tasks                              List all mesh tasks',
     '  mesh tasks --status running             Filter mesh tasks by status',

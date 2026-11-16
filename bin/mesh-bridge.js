@@ -322,17 +322,6 @@ function handleCollabEvent(eventType, taskId, data) {
 
     // Circling Strategy events
     case 'collab.circling_step_started': {
-      if (!dispatched.has(taskId)) {
-        // Auto-track CLI-submitted circling tasks
-        try {
-          const tasks = readTasks(ACTIVE_TASKS_PATH);
-          if (tasks.find(t => t.task_id === taskId && t.execution === 'mesh')) {
-            dispatched.add(taskId);
-            lastHeartbeat.set(taskId, Date.now());
-            log(`CIRCLING AUTO-TRACK: ${taskId} (CLI-submitted)`);
-          } else { break; }
-        } catch { break; }
-      }
       const c = session.circling || {};
       const stepName = c.phase === 'init' ? 'Init'
         : c.phase === 'finalization' ? 'Finalization'
