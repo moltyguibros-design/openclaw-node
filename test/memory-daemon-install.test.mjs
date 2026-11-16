@@ -36,6 +36,8 @@ test('memory-daemon direct install preserves the configured LLM URL', () => {
     assert.equal(result.status, 0, result.stderr);
     assert.match(fs.readFileSync(plist, 'utf8'),
       /<key>LLM_BASE_URL<\/key>\s*<string>http:\/\/192\.168\.64\.1:11434<\/string>/);
+    assert.match(fs.readFileSync(plist, 'utf8'), /<key>TZ<\/key>\s*<string>America\/Montreal<\/string>/,
+      'no OPENCLAW_TIMEZONE anywhere: the default zone');
     assert.equal(fs.readFileSync(path.join(home, '.openclaw/services/ai.openclaw.memory-daemon.plist'), 'utf8'),
       fs.readFileSync(plist, 'utf8'));
 
@@ -59,7 +61,14 @@ test('memory-daemon direct install preserves the configured LLM URL', () => {
     assert.match(fs.readFileSync(plist, 'utf8'),
       /<key>LLM_BASE_URL<\/key>\s*<string>http:\/\/override:11434\/\?a=1&amp;b=2<\/string>/);
     fs.writeFileSync(path.join(home, '.openclaw/openclaw.env'),
-      'LLM_BASE_URL=http://192.168.64.1:11434\n');
+      'LLM_BASE_URL=http://192.168.64.1:11434\nOPENCLAW_TIMEZONE=Europe/Paris\n');
+    result = run();
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(fs.readFileSync(plist, 'utf8'), /<key>TZ<\/key>\s*<string>Europe\/Paris<\/string>/);
+    result = run({ OPENCLAW_TIMEZONE: 'Asia/Tokyo' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(fs.readFileSync(plist, 'utf8'), /<key>TZ<\/key>\s*<string>Asia\/Tokyo<\/string>/,
+      'the process env wins over openclaw.env');
 
     fs.writeFileSync(path.join(stubBin, 'uname'), '#!/bin/sh\nprintf "Linux\\n"\n', { mode: 0o755 });
     fs.writeFileSync(path.join(stubBin, 'systemctl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
@@ -68,6 +77,7 @@ test('memory-daemon direct install preserves the configured LLM URL', () => {
     const unit = path.join(home, '.config/systemd/user/openclaw-memory-daemon.service');
     assert.match(fs.readFileSync(unit, 'utf8'),
       /^Environment=LLM_BASE_URL=http:\/\/192\.168\.64\.1:11434$/m);
+    assert.match(fs.readFileSync(unit, 'utf8'), /^Environment=TZ=Europe\/Paris$/m);
 
     fs.writeFileSync(path.join(stubBin, 'uname'), '#!/bin/sh\nprintf "Other\\n"\n', { mode: 0o755 });
     fs.writeFileSync(path.join(stubBin, 'pm2'),
@@ -76,7 +86,7 @@ test('memory-daemon direct install preserves the configured LLM URL', () => {
     result = run();
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(fs.readFileSync(path.join(home, 'pm2.env'), 'utf8').trim().split('\n'),
-      [workspace, 'http://192.168.64.1:11434', 'America/Montreal']);
+      [workspace, 'http://192.168.64.1:11434', 'Europe/Paris']);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

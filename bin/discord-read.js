@@ -98,7 +98,7 @@ function parseArgs(args) {
 function formatMessages(messages) {
   for (const m of messages) {
     const time = new Date(m.timestamp).toLocaleString('en-US', {
-      timeZone: 'America/Montreal', hour12: false,
+      timeZone: process.env.OPENCLAW_TIMEZONE || process.env.TZ || 'America/Montreal', hour12: false,
       year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit',
     });

@@ -57,6 +57,19 @@ resolve_llm_base_url() {
   LLM_BASE_URL="${LLM_BASE_URL:-http://localhost:11434}"
 }
 
+resolve_timezone() {
+  local line env_file="$HOME/.openclaw/openclaw.env"
+  if [ -z "${OPENCLAW_TIMEZONE:-}" ] && [ -f "$env_file" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line%$'\r'}"
+      case "$line" in
+        OPENCLAW_TIMEZONE=*) OPENCLAW_TIMEZONE="$(printf '%s\n' "${line#*=}" | xargs)" ;;
+      esac
+    done < "$env_file"
+  fi
+  OPENCLAW_TIMEZONE="${OPENCLAW_TIMEZONE:-America/Montreal}"
+}
+
 # ============================================================
 # macOS — launchd
 # ============================================================
@@ -100,7 +113,7 @@ install_macos() {
       <key>PATH</key>
       <string>${daemon_path}</string>
       <key>TZ</key>
-      <string>America/Montreal</string>
+      <string>${OPENCLAW_TIMEZONE}</string>
       <key>OPENCLAW_WORKSPACE</key>
       <string>${WORKSPACE}</string>
       <key>LLM_BASE_URL</key>
@@ -173,7 +186,7 @@ ExecStart=${NODE_BIN} ${DAEMON_SCRIPT}
 Restart=always
 RestartSec=5
 Environment=HOME=${HOME}
-Environment=TZ=America/Montreal
+Environment=TZ=${OPENCLAW_TIMEZONE}
 Environment=OPENCLAW_WORKSPACE=${WORKSPACE}
 Environment=LLM_BASE_URL=${LLM_BASE_URL}
 Environment=OPENCLAW_NATS=${OPENCLAW_NATS:-}
@@ -237,7 +250,7 @@ install_pm2() {
   pm2 stop openclaw-memory-daemon 2>/dev/null || true
   pm2 delete openclaw-memory-daemon 2>/dev/null || true
 
-  OPENCLAW_WORKSPACE="$WORKSPACE" LLM_BASE_URL="$LLM_BASE_URL" TZ=America/Montreal \
+  OPENCLAW_WORKSPACE="$WORKSPACE" LLM_BASE_URL="$LLM_BASE_URL" TZ="$OPENCLAW_TIMEZONE" \
   pm2 start "$DAEMON_SCRIPT" \
     --name openclaw-memory-daemon \
     --cwd "$WORKSPACE" \
@@ -290,6 +303,7 @@ echo ""
 case "$ACTION" in
   install|--install)
     resolve_llm_base_url
+    resolve_timezone
     case "$OS" in
       macos)   install_macos ;;
       linux)   install_linux ;;

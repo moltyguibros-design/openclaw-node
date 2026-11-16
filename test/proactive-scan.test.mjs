@@ -58,6 +58,16 @@ test('a Montreal wall-time updated_at is still parsed', t => {
   assert.match(scanRunningTask(t, '2020-01-01 09:15 America/Montreal', 'America/Montreal'), /stale_task/);
 });
 
+test('a wall-time updated_at is read in the zone it names, not the scanner zone', t => {
+  const wall = (ms, timeZone) => new Intl.DateTimeFormat('en-CA', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).format(new Date(ms)).replace(',', '');
+  const hourAgo = `${wall(Date.now() - 3600_000, 'Asia/Tokyo')} Asia/Tokyo`;
+  assert.match(scanRunningTask(t, hourAgo, 'America/Montreal'), /running for 6[01]min/);
+  const justNow = `${wall(Date.now() - 5 * 60_000, 'Asia/Tokyo')} Asia/Tokyo`;
+  assert.doesNotMatch(scanRunningTask(t, justNow, 'America/Montreal'), /stale_task/);
+});
+
 test('without OPENCLAW_WORKSPACE the scan reads the workspace that holds the script, run from the workspace', t => {
   const { ws, bin } = fixture(t);
   const r = scan(bin, ws);

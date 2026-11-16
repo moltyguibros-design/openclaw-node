@@ -33,6 +33,7 @@ TRIGGERS=$(OPENCLAW_WORKSPACE="$WORKSPACE" python3 << 'PYEOF'
 import json, re, os, subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 workspace = os.environ["OPENCLAW_WORKSPACE"]
 active_tasks = os.path.join(workspace, "memory/active-tasks.md")
@@ -56,10 +57,14 @@ if os.path.isfile(active_tasks):
 
         if updated_m:
             ts_raw = updated_m.group(1).strip()
-            # "2026-02-21 09:15 America/Montreal" (local wall time) or ISO-8601 UTC "...Z"
+            # "2026-02-21 09:15 America/Montreal" (wall time in the named zone) or ISO-8601 UTC "...Z"
+            zoned = re.match(r'^(.*?)\s+([A-Za-z_]+(?:/[A-Za-z0-9_+-]+)+)$', ts_raw)
             try:
-                dt = datetime.fromisoformat(ts_raw.replace('America/Montreal', '').strip().replace('Z', '+00:00'))
-            except ValueError:
+                if zoned:
+                    dt = datetime.fromisoformat(zoned.group(1)).replace(tzinfo=ZoneInfo(zoned.group(2)))
+                else:
+                    dt = datetime.fromisoformat(ts_raw.replace('Z', '+00:00'))
+            except (ValueError, KeyError):
                 continue
             if dt.tzinfo is None:
                 dt = dt.astimezone()

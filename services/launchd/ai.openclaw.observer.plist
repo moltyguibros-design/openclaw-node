@@ -27,7 +27,7 @@
       <key>PATH</key>
       <string>/usr/sbin:/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin</string>
       <key>TZ</key>
-      <string>America/Montreal</string>
+      <string>${OPENCLAW_TIMEZONE}</string>
     </dict>
   </dict>
 </plist>

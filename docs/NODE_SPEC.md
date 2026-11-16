@@ -76,7 +76,7 @@ Written to `~/.openclaw/openclaw.env` by install (generated where marked ⚙; RA
 | `LLM_MODEL` | `qwen3:8b` ⚖ | ⚙ | llm-client (extraction) + probes | the local model tag — extraction/probe organ ONLY, never a grappe worker's mind (D11) |
 | `LLM_BASE_URL` | `http://localhost:11434` | ⚙ | llm-client, probes | ollama endpoint. In a VM whose host serves Ollama with `LLM_MODEL`, install.sh points it at the host through the VM's gateway, and nothing runs or downloads in the VM (`scripts/install/llm-host.sh`). `OPENCLAW_LLM_HOST=0` keeps a VM on its own Ollama |
 | `USE_LLM_EXTRACTION` | `true` | | pre-compression-flush | extraction mode (falls back to regex, loudly watched) |
-| `OPENCLAW_TIMEZONE` | `America/Montreal` | | timers, memory files | timestamps |
+| `OPENCLAW_TIMEZONE` | `America/Montreal` | | every unit's `TZ`, timers, memory files | timestamps |
 | optional: `ANTHROPIC/OPENAI/GOOGLE_API_KEY`, `DISCORD_BOT_TOKEN`, `OBSIDIAN_API_KEY`, `KNOWLEDGE_MODEL`, `LLM_TIMEOUT`, `LLM_ANALYSIS_TIMEOUT` | — | | respective adapters | cloud/off-node extras; the core node runs with none of them |
 
 **Identity (not env):** ed25519 keypair provisioned at install via `lib/node-identity.mjs getOrCreateIdentity(~/.openclaw)` — grappe signing (federation 1.4) has a keypair to stand on from day 1.

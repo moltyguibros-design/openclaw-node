@@ -12,7 +12,7 @@ Environment=PATH=${HOME}/.openclaw/workspace/.npm-global/bin:${HOME}/.local/bin:
 Environment=NODE_PATH=${HOME}/openclaw/node_modules:${HOME}/openclaw/lib
 Environment=OPENCLAW_NATS=${OPENCLAW_NATS}
 Environment=OPENCLAW_WORKSPACE=${OPENCLAW_WORKSPACE}
-Environment=TZ=America/Montreal
+Environment=TZ=${OPENCLAW_TIMEZONE}
 WorkingDirectory=${HOME}/openclaw
 StandardOutput=append:${HOME}/.openclaw/logs/gateway.log
 StandardError=append:${HOME}/.openclaw/logs/gateway.err

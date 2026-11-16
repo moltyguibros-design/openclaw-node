@@ -14,7 +14,7 @@ SKIPPED_COUNT=0
 RENDER_ERRORS=0
 # The sed fallback's placeholder list. Bare envsubst also blanks systemd's own
 # runtime variables ($MAINPID in the NATS units' ExecReload).
-UNIT_VARS='${HOME} ${NODE_BIN} ${OPENCLAW_WORKSPACE} ${OPENCLAW_NATS} ${OPENCLAW_NATS_TOKEN} ${OPENCLAW_NODE_ID} ${OPENCLAW_NODE_ROLE} ${OPENCLAW_DEPLOY_TRUSTED_KEYS} ${OPENCLAW_REPO_DIR} ${NPM_BIN} ${OPENCLAW_GATEWAY_JS} ${NATS_SERVER_BIN} ${MESH_LLM_PROVIDER} ${LLM_MODEL} ${LLM_BASE_URL} ${MESH_FOREMAN_ENFORCE}'
+UNIT_VARS='${HOME} ${NODE_BIN} ${OPENCLAW_WORKSPACE} ${OPENCLAW_NATS} ${OPENCLAW_NATS_TOKEN} ${OPENCLAW_NODE_ID} ${OPENCLAW_NODE_ROLE} ${OPENCLAW_DEPLOY_TRUSTED_KEYS} ${OPENCLAW_REPO_DIR} ${NPM_BIN} ${OPENCLAW_GATEWAY_JS} ${NATS_SERVER_BIN} ${MESH_LLM_PROVIDER} ${LLM_MODEL} ${LLM_BASE_URL} ${MESH_FOREMAN_ENFORCE} ${OPENCLAW_TIMEZONE}'
 
 # Fail-loud render audit — a unit shipping a live ${VAR} placeholder is broken
 # by construction (the silent-unrendered class, 2026-07-11 audit).
@@ -91,6 +91,7 @@ else
           -e "s|\${LLM_MODEL}|$LLM_MODEL|g" \
           -e "s|\${LLM_BASE_URL}|$LLM_BASE_URL|g" \
           -e "s|\${MESH_FOREMAN_ENFORCE}|${MESH_FOREMAN_ENFORCE:-}|g" \
+          -e "s|\${OPENCLAW_TIMEZONE}|$OPENCLAW_TIMEZONE|g" \
           "$TEMPLATE" > "$DEST"
       fi
       check_rendered "$DEST"
@@ -142,6 +143,7 @@ else
               -e "s|\${LLM_MODEL}|$LLM_MODEL|g" \
               -e "s|\${LLM_BASE_URL}|$LLM_BASE_URL|g" \
               -e "s|\${MESH_FOREMAN_ENFORCE}|${MESH_FOREMAN_ENFORCE:-}|g" \
+              -e "s|\${OPENCLAW_TIMEZONE}|$OPENCLAW_TIMEZONE|g" \
               "$TEMPLATE" > "$DEST"
           fi
           check_rendered "$DEST"
@@ -185,6 +187,7 @@ else
             -e "s|\${LLM_MODEL}|$LLM_MODEL|g" \
             -e "s|\${LLM_BASE_URL}|$LLM_BASE_URL|g" \
             -e "s|\${MESH_FOREMAN_ENFORCE}|${MESH_FOREMAN_ENFORCE:-}|g" \
+            -e "s|\${OPENCLAW_TIMEZONE}|$OPENCLAW_TIMEZONE|g" \
             "$TEMPLATE" > "$DEST"
         fi
         check_rendered "$DEST"

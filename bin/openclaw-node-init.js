@@ -566,7 +566,7 @@ const SERVICE_TEMPLATE_VARS = [
   'HOME', 'NODE_BIN', 'NPM_BIN', 'NATS_SERVER_BIN', 'OPENCLAW_WORKSPACE', 'OPENCLAW_REPO_DIR',
   'OPENCLAW_NATS', 'OPENCLAW_NATS_TOKEN', 'OPENCLAW_NODE_ID', 'OPENCLAW_NODE_ROLE',
   'OPENCLAW_DEPLOY_TRUSTED_KEYS', 'MESH_LLM_PROVIDER', 'LLM_MODEL', 'LLM_BASE_URL',
-  'MESH_FOREMAN_ENFORCE',
+  'MESH_FOREMAN_ENFORCE', 'OPENCLAW_TIMEZONE',
 ];
 
 function serviceTemplateVars({ meshDir, nodeId, config }) {
@@ -594,6 +594,7 @@ function serviceTemplateVars({ meshDir, nodeId, config }) {
     // alone, where an operator's MESH_FOREMAN_ENFORCE=1 in that file rendered as shadow. The
     // process env still wins.
     MESH_FOREMAN_ENFORCE: require('../lib/nats-resolve').resolveEnvKey('MESH_FOREMAN_ENFORCE') || '',
+    OPENCLAW_TIMEZONE: require('../lib/nats-resolve').resolveEnvKey('OPENCLAW_TIMEZONE') || 'America/Montreal',
   };
 }
 

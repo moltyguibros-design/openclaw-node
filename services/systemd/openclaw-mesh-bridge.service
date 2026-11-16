@@ -14,7 +14,7 @@ Environment=OPENCLAW_NATS=${OPENCLAW_NATS}
 Environment=OPENCLAW_WORKSPACE=${OPENCLAW_WORKSPACE}
 Environment=OPENCLAW_NODE_ID=${OPENCLAW_NODE_ID}
 Environment=OPENCLAW_REPO_DIR=${OPENCLAW_REPO_DIR}
-Environment=TZ=America/Montreal
+Environment=TZ=${OPENCLAW_TIMEZONE}
 WorkingDirectory=${OPENCLAW_REPO_DIR}
 StandardOutput=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-mesh-bridge.log
 StandardError=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-mesh-bridge.err

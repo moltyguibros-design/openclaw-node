@@ -145,12 +145,14 @@ const WORKSPACE = PATHS.workspace || path.dirname(__dirname);
 const HOME = os.homedir();
 const CONFIG_PATH = PATHS.config;
 const TRANSCRIPT_REGISTRY = PATHS.transcriptSources;
+// The unit renders TZ from OPENCLAW_TIMEZONE; daemon.json's timezone overrides it for the daemon's own dates.
+const TIMEZONE = process.env.OPENCLAW_TIMEZONE || process.env.TZ || 'America/Montreal';
 
 function loadConfig() {
   const defaults = {
     nodeId: 'daedalus',
     workspace: WORKSPACE,
-    timezone: 'America/Montreal',
+    timezone: TIMEZONE,
     intervals: {
       pollMs: 30000,
       activityWindowMs: 900000,   // 15 min
@@ -204,7 +206,7 @@ function ensureDirs() {
 
 function timestamp() {
   return new Date().toLocaleString('en-CA', {
-    timeZone: 'America/Montreal',
+    timeZone: TIMEZONE,
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
     hour12: false,
@@ -1267,7 +1269,7 @@ function runSubprocess(cmd, args, timeoutMs = 30000) {
       env: {
         ...process.env,
         OPENCLAW_WORKSPACE: WORKSPACE,
-        TZ: 'America/Montreal',
+        TZ: TIMEZONE,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });

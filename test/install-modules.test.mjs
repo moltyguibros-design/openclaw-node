@@ -846,3 +846,30 @@ test('every manifest unit ships its templates, execs a deployed entrypoint, and 
     }
   }
 });
+
+// OPENCLAW_TIMEZONE is a per-node setting: a unit that sets TZ renders it.
+test('unit templates and the daemon installer render TZ from OPENCLAW_TIMEZONE', () => {
+  const templates = [
+    ...readdirSync(join(ROOT, 'services/systemd')).map((f) => `systemd/${f}`),
+    ...readdirSync(join(ROOT, 'services/launchd')).filter((f) => f.startsWith('ai.openclaw.')).map((f) => `launchd/${f}`),
+  ];
+  let withTz = 0;
+  for (const f of templates) {
+    const text = readFileSync(join(ROOT, 'services', f), 'utf8');
+    const tz = text.match(/^Environment=TZ=(.*)$/m)?.[1]
+      ?? text.match(/<key>TZ<\/key>\s*<string>([^<]*)<\/string>/)?.[1];
+    if (tz === undefined) continue;
+    withTz++;
+    assert.equal(tz, '${OPENCLAW_TIMEZONE}', `${f} pins TZ=${tz}`);
+  }
+  assert.ok(withTz >= 20, `TZ-setting templates found: ${withTz}`);
+  const installDaemon = readFileSync(join(ROOT, 'workspace-bin/install-daemon'), 'utf8');
+  assert.doesNotMatch(installDaemon, /TZ=America|<string>America\//);
+  for (const f of ['workspace-bin/memory-maintenance.mjs', 'workspace-bin/session-recap', 'bin/discord-read.js',
+    'workspace-bin/proactive-scan', 'workspace-bin/memory-daemon.mjs']) {
+    const code = readFileSync(join(ROOT, f), 'utf8')
+      .split('\n').filter((l) => !/^\s*(?:\/\/|#|\*)/.test(l)).join('\n')
+      .replace(/process\.env\.OPENCLAW_TIMEZONE \|\| process\.env\.TZ \|\| (['"])America\/Montreal\1/g, '');
+    assert.doesNotMatch(code, /America\\?\/Montreal/, `${f} pins the zone instead of reading OPENCLAW_TIMEZONE`);
+  }
+});

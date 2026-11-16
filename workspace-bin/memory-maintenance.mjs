@@ -102,10 +102,13 @@ const args = process.argv.slice(2);
 const FORCE = args.includes('--force');
 const DRY_RUN = args.includes('--dry-run');
 const VERBOSE = args.includes('--verbose');
+const TIMEZONE = process.env.OPENCLAW_TIMEZONE || process.env.TZ || 'America/Montreal';
+// Wall-time stamps carry their IANA zone as a suffix: "2026-02-21 09:15 America/Montreal".
+const ZONE_SUFFIX = /\s+[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)+\s*$/;
 
 function timestamp() {
   return new Date().toLocaleString('en-CA', {
-    timeZone: 'America/Montreal',
+    timeZone: TIMEZONE,
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
   });
@@ -129,12 +132,12 @@ function daysBetween(d1, d2) {
 }
 
 function today() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Montreal' });
+  return new Date().toLocaleDateString('en-CA', { timeZone: TIMEZONE });
 }
 
 function parseDate(str) {
-  // Handle YYYY-MM-DD, ISO, or "America/Montreal" suffix
-  const cleaned = str.trim().replace(/\s*America\/Montreal\s*$/, '').trim();
+  // Handle YYYY-MM-DD, ISO, or an IANA zone suffix
+  const cleaned = str.trim().replace(ZONE_SUFFIX, '').trim();
   const d = new Date(cleaned);
   return isNaN(d.getTime()) ? null : d;
 }
@@ -320,7 +323,7 @@ function checkTimestamps() {
 
   const content = readFileOr(ACTIVE_TASKS);
   const updatedLines = content.split('\n').filter(l => l.includes('updated_at:'));
-  const nonIso = updatedLines.filter(l => !l.includes('T') && !l.includes('America/Montreal'));
+  const nonIso = updatedLines.filter(l => !l.includes('T') && !ZONE_SUFFIX.test(l));
 
   if (nonIso.length > 0) {
     report(`TIMESTAMP_WARN: ${nonIso.length} tasks have non-standard timestamp format`);

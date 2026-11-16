@@ -33,6 +33,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const TIMEZONE = process.env.OPENCLAW_TIMEZONE || process.env.TZ || "America/Montreal";
 
 // --- Config (portable — derives paths from script location) ---
 const SCRIPT_DIR = path.dirname(fs.realpathSync(__filename));
@@ -232,7 +233,7 @@ function extractMessages(jsonlText) {
 function formatDigest(messages, sessionFile) {
   const now = new Date();
   const ts = now.toLocaleString("en-CA", {
-    timeZone: "America/Montreal",
+    timeZone: TIMEZONE,
     year: "numeric", month: "2-digit", day: "2-digit",
     hour: "2-digit", minute: "2-digit", hour12: false,
   });
@@ -290,7 +291,7 @@ function main() {
     console.log(`Found ${files.length} JSONL transcripts:\n`);
     files.slice(0, 10).forEach((f, i) => {
       const date = new Date(f.mtime).toLocaleString("en-CA", {
-        timeZone: "America/Montreal", hour12: false,
+        timeZone: TIMEZONE, hour12: false,
       });
       const sizeKB = (f.size / 1024).toFixed(0);
       const marker = i === 0 ? " ← current" : "";
