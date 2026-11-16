@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { watch } from 'node:fs';
 import { openStore, closeStore, getVersion, setVersion } from '../lib/sqlite-store.mjs';
-import { buildGraph } from '../lib/obsidian-graph.mjs';
+import { buildGraph, conceptNodeId } from '../lib/obsidian-graph.mjs';
 import { createConcurrencyGuard } from '../lib/concurrency-guard.mjs';
 import { getVaultPath } from '../lib/obsidian-vault.mjs';
 import { slugifyName } from '../lib/obsidian-summarizer.mjs';
@@ -139,11 +139,13 @@ export function createGraphCache(opts = {}) {
       // must not break the vault refresh (survives full-replace: re-added each refresh).
       if (extractionStore && typeof extractionStore.getConceptEdges === 'function') {
         try {
-          // Store names are LLM display names; vault nodes and activation seeds are slugs.
+          // Store names are LLM display names; vault nodes and activation seeds are concept note ids.
           for (const e of extractionStore.getConceptEdges()) {
-            const source = e.source ? slugifyName(e.source) : '';
-            const target = e.target ? slugifyName(e.target) : '';
-            if (!source || !target || source === target) continue;
+            const sourceSlug = e.source ? slugifyName(e.source) : '';
+            const targetSlug = e.target ? slugifyName(e.target) : '';
+            if (!sourceSlug || !targetSlug || sourceSlug === targetSlug) continue;
+            const source = conceptNodeId(sourceSlug);
+            const target = conceptNodeId(targetSlug);
             if (!graph.nodes.has(source)) insertNode.run(source, e.source, null, 1.0);
             if (!graph.nodes.has(target)) insertNode.run(target, e.target, null, 1.0);
             insertEdge.run(source, target, e.edge_type || 'related', 1.0);

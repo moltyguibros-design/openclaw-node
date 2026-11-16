@@ -105,7 +105,11 @@ describe('theme notes (repair 2.9)', () => {
   it('hub note carries alias, members or the honest no-membership line', () => {
     const withMembers = buildThemeNote({ label: 'memory pipeline', mention_count: 9 }, { members: ['NATS JetStream'] });
     assert.match(withMembers, /aliases: \["memory pipeline"\]/);
-    assert.match(withMembers, /- \[\[nats-jetstream\|NATS JetStream\]\]/);
+    assert.match(withMembers, /- \[\[concepts\/nats-jetstream\|NATS JetStream\]\]/);
+
+    // Related themes link the hub note by folder and slug, like the members (were bare labels).
+    const related = buildThemeNote({ label: 'nats', mention_count: 9 }, { relatedThemes: ['Memory Pipeline'] });
+    assert.match(related, /## Related themes\n- \[\[themes\/memory-pipeline\|Memory Pipeline\]\]/);
 
     const without = buildThemeNote({ label: 'lonely theme', mention_count: 5 }, {});
     assert.match(without, /No structural concept membership recorded/);

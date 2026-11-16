@@ -14,6 +14,7 @@ import {
   sessionFtsSearch,
   toFtsQuery,
   buildSeeds,
+  activationSearch,
   weightedRRF,
   createRetrievalPipeline,
   setChannelErrorSink,
@@ -508,13 +509,9 @@ describe('buildSeeds', () => {
   beforeEach(() => { db = createExtractionDb(); seedExtractionDb(db); });
   afterEach(() => { db.close(); });
 
-  it('returns slugified entity/theme names as seeds with activation 1.0', () => {
+  it('seeds each entity concept note and theme hub note with activation 1.0', () => {
     const seeds = buildSeeds(db, 'How does NATS handle memory infrastructure?');
-    // Should find NATS entity and memory infrastructure theme
-    assert.ok('nats' in seeds);
-    assert.ok('memory-infrastructure' in seeds);
-    assert.strictEqual(seeds['nats'], 1.0);
-    assert.strictEqual(seeds['memory-infrastructure'], 1.0);
+    assert.deepStrictEqual(seeds, { 'concepts/nats': 1.0, 'themes/memory-infrastructure': 1.0 });
   });
 
   it('returns empty object for no matches', () => {
@@ -695,5 +692,37 @@ describe('normalized scores and the offerer gate', () => {
     });
     assert.equal(result.action, 'offered', JSON.stringify({ result, stats: offerer.stats }));
     assert.ok(published[0].data.data.artifacts.every(a => a.relevance_score >= 0.55 && a.relevance_score <= 1));
+  });
+});
+
+// Graph node ids are vault paths: channel 5 seeds the entity's concept note
+// and maps activated concept notes back to entities. A theme hub that shares
+// an entity's slug is a different node and never stands in for the entity.
+describe('activationSearch on path-keyed graph nodes', () => {
+  let knowledgeDb, extractionDb;
+  beforeEach(() => {
+    knowledgeDb = createKnowledgeDb();
+    extractionDb = createExtractionDb();
+    seedKnowledgeDb(knowledgeDb);
+    seedExtractionDb(extractionDb);
+  });
+  afterEach(() => { knowledgeDb.close(); extractionDb.close(); });
+
+  const cacheOf = (edges) => ({
+    queryNeighbors(id) {
+      return { edges: edges.filter(e => e.source_id === id || e.target_id === id), neighbors: [] };
+    },
+  });
+
+  it('spreads from concepts/nats to concepts/sqlite and returns SQLite sessions', () => {
+    const graphCache = cacheOf([{ source_id: 'concepts/nats', target_id: 'concepts/sqlite', weight: 1 }]);
+    const results = activationSearch(extractionDb, knowledgeDb, graphCache, 'NATS');
+    assert.ok(results.length > 0);
+    assert.ok(results.every(r => r.session_id === 'session-002'), JSON.stringify(results));
+  });
+
+  it('a theme note named like an entity does not map to that entity', () => {
+    const graphCache = cacheOf([{ source_id: 'concepts/nats', target_id: 'themes/sqlite', weight: 1 }]);
+    assert.deepEqual(activationSearch(extractionDb, knowledgeDb, graphCache, 'NATS'), []);
   });
 });

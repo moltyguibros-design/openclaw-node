@@ -105,3 +105,30 @@ describe('checkReferentialCoverage', () => {
     await rm(vault, { recursive: true, force: true });
   });
 });
+
+// Indexed by basename, the last of two same-named notes won: links to the name
+// resolved to one of them and the other was reported orphaned.
+describe('checkVaultLinks with same-named notes in different folders', () => {
+  let vault;
+
+  before(async () => {
+    vault = await mkdtemp(join(tmpdir(), 'vault-collide-'));
+    for (const d of ['concepts', 'themes']) await mkdir(join(vault, d), { recursive: true });
+    await writeFile(join(vault, 'concepts', 'nats.md'), '---\ntype: concept\naliases: [NATS]\n---\n# NATS\n');
+    await writeFile(join(vault, 'themes', 'nats.md'),
+      '---\ntype: theme\naliases: ["nats"]\n---\n# nats\n- [[concepts/nats|NATS]]\n- [[themes/messaging|messaging]]\n');
+    await writeFile(join(vault, 'themes', 'messaging.md'), '---\ntype: theme\n---\n# messaging\n- [[nats]]\n');
+  });
+
+  after(async () => {
+    await rm(vault, { recursive: true, force: true });
+  });
+
+  it('resolves each link to its own note and reports no false orphan', () => {
+    const r = checkVaultLinks(vault);
+    assert.equal(r.notes, 3);
+    assert.equal(r.resolved, 3);
+    assert.deepEqual(r.dangling, []);
+    assert.deepEqual(r.orphans, []);
+  });
+});

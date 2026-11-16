@@ -3,7 +3,7 @@
 // in state.db concept_edges and merged into the graph so spreading-activation gets typed edges.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createExtractionStore } from '../lib/extraction-store.mjs';
@@ -41,19 +41,20 @@ test('P2: graph refresh merges the typed relationships as edges (not mentions-on
   gc.close && gc.close();
 });
 
-test('P2: typed edges land on slug node ids (reachable from vault concept nodes and slug seeds)', async () => {
+test('P2: typed edges land on concept node ids (reachable from vault concept nodes and channel-5 seeds)', async () => {
   const vault = mkdtempSync(join(tmpdir(), 'vault-'));
-  writeFileSync(join(vault, 'nats-jetstream.md'), '# NATS JetStream\n');
-  writeFileSync(join(vault, 'ollama.md'), '# Ollama\n');
+  mkdirSync(join(vault, 'concepts'));
+  writeFileSync(join(vault, 'concepts', 'nats-jetstream.md'), '# NATS JetStream\n');
+  writeFileSync(join(vault, 'concepts', 'ollama.md'), '# Ollama\n');
   const mockStore = { getConceptEdges: () => [
     { source: 'NATS JetStream', target: 'Ollama', edge_type: 'depends_on' },
     { source: 'NATS', target: 'nats', edge_type: 'related' },
   ] };
   const gc = createGraphCache({ dbPath: tmpDb(), vaultPath: vault, extractionStore: mockStore });
   const res = await gc.refreshCache();
-  const out = gc.queryNeighbors('nats-jetstream', { direction: 'outgoing' }).edges;
-  assert.ok(out.some(e => e.target_id === 'ollama' && e.edge_type === 'depends_on'),
-    `typed edge reachable from the slug node (got ${JSON.stringify(out)})`);
+  const out = gc.queryNeighbors('concepts/nats-jetstream', { direction: 'outgoing' }).edges;
+  assert.ok(out.some(e => e.target_id === 'concepts/ollama' && e.edge_type === 'depends_on'),
+    `typed edge reachable from the concept node (got ${JSON.stringify(out)})`);
   const ids = new Set(gc.getNodes().map(n => n.id));
   assert.ok(!ids.has('NATS JetStream') && !ids.has('Ollama'), 'no raw-name parallel nodes');
   assert.equal(res.mergedEdges, 1, 'an edge whose ends slug to the same node is skipped');
