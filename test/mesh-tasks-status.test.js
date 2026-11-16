@@ -79,6 +79,31 @@ describe("createTask()", () => {
     assert.equal(task.priority, 5);
   });
 
+  it("keeps the HyperAgent provenance fields a submit envelope carries", () => {
+    const provenance = {
+      execution_class: "chaos",
+      run_id: "run-7",
+      logical_task_id: "logical-3",
+      parent_task_id: "parent-1",
+      domain: "infra",
+      subdomain: "nats",
+    };
+    const task = createTask({ task_id: "T-PROV", title: "Provenance", ...provenance });
+    for (const [k, v] of Object.entries(provenance)) assert.equal(task[k], v, k);
+    const bare = createTask({ task_id: "T-PROV-0", title: "No provenance" });
+    for (const k of Object.keys(provenance)) assert.equal(bare[k], null, k);
+  });
+
+  it("refuses an execution_class outside real|mock|chaos|synthetic", () => {
+    assert.throws(
+      () => createTask({ task_id: "T-PROV-BAD", title: "Bad", execution_class: "production" }),
+      /invalid execution_class: production/,
+    );
+    for (const c of ["real", "mock", "chaos", "synthetic"]) {
+      assert.equal(createTask({ task_id: `T-${c}`, title: c, execution_class: c }).execution_class, c);
+    }
+  });
+
   it("initializes state fields to null/empty", () => {
     const task = createTask({ task_id: "T-004", title: "State check" });
     assert.equal(task.owner, null);

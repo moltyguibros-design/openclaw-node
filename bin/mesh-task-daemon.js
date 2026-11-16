@@ -210,7 +210,13 @@ async function handleSubmit(msg) {
     return respondError(msg, `Task ${params.task_id} already exists`);
   }
 
-  const task = createTask(params);
+  let task;
+  try {
+    task = createTask(params);
+  } catch (err) {
+    log(`SUBMIT REJECTED ${params.task_id}: ${err.message}`);
+    return respondError(msg, err.message);
+  }
 
   // Built before the first put: createSession throws on an unknown mode, and a
   // stored collab task with no session is claimed and failed as "Collab session not found".
