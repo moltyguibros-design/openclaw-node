@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -9,6 +10,7 @@ import {
   EXTRACT_SUBJECT,
   publishExtractDirect,
   createNatsPublisher,
+  resolvePublisherNodeId,
 } from '../lib/publishers/publish-helper.mjs';
 import { wrapOpenAI } from '../lib/publishers/openai-wrapper.mjs';
 import { wrapAnthropic } from '../lib/publishers/anthropic-wrapper.mjs';
@@ -40,7 +42,7 @@ describe('publishExtractDirect', () => {
     publishExtractDirect(mockNc, 'node-1', 'test-trigger');
 
     assert.equal(published.length, 1);
-    assert.equal(published[0].subject, 'mesh.memory.extract_request');
+    assert.equal(published[0].subject, 'mesh.memory.extract_request.node-1');
     assert.equal(published[0].data.node_id, 'node-1');
     assert.equal(published[0].data.triggered_by, 'test-trigger');
     assert.ok(published[0].data.timestamp);
@@ -80,9 +82,10 @@ describe('createNatsPublisher', () => {
   });
 
   it('falls back to lib/node-id resolveNodeId (MESH_NODE_ID) instead of the raw hostname', async () => {
-    const saved = { OPENCLAW_NODE_ID: process.env.OPENCLAW_NODE_ID, MESH_NODE_ID: process.env.MESH_NODE_ID };
+    const saved = { OPENCLAW_NODE_ID: process.env.OPENCLAW_NODE_ID, MESH_NODE_ID: process.env.MESH_NODE_ID, HOME: process.env.HOME };
     delete process.env.OPENCLAW_NODE_ID;
     process.env.MESH_NODE_ID = 'legacy-node';
+    process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pub-home-')); // no openclaw.env
     try {
       const published = [];
       const mockNc = {
@@ -95,6 +98,29 @@ describe('createNatsPublisher', () => {
       await publisher.publish('t');
       assert.equal(published[0].data.node_id, 'legacy-node');
     } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  it("publishes on the daemon's per-node subject, taking the id from openclaw.env when the env lacks it", async () => {
+    const saved = { OPENCLAW_NODE_ID: process.env.OPENCLAW_NODE_ID, MESH_NODE_ID: process.env.MESH_NODE_ID, HOME: process.env.HOME };
+    delete process.env.OPENCLAW_NODE_ID;
+    delete process.env.MESH_NODE_ID;
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pub-home-'));
+    fs.mkdirSync(path.join(home, '.openclaw'));
+    fs.writeFileSync(path.join(home, '.openclaw', 'openclaw.env'), 'OPENCLAW_NODE_ID=custom-lead\n');
+    process.env.HOME = home;
+    try {
+      assert.equal(resolvePublisherNodeId(), 'custom-lead');
+      const published = [];
+      const publisher = createNatsPublisher({ nc: { publish: (subject) => published.push(subject), async drain() {} } });
+      await publisher.publish('hook');
+      assert.deepEqual(published, ['mesh.memory.extract_request.custom-lead']);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
       for (const [k, v] of Object.entries(saved)) {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;

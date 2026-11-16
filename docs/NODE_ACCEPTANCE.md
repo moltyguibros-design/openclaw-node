@@ -180,7 +180,7 @@ that a server is listening.
 | NET-L2-1 | **core pub/sub round-trip** | subscribe a probe subject, publish a nonce, await delivery | message received within 1s, payload matches | sent/received nonce + ms | nats-resolve |
 | NET-L2-2 | **JetStream durability** | publish a nonce to the stream, read it back via consumer | the published message is read back intact | seq + payload | 1.7 done-criterion |
 | NET-L2-3 | daemon connected | grep daemon log for `NATS connected` + stream-init line at boot | both lines present, current boot | log lines + ts | 0.4 |
-| NET-L2-4 | **extraction trigger round-trip** | publish `mesh.memory.extract_request`; watch for a flush boundary (log/event) | a flush fires within `N` s | trigger→flush log pair | 1.6 done-criterion |
+| NET-L2-4 | **extraction trigger round-trip** | publish `mesh.memory.extract_request.<nodeId>`; watch for a flush boundary (log/event) | a flush fires within `N` s | trigger→flush log pair | 1.6 done-criterion |
 | NET-L1-5 | mesh services loaded | `launchctl list` for the 5 `mesh-*` jobs | all loaded | launchctl rows | 4.1 |
 
 > NET-L2-1/L2-2 distinguish "server up" (L1) from "messaging works" (L2). NET-L2-4 is the

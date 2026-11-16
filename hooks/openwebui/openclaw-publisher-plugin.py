@@ -1,7 +1,7 @@
 """
 openclaw-publisher-plugin.py — OpenWebUI plugin for OpenClaw extraction triggering.
 
-Publishes a mesh.memory.extract_request event when a conversation completes.
+Publishes a mesh.memory.extract_request.<nodeId> event when a conversation completes.
 Uses subprocess to call the Node.js CLI tool (no Python NATS dependency required).
 
 Installation:

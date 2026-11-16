@@ -1611,7 +1611,7 @@ async function main() {
       log(`Shared stream unavailable (${streamErr.message}) — continuing without federation stream`);
     }
 
-    // Initialize agnostic extraction trigger (mesh.memory.extract_request)
+    // Initialize agnostic extraction trigger (mesh.memory.extract_request.<NODE_ID>)
     try {
       extractionTrigger = createExtractionTrigger(natsConn, NODE_ID, {
         log,

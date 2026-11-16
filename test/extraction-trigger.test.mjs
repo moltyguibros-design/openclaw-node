@@ -5,6 +5,7 @@ import {
   DEFAULT_IDLE_THRESHOLD_SEC,
   publishExtractRequest,
   createExtractionTrigger,
+  extractSubject,
 } from '../lib/extraction-trigger.mjs';
 
 /**
@@ -68,12 +69,12 @@ describe('publishExtractRequest', () => {
 
     const result = publishExtractRequest(mockNc, 'node-A', { triggeredBy: 'test-hook' });
 
-    assert.strictEqual(result.subject, EXTRACT_SUBJECT);
+    assert.strictEqual(result.subject, `${EXTRACT_SUBJECT}.node-A`);
     assert.strictEqual(result.payload.node_id, 'node-A');
     assert.strictEqual(result.payload.triggered_by, 'test-hook');
     assert.ok(result.payload.timestamp);
     assert.strictEqual(published.length, 1);
-    assert.strictEqual(published[0].subject, EXTRACT_SUBJECT);
+    assert.strictEqual(published[0].subject, `${EXTRACT_SUBJECT}.node-A`);
     assert.strictEqual(published[0].data.node_id, 'node-A');
     assert.strictEqual(published[0].data.triggered_by, 'test-hook');
   });
@@ -128,7 +129,7 @@ describe('createExtractionTrigger', () => {
     await trigger.start();
 
     assert.strictEqual(subscribed.length, 1);
-    assert.strictEqual(subscribed[0], EXTRACT_SUBJECT);
+    assert.strictEqual(subscribed[0], `${EXTRACT_SUBJECT}.node-A`);
 
     trigger.stop();
   });
@@ -180,7 +181,7 @@ describe('createExtractionTrigger', () => {
     trigger.stop();
 
     assert.ok(published.length >= 1, 'idle timer should have published at least once');
-    assert.strictEqual(published[0].subject, EXTRACT_SUBJECT);
+    assert.strictEqual(published[0].subject, `${EXTRACT_SUBJECT}.node-A`);
     assert.strictEqual(published[0].data.triggered_by, 'idle-timer');
     assert.strictEqual(published[0].data.node_id, 'node-A');
   });
@@ -336,5 +337,48 @@ describe('R40 (repair 4.5): idle-timer self-loop', () => {
 
     assert.strictEqual(published.length, 1,
       `idle timer must fire once and stay quiet until real activity (got ${published.length} fires)`);
+  });
+});
+
+describe('per-node extraction subject', () => {
+  it("a request from one node reaches only that node's daemon on a shared bus", async () => {
+    // Exact-subject loopback bus: what the clustered NATS routes do for core subjects.
+    const subs = new Map();
+    const bus = {
+      subscribe(subject) {
+        const queue = [];
+        let wake = null;
+        const sub = {
+          unsubscribe() { if (wake) { wake({ value: undefined, done: true }); wake = null; } },
+          push(msg) { if (wake) { wake({ value: msg, done: false }); wake = null; } else queue.push(msg); },
+          [Symbol.asyncIterator]: () => ({
+            next: () => (queue.length ? Promise.resolve({ value: queue.shift(), done: false })
+              : new Promise((resolve) => { wake = resolve; })),
+          }),
+        };
+        subs.set(subject, sub);
+        return sub;
+      },
+      publish(subject, data) { subs.get(subject)?.push({ data }); },
+    };
+    const seen = { 'node-A': [], 'node-B': [] };
+    const triggers = Object.keys(seen).map((id) => createExtractionTrigger(bus, id, {
+      onExtract: (p) => seen[id].push(p), idleThresholdSec: 99999,
+    }));
+    for (const t of triggers) await t.start();
+
+    publishExtractRequest(bus, 'node-A', { triggeredBy: 'hook' });
+    await new Promise((r) => setTimeout(r, 20));
+    for (const t of triggers) t.stop();
+
+    assert.equal(seen['node-A'].length, 1);
+    assert.equal(seen['node-B'].length, 0, "node-B must not flush on node-A's trigger");
+  });
+
+  it('refuses a node id that is not a single plain subject token', () => {
+    assert.equal(extractSubject('mac-mini_2'), 'mesh.memory.extract_request.mac-mini_2');
+    for (const bad of ['*', '>', 'a.b', 'has space', '', undefined]) {
+      assert.throws(() => extractSubject(bad), /invalid node id/, String(bad));
+    }
   });
 });

@@ -110,7 +110,7 @@ const subsystems = [
     notWiredFix: 'Implement projection in onIngest; remove env-gate. Today: OPENCLAW_SUBSCRIBER_PROJECTION=stub enables an ack-without-project mode.',
   },
   {
-    name: 'Real-time extraction trigger (NATS subject mesh.memory.extract_request)',
+    name: 'Real-time extraction trigger (NATS subject mesh.memory.extract_request.<nodeId>)',
     check: () => isInvoked(daemonSrc, 'createExtractionTrigger'),
     notWiredFix: 'Daemon must import + call createExtractionTrigger(nc, nodeId, { runFlush }). Without this, the PreCompact hooks publish to a subject with no subscriber.',
   },

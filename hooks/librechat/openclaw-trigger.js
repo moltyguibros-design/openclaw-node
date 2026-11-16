@@ -31,7 +31,7 @@ export function getPublisher() {
 
 /**
  * Call after a LibreChat response is sent to the user.
- * Fires a mesh.memory.extract_request event (fire-and-forget).
+ * Fires a mesh.memory.extract_request.<nodeId> event (fire-and-forget).
  */
 export async function onResponse() {
   await getPublisher().publish('librechat-trigger');

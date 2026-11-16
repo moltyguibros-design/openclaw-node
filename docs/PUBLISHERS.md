@@ -1,13 +1,15 @@
 # OpenClaw Publisher Integrations
 
 This document describes how to connect any LLM frontend to OpenClaw's memory extraction system.
-The core mechanism: publish a `mesh.memory.extract_request` event to NATS when a conversation
-turn completes or a session ends. The memory daemon subscribes and runs the extraction pipeline.
+The core mechanism: publish a `mesh.memory.extract_request.<nodeId>` event to NATS when a
+conversation turn completes or a session ends. The memory daemon on that node subscribes to its own
+subject and runs the extraction pipeline. The subject is per node because the bus is shared across
+the cluster: a request extracts only on the node that sent it.
 
 ## Architecture
 
 ```
-LLM Frontend → Publisher → NATS (mesh.memory.extract_request) → Memory Daemon → Extraction
+LLM Frontend → Publisher → NATS (mesh.memory.extract_request.<nodeId>) → Memory Daemon → Extraction
 ```
 
 Three tiers of integration, from tightest to loosest:
@@ -29,7 +31,7 @@ Three tiers of integration, from tightest to loosest:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NATS_URL` | `nats://localhost:4222` | NATS server URL |
-| `OPENCLAW_NODE_ID` | `os.hostname()` | Node identifier for provenance |
+| `OPENCLAW_NODE_ID` | `~/.openclaw/openclaw.env`, else the short hostname | Node whose daemon the request goes to; must match the daemon's id |
 | `EXTRACTION_IDLE_THRESHOLD_SEC` | `2700` (45 min) | Idle timer before auto-extraction |
 
 ---
