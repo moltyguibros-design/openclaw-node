@@ -81,6 +81,11 @@
     "autostart": true
   },
   {
+    "name": "openclaw-health-watch",
+    "role": "both",
+    "autostart": true
+  },
+  {
     "name": "openclaw-scheduler-heartbeat",
     "role": "both",
     "autostart": true,

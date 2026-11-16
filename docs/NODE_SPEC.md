@@ -117,6 +117,7 @@ Written to `~/.openclaw/openclaw.env` by install (generated where marked ⚙; RA
 | openclaw-mesh-agent | **no — on demand** | bus, LLM provider | the worker brain; started per-node for grappe work (see §6) |
 | openclaw-mesh-tool-discord | **no** (needs token) | bus + `DISCORD_BOT_TOKEN` | Discord proxy tool |
 | openclaw-node-watch | yes | nothing (honest probes) | WORKING/BROKEN/OFF/UNKNOWN watcher + notifications |
+| openclaw-health-watch | yes | workspace tree, Mission Control (`/diagnostics`) | 60s liveness poll of the memory stack; writes `.daemon-health.md` (node-watch's diagnostics heartbeat), alerts on `mesh.health.alerts` + banner, unloads a stuck local Ollama model |
 | openclaw-observer | yes (timer 60s) | workspace tree | 5-layer uptime/activity ledger sampler |
 | openclaw-scheduler-heartbeat | yes (timer 60s) | Mission Control | ticks MC's scheduler API |
 | openclaw-mission-control | yes | npm, production build (see gate) | the dashboard on :3000 |

@@ -64,13 +64,14 @@ run rsync -av --exclude='*.bak' --exclude='*.bak.*' --exclude='routing-eval-test
 # all resolve it next to themselves (or at ../bin/) in the deployed tree.
 # consolidate.mjs (consolidation-scheduler's import) and memory-subscriber.mjs +
 # memory-promoter.mjs (the daemon's federation import) are siblings they load at runtime.
+# health-watch.mjs is the openclaw-health-watch unit's entrypoint.
 # -ef guard: when the workspace copy is a symlink/same inode as the repo file
 # (live-dev setups), macOS cp exits 1 ("are identical") and set -e kills the
 # install (observed 2026-07-14 on the VM). Same file = already deployed = skip.
 for _wsbin in node-watch.mjs node-acceptance.mjs openclaw-notify.mjs \
               obsidian-graph-cache.mjs observer.mjs consolidation-scheduler.mjs \
               consolidate.mjs hyperagent.mjs embed-probe.mjs scheduler-heartbeat.mjs \
-              memory-subscriber.mjs memory-promoter.mjs nats-legacy-lock.py; do
+              memory-subscriber.mjs memory-promoter.mjs health-watch.mjs nats-legacy-lock.py; do
   if [ ! "$REPO_DIR/bin/$_wsbin" -ef "$WORKSPACE/bin/$_wsbin" ]; then
     run cp "$REPO_DIR/bin/$_wsbin" "$WORKSPACE/bin/$_wsbin"
   fi

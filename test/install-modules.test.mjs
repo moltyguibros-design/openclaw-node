@@ -808,3 +808,34 @@ test('README env table agrees with the installer defaults', () => {
   assert.doesNotMatch(readme, /^\| `OPENCLAW_TIMEZONE` \| Yes \|/m, 'a defaulted key is not required');
   assert.doesNotMatch(readme, /for all available configuration/);
 });
+
+// health-watch was hand-installed on one node only, yet node-watch's
+// diagnostics probe and the observer's core roster require it everywhere.
+test('every manifest unit ships its templates, execs a deployed entrypoint, and renders the node id', () => {
+  const manifest = JSON.parse(readFileSync(join(ROOT, 'services/service-manifest.json'), 'utf8'));
+  assert.ok(manifest.some((s) => s.name === 'openclaw-health-watch' && s.role === 'both' && s.autostart),
+    'health-watch is a standard unit on every node');
+  const loop = moduleSrc['workspace.sh'].match(/for _wsbin in ([^;]+); do/);
+  assert.ok(loop, 'workspace.sh copy loop parsed');
+  const copied = new Set(loop[1].replace(/\\\n/g, ' ').split(/\s+/).filter(Boolean));
+  const deployed = (script) => copied.has(script) || existsSync(join(ROOT, 'workspace-bin', script));
+
+  for (const { name, timer } of manifest) {
+    const files = [
+      `launchd/ai.openclaw.${name.replace(/^openclaw-/, '')}.plist`,
+      `systemd/${name}.service`,
+      ...(timer ? [`systemd/${name}.timer`] : []),
+    ];
+    for (const f of files) {
+      const path = join(ROOT, 'services', f);
+      assert.ok(existsSync(path), `${name}: ${f} missing`);
+      const text = readFileSync(path, 'utf8');
+      for (const [, script] of text.matchAll(/\$\{OPENCLAW_WORKSPACE\}\/bin\/([\w.-]+\.(?:mjs|js|sh|py))/g)) {
+        assert.ok(deployed(script), `${f} execs ${script}, which the installer never deploys`);
+      }
+      const nodeId = text.match(/<key>OPENCLAW_NODE_ID<\/key>\s*<string>([^<]*)<\/string>/)?.[1]
+        ?? text.match(/^Environment=OPENCLAW_NODE_ID=(.*)$/m)?.[1];
+      if (nodeId !== undefined) assert.equal(nodeId, '${OPENCLAW_NODE_ID}', `${f} hardcodes its node id`);
+    }
+  }
+});
