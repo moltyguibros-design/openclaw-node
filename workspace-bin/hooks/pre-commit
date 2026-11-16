@@ -43,23 +43,30 @@ for skill_name in $CHANGED_SKILLS; do
     continue
   fi
 
-  # Run scanner
-  SCAN_OUTPUT=$(python3 "$SCANNER" --skill "$skill_name" --json 2>/dev/null) || continue
+  # scanner.py exits 1 exactly when a skill is dangerous (or missing), so its
+  # status is not an error signal; the JSON decides. The default --dir is the
+  # deployed ~/.openclaw tree, not the tree being committed.
+  SCAN_OUTPUT=$(python3 "$SCANNER" --dir "$REPO_ROOT/skills" --skill "$skill_name" --json 2>/dev/null) || true
 
-  # Extract risk_score from JSON
+  # No parseable report fails closed: an unscanned skill must not pass.
   RISK_SCORE=$(python3 -c "
 import json, sys
 try:
-    data = json.loads(sys.argv[1])
-    print(data.get('risk_score', 0))
+    print(int(json.loads(sys.argv[1])['skills'][0]['risk_score']))
 except Exception:
-    print(0)
-" "$SCAN_OUTPUT" 2>/dev/null) || RISK_SCORE=0
+    print('unscanned')
+" "$SCAN_OUTPUT" 2>/dev/null) || RISK_SCORE=unscanned
 
-  if [ "$RISK_SCORE" -ge 70 ] 2>/dev/null; then
+  if [ "$RISK_SCORE" = "unscanned" ]; then
+    echo "BLOCKED: skills/$skill_name — the scanner produced no report"
+    BLOCKED=1
+    continue
+  fi
+
+  if [ "$RISK_SCORE" -ge 70 ]; then
     echo "BLOCKED: skills/$skill_name — risk_score $RISK_SCORE/100 (dangerous)"
     BLOCKED=1
-  elif [ "$RISK_SCORE" -ge 30 ] 2>/dev/null; then
+  elif [ "$RISK_SCORE" -ge 30 ]; then
     echo "WARNING: skills/$skill_name — risk_score $RISK_SCORE/100 (suspicious)"
     WARNED=1
   fi
