@@ -90,7 +90,8 @@ const DIRS = {
   CLI_BIN:          path.join(HOME, 'openclaw', 'bin'),
   CLI_LIB:          path.join(HOME, 'openclaw', 'lib'),
   MC_PROJECT:       path.join(HOME, '.openclaw', 'workspace', 'projects', 'mission-control'),
-  SKILLS:           path.join(HOME, '.openclaw', 'skills'),
+  SKILLS:           path.join(HOME, '.openclaw', 'workspace', 'skills'),
+  MANAGED_SKILLS:   path.join(HOME, '.openclaw', 'skills'),
   SOULS:            path.join(HOME, '.openclaw', 'souls'),
   CONFIG:           path.join(HOME, '.openclaw', 'config'),
   BOOT:             path.join(HOME, '.openclaw', 'workspace', '.boot'),
@@ -428,12 +429,14 @@ const MANIFEST = [
     risk: 'safe',
     repoPaths: ['skills/'],
     // Quarantined skills must never reach a node (skills/_quarantine/README.md):
-    // neither installed nor, through the diff, removed.
-    exclude: ['skills/_quarantine/'],
+    // neither installed nor, through the diff, removed. dist/ and scripts/ are
+    // packaging, not skills: install.sh's Step 6 rsync leaves them out too.
+    exclude: ['skills/_quarantine/', 'skills/dist/', 'skills/scripts/'],
     targets: [DIRS.SKILLS],
     servicesMac: [],
     servicesLinux: [],
     nodeFilter: 'all',
+    postInstall: () => retireManagedSkillCopies(),
   },
 
   // ── BOOT SYSTEM ─────────────────────────────────────────────────────────
@@ -760,6 +763,32 @@ function saveDeployState(state) {
  */
 function deployedBase(repoDir) {
   return resolveCommit(repoDir, loadDeployState().deployedSha) || gitLine(repoDir, ['rev-parse', 'HEAD']);
+}
+
+/**
+ * mesh-deploy used to ship the skill library to ~/.openclaw/skills, where the
+ * workspace copies install.sh wrote take precedence, so those copies never
+ * loaded. Move each leftover repo skill the workspace now holds (and the
+ * dist/ and scripts/ packaging dirs) into a dated archive; never delete. The
+ * mesh skill stays: integrations.sh installs it there for every agent.
+ */
+function retireManagedSkillCopies() {
+  if (!fs.existsSync(DIRS.MANAGED_SKILLS)) return;
+  const repoSkills = new Set(fs.readdirSync(path.join(REPO_DIR, 'skills')));
+  const archive = path.join(DIRS.OPENCLAW_HOME, `skills.retired-${new Date().toISOString().slice(0, 10)}`);
+  for (const name of fs.readdirSync(DIRS.MANAGED_SKILLS)) {
+    if (name === 'mesh' || !repoSkills.has(name)) continue;
+    const packaging = name === 'dist' || name === 'scripts';
+    if (!packaging && !fs.existsSync(path.join(DIRS.SKILLS, name))) continue;
+    const dst = path.join(archive, name);
+    if (fs.existsSync(dst)) {
+      warn(`  ${path.join(DIRS.MANAGED_SKILLS, name)} left in place — ${dst} already exists`);
+      continue;
+    }
+    fs.mkdirSync(archive, { recursive: true });
+    fs.renameSync(path.join(DIRS.MANAGED_SKILLS, name), dst);
+    console.log(`  ${C.dim('retire')} ${path.join(DIRS.MANAGED_SKILLS, name)} → ${dst}`);
+  }
 }
 
 /**

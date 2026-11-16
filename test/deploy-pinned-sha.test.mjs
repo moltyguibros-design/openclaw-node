@@ -34,7 +34,7 @@ const IS_MAC = process.platform === 'darwin';
 // Where mesh-deploy installs on a lead, all derived from HOME.
 const RT = {
   bin: path.join(HOME, 'openclaw', 'bin'),
-  skills: path.join(HOME, '.openclaw', 'skills'),
+  skills: path.join(HOME, '.openclaw', 'workspace', 'skills'),
   workspace: path.join(HOME, '.openclaw', 'workspace'),
   mc: path.join(HOME, '.openclaw', 'workspace', 'projects', 'mission-control'),
   state: path.join(HOME, '.openclaw', '.deploy-state.json'),
@@ -332,8 +332,17 @@ describe('`mesh deploy --force` on a live node leaves what the node owns alone',
       'souls/daedalus/evolution/events.jsonl': '{"event":"seed"}\n',
       'souls/newcomer/evolution/genes.json': '{"genes":"newcomer seed"}\n',
       'skills/demo/SKILL.md': '# demo\n',
+      'skills/mesh/SKILL.md': '# mesh\n',
+      'skills/dist/demo.skill': 'packaged\n',
+      'skills/scripts/golden.sh': '#!/bin/sh\n',
       'skills/_quarantine/memorylayer/SKILL.md': '# quarantined: ships memory to a SaaS\n',
     });
+    // What earlier deploys left in the managed dir, beside an operator's own skill
+    // and the mesh skill integrations.sh installs there on purpose.
+    write(fx.home, '.openclaw/skills/demo/SKILL.md', '# demo, stale managed copy\n');
+    write(fx.home, '.openclaw/skills/dist/demo.skill', 'packaged\n');
+    write(fx.home, '.openclaw/skills/mesh/SKILL.md', '# mesh\n');
+    write(fx.home, '.openclaw/skills/operator-own/SKILL.md', '# mine\n');
     write(fx.home, '.openclaw/openclaw.json', LIVE_CONFIG);
     write(fx.home, '.openclaw/openclaw.env', 'DISCORD_BOT_TOKEN=discord-fixture\n');
     write(fx.home, '.openclaw/souls/daedalus/evolution/genes.json', LEARNED_GENES);
@@ -345,7 +354,7 @@ describe('`mesh deploy --force` on a live node leaves what the node owns alone',
 
   it('reinstalls the node and succeeds', () => {
     ranOk(run);
-    assert.equal(read(fx.rt('.openclaw/skills/demo/SKILL.md')), '# demo\n');
+    assert.equal(read(fx.rt('.openclaw/workspace/skills/demo/SKILL.md')), '# demo\n');
   });
 
   it('leaves openclaw.json alone when its template did not change: no rewrite, no backup', () => {
@@ -359,8 +368,23 @@ describe('`mesh deploy --force` on a live node leaves what the node owns alone',
     assert.equal(read(fx.rt('.openclaw/souls/newcomer/evolution/genes.json')), '{"genes":"newcomer seed"}\n');
   });
 
+  it('ships skills to the workspace dir install.sh uses, without dist/ or scripts/', () => {
+    assert.ok(fs.existsSync(fx.rt('.openclaw/workspace/skills/mesh/SKILL.md')));
+    assert.ok(!fs.existsSync(fx.rt('.openclaw/workspace/skills/dist')), 'skills/dist shipped');
+    assert.ok(!fs.existsSync(fx.rt('.openclaw/workspace/skills/scripts')), 'skills/scripts shipped');
+  });
+
+  it('archives the stale managed copies it used to deploy, keeping mesh and operator skills', () => {
+    const archives = fs.readdirSync(fx.rt('.openclaw')).filter(f => f.startsWith('skills.retired-'));
+    assert.equal(archives.length, 1);
+    const archive = fx.rt(`.openclaw/${archives[0]}`);
+    assert.equal(read(path.join(archive, 'demo', 'SKILL.md')), '# demo, stale managed copy\n');
+    assert.ok(fs.existsSync(path.join(archive, 'dist', 'demo.skill')));
+    assert.deepEqual(fs.readdirSync(fx.rt('.openclaw/skills')).sort(), ['mesh', 'operator-own']);
+  });
+
   it('never installs skills/_quarantine', () => {
-    assert.ok(!fs.existsSync(fx.rt('.openclaw/skills/_quarantine')), 'the quarantined skill reached the node');
+    assert.ok(!fs.existsSync(fx.rt('.openclaw/workspace/skills/_quarantine')), 'the quarantined skill reached the node');
   });
 
   it('never runs npm or the openclaw CLI: no implicit, unpinned CLI update', () => {
@@ -490,7 +514,7 @@ describe('a deploy installs the commit, never the working tree', () => {
       assert.equal(run.status, 1, run.stdout);
       assert.match(run.stdout, /DEPLOY_ERROR .*tracked files in .* differ from the commit \(M skills\/demo\/SKILL\.md\)/);
       assert.equal(nodeHead(), fx.S0, 'the branch was not fast-forwarded');
-      assert.equal(read(fx.rt('.openclaw/skills/demo/SKILL.md')), '# demo v0\n');
+      assert.equal(read(fx.rt('.openclaw/workspace/skills/demo/SKILL.md')), '# demo v0\n');
       assert.equal(read(fx.rt('openclaw/bin/mesh-agent.js')), '// agent v0\n');
     } finally {
       git(fx.node, 'checkout', '-q', '--', 'skills/demo/SKILL.md');
