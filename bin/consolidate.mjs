@@ -42,7 +42,7 @@ import { loadPromotionPolicy } from '../lib/promotion-policy.mjs';
 import { backfillSessionNotes } from '../lib/obsidian-session-notes.mjs';
 import { generateDecisionNotes } from '../lib/obsidian-decision-notes.mjs';
 import { generateThemeNotes } from '../lib/obsidian-theme-notes.mjs';
-import { generateDailyDigest } from '../lib/obsidian-digest.mjs';
+import { generateDailyDigest, generateWeeklyDigest, previousIsoWeekEnd } from '../lib/obsidian-digest.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -92,7 +92,7 @@ function decayedEventData(decay, prune, durationMs) {
  * @param {object} [opts]
  * @param {string} [opts.dbPath] — path to extraction store DB
  * @param {string} [opts.vaultPath] — Obsidian vault path
- * @param {boolean} [opts.dryRun] — skip only the vault-surface writers (session/decision/theme notes, daily digest); decay, prune, reinforce, concept summaries, events and the promotion fingerprint still write
+ * @param {boolean} [opts.dryRun] — skip only the vault-surface writers (session/decision/theme notes, daily/weekly digest); decay, prune, reinforce, concept summaries, events and the promotion fingerprint still write
  * @param {object} [opts.db] — pre-opened database (for testing)
  * @param {object} [opts.client] — LLM client for summary generation
  * @param {AbortSignal} [opts.signal] — F-N100: hard-cap cancellation
@@ -100,6 +100,7 @@ function decayedEventData(decay, prune, durationMs) {
  * @param {object} [opts.eventLog] — local event log instance (publishLocal method)
  * @param {string} [opts.nodeId] — node identifier for event emission
  * @param {string} [opts.promotionPolicyPath] — promotion policy YAML (default: config/promotion-policy.yaml beside lib/)
+ * @param {number} [opts.now] — clock for the weekly digest's week (testing)
  * @returns {Promise<object>} cycle results, including `aborted: true` and
  *   `abortedAt: '<step name>'` when the cycle stopped short.
  */
@@ -194,6 +195,20 @@ export async function runConsolidationCycle(opts = {}) {
         const r = await generateDailyDigest({ ...vp });
         vaultSurfaceResult.dailyDigest = r.generated ? 1 : 0;
       } catch (e) { vaultSurfaceResult.dailyDigestError = e.message; }
+      // Weekly digest: the first cycle of each ISO week writes the week that
+      // just ended (daily/<its Sunday>-weekly.md); later cycles that week skip.
+      if (!abortInfo) abortInfo = checkpoint('vault-surfaces');
+      if (!abortInfo) try {
+        const endDate = previousIsoWeekEnd(opts.now ?? Date.now());
+        const last = db.prepare(`SELECT value FROM consolidation_meta WHERE key = 'last_weekly_digest'`).get()?.value;
+        vaultSurfaceResult.weeklyDigest = 0;
+        if (last !== endDate) {
+          const r = await generateWeeklyDigest({ ...vp, endDate });
+          db.prepare(`INSERT INTO consolidation_meta (key, value) VALUES ('last_weekly_digest', ?)
+                      ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(endDate);
+          vaultSurfaceResult.weeklyDigest = r.generated ? 1 : 0;
+        }
+      } catch (e) { vaultSurfaceResult.weeklyDigestError = e.message; }
     }
 
     // 5. Regenerate summaries (async — uses LLM). Signal flows in so the

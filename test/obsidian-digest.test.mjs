@@ -16,6 +16,7 @@ import {
   buildDigestBody,
   generateDailyDigest,
   generateWeeklyDigest,
+  previousIsoWeekEnd,
 } from '../lib/obsidian-digest.mjs';
 
 describe('obsidian-digest', () => {
@@ -365,6 +366,23 @@ describe('obsidian-digest', () => {
 
       const result = await generateWeeklyDigest({ vaultPath: vaultDir, endDate: '2026-06-01' });
       assert.equal(result.sessions, 0);
+    });
+
+    it('does not rewrite an unchanged weekly digest', async () => {
+      const r1 = await generateWeeklyDigest({ vaultPath: vaultDir, endDate: '2026-06-07' });
+      const pinned = (await readFile(r1.filePath, 'utf-8'))
+        .replace(/^generated_at: .*$/m, 'generated_at: 2000-01-01T00:00:00.000Z');
+      await writeFile(r1.filePath, pinned);
+      await generateWeeklyDigest({ vaultPath: vaultDir, endDate: '2026-06-07' });
+      assert.equal(await readFile(r1.filePath, 'utf-8'), pinned);
+    });
+  });
+
+  describe('previousIsoWeekEnd', () => {
+    it('is the Sunday that closed the previous ISO week', () => {
+      assert.equal(previousIsoWeekEnd(Date.parse('2026-06-08T00:00:00Z')), '2026-06-07', 'Monday');
+      assert.equal(previousIsoWeekEnd(Date.parse('2026-06-10T15:00:00Z')), '2026-06-07', 'Wednesday');
+      assert.equal(previousIsoWeekEnd(Date.parse('2026-06-14T23:59:59Z')), '2026-06-07', 'Sunday');
     });
   });
 });

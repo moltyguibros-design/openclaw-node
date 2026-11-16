@@ -690,6 +690,27 @@ describe('runConsolidationCycle', () => {
     db.close();
   });
 
+  it('writes the weekly digest on the first cycle of each ISO week only', async () => {
+    const db = createTestDb();
+    const vault = mkdtempSync(join(tmpdir(), 'cycle-weekly-'));
+    const { readdirSync } = await import('node:fs');
+    const weekly = () => readdirSync(join(vault, 'daily')).filter((f) => f.endsWith('-weekly.md')).sort();
+
+    const monday = Date.parse('2026-06-08T10:00:00Z');
+    const first = await runConsolidationCycle({ vaultPath: vault, db, now: monday });
+    assert.equal(first.vaultSurfaces.weeklyDigest, 1);
+    assert.deepEqual(weekly(), ['2026-06-07-weekly.md'], 'the ISO week that just ended');
+
+    const later = await runConsolidationCycle({ vaultPath: vault, db, now: monday + 2 * 86400000 });
+    assert.equal(later.vaultSurfaces.weeklyDigest, 0, 'same ISO week: skipped');
+
+    const nextWeek = await runConsolidationCycle({ vaultPath: vault, db, now: monday + 7 * 86400000 });
+    assert.equal(nextWeek.vaultSurfaces.weeklyDigest, 1);
+    assert.deepEqual(weekly(), ['2026-06-07-weekly.md', '2026-06-14-weekly.md']);
+
+    db.close();
+  });
+
   it('regression_F-N100: aborts cleanly when signal fires before the cycle starts', async () => {
     const db = createTestDb();
     insertEntity(db, 'e1', 'concept', { mentionCount: 1 });
