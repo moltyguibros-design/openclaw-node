@@ -13,7 +13,9 @@ import {
   writeBackReconsolidation,
   curateForRecall,
   RECALL_CAPS,
+  llmSeedTerms,
 } from '../lib/memory-injector.mjs';
+import { setChannelErrorSink } from '../lib/retrieval-pipeline.mjs';
 import { formatMemoryBlock } from '../lib/memory-formatter.mjs';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -424,5 +426,53 @@ describe('curateForRecall — related_sessions caps sessions, not chunks', () =>
     assert.match(block, /\[A\]: a1/);
     assert.match(block, /\[B\]: b1/);
     assert.match(block, /\[C\]: c1/);
+  });
+});
+
+// ─── memory-knowledge#5: the LLM analysis steers retrieval ──────────────────
+
+describe('LLM analysis entities/themes seed retrieval', () => {
+  it('llmSeedTerms takes string entities then themes, nothing on fallback', () => {
+    assert.deepEqual(llmSeedTerms(null), []);
+    assert.deepEqual(llmSeedTerms({ intent: 'debug' }), []);
+    assert.deepEqual(
+      llmSeedTerms({ entities: ['NATS', 3], themes: ['messaging', null] }),
+      ['NATS', 'messaging'],
+    );
+  });
+
+  it('an entity the prompt only paraphrases is retrieved via the analysis', async () => {
+    const extractionDb = createTestExtractionDb();
+    seedTestData(extractionDb);
+    const knowledgeDb = new Database(':memory:');
+    knowledgeDb.exec(`CREATE TABLE session_chunks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+      turn_index INTEGER NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL, snippet TEXT NOT NULL)`);
+    knowledgeDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet)
+      VALUES ('session-1', 0, 'user', 'jetstream setup', 'jetstream setup')`).run();
+    const llmClient = {
+      async generateAnalysis() {
+        return { mode: 'llm', value: { content: JSON.stringify({ intent: 'debug', entities: ['NATS'], themes: [] }) } };
+      },
+    };
+    setChannelErrorSink(() => {}); // no FTS/vector tables in this knowledge DB
+    try {
+      const injector = createMemoryInjector({ knowledgeDb, extractionDb, llmClient });
+      const result = await injector.retrieve('why is the message bus dropping events', {
+        embedFn: async () => null,
+        respectPrivacy: false,
+      });
+      assert.equal(result.analysis.mode, 'llm');
+      assert.ok(
+        result.snippets.some(s => s.sessionId === 'session-1'),
+        'the session mentioning the analysis entity must be injected',
+      );
+    } finally {
+      extractionDb.close();
+      knowledgeDb.close();
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
   });
 });

@@ -15,6 +15,7 @@ import {
   weightedRRF,
   createRetrievalPipeline,
   setChannelErrorSink,
+  buildSeedMatchText,
 } from '../lib/retrieval-pipeline.mjs';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -532,6 +533,38 @@ describe('R19 (repair 5.2): channel failures are observable, never silent', () =
       assert.deepStrictEqual(findMatchingEntities(broken, 'x'), []);
       broken.close();
     } finally {
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
+  });
+});
+
+describe('seedTerms: prompt-analysis entities/themes steer channels 3/4/5', () => {
+  it('buildSeedMatchText appends usable string terms and drops the rest', () => {
+    assert.equal(buildSeedMatchText('q', undefined), 'q');
+    assert.equal(buildSeedMatchText('q', []), 'q');
+    assert.equal(buildSeedMatchText('q', ['NATS', 7, '', 'x', 'a'.repeat(81), ' SQLite ']), 'q\nNATS\nSQLite');
+  });
+
+  it('an entity named only by the analysis surfaces its sessions', async () => {
+    const extractionDb = createExtractionDb();
+    const knowledgeDb = createKnowledgeDb();
+    seedExtractionDb(extractionDb);
+    seedKnowledgeDb(knowledgeDb);
+    setChannelErrorSink(() => {}); // test knowledge DB has no FTS/vector tables
+    try {
+      const pipeline = createRetrievalPipeline({ knowledgeDb, extractionDb, respect_privacy: false });
+      const query = 'how does our message bus behave under load';
+      const without = await pipeline.retrieve(query);
+      assert.deepStrictEqual(without, []);
+      const withSeeds = await pipeline.retrieve(query, { seedTerms: ['NATS'] });
+      const sessions = new Set(withSeeds.map(r => r.session_id));
+      assert.ok(sessions.has('session-001'), 'NATS mention session must be retrieved');
+      assert.ok(sessions.has('session-002'), 'NATS mention session must be retrieved');
+    } finally {
+      extractionDb.close();
+      knowledgeDb.close();
       setChannelErrorSink((channel, err) => {
         console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
       });
