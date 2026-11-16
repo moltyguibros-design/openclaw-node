@@ -67,10 +67,11 @@ describe('worker extraction timeouts reach the daemon snapshot', () => {
     assert.deepEqual(m.queue, { extraction_timeouts: 0, extraction_successes: 0, timeouts: 0 });
   });
 
-  it('the daemon folds every worker message into its queue state', () => {
+  it('the daemon folds every worker result message into its queue state', () => {
     const src = readFileSync(join(ROOT, 'workspace-bin', 'memory-daemon.mjs'), 'utf8');
     const fn = src.slice(src.indexOf('function runMemoryWorker'), src.indexOf('function runFlushInWorker'));
-    assert.match(fn, /w\.once\('message', \(m\) => \{\s*if \(!settled\) foldWorkerQueueState\(m\.queue\);/);
+    // llm start/end span messages (applyWorkerLlmMessage) carry no queue report.
+    assert.match(fn, /w\.on\('message', \(m\) => \{\s*if \(settled\) return;\s*if \(applyWorkerLlmMessage\([^)]*\)\) return;\s*foldWorkerQueueState\(m\.queue\);/);
   });
 });
 
