@@ -15,6 +15,7 @@
 const { spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 const PKG_ROOT = __dirname;
 const INSTALL_SCRIPT = path.join(PKG_ROOT, 'install.sh');
@@ -22,6 +23,30 @@ const MESH_INIT_SCRIPT = path.join(PKG_ROOT, 'bin', 'openclaw-node-init.js');
 
 const args = process.argv.slice(2);
 const meshOnly = args.includes('--mesh-only');
+
+// npx runs the package from its cache (~/.npm/_npx/<hash>/node_modules/<pkg>),
+// which npm clears or replaces at will, and install.sh renders every mesh unit's
+// ExecStart/WorkingDirectory from the directory it runs in. A full install runs
+// from a stable per-version copy instead.
+function stableInstallRoot(dryRun) {
+  if (!PKG_ROOT.split(path.sep).includes('_npx')) return PKG_ROOT;
+  const { version } = require(path.join(PKG_ROOT, 'package.json'));
+  const dest = path.join(process.env.OPENCLAW_ROOT || path.join(os.homedir(), '.openclaw'), 'harness', version);
+  if (dryRun) {
+    console.log(`[dry-run] would copy ${PKG_ROOT} to ${dest} and install from there`);
+    return PKG_ROOT;
+  }
+  if (!fs.existsSync(path.join(dest, 'install.sh'))) {
+    const tmp = `${dest}.tmp-${process.pid}`;
+    fs.rmSync(tmp, { recursive: true, force: true });
+    // npx hoists dependencies out of the package dir; install.sh installs them in the copy.
+    const skip = path.join(PKG_ROOT, 'node_modules');
+    fs.cpSync(PKG_ROOT, tmp, { recursive: true, filter: (src) => src !== skip });
+    fs.renameSync(tmp, dest);
+  }
+  console.log(`Installing from ${dest} (stable copy of the npx package)`);
+  return dest;
+}
 
 // spawnSync reports a signal-killed or never-spawned child as status null.
 function exitWith(result) {
@@ -52,15 +77,23 @@ if (meshOnly) {
     process.exit(1);
   }
 
+  let root;
+  try {
+    root = stableInstallRoot(args.includes('--dry-run'));
+  } catch (err) {
+    console.error('ERROR: could not copy the package out of the npx cache:', err.message);
+    process.exit(1);
+  }
+
   // Forward args (--update, --dry-run, --enable-services, etc.). install.sh runs
-  // with cwd=PKG_ROOT, so a relative --project is resolved against the caller's
+  // with cwd=root, so a relative --project is resolved against the caller's
   // cwd here.
   const forwarded = args.map((a) => (a.startsWith('--project=')
     ? `--project=${path.resolve(a.slice('--project='.length))}`
     : a));
-  const result = spawnSync('bash', [INSTALL_SCRIPT, ...forwarded], {
+  const result = spawnSync('bash', [path.join(root, 'install.sh'), ...forwarded], {
     stdio: 'inherit',
-    cwd: PKG_ROOT,
+    cwd: root,
   });
   exitWith(result);
 }
