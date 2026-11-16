@@ -198,6 +198,32 @@ describe('appendTaskBlock', () => {
   });
 });
 
+describe('stale lock recovery', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  const { updateTaskInPlace } = require('../lib/kanban-io');
+
+  it('breaks a lock left behind longer than 30s ago, and still waits on a fresh one', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kanban-stale-'));
+    const tmpFile = path.join(dir, 'active-tasks.md');
+    const lockDir = tmpFile + '.lk';
+    fs.writeFileSync(tmpFile, '## Live Tasks\n- task_id: a1\n  title: A\n  status: queued\n');
+    try {
+      fs.mkdirSync(lockDir);
+      await assert.rejects(updateTaskInPlace(tmpFile, 'a1', { status: 'running' }), /lock acquisition timeout/);
+
+      const old = (Date.now() - 60_000) / 1000;
+      fs.utimesSync(lockDir, old, old);
+      await updateTaskInPlace(tmpFile, 'a1', { status: 'running' });
+      assert.equal(parseTasks(fs.readFileSync(tmpFile, 'utf8'))[0].status, 'running');
+      assert.equal(fs.existsSync(lockDir), false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('workspace resolution follows OPENCLAW_WORKSPACE', () => {
   const fs = require('fs');
   const path = require('path');

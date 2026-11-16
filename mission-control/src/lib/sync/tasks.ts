@@ -481,6 +481,22 @@ function parseExtra(raw: string | null): Record<string, string> {
   }
 }
 
+// Same rule as lib/kanban-io.js: a lock older than this was left by a writer
+// killed while holding it, and is removed (accepting that two writers may race it).
+const STALE_LOCK_MS = 30000;
+
+function breakStaleLock(lockDir: string): boolean {
+  try {
+    const age = Date.now() - fs.statSync(lockDir).mtimeMs;
+    if (age <= STALE_LOCK_MS) return false;
+    fs.rmdirSync(lockDir);
+    console.warn(`[sync] removed stale lock ${lockDir} (${Math.round(age / 1000)}s old)`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Mirror of lib/kanban-io.js withMkdirLock (mkdir(<file>.lk) is atomic on
  * every local filesystem). Synchronous because the sync layer is; the wait
@@ -495,6 +511,7 @@ export function withKanbanLockSync<T>(filePath: string, fn: () => T, maxWaitMs =
       fs.mkdirSync(lockDir);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+        if (breakStaleLock(lockDir)) continue;
         Atomics.wait(sleep, 0, 0, 50);
         continue;
       }
