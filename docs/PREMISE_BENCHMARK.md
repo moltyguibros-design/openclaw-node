@@ -12,9 +12,10 @@ Same task, same model (Claude/sonnet), same harness-loaded OpenClaw, same bus. T
 - **GRAPPE** — three OpenClaws circle it: 1 worker + 2 reviewers, one sub-round
   (`max_subrounds:1` so it closes cleanly — 2.4 finding 13), then finalize.
 
-The harness is `bin/fed-benchmark.mjs` (the original `grappe-benchmark.mjs` is RETIRED — its
-prose-metric default trips the agent's metric security filter and its pair handling could reuse
-stale artifacts; both failed the 2026-08-03 smoke). `submit <task-id> <arm> <task-file.md>` sends
+The harness is `bin/fed-benchmark.mjs` (the original `grappe-benchmark.mjs` and its unattended
+`fed-benchmark-driver.mjs` were retired and later deleted — the former's prose-metric default
+tripped the agent's metric security filter and its pair handling could reuse stale artifacts,
+both failing the 2026-08-03 smoke; git history keeps them). `submit <task-id> <arm> <task-file.md>` sends
 each arm (safe trivially-passing metric `node --version`; blind scoring is the quality gate);
 `collect` writes an anonymized, de-identified pair under `benchmark/pairs-d14/<name>/` — write
 once, no overwrite, July's tracked `benchmark/pairs/` + `handrun/` are never read — with a sealed
@@ -25,11 +26,15 @@ provider captures json-mode usage). You blind-score all pairs, then `tally`.
 
 1. Prereqs (the node's own services — NODE_SPEC §6): launchd mesh-task-daemon + bridge up; 3
    mesh-agents running with `MESH_LLM_PROVIDER=claude`.
-2. For each of the ≥5 tasks: `node bin/grappe-benchmark.mjs run tasks/<t>.json` → a pair dir under
-   `~/.openclaw/benchmark/`.
-3. Blind-score each pair on the rubric below (record A or B + one-line why). Do NOT reveal until all
-   are scored.
-4. `reveal <dir>` each; tally grappe-wins vs solo-wins.
+2. For each of the ≥5 tasks: `node bin/fed-benchmark.mjs submit <solo-task-id> solo <task-file.md>`
+   and `node bin/fed-benchmark.mjs submit <grappe-task-id> grappe <task-file.md>` (one task file,
+   two task ids); once both are terminal,
+   `node bin/fed-benchmark.mjs collect <name> <solo-task-id> <grappe-task-id>` → `A.md`/`B.md` under
+   `benchmark/pairs-d14/<name>/`, with the key sealed apart under `benchmark/sealed-d14/`.
+3. Blind-score each pair on the rubric below into `benchmark/pairs-d14/<name>/score.json`
+   (`winner` A | B | tie, notes, and per arm the five scores `tally` requires: `correctness`,
+   `completeness`, `evidence`, `actionability`, `defect_discovery`). Do NOT unseal until all are scored.
+4. `node bin/fed-benchmark.mjs tally` unblinds each scored pair and tallies grappe-wins vs solo-wins.
 5. **Verdict:** grappe wins a clear majority (≥4/5, or your pre-agreed bar) ⇒ premise PROVEN, Phase
    2/3 unlocked. Else ⇒ write BLOCKED.md citing the miss; the architecture stops here for redesign.
 6. Record the GPU/token + wall-clock cost delta (grappe ≈ 3× the calls + reviewer turns) so the
