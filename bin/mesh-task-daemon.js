@@ -2624,8 +2624,8 @@ async function advancePlanWave(planId) {
   }
 
   // Claim the ready subtasks in one CAS before dispatching anything: their
-  // plan-side fields are known up front (a mesh task's id is its subtask id),
-  // and a second caller then finds them no longer pending instead of
+  // plan-side fields are known up front (a mesh task's id is its subtask id,
+  // namespaced by plan), and a second caller then finds them no longer pending instead of
   // dispatching them again.
   let ready = [];
   const plan = await planStore._updateWithCAS(planId, (p) => {
@@ -2636,7 +2636,7 @@ async function advancePlanWave(planId) {
       switch (st.delegation.mode) {
         case 'solo_mesh':
         case 'collab_mesh':
-          st.mesh_task_id = st.subtask_id;
+          st.mesh_task_id = `${planId}-${st.subtask_id}`;
           break;
         case 'local':
         case 'soul':
@@ -2682,7 +2682,7 @@ async function advancePlanWave(planId) {
         // Namespaced by plan: subtask ids come from templates (reproduce, fix, …), so a
         // bare id let a second plan overwrite the first plan's task record and branch.
         const meshTask = createTask({
-          task_id: `${planId}-${st.subtask_id}`,
+          task_id: st.mesh_task_id,
           title: st.title,
           description: st.description,
           budget_minutes: st.budget_minutes,
