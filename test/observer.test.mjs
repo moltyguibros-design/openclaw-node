@@ -7,6 +7,7 @@ import { readFile } from 'node:fs/promises';
 import {
   sampleLayers, appendSample, scanMemoryActivity, extractActivity,
   readTimeline, readActivity, GAP_THRESHOLD_MS, WORKING_WINDOW_MS, CORE_SERVICES,
+  coreServiceRoster, coreServices,
 } from '../lib/observer.mjs';
 import { cliSummaryLines, stampLine } from '../bin/consolidation-scheduler.mjs';
 
@@ -22,11 +23,11 @@ describe('sampleLayers', () => {
 
     const s = sampleLayers({
       now, boot: 111, daemonStatePath: dsPath,
-      roster: { up: CORE_SERVICES.slice(0, 5), down: CORE_SERVICES.slice(5) },
+      roster: { up: CORE_SERVICES.slice(0, -1), down: CORE_SERVICES.slice(-1) },
       lastExtraction: new Date(now - WORKING_WINDOW_MS - 3600_000).toISOString(), // stale
     });
     assert.equal(s.vm_boot, 111);
-    assert.equal(s.node.core_up, 5);
+    assert.equal(s.node.core_up, CORE_SERVICES.length - 1);
     assert.equal(s.node.core_total, CORE_SERVICES.length);
     assert.equal(s.interaction.active, true, 'ACTIVE + 30s idle => active');
     assert.equal(s.interaction.session, 'abcd1234');
@@ -41,6 +42,54 @@ describe('sampleLayers', () => {
     const s = sampleLayers({ now, boot: 1, daemonStatePath: dsPath, roster: { up: [], down: CORE_SERVICES }, lastExtraction: null });
     assert.equal(s.interaction.active, false, 'idle past the window => not active even if state says ACTIVE');
     assert.equal(s.memory.working, false);
+  });
+});
+
+describe('coreServiceRoster — Linux', () => {
+  const units = ['openclaw-nats', 'openclaw-memory-daemon', 'openclaw-mission-control', 'openclaw-node-watch',
+    'openclaw-nats-1', 'openclaw-nats-2', 'openclaw-nats-3'];
+  const systemctl = (states) => (cmd, args) => {
+    assert.equal(cmd, 'systemctl');
+    assert.deepEqual(args, ['--user', 'is-active', ...units]);
+    const out = units.map((u) => states[u] ?? 'inactive').join('\n') + '\n';
+    if (units.some((u) => states[u] !== 'active')) throw Object.assign(new Error('exit 3'), { stdout: out });
+    return out;
+  };
+
+  it('counts the autostarted units only, so a healthy node reads fully up', () => {
+    const r = coreServiceRoster({ platform: 'linux', execFile: systemctl({
+      'openclaw-nats': 'active', 'openclaw-memory-daemon': 'active',
+      'openclaw-mission-control': 'active', 'openclaw-node-watch': 'active',
+    }) });
+    assert.deepEqual(r, { up: coreServices('linux'), down: [] });
+    assert.equal(coreServices('linux').length, 4);
+    assert.ok(!coreServices('linux').some((s) => /gateway|health-watch/.test(s)));
+  });
+
+  it('credits the nats slot to the single-host R=3 cluster only when all three nodes run', () => {
+    const base = { 'openclaw-memory-daemon': 'active', 'openclaw-mission-control': 'active', 'openclaw-node-watch': 'active' };
+    const all = coreServiceRoster({ platform: 'linux', execFile: systemctl({ ...base,
+      'openclaw-nats-1': 'active', 'openclaw-nats-2': 'active', 'openclaw-nats-3': 'active' }) });
+    assert.deepEqual(all.down, []);
+    const two = coreServiceRoster({ platform: 'linux', execFile: systemctl({ ...base,
+      'openclaw-nats-1': 'active', 'openclaw-nats-2': 'active' }) });
+    assert.deepEqual(two.down, ['openclaw-nats']);
+  });
+
+  it('no user manager => unknown, recorded in the sample and left out of node uptime', () => {
+    const r = coreServiceRoster({ platform: 'linux', execFile: () => { throw Object.assign(new Error('bus'), { stdout: '' }); } });
+    assert.equal(r.unknown, true);
+    const t0 = Date.parse('2026-07-04T00:00:00Z');
+    const samples = [0, 1, 2, 3].map((i) => {
+      const s = sampleLayers({ now: t0 + i * 60_000, boot: 1, daemonStatePath: path.join(tmp, 'none.json'),
+        daemonUp: true, lastExtraction: null, platform: 'linux',
+        roster: i < 2 ? { up: coreServices('linux'), down: [] } : r });
+      return JSON.stringify({ event: 'sample', ...s });
+    });
+    assert.equal(JSON.parse(samples[3]).node.unknown, true);
+    const t = readTimeline(samples.join('\n'), { now: t0 + 3 * 60_000 + 1000 });
+    assert.equal(t.layers.node.uptimePct, 100, 'unknown intervals are not downtime');
+    assert.equal(t.layers.node.current, '?');
   });
 });
 
