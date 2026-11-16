@@ -469,10 +469,15 @@ Benchmarked on a ~250-file workspace:
 
 ### Running tests
 
+CI and the root `npm test` cover the knowledge server through `test/mcp-knowledge-*.test.mjs`.
+
+`lib/mcp-knowledge/test.mjs` is a manual local suite (12 groups, every exported function plus
+the HTTP transport) that embeds with the real bge-m3 model, so it needs the ~2 GB model download
+on first run. CI does not run it:
+
 ```bash
 cd lib/mcp-knowledge
 node test.mjs
-# 98 assertions across 12 test groups
 ```
 
 ## Mesh Network (Multi-Node)
