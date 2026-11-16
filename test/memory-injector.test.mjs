@@ -215,7 +215,7 @@ describe('trimToBudget', () => {
   });
 
   it('trims snippets first when over budget', () => {
-    const longSnippet = 'x'.repeat(2000); // 500 tokens
+    const longSnippet = 'x'.repeat(2000); // rendered capped at FIELD_CAPS.snippet: ~34 tokens
     const data = {
       concepts: [{ name: 'A', type: 'tech' }],
       decisions: [{ decision: 'Use X', confidence: 0.9, date: '2026-05-23' }],
@@ -224,12 +224,12 @@ describe('trimToBudget', () => {
         { snippet: longSnippet, score: 0.8 },
       ],
     };
-    // Budget of 100 tokens — concepts + decisions fit, but not both long snippets
-    const result = trimToBudget(data, 100);
+    // Budget of 60 tokens — overhead + concepts + decisions fit, no snippet does
+    const result = trimToBudget(data, 60);
     assert.equal(result.concepts.length, 1);
     assert.equal(result.decisions.length, 1);
     assert.equal(result.snippets.length, 0); // snippets too large
-    assert.ok(result.tokenCount <= 100);
+    assert.ok(result.tokenCount <= 60);
   });
 
   it('returns empty sections for very small budget', () => {
@@ -426,6 +426,30 @@ describe('curateForRecall — related_sessions caps sessions, not chunks', () =>
     assert.match(block, /\[A\]: a1/);
     assert.match(block, /\[B\]: b1/);
     assert.match(block, /\[C\]: c1/);
+  });
+});
+
+describe('curateForRecall — token accounting follows the rendered block', () => {
+  const longDecision = {
+    id: 1, session_id: 's', decision: 'x'.repeat(1000), confidence: 0.9,
+    date: '2026-05-23T12:00:00.000Z',
+  };
+  const snippets = [
+    { sessionId: 'A', snippet: 'y'.repeat(600), score: 0.05 },
+  ];
+
+  it('a long decision is costed at its capped length and does not crowd out a snippet', () => {
+    const result = curateForRecall({ concepts: [], decisions: [longDecision], snippets }, 200);
+    assert.equal(result.decisions.length, 1);
+    assert.deepEqual(result.snippets.map(s => s.sessionId), ['A']);
+  });
+
+  it('tokenCount tracks the rendered block, not the raw fields', () => {
+    const result = curateForRecall({ concepts: [], decisions: [longDecision], snippets }, 1500);
+    const rendered = estimateTokens(formatMemoryBlock(result));
+    assert.ok(result.tokenCount < 250, `tokenCount ${result.tokenCount} counts uncapped text`);
+    assert.ok(Math.abs(result.tokenCount - rendered) <= 40,
+      `tokenCount ${result.tokenCount} vs rendered ${rendered}`);
   });
 });
 
