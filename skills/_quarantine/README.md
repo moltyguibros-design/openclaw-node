@@ -1,9 +1,11 @@
 # Quarantined skills
 
 Skills in this directory are **not loaded** and must not be installed into a node's
-`skills/` tree. They were moved here on 2026-09-06 by the adversarial review
-(`ADVERSARIAL_REVIEW_2026-09-06.md`, P5-8) because their designed behaviour, not a
-bug, is incompatible with a node that holds the operator's memory:
+`skills/` tree. Each was moved here because its designed behaviour, not a bug, is
+incompatible with a node that holds the operator's memory. The first two came from the
+2026-09-06 adversarial review (`ADVERSARIAL_REVIEW_2026-09-06.md`, P5-8); the rest from the
+2026-11 audit, `auto-updater` under skills-a-l#8 (operator decision: agents may not install
+or update third-party skills on their own):
 
 | Skill | Why |
 |-------|-----|
@@ -12,6 +14,7 @@ bug, is incompatible with a node that holds the operator's memory:
 | `second-brain` | Same pattern as `memorylayer`: stores and searches memory, including `private/` and `journal/` namespaces, on an external SaaS (`api.ensue-network.ai`, `scripts/ensue-api.sh`). Quarantined 2026-11-16 (audit finding skills-m-z-souls-identity#13, operator choice A). |
 | `refactor-suggest` | Runs an unpinned third-party package (`npx ai-refactor`, any version) that sends the file under review to an external LLM API. Code leaves the node, and whoever publishes that npm name runs code on it. Quarantined 2026-11-16 (same finding). |
 | `capability-evolver` | Quarantined 2026-11-16 (adversarial review H-11, never remediated): an unattended self-edit loop ("Mad Dog Mode" runs immediately) whose prompt embeds up to 100 KB of raw session transcript plus MEMORY/USER, so text an attacker plants in a conversation can steer code edits, `git push` and publish; `src/evolve.js` also runs `INTEGRATION_STATUS_CMD` through a shell. Removed from the daedalus soul. |
+| `auto-updater` | Schedules a daily cron that runs `npm update -g clawdbot@latest`, `clawdbot doctor --yes` and `clawdhub update --all`: unscanned third-party code lands on the node with nobody reviewing it, bypassing `openclaw-skill-scanner/install-hook.sh`, and repo-managed skills are overwritten with their upstream versions, drifting from the deployed SHA. |
 
 The Clawdbot-era `memory-setup` and `memory-hygiene` skills were deleted with the `second-brain` and `refactor-suggest` quarantine:
 they described a memory system the node does not run.

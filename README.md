@@ -230,7 +230,7 @@ package manager's exit code.
 ### Skills with their own dependencies
 
 The installer auto-detects and installs these:
-- ~~memorylayer~~ / ~~moltbook-registry~~ — **quarantined** (`skills/_quarantine/README.md`): external memory exfil and mainnet wallet actions by design; not installed.
+- ~~memorylayer~~ / ~~moltbook-registry~~ / ~~auto-updater~~ — **quarantined** (`skills/_quarantine/README.md`): external memory exfil, mainnet wallet actions and unscanned scheduled skill updates by design; not installed.
 - **prompt-guard** — pip: `pyyaml`
 - **crypto-price** — pip: `matplotlib`
 - **fast-browser-use** — Rust (requires manual `cargo build` if needed)
