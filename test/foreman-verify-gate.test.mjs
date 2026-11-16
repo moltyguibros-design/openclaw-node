@@ -18,6 +18,8 @@ import { createSupervisor } from '../lib/foreman/supervisor.mjs';
 
 const require = createRequire(import.meta.url);
 const { registerProvider } = require('../lib/llm-providers.js');
+// A task may name the shell provider only on a node configured for it (P1-3).
+process.env.MESH_LLM_PROVIDER = 'shell';
 const { foremanVerify, superviseTask } = require('../bin/mesh-agent.js');
 
 const all = (value) => Object.fromEntries(DIMENSIONS.map((name) => [name, value]));

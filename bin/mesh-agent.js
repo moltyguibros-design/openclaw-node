@@ -52,7 +52,7 @@ const { findRole, formatRoleForPrompt, validateRequiredOutputs } = require('../l
 
 const sc = StringCodec();
 const { NATS_URL, natsConnectOpts, resolveEnvKey } = require('../lib/nats-resolve');
-const { resolveProvider, resolveModel, stripLlmOutput, isOpenClawWorkerProvider } = require('../lib/llm-providers');
+const { PROVIDERS, resolveProvider, resolveModel, stripLlmOutput, isOpenClawWorkerProvider, taskProviderRefusal } = require('../lib/llm-providers');
 // One derivation for every daemon (lib/node-id) — the agent must claim tasks
 // under the same node_id the task daemon authorizes, or ownership checks fail.
 const NODE_ID = require('../lib/node-id').resolveNodeId();
@@ -383,8 +383,11 @@ async function recordHyperagentTask(task, { outcome, iterations, startedAt, note
     try {
       const { domain, subdomain } = taskTaxonomy(task);
       // Deterministic per task — recomputed here rather than threaded through
-      // six call sites.
-      const workerProvider = resolveProvider(task, CLI_PROVIDER, ENV_PROVIDER);
+      // six call sites. A refused provider override is still what the task
+      // asked for: the refusal governs running it, not describing it.
+      const workerProvider = taskProviderRefusal(task, CLI_PROVIDER, ENV_PROVIDER)
+        ? PROVIDERS[task.llm_provider]
+        : resolveProvider(task, CLI_PROVIDER, ENV_PROVIDER);
       const providerName = workerProvider?.name ?? null;
       const model = resolveModel(task, CLI_MODEL, workerProvider) ?? null;
       const row = store.logTelemetry({
@@ -1818,6 +1821,21 @@ async function executeCollabTask(task) {
   const collabSpec = task.collaboration;
   log(`COLLAB EXECUTING: ${task.task_id} "${task.title}" (mode: ${collabSpec.mode})`);
 
+  const providerRefusal = taskProviderRefusal(task, CLI_PROVIDER, ENV_PROVIDER);
+  if (providerRefusal) {
+    log(`COLLAB DECLINED: ${providerRefusal}`);
+    writeAgentState('idle', null);
+    if (task.owner === NODE_ID) {
+      await natsRequest('mesh.tasks.release', {
+        task_id: task.task_id,
+        node_id: NODE_ID,
+        lease_token: task.lease_token,
+        reason: providerRefusal,
+      }).catch(err => warn(`mesh.tasks.release: ${err.message}`));
+    }
+    return;
+  }
+
   // D11: a grappe worker is the node's OpenClaw agent on an ADVANCED LLM — never a
   // local model the operator has not vetted. Refuse to run (no silent local fallback)
   // rather than degrade the grappe. Recruits are filtered before they get here
@@ -2202,6 +2220,19 @@ async function executeCollabTask(task) {
 async function executeTask(task) {
   const startedAt = Date.now();
   log(`EXECUTING: ${task.task_id} "${task.title}" (budget: ${task.budget_minutes}m, metric: ${task.metric || 'none'}, max attempts: ${MAX_ATTEMPTS})`);
+
+  const providerRefusal = taskProviderRefusal(task, CLI_PROVIDER, ENV_PROVIDER);
+  if (providerRefusal) {
+    log(`REFUSED: ${providerRefusal}`);
+    await natsRequest('mesh.tasks.fail', {
+      task_id: task.task_id,
+      node_id: NODE_ID,
+      lease_token: task.lease_token,
+      reason: providerRefusal,
+    }).catch(err => warn(`mesh.tasks.fail: ${err.message}`));
+    writeAgentState('idle', null);
+    return;
+  }
 
   const preCheck = await runPreChecks({ rules: getHarnessRules(), probes: PRE_CHECK_PROBES, log });
   if (!preCheck.pass) {

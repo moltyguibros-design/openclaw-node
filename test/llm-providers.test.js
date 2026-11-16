@@ -11,8 +11,16 @@ const { resolveProvider, resolveModel, PROVIDERS } = require('../lib/llm-provide
 
 describe('resolveProvider', () => {
   it('task.llm_provider takes priority over env and CLI', () => {
-    const provider = resolveProvider({ llm_provider: 'shell' }, 'openai', 'gemini');
-    assert.equal(provider.name, 'shell');
+    const provider = resolveProvider({ llm_provider: 'openai' }, 'claude', 'gemini');
+    assert.equal(provider.name, 'openai');
+  });
+
+  it('P1-3: a task may select shell only on a node whose own provider is shell', () => {
+    for (const [cli, env] of [['openai', 'gemini'], ['claude', null], [null, 'claude'], [null, null], ['shell', 'claude']]) {
+      assert.throws(() => resolveProvider({ task_id: 'T-sh', llm_provider: 'shell' }, cli, env), /only on a node configured for it/, `${cli}/${env}`);
+    }
+    assert.equal(resolveProvider({ llm_provider: 'shell' }, null, 'shell').name, 'shell');
+    assert.equal(resolveProvider({ llm_provider: 'shell' }, 'shell', null).name, 'shell');
   });
 
   it('env takes priority over CLI when task has no provider', () => {
@@ -44,7 +52,7 @@ describe('resolveProvider', () => {
 
   it('resolves all built-in providers', () => {
     for (const name of ['claude', 'openai', 'gemini', 'deepseek', 'shell', 'ollama', 'aider']) {
-      const provider = resolveProvider({ llm_provider: name }, null, null);
+      const provider = resolveProvider({ llm_provider: name }, null, name);
       assert.equal(provider.name, name);
     }
   });
