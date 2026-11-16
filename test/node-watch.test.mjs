@@ -282,6 +282,27 @@ describe('node-watch honesty invariants', () => {
     assert.equal((await target('mem.inject').run(envFor(makeCtx(), { probes: bad }))).status, STATUS.BROKEN);
   });
 
+  it('a light tick checks inject liveness via /health and never runs the inject pipeline', async () => {
+    let pipelineRuns = 0;
+    const probes = { 'MEM-L2-INJECT': { run: async () => { pipelineRuns++; return { status: 'PASS', detail: 'ok' }; } } };
+    const seen = [];
+    const ctxFor = (reply) => makeCtx({
+      fsp: { ...makeCtx().fsp, readFile: async () => 'tok\n' },
+      httpGet: async (url, opts) => { seen.push({ url, auth: opts?.headers?.Authorization }); return reply(); },
+      httpPost: async () => { throw new Error('light tick must not POST'); },
+    });
+    const light = (ctx) => target('mem.inject').run(envFor(ctx, { probes, includeHeavy: false }));
+
+    assert.equal((await light(ctxFor(() => ({ status: 200, json: { ok: true } })))).status, STATUS.WORKING);
+    assert.deepEqual(seen.at(-1), { url: `http://${config.injectHost}:${config.injectPort}/health`, auth: 'Bearer tok' });
+    assert.equal((await light(ctxFor(() => ({ status: 401, json: { error: 'unauthorized' } })))).status, STATUS.BROKEN);
+    assert.equal((await light(ctxFor(() => { throw new Error('ECONNREFUSED'); }))).status, STATUS.BROKEN);
+    assert.equal(pipelineRuns, 0);
+
+    assert.equal((await target('mem.inject').run(envFor(ctxFor(() => ({ status: 200 })), { probes, includeHeavy: true }))).status, STATUS.WORKING);
+    assert.equal(pipelineRuns, 1, 'the deep sweep runs the full pipeline');
+  });
+
   it('a missing reused probe is UNKNOWN, never WORKING', async () => {
     const r = await target('net.nats').run(envFor(makeCtx(), { probes: {} }));
     assert.equal(r.status, STATUS.UNKNOWN);
