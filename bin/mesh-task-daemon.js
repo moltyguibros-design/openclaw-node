@@ -39,7 +39,7 @@ const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-task-daemon');
 const { createTask, TaskStore, TASK_STATUS, TASK_TERMINAL, DEFAULT_MAX_REJECTIONS, DEFAULT_LEASE_MS, KV_BUCKET } = require('../lib/mesh-tasks');
 const { validateMetricCommand } = require('../lib/exec-safety');
-const { createSession, CollabStore, COLLAB_STATUS, COLLAB_KV_BUCKET, COLLAB_MODE, isModeImplemented } = require('../lib/mesh-collab');
+const { createSession, issueMemberToken, CollabStore, COLLAB_STATUS, COLLAB_KV_BUCKET, COLLAB_MODE, isModeImplemented } = require('../lib/mesh-collab');
 const { createPlan, autoRoutePlan, PlanStore, PLAN_STATUS, SUBTASK_STATUS, PLANS_KV_BUCKET } = require('../lib/mesh-plans');
 const { findRole, findRoleByScope, validateRequiredOutputs } = require('../lib/role-loader');
 const path = require('path');
@@ -1036,14 +1036,28 @@ async function handleCollabCreate(msg) {
 }
 
 /**
+ * Refuse a collab mutation whose node_id did not present the member token it
+ * was issued at join. Answers the request and returns false on refusal.
+ */
+function memberAuthorized(msg, session, nodeId, token, action) {
+  if (CollabStore.memberTokenMatches(session, nodeId, token)) return true;
+  warn(`AUTHZ REFUSED collab_${action}: ${nodeId} presented no valid member token for ${session.session_id}`);
+  respondError(msg, `collab ${action} refused: ${nodeId} is not a member holding its join token`);
+  return false;
+}
+
+/**
  * mesh.collab.join — Node joins a collab session.
  * Expects: { session_id, node_id, role? }
+ * Returns the session plus member_token, which only this reply carries; leave
+ * and reflect require it.
  */
 async function handleCollabJoin(msg) {
   const { session_id, node_id, role } = parseRequest(msg);
   if (!session_id || !node_id) return respondError(msg, 'session_id and node_id required');
 
-  const session = await collabStore.addNode(session_id, node_id, role || 'worker');
+  const { token, hash } = issueMemberToken();
+  const session = await collabStore.addNode(session_id, node_id, role || 'worker', '*', { tokenHash: hash });
   if (!session) return respondError(msg, `Cannot join ${session_id}: full, closed, or already joined`);
 
   log(`COLLAB JOIN ${session_id}: ${node_id} (${session.nodes.length}/${session.max_nodes || '∞'} nodes)`);
@@ -1059,16 +1073,33 @@ async function handleCollabJoin(msg) {
     await startRecruitedSession(session.session_id);
   }
 
-  respond(msg, session);
+  respond(msg, { ...session, member_token: token });
 }
 
 /**
  * mesh.collab.leave — Node leaves a collab session.
- * Expects: { session_id, node_id, reason? }
+ * Expects: { session_id, node_id, member_token, reason? } from the member, or
+ * a signed operator request { session_id, target_node_id, reason? } (Mission
+ * Control remove_node; the signer's envelope owns node_id).
  */
 async function handleCollabLeave(msg) {
-  const { session_id, node_id, reason } = parseRequest(msg);
-  if (!session_id || !node_id) return respondError(msg, 'session_id and node_id required');
+  const params = parseRequest(msg);
+  const { session_id, reason } = params;
+  if (!session_id) return respondError(msg, 'session_id required');
+
+  const current = await collabStore.get(session_id);
+  if (!current) return respondError(msg, `Session ${session_id} not found`);
+
+  let node_id;
+  if (params.operator_action === true) {
+    if (!(await authorize(msg, params, null, { action: 'collab_leave' }))) return;
+    node_id = params.target_node_id;
+    if (!node_id) return respondError(msg, 'target_node_id required');
+  } else {
+    node_id = params.node_id;
+    if (!node_id) return respondError(msg, 'session_id and node_id required');
+    if (!memberAuthorized(msg, current, node_id, params.member_token, 'leave')) return;
+  }
 
   const session = await collabStore.removeNode(session_id, node_id);
   if (!session) return respondError(msg, `Session ${session_id} not found`);
@@ -1180,6 +1211,10 @@ async function handleCollabReflect(msg) {
   const reflection = parseRequest(msg);
   const { session_id } = reflection;
   if (!session_id || !reflection.node_id) return respondError(msg, 'session_id and node_id required');
+
+  const current = await collabStore.get(session_id);
+  if (!current) return respondError(msg, `Session ${session_id} not found`);
+  if (!memberAuthorized(msg, current, reflection.node_id, reflection.member_token, 'reflect')) return;
 
   // D14 cost record: every reflection — accepted, degraded, or about to be
   // retried — carries this round-attempt's real spend. Accumulate before any
@@ -3020,6 +3055,9 @@ if (require.main === module) {
     handleHeartbeat: (msg) => handleHeartbeat(msg),
     handleRelease: (msg) => handleRelease(msg),
     handleTaskApprove: (msg) => handleTaskApprove(msg),
+    handleCollabJoin: (msg) => handleCollabJoin(msg),
+    handleCollabLeave: (msg) => handleCollabLeave(msg),
+    handleCollabReflect: (msg) => handleCollabReflect(msg),
     handleTaskReject: (msg) => handleTaskReject(msg),
     handleCancel: (msg) => handleCancel(msg),
     handleTaskMerged: (msg) => handleTaskMerged(msg),

@@ -209,10 +209,15 @@ export async function POST(request: NextRequest) {
           await nc.request(
             "mesh.collab.leave",
             sc.encode(
-              JSON.stringify({
-                session_id: sessionId,
-                node_id: nodeId,
-              })
+              JSON.stringify(
+                // Removing another node is an OPERATOR action: the daemon
+                // accepts a leave only from the member's join token or a valid
+                // signature, and the signer's envelope owns node_id.
+                await signOperatorRequest({
+                  session_id: sessionId,
+                  target_node_id: nodeId,
+                })
+              )
             ),
             { timeout: 5000 }
           );

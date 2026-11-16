@@ -1841,6 +1841,7 @@ async function executeCollabTask(task) {
         await natsRequest('mesh.collab.reflect', {
           session_id: sessionId,
           node_id: NODE_ID,
+          member_token: session.member_token,
           round: round_number,
           summary: reflection.summary,
           learnings: reflection.learnings || '',

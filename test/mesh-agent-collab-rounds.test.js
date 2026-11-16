@@ -75,7 +75,7 @@ function fakeBus(rounds, completeAfter, { status: statusExtra = {}, tasks = {} }
         let reply = {};
         if (subject === 'mesh.collab.join') {
           // The daemon answers a join with the session as recruiting left it.
-          reply = { session_id: payload.session_id, status: 'recruiting', current_round: 0, nodes: [{ node_id: payload.node_id }] };
+          reply = { session_id: payload.session_id, status: 'recruiting', current_round: 0, nodes: [{ node_id: payload.node_id }], member_token: `token-of-${payload.node_id}` };
         } else if (subject === 'mesh.collab.reflect') {
           reflections.push(payload);
         } else if (subject === 'mesh.collab.status') {
@@ -131,6 +131,17 @@ describe('collab telemetry', () => {
     assert.equal(rows.length, 1);
     assert.equal(rows[0].outcome, 'success');
     assert.equal(rows[0].iterations, 2);
+  });
+});
+
+describe('collab member token (mesh-core#21)', () => {
+  beforeEach(freshWorkspace);
+
+  it('a reflection presents the token the join reply carried', async () => {
+    const reflections = fakeBus([{ round_number: 1, mode: 'parallel', my_role: 'worker', my_scope: [], shared_intel: '' }], 1);
+    await agent.__test.executeCollabTask(collabTask('C-tok', 'parallel', 'done'));
+    assert.equal(reflections.length, 1);
+    assert.equal(reflections[0].member_token, 'token-of-node-self');
   });
 });
 
