@@ -3,15 +3,23 @@
  * subagent-audit.mjs — Scan JSONL transcripts for sub-agent delegation patterns
  *
  * Extracts Task tool invocations from session transcripts, classifies outcomes,
- * and auto-updates the trust registry + lessons file.
+ * and, only with --apply, updates the trust registry + lessons file.
+ *
+ * Report-only by default: the keyword classifier marked successful delegations
+ * ("0 failed", "unblocked") as failures, which opened trust circuits and
+ * shared false [error] lessons across nodes. Writes stay off until the
+ * classifier and the sub-agent tool name ('Task') are checked against a real
+ * current transcript.
  *
  * Usage:
- *   node bin/subagent-audit.mjs [--dry-run] <jsonl-path>    # audit one file
- *   node bin/subagent-audit.mjs --health-check               # trust registry health
+ *   node bin/subagent-audit.mjs <jsonl-path>            # audit one file, report only
+ *   node bin/subagent-audit.mjs --apply <jsonl-path>    # also write trust registry + lessons
+ *   node bin/subagent-audit.mjs --health-check          # trust registry health
  *
- * Called by memory-daemon:
+ * Called by memory-daemon (without --apply):
  *   - session end and Phase 0 (bootstrap): audit the ended session's JSONL
- *     (both may see the same session; LEDGER_FILE keeps each delegation counted once)
+ *     (both may see the same session; LEDGER_FILE keeps each delegation counted
+ *     once when --apply writes)
  *   - Phase 2 (throttled): --health-check every 30min
  */
 
@@ -293,7 +301,7 @@ export async function healthCheck(dryRun = false) {
 const isMain = process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(__filename);
 if (isMain) {
   const args = process.argv.slice(2);
-  const dryRun = args.includes('--dry-run');
+  const dryRun = !args.includes('--apply') || args.includes('--dry-run');
   const doHealthCheck = args.includes('--health-check');
   const jsonlPath = args.find(a => !a.startsWith('--'));
 
@@ -312,14 +320,14 @@ if (isMain) {
         const actionable = fresh.filter(r => r.result !== 'unknown');
         if (actionable.length > 0) {
           console.log(dryRun
-            ? `\nDry run: would update ${actionable.length} trust registry entries`
+            ? `\nReport only: would update ${actionable.length} trust registry entries (pass --apply to write)`
             : `\nUpdated ${actionable.length} trust registry entries`);
         }
       })
       .catch(e => { console.error(e.message); process.exit(1); });
   } else {
     console.log('Usage:');
-    console.log('  node bin/subagent-audit.mjs [--dry-run] <jsonl-path>');
+    console.log('  node bin/subagent-audit.mjs [--apply] <jsonl-path>');
     console.log('  node bin/subagent-audit.mjs --health-check');
   }
 }

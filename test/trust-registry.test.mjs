@@ -120,7 +120,7 @@ test('an update repeating a recorded --delegation-id is ignored', t => {
   assert.deepEqual(reg.delegations.map(d => d.delegation_id), ['toolu_a', 'toolu_b']);
 });
 
-// memory-daemon audits a session at its end and again at the next bootstrap;
+// An --apply audit can see a session at its end and again at the next bootstrap;
 // without an id each delegation counted twice, so two real failures opened
 // the circuit (>= 3) instead of three.
 test('auditing the same transcript twice records each delegation once', t => {
@@ -134,7 +134,7 @@ test('auditing the same transcript twice records each delegation once', t => {
   fs.writeFileSync(jsonl, lines.map(l => JSON.stringify(l)).join('\n') + '\n');
   const audit = fileURLToPath(new URL('../workspace-bin/subagent-audit.mjs', import.meta.url));
   for (let i = 0; i < 2; i++) {
-    const r = spawnSync(process.execPath, [audit, jsonl], {
+    const r = spawnSync(process.execPath, [audit, '--apply', jsonl], {
       env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: ws }, encoding: 'utf8',
     });
     assert.equal(r.status, 0, r.stdout + r.stderr);
