@@ -83,3 +83,22 @@ test('cluster docs show the authenticated own-address config the template render
   }
   assert.doesNotMatch(read('docs/MULTI_NODE_DEPLOY.md'), /binds `0\.0\.0\.0`/);
 });
+
+test('both read-only NATS census CLIs are documented in docs/NATS_CLUSTER.md with their real flags', () => {
+  const read = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
+  const doc = read('docs/NATS_CLUSTER.md');
+  for (const [cli, flags] of [
+    ['bin/nats-live-census.py', ['--uid', '--home']],
+    ['bin/nats-store-holder-census.py', ['--home']],
+  ]) {
+    const usage = doc.split('\n').find((line) => line.includes(`/usr/bin/python3 ${cli}`));
+    assert.ok(usage, `${cli} has a usage line`);
+    const source = read(cli);
+    for (const flag of flags) {
+      assert.ok(source.includes(`'${flag}'`), `${cli} takes ${flag}`);
+      assert.ok(usage.includes(flag), `the ${cli} usage line names ${flag}`);
+    }
+    assert.match(source, /parser\.exit\(2,/, `${cli} exits 2 on refusal, as documented`);
+  }
+  assert.match(doc, /exit 2 when the census is\s+refused/);
+});

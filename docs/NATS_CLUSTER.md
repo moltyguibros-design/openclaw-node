@@ -233,6 +233,24 @@ done
 - Run `curl -s http://localhost:8222/jsz` — `meta_leader` should be set
 - If a node was added late, the leader may need a few seconds to recognize it
 
+**Who holds the NATS install? (read-only census, macOS):**
+
+Two read-only diagnostics, run from the repo root. Neither changes anything or
+certifies a state; both print a JSON report and exit 2 when the census is
+refused because the system could not be observed.
+
+```bash
+# launchd units, nats-server processes and JetStream store identities
+/usr/bin/python3 bin/nats-live-census.py [--uid UID] [--home DIR]
+
+# processes holding open files, mappings or a cwd inside the JetStream stores
+# (~/.openclaw/nats/jetstream, jetstream-1, -2, -3), per store, linked or unlinked
+/usr/bin/python3 bin/nats-store-holder-census.py [--home DIR]
+```
+
+The holder census covers only processes it can read: check `coverage` and
+`unreadable_pids` in its report before reading an empty `holders` list as "no holder".
+
 **Port conflicts:**
 - If standalone NATS is already running on 4222: `launchctl unload ~/Library/LaunchAgents/nats.plist` (or however it was started)
 - Check: `lsof -i :4222 -i :4223 -i :4224`
