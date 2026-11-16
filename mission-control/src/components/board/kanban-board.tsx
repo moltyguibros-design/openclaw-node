@@ -345,7 +345,8 @@ export function KanbanBoard() {
           </span>
           <div className="w-px h-6 bg-border" />
           <span className="text-xs text-muted-foreground">Move to:</span>
-          {COLUMNS.map((col) => (
+          {/* No "Done": without force_done it lands in Review, which has its own button. */}
+          {COLUMNS.filter((col) => col !== "done").map((col) => (
             <button
               key={col}
               onClick={() => handleBulkMove(col)}

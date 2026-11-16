@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { createTask, updateTask, deleteTask, type Task } from "@/lib/hooks";
 import { extractEstimate } from "@/lib/task-description";
+import { isCheckedOff, checkOffToggle } from "@/lib/done-gate";
 
 function isMetaTask(task: Task): boolean {
   return task.type === "project" || task.type === "pipeline" || task.type === "phase";
@@ -98,7 +99,7 @@ export function TaskCard({
   const MetaIcon = isMeta ? TYPE_ICONS[task.type || ''] || null : null;
 
   const doneCount = subItems.filter(
-    (s) => s.status === "done" || s.status === "cancelled"
+    (s) => isCheckedOff(s.status) || s.status === "cancelled"
   ).length;
   const hasSubItems = subItems.length > 0;
   const estimate = extractEstimate(task.description);
@@ -113,8 +114,7 @@ export function TaskCard({
   }
 
   const toggleSubItem = async (sub: Task) => {
-    const newStatus = sub.status === "done" ? "queued" : "done";
-    await updateTask(sub.id, { status: newStatus } as Record<string, unknown>);
+    await updateTask(sub.id, { status: checkOffToggle(sub.status) } as Record<string, unknown>);
   };
 
   const handleAddSubItem = async () => {
@@ -352,8 +352,9 @@ export function TaskCard({
                       toggleSubItem(sub);
                     }}
                     className="shrink-0"
+                    title={isCheckedOff(sub.status) ? "Back to queued" : "Send to review"}
                   >
-                    {sub.status === "done" ? (
+                    {isCheckedOff(sub.status) ? (
                       <Check className="h-3 w-3 text-green-400" />
                     ) : (
                       <Circle className="h-3 w-3 text-muted-foreground/50 hover:text-foreground transition-colors" />
@@ -365,7 +366,7 @@ export function TaskCard({
                       onTaskClick(sub);
                     }}
                     className={`text-[11px] truncate cursor-pointer hover:text-foreground transition-colors ${
-                      sub.status === "done"
+                      isCheckedOff(sub.status)
                         ? "text-muted-foreground/50 line-through"
                         : "text-foreground/80"
                     }`}

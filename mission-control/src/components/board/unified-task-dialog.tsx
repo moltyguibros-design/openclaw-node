@@ -7,6 +7,7 @@ import { X, Zap, Paperclip, Trash2, ArrowLeftFromLine, ArrowRightFromLine, Clock
 import { createTask, updateTask, createProject, type Task } from "@/lib/hooks";
 import { ExecutionConfig, type ExecutionFields } from "./execution-config";
 import { LOCAL_EXECUTION_FIELDS, executionFieldsFromTask } from "@/lib/execution-fields";
+import { isCheckedOff } from "@/lib/done-gate";
 
 const TYPES = ["project", "pipeline", "phase"] as const;
 type HierarchyType = (typeof TYPES)[number];
@@ -449,18 +450,18 @@ export function UnifiedTaskDialog({
           </button>
         </div>
 
-        {/* Done checkbox + Started by — leaf mode only */}
+        {/* Send-to-review checkbox + Started by — leaf mode only */}
         {!isHierarchyMode && (
           <div className="flex items-center gap-3 mb-4">
             <label className="flex items-center gap-2 cursor-pointer group">
               <input
                 type="checkbox"
-                checked={status === "done"}
-                onChange={(e) => setStatus(e.target.checked ? "done" : "queued")}
+                checked={isCheckedOff(status)}
+                onChange={(e) => setStatus(e.target.checked ? "waiting-user" : "queued")}
                 className="h-5 w-5 rounded border-border text-green-500 focus:ring-green-500/50 accent-green-500 cursor-pointer"
               />
-              <span className={`text-sm font-medium transition-colors ${status === "done" ? "text-green-400 line-through" : "text-muted-foreground group-hover:text-foreground"}`}>
-                Mark as done
+              <span className={`text-sm font-medium transition-colors ${isCheckedOff(status) ? "text-green-400 line-through" : "text-muted-foreground group-hover:text-foreground"}`}>
+                Send to review
               </span>
             </label>
             {/* Daedalus acknowledgment checkbox — shows when auto-dispatched */}
