@@ -419,6 +419,32 @@ console.log('LOCAL_COMPLETION '+result.ok);`;
     assert.match(done, /backup written \/tmp\/backups\/state-20260926T120000000Z\.db/);
   });
 
+  it('runOnce logs the phase times of a cycle that overran the hard cap', async () => {
+    const idle = () => ({
+      current_job: null, queue_depth: 0,
+      history: { extraction: { count: 0, avg_ms: 0 }, analysis: { count: 0, avg_ms: 0 } },
+      recent_fallbacks: [],
+    });
+    const logs = [];
+    const scheduler = createConsolidationScheduler({
+      getStateFn: idle,
+      log: (msg) => logs.push(msg),
+      notifyFailure: async () => {},
+      hardCapMs: 20,
+      runCycle: async ({ signal }) => {
+        await new Promise((r) => signal.addEventListener('abort', r, { once: true }));
+        return { aborted: true, abortedAt: 'summaries-midloop', phaseMs: { init: 1, decay: 2, summaries: 17 } };
+      },
+    });
+
+    const result = await scheduler.runOnce();
+
+    assert.equal(result.ok, false);
+    const failed = logs.find((l) => l.includes('cycle failed'));
+    assert.match(failed, /exceeded hard cap \(20ms\)/);
+    assert.match(failed, /\[phases: init=1ms decay=2ms summaries=17ms\]/);
+  });
+
   it('runOnce skips when system is busy', async () => {
     const getStateFn = () => ({
       current_job: { type: 'extraction', elapsed_ms: 1000 },

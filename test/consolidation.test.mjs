@@ -679,6 +679,22 @@ describe('runConsolidationCycle', () => {
     db.close();
   });
 
+  it('reports wall time for every phase it ran, and none for phases it skipped', async () => {
+    const db = createTestDb();
+    insertEntity(db, 'timed-entity', 'concept', { mentionCount: 2 });
+
+    const result = await runConsolidationCycle({ vaultPath: mkdtempSync(join(tmpdir(), 'cycle-phases-')), db });
+    assert.deepEqual(Object.keys(result.phaseMs), ['init', 'decay', 'prune', 'reinforce', 'clusters',
+      'vault-surfaces', 'summaries', 'contradictions', 'promotion']);
+    for (const ms of Object.values(result.phaseMs)) assert.ok(Number.isInteger(ms) && ms >= 0);
+
+    const ac = new AbortController();
+    ac.abort(new Error('hard cap'));
+    const aborted = await runConsolidationCycle({ vaultPath: TEST_VAULT, db, signal: ac.signal });
+    assert.deepEqual(Object.keys(aborted.phaseMs), ['init']);
+    db.close();
+  });
+
   it('the cycle backfills session notes for DB sessions lacking one (memory review V1-2)', async () => {
     const db = createTestDb();
     insertEntity(db, 'backfilled-concept', 'concept', {

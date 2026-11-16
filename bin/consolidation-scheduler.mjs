@@ -153,8 +153,9 @@ export async function runScheduledCycle(opts = {}) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(new Error('hard cap')), hardCap);
 
+  let result;
   try {
-    const result = await runCycle({
+    result = await runCycle({
       dbPath: opts.dbPath,
       vaultPath: opts.vaultPath,
       db: opts.db,
@@ -176,10 +177,18 @@ export async function runScheduledCycle(opts = {}) {
       ok: false,
       error: ac.signal.aborted ? `consolidation cycle exceeded hard cap (${hardCap}ms)` : err.message,
       durationMs: Date.now() - startMs,
+      // An overrun still settles with the phases it ran: the profile of the overrun.
+      ...(result ? { result } : {}),
     };
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** ` [phases: decay=12ms summaries=290100ms ...]`, or '' when the cycle reported none. */
+export function formatPhaseTimes(result) {
+  const phases = Object.entries(result?.phaseMs || {});
+  return phases.length ? ` [phases: ${phases.map(([name, ms]) => `${name}=${ms}ms`).join(' ')}]` : '';
 }
 
 // ─── Scheduler Factory ──────────────────────────────────────────────────────
@@ -235,7 +244,7 @@ export function createConsolidationScheduler(opts = {}) {
       // then the counts, in the launchd log that outlives the process.
       for (const r of cycleRemovals(result.result)) log(`[consolidation-scheduler] ${formatRemoval(r)}`);
       const summary = summarizeRemovals(result.result);
-      log(`[consolidation-scheduler] cycle complete (${result.durationMs}ms)${summary ? `: ${summary}` : ''}`);
+      log(`[consolidation-scheduler] cycle complete (${result.durationMs}ms)${summary ? `: ${summary}` : ''}${formatPhaseTimes(result.result)}`);
       if (opts.onCycleComplete) {
         try {
           await opts.onCycleComplete(result.result);
@@ -244,7 +253,7 @@ export function createConsolidationScheduler(opts = {}) {
         }
       }
     } else {
-      log(`[consolidation-scheduler] cycle failed: ${result.error} (${result.durationMs}ms)`);
+      log(`[consolidation-scheduler] cycle failed: ${result.error} (${result.durationMs}ms)${formatPhaseTimes(result.result)}`);
       await (opts.notifyFailure || notifyCycleFailure)(`${result.error} (${result.durationMs}ms)`);
     }
 

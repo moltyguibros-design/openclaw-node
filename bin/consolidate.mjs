@@ -129,14 +129,25 @@ export async function runConsolidationCycle(opts = {}) {
   let summaryResult = { regenerated: 0 };
   let contradictionResult, promotionResult, vaultSurfaceResult;
 
+  // Wall time per phase that ran: the evidence for which stage spends the hard
+  // cap (profile first; raising the cap is not a fix).
+  const phaseMs = {};
+  let lapStart = Date.now();
+  const lap = (phase) => {
+    const now = Date.now();
+    phaseMs[phase] = now - lapStart;
+    lapStart = now;
+  };
+
   try {
     // 1. Init tables
     initConsolidationTables(db);
+    lap('init');
 
     // 2. Decay weights
     abortInfo = checkpoint('decay');
     const decayStart = Date.now();
-    if (!abortInfo) decayResult = decayWeights(db, { backupDir: opts.backupDir });
+    if (!abortInfo) { decayResult = decayWeights(db, { backupDir: opts.backupDir }); lap('decay'); }
 
     // 2b. Prune what decay made irrelevant (P5-2): decayed-out decisions move
     // to the archive, idle themes are deleted once a backup exists.
@@ -148,20 +159,22 @@ export async function runConsolidationCycle(opts = {}) {
       pruneResult = pruneOn
         ? pruneStale(db, { backupDir: opts.backupDir })
         : { skipped: 'CONSOLIDATE_PRUNE=0', archivedDecisions: 0, prunedThemes: 0, themesSkipped: null, backup: null, removed: [] };
+      lap('prune');
     }
     if (decayResult && eventLog) {
       const evt = buildMemoryEvent('memory.decayed', 'consolidation', 'memory',
         decayedEventData(decayResult, pruneResult, Date.now() - decayStart), nodeId);
       await eventLog.publishLocal(evt).catch(() => {});
+      lap('decay-event');
     }
 
     // 3. Reinforce co-occurrence
     if (!abortInfo) abortInfo = checkpoint('reinforce');
-    if (!abortInfo) reinforceResult = reinforceCoOccurrence(db);
+    if (!abortInfo) { reinforceResult = reinforceCoOccurrence(db); lap('reinforce'); }
 
     // 4. Detect clusters
     if (!abortInfo) abortInfo = checkpoint('clusters');
-    if (!abortInfo) clusterResult = detectClusters(db);
+    if (!abortInfo) { clusterResult = detectClusters(db); lap('clusters'); }
 
     // 4b. Vault surfaces beyond concepts (BEFORE concept regeneration: the
     // concept writer links session notes via the resolver, so sessions must
@@ -210,6 +223,7 @@ export async function runConsolidationCycle(opts = {}) {
           vaultSurfaceResult.weeklyDigest = r.generated ? 1 : 0;
         }
       } catch (e) { vaultSurfaceResult.weeklyDigestError = e.message; }
+      lap('vault-surfaces');
     }
 
     // 5. Regenerate summaries (async — uses LLM). Signal flows in so the
@@ -223,6 +237,7 @@ export async function runConsolidationCycle(opts = {}) {
         signal,
         maxConcepts: opts.maxConcepts,
       });
+      lap('summaries');
       // F-P208 fix: regenerateSummaries' per-concept loop checks the signal
       // and returns { aborted: true } when interrupted mid-loop. Before this
       // fix, the cycle continued running detectContradictions and
@@ -235,7 +250,7 @@ export async function runConsolidationCycle(opts = {}) {
 
     // 6. Detect contradictions
     if (!abortInfo) abortInfo = checkpoint('contradictions');
-    if (!abortInfo) contradictionResult = detectContradictions(db);
+    if (!abortInfo) { contradictionResult = detectContradictions(db); lap('contradictions'); }
 
     // 7. Evaluate promotion candidates
     if (!abortInfo) abortInfo = checkpoint('promotion');
@@ -280,6 +295,7 @@ export async function runConsolidationCycle(opts = {}) {
                       ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(fingerprint);
         }
       }
+      lap('promotion');
     }
 
     const durationMs = Date.now() - startMs;
@@ -294,6 +310,7 @@ export async function runConsolidationCycle(opts = {}) {
       contradictions: contradictionResult,
       promotionCandidates: promotionResult,
       durationMs,
+      phaseMs,
       ...(abortInfo || { aborted: false }),
     };
   } finally {
