@@ -87,3 +87,53 @@ describe('runLLM heartbeat', () => {
     }
   });
 });
+
+describe('collab lease heartbeat between rounds', () => {
+  /** Runs a collab task whose first round arrives only after `waitMs`; returns heartbeats sent before it. */
+  async function heartbeatsWhileWaiting(task, waitMs = 400) {
+    const before = [];
+    let roundArrived = false;
+    let reflected = 0;
+    agent.__test.setContext({
+      nc: {
+        async request(subject, data) {
+          const payload = JSON.parse(sc.decode(data));
+          let reply = {};
+          if (subject === 'mesh.tasks.heartbeat' && !roundArrived) before.push(payload);
+          else if (subject === 'mesh.collab.join') reply = { session_id: payload.session_id, status: 'recruiting', current_round: 0, nodes: [{ node_id: payload.node_id }] };
+          else if (subject === 'mesh.collab.reflect') reflected++;
+          else if (subject === 'mesh.collab.status') reply = { status: reflected ? 'completed' : 'active' };
+          return { data: sc.encode(JSON.stringify({ ok: true, data: reply })) };
+        },
+        subscribe() {
+          return {
+            unsubscribe() {},
+            async *[Symbol.asyncIterator]() {
+              await new Promise(r => setTimeout(r, waitMs));
+              roundArrived = true;
+              yield { data: sc.encode(JSON.stringify({ round_number: 1, mode: 'parallel', my_role: 'worker', my_scope: [], shared_intel: '' })) };
+            },
+          };
+        },
+      },
+    });
+    await agent.__test.executeCollabTask({
+      title: 'wait for round', description: 'd', collaboration: { mode: 'parallel' },
+      llm_provider: 'heartbeat-stub', scope: [], ...task,
+    });
+    return before;
+  }
+
+  it('the owner renews its lease while no worker runs', async () => {
+    const before = await heartbeatsWhileWaiting({
+      task_id: 'HB-OWN', collab_session_id: 'S-OWN', owner: 'node-self', lease_token: 'lease-own',
+    });
+    assert.ok(before.length > 0, 'the owner heartbeat went out before round 1 arrived');
+    for (const hb of before) assert.deepEqual(hb, { task_id: 'HB-OWN', node_id: 'node-self', lease_token: 'lease-own' });
+  });
+
+  it('a recruited member, which holds no lease, sends none', async () => {
+    const before = await heartbeatsWhileWaiting({ task_id: 'HB-MEM', collab_session_id: 'S-MEM', owner: 'node-other' });
+    assert.deepEqual(before, []);
+  });
+});

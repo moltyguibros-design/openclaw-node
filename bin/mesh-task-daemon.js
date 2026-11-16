@@ -808,7 +808,7 @@ async function detectStalls() {
   // detector to release it for human triage. The stall detector below still
   // covers a worker that renews but never finishes.
   try {
-    const reaped = await store.reapExpiredLeases();
+    const reaped = await store.reapExpiredLeases({ keep: collabSessionLive });
     for (const id of reaped.requeued) {
       log(`LEASE EXPIRED ${id}: holder stopped renewing — re-queued`);
       const t = await store.get(id);
@@ -1053,6 +1053,19 @@ function memberAuthorized(msg, session, nodeId, token, action) {
   return false;
 }
 
+// The collab owner heartbeats only while its own worker runs; between rounds
+// nothing else touched the parent, so the lease reaper re-queued a live session.
+async function renewCollabParentLease(taskId) {
+  if (!taskId) return;
+  try { await store.touchActivity(taskId); } catch (err) { warn(`collab lease renew ${taskId}: ${err.message}`); }
+}
+
+async function collabSessionLive(task) {
+  if (!task.collab_session_id || !collabStore) return false;
+  const session = await collabStore.get(task.collab_session_id);
+  return !!session && (session.status === COLLAB_STATUS.RECRUITING || session.status === COLLAB_STATUS.ACTIVE);
+}
+
 /**
  * mesh.collab.join — Node joins a collab session.
  * Expects: { session_id, node_id, role? }
@@ -1068,6 +1081,7 @@ async function handleCollabJoin(msg) {
   if (!session) return respondError(msg, `Cannot join ${session_id}: full, closed, or already joined`);
 
   log(`COLLAB JOIN ${session_id}: ${node_id} (${session.nodes.length}/${session.max_nodes || '∞'} nodes)`);
+  await renewCollabParentLease(session.task_id);
   await collabStore.appendAudit(session_id, 'node_joined', { node_id, role: role || 'worker', total_nodes: session.nodes.length });
   publishCollabEvent('joined', session);
 
@@ -1262,6 +1276,7 @@ async function handleCollabReflect(msg) {
 
   const session = await collabStore.submitReflection(session_id, reflection);
   if (!session) return respondError(msg, `Cannot submit reflection to ${session_id}`);
+  await renewCollabParentLease(session.task_id);
 
   log(`COLLAB REFLECT ${session_id} R${session.current_round}: ${reflection.node_id} (vote: ${reflection.vote}, conf: ${reflection.confidence}${reflection.parse_failed ? ', PARSE FAILED' : ''})`);
   await collabStore.appendAudit(session_id, 'reflection_received', {
@@ -1407,7 +1422,7 @@ async function evaluateCooperativeRound(sessionId, session, currentRound) {
     });
     publishCollabEvent('completed', done);
     const settled = await store.markCompleted(session.task_id, done.result);
-    publishEvent('completed', await store.get(session.task_id));
+    if (settled) publishEvent('completed', settled);
     if (settled) await checkPlanProgress(session.task_id, 'completed');
     return;
   }
@@ -1430,7 +1445,7 @@ async function evaluateCooperativeRound(sessionId, session, currentRound) {
     await collabStore.markAborted(sessionId, 'No alive integrator candidates remain');
     publishCollabEvent('aborted', await collabStore.get(sessionId));
     const settled = await store.markFailed(session.task_id, 'Cooperative session lost all integrator candidates');
-    publishEvent('failed', await store.get(session.task_id));
+    if (settled) publishEvent('failed', settled);
     if (settled) await checkPlanProgress(session.task_id, 'failed');
     return;
   }
@@ -1501,7 +1516,7 @@ async function evaluateCollaborativeRound(sessionId, session, currentRound) {
     await collabStore.markAborted(sessionId, `Merge gate failed: ${gateFailure}`);
     publishCollabEvent('aborted', await collabStore.get(sessionId));
     const settled = await store.markFailed(session.task_id, `Collaborative merge gate failed: ${gateFailure}`);
-    publishEvent('failed', await store.get(session.task_id));
+    if (settled) publishEvent('failed', settled);
     if (settled) await checkPlanProgress(session.task_id, 'failed');
     return;
   }
@@ -1530,7 +1545,7 @@ async function evaluateCollaborativeRound(sessionId, session, currentRound) {
   await collabStore.appendAudit(sessionId, 'session_completed', { outcome: 'collaborative_merged', merger: collab.merger_node_id });
   publishCollabEvent('completed', done);
   const settled = await store.markCompleted(session.task_id, done.result);
-  publishEvent('completed', await store.get(session.task_id));
+  if (settled) publishEvent('completed', settled);
   if (settled) await checkPlanProgress(session.task_id, 'completed');
 }
 
@@ -1624,6 +1639,7 @@ async function startCollabRound(sessionId) {
   }
 
   const session = await collabStore.get(sessionId);
+  await renewCollabParentLease(session.task_id);
   log(`COLLAB ROUND ${sessionId} R${round.round_number} START (${session.nodes.length} nodes)`);
   await collabStore.appendAudit(sessionId, 'round_started', {
     round: round.round_number, active_nodes: session.nodes.map(n => n.node_id),
@@ -1794,7 +1810,7 @@ async function evaluateRound(sessionId) {
     // Complete the parent task
     const completedSession = await collabStore.get(sessionId);
     const settled = await store.markCompleted(freshSession.task_id, completedSession.result);
-    publishEvent('completed', await store.get(freshSession.task_id));
+    if (settled) publishEvent('completed', settled);
     publishCollabEvent('completed', completedSession);
     if (settled) await checkPlanProgress(freshSession.task_id, 'completed');
 
@@ -1905,6 +1921,7 @@ function notConvergedDigest(session) {
 async function startCirclingStep(sessionId) {
   const session = await collabStore.get(sessionId);
   if (!session || !session.circling) return;
+  await renewCollabParentLease(session.task_id);
 
   const { phase, current_subround, current_step } = session.circling;
 
@@ -2102,7 +2119,7 @@ async function completeCirclingSession(sessionId) {
   // Complete parent task
   const completedSession = await collabStore.get(sessionId);
   const settled = await store.markCompleted(session.task_id, completedSession.result);
-  publishEvent('completed', await store.get(session.task_id));
+  if (settled) publishEvent('completed', settled);
   publishCollabEvent('completed', completedSession);
   if (settled) await checkPlanProgress(session.task_id, 'completed');
 }
@@ -2142,7 +2159,7 @@ async function handleCirclingGateApprove(msg) {
     });
     const completedSession = await collabStore.get(session_id);
     const settled = await store.markCompleted(session.task_id, completedSession.result);
-    publishEvent('completed', await store.get(session.task_id));
+    if (settled) publishEvent('completed', settled);
     publishCollabEvent('completed', completedSession);
     if (settled) await checkPlanProgress(session.task_id, 'completed');
   } else {
@@ -2364,7 +2381,7 @@ async function dropTimedOutMembers(session, missing, auditEvent, auditData) {
   await collabStore.markAborted(session.session_id, `Round ${fresh.current_round} timed out; ${alive}/${fresh.min_nodes} members alive`);
   publishCollabEvent('aborted', await collabStore.get(session.session_id));
   const settled = await store.markFailed(fresh.task_id, `Collab round timed out with too few members (${alive}/${fresh.min_nodes})`);
-  publishEvent('failed', await store.get(fresh.task_id));
+  if (settled) publishEvent('failed', settled);
   if (settled) await checkPlanProgress(fresh.task_id, 'failed');
   return false;
 }
@@ -3148,6 +3165,8 @@ if (require.main === module) {
       if (ctx.planStore !== undefined) planStore = ctx.planStore;
     },
     startRecruitedSession: (id) => startRecruitedSession(id),
+    handleCollabJoin: (msg) => handleCollabJoin(msg),
+    handleCollabReflect: (msg) => handleCollabReflect(msg),
     handleCollabJoinDispatch: async (session) =>
       collabStore.isRecruitingDone(session) ? startRecruitedSession(session.session_id) : false,
     evaluateRound: (id) => evaluateRound(id),

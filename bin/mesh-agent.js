@@ -1992,6 +1992,15 @@ async function executeCollabTask(task) {
     } catch (err) { warn(`collab heartbeat: ${err.message}`); }
   }, 10000);
 
+  // runLLM renews the lease only while this node's worker runs; the owner must
+  // also renew it while waiting between rounds, or the reaper re-queues the task.
+  const leaseHeartbeat = task.owner === NODE_ID && task.lease_token
+    ? setInterval(() => {
+      natsRequest('mesh.tasks.heartbeat', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token })
+        .catch(err => warn(`collab lease heartbeat: ${err.message}`));
+    }, HEARTBEAT_INTERVAL)
+    : null;
+
   // Signal start
   await natsRequest('mesh.tasks.start', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token }).catch(err => warn(`mesh.tasks.start: ${err.message}`));
 
@@ -2167,6 +2176,7 @@ async function executeCollabTask(task) {
     }
   } finally {
     clearInterval(sessionHeartbeat);
+    clearInterval(leaseHeartbeat);
     roundSub.unsubscribe();
   }
 
