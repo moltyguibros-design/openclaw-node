@@ -75,6 +75,13 @@ for _wsbin in node-watch.mjs node-acceptance.mjs openclaw-notify.mjs \
     run cp "$REPO_DIR/bin/$_wsbin" "$WORKSPACE/bin/$_wsbin"
   fi
 done
+# The rsync above never deletes, so a script removed from workspace-bin/ stays
+# installed and runnable until it is listed here. sync-to-harness: its "dry run"
+# rewrote ~/openclaw (the deploy checkout) with --delete and pushed to main.
+RETIRED_WORKSPACE_BIN=(sync-to-harness)
+for _retired in "${RETIRED_WORKSPACE_BIN[@]}"; do
+  run rm -f "$WORKSPACE/bin/$_retired"
+done
 run chmod +x "$WORKSPACE/bin/"*
 run chmod +x "$WORKSPACE/bin/hooks/"* 2>/dev/null || true
 info "Workspace scripts installed to $WORKSPACE/bin/"

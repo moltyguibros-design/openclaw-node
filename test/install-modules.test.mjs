@@ -229,6 +229,22 @@ test('the retired npx openclaw-mesh layer is neither advertised nor run', () => 
   assert.doesNotMatch(code, /npx\s+(--yes\s+)?openclaw-mesh/);
 });
 
+test('sync-to-harness is gone from the repo and an --update removes the installed copy', () => {
+  assert.equal(existsSync(join(ROOT, 'workspace-bin/sync-to-harness')), false);
+  const src = moduleSrc['workspace.sh'];
+  const start = src.indexOf('RETIRED_WORKSPACE_BIN=(');
+  assert.ok(start >= 0, 'workspace.sh lists retired workspace scripts');
+  const block = src.slice(start, src.indexOf('\ndone\n', start) + '\ndone\n'.length);
+  const ws = mkdtempSync(join(tmpdir(), 'retired-ws-'));
+  mkdirSync(join(ws, 'bin'));
+  writeFileSync(join(ws, 'bin/sync-to-harness'), '#!/bin/sh\n');
+  writeFileSync(join(ws, 'bin/kept'), '#!/bin/sh\n');
+  const r = spawnSync('bash', ['-euc', `run() { "$@"; }\nWORKSPACE="$1"\n${block}`, 'bash', ws], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(existsSync(join(ws, 'bin/sync-to-harness')), false);
+  assert.equal(existsSync(join(ws, 'bin/kept')), true);
+});
+
 test('installer links scoped packages into both deployed parent trees', () => {
   const workspace = moduleSrc['workspace.sh'];
   assert.ok(workspace.includes('for scoped_dir in "$pkgdir"*/'));
