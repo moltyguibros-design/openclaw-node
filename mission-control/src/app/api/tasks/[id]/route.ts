@@ -9,6 +9,7 @@ import { gatewayNotify } from "@/lib/gateway-notify";
 import { AGENT_NAME, HUMAN_NAME } from "@/lib/config";
 import { getNats, sc } from "@/lib/nats";
 import { signOperatorRequest } from "@/lib/mesh-sign";
+import { requestDaemon, cancelDone, type DaemonOutcome } from "@/lib/mesh-request";
 import { applyDoneGate } from "@/lib/done-gate";
 
 /**
@@ -22,21 +23,20 @@ function notifyAgent(text: string) {
 }
 
 /**
- * Cancel a running mesh task via NATS. Best-effort — ignores failures.
+ * Cancel a live mesh task at the task daemon before Mission Control marks it
+ * cancelled or deletes it. A refusal, a signing failure or an unreachable
+ * daemon is returned and the caller changes nothing. A task the daemon never
+ * received (the bridge dispatches queued rows only) has nothing to cancel.
  */
-async function cancelMeshTask(taskId: string, execution: string | null, status: string) {
-  if (execution === "mesh" && status !== "done" && status !== "cancelled") {
-    const nc = await getNats();
-    if (nc) {
-      try {
-        // Signed operator action — the daemon refuses unsigned cancel.
-        const signed = await signOperatorRequest({ task_id: taskId });
-        await nc.request("mesh.tasks.cancel", sc.encode(JSON.stringify(signed)), { timeout: 5000 });
-      } catch (err) {
-        console.warn(`[tasks] mesh.tasks.cancel for ${taskId} not delivered: ${(err as Error).message}`);
-      }
-    }
-  }
+async function cancelMeshTask(taskId: string, execution: string | null, status: string): Promise<DaemonOutcome | null> {
+  if (execution !== "mesh" || status === "done" || status === "cancelled") return null;
+  // Signed operator action — the daemon refuses unsigned cancel.
+  return requestDaemon(
+    await getNats(),
+    "mesh.tasks.cancel",
+    () => signOperatorRequest({ task_id: taskId }),
+    (reply) => cancelDone(reply) || reply.code === "TASK_NOT_FOUND"
+  );
 }
 
 /**
@@ -86,8 +86,29 @@ export async function DELETE(
     idsToDelete.push(id); // add the root task last
     rows.push(existing);
 
-    // A deleted row can no longer receive its mesh result: cancel every running mesh task in the subtree.
-    for (const row of rows) await cancelMeshTask(row.id, row.execution, row.status);
+    // A deleted row can no longer receive its mesh result: cancel every running
+    // mesh task in the subtree first, and delete nothing unless all of them are.
+    const cancelled: string[] = [];
+    for (const row of rows) {
+      const outcome = await cancelMeshTask(row.id, row.execution, row.status);
+      if (!outcome) continue;
+      if (!outcome.ok) {
+        // Rows the daemon did cancel before the refusal now say so.
+        const now = new Date().toISOString();
+        for (const doneId of cancelled) {
+          db.update(tasks)
+            .set({ status: "cancelled", kanbanColumn: statusToKanban("cancelled"), updatedAt: now })
+            .where(eq(tasks.id, doneId))
+            .run();
+        }
+        if (cancelled.length) syncTasksToMarkdown(db);
+        return NextResponse.json(
+          { error: `Not deleted: ${row.id}: ${outcome.error}`, cancelled },
+          { status: outcome.status }
+        );
+      }
+      cancelled.push(row.id);
+    }
 
     // Delete all collected tasks + their dependency edges
     for (const delId of idsToDelete) {
@@ -293,12 +314,15 @@ export async function PATCH(
       update.owner = HUMAN_NAME;
     }
 
-    db.update(tasks).set(update).where(eq(tasks.id, id)).run();
-
-    // Cancel mesh task if status changed to cancelled
+    // Cancel the mesh task before the row says cancelled; a refusal changes nothing.
     if (update.status === "cancelled") {
-      await cancelMeshTask(id, existing.execution, existing.status);
+      const outcome = await cancelMeshTask(id, existing.execution, existing.status);
+      if (outcome && !outcome.ok) {
+        return NextResponse.json({ error: outcome.error }, { status: outcome.status });
+      }
     }
+
+    db.update(tasks).set(update).where(eq(tasks.id, id)).run();
 
     // Sync back to markdown
     syncTasksToMarkdown(db);

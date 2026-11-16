@@ -671,7 +671,8 @@ async function handleCancel(msg) {
   if (!task_id) return respondError(msg, 'task_id is required');
 
   const existing = await store.get(task_id);
-  if (!existing) return respondError(msg, `Task ${task_id} not found`);
+  // Coded so Mission Control can tell "never reached the mesh" from a refusal.
+  if (!existing) return respondError(msg, `Task ${task_id} not found`, { code: 'TASK_NOT_FOUND' });
   if (!(await authorize(msg, params, existing, { action: 'cancel' }))) return;
 
   const task = await store.markCancelled(task_id, reason || 'cancelled');

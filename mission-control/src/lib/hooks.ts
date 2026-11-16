@@ -127,8 +127,12 @@ export async function updateTask(
 }
 
 export async function deleteTask(id: string) {
-  await fetch(`/api/tasks/${id}`, { method: "DELETE" });
+  const res = await fetch(`/api/tasks/${id}`, { method: "DELETE" });
   await mutate("/api/tasks");
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? `HTTP ${res.status}`);
+  }
 }
 
 export function useMemorySearch(query: string, limit = 20, source?: string) {

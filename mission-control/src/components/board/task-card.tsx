@@ -194,7 +194,7 @@ export function TaskCard({
             onClick={(e) => {
               e.stopPropagation();
               if (confirm(`Delete "${task.title}"?`)) {
-                deleteTask(task.id);
+                deleteTask(task.id).catch((err) => alert(`Delete failed: ${(err as Error).message}`));
               }
             }}
             className="shrink-0 mt-0.5 p-1 rounded opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-all"

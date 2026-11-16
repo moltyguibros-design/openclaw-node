@@ -4,15 +4,16 @@ import os from "node:os";
 import path from "node:path";
 import { NextRequest } from "next/server";
 
+const daemonSays = (body: object) => async () => ({ data: JSON.stringify(body) });
 const { requestSpy, notifySpy, logSpy } = vi.hoisted(() => ({
-  requestSpy: vi.fn(async () => ({})),
+  requestSpy: vi.fn(async (..._args: unknown[]): Promise<{ data: string }> => ({ data: JSON.stringify({ ok: true }) })),
   notifySpy: vi.fn(async () => true),
   logSpy: vi.fn(),
 }));
 
 vi.mock("@/lib/nats", () => ({
   getNats: async () => ({ request: requestSpy, publish: vi.fn() }),
-  sc: { encode: (s: string) => s },
+  sc: { encode: (s: string) => s, decode: (s: string) => s },
 }));
 vi.mock("@/lib/mesh-sign", () => ({ signOperatorRequest: async (p: object) => p }));
 vi.mock("@/lib/gateway-notify", () => ({ gatewayNotify: notifySpy }));
@@ -26,7 +27,8 @@ beforeEach(() => {
   vi.stubEnv("DB_PATH", path.join(root, "mission-control.db"));
   vi.stubEnv("WORKSPACE_ROOT", root);
   vi.resetModules();
-  requestSpy.mockClear();
+  requestSpy.mockReset();
+  requestSpy.mockImplementation(daemonSays({ ok: true }));
   notifySpy.mockClear();
   logSpy.mockClear();
 });
@@ -72,6 +74,78 @@ describe("DELETE /api/tasks/[id]", () => {
     expect(res.status).toBe(200);
     const { getRawDb } = await import("@/lib/db");
     expect(getRawDb().prepare("SELECT COUNT(*) AS n FROM tasks").get()).toEqual({ n: 0 });
+  });
+});
+
+// Operator decision: a refused or unreachable cancel changes nothing in Mission Control.
+describe("mesh cancel must be accepted before the row changes", () => {
+  const rowStatus = async (id: string) => {
+    const { getRawDb } = await import("@/lib/db");
+    return (getRawDb().prepare("SELECT status FROM tasks WHERE id = ?").get(id) as { status: string } | undefined)?.status;
+  };
+
+  it("DELETE keeps the row when the daemon refuses the cancel", async () => {
+    await insertTask({ id: "M", status: "running", kanbanColumn: "in_progress", execution: "mesh" });
+    requestSpy.mockImplementation(daemonSays({ ok: false, error: "cancel refused: bad signature" }));
+    const { DELETE } = await import("@/app/api/tasks/[id]/route");
+
+    const res = await DELETE(new NextRequest("http://x/api/tasks/M", { method: "DELETE" }), params("M"));
+
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toContain("bad signature");
+    expect(await rowStatus("M")).toBe("running");
+  });
+
+  it("DELETE keeps the row when the daemon cannot be reached", async () => {
+    await insertTask({ id: "M", status: "running", kanbanColumn: "in_progress", execution: "mesh" });
+    requestSpy.mockImplementation(async () => { throw new Error("TIMEOUT"); });
+    const { DELETE } = await import("@/app/api/tasks/[id]/route");
+
+    const res = await DELETE(new NextRequest("http://x/api/tasks/M", { method: "DELETE" }), params("M"));
+
+    expect(res.status).toBe(503);
+    expect(await rowStatus("M")).toBe("running");
+  });
+
+  it("DELETE of a subtree marks the children the daemon did cancel and deletes nothing", async () => {
+    await insertTask({ id: "P", status: "queued", execution: null });
+    await insertTask({ id: "C1", status: "running", kanbanColumn: "in_progress", execution: "mesh", parentId: "P" });
+    await insertTask({ id: "C2", status: "running", kanbanColumn: "in_progress", execution: "mesh", parentId: "P" });
+    requestSpy
+      .mockImplementationOnce(daemonSays({ ok: true }))
+      .mockImplementationOnce(daemonSays({ ok: false, error: "cancel refused" }));
+    const { DELETE } = await import("@/app/api/tasks/[id]/route");
+
+    const res = await DELETE(new NextRequest("http://x/api/tasks/P", { method: "DELETE" }), params("P"));
+
+    expect(res.status).toBe(502);
+    expect(await rowStatus("C1")).toBe("cancelled");
+    expect(await rowStatus("C2")).toBe("running");
+    expect(await rowStatus("P")).toBe("queued");
+  });
+
+  it("DELETE proceeds for a mesh task the daemon never received, or one that already ended", async () => {
+    await insertTask({ id: "Q", status: "queued", execution: "mesh" });
+    requestSpy.mockImplementation(daemonSays({ ok: false, error: "Task Q not found", code: "TASK_NOT_FOUND" }));
+    const { DELETE } = await import("@/app/api/tasks/[id]/route");
+    expect((await DELETE(new NextRequest("http://x/api/tasks/Q", { method: "DELETE" }), params("Q"))).status).toBe(200);
+
+    await insertTask({ id: "E", status: "running", kanbanColumn: "in_progress", execution: "mesh" });
+    requestSpy.mockImplementation(daemonSays({ ok: false, error: "Task E is already completed", code: "TASK_TERMINAL" }));
+    expect((await DELETE(new NextRequest("http://x/api/tasks/E", { method: "DELETE" }), params("E"))).status).toBe(200);
+  });
+
+  it("PATCH to cancelled leaves the row as it was when the daemon refuses", async () => {
+    await insertTask({ id: "M", status: "running", kanbanColumn: "in_progress", execution: "mesh" });
+    requestSpy.mockImplementation(daemonSays({ ok: false, error: "cancel refused: not authorized" }));
+    const { PATCH } = await import("@/app/api/tasks/[id]/route");
+
+    // force_done: without it the done-gate turns a move to the done column into waiting-user.
+    const req = new NextRequest("http://x/api/tasks/M", { method: "PATCH", body: JSON.stringify({ status: "cancelled", force_done: true }) });
+    const res = await PATCH(req, params("M"));
+
+    expect(res.status).toBe(502);
+    expect(await rowStatus("M")).toBe("running");
   });
 });
 
