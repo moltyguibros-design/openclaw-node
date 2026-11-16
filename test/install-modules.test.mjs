@@ -245,6 +245,29 @@ test('sync-to-harness is gone from the repo and an --update removes the installe
   assert.equal(existsSync(join(ws, 'bin/kept')), true);
 });
 
+test('skills that ship memory or code off the node are quarantined, and an --update removes installed copies', () => {
+  const quarantine = readFileSync(join(ROOT, 'skills/_quarantine/README.md'), 'utf8');
+  for (const s of ['second-brain', 'refactor-suggest']) {
+    assert.equal(existsSync(join(ROOT, 'skills', s)), false, `${s} still ships`);
+    assert.equal(existsSync(join(ROOT, 'skills/_quarantine', s, 'SKILL.md')), true, `${s} not in _quarantine`);
+    assert.match(quarantine, new RegExp(`^\\| \`${s}\` \\|`, 'm'), `${s} has no README row`);
+  }
+  for (const s of ['memory-setup', 'memory-hygiene']) assert.equal(existsSync(join(ROOT, 'skills', s)), false, `${s} still ships`);
+
+  const src = moduleSrc['workspace.sh'];
+  const start = src.indexOf('RETIRED_SKILLS=(');
+  assert.ok(start >= 0, 'workspace.sh lists retired skills');
+  const block = src.slice(start, src.indexOf('\ndone\n', start) + '\ndone\n'.length);
+  const ws = mkdtempSync(join(tmpdir(), 'retired-skills-'));
+  for (const s of ['second-brain', 'refactor-suggest', 'memory-setup', 'memory-hygiene', 'kept']) {
+    mkdirSync(join(ws, 'skills', s), { recursive: true });
+    writeFileSync(join(ws, 'skills', s, 'SKILL.md'), '# x\n');
+  }
+  const r = spawnSync('bash', ['-euc', `run() { "$@"; }\nWORKSPACE="$1"\n${block}`, 'bash', ws], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(readdirSync(join(ws, 'skills')), ['kept']);
+});
+
 test('installer links scoped packages into both deployed parent trees', () => {
   const workspace = moduleSrc['workspace.sh'];
   assert.ok(workspace.includes('for scoped_dir in "$pkgdir"*/'));

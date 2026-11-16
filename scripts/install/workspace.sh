@@ -232,6 +232,12 @@ step "Step 6: Skills"
 # matching mesh-deploy's skills component.
 run rsync -av --exclude='/dist/' --exclude='/scripts/' --exclude='/_quarantine/' "$REPO_DIR/skills/" "$WORKSPACE/skills/"
 info "Skills installed to $WORKSPACE/skills/ ($(ls -d "$REPO_DIR/skills"/*/ 2>/dev/null | grep -Ev '/(dist|scripts|_quarantine)/$' | wc -l | tr -d ' ') skills)"
+# The rsync never deletes: a skill quarantined or removed from the repo stays
+# installed, and agents keep following it, until it is removed here.
+RETIRED_SKILLS=(second-brain refactor-suggest memory-setup memory-hygiene)
+for _retired in "${RETIRED_SKILLS[@]}"; do
+  run rm -rf "$WORKSPACE/skills/$_retired"
+done
 
 # Install skill-specific dependencies (npm/pip where needed)
 if $SANDBOX; then
