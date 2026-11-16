@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { X, Zap, Paperclip, Trash2, ArrowLeftFromLine, ArrowRightFromLine, Clock, User, Cpu } from "lucide-react";
 import { createTask, updateTask, createProject, type Task } from "@/lib/hooks";
 import { ExecutionConfig, type ExecutionFields } from "./execution-config";
+import { LOCAL_EXECUTION_FIELDS, executionFieldsFromTask } from "@/lib/execution-fields";
 
 const TYPES = ["project", "pipeline", "phase"] as const;
 type HierarchyType = (typeof TYPES)[number];
@@ -93,17 +94,12 @@ export function UnifiedTaskDialog({
   const [showInCalendar, setShowInCalendar] = useState(false);
   const [acknowledgedAt, setAcknowledgedAt] = useState<string | null>(null);
   const [artifacts, setArtifacts] = useState<string[]>([]);
-  const [execFields, setExecFields] = useState<ExecutionFields>({
-    execution: "local",
-    collaboration: null,
-    preferred_nodes: [],
-    exclude_nodes: [],
-    cluster_id: null,
-    metric: null,
-    budget_minutes: 30,
-    scope: [],
-    needs_approval: true,
-  });
+  const [execFields, setExecFields] = useState<ExecutionFields>(LOCAL_EXECUTION_FIELDS);
+  // ExecutionConfig seeds its own state from `value` once, at mount. Mounted on
+  // the first open render it saw the previous task's fields, then wrote them
+  // back over this one's; it now mounts (keyed per open) only after the init
+  // effect below has set this task's fields.
+  const [execConfigKey, setExecConfigKey] = useState(0);
   const [dragOver, setDragOver] = useState(false);
   const [saving, setSaving] = useState(false);
   const initializedForOpen = useRef(false);
@@ -113,13 +109,14 @@ export function UnifiedTaskDialog({
     // This prevents SWR refreshes from resetting form fields while editing.
     if (!open) {
       initializedForOpen.current = false;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot form reset/init per open (ref-guarded); key-remount refactor queued
+      setExecConfigKey(0);
       return;
     }
     if (initializedForOpen.current) return;
     initializedForOpen.current = true;
 
     if (item) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot form init when the dialog opens (ref-guarded); key-remount refactor queued
       setId(item.id);
       setTitle(item.title);
       setType((item.type as HierarchyType) || defaultType || "project");
@@ -162,24 +159,7 @@ export function UnifiedTaskDialog({
       setShowInCalendar(!!item.showInCalendar);
       setAcknowledgedAt(item.acknowledgedAt ?? null);
       setArtifacts(item.artifacts ?? []);
-      // Execution config
-      const collabParsed = item.collaboration
-        ? (typeof item.collaboration === "string" ? (() => { try { return JSON.parse(item.collaboration as string); } catch { return null; } })() : item.collaboration)
-        : null;
-      const prefNodes = item.preferredNodes
-        ? (typeof item.preferredNodes === "string" ? (() => { try { return JSON.parse(item.preferredNodes as string); } catch { return []; } })() : item.preferredNodes)
-        : [];
-      setExecFields({
-        execution: item.execution || "local",
-        collaboration: collabParsed,
-        preferred_nodes: prefNodes,
-        exclude_nodes: [],
-        cluster_id: item.clusterId || null,
-        metric: item.metric || null,
-        budget_minutes: item.budgetMinutes || 30,
-        scope: item.scope ? (typeof item.scope === "string" ? (() => { try { return JSON.parse(item.scope as string); } catch { return []; } })() : item.scope) : [],
-        needs_approval: item.needsApproval !== 0,
-      });
+      setExecFields(executionFieldsFromTask(item));
     } else {
       setId("");
       setTitle("");
@@ -205,18 +185,9 @@ export function UnifiedTaskDialog({
       setCapacityClass("normal");
       setAutoPriority(0);
       setArtifacts([]);
-      setExecFields({
-        execution: "local",
-        collaboration: null,
-        preferred_nodes: [],
-        exclude_nodes: [],
-        cluster_id: null,
-        metric: null,
-        budget_minutes: 30,
-        scope: [],
-        needs_approval: true,
-      });
+      setExecFields(LOCAL_EXECUTION_FIELDS);
     }
+    setExecConfigKey((k) => k + 1);
   }, [open, item, defaultType, defaultParentId, defaultScheduledDate]);
 
   const resolveBasenames = useCallback(async (names: string[]) => {
@@ -954,11 +925,14 @@ export function UnifiedTaskDialog({
                 <Cpu className="h-3.5 w-3.5 text-cyan-400" />
                 Execution
               </p>
-              <ExecutionConfig
-                value={execFields}
-                onChange={setExecFields}
-                disabled={!!item?.meshTaskId}
-              />
+              {execConfigKey > 0 && (
+                <ExecutionConfig
+                  key={execConfigKey}
+                  value={execFields}
+                  onChange={setExecFields}
+                  disabled={!!item?.meshTaskId}
+                />
+              )}
             </div>
           )}
 

@@ -3,20 +3,9 @@
 import { useState, useEffect } from "react";
 import useSWR from "swr";
 import { fetcher, useClusters } from "@/lib/hooks";
+import { executionFieldsFor, type ExecutionFields, type ExecutionMode } from "@/lib/execution-fields";
 
-type ExecutionMode = "local" | "mesh" | "collab";
-
-export interface ExecutionFields {
-  execution: string | null;
-  collaboration: Record<string, unknown> | null;
-  preferred_nodes: string[];
-  exclude_nodes: string[];
-  cluster_id: string | null;
-  metric: string | null;
-  budget_minutes: number;
-  scope: string[];
-  needs_approval: boolean;
-}
+export type { ExecutionFields };
 
 interface ExecutionConfigProps {
   value: ExecutionFields;
@@ -74,68 +63,16 @@ export function ExecutionConfig({ value, onChange, disabled }: ExecutionConfigPr
   // Clusters (for collab mode)
   const { clusters } = useClusters();
 
+  const settings = {
+    collabMode, convergenceType, convergenceThreshold, maxRounds, scopeStrategy,
+    metric, budgetMinutes, scopeText, selectedNodes, clusterId,
+  };
+
   // Sync internal state back to parent
   useEffect(() => {
     // Don't fire onChange during disabled state
     if (disabled) return;
-
-    const scopeArr = scopeText
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    if (mode === "local") {
-      onChange({
-        execution: "local",
-        collaboration: null,
-        preferred_nodes: [],
-        exclude_nodes: [],
-        cluster_id: null,
-        metric: null,
-        budget_minutes: 30,
-        scope: [],
-        needs_approval: true,
-      });
-    } else if (mode === "mesh") {
-      onChange({
-        execution: "mesh",
-        collaboration: null,
-        preferred_nodes: Array.from(selectedNodes),
-        exclude_nodes: [],
-        cluster_id: null,
-        metric: metric || null,
-        budget_minutes: budgetMinutes,
-        scope: scopeArr,
-        needs_approval: false,
-      });
-    } else {
-      // collab
-      const nodeIds = Array.from(selectedNodes);
-      onChange({
-        execution: "mesh",
-        collaboration: {
-          mode: collabMode,
-          min_nodes: Math.min(nodeIds.length || 2, 2),
-          max_nodes: nodeIds.length || 4,
-          join_window_s: 30,
-          max_rounds: maxRounds,
-          convergence: {
-            type: convergenceType,
-            threshold: convergenceThreshold / 100,
-            metric: null,
-            min_quorum: Math.min(nodeIds.length || 2, 2),
-          },
-          scope_strategy: scopeStrategy,
-        },
-        preferred_nodes: nodeIds,
-        exclude_nodes: [],
-        cluster_id: clusterId || null,
-        metric: metric || null,
-        budget_minutes: budgetMinutes,
-        scope: scopeArr,
-        needs_approval: false,
-      });
-    }
+    onChange(executionFieldsFor(mode, settings, value.exclude_nodes));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     mode,
@@ -154,44 +91,7 @@ export function ExecutionConfig({ value, onChange, disabled }: ExecutionConfigPr
 
   const setMode = (m: ExecutionMode) => {
     if (disabled) return;
-    if (m === "local") {
-      onChange({
-        execution: "local",
-        collaboration: null,
-        preferred_nodes: [],
-        exclude_nodes: [],
-        cluster_id: null,
-        metric: null,
-        budget_minutes: 30,
-        scope: [],
-        needs_approval: true,
-      });
-    } else if (m === "mesh") {
-      onChange({
-        execution: "mesh",
-        collaboration: null,
-        preferred_nodes: Array.from(selectedNodes),
-        exclude_nodes: [],
-        cluster_id: null,
-        metric: metric || null,
-        budget_minutes: budgetMinutes,
-        scope: scopeText.split("\n").map((s) => s.trim()).filter(Boolean),
-        needs_approval: false,
-      });
-    } else {
-      // Set collab — trigger the useEffect to build collaboration spec
-      onChange({
-        execution: "mesh",
-        collaboration: { mode: collabMode }, // placeholder, useEffect rebuilds
-        preferred_nodes: Array.from(selectedNodes),
-        exclude_nodes: [],
-        cluster_id: clusterId || null,
-        metric: metric || null,
-        budget_minutes: budgetMinutes,
-        scope: scopeText.split("\n").map((s) => s.trim()).filter(Boolean),
-        needs_approval: false,
-      });
-    }
+    onChange(executionFieldsFor(m, settings, value.exclude_nodes));
   };
 
   const toggleNode = (nodeId: string) => {
