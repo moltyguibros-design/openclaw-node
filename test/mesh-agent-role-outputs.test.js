@@ -85,6 +85,8 @@ function fakeDaemon() {
   const seen = {};
   agent.__test.setContext({
     nc: {
+      isClosed: () => false,
+      async flush() {},
       async request(subject, data) {
         const payload = JSON.parse(sc.decode(data));
         seen[subject] = payload;

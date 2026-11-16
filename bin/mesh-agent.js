@@ -45,7 +45,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const { getSessionInfo } = require('../lib/agent-activity');
 const { loadAllRules, matchRules, formatRulesForPrompt, detectFrameworks, activateFrameworkRules } = require('../lib/rule-loader');
-const { loadHarnessRules, runMeshHarness, runPostCommitValidation, formatHarnessForPrompt } = require('../lib/mesh-harness');
+const { loadHarnessRules, runMeshHarness, runPostCommitValidation, runPreChecks, formatHarnessForPrompt } = require('../lib/mesh-harness');
 const { validateMetricCommand } = require('../lib/exec-safety');
 const { TASK_TERMINAL } = require('../lib/mesh-tasks');
 const { findRole, formatRoleForPrompt, validateRequiredOutputs } = require('../lib/role-loader');
@@ -85,6 +85,16 @@ function getHarnessRules() {
   }
   return cachedHarnessRules;
 }
+
+// Probes for the harness pre_check stage (no-assume-running): a flush is a
+// round trip to the server, so it proves the bus answers, not just that a
+// socket object exists.
+const PRE_CHECK_PROBES = {
+  async nats() {
+    if (!nc || nc.isClosed()) throw new Error('connection closed');
+    await nc.flush();
+  },
+};
 
 /**
  * Inject matching coding rules into a prompt parts array based on task scope.
@@ -1974,6 +1984,20 @@ async function executeCollabTask(task) {
 async function executeTask(task) {
   const startedAt = Date.now();
   log(`EXECUTING: ${task.task_id} "${task.title}" (budget: ${task.budget_minutes}m, metric: ${task.metric || 'none'}, max attempts: ${MAX_ATTEMPTS})`);
+
+  const preCheck = await runPreChecks({ rules: getHarnessRules(), probes: PRE_CHECK_PROBES, log });
+  if (!preCheck.pass) {
+    const reason = `Harness pre-check failed on ${NODE_ID}: ${preCheck.failures.map(f => `${f.service} (${f.reason})`).join('; ')}. Task not started.`;
+    log(`PRE-CHECK FAILED: ${task.task_id} — ${reason}`);
+    // Best effort: with the bus itself down this cannot arrive, and the
+    // claim's lease expiry re-queues the task instead.
+    await natsRequest('mesh.tasks.release', {
+      task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token, reason,
+    }).catch(err => warn(`mesh.tasks.release: ${err.message}`));
+    writeAgentState('idle', null);
+    return;
+  }
+
   await prepareHyperagentStrategy(task);
 
   // Create isolated worktree for this task — FAIL-CLOSED (D14 rerun,

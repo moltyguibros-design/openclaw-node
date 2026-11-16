@@ -12,6 +12,7 @@ const {
   scanOutputForBlocks,
   formatHarnessForPrompt,
   runMeshHarness,
+  runPreChecks,
 } = require('../lib/mesh-harness');
 
 // ── loadHarnessRules ─────────────────────────────
@@ -333,5 +334,40 @@ describe('postCommitValidate (shipped git-conventional-commits rule)', () => {
     const result = postCommitValidate(dir, command);
     assert.strictEqual(result.passed, false);
     assert.doesNotMatch(result.output, /blocked/);
+  });
+});
+
+// ── runPreChecks (install-infra-packaging#23) ────
+// no-assume-running declares a pre_check of nats; nothing used to run it.
+
+describe('runPreChecks', () => {
+  const shipped = () => loadHarnessRules(path.join(__dirname, '..', 'config', 'harness-rules.json'), 'mesh');
+  const rule = (services) => [{ id: 'svc', mesh_enforcement: 'pre_check', mesh_pre_checks: services }];
+
+  it('probes the services the shipped no-assume-running rule lists', async () => {
+    const probed = [];
+    const result = await runPreChecks({ rules: shipped(), probes: { nats: async () => { probed.push('nats'); } } });
+    assert.deepStrictEqual(probed, ['nats']);
+    assert.deepStrictEqual(result, { pass: true, failures: [] });
+  });
+
+  it('fails when a probe throws, naming the rule, service and reason', async () => {
+    const result = await runPreChecks({ rules: shipped(), probes: { nats: async () => { throw new Error('connection closed'); } } });
+    assert.strictEqual(result.pass, false);
+    assert.deepStrictEqual(result.failures, [{ rule: 'no-assume-running', service: 'nats', reason: 'connection closed' }]);
+  });
+
+  it('fails a listed service that has no probe', async () => {
+    const result = await runPreChecks({ rules: rule(['redis']), probes: {} });
+    assert.deepStrictEqual(result.failures, [{ rule: 'svc', service: 'redis', reason: 'no probe for this service' }]);
+  });
+
+  it('fails a probe that never answers', async () => {
+    const result = await runPreChecks({ rules: rule(['nats']), probes: { nats: () => new Promise(() => {}) }, timeoutMs: 20 });
+    assert.deepStrictEqual(result.failures, [{ rule: 'svc', service: 'nats', reason: 'no answer within 20ms' }]);
+  });
+
+  it('passes when no rule declares a pre_check', async () => {
+    assert.deepStrictEqual(await runPreChecks({ rules: [{ id: 'x', mesh_enforcement: 'scope_check' }] }), { pass: true, failures: [] });
   });
 });
