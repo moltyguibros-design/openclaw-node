@@ -707,6 +707,8 @@ framework:
 
 Roles auto-assign from task scope: a task with `scope: ["contracts/Token.sol"]` gets `role: solidity-dev` because the glob matches.
 
+`required_outputs` are checked by the worker, in its worktree, against the files the attempt created or modified (a `content_check` reads them there). The worker sends the files as `result.artifacts` and the verdict as `result.role_validation`; a failing verdict, or a worker completion without one, sends the task to human review.
+
 ## Plan Pipelines
 
 Multi-phase workflows defined as YAML templates. Plans decompose into subtasks dispatched across mesh agents in dependency waves.

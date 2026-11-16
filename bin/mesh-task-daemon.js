@@ -41,7 +41,7 @@ const { createTask, TaskStore, TASK_STATUS, TERMINAL_STATES, TASK_TERMINAL, DEFA
 const { validateMetricCommand } = require('../lib/exec-safety');
 const { createSession, issueMemberToken, CollabStore, COLLAB_STATUS, COLLAB_KV_BUCKET, COLLAB_MODE, isModeImplemented } = require('../lib/mesh-collab');
 const { createPlan, autoRoutePlan, PlanStore, PLAN_STATUS, SUBTASK_STATUS, PLANS_KV_BUCKET } = require('../lib/mesh-plans');
-const { findRole, findRoleByScope, validateRequiredOutputs } = require('../lib/role-loader');
+const { findRole, findRoleByScope } = require('../lib/role-loader');
 const path = require('path');
 
 // Role search directories
@@ -137,7 +137,8 @@ async function operatorAuth() {
 
 /**
  * Gate a mutation. On refusal, answers the request with an error and returns
- * false so the handler can simply `return`.
+ * false so the handler can simply `return`; otherwise returns the credential
+ * that passed ('owner' or 'operator').
  */
 async function authorize(msg, params, task, { action, allowOwner = false, allowOperator = true }) {
   const { authorizeTaskMutation } = await operatorAuth();
@@ -148,7 +149,7 @@ async function authorize(msg, params, task, { action, allowOwner = false, allowO
     return false;
   }
   if (decision.via === 'operator') log(`AUTHZ ${action}: signed operator request accepted`);
-  return true;
+  return decision.via;
 }
 
 // ── Event Publishing ───────────────────────────────
@@ -384,7 +385,8 @@ async function handleComplete(msg) {
   // The claiming node completes its own task; a signed operator request may
   // force-complete (Mission Control "force converge"). Anyone else — including
   // a peer with the shared NATS token fabricating { success: true } — is refused.
-  if (!(await authorize(msg, params, existingTask, { action: 'complete', allowOwner: true, allowOperator: true }))) return;
+  const via = await authorize(msg, params, existingTask, { action: 'complete', allowOwner: true, allowOperator: true });
+  if (!via) return;
 
   let needsReview = existingTask.requires_review;
   let reviewReason = needsReview ? 'explicit_requires_review' : null;
@@ -407,23 +409,20 @@ async function handleComplete(msg) {
     }
   }
 
-  // Role-based post-completion validation — runs UNCONDITIONALLY on all tasks
-  // with a role, regardless of review status. Validation results are included
-  // in the pending_review metadata so human reviewers see structured checks.
+  // Role required_outputs are checked by the worker, in the worktree where the
+  // files and their contents exist, and arrive as result.role_validation. The
+  // daemon acts on that verdict for every task whose role requires outputs,
+  // whatever its review status, and the result reaches the reviewer. An owner
+  // completion without a verdict goes to review rather than passing unchecked;
+  // a signed operator force-complete is the operator's own call.
   let roleValidation = { passed: true, issues: [] };
   if (existingTask.role) {
     const role = findRole(existingTask.role, ROLE_DIRS);
-    if (role) {
-      const outputFiles = result?.artifacts || [];
-      const harnessFiles = (result?.harness?.violations || []).flatMap(v => v.files || []);
-      const allFiles = [...new Set([...outputFiles, ...harnessFiles])];
-
-      if (allFiles.length > 0) {
-        const reqResult = validateRequiredOutputs(role, allFiles, null);
-        if (!reqResult.passed) {
-          roleValidation.passed = false;
-          roleValidation.issues.push(...reqResult.failures.map(f => `[required_output] ${f.description}: ${f.detail}`));
-        }
+    if (role?.required_outputs?.length) {
+      if (result?.role_validation) {
+        roleValidation = { passed: result.role_validation.passed === true, issues: result.role_validation.issues || [] };
+      } else if (via === 'owner') {
+        roleValidation = { passed: false, issues: ['[required_output] the worker sent no role validation'] };
       }
 
       if (!roleValidation.passed) {

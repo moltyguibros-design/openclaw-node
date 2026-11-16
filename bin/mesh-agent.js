@@ -48,7 +48,7 @@ const { loadAllRules, matchRules, formatRulesForPrompt, detectFrameworks, activa
 const { loadHarnessRules, runMeshHarness, runPostCommitValidation, formatHarnessForPrompt } = require('../lib/mesh-harness');
 const { validateMetricCommand } = require('../lib/exec-safety');
 const { TASK_TERMINAL } = require('../lib/mesh-tasks');
-const { findRole, formatRoleForPrompt } = require('../lib/role-loader');
+const { findRole, formatRoleForPrompt, validateRequiredOutputs } = require('../lib/role-loader');
 
 const sc = StringCodec();
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
@@ -173,6 +173,49 @@ function getRole(roleId) {
   const role = findRole(roleId, ROLE_DIRS);
   if (role) roleCache.set(roleId, role);
   return role;
+}
+
+/**
+ * Paths the attempt created or modified in its worktree (deletions excluded),
+ * read before the commit so MESH_NO_MERGE runs report them too.
+ */
+function changedFiles(worktreePath) {
+  if (!worktreePath) return [];
+  let out;
+  try {
+    out = execFileSync('git', ['status', '--porcelain', '-uall', '-z'], { cwd: worktreePath, timeout: 5000, encoding: 'utf-8' });
+  } catch (err) {
+    warn(`changedFiles: ${err.message}`);
+    return [];
+  }
+  const entries = out.split('\0');
+  const files = [];
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    if (!entry) continue;
+    const xy = entry.slice(0, 2);
+    // With -z a rename or copy is followed by its source path as its own entry.
+    if (xy[0] === 'R' || xy[0] === 'C') i++;
+    if (xy.includes('D')) continue;
+    files.push(entry.slice(3));
+  }
+  return files;
+}
+
+/**
+ * A role's required_outputs, checked here because the worktree (and so the
+ * file contents a content_check reads) exists only on this node. The daemon
+ * acts on the verdict. Null when the task's role requires no outputs.
+ */
+function checkRoleOutputs(task, files, worktreePath) {
+  const role = getRole(task.role);
+  if (!role?.required_outputs?.length) return null;
+  const { passed, failures } = validateRequiredOutputs(role, files, worktreePath);
+  return {
+    role: role.id,
+    passed,
+    issues: failures.map(f => `[required_output] ${f.description}: ${f.detail}`),
+  };
 }
 
 /**
@@ -2120,6 +2163,9 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
       attempts.push(attemptRecord);
       await natsRequest('mesh.tasks.attempt', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token, ...attemptRecord });
 
+      const artifacts = changedFiles(worktreePath);
+      const roleValidation = checkRoleOutputs(task, artifacts, worktreePath);
+
       // Commit on the task branch; merge only after the daemon's review decision
       const commit = commitWorktree(worktreePath, task.task_id, summary);
 
@@ -2133,7 +2179,8 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
         node_id: NODE_ID,
         lease_token: task.lease_token,
         result: {
-          success: true, summary, artifacts: [],
+          success: true, summary, artifacts,
+          ...(roleValidation ? { role_validation: roleValidation } : {}),
           cost: sessionInfo?.cost || null,
           harness: {
             violations: harnessResult.violations,
@@ -2170,6 +2217,9 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
       attempts.push(attemptRecord);
       await natsRequest('mesh.tasks.attempt', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token, ...attemptRecord });
 
+      const artifacts = changedFiles(worktreePath);
+      const roleValidation = checkRoleOutputs(task, artifacts, worktreePath);
+
       // Commit on the task branch; merge only after the daemon's review decision
       const commit = commitWorktree(worktreePath, task.task_id, summary);
 
@@ -2188,7 +2238,8 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
           // Full worker deliverable — the 200-char summary loses text-artifact
           // tasks (2.6 benchmark needs the whole answer, not a tail).
           output: llmResult.stdout,
-          artifacts: [],
+          artifacts,
+          ...(roleValidation ? { role_validation: roleValidation } : {}),
           cost: sessionInfo?.cost || null,
           sha: commit?.sha || null,
           branch: commit?.branch || null,
@@ -2537,6 +2588,6 @@ module.exports = { buildCirclingPrompt, buildCollabPrompt, buildInitialPrompt, b
 module.exports.__test = {
   setContext(ctx) { if (ctx.nc !== undefined) nc = ctx.nc; },
   mergeIfApproved, onReviewApproved, onReviewRejected, reconcileKeptBranches,
-  natsRequest, createWorktree, onWorkerError, executeCollabTask,
+  natsRequest, createWorktree, onWorkerError, executeCollabTask, executeTask,
 };
 // deploy-v7f0130b
