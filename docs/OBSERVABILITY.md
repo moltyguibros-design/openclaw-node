@@ -11,14 +11,14 @@ OpenClaw ships a unified tracer (`lib/tracer.js`) that instruments every signifi
 - **`dev` mode** — logs every function call unconditionally (~500 instrumentation points). Useful for local debugging and development.
 - **`smart` mode** (default) — applies a sampling filter that only emits events for: tier 1 functions, errors, state transitions, cross-node events, and slow calls (>500 ms). This keeps production NATS traffic manageable while preserving all operationally critical data.
 
-**Transport:** Each trace event is published to NATS on the subject `openclaw.trace.{nodeId}.{module}`. A 2,000-event in-memory ring buffer serves as a fallback for local reads when NATS is unavailable.
+**Transport:** Each daemon writes its trace events straight into the `observability_events` table of Mission Control's SQLite database (`lib/obs-db.js`, `OPENCLAW_OBS_DB`): that is the source of truth. When the daemon has a NATS connection it also publishes each event on `openclaw.trace.{nodeId}.{module}`, for the live feed only. A 2,000-event in-memory ring buffer serves local reads.
 
-**Mission Control (MC) Dashboard:** The Next.js MC app subscribes to `openclaw.trace.>` via a NATS wildcard, ingests events into a SQLite database (`observabilityEvents` table), and serves them through:
+**Mission Control (MC) Dashboard:** The Next.js MC app reads the events table and relays `openclaw.trace.>` from NATS to the browser:
 
-- `/api/observability/events` — paginated event query
-- `/api/observability/stream` — SSE live feed
+- `/api/observability/events` — paginated event query (SQLite)
+- `/api/observability/stream` — SSE live feed (NATS relay)
 - `/api/observability/nodes` — per-node health aggregation
-- `/api/observability/config` — runtime trace mode toggle
+- `/api/observability/config` — trace mode switch. Daemons start in `OPENCLAW_TRACE_MODE` (default `smart`). A PATCH publishes `{ mode }` on `openclaw.trace.config` as a signed operator request (`lib/operator-auth.mjs`); each daemon's tracer verifies it against the operator allowlist and switches. A daemon that restarts returns to `OPENCLAW_TRACE_MODE`.
 
 The dashboard UI includes a live feed, event timeline, and system map for real-time visibility into all mesh nodes.
 
