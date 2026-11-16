@@ -3,7 +3,9 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema";
 import { DB_PATH } from "../config";
 import fs, { chmodSync, existsSync } from "fs";
+import os from "os";
 import path from "path";
+import { currentSandbox, type Sandbox } from "../sandbox";
 
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null;
 let _sqlite: Database.Database | null = null;
@@ -533,6 +535,8 @@ function runMigrations(sqlite: Database.Database) {
 }
 
 export function getDb() {
+  const sandbox = currentSandbox();
+  if (sandbox) return sandbox.db;
   if (_db) return _db;
   if (initializationError !== null) throw initializationError;
 
@@ -577,8 +581,34 @@ export function getDb() {
 }
 
 export function getRawDb(): Database.Database {
+  const sandbox = currentSandbox();
+  if (sandbox) return sandbox.raw;
   if (!_sqlite) getDb();
   return _sqlite!;
+}
+
+/** A migrated database and workspace in a fresh temp dir; dispose() deletes both. */
+export function openThrowawayDb(): Sandbox & { dispose(): void } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mc-sandbox-"));
+  const workspaceRoot = path.join(dir, "workspace");
+  fs.mkdirSync(path.join(workspaceRoot, "memory"), { recursive: true });
+  const raw = new Database(path.join(dir, "mission-control.db"));
+  try {
+    runMigrations(raw);
+  } catch (err) {
+    raw.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+    throw err;
+  }
+  return {
+    db: drizzle(raw, { schema }),
+    raw,
+    workspaceRoot,
+    dispose() {
+      raw.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    },
+  };
 }
 
 /**

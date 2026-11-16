@@ -8,6 +8,7 @@ import { readFileSync } from "fs";
 import path from "path";
 import os from "os";
 import { traceCall } from "./tracer";
+import { currentSandbox } from "./sandbox";
 
 const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(os.homedir(), ".openclaw");
 const CONFIG_PATH = path.join(OPENCLAW_HOME, "openclaw.json");
@@ -46,6 +47,8 @@ function loadGatewayConfig(): GatewayConfig {
  * Uses chat.send — message persists in TUI chat stream.
  */
 export function gatewayNotify(text: string): Promise<boolean> {
+  // A sandboxed run (diagnostics test runner) must never start a live agent turn.
+  if (currentSandbox()) return Promise.resolve(false);
   const _start = Date.now();
   const config = loadGatewayConfig();
   if (!config.token) {

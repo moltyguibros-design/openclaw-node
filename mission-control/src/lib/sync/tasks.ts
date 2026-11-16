@@ -3,6 +3,7 @@ import path from "path";
 import { eq } from "drizzle-orm";
 import { tasks, taskSyncBase } from "@/lib/db/schema";
 import { ACTIVE_TASKS_MD } from "@/lib/config";
+import { activeTasksMd } from "@/lib/sandbox";
 import { NODE_ROLE } from "@/lib/config";
 import {
   parseTasksMarkdown,
@@ -58,11 +59,13 @@ function markdownChangedExternally(): boolean {
  * Merges markdown state into DB without blindly overwriting DB-only fields.
  */
 export function syncTasksFromMarkdown(db: DrizzleDb): void {
-  if (!fs.existsSync(ACTIVE_TASKS_MD)) return;
+  const file = activeTasksMd();
+  if (!fs.existsSync(file)) return;
 
-  lastImportTime = Date.now(); // stamp BEFORE work — prevents re-entry during long imports
+  // The mtime/debounce state tracks the live file only; a sandboxed sync must not move it.
+  if (file === ACTIVE_TASKS_MD) lastImportTime = Date.now(); // stamp BEFORE work — prevents re-entry during long imports
 
-  const raw = fs.readFileSync(ACTIVE_TASKS_MD, "utf-8");
+  const raw = fs.readFileSync(file, "utf-8");
   const parsed = parseTasksMarkdown(raw);
   const now = new Date().toISOString();
 
@@ -252,11 +255,13 @@ export function syncTasksToMarkdown(db: DrizzleDb): void {
   const stored = loadBaseline(db);
 
   // P5-5: the mesh bridge and memory daemon write this file under the
-  // kanban-io mkdir lock. Same lock dir, same protocol — refuse to write without it.
-  withKanbanLockSync(ACTIVE_TASKS_MD, () => {
-    const exists = fs.existsSync(ACTIVE_TASKS_MD);
-    const content = exists ? fs.readFileSync(ACTIVE_TASKS_MD, "utf-8") : "";
-    const unseenExternalWrite = exists && !isOwnMtime(fs.statSync(ACTIVE_TASKS_MD).mtimeMs);
+  // kanban-io mkdir lock; MC used to write beside them unlocked (lost-update
+  // race). Same lock dir, same protocol — refuse to write without it.
+  const file = activeTasksMd();
+  withKanbanLockSync(file, () => {
+    const exists = fs.existsSync(file);
+    const content = exists ? fs.readFileSync(file, "utf-8") : "";
+    const unseenExternalWrite = exists && file === ACTIVE_TASKS_MD && !isOwnMtime(fs.statSync(file).mtimeMs);
     let next: string;
     if (/^## Live Tasks/m.test(content)) {
       const edited = applyTaskChanges(content, current, after, stored);
@@ -264,18 +269,19 @@ export function syncTasksToMarkdown(db: DrizzleDb): void {
       next = edited;
     } else {
       // No file (or no Live Tasks section to edit in place): write it whole.
-      fs.mkdirSync(path.dirname(ACTIVE_TASKS_MD), { recursive: true });
+      fs.mkdirSync(path.dirname(file), { recursive: true });
       next = serializeTasksMarkdown(current);
     }
 
     // Atomic write: write to .tmp, then rename over original
-    const tmpPath = ACTIVE_TASKS_MD + ".tmp";
+    const tmpPath = file + ".tmp";
     fs.writeFileSync(tmpPath, next, "utf-8");
-    fs.renameSync(tmpPath, ACTIVE_TASKS_MD);
+    fs.renameSync(tmpPath, file);
 
     // Our own write is not re-imported — unless it carried another writer's
     // edits MC has not imported yet: then the next read must import them.
-    const mtime = fs.statSync(ACTIVE_TASKS_MD).mtimeMs;
+    if (file !== ACTIVE_TASKS_MD) return;
+    const mtime = fs.statSync(file).mtimeMs;
     lastWriteMtime = unseenExternalWrite ? 0 : mtime;
     lastKnownMtime = unseenExternalWrite ? 0 : mtime;
   });

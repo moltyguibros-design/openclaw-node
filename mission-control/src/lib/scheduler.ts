@@ -7,7 +7,8 @@ import { tasks, dependencies } from "./db/schema";
 import { statusToKanban } from "./parsers/task-markdown";
 import { syncTasksToMarkdown } from "./sync/tasks";
 import { logActivity } from "./activity";
-import { WORKSPACE_ROOT, AGENT_NAME, DISPATCH_SIGNAL_FILE } from "./config";
+import { AGENT_NAME, DISPATCH_SIGNAL_FILE } from "./config";
+import { workspaceRoot } from "./sandbox";
 import { gatewayNotify } from "./gateway-notify";
 import { traceCall } from "./tracer";
 import { generateTaskId } from "./task-id";
@@ -427,7 +428,7 @@ export function schedulerTick(): TickResult {
 
     // Also write dispatch signal with full details (auto-checkpoint picks it up)
     try {
-      const signalDir = path.join(WORKSPACE_ROOT, ".tmp");
+      const signalDir = path.join(workspaceRoot(), ".tmp");
       mkdirSync(signalDir, { recursive: true });
       writeFileSync(
         path.join(signalDir, DISPATCH_SIGNAL_FILE),
