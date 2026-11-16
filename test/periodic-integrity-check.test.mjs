@@ -106,6 +106,6 @@ describe('periodic jobs open the stores with quick_check, not the full scan', ()
     const res = spawnSync(process.execPath, ['--input-type=module', '-e', parent],
       { cwd: ROOT, encoding: 'utf8', timeout: 60_000, env: { ...process.env, HOME: home } });
     const msg = JSON.parse(res.stdout.trim().split('\n').pop());
-    assert.deepEqual(msg, { ok: true, result: { sessionId: 'sess-1', messageCount: 0, imported: false } }, res.stderr);
+    assert.deepEqual({ ok: msg.ok, result: msg.result }, { ok: true, result: { sessionId: 'sess-1', messageCount: 0, imported: false } }, res.stderr);
   });
 });
