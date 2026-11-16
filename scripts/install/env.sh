@@ -32,10 +32,11 @@ else
 fi
 
 # The memory daemon imports packages/event-schemas/dist and exits at startup
-# without it. dist/ is gitignored, the release tarball ships only the .ts
-# sources, and --omit=dev leaves no compiler behind — so on the first virgin-Mac
-# run the daemon died silently and the acceptance gate failed five rows
-# downstream (no DBs, no inject token, no event stream). Build it here.
+# without it. dist/ is gitignored and --omit=dev leaves no compiler behind, so a
+# git checkout has none (the npm tarball now gets it from prepack). On the first
+# virgin-Mac run the tarball had none either: the daemon died silently and the
+# acceptance gate failed five rows downstream (no DBs, no inject token, no event
+# stream). Build it here.
 SCHEMAS_DIST="$REPO_DIR/packages/event-schemas/dist/index.js"
 if [ ! -f "$SCHEMAS_DIST" ]; then
   info "Building event-schemas (memory daemon refuses to start without its dist)..."

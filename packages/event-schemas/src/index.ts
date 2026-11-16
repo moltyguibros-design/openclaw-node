@@ -1,4 +1,4 @@
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { z } from 'zod';
 import { MemoryEventSchema } from './events.js';
 
 export { EventEnvelopeSchema, type EventEnvelope } from './envelope.js';
@@ -28,8 +28,5 @@ export {
 } from './broadcast/index.js';
 
 export function toJsonSchema() {
-  // Cast needed: the root node_modules has Zod 4.x while this package targets 3.x.
-  // zodToJsonSchema handles both at runtime; the cast resolves the type mismatch
-  // until npm install properly resolves workspace-scoped zod@^3.23.0.
-  return zodToJsonSchema(MemoryEventSchema as any, 'MemoryEvent');
+  return z.toJSONSchema(MemoryEventSchema);
 }

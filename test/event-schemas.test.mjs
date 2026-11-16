@@ -505,11 +505,18 @@ describe('MemoryEventSchema discriminated union', () => {
   });
 });
 
+// zod-to-json-schema does not understand Zod 4 schemas and returned an empty
+// MemoryEvent definition; the old assertion (definitions exists) passed on it.
 describe('toJsonSchema', () => {
-  it('generates a JSON Schema object with definitions', () => {
+  it('describes every memory event variant', () => {
     const schema = toJsonSchema();
-    assert.equal(typeof schema, 'object');
-    assert.ok(schema.$schema || schema.definitions || schema.$defs,
-      'should have $schema, definitions, or $defs');
+    assert.ok(schema.$schema, 'should declare its JSON Schema dialect');
+    const variants = schema.oneOf ?? schema.anyOf;
+    assert.ok(Array.isArray(variants), `expected a union, got ${JSON.stringify(schema).slice(0, 200)}`);
+    const types = variants.map((v) => v.properties?.event_type?.const).filter(Boolean);
+    for (const t of ['memory.session_started', 'memory.fact_extracted', 'memory.error']) {
+      assert.ok(types.includes(t), `missing ${t} in ${types}`);
+    }
+    assert.ok(variants.every((v) => v.required?.includes('data')), 'each variant requires data');
   });
 });
