@@ -384,3 +384,26 @@ describe('close', () => {
     assert.throws(() => store.getStats());
   });
 });
+
+describe('state.db user_version belongs to the extraction store', () => {
+  it('SessionStore leaves user_version alone and records its version in session_store_meta', () => {
+    const raw = new Database(DB_PATH, { readonly: true });
+    try {
+      assert.equal(raw.pragma('user_version', { simple: true }), 0);
+      assert.equal(raw.prepare("SELECT value FROM session_store_meta WHERE key = 'session_store_version'").get().value, '1');
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('the extraction store then opens the sessions-only state.db as new: no pre-migration backup', async () => {
+    const { createExtractionStore } = await import('../lib/extraction-store.mjs');
+    const ex = createExtractionStore({ dbPath: DB_PATH });
+    try {
+      assert.equal(ex.db.pragma('user_version', { simple: true }), 7);
+    } finally {
+      ex.close();
+    }
+    assert.throws(() => statSync(join(TMP, 'backups')), { code: 'ENOENT' });
+  });
+});
