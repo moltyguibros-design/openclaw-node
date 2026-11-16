@@ -392,6 +392,18 @@ describe('themeEntitySearch', () => {
     assert.doesNotThrow(() =>
       themeEntitySearch(eDb, kDb, 'thoughts on mesh AND "security" hardening', 10));
   });
+
+  it('respects decision privacy on the theme path when respectPrivacy is set', () => {
+    eDb.exec('ALTER TABLE entities ADD COLUMN private INTEGER DEFAULT 1; ALTER TABLE themes ADD COLUMN private INTEGER DEFAULT 1;');
+    eDb.prepare(`UPDATE themes SET private = 0 WHERE label = 'memory infrastructure'`).run();
+    // The seeded session-004 decision is private (DEFAULT 1).
+    const hidden = themeEntitySearch(eDb, kDb, 'Tell me about memory infrastructure', 10, { respectPrivacy: true });
+    assert.ok(!hidden.some(r => r.session_id === 'session-004'), 'a private decision must not surface its session');
+
+    eDb.prepare(`UPDATE decisions SET private = 0 WHERE session_id = 'session-004'`).run();
+    const visible = themeEntitySearch(eDb, kDb, 'Tell me about memory infrastructure', 10, { respectPrivacy: true });
+    assert.ok(visible.some(r => r.session_id === 'session-004'));
+  });
 });
 
 describe('toFtsQuery', () => {
