@@ -622,6 +622,16 @@ function renderServiceFile(meshDir, relTemplate, vars) {
 
 const LAUNCHD_SERVICES = ['ai.openclaw.mesh-agent.plist', 'ai.openclaw.mesh-deploy-listener.plist'];
 const SYSTEMD_SERVICES = ['openclaw-mesh-agent.service', 'openclaw-mesh-deploy-listener.service'];
+// The agent is on demand (service-manifest autostart:false; its plist has
+// RunAtLoad false): node-init renders and loads it but never starts it or
+// enables it at boot. The deploy listener is what must be running after a join.
+const ON_DEMAND_UNIT = 'openclaw-mesh-agent';
+
+function agentStartCommand(osInfo) {
+  return osInfo.serviceType === 'launchd'
+    ? 'launchctl kickstart gui/$(id -u)/ai.openclaw.mesh-agent'
+    : `systemctl --user start ${ON_DEMAND_UNIT}`;
+}
 
 function installLaunchdService(meshDir, vars) {
   const plistDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
@@ -688,13 +698,17 @@ function installSystemdService(meshDir, vars) {
   try {
     execSync('systemctl --user daemon-reload', { stdio: 'pipe' });
     for (const r of rendered) {
+      if (r.unit === ON_DEMAND_UNIT) {
+        ok(`${r.unit} installed (on demand: not enabled or started)`);
+        continue;
+      }
       execSync(`systemctl --user enable ${r.unit}`, { stdio: 'pipe' });
       execSync(`systemctl --user restart ${r.unit}`, { stdio: 'pipe' });
       ok(`${r.unit} enabled and started`);
     }
   } catch (e) {
     warn(`Service start warning: ${e.message}`);
-    warn('Try manually: systemctl --user start openclaw-mesh-agent');
+    warn('Try manually: systemctl --user restart openclaw-mesh-deploy-listener');
   }
 
   const username = os.userInfo().username;
@@ -728,34 +742,34 @@ function verifyServiceRunning(osInfo) {
 
   if (osInfo.serviceType === 'launchd') {
     try {
-      const out = execSync('launchctl list | grep mesh-agent', { encoding: 'utf8', stdio: 'pipe' }).trim();
+      const out = execSync('launchctl list | grep ai.openclaw.mesh-deploy-listener', { encoding: 'utf8', stdio: 'pipe' }).trim();
       if (out) {
         const parts = out.split(/\s+/);
         const pid = parts[0];
         const exitStatus = parts[1];
         if (pid && pid !== '-') {
-          ok(`Service running (PID ${pid})`);
+          ok(`Deploy listener running (PID ${pid})`);
           return true;
         } else {
-          fail(`Service not running (exit status: ${exitStatus})`);
-          fail('Check logs: tail -f ~/.openclaw/workspace/.tmp/mesh-agent.err');
+          fail(`Deploy listener not running (exit status: ${exitStatus})`);
+          fail('Check logs: tail -f ~/.openclaw/workspace/.tmp/mesh-deploy-listener.err');
           return false;
         }
       }
     } catch {
-      fail('Service not found in launchctl');
+      fail('Deploy listener not found in launchctl');
       return false;
     }
   } else {
     try {
-      const result = spawnSync('systemctl', ['--user', 'is-active', 'openclaw-mesh-agent'], { encoding: 'utf8', stdio: 'pipe' });
+      const result = spawnSync('systemctl', ['--user', 'is-active', 'openclaw-mesh-deploy-listener'], { encoding: 'utf8', stdio: 'pipe' });
       const status = (result.stdout || '').trim();
       if (status === 'active') {
-        ok('Service running (systemd active)');
+        ok('Deploy listener running (systemd active)');
         return true;
       } else {
-        fail(`Service not running (systemd status: ${status})`);
-        fail('Check logs: journalctl --user -u openclaw-mesh-agent -n 20');
+        fail(`Deploy listener not running (systemd status: ${status})`);
+        fail('Check logs: journalctl --user -u openclaw-mesh-deploy-listener -n 20');
         return false;
       }
     } catch {
@@ -961,9 +975,9 @@ async function main() {
 
   // ── Step 8: Verify health ──
   step(8, 'Verifying health...');
-  const serviceAlive = verifyServiceRunning(osInfo);
+  const listenerAlive = verifyServiceRunning(osInfo);
   const natsHealthy = await verifyNatsHealth(config.nats, nodeId);
-  const healthy = serviceAlive && natsHealthy;
+  const healthy = listenerAlive && natsHealthy;
 
   // ── Step 9: Discover mesh topology ──
   step(9, 'Discovering mesh topology...');
@@ -973,12 +987,12 @@ async function main() {
   console.log(`\n${BOLD}${GREEN}═══════════════════════════════════════${RESET}`);
   if (healthy) {
     console.log(`${BOLD}${GREEN}  Node "${nodeId}" joined the mesh!${RESET}`);
-  } else if (serviceAlive && !natsHealthy) {
-    console.log(`${BOLD}${YELLOW}  Service running but NATS unreachable.${RESET}`);
-    console.log(`${YELLOW}  The agent will retry automatically.${RESET}`);
-  } else if (!serviceAlive) {
-    console.log(`${BOLD}${RED}  Service failed to start.${RESET}`);
-    console.log(`${RED}  Provisioning complete but agent is not running.${RESET}`);
+  } else if (listenerAlive && !natsHealthy) {
+    console.log(`${BOLD}${YELLOW}  Deploy listener running but NATS unreachable.${RESET}`);
+    console.log(`${YELLOW}  It will retry automatically.${RESET}`);
+  } else if (!listenerAlive) {
+    console.log(`${BOLD}${RED}  Deploy listener failed to start.${RESET}`);
+    console.log(`${RED}  Provisioning complete but this node cannot receive deploys.${RESET}`);
   } else {
     console.log(`${BOLD}${YELLOW}  Provisioned with warnings.${RESET}`);
   }
@@ -987,12 +1001,13 @@ async function main() {
   console.log('Next steps:');
   console.log(`  1. Add API keys to ~/.openclaw/openclaw.env`);
   console.log(`     Example: ANTHROPIC_API_KEY=sk-ant-...`);
+  console.log(`  2. The mesh agent is on demand. Start it with: ${agentStartCommand(osInfo)}`);
   if (osInfo.serviceType === 'systemd') {
-    console.log(`  2. Check service: systemctl --user status openclaw-mesh-agent`);
-    console.log(`  3. View logs: journalctl --user -u openclaw-mesh-agent -f`);
+    console.log(`  3. Check it: systemctl --user status openclaw-mesh-agent`);
+    console.log(`  4. View logs: journalctl --user -u openclaw-mesh-agent -f`);
   } else {
-    console.log(`  2. Check service: launchctl list | grep mesh-agent`);
-    console.log(`  3. View logs: tail -f ~/.openclaw/workspace/.tmp/mesh-agent.log`);
+    console.log(`  3. Check it: launchctl list | grep mesh-agent`);
+    console.log(`  4. View logs: tail -f ~/.openclaw/workspace/.tmp/mesh-agent.log`);
   }
   console.log('');
 }
@@ -1002,4 +1017,7 @@ if (require.main === module) main().catch(err => {
   process.exit(1);
 });
 
-module.exports = { renderServiceTemplate, serviceTemplateVars, SERVICE_TEMPLATE_VARS, parseJoinToken, updateEnvFile, provisionTrust };
+module.exports = {
+  renderServiceTemplate, serviceTemplateVars, SERVICE_TEMPLATE_VARS, parseJoinToken, updateEnvFile, provisionTrust,
+  installService, verifyServiceRunning, agentStartCommand,
+};

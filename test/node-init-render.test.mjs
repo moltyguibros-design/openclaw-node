@@ -248,3 +248,54 @@ describe('mesh-node-remove removes every unit node-init installs', () => {
     }
   });
 });
+
+// The agent is on demand (manifest autostart:false, plist RunAtLoad false). On
+// macOS node-init loaded it, then failed the join because it had no PID; on
+// Linux it enabled and started it at boot. Both now leave it off, and the join
+// is judged on the deploy listener.
+describe('node-init leaves the mesh agent on demand', () => {
+  for (const serviceType of ['systemd', 'launchd']) {
+    it(`${serviceType}: the listener is started and verified, the agent is neither started nor enabled`, () => {
+      const home = mkdtempSync(join(tmpdir(), 'node-init-ondemand-'));
+      try {
+        const fakeBin = join(home, 'fakebin');
+        mkdirSync(fakeBin);
+        const callLog = join(home, 'calls.log');
+        const stub = (tool, body = '') => writeFileSync(join(fakeBin, tool),
+          `#!/bin/sh\necho "${tool} $*" >> "${callLog}"\n${body}exit 0\n`, { mode: 0o755 });
+        stub('systemctl', 'if [ "$2" = is-active ]; then if [ "$3" = openclaw-mesh-deploy-listener ]; then echo active; else echo inactive; exit 3; fi; fi\n');
+        stub('launchctl', 'if [ "$1" = list ]; then printf "321\\t0\\tai.openclaw.mesh-deploy-listener\\n-\\t0\\tai.openclaw.mesh-agent\\n"; fi\n');
+        stub('loginctl');
+        stub('sudo');
+
+        const script = `
+          const ni = require(${JSON.stringify(join(ROOT, 'bin', 'openclaw-node-init.js'))});
+          const osInfo = { serviceType: ${JSON.stringify(serviceType)} };
+          ni.installService(osInfo, ${JSON.stringify(ROOT)}, { nats: 'nats://127.0.0.1:4222', provider: 'shell' });
+          console.log('VERIFIED=' + ni.verifyServiceRunning(osInfo));
+          console.log('START=' + ni.agentStartCommand(osInfo));
+        `;
+        const r = spawnSync(process.execPath, ['-e', script], {
+          encoding: 'utf8', timeout: 30000,
+          env: { ...process.env, HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, OPENCLAW_NODE_ID: 'worker-7' },
+        });
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /VERIFIED=true/);
+        const calls = readFileSync(callLog, 'utf8').split('\n').filter(Boolean);
+        if (serviceType === 'systemd') {
+          assert.ok(calls.includes('systemctl --user enable openclaw-mesh-deploy-listener'), calls.join('\n'));
+          assert.ok(calls.includes('systemctl --user restart openclaw-mesh-deploy-listener'));
+          assert.deepEqual(calls.filter((c) => /(enable|restart|start) openclaw-mesh-agent/.test(c)), []);
+          assert.match(r.stdout, /START=systemctl --user start openclaw-mesh-agent/);
+        } else {
+          assert.ok(calls.some((c) => /^launchctl load .*ai\.openclaw\.mesh-agent\.plist$/.test(c)), calls.join('\n'));
+          assert.ok(calls.some((c) => /^launchctl load .*ai\.openclaw\.mesh-deploy-listener\.plist$/.test(c)));
+          assert.deepEqual(calls.filter((c) => /kickstart|start ai\.openclaw\.mesh-agent/.test(c)), []);
+          assert.match(r.stdout, /START=launchctl kickstart gui\/\$\(id -u\)\/ai\.openclaw\.mesh-agent/);
+        }
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+  }
+});
