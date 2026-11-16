@@ -335,6 +335,21 @@ const ENV_PROVIDER = process.env.MESH_LLM_PROVIDER || null;
 let nc;
 let running = true;
 let currentTaskId = null; // tracks active task for alive-check responses
+// One task at a time: the claim loop, the recruit broadcast and the recruiting poll
+// each take this slot synchronously before their first await. Checking
+// currentTaskId and setting it after an await let two of them start a task at once.
+let taskSlotHeld = false;
+
+function acquireTaskSlot() {
+  if (taskSlotHeld) return false;
+  taskSlotHeld = true;
+  return true;
+}
+
+function releaseTaskSlot() {
+  taskSlotHeld = false;
+  currentTaskId = null;
+}
 
 // ── Agent State File (read by mesh-health-publisher) ──
 const AGENT_STATE_PATH = path.join(os.homedir(), '.openclaw', '.tmp', 'agent-state.json');
@@ -1680,26 +1695,67 @@ async function joinRecruitedTask(task, label, sessionId) {
 
 /** A mesh.collab.*.recruit broadcast. */
 async function onRecruit(recruit) {
-  if (currentTaskId) return; // busy
-  const task = await recruitCandidate(recruit.session_id, recruit.task_id);
-  if (task) await joinRecruitedTask(task, 'RECRUIT', recruit.session_id);
+  if (!acquireTaskSlot()) return; // busy
+  try {
+    const task = await recruitCandidate(recruit.session_id, recruit.task_id);
+    if (task) await joinRecruitedTask(task, 'RECRUIT', recruit.session_id);
+  } finally {
+    releaseTaskSlot();
+  }
 }
 
 /** Poll for recruiting sessions on idle — catches recruits we missed. */
 async function checkRecruitingSessions() {
-  if (currentTaskId) return; // busy
+  if (!acquireTaskSlot()) return; // busy
   try {
     const sessions = await natsRequest('mesh.collab.recruiting', {}, 5000);
     if (!sessions || !Array.isArray(sessions) || sessions.length === 0) return;
 
     for (const s of sessions) {
-      if (currentTaskId) break; // became busy
       if (s.node_ids && s.node_ids.includes(NODE_ID)) continue; // already joined
       if (s.max_nodes && s.current_nodes >= s.max_nodes) continue; // full
       const task = await recruitCandidate(s.session_id, s.task_id);
       if (task) await joinRecruitedTask(task, 'RECRUIT POLL', s.session_id);
     }
-  } catch (err) { warn(`recruiting poll: ${err.message}`); }
+  } catch (err) {
+    warn(`recruiting poll: ${err.message}`);
+  } finally {
+    releaseTaskSlot();
+  }
+}
+
+/**
+ * One pass of the claim path: claim the next task and run it. Returns 'busy'
+ * (a recruit holds the slot), 'none' (nothing claimable), 'ran' or 'error'.
+ */
+async function claimAndRun() {
+  if (!acquireTaskSlot()) return 'busy';
+  let claimedTask = null;
+  let claimedAt = 0;
+  try {
+    // accepts_collab: false asks the daemon to leave collab tasks to nodes whose
+    // default provider can be a grappe worker (D11).
+    const acceptsCollab = collabDeclinedProvider(null) === null;
+    // Longer timeout — KV operations on remote NATS can be slow.
+    const task = await natsRequest('mesh.tasks.claim', { node_id: NODE_ID, accepts_collab: acceptsCollab }, 60000);
+    if (!task) return 'none';
+
+    log(`CLAIMED: ${task.task_id} "${task.title}"`);
+    claimedTask = task;
+    claimedAt = Date.now();
+    currentTaskId = task.task_id;
+    if (task.collaboration) {
+      await executeCollabTask(task);
+    } else {
+      await executeTask(task);
+    }
+    return 'ran';
+  } catch (err) {
+    await onWorkerError(claimedTask, claimedAt, err);
+    return 'error';
+  } finally {
+    releaseTaskSlot();
+  }
 }
 
 
@@ -2620,54 +2676,20 @@ async function main() {
   })();
   log(`  Listening: mesh.collab.*.recruit (collab recruiting)`);
 
-  let claimedTask = null;
-  let claimedAt = 0;
   while (running) {
-    try {
-      // Check for recruiting collab sessions before trying to claim
-      await checkRecruitingSessions();
-      if (currentTaskId) {
-        await new Promise(r => setTimeout(r, POLL_INTERVAL));
-        continue;
-      }
-
-      // Claim next available task (longer timeout — KV operations on remote NATS can be slow)
-      // accepts_collab: false asks the daemon to leave collab tasks to nodes whose
-      // default provider can be a grappe worker (D11).
-      const acceptsCollab = collabDeclinedProvider(null) === null;
-      const task = await natsRequest('mesh.tasks.claim', { node_id: NODE_ID, accepts_collab: acceptsCollab }, 60000);
-
-      if (!task) {
-        if (ONCE) {
-          log('No tasks available. Exiting (--once mode).');
-          break;
-        }
-        // Wait and retry
-        await new Promise(r => setTimeout(r, POLL_INTERVAL));
-        continue;
-      }
-
-      log(`CLAIMED: ${task.task_id} "${task.title}"`);
-      claimedTask = task;
-      claimedAt = Date.now();
-
-      // Execute the task (collab or solo)
-      currentTaskId = task.task_id;
-      if (task.collaboration) {
-        await executeCollabTask(task);
-      } else {
-        await executeTask(task);
-      }
-      currentTaskId = null;
-      claimedTask = null;
-
-    } catch (err) {
-      await onWorkerError(claimedTask, claimedAt, err);
-      claimedTask = null;
-      currentTaskId = null;
-      // Don't crash the loop — wait and retry
+    // Check for recruiting collab sessions before trying to claim
+    await checkRecruitingSessions();
+    const outcome = await claimAndRun();
+    if (outcome === 'busy') {
       await new Promise(r => setTimeout(r, POLL_INTERVAL));
+      continue;
     }
+    if (outcome === 'none' && ONCE) {
+      log('No tasks available. Exiting (--once mode).');
+      break;
+    }
+    // Nothing claimed, or the task errored — wait before retrying.
+    if (outcome !== 'ran') await new Promise(r => setTimeout(r, POLL_INTERVAL));
 
     if (ONCE) break;
   }
@@ -2707,5 +2729,6 @@ module.exports.__test = {
   mergeIfApproved, onReviewApproved, onReviewRejected, reconcileKeptBranches,
   natsRequest, createWorktree, onWorkerError, executeCollabTask, executeTask,
   onRecruit, checkRecruitingSessions,
+  claimAndRun,
 };
 // deploy-v7f0130b
