@@ -197,6 +197,33 @@ describe('createExtractionStore', () => {
     assert.equal(store.db.prepare('SELECT mention_count FROM entities WHERE id = ?').get(id).mention_count, 2);
   });
 
+  it('theme mention_count counts sessions, not flushes', () => {
+    const themeCount = () => store.db.prepare(`SELECT mention_count FROM themes WHERE label = 'Message queue configuration'`).get().mention_count;
+    for (let i = 0; i < 4; i++) store.storeExtractionResult('session-001', mockExtractionResult);
+    assert.equal(themeCount(), 1, 'four flushes of one session are one sighting');
+    store.storeExtractionResult('session-002', mockExtractionResult);
+    assert.equal(themeCount(), 2);
+    assert.equal(store.db.prepare('SELECT COUNT(*) n FROM theme_mentions').get().n, 2);
+  });
+
+  it('v8 migration resets per-flush theme counts to max(1, linked sessions)', () => {
+    const db = store.db;
+    const theme = db.prepare(`INSERT INTO themes (label, hierarchy_path, first_seen, last_seen, mention_count) VALUES (?, '[]', 't0', 't1', ?)`);
+    theme.run('inflated by one busy session', 9);
+    theme.run('seen in two sessions', 6);
+    const id = db.prepare(`SELECT id FROM themes WHERE label = 'seen in two sessions'`).get().id;
+    db.prepare(`INSERT INTO theme_mentions (theme_id, session_id, created_at) VALUES (?, 's-1', 't0'), (?, 's-2', 't1')`).run(id, id);
+    db.pragma('user_version = 7');
+    const dbPath = db.prepare('PRAGMA database_list').get().file;
+    store.close();
+
+    store = createExtractionStore({ dbPath });
+    assert.equal(store.db.pragma('user_version', { simple: true }), 8);
+    const counts = Object.fromEntries(store.db.prepare('SELECT label, mention_count FROM themes').all().map((r) => [r.label, r.mention_count]));
+    assert.deepEqual(counts, { 'inflated by one busy session': 1, 'seen in two sessions': 2 });
+    assert.equal(fs.readdirSync(path.join(tmpDir, 'backups', 'migration')).length, 1, 'backed up before the counts were rewritten');
+  });
+
   it('re-extracting a decision refreshes rationale/confidence instead of duplicating', () => {
     store.storeExtractionResult('session-001', mockExtractionResult);
     const updated = {

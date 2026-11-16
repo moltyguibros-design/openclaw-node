@@ -18,7 +18,7 @@ describe('registry', () => {
     assert.equal(MEMORY_TYPES.entity.fields.name, MERGE_OPS.IMMUTABLE);
     assert.equal(MEMORY_TYPES.entity.fields.aliases, MERGE_OPS.UNION);
     assert.equal(MEMORY_TYPES.decision.fields.superseded_by, MERGE_OPS.IMMUTABLE);
-    assert.equal(MEMORY_TYPES.theme.fields.mention_count, MERGE_OPS.SUM);
+    assert.equal('mention_count' in MEMORY_TYPES.theme.fields, false, 'derived from theme_mentions, never summed');
   });
 });
 
@@ -45,9 +45,9 @@ describe('mergeFields', () => {
     assert.equal(merged.confidence, 0.8);
     assert.equal(merged.superseded_by, 9);
   });
-  it('theme: mention_count sums, hierarchy replaces', () => {
+  it('theme: hierarchy replaces, mention_count is left to the store', () => {
     const { merged } = mergeFields('theme', { mention_count: 3, hierarchy_path: '["a"]' }, { mention_count: 1, hierarchy_path: '["a","b"]' });
-    assert.equal(merged.mention_count, 4);
+    assert.equal(merged.mention_count, 3);
     assert.equal(merged.hierarchy_path, '["a","b"]');
   });
   it('union is case-insensitive and bounded', () => {
