@@ -8,7 +8,6 @@ triggers:
   - "gemini market research"
 negative_triggers:
   - "quick web search"
-  - "use the deep-research skill"
   - "summarize this link"
 metadata: {"clawdbot":{"emoji":"🔬","requires":{"env":["GEMINI_API_KEY"]},"primaryEnv":"GEMINI_API_KEY"}}
 ---
