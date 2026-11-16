@@ -16,7 +16,9 @@
  *
  * NATS KV buckets:
  *   MESH_DEPLOY_RESULTS    — write deploy result per node per SHA
- *   MESH_NODES             — update deployVersion after success
+ *   MESH_NODES             — this node's registry entry (nodeId, role, platform,
+ *                            deployVersion, lastSeen): created at startup,
+ *                            updated after each successful deploy
  */
 
 const { connect, StringCodec } = require('nats');
@@ -50,6 +52,7 @@ const sc = StringCodec();
 
 const RESULTS_BUCKET = 'MESH_DEPLOY_RESULTS';
 const NODES_BUCKET = 'MESH_NODES';
+const NODE_REGISTRY_HEARTBEAT_MS = 60 * 1000;
 const IS_MAC = os.platform() === 'darwin';
 
 // Node role — determines which components this node runs.
@@ -397,17 +400,10 @@ async function executeDeploy(trigger, resultsKv, nodesKv, opts = {}) {
       notifyDesktop('error', 'Mesh deploy FAILED', `${NODE_ID} (${where}, attempt ${attempts}/${MAX_DEPLOY_ATTEMPTS}): ${result.errors[0]?.slice(0, 160) || 'unknown'}`);
     }
 
-    // Update our deployVersion in the nodes registry
     if (result.status === 'success' && nodesKv) {
       try {
-        const existing = await nodesKv.get(NODE_ID);
-        if (existing && existing.value) {
-          const node = JSON.parse(sc.decode(existing.value));
-          node.deployVersion = result.sha;
-          node.lastDeploy = result.completedAt;
-          await nodesKv.put(NODE_ID, sc.encode(JSON.stringify(node)));
-          console.log(`[deploy-listener] Updated node registry: deployVersion=${result.sha.slice(0,7)}`);
-        }
+        await upsertNodeRegistry(nodesKv, { deployVersion: result.sha, lastDeploy: result.completedAt });
+        console.log(`[deploy-listener] Updated node registry: deployVersion=${result.sha.slice(0,7)}`);
       } catch (err) { console.warn(`[deploy-listener] update node deploy version: ${err.message}`); }
     }
 
@@ -418,6 +414,40 @@ async function executeDeploy(trigger, resultsKv, nodesKv, opts = {}) {
   } finally {
     deploying = false;
   }
+}
+
+// ── Node Registry ────────────────────────────────────────────────────────
+
+/**
+ * Create or update this node's MESH_NODES entry. fleet-deploy discovers the
+ * fleet from MESH_NODES first, so the listener — which runs on every node —
+ * is the one that must create the entry, not only touch an existing one.
+ */
+async function upsertNodeRegistry(nodesKv, { deployVersion, lastDeploy } = {}) {
+  let node = {};
+  const existing = await nodesKv.get(NODE_ID);
+  if (existing && existing.value) {
+    try { node = JSON.parse(sc.decode(existing.value)); } catch { node = {}; }
+  }
+  node.nodeId = NODE_ID;
+  node.role = NODE_ROLE;
+  node.platform = os.platform();
+  if (deployVersion) node.deployVersion = deployVersion;
+  else if (node.deployVersion === undefined) node.deployVersion = null;
+  if (lastDeploy) node.lastDeploy = lastDeploy;
+  node.lastSeen = new Date().toISOString();
+  await nodesKv.put(NODE_ID, sc.encode(JSON.stringify(node)));
+  return node;
+}
+
+async function registerNode(nodesKv, { readHead = true } = {}) {
+  let headSha = null;
+  if (readHead) {
+    try { headSha = git('rev-parse', '--short', 'HEAD'); } catch (err) { console.warn(`[deploy-listener] read git HEAD: ${err.message}`); }
+  }
+  try {
+    await upsertNodeRegistry(nodesKv, { deployVersion: headSha });
+  } catch (err) { console.warn(`[deploy-listener] register in MESH_NODES: ${err.message}`); }
 }
 
 // ── Auto-Catch-Up ────────────────────────────────────────────────────────
@@ -503,6 +533,12 @@ async function main() {
   try {
     nodesKv = await js.views.kv(NODES_BUCKET, { history: 1 }); // No TTL — node identity persists
   } catch (err) { console.warn(`[deploy-listener] open MESH_NODES bucket: ${err.message}`); }
+  if (nodesKv) {
+    await registerNode(nodesKv);
+    // fleet-deploy --status calls a node OFFLINE once lastSeen is 120 s old.
+    // Mid-deploy HEAD is transient, so only lastSeen is refreshed then.
+    setInterval(() => registerNode(nodesKv, { readHead: !deploying }), NODE_REGISTRY_HEARTBEAT_MS);
+  }
 
   // Check for missed deploys while we were offline
   await checkAndCatchUp(resultsKv, nodesKv);
@@ -589,7 +625,7 @@ async function main() {
   console.log(`[deploy-listener] ═══ Ready ═══`);
 }
 
-module.exports = { shouldCatchUp, runDeploy, scheduleSelfRestart };
+module.exports = { shouldCatchUp, runDeploy, scheduleSelfRestart, upsertNodeRegistry };
 
 if (require.main === module) {
   main().catch(err => {

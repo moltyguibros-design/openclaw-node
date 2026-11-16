@@ -92,7 +92,7 @@ async function discoverNodes(nc) {
               nodeId: health.nodeId || key,
               role: health.role || 'worker',
               platform: health.platform || 'unknown',
-              deployVersion: null,
+              deployVersion: health.deployVersion && health.deployVersion !== 'unknown' ? health.deployVersion : null,
               lastSeen: health.reportedAt || null,
             });
           }
