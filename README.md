@@ -78,7 +78,7 @@ curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/m
 If any dependency is missing at the end, bootstrap **refuses to start `install.sh`** and
 exits non-zero rather than leaving you a half-installed node.
 
-### If the machine already has Node 22+
+### If the machine already has Node 22.12+
 
 ```bash
 npx openclaw-node-harness            # Full install — identity, skills, MC, services, everything
@@ -92,8 +92,9 @@ npx openclaw-node-harness --mesh-only # Worker nodes — mesh agent + NATS only,
 >
 > `npx` requires npm, which requires Node. It therefore **cannot install Node**, and
 > cannot bootstrap a virgin machine — use the `curl | bash` command above for that.
-> This package also declares `engines: { node: ">=22" }`, so npm refuses to run it on
-> Node 18–21 even though older docs described the baseline as "Node.js 18+".
+> This package also declares `engines: { node: ">=22.12" }`, so npm refuses to run it on
+> anything older: 22.12 is the first 22.x whose `require()` loads an ES module unflagged,
+> which joining a mesh needs.
 
 ### From a clone
 
@@ -113,7 +114,7 @@ What a node needs and what "running" means is specified in [docs/NODE_SPEC.md](d
 the verification matrix is [docs/INSTALL_TEST_PROTOCOL.md](docs/INSTALL_TEST_PROTOCOL.md).
 
 The installer will:
-1. Verify system dependencies via `scripts/install/prereqs.sh` — Node.js 22+, Python 3, Git, SQLite3, build tools, `jq`, **nats-server** (the bus), **ollama** (the local LLM; skip with `--skip-llm`), **Tailscale** (needed for multi-machine clustering). Each is confirmed on `PATH`; the install **aborts** if any is missing rather than continuing partially installed.
+1. Verify system dependencies via `scripts/install/prereqs.sh` — Node.js 22.12+, Python 3, Git, SQLite3, build tools, `jq`, **nats-server** (the bus), **ollama** (the local LLM; skip with `--skip-llm`), **Tailscale** (needed for multi-machine clustering). Each is confirmed on `PATH`; the install **aborts** if any is missing rather than continuing partially installed.
 2. Install the repo's runtime `node_modules` (the mesh daemons exec from the repo tree)
 3. Create the `~/.openclaw/` directory structure and copy scripts, libs (incl. mcp-knowledge), identity files, souls, and skills
 4. Generate configuration from templates — including the **single-node NATS bus** (`nats.conf`, loopback + generated token) and an env file with the **local-first memory-model defaults** (RAM-tiered `LLM_MODEL`); the agent provider (`MESH_LLM_PROVIDER`) is whatever you choose — `--provider=NAME`, the install prompt, or a CLI already on PATH
@@ -202,7 +203,7 @@ OpenClaw targets lightweight **consumer hardware** (see [docs/NODE_SPEC.md §1](
 - **macOS** (primary dev target; nodes default to the `lead` role, services via launchd)
 - **Linux with systemd** (Ubuntu 20.04+; nodes default to `worker`, services via systemd)
 
-Baseline: **Node.js 22+** (the `engines` floor; Mission Control requires it), Python 3.8+,
+Baseline: **Node.js 22.12+** (the `engines` floor; Mission Control requires it), Python 3.8+,
 Git, SQLite 3, plus a working compiler for `better-sqlite3`.
 
 ### System dependencies

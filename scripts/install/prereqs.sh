@@ -37,7 +37,16 @@ if [ "$(id -u)" -eq 0 ]; then SUDO=""
 elif have sudo; then SUDO="sudo"
 else SUDO=""; fi
 
-node_ok() { have node && [ "$(node -e 'console.log(process.versions.node.split(".")[0])' 2>/dev/null || echo 0)" -ge 22 ]; }
+# 22.12 is the first 22.x whose require() loads an ES module unflagged
+# (bin/mesh-join-token.js and openclaw-node-init load lib/node-identity.mjs).
+node_ok() {
+  have node || return 1
+  local v major minor
+  v="$(node -v 2>/dev/null)"; v="${v#v}"
+  major="${v%%.*}"; minor="${v#*.}"; minor="${minor%%.*}"
+  case "$major$minor" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$major" -gt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 12 ]; }
+}
 
 # ---------- macOS ----------
 if [ "$PREREQ_OS" = macos ]; then
@@ -64,10 +73,10 @@ if [ "$PREREQ_OS" = macos ]; then
   if node_ok; then
     ok "node $(node -v)"
   elif $CHECK_ONLY; then
-    error "node 22+ MISSING (found: $(node -v 2>/dev/null || echo none))"
+    error "node 22.12+ MISSING (found: $(node -v 2>/dev/null || echo none))"
   else
     brew install node@22 && brew link --overwrite --force node@22
-    node_ok && ok "node $(node -v)" || error "node 22+ still unavailable after install"
+    node_ok && ok "node $(node -v)" || error "node 22.12+ still unavailable after install"
   fi
 
   # Report on the BINARY, never on the package manager's exit code: a formula
@@ -122,7 +131,7 @@ else
   if node_ok; then
     ok "node $(node -v)"
   elif $CHECK_ONLY; then
-    error "node 22+ MISSING (found: $(node -v 2>/dev/null || echo none))"
+    error "node 22.12+ MISSING (found: $(node -v 2>/dev/null || echo none))"
   else
     $SUDO mkdir -p /etc/apt/keyrings
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
@@ -130,7 +139,7 @@ else
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
       | $SUDO tee /etc/apt/sources.list.d/nodesource.list >/dev/null
     $SUDO apt-get update -y && $SUDO apt-get install -y nodejs
-    node_ok && ok "node $(node -v)" || error "node 22+ still unavailable after install"
+    node_ok && ok "node $(node -v)" || error "node 22.12+ still unavailable after install"
   fi
 
   if have nats-server; then
@@ -206,7 +215,7 @@ PREREQ_FAIL=0
 _chk() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else error "$1 — MISSING"; PREREQ_FAIL=1; fi; }
 echo ""
 echo "───── prerequisite gate ─────"
-_chk "node 22+"      'node_ok'
+_chk "node 22.12+"   'node_ok'
 _chk "python3 3.8+"  'python3 -c "import sys; sys.exit(0 if sys.version_info>=(3,8) else 1)"'
 _chk "PyYAML"        'python3 -c "import yaml"'
 _chk "git"           'command -v git'

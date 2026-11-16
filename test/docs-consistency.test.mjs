@@ -51,7 +51,7 @@ test('README KNOWLEDGE_ROOT default is the working directory core.mjs falls back
 
 test('TEST.md names the CI Node matrix and lists no tested module as a coverage gap', () => {
   const testMd = read('TEST.md');
-  const matrix = read('.github/workflows/test.yml').match(/node-version: \[([\d, ]+)\]/)[1];
+  const matrix = read('.github/workflows/test.yml').match(/node-version: \[([^\]]+)\]/)[1].replace(/'/g, '');
   assert.ok(testMd.includes(`Root unit tests on Node ${matrix}\n`), `TEST.md CI line must match the [${matrix}] matrix`);
   assert.doesNotMatch(testMd, /Node 18/);
   const testFiles = readdirSync(new URL('../test/', import.meta.url));

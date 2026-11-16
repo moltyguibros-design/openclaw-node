@@ -13,7 +13,7 @@
   ],
   "keywords": ["openclaw", "plugin", "context-engine", "memory", "openclaw-node"],
   "engines": {
-    "node": ">=22",
+    "node": ">=22.12",
     "openclaw": ">=2026.5.27"
   },
   "openclaw": {

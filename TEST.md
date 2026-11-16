@@ -23,7 +23,7 @@ node --test test/mesh-plans.test.js
 
 - **Root tests** (`test/`): Node.js built-in test runner (`node:test`) + `assert/strict`
 - **Mission Control** (`mission-control/src/lib/__tests__/`): Vitest + `expect`
-- No external test dependencies for root tests — runs on the CI matrix (Node 20 and 22)
+- No external test dependencies for root tests — runs on the CI matrix (Node 22.12.0, the floor, and current 22)
 
 ## Root Tests (`test/`)
 
@@ -166,7 +166,7 @@ Run: `cd mission-control && npx vitest run src/lib/__tests__/my-module.test.ts`
 ## CI
 
 GitHub Actions runs on every push/PR to `main`:
-- Root unit tests on Node 20, 22
+- Root unit tests on Node 22.12.0, 22
 - MC tests on Node 22
 
 See `.github/workflows/test.yml`.

@@ -105,7 +105,16 @@ if ! have curl && ! have wget; then
 fi
 ok "downloader: $(have curl && echo curl || echo wget)"
 
-node_ok() { have node && [ "$(node -e 'console.log(process.versions.node.split(".")[0])' 2>/dev/null || echo 0)" -ge 22 ]; }
+# 22.12 is the first 22.x whose require() loads an ES module unflagged
+# (bin/mesh-join-token.js and openclaw-node-init load lib/node-identity.mjs).
+node_ok() {
+  have node || return 1
+  local v major minor
+  v="$(node -v 2>/dev/null)"; v="${v#v}"
+  major="${v%%.*}"; minor="${v#*.}"; minor="${minor%%.*}"
+  case "$major$minor" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$major" -gt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 12 ]; }
+}
 
 # ============================================================
 # macOS
@@ -159,7 +168,7 @@ if [ "$OS" = macos ]; then
     ok "node $(node -v)"
   else
     brew install node@22 </dev/null && brew link --overwrite --force node@22
-    node_ok && ok "node $(node -v)" || err "node 22+ install failed"
+    node_ok && ok "node $(node -v)" || err "node 22.12+ install failed"
   fi
 
   # Report on whether the BINARY landed, never on the package manager's exit
@@ -214,7 +223,7 @@ else
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
       | $SUDO tee /etc/apt/sources.list.d/nodesource.list >/dev/null
     $SUDO apt-get update -y && $SUDO apt-get install -y nodejs
-    node_ok && ok "node $(node -v)" || err "node 22+ install failed"
+    node_ok && ok "node $(node -v)" || err "node 22.12+ install failed"
   fi
 
   step "nats-server, ollama, tailscale"
@@ -284,7 +293,7 @@ fi
 step "Verification"
 FAIL=0
 chk() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else err "$1 — MISSING"; FAIL=1; fi; }
-chk "node 22+"      'node_ok'
+chk "node 22.12+"   'node_ok'
 chk "python3 3.8+"  'python3 -c "import sys; sys.exit(0 if sys.version_info>=(3,8) else 1)"'
 chk "PyYAML"        'python3 -c "import yaml"'
 chk "git"           'command -v git'
