@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import crypto from 'node:crypto';
 import {
   DEFAULT_CHANNEL_WEIGHTS,
   parseWeights,
@@ -614,5 +615,85 @@ describe('seedTerms: prompt-analysis entities/themes steer channels 3/4/5', () =
         console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
       });
     }
+  });
+});
+
+// ─── Offerer relevance gate on the real pipeline ─────────────────────────────
+// The offerer's 0.55 threshold is on a 0–1 scale; raw fused RRF scores top out
+// at Σw/61 (≈0.098 with six channels), so every peer broadcast used to end in
+// below_threshold. retrieve({ normalize: true }) puts the score on that scale.
+
+describe('normalized scores and the offerer gate', () => {
+  let knowledgeDb, extractionDb, savedWeights, savedSigned;
+  beforeEach(() => {
+    knowledgeDb = createKnowledgeDb();
+    extractionDb = createExtractionDb();
+    seedKnowledgeDb(knowledgeDb);
+    seedExtractionDb(extractionDb);
+    savedWeights = process.env.RETRIEVAL_WEIGHTS;
+    savedSigned = process.env.OPENCLAW_REQUIRE_SIGNED;
+    // The fixture has no session FTS/vector tables: those two channels are off
+    // here, so the three that can answer are the whole best-reachable score.
+    process.env.RETRIEVAL_WEIGHTS = 'fts:0,vec:0';
+    process.env.OPENCLAW_REQUIRE_SIGNED = '0';
+    setChannelErrorSink(() => {});
+  });
+  afterEach(() => {
+    knowledgeDb.close();
+    extractionDb.close();
+    for (const [k, v] of [['RETRIEVAL_WEIGHTS', savedWeights], ['OPENCLAW_REQUIRE_SIGNED', savedSigned]]) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+    setChannelErrorSink((channel, err) => {
+      console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+    });
+  });
+
+  it('normalize divides by the best score the active channels can give', async () => {
+    const pipeline = createRetrievalPipeline({ knowledgeDb, extractionDb, respect_privacy: false });
+    const raw = await pipeline.retrieve('NATS federation memory infrastructure');
+    const norm = await pipeline.retrieve('NATS federation memory infrastructure', { normalize: true });
+    assert.ok(raw.length > 0);
+    assert.deepEqual(norm.map(r => r.chunk_id), raw.map(r => r.chunk_id));
+    const best = 3 / 61;
+    for (let i = 0; i < raw.length; i++) {
+      assert.ok(Math.abs(norm[i].score - Math.min(1, raw[i].score / best)) < 1e-6);
+    }
+    assert.ok(raw[0].score < 0.1, 'raw fused scores are on the RRF scale');
+    assert.ok(norm[0].score > 0.55, 'a chunk ranked first by two of three channels clears 0.55');
+  });
+
+  it('an offerer on the real pipeline offers a strong match at the default threshold', async () => {
+    const { createOfferer, RELEVANCE_THRESHOLD } = await import('../lib/broadcast-offerer.mjs');
+    assert.equal(RELEVANCE_THRESHOLD, 0.55);
+    const published = [];
+    const nc = {
+      jetstream: () => ({
+        async publish(subject, data) {
+          published.push({ subject, data: JSON.parse(new TextDecoder().decode(data)) });
+          return { seq: published.length, stream: 'OPENCLAW_SHARED' };
+        },
+      }),
+    };
+    const offerer = createOfferer(nc, 'my-node', {
+      retrievalPipeline: createRetrievalPipeline({ knowledgeDb, extractionDb, respect_privacy: false }),
+    });
+    const eventId = crypto.randomUUID();
+    const result = await offerer._processBroadcast({
+      event_id: eventId,
+      event_type: 'context.broadcast',
+      event_version: 1,
+      entity_id: eventId,
+      entity_type: 'session',
+      timestamp: new Date().toISOString(),
+      causation_id: null,
+      correlation_id: null,
+      actor: { type: 'system', id: 'broadcaster-peer-node' },
+      node_id: 'peer-node',
+      idempotency_key: eventId,
+      data: { themes: ['federation', 'memory infrastructure'], entities: ['NATS'], intensity: 'interested', ttl_minutes: 60, dedup_key: 'abc123' },
+    });
+    assert.equal(result.action, 'offered', JSON.stringify({ result, stats: offerer.stats }));
+    assert.ok(published[0].data.data.artifacts.every(a => a.relevance_score >= 0.55 && a.relevance_score <= 1));
   });
 });
