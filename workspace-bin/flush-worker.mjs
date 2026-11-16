@@ -17,8 +17,13 @@
  * No embedder is loaded in this worker.
  */
 import { parentPort, workerData } from 'node:worker_threads';
+import { workerQueueReport } from '../lib/ollama-queue.mjs';
 
 const { kind = 'flush', stateDb } = workerData;
+
+// Every message carries this thread's ollama-queue counters: the daemon folds
+// them into the snapshot health-watch reads for stuck-model recovery.
+const post = (msg) => parentPort.postMessage({ ...msg, queue: workerQueueReport() });
 
 try {
   if (kind === 'import') {
@@ -28,7 +33,7 @@ try {
     // scan (the daemon's own store ran that once at boot).
     const store = new SessionStore({ dbPath: stateDb, integrityCheck: 'quick' });
     const result = await store.importSession(jsonlPath, { source, format });
-    parentPort.postMessage({ ok: true, result });
+    post({ ok: true, result });
   } else if (kind === 'importDir') {
     const { sources } = workerData;
     const { SessionStore } = await import('../lib/session-store.mjs');
@@ -38,7 +43,7 @@ try {
       const r = await store.importDirectory(source.path, { source: source.name, format: source.format });
       for (const imported of r.results) results.push({ ...imported, source: source.name });
     }
-    parentPort.postMessage({ ok: true, result: { results } });
+    post({ ok: true, result: { results } });
   } else {
     const { jsonlPath, memoryMdPath, charBudget, checkShouldFlush, contextWindowTokens } = workerData;
     const { runFlush, shouldFlush, USE_LLM_EXTRACTION } = await import('../lib/pre-compression-flush.mjs');
@@ -46,7 +51,7 @@ try {
     if (checkShouldFlush) {
       check = await shouldFlush(jsonlPath, { contextWindowTokens: contextWindowTokens || 200000 });
       if (!check.shouldFlush) {
-        parentPort.postMessage({ ok: true, result: { flushed: false, skippedByCheck: true, check } });
+        post({ ok: true, result: { flushed: false, skippedByCheck: true, check } });
       }
     }
     if (!check || check.shouldFlush) {
@@ -65,11 +70,11 @@ try {
       }
       const result = await runFlush(jsonlPath, memoryMdPath, { charBudget, llmClient, extractionStore });
       if (check) result.check = check;
-      parentPort.postMessage({ ok: true, result });
+      post({ ok: true, result });
     }
   }
 } catch (err) {
-  parentPort.postMessage({ ok: false, error: err?.message || String(err) });
+  post({ ok: false, error: err?.message || String(err) });
 }
 // Let the message drain, then exit — undici keep-alive sockets from the LLM
 // client can otherwise hold the worker's loop open for minutes.

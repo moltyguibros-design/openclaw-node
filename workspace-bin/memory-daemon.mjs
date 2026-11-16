@@ -51,7 +51,7 @@ import { createExtractionTrigger } from '../lib/extraction-trigger.mjs';
 import { ensureSharedStream, inspectSharedStream, verifySharedStreamConfig } from '../lib/shared-event-stream.mjs';
 import { NATS_RECONNECT_OPTS } from '../lib/federation-resilience.mjs';
 import { createConcurrencyGuard } from '../lib/concurrency-guard.mjs';
-import { exportStateSnapshot, getState as getOllamaQueueState, setStateObserver, markExternalJob, clearExternalJob } from '../lib/ollama-queue.mjs';
+import { exportStateSnapshot, getState as getOllamaQueueState, setStateObserver, markExternalJob, clearExternalJob, foldWorkerQueueState } from '../lib/ollama-queue.mjs';
 import { loadEventSchemas } from '../lib/event-schemas.mjs';
 import { createMemoryWatcher, runStoreHealthProbes, appendWatcherRecord } from '../lib/memory-watcher.mjs';
 import { initDatabase as initKnowledgeDb } from '../lib/mcp-knowledge/core.mjs';
@@ -356,7 +356,10 @@ function runMemoryWorker(data, timeoutMs = FLUSH_WORKER_TIMEOUT_MS) {
     }, timeoutMs);
     timer.unref();
     const settle = (fn, v) => { if (!settled) { settled = true; clearTimeout(timer); clearExternalJob(jobId); fn(v); } };
-    w.once('message', (m) => settle(m.ok ? resolve : reject, m.ok ? m.result : new Error(m.error)));
+    w.once('message', (m) => {
+      if (!settled) foldWorkerQueueState(m.queue);
+      settle(m.ok ? resolve : reject, m.ok ? m.result : new Error(m.error));
+    });
     w.once('error', (e) => settle(reject, e));
     w.once('exit', (code) => { if (code !== 0) settle(reject, new Error(`memory worker (${data.kind || 'flush'}) exited with code ${code}`)); });
   });

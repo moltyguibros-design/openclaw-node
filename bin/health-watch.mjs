@@ -131,6 +131,7 @@ export async function getQueueHealth(snapshotPath) {
 const RESTART_WINDOW_MS = 15 * 60 * 1000;
 const RESTART_MAX = 3;
 let _localRestarts = [];
+let _lastUnloadEvidence = null;
 
 /**
  * Detect a stuck daemon-side Ollama (>=3 consecutive extraction timeouts in
@@ -167,6 +168,11 @@ export async function maybeAutoRestartOllama(snapshotPath) {
   }
 
   _localRestarts = _localRestarts.filter(ts => Date.now() - ts < RESTART_WINDOW_MS);
+  // The daemon's streak only resets on its next successful extraction, so the
+  // snapshot still reads stuck right after an unload; act again only once new
+  // timeouts have been counted.
+  const evidence = Number.isFinite(snapshot.totals?.timeouts) ? `${snapshot.pid}:${snapshot.totals.timeouts}` : null;
+  if (evidence && evidence === _lastUnloadEvidence) return false;
   if (_localRestarts.length >= RESTART_MAX) {
     console.warn(`[health-watch] Ollama stuck but restart rate-limited (${_localRestarts.length} restarts in last 15min) — abstaining`);
     return false;
@@ -183,6 +189,7 @@ export async function maybeAutoRestartOllama(snapshotPath) {
     });
     if (!res.ok) throw new Error(`unload returned ${res.status}`);
     _localRestarts.push(Date.now());
+    _lastUnloadEvidence = evidence;
     return true;
   } catch (err) {
     console.error(`[health-watch] ollama unload failed: ${err.message}`);
@@ -193,15 +200,21 @@ export async function maybeAutoRestartOllama(snapshotPath) {
 /**
  * Format the queue-state section appended to the health report.
  */
-export function formatQueueSection(qs) {
+export function formatQueueSection(qs, restarts = _localRestarts) {
   if (!qs) return '';
   const lines = ['', '## Queue State', ''];
+  // Flush/import extraction runs in daemon worker threads; the snapshot lists
+  // them as external_jobs, not as current_job.
+  const external = Array.isArray(qs.external_jobs) ? qs.external_jobs : [];
   if (qs.current_job) {
     const ela = (qs.current_job.elapsed_ms / 1000).toFixed(1);
     const eta = qs.current_job.eta_ms ? `, ETA ~${Math.round(qs.current_job.eta_ms / 60000)}min` : '';
     lines.push(`- **In flight:** ${qs.current_job.type} (${ela}s elapsed${eta}, model=${qs.current_job.model || 'unknown'})`);
-  } else {
+  } else if (!external.length) {
     lines.push('- **In flight:** none (queue idle)');
+  }
+  for (const j of external) {
+    lines.push(`- **In flight (worker):** ${j.type}${j.detail ? ` ${j.detail}` : ''} (${(j.elapsed_ms / 1000).toFixed(1)}s elapsed)`);
   }
   lines.push(`- **Queue depth:** ${qs.queue_depth} pending`);
   lines.push(`- **History (rolling 10):** extraction avg=${qs.history.extraction.avg_ms}ms (n=${qs.history.extraction.count}); analysis avg=${qs.history.analysis.avg_ms}ms (n=${qs.history.analysis.count})`);
@@ -215,9 +228,11 @@ export function formatQueueSection(qs) {
     const f = qs.recent_fallbacks[qs.recent_fallbacks.length - 1];
     lines.push(`- **Last fallback:** ${f.reason} at ${new Date(f.ts).toISOString()}`);
   }
-  if (qs.recent_restarts.length > 0) {
-    const r = qs.recent_restarts[qs.recent_restarts.length - 1];
-    lines.push(`- **Last auto-restart:** ${r.reason} at ${new Date(r.ts).toISOString()}`);
+  // The daemon never records restarts (health-watch performs them), so this
+  // process's own unload log is the only source.
+  if (restarts.length > 0) {
+    const inWindow = restarts.filter(ts => Date.now() - ts < RESTART_WINDOW_MS).length;
+    lines.push(`- **Last auto-unload:** stuck extraction at ${new Date(restarts[restarts.length - 1]).toISOString()} (${inWindow} in last 15min)`);
   }
   return lines.join('\n');
 }
