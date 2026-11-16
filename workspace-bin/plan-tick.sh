@@ -260,7 +260,8 @@ fi
 # to something without -pre/-mid — a self-written string, no tests, no evidence
 # (review: the tick was judge of its own done-ness). Now a close is accepted only
 # if the closing commit carries a Runtime-Evidence: trailer AND the close check
-# (default `npm test`; WORKPLAN_CLOSE_CHECK overrides, `none` disables loudly)
+# (default `npm test`; WORKPLAN_CLOSE_CHECK overrides, `none` disables loudly;
+# the viewer exports it from the plan's automation.json `close_check`)
 # is green. A refused close writes BLOCKED.md so the chain stops and the operator
 # decides; nothing is auto-reverted.
 close_gate() {

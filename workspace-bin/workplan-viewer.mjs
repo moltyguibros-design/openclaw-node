@@ -466,6 +466,7 @@ function planSummary(plan, { dirty = true } = {}) {
 //   "interval_seconds": 1800,
 //   "stdout_path":      "...",
 //   "stderr_path":      "...",
+//   "close_check":      "node --test test/foo.test.mjs",   // optional; "none" disables
 //   "env": { "PATH": "...", "HOME": "..." }
 // }
 
@@ -522,6 +523,7 @@ function writeAutomationConfig(plan, cfg) {
     throttle_seconds: Number(cfg.throttle_seconds) || 30,
     stdout_path: cfg.stdout_path,
     stderr_path: cfg.stderr_path,
+    ...(cfg.close_check ? { close_check: String(cfg.close_check) } : {}),
     env: cfg.env || {},
   };
   fs.writeFileSync(file, JSON.stringify(out, null, 2) + '\n');
@@ -533,12 +535,19 @@ function plistEscape(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// plan-tick.sh reads the close gate's test command from WORKPLAN_CLOSE_CHECK;
+// without it every plan gates its closes on the root `npm test`.
+function closeCheckEnv(cfg) {
+  return cfg.close_check ? { WORKPLAN_CLOSE_CHECK: String(cfg.close_check) } : {};
+}
+
 function generatePlistXml(cfg) {
   // Inject auto-pause env vars so the wrapper can unload this job on fast-exit
   // paths (BLOCKED.md, dirty tree on clean VERSION, plan complete). Otherwise
   // chain mode polls the wall forever and interval mode wastes a slot per tick.
   const env = {
     ...(cfg.env || {}),
+    ...closeCheckEnv(cfg),
     WORKPLAN_AUTOPAUSE: '1',
     WORKPLAN_PLIST_LABEL: cfg.plist_label,
   };
@@ -1868,6 +1877,7 @@ const server = http.createServer(async (req, res) => {
           throttle_seconds: body.throttle_seconds != null ? Number(body.throttle_seconds) : current.throttle_seconds,
           stdout_path:      body.stdout_path      ?? current.stdout_path,
           stderr_path:      body.stderr_path      ?? current.stderr_path,
+          close_check:      body.close_check      ?? current.close_check,
           env:              body.env              ?? current.env,
         };
         if (next.mode !== 'interval' && next.mode !== 'chain') {
@@ -1959,6 +1969,7 @@ const server = http.createServer(async (req, res) => {
           stdio: 'ignore',
           env: {
             ...process.env,
+            ...closeCheckEnv(cfg),
             // Don't auto-pause launchd for manual runs (in case it IS loaded).
             WORKPLAN_AUTOPAUSE: '0',
             // Clear nested-claude guard so the manual fire works from inside

@@ -246,6 +246,26 @@ test('authenticated controls preserve errors and execute only the fixture comman
   assert.ok(!f.output().includes(f.master));
 });
 
+test('a plan close_check reaches the tick as WORKPLAN_CLOSE_CHECK from the plist and from run-once', async t => {
+  const f = await fixture(t);
+  const opts = { token: f.master };
+  const seen = path.join(f.root, 'close-check');
+  const tick = path.join(f.root, 'env-tick.sh');
+  fs.writeFileSync(tick, '#!/bin/sh\nprintf %s "$WORKPLAN_CLOSE_CHECK" > "' + seen + '"\n', { mode: 0o700 });
+  const plist = path.join(f.root, 'fixture.plist');
+  const config = { tick_command: tick, working_dir: f.root, plist_label: 'fixture-only', plist_path: plist,
+    stdout_path: path.join(f.root, 'stdout'), stderr_path: path.join(f.root, 'stderr'), interval_seconds: 1800,
+    close_check: 'node --test test/service-gate.test.mjs' };
+  assert.equal((await f.request('/api/plans/fixture/automation/config', { ...opts, method: 'PUT', body: config })).status, 200);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.plan, 'automation.json'), 'utf8')).close_check, config.close_check);
+  assert.equal((await f.request('/api/plans/fixture/automation/load', { ...opts, method: 'POST' })).status, 200);
+  assert.match(fs.readFileSync(plist, 'utf8'),
+    /<key>WORKPLAN_CLOSE_CHECK<\/key>\n\s*<string>node --test test\/service-gate\.test\.mjs<\/string>/);
+  assert.equal((await f.request('/api/plans/fixture/automation/run-once', { ...opts, method: 'POST' })).status, 200);
+  for (let i = 0; i < 50 && !(fs.existsSync(seen) && fs.statSync(seen).size); i++) await sleep(20);
+  assert.equal(fs.readFileSync(seen, 'utf8'), config.close_check);
+});
+
 test('default automation config points at the repo that holds memory-plan/plans', async t => {
   const f = await fixture(t);
   const r = await f.request('/api/plans/fixture/automation', { token: f.master });
