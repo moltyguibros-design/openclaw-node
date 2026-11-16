@@ -10,7 +10,7 @@ const { describe, it, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 
 const daemon = require('../bin/mesh-task-daemon.js');
-const { createSession, CollabStore, COLLAB_STATUS } = require('../lib/mesh-collab');
+const { createSession, issueMemberToken, CollabStore, COLLAB_STATUS } = require('../lib/mesh-collab');
 const { isOpenClawWorkerProvider } = require('../lib/llm-providers');
 
 class MockKV {
@@ -348,7 +348,9 @@ describe('round timeout for parallel / review / sequential (mesh-core #9)', () =
     quiet(t);
     const ctx = makeContext();
     const s = await sequentialSession(ctx, new Date().toISOString());
-    await daemon.__test.handleCollabLeave(msg({ session_id: s.session_id, node_id: 'b', reason: 'worktree isolation failed' }));
+    const { token, hash } = issueMemberToken();
+    await ctx.collabStore._updateWithCAS(s.session_id, (sess) => { sess.nodes.find(n => n.node_id === 'b').token_hash = hash; return sess; });
+    await daemon.__test.handleCollabLeave(msg({ session_id: s.session_id, node_id: 'b', member_token: token, reason: 'worktree isolation failed' }));
     const after = await ctx.collabStore.get(s.session_id);
     assert.equal(after.current_turn, 'c');
     assert.deepEqual(after.turn_order, ['a', 'c']);

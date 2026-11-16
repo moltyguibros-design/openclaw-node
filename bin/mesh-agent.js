@@ -1949,6 +1949,7 @@ async function executeCollabTask(task) {
     await natsRequest('mesh.collab.leave', {
       session_id: sessionId,
       node_id: NODE_ID,
+      member_token: session.member_token,
       reason: 'worktree isolation failed',
     }).catch(err => warn(`mesh.collab.leave: ${err.message}`));
     writeAgentState('idle', null);

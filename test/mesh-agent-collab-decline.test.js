@@ -130,13 +130,14 @@ describe('collab member without worktree isolation (mesh-core #9)', () => {
   it('leaves the session it joined and drops its round subscription', async () => {
     // MESH_WORKSPACE is not a git repository here, so createWorktree fails.
     const task = recruitingTask({ llm_provider: 'claude' });
-    const calls = fakeBus(task, { join: { session_id: task.collab_session_id, status: 'active', nodes: [{ node_id: 'node-local' }] } });
+    const calls = fakeBus(task, { join: { session_id: task.collab_session_id, status: 'active', nodes: [{ node_id: 'node-local' }], member_token: 'tok-local' } });
     await agent.__test.executeCollabTask(task);
 
     const leave = calls.find((c) => c.subject === 'mesh.collab.leave');
     assert.ok(leave, 'the member withdraws from the session');
     assert.equal(leave.payload.session_id, task.collab_session_id);
     assert.equal(leave.payload.node_id, 'node-local');
+    assert.equal(leave.payload.member_token, 'tok-local', 'the daemon refuses a leave without the join token');
     assert.equal(calls.unsubscribed, 1);
     assert.equal(calls.filter((c) => c.subject === 'mesh.collab.reflect').length, 0);
   });
