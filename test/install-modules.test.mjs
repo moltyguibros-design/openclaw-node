@@ -192,6 +192,25 @@ test('workspace agent docs have one source: identity/, shipped by both install.s
   assert.ok(agents.includes('## Skill Enforcement'));
 });
 
+test('every unit that runs a repo-shipped bin/ tool execs it from ${OPENCLAW_REPO_DIR}, on both OSes', () => {
+  const units = [
+    ...readdirSync(join(ROOT, 'services/launchd')).map((f) => `services/launchd/${f}`),
+    ...readdirSync(join(ROOT, 'services/systemd')).map((f) => `services/systemd/${f}`),
+  ];
+  let binUnits = 0;
+  for (const rel of units) {
+    const src = readFileSync(join(ROOT, rel), 'utf8');
+    assert.doesNotMatch(src, /\$\{HOME\}\/openclaw\/bin\//, `${rel} execs the ~/openclaw copy`);
+    if (!/\$\{OPENCLAW_REPO_DIR\}\/bin\//.test(src)) continue;
+    binUnits++;
+    for (const [, root] of src.matchAll(/NODE_PATH(?:=|<\/key>\s*<string>)([^:\n<]+)\/node_modules/g)) {
+      assert.equal(root, '${OPENCLAW_REPO_DIR}', `${rel} NODE_PATH`);
+    }
+    for (const [, dir] of src.matchAll(/^WorkingDirectory=(.*)$/gm)) assert.equal(dir, '${OPENCLAW_REPO_DIR}', `${rel} WorkingDirectory`);
+  }
+  assert.ok(binUnits >= 16, `bin/ units found: ${binUnits}`);
+});
+
 test('preserved behaviors sit in their modules', () => {
   assert.ok(moduleSrc['env.sh'].includes('claude_project_path() {'));
   assert.ok(moduleSrc['env.sh'].includes("sed 's|[/.]|-|g'"));

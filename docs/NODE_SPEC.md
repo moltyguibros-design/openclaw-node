@@ -98,7 +98,8 @@ Written to `~/.openclaw/openclaw.env` by install (generated where marked ⚙; RA
     lib/                        shared libs INCLUDING mcp-knowledge (embedder)
     node_modules/               symlinks: better-sqlite3, bindings, nats, js-yaml, …
     memory/  .learnings/  .boot/  skills/  projects/mission-control/
-~/openclaw/{bin,lib,node_modules}   mesh tree (Linux exec root; macOS units exec from the repo)
+~/openclaw/{bin,lib,node_modules}   CLI copy mesh-deploy installs (the `mesh` command); on mesh-install nodes it is also the checkout
+<repo checkout> (OPENCLAW_REPO_DIR)  exec root: every unit that runs a repo-shipped bin/ tool execs ${OPENCLAW_REPO_DIR}/bin, on macOS and Linux alike
 ~/Library/LaunchAgents/ai.openclaw.*.plist   (or ~/.config/systemd/user/openclaw-*)
 ```
 

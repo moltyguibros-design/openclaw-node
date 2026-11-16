@@ -9,7 +9,7 @@
     <key>ProgramArguments</key>
     <array>
       <string>/bin/bash</string>
-      <string>${HOME}/openclaw/bin/log-rotate</string>
+      <string>${OPENCLAW_REPO_DIR}/bin/log-rotate</string>
     </array>
     <key>StartCalendarInterval</key>
     <dict>
