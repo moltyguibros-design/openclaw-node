@@ -257,24 +257,36 @@ const MEMORY_INJECT_CAP = Number(process.env.MESH_MEMORY_INJECT_CHARS ?? 4000);
 const MEMORY_INJECT_PORT = Number(process.env.MEMORY_INJECT_PORT || 7893);
 const MEMORY_INJECT_TOKEN_PATH = path.join(process.env.HOME || '', '.openclaw', 'config', 'memory-injection-token');
 
-function recallForTask(task) {
+// Async with an abort timeout: a synchronous curl here froze the agent's event loop
+// (alive checks, heartbeats, NATS) for as long as the inject-server took to answer.
+async function recallForTask(task) {
   if (process.env.MESH_MEMORY_RECALL === 'off' || !task) return null;
   const query = [task.title, task.description].filter(Boolean).join('\n').trim().slice(0, 4000);
   if (!query) return null;
   let token;
-  try { token = fs.readFileSync(MEMORY_INJECT_TOKEN_PATH, 'utf8').trim(); } catch { return null; }
+  try { token = (await fs.promises.readFile(MEMORY_INJECT_TOKEN_PATH, 'utf8')).trim(); } catch { return null; }
   if (!token) return null;
   try {
-    const out = execFileSync('curl', [
-      '-s', '--max-time', '4',
-      '-X', 'POST', `http://127.0.0.1:${MEMORY_INJECT_PORT}/memory/inject`,
-      '-H', 'content-type: application/json',
-      '-H', `authorization: Bearer ${token}`,
-      '-d', JSON.stringify({ prompt: query }),
-    ], { encoding: 'utf8', timeout: 6000, stdio: ['ignore', 'pipe', 'ignore'] });
-    const block = JSON.parse(out).block;
+    const res = await fetch(`http://127.0.0.1:${MEMORY_INJECT_PORT}/memory/inject`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ prompt: query }),
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) return null;
+    const { block } = await res.json();
     return (typeof block === 'string' && block.trim()) ? block.trim() : null;
   } catch { return null; }
+}
+
+/**
+ * Fetch the task-relevant recall before a prompt is built; the builders stay
+ * synchronous and read it from the task (like _hyperagentStrategy).
+ */
+async function prepareMemoryRecall(task) {
+  const recalled = MEMORY_INJECT_CAP > 0 ? await recallForTask(task) : null;
+  Object.defineProperty(task, '_memoryRecall', { value: recalled, configurable: true, writable: true });
+  return recalled;
 }
 
 let memCache = { mtime: -1, content: '' };
@@ -289,7 +301,7 @@ function readNodeMemory() {
 
 function injectMemory(parts, task) {
   if (!(MEMORY_INJECT_CAP > 0)) return;
-  const recalled = recallForTask(task);
+  const recalled = task?._memoryRecall;
   if (recalled) {
     parts.push('## Node memory (task-relevant recall)');
     parts.push('');
@@ -1867,6 +1879,7 @@ async function executeCollabTask(task) {
       log(`COLLAB ${stepLabel}: Starting work (role: ${my_role}, scope: ${JSON.stringify(my_scope)})`);
 
       // Build prompt — circling uses directed inputs, other modes use shared intel
+      await prepareMemoryRecall(task);
       const prompt = isCircling
         ? buildCirclingPrompt(task, roundData)
         : buildCollabPrompt(task, round_number, shared_intel, my_scope, my_role, round_role);
@@ -2140,6 +2153,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
     log(`Attempt ${attempt}/${MAX_ATTEMPTS} (${remaining.toFixed(1)}m remaining)`);
 
     // Build prompt — attempt number injected as discrete integer for strategy branching
+    await prepareMemoryRecall(task);
     const prompt = attempt === 1
       ? buildInitialPrompt(task)
       : buildRetryPrompt(task, attempts, attempt);
@@ -2632,7 +2646,7 @@ if (require.main === module) {
 
 // Test surface (no NATS): the prompt builders + harness injectors, and the Foreman
 // completion gate + supervision wrapper (they spawn the task's provider, nothing else).
-module.exports = { buildCirclingPrompt, buildCollabPrompt, buildInitialPrompt, buildRetryPrompt, injectRules, injectRole, injectMemory, injectHyperagentStrategy, recallForTask, readNodeMemory, recordHyperagentTask, deriveExecutionClass, foremanVerify, superviseTask };
+module.exports = { buildCirclingPrompt, buildCollabPrompt, buildInitialPrompt, buildRetryPrompt, injectRules, injectRole, injectMemory, injectHyperagentStrategy, recallForTask, prepareMemoryRecall, readNodeMemory, recordHyperagentTask, deriveExecutionClass, foremanVerify, superviseTask };
 // Review-gate, worker-error and collab-round surfaces (test/mesh-agent-review-gate.test.js,
 // test/mesh-agent-terminal-task.test.js, test/mesh-agent-collab-rounds.test.js): the real
 // merge/review handlers, the real daemon client and error path, and the real collab round

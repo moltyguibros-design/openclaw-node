@@ -44,9 +44,9 @@ test('HyperAgent strategy is mechanically injected into all worker prompt shapes
   }
 });
 
-test('P1: recallForTask returns null when disabled / no task (clean fallback, never throws)', () => {
-  assert.equal(m.recallForTask(task), null);
-  assert.equal(m.recallForTask(null), null);
+test('P1: recallForTask returns null when disabled / no task (clean fallback, never throws)', async () => {
+  assert.equal(await m.recallForTask(task), null);
+  assert.equal(await m.recallForTask(null), null);
 });
 
 test('P1: readNodeMemory is mtime-cached and returns the node index', () => {
