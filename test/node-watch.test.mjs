@@ -489,6 +489,18 @@ describe('node-watch observed verdicts', () => {
     assert.equal((await target('store.state_db').run(envFor(absent))).status, STATUS.BROKEN);
   });
 
+  it('knowledge index grades the daemon job stamp, not the MCP-client-only workspace stamp', async () => {
+    const meta = (values) => makeCtx({ queryDb: (_p, fn) => fn({ prepare: () => ({ get: (key) => (key in values ? { value: values[key] } : undefined) }) }) });
+    const hoursAgo = (h) => String(Date.now() - h * 3600_000);
+    // No MCP client for a day, daemon job ran 5 min ago: indexing works.
+    const daemonFresh = meta({ last_index_time: hoursAgo(24), last_session_index_time: hoursAgo(5 / 60) });
+    assert.equal((await target('mem.knowledge_index').run(envFor(daemonFresh))).status, STATUS.WORKING);
+    const daemonStale = meta({ last_index_time: hoursAgo(0.1), last_session_index_time: hoursAgo(3) });
+    assert.equal((await target('mem.knowledge_index').run(envFor(daemonStale))).status, STATUS.BROKEN);
+    const never = meta({ last_index_time: hoursAgo(0.1) });
+    assert.equal((await target('mem.knowledge_index').run(envFor(never))).status, STATUS.UNKNOWN);
+  });
+
   it('graph cache fresh → WORKING; stale → BROKEN (channel 5 degraded)', async () => {
     const fresh = makeCtx({ queryDb: makeQueryDb({ metaValue: new Date().toISOString() }) });
     assert.equal((await target('obs.graph_cache').run(envFor(fresh))).status, STATUS.WORKING);

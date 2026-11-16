@@ -74,3 +74,20 @@ test('knowledge-index-job prepares a fixed number of statements regardless of se
   assert.equal(large.prepares, small.prepares,
     `prepares grew with the archive: ${small.prepares} at 3 sessions, ${large.prepares} at 30`);
 });
+
+test('knowledge-index-job stamps last_session_index_time on every run, even with nothing to index', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kidx-stamp-'));
+  try {
+    const { statePath, knowledgePath } = seed(dir, 2);
+    const before = Date.now();
+    const res = spawnSync(process.execPath, [JOB, statePath, knowledgePath], { cwd: ROOT, encoding: 'utf8', timeout: 60_000 });
+    assert.deepEqual(JSON.parse(res.stdout.trim().split('\n').pop()), { indexed: 0, chunks: 0 }, res.stderr);
+    const db = new Database(knowledgePath, { readonly: true });
+    const row = db.prepare("SELECT value FROM meta WHERE key = 'last_session_index_time'").get();
+    db.close();
+    assert.ok(row, 'no last_session_index_time stamp');
+    assert.ok(Number(row.value) >= before && Number(row.value) <= Date.now(), `stamp ${row.value} not from this run`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -54,6 +54,10 @@ try {
       chunks += result.chunks;
     }
   }
+  // node-watch's mem.knowledge_index grades this stamp: it proves the job ran,
+  // with or without new work.
+  knowledgeDb.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)')
+    .run('last_session_index_time', Date.now().toString());
   process.stdout.write(JSON.stringify({ indexed, chunks }) + '\n');
 } finally {
   stateDb.close();

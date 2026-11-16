@@ -68,7 +68,7 @@ delegates to a `node-acceptance` probe · **applic.** = applicability gate (OFF 
 | Memory daemon | process alive | reuse (health) |
 | Session ingest | configured transcript turns match archived counts and last timestamps | live |
 | LLM extraction | entities present, latest `last_seen` | live |
-| Knowledge index | `.knowledge.db` `last_index_time` < 2h | live |
+| Knowledge index | `.knowledge.db` `last_session_index_time` < 2h (stamped by the daemon's knowledge-index-job on every run; `last_index_time` is MCP-client driven and not graded) | live |
 | Inject server :7893 | authorized POST returns block + items | reuse (`MEM-L2-INJECT`) |
 | Memory watcher | `watcher.jsonl` fresh < 30min | live |
 
