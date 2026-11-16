@@ -20,8 +20,9 @@ import { initDatabase, indexSessionTurns } from '../lib/mcp-knowledge/core.mjs';
 const [statePath, knowledgePath, batchArg] = process.argv.slice(2);
 const batchLimit = Number(batchArg) || 5;
 
-const knowledgeDb = initDatabase(knowledgePath);
-// R22 (repair 5.6): no integrity scan on the 10-min indexing path.
+// R22 (repair 5.6): no integrity scan on the 10-min indexing path; the daemon
+// scans both DBs when it opens them at boot.
+const knowledgeDb = initDatabase(knowledgePath, { integrityCheck: false });
 const stateDb = openStore(statePath, { readonly: true, integrityCheck: false });
 try {
   const allSessions = stateDb.prepare(

@@ -24,13 +24,15 @@ try {
   if (kind === 'import') {
     const { jsonlPath, source, format } = workerData;
     const { SessionStore } = await import('../lib/session-store.mjs');
-    const store = new SessionStore({ dbPath: stateDb });
+    // Spawned every 10 min and on every flush: the daemon already scanned
+    // state.db when it opened it at boot.
+    const store = new SessionStore({ dbPath: stateDb, integrityCheck: false });
     const result = await store.importSession(jsonlPath, { source, format });
     parentPort.postMessage({ ok: true, result });
   } else if (kind === 'importDir') {
     const { sources } = workerData;
     const { SessionStore } = await import('../lib/session-store.mjs');
-    const store = new SessionStore({ dbPath: stateDb });
+    const store = new SessionStore({ dbPath: stateDb, integrityCheck: false });
     const results = [];
     for (const source of sources) {
       const r = await store.importDirectory(source.path, { source: source.name, format: source.format });
@@ -55,7 +57,7 @@ try {
         llmClient = createLlmClient();
         try {
           const { createExtractionStore } = await import('../lib/extraction-store.mjs');
-          extractionStore = createExtractionStore({ dbPath: stateDb });
+          extractionStore = createExtractionStore({ dbPath: stateDb, integrityCheck: false });
         } catch {
           // runFlush degrades to the regex path without a store — same behavior
           // the daemon's own getExtractionStore() failure produces.
