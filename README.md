@@ -505,7 +505,8 @@ every machine:
 1. **Lead:** trust every worker's identity pubkey (each worker prints it at the end of
    `openclaw-node-init`; the join token carries the lead's key the other way):
    `node bin/openclaw-trust-peer.mjs <worker-id> <pubkey> --role worker --sync-nats`
-   Set `OPENCLAW_NATS_AUTH=nkey` in `openclaw.env`, run `node bin/openclaw-trust-peer.mjs
+   Set `OPENCLAW_NATS_AUTH=nkey` and `OPENCLAW_NODE_ROLE=lead` in the lead's `openclaw.env` (nkey
+   mode refuses to render while the role is unset), run `node bin/openclaw-trust-peer.mjs
    --sync-nats` (renders `~/.openclaw/config/nats-auth.conf` with a users list plus a legacy
    password user, and reloads nats-server), then restart the daemons.
 2. **Workers:** set `OPENCLAW_NATS_AUTH=nkey` in `openclaw.env`, restart the daemons. Workers
