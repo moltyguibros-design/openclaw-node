@@ -255,6 +255,8 @@ if [ -n "$CLUSTER_PEERS" ]; then
 fi
 
 generate_config "$REPO_DIR/config/obsidian-sync.json.template" "$OPENCLAW_ROOT/config/obsidian-sync.json"
+# lib/promotion-policy.mjs reads it here: the workspace copy of lib/ has no config/ beside it.
+generate_config "$REPO_DIR/config/promotion-policy.yaml" "$OPENCLAW_ROOT/config/promotion-policy.yaml"
 generate_config "$REPO_DIR/config/openclaw.json.template" "$OPENCLAW_ROOT/openclaw.json"
 
 # ============================================================

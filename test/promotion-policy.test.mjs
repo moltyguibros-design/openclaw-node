@@ -1,14 +1,19 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFile, mkdir, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { writeFile, mkdir, rm, mkdtemp } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import {
   loadPromotionPolicy,
   validatePromotionPolicy,
-  DEFAULT_POLICY_PATH,
+  resolvePromotionPolicyPath,
+  REPO_POLICY_PATH,
   POLICY_CATEGORIES,
 } from '../lib/promotion-policy.mjs';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 describe('promotion-policy', () => {
   const validPolicy = {
@@ -20,7 +25,7 @@ describe('promotion-policy', () => {
 
   describe('loadPromotionPolicy', () => {
     it('loads and validates the default config file', async () => {
-      const policy = await loadPromotionPolicy(DEFAULT_POLICY_PATH);
+      const policy = await loadPromotionPolicy(REPO_POLICY_PATH);
       assert.deepStrictEqual(policy.automatic, ['kanban_events']);
       assert.deepStrictEqual(policy.explicit, ['share_true']);
       assert.strictEqual(policy.threshold.concept_mention_count, 10);
@@ -107,9 +112,32 @@ describe('promotion-policy', () => {
     });
   });
 
+  // A deployed lib/ (~/.openclaw/workspace/lib) has no config/ beside it: the
+  // lib-relative default was ENOENT everywhere but a repo checkout.
+  describe('resolvePromotionPolicyPath', () => {
+    it('prefers $PROMOTION_POLICY, then ~/.openclaw/config, then the repo copy', async () => {
+      const home = await mkdtemp(join(tmpdir(), 'promo-home-'));
+      try {
+        assert.equal(resolvePromotionPolicyPath({ env: {}, home }), REPO_POLICY_PATH);
+        const nodePath = join(home, '.openclaw', 'config', 'promotion-policy.yaml');
+        await mkdir(dirname(nodePath), { recursive: true });
+        await writeFile(nodePath, readFileSync(REPO_POLICY_PATH));
+        assert.equal(resolvePromotionPolicyPath({ env: {}, home }), nodePath);
+        assert.equal(resolvePromotionPolicyPath({ env: { PROMOTION_POLICY: '/x/p.yaml' }, home }), '/x/p.yaml');
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
+    });
+
+    it('the installer puts the policy where the resolver looks', () => {
+      const config = readFileSync(join(ROOT, 'scripts/install/config.sh'), 'utf8');
+      assert.match(config, /generate_config "\$REPO_DIR\/config\/promotion-policy\.yaml" "\$OPENCLAW_ROOT\/config\/promotion-policy\.yaml"/);
+    });
+  });
+
   describe('constants', () => {
-    it('DEFAULT_POLICY_PATH ends with config/promotion-policy.yaml', () => {
-      assert.ok(DEFAULT_POLICY_PATH.endsWith('config/promotion-policy.yaml'));
+    it('REPO_POLICY_PATH ends with config/promotion-policy.yaml', () => {
+      assert.ok(REPO_POLICY_PATH.endsWith('config/promotion-policy.yaml'));
     });
 
     it('POLICY_CATEGORIES contains all four categories', () => {

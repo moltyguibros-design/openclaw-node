@@ -17,7 +17,7 @@
  * Environment:
  *   NATS_URL           — NATS server URL (default: nats://localhost:4222)
  *   OPENCLAW_NODE_ID   — Node identifier (default: lib/node-id resolveNodeId())
- *   PROMOTION_POLICY   — Path to policy YAML (default: config/promotion-policy.yaml)
+ *   PROMOTION_POLICY   — Path to policy YAML (default: ~/.openclaw/config/promotion-policy.yaml, else the repo copy)
  */
 
 import crypto from 'node:crypto';
