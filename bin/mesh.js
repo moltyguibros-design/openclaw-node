@@ -3,15 +3,22 @@
 /**
  * mesh — CLI bridge for OpenClaw ↔ NATS mesh interaction.
  *
+ * ARCHITECTURE:
+ *   OpenClaw (via bash tool) → mesh CLI → NATS → mesh-task-daemon / mesh-deploy-listener
+ *
  * This is a short-lived process: connects to NATS, sends the request,
  * waits for a response, prints the result, exits. No daemon. No state.
  *
  * SUBCOMMANDS (`mesh help` lists them all):
  *   mesh status                          — every node in MESH_NODE_HEALTH
  *   mesh health [--all] [--json]         — ok / degraded / down from MESH_NODE_HEALTH
- *   mesh ls [subdir]                     — list shared folder contents
- *   mesh put <filepath> [subdir]         — copy file into shared folder
- *   mesh submit | tasks | plan | deploy  — task daemon and fleet deploy
+ *   mesh submit | tasks | plan           — the mesh task daemon (mesh.tasks.*, mesh.plans.*)
+ *   mesh deploy                          — signed fleet deploy trigger (mesh.deploy.trigger)
+ *
+ * The exec/capture/broadcast/repair/ls/put commands were removed: their
+ * responder (~/openclaw/agent.js, subjects openclaw.<node>.*) was retired on
+ * 2026-10-02, mesh-health.sh/mesh-repair.sh never shipped, and nothing synced
+ * ~/openclaw/shared/ between nodes.
  *
  * ENVIRONMENT:
  *   OPENCLAW_NATS  — NATS server URL (auto-detected from env or ~/.openclaw/openclaw.env)
@@ -24,7 +31,6 @@ const os = require('os');
 const { natsConnectOpts } = require('../lib/nats-resolve');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-cli');
-const SHARED_DIR = path.join(os.homedir(), 'openclaw', 'shared');
 const LOCAL_NODE = require('../lib/node-id').resolveNodeId();
 const sc = StringCodec();
 
@@ -77,7 +83,7 @@ async function natsRequest(nc, subject, payload, timeoutMs = 35000) {
     return JSON.parse(sc.decode(msg.data));
   } catch (err) {
     if (err.code === '503' || err.message?.includes('503')) {
-      console.error(`Error: No responder on subject "${subject}". Is the target node's agent running?`);
+      console.error(`Error: No responder on subject "${subject}". Is mesh-task-daemon running?`);
     } else if (err.code === 'TIMEOUT' || err.message?.includes('TIMEOUT')) {
       console.error(`Error: Request timed out after ${timeoutMs / 1000}s. The target node may be offline or the command is taking too long.`);
     } else {
@@ -153,73 +159,6 @@ async function cmdStatus() {
     console.log(`    Reported:     ${formatAge(n.ageSeconds)}`);
     console.log('');
   }
-}
-
-/**
- * mesh ls [subdir] — list shared folder contents.
- */
-function cmdLs(args) {
-  const subdir = args[0] || '';
-  const target = path.join(SHARED_DIR, subdir);
-
-  if (!fs.existsSync(target)) {
-    console.error(`Not found: ${target}`);
-    process.exit(1);
-  }
-
-  const stat = fs.statSync(target);
-  if (!stat.isDirectory()) {
-    // Single file — show info
-    console.log(`${target} (${(stat.size / 1024).toFixed(1)}KB, ${stat.mtime.toISOString()})`);
-    return;
-  }
-
-  // List directory recursively with sizes
-  listDir(target, '');
-}
-
-function listDir(dir, prefix) {
-  const entries = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      console.log(`${prefix}${entry.name}/`);
-      listDir(full, prefix + '  ');
-    } else {
-      const size = fs.statSync(full).size;
-      const sizeStr = size < 1024 ? `${size}B` : size < 1048576 ? `${(size / 1024).toFixed(1)}KB` : `${(size / 1048576).toFixed(1)}MB`;
-      console.log(`${prefix}${entry.name}  (${sizeStr})`);
-    }
-  }
-}
-
-/**
- * mesh put <filepath> [subdir] — copy file into shared folder.
- */
-function cmdPut(args) {
-  const srcPath = args[0];
-  const destSubdir = args[1] || '';
-
-  if (!srcPath) {
-    console.error('Usage: mesh put <filepath> [subdir]');
-    process.exit(1);
-  }
-
-  if (!fs.existsSync(srcPath)) {
-    console.error(`Not found: ${srcPath}`);
-    process.exit(1);
-  }
-
-  const destDir = path.join(SHARED_DIR, destSubdir);
-  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-
-  const filename = path.basename(srcPath);
-  const destPath = path.join(destDir, filename);
-
-  fs.copyFileSync(srcPath, destPath);
-  const relPath = path.relative(SHARED_DIR, destPath);
-  console.log(`~/openclaw/shared/${relPath}`);
-  console.log(`(will sync to other nodes automatically)`);
 }
 
 /**
@@ -894,8 +833,6 @@ function cmdHelp() {
     '',
     'USAGE:',
     '  mesh status                             Every node in MESH_NODE_HEALTH',
-    '  mesh ls [subdir]                        List shared folder',
-    '  mesh put <file> [subdir]                Copy file to shared folder',
     '  mesh submit <task.yaml>                 Submit a task YAML to the mesh',
     '  mesh submit --id <task-id>              Submit a kanban card by ID',
     '  cat task.yaml | mesh submit             Submit from stdin',
@@ -920,9 +857,6 @@ function cmdHelp() {
     '  self, local           = this node',
     '  ~/.openclaw/mesh-aliases.json adds more (openclaw-node-init writes it)',
     '',
-    'SHARED FOLDER:',
-    '  ~/openclaw/shared/  -- auto-synced between all nodes via NATS',
-    '',
     'ENVIRONMENT:',
     '  OPENCLAW_NATS  -- NATS server URL (auto-detected from env or ~/.openclaw/openclaw.env)',
     '',
@@ -944,18 +878,9 @@ async function main() {
 
   switch (cmd) {
     case 'status':    return cmdStatus();
-    case 'ls':        return cmdLs(args);
-    case 'put':       return cmdPut(args);
     case 'submit':    return cmdSubmit(args);
     case 'tasks':     return cmdTasks(args);
     case 'health':    return cmdHealth(args);
-    case 'exec':
-    case 'capture':
-    case 'broadcast':
-    case 'repair':
-      // Nothing on the mesh ever answered these (federation D4); say so to anyone following old docs.
-      console.error(`mesh ${cmd} was removed: no node runs a responder for it. See "mesh help".`);
-      process.exit(1);
     case 'deploy':    return cmdDeploy(args);
     case 'plan':      return cmdPlan(args);
     case 'help':

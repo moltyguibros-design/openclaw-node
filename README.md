@@ -483,7 +483,7 @@ node test.mjs
 
 ## Mesh Network (Multi-Node)
 
-By default every node runs a single-node loopback NATS bus (`nats://127.0.0.1:4222`) and operates standalone. The multi-node mesh — a Tailscale-linked, R=3-replicated, route-authenticated NATS cluster — is an opt-in upgrade: `install.sh --cluster-peers=… --cluster-bind=…` builds it explicitly (recommended, below). When enabled, nodes dispatch and run tasks across the fleet via the NATS task-daemon and publish their health to the `MESH_NODE_HEALTH` KV (`mesh status`, `mesh health`).
+By default every node runs a single-node loopback NATS bus (`nats://127.0.0.1:4222`) and operates standalone. The multi-node mesh — a Tailscale-linked, R=3-replicated, route-authenticated NATS cluster — is an opt-in upgrade: `install.sh --cluster-peers=… --cluster-bind=…` builds it explicitly (recommended, below). When enabled, nodes dispatch and run tasks across the fleet via the NATS task-daemon (`mesh submit`), take signed fleet deploys (`mesh deploy`), and publish their health to the `MESH_NODE_HEALTH` KV (`mesh status`, `mesh health`).
 
 ### Setup — multi-machine NATS council (recommended)
 
@@ -538,15 +538,19 @@ multi-machine T7 run.*
 ### Mesh commands
 
 ```
-mesh status          # every node in MESH_NODE_HEALTH
-mesh health --all    # ok / degraded / down per node (--json for scripts)
-mesh submit task.yaml  # run work on the fleet
+node ~/openclaw/bin/mesh.js status           # every node in MESH_NODE_HEALTH
+node ~/openclaw/bin/mesh.js health --all     # ok / degraded / down per node (--json for scripts)
+node ~/openclaw/bin/mesh.js submit task.yaml   # hand a task to the mesh workers
+node ~/openclaw/bin/mesh.js tasks              # list mesh tasks (review / approve / reject)
+node ~/openclaw/bin/mesh.js plan list          # multi-step plans
+node ~/openclaw/bin/mesh.js deploy             # signed fleet deploy of the repo HEAD
+openclaw-node-check --axis network --no-mutate # read-only bus probes (also --axis federation)
 ```
 
 ### Architecture
 
 - **NATS** — message bus for commands, task dispatch, and heartbeats (single-node loopback by default; the R=3 cluster runs across the mesh)
-- **Mesh worker** (`bin/mesh-agent.js`) — LLM-agnostic task executor: connects to NATS, claims tasks from the mesh task-daemon, runs the configured LLM CLI, and reports results. For grappe/collab work the D11 guard applies (local models declined; `shell` mocks gated behind `MESH_ALLOW_MOCK_WORKERS=1`). (`mesh put`/`mesh ls` operate on a local `~/openclaw/shared/` directory — there is no cross-node shared-folder syncer)
+- **Mesh worker** (`bin/mesh-agent.js`) — LLM-agnostic task executor: connects to NATS, claims tasks from the mesh task-daemon, runs the configured LLM CLI, and reports results. For grappe/collab work the D11 guard applies (local models declined; `shell` mocks gated behind `MESH_ALLOW_MOCK_WORKERS=1`).
 - **Task Bridge** (`bin/mesh-bridge.js`) — dispatches kanban tasks marked `execution=mesh` to the mesh task-daemon over NATS and writes results/logs back to `active-tasks.md` on completion (subscribes to `mesh.events.>`)
 - **Knowledge over NATS** *(planned)* — the `mesh.tool.{nodeId}.<tool>.*` request/reply pattern exists but is wired only for `discord-history` today; there is no knowledge-over-NATS responder yet (mesh workers query the lead's index over HTTP)
 - **Tailscale** — encrypted WireGuard tunnel between nodes

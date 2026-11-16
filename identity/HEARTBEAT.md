@@ -94,9 +94,9 @@ AGENTS.md points here. All heartbeat logic lives here.
 - Setup: `git config core.hooksPath bin/hooks`
 
 ## Mesh Health
-1. Run `mesh health --json --all` silently (if mesh available)
-2. If any node degraded/down: log its `problems` to `~/openclaw/shared/mesh-incidents.log`
-3. If 3 consecutive failures: escalate to user
+1. Run `bin/node-acceptance.mjs --axis network --no-mutate` silently (NATS, JetStream, event stream, pub/sub; read-only). On a clustered node also `--axis federation --no-mutate`.
+2. Exit 0 = healthy (HEARTBEAT_OK). Exit 1 REJECTED or 2 INCOMPLETE: note the failing or skipped probe lines; `node ~/openclaw/bin/openclaw-stack.mjs status` shows which unit is down. Do not delegate work to the mesh while it fails.
+3. If the same probe fails across 3 consecutive heartbeats: escalate to the user with the failing lines. Restarting services is the operator's call.
 
 ## Proactive Work (safe to do without asking)
 
@@ -141,24 +141,3 @@ Before significant decisions, write a structured prediction:
 - Skill Quality Engineering: complete (Phases 1-6)
 - Routing eval baseline: 95.9% accuracy, 29 conflict pairs
 - Security gate: active via core.hooksPath
-
-# Mesh Health (add to ~/.openclaw/workspace/HEARTBEAT.md)
-
-## Mesh maintenance check
-
-Every heartbeat, verify the mesh is operational:
-
-1. Run `mesh health --json --all` silently
-2. Parse the JSON — check `overall` for each entry in `nodes`
-3. If any node shows `"degraded"` or `"down"`:
-   a. Append a timestamped entry with its `problems` to `~/openclaw/shared/mesh-incidents.log`:
-      ```
-      [2026-03-02T14:30:00Z] calos-vmware-virtual-platform degraded: mesh-agent: inactive
-      ```
-   b. If the issue persists across 3 consecutive heartbeats, escalate:
-      send a message to the user noting which nodes and services are down.
-      There is no `mesh repair`: services are restarted on the node itself.
-4. If all healthy: HEARTBEAT_OK (no output needed)
-
-**Priority**: Run this check BEFORE any task that involves the remote node.
-If mesh is unhealthy, do not delegate work to the remote node — do it locally or queue it.

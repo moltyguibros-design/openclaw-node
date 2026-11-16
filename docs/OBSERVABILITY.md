@@ -259,16 +259,15 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `resolveNatsToken` | nats-resolve | 2 | Resolves authentication token for NATS — logged to diagnose auth failures without exposing the token. |
 | `natsConnectOpts` | nats-resolve | 2 | Builds NATS connection options — logs connection parameters (sans secrets) for troubleshooting. |
 
-### 4.3 Remote Execution (removed)
+### 4.3 Remote Execution (mesh exec) — removed
 
-`mesh exec`, `mesh capture` and `mesh broadcast` were removed: no node ran a responder for them (federation D4).
+`mesh exec/capture/broadcast/repair` were removed from the CLI: no node ran a responder for them
+(federation D4) once `~/openclaw/agent.js` was retired on 2026-10-02. Remote work goes through
+`mesh submit`; `mesh status` and `mesh health` read the `MESH_NODE_HEALTH` KV.
 
-### 4.4 File Sync & Shared Folder
+### 4.4 File Sync & Shared Folder — removed
 
-| Function | Module | Tier | Why Logged |
-|----------|--------|------|------------|
-| `cmdLs` | mesh CLI | 3 | Lists files on a remote node — high-frequency read; logged in dev for debugging sync issues. |
-| `cmdPut` | mesh CLI | 2 | Transfers a file to a remote node — tracks file sync operations and transfer sizes. |
+`mesh ls/put` wrote a local `~/openclaw/shared/` that nothing synced between nodes; removed.
 
 ### 4.5 Deploy Pipeline
 

@@ -2,7 +2,7 @@
  * mesh-node-health.test.js — `mesh status` and `mesh health` read the
  * MESH_NODE_HEALTH KV. They used to wait on openclaw.*.heartbeat (no publisher
  * anywhere: `mesh status` hung forever) and run mesh-health.sh / mesh-repair.sh
- * (never shipped). exec, capture, broadcast and repair are gone.
+ * (never shipped). exec, capture, broadcast, repair, ls and put are gone.
  */
 
 const { describe, it, after } = require('node:test');
@@ -142,11 +142,11 @@ describe('mesh CLI', () => {
     assert.match(r.stdout, /^OK\s+lead-x \(this machine\)/m);
   });
 
-  for (const cmd of ['exec', 'capture', 'broadcast', 'repair']) {
-    it(`mesh ${cmd} is refused as removed`, () => {
+  for (const cmd of ['exec', 'capture', 'broadcast', 'repair', 'ls', 'put']) {
+    it(`mesh ${cmd} is no longer a command`, () => {
       const r = mesh(cmd, 'x');
       assert.equal(r.status, 1);
-      assert.match(r.stderr, new RegExp(`mesh ${cmd} was removed`));
+      assert.match(r.stderr, new RegExp(`Unknown command: ${cmd}`));
     });
   }
 });
