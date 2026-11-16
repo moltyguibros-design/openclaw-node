@@ -37,7 +37,7 @@
 const { connect, StringCodec } = require('nats');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-task-daemon');
-const { createTask, TaskStore, TASK_STATUS, TASK_TERMINAL, DEFAULT_MAX_REJECTIONS, DEFAULT_LEASE_MS, KV_BUCKET } = require('../lib/mesh-tasks');
+const { createTask, TaskStore, TASK_STATUS, TERMINAL_STATES, TASK_TERMINAL, DEFAULT_MAX_REJECTIONS, DEFAULT_LEASE_MS, KV_BUCKET } = require('../lib/mesh-tasks');
 const { validateMetricCommand } = require('../lib/exec-safety');
 const { createSession, issueMemberToken, CollabStore, COLLAB_STATUS, COLLAB_KV_BUCKET, COLLAB_MODE, isModeImplemented } = require('../lib/mesh-collab');
 const { createPlan, autoRoutePlan, PlanStore, PLAN_STATUS, SUBTASK_STATUS, PLANS_KV_BUCKET } = require('../lib/mesh-plans');
@@ -2465,13 +2465,35 @@ async function handlePlanAbort(msg) {
   if (!plan_id) return respondError(msg, 'plan_id is required');
   if (!(await authorize(msg, params, null, { action: 'plan.abort' }))) return;
 
-  const plan = await planStore.markAborted(plan_id, reason || 'manually aborted');
+  const plan = await abortPlan(plan_id, reason || 'manually aborted');
   if (!plan) return respondError(msg, `Plan ${plan_id} not found`);
 
-  log(`PLAN ABORTED ${plan_id}: ${reason || 'no reason'}`);
+  respond(msg, plan);
+}
+
+/**
+ * Abort a plan and stop its work. markAborted only rewrites the plan
+ * document; every mesh task the plan dispatched that has not ended
+ * (escalations included) is cancelled too, so a running worker stops at its
+ * next heartbeat with its partial work left on its branch, and the task's
+ * collab session is aborted.
+ */
+async function abortPlan(planId, reason) {
+  const plan = await planStore.markAborted(planId, reason);
+  if (!plan) return null;
+  log(`PLAN ABORTED ${planId}: ${reason}`);
   publishPlanEvent('aborted', plan);
 
-  respond(msg, plan);
+  const live = (await store.list()).filter(t => t.plan_id === planId && !TERMINAL_STATES.has(t.status));
+  for (const { task_id } of live) {
+    const why = `Plan ${planId} aborted: ${reason}`;
+    const task = await store.markCancelled(task_id, why);
+    if (!task) continue;
+    log(`  CANCEL ${task_id}: ${why}`);
+    publishEvent('cancelled', task);
+    await cleanupTaskCollabSession(task, why);
+  }
+  return plan;
 }
 
 /**
@@ -2736,18 +2758,14 @@ async function checkPlanProgress(taskId, status) {
     const policy = plan.failure_policy || 'continue_best_effort';
 
     if (policy === 'abort_on_first_fail') {
-      await planStore.markAborted(plan.plan_id, `Subtask ${st.subtask_id} failed (abort_on_first_fail)`);
-      publishPlanEvent('aborted', await planStore.get(plan.plan_id));
-      log(`PLAN ABORTED ${plan.plan_id}: ${st.subtask_id} failed (abort_on_first_fail policy)`);
+      await abortPlan(plan.plan_id, `Subtask ${st.subtask_id} failed (abort_on_first_fail)`);
       return;
     }
 
     if (policy === 'abort_on_critical_fail') {
       // Check direct failure
       if (st.critical) {
-        await planStore.markAborted(plan.plan_id, `Critical subtask ${st.subtask_id} failed (abort_on_critical_fail)`);
-        publishPlanEvent('aborted', await planStore.get(plan.plan_id));
-        log(`PLAN ABORTED ${plan.plan_id}: critical subtask ${st.subtask_id} failed`);
+        await abortPlan(plan.plan_id, `Critical subtask ${st.subtask_id} failed (abort_on_critical_fail)`);
         return;
       }
 
@@ -2758,12 +2776,10 @@ async function checkPlanProgress(taskId, status) {
       );
       if (blockedCritical.length > 0) {
         const ids = blockedCritical.map(s => s.subtask_id).join(', ');
-        await planStore.markAborted(
+        await abortPlan(
           plan.plan_id,
           `Critical subtask(s) ${ids} blocked by failed dependency ${st.subtask_id} (abort_on_critical_fail)`
         );
-        publishPlanEvent('aborted', await planStore.get(plan.plan_id));
-        log(`PLAN ABORTED ${plan.plan_id}: critical subtask(s) [${ids}] blocked by ${st.subtask_id}`);
         return;
       }
     }
@@ -3063,6 +3079,7 @@ if (require.main === module) {
     handleTaskMerged: (msg) => handleTaskMerged(msg),
     handlePlanCreate: (msg) => handlePlanCreate(msg),
     handlePlanApprove: (msg) => handlePlanApprove(msg),
+    handlePlanAbort: (msg) => handlePlanAbort(msg),
     processProposals: () => processProposals(),
     detectStalls: () => detectStalls(),
     enforceBudgets: () => enforceBudgets(),
