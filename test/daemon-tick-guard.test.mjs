@@ -184,5 +184,7 @@ test('an event log set by a NATS retry reaches the inject server and the memory 
 test('memory.ingested reports the messages a re-import added, not the whole session', () => {
   assert.match(daemonSrc, /messages_added: Math\.max\(0, messageCount - previousCount\)/);
   assert.doesNotMatch(daemonSrc, /messages_added: messageCount,/);
-  assert.equal((daemonSrc.match(/emitIngestEvent\([^)]*previousCount\)/g) || []).length, 4);
+  const calls = daemonSrc.match(/emitIngestEvent\([^)]*\)/g).filter(c => !c.startsWith('emitIngestEvent(sessionId'));
+  assert.ok(calls.length >= 2);
+  for (const c of calls) assert.match(c, /previousCount\)$/, c);
 });

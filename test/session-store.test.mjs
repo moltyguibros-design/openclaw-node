@@ -14,7 +14,7 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -227,6 +227,50 @@ describe('importDirectory', () => {
     const second = await store.importDirectory(TMP);
     assert.equal(second.imported, 0);
     assert.equal(second.skipped, 1);
+  });
+});
+
+// ─── source marker ──────────────────────────────────────────────────────────
+
+describe('source marker skip', () => {
+  it('skips an unchanged transcript without parsing it', async () => {
+    const q = JSON.stringify({ type: 'user', message: { content: 'q1' } });
+    const a = JSON.stringify({ type: 'assistant', message: { content: 'a1' } });
+    const p = join(TMP, 'marker.jsonl');
+    writeFileSync(p, `${q}\n${' '.repeat(a.length)}\n`);
+    utimesSync(p, 1_700_000_000, 1_700_000_000);
+    await store.importSession(p);
+    // Same size and mtime, one more message: only a parse could notice.
+    writeFileSync(p, `${q}\n${a}\n`);
+    utimesSync(p, 1_700_000_000, 1_700_000_000);
+    const second = await store.importSession(p);
+    assert.equal(second.imported, false);
+    assert.equal(store.getSession('marker').message_count, 1);
+  });
+
+  it('re-parses once the file size or mtime changes', async () => {
+    const p = writeJsonl('marker2.jsonl', [{ type: 'user', message: { content: 'q1' } }]);
+    await store.importSession(p);
+    writeJsonl('marker2.jsonl', [
+      { type: 'user', message: { content: 'q1' } },
+      { type: 'assistant', message: { content: 'a1' } },
+    ]);
+    const second = await store.importSession(p);
+    assert.equal(second.imported, true);
+    assert.equal(second.messageCount, 2);
+  });
+
+  it('adds source_marker to an existing database without touching the shared user_version', () => {
+    store.close();
+    const legacy = new Database(DB_PATH);
+    legacy.exec('ALTER TABLE sessions DROP COLUMN source_marker');
+    legacy.pragma('user_version = 7');
+    legacy.close();
+    store = new SessionStore({ dbPath: DB_PATH });
+    const db = new Database(DB_PATH, { readonly: true });
+    assert.ok(db.prepare('PRAGMA table_info(sessions)').all().some(c => c.name === 'source_marker'));
+    assert.equal(db.pragma('user_version', { simple: true }), 7);
+    db.close();
   });
 });
 

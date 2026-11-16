@@ -1,7 +1,7 @@
 /**
  * flush-worker.mjs — runs the memory pipeline's HEAVY transcript work OFF the
  * daemon's main thread: the pre-compression flush, the shouldFlush token check,
- * and the live session import. All three parse a multi-MB JSONL synchronously;
+ * and the session-store imports. All of them parse multi-MB JSONL synchronously;
  * on the daemon's event loop they starved the :7893 inject server for the whole
  * window — and under llama-server full-burn the starvation stretched to minutes
  * (thread-sample + live curl evidence in audits/memory_ingest_remediation and
@@ -11,6 +11,8 @@
  *   'flush'  — optional shouldFlush gate, then runFlush. LLM client + extraction
  *              store are constructed HERE (env-derived; not structured-cloneable).
  *   'import' — SessionStore.importSession (full parse + wholesale row replace).
+ *   'importDir' — SessionStore.importDirectory over every transcript source;
+ *              unchanged files are skipped on their stored size/mtime marker.
  *
  * No embedder is loaded in this worker.
  */
@@ -25,6 +27,16 @@ try {
     const store = new SessionStore();
     const result = await store.importSession(jsonlPath, { source, format });
     parentPort.postMessage({ ok: true, result });
+  } else if (kind === 'importDir') {
+    const { sources } = workerData;
+    const { SessionStore } = await import('../lib/session-store.mjs');
+    const store = new SessionStore();
+    const results = [];
+    for (const source of sources) {
+      const r = await store.importDirectory(source.path, { source: source.name, format: source.format });
+      for (const imported of r.results) results.push({ ...imported, source: source.name });
+    }
+    parentPort.postMessage({ ok: true, result: { results } });
   } else {
     const { jsonlPath, memoryMdPath, charBudget, checkShouldFlush, contextWindowTokens } = workerData;
     const { runFlush, shouldFlush, USE_LLM_EXTRACTION } = await import('../lib/pre-compression-flush.mjs');

@@ -83,21 +83,6 @@ function getExtractionStore() {
   return _extractionStore;
 }
 
-// Session store loaded lazily (requires better-sqlite3)
-let _sessionStore = null;
-async function getSessionStore() {
-  if (_sessionStore) return _sessionStore;
-  try {
-    const { SessionStore } = await import('../lib/session-store.mjs');
-    _sessionStore = new SessionStore();
-    console.log('[memory-daemon] Session store initialized');
-    return _sessionStore;
-  } catch (err) {
-    log(`session-store unavailable: ${err.message}`);
-    return null;
-  }
-}
-
 // HyperAgent store loaded lazily (requires better-sqlite3)
 let _haStore = null;
 async function getHyperAgentStore() {
@@ -481,8 +466,26 @@ function runMemoryWorker(data, timeoutMs = FLUSH_WORKER_TIMEOUT_MS) {
 function runFlushInWorker(jsonlPath, memoryMdPath, opts = {}) {
   return runMemoryWorker({ kind: 'flush', jsonlPath, memoryMdPath, ...opts });
 }
+// Session-store imports are serialized: the end-of-session archive, the boot
+// pass and the Phase 2 pass all write the current session's rows, and two
+// workers doing it at once is a duplicate delete-and-reinsert.
+let importChain = Promise.resolve();
+function serializeImport(fn) {
+  const next = importChain.then(fn, fn);
+  importChain = next.catch(() => {});
+  return next;
+}
 function runImportInWorker(jsonlPath, { source, format } = {}) {
-  return runMemoryWorker({ kind: 'import', jsonlPath, source, format }, 10 * 60_000);
+  return serializeImport(() => runMemoryWorker({ kind: 'import', jsonlPath, source, format }, 10 * 60_000));
+}
+// The directory pass parses only files whose size/mtime marker changed, but the
+// first pass after an upgrade parses everything once, hence the long timeout.
+async function runImportDirInWorker(sources) {
+  const present = sources.filter(s => fs.existsSync(s.path)).map(s => ({ path: s.path, name: s.name, format: s.format }));
+  if (present.length === 0) return [];
+  const { results } = await serializeImport(() => runMemoryWorker({ kind: 'importDir', sources: present }));
+  for (const r of results) emitIngestEvent(r.sessionId, r.source, r.messageCount, r.previousCount);
+  return results;
 }
 
 function emitIngestEvent(sessionId, source, messageCount, previousCount = 0) {
@@ -743,22 +746,10 @@ async function runPhase0Bootstrap(sessionId, config) {
     log(`  memory-budget frozen ${stats.meterDisplay}`);
   } catch (e) { log(`  memory-budget freeze failed: ${e.message}`); }
 
-  // 10. Import recent sessions into SQLite archive
+  // 10. Import changed sessions into SQLite archive (memory worker)
   try {
-    const store = await getSessionStore();
-    if (store) {
-      const sources = loadTranscriptSources();
-      let totalImported = 0;
-      for (const source of sources) {
-        if (!fs.existsSync(source.path)) continue;
-        const result = await store.importDirectory(source.path, {
-          source: source.name, format: source.format,
-          onImported: (r) => emitIngestEvent(r.sessionId, source.name, r.messageCount, r.previousCount),
-        });
-        totalImported += result.imported;
-      }
-      if (totalImported > 0) log(`  session-store: imported ${totalImported} sessions`);
-    }
+    const imported = await runImportDirInWorker(loadTranscriptSources());
+    if (imported.length > 0) log(`  session-store: imported ${imported.length} sessions`);
   } catch (e) { log(`  session-store import failed: ${e.message}`); emitErrorEvent('ingest', e); }
 
   log('Phase 0: Bootstrap complete');
@@ -1022,31 +1013,6 @@ async function runPhase2ThrottledWork(config, sessionState) {
     }
   }
 
-  // Live session import (every 10min while a session is running) — state.db
-  // ingest used to happen only at boot + session end, so a marathon session
-  // lagged hours behind its own transcript (and the mem.ingest freshness probe
-  // rightly flagged it). importSession is offset-incremental, so this is cheap.
-  if (now - (throttle.lastLiveImport || 0) >= config.intervals.sessionRecapMs) {
-    throttle.lastLiveImport = now;
-    stage1.push((async () => {
-      const sources = loadTranscriptSources();
-      const currentJsonl = findCurrentJsonl(sources);
-      if (!currentJsonl) return;
-      const src = sourceOfJsonl(sources, currentJsonl);
-      // importSession fully re-parses the JSONL and bulk-replaces rows — on the
-      // main thread that starved the inject server (same class as the flush);
-      // it runs in the memory worker instead.
-      const result = await runImportInWorker(currentJsonl, {
-        source: src?.name || 'unknown',
-        format: src?.format,
-      });
-      if (result.imported) {
-        log(`  Phase 2: live session import — ${result.sessionId.slice(0, 8)} (${result.messageCount} msgs)`);
-        emitIngestEvent(result.sessionId, src?.name || 'unknown', result.messageCount, result.previousCount);
-      }
-    })().catch(e => log(`  Phase 2: live session import failed: ${e.message}`)));
-  }
-
   // Memory maintenance (every 30min)
   if (now - throttle.lastMaintenance >= config.intervals.maintenanceMs) {
     throttle.lastMaintenance = now;
@@ -1073,25 +1039,16 @@ async function runPhase2ThrottledWork(config, sessionState) {
     }
   }
 
-  // Session archive import — incremental (every 10min, aligned with recap)
+  // Session archive import — incremental (every 10min, aligned with recap).
+  // This one pass also keeps the live session fresh in state.db (the mem.ingest
+  // freshness probe): its transcript is the file whose marker keeps changing.
   if (now - throttle.lastSessionImport >= config.intervals.sessionRecapMs) {
     throttle.lastSessionImport = now;
     stage1.push(
       (async () => {
         try {
-          const store = await getSessionStore();
-          if (!store) return;
-          const sources = loadTranscriptSources();
-          let totalImported = 0;
-          for (const source of sources) {
-            if (!fs.existsSync(source.path)) continue;
-            const result = await store.importDirectory(source.path, {
-              source: source.name, format: source.format,
-              onImported: (r) => emitIngestEvent(r.sessionId, source.name, r.messageCount, r.previousCount),
-            });
-            totalImported += result.imported;
-          }
-          if (totalImported > 0) log(`  Phase 2: session-store imported ${totalImported} sessions`);
+          const imported = await runImportDirInWorker(loadTranscriptSources());
+          if (imported.length > 0) log(`  Phase 2: session-store imported ${imported.length} sessions`);
         } catch (e) { log(`  Phase 2: session-import failed: ${e.message}`); emitErrorEvent('ingest', e); }
       })()
     );
@@ -1380,17 +1337,14 @@ async function handleTransitions(transitions, config) {
       // 0b. Archive current session to SQLite
       if (currentJsonl) {
         try {
-          const store = await getSessionStore();
-          if (store) {
-            const src = sourceOfJsonl(sources, currentJsonl);
-            const result = await store.importSession(currentJsonl, {
-              source: src?.name || 'unknown',
-              format: src?.format,
-            });
-            if (result.imported) {
-              log(`  session-store: archived ${result.sessionId.slice(0, 8)} (${result.messageCount} msgs)`);
-              emitIngestEvent(result.sessionId, src?.name || 'unknown', result.messageCount, result.previousCount);
-            }
+          const src = sourceOfJsonl(sources, currentJsonl);
+          const result = await runImportInWorker(currentJsonl, {
+            source: src?.name || 'unknown',
+            format: src?.format,
+          });
+          if (result.imported) {
+            log(`  session-store: archived ${result.sessionId.slice(0, 8)} (${result.messageCount} msgs)`);
+            emitIngestEvent(result.sessionId, src?.name || 'unknown', result.messageCount, result.previousCount);
           }
         } catch (e) { log(`  session-store archive failed: ${e.message}`); emitErrorEvent('ingest', e); }
       }
@@ -1927,9 +1881,6 @@ async function main() {
     }
     if (_extractionStore) {
       try { _extractionStore.close(); } catch (_) {}
-    }
-    if (_sessionStore) {
-      try { _sessionStore.close(); } catch (_) {}
     }
     if (_haStore) {
       try { _haStore.close(); } catch (_) {}
