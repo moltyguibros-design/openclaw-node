@@ -112,6 +112,23 @@ describe('getActivityState', () => {
     process.env.HOME = origHome;
     assert.equal(state.state, 'starting');
   });
+
+  it('reads the state from a last line longer than 4KB', async () => {
+    const origHome = process.env.HOME;
+    process.env.HOME = tmpDir;
+    const lines = [
+      { type: 'assistant', message: { content: 'calling a tool' } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: 'x'.repeat(20000) }] } },
+    ];
+    fs.writeFileSync(path.join(projectDir, 'long-line.jsonl'), lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+    try {
+      const state = await getActivityState('/fake/workspace');
+      assert.ok(state, 'a long last line must not lose the activity state');
+      assert.equal(state.state, 'active');
+    } finally {
+      process.env.HOME = origHome;
+    }
+  });
 });
 
 describe('getSessionInfo', () => {
@@ -206,6 +223,26 @@ describe('getSessionInfo', () => {
     process.env.HOME = origHome;
     assert.equal(info.cost.inputTokens, 1015);
     assert.equal(info.cost.outputTokens, 300);
+  });
+
+  it('sums usage over the whole session file, not only its last 128KB', async () => {
+    const origHome = process.env.HOME;
+    process.env.HOME = tmpDir;
+    const lines = [{ type: 'user', message: { content: 'long task' } }];
+    // ~400 responses with padding: the file is far larger than any tail window.
+    for (let i = 0; i < 400; i++) {
+      const message = { id: `msg_${i}`, model: 'claude-sonnet-4-6', content: [{ type: 'text', text: 'y'.repeat(1000) }], usage: { input_tokens: 1, output_tokens: 2 } };
+      lines.push({ type: 'assistant', requestId: `req_${i}`, message });
+      lines.push({ type: 'assistant', requestId: `req_${i}`, message });
+    }
+    const sessionFile = path.join(projectDir, 'long-session.jsonl');
+    fs.writeFileSync(sessionFile, lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+    assert.ok(fs.statSync(sessionFile).size > 4 * 131072);
+    const info = await getSessionInfo('/fake/workspace');
+    process.env.HOME = origHome;
+    assert.equal(info.cost.inputTokens, 400);
+    assert.equal(info.cost.outputTokens, 800);
+    assert.equal(info.summary, 'long task');
   });
 
   it('extracts cost from costUSD field', async () => {
