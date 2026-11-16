@@ -9,7 +9,9 @@ addition. This replaces the companion-bridge proxy as the path memory takes into
 the gateway.
 
 What stays in the daemon: retrieval (the six-channel pipeline), the token
-budget, `@memory` directives, reconsolidation write-back, and **extraction** —
+budget, `@memory` directives (the daemon honours them, but this plugin passes
+the conversation through unchanged, so unlike the publisher wrappers the model
+still sees the directive text), reconsolidation write-back, and **extraction** —
 the daemon already tails `~/.openclaw/agents/*/sessions/*.jsonl` and flushes on
 idle / session end / pre-compaction size, so this plugin records nothing.
 Compaction is delegated to OpenClaw's native compactor through
