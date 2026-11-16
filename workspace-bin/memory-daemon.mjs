@@ -1343,6 +1343,8 @@ runSubprocess = tracer.wrapAsync('runSubprocess', runSubprocess, { tier: 2 });
 // ran). One daemon now owns everything; the federation wiring below is
 // dormant by design until multi-node lands. Default (env unset) is OFF —
 // none of this section executes and no federation module is even imported.
+// One federation piece is outside it: initNatsSubsystems ensures the
+// OPENCLAW_SHARED stream on every node (fatal on mismatch only when ON).
 //
 // What starts when OPENCLAW_FEDERATION=1:
 //   - startFederation (lib/federation-startup.mjs): identity + strict trust
@@ -1581,16 +1583,24 @@ async function main() {
       }
     }
 
-    // Ensure shared federation stream (OPENCLAW_SHARED, R=3)
+    // Ensure shared federation stream (OPENCLAW_SHARED, R=3). This runs even
+    // with federation off; a config mismatch is fatal only when federation is
+    // on, since the stream protects nothing else and a crash loop for an
+    // opt-in feature is worse than an idle, misconfigured stream.
     try {
       await ensureSharedStream(natsConn);
       const streamInfo = await inspectSharedStream(natsConn);
       const verification = verifySharedStreamConfig(streamInfo);
       if (!verification.valid) {
-        log(`FATAL: Shared stream config mismatch: ${verification.reasons.join('; ')}`);
-        process.exit(1);
+        const reasons = verification.reasons.join('; ');
+        if (process.env.OPENCLAW_FEDERATION === '1') {
+          log(`FATAL: Shared stream config mismatch: ${reasons}`);
+          process.exit(1);
+        }
+        log(`WARNING: Shared stream config mismatch: ${reasons} — federation is off, continuing`);
+      } else {
+        log(`Shared stream OPENCLAW_SHARED verified (R=${streamInfo.config.num_replicas}, storage=${streamInfo.config.storage})`);
       }
-      log(`Shared stream OPENCLAW_SHARED verified (R=${streamInfo.config.num_replicas}, storage=${streamInfo.config.storage})`);
     } catch (streamErr) {
       log(`Shared stream unavailable (${streamErr.message}) — continuing without federation stream`);
     }
