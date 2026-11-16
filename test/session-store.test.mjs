@@ -400,7 +400,7 @@ describe('state.db user_version belongs to the extraction store', () => {
     const { createExtractionStore } = await import('../lib/extraction-store.mjs');
     const ex = createExtractionStore({ dbPath: DB_PATH });
     try {
-      assert.equal(ex.db.pragma('user_version', { simple: true }), 7);
+      assert.equal(ex.db.pragma('user_version', { simple: true }), 8);
     } finally {
       ex.close();
     }
