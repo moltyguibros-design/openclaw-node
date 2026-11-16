@@ -14,7 +14,7 @@ SKIPPED_COUNT=0
 RENDER_ERRORS=0
 # The sed fallback's placeholder list. Bare envsubst also blanks systemd's own
 # runtime variables ($MAINPID in the NATS units' ExecReload).
-UNIT_VARS='${HOME} ${NODE_BIN} ${OPENCLAW_WORKSPACE} ${OPENCLAW_NATS} ${OPENCLAW_NATS_TOKEN} ${OPENCLAW_NODE_ID} ${OPENCLAW_NODE_ROLE} ${OPENCLAW_DEPLOY_TRUSTED_KEYS} ${OPENCLAW_REPO_DIR} ${NPM_BIN} ${OPENCLAW_GATEWAY_JS} ${NATS_SERVER_BIN} ${MESH_LLM_PROVIDER} ${LLM_MODEL} ${LLM_BASE_URL} ${MESH_FOREMAN_ENFORCE} ${OPENCLAW_TIMEZONE}'
+UNIT_VARS='${HOME} ${NODE_BIN} ${NODE_BIN_DIR} ${OPENCLAW_WORKSPACE} ${OPENCLAW_NATS} ${OPENCLAW_NATS_TOKEN} ${OPENCLAW_NODE_ID} ${OPENCLAW_NODE_ROLE} ${OPENCLAW_DEPLOY_TRUSTED_KEYS} ${OPENCLAW_REPO_DIR} ${NPM_BIN} ${OPENCLAW_GATEWAY_JS} ${NATS_SERVER_BIN} ${MESH_LLM_PROVIDER} ${LLM_MODEL} ${LLM_BASE_URL} ${MESH_FOREMAN_ENFORCE} ${OPENCLAW_TIMEZONE}'
 
 # Fail-loud render audit — a unit shipping a live ${VAR} placeholder is broken
 # by construction (the silent-unrendered class, 2026-07-11 audit).
@@ -77,6 +77,7 @@ else
         sed \
           -e "s|\${HOME}|$HOME|g" \
           -e "s|\${NODE_BIN}|$NODE_BIN|g" \
+          -e "s|\${NODE_BIN_DIR}|$NODE_BIN_DIR|g" \
           -e "s|\${OPENCLAW_WORKSPACE}|$OPENCLAW_WORKSPACE|g" \
           -e "s|\${OPENCLAW_NATS}|$OPENCLAW_NATS|g" \
           -e "s|\${OPENCLAW_NATS_TOKEN}|$OPENCLAW_NATS_TOKEN|g" \
@@ -129,6 +130,7 @@ else
             sed \
               -e "s|\${HOME}|$HOME|g" \
               -e "s|\${NODE_BIN}|$NODE_BIN|g" \
+              -e "s|\${NODE_BIN_DIR}|$NODE_BIN_DIR|g" \
               -e "s|\${OPENCLAW_WORKSPACE}|$OPENCLAW_WORKSPACE|g" \
               -e "s|\${OPENCLAW_NATS}|$OPENCLAW_NATS|g" \
               -e "s|\${OPENCLAW_NATS_TOKEN}|$OPENCLAW_NATS_TOKEN|g" \
@@ -173,6 +175,7 @@ else
           sed \
             -e "s|\${HOME}|$HOME|g" \
             -e "s|\${NODE_BIN}|$NODE_BIN|g" \
+            -e "s|\${NODE_BIN_DIR}|$NODE_BIN_DIR|g" \
             -e "s|\${OPENCLAW_WORKSPACE}|$OPENCLAW_WORKSPACE|g" \
             -e "s|\${OPENCLAW_NATS}|$OPENCLAW_NATS|g" \
             -e "s|\${OPENCLAW_NATS_TOKEN}|$OPENCLAW_NATS_TOKEN|g" \

@@ -992,3 +992,79 @@ test('--project drives framework rules and git hooks', () => {
   assert.ok(rules.includes('typescript.md') && rules.includes('solidity.md'), `rules: ${rules}`);
   assert.ok(!rules.includes('unity.md'));
 });
+
+// `install.sh --update` re-synced Mission Control's source but kept the old
+// .next, ran a loose `npm install`, never deleted routes removed from the repo,
+// and the unit's PATH could resolve a node other than the one the native deps
+// were built for. It now follows workspace-docs/RUNBOOK_MC_DEPLOY.md.
+test('install --update redeploys Mission Control: exact sync, npm@10 ci, rebuild under NODE_BIN, build kept on failure', () => {
+  const comp = moduleSrc['components.sh'];
+  const block = comp.slice(comp.indexOf('MC_DIR="$WORKSPACE/projects/mission-control"'),
+    comp.indexOf('# Create .env.local for MC if not exists'));
+  assert.ok(block.includes('mc_build'), 'the Mission Control step must be found');
+
+  const root = mkdtempSync(join(tmpdir(), 'openclaw-mc-update-'));
+  const put = (rel, text) => { mkdirSync(dirname(join(root, rel)), { recursive: true }); writeFileSync(join(root, rel), text); };
+  const read = (rel) => readFileSync(join(root, rel), 'utf8');
+  const mc = 'ws/projects/mission-control';
+  put('repo/mission-control/package.json', '{"name":"mc"}\n');
+  put('repo/mission-control/src/app/page.tsx', 'new page, v2\n');
+  put(`${mc}/src/app/page.tsx`, 'old page\n');
+  put(`${mc}/src/app/api/removed/route.ts`, 'deleted from the repo\n');
+  put(`${mc}/.env.local`, 'DB_PATH=data/mission-control.db\n');
+  put(`${mc}/data/mission-control.db`, 'live rows\n');
+  put(`${mc}/node_modules/.package-lock.json`, '{}\n');
+  put(`${mc}/.next/BUILD_ID`, 'old build\n');
+  put('nodebin/node', '');
+  const calls = join(root, 'calls.log');
+  for (const name of ['npx', 'npm']) {
+    put(`fakebin/${name}`, `#!/bin/sh
+echo "${name} $* PATH0=\${PATH%%:*}" >> "${calls}"
+if [ "$*" = "run build" ]; then
+  mkdir -p .next && echo partial > .next/BUILD_ID
+  [ -n "\${MC_TEST_BUILD_FAIL:-}" ] && exit 1
+  echo new build > .next/BUILD_ID
+fi
+exit 0
+`);
+    spawnSync('chmod', ['+x', join(root, 'fakebin', name)]);
+  }
+  const script = `
+    set -euo pipefail
+    DRY_RUN=false SANDBOX=false UPDATE_ONLY=true
+    info() { :; }; warn() { echo "WARN $*"; }; run() { "$@"; }
+    WORKSPACE="${root}/ws" REPO_DIR="${root}/repo" NODE_BIN="${root}/nodebin/node" NODE_BIN_DIR="${root}/nodebin"
+    ${block}
+  `;
+  const install = (env = {}) => spawnSync('bash', ['-c', script], {
+    encoding: 'utf8', env: { ...process.env, PATH: `${join(root, 'fakebin')}:${process.env.PATH}`, ...env },
+  });
+
+  const first = install();
+  assert.equal(first.status, 0, first.stderr + first.stdout);
+  assert.equal(read(`${mc}/src/app/page.tsx`), 'new page, v2\n');
+  assert.equal(existsSync(join(root, mc, 'src/app/api/removed')), false, 'a route deleted from the repo leaves the live tree');
+  assert.equal(read(`${mc}/.env.local`), 'DB_PATH=data/mission-control.db\n');
+  assert.equal(read(`${mc}/data/mission-control.db`), 'live rows\n');
+  assert.equal(read(`${mc}/.next/BUILD_ID`), 'new build\n', 'the build is redone, not kept');
+  assert.equal(existsSync(join(root, mc, '.next.prev')), false);
+  const nodeDir = join(root, 'nodebin');
+  assert.deepEqual(read('calls.log').trim().split('\n'), [
+    `npx -y npm@10 ci PATH0=${nodeDir}`,
+    `npm rebuild better-sqlite3 PATH0=${nodeDir}`,
+    `npm run build PATH0=${nodeDir}`,
+  ]);
+
+  const failed = install({ MC_TEST_BUILD_FAIL: '1' });
+  assert.equal(failed.status, 0, failed.stderr);
+  assert.match(failed.stdout, /WARN Mission Control build FAILED — the previous build is still in place/);
+  assert.equal(read(`${mc}/.next/BUILD_ID`), 'new build\n', 'a failed build leaves the previous one in place');
+  assert.equal(existsSync(join(root, mc, '.next.prev')), false);
+
+  // The unit runs that same node: NODE_BIN's dir leads its PATH.
+  const plist = readFileSync(join(ROOT, 'services/launchd/ai.openclaw.mission-control.plist'), 'utf8');
+  assert.match(plist, /<key>PATH<\/key>\s*<string>\$\{NODE_BIN_DIR\}:/);
+  const unit = readFileSync(join(ROOT, 'services/systemd/openclaw-mission-control.service'), 'utf8');
+  assert.match(unit, /^Environment=PATH=\$\{NODE_BIN_DIR\}:/m);
+  assert.match(moduleSrc['env.sh'], /export NODE_BIN_DIR="\$\(dirname "\$NODE_BIN"\)"/);
+});

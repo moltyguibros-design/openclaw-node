@@ -5,6 +5,9 @@ if [ -z "$NODE_BIN" ]; then
   exit 1
 fi
 export NODE_BIN
+# Leads the PATH of units whose children find node by name (Mission Control's
+# npm start → next), so they run the node their native modules were built for.
+export NODE_BIN_DIR="$(dirname "$NODE_BIN")"
 
 # ── Resolve nats-server binary (service templates exec ${NATS_SERVER_BIN}) ──
 NATS_SERVER_BIN="$(command -v nats-server 2>/dev/null || echo "")"
