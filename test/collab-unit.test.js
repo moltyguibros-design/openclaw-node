@@ -3,8 +3,8 @@
 /**
  * collab-unit.test.js — Pure unit tests for mesh-collab.js.
  *
- * No NATS required. Mocks the 'nats' module, uses a mock KV to test
- * CollabStore logic directly. Covers bugs that existed before patching:
+ * No NATS required. Uses a mock KV to test CollabStore logic directly.
+ * Covers bugs that existed before patching:
  *
  *   Bug 1: isRoundComplete() must exclude dead nodes
  *   Bug 2: advanceTurn() must work, sequential mode must not deadlock
@@ -12,28 +12,6 @@
  *
  * Run: node --test test/collab-unit.test.js
  */
-
-// ── Mock 'nats' module before any require that depends on it ──
-// nats may not be installed locally (lives in ~/openclaw/node_modules).
-// We mock it so these unit tests run without external deps.
-const Module = require('module');
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-const mockNats = {
-  StringCodec: () => ({
-    encode: (str) => encoder.encode(str),
-    decode: (buf) => decoder.decode(buf),
-  }),
-  connect: async () => ({}),
-};
-const origResolve = Module._resolveFilename;
-Module._resolveFilename = function (request, parent, ...rest) {
-  if (request === 'nats') return 'nats'; // fake path
-  return origResolve.call(this, request, parent, ...rest);
-};
-require.cache['nats'] = {
-  id: 'nats', filename: 'nats', loaded: true, exports: mockNats,
-};
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');

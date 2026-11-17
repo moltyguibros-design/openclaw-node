@@ -16,26 +16,6 @@
  * Run: node --test test/circling-comprehensive.test.js
  */
 
-// ── Mock 'nats' module ──
-const Module = require('module');
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-const mockNats = {
-  StringCodec: () => ({
-    encode: (str) => encoder.encode(str),
-    decode: (buf) => decoder.decode(buf),
-  }),
-  connect: async () => ({}),
-};
-const origResolve = Module._resolveFilename;
-Module._resolveFilename = function (request, parent, ...rest) {
-  if (request === 'nats') return 'nats';
-  return origResolve.call(this, request, parent, ...rest);
-};
-require.cache['nats'] = {
-  id: 'nats', filename: 'nats', loaded: true, exports: mockNats,
-};
-
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const {
