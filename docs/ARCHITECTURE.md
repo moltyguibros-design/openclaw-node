@@ -93,7 +93,7 @@ Install: `bin/install-daemon` (detects OS: launchd on macOS, systemd on Linux, p
 | `proactive-scan` | Proactive scanning for workspace issues |
 | `evolve` | Genetic algorithm for soul evolution |
 | `fitness_score.py` | Fitness scoring for evolved souls |
-| `test-multi-soul-workflow` | Test harness for multi-soul |
+| `test-multi-soul-workflow` | Multi-soul workflow test; runs against a disposable Mission Control and souls repo it removes on exit |
 
 ### Skill Management
 
