@@ -81,3 +81,41 @@ test('rsync partial-transfer and vanished-file exits (23/24) still count as arch
     assert.match(log, /archived ok/);
   }
 });
+
+test('every enabled registry source outside the two default roots is archived under sources/<name>', t => {
+  const home = mkdtempSync(join(tmpdir(), 'openclaw-archive-reg-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const extra = join(home, 'kimi/sessions');
+  const disabled = join(home, 'old/sessions');
+  const covered = join(home, '.claude/projects/-ws');
+  for (const dir of [extra, disabled, covered]) mkdirSync(dir, { recursive: true });
+  writeFileSync(join(extra, 'k.jsonl'), '{"text":"kimi"}\n');
+  writeFileSync(join(extra, 'notes.txt'), 'skip\n');
+  writeFileSync(join(disabled, 'd.jsonl'), '{}\n');
+  writeFileSync(join(covered, 'c.jsonl'), '{}\n');
+  mkdirSync(join(home, '.openclaw/config'), { recursive: true });
+  const registry = join(home, '.openclaw/config/transcript-sources.json');
+  writeFileSync(registry, JSON.stringify({ sources: [
+    { name: 'claude-code-workspace', path: '~/.claude/projects/-ws/', format: 'claude-code', enabled: true },
+    { name: 'gateway', path: '~/.openclaw/agents/main/sessions/', format: 'openclaw-gateway', enabled: true },
+    { name: 'kimi', path: '~/kimi/sessions/', format: 'generic', enabled: true },
+    { name: 'old', path: disabled, format: 'generic', enabled: false },
+  ] }));
+  const run = () => spawnSync('/bin/sh', [script], {
+    env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin:/usr/local/bin' }, encoding: 'utf8', timeout: 10_000,
+  });
+  let result = run();
+  assert.equal(result.status, 0, result.stderr);
+  const archive = join(home, '.openclaw/transcript-archive');
+  assert.equal(readFileSync(join(archive, 'sources/kimi/k.jsonl'), 'utf8'), '{"text":"kimi"}\n');
+  assert.equal(existsSync(join(archive, 'sources/kimi/notes.txt')), false);
+  assert.equal(existsSync(join(archive, 'sources/old')), false);
+  assert.equal(existsSync(join(archive, 'sources/claude-code-workspace')), false);
+  assert.equal(existsSync(join(archive, 'claude-projects/-ws/c.jsonl')), true);
+  assert.match(readFileSync(join(archive, 'archive.log'), 'utf8'), /archived ok — 2 transcripts,/);
+
+  writeFileSync(registry, '{ not json');
+  result = run();
+  assert.notEqual(result.status, 0);
+  assert.match(readFileSync(join(archive, 'archive.log'), 'utf8'), /archive FAILED \(unreadable .*transcript-sources\.json\)/);
+});

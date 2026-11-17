@@ -19,7 +19,7 @@ DELEGATED = {
     'scheduler-heartbeat': (),
     'consolidation-scheduler': (),
     'observer': ('launchctl', 'sqlite3'),
-    'transcript-archive': ('mkdir', 'rsync', 'date', 'find', 'wc', 'tr', 'du', 'cut'),
+    'transcript-archive': ('mkdir', 'rsync', 'python3', 'date', 'find', 'wc', 'tr', 'du', 'cut'),
     'log-rotate': ('date', 'wc', 'tr', 'gzip', 'ls', 'tail', 'xargs', 'rm'),
 }
 PROBE = '''import hashlib,json,os,sys
