@@ -23,6 +23,14 @@ const MAINT = path.join(
 );
 const { postAuthenticatedMutation } = await import(MAINT);
 
+test('the MC token path has one override, documented test-only, and no third spelling', () => {
+  const repo = path.join(path.dirname(MAINT), '..');
+  const helper = fs.readFileSync(path.join(repo, 'lib/mc-session-token.mjs'), 'utf8');
+  assert.match(helper, /OPENCLAW_MC_TOKEN_FILE is a test-only override/);
+  assert.doesNotMatch(helper, /memory-maintenance, scheduler-heartbeat/, 'scheduler-heartbeat does not use the helper');
+  assert.doesNotMatch(fs.readFileSync(MAINT, 'utf8'), /MC_SESSION_TOKEN_PATH/);
+});
+
 const URL_SYNC = 'http://127.0.0.1:3000/api/memory/sync';
 const readToken = async () => 'test-token-value\n';
 const res = (status, body, { json = true } = {}) => ({
@@ -103,6 +111,8 @@ for (const authorized of [true, false]) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-maintenance-http-'));
     const tokenPath = path.join(root, 'session-token');
     fs.writeFileSync(tokenPath, 'fixture-session-token\n', { mode: 0o600 });
+    const decoyPath = path.join(root, 'decoy-token');
+    fs.writeFileSync(decoyPath, 'decoy-session-token\n', { mode: 0o600 });
     const requests = [];
     const server = http.createServer((req, res) => {
       requests.push({ method: req.method, url: req.url, auth: req.headers.authorization });
@@ -118,7 +128,8 @@ for (const authorized of [true, false]) {
       const result = await promisify(execFile)(process.execPath, [MAINT, '--force', '--verbose'], {
         env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root,
           MC_URL: `http://127.0.0.1:${server.address().port}`,
-          MC_SESSION_TOKEN_PATH: '', OPENCLAW_MC_TOKEN_FILE: tokenPath },
+          // The retired third spelling must not win over the one override.
+          MC_SESSION_TOKEN_PATH: decoyPath, OPENCLAW_MC_TOKEN_FILE: tokenPath },
         timeout: 15000,
       });
       assert.ok(requests.every(r => r.auth === 'Bearer fixture-session-token'));
@@ -187,7 +198,7 @@ test('a non-executable clawvault-local is reported as a failed checkpoint, not a
     const result = await promisify(execFile)(process.execPath, [MAINT, '--force', '--verbose'], {
       env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root,
         MC_URL: `http://127.0.0.1:${server.address().port}`,
-        MC_SESSION_TOKEN_PATH: '', OPENCLAW_MC_TOKEN_FILE: tokenPath },
+        OPENCLAW_MC_TOKEN_FILE: tokenPath },
       timeout: 15000,
     });
     assert.match(result.stdout, /ClawVault checkpoint failed: .*EACCES/);

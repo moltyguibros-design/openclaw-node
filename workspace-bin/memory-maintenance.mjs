@@ -20,13 +20,12 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import http from 'http';
 import os from 'os';
-import { mcAuthHeaders } from '../lib/mc-session-token.mjs';
+import { mcAuthHeaders, DEFAULT_MC_TOKEN_PATH } from '../lib/mc-session-token.mjs';
 import { resolveNodeId } from '../lib/node-id.js';
 
 const execFileAsync = promisify(execFile);
-const MC_TOKEN_PATH = process.env.MC_SESSION_TOKEN_PATH
-  || process.env.OPENCLAW_MC_TOKEN_FILE
-  || path.join(os.homedir(), '.openclaw', 'config', 'mc-session-token');
+// OPENCLAW_MC_TOKEN_FILE is test-only (lib/mc-session-token.mjs).
+const MC_TOKEN_PATH = process.env.OPENCLAW_MC_TOKEN_FILE || DEFAULT_MC_TOKEN_PATH;
 const MC_LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const MC_URL = process.env.MC_URL || 'http://127.0.0.1:3000';
 const mcOrigin = new URL(MC_URL);
