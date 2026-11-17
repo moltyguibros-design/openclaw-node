@@ -14,7 +14,7 @@ import { describe, it, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import {
   requestExtraction,
   requestAnalysis,
@@ -32,6 +32,9 @@ import {
   _resetForTesting,
 } from '../lib/ollama-queue.mjs';
 import { Worker } from 'node:worker_threads';
+
+// Hermetic against an operator's ~/.openclaw/openclaw.env raising the slot count.
+process.env.OLLAMA_NUM_PARALLEL ??= '1';
 
 beforeEach(() => {
   _resetForTesting();
@@ -286,6 +289,63 @@ describe('requestAnalysis fallback paths', () => {
     assert.equal(result.mode, 'fallback');
     assert.equal(result.reason, 'ollama-busy-extraction');
     await slowExtraction;
+  });
+
+  it('runs analysis beside an in-flight extraction when OLLAMA_NUM_PARALLEL > 1', async () => {
+    const prev = process.env.OLLAMA_NUM_PARALLEL;
+    process.env.OLLAMA_NUM_PARALLEL = '2';
+    try {
+      let release;
+      const slowExtraction = requestExtraction(() => new Promise(r => { release = () => r('extract-done'); }));
+      await new Promise(r => setTimeout(r, 10));
+      const result = await requestAnalysis(async () => 'analysis-ran', { waitTimeoutMs: 500 });
+      assert.equal(result.mode, 'llm');
+      assert.equal(result.value, 'analysis-ran');
+      assert.equal(getState().current_job?.type, 'extraction', 'the extraction still holds the queue');
+      markExternalJob('w1', { type: 'extraction' });
+      release();
+      await slowExtraction;
+      const besideWorker = await requestAnalysis(async () => 'beside-worker', { waitTimeoutMs: 500 });
+      assert.equal(besideWorker.mode, 'llm');
+      clearExternalJob('w1');
+      assert.equal(getState().current_job, null);
+    } finally {
+      if (prev === undefined) delete process.env.OLLAMA_NUM_PARALLEL;
+      else process.env.OLLAMA_NUM_PARALLEL = prev;
+    }
+  });
+
+  it('reads OLLAMA_NUM_PARALLEL from ~/.openclaw/openclaw.env when the process env lacks it', async () => {
+    const prev = { slots: process.env.OLLAMA_NUM_PARALLEL, home: process.env.HOME };
+    const home = mkdtempSync(join(tmpdir(), 'ollama-queue-home-'));
+    mkdirSync(join(home, '.openclaw'));
+    writeFileSync(join(home, '.openclaw', 'openclaw.env'), 'LLM_MODEL=x\nOLLAMA_NUM_PARALLEL=4\n');
+    delete process.env.OLLAMA_NUM_PARALLEL;
+    process.env.HOME = home;
+    try {
+      markExternalJob('w1', { type: 'extraction' });
+      const result = await requestAnalysis(async () => 'from-env-file', { waitTimeoutMs: 500 });
+      assert.equal(result.mode, 'llm');
+      clearExternalJob('w1');
+    } finally {
+      process.env.HOME = prev.home;
+      process.env.OLLAMA_NUM_PARALLEL = prev.slots;
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('still answers busy during extraction when OLLAMA_NUM_PARALLEL is 1', async () => {
+    const prev = process.env.OLLAMA_NUM_PARALLEL;
+    process.env.OLLAMA_NUM_PARALLEL = '1';
+    try {
+      markExternalJob('w1', { type: 'extraction' });
+      const result = await requestAnalysis(async () => 'never-runs', { waitTimeoutMs: 500 });
+      assert.equal(result.reason, 'ollama-busy-extraction');
+      clearExternalJob('w1');
+    } finally {
+      if (prev === undefined) delete process.env.OLLAMA_NUM_PARALLEL;
+      else process.env.OLLAMA_NUM_PARALLEL = prev;
+    }
   });
 
   it('returns fallback with reason "analysis-wait-timeout" when analysis exceeds wait', async () => {
