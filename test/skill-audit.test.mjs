@@ -94,7 +94,7 @@ describe('skill-batch-fix', { skip: !HAVE_PY && 'python3 not available' }, () =>
   });
 
   it('treats top-level triggers as present and writes missing ones top-level, never under metadata.openclaw', () => {
-    const home = mkdtempSync(join(tmpdir(), 'skill-batch-fix-'));
+    const home = tmpDir('skill-batch-fix-');
     const skills = join(home, '.openclaw', 'workspace', 'skills');
     const has = join(skills, 'has-triggers');
     const lacks = join(skills, 'lacks-triggers');
