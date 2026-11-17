@@ -40,7 +40,7 @@ const execFileAsync = promisify(execFile);
 const sc = StringCodec();
 const IS_MAC = os.platform() === "darwin";
 
-const { ROLE_COMPONENTS } = require('../lib/mesh-roles');
+const { ROLE_COMPONENTS, requireNodeRole } = require('../lib/mesh-roles');
 const { launchdServiceStatus, systemdServiceStatus } = require('../lib/service-status');
 
 // ── Circuit Breaker State ───────────────────────────────────────────────
@@ -112,17 +112,23 @@ async function getServices(run = runProbe, isMac = IS_MAC) {
   })));
 }
 
-/** The role this node is configured as: OPENCLAW_NODE_ROLE, else openclaw.env (as mesh-deploy reads it). */
+let warnedNoRole = false;
+
+/**
+ * The role this node is configured as: OPENCLAW_NODE_ROLE, else openclaw.env, via
+ * the same requireNodeRole mesh-deploy uses. Never a guess from the platform: an
+ * unset or invalid role is null (published as "unknown"), logged once.
+ */
 function resolveConfiguredRole(env = process.env, home = os.homedir()) {
-  if (env.OPENCLAW_NODE_ROLE && env.OPENCLAW_NODE_ROLE.trim()) return env.OPENCLAW_NODE_ROLE.trim();
   try {
-    const content = fs.readFileSync(path.join(home, ".openclaw", "openclaw.env"), "utf8");
-    const match = content.match(/^\s*OPENCLAW_NODE_ROLE\s*=\s*(.+)/m);
-    if (match && match[1].trim()) return match[1].trim().replace(/^["']|["']$/g, "");
+    return requireNodeRole({ env, envFile: path.join(home, ".openclaw", "openclaw.env") });
   } catch (err) {
-    if (err.code !== "ENOENT") console.warn(`[health-publisher] read openclaw.env: ${err.message}`);
+    if (!warnedNoRole) {
+      warnedNoRole = true;
+      console.warn(`[health-publisher] publishing role "unknown": ${err.message}`);
+    }
+    return null;
   }
-  return null;
 }
 
 /**
@@ -130,11 +136,11 @@ function resolveConfiguredRole(env = process.env, home = os.homedir()) {
  * assumes); runningRole is whether the task daemon is actually up. A mismatch is
  * flagged rather than resolved, since either side can be the wrong one.
  */
-function reconcileRole(configuredRole, services, isMac = IS_MAC) {
+function reconcileRole(configuredRole, services) {
   const runningRole = services.some((s) => s.name === "mesh-task-daemon" && s.status === "active")
     ? "lead" : "worker";
-  const role = configuredRole || (isMac ? "lead" : "worker");
-  return { role, configuredRole, runningRole, roleMismatch: role !== runningRole };
+  const role = configuredRole || "unknown";
+  return { role, configuredRole, runningRole, roleMismatch: !!configuredRole && role !== runningRole };
 }
 
 async function getAgentStatus(home = os.homedir()) {
@@ -293,7 +299,7 @@ async function gatherHealth(nc, run = runProbe) {
     runningRole: roleInfo.runningRole,
     roleMismatch: roleInfo.roleMismatch,
     deployVersion,
-    components: ROLE_COMPONENTS[roleInfo.role] || ROLE_COMPONENTS.worker,
+    components: ROLE_COMPONENTS[roleInfo.role] || [],
     tailscaleIp: tsData.selfIp,
     diskPercent,
     mem: getMemory(),

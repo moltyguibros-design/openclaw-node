@@ -7,7 +7,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -33,12 +33,31 @@ describe('mesh-health-publisher probes', () => {
 
   it('the role is the configured one, with a flag when the running services disagree', () => {
     const lead = [{ name: 'mesh-task-daemon', status: 'active' }];
-    assert.deepEqual(publisher.reconcileRole('lead', lead, false),
+    assert.deepEqual(publisher.reconcileRole('lead', lead),
       { role: 'lead', configuredRole: 'lead', runningRole: 'lead', roleMismatch: false });
-    assert.deepEqual(publisher.reconcileRole('worker', lead, false),
+    assert.deepEqual(publisher.reconcileRole('worker', lead),
       { role: 'worker', configuredRole: 'worker', runningRole: 'lead', roleMismatch: true });
-    assert.equal(publisher.reconcileRole('lead', [], false).roleMismatch, true);
-    assert.equal(publisher.reconcileRole(null, [], false).role, 'worker');
+    assert.equal(publisher.reconcileRole('lead', []).roleMismatch, true);
+  });
+
+  // follow-up#4: a role is what was saved for the node, never a guess from its OS.
+  it('with no configured role it publishes "unknown", logs once, and never guesses from the platform', () => {
+    assert.deepEqual(publisher.reconcileRole(null, []),
+      { role: 'unknown', configuredRole: null, runningRole: 'worker', roleMismatch: false });
+    const home = mkdtempSync(join(tmpdir(), 'health-norole-'));
+    const warn = console.warn;
+    const warnings = [];
+    console.warn = (...a) => warnings.push(a.join(' '));
+    try {
+      assert.equal(publisher.resolveConfiguredRole({}, home), null);
+      assert.equal(publisher.resolveConfiguredRole({ OPENCLAW_NODE_ROLE: 'Lead' }, home), null);
+    } finally {
+      console.warn = warn;
+      rmSync(home, { recursive: true, force: true });
+    }
+    assert.ok(warnings.length <= 1, warnings.join('\n'));
+    const src = readFileSync(new URL('../bin/mesh-health-publisher.js', import.meta.url), 'utf8');
+    assert.doesNotMatch(src, /isMac \? "lead"|IS_MAC \? .lead/);
   });
 
   it('the configured role comes from OPENCLAW_NODE_ROLE, else openclaw.env', () => {
@@ -75,7 +94,7 @@ describe('mesh-health-publisher probes', () => {
     assert.ok(maxInFlight > 1, `probes ran one at a time (max in flight ${maxInFlight})`);
     assert.ok(elapsed < DELAY * 3, `gatherHealth took ${elapsed}ms for ${DELAY}ms probes`);
     assert.ok(ticks > 3, `event loop starved during gatherHealth (${ticks} ticks)`);
-    assert.ok(['lead', 'worker'].includes(health.role));
+    assert.ok(['lead', 'worker', 'unknown'].includes(health.role));
     assert.equal(typeof health.roleMismatch, 'boolean');
   });
 });
