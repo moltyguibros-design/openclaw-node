@@ -16,7 +16,8 @@
  */
 
 const { connect, StringCodec } = require("nats");
-const { execSync } = require("child_process");
+const { execFile } = require("child_process");
+const { promisify } = require("util");
 const os = require("os");
 const fs = require("fs");
 const path = require("path");
@@ -35,6 +36,7 @@ const KV_TTL_MS = 120_000; // entries expire after 2 minutes if node dies
 const REPO_DIR = process.env.OPENCLAW_REPO_DIR ||
   path.join(os.homedir(), 'openclaw');
 
+const execFileAsync = promisify(execFile);
 const sc = StringCodec();
 const IS_MAC = os.platform() === "darwin";
 
@@ -48,22 +50,23 @@ let lastErrorMsg = '';
 let lastErrorRepeatCount = 0;
 
 // ── Health Gathering ─────────────────────────────────────────────────────
-// All the expensive execSync calls happen here, on our own schedule.
-// No request timeout to race against.
+// Probes are async: a synchronous shell (tailscale ping waits up to 3s per
+// peer) stalls the event loop, and with it the NATS connection.
 
-function execSafe(cmd) {
+async function runProbe(file, args, opts = {}) {
   try {
-    return execSync(cmd, { encoding: "utf-8", timeout: 5000 }).trim();
+    const { stdout } = await execFileAsync(file, args, { encoding: "utf-8", timeout: 5000, ...opts });
+    return stdout.trim();
   } catch (err) {
-    console.warn(`[health-publisher] execSafe(${cmd.slice(0, 40)}): ${err.message}`);
+    console.warn(`[health-publisher] ${file} ${args.join(" ").slice(0, 40)}: ${err.message}`);
     return null;
   }
 }
 
-function getDiskPercent() {
-  const raw = execSafe("df -h / | tail -1");
+async function getDiskPercent(run = runProbe) {
+  const raw = await run("df", ["-h", "/"]);
   if (!raw) return 0;
-  const match = raw.match(/(\d+)%/);
+  const match = raw.split("\n").pop().match(/(\d+)%/);
   return match ? parseInt(match[1], 10) : 0;
 }
 
@@ -76,15 +79,16 @@ function getMemory() {
   };
 }
 
-function getTailscaleIp() {
-  const raw = execSafe("tailscale ip -4");
-  return raw || "unknown";
-}
+const LINUX_USER_SERVICES = [
+  "openclaw-mesh-task-daemon",
+  "openclaw-mesh-agent",
+  "openclaw-gateway",
+  "openclaw-mesh-health-publisher",
+  "openclaw-mesh-deploy-listener",
+];
 
-function getServices() {
-  const services = [];
-
-  if (IS_MAC) {
+async function getServices(run = runProbe, isMac = IS_MAC) {
+  if (isMac) {
     const serviceNames = [
       "ai.openclaw.mesh-task-daemon",
       "ai.openclaw.mesh-bridge",
@@ -95,69 +99,66 @@ function getServices() {
       "ai.openclaw.mesh-health-publisher",
       "ai.openclaw.mesh-deploy-listener",
     ];
-    for (const name of serviceNames) {
-      const raw = execSafe(`launchctl list ${name} 2>/dev/null`);
-      services.push({ name: name.replace("ai.openclaw.", ""), ...launchdServiceStatus(raw) });
-    }
-  } else {
-    // Linux: check both system-level and user-level services
-    const systemServices = [
-      "openclaw-agent",
-    ];
-    // Only check services that belong on this node.
-    // Lead-only services (task-daemon, bridge, mission-control, memory-daemon)
-    // are not expected on worker nodes.
-    const userServices = [
-      "openclaw-gateway",
-      "openclaw-mesh-health-publisher",
-      "openclaw-mesh-deploy-listener",
-    ];
-    const props = "--property=LoadState,ActiveState,MainPID";
-    for (const name of systemServices) {
-      const raw = execSafe(`systemctl show ${name} ${props} 2>/dev/null`);
-      services.push({ name: name.replace("openclaw-", ""), ...systemdServiceStatus(raw) });
-    }
-    for (const name of userServices) {
-      const raw = execSafe(`systemctl --user show ${name} ${props} 2>/dev/null`);
-      services.push({ name: name.replace("openclaw-", ""), ...systemdServiceStatus(raw) });
-    }
+    return Promise.all(serviceNames.map(async (name) => ({
+      name: name.replace("ai.openclaw.", ""),
+      ...launchdServiceStatus(await run("launchctl", ["list", name])),
+    })));
   }
-
-  return services;
+  // The installer renders every unit as a systemd --user unit.
+  const props = "--property=LoadState,ActiveState,MainPID";
+  return Promise.all(LINUX_USER_SERVICES.map(async (name) => ({
+    name: name.replace("openclaw-", ""),
+    ...systemdServiceStatus(await run("systemctl", ["--user", "show", name, props])),
+  })));
 }
 
-function getAgentStatus() {
+/** The role this node is configured as: OPENCLAW_NODE_ROLE, else openclaw.env (as mesh-deploy reads it). */
+function resolveConfiguredRole(env = process.env, home = os.homedir()) {
+  if (env.OPENCLAW_NODE_ROLE && env.OPENCLAW_NODE_ROLE.trim()) return env.OPENCLAW_NODE_ROLE.trim();
+  try {
+    const content = fs.readFileSync(path.join(home, ".openclaw", "openclaw.env"), "utf8");
+    const match = content.match(/^\s*OPENCLAW_NODE_ROLE\s*=\s*(.+)/m);
+    if (match && match[1].trim()) return match[1].trim().replace(/^["']|["']$/g, "");
+  } catch (err) {
+    if (err.code !== "ENOENT") console.warn(`[health-publisher] read openclaw.env: ${err.message}`);
+  }
+  return null;
+}
+
+/**
+ * The published role is the configured one (what mesh-deploy installs and MC
+ * assumes); runningRole is whether the task daemon is actually up. A mismatch is
+ * flagged rather than resolved, since either side can be the wrong one.
+ */
+function reconcileRole(configuredRole, services, isMac = IS_MAC) {
+  const runningRole = services.some((s) => s.name === "mesh-task-daemon" && s.status === "active")
+    ? "lead" : "worker";
+  const role = configuredRole || (isMac ? "lead" : "worker");
+  return { role, configuredRole, runningRole, roleMismatch: role !== runningRole };
+}
+
+async function getAgentStatus(home = os.homedir()) {
   const status = { status: "idle", currentTask: null, llm: null, model: null };
   try {
-    const statePath = `${os.homedir()}/.openclaw/.tmp/agent-state.json`;
-    const raw = execSafe(`cat ${statePath} 2>/dev/null`);
-    if (raw) {
-      const state = JSON.parse(raw);
-      status.status = state.status || "idle";
-      status.currentTask = state.taskId || null;
-      status.llm = state.llm || "claude";
-      status.model = state.model || null;
-    }
+    const raw = await fs.promises.readFile(path.join(home, ".openclaw", ".tmp", "agent-state.json"), "utf8");
+    const state = JSON.parse(raw);
+    status.status = state.status || "idle";
+    status.currentTask = state.taskId || null;
+    status.llm = state.llm || "claude";
+    status.model = state.model || null;
   } catch (err) {
-    console.warn(`[health-publisher] read agent state: ${err.message}`);
+    if (err.code !== "ENOENT") console.warn(`[health-publisher] read agent state: ${err.message}`);
   }
   return status;
 }
 
-function getDeployVersion() {
-  try {
-    return execSync('git rev-parse --short HEAD', {
-      cwd: REPO_DIR, encoding: 'utf-8', timeout: 5000,
-    }).trim();
-  } catch (err) {
-    console.warn(`[health-publisher] read deploy version: ${err.message}`);
-    return 'unknown';
-  }
+async function getDeployVersion(run = runProbe) {
+  return (await run("git", ["rev-parse", "--short", "HEAD"], { cwd: REPO_DIR })) || "unknown";
 }
 
-function getTailscalePeers() {
+async function getTailscalePeers(run = runProbe) {
   try {
-    const raw = execSafe('tailscale status --json');
+    const raw = await run("tailscale", ["status", "--json"]);
     if (!raw) return { peers: [], selfIp: 'unknown', natType: 'unknown' };
     const status = JSON.parse(raw);
 
@@ -185,9 +186,9 @@ function getTailscalePeers() {
   } catch (err) { console.warn(`[health-publisher] get tailscale peers: ${err.message}`); return { peers: [], selfIp: 'unknown', natType: 'unknown' }; }
 }
 
-function getTailscaleLatency(peerIp) {
+async function getTailscaleLatency(peerIp, run = runProbe) {
   try {
-    const raw = execSafe(`tailscale ping -c 1 --timeout 3s ${peerIp}`);
+    const raw = await run("tailscale", ["ping", "-c", "1", "--timeout", "3s", peerIp]);
     if (!raw) return null;
     const match = raw.match(/in (\d+(?:\.\d+)?)ms/);
     const viaMatch = raw.match(/via (DERP\([^)]+\)|[\d.]+:\d+)/);
@@ -217,12 +218,18 @@ function getNatsInfo(nc, natsUrl) {
   } catch (err) { console.warn(`[health-publisher] get NATS info: ${err.message}`); return { serverUrl: 'unknown', connected: false, serverVersion: 'unknown', isHost: false }; }
 }
 
+// performance.jsonl only grows; re-parse it only when it changed or the day rolled.
+let nodeStatsCache = null;
+
 function getNodeStats() {
   try {
     const perfPath = path.join(os.homedir(), '.openclaw', 'workspace', 'memory', 'performance.jsonl');
     if (!fs.existsSync(perfPath)) return { tasksToday: 0, successRate: 1.0, tokenSpendTodayUsd: 0 };
 
     const today = new Date().toISOString().slice(0, 10);
+    const st = fs.statSync(perfPath);
+    const key = `${today}:${st.mtimeMs}:${st.size}`;
+    if (nodeStatsCache?.key === key) return nodeStatsCache.stats;
     const lines = fs.readFileSync(perfPath, 'utf-8').split('\n').filter(Boolean);
 
     let completed = 0, failed = 0, tokens = 0;
@@ -238,34 +245,41 @@ function getNodeStats() {
     }
 
     const total = completed + failed;
-    return {
+    const stats = {
       tasksToday: total,
       successRate: total > 0 ? completed / total : 1.0,
       tokenSpendTodayUsd: Math.round(tokens * 100) / 100,
     };
+    nodeStatsCache = { key, stats };
+    return stats;
   } catch (err) { console.warn(`[health-publisher] get node stats: ${err.message}`); return { tasksToday: 0, successRate: 1.0, tokenSpendTodayUsd: 0 }; }
 }
 
 let publishCount = 0;
+let lastRoleMismatch = false;
 
-function gatherHealth(nc) {
-  // Gather services once — used for both role detection and health report
-  const services = getServices();
-  const hasDaemon = services.some(
-    (s) => s.name === "mesh-task-daemon" && s.status === "active"
-  );
-  const role = hasDaemon ? "lead" : "worker";
-
+async function gatherHealth(nc, run = runProbe) {
   publishCount++;
-  const tsData = getTailscalePeers();
+  const [services, tsData, deployVersion, diskPercent, agent] = await Promise.all([
+    getServices(run),
+    getTailscalePeers(run),
+    getDeployVersion(run),
+    getDiskPercent(run),
+    getAgentStatus(),
+  ]);
+  const roleInfo = reconcileRole(resolveConfiguredRole(), services);
+  if (roleInfo.roleMismatch !== lastRoleMismatch) {
+    lastRoleMismatch = roleInfo.roleMismatch;
+    if (roleInfo.roleMismatch) {
+      console.warn(`[health-publisher] role mismatch: configured ${roleInfo.role}, running as ${roleInfo.runningRole}`);
+    }
+  }
 
   // Only ping peers every 5th cycle (every 75 seconds)
   if (publishCount % 5 === 0) {
-    for (const peer of tsData.peers) {
-      if (peer.ip && peer.online) {
-        peer.latency = getTailscaleLatency(peer.ip);
-      }
-    }
+    await Promise.all(tsData.peers.filter((p) => p.ip && p.online).map(async (peer) => {
+      peer.latency = await getTailscaleLatency(peer.ip, run);
+    }));
   }
 
   const natsInfo = getNatsInfo(nc, NATS_URL);
@@ -275,15 +289,17 @@ function gatherHealth(nc) {
   return {
     nodeId: NODE_ID,
     platform: os.platform(),
-    role,
-    deployVersion: getDeployVersion(),
-    components: ROLE_COMPONENTS[role] || ROLE_COMPONENTS.worker,
+    role: roleInfo.role,
+    runningRole: roleInfo.runningRole,
+    roleMismatch: roleInfo.roleMismatch,
+    deployVersion,
+    components: ROLE_COMPONENTS[roleInfo.role] || ROLE_COMPONENTS.worker,
     tailscaleIp: tsData.selfIp,
-    diskPercent: getDiskPercent(),
+    diskPercent,
     mem: getMemory(),
     uptimeSeconds: Math.round(os.uptime()),
     services,
-    agent: getAgentStatus(),
+    agent,
     capabilities: [],
     tailscale: tsData,
     nats: natsInfo,
@@ -294,7 +310,7 @@ function gatherHealth(nc) {
 }
 
 // ── Tracer Instrumentation ───────────────────────────────────────────────
-gatherHealth = tracer.wrap('gatherHealth', gatherHealth, { tier: 3 });
+gatherHealth = tracer.wrapAsync('gatherHealth', gatherHealth, { tier: 3 });
 
 // ── Main Loop ────────────────────────────────────────────────────────────
 
@@ -330,7 +346,7 @@ async function main() {
     }
 
     try {
-      const health = gatherHealth(nc);
+      const health = await gatherHealth(nc);
       const payload = JSON.stringify(health);
       await kv.put(NODE_ID, sc.encode(payload));
       if (publishCount % 10 === 0) {
@@ -380,7 +396,11 @@ async function main() {
   await nc.closed();
 }
 
-main().catch((err) => {
-  console.error("[health-publisher] fatal:", err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error("[health-publisher] fatal:", err);
+    process.exit(1);
+  });
+}
+
+module.exports = { gatherHealth, getServices, resolveConfiguredRole, reconcileRole, LINUX_USER_SERVICES };
