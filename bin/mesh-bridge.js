@@ -848,6 +848,7 @@ async function main() {
 
   // Subscribe to ALL mesh events (wildcard)
   const sub = nc.subscribe('mesh.events.>');
+  await nc.flush();
   log('Subscribed to mesh.events.>');
 
   // Event listener (runs in background)
