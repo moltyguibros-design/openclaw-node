@@ -14,6 +14,61 @@ let tmp;
 before(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-protocol-')); });
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
+// What each tick provider's CLI prints on a run that answered, and on one that
+// printed only metadata (init, usage, an empty result) and answered nothing.
+const STREAMS = {
+  claude: {
+    answer: [
+      { type: 'system', subtype: 'init', session_id: 's1', model: 'm', tools: [] },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Step 1.1 waits on the operator.' }] } },
+      { type: 'result', subtype: 'success', is_error: false, result: 'Step 1.1 waits on the operator.', usage: { input_tokens: 9, output_tokens: 7 }, total_cost_usd: 0.01 },
+    ],
+    empty: [
+      { type: 'system', subtype: 'init', session_id: 's1', model: 'm', tools: [] },
+      { type: 'result', subtype: 'success', is_error: false, result: '', usage: { input_tokens: 9, output_tokens: 0 }, total_cost_usd: 0.001 },
+    ],
+  },
+  codex: {
+    answer: [
+      { type: 'thread.started', thread_id: 't1' },
+      { type: 'turn.started' },
+      { type: 'item.completed', item: { id: 'i0', type: 'agent_message', text: 'Step 1.1 waits on the operator.' } },
+      { type: 'turn.completed', usage: { input_tokens: 9, cached_input_tokens: 0, output_tokens: 7 } },
+    ],
+    empty: [
+      { type: 'thread.started', thread_id: 't1' },
+      { type: 'turn.started' },
+      { type: 'item.completed', item: { id: 'i0', type: 'reasoning', text: '**Reading the inventory**' } },
+      { type: 'turn.completed', usage: { input_tokens: 9, cached_input_tokens: 0, output_tokens: 0 } },
+    ],
+  },
+  gemini: {
+    answer: [
+      { type: 'init', session_id: 's1', model: 'gemini-2.5-pro' },
+      { type: 'message', role: 'user', content: 'tick' },
+      { type: 'message', role: 'assistant', content: 'Step 1.1 waits ', delta: true },
+      { type: 'message', role: 'assistant', content: 'on the operator.', delta: true },
+      { type: 'result', status: 'success', stats: { total_tokens: 16 } },
+    ],
+    empty: [
+      { type: 'init', session_id: 's1', model: 'gemini-2.5-pro' },
+      { type: 'message', role: 'user', content: 'tick' },
+      { type: 'result', status: 'success', stats: { total_tokens: 9 } },
+    ],
+  },
+};
+const printStream = (records) => `cat <<'STREAM_EOF'\n${records.map((r) => JSON.stringify(r)).join('\n')}\nSTREAM_EOF`;
+
+// plan-tick reads the agent's answer with REPO/lib/agent-stream.js and `node`.
+// The link resolves to the real file, so its own requires load from this repo;
+// node goes into the fake bin, because these PATHs deliberately leave out the
+// directories a developer's real agent CLIs live in (often node's own bin).
+function provisionAnswerCheck(root, bin) {
+  fs.mkdirSync(path.join(root, 'lib'), { recursive: true });
+  fs.symlinkSync(path.join(REPO, 'lib', 'agent-stream.js'), path.join(root, 'lib', 'agent-stream.js'));
+  fs.symlinkSync(process.execPath, path.join(bin, 'node'));
+}
+
 function bash(script, { input } = {}) {
   return spawnSync('bash', [script], { input: input ?? '', encoding: 'utf8' });
 }
@@ -239,9 +294,10 @@ describe('plan-tick conformance gate — fails closed when plan-lint never reach
     const bin = path.join(tmp, 'tickbin');
     fs.mkdirSync(bin);
     claudeLog = path.join(tmp, 'claude-invocations');
-    // Prints a line like any real agent run: a silent run that changes nothing is a failed run.
-    fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/bash\ncat >/dev/null\necho "$*" >> '${claudeLog}'\necho '{"type":"result"}'\n`);
+    // Answers like a real agent run: one that answers nothing and changes nothing is a failed run.
+    fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/bash\ncat >/dev/null\necho "$*" >> '${claudeLog}'\n${printStream(STREAMS.claude.answer)}\n`);
     fs.chmodSync(path.join(bin, 'claude'), 0o755);
+    provisionAnswerCheck(root, bin);
     const home = path.join(tmp, 'tickhome');
     fs.mkdirSync(home);
     // Not process.env: the close gate runs this suite inside a real tick, whose
@@ -407,12 +463,13 @@ describe('plan-tick shares one repo lock and blames only its own silo for dirt',
     fs.writeFileSync(path.join(plan, 'TICK_PROMPT.md'), 'tick\n');
     fs.writeFileSync(path.join(root, 'lib', 'code.js'), 'one\n');
     const sh = (cmd) => assert.equal(spawnSync('bash', ['-c', cmd], { cwd: root }).status, 0, cmd);
-    sh(`git init -q . && git add -A && ${GIT} commit -q -m seed`);
     const bin = path.join(tmp, `lockbin${n}`);
     fs.mkdirSync(bin);
+    provisionAnswerCheck(root, bin);
+    sh(`git init -q . && git add -A && ${GIT} commit -q -m seed`);
     const seen = path.join(tmp, `lockseen${n}`);
     fs.writeFileSync(path.join(bin, 'claude'),
-      `#!/bin/bash\ncat >/dev/null\ncat memory-plan/.tick.lock/plan > '${seen}'\necho '{"type":"result"}'\n`);
+      `#!/bin/bash\ncat >/dev/null\ncat memory-plan/.tick.lock/plan > '${seen}'\n${printStream(STREAMS.claude.answer)}\n`);
     fs.chmodSync(path.join(bin, 'claude'), 0o755);
     const home = path.join(tmp, `lockhome${n}`);
     fs.mkdirSync(home);
@@ -462,7 +519,7 @@ describe('plan-tick counts failed agent runs and blocks after WORKPLAN_FAIL_LIMI
   const GIT = 'git -c user.name=t -c user.email=t@t';
   let n = 0;
 
-  function repo(id, { agent, env: extra = {} } = {}) {
+  function repo(id, { agent, provider = 'claude', version = 'v1.0', env: extra = {} } = {}) {
     const root = path.join(tmp, `failrepo${++n}`);
     const plan = path.join(root, 'memory-plan', 'plans', id);
     fs.mkdirSync(plan, { recursive: true });
@@ -471,29 +528,36 @@ describe('plan-tick counts failed agent runs and blocks after WORKPLAN_FAIL_LIMI
     fs.writeFileSync(path.join(root, 'workspace-bin', 'plan-lint.sh'),
       '#!/bin/bash\necho "summary: 1 PASS · 0 WARN · 0 FAIL → CONFORMANT"\n');
     fs.writeFileSync(path.join(plan, 'INVENTORY.md'), '| 1 | 1.1 | v1.1 | [ ] | open step |\n');
-    fs.writeFileSync(path.join(plan, 'VERSION'), 'v1.0\n');
+    fs.writeFileSync(path.join(plan, 'VERSION'), `${version}\n`);
     fs.writeFileSync(path.join(plan, 'TICK_PROMPT.md'), 'tick\n');
     fs.writeFileSync(path.join(root, '.gitignore'), 'memory-plan/plans/*/tick-logs/\n');
     const sh = (cmd) => assert.equal(spawnSync('bash', ['-c', cmd], { cwd: root }).status, 0, cmd);
-    sh(`git init -q . && git add -A && ${GIT} commit -q -m seed`);
     const bin = path.join(tmp, `failbin${n}`);
     fs.mkdirSync(bin);
+    provisionAnswerCheck(root, bin);
+    sh(`git init -q . && git add -A && ${GIT} commit -q -m seed`);
     const setAgent = (body) => {
-      fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/bash\ncat >/dev/null\n${body}\n`);
-      fs.chmodSync(path.join(bin, 'claude'), 0o755);
+      fs.writeFileSync(path.join(bin, provider), `#!/bin/bash\ncat >/dev/null\n${body}\n`);
+      fs.chmodSync(path.join(bin, provider), 0o755);
     };
+    // A fake launchctl: an auto-pause must be observable, and must never reach a live chain.
+    const launchctlLog = path.join(tmp, `launchctl${n}.log`);
+    fs.writeFileSync(path.join(bin, 'launchctl'), `#!/bin/bash\necho "$*" >> '${launchctlLog}'\n`);
+    fs.chmodSync(path.join(bin, 'launchctl'), 0o755);
     if (agent !== undefined) setAgent(agent);
     const home = path.join(tmp, `failhome${n}`);
     fs.mkdirSync(home);
-    // Without a fake agent, PATH must not reach a real `claude` installed on this machine.
+    // Without a fake agent, PATH must not reach a real agent CLI installed on this machine.
     const basePath = process.env.PATH.split(path.delimiter)
-      .filter((d) => d && !fs.existsSync(path.join(d, 'claude'))).join(path.delimiter);
-    const env = { PATH: `${bin}${path.delimiter}${basePath}`, HOME: home, TMPDIR: tmp, WORKPLAN_CLOSE_CHECK: 'none', ...extra };
+      .filter((d) => d && !['claude', 'codex', 'gemini'].some((a) => fs.existsSync(path.join(d, a)))).join(path.delimiter);
+    const env = { PATH: `${bin}${path.delimiter}${basePath}`, HOME: home, TMPDIR: tmp, WORKPLAN_CLOSE_CHECK: 'none',
+      WORKPLAN_AGENT_PROVIDER: provider, ...extra };
     const tick = () => spawnSync('bash', [path.join(root, 'workspace-bin', 'plan-tick.sh'), id], { encoding: 'utf8', env, timeout: 60_000 });
     const blockPath = path.join(plan, 'BLOCKED.md');
     const failFile = path.join(plan, 'tick-logs', '.agent-failures');
     return {
-      root, plan, tick, setAgent,
+      root, plan, tick, setAgent, sh, bin,
+      launchctl: () => (fs.existsSync(launchctlLog) ? fs.readFileSync(launchctlLog, 'utf8') : ''),
       block: () => (fs.existsSync(blockPath) ? fs.readFileSync(blockPath, 'utf8') : null),
       fails: () => (fs.existsSync(failFile) ? fs.readFileSync(failFile, 'utf8').trim() : null),
       seedFails: (k) => { fs.mkdirSync(path.dirname(failFile), { recursive: true }); fs.writeFileSync(failFile, `${k}\n`); },
@@ -526,7 +590,7 @@ describe('plan-tick counts failed agent runs and blocks after WORKPLAN_FAIL_LIMI
     const f = repo('freset', { agent: 'exit 3', env: { WORKPLAN_FAIL_LIMIT: '2' } });
     assert.equal(f.tick().status, 1);
     assert.equal(f.fails(), '1');
-    f.setAgent('echo "{\\"type\\":\\"result\\"}"');
+    f.setAgent(printStream(STREAMS.claude.answer));
     const ok = f.tick();
     assert.equal(ok.status, 0, ok.stdout + ok.stderr);
     assert.equal(f.fails(), null, 'a good run did not reset the count');
@@ -541,8 +605,8 @@ describe('plan-tick counts failed agent runs and blocks after WORKPLAN_FAIL_LIMI
     const f = repo('fsilent', { agent: 'exit 0', env: { WORKPLAN_FAIL_LIMIT: '1' } });
     const r = f.tick();
     assert.equal(r.status, 2, r.stdout + r.stderr);
-    assert.match(f.block(), /last: exited 0 with no output and changed nothing/);
-    assert.match(f.block(), /printed nothing and changed nothing/);
+    assert.match(f.block(), /last: exited 0 without an answer \(no JSON records\) and changed nothing/);
+    assert.match(f.block(), /gave no answer and changed nothing: read its stream \(.*\/tick-logs\/\d{8}-\d{6}\.jsonl\)/);
   });
 
   it('a silent exit-0 run that committed work is not a failure', () => {
@@ -570,7 +634,7 @@ describe('plan-tick counts failed agent runs and blocks after WORKPLAN_FAIL_LIMI
   });
 
   it('WORKPLAN_TICK_TIMEOUT at or past the 3600 s lock reap falls back to the default', () => {
-    const f = repo('fcap', { agent: 'echo ok', env: { WORKPLAN_TICK_TIMEOUT: '3600' } });
+    const f = repo('fcap', { agent: printStream(STREAMS.claude.answer), env: { WORKPLAN_TICK_TIMEOUT: '3600' } });
     const r = f.tick();
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.match(r.stdout, /WORKPLAN_TICK_TIMEOUT=3600 must be 1\.\.3599 s — using 2700/);
@@ -599,6 +663,94 @@ describe('plan-tick counts failed agent runs and blocks after WORKPLAN_FAIL_LIMI
     assert.equal(g.block(), '**Trigger**: own reason\n', "the wrapper overwrote the tick's own BLOCKED.md");
     assert.equal(g.fails(), null);
   });
+
+  // An exit-0 run that changed nothing is good only if the provider answered.
+  // Metadata (init, usage, an empty result) counted as output, so a CLI that
+  // answered nothing deleted .agent-failures on every tick and never blocked.
+  for (const provider of ['claude', 'codex', 'gemini']) {
+    it(`${provider}: a metadata-only exit-0 run counts to 3, then blocks and auto-pauses`, () => {
+      const f = repo(`fempty${provider}`, { provider, agent: printStream(STREAMS[provider].empty),
+        env: { WORKPLAN_AUTOPAUSE: '1', WORKPLAN_PLIST_LABEL: 'test.empty' } });
+      for (const k of [1, 2]) {
+        const r = f.tick();
+        assert.equal(r.status, 1, r.stdout + r.stderr);
+        assert.match(r.stdout, new RegExp(`agent run failed \\(${k}/3 in a row\\): ${provider} exited 0 without an answer \\(\\d+ JSON record\\(s\\), none an answer\\) and changed nothing`));
+        assert.equal(f.fails(), String(k));
+        assert.equal(f.block(), null);
+      }
+      const r = f.tick();
+      assert.equal(r.status, 2, r.stdout + r.stderr);
+      assert.match(f.block(), new RegExp(`^\\*\\*Trigger\\*\\*: agent CLI ${provider} failed 3 runs in a row — last: exited 0 without an answer`, 'm'));
+      assert.match(f.block(), /^- Last exit code: 0$/m);
+      assert.equal(f.fails(), null);
+      assert.match(f.launchctl(), /^disable gui\/\d+\/test\.empty$/m);
+      assert.match(f.launchctl(), /^bootout gui\/\d+\/test\.empty$/m);
+    });
+
+    it(`${provider}: a real answer is a good run and resets the count`, () => {
+      const f = repo(`fanswer${provider}`, { provider, agent: printStream(STREAMS[provider].answer) });
+      f.seedFails(2);
+      const r = f.tick();
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.equal(f.fails(), null);
+      assert.equal(f.block(), null);
+    });
+
+    it(`${provider}: metadata-only output with committed work is a good run`, () => {
+      const f = repo(`fwork${provider}`, { provider,
+        agent: `${GIT} commit -q --allow-empty -m work\n${printStream(STREAMS[provider].empty)}` });
+      f.seedFails(2);
+      const r = f.tick();
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.equal(f.fails(), null);
+    });
+  }
+
+  it('an empty or error result is no answer; a bare {"type":"result"} is no answer', () => {
+    for (const [name, stream] of [
+      ['bare', [{ type: 'result' }]],
+      ['error', [{ type: 'result', subtype: 'success', is_error: true, result: 'Credit balance is too low' }]],
+      ['initonly', [{ type: 'system', subtype: 'init', session_id: 's' }]],
+      ['thinking', [{ type: 'result', is_error: false, result: 'Thinking...\nthe plan\n...done thinking.' }]],
+    ]) {
+      const f = repo(`fres${name}`, { agent: printStream(stream), env: { WORKPLAN_FAIL_LIMIT: '1' } });
+      const r = f.tick();
+      assert.equal(r.status, 2, `${name}: ${r.stdout}${r.stderr}`);
+      assert.match(f.block(), /last: exited 0 without an answer/, name);
+    }
+  });
+
+  it('a metadata-only run that changed tracked files is a good run, even uncommitted', () => {
+    const f = repo('fedit', { agent: `echo edit >> memory-plan/plans/fedit/INVENTORY.md\n${printStream(STREAMS.claude.empty)}` });
+    f.seedFails(2);
+    const r = f.tick();
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(f.fails(), null);
+  });
+
+  it('on an in-flight dirty tree, "changed nothing" compares against the tree the tick started on', () => {
+    const f = repo('finflight', { version: 'v1.1-pre', agent: printStream(STREAMS.claude.empty), env: { WORKPLAN_FAIL_LIMIT: '2' } });
+    fs.appendFileSync(path.join(f.plan, 'INVENTORY.md'), 'half-done\n');
+    const r = f.tick();
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stdout, /info: tree dirty but VERSION=v1\.1-pre \(in-flight\); proceeding/);
+    assert.match(r.stdout, /agent run failed \(1\/2 in a row\): claude exited 0 without an answer/);
+    f.setAgent(`echo more >> memory-plan/plans/finflight/INVENTORY.md\n${printStream(STREAMS.claude.empty)}`);
+    const moved = f.tick();
+    assert.equal(moved.status, 0, moved.stdout + moved.stderr);
+    assert.equal(f.fails(), null, 'a run that edited the already-dirty tree was counted as a failure');
+  });
+
+  it('when the answer cannot be checked, the run fails closed and says why', () => {
+    const f = repo('fnocheck', { agent: printStream(STREAMS.claude.answer), env: { WORKPLAN_FAIL_LIMIT: '1' } });
+    const node = path.join(f.bin, 'node');
+    fs.rmSync(node);
+    fs.writeFileSync(node, '#!/bin/bash\necho "node: broken" >&2\nexit 3\n');
+    fs.chmodSync(node, 0o755);
+    const r = f.tick();
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(f.block(), /last: exited 0 and changed nothing, and its answer could not be checked \(rc=3: node: broken\)/);
+  });
 });
 
 describe("plan-tick runs the plan's agent CLI chosen by WORKPLAN_AGENT_PROVIDER", () => {
@@ -625,9 +777,10 @@ describe("plan-tick runs the plan's agent CLI chosen by WORKPLAN_AGENT_PROVIDER"
     fs.mkdirSync(seen);
     for (const name of installed) {
       fs.writeFileSync(path.join(bin, name),
-        `#!/bin/bash\nprintf '%s\\n' "$@" > '${seen}/${name}.argv'\ncat > '${seen}/${name}.stdin'\necho '{"type":"result"}'\n`);
+        `#!/bin/bash\nprintf '%s\\n' "$@" > '${seen}/${name}.argv'\ncat > '${seen}/${name}.stdin'\n${printStream(STREAMS[name].answer)}\n`);
       fs.chmodSync(path.join(bin, name), 0o755);
     }
+    provisionAnswerCheck(root, bin);
     const home = path.join(tmp, `agenthome${n}`);
     fs.mkdirSync(home);
     // A bare PATH: a real agent CLI on the developer's machine must not stand in for a missing fake.

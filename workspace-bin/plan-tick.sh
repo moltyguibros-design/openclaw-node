@@ -301,6 +301,9 @@ TICK_START_EPOCH=$(date +%s)
 CURRENT_LINK="${TICK_LOG_DIR}/current.log"
 ln -sfn "$(basename "${TICK_LOG}")" "${CURRENT_LINK}"
 PRE_HEAD=$(git -C "${REPO}" rev-parse -q --verify HEAD 2>/dev/null || true)
+# Tracked content, not just clean/dirty: an in-flight -pre/-mid tick starts on a dirty tree.
+tree_fingerprint() { { git -C "${REPO}" diff --binary HEAD 2>/dev/null || true; } | cksum; }
+PRE_TREE=$(tree_fingerprint)
 
 {
   printf '## Tick started (%s): %s\n' "${PLAN_ID}" "$(ts)"
@@ -422,18 +425,27 @@ fi
 # Before: the exit status was only logged and the wrapper exited 0, so under chain
 # mode (launchd KeepAlive, 30 s throttle) a CLI that failed at once — signed out,
 # out of quota, crashed, missing — relaunched ~2,880 times a day. A failed run is a
-# non-zero exit (124 = wall-clock limit, 127 = could not be started), or exit 0 with
-# no output that changed nothing. Failures in a row are counted in FAIL_FILE; any
-# good run resets it. Below FAIL_LIMIT the wrapper exits 1 so launchd's
-# LastExitStatus shows it; at FAIL_LIMIT it blocks and pauses the chain.
+# non-zero exit (124 = wall-clock limit, 127 = could not be started), or exit 0
+# that left VERSION, HEAD and the tracked tree as they were without answering.
+# "Answering" is the provider's own answer read from its stream (lib/agent-stream.js),
+# not any output: init, usage and empty result records counted as output, so a CLI
+# that answered nothing reset the count every time. Failures in a row are counted
+# in FAIL_FILE; any good run resets it. Below FAIL_LIMIT the wrapper exits 1 so
+# launchd's LastExitStatus shows it; at FAIL_LIMIT it blocks and pauses the chain.
 AGENT_FAILURE=""
 if [ "${POST_VERSION}" = "${VERSION:-}" ]; then
   case "${AGENT_RC}" in
     0)
-      if ! grep -q '[^[:space:]]' "${TICK_RAW}" 2>/dev/null \
-        && [ -z "$(git -C "${REPO}" status --porcelain | grep -v '^??' || true)" ] \
-        && [ "$(git -C "${REPO}" rev-parse -q --verify HEAD 2>/dev/null || true)" = "${PRE_HEAD}" ]; then
-        AGENT_FAILURE="exited 0 with no output and changed nothing"
+      if [ "$(git -C "${REPO}" rev-parse -q --verify HEAD 2>/dev/null || true)" = "${PRE_HEAD}" ] \
+        && [ "$(tree_fingerprint)" = "${PRE_TREE}" ]; then
+        ANSWER_RC=0
+        ANSWER_WHY=$(node "${REPO}/lib/agent-stream.js" "${AGENT_PROVIDER}" "${TICK_RAW}" 2>&1) || ANSWER_RC=$?
+        ANSWER_WHY=${ANSWER_WHY%%$'\n'*}
+        case "${ANSWER_RC}" in
+          0) ;;
+          1) AGENT_FAILURE="exited 0 without an answer (${ANSWER_WHY}) and changed nothing" ;;
+          *) AGENT_FAILURE="exited 0 and changed nothing, and its answer could not be checked (rc=${ANSWER_RC}: ${ANSWER_WHY:-no output})" ;;
+        esac
       fi ;;
     124) AGENT_FAILURE="ran past the ${TICK_TIMEOUT}s wall-clock limit and was stopped (rc=124)" ;;
     126|127) AGENT_FAILURE="could not be started (rc=${AGENT_RC})" ;;
@@ -445,7 +457,7 @@ agent_fix_hint() {
   case "${AGENT_RC}" in
     126|127) printf 'the agent CLI `%s` is not installed, not executable, or not on the PATH this job runs with (launchd units get a minimal PATH): install it or add its directory to the unit PATH' "${AGENT_BIN}" ;;
     124) printf 'the run hung past the %ss limit: read the last log for where it stalled, review any uncommitted work it left, and raise WORKPLAN_TICK_TIMEOUT (max 3599) only if the step genuinely needs longer' "${TICK_TIMEOUT}" ;;
-    0) printf 'the agent CLI `%s` printed nothing and changed nothing: run it by hand on this plan TICK_PROMPT.md to see what it does' "${AGENT_BIN}" ;;
+    0) printf 'the agent CLI `%s` gave no answer and changed nothing: read its stream (%s), then run it by hand on this plan TICK_PROMPT.md to see what it does' "${AGENT_BIN}" "${TICK_RAW}" ;;
     *) printf 'sign the agent CLI `%s` in again (run it interactively), check the account quota or billing, or read the last log for a crash' "${AGENT_BIN}" ;;
   esac
 }
