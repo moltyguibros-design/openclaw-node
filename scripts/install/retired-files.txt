@@ -19,3 +19,5 @@ workspace-bin sync-to-harness
 workspace-bin memory-plan-status.sh
 workspace-bin memory-plan-timeline.sh
 workspace-bin memory-plan-notify.sh
+# pair-session.js read prompt templates that never shipped, so every run crashed.
+workspace-bin pair-session.js

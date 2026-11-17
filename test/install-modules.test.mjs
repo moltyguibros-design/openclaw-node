@@ -322,6 +322,13 @@ test('the pre-silo plan tools are gone, retired on --update, and nothing points 
   assert.doesNotMatch(readFileSync(join(ROOT, 'workspace-bin/memory-plan-pretty-stream.sh'), 'utf8'), /memory-plan-tick\.sh/);
 });
 
+test('pair-session and its Teams transport are retired: not shipped, not documented, archived on update', () => {
+  assert.equal(existsSync(join(ROOT, 'workspace-bin/pair-session.js')), false);
+  assert.equal(existsSync(join(ROOT, 'lib/pair-transport-teams.js')), false);
+  assert.match(readFileSync(join(ROOT, 'scripts/install/retired-files.txt'), 'utf8'), /^workspace-bin pair-session\.js$/m);
+  assert.doesNotMatch(readFileSync(join(ROOT, 'docs/OBSERVABILITY.md'), 'utf8'), /pair-transport-teams|TeamsTransport/);
+});
+
 test('skills that ship memory or code off the node are quarantined, and an --update removes installed copies', () => {
   const quarantine = readFileSync(join(ROOT, 'skills/_quarantine/README.md'), 'utf8');
   for (const s of ['second-brain', 'refactor-suggest']) {

@@ -618,12 +618,6 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 |----------|--------|------|------------|
 | (Integrated into `publishEvent`, `publishCollabEvent`, `publishPlanEvent`) | mesh-task-daemon | 1 | NATS-based event publishing serves as the notification gateway — all events propagate to subscribed consumers. |
 
-### 12.3 Teams Transport
-
-| Function | Module | Tier | Why Logged |
-|----------|--------|------|------------|
-| TeamsTransport class methods (15) | pair-transport-teams | 2 | All Teams transport operations — logged to track message delivery, connection health, and transport errors for the Teams integration. |
-
 ---
 
 ## 13. DEPLOYMENT & PROVISIONING
@@ -741,7 +735,6 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | mcp-knowledge/core | 4 |
 | mcp-knowledge/server | varies |
 | heartbeat-detect | 2 |
-| pair-transport-teams | 15 |
 | memory-daemon | 13 |
 | obsidian-sync | 12 |
 | memory-maintenance | 13 |
@@ -759,6 +752,6 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | discord-read | 1 |
 | discord-tool | 4 |
 | hyperagent CLI | 11 |
-| **Grand Total** | **~322** |
+| **Grand Total** | **~307** |
 
 > The exact count varies slightly due to MeshRegistry and MCP knowledge server having dynamic method counts. All functions listed above are wrapped by `tracer.wrapClass()`, `tracer.wrapAsync()`, or `tracer.wrap()` and emit structured trace events through the unified observability pipeline.
