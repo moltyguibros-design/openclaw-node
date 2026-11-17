@@ -31,7 +31,7 @@ vi.mock("@/lib/nats", () => ({
 vi.mock("@/lib/mesh-sign", () => ({ signOperatorRequest: h.sign }));
 
 let kv: MockKV;
-let kvWrites: ReturnType<typeof vi.fn>;
+const kvWrites = vi.fn((..._args: unknown[]) => {});
 
 const daemonSays = (body: object) => async () => ({ data: encoder.encode(JSON.stringify(body)) });
 const sent = () => h.request.mock.calls.map(([subject, data]) => ({ subject, body: JSON.parse(decoder.decode(data as Uint8Array)) }));
@@ -46,7 +46,7 @@ const stored = async (id = "T-1") => JSON.parse(decoder.decode((await kv.get(id)
 beforeEach(async () => {
   kv = new MockKV();
   h.kv = kv;
-  kvWrites = vi.fn();
+  kvWrites.mockClear();
   await seed();
   for (const method of ["put", "update", "create", "delete"] as const) {
     const original = (kv as unknown as Record<string, (...a: unknown[]) => unknown>)[method];
