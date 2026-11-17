@@ -4,10 +4,8 @@ import { soulEvolutionLog } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 import fs from "fs/promises";
 import path from "path";
-import os from "os";
 import { isSafeId } from "@/lib/safe-path";
-
-const SOULS_DIR = path.join(os.homedir(), ".openclaw/souls");
+import { SOULS_DIR } from "@/lib/config";
 
 interface PropagateRequest {
   sourceEventId: string;

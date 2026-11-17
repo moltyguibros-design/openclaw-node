@@ -3,14 +3,8 @@ import { getDb } from "@/lib/db";
 import { soulSpawns } from "@/lib/db/schema";
 import fs from "fs/promises";
 import path from "path";
-import os from "os";
 import { isSafeId } from "@/lib/safe-path";
-
-const SOULS_DIR = path.join(os.homedir(), ".openclaw/souls");
-const HANDOFFS_DIR = path.join(
-  os.homedir(),
-  ".openclaw/workspace/memory-vault/handoffs"
-);
+import { HANDOFFS_DIR, SOULS_DIR } from "@/lib/config";
 
 interface PromptRequest {
   taskId?: string;

@@ -5,7 +5,7 @@ import { getDb, getRawDb } from "@/lib/db";
 import { tasks } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { withTrace } from "@/lib/tracer";
-import { NODE_ID, NODE_PLATFORM, NODE_ROLE } from "@/lib/config";
+import { NODE_ID, NODE_PLATFORM, NODE_ROLE, OPENCLAW_ROOT } from "@/lib/config";
 import { exec } from "child_process";
 import { promisify } from "util";
 import os from "os";
@@ -180,7 +180,7 @@ async function discoverNodes(kv: KV | null): Promise<string[]> {
 
   // Source 3: mesh-aliases.json (maps shortnames → full IDs)
   try {
-    const aliasPath = path.join(os.homedir(), ".openclaw", "mesh-aliases.json");
+    const aliasPath = path.join(OPENCLAW_ROOT, "mesh-aliases.json");
     if (fs.existsSync(aliasPath)) {
       const aliases = JSON.parse(fs.readFileSync(aliasPath, "utf-8"));
       for (const fullId of Object.values(aliases) as string[]) {
@@ -318,7 +318,7 @@ async function gatherLocalHealth(): Promise<NodeHealth> {
 
   const natsUrl = process.env.OPENCLAW_NATS || (() => {
     try {
-      const envPath = path.join(os.homedir(), ".openclaw", "openclaw.env");
+      const envPath = path.join(OPENCLAW_ROOT, "openclaw.env");
       if (fs.existsSync(envPath)) {
         const content = fs.readFileSync(envPath, "utf-8");
         const match = content.match(/^\s*OPENCLAW_NATS\s*=\s*(.+)/m);
@@ -341,7 +341,7 @@ async function gatherLocalHealth(): Promise<NodeHealth> {
     agent: (() => {
       // Read runtime state if agent is active
       try {
-        const statePath = path.join(os.homedir(), ".openclaw", ".tmp", "agent-state.json");
+        const statePath = path.join(OPENCLAW_ROOT, ".tmp", "agent-state.json");
         if (fs.existsSync(statePath)) {
           const state = JSON.parse(fs.readFileSync(statePath, "utf-8"));
           return {
@@ -546,7 +546,7 @@ export const GET = withTrace("mesh", "GET /api/mesh/nodes", async () => {
   const natsConnected = kv !== null;
   const natsUrl = process.env.OPENCLAW_NATS || (() => {
     try {
-      const envPath = path.join(os.homedir(), ".openclaw", "openclaw.env");
+      const envPath = path.join(OPENCLAW_ROOT, "openclaw.env");
       if (fs.existsSync(envPath)) {
         const content = fs.readFileSync(envPath, "utf-8");
         const match = content.match(/^\s*OPENCLAW_NATS\s*=\s*(.+)/m);

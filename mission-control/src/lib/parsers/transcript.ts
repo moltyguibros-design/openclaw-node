@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { WORKSPACE_ROOT } from "../config";
+import { OPENCLAW_ROOT, WORKSPACE_ROOT } from "../config";
 
 /**
  * Represents a single activity event extracted from the JSONL transcript.
@@ -33,7 +33,7 @@ const TRANSCRIPT_DIRS = [
   // Agent CLI workspace sessions (cross-platform path encoding)
   path.join(HOME, ".claude/projects", toAgentProjectPath(WORKSPACE_ROOT)),
   // OpenClaw Gateway sessions (Discord, Telegram, etc.)
-  path.join(HOME, ".openclaw/agents/main/sessions"),
+  path.join(OPENCLAW_ROOT, "agents", "main", "sessions"),
 ];
 
 /**

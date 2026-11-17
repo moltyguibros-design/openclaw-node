@@ -40,7 +40,7 @@ beforeEach(async () => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), "mc-souls-evolution-"));
   process.env.HOME = home;
   vi.stubEnv("DB_PATH", path.join(home, "mission-control.db"));
-  vi.stubEnv("WORKSPACE_ROOT", path.join(home, "workspace"));
+  vi.stubEnv("WORKSPACE_ROOT", path.join(home, ".openclaw", "workspace"));
   vi.resetModules();
 
   soulsDir = path.join(home, ".openclaw", "souls");

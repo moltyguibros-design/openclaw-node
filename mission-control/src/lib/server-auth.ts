@@ -1,9 +1,7 @@
 import { randomBytes, timingSafeEqual } from "crypto";
 import fs from "fs";
 import path from "path";
-import os from "os";
-
-const TOKEN_PATH = path.join(os.homedir(), ".openclaw", "config", "mc-session-token");
+import { MC_SESSION_TOKEN_PATH as TOKEN_PATH } from "./config";
 
 let cachedToken: string | null = null;
 let bootstrapHintLogged = false;

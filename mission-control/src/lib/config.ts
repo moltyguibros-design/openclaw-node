@@ -7,6 +7,11 @@ export const WORKSPACE_ROOT =
   process.env.OPENCLAW_WORKSPACE ||
   path.join(os.homedir(), ".openclaw", "workspace");
 
+// ~/.openclaw by default, or the installer's OPENCLAW_ROOT: the root containing
+// every memory store/log a watcher event can point at (vault notes, the
+// injections log, MEMORY.md). Read route is jailed here.
+export const OPENCLAW_ROOT = path.dirname(WORKSPACE_ROOT);
+
 export const DB_PATH =
   process.env.DB_PATH ||
   path.join(WORKSPACE_ROOT, "projects", "mission-control", "data", "mission-control.db");
@@ -28,7 +33,7 @@ export const STATE_DB_PATH =
 function configuredMemoryVaultPath(): string | null {
   try {
     const cfg = JSON.parse(
-      fs.readFileSync(path.join(os.homedir(), ".openclaw", "config", "obsidian-sync.json"), "utf8"),
+      fs.readFileSync(path.join(OPENCLAW_ROOT, "config", "obsidian-sync.json"), "utf8"),
     );
     if (!cfg.memoryVaultPath) return null;
     return path.isAbsolute(cfg.memoryVaultPath)
@@ -42,12 +47,13 @@ export const OBSIDIAN_DIR =
   process.env.OBSIDIAN_DIR ||
   configuredMemoryVaultPath() ||
   path.join(path.dirname(WORKSPACE_ROOT), "obsidian-local");
-// ~/.openclaw — the root containing every memory store/log a watcher event can
-// point at (vault notes, the injections log, MEMORY.md). Read route is jailed here.
-export const OPENCLAW_ROOT = path.dirname(WORKSPACE_ROOT);
+export const INJECTIONS_LOG = path.join(WORKSPACE_ROOT, "logs", "memory-injections.jsonl");
 export const ACTIVE_TASKS_MD = path.join(MEMORY_DIR, "active-tasks.md");
 export const CLAWVAULT_DIR = path.join(WORKSPACE_ROOT, "memory-vault");
 export const CLAWVAULT_INDEX = path.join(CLAWVAULT_DIR, ".clawvault-index.json");
+export const HANDOFFS_DIR = path.join(CLAWVAULT_DIR, "handoffs");
+export const SOULS_DIR = path.join(OPENCLAW_ROOT, "souls");
+export const MC_SESSION_TOKEN_PATH = path.join(OPENCLAW_ROOT, "config", "mc-session-token");
 
 // Lore knowledge base directories
 export const LORE_DIRS = [

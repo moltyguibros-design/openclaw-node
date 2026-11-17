@@ -2,17 +2,13 @@ import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { OPENCLAW_ROOT, WORKSPACE_ROOT } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
 const HOME = os.homedir();
-const WORKSPACE =
-  process.env.OPENCLAW_WORKSPACE ||
-  path.join(HOME, ".openclaw/workspace");
-const TRANSCRIPT_REGISTRY = path.join(
-  HOME,
-  ".openclaw/config/transcript-sources.json"
-);
+const WORKSPACE = WORKSPACE_ROOT;
+const TRANSCRIPT_REGISTRY = path.join(OPENCLAW_ROOT, "config", "transcript-sources.json");
 
 // Patterns that identify a heartbeat-triggered gateway session.
 const HEARTBEAT_PATTERNS = [
@@ -47,7 +43,7 @@ function loadTranscriptSources(): Array<{
   return [
     {
       name: "gateway",
-      path: path.join(HOME, ".openclaw/agents/main/sessions"),
+      path: path.join(OPENCLAW_ROOT, "agents", "main", "sessions"),
       format: "openclaw-gateway",
     },
   ];

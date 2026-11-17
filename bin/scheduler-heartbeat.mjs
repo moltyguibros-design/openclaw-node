@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DEFAULT_MC_TOKEN_PATH as DEFAULT_TOKEN_PATH } from '../lib/mc-session-token.mjs';
 
 const DEFAULT_ENDPOINT = 'http://127.0.0.1:3000/api/scheduler/tick';
-const DEFAULT_TOKEN_PATH = path.join(os.homedir(), '.openclaw', 'config', 'mc-session-token');
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost']);
 export const HEARTBEAT_TIMEOUT_MS = 30_000;
 

@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
-import os from "os";
 import path from "path";
+import { OPENCLAW_ROOT } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
 // Read-only viewer over the notifier's append-only ledger — never writes.
 const LEDGER_PATH =
   process.env.OPENCLAW_NOTIFY_LEDGER ||
-  path.join(os.homedir(), ".openclaw", "notifications", "ledger.jsonl");
+  path.join(OPENCLAW_ROOT, "notifications", "ledger.jsonl");
 
 interface NotificationEvent {
   id: string;

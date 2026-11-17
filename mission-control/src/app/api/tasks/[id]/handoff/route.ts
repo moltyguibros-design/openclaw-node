@@ -4,13 +4,8 @@ import { tasks, soulHandoffs } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import fs from "fs/promises";
 import path from "path";
-import os from "os";
 import { isSafeId } from "@/lib/safe-path";
-
-const HANDOFFS_DIR = path.join(
-  os.homedir(),
-  ".openclaw/workspace/memory-vault/handoffs"
-);
+import { HANDOFFS_DIR } from "@/lib/config";
 
 interface HandoffRequest {
   toSoul: string;

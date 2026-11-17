@@ -4,13 +4,12 @@ import { soulEvolutionLog } from "@/lib/db/schema";
 import { and, eq, desc } from "drizzle-orm";
 import fs from "fs/promises";
 import path from "path";
-import os from "os";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { isSafeId } from "@/lib/safe-path";
+import { SOULS_DIR } from "@/lib/config";
 
 const execFileAsync = promisify(execFile);
-const SOULS_DIR = path.join(os.homedir(), ".openclaw/souls");
 
 interface EvolutionEvent {
   eventId: string;

@@ -20,8 +20,8 @@
 import { createPrivateKey } from "crypto";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
 import { nkeyAuthenticator, nkeys, type Authenticator } from "nats";
+import { OPENCLAW_ROOT } from "./config";
 
 // The nkey seed codec is not exported by `nats` (nor by nkeys.js's public
 // entry), so it is vendored, as in lib/nats-nkey.js: prefix + payload +
@@ -64,7 +64,7 @@ export type NatsAuthMode = "token" | "nkey" | "nkey-strict";
 const MODES: NatsAuthMode[] = ["token", "nkey", "nkey-strict"];
 
 export function openclawHome(): string {
-  return process.env.OPENCLAW_HOME || join(homedir(), ".openclaw");
+  return process.env.OPENCLAW_HOME || OPENCLAW_ROOT;
 }
 
 /** env → ~/.openclaw/openclaw.env (same regex as the node resolver). */

@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
-import os from "os";
 import { isSafeId } from "@/lib/safe-path";
+import { SOULS_DIR } from "@/lib/config";
 
-const SOULS_DIR = path.join(os.homedir(), ".openclaw/souls");
 const REGISTRY_PATH = path.join(SOULS_DIR, "registry.json");
 
 interface Soul {

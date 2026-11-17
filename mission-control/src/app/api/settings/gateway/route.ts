@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
-import os from "os";
+import { OPENCLAW_ROOT } from "@/lib/config";
 
-const CONFIG_PATH = path.join(
-  process.env.OPENCLAW_HOME || path.join(os.homedir(), ".openclaw"),
-  "openclaw.json"
-);
+const CONFIG_PATH = path.join(process.env.OPENCLAW_HOME || OPENCLAW_ROOT, "openclaw.json");
 
 interface OpenclawConfig {
   agents?: {
