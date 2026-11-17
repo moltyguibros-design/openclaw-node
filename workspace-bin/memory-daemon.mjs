@@ -1322,27 +1322,18 @@ function saveDaemonState(sm) {
   } catch (err) { console.warn(`[memory-daemon] daemon state write failed: ${err.message}`); }
 }
 
+// The saved PID is not checked: whether the previous daemon crashed, was
+// restarted or its PID was reused, it no longer drives these sessions, and
+// forcing ENDED here dropped their end-of-session pipeline (restore parks them
+// IDLE instead).
 function loadDaemonState() {
-  if (fs.existsSync(DAEMON_STATE_FILE)) {
-    try {
-      const state = JSON.parse(fs.readFileSync(DAEMON_STATE_FILE, 'utf-8'));
-      // Check if previous daemon process is still alive
-      if (state.pid) {
-        try {
-          process.kill(state.pid, 0); // check if alive
-          // PID exists — but might be reused by a different process
-          const staleSec = (Date.now() - (state.updatedAt || 0)) / 1000;
-          if (staleSec > 300) {
-            // >5 min since last update — PID was likely reused
-            log('Stale PID detected (>5 min since last update) — resetting state');
-            state.state = STATES.ENDED;
-          }
-        } catch (err) { console.warn(`[memory-daemon] PID check failed (process not alive): ${err.message}`); state.state = STATES.ENDED; }
-      }
-      return state;
-    } catch (err) { console.warn(`[memory-daemon] daemon state parse failed: ${err.message}`); }
+  if (!fs.existsSync(DAEMON_STATE_FILE)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(DAEMON_STATE_FILE, 'utf-8'));
+  } catch (err) {
+    console.warn(`[memory-daemon] daemon state parse failed: ${err.message}`);
+    return null;
   }
-  return null;
 }
 
 // ── Tracer wrapping ──────────────────────────────────

@@ -79,13 +79,40 @@ test('restore reads the per-session list and the legacy single-session form', ()
   tr.completeBoot('a');
   const copy = new SessionTracker(config);
   copy.restore(JSON.parse(JSON.stringify(tr.toJSON())));
-  assert.deepEqual(copy.sessions.map(s => [s.sessionId, s.state]), [['a', 'ACTIVE'], ['b', 'BOOT']]);
+  assert.deepEqual(copy.sessions.map(s => [s.sessionId, s.state]), [['a', 'IDLE'], ['b', 'IDLE']]);
 
   const legacy = new SessionTracker(config);
   legacy.restore({ state: 'IDLE', sessionId: 'x', lastActivityTime: 5 });
   assert.deepEqual(legacy.sessions.map(s => [s.sessionId, s.state]), [['x', 'IDLE']]);
   legacy.restore({ state: 'ENDED', sessionId: 'x', sessions: [{ sessionId: 'x', state: 'IDLE' }] });
   assert.deepEqual(legacy.sessions, []);
+});
+
+test('a session live at a daemon restart resumes as IDLE: written again it goes ACTIVE, quiet it runs its own end pipeline', () => {
+  const before = new SessionTracker(config);
+  before.tick(seen('a', 'b'), 0);
+  before.completeBoot('a');
+  before.completeBoot('b');
+  before.tick(seen('a', 'b'), MIN);
+  const saved = JSON.parse(JSON.stringify(before.toJSON()));
+
+  const after = new SessionTracker(config);
+  after.restore(saved);
+  assert.equal(after.state, STATES.IDLE);
+  // a is still being written: back to ACTIVE with no ENDED->BOOT re-bootstrap.
+  assert.deepEqual(brief(after.tick(seen('a'), 2 * MIN)), ['a:IDLE->ACTIVE']);
+  // b went quiet across the restart: it still gets IDLE->ENDED, with its path.
+  const ended = after.tick(seen('a'), MIN + 15 * MIN + 1);
+  assert.deepEqual(brief(ended), ['b:IDLE->ENDED']);
+  assert.equal(ended[0].jsonlPath, '/t/b.jsonl');
+  assert.equal(ended[0].othersLive, true);
+});
+
+test('the daemon does not reset a restored state to ENDED when the previous PID is dead', () => {
+  const load = daemonSrc.match(/function loadDaemonState\(\) \{[\s\S]*?\n\}\n/)[0];
+  assert.doesNotMatch(load, /STATES\.ENDED/);
+  assert.doesNotMatch(load, /process\.kill/);
+  assert.match(daemonSrc, /const savedState = loadDaemonState\(\);\n  if \(savedState\) \{\n    sm\.restore\(savedState\);/);
 });
 
 test('the daemon drives the per-session tracker and completes every finished boot', () => {
