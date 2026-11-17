@@ -45,7 +45,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const { getSessionInfo } = require('../lib/agent-activity');
 const { loadAllRules, matchRules, formatRulesForPrompt, detectFrameworks, activateFrameworkRules } = require('../lib/rule-loader');
-const { loadHarnessRules, runMeshHarness, runPostCommitValidation, runPreChecks, formatHarnessForPrompt } = require('../lib/mesh-harness');
+const { loadHarnessRules, runMeshHarness, runPostCommitValidation, runPreChecks, formatHarnessForPrompt, preCommitSecretScan } = require('../lib/mesh-harness');
 const { validateMetricCommand } = require('../lib/exec-safety');
 const { TASK_TERMINAL, TERMINAL_STATES } = require('../lib/mesh-tasks');
 const { findRole, formatRoleForPrompt, validateRequiredOutputs } = require('../lib/role-loader');
@@ -777,7 +777,8 @@ function buildRetryPrompt(task, previousAttempts, attemptNumber) {
     parts.push(`### Attempt ${i + 1}`);
     parts.push(`- Approach: ${a.approach || 'unknown'}`);
     parts.push(`- Result: ${a.result || 'unknown'}`);
-    parts.push(`- Kept: ${a.keep ? 'yes' : 'no (reverted)'}`);
+    // Only a secrets block resets the tree; any other failed attempt's edits are still there.
+    parts.push(`- Kept: ${a.keep ? 'yes' : a.reset ? 'no (the worktree was reset to HEAD; its changes are gone)' : 'no (its changes are still in the worktree)'}`);
     parts.push('');
   }
 
@@ -927,6 +928,32 @@ function commitWorktree(worktreePath, taskId, summary) {
   } catch (err) {
     log(`Commit warning: ${err.message}`);
     return null;
+  }
+}
+
+/**
+ * Commit leftover work for post-mortem. Unlike a completion, it never went through the
+ * harness, so it gets the harness's secret scan here; a finding skips the commit and
+ * returns { blocked: true }, and the caller drops the branch with the worktree.
+ */
+function commitPartialWork(worktreePath, taskId, summary) {
+  const scan = preCommitSecretScan(worktreePath);
+  if (scan.blocked) {
+    warn(`${taskId}: partial work not committed, secret scan found: ${scan.findings.join('; ')}`);
+    return { committed: false, blocked: true };
+  }
+  return commitWorktree(worktreePath, taskId, summary);
+}
+
+/** Put the task worktree back to its HEAD, untracked files included. Returns whether it worked. */
+function resetWorktree(worktreePath) {
+  try {
+    execFileSync('git', ['reset', '--hard', 'HEAD'], { cwd: worktreePath, timeout: 10000, stdio: 'pipe' });
+    execFileSync('git', ['clean', '-fd'], { cwd: worktreePath, timeout: 10000, stdio: 'pipe' });
+    return true;
+  } catch (err) {
+    warn(`worktree reset failed (${worktreePath}): ${err.message}`);
+    return false;
   }
 }
 
@@ -2563,14 +2590,18 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
       // Secret violations block the commit entirely.
       const hasSecrets = harnessResult.violations.some(v => v.rule === 'no-hardcoded-secrets');
       if (hasSecrets) {
+        // The next attempt starts from a clean tree: left in place, the secret would ride
+        // into the next attempt and into a partial commit.
+        const reset = resetWorktree(worktreePath);
         const attemptRecord = {
           approach: `Attempt ${attempt}: harness blocked — secrets detected`,
           result: harnessResult.violations.map(v => v.message).join('; '),
           keep: false,
+          reset,
         };
         attempts.push(attemptRecord);
         await natsRequest('mesh.tasks.attempt', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token, ...attemptRecord });
-        log(`Attempt ${attempt}: harness blocked commit (secrets). Retrying.`);
+        log(`Attempt ${attempt}: harness blocked commit (secrets); worktree ${reset ? 'reset to HEAD' : 'reset FAILED'}. Retrying.`);
         continue;
       }
       // Non-secret violations (scope reverts, output blocks): proceed with warnings
@@ -2723,7 +2754,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
   // "Failed" = a single attempt failed (used by daemon for budget/stall).
   // Commit whatever partial work exists on the task branch — preserved for
   // post-mortem, never merged (a released task failed its own verification).
-  commitWorktree(worktreePath, task.task_id, 'partial: released after exhausting attempts');
+  const partial = commitPartialWork(worktreePath, task.task_id, 'partial: released after exhausting attempts');
 
   const escalated = supervisor?.state.escalation ? `Foreman escalated: ${supervisor.state.escalation.reason}. ` : '';
   const reason = `${escalated}Exhausted ${attempts.length}/${MAX_ATTEMPTS} attempts. Last: ${attempts[attempts.length - 1]?.result?.slice(0, 200) || 'unknown'}`;
@@ -2737,7 +2768,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
   });
   // Keep worktree branch on release for post-mortem debugging (don't merge partial
   // work); startup reconcile keeps it until MESH_KEPT_BRANCH_MAX_DAYS.
-  cleanupWorktree(worktreePath, true);
+  cleanupWorktree(worktreePath, !partial?.blocked);
   writeAgentState('idle', null);
   const foremanNote = await closeSupervision(supervisor, 'failure');
   await recordHyperagentTask(task, {
@@ -2759,8 +2790,8 @@ async function onWorkerError(task, startedAt, err) {
   // createWorktree's own id check: the error may be its refusal of an unsafe id.
   const worktreePath = /^[\w][\w.-]{0,127}$/.test(task.task_id) ? path.join(WORKTREE_BASE, task.task_id) : null;
   if (worktreePath && fs.existsSync(worktreePath)) {
-    commitWorktree(worktreePath, task.task_id, terminal ? `partial: the daemon ended this task (${err.taskStatus})` : 'partial: abandoned after a worker error');
-    cleanupWorktree(worktreePath, true);
+    const partial = commitPartialWork(worktreePath, task.task_id, terminal ? `partial: the daemon ended this task (${err.taskStatus})` : 'partial: abandoned after a worker error');
+    cleanupWorktree(worktreePath, !partial?.blocked);
   }
   writeAgentState('idle', null);
   await recordHyperagentTask(task, {
