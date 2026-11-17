@@ -11,7 +11,7 @@
 //
 // Discovery roots (in priority order):
 //   1. $WORKPLAN_ROOTS — colon-separated list of dirs to scan
-//   2. The current working directory (process.cwd())
+//   2. <cwd>/memory-plan/plans (only when $WORKPLAN_ROOTS is unset)
 // Within each root, every immediate subdirectory that contains BOTH
 // INVENTORY.md and VERSION is registered as a plan.
 //
@@ -466,7 +466,7 @@ function planSummary(plan, { dirty = true } = {}) {
 // root. If missing, defaults are derived from the plan id and the repo layout.
 // Schema:
 // {
-//   "plist_label":      "com.openclaw.memory-plan-tick",
+//   "plist_label":      "ai.openclaw.<id>-tick",
 //   "plist_path":       "~/Library/LaunchAgents/<label>.plist",
 //   "tick_command":     "/path/to/workspace-bin/<id>-tick.sh",
 //   "working_dir":      "/path/to/repo",
