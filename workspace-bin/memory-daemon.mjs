@@ -1854,7 +1854,11 @@ async function main() {
     inFlightTick = run;
     return run.finally(() => { if (inFlightTick === run) inFlightTick = null; });
   };
-  const guardedTick = createConcurrencyGuard(trackedTick, { maxAgeMs: 30 * 60_000, log });
+  // One legitimate tick can chain a 30-min flush worker, a 30-min
+  // knowledge-index child and flushes queued behind them; force-clearing it
+  // at 30 min started an overlapping tick that lost throttle-state updates.
+  // The bound only recovers a truly wedged tick.
+  const guardedTick = createConcurrencyGuard(trackedTick, { maxAgeMs: 2 * 60 * 60_000, log });
 
   // Run first tick immediately
   await guardedTick();

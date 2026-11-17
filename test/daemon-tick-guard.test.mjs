@@ -71,8 +71,15 @@ test('daemon imports the shared concurrency guard', () => {
   assert.match(daemonSrc, /import \{ createConcurrencyGuard \} from '\.\.\/lib\/concurrency-guard\.mjs';/);
 });
 
-test('daemon wraps tick in the guard with a deadlock force-clear', () => {
-  assert.match(daemonSrc, /const guardedTick = createConcurrencyGuard\(trackedTick, \{ maxAgeMs: 30 \* 60_000, log \}\)/);
+test('daemon wraps tick in the guard with a deadlock force-clear well past its longest legitimate tick', () => {
+  assert.match(daemonSrc, /const guardedTick = createConcurrencyGuard\(trackedTick, \{ maxAgeMs: 2 \* 60 \* 60_000, log \}\)/);
+  // A tick can await a flush worker and a knowledge-index child back to back;
+  // a bound at or under their sum force-cleared a live tick and overlapped it.
+  const product = (expr) => expr.split('*').reduce((acc, n) => acc * Number(n.trim().replaceAll('_', '')), 1);
+  const flushWorker = product(daemonSrc.match(/const FLUSH_WORKER_TIMEOUT_MS = ([^;]+);/)[1]);
+  const indexJob = product(daemonSrc.match(/execFileAsync\(process\.execPath, jobArgs,\s*\{ timeout: ([^,]+),/)[1]);
+  const maxAge = product(daemonSrc.match(/createConcurrencyGuard\(trackedTick, \{ maxAgeMs: ([^,]+),/)[1]);
+  assert.ok(maxAge > 2 * flushWorker + indexJob, `maxAgeMs ${maxAge} must exceed two flush workers plus the index job`);
 });
 
 test('no call site invokes tick() bare, and only a started run is tracked for fencing', () => {
