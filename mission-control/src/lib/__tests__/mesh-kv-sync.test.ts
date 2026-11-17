@@ -110,23 +110,23 @@ describe("authority model (production)", () => {
     cfg.nodeRole = "lead";
     cfg.nodeId = "lead-node";
     const rev = await putMeshTask(task({ origin: "worker-9" }));
-    const newRev = await updateMeshTaskCAS("t1", { status: "running" }, rev);
+    const newRev = await updateMeshTaskCAS("t1", { title: "renamed" }, rev);
     expect(newRev).toBeGreaterThan(rev);
-    expect((await getMeshTask("t1"))?.task.status).toBe("running");
+    expect((await getMeshTask("t1"))?.task.title).toBe("renamed");
   });
 
   it("worker can update its OWN task", async () => {
     const rev = await putMeshTask(task({ origin: "worker-1" }));
-    await updateMeshTaskCAS("t1", { status: "running" }, rev);
-    expect((await getMeshTask("t1"))?.task.status).toBe("running");
+    await updateMeshTaskCAS("t1", { title: "renamed" }, rev);
+    expect((await getMeshTask("t1"))?.task.title).toBe("renamed");
   });
 
   it("worker is DENIED updating a foreign-origin task", async () => {
     const rev = await putMeshTask(task({ origin: "lead-node" }));
-    await expect(updateMeshTaskCAS("t1", { status: "running" }, rev)).rejects.toThrow(
+    await expect(updateMeshTaskCAS("t1", { title: "renamed" }, rev)).rejects.toThrow(
       /Authority denied: worker worker-1/
     );
-    expect((await getMeshTask("t1"))?.task.status).toBe("queued");
+    expect((await getMeshTask("t1"))?.task.title).toBe("Test task");
   });
 });
 
@@ -143,14 +143,48 @@ describe("CAS update (production)", () => {
 
   it("throws on a stale revision (another node wrote since our read)", async () => {
     const rev = await putMeshTask(task({ origin: "worker-1" }));
-    await updateMeshTaskCAS("t1", { status: "running" }, rev);
-    await expect(updateMeshTaskCAS("t1", { status: "done" }, rev)).rejects.toThrow(
+    await updateMeshTaskCAS("t1", { priority: 2 }, rev);
+    await expect(updateMeshTaskCAS("t1", { priority: 3 }, rev)).rejects.toThrow(
       /wrong last sequence/
     );
   });
 
   it("throws when the task does not exist", async () => {
-    await expect(updateMeshTaskCAS("nope", { status: "x" }, 1)).rejects.toThrow(/not found/);
+    await expect(updateMeshTaskCAS("nope", { title: "x" }, 1)).rejects.toThrow(/not found/);
+  });
+});
+
+// ── Field whitelist (audit mission-control-app#19, part 2 option B) ──
+
+describe("updateMeshTaskCAS edits only node-editable fields", () => {
+  for (const [field, value] of [
+    ["status", "completed"],
+    ["owner", "lead-node"],
+    ["lease_token", "forged"],
+    ["result", { success: true }],
+    ["requires_review", false],
+    ["plan_id", "PLAN-x"],
+    ["metric", "npm test"],
+  ] as const) {
+    it(`refuses ${field}, even on the lead`, async () => {
+      cfg.nodeRole = "lead";
+      cfg.nodeId = "lead-node";
+      const rev = await putMeshTask(task({ status: "running", owner: "worker-2" }));
+      await expect(updateMeshTaskCAS("t1", { [field]: value }, rev)).rejects.toThrow(
+        new RegExp(`Fields not editable: ${field}`)
+      );
+      const after = (await getMeshTask("t1"))!;
+      expect(after.revision).toBe(rev);
+      expect(after.task.status).toBe("running");
+    });
+  }
+
+  it("a mixed update is refused whole", async () => {
+    const rev = await putMeshTask(task({ origin: "worker-1" }));
+    await expect(updateMeshTaskCAS("t1", { title: "ok", status: "completed" }, rev)).rejects.toThrow(
+      /Fields not editable: status/
+    );
+    expect((await getMeshTask("t1"))?.task.title).toBe("Test task");
   });
 });
 
@@ -162,6 +196,12 @@ describe("proposeMeshTask (production)", () => {
     expect(proposed.status).toBe("proposed");
     expect(proposed.origin).toBe("worker-1");
     expect((await getMeshTask("p1"))?.task.status).toBe("proposed");
+  });
+
+  it("a proposal never overwrites an existing task", async () => {
+    await putMeshTask(task({ task_id: "taken", status: "running", owner: "worker-2" }));
+    await expect(proposeMeshTask(task({ task_id: "taken" }))).rejects.toThrow(/already exists/);
+    expect((await getMeshTask("taken"))?.task.status).toBe("running");
   });
 
   it("a lead proposal is queued directly", async () => {

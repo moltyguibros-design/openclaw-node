@@ -990,7 +990,7 @@ The system has two layers:
    - SSE event broadcast to UI
    - All other MC instances receive the KV watch event and update their local mirrors
 
-2. **Worker proposes a task** via `POST /api/mesh/tasks` (on the lead, POST writes the task directly as `queued`; only worker POSTs land as `proposed` for daemon validation)
+2. **Worker proposes a task** via `POST /api/mesh/tasks` (on the lead, POST writes the task directly as `queued`; only worker POSTs land as `proposed` for daemon validation). A `task_id` that already exists is refused with 409, never overwritten
    - Task written to KV with `status: proposed`, `origin: <worker-node-id>`
    - Lead's `mesh-task-daemon` picks it up in the next enforcement loop (< 30s)
    - Daemon validates and transitions: `proposed` → `queued` (or `rejected`)
@@ -1002,8 +1002,9 @@ The system has two layers:
    - On workers: KV version preferred (more current for mesh tasks)
    - On lead: SQLite version preferred (has richer fields like `kanbanColumn`, `sortOrder`)
 
-4. **Anyone updates a task** via `PATCH /api/mesh/tasks/:id`
-   - Authority check: only `lead` can transition most states
+4. **Anyone updates a task** via `PATCH /api/mesh/tasks/:id` (both routes go through `mission-control/src/lib/sync/mesh-kv.ts`)
+   - Only the descriptive fields can change (`MESH_TASK_EDITABLE_FIELDS`: title, description, priority, budget_minutes, success_criteria, scope, tags, preferred_nodes, exclude_nodes); a body naming any other field (status, owner, lease, result, metric, ...) is refused with 400, because those belong to the task daemon's authorized RPCs
+   - The lead can edit any task
    - Workers can update tasks they own (`origin` matches)
    - Uses CAS (Compare-And-Swap) to prevent stale writes — the `revision` field must match
    - On revision mismatch: HTTP 409 with the current state, so the client can retry
