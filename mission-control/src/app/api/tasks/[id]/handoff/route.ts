@@ -5,7 +5,8 @@ import { eq } from "drizzle-orm";
 import fs from "fs/promises";
 import path from "path";
 import { isSafeId } from "@/lib/safe-path";
-import { HANDOFFS_DIR } from "@/lib/config";
+import { HANDOFFS_DIR, SOULS_DIR } from "@/lib/config";
+import { checkSoulAccess } from "@/lib/soul-access";
 
 interface HandoffRequest {
   toSoul: string;
@@ -41,6 +42,18 @@ export async function POST(
     }
 
     const fromSoul = task.soulId || "main-agent";
+
+    // handoffs/ is gated by each soul's capabilities.json: the receiver must be able to read
+    // the doc, and a soul handing off must be able to write it. No soul: the orchestrator.
+    if (!isSafeId(body.toSoul)) {
+      return NextResponse.json({ error: "invalid toSoul" }, { status: 400 });
+    }
+    const checks = [checkSoulAccess(body.toSoul, "handoffs", "read", SOULS_DIR)];
+    if (task.soulId) checks.push(checkSoulAccess(task.soulId, "handoffs", "write", SOULS_DIR));
+    const denied = (await Promise.all(checks)).find((c) => !c.granted);
+    if (denied) {
+      return NextResponse.json({ error: `handoff refused: ${denied.reason}` }, { status: 403 });
+    }
 
     // Create handoff document in ClawVault
     await fs.mkdir(HANDOFFS_DIR, { recursive: true });

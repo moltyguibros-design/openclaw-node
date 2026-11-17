@@ -252,20 +252,32 @@ git revert eae6b23  # Revert specific evolution commit
 
 ```
 memory-vault/
-├── shared/              # Cross-soul knowledge (all can read, only daedalus writes)
+├── shared/              # Cross-soul knowledge (permissions.memory.shared: read or readwrite)
 │   ├── project-arcane/
 │   └── decisions/
-├── private/             # Per-soul isolation (only owner + daedalus can access)
+├── private/             # Per-soul isolation (permissions.memory.private lists whose)
 │   ├── daedalus/
 │   ├── blockchain-auditor/
 │   └── lore-writer/
-└── handoffs/            # Task context transfers (readable by involved souls)
+└── handoffs/            # Task context transfers (permissions.memory.handoffs)
     └── T-20260220-001-handoff.md
 ```
 
 ### Access Control
 
-Enforced by `bin/clawvault-access-control`:
+Each soul declares its access in `capabilities.json` `permissions.memory`:
+`shared` and `handoffs` are `read` or `readwrite`, and `private` lists the souls whose
+private memory it may use. `lib/soul-memory-access.mjs` applies that declaration, and it is
+enforced at:
+
+- `bin/clawvault-local`: with `OPENCLAW_SOUL_ID` set, a vault command spans every category,
+  so it runs only for a soul granted readwrite on `shared`, `handoffs` and every soul's
+  private memory (the `vault` category). Without `OPENCLAW_SOUL_ID` it runs as the orchestrator.
+- `POST /api/tasks/:id/handoff`: the receiving soul must have `handoffs` read, and a soul
+  handing off must have `handoffs` write (HTTP 403 otherwise).
+- `POST /api/souls/:id/prompt`: the handoff doc is included only for a soul with `handoffs` read.
+
+`bin/clawvault-access-control` answers the same question from the command line:
 
 ```bash
 # Check if soul can access category
@@ -273,7 +285,7 @@ clawvault-access-control blockchain-auditor private/blockchain-auditor read
 # Output: GRANTED
 
 clawvault-access-control blockchain-auditor private/lore-writer read
-# Output: DENIED: Can only access own private memory
+# Output: DENIED: blockchain-auditor may not access private/lore-writer
 ```
 
 ---
@@ -360,7 +372,7 @@ git commit -m "Initial souls commit"
 
 ```bash
 # Verify access control script
-clawvault-access-control <soul-id> <category> <read|write>
+clawvault-access-control <soul-id> <shared|handoffs|private/<soul>|vault> <read|write>
 
 # Check permissions in capabilities.json
 cat ~/.openclaw/souls/<soul-id>/capabilities.json | jq '.permissions.memory'

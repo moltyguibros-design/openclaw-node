@@ -69,8 +69,8 @@ Install: `install.sh` — `scripts/install/services.sh` renders `services/launch
 | `session-recap` | node | Extracts rolling 2-session digest + session fingerprint (JSON sidecar) from JSONL transcripts | memory-daemon (10min) |
 | `obsidian-sync.mjs` | node | Push workspace artifacts to Obsidian vault. Hash-based change detection, 14 node-private + 39 shared routes across all 22 vault domains. REST API + file fallback. | memory-daemon (30min, after stage 1) |
 | `subagent-audit.mjs` | node | Scan JSONL for Task tool delegations, classify outcomes, update trust-registry + lessons. | memory-daemon (Phase 0 + 30min health check) |
-| `clawvault-local` | bash | ClawVault wrapper with auto vault-path injection | memory-daemon + on-demand |
-| `clawvault-access-control` | bash | Access control for ClawVault operations | on-demand |
+| `clawvault-local` | bash | ClawVault wrapper with auto vault-path injection; with `OPENCLAW_SOUL_ID` set, runs only for a soul granted the whole vault | memory-daemon + on-demand |
+| `clawvault-access-control` | node | Soul memory access from `capabilities.json` `permissions.memory` (`lib/soul-memory-access.mjs`, also used by MC's handoff and soul-prompt routes) | clawvault-local + on-demand |
 | `compile-boot` | python | Compiles AGENTS.md into profile-aware boot artifacts (.boot/*.compiled.md). Fetches entity context from MC graph API (Option B: top 10 entities). | memory-daemon (session start) |
 
 ### Frontend Adapters

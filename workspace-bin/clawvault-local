@@ -10,6 +10,20 @@ DEFAULT_VAULT="$WORKSPACE/memory-vault"
 
 export PATH="$HOME/.bun/bin:$PATH"
 
+# In a soul's context (OPENCLAW_SOUL_ID) a vault command spans every category, so the soul
+# must be granted the whole vault by its capabilities.json. No soul id: the orchestrator.
+if [ -n "${OPENCLAW_SOUL_ID:-}" ]; then
+  case "${1:-status}" in
+    --help|-h|help) ;;
+    *)
+      if ! verdict="$("$SCRIPT_DIR/clawvault-access-control" "$OPENCLAW_SOUL_ID" vault write)"; then
+        echo "clawvault-local: $verdict" >&2
+        exit 77
+      fi
+      ;;
+  esac
+fi
+
 # The installer accepts clawvault anywhere on PATH; `npm install -g` lands in the global prefix, not .npm-global.
 if [ ! -x "$CLAWVAULT_BIN" ]; then
   CLAWVAULT_BIN="$(command -v clawvault || true)"
