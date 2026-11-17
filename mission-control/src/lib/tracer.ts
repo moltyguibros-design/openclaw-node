@@ -155,15 +155,3 @@ export function traceCall(
   insertEvent(event);
   publishEvent(event);
 }
-
-/** Batch insert events (for NATS ingestion) */
-export function batchInsertEvents(events: NewObservabilityEvent[]) {
-  try {
-    const db = getDb();
-    for (const e of events) {
-      db.insert(observabilityEvents).values(e).run();
-    }
-  } catch (err) {
-    console.warn(`[tracer] batchInsert failed (${events.length} events): ${(err as Error).message}`);
-  }
-}

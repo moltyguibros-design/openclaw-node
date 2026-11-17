@@ -290,80 +290,6 @@ export async function createDependency(dep: {
   return data;
 }
 
-export async function deleteDependency(id: number) {
-  await fetch(`/api/dependencies?id=${id}`, { method: "DELETE" });
-}
-
-// --- Memory Items ---
-
-export interface MemoryItemEntry {
-  id: number;
-  fact_text: string;
-  confidence: number;
-  source_doc_id: number | null;
-  category: string | null;
-  status: string;
-  gate_decision: string | null;
-  gate_reason: string | null;
-  extraction_source: string | null;
-  last_accessed: string | null;
-  created_at: string;
-  source_file?: string;
-  source_title?: string;
-  source_date?: string;
-}
-
-export interface CategoryOverview {
-  category: string;
-  itemCount: number;
-  hasSummary: boolean;
-  summaryAge: number | null;
-}
-
-export function useMemoryItems(category?: string, limit = 50) {
-  const params = new URLSearchParams();
-  if (category) params.set("category", category);
-  params.set("limit", String(limit));
-
-  const { data, error, isLoading } = useSWR<{
-    items: MemoryItemEntry[];
-    limit: number;
-    offset: number;
-  }>(`/api/memory/items?${params.toString()}`, fetcher, {
-    refreshInterval: 10000,
-  });
-  return { items: data?.items ?? [], error, isLoading };
-}
-
-export function useMemoryItemStats() {
-  const { data, error, isLoading } = useSWR<{
-    active: number;
-    archived: number;
-    byCategory: Array<{ category: string; count: number }>;
-    recentAudit: Array<Record<string, unknown>>;
-  }>("/api/memory/items?stats=true", fetcher, {
-    refreshInterval: 30000,
-  });
-  return {
-    stats: data ?? null,
-    error,
-    isLoading,
-  };
-}
-
-export function useMemoryCategories() {
-  const { data, error, isLoading } = useSWR<{
-    categories: CategoryOverview[];
-  }>("/api/memory/categories", fetcher, {
-    refreshInterval: 30000,
-  });
-  return {
-    categories: data?.categories ?? [],
-    error,
-    isLoading,
-  };
-}
-
 // --- Wikilink Graph ---
 
 export interface WikilinkNode {
@@ -622,17 +548,6 @@ export async function createCluster(params: {
   return data;
 }
 
-export async function updateCluster(id: string, updates: Record<string, unknown>) {
-  const res = await fetch(`/api/cowork/clusters/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
-  });
-  const data = await res.json();
-  await mutate("/api/cowork/clusters");
-  return data;
-}
-
 export async function deleteCluster(id: string) {
   await fetch(`/api/cowork/clusters/${id}`, { method: "DELETE" });
   await mutate("/api/cowork/clusters");
@@ -770,38 +685,6 @@ export function useMeshSSE() {
       esRef.current = null;
     };
   }, []);
-}
-
-// --- Token usage ---
-
-export interface TokenUsageEntry {
-  id: number;
-  task_id: string | null;
-  node_id: string | null;
-  model: string;
-  input_tokens: number;
-  output_tokens: number;
-  cost_usd: number;
-  timestamp: string;
-}
-
-export interface TokenSummary {
-  totalCost: number;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  taskCount: number;
-  byModel: Array<{ model: string; cost: number; count: number }>;
-  byNode: Array<{ node_id: string; cost: number; count: number }>;
-  recent: TokenUsageEntry[];
-}
-
-export function useTokenUsage(period: "today" | "week" | "month" = "today") {
-  const { data, error, isLoading } = useSWR<TokenSummary>(
-    `/api/mesh/tokens?period=${period}`,
-    fetcher,
-    { refreshInterval: 30000 }
-  );
-  return { tokenData: data ?? null, error, isLoading };
 }
 
 // --- Mesh Tasks (Distributed MC) ---
