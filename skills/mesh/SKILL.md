@@ -76,6 +76,13 @@ mesh plan approve <plan-id>                           # approve and start execut
 mesh plan abort <plan-id> --reason "..."
 ```
 
+### Collab gates
+
+```bash
+mesh collab gate approve <session-id>     # resume a circling session waiting at its gate (signed operator request)
+mesh collab gate reject <session-id>      # send it back for another sub-round
+```
+
 ### Deploy
 
 ```bash

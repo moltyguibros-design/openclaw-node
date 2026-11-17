@@ -554,6 +554,7 @@ node ~/openclaw/bin/mesh.js health --all     # ok / degraded / down per node (--
 node ~/openclaw/bin/mesh.js submit task.yaml   # hand a task to the mesh workers
 node ~/openclaw/bin/mesh.js tasks              # list mesh tasks (review / approve / reject)
 node ~/openclaw/bin/mesh.js plan list          # multi-step plans
+node ~/openclaw/bin/mesh.js collab gate approve <session-id>  # resume a circling session at its gate (signed)
 node ~/openclaw/bin/mesh.js deploy             # signed fleet deploy of the repo HEAD
 openclaw-node-check --axis network --no-mutate # read-only bus probes (also --axis federation)
 ```

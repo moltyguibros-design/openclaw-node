@@ -39,6 +39,9 @@ test('the mesh skill names only dispatched subcommands and requires no `mesh` bi
   const used = new Set([...SKILL.matchAll(/^mesh ([a-z-]+)/gm)].map((m) => m[1]));
   assert.ok(used.size > 0, 'no mesh examples found');
   for (const sub of used) assert.ok(dispatched.has(sub), `SKILL.md uses \`mesh ${sub}\`, which bin/mesh.js does not dispatch`);
+  assert.deepEqual([...used].sort(), [...dispatched].sort(), 'the skill documents every dispatched subcommand');
+  const readme = new Set([...read('README.md').matchAll(/^node ~\/openclaw\/bin\/mesh\.js ([a-z-]+)/gm)].map((m) => m[1]));
+  assert.deepEqual([...readme].sort(), [...dispatched].sort(), 'README "Mesh commands" lists exactly the dispatched subcommands');
   const frontmatter = SKILL.split(/^---$/m)[1];
   assert.doesNotMatch(frontmatter, /bins:/);
 });
