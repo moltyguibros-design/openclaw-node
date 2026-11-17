@@ -373,19 +373,6 @@ const MANIFEST = [
     servicesLinux: ['openclaw-memory-daemon', 'openclaw-node-watch'],
   },
 
-  {
-    id: 'memory-harness',
-    name: 'Memory Harness Templates',
-    description: 'MEMORY.md template, extraction configs, consolidation rules',
-    risk: 'careful',
-    repoPaths: ['config/memory-config.json', 'config/extraction-rules.json'],
-    targets: [DIRS.CONFIG],
-    servicesMac: ['ai.openclaw.memory-daemon'],
-    servicesLinux: ['openclaw-memory-daemon'],
-    notes: 'Does NOT overwrite MEMORY.md, memory-vault/, or daily logs — those are user data. ' +
-           'Only deploys config templates that control extraction and consolidation behavior.',
-  },
-
   // ── SOUL SYSTEM ─────────────────────────────────────────────────────────
 
   {
@@ -665,7 +652,7 @@ const MANIFEST = [
     repoPaths: ['bin/log-rotate'],
     targets: [DIRS.CLI_BIN],
     servicesMac: ['ai.openclaw.log-rotate'],
-    servicesLinux: [],  // Ubuntu uses logrotate.d natively
+    servicesLinux: ['openclaw-log-rotate'],
   },
 
   // ── DISCORD TOOL ────────────────────────────────────────────────────────

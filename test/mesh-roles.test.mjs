@@ -27,13 +27,14 @@ const trigger = components => ({ sha: 'abcdef1', branch: 'main', components });
 describe('fleet component filter', () => {
   it('lets every repo-sourced MANIFEST id through on the role that runs it', () => {
     assert.deepEqual(FLEET_COMPONENTS.lead, [
-      'mesh-daemons', 'mesh-cli', 'shared-lib', 'mc', 'memory-daemon', 'workspace-bin', 'memory-harness',
+      'mesh-daemons', 'mesh-cli', 'shared-lib', 'mc', 'memory-daemon', 'workspace-bin',
       'souls', 'skills', 'boot', 'workspace-docs', 'harness-rules', 'config', 'lane-watchdog',
       'log-rotate', 'mesh-tool-discord',
     ]);
+    // Workers install and run the log-rotate timer too (service-manifest role 'both').
     assert.deepEqual(FLEET_COMPONENTS.worker, [
       'mesh-daemons', 'mesh-cli', 'shared-lib', 'workspace-bin', 'souls', 'skills', 'workspace-docs',
-      'harness-rules', 'config',
+      'harness-rules', 'config', 'log-rotate',
     ]);
   });
 
@@ -89,6 +90,29 @@ describe('mesh-deploy MANIFEST and the role table are one list', () => {
     assert.doesNotMatch(block, /nodeFilter:/, 'nodeFilter is taken from lib/mesh-roles.js');
   });
 
+  // memory-harness named two config files that never existed, so it could never
+  // install anything: every literal repoPath must be in the tree.
+  it('every literal repoPath names a file or dir in the repo', () => {
+    const src = fs.readFileSync(path.join(REPO, 'bin/mesh-deploy.js'), 'utf8');
+    const start = src.indexOf('const MANIFEST = [');
+    const block = src.slice(start, src.indexOf('\n];', start));
+    const lists = [...block.matchAll(/^ {4}repoPaths: \[((?:'[^']+'(?:, )?)*)\],$/gm)];
+    assert.ok(lists.length >= 10);
+    for (const [, list] of lists) {
+      for (const [, rel] of list.matchAll(/'([^']+)'/g)) assert.ok(fs.existsSync(path.join(REPO, rel)), rel);
+    }
+    assert.ok(!DEPLOY_COMPONENTS.some(c => c.id === 'memory-harness'));
+  });
+
+  it('log-rotate restarts the Linux timer service it ships to every node', () => {
+    const src = fs.readFileSync(path.join(REPO, 'bin/mesh-deploy.js'), 'utf8');
+    const entry = src.slice(src.indexOf("    id: 'log-rotate',"), src.indexOf('\n  },', src.indexOf("    id: 'log-rotate',")));
+    assert.match(entry, /servicesLinux: \['openclaw-log-rotate'\]/);
+    const manifest = JSON.parse(fs.readFileSync(path.join(REPO, 'services/service-manifest.json'), 'utf8'));
+    assert.equal(manifest.find(u => u.name === 'openclaw-log-rotate').role, 'both');
+    assert.equal(DEPLOY_COMPONENTS.find(c => c.id === 'log-rotate').nodeFilter, 'all');
+  });
+
   // The services component's preInstall vetoed it unconditionally, so the flag
   // never installed a unit; units change only through the installer's renderer.
   it('has no services component, and refuses --include-services instead of ignoring it', () => {
@@ -101,7 +125,7 @@ describe('mesh-deploy MANIFEST and the role table are one list', () => {
 
   it('mesh-deploy refuses to run when the table lacks a MANIFEST id', () => {
     const src = fs.readFileSync(path.join(REPO, 'lib/mesh-roles.js'), 'utf8');
-    const run = runDeployWithRoles(src.replace("  { id: 'log-rotate', nodeFilter: 'lead' },\n", ''));
+    const run = runDeployWithRoles(src.replace("  { id: 'log-rotate', nodeFilter: 'all' },\n", ''));
     assert.notEqual(run.status, 0);
     assert.match(run.stderr, /MANIFEST and lib\/mesh-roles\.js disagree: not in mesh-roles: log-rotate/);
   });
