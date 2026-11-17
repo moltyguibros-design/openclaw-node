@@ -29,7 +29,8 @@ export default function CoworkPage() {
   );
   const { sessions: recentSessions } = useCollabSessions(
     "converged,completed,aborted",
-    30000
+    30000,
+    8
   );
   const { clusters } = useClusters();
   const { tasks } = useTasks();
@@ -111,7 +112,7 @@ export default function CoworkPage() {
                   Recent Sessions
                 </h2>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  {recentSessions.slice(0, 8).map((s) => (
+                  {recentSessions.map((s) => (
                     <SessionCard key={s.session_id} session={s} linkedTask={taskMap.get(s.task_id)} />
                   ))}
                 </div>

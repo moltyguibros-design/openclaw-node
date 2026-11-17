@@ -514,8 +514,9 @@ export function useClusters() {
   return { clusters: data?.clusters ?? [], error, isLoading };
 }
 
-export function useCollabSessions(status?: string, refreshInterval = 5000) {
-  const params = status ? `?status=${status}` : "";
+export function useCollabSessions(status?: string, refreshInterval = 5000, limit?: number) {
+  const query = [status && `status=${status}`, limit && `limit=${limit}`].filter(Boolean).join("&");
+  const params = query ? `?${query}` : "";
   const { data, error, isLoading } = useSWR<{
     sessions: CollabSession[];
     natsAvailable: boolean;
