@@ -155,6 +155,7 @@ async function main() {
     const existing = registry.get(nodeId);
     if (existing.pubkey === pubkey) {
       process.stdout.write(`${nodeId} already trusted with same pubkey (no-op)\n`);
+      if (SYNC) await syncNats();
     } else {
       process.stderr.write(`refused: ${nodeId} already registered with a DIFFERENT pubkey.\n`);
       process.stderr.write(`  existing: ${existing.pubkey}\n`);

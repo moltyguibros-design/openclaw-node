@@ -365,6 +365,27 @@ describe('node-identity', () => {
       assert.equal(fs.readFileSync(p, 'utf8'), bad);
     });
 
+    it('a registry write failure throws and leaves no unpersisted entry behind', async () => {
+      const { createIdentityRegistry } = await import('../lib/node-identity.mjs');
+      const dir = tmpDir + '/regdir';
+      fs.mkdirSync(dir);
+      const p = dir + '/reg.json';
+      const reg = createIdentityRegistry({ path: p, mode: 'strict' });
+      reg.trust('kept', 'a'.repeat(44), 'operator');
+      const tofu = createIdentityRegistry({ path: p, mode: 'tofu' });
+      // A file where the registry's directory was makes every write fail, even as root.
+      fs.renameSync(dir, tmpDir + '/regdir.moved');
+      fs.writeFileSync(dir, '');
+      assert.throws(() => reg.trust('peer', 'b'.repeat(44), 'operator'), /could not be written/);
+      assert.equal(reg.get('peer'), null);
+      assert.throws(() => reg.trust('kept', 'c'.repeat(44), 'self', { force: true }), /could not be written/);
+      assert.equal(reg.get('kept').pubkey, 'a'.repeat(44));
+      assert.throws(() => reg.remove('kept'), /could not be written/);
+      assert.equal(reg.get('kept').pubkey, 'a'.repeat(44));
+      assert.deepEqual(tofu.verify('newnode', 'd'.repeat(44)), { ok: false, reason: 'registry-write-failed' });
+      assert.equal(tofu.get('newnode'), null);
+    });
+
     it('refuses a registry file that is valid JSON but not an object', async () => {
       const { createIdentityRegistry } = await import('../lib/node-identity.mjs');
       for (const body of ['null', '[]', '"x"']) {

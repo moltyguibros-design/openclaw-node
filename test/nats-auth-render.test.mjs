@@ -171,4 +171,33 @@ describe('syncNatsAuth', () => {
     assert.match(r.stdout, /no running nats-server found|SIGHUP sent|reloaded/);
     fs.rmSync(home, { recursive: true, force: true });
   });
+
+  it('openclaw-trust-peer --sync-nats still syncs when the peer was already trusted with the same key', () => {
+    const home = tmpHome();
+    const dir = path.join(home, '.openclaw');
+    fs.writeFileSync(path.join(dir, 'openclaw.env'), 'OPENCLAW_NATS_TOKEN=t\nOPENCLAW_NATS_AUTH=nkey\nOPENCLAW_NODE_ROLE=lead\nOPENCLAW_NODE_ID=lead-a\n');
+    const peer = getOrCreateIdentity(path.join(home, 'peer'));
+    const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !KEYS.includes(k))), HOME: home, OPENCLAW_IDENTITY_DIR: dir };
+    const first = runIsolatedCli(home, 'bin/openclaw-trust-peer.mjs', ['w2', peer.publicKeyBase64], env);
+    assert.equal(first.status, 0, first.stderr);
+    assert.equal(fs.existsSync(path.join(dir, 'config', 'nats-auth.conf')), false);
+    const again = runIsolatedCli(home, 'bin/openclaw-trust-peer.mjs', ['w2', peer.publicKeyBase64, '--sync-nats'], env);
+    assert.equal(again.status, 0, again.stderr + again.stdout);
+    assert.match(again.stdout, /already trusted with same pubkey/);
+    assert.ok(fs.readFileSync(path.join(dir, 'config', 'nats-auth.conf'), 'utf8').includes(publicKeyBase64ToNkey(peer.publicKeyBase64)));
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('openclaw-trust-peer fails instead of reporting trusted when the registry cannot be written', () => {
+    const home = tmpHome();
+    const notDir = path.join(home, 'identity-is-a-file');
+    fs.writeFileSync(notDir, '');
+    const peer = getOrCreateIdentity(path.join(home, 'peer'));
+    const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !KEYS.includes(k))), HOME: home, OPENCLAW_IDENTITY_DIR: notDir };
+    const r = runIsolatedCli(home, 'bin/openclaw-trust-peer.mjs', ['w2', peer.publicKeyBase64], env);
+    assert.notEqual(r.status, 0);
+    assert.doesNotMatch(r.stdout, /trusted:/);
+    assert.match(r.stderr, /could not be written/);
+    fs.rmSync(home, { recursive: true, force: true });
+  });
 });
