@@ -11,11 +11,11 @@ OpenClaw ships a unified tracer (`lib/tracer.js`) that instruments every signifi
 - **`dev` mode** — logs every function call unconditionally (~500 instrumentation points). Useful for local debugging and development.
 - **`smart` mode** (default) — applies a sampling filter that only emits events for: tier 1 functions, errors, state transitions, cross-node events, and slow calls (>500 ms). This keeps production NATS traffic manageable while preserving all operationally critical data.
 
-**Transport:** Each daemon writes its trace events straight into the `observability_events` table of Mission Control's SQLite database (`lib/obs-db.js`, `OPENCLAW_OBS_DB`): that is the source of truth. When the daemon has a NATS connection it also publishes each event on `openclaw.trace.{nodeId}.{module}`, for the live feed only. A 2,000-event in-memory ring buffer serves local reads.
+**Transport:** Each daemon writes its trace events straight into the `observability_events` table of its own host's Mission Control SQLite database (`lib/obs-db.js`, `OPENCLAW_OBS_DB`). When the daemon has a NATS connection it also publishes each event on `openclaw.trace.{nodeId}.{module}`. A 2,000-event in-memory ring buffer serves local reads.
 
-**Mission Control (MC) Dashboard:** The Next.js MC app reads the events table and relays `openclaw.trace.>` from NATS to the browser:
+**Mission Control (MC) Dashboard:** At server start (`src/instrumentation.ts`) MC subscribes to `openclaw.trace.>` and stores every node's events in its `observability_events` table (`src/lib/trace-ingest.ts`), so remote nodes' traces appear beside the same-host ones. Rows are keyed on the event `id` with `INSERT OR IGNORE`, so an event that arrives both directly and over NATS is stored once; an event whose `node_id` differs from the node in its subject is dropped. If NATS is unreachable MC retries every 30 s; traces published while MC is not subscribed are not recovered. MC also relays `openclaw.trace.>` to the browser:
 
-- `/api/observability/events` — paginated event query (SQLite)
+- `/api/observability/events` — paginated event query (SQLite, all nodes)
 - `/api/observability/stream` — SSE live feed (NATS relay)
 - `/api/observability/nodes` — per-node health aggregation
 - `/api/observability/config` — trace mode switch. Daemons start in `OPENCLAW_TRACE_MODE` (default `smart`). A PATCH publishes `{ mode }` on `openclaw.trace.config` as a signed operator request (`lib/operator-auth.mjs`); each daemon's tracer verifies it against the operator allowlist and switches. A daemon that restarts returns to `OPENCLAW_TRACE_MODE`.
