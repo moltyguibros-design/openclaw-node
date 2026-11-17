@@ -224,6 +224,47 @@ describe('stale lock recovery', () => {
   });
 });
 
+describe('lock holder record', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  const { updateTaskInPlace } = require('../lib/kanban-io');
+
+  it('records pid + node + time while held, names the holder on contention, and cleans up', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kanban-owner-'));
+    const tmpFile = path.join(dir, 'active-tasks.md');
+    const lockDir = tmpFile + '.lk';
+    fs.writeFileSync(tmpFile, '## Live Tasks\n- task_id: a1\n  title: A\n  status: queued\n');
+    const realRead = fs.readFileSync;
+    let seen = null;
+    fs.readFileSync = function (file, ...rest) {
+      if (file === tmpFile && !seen) seen = JSON.parse(realRead.call(fs, path.join(lockDir, 'owner'), 'utf8'));
+      return realRead.call(fs, file, ...rest);
+    };
+    try {
+      await updateTaskInPlace(tmpFile, 'a1', { status: 'running' });
+      fs.readFileSync = realRead;
+      assert.equal(seen.pid, process.pid);
+      assert.equal(seen.node, require('../lib/node-id').resolveNodeId());
+      assert.ok(Math.abs(Date.now() - seen.acquiredAt) < 10_000);
+      assert.equal(fs.existsSync(lockDir), false, 'release removes the dir and its owner record');
+
+      fs.mkdirSync(lockDir);
+      fs.writeFileSync(path.join(lockDir, 'owner'), JSON.stringify({ pid: 4242, node: 'other-host', acquiredAt: Date.now() }));
+      await assert.rejects(updateTaskInPlace(tmpFile, 'a1', { status: 'done' }), /pid 4242 on other-host/);
+
+      const old = (Date.now() - 60_000) / 1000;
+      fs.utimesSync(lockDir, old, old);
+      await updateTaskInPlace(tmpFile, 'a1', { status: 'done' });
+      assert.equal(parseTasks(fs.readFileSync(tmpFile, 'utf8'))[0].status, 'done');
+      assert.equal(fs.existsSync(lockDir), false, 'a stale lock with an owner record is still broken');
+    } finally {
+      fs.readFileSync = realRead;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('workspace resolution follows OPENCLAW_WORKSPACE', () => {
   const fs = require('fs');
   const path = require('path');

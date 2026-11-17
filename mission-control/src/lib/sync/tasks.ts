@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { tasks, taskSyncBase } from "@/lib/db/schema";
 import { ACTIVE_TASKS_MD } from "@/lib/config";
 import { activeTasksMd } from "@/lib/sandbox";
-import { NODE_ROLE } from "@/lib/config";
+import { NODE_ID, NODE_ROLE } from "@/lib/config";
 import {
   parseTasksMarkdown,
   serializeTasksMarkdown,
@@ -490,13 +490,38 @@ function parseExtra(raw: string | null): Record<string, string> {
 // Same rule as lib/kanban-io.js: a lock older than this was left by a writer
 // killed while holding it, and is removed (accepting that two writers may race it).
 const STALE_LOCK_MS = 30000;
+// Shared with lib/kanban-io.js: `<file>.lk/owner` holds {pid, node, acquiredAt}
+// so a stale or contended lock names its holder.
+const LOCK_OWNER = "owner";
+
+function recordLockOwner(lockDir: string): void {
+  try {
+    fs.writeFileSync(path.join(lockDir, LOCK_OWNER),
+      JSON.stringify({ pid: process.pid, node: NODE_ID, acquiredAt: Date.now() }));
+  } catch { /* attribution only; the mkdir is the lock */ }
+}
+
+function describeLockOwner(lockDir: string): string {
+  try {
+    const { pid, node, acquiredAt } = JSON.parse(fs.readFileSync(path.join(lockDir, LOCK_OWNER), "utf-8"));
+    return `pid ${pid} on ${node} since ${new Date(acquiredAt).toISOString()}`;
+  } catch {
+    return "holder unrecorded";
+  }
+}
+
+function removeLock(lockDir: string): void {
+  try { fs.unlinkSync(path.join(lockDir, LOCK_OWNER)); } catch { /* none recorded */ }
+  fs.rmdirSync(lockDir);
+}
 
 function breakStaleLock(lockDir: string): boolean {
   try {
     const age = Date.now() - fs.statSync(lockDir).mtimeMs;
     if (age <= STALE_LOCK_MS) return false;
-    fs.rmdirSync(lockDir);
-    console.warn(`[sync] removed stale lock ${lockDir} (${Math.round(age / 1000)}s old)`);
+    const holder = describeLockOwner(lockDir);
+    removeLock(lockDir);
+    console.warn(`[sync] removed stale lock ${lockDir} (${Math.round(age / 1000)}s old; ${holder})`);
     return true;
   } catch {
     return false;
@@ -515,6 +540,7 @@ export function withKanbanLockSync<T>(filePath: string, fn: () => T, maxWaitMs =
   while (Date.now() - start < maxWaitMs) {
     try {
       fs.mkdirSync(lockDir);
+      recordLockOwner(lockDir);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "EEXIST") {
         if (breakStaleLock(lockDir)) continue;
@@ -526,8 +552,8 @@ export function withKanbanLockSync<T>(filePath: string, fn: () => T, maxWaitMs =
     try {
       return fn();
     } finally {
-      try { fs.rmdirSync(lockDir); } catch { /* already released */ }
+      try { removeLock(lockDir); } catch { /* already released */ }
     }
   }
-  throw new Error(`active-tasks.md lock acquisition timeout after ${maxWaitMs}ms — another writer holds ${lockDir}`);
+  throw new Error(`active-tasks.md lock acquisition timeout after ${maxWaitMs}ms — another writer holds ${lockDir} (${describeLockOwner(lockDir)})`);
 }
