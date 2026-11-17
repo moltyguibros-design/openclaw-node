@@ -90,6 +90,8 @@ for arg in "$@"; do
       echo "  --cluster-peers=A,B Join a multi-MACHINE NATS cluster: A,B are the OTHER"
       echo "                      machines' addresses (Tailscale/LAN IPs). Renders THIS"
       echo "                      machine's nats.conf to cluster with them (R=3 failsafe)."
+      echo "                      Saved with the bind address in openclaw.env, so a later"
+      echo "                      --update re-renders the cluster config without the flags."
       echo "  --cluster-bind=IP   THIS machine's own tailnet/LAN address to bind (never"
       echo "                      0.0.0.0). Auto-detected from 'tailscale ip -4' if omitted."
       echo "  --provider=NAME     The node's mind: claude | openai | gemini | deepseek | kimi |"

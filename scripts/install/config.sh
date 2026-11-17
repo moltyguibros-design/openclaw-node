@@ -181,6 +181,15 @@ generate_config "$REPO_DIR/config/transcript-sources.json.template" "$OPENCLAW_R
 # node runs; nats-{1,2,3} are the R=3 cluster (operator-gated, federation 1.5).
 "$NODE_BIN" "$REPO_DIR/bin/nats-legacy-writer-check.mjs"
 run mkdir -p "$OPENCLAW_ROOT/nats"
+# A cluster node's peers and bind address are saved in the env file by the
+# --cluster-peers run below. A later run without the flags (--update) takes them
+# from there, so it re-renders the cluster nats.conf, not a single-node one.
+CLUSTER_FROM_ENV=false
+if [ -z "$CLUSTER_PEERS" ] && [ -n "${OPENCLAW_NATS_CLUSTER_PEERS:-}" ]; then
+  CLUSTER_PEERS="$OPENCLAW_NATS_CLUSTER_PEERS"
+  CLUSTER_FROM_ENV=true
+fi
+CLUSTER_BIND="${CLUSTER_BIND:-${OPENCLAW_NATS_CLUSTER_BIND:-}}"
 # --cluster-peers renders this machine's nats.conf below instead.
 [ -n "$CLUSTER_PEERS" ] || generate_config "$REPO_DIR/services/nats/nats-single.conf" "$OPENCLAW_ROOT/config/nats.conf"
 generate_config "$REPO_DIR/services/nats/nats-1.conf" "$OPENCLAW_ROOT/config/nats-1.conf"
@@ -196,6 +205,13 @@ generate_config "$REPO_DIR/services/nats/nats-3.conf" "$OPENCLAW_ROOT/config/nat
 if [ -n "$CLUSTER_PEERS" ]; then
   step "Multi-machine NATS cluster (peers: $CLUSTER_PEERS)"
   CLUSTER_SERVER_NAME="openclaw-nats-${OPENCLAW_NODE_ID}"
+  # Explicit flags replace nats.conf. Saved peers follow generate_config's rule:
+  # an existing nats.conf is kept and a differing render goes beside it as .new.
+  NATS_CONF="$OPENCLAW_ROOT/config/nats.conf"
+  NATS_CONF_DEST="$NATS_CONF"
+  if $CLUSTER_FROM_ENV && [ -f "$NATS_CONF" ]; then
+    NATS_CONF_DEST="$NATS_CONF.new"
+  fi
 
   # The machine's OWN address to bind (D2/D4: the tailnet interface, never all-interfaces).
   if [ -z "$CLUSTER_BIND" ] && command -v tailscale >/dev/null 2>&1; then
@@ -209,7 +225,8 @@ if [ -n "$CLUSTER_PEERS" ]; then
 
   # Cluster-route password — shared across the council like the client token.
   if [ -z "${OPENCLAW_NATS_CLUSTER_PASS:-}" ]; then
-    OPENCLAW_NATS_CLUSTER_PASS="$(grep '^OPENCLAW_NATS_CLUSTER_PASS=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2)"
+    # grep exits 1 on a first cluster install; under pipefail that aborted the installer.
+    OPENCLAW_NATS_CLUSTER_PASS="$( { grep '^OPENCLAW_NATS_CLUSTER_PASS=' "$ENV_FILE" 2>/dev/null || true; } | head -1 | cut -d= -f2)"
   fi
   if [ -z "${OPENCLAW_NATS_CLUSTER_PASS:-}" ]; then
     OPENCLAW_NATS_CLUSTER_PASS="$(openssl rand -hex 32)"
@@ -238,10 +255,21 @@ if [ -n "$CLUSTER_PEERS" ]; then
              }));
         fs.writeFileSync(process.argv[3], t, { mode: 0o600 });
         process.stdout.write(String(replicasForPeers(parsePeers(process.env.CLUSTER_PEERS).length)));
-      ' "$REPO_DIR/lib/nats-cluster-config.js" "$REPO_DIR/services/nats/nats-cluster-node.conf" "$OPENCLAW_ROOT/config/nats.conf")"
-    # Persist: replica target, cluster pass, and point every local consumer at the
-    # bound address (the server no longer listens on 127.0.0.1).
-    for kv in "OPENCLAW_KV_REPLICAS=$KV_REPLICAS" "OPENCLAW_NATS_CLUSTER_PASS=$OPENCLAW_NATS_CLUSTER_PASS" "OPENCLAW_NATS=nats://$CLUSTER_BIND:4222"; do
+      ' "$REPO_DIR/lib/nats-cluster-config.js" "$REPO_DIR/services/nats/nats-cluster-node.conf" "$NATS_CONF_DEST")"
+    if [ "$NATS_CONF_DEST" != "$NATS_CONF" ]; then
+      if cmp -s "$NATS_CONF_DEST" "$NATS_CONF"; then
+        rm -f "$NATS_CONF_DEST"
+        info "Config nats.conf up to date (cluster render from the saved peers)"
+      else
+        warn "Config nats.conf differs from its cluster render: kept as is, render saved as nats.conf.new (merge by hand)"
+      fi
+    fi
+    # Persist: replica target, cluster pass, the peers and bind address (re-renders
+    # on --update), and point every local consumer at the bound address (the
+    # server no longer listens on 127.0.0.1).
+    for kv in "OPENCLAW_KV_REPLICAS=$KV_REPLICAS" "OPENCLAW_NATS_CLUSTER_PASS=$OPENCLAW_NATS_CLUSTER_PASS" \
+              "OPENCLAW_NATS_CLUSTER_PEERS=$CLUSTER_PEERS" "OPENCLAW_NATS_CLUSTER_BIND=$CLUSTER_BIND" \
+              "OPENCLAW_NATS=nats://$CLUSTER_BIND:4222"; do
       key="${kv%%=*}"
       if grep -q "^$key=" "$ENV_FILE" 2>/dev/null; then
         run sed -i.bak "s|^$key=.*|$kv|" "$ENV_FILE" && run rm -f "$ENV_FILE.bak"

@@ -305,6 +305,11 @@ bash install.sh --cluster-peers=100.64.0.1,100.64.0.2 --cluster-bind=100.64.0.3
 #  REFUSES to bind 0.0.0.0.)
 ```
 
+The peers and bind address are saved in `openclaw.env` (`OPENCLAW_NATS_CLUSTER_PEERS`,
+`OPENCLAW_NATS_CLUSTER_BIND`), so a later `install.sh --update` re-renders the cluster
+`nats.conf` without the flags. An existing `nats.conf` that differs from that render is kept, and
+the render goes beside it as `nats.conf.new`.
+
 **Security (D2/D4):** each server binds its OWN tailnet address only; the monitor stays on
 loopback; the cluster port is authenticated (user `openclaw-route` + `OPENCLAW_NATS_CLUSTER_PASS`).
 **Copy BOTH shared secrets to every machine's `~/.openclaw/openclaw.env` before starting:**

@@ -548,6 +548,56 @@ generate_config "$1" "$2"`, 'x', template, out], {
   assert.match(cfg, /\[ -n "\$CLUSTER_PEERS" \] \|\| generate_config "\$REPO_DIR\/services\/nats\/nats-single\.conf"/);
 });
 
+// A cluster node's --update ran without --cluster-peers and rendered the
+// single-node nats.conf (as .new), since the peers and bind were never saved.
+test('config.sh saves the cluster peers and bind, and a flagless --update re-renders the cluster nats.conf', () => {
+  const cfg = moduleSrc['config.sh'];
+  const start = cfg.indexOf("# A cluster node's peers and bind address");
+  const end = cfg.indexOf('generate_config "$REPO_DIR/config/obsidian-sync.json.template"');
+  assert.ok(start > 0 && end > start, 'NATS render block must exist in config.sh');
+  const block = cfg.slice(start, end);
+  const root = mkdtempSync(join(tmpdir(), 'oc-cluster-'));
+  mkdirSync(join(root, 'config'));
+  const envFile = join(root, 'openclaw.env');
+  writeFileSync(envFile, 'OPENCLAW_NATS_TOKEN=tok\n');
+  const conf = join(root, 'config', 'nats.conf');
+  const run = (flags) => spawnSync('bash', ['-c', `set -euo pipefail
+step() { :; }; info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }; error() { echo "ERR $*" >&2; }
+run() { "$@"; }; generate_config() { echo "GEN $(basename "$2")"; }
+while IFS='=' read -r k v; do export "$k=$v"; done < "$ENV_FILE"
+${block}`], {
+    encoding: 'utf8',
+    env: {
+      PATH: process.env.PATH, HOME: root, OPENCLAW_ROOT: root, ENV_FILE: envFile, REPO_DIR: ROOT,
+      DRY_RUN: 'false', OPENCLAW_NODE_ID: 'n1', CLUSTER_PEERS: '', CLUSTER_BIND: '', ...flags,
+    },
+  });
+
+  let r = run({ CLUSTER_PEERS: '100.64.0.2,100.64.0.3', CLUSTER_BIND: '100.64.0.1' });
+  assert.equal(r.status, 0, r.stderr);
+  const env = readFileSync(envFile, 'utf8');
+  assert.match(env, /^OPENCLAW_NATS_CLUSTER_PEERS=100\.64\.0\.2,100\.64\.0\.3$/m);
+  assert.match(env, /^OPENCLAW_NATS_CLUSTER_BIND=100\.64\.0\.1$/m);
+  const rendered = readFileSync(conf, 'utf8');
+  assert.match(rendered, /100\.64\.0\.1/);
+  assert.match(rendered, /100\.64\.0\.3/);
+
+  r = run({});
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /GEN nats\.conf/, 'a cluster node must not get the single-node render');
+  assert.match(r.stdout, /nats\.conf up to date/);
+  assert.equal(readFileSync(conf, 'utf8'), rendered);
+  assert.ok(!existsSync(`${conf}.new`), 'an unchanged cluster render leaves no .new');
+
+  const operator = rendered + '# operator edit\n';
+  writeFileSync(conf, operator);
+  r = run({});
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(conf, 'utf8'), operator, 'a flagless --update kept the operator edit');
+  assert.equal(readFileSync(`${conf}.new`, 'utf8'), rendered);
+  rmSync(root, { recursive: true, force: true });
+});
+
 test('config.sh env-file parse keeps quotes, spacing and backslashes like renderConfigTemplate', () => {
   const cfg = moduleSrc['config.sh'];
   const start = cfg.indexOf('# Source env file for config generation');
