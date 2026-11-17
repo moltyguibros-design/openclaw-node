@@ -19,8 +19,11 @@ if [ ! -f "$SCANNER" ]; then
 fi
 
 # ── Identify changed skill directories ────────────────────────────────────────
+# skills/_quarantine/ is never installed or deployed; scanning it would block
+# moving an already-dangerous skill out of the shipped tree.
 CHANGED_SKILLS=$(git diff --cached --name-only --diff-filter=ACMR \
   | grep -E '^skills/' \
+  | grep -vE '^skills/_quarantine/' \
   | sed 's|^skills/\([^/]*\)/.*|\1|' \
   | sort -u) || true
 
@@ -34,7 +37,7 @@ WARNED=0
 
 for skill_name in $CHANGED_SKILLS; do
   # Skip self (the scanner itself)
-  if [ "$skill_name" = "openclaw-skill-scanner" ]; then
+  if [ "$skill_name" = "openclaw-skill-scanner" ] || [ "$skill_name" = "_quarantine" ]; then
     continue
   fi
 
