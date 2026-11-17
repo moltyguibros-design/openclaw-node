@@ -126,4 +126,14 @@ describe("operator interventions change nothing unless the task daemon accepts",
     expect(h.put).not.toHaveBeenCalled();
     expect(h.publish).not.toHaveBeenCalled();
   });
+
+  it("remove_node: the stop notice to the removed node is signed and names it as the target", async () => {
+    h.sign.mockImplementation(async (p: object) => ({ ...p, signature: "sig" }));
+    expect((await intervene({ action: "remove_node", sessionId: "S", nodeId: "n2" })).status).toBe(200);
+    const stop = h.publish.mock.calls.find((c) => c[0] === "mesh.agent.n2.stall");
+    expect(stop).toBeDefined();
+    expect(JSON.parse(stop![1] as string)).toEqual({
+      task_id: "T", target_node_id: "n2", reason: "Removed by operator", signature: "sig",
+    });
+  });
 });

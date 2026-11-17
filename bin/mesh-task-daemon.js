@@ -899,14 +899,15 @@ async function detectStalls() {
     // Update plan progress if this task belongs to a plan
     await checkPlanProgress(task.task_id, 'failed');
 
-    // Notify the agent's node (fire-and-forget)
+    // Tell the agent's node to stop the task it no longer holds (fire-and-forget)
     if (task.owner) {
       log(`STALL NOTIFY: ${task.task_id} → ${task.owner}`);
-      nc.publish(`mesh.agent.${task.owner}.stall`, sc.encode(JSON.stringify({
+      await publishAgentStop(task.owner, 'stall', {
         task_id: task.task_id,
+        reason: `released after ${silentMin}m without a heartbeat`,
         silent_minutes: parseFloat(silentMin),
         threshold_minutes: STALL_MINUTES,
-      })));
+      });
     }
   }
 }
@@ -979,13 +980,29 @@ async function enforceBudgets() {
     // Update plan progress if this task belongs to a plan
     await checkPlanProgress(task.task_id, 'failed');
 
-    // Publish notification so the agent knows
+    // Tell the agent to stop the task it was failed for
     log(`BUDGET NOTIFY: ${task.task_id} → ${task.owner}`);
-    nc.publish(`mesh.agent.${task.owner}.budget_exceeded`, sc.encode(JSON.stringify({
+    await publishAgentStop(task.owner, 'budget_exceeded', {
       task_id: task.task_id,
+      reason: `failed at ${elapsed}m of a ${task.budget_minutes}m budget`,
       elapsed_minutes: parseFloat(elapsed),
       budget_minutes: task.budget_minutes,
-    })));
+    });
+  }
+}
+
+/**
+ * mesh-agent acts on mesh.agent.<node>.stall/.budget_exceeded only when an
+ * operator key signed it (anyone with the bus token could otherwise stop any
+ * node's work), and only for the node the signature names.
+ */
+async function publishAgentStop(nodeId, kind, payload) {
+  try {
+    const { signOperatorRequest } = await operatorAuth();
+    nc.publish(`mesh.agent.${nodeId}.${kind}`, sc.encode(JSON.stringify(
+      signOperatorRequest({ ...payload, target_node_id: nodeId }))));
+  } catch (err) {
+    warn(`${kind} notice to ${nodeId} not sent: ${err.message}`);
   }
 }
 

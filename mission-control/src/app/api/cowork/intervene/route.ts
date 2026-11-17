@@ -218,14 +218,18 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: leave.error }, { status: leave.status });
         }
 
-        // Notify the node to stop
+        // Stop the removed node's in-flight round: mesh-agent acts on this
+        // only when it is signed and names that node as its target.
         nc.publish(
           `mesh.agent.${nodeId}.stall`,
           sc.encode(
-            JSON.stringify({
-              task_id: session.task_id,
-              reason: "Removed by operator",
-            })
+            JSON.stringify(
+              await signOperatorRequest({
+                task_id: session.task_id,
+                target_node_id: nodeId,
+                reason: "Removed by operator",
+              })
+            )
           )
         );
 

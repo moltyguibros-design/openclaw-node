@@ -69,7 +69,7 @@ Written to `~/.openclaw/openclaw.env` by install (generated where marked ⚙; RA
 | `OPENCLAW_NATS_LEGACY_USER` | `openclaw` | | nats-resolve, auth renderer | name of the password user kept for un-migrated clients in nkey mode; `0` drops it from the server render |
 | `OPENCLAW_IDENTITY_DIR` | `~/.openclaw` | | node-identity, nats-nkey, trust-peer, auth renderer | where `identity.key` / `identity.pub` / `identity-registry.json` live |
 | `OPENCLAW_DEPLOY_TRUSTED_KEYS` | ⚙ own identity pubkey | ⚙ | `lib/deploy-trigger-auth.mjs` (deploy listener) | comma-separated RAW base64 ed25519 pubkeys allowed to sign deploy triggers; the lead seeds its own, a worker gets the lead's from the join token / `--lead-pubkey` (merged, never overwritten) |
-| `OPENCLAW_OPERATOR_TRUSTED_KEYS` | ⚙ own identity pubkey | ⚙ | `lib/operator-auth.mjs` (task daemon, MC) | same shape; keys allowed to sign operator actions |
+| `OPENCLAW_OPERATOR_TRUSTED_KEYS` | ⚙ own identity pubkey | ⚙ | `lib/operator-auth.mjs` (task daemon, MC, mesh-agent stop notices) | same shape; keys allowed to sign operator actions. A worker node must list the lead's key to act on its `mesh.agent.<node>.stall` / `.budget_exceeded` |
 | `OPENCLAW_NODE_ID` | hostname (sanitized) | | heartbeats, KV keys, identity, grappe membership | stable node identity string |
 | `OPENCLAW_NODE_ROLE` | macOS `lead` / Linux `worker` | | service-manifest role filter | which units install |
 | `MESH_LLM_PROVIDER` | none (chosen at install) | ⚙ | `lib/llm-providers.js` → mesh-agent | the node's mind: claude · openai (codex) · gemini · deepseek · kimi · minimax · aider · ollama · shell. `install.sh --provider=NAME`, the install prompt, or a CLI on PATH; D11 still refuses local models for grappe workers |

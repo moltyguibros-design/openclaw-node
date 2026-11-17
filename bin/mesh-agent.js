@@ -339,8 +339,6 @@ let currentTaskId = null; // tracks active task for alive-check responses
 // each take this slot synchronously before their first await. Checking
 // currentTaskId and setting it after an await let two of them start a task at once.
 let taskSlotHeld = false;
-// The provider CLI runLLM is running, so a confirmed stall or budget notice can stop it.
-let activeWorker = null;
 
 function acquireTaskSlot() {
   if (taskSlotHeld) return false;
@@ -351,6 +349,88 @@ function acquireTaskSlot() {
 function releaseTaskSlot() {
   taskSlotHeld = false;
   currentTaskId = null;
+  stopRequest = null;
+}
+
+// ── Stop notices ──────────────────────────────────────
+// mesh.agent.<node>.stall / .budget_exceeded: the daemon's stall sweep and budget
+// enforcer, and Mission Control's remove_node, tell this node to stop a task. They
+// are signed with the lead's identity because anyone holding the shared bus token
+// could otherwise stop any node's work.
+const STOP_NOTICES = ['stall', 'budget_exceeded'];
+let stopRequest = null; // { task_id, reason } for the task this node holds
+let activeWorker = null; // { taskId, stop } while a worker process runs
+const stopHooks = new Map(); // task_id → ends a collab round loop waiting between rounds
+
+let _operatorAuth = null;
+async function operatorAuth() {
+  if (!_operatorAuth) _operatorAuth = await import('../lib/operator-auth.mjs');
+  return _operatorAuth;
+}
+
+function stoppedFor(taskId) {
+  return stopRequest && stopRequest.task_id === taskId ? stopRequest : null;
+}
+
+// Path (a): a notice signed by a trusted operator key naming this node and the task it holds.
+async function signedStop(notice) {
+  const { verifyOperatorRequest, trustedOperatorKeys, stripOperatorEnvelope } = await operatorAuth();
+  const trustedKeys = trustedOperatorKeys({ env: resolveEnvKey('OPENCLAW_OPERATOR_TRUSTED_KEYS') || '' });
+  const verdict = verifyOperatorRequest(notice, { trustedKeys });
+  if (!verdict.ok) return { ok: false, why: verdict.reason };
+  const { task_id, target_node_id, reason } = stripOperatorEnvelope(notice);
+  // The signature covers the target, so a notice signed for another node cannot be replayed here.
+  if (target_node_id !== NODE_ID) return { ok: false, why: `signed for ${target_node_id}, not ${NODE_ID}` };
+  if (!task_id || task_id !== currentTaskId) return { ok: false, why: `${task_id} is not the current task (${currentTaskId})` };
+  return { ok: true, task_id, reason };
+}
+
+const runningHere = (taskId) => !!taskId && (taskId === currentTaskId || activeWorker?.taskId === taskId);
+
+/**
+ * One stop notice off the bus. Acts on (a) a valid trusted-operator signature, or
+ * (b) the daemon confirming the task is no longer this node's (taskWithdrawn).
+ * Anything else is logged and ignored. Returns true when it stopped the task.
+ */
+async function onStopNotice(kind, notice) {
+  let stop = await signedStop(notice);
+  if (!stop.ok) {
+    const taskId = notice?.task_id;
+    if (!runningHere(taskId)) {
+      log(`STOP ${kind} ignored: ${stop.why}; ${taskId} is not running here`);
+      return false;
+    }
+    if (!(await taskWithdrawn(taskId))) {
+      warn(`STOP ${kind} ${taskId} ignored: ${stop.why}, and the daemon still has it running on this node`);
+      return false;
+    }
+    if (!runningHere(taskId)) return false;
+    stop = { ok: true, task_id: taskId, reason: 'the daemon ended this node\'s run' };
+  }
+  const { task_id } = stop;
+  const request = { task_id, kind, reason: `${kind}: ${stop.reason || 'stopped by the daemon'}` };
+  if (task_id === currentTaskId) stopRequest = request;
+  log(`STOP ${kind}: ${task_id} — ${request.reason}`);
+  if (activeWorker?.taskId === task_id) activeWorker.stop();
+  const hook = stopHooks.get(task_id);
+  if (hook) hook();
+  return true;
+}
+
+function listenForStops() {
+  return STOP_NOTICES.map((kind) => {
+    const sub = nc.subscribe(`mesh.agent.${NODE_ID}.${kind}`);
+    (async () => {
+      for await (const msg of sub) {
+        try {
+          await onStopNotice(kind, JSON.parse(sc.decode(msg.data)));
+        } catch (err) {
+          warn(`${kind} notice: ${err.message}`);
+        }
+      }
+    })();
+    return sub;
+  });
 }
 
 // ── Agent State File (read by mesh-health-publisher) ──
@@ -1028,10 +1108,10 @@ async function onReviewRejected(taskId) {
   return true;
 }
 
-// The daemon's stall and budget notices are core publishes too, so a forged one
-// must not kill a healthy worker: the running child is stopped only once the
-// daemon reports the task ended, or no longer this node's (another owner, or,
-// for a collab member, no live seat in its session).
+// An unsigned (or not-for-us) stop notice is still acted on when the daemon
+// itself confirms it: the task ended, or is no longer this node's (another
+// owner, or, for a collab member, no live seat in its session). A forged notice
+// therefore cannot kill a healthy worker.
 async function taskWithdrawn(taskId) {
   const task = await natsRequest('mesh.tasks.get', { task_id: taskId }, 5000).catch(() => null);
   if (!task) return false;
@@ -1044,21 +1124,6 @@ async function taskWithdrawn(taskId) {
   if (session.status === 'completed' || session.status === 'aborted') return true;
   const seat = (session.nodes || []).find(n => n.id === NODE_ID);
   return !seat || seat.status === 'dead';
-}
-
-async function onTaskWithdrawn(taskId, notice) {
-  if (!activeWorker || activeWorker.taskId !== taskId) {
-    warn(`${notice} ${taskId} ignored — not running it`);
-    return false;
-  }
-  if (!(await taskWithdrawn(taskId))) {
-    warn(`${notice} ${taskId} ignored — the daemon still has it running on this node`);
-    return false;
-  }
-  if (!activeWorker || activeWorker.taskId !== taskId) return false;
-  log(`${notice} ${taskId} — the daemon ended this node's run; stopping the worker`);
-  activeWorker.stop();
-  return true;
 }
 
 // Partial-work branches of released and budget/stall-failed tasks are kept for
@@ -1211,14 +1276,15 @@ function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null)
     const signalGroup = (signal) => {
       try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* gone */ } }
     };
-    const stopGroup = () => {
+    const terminate = () => {
       signalGroup('SIGTERM');
       setTimeout(() => signalGroup('SIGKILL'), 5000).unref();
     };
-    const budgetTimer = setTimeout(stopGroup, timeoutMs ?? (task.budget_minutes || 30) * 60 * 1000);
-    const worker = { taskId: task.task_id, stop: stopGroup };
+    const budgetTimer = setTimeout(terminate, timeoutMs ?? (task.budget_minutes || 30) * 60 * 1000);
+    const worker = { taskId: task.task_id, stop: terminate };
     activeWorker = worker;
-    const forgetWorker = () => { if (activeWorker === worker) activeWorker = null; };
+    if (stoppedFor(task.task_id)) terminate();
+    const clearWorker = () => { if (activeWorker === worker) activeWorker = null; };
 
     // Heartbeat: renews the lease and keeps the daemon's stall detector quiet.
     let lastHeartbeatWarn = 0;
@@ -1243,7 +1309,7 @@ function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null)
     child.on('close', (code, signal) => {
       clearInterval(heartbeatTimer);
       clearTimeout(budgetTimer);
-      forgetWorker();
+      clearWorker();
       if (supervisor) supervisor.workerExited({ exitCode: code, signal });
       // A provider that reports its own result record (claude's json output) yields the
       // answer text and the CLI's own cost; everything downstream reads only the text.
@@ -1256,7 +1322,7 @@ function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null)
     child.on('error', (err) => {
       clearInterval(heartbeatTimer);
       clearTimeout(budgetTimer);
-      forgetWorker();
+      clearWorker();
       if (supervisor) supervisor.workerExited({ exitCode: 1, signal: null });
       resolve({ exitCode: 1, stdout: '', stderr: err.message, provider: provider.name, model });
     });
@@ -2022,6 +2088,13 @@ async function executeCollabTask(task) {
   }
   const taskDir = worktreePath;
 
+  const endRounds = () => {
+    lastKnownSessionStatus = 'stopped';
+    roundsDone = true;
+    roundSub.unsubscribe();
+  };
+  stopHooks.set(task.task_id, endRounds);
+
   // Periodic session heartbeat — detects abort/completion while waiting for rounds
   const sessionHeartbeat = setInterval(async () => {
     try {
@@ -2084,6 +2157,12 @@ async function executeCollabTask(task) {
 
       // Execute provider (LLM or shell)
       const llmResult = await runLLM(prompt, task, worktreePath);
+      const stop = stoppedFor(task.task_id);
+      if (stop) {
+        log(`COLLAB ${stepLabel}: ${stop.reason} — round abandoned, no reflection`);
+        endRounds();
+        break;
+      }
       const output = llmResult.stdout || '';
       lastOutput = output;
 
@@ -2221,6 +2300,7 @@ async function executeCollabTask(task) {
   } finally {
     clearInterval(sessionHeartbeat);
     clearInterval(leaseHeartbeat);
+    stopHooks.delete(task.task_id);
     roundSub.unsubscribe();
   }
 
@@ -2356,6 +2436,12 @@ async function superviseTask(supervisor, run) {
 }
 
 /** The attempt loop — try → measure → keep/discard → retry — then release. */
+function throwIfStopped(task) {
+  const stop = stoppedFor(task.task_id);
+  // The daemon already released or failed the task: wind down as onWorkerError does for a TASK_TERMINAL refusal.
+  if (stop) throw Object.assign(new Error(`Stopped: ${stop.reason}`), { code: TASK_TERMINAL, taskStatus: stop.kind });
+}
+
 async function runAttempts(task, worktreePath, supervisor, startedAt) {
   const attempts = [];
   // The daemon escalates to the role's on_metric_failure target only when every
@@ -2365,6 +2451,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     lastMetricFailed = false;
+    throwIfStopped(task);
     // Check budget before each attempt
     const budgetDeadline = new Date(task.budget_deadline);
     const remaining = (budgetDeadline - Date.now()) / 60000;
@@ -2390,6 +2477,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
     // Run LLM (with worktree isolation if available), supervised as it streams
     if (supervisor) supervisor.workerStarted({ attempt });
     const llmResult = await runLLM(prompt, task, worktreePath, supervisor);
+    throwIfStopped(task);
     const summary = llmResult.stdout.slice(-500) || '(no output)';
 
     log(`${llmResult.provider} exited with code ${llmResult.exitCode}`);
@@ -2784,24 +2872,8 @@ async function main() {
     }
   })();
   log(`  Listening: mesh.agent.${NODE_ID}.approved / .rejected`);
-
-  // The daemon's stall detector and budget enforcer (and MC's remove_node) end a
-  // task without this worker's help; these notices stop the CLI still running it.
-  const stallSub = nc.subscribe(`mesh.agent.${NODE_ID}.stall`);
-  const budgetSub = nc.subscribe(`mesh.agent.${NODE_ID}.budget_exceeded`);
-  for (const [sub, notice] of [[stallSub, 'STALL'], [budgetSub, 'BUDGET EXCEEDED']]) {
-    (async () => {
-      for await (const msg of sub) {
-        try {
-          const { task_id } = JSON.parse(sc.decode(msg.data));
-          if (task_id) await onTaskWithdrawn(task_id, notice);
-        } catch (err) {
-          warn(`${notice.toLowerCase()} handler: ${err.message}`);
-        }
-      }
-    })();
-  }
-  log(`  Listening: mesh.agent.${NODE_ID}.stall / .budget_exceeded`);
+  const stopSubs = listenForStops();
+  log(`  Listening: mesh.agent.${NODE_ID}.${STOP_NOTICES.join(' / .')}`);
   await reconcileKeptBranches();
 
   // Subscribe to collab recruit broadcasts — allows this node to join
@@ -2839,8 +2911,7 @@ async function main() {
   aliveSub.unsubscribe();
   approvedSub.unsubscribe();
   rejectedSub.unsubscribe();
-  stallSub.unsubscribe();
-  budgetSub.unsubscribe();
+  for (const sub of stopSubs) sub.unsubscribe();
   recruitSub.unsubscribe();
   draining = true;
   log('Draining NATS...');
@@ -2870,11 +2941,12 @@ module.exports = { buildCirclingPrompt, buildCollabPrompt, buildInitialPrompt, b
 // loop, against a real git workspace, with only the NATS connection injected.
 module.exports.__test = {
   setContext(ctx) { if (ctx.nc !== undefined) nc = ctx.nc; },
-  mergeIfApproved, onReviewApproved, onReviewRejected, reconcileKeptBranches, onTaskWithdrawn,
+  mergeIfApproved, onReviewApproved, onReviewRejected, reconcileKeptBranches,
   natsRequest, createWorktree, onWorkerError, executeCollabTask, executeTask,
   onRecruit, checkRecruitingSessions,
   claimAndRun,
   runLLM,
+  onStopNotice, listenForStops,
   evaluateMetric,
 };
 // deploy-v7f0130b

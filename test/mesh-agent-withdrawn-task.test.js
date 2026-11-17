@@ -65,7 +65,7 @@ describe('stall / budget_exceeded notices', () => {
   it('stop the running worker once the daemon reports the task ended', async () => {
     const asked = fakeDaemon({ 'mesh.tasks.get': { task_id: 'T-1', status: 'released', owner: 'node-self' } });
     const worker = startWorker('T-1');
-    assert.equal(await agent.__test.onTaskWithdrawn('T-1', 'STALL'), true);
+    assert.equal(await agent.__test.onStopNotice('stall', { task_id: 'T-1' }), true);
     const result = await worker.run;
     assert.notEqual(result.exitCode, 0);
     assert.ok(asked.includes('mesh.tasks.get'));
@@ -74,7 +74,7 @@ describe('stall / budget_exceeded notices', () => {
   it('a budget notice for a failed task stops it too', async () => {
     fakeDaemon({ 'mesh.tasks.get': { task_id: 'T-2', status: 'failed', owner: 'node-self' } });
     const worker = startWorker('T-2');
-    assert.equal(await agent.__test.onTaskWithdrawn('T-2', 'BUDGET EXCEEDED'), true);
+    assert.equal(await agent.__test.onStopNotice('budget_exceeded', { task_id: 'T-2' }), true);
     await worker.run;
   });
 
@@ -82,23 +82,23 @@ describe('stall / budget_exceeded notices', () => {
     let status = 'running';
     fakeDaemon({ 'mesh.tasks.get': () => ({ task_id: 'T-3', status, owner: 'node-self' }) });
     const worker = startWorker('T-3');
-    assert.equal(await agent.__test.onTaskWithdrawn('T-3', 'STALL'), false);
+    assert.equal(await agent.__test.onStopNotice('stall', { task_id: 'T-3' }), false);
     await tick(300);
     assert.equal(worker.settled(), false, 'the worker kept running');
     status = 'released';
-    assert.equal(await agent.__test.onTaskWithdrawn('T-3', 'STALL'), true);
+    assert.equal(await agent.__test.onStopNotice('stall', { task_id: 'T-3' }), true);
     await worker.run;
   });
 
   it('a notice for another task leaves the running worker alone', async () => {
     const asked = fakeDaemon({ 'mesh.tasks.get': { task_id: 'OTHER', status: 'released', owner: 'node-self' } });
     const worker = startWorker('T-4');
-    assert.equal(await agent.__test.onTaskWithdrawn('OTHER', 'STALL'), false);
+    assert.equal(await agent.__test.onStopNotice('stall', { task_id: 'OTHER' }), false);
     assert.equal(asked.length, 0);
     await tick(300);
     assert.equal(worker.settled(), false);
     fakeDaemon({ 'mesh.tasks.get': { task_id: 'T-4', status: 'cancelled' } });
-    assert.equal(await agent.__test.onTaskWithdrawn('T-4', 'STALL'), true);
+    assert.equal(await agent.__test.onStopNotice('stall', { task_id: 'T-4' }), true);
     await worker.run;
   });
 
@@ -110,11 +110,11 @@ describe('stall / budget_exceeded notices', () => {
       'mesh.collab.status': () => ({ session_id: 'S-1', status: 'active', nodes }),
     });
     const worker = startWorker('C-1');
-    assert.equal(await agent.__test.onTaskWithdrawn('C-1', 'STALL'), false, 'still seated: the notice is forged');
+    assert.equal(await agent.__test.onStopNotice('stall', { task_id: 'C-1' }), false, 'still seated: the notice is forged');
     await tick(300);
     assert.equal(worker.settled(), false);
     nodes = nodes.filter((n) => n.id !== 'node-self');
-    assert.equal(await agent.__test.onTaskWithdrawn('C-1', 'STALL'), true, 'removed by the operator');
+    assert.equal(await agent.__test.onStopNotice('stall', { task_id: 'C-1' }), true, 'removed by the operator');
     await worker.run;
   });
 });
