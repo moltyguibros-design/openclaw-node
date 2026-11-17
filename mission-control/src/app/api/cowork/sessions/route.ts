@@ -28,6 +28,8 @@ export async function GET(request: NextRequest) {
     for await (const key of keyIter) keys.push(key);
 
     for (const key of keys) {
+      // The daemon's live-session index (lib/mesh-collab.js LIVE_INDEX_KEY), not a session.
+      if (key === "index.live") continue;
       try {
         const entry = await kv.get(key);
         if (!entry || !entry.value) continue;

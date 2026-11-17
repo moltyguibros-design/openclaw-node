@@ -300,8 +300,6 @@ async function cleanupTaskCollabSession(task, reason) {
       log(`COLLAB ABORTED ${task.collab_session_id}: ${reason}`);
     }
     // Clean up audit error rate-limit counter
-    // NOTE: sessions expiring via KV TTL bypass this — residual Map entry is negligible
-    // for a homelab mesh but worth noting.
     collabStore.clearAuditErrorCount(task.collab_session_id);
   } catch (err) {
     log(`COLLAB CLEANUP WARN: could not abort session ${task.collab_session_id}: ${err.message}`);
