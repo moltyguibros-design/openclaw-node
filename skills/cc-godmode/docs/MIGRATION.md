@@ -6,8 +6,8 @@ How to migrate from using CC_GodMode via CLAUDE.md to the OpenClaw Skill.
 
 | Aspect | CLAUDE.md (Claude Code) | OpenClaw Skill |
 |--------|------------------------|----------------|
-| Installation | Copy to project root | `clawdhub install cc-godmode` |
-| Updates | Manual copy | `clawdhub update cc-godmode` |
+| Installation | Copy to project root | `bash skills/openclaw-skill-scanner/install-hook.sh cc-godmode` |
+| Updates | Manual copy | `bash skills/openclaw-skill-scanner/install-hook.sh cc-godmode` |
 | Scope | Per-project | System-wide |
 | Discovery | Must know about it | ClawHub marketplace |
 | Agent files | `~/.claude/agents/` | Same (unchanged) |
@@ -17,13 +17,13 @@ How to migrate from using CC_GodMode via CLAUDE.md to the OpenClaw Skill.
 ### Step 1: Install the Skill
 
 ```bash
-clawdhub install cc-godmode
+bash skills/openclaw-skill-scanner/install-hook.sh cc-godmode
 ```
 
 ### Step 2: Verify Installation
 
 ```bash
-clawdhub list | grep cc-godmode
+ls ~/.openclaw/workspace/skills/ | grep cc-godmode
 ```
 
 You should see:
@@ -150,7 +150,7 @@ If you need to go back to CLAUDE.md:
 ### Step 1: Uninstall Skill
 
 ```bash
-clawdhub uninstall cc-godmode
+rm -rf ~/.openclaw/workspace/skills/cc-godmode
 ```
 
 ### Step 2: Restore CLAUDE.md
@@ -191,13 +191,10 @@ No. Agent files are separate from the skill. Update them independently when CC_G
 ### Q: How do I get skill updates?
 
 ```bash
-clawdhub update cc-godmode
+bash skills/openclaw-skill-scanner/install-hook.sh cc-godmode
 ```
 
-Or for specific version:
-```bash
-clawdhub install cc-godmode@5.12.0
-```
+The gate installs the current ClawHub version; it does not pin one.
 
 ## Getting Help
 

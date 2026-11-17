@@ -1,4 +1,4 @@
-import { eq, and, ne, or, lte, like, desc, isNull } from "drizzle-orm";
+import { eq, and, ne, or, isNull } from "drizzle-orm";
 import { CronExpressionParser } from "cron-parser";
 import { writeFileSync, mkdirSync } from "fs";
 import path from "path";
@@ -7,9 +7,11 @@ import { tasks, dependencies } from "./db/schema";
 import { statusToKanban } from "./parsers/task-markdown";
 import { syncTasksToMarkdown } from "./sync/tasks";
 import { logActivity } from "./activity";
-import { WORKSPACE_ROOT, AGENT_NAME, DISPATCH_SIGNAL_FILE } from "./config";
+import { AGENT_NAME, DISPATCH_SIGNAL_FILE } from "./config";
+import { workspaceRoot } from "./sandbox";
 import { gatewayNotify } from "./gateway-notify";
 import { traceCall } from "./tracer";
+import { generateTaskId } from "./task-id";
 
 
 export interface Wave {
@@ -114,7 +116,7 @@ export interface SchedulerStatus {
 export function schedulerStatus(graceMinutes = 30): SchedulerStatus {
   const db = getDb();
   const now = new Date();
-  const cutoff = new Date(now.getTime() - graceMinutes * 60_000).toISOString();
+  const cutoffMs = now.getTime() - graceMinutes * 60_000;
 
   const atQueued = db
     .select({ id: tasks.id, triggerAt: tasks.triggerAt })
@@ -129,7 +131,7 @@ export function schedulerStatus(graceMinutes = 30): SchedulerStatus {
   const ready = db.select({ id: tasks.id }).from(tasks).where(eq(tasks.status, "ready")).all();
   const running = db.select({ id: tasks.id }).from(tasks).where(eq(tasks.status, "running")).all();
 
-  const overdue = atQueued.filter((t) => t.triggerAt && t.triggerAt <= cutoff);
+  const overdue = atQueued.filter((t) => t.triggerAt !== null && Date.parse(t.triggerAt) <= cutoffMs);
 
   return {
     now: now.toISOString(),
@@ -140,6 +142,26 @@ export function schedulerStatus(graceMinutes = 30): SchedulerStatus {
     overdueIds: overdue.map((t) => t.id).slice(0, 10),
     graceMinutes,
   };
+}
+
+// `extra` carries the active-tasks.md fields MC does not model. Of those only
+// the worker routing is part of a task's definition; the rest (collab_result,
+// circling_* progress, ...) is what a run wrote.
+const DEFINITION_EXTRA_KEYS = ["llm_provider", "llm_model", "provider", "model"];
+
+function definitionExtra(raw: string | null): string | null {
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const kept = Object.fromEntries(
+    Object.entries(parsed as Record<string, unknown>).filter(([k]) => DEFINITION_EXTRA_KEYS.includes(k))
+  );
+  return Object.keys(kept).length ? JSON.stringify(kept) : null;
 }
 
 /**
@@ -163,17 +185,14 @@ export function schedulerTick(): TickResult {
   // --- Phase 1: Trigger evaluation ---
 
   // 1a. One-shot triggers: trigger_kind="at", status="queued", trigger_at <= now
+  // trigger_at from the dialog is a zone-less datetime-local value; compare
+  // instants (Date.parse reads it in the server zone, ISO-Z values as UTC).
   const atTasks = db
     .select()
     .from(tasks)
-    .where(
-      and(
-        eq(tasks.triggerKind, "at"),
-        eq(tasks.status, "queued"),
-        lte(tasks.triggerAt, now.toISOString())
-      )
-    )
-    .all();
+    .where(and(eq(tasks.triggerKind, "at"), eq(tasks.status, "queued")))
+    .all()
+    .filter((t) => t.triggerAt !== null && Date.parse(t.triggerAt) <= now.getTime());
 
   for (const t of atTasks) {
     db.update(tasks)
@@ -205,8 +224,13 @@ export function schedulerTick(): TickResult {
       });
       const prev = interval.prev().toDate();
       const diffMs = now.getTime() - prev.getTime();
-      // 20-min window matches heartbeat interval
-      if (diffMs >= 0 && diffMs < 20 * 60 * 1000) {
+      // A row recreated by Phase 1c is born after the occurrence that fired its
+      // predecessor; it waits for the next one instead of firing it again.
+      if (
+        diffMs >= 0 &&
+        diffMs < 20 * 60 * 1000 &&
+        prev.getTime() >= Date.parse(t.createdAt)
+      ) {
         db.update(tasks)
           .set({
             status: "ready",
@@ -239,7 +263,7 @@ export function schedulerTick(): TickResult {
     .all();
 
   for (const t of recurringDone) {
-    const newId = generateNextId(db, now);
+    const newId = generateTaskId(db, now);
 
     // Compute next trigger_at for cron-based recurring tasks
     let nextTriggerAt: string | null = null;
@@ -255,6 +279,10 @@ export function schedulerTick(): TickResult {
       }
     }
 
+    // The next run is the same task: every definition field carries over
+    // (where it runs, what it does, how it is checked and routed). Only run
+    // state starts fresh: status, mesh ids, acknowledgement, artifacts, and the
+    // results the bridge writes into `extra`.
     db.insert(tasks)
       .values({
         id: newId,
@@ -268,6 +296,9 @@ export function schedulerTick(): TickResult {
         project: t.project,
         type: t.type,
         parentId: t.parentId,
+        description: t.description,
+        color: t.color,
+        showInCalendar: t.showInCalendar,
         needsApproval: t.needsApproval,
         triggerKind: t.triggerKind,
         triggerAt: nextTriggerAt,
@@ -276,6 +307,15 @@ export function schedulerTick(): TickResult {
         isRecurring: 1,
         capacityClass: t.capacityClass,
         autoPriority: t.autoPriority,
+        execution: t.execution,
+        metric: t.metric,
+        budgetMinutes: t.budgetMinutes,
+        scope: t.scope,
+        collaboration: t.collaboration,
+        preferredNodes: t.preferredNodes,
+        excludeNodes: t.excludeNodes,
+        clusterId: t.clusterId,
+        extra: definitionExtra(t.extra),
         updatedAt: now.toISOString(),
         createdAt: now.toISOString(),
       })
@@ -388,7 +428,7 @@ export function schedulerTick(): TickResult {
 
     // Also write dispatch signal with full details (auto-checkpoint picks it up)
     try {
-      const signalDir = path.join(WORKSPACE_ROOT, ".tmp");
+      const signalDir = path.join(workspaceRoot(), ".tmp");
       mkdirSync(signalDir, { recursive: true });
       writeFileSync(
         path.join(signalDir, DISPATCH_SIGNAL_FILE),
@@ -430,29 +470,4 @@ export function schedulerTick(): TickResult {
     traceCall("scheduler", "schedulerTick", _start, undefined, err);
     throw err;
   }
-}
-
-function generateNextId(
-  db: ReturnType<typeof getDb>,
-  date: Date
-): string {
-  const dateStr =
-    date.getFullYear().toString() +
-    (date.getMonth() + 1).toString().padStart(2, "0") +
-    date.getDate().toString().padStart(2, "0");
-
-  const prefix = `T-${dateStr}-`;
-  const row = db
-    .select({ id: tasks.id })
-    .from(tasks)
-    .where(like(tasks.id, `${prefix}%`))
-    .orderBy(desc(tasks.id))
-    .limit(1)
-    .get();
-
-  let nextSeq = 1;
-  if (row) {
-    nextSeq = (parseInt(row.id.slice(prefix.length), 10) || 0) + 1;
-  }
-  return `${prefix}${nextSeq.toString().padStart(3, "0")}`;
 }

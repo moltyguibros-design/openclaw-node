@@ -46,12 +46,10 @@ describe('node-acceptance federation axis (step 6.4)', () => {
   });
 
   it('FED-L2-COORD: coordinator running → PASS; absent → SKIP; loaded without PID → FAIL', async () => {
-    if (!IS_DARWIN) {
-      const r = await fedProbe('FED-L2-COORD').run();
-      assert.equal(r.status, VERDICT.SKIP);
-      assert.match(r.detail, /darwin-only/);
-      return;
-    }
+    const other = await fedProbe('FED-L2-COORD', { platform: 'win32' }).run();
+    assert.equal(other.status, VERDICT.SKIP);
+    assert.match(other.detail, /no service-manager probe for win32/);
+    if (!IS_DARWIN) return;
     const running = await fedProbe('FED-L2-COORD', {
       exec: async () => ({ code: 0, stdout: 'state = running\npid = 123\n', stderr: '' }),
     }).run();
@@ -66,6 +64,24 @@ describe('node-acceptance federation axis (step 6.4)', () => {
       exec: async () => ({ code: 0, stdout: 'state = not running\nlast exit code = 1\n', stderr: '' }),
     }).run();
     assert.equal(stopped.status, VERDICT.FAIL);
+  });
+
+  it('FED-L2-COORD grades the Linux systemd unit instead of skipping', async () => {
+    const calls = [];
+    const show = (stdout) => ({ platform: 'linux', exec: async (cmd, args) => { calls.push([cmd, ...args]); return { code: 0, stdout, stderr: '' }; } });
+    const running = await fedProbe('FED-L2-COORD', show(
+      'LoadState=loaded\nUnitFileState=enabled\nActiveState=active\nSubState=running\nMainPID=4242\nExecMainCode=0\nExecMainStatus=0\n')).run();
+    assert.equal(running.status, VERDICT.PASS);
+    assert.match(running.detail, /pid=4242/);
+    assert.deepEqual(calls[0].slice(0, 3), ['systemctl', '--user', 'show']);
+    assert.equal(calls[0].at(-1), 'openclaw-mesh-task-daemon.service');
+
+    const absent = await fedProbe('FED-L2-COORD', show('LoadState=not-found\nActiveState=inactive\nMainPID=0\n')).run();
+    assert.equal(absent.status, VERDICT.SKIP);
+
+    const failed = await fedProbe('FED-L2-COORD', show(
+      'LoadState=loaded\nUnitFileState=enabled\nActiveState=failed\nSubState=failed\nMainPID=0\nExecMainCode=1\nExecMainStatus=1\nResult=exit-code\n')).run();
+    assert.equal(failed.status, VERDICT.FAIL);
   });
 
   // These drive the probe's PARSE (jsz.json → meta_cluster) as well as the grade —

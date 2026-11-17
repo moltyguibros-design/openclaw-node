@@ -46,6 +46,8 @@ export async function GET() {
         try {
           for await (const msg of sub) {
             if (closed) break;
+            // The trace-mode switch shares the prefix; it is a command, not a node's trace event.
+            if (msg.subject === "openclaw.trace.config") continue;
             try {
               const data = sc.decode(msg.data);
               // Extract source node from subject: openclaw.trace.<nodeId>.<module>

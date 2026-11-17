@@ -9,6 +9,7 @@ test('owned restore-only command resolves an interrupted hold and refuses unsafe
   const result = spawnSync('python3', [fileURLToPath(new URL('../memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_restore_only.py', import.meta.url))], {
     timeout: 180_000,
     encoding: 'utf8',
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
   });
   console.log(result.stderr);
   assert.ifError(result.error);

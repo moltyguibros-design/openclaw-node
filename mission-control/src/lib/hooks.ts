@@ -1,7 +1,15 @@
 import useSWR, { mutate } from "swr";
 import { useEffect, useRef } from "react";
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+// SWR sets `error` only when the fetcher throws; API routes answer failures with a JSON {error} body.
+export async function fetcher(url: string) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `HTTP ${res.status}`);
+  }
+  return res.json();
+}
 
 export interface Task {
   id: string;
@@ -89,7 +97,7 @@ export async function createTask(task: {
   title: string;
   status?: string;
   owner?: string;
-  nextAction?: string;
+  next_action?: string;
   scheduled_date?: string;
   project?: string;
   [key: string]: unknown;
@@ -119,8 +127,12 @@ export async function updateTask(
 }
 
 export async function deleteTask(id: string) {
-  await fetch(`/api/tasks/${id}`, { method: "DELETE" });
+  const res = await fetch(`/api/tasks/${id}`, { method: "DELETE" });
   await mutate("/api/tasks");
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? `HTTP ${res.status}`);
+  }
 }
 
 export function useMemorySearch(query: string, limit = 20, source?: string) {
@@ -276,80 +288,6 @@ export async function createDependency(dep: {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Failed to create dependency");
   return data;
-}
-
-export async function deleteDependency(id: number) {
-  await fetch(`/api/dependencies?id=${id}`, { method: "DELETE" });
-}
-
-// --- Memory Items ---
-
-export interface MemoryItemEntry {
-  id: number;
-  fact_text: string;
-  confidence: number;
-  source_doc_id: number | null;
-  category: string | null;
-  status: string;
-  gate_decision: string | null;
-  gate_reason: string | null;
-  extraction_source: string | null;
-  last_accessed: string | null;
-  created_at: string;
-  source_file?: string;
-  source_title?: string;
-  source_date?: string;
-}
-
-export interface CategoryOverview {
-  category: string;
-  itemCount: number;
-  hasSummary: boolean;
-  summaryAge: number | null;
-}
-
-export function useMemoryItems(category?: string, limit = 50) {
-  const params = new URLSearchParams();
-  if (category) params.set("category", category);
-  params.set("limit", String(limit));
-
-  const { data, error, isLoading } = useSWR<{
-    items: MemoryItemEntry[];
-    limit: number;
-    offset: number;
-  }>(`/api/memory/items?${params.toString()}`, fetcher, {
-    refreshInterval: 10000,
-  });
-  return { items: data?.items ?? [], error, isLoading };
-}
-
-export function useMemoryItemStats() {
-  const { data, error, isLoading } = useSWR<{
-    active: number;
-    archived: number;
-    byCategory: Array<{ category: string; count: number }>;
-    recentAudit: Array<Record<string, unknown>>;
-  }>("/api/memory/items?stats=true", fetcher, {
-    refreshInterval: 30000,
-  });
-  return {
-    stats: data ?? null,
-    error,
-    isLoading,
-  };
-}
-
-export function useMemoryCategories() {
-  const { data, error, isLoading } = useSWR<{
-    categories: CategoryOverview[];
-  }>("/api/memory/categories", fetcher, {
-    refreshInterval: 30000,
-  });
-  return {
-    categories: data?.categories ?? [],
-    error,
-    isLoading,
-  };
 }
 
 // --- Wikilink Graph ---
@@ -576,8 +514,9 @@ export function useClusters() {
   return { clusters: data?.clusters ?? [], error, isLoading };
 }
 
-export function useCollabSessions(status?: string, refreshInterval = 5000) {
-  const params = status ? `?status=${status}` : "";
+export function useCollabSessions(status?: string, refreshInterval = 5000, limit?: number) {
+  const query = [status && `status=${status}`, limit && `limit=${limit}`].filter(Boolean).join("&");
+  const params = query ? `?${query}` : "";
   const { data, error, isLoading } = useSWR<{
     sessions: CollabSession[];
     natsAvailable: boolean;
@@ -604,17 +543,6 @@ export async function createCluster(params: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
-  });
-  const data = await res.json();
-  await mutate("/api/cowork/clusters");
-  return data;
-}
-
-export async function updateCluster(id: string, updates: Record<string, unknown>) {
-  const res = await fetch(`/api/cowork/clusters/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
   });
   const data = await res.json();
   await mutate("/api/cowork/clusters");
@@ -694,6 +622,7 @@ export async function interveneSession(params: {
   const data = await res.json();
   await mutate("/api/cowork/sessions");
   await mutate("/api/tasks");
+  if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
   return data;
 }
 
@@ -759,38 +688,6 @@ export function useMeshSSE() {
   }, []);
 }
 
-// --- Token usage ---
-
-export interface TokenUsageEntry {
-  id: number;
-  task_id: string | null;
-  node_id: string | null;
-  model: string;
-  input_tokens: number;
-  output_tokens: number;
-  cost_usd: number;
-  timestamp: string;
-}
-
-export interface TokenSummary {
-  totalCost: number;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  taskCount: number;
-  byModel: Array<{ model: string; cost: number; count: number }>;
-  byNode: Array<{ node_id: string; cost: number; count: number }>;
-  recent: TokenUsageEntry[];
-}
-
-export function useTokenUsage(period: "today" | "week" | "month" = "today") {
-  const { data, error, isLoading } = useSWR<TokenSummary>(
-    `/api/mesh/tokens?period=${period}`,
-    fetcher,
-    { refreshInterval: 30000 }
-  );
-  return { tokenData: data ?? null, error, isLoading };
-}
-
 // --- Mesh Tasks (Distributed MC) ---
 
 export interface MeshTask {
@@ -851,13 +748,22 @@ export async function createMeshTask(task: {
 
 export async function updateMeshTask(
   id: string,
-  updates: Record<string, unknown>,
-  revision: number
+  updates: {
+    title?: string;
+    description?: string;
+    priority?: number;
+    budget_minutes?: number;
+    success_criteria?: string[];
+    scope?: string[];
+    tags?: string[];
+    preferred_nodes?: string[];
+    exclude_nodes?: string[];
+  }
 ) {
   const res = await fetch(`/api/mesh/tasks/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...updates, revision }),
+    body: JSON.stringify(updates),
   });
   const data = await res.json();
   await mutate("/api/mesh/tasks");
@@ -946,13 +852,18 @@ export interface MemoryEntity { name: string; type: string; mention_count: numbe
 export interface MemoryDecision { decision: string; rationale: string; confidence: number; session_id: string; created_at: string; }
 export interface MemoryTheme { label: string; hierarchy: string[]; mention_count: number; last_seen: string; }
 
-export function useMemoryContent(q?: string, session?: string) {
+export function memoryContentKey(q?: string, session?: string): string | null {
+  // repair 6.4: a session-less watcher panel (q undefined) fetches nothing;
+  // the /memory-content page's q="" is the unscoped top-N view and must fetch.
+  if (q === undefined && !session) return null;
   const params = new URLSearchParams();
   if (q) params.set("q", q);
   if (session) params.set("session", session);
-  // repair 6.4: no scope -> no fetch. Session-less detail panels were
-  // pulling the full top-50 content every 10s and never rendering it.
-  const key = q || session ? `/api/memory-content?${params.toString()}` : null;
+  return `/api/memory-content?${params.toString()}`;
+}
+
+export function useMemoryContent(q?: string, session?: string) {
+  const key = memoryContentKey(q, session);
   const { data, error, isLoading } = useSWR<{
     entities: MemoryEntity[];
     decisions: MemoryDecision[];

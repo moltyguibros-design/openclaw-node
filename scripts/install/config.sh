@@ -35,9 +35,13 @@ if [ -f "$ENV_FILE" ]; then
     # Split only on the first '=' to preserve base64 padding etc.
     key="${line%%=*}"
     value="${line#*=}"
-    # Trim whitespace
-    key="$(echo "$key" | xargs)"
-    value="$(echo "$value" | xargs)"
+    # Trim whitespace and one pair of surrounding quotes, as mesh-deploy's
+    # renderConfigTemplate does; xargs aborted the install on a lone ' or ".
+    key="${key#"${key%%[![:space:]]*}"}"; key="${key%"${key##*[![:space:]]}"}"
+    value="${value#"${value%%[![:space:]]*}"}"; value="${value%"${value##*[![:space:]]}"}"
+    case "$value" in
+      \"*\"|\'*\') value="${value:1:${#value}-2}" ;;
+    esac
     # Only export valid variable names
     [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && export "$key=$value"
   done < "$ENV_FILE"
@@ -53,14 +57,26 @@ if [ -f "$ENV_FILE" ] && [ "$DRY_RUN" != true ] && ! grep -q '^OPENCLAW_NODE_ID=
   info "Persisted OPENCLAW_NODE_ID=$OPENCLAW_NODE_ID to $ENV_FILE (stable node identity)"
 fi
 
+# The role too: unpersisted, every --update without --role fell back to the
+# platform default (a Linux lead re-rendered as a worker), and the loop above
+# could export a file value that disagrees with the NODE_ROLE services.sh filters on.
+if [ -f "$ENV_FILE" ]; then
+  set_env_key OPENCLAW_NODE_ROLE "$NODE_ROLE"
+fi
+export OPENCLAW_NODE_ROLE="$NODE_ROLE"
+
 # Generate OPENCLAW_NATS_TOKEN if not set — server-side auth token (D2, federation step 1.1).
 # Clients already resolve+send it via lib/nats-resolve.js; this closes the server-side gap.
 if [ -z "${OPENCLAW_NATS_TOKEN:-}" ]; then
   OPENCLAW_NATS_TOKEN="$(openssl rand -hex 32)"
   export OPENCLAW_NATS_TOKEN
   if [ -f "$ENV_FILE" ]; then
-    echo "OPENCLAW_NATS_TOKEN=$OPENCLAW_NATS_TOKEN" >> "$ENV_FILE"
-    info "Generated OPENCLAW_NATS_TOKEN and persisted to $ENV_FILE"
+    if $DRY_RUN; then
+      echo "  [dry-run] would persist a generated OPENCLAW_NATS_TOKEN to $ENV_FILE"
+    else
+      echo "OPENCLAW_NATS_TOKEN=$OPENCLAW_NATS_TOKEN" >> "$ENV_FILE"
+      info "Generated OPENCLAW_NATS_TOKEN and persisted to $ENV_FILE"
+    fi
   fi
 fi
 
@@ -73,10 +89,10 @@ if [ -f "$ENV_FILE" ] && [ -n "${OPENCLAW_PROVIDER:-}" ]; then
   info "MESH_LLM_PROVIDER=$OPENCLAW_PROVIDER recorded in $ENV_FILE"
 fi
 if [ -f "$ENV_FILE" ] && ! grep -q '^LLM_MODEL=' "$ENV_FILE"; then
-  echo "LLM_MODEL=qwen3:8b" >> "$ENV_FILE"
+  set_env_key LLM_MODEL qwen3:8b
 fi
 if [ -f "$ENV_FILE" ] && ! grep -q '^LLM_BASE_URL=' "$ENV_FILE"; then
-  echo "LLM_BASE_URL=http://localhost:11434" >> "$ENV_FILE"
+  set_env_key LLM_BASE_URL http://localhost:11434
 fi
 export MESH_LLM_PROVIDER="${OPENCLAW_PROVIDER:-${MESH_LLM_PROVIDER:-}}"
 export LLM_MODEL="${LLM_MODEL:-qwen3:8b}"
@@ -101,19 +117,24 @@ generate_config() {
   local basename
   basename=$(basename "$output")
 
-  if [ -f "$output" ] && ! $UPDATE_ONLY; then
-    info "Config $basename already exists, skipping (use --update to overwrite)"
-    return
-  fi
+  # These files are the node's own once rendered: the operator adds gateway auth
+  # profiles, registers transcript sources, enables obsidian sync, a cluster node
+  # carries its own nats.conf. An existing one is never overwritten, --update or
+  # not; the fresh render goes beside it as <file>.new for a manual merge.
+  local dest="$output"
+  [ -f "$output" ] && dest="$output.new"
 
   # P4-3: the redirect below bypassed run(); --dry-run rendered real configs.
   if $DRY_RUN; then
-    info "  [dry-run] would render $template -> $output"
+    info "  [dry-run] would render $template -> $dest"
     return
   fi
 
+  local old_umask
+  old_umask=$(umask)
+  umask 077
   if command -v envsubst >/dev/null 2>&1; then
-    envsubst < "$template" > "$output"
+    envsubst < "$template" > "$dest"
   else
     # Fallback: manual sed substitution
     sed \
@@ -134,9 +155,19 @@ generate_config() {
       -e "s|\${CLAUDE_PROJECT_WORKSPACE}|${CLAUDE_PROJECT_WORKSPACE}|g" \
       -e "s|\${CLAUDE_PROJECT_HOME}|${CLAUDE_PROJECT_HOME}|g" \
       -e "s|\${CLAUDE_PROJECT_REPO}|${CLAUDE_PROJECT_REPO}|g" \
-      "$template" > "$output"
+      "$template" > "$dest"
   fi
-  run chmod 600 "$output"
+  umask "$old_umask"
+  run chmod 600 "$dest"
+  if [ "$dest" != "$output" ]; then
+    if cmp -s "$dest" "$output"; then
+      rm -f "$dest"
+      info "Config $basename up to date"
+    else
+      warn "Config $basename differs from its template render: kept as is, render saved as $basename.new (merge by hand)"
+    fi
+    return
+  fi
   info "Generated $basename (mode 600)"
 }
 
@@ -150,7 +181,17 @@ generate_config "$REPO_DIR/config/transcript-sources.json.template" "$OPENCLAW_R
 # node runs; nats-{1,2,3} are the R=3 cluster (operator-gated, federation 1.5).
 "$NODE_BIN" "$REPO_DIR/bin/nats-legacy-writer-check.mjs"
 run mkdir -p "$OPENCLAW_ROOT/nats"
-generate_config "$REPO_DIR/services/nats/nats-single.conf" "$OPENCLAW_ROOT/config/nats.conf"
+# A cluster node's peers and bind address are saved in the env file by the
+# --cluster-peers run below. A later run without the flags (--update) takes them
+# from there, so it re-renders the cluster nats.conf, not a single-node one.
+CLUSTER_FROM_ENV=false
+if [ -z "$CLUSTER_PEERS" ] && [ -n "${OPENCLAW_NATS_CLUSTER_PEERS:-}" ]; then
+  CLUSTER_PEERS="$OPENCLAW_NATS_CLUSTER_PEERS"
+  CLUSTER_FROM_ENV=true
+fi
+CLUSTER_BIND="${CLUSTER_BIND:-${OPENCLAW_NATS_CLUSTER_BIND:-}}"
+# --cluster-peers renders this machine's nats.conf below instead.
+[ -n "$CLUSTER_PEERS" ] || generate_config "$REPO_DIR/services/nats/nats-single.conf" "$OPENCLAW_ROOT/config/nats.conf"
 generate_config "$REPO_DIR/services/nats/nats-1.conf" "$OPENCLAW_ROOT/config/nats-1.conf"
 generate_config "$REPO_DIR/services/nats/nats-2.conf" "$OPENCLAW_ROOT/config/nats-2.conf"
 generate_config "$REPO_DIR/services/nats/nats-3.conf" "$OPENCLAW_ROOT/config/nats-3.conf"
@@ -164,6 +205,13 @@ generate_config "$REPO_DIR/services/nats/nats-3.conf" "$OPENCLAW_ROOT/config/nat
 if [ -n "$CLUSTER_PEERS" ]; then
   step "Multi-machine NATS cluster (peers: $CLUSTER_PEERS)"
   CLUSTER_SERVER_NAME="openclaw-nats-${OPENCLAW_NODE_ID}"
+  # Explicit flags replace nats.conf. Saved peers follow generate_config's rule:
+  # an existing nats.conf is kept and a differing render goes beside it as .new.
+  NATS_CONF="$OPENCLAW_ROOT/config/nats.conf"
+  NATS_CONF_DEST="$NATS_CONF"
+  if $CLUSTER_FROM_ENV && [ -f "$NATS_CONF" ]; then
+    NATS_CONF_DEST="$NATS_CONF.new"
+  fi
 
   # The machine's OWN address to bind (D2/D4: the tailnet interface, never all-interfaces).
   if [ -z "$CLUSTER_BIND" ] && command -v tailscale >/dev/null 2>&1; then
@@ -177,7 +225,8 @@ if [ -n "$CLUSTER_PEERS" ]; then
 
   # Cluster-route password — shared across the council like the client token.
   if [ -z "${OPENCLAW_NATS_CLUSTER_PASS:-}" ]; then
-    OPENCLAW_NATS_CLUSTER_PASS="$(grep '^OPENCLAW_NATS_CLUSTER_PASS=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2)"
+    # grep exits 1 on a first cluster install; under pipefail that aborted the installer.
+    OPENCLAW_NATS_CLUSTER_PASS="$( { grep '^OPENCLAW_NATS_CLUSTER_PASS=' "$ENV_FILE" 2>/dev/null || true; } | head -1 | cut -d= -f2)"
   fi
   if [ -z "${OPENCLAW_NATS_CLUSTER_PASS:-}" ]; then
     OPENCLAW_NATS_CLUSTER_PASS="$(openssl rand -hex 32)"
@@ -206,10 +255,21 @@ if [ -n "$CLUSTER_PEERS" ]; then
              }));
         fs.writeFileSync(process.argv[3], t, { mode: 0o600 });
         process.stdout.write(String(replicasForPeers(parsePeers(process.env.CLUSTER_PEERS).length)));
-      ' "$REPO_DIR/lib/nats-cluster-config.js" "$REPO_DIR/services/nats/nats-cluster-node.conf" "$OPENCLAW_ROOT/config/nats.conf")"
-    # Persist: replica target, cluster pass, and point every local consumer at the
-    # bound address (the server no longer listens on 127.0.0.1).
-    for kv in "OPENCLAW_KV_REPLICAS=$KV_REPLICAS" "OPENCLAW_NATS_CLUSTER_PASS=$OPENCLAW_NATS_CLUSTER_PASS" "OPENCLAW_NATS=nats://$CLUSTER_BIND:4222"; do
+      ' "$REPO_DIR/lib/nats-cluster-config.js" "$REPO_DIR/services/nats/nats-cluster-node.conf" "$NATS_CONF_DEST")"
+    if [ "$NATS_CONF_DEST" != "$NATS_CONF" ]; then
+      if cmp -s "$NATS_CONF_DEST" "$NATS_CONF"; then
+        rm -f "$NATS_CONF_DEST"
+        info "Config nats.conf up to date (cluster render from the saved peers)"
+      else
+        warn "Config nats.conf differs from its cluster render: kept as is, render saved as nats.conf.new (merge by hand)"
+      fi
+    fi
+    # Persist: replica target, cluster pass, the peers and bind address (re-renders
+    # on --update), and point every local consumer at the bound address (the
+    # server no longer listens on 127.0.0.1).
+    for kv in "OPENCLAW_KV_REPLICAS=$KV_REPLICAS" "OPENCLAW_NATS_CLUSTER_PASS=$OPENCLAW_NATS_CLUSTER_PASS" \
+              "OPENCLAW_NATS_CLUSTER_PEERS=$CLUSTER_PEERS" "OPENCLAW_NATS_CLUSTER_BIND=$CLUSTER_BIND" \
+              "OPENCLAW_NATS=nats://$CLUSTER_BIND:4222"; do
       key="${kv%%=*}"
       if grep -q "^$key=" "$ENV_FILE" 2>/dev/null; then
         run sed -i.bak "s|^$key=.*|$kv|" "$ENV_FILE" && run rm -f "$ENV_FILE.bak"
@@ -223,6 +283,8 @@ if [ -n "$CLUSTER_PEERS" ]; then
 fi
 
 generate_config "$REPO_DIR/config/obsidian-sync.json.template" "$OPENCLAW_ROOT/config/obsidian-sync.json"
+# lib/promotion-policy.mjs looks here after $PROMOTION_POLICY, before the copy beside lib/ (workspace.sh).
+generate_config "$REPO_DIR/config/promotion-policy.yaml" "$OPENCLAW_ROOT/config/promotion-policy.yaml"
 generate_config "$REPO_DIR/config/openclaw.json.template" "$OPENCLAW_ROOT/openclaw.json"
 
 # ============================================================

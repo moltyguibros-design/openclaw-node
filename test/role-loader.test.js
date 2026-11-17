@@ -56,6 +56,12 @@ describe('findRole', () => {
     const role = findRole('nonexistent-role', [SHIPPED_ROLES]);
     assert.strictEqual(role, null);
   });
+
+  it('refuses a role id that escapes the search dir', () => {
+    assert.strictEqual(findRole('../solidity-dev', [path.join(SHIPPED_ROLES, 'missing')]), null);
+    assert.strictEqual(findRole('solidity-dev/..', [SHIPPED_ROLES]), null);
+    assert.strictEqual(findRole('..', [path.join(SHIPPED_ROLES, 'missing')]), null);
+  });
 });
 
 // ── listRoles ────────────────────────────────────

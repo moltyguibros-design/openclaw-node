@@ -350,6 +350,26 @@ describe('runStoreHealthProbes', () => {
     assert.equal(typeof result.stores.graph_cache.wal_bytes, 'number');
   });
 
+  it('probes the graph cache at GRAPH_CACHE_DB_PATH when no graphCacheDb is passed', async () => {
+    const dbPath = path.join(tmpDir, 'env-graph.db');
+    seedGraphCacheDb(dbPath);
+    const prior = process.env.GRAPH_CACHE_DB_PATH;
+    process.env.GRAPH_CACHE_DB_PATH = dbPath;
+    try {
+      const result = await runStoreHealthProbes({
+        stateDb: path.join(tmpDir, 'nonexistent.db'),
+        knowledgeDb: path.join(tmpDir, 'nonexistent.db'),
+        workspaceLib: '/nonexistent/lib',
+        workspaceDaemon: '/nonexistent/daemon',
+      });
+      assert.equal(result.stores.graph_cache.nodes, 2);
+      assert.equal(result.stores.graph_cache.edges, 1);
+    } finally {
+      if (prior === undefined) delete process.env.GRAPH_CACHE_DB_PATH;
+      else process.env.GRAPH_CACHE_DB_PATH = prior;
+    }
+  });
+
   it('returns null for missing databases', async () => {
     const result = await runStoreHealthProbes({
       stateDb: path.join(tmpDir, 'nope.db'),

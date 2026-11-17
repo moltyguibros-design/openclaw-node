@@ -32,21 +32,20 @@ for (const dir of soulDirs) {
   const capPath = path.join(SOULS_DIR, dir.name, 'capabilities.json');
   const cap = JSON.parse(fs.readFileSync(capPath, 'utf8'));
   const prev = existingMap.get(dir.name);
+  const capabilities = { skills: cap.skills || [], tools: cap.tools || [], mcpServers: cap.mcpServers || [] };
+  // A re-run that changes nothing must not re-stamp every soul.
+  const unchanged = prev?.updatedAt && JSON.stringify(prev.capabilities) === JSON.stringify(capabilities);
 
   souls.push({
     id: dir.name,
     type: prev?.type || (dir.name === 'daedalus' ? 'orchestrator' : 'specialist'),
     basePath: `~/.openclaw/souls/${dir.name}`,
-    capabilities: {
-      skills: cap.skills || [],
-      tools: cap.tools || [],
-      mcpServers: cap.mcpServers || [],
-    },
+    capabilities,
     specializations: prev?.specializations || [],
     evolutionEnabled: prev?.evolutionEnabled ?? true,
     parentSoul: prev?.parentSoul ?? (dir.name === 'daedalus' ? null : 'daedalus'),
     createdAt: prev?.createdAt || new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    updatedAt: unchanged ? prev.updatedAt : new Date().toISOString(),
   });
 }
 

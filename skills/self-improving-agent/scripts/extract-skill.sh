@@ -143,8 +143,8 @@ description: "[TODO: Add a concise description of what this skill does and when 
 ## Source Learning
 
 This skill was extracted from a learning entry.
-- Learning ID: [TODO: Add original learning ID]
-- Original File: .learnings/LEARNINGS.md
+- Lesson: [TODO: Paste the original lesson line]
+- Original File: .learnings/lessons.md
 TEMPLATE
     echo "---"
     exit 0
@@ -183,8 +183,8 @@ description: "[TODO: Add a concise description of what this skill does and when 
 ## Source Learning
 
 This skill was extracted from a learning entry.
-- Learning ID: [TODO: Add original learning ID]
-- Original File: .learnings/LEARNINGS.md
+- Lesson: [TODO: Paste the original lesson line]
+- Original File: .learnings/lessons.md
 TEMPLATE
 
 log_info "Created: $SKILL_PATH/SKILL.md"

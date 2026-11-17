@@ -12,6 +12,9 @@ SYSTEMD_DEST="${OPENCLAW_SYSTEMD_DIR:-$HOME/.config/systemd/user}"
 INSTALLED_COUNT=0
 SKIPPED_COUNT=0
 RENDER_ERRORS=0
+# The sed fallback's placeholder list. Bare envsubst also blanks systemd's own
+# runtime variables ($MAINPID in the NATS units' ExecReload).
+UNIT_VARS='${HOME} ${NODE_BIN} ${NODE_BIN_DIR} ${OPENCLAW_WORKSPACE} ${OPENCLAW_NATS} ${OPENCLAW_NATS_TOKEN} ${OPENCLAW_NODE_ID} ${OPENCLAW_NODE_ROLE} ${OPENCLAW_DEPLOY_TRUSTED_KEYS} ${OPENCLAW_REPO_DIR} ${NPM_BIN} ${OPENCLAW_GATEWAY_JS} ${NATS_SERVER_BIN} ${MESH_LLM_PROVIDER} ${LLM_MODEL} ${LLM_BASE_URL} ${MESH_FOREMAN_ENFORCE} ${OPENCLAW_TIMEZONE}'
 
 # Fail-loud render audit — a unit shipping a live ${VAR} placeholder is broken
 # by construction (the silent-unrendered class, 2026-07-11 audit).
@@ -24,8 +27,8 @@ check_rendered() {
   fi
 }
 
-# Ensure log directories exist
-run mkdir -p "$OPENCLAW_ROOT/logs" "$WORKSPACE/.tmp"
+# Ensure log directories exist (the transcript-archive plist logs into its archive dir)
+run mkdir -p "$OPENCLAW_ROOT/logs" "$WORKSPACE/.tmp" "$OPENCLAW_ROOT/transcript-archive"
 
 if [ ! -f "$MANIFEST" ]; then
   warn "Service manifest not found at $MANIFEST — skipping service installation"
@@ -66,7 +69,7 @@ else
       fi
 
       if command -v envsubst >/dev/null 2>&1; then
-        envsubst < "$TEMPLATE" > "$DEST"
+        envsubst "$UNIT_VARS" < "$TEMPLATE" > "$DEST"
       else
         # NOTE: sed delimiter is |. If OPENCLAW_NATS_TOKEN ever contains |
         # (unlikely — tokens are hex/base64), this substitution will break.
@@ -74,6 +77,7 @@ else
         sed \
           -e "s|\${HOME}|$HOME|g" \
           -e "s|\${NODE_BIN}|$NODE_BIN|g" \
+          -e "s|\${NODE_BIN_DIR}|$NODE_BIN_DIR|g" \
           -e "s|\${OPENCLAW_WORKSPACE}|$OPENCLAW_WORKSPACE|g" \
           -e "s|\${OPENCLAW_NATS}|$OPENCLAW_NATS|g" \
           -e "s|\${OPENCLAW_NATS_TOKEN}|$OPENCLAW_NATS_TOKEN|g" \
@@ -82,11 +86,13 @@ else
           -e "s|\${OPENCLAW_DEPLOY_TRUSTED_KEYS}|${OPENCLAW_DEPLOY_TRUSTED_KEYS:-}|g" \
           -e "s|\${OPENCLAW_REPO_DIR}|$OPENCLAW_REPO_DIR|g" \
           -e "s|\${NPM_BIN}|$NPM_BIN|g" \
+          -e "s|\${OPENCLAW_GATEWAY_JS}|$OPENCLAW_GATEWAY_JS|g" \
           -e "s|\${NATS_SERVER_BIN}|$NATS_SERVER_BIN|g" \
           -e "s|\${MESH_LLM_PROVIDER}|$MESH_LLM_PROVIDER|g" \
           -e "s|\${LLM_MODEL}|$LLM_MODEL|g" \
           -e "s|\${LLM_BASE_URL}|$LLM_BASE_URL|g" \
           -e "s|\${MESH_FOREMAN_ENFORCE}|${MESH_FOREMAN_ENFORCE:-}|g" \
+          -e "s|\${OPENCLAW_TIMEZONE}|$OPENCLAW_TIMEZONE|g" \
           "$TEMPLATE" > "$DEST"
       fi
       check_rendered "$DEST"
@@ -119,11 +125,12 @@ else
             continue
           fi
           if command -v envsubst >/dev/null 2>&1; then
-            envsubst < "$TEMPLATE" > "$DEST"
+            envsubst "$UNIT_VARS" < "$TEMPLATE" > "$DEST"
           else
             sed \
               -e "s|\${HOME}|$HOME|g" \
               -e "s|\${NODE_BIN}|$NODE_BIN|g" \
+              -e "s|\${NODE_BIN_DIR}|$NODE_BIN_DIR|g" \
               -e "s|\${OPENCLAW_WORKSPACE}|$OPENCLAW_WORKSPACE|g" \
               -e "s|\${OPENCLAW_NATS}|$OPENCLAW_NATS|g" \
               -e "s|\${OPENCLAW_NATS_TOKEN}|$OPENCLAW_NATS_TOKEN|g" \
@@ -132,16 +139,19 @@ else
           -e "s|\${OPENCLAW_DEPLOY_TRUSTED_KEYS}|${OPENCLAW_DEPLOY_TRUSTED_KEYS:-}|g" \
               -e "s|\${OPENCLAW_REPO_DIR}|$OPENCLAW_REPO_DIR|g" \
               -e "s|\${NPM_BIN}|$NPM_BIN|g" \
+              -e "s|\${OPENCLAW_GATEWAY_JS}|$OPENCLAW_GATEWAY_JS|g" \
               -e "s|\${NATS_SERVER_BIN}|$NATS_SERVER_BIN|g" \
               -e "s|\${MESH_LLM_PROVIDER}|$MESH_LLM_PROVIDER|g" \
               -e "s|\${LLM_MODEL}|$LLM_MODEL|g" \
               -e "s|\${LLM_BASE_URL}|$LLM_BASE_URL|g" \
               -e "s|\${MESH_FOREMAN_ENFORCE}|${MESH_FOREMAN_ENFORCE:-}|g" \
+              -e "s|\${OPENCLAW_TIMEZONE}|$OPENCLAW_TIMEZONE|g" \
               "$TEMPLATE" > "$DEST"
           fi
           check_rendered "$DEST"
         done
         if $ENABLE_SERVICES; then
+          run systemctl --user daemon-reload
           run systemctl --user enable "${SVC_NAME}.timer"
           run systemctl --user start "${SVC_NAME}.timer"
           info "  Installed + enabled: $SVC_NAME (timer)"
@@ -160,11 +170,12 @@ else
           continue
         fi
         if command -v envsubst >/dev/null 2>&1; then
-          envsubst < "$TEMPLATE" > "$DEST"
+          envsubst "$UNIT_VARS" < "$TEMPLATE" > "$DEST"
         else
           sed \
             -e "s|\${HOME}|$HOME|g" \
             -e "s|\${NODE_BIN}|$NODE_BIN|g" \
+            -e "s|\${NODE_BIN_DIR}|$NODE_BIN_DIR|g" \
             -e "s|\${OPENCLAW_WORKSPACE}|$OPENCLAW_WORKSPACE|g" \
             -e "s|\${OPENCLAW_NATS}|$OPENCLAW_NATS|g" \
             -e "s|\${OPENCLAW_NATS_TOKEN}|$OPENCLAW_NATS_TOKEN|g" \
@@ -173,17 +184,21 @@ else
           -e "s|\${OPENCLAW_DEPLOY_TRUSTED_KEYS}|${OPENCLAW_DEPLOY_TRUSTED_KEYS:-}|g" \
             -e "s|\${OPENCLAW_REPO_DIR}|$OPENCLAW_REPO_DIR|g" \
             -e "s|\${NPM_BIN}|$NPM_BIN|g" \
+            -e "s|\${OPENCLAW_GATEWAY_JS}|$OPENCLAW_GATEWAY_JS|g" \
             -e "s|\${NATS_SERVER_BIN}|$NATS_SERVER_BIN|g" \
             -e "s|\${MESH_LLM_PROVIDER}|$MESH_LLM_PROVIDER|g" \
             -e "s|\${LLM_MODEL}|$LLM_MODEL|g" \
             -e "s|\${LLM_BASE_URL}|$LLM_BASE_URL|g" \
             -e "s|\${MESH_FOREMAN_ENFORCE}|${MESH_FOREMAN_ENFORCE:-}|g" \
+            -e "s|\${OPENCLAW_TIMEZONE}|$OPENCLAW_TIMEZONE|g" \
             "$TEMPLATE" > "$DEST"
         fi
         check_rendered "$DEST"
         if [ "$SVC_AUTO" = "true" ] && $ENABLE_SERVICES; then
+          run systemctl --user daemon-reload
           run systemctl --user enable "${SVC_NAME}.service"
-          run systemctl --user start "${SVC_NAME}.service"
+          # start is a no-op on a running unit; restart applies the re-rendered unit and new code, as unload/load does on macOS.
+          run systemctl --user restart "${SVC_NAME}.service"
           info "  Installed + started: $SVC_NAME"
         else
           info "  Installed: $SVC_NAME"
@@ -306,7 +321,9 @@ elif [ "$OS" = "macos" ]; then
 elif [ "$OS" = "linux" ]; then
   DESKTOP_DIR="$HOME/.local/share/applications"
   run mkdir -p "$DESKTOP_DIR"
-  if command -v envsubst >/dev/null 2>&1; then
+  if $DRY_RUN; then
+    echo "  [dry-run] would install $DESKTOP_DIR/openclaw-stack.desktop"
+  elif command -v envsubst >/dev/null 2>&1; then
     NODE_BIN="$NODE_BIN" OPENCLAW_REPO_DIR="$REPO_DIR" HOME="$HOME" \
       envsubst < "$REPO_DIR/services/launcher/openclaw-stack.desktop" > "$DESKTOP_DIR/openclaw-stack.desktop"
   else

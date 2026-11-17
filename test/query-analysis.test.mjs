@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractStructuredCues, embedPrompt, analyzeQuery } from '../lib/query-analysis.mjs';
+import { extractStructuredCues, embedPrompt, analyzeQuery, analyzeQueryWithLlm } from '../lib/query-analysis.mjs';
 
 // ─── extractStructuredCues ───────────────────────────────────────────────────
 
@@ -101,5 +101,43 @@ describe('analyzeQuery', () => {
     assert.equal(result.rawQuery, 'What is NATS?');
     assert.equal(result.embedding, null, 'embedding null on failure');
     assert.ok(result.structuredCues, 'structuredCues still present');
+  });
+});
+
+// ─── analyzeQueryWithLlm timings ─────────────────────────────────────────────
+
+describe('analyzeQueryWithLlm timings', () => {
+  it('embedMs is the embedding\'s own latency even when the LLM runs longer in parallel', async () => {
+    const embedFn = () => new Promise(r => setTimeout(() => r(new Float32Array(4)), 50));
+    const llmClient = {
+      generateAnalysis: () => new Promise(r => setTimeout(() => r({ mode: 'ok', value: { content: '{}' } }), 400)),
+    };
+    const result = await analyzeQueryWithLlm('hello', llmClient, { embedFn });
+    assert.equal(result.analysisMode, 'llm');
+    assert.ok(result.timings.embedMs >= 40, `embedMs ${result.timings.embedMs} should reflect the ~50ms embed`);
+    assert.ok(result.timings.embedMs < 300, `embedMs ${result.timings.embedMs} must not include the LLM wait`);
+    assert.ok(result.timings.llmMs >= 350, `llmMs ${result.timings.llmMs}`);
+  });
+});
+
+// Free-form output (no format:json on thinking-family models) can wrap the
+// JSON in prose or a fence; the analysis must still parse it.
+describe('analyzeQueryWithLlm free-form output', () => {
+  const embedFn = async () => new Float32Array(4);
+  const answer = (content) => ({ generateAnalysis: async () => ({ mode: 'llm', value: { content } }) });
+
+  it('parses JSON wrapped in a fence or prose', async () => {
+    const fenced = await analyzeQueryWithLlm('hello', answer('```json\n{"intent":"lookup"}\n```'), { embedFn });
+    assert.equal(fenced.analysisMode, 'llm');
+    assert.deepEqual(fenced.llmAnalysis, { intent: 'lookup' });
+    const prose = await analyzeQueryWithLlm('hello', answer('Here you go: {"intent":"lookup"} done.'), { embedFn });
+    assert.equal(prose.analysisMode, 'llm');
+    assert.deepEqual(prose.llmAnalysis, { intent: 'lookup' });
+  });
+
+  it('still reports unparseable output as malformed', async () => {
+    const r = await analyzeQueryWithLlm('hello', answer('no json here'), { embedFn });
+    assert.equal(r.analysisMode, 'embedding-fallback');
+    assert.equal(r.fallbackReason, 'llm-malformed-json');
   });
 });

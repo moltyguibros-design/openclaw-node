@@ -3,8 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import useSWR from "swr";
 import { Search, ChevronDown, ChevronUp, RotateCcw } from "lucide-react";
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { fetcher } from "@/lib/hooks";
 
 export interface TraceEvent {
   id: string;

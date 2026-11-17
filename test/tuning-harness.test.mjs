@@ -98,6 +98,18 @@ describe('runConfigQueries', () => {
   });
 });
 
+describe('runConfigQueries — seedTerms (memory-knowledge#5)', () => {
+  it('passes each query\'s seedTerms to the pipeline', async () => {
+    const seen = [];
+    const pipeline = { retrieve: async (query, opts) => { seen.push(opts.seedTerms); return []; } };
+    await runConfigQueries(pipeline, [
+      { id: 'q01', query: 'the message bus', category: 'c', expected_topic: 't', seedTerms: ['NATS'] },
+      { id: 'q02', query: 'plain', category: 'c', expected_topic: 't' },
+    ], 5);
+    assert.deepEqual(seen, [['NATS'], undefined]);
+  });
+});
+
 describe('formatTuningReport', () => {
   it('produces markdown with summary table and per-query matrix', () => {
     const allResults = [

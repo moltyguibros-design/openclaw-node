@@ -94,6 +94,11 @@ const LOAD_SKIP = perCoreLoad > 1.5
   ? `box saturated (load ${os.loadavg()[0].toFixed(1)} on ${os.cpus().length} cores) — latency numbers meaningless`
   : false;
 
+// A skipped describe adds nothing to the summary's skipped count; this sentinel does.
+test('embedding latency load census', (t) => {
+  if (LOAD_SKIP && !EMBED_SKIP) t.skip(LOAD_SKIP);
+});
+
 describe('embedding latency benchmark', { skip: EMBED_SKIP || LOAD_SKIP }, () => {
   before(async () => {
     // Warm up the model (first call loads ONNX weights from cache)

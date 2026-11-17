@@ -8,14 +8,20 @@
  * and channel weights) and produces a structured markdown comparison report.
  *
  * Usage:
- *   node bin/run-tuning-harness.mjs [--queries path] [--db path] [--extraction-db path] [--graph-db path] [--out path] [--limit N]
+ *   node bin/run-tuning-harness.mjs [--queries path] [--db path] [--extraction-db path] [--graph-db path] [--out path] [--limit N] [--llm-seeds]
+ *
+ * --llm-seeds runs each query through the inject path's LLM prompt analysis
+ * once and passes its entities/themes as seedTerms, as memory-injector does.
+ * Run once with and once without it to measure what the seeds change.
  */
 
 import { parseArgs } from 'node:util';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
-import { parseQuerySet } from './run-gulf1-eval.mjs';
+import { dirname, join } from 'node:path';
+import { parseQuerySet, DEFAULT_QUERIES, DEFAULT_EVAL_OUT_DIR } from './run-gulf1-eval.mjs';
 import { createRetrievalPipeline } from '../lib/retrieval-pipeline.mjs';
+
+const DEFAULT_OUT = join(DEFAULT_EVAL_OUT_DIR, 'tuning-results.md');
 
 // ─── Default Configurations ──────────────────────────────────────────────────
 
@@ -138,7 +144,7 @@ export async function runConfigQueries(pipeline, queries, limit = 5) {
   for (const q of queries) {
     let hits = [];
     try {
-      hits = await pipeline.retrieve(q.query, { k: limit });
+      hits = await pipeline.retrieve(q.query, { k: limit, seedTerms: q.seedTerms });
     } catch { /* pipeline may fail on empty DBs */ }
     results.push({
       queryId: q.id,
@@ -285,12 +291,13 @@ const isMain = process.argv[1] && (
 if (isMain) {
   const { values: opts } = parseArgs({
     options: {
-      queries: { type: 'string', default: 'memory-plan/eval/gulf1-queries.json' },
+      queries: { type: 'string', default: DEFAULT_QUERIES },
       db: { type: 'string' },
       'extraction-db': { type: 'string' },
       'graph-db': { type: 'string' },
-      out: { type: 'string', default: 'memory-plan/eval/tuning-results.md' },
+      out: { type: 'string', default: DEFAULT_OUT },
       limit: { type: 'string', default: '5' },
+      'llm-seeds': { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
   });
@@ -299,12 +306,13 @@ if (isMain) {
     process.stdout.write(`Usage: run-tuning-harness [--queries path] [--db path] [--extraction-db path] [--graph-db path] [--out path] [--limit N]
 
 Options:
-  --queries PATH         Path to query set JSON (default: memory-plan/eval/gulf1-queries.json)
-  --db PATH              Path to knowledge database (default: auto-detect)
+  --queries PATH         Path to query set JSON (default: ${DEFAULT_QUERIES})
+  --db PATH              Path to knowledge database (default: $KNOWLEDGE_DB, else $KNOWLEDGE_ROOT/.knowledge.db, else ~/.openclaw/workspace/.knowledge.db)
   --extraction-db PATH   Path to extraction store database (default: auto-detect)
   --graph-db PATH        Path to graph cache database (default: auto-detect)
-  --out PATH             Output markdown file (default: memory-plan/eval/tuning-results.md)
+  --out PATH             Output markdown file (default: ${DEFAULT_OUT})
   --limit N              Top-K results per query per config (default: 5)
+  --llm-seeds            Seed channels 3-5 with the LLM prompt analysis's entities/themes
   -h, --help             Show this help
 `);
     process.exit(0);
@@ -328,9 +336,10 @@ Options:
     process.stderr.write(`[tuning] Knowledge DB: ${opts.db}\n`);
   } else {
     try {
-      const { initDatabase, DB_PATH } = await import('../lib/mcp-knowledge/core.mjs');
-      knowledgeDb = initDatabase(DB_PATH);
-      process.stderr.write(`[tuning] Knowledge DB: ${DB_PATH}\n`);
+      const { initDatabase } = await import('../lib/mcp-knowledge/core.mjs');
+      const { DEFAULT_KNOWLEDGE_DB } = await import('./embed-existing-sessions.mjs');
+      knowledgeDb = initDatabase(DEFAULT_KNOWLEDGE_DB);
+      process.stderr.write(`[tuning] Knowledge DB: ${DEFAULT_KNOWLEDGE_DB}\n`);
     } catch {
       process.stderr.write('[tuning] WARNING: No knowledge DB found. FTS5 and vector channels disabled.\n');
     }
@@ -365,6 +374,18 @@ Options:
       process.stderr.write('[tuning] Graph cache: default path\n');
     } catch {
       process.stderr.write('[tuning] WARNING: No graph cache found. Spreading activation channel disabled.\n');
+    }
+  }
+
+  if (opts['llm-seeds']) {
+    const { analyzeQueryWithLlm } = await import('../lib/query-analysis.mjs');
+    const { createLlmClient } = await import('../lib/llm-client.mjs');
+    const { llmSeedTerms } = await import('../lib/memory-injector.mjs');
+    const llmClient = createLlmClient();
+    for (const q of queries) {
+      const analysis = await analyzeQueryWithLlm(q.query, llmClient, { embedFn: async () => null });
+      q.seedTerms = llmSeedTerms(analysis.llmAnalysis);
+      process.stderr.write(`[tuning] ${q.id} seeds (${analysis.analysisMode}): ${q.seedTerms.join(', ') || '—'}\n`);
     }
   }
 

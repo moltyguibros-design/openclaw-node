@@ -201,6 +201,19 @@ describe('generateAnalysis — separate budget', () => {
     }
   });
 
+  it('applies the same format:json gate as generate (no thinking-family stall)', async () => {
+    delete process.env.LLM_FORCE_FREE_FORM;
+    nextResponse = { status: 200, body: { message: { content: '{}' }, done_reason: 'stop' } };
+    const thinking = await createLlmClient({ baseUrl: baseUrl(), model: 'qwen3:8b' })
+      .generateAnalysis([{ role: 'user', content: 'q' }], { jsonMode: true, waitTimeoutMs: 5000 });
+    assert.equal(thinking.mode, 'llm');
+    assert.equal(lastRequest.body.format, undefined);
+    const plain = await createLlmClient({ baseUrl: baseUrl(), model: 'llama3.1:8b' })
+      .generateAnalysis([{ role: 'user', content: 'q' }], { jsonMode: true, waitTimeoutMs: 5000 });
+    assert.equal(plain.mode, 'llm');
+    assert.equal(lastRequest.body.format, 'json');
+  });
+
   it('returns mode:llm shape on success path', async () => {
     const c = createLlmClient({ baseUrl: baseUrl() });
     nextResponse = { status: 200, body: { message: { content: 'r' }, done_reason: 'stop' } };

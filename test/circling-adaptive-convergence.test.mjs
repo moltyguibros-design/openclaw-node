@@ -11,10 +11,10 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { execSync, spawn as spawnProcess } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { natsServerBin, freePort, startNatsServer, writeServerConfig } from './helpers/nats-server.mjs';
 
 const require = createRequire(import.meta.url);
 const { CollabStore, COLLAB_MODE, createSession } = require('../lib/mesh-collab');
@@ -224,60 +224,15 @@ describe('advanceCirclingStep — adaptive convergence (paper §14.1)', () => {
 // a scripted session that converges unanimously in SR1 with max_subrounds=3
 // advances to finalization after SR1, skipping SR2 and SR3.
 
-let NATS_BIN = null;
-try { NATS_BIN = execSync('which nats-server', { encoding: 'utf8' }).trim(); } catch { /* skip */ }
-const NATS_SKIP = NATS_BIN ? undefined : 'nats-server not found on PATH';
-
-async function stopNatsServer(proc) {
-  if (!proc?.pid || proc.exitCode !== null || proc.signalCode !== null) return;
-  await new Promise((resolve, reject) => {
-    const force = setTimeout(() => proc.kill('SIGKILL'), 1000);
-    const deadline = setTimeout(() => {
-      proc.stdout?.destroy();
-      proc.stderr?.destroy();
-      proc.unref();
-      reject(new Error('NATS test server did not exit'));
-    }, 5000);
-    proc.once('exit', () => {
-      clearTimeout(force);
-      clearTimeout(deadline);
-      resolve();
-    });
-    proc.kill();
-  });
-}
-
-function startNatsServer({ port, storeDir }) {
-  return new Promise((resolve, reject) => {
-    const proc = spawnProcess(NATS_BIN, ['-p', String(port), '-a', '127.0.0.1', '-js', '-sd', storeDir], { stdio: 'pipe' });
-    let settled = false;
-    const timer = setTimeout(() => fail(new Error('nats-server start timeout')), 5000);
-    function fail(error) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      stopNatsServer(proc).then(() => reject(error), reject);
-    }
-    proc.stderr.on('data', (chunk) => {
-      if (!settled && chunk.toString().includes('Server is ready')) {
-        settled = true;
-        clearTimeout(timer);
-        resolve({ proc, port });
-      }
-    });
-    proc.once('error', fail);
-    proc.once('exit', () => fail(new Error('nats-server exited before ready')));
-  });
-}
+const NATS_SKIP = natsServerBin() ? undefined : 'nats-server not found on PATH';
 
 let storeDir, nats, nc, kv, collab;
-const PORT = 14879;
 
 after(async () => {
   try {
     await nc?.close();
   } finally {
-    await stopNatsServer(nats?.proc);
+    await nats?.stop();
     if (storeDir) await rm(storeDir, { recursive: true, force: true });
   }
 });
@@ -287,8 +242,9 @@ describe('advanceCirclingStep — adaptive convergence integration (real NATS KV
   before(async () => {
     const { connect, StringCodec } = await import('nats');
     storeDir = await mkdtemp(join(tmpdir(), 'circling-adapt-nats-'));
-    nats = await startNatsServer({ port: PORT, storeDir });
-    nc = await connect({ servers: `nats://127.0.0.1:${PORT}` });
+    const port = await freePort();
+    nats = await startNatsServer(writeServerConfig(storeDir, port, { auth: false }));
+    nc = await connect({ servers: `nats://127.0.0.1:${port}` });
     const js = nc.jetstream();
     const jsm = await nc.jetstreamManager();
     await jsm.streams.add({ name: 'KV_MESH_COLLAB', subjects: ['$KV.MESH_COLLAB.>'] });

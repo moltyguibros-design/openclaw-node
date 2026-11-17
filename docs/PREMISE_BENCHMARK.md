@@ -1,5 +1,10 @@
 # PREMISE_BENCHMARK — does a grappe of OpenClaws beat one OpenClaw? (step 2.6)
 
+**Status (2026-08-05): CLOSED FAILED.** Run 2 tallied solo 3 · grappe 2 · tie 0, below the D3 ≥4/5
+bar. See federation DECISIONS D15, then D16 (consensus gating is dead; federation is a deterministic
+pipeline), and `memory-plan/plans/federation/BLOCKED.md`. Any rerun is a NEW preregistered
+benchmark; the protocol below is the apparatus it would reuse.
+
 **The question that decides the plan.** Everything past Block 2 assumes an adversarial grappe
 produces observably better work than a single node. 2.6 tests that head-to-head, blind. Per
 DECISIONS D3, a fail is a plan-level BLOCK, not a step failure — we do not build management/savant
@@ -12,24 +17,32 @@ Same task, same model (Claude/sonnet), same harness-loaded OpenClaw, same bus. T
 - **GRAPPE** — three OpenClaws circle it: 1 worker + 2 reviewers, one sub-round
   (`max_subrounds:1` so it closes cleanly — 2.4 finding 13), then finalize.
 
-The harness is `bin/fed-benchmark.mjs` (the original `grappe-benchmark.mjs` is RETIRED — its
-prose-metric default trips the agent's metric security filter and its pair handling could reuse
-stale artifacts; both failed the 2026-08-03 smoke). `submit <task-id> <arm> <task-file.md>` sends
+The harness is `bin/fed-benchmark.mjs` (the original `grappe-benchmark.mjs` and its unattended
+`fed-benchmark-driver.mjs` were retired and then deleted — the former's prose-metric default tripped
+the agent's metric security filter and its pair handling could reuse stale artifacts; both failed
+the 2026-08-03 smoke. Their history is in git and the step-2.6 `RERUN_LOG.md`). `submit <task-id> <arm> <task-file.md>` sends
 each arm (safe trivially-passing metric `node --version`; blind scoring is the quality gate);
 `collect` writes an anonymized, de-identified pair under `benchmark/pairs-d14/<name>/` — write
-once, no overwrite, July's tracked `benchmark/pairs/` + `handrun/` are never read — with a sealed
-`key.json` and a `meta.json` cost record (per-arm wall-clock; tokens honestly null until the
-provider captures json-mode usage). You blind-score all pairs, then `tally`.
+once, no overwrite, July's tracked `benchmark/pairs/` + `handrun/` are never read — and seals its
+`key.json`, `meta.json` cost record (per-arm wall-clock and usage) and hashes under
+`benchmark/sealed-d14/<name>/`, outside the scorer's directory. You blind-score all pairs, then
+`tally`.
 
 ## Protocol
 
 1. Prereqs (the node's own services — NODE_SPEC §6): launchd mesh-task-daemon + bridge up; 3
    mesh-agents running with `MESH_LLM_PROVIDER=claude`.
-2. For each of the ≥5 tasks: `node bin/grappe-benchmark.mjs run tasks/<t>.json` → a pair dir under
-   `~/.openclaw/benchmark/`.
-3. Blind-score each pair on the rubric below (record A or B + one-line why). Do NOT reveal until all
-   are scored.
-4. `reveal <dir>` each; tally grappe-wins vs solo-wins.
+2. For each of the ≥5 tasks, from the repo root (one task file, two task ids):
+   `node bin/fed-benchmark.mjs submit <id>-solo solo benchmark/tasks/<t>.md` and
+   `node bin/fed-benchmark.mjs submit <id>-grappe grappe benchmark/tasks/<t>.md`; poll each with
+   `status <task-id>`. When both are terminal, `collect <name> <id>-solo <id>-grappe` writes the
+   scorer package `benchmark/pairs-d14/<name>/{A.md,B.md}` and seals the key apart under
+   `benchmark/sealed-d14/<name>/`.
+3. Blind-score each pair on the rubric below by writing `benchmark/pairs-d14/<name>/score.json`
+   (`winner` A | B | tie, notes, and per arm the five scores `tally` requires). Never read
+   `benchmark/sealed-d14/` until every delivered pair is scored.
+4. `node bin/fed-benchmark.mjs tally` unblinds and tallies grappe-wins vs solo-wins (it gives no
+   verdict while a delivered pair is unscored).
 5. **Verdict:** grappe wins a clear majority (≥4/5, or your pre-agreed bar) ⇒ premise PROVEN, Phase
    2/3 unlocked. Else ⇒ write BLOCKED.md citing the miss; the architecture stops here for redesign.
 6. Record the GPU/token + wall-clock cost delta (grappe ≈ 3× the calls + reviewer turns) so the
@@ -37,18 +50,27 @@ provider captures json-mode usage). You blind-score all pairs, then `tally`.
 
 ## Scoring rubric (per pair, blind)
 
-| Dimension | A | B |
-|---|---|---|
-| Correctness (claims true, cites real file:line) | | |
-| Completeness (addresses the whole task) | | |
-| Caught issues a first draft would miss | | |
-| Honesty (no overclaiming; flags its own gaps) | | |
-| **Overall better** | ☐ | ☐ |
+`tally` rejects a delivered pair's score unless every dimension is scored 1–5 for both arms:
+
+```json
+{"winner": "A" | "B" | "tie", "notes": "...",
+ "scores": {"A": {"correctness": 1, "completeness": 1, "evidence": 1, "actionability": 1, "defect_discovery": 1},
+            "B": {"correctness": 1, "completeness": 1, "evidence": 1, "actionability": 1, "defect_discovery": 1}}}
+```
+
+| Dimension | What it scores |
+|---|---|
+| correctness | claims are true; cited file:line exist |
+| completeness | addresses the whole task |
+| evidence | claims are backed by the code, not asserted |
+| actionability | the operator could act on it as written |
+| defect_discovery | catches issues a first draft would miss |
 
 ## The task set (≥5 real, small, checkable — chosen with the operator)
 
-Tasks live as `tasks/<id>.json` (`{task_id_base,title,description,metric}`). Starter set — swap in
-your own real work anytime; the point is REAL tasks, not toys:
+Tasks live as markdown under `benchmark/tasks/<id>.md` (first line = title, the rest = description).
+The original starter set is below — swap in your own real work anytime; the point is REAL tasks, not
+toys:
 
 1. **spec-harden** — the F1/F2/F4 FEDERATION_SPEC defects (already dogfooded in 2.4; a known-answer
    control — we know the right output, so it calibrates the rubric).

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRawDb } from "@/lib/db";
-import { withTrace } from "@/lib/tracer";
 
 export const dynamic = "force-dynamic";
 
@@ -16,9 +15,12 @@ export const dynamic = "force-dynamic";
  * - error: if "true", only events with errors
  * - limit: default 200, max 1000
  *
- * Returns JSON array ordered by timestamp DESC.
+ * Returns { events: [...] } ordered by timestamp DESC.
+ *
+ * Not wrapped in withTrace: the Observability page polls this every 3 s, and a
+ * trace per poll would fill the table it serves with its own reads.
  */
-export const GET = withTrace("observability", "GET /api/observability/events", async (request: NextRequest) => {
+export async function GET(request: NextRequest) {
   try {
     const url = request.nextUrl;
     // Support both ?since=<ms timestamp> and ?hours=<N> for convenience
@@ -90,4 +92,4 @@ export const GET = withTrace("observability", "GET /api/observability/events", a
       { status: 500 }
     );
   }
-});
+}

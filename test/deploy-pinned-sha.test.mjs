@@ -34,7 +34,7 @@ const IS_MAC = process.platform === 'darwin';
 // Where mesh-deploy installs on a lead, all derived from HOME.
 const RT = {
   bin: path.join(HOME, 'openclaw', 'bin'),
-  skills: path.join(HOME, '.openclaw', 'skills'),
+  skills: path.join(HOME, '.openclaw', 'workspace', 'skills'),
   workspace: path.join(HOME, '.openclaw', 'workspace'),
   mc: path.join(HOME, '.openclaw', 'workspace', 'projects', 'mission-control'),
   state: path.join(HOME, '.openclaw', '.deploy-state.json'),
@@ -101,7 +101,7 @@ if (IS_MAC) {
 }
 
 // What a node's clone needs to run bin/mesh-deploy.js.
-const DEPLOY_SCRIPT_FILES = ['bin/mesh-deploy.js', 'lib/tracer.js', 'lib/obs-db.js'];
+const DEPLOY_SCRIPT_FILES = ['bin/mesh-deploy.js', 'lib/mesh-roles.js', 'lib/tracer.js', 'lib/obs-db.js', 'lib/node-id.js', 'lib/node-aliases.js'];
 git(ROOT, 'init', '-q', '--bare', '-b', 'main', ORIGIN);
 git(ROOT, 'init', '-q', '-b', 'main', SEED);
 git(SEED, 'remote', 'add', 'origin', ORIGIN);
@@ -112,7 +112,7 @@ write(SEED, 'bin/mesh-agent.js', '// agent v0\n');
 write(SEED, 'skills/demo/SKILL.md', '# demo v0\n');
 write(SEED, 'skills/demo/old-name.md', 'renamed in v1\n');
 write(SEED, 'skills/retired/SKILL.md', '# retired in v1\n');
-write(SEED, 'workspace-docs/SOUL.md', '# soul v0\n');
+write(SEED, 'identity/SOUL.md', '# soul v0\n');
 write(SEED, 'mission-control/package.json', '{ "name": "mission-control" }\n');
 write(SEED, 'mission-control/src/app/page.tsx', "export default () => 'v0';\n");
 const S0 = commit('v0');
@@ -157,7 +157,7 @@ describe('pinned-sha deploy through the listener (bare origin + node clone)', ()
     write(SEED, 'skills/demo/SKILL.md', '# demo v1\n');
     git(SEED, 'mv', 'skills/demo/old-name.md', 'skills/demo/new-name.md');
     git(SEED, 'rm', '-q', 'skills/retired/SKILL.md');
-    write(SEED, 'workspace-docs/SOUL.md', '# soul v1\n');
+    write(SEED, 'identity/SOUL.md', '# soul v1\n');
     write(SEED, 'mission-control/src/app/page.tsx', "export default () => 'v1';\n");
     S1 = commit('v1');
 
@@ -332,8 +332,18 @@ describe('`mesh deploy --force` on a live node leaves what the node owns alone',
       'souls/daedalus/evolution/events.jsonl': '{"event":"seed"}\n',
       'souls/newcomer/evolution/genes.json': '{"genes":"newcomer seed"}\n',
       'skills/demo/SKILL.md': '# demo\n',
+      'skills/mesh/SKILL.md': '# mesh\n',
+      'skills/dist/demo.skill': 'packaged\n',
+      'skills/scripts/golden.sh': '#!/bin/sh\n',
       'skills/_quarantine/memorylayer/SKILL.md': '# quarantined: ships memory to a SaaS\n',
+      'skills/demo/scripts/run.sh': '#!/bin/sh\n',
     });
+    // What earlier deploys left in the managed dir, beside an operator's own skill
+    // and the mesh skill integrations.sh installs there on purpose.
+    write(fx.home, '.openclaw/skills/demo/SKILL.md', '# demo, stale managed copy\n');
+    write(fx.home, '.openclaw/skills/dist/demo.skill', 'packaged\n');
+    write(fx.home, '.openclaw/skills/mesh/SKILL.md', '# mesh\n');
+    write(fx.home, '.openclaw/skills/operator-own/SKILL.md', '# mine\n');
     write(fx.home, '.openclaw/openclaw.json', LIVE_CONFIG);
     write(fx.home, '.openclaw/openclaw.env', 'DISCORD_BOT_TOKEN=discord-fixture\n');
     write(fx.home, '.openclaw/souls/daedalus/evolution/genes.json', LEARNED_GENES);
@@ -345,7 +355,7 @@ describe('`mesh deploy --force` on a live node leaves what the node owns alone',
 
   it('reinstalls the node and succeeds', () => {
     ranOk(run);
-    assert.equal(read(fx.rt('.openclaw/skills/demo/SKILL.md')), '# demo\n');
+    assert.equal(read(fx.rt('.openclaw/workspace/skills/demo/SKILL.md')), '# demo\n');
   });
 
   it('leaves openclaw.json alone when its template did not change: no rewrite, no backup', () => {
@@ -359,8 +369,24 @@ describe('`mesh deploy --force` on a live node leaves what the node owns alone',
     assert.equal(read(fx.rt('.openclaw/souls/newcomer/evolution/genes.json')), '{"genes":"newcomer seed"}\n');
   });
 
+  it('ships skills to the workspace dir install.sh uses, without dist/ or the top-level scripts/', () => {
+    assert.ok(fs.existsSync(fx.rt('.openclaw/workspace/skills/mesh/SKILL.md')));
+    assert.ok(!fs.existsSync(fx.rt('.openclaw/workspace/skills/dist')), 'skills/dist shipped');
+    assert.ok(!fs.existsSync(fx.rt('.openclaw/workspace/skills/scripts')), 'skills/scripts shipped');
+    assert.equal(read(fx.rt('.openclaw/workspace/skills/demo/scripts/run.sh')), '#!/bin/sh\n', 'a skill keeps its own scripts/');
+  });
+
+  it('archives the stale managed copies it used to deploy, keeping mesh and operator skills', () => {
+    const archives = fs.readdirSync(fx.rt('.openclaw')).filter(f => f.startsWith('skills.retired-'));
+    assert.equal(archives.length, 1);
+    const archive = fx.rt(`.openclaw/${archives[0]}`);
+    assert.equal(read(path.join(archive, 'demo', 'SKILL.md')), '# demo, stale managed copy\n');
+    assert.ok(fs.existsSync(path.join(archive, 'dist', 'demo.skill')));
+    assert.deepEqual(fs.readdirSync(fx.rt('.openclaw/skills')).sort(), ['mesh', 'operator-own']);
+  });
+
   it('never installs skills/_quarantine', () => {
-    assert.ok(!fs.existsSync(fx.rt('.openclaw/skills/_quarantine')), 'the quarantined skill reached the node');
+    assert.ok(!fs.existsSync(fx.rt('.openclaw/workspace/skills/_quarantine')), 'the quarantined skill reached the node');
   });
 
   it('never runs npm or the openclaw CLI: no implicit, unpinned CLI update', () => {
@@ -375,7 +401,7 @@ describe('openclaw.json is rewritten only from a changed template, rendered as t
   const config = () => fx.rt('.openclaw/openclaw.json');
   const backups = () => fs.readdirSync(fx.rt('.openclaw')).filter(f => f.startsWith('openclaw.json.bak.'));
   before(() => {
-    fx = makeNode('config', { 'config/openclaw.json.template': TEMPLATE(0), 'config/harness-rules.json': '{"v":0}\n' });
+    fx = makeNode('config', { 'config/openclaw.json.template': TEMPLATE(0), 'config/daemon.json.template': '{"v":0}\n' });
     // An earlier deploy installed the template; the operator has since configured the gateway.
     write(fx.home, '.openclaw/config/openclaw.json.template', TEMPLATE(0));
     write(fx.home, '.openclaw/openclaw.json', LIVE_CONFIG);
@@ -383,7 +409,7 @@ describe('openclaw.json is rewritten only from a changed template, rendered as t
   });
 
   it('a diff that changes another config/ file leaves openclaw.json alone', () => {
-    S1 = fx.commit('v1: harness rules', { 'config/harness-rules.json': '{"v":1}\n' });
+    S1 = fx.commit('v1: daemon template', { 'config/daemon.json.template': '{"v":1}\n' });
     ranOk(fx.deploy(['--from', fx.S0, '--to', S1]));
     assert.equal(read(config()), LIVE_CONFIG);
     assert.deepEqual(backups(), []);
@@ -408,6 +434,13 @@ describe('openclaw.json is rewritten only from a changed template, rendered as t
     assert.equal(JSON.parse(read(config())).workspace, fx.rt('.openclaw/workspace'));
     assert.equal(fileMode(config()), 0o600);
     assert.equal(backups().length, 1, 'nothing existed to back up');
+  });
+
+  it('renders the node workspace from OPENCLAW_WORKSPACE, not the default path', () => {
+    fs.rmSync(config());
+    const workspace = fx.rt('custom-workspace');
+    ranOk(fx.deploy(['--from', S2, '--to', S2, '--force'], { OPENCLAW_WORKSPACE: workspace }));
+    assert.equal(JSON.parse(read(config())).workspace, workspace);
   });
 });
 
@@ -490,7 +523,7 @@ describe('a deploy installs the commit, never the working tree', () => {
       assert.equal(run.status, 1, run.stdout);
       assert.match(run.stdout, /DEPLOY_ERROR .*tracked files in .* differ from the commit \(M skills\/demo\/SKILL\.md\)/);
       assert.equal(nodeHead(), fx.S0, 'the branch was not fast-forwarded');
-      assert.equal(read(fx.rt('.openclaw/skills/demo/SKILL.md')), '# demo v0\n');
+      assert.equal(read(fx.rt('.openclaw/workspace/skills/demo/SKILL.md')), '# demo v0\n');
       assert.equal(read(fx.rt('openclaw/bin/mesh-agent.js')), '// agent v0\n');
     } finally {
       git(fx.node, 'checkout', '-q', '--', 'skills/demo/SKILL.md');
@@ -511,5 +544,235 @@ describe('a deploy installs the commit, never the working tree', () => {
     fs.chmodSync(path.join(fx.node, 'skills', 'demo', 'SKILL.md'), 0o755); // as the installer's chmod +x does
     ranOk(fx.deploy(['--from', fx.S0, '--to', S1]));
     assert.equal(read(fx.rt('openclaw/bin/mesh-agent.js')), '// agent v1\n');
+  });
+});
+
+describe('--dry-run writes nothing into the workspace', () => {
+  let fx, run;
+  before(() => {
+    fx = makeNode('dry-run', { 'identity/SOUL.md': '# soul v0\n' });
+    write(fx.home, '.openclaw/workspace/SOUL.md', '# soul, edited on this node\n');
+    const S1 = fx.commit('v1', { 'identity/SOUL.md': '# soul v1\n' });
+    run = fx.deploy(['--from', fx.S0, '--to', S1, '--dry-run']);
+  });
+
+  it('reports the local edit without saving a .repo copy', () => {
+    ranOk(run);
+    assert.match(run.stdout, /SOUL\.md differs from repo version/);
+    assert.ok(!fs.existsSync(fx.rt('.openclaw/workspace/SOUL.md.repo')));
+    assert.equal(read(fx.rt('.openclaw/workspace/SOUL.md')), '# soul, edited on this node\n');
+  });
+});
+
+describe('a lib/ deploy restarts every daemon that loads lib, and the listener only from outside itself', () => {
+  const LIB_UNITS = 'openclaw-mesh-task-daemon openclaw-mesh-bridge openclaw-mesh-agent ' +
+    'openclaw-mesh-health-publisher openclaw-mesh-tool-discord openclaw-mesh-deploy-listener';
+  let fx;
+  before(() => {
+    fx = makeNode('lib-restarts', { 'bin/mesh-agent.js': '// agent v0\n', 'lib/shared.js': '// v0\n' });
+    for (const svc of ['mesh-health-publisher', 'mesh-tool-discord', 'mesh-deploy-listener']) {
+      write(fx.home, `Library/LaunchAgents/ai.openclaw.${svc}.plist`, '<plist/>\n');
+    }
+  });
+
+  it('systemd, pinned (the listener\'s child): health publisher and Discord tool restart; the listener restart is deferred', () => {
+    fs.rmSync(fx.callLog, { force: true });
+    const S1 = fx.commit('v1: lib', { 'lib/shared.js': '// v1\n' });
+    const run = fx.deploy(['--from', fx.S0, '--to', S1], { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: LIB_UNITS });
+    ranOk(run);
+    const systemctl = fx.calls().filter(l => l.startsWith('systemctl '));
+    for (const svc of ['openclaw-mesh-health-publisher', 'openclaw-mesh-tool-discord']) {
+      assert.ok(systemctl.includes(`systemctl --user try-restart ${svc}`), `${svc} kept the old lib:\n${systemctl.join('\n')}`);
+    }
+    assert.deepEqual(systemctl.filter(l => /restart openclaw-mesh-deploy-listener$/.test(l)), [],
+      'a pinned deploy restarted the listener that runs it');
+    assert.deepEqual(resultOf(run).deferredRestart, ['openclaw-mesh-deploy-listener']);
+  });
+
+  it('launchd, pinned: the same, with launchd labels', () => {
+    fs.rmSync(fx.callLog, { force: true });
+    const S1 = git(fx.node, 'rev-parse', 'HEAD');
+    const S2 = fx.commit('v2: lib', { 'lib/shared.js': '// v2\n' });
+    const run = fx.deploy(['--from', S1, '--to', S2], { DEPLOY_TEST_PLATFORM: 'darwin' });
+    ranOk(run);
+    const uid = process.getuid();
+    const launchctl = fx.calls().filter(l => l.startsWith('launchctl kickstart'));
+    for (const svc of ['mesh-health-publisher', 'mesh-tool-discord']) {
+      assert.ok(launchctl.includes(`launchctl kickstart -k gui/${uid}/ai.openclaw.${svc}`), launchctl.join('\n'));
+    }
+    assert.ok(!launchctl.some(l => l.endsWith('ai.openclaw.mesh-deploy-listener')), launchctl.join('\n'));
+    assert.deepEqual(resultOf(run).deferredRestart, ['ai.openclaw.mesh-deploy-listener']);
+  });
+
+  it('a deploy run from a shell (not the listener) restarts the listener in place', () => {
+    fs.rmSync(fx.callLog, { force: true });
+    git(fx.node, 'checkout', '-q', 'main');
+    fx.commit('v3: listener', { 'bin/mesh-deploy-listener.js': '// listener v3\n' });
+    const run = fx.deploy([], { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: LIB_UNITS });
+    ranOk(run);
+    assert.ok(resultOf(run).restarted.includes('openclaw-mesh-deploy-listener'), run.stdout);
+    assert.deepEqual(resultOf(run).deferredRestart, []);
+  });
+});
+
+describe('the listener schedules its own restart outside its own process tree', () => {
+  const require = createRequire(import.meta.url);
+  const { scheduleSelfRestart } = require('../bin/mesh-deploy-listener.js');
+  const recorder = () => {
+    const spawned = [];
+    const spawnFn = (cmd, args, opts) => { spawned.push({ cmd, args, opts }); return { on() {}, unref() {} }; };
+    return { spawned, spawnFn };
+  };
+
+  it('systemd: a transient timer restarts the unit after a delay', () => {
+    const { spawned, spawnFn } = recorder();
+    assert.deepEqual(scheduleSelfRestart(['openclaw-mesh-deploy-listener'], { platform: 'linux', spawnFn }), ['openclaw-mesh-deploy-listener']);
+    assert.equal(spawned.length, 1);
+    assert.equal(spawned[0].cmd, 'systemd-run');
+    assert.deepEqual(spawned[0].args, ['--user', '--on-active=10s', '--', 'systemctl', '--user', 'restart', 'openclaw-mesh-deploy-listener']);
+    assert.equal(spawned[0].opts.detached, true);
+  });
+
+  it('launchd: a detached child kickstarts the job after a delay', () => {
+    const { spawned, spawnFn } = recorder();
+    scheduleSelfRestart(['ai.openclaw.mesh-deploy-listener'], { platform: 'darwin', spawnFn, uid: 501 });
+    assert.equal(spawned[0].cmd, '/bin/sh');
+    assert.match(spawned[0].args[1], /^sleep 10; exec launchctl kickstart -k "\$1"$/);
+    assert.equal(spawned[0].args.at(-1), 'gui/501/ai.openclaw.mesh-deploy-listener');
+    assert.equal(spawned[0].opts.detached, true);
+  });
+
+  it('restarts nothing but the listener itself', () => {
+    const { spawned, spawnFn } = recorder();
+    assert.deepEqual(scheduleSelfRestart(['openclaw-mesh-agent', 'x; rm -rf /'], { platform: 'linux', spawnFn }), []);
+    assert.equal(spawned.length, 0);
+  });
+});
+
+describe('a deploy that changes config/harness-rules.json merges it into the file mesh-agent reads', () => {
+  const rules = enforcement => JSON.stringify([
+    { id: 'scan', description: 'upstream', content: 'upstream text', mesh_enforcement: enforcement },
+  ], null, 2) + '\n';
+  let fx, run;
+  const live = () => fx.rt('.openclaw/harness-rules.json');
+  before(() => {
+    fx = makeNode('harness', {
+      'bin/harness-sync.js': fs.readFileSync(path.join(REPO, 'bin/harness-sync.js')),
+      'config/harness-rules.json': rules('warn'),
+    });
+    // Installed by install.sh, then edited on this node.
+    write(fx.home, '.openclaw/harness-rules.json', JSON.stringify([
+      { id: 'scan', description: 'upstream', content: 'edited on this node', mesh_enforcement: 'warn' },
+      { id: 'mine', description: 'a rule only this node has' },
+    ], null, 2) + '\n');
+    const S1 = fx.commit('v1: enforce', { 'config/harness-rules.json': rules('block') });
+    run = fx.deploy(['--from', fx.S0, '--to', S1], {
+      DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: 'openclaw-mesh-agent',
+    });
+  });
+
+  it('source-owned fields reach the live rules; the node\'s edits and own rules stay', () => {
+    ranOk(run);
+    const merged = JSON.parse(read(live()));
+    const scan = merged.find(r => r.id === 'scan');
+    assert.equal(scan.mesh_enforcement, 'block', 'the new enforcement never reached the node');
+    assert.equal(scan.content, 'edited on this node');
+    assert.ok(merged.some(r => r.id === 'mine'));
+  });
+
+  it('restarts mesh-agent, which caches the rules', () => {
+    assert.ok(fx.calls().includes('systemctl --user try-restart openclaw-mesh-agent'), fx.calls().join('\n'));
+  });
+
+  it('no longer copies the rules into the unread ~/.openclaw/config', () => {
+    assert.ok(!fs.existsSync(fx.rt('.openclaw/config/harness-rules.json')));
+  });
+});
+
+describe('workspace agent docs come from identity/, as install.sh installs them', () => {
+  const DOCS = ['CLAUDE', 'SOUL', 'PRINCIPLES', 'AGENTS', 'DELEGATION', 'HEARTBEAT', 'MEMORY_SPEC', 'TOOLS'];
+  let fx, run;
+  const ws = f => fx.rt(path.join('.openclaw/workspace', f));
+  before(() => {
+    fx = makeNode('identity-docs', Object.fromEntries(DOCS.map(d => [`identity/${d}.md`, `# ${d} v0\n`])));
+    write(fx.home, '.openclaw/workspace/AGENTS.md', '# AGENTS, edited on this node\n');
+    run = fx.deploy(['--from', fx.S0, '--to', fx.S0, '--component', 'workspace-docs']);
+  });
+
+  it('installs install.sh\'s eight docs into the workspace', () => {
+    ranOk(run);
+    for (const d of DOCS.filter(d => d !== 'AGENTS')) assert.equal(read(ws(`${d}.md`)), `# ${d} v0\n`, d);
+  });
+
+  it('keeps a node-edited doc and saves the repo copy beside it, without holding back the others', () => {
+    assert.equal(read(ws('AGENTS.md')), '# AGENTS, edited on this node\n');
+    assert.equal(read(ws('AGENTS.md.repo')), '# AGENTS v0\n');
+  });
+
+  it('--force writes nothing into the unread ~/.openclaw/identity', () => {
+    ranOk(fx.deploy(['--from', fx.S0, '--to', fx.S0, '--force']));
+    assert.ok(!fs.existsSync(fx.rt('.openclaw/identity')), 'identity docs were copied into a directory nothing reads');
+  });
+});
+
+describe('a deploy updates the workspace runtime the memory daemon and node-watch run from', () => {
+  const UNITS = 'openclaw-memory-daemon openclaw-node-watch';
+  let fx, S1, S2;
+  const ws = rel => fx.rt(path.join('.openclaw/workspace', rel));
+  before(() => {
+    fx = makeNode('workspace-runtime', {
+      'lib/memory-store.mjs': '// v0\n',
+      'workspace-bin/session-recap': '#!/bin/sh\n# v0\n',
+      'workspace-bin/archive-transcripts.sh': '# timer v0\n',
+      'bin/node-watch.mjs': '// v0\n',
+      'bin/observer.mjs': '// timer v0\n',
+    });
+  });
+
+  it('lib/ reaches the workspace lib, and the daemons that import it restart', () => {
+    S1 = fx.commit('v1: lib', { 'lib/memory-store.mjs': '// v1\n' });
+    const run = fx.deploy(['--from', fx.S0, '--to', S1], { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: UNITS });
+    ranOk(run);
+    assert.equal(read(ws('lib/memory-store.mjs')), '// v1\n');
+    assert.equal(read(fx.rt('openclaw/lib/memory-store.mjs')), '// v1\n');
+    for (const svc of ['openclaw-memory-daemon', 'openclaw-node-watch']) {
+      assert.ok(resultOf(run).restarted.includes(svc), `${svc} kept the old lib: ${run.stdout}`);
+    }
+  });
+
+  it('workspace scripts reach the workspace bin; the timer cohort is never rewritten', () => {
+    fs.rmSync(fx.callLog, { force: true });
+    S2 = fx.commit('v2: scripts', {
+      'workspace-bin/session-recap': '#!/bin/sh\n# v2\n',
+      'workspace-bin/archive-transcripts.sh': '# timer v2\n',
+      'bin/node-watch.mjs': '// v2\n',
+      'bin/observer.mjs': '// timer v2\n',
+    });
+    write(fx.home, '.openclaw/workspace/bin/observer.mjs', '// fenced by the timer handoff\n');
+    const run = fx.deploy(['--from', S1, '--to', S2], { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: UNITS });
+    ranOk(run);
+    assert.equal(read(ws('bin/session-recap')), '#!/bin/sh\n# v2\n');
+    assert.equal(read(ws('bin/node-watch.mjs')), '// v2\n');
+    assert.equal(read(ws('bin/observer.mjs')), '// fenced by the timer handoff\n');
+    assert.ok(!fs.existsSync(ws('bin/archive-transcripts.sh')));
+    assert.ok(resultOf(run).restarted.includes('openclaw-node-watch'), run.stdout);
+  });
+
+  it('refuses to write through a workspace lib symlinked outside the checkout', () => {
+    const elsewhere = path.join(path.dirname(fx.home), 'elsewhere-lib');
+    fs.mkdirSync(elsewhere, { recursive: true });
+    fs.rmSync(ws('lib'), { recursive: true, force: true });
+    fs.symlinkSync(elsewhere, ws('lib'));
+    const S3 = fx.commit('v3: lib', { 'lib/memory-store.mjs': '// v3\n' });
+    const run = fx.deploy(['--from', S2, '--to', S3], { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: UNITS });
+    assert.equal(run.status, 1, run.stdout);
+    assert.match(run.stdout, /DEPLOY_ERROR .*refusing to write through symlinked/);
+    assert.deepEqual(fs.readdirSync(elsewhere), []);
+
+    // Linked to the checkout itself: the checkout already is the runtime.
+    fs.rmSync(ws('lib'));
+    fs.symlinkSync(path.join(fx.node, 'lib'), ws('lib'));
+    ranOk(fx.deploy(['--from', S2, '--to', S3], { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: UNITS }));
+    assert.equal(git(fx.node, 'status', '--porcelain'), '', 'the deploy wrote into the checkout');
   });
 });

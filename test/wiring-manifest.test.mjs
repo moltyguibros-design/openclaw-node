@@ -35,6 +35,13 @@ const REQUIRED_PRODUCTION_WIRES = [
   { factory: 'createOfferer',          calledIn: 'lib/federation-startup.mjs' },
   { factory: 'createAcceptor',         calledIn: 'lib/federation-startup.mjs' },
   { factory: 'startFederation',        calledIn: 'workspace-bin/memory-daemon.mjs' },
+  // Built is not driven: each half of the trio's API needs a production caller.
+  { factory: 'maybeBroadcast',         calledIn: 'lib/memory-inject-server.mjs' },
+  { factory: 'checkAcceptance',        calledIn: 'lib/memory-inject-server.mjs' },
+  { factory: 'getTopOffer',            calledIn: 'lib/memory-inject-server.mjs' },
+  { factory: 'broadcastFromConsolidation', calledIn: 'lib/federation-startup.mjs' },
+  { factory: 'broadcastConsolidation', calledIn: 'workspace-bin/memory-daemon.mjs' },
+  { factory: 'createPeerTracker',      calledIn: 'lib/federation-startup.mjs' },
 
   // F-N2: registry + seenIds must be constructed at startup, not left null.
   { factory: 'createIdentityRegistry', calledIn: 'lib/federation-startup.mjs' },
@@ -85,6 +92,7 @@ const REQUIRED_PRODUCTION_WIRES = [
   { factory: 'withKanbanLockSync',       calledIn: 'mission-control/src/lib/sync/tasks.ts' }, // MC takes the kanban lock (P5-5)
   // Phase 6 — remaining plan items.
   { factory: 'reapExpiredLeases',        calledIn: 'bin/mesh-task-daemon.js' },       // dead-worker requeue (P4-5)
+  { factory: 'requeueOwnedBy',           calledIn: 'bin/mesh-node-remove.js' },       // node removal requeues under CAS
   { factory: 'renderServiceTemplate',    calledIn: 'bin/openclaw-node-init.js' },     // one service definition (P4-8)
   // The flush runs OFF the daemon's main thread since the flush-worker change
   // (audits/flush_worker): the daemon invokes runFlushInWorker at every flush
@@ -146,7 +154,7 @@ describe('production wiring manifest', () => {
       assert.match(stripped, callPattern,
         `${factory} must be INVOKED (call position) in ${calledIn} — not just imported. ` +
         `If the factory was renamed, update REQUIRED_PRODUCTION_WIRES. ` +
-        `If intentionally inert, document the gap in memory-plan/STUB_AUDIT.md and remove the row. ` +
+        `If intentionally inert, document the gap in memory-plan/plans/legacy/STUB_AUDIT.md and remove the row. ` +
         `See F-N1 + F-P110 + F-Q412.`);
     });
   }

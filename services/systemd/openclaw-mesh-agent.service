@@ -19,7 +19,7 @@ Environment=LLM_MODEL=${LLM_MODEL}
 Environment=LLM_BASE_URL=${LLM_BASE_URL}
 # Foreman supervision (docs/foreman.md): empty = shadow (decisions recorded, nothing enforced); 1 = enforce.
 Environment=MESH_FOREMAN_ENFORCE=${MESH_FOREMAN_ENFORCE}
-Environment=TZ=America/Montreal
+Environment=TZ=${OPENCLAW_TIMEZONE}
 WorkingDirectory=${OPENCLAW_REPO_DIR}
 StandardOutput=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-mesh-agent.log
 StandardError=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-mesh-agent.err

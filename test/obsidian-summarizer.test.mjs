@@ -483,6 +483,72 @@ describe('queryConceptData + generateConceptNotes integration', () => {
     }
   });
 
+  it('re-summarizes a note that has prose only when its entity row changed', async () => {
+    const db = seedDb();
+    const vaultPath = join(tmpDir, 'vault-refresh');
+    const calls = [];
+    const proseClient = {
+      generate: async (messages) => {
+        calls.push(messages[1].content);
+        return { content: `Prose number ${calls.length} for this concept.` };
+      },
+    };
+
+    try {
+      await generateConceptNotes({ db, vaultPath, threshold: 5, client: proseClient });
+      assert.equal(calls.length, 2);
+
+      const idle = await generateConceptNotes({ db, vaultPath, threshold: 5, client: proseClient });
+      assert.equal(calls.length, 2, 'unchanged entity rows must not spend LLM calls');
+      assert.equal(idle.attempted, 0);
+      assert.equal(idle.unchanged, 2);
+      assert.equal(idle.skipped, 0);
+      assert.equal(idle.generated, 0);
+
+      db.prepare(`UPDATE entities SET mention_count = 11, last_seen = '2026-05-21' WHERE name = 'NATS JetStream'`).run();
+      const changed = await generateConceptNotes({ db, vaultPath, threshold: 5, client: proseClient });
+      assert.equal(calls.length, 3);
+      assert.match(calls[2], /NATS JetStream/);
+      assert.deepEqual(changed.notes, ['nats-jetstream.md']);
+      assert.equal(changed.unchanged, 1);
+      const note = await readFile(join(vaultPath, 'concepts', 'nats-jetstream.md'), 'utf-8');
+      assert.match(note, /mention_count: 11/);
+      assert.match(note, /Prose number 3/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('runs per-entity detail queries only for the concepts inside the budget, prepared once', async () => {
+    const db = seedDb();
+    db.prepare(`INSERT INTO entities (name, type, first_seen, last_seen, mention_count, private)
+      VALUES ('Third Concept', 'concept', '2026-05-11', '2026-05-18', 6, 0)`).run();
+    const vaultPath = join(tmpDir, 'vault-detail-budget');
+    const prepared = [];
+    const executed = [];
+    const spyDb = {
+      prepare(sql) {
+        const stmt = db.prepare(sql);
+        prepared.push(sql);
+        return {
+          get: (...args) => { executed.push(sql); return stmt.get(...args); },
+          all: (...args) => { executed.push(sql); return stmt.all(...args); },
+        };
+      },
+    };
+    const isSalience = (sql) => sql.includes('AVG(salience)');
+
+    try {
+      const result = await generateConceptNotes({ db: spyDb, vaultPath, threshold: 5, client: null, maxConcepts: 2 });
+      assert.equal(result.generated, 2);
+      assert.equal(result.skipped, 1);
+      assert.equal(executed.filter(isSalience).length, 2, 'details only for the 2 budgeted concepts');
+      assert.equal(prepared.filter(isSalience).length, 1, 'detail statements prepared once per call');
+    } finally {
+      db.close();
+    }
+  });
+
   it('spends the budget frontier-first: a noteless concept beats an already-written hub', async () => {
     const db = seedDb();
     const vaultPath = join(tmpDir, 'vault-frontier');

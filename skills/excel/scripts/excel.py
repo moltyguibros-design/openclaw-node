@@ -3,7 +3,7 @@
 """
 Excel CLI - Comprehensive Excel file manipulation.
 
-Read, write, edit, and format Excel files (.xlsx, .xls).
+Read, write, edit, and format Excel files (.xlsx).
 
 Usage:
     excel.py info <file>
@@ -52,12 +52,6 @@ try:
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
-
-try:
-    import xlrd
-    XLRD_AVAILABLE = True
-except ImportError:
-    XLRD_AVAILABLE = False
 
 
 def require_openpyxl():

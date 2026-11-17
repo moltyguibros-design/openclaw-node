@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getNats, sc } from "@/lib/nats";
 import { NODE_ID } from "@/lib/config";
+import { resolveEnvKey } from "@/lib/nats-auth";
+import { signOperatorRequest } from "@/lib/mesh-sign";
 
 export const dynamic = "force-dynamic";
 
-// Module-level state — survives across requests within the same process
-let traceMode: "dev" | "smart" = "dev";
+type TraceMode = "dev" | "smart";
+
+// What the daemons start with (lib/tracer.js); after a switch, the mode last broadcast.
+let traceMode: TraceMode = resolveEnvKey("OPENCLAW_TRACE_MODE") === "dev" ? "dev" : "smart";
 
 /**
  * GET /api/observability/config
@@ -27,9 +31,9 @@ export async function GET() {
 /**
  * PATCH /api/observability/config
  *
- * Accepts { mode: "dev" | "smart" }.
- * Updates local state and publishes openclaw.trace.config via NATS
- * so all mesh nodes can switch mode.
+ * Accepts { mode: "dev" | "smart" } and publishes it on openclaw.trace.config as a
+ * signed operator request: each daemon's tracer verifies it and switches. A daemon
+ * that restarts goes back to OPENCLAW_TRACE_MODE.
  */
 export async function PATCH(request: NextRequest) {
   try {
@@ -43,22 +47,21 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    traceMode = newMode;
-
-    // Publish config change to all nodes via NATS
-    try {
-      const nc = await getNats();
-      if (nc) {
-        const payload = JSON.stringify({
-          mode: traceMode,
-          changedBy: NODE_ID,
-          timestamp: Date.now(),
-        });
-        nc.publish("openclaw.trace.config", sc.encode(payload));
-      }
-    } catch {
-      // NATS publish failed — local state still updated
+    const nc = await getNats();
+    if (!nc) {
+      return NextResponse.json({ error: "NATS unavailable — trace mode not changed", mode: traceMode }, { status: 503 });
     }
+    let signed;
+    try {
+      signed = await signOperatorRequest({ mode: newMode as TraceMode });
+    } catch (err) {
+      return NextResponse.json(
+        { error: `cannot sign the operator request — trace mode not changed: ${(err as Error).message}`, mode: traceMode },
+        { status: 503 }
+      );
+    }
+    nc.publish("openclaw.trace.config", sc.encode(JSON.stringify(signed)));
+    traceMode = newMode;
 
     return NextResponse.json({ mode: traceMode, nodeId: NODE_ID });
   } catch (err) {

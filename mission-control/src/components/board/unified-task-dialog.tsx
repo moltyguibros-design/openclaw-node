@@ -1,11 +1,13 @@
 "use client";
 
-const AGENT_NAME = process.env.NEXT_PUBLIC_AGENT_NAME || "Daedalus";
+import { AGENT_NAME } from "@/lib/client-agent-name";
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { X, Zap, Paperclip, Trash2, ArrowLeftFromLine, ArrowRightFromLine, Clock, User, Cpu } from "lucide-react";
 import { createTask, updateTask, createProject, type Task } from "@/lib/hooks";
 import { ExecutionConfig, type ExecutionFields } from "./execution-config";
+import { LOCAL_EXECUTION_FIELDS, executionFieldsFromTask } from "@/lib/execution-fields";
+import { isCheckedOff } from "@/lib/done-gate";
 
 const TYPES = ["project", "pipeline", "phase"] as const;
 type HierarchyType = (typeof TYPES)[number];
@@ -93,17 +95,12 @@ export function UnifiedTaskDialog({
   const [showInCalendar, setShowInCalendar] = useState(false);
   const [acknowledgedAt, setAcknowledgedAt] = useState<string | null>(null);
   const [artifacts, setArtifacts] = useState<string[]>([]);
-  const [execFields, setExecFields] = useState<ExecutionFields>({
-    execution: "local",
-    collaboration: null,
-    preferred_nodes: [],
-    exclude_nodes: [],
-    cluster_id: null,
-    metric: null,
-    budget_minutes: 30,
-    scope: [],
-    needs_approval: true,
-  });
+  const [execFields, setExecFields] = useState<ExecutionFields>(LOCAL_EXECUTION_FIELDS);
+  // ExecutionConfig seeds its own state from `value` once, at mount. Mounted on
+  // the first open render it saw the previous task's fields, then wrote them
+  // back over this one's; it now mounts (keyed per open) only after the init
+  // effect below has set this task's fields.
+  const [execConfigKey, setExecConfigKey] = useState(0);
   const [dragOver, setDragOver] = useState(false);
   const [saving, setSaving] = useState(false);
   const initializedForOpen = useRef(false);
@@ -113,13 +110,14 @@ export function UnifiedTaskDialog({
     // This prevents SWR refreshes from resetting form fields while editing.
     if (!open) {
       initializedForOpen.current = false;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot form reset/init per open (ref-guarded); key-remount refactor queued
+      setExecConfigKey(0);
       return;
     }
     if (initializedForOpen.current) return;
     initializedForOpen.current = true;
 
     if (item) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot form init when the dialog opens (ref-guarded); key-remount refactor queued
       setId(item.id);
       setTitle(item.title);
       setType((item.type as HierarchyType) || defaultType || "project");
@@ -156,30 +154,13 @@ export function UnifiedTaskDialog({
       setTriggerAt(item.triggerAt ?? "");
       setTriggerCron(item.triggerCron ?? "");
       setTriggerTz(item.triggerTz ?? "America/Montreal");
-      setIsRecurring(!!item.isRecurring);
+      setIsRecurring(!!item.isRecurring && item.triggerKind !== "at");
       setCapacityClass(item.capacityClass ?? "normal");
       setAutoPriority(item.autoPriority ?? 0);
       setShowInCalendar(!!item.showInCalendar);
       setAcknowledgedAt(item.acknowledgedAt ?? null);
       setArtifacts(item.artifacts ?? []);
-      // Execution config
-      const collabParsed = item.collaboration
-        ? (typeof item.collaboration === "string" ? (() => { try { return JSON.parse(item.collaboration as string); } catch { return null; } })() : item.collaboration)
-        : null;
-      const prefNodes = item.preferredNodes
-        ? (typeof item.preferredNodes === "string" ? (() => { try { return JSON.parse(item.preferredNodes as string); } catch { return []; } })() : item.preferredNodes)
-        : [];
-      setExecFields({
-        execution: item.execution || "local",
-        collaboration: collabParsed,
-        preferred_nodes: prefNodes,
-        exclude_nodes: [],
-        cluster_id: item.clusterId || null,
-        metric: item.metric || null,
-        budget_minutes: item.budgetMinutes || 30,
-        scope: item.scope ? (typeof item.scope === "string" ? (() => { try { return JSON.parse(item.scope as string); } catch { return []; } })() : item.scope) : [],
-        needs_approval: item.needsApproval !== 0,
-      });
+      setExecFields(executionFieldsFromTask(item));
     } else {
       setId("");
       setTitle("");
@@ -205,18 +186,9 @@ export function UnifiedTaskDialog({
       setCapacityClass("normal");
       setAutoPriority(0);
       setArtifacts([]);
-      setExecFields({
-        execution: "local",
-        collaboration: null,
-        preferred_nodes: [],
-        exclude_nodes: [],
-        cluster_id: null,
-        metric: null,
-        budget_minutes: 30,
-        scope: [],
-        needs_approval: true,
-      });
+      setExecFields(LOCAL_EXECUTION_FIELDS);
     }
+    setExecConfigKey((k) => k + 1);
   }, [open, item, defaultType, defaultParentId, defaultScheduledDate]);
 
   const resolveBasenames = useCallback(async (names: string[]) => {
@@ -408,7 +380,7 @@ export function UnifiedTaskDialog({
             scheduled_date: scheduledDate || undefined,
             color: color || undefined,
             owner: owner || undefined,
-            nextAction: nextAction || undefined,
+            next_action: nextAction || undefined,
             needs_approval: needsApproval,
             trigger_kind: triggerKind,
             trigger_at: triggerAt || undefined,
@@ -427,7 +399,7 @@ export function UnifiedTaskDialog({
           status,
           owner: owner || undefined,
           description: finalDescription || undefined,
-          nextAction: nextAction || undefined,
+          next_action: nextAction || undefined,
           scheduled_date: scheduledDate || undefined,
           project: project || undefined,
           parent_id: parentId || undefined,
@@ -478,21 +450,21 @@ export function UnifiedTaskDialog({
           </button>
         </div>
 
-        {/* Done checkbox + Started by — leaf mode only */}
+        {/* Send-to-review checkbox + Started by — leaf mode only */}
         {!isHierarchyMode && (
           <div className="flex items-center gap-3 mb-4">
             <label className="flex items-center gap-2 cursor-pointer group">
               <input
                 type="checkbox"
-                checked={status === "done"}
-                onChange={(e) => setStatus(e.target.checked ? "done" : "queued")}
+                checked={isCheckedOff(status)}
+                onChange={(e) => setStatus(e.target.checked ? "waiting-user" : "queued")}
                 className="h-5 w-5 rounded border-border text-green-500 focus:ring-green-500/50 accent-green-500 cursor-pointer"
               />
-              <span className={`text-sm font-medium transition-colors ${status === "done" ? "text-green-400 line-through" : "text-muted-foreground group-hover:text-foreground"}`}>
-                Mark as done
+              <span className={`text-sm font-medium transition-colors ${isCheckedOff(status) ? "text-green-400 line-through" : "text-muted-foreground group-hover:text-foreground"}`}>
+                Send to review
               </span>
             </label>
-            {/* Daedalus acknowledgment checkbox — shows when auto-dispatched */}
+            {/* Agent acknowledgment checkbox — shows when auto-dispatched */}
             {item && status === "running" && owner?.toLowerCase() === AGENT_NAME.toLowerCase() && (
               <label className="flex items-center gap-2 cursor-pointer group ml-2">
                 <input
@@ -506,7 +478,7 @@ export function UnifiedTaskDialog({
                   className="h-5 w-5 rounded border-red-500/50 text-red-500 focus:ring-red-500/50 accent-red-500 cursor-pointer"
                 />
                 <span className={`text-sm font-medium transition-colors ${acknowledgedAt ? "text-red-400" : "text-muted-foreground group-hover:text-foreground"}`}>
-                  Daedalus
+                  {AGENT_NAME}
                 </span>
               </label>
             )}
@@ -849,7 +821,10 @@ export function UnifiedTaskDialog({
                   <button
                     key={kind}
                     type="button"
-                    onClick={() => setTriggerKind(kind)}
+                    onClick={() => {
+                      setTriggerKind(kind);
+                      if (kind === "at") setIsRecurring(false);
+                    }}
                     className={`px-2.5 py-1 text-[10px] rounded-md border transition-colors ${
                       triggerKind === kind
                         ? "border-primary bg-primary/10 text-primary"
@@ -904,16 +879,19 @@ export function UnifiedTaskDialog({
               </div>
             )}
 
-            <label className="flex items-center gap-2 cursor-pointer">
+            <label className={`flex items-center gap-2 ${triggerKind === "at" ? "opacity-50" : "cursor-pointer"}`}>
               <input
                 type="checkbox"
                 checked={isRecurring}
+                disabled={triggerKind === "at"}
                 onChange={(e) => setIsRecurring(e.target.checked)}
                 className="rounded border-border"
               />
               <span className="text-xs text-foreground">Recurring</span>
               <span className="text-[10px] text-muted-foreground">
-                Auto-recreates after completion
+                {triggerKind === "at"
+                  ? "A one-time trigger cannot repeat; use Cron"
+                  : "Auto-recreates after completion"}
               </span>
             </label>
 
@@ -954,11 +932,14 @@ export function UnifiedTaskDialog({
                 <Cpu className="h-3.5 w-3.5 text-cyan-400" />
                 Execution
               </p>
-              <ExecutionConfig
-                value={execFields}
-                onChange={setExecFields}
-                disabled={!!item?.meshTaskId}
-              />
+              {execConfigKey > 0 && (
+                <ExecutionConfig
+                  key={execConfigKey}
+                  value={execFields}
+                  onChange={setExecFields}
+                  disabled={!!item?.meshTaskId}
+                />
+              )}
             </div>
           )}
 

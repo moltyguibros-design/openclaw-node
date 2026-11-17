@@ -5,6 +5,9 @@ if [ -z "$NODE_BIN" ]; then
   exit 1
 fi
 export NODE_BIN
+# Leads the PATH of units whose children find node by name (Mission Control's
+# npm start → next), so they run the node their native modules were built for.
+export NODE_BIN_DIR="$(dirname "$NODE_BIN")"
 
 # ── Resolve nats-server binary (service templates exec ${NATS_SERVER_BIN}) ──
 NATS_SERVER_BIN="$(command -v nats-server 2>/dev/null || echo "")"
@@ -32,10 +35,11 @@ else
 fi
 
 # The memory daemon imports packages/event-schemas/dist and exits at startup
-# without it. dist/ is gitignored, the release tarball ships only the .ts
-# sources, and --omit=dev leaves no compiler behind — so on the first virgin-Mac
-# run the daemon died silently and the acceptance gate failed five rows
-# downstream (no DBs, no inject token, no event stream). Build it here.
+# without it. dist/ is gitignored and --omit=dev leaves no compiler behind, so a
+# git checkout has none (the npm tarball now gets it from prepack). On the first
+# virgin-Mac run the tarball had none either: the daemon died silently and the
+# acceptance gate failed five rows downstream (no DBs, no inject token, no event
+# stream). Build it here.
 SCHEMAS_DIST="$REPO_DIR/packages/event-schemas/dist/index.js"
 if [ ! -f "$SCHEMAS_DIST" ]; then
   info "Building event-schemas (memory daemon refuses to start without its dist)..."
@@ -94,12 +98,14 @@ export KNOWN_PROVIDERS
 if [ -z "$NODE_ROLE" ]; then
   NODE_ROLE="${OPENCLAW_NODE_ROLE:-}"
 fi
+if [ -z "$NODE_ROLE" ] && [ -f "$ENV_FILE" ]; then
+  NODE_ROLE="$(grep -m1 '^OPENCLAW_NODE_ROLE=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d "\"'" | xargs || true)"
+fi
+# Never guessed from the OS: a Mac is not necessarily the lead. A node's first
+# install names it; config.sh saves it for every later run.
 if [ -z "$NODE_ROLE" ]; then
-  if [ "$OS" = "macos" ]; then
-    NODE_ROLE="lead"
-  else
-    NODE_ROLE="worker"
-  fi
+  error "No node role: pass --role=lead or --role=worker (saved to $ENV_FILE for later runs)"
+  exit 1
 fi
 if [ "$NODE_ROLE" != "lead" ] && [ "$NODE_ROLE" != "worker" ]; then
   error "Invalid role: $NODE_ROLE (must be 'lead' or 'worker')"
@@ -137,3 +143,7 @@ export CLAUDE_PROJECT_REPO="$(claude_project_path "$REPO_DIR")"
 export OPENCLAW_WORKSPACE="$WORKSPACE"
 export OPENCLAW_REPO_DIR="$REPO_DIR"
 export NPM_BIN="$(command -v npm 2>/dev/null || echo "$HOME/.openclaw/workspace/.npm-global/bin/npm")"
+# The gateway unit runs the global openclaw package (`npm i -g openclaw`). npm -g
+# lands in /opt/homebrew/lib on Apple-Silicon Homebrew and /usr/lib on NodeSource,
+# so ask this npm instead of assuming /usr/local/lib (no debug log: --dry-run writes nothing).
+export OPENCLAW_GATEWAY_JS="$("$NPM_BIN" root -g --logs-max=0 2>/dev/null || echo /usr/local/lib/node_modules)/openclaw/dist/index.js"

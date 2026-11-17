@@ -1,6 +1,7 @@
 "use client";
 
 import { format } from "date-fns";
+import { AGENT_NAME } from "@/lib/client-agent-name";
 
 interface ChatBubbleProps {
   role: "user" | "agent";
@@ -30,7 +31,7 @@ export function ChatBubble({
       >
         {isAgent && (
           <div className="text-[10px] font-medium text-muted-foreground mb-1 uppercase tracking-wider">
-            Daedalus
+            {AGENT_NAME}
           </div>
         )}
         <div className="text-sm whitespace-pre-wrap break-words">

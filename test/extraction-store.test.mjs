@@ -2,7 +2,7 @@
  * Tests for lib/extraction-store.mjs and the LLM extraction path in pre-compression-flush.mjs.
  */
 
-import { describe, it, beforeEach, afterEach } from 'node:test';
+import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
@@ -197,6 +197,33 @@ describe('createExtractionStore', () => {
     assert.equal(store.db.prepare('SELECT mention_count FROM entities WHERE id = ?').get(id).mention_count, 2);
   });
 
+  it('theme mention_count counts sessions, not flushes', () => {
+    const themeCount = () => store.db.prepare(`SELECT mention_count FROM themes WHERE label = 'Message queue configuration'`).get().mention_count;
+    for (let i = 0; i < 4; i++) store.storeExtractionResult('session-001', mockExtractionResult);
+    assert.equal(themeCount(), 1, 'four flushes of one session are one sighting');
+    store.storeExtractionResult('session-002', mockExtractionResult);
+    assert.equal(themeCount(), 2);
+    assert.equal(store.db.prepare('SELECT COUNT(*) n FROM theme_mentions').get().n, 2);
+  });
+
+  it('v8 migration resets per-flush theme counts to max(1, linked sessions)', () => {
+    const db = store.db;
+    const theme = db.prepare(`INSERT INTO themes (label, hierarchy_path, first_seen, last_seen, mention_count) VALUES (?, '[]', 't0', 't1', ?)`);
+    theme.run('inflated by one busy session', 9);
+    theme.run('seen in two sessions', 6);
+    const id = db.prepare(`SELECT id FROM themes WHERE label = 'seen in two sessions'`).get().id;
+    db.prepare(`INSERT INTO theme_mentions (theme_id, session_id, created_at) VALUES (?, 's-1', 't0'), (?, 's-2', 't1')`).run(id, id);
+    db.pragma('user_version = 7');
+    const dbPath = db.prepare('PRAGMA database_list').get().file;
+    store.close();
+
+    store = createExtractionStore({ dbPath });
+    assert.equal(store.db.pragma('user_version', { simple: true }), 8);
+    const counts = Object.fromEntries(store.db.prepare('SELECT label, mention_count FROM themes').all().map((r) => [r.label, r.mention_count]));
+    assert.deepEqual(counts, { 'inflated by one busy session': 1, 'seen in two sessions': 2 });
+    assert.equal(fs.readdirSync(path.join(tmpDir, 'backups', 'migration')).length, 1, 'backed up before the counts were rewritten');
+  });
+
   it('re-extracting a decision refreshes rationale/confidence instead of duplicating', () => {
     store.storeExtractionResult('session-001', mockExtractionResult);
     const updated = {
@@ -272,6 +299,34 @@ describe('runFlush with LLM extraction', () => {
     assert.ok(memoryContent.includes('NATS JetStream'));
   });
 
+  it('walks the vault once per flush: the concept backfill no longer runs the full coverage report', async () => {
+    const jsonlPath = path.join(tmpDir, 'walk-session.jsonl');
+    const memoryMdPath = path.join(tmpDir, 'MEMORY-walk.md');
+    const vaultPath = path.join(tmpDir, 'vault-walk');
+    fs.mkdirSync(path.join(vaultPath, 'concepts'), { recursive: true });
+    fs.writeFileSync(jsonlPath, [
+      { type: 'user', message: { role: 'user', content: "Let's configure NATS JetStream with file storage" }, timestamp: '2026-05-22T10:00:00Z' },
+      { type: 'assistant', message: { role: 'assistant', content: "I'll set up JetStream with file-backed storage" }, timestamp: '2026-05-22T10:00:05Z' },
+    ].map((m) => JSON.stringify(m)).join('\n'));
+    const mockClient = {
+      async generate() {
+        return { content: JSON.stringify(mockExtractionResult), usage: null, finishReason: 'stop' };
+      },
+    };
+
+    const readdir = mock.method(fs, 'readdirSync');
+    try {
+      const result = await runFlush(jsonlPath, memoryMdPath, {
+        vaultPath, charBudget: 2200, llmClient: mockClient, extractionStore: store,
+      });
+      assert.equal(result.mode, 'llm');
+      const rootWalks = readdir.mock.calls.filter((c) => path.resolve(String(c.arguments[0])) === vaultPath);
+      assert.equal(rootWalks.length, 1, 'only the end-of-flush integrity check walks the vault');
+    } finally {
+      readdir.mock.restore();
+    }
+  });
+
   it('populates turn_index on mentions via runFlush pipeline', async () => {
     const jsonlPath = path.join(tmpDir, 'turn-idx-session.jsonl');
     const memoryMdPath = path.join(tmpDir, 'MEMORY.md');
@@ -332,6 +387,7 @@ describe('runFlush with LLM extraction', () => {
     assert.equal(second.flushed, false);
     assert.equal(second.skipped, 1);
     assert.equal(second.extraction.entities_count, 0);
+    assert.equal(second.extraction.dedup, true, 'the daemon tags the event so the watcher keeps it out of the failure rate');
     assert.equal(llmCalls, callsAfterFirst);
     assert.equal(
       store.db.prepare(`SELECT COUNT(*) c FROM mentions WHERE session_id = 'dedup-session'`).get().c,

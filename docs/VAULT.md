@@ -19,7 +19,9 @@ the writers, the graph parser, the link checker, and the node-watch `obs.*` prob
 (Mission Control's `config.ts` mirrors it):
 
 1. explicit `opts.vaultPath` (tests always use this — tmp vaults, never the live one)
-2. `OBSIDIAN_VAULT_PATH` env override
+2. `OBSIDIAN_VAULT_PATH` env override (the pipeline subtree only: the `workspace-bin/obsidian`
+   CLI and obsidian-sync find the real vault root through `vaultPath` / `apiKeyFile` in the
+   same config file — lib/obsidian-vault.mjs `getObsidianVaultRoot()`)
 3. **`memoryVaultPath` in `~/.openclaw/config/obsidian-sync.json`** — the fusion knob;
    workspace-relative (like the file's other paths) or absolute
 4. legacy default `~/.openclaw/obsidian-local/` (fresh nodes before the operator points it

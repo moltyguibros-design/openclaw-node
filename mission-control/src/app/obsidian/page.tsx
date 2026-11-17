@@ -41,8 +41,8 @@ export default function ObsidianPage() {
   const handleIndexWorkspace = async () => {
     setIndexing(true);
     try {
-      await fetch("/api/memory/flush", { method: "POST" });
-      // Force SWR to revalidate the graph
+      const res = await fetch("/api/memory/sync", { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       window.location.reload();
     } catch {
       setIndexing(false);

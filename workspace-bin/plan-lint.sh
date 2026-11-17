@@ -120,7 +120,13 @@ if [ -f "$AUTO" ]; then
   else
     report FAIL automation "automation.json invalid JSON or missing plist_label/tick_command"
   fi
-else report FAIL automation "automation.json missing"; fi
+else
+  # automation.json is machine-local (gitignored: it renders absolute paths), so a
+  # fresh clone never has one; the viewer derives the same defaults from the id.
+  derived="$REPO/workspace-bin/$ID-tick.sh"
+  if [ -x "$derived" ]; then report PASS automation "no automation.json — derived defaults (tick_command ${derived#$REPO/})"
+  else report WARN automation "no automation.json and no derived tick shim ${derived#$REPO/} (chain cannot run headless)"; fi
+fi
 
 if [ -f "$PLAN/TICK_PROMPT.md" ]; then
   if grep -q '<FILL:' "$PLAN/TICK_PROMPT.md"; then
@@ -156,7 +162,7 @@ else report WARN documents "ROADMAP.md missing (required for new plans; historic
 
 # ── surface 6: history ──────────────────────────────────────────────────────
 if [ -d "$PLAN/tick-logs" ]; then report PASS history "tick-logs/ present"
-else report FAIL history "tick-logs/ missing (ticks have nowhere to write; Live/History tabs dead)"; fi
+else report WARN history "tick-logs/ missing (gitignored; plan-tick creates it on the first tick)"; fi
 
 if [ -f "$PLAN/VERSION" ]; then
   ver=$(tr -d '[:space:]' < "$PLAN/VERSION")

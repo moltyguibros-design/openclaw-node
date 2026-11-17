@@ -323,9 +323,8 @@ export function KanbanBoard() {
                 highlight={bulkMode}
                 bulkMode={bulkMode}
                 bulkSelection={bulkSelection}
-                onClearDone={col === "done" ? async () => {
-                  // Archive all visible done tasks
-                  for (const t of columns.done) {
+                onClearDone={col === "done" ? async (visibleTasks) => {
+                  for (const t of visibleTasks) {
                     await updateTask(t.id, { status: "archived" } as Record<string, unknown>);
                   }
                 } : undefined}
@@ -346,7 +345,8 @@ export function KanbanBoard() {
           </span>
           <div className="w-px h-6 bg-border" />
           <span className="text-xs text-muted-foreground">Move to:</span>
-          {COLUMNS.map((col) => (
+          {/* No "Done": without force_done it lands in Review, which has its own button. */}
+          {COLUMNS.filter((col) => col !== "done").map((col) => (
             <button
               key={col}
               onClick={() => handleBulkMove(col)}

@@ -3,10 +3,20 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { stageRelease, verifyRelease } from '../workspace-bin/stage-consolidation-graph.mjs';
+import { checkLock, stageRelease, verifyRelease } from '../workspace-bin/stage-consolidation-graph.mjs';
 
 const nodeBinary = '/usr/local/bin/node';
 const nativeMac = process.platform === 'darwin' && fs.existsSync(nodeBinary);
+
+test('private consolidation lock pins only root-lock versions', () => {
+  const read = rel => JSON.parse(fs.readFileSync(new URL(rel, import.meta.url), 'utf8'));
+  const stageLock = read('../workspace-bin/consolidation-graph-package-lock.json');
+  const manifest = read('../workspace-bin/consolidation-graph-package.json');
+  const checked = checkLock(read('../package-lock.json'), stageLock);
+  assert.deepEqual(Object.keys(checked).sort(), Object.keys(stageLock.packages).filter(key => key.includes('node_modules/')).sort());
+  assert.deepEqual(stageLock.packages[''].dependencies, manifest.dependencies);
+  assert.deepEqual(stageLock.packages[''].devDependencies, manifest.devDependencies);
+});
 
 test('private consolidation graph stages under the loaded timer ABI and refuses file drift', { skip: !nativeMac }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'consolidation-graph-test-'));

@@ -257,6 +257,65 @@ describe('POST /memory/inject — happy path (degraded mode w/ null DBs)', () =>
   });
 });
 
+describe('POST /memory/inject — emitted events', () => {
+  const events = [];
+  let handle;
+  let MemoryEventSchema;
+  let toWatcherRecord;
+
+  before(async () => {
+    ({ MemoryEventSchema } = await import('../packages/event-schemas/dist/index.js'));
+    ({ toWatcherRecord } = await import('../lib/memory-watcher.mjs'));
+    // publishLocal validates with MemoryEventSchema and publishes the parsed
+    // result, so capture exactly that.
+    handle = await startInjectionServer(
+      { eventLog: { publishLocal: async (e) => { events.push(MemoryEventSchema.parse(e)); } }, nodeId: 'test-node' },
+      { port: 0, host: '127.0.0.1', log: () => {} },
+    );
+  });
+
+  after(async () => { if (handle) await handle.close(); });
+
+  async function inject(body) {
+    events.length = 0;
+    const res = await fetch(`http://127.0.0.1:${handle.port}/memory/inject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${handle.token}` },
+      body: JSON.stringify(body),
+    });
+    assert.equal(res.status, 200);
+    await res.text();
+  }
+
+  it('memory.injected and memory.retrieved carry the frontend and session_id', async () => {
+    await inject({ prompt: 'what did we decide about nats', frontend: 'openclaw-context-engine', session_id: 'agent:main:s1' });
+    const injected = events.find((e) => e.event_type === 'memory.injected');
+    const retrieved = events.find((e) => e.event_type === 'memory.retrieved');
+    assert.ok(injected, 'memory.injected emitted');
+    assert.ok(retrieved, 'memory.retrieved emitted');
+    assert.equal(injected.data.frontend, 'openclaw-context-engine');
+    assert.equal(injected.data.session_id, 'agent:main:s1');
+    assert.equal(toWatcherRecord(injected).session, 'agent:main:s1');
+    assert.equal(retrieved.data.frontend, 'openclaw-context-engine');
+    assert.equal(retrieved.data.session_id, 'agent:main:s1');
+  });
+
+  it('caps an over-long frontend instead of dropping the event', async () => {
+    await inject({ prompt: 'what did we decide about nats', frontend: 'f'.repeat(500) });
+    const injected = events.find((e) => e.event_type === 'memory.injected');
+    assert.ok(injected, 'memory.injected emitted');
+    assert.equal(injected.data.frontend.length, 100);
+    assert.equal('session_id' in injected.data, false);
+  });
+
+  it('a prompt over 200 chars still yields a valid memory.retrieved', async () => {
+    await inject({ prompt: 'word '.repeat(80) });
+    const retrieved = events.find((e) => e.event_type === 'memory.retrieved');
+    assert.ok(retrieved, 'memory.retrieved emitted');
+    assert.ok(retrieved.data.query.length <= 200, `query is ${retrieved.data.query.length} chars`);
+  });
+});
+
 describe('Unknown routes', () => {
   it('returns 404 for unknown path with auth', async () => {
     const r = await req('GET', '/nope', {

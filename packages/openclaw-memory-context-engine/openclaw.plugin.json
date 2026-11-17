@@ -32,9 +32,9 @@
     },
     "timeoutMs": {
       "label": "Request timeout (ms)",
-      "placeholder": "4000",
+      "placeholder": "12000",
       "advanced": true,
-      "help": "The daemon answers in well under a second when warm; on timeout the turn proceeds without memory."
+      "help": "The daemon may spend up to 8 s on LLM query analysis before embedding and retrieval (about 9-11 s worst case), and the turn waits that long. Lower it for faster turns at the cost of memory on cold or busy ones; on timeout the turn proceeds without memory."
     },
     "bypassSessionPatterns": {
       "label": "Bypass session patterns",

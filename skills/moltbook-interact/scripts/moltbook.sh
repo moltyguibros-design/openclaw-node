@@ -95,7 +95,7 @@ case "${1:-}" in
             exit 1
         fi
         echo "Posting reply..."
-        api_call POST "/posts/${post_id}/comments" "{\"content\":\"${content}\"}"
+        api_call POST "/posts/${post_id}/comments" "$(node -e 'process.stdout.write(JSON.stringify({content: process.argv[1]}))' -- "$content")"
         ;;
     create)
         title="$2"
@@ -106,7 +106,7 @@ case "${1:-}" in
             exit 1
         fi
         echo "Creating post..."
-        api_call POST "/posts" "{\"title\":\"${title}\",\"content\":\"${content}\",\"submolt_id\":\"${submolt}\"}"
+        api_call POST "/posts" "$(node -e 'process.stdout.write(JSON.stringify({title: process.argv[1], content: process.argv[2], submolt_id: process.argv[3]}))' -- "$title" "$content" "$submolt")"
         ;;
     test)
         echo "Testing Moltbook API connection..."

@@ -20,6 +20,7 @@
  *   node bin/mesh-join-token.js --provider deepseek     # set default LLM
  *   node bin/mesh-join-token.js --expires 24h           # custom expiry (default: 48h)
  *   node bin/mesh-join-token.js --one-liner             # output curl | sh one-liner
+ *   node bin/mesh-join-token.js --verify <token>        # did this lead issue it, and is it live?
  *
  * The token is NOT encrypted — it's signed for integrity. Don't embed secrets
  * (API keys). Those go in ~/.openclaw/openclaw.env on the target node.
@@ -33,7 +34,7 @@ const { createTracer } = require('../lib/tracer');
 const tracer = createTracer('mesh-join-token');
 
 const { NATS_URL, resolveNatsAuthMode, resolveEnvKey } = require('../lib/nats-resolve');
-const { encodeJoinToken, CURRENT_VERSION } = require('../lib/join-token');
+const { encodeJoinToken, decodeJoinToken, isJoinTokenExpired, verifyJoinTokenHmac, CURRENT_VERSION } = require('../lib/join-token');
 const { resolveNodeId } = require('../lib/node-id');
 
 // ── CLI args ──────────────────────────────────────────
@@ -132,12 +133,58 @@ const generateToken = tracer.wrap('generateToken', function generateToken() {
   return encodeJoinToken(payload, secret);
 }, { tier: 2, category: 'lifecycle' });
 
+// ── Verify ────────────────────────────────────────────
+// Exit 0 only for a token this lead's secret signed that has not expired. The secret is
+// read, never created: a lead without one issued nothing.
+
+function verifyToken(token) {
+  let secret;
+  try {
+    secret = fs.readFileSync(SECRET_PATH, 'utf8').trim();
+  } catch {
+    console.error(`INVALID: no mesh secret at ${SECRET_PATH}; this node issued no join tokens`);
+    return 1;
+  }
+  let payload;
+  try {
+    ({ payload } = decodeJoinToken(token));
+  } catch (err) {
+    console.error(`INVALID: ${err.message}`);
+    return 1;
+  }
+  if (!verifyJoinTokenHmac(token, secret)) {
+    console.error('INVALID: signature does not match this lead\'s mesh secret');
+    return 1;
+  }
+  if (isJoinTokenExpired(payload)) {
+    console.error(`INVALID: expired ${new Date(payload.expires).toISOString()}`);
+    return 1;
+  }
+  const expires = typeof payload.expires === 'number' ? new Date(payload.expires).toISOString() : 'never (v1)';
+  console.log(`VALID: v${payload.v || 1} ${payload.role} token for ${payload.nats}, issued by ${payload.lead_node_id || payload.lead}, expires ${expires}`);
+  return 0;
+}
+
+if (args.includes('--verify')) {
+  const token = getArg('--verify', '');
+  if (!token) {
+    console.error('Usage: mesh-join-token --verify <token>');
+    process.exit(2);
+  }
+  process.exit(verifyToken(token));
+}
+
 // ── Main ──────────────────────────────────────────────
 
 const { token, payload } = generateToken();
 
+// stderr keeps the --one-liner stdout clean; not a refusal, since an SSH tunnel can make loopback valid.
+if (/^nats:\/\/(127\.\d+\.\d+\.\d+|localhost|\[::1\])(:|\/|$)/i.test(payload.nats)) {
+  console.error(`WARNING: the token's NATS URL is ${payload.nats} (loopback). A worker would connect to its own machine, and a single-node lead's bus listens on 127.0.0.1 only. Workers need a bus bound to an address they can reach (install.sh --cluster-peers=... --cluster-bind=...); reissue with OPENCLAW_NATS=nats://<lead-tailnet-ip>:4222 node bin/mesh-join-token.js.`);
+}
+
 if (ONE_LINER) {
-  console.log(`curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/mesh-install.sh | MESH_JOIN_TOKEN=${token} sh`);
+  console.log(`curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/mesh-install.sh | MESH_JOIN_TOKEN=${token} bash`);
 } else {
   console.log('\n--- Mesh Join Token ---');
   console.log(`Role:     ${payload.role}`);

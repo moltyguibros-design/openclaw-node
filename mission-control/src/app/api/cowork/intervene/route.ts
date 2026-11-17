@@ -6,6 +6,7 @@ import { tasks } from "@/lib/db/schema";
 import { syncTasksToMarkdown } from "@/lib/sync/tasks";
 import type { CollabSession } from "@/lib/hooks";
 import { signOperatorRequest } from "@/lib/mesh-sign";
+import { requestDaemon, cancelDone } from "@/lib/mesh-request";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,10 @@ export const dynamic = "force-dynamic";
  *
  * Operator interventions on collab sessions.
  * Actions: abort, force_converge, remove_node
+ *
+ * Each action asks the task daemon first and changes the collab KV, events and
+ * Kanban only once it accepts. A refusal answers 502 with the daemon's reason,
+ * an unreachable daemon 503, a signing failure 500; nothing changes.
  */
 export async function POST(request: NextRequest) {
   const nc = await getNats();
@@ -65,24 +70,27 @@ export async function POST(request: NextRequest) {
   try {
     switch (action) {
       case "abort": {
+        // Cancel parent task via daemon RPC — a signed operator action; the
+        // daemon refuses unsigned cancel (review H-1).
+        const cancel = await requestDaemon(
+          nc,
+          "mesh.tasks.cancel",
+          () => signOperatorRequest({ task_id: session.task_id }),
+          cancelDone
+        );
+        if (!cancel.ok) {
+          return NextResponse.json({ error: cancel.error }, { status: cancel.status });
+        }
+
+        // The daemon's cancel already aborted the session and appended to its
+        // audit log; build on that copy rather than overwrite it.
+        const fresh = await kv.get(sessionId);
+        if (fresh?.value) session = JSON.parse(sc.decode(fresh.value));
         session.status = "aborted";
         session.completed_at = now;
         audit("manual_abort");
 
         await kv.put(sessionId, sc.encode(JSON.stringify(session)));
-
-        // Cancel parent task via daemon RPC — a signed operator action; the
-        // daemon refuses unsigned cancel (review H-1).
-        try {
-          await nc.request(
-            "mesh.tasks.cancel",
-            sc.encode(JSON.stringify(await signOperatorRequest({ task_id: session.task_id }))),
-            { timeout: 5000 }
-          );
-        } catch (err) {
-          // Daemon may be down (KV is already updated) or signing unavailable — say which.
-          console.warn(`[intervene] mesh.tasks.cancel not delivered: ${(err as Error).message}`);
-        }
 
         // Notify subscribers
         nc.publish(
@@ -109,6 +117,25 @@ export async function POST(request: NextRequest) {
       }
 
       case "force_converge": {
+        // Complete parent task via daemon RPC first: without it the daemon's
+        // task stays running forever, and a refused complete must leave the
+        // session as it is.
+        const complete = await requestDaemon(nc, "mesh.tasks.complete", () =>
+          // Force-complete is an OPERATOR action (MC is not the task's
+          // owner); the daemon accepts it only with a valid signature.
+          signOperatorRequest({
+            task_id: session.task_id,
+            result: {
+              success: true,
+              summary: "Force-converged by operator via Mission Control",
+              forced: true,
+            },
+          })
+        );
+        if (!complete.ok) {
+          return NextResponse.json({ error: complete.error }, { status: complete.status });
+        }
+
         // Inject synthetic reflections for nodes that haven't submitted
         const currentRound =
           session.rounds?.[session.rounds.length - 1];
@@ -141,9 +168,6 @@ export async function POST(request: NextRequest) {
         session.status = "converged";
         audit("force_converge");
 
-        // Order matters: KV first, then event, then complete parent task.
-        // If mesh.tasks.complete fires before KV is updated, the task closes
-        // but the session shows as still active in the UI until next SWR poll.
         await kv.put(sessionId, sc.encode(JSON.stringify(session)));
 
         nc.publish(
@@ -156,31 +180,6 @@ export async function POST(request: NextRequest) {
             })
           )
         );
-
-        // Complete parent task via daemon RPC — critical fix:
-        // without this, daemon's in-memory task stays running forever
-        try {
-          await nc.request(
-            "mesh.tasks.complete",
-            sc.encode(
-              JSON.stringify(
-                // Force-complete is an OPERATOR action (MC is not the task's
-                // owner); the daemon accepts it only with a valid signature.
-                await signOperatorRequest({
-                  task_id: session.task_id,
-                  result: {
-                    success: true,
-                    summary: "Force-converged by operator via Mission Control",
-                    forced: true,
-                  },
-                })
-              )
-            ),
-            { timeout: 5000 }
-          );
-        } catch {
-          // Daemon may be down — session is at least marked converged in KV
-        }
 
         // Update Kanban for immediate feedback
         try {
@@ -204,38 +203,33 @@ export async function POST(request: NextRequest) {
         }
 
         // Use daemon RPC so it updates both KV and in-memory state atomically
-        // This avoids stale quorum in the daemon's evaluateRound()
-        try {
-          await nc.request(
-            "mesh.collab.leave",
-            sc.encode(
-              JSON.stringify({
-                session_id: sessionId,
-                node_id: nodeId,
-              })
-            ),
-            { timeout: 5000 }
-          );
-        } catch {
-          // Fallback: direct KV write if daemon doesn't handle leave RPC
-          const node = (session.nodes || []).find(
-            (n) => n.node_id === nodeId
-          );
-          if (node) {
-            node.status = "dead";
-            audit("node_removed", nodeId);
-            await kv.put(sessionId, sc.encode(JSON.stringify(session)));
-          }
+        // This avoids stale quorum in the daemon's evaluateRound(). There is
+        // no direct-KV fallback: a KV-only removal is exactly that stale quorum.
+        // Removing another node is an OPERATOR action: the daemon accepts a
+        // leave only from the member's join token or a valid signature, and
+        // the signer's envelope owns node_id.
+        const leave = await requestDaemon(nc, "mesh.collab.leave", () =>
+          signOperatorRequest({
+            session_id: sessionId,
+            target_node_id: nodeId,
+          })
+        );
+        if (!leave.ok) {
+          return NextResponse.json({ error: leave.error }, { status: leave.status });
         }
 
-        // Notify the node to stop
+        // Stop the removed node's in-flight round: mesh-agent acts on this
+        // only when it is signed and names that node as its target.
         nc.publish(
           `mesh.agent.${nodeId}.stall`,
           sc.encode(
-            JSON.stringify({
-              task_id: session.task_id,
-              reason: "Removed by operator",
-            })
+            JSON.stringify(
+              await signOperatorRequest({
+                task_id: session.task_id,
+                target_node_id: nodeId,
+                reason: "Removed by operator",
+              })
+            )
           )
         );
 

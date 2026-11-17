@@ -8,7 +8,7 @@
     <string>OpenClaw NATS Node 2 — client 4223, cluster 6223, monitor 8223 (R=3 cluster)</string>
     <key>ProgramArguments</key>
     <array>
-      <string>/opt/homebrew/bin/nats-server</string>
+      <string>${NATS_SERVER_BIN}</string>
       <string>--config</string>
       <string>${HOME}/.openclaw/config/nats-2.conf</string>
     </array>

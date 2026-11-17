@@ -3,14 +3,9 @@ import { getDb } from "@/lib/db";
 import { soulSpawns } from "@/lib/db/schema";
 import fs from "fs/promises";
 import path from "path";
-import os from "os";
 import { isSafeId } from "@/lib/safe-path";
-
-const SOULS_DIR = path.join(os.homedir(), ".openclaw/souls");
-const HANDOFFS_DIR = path.join(
-  os.homedir(),
-  ".openclaw/workspace/memory-vault/handoffs"
-);
+import { HANDOFFS_DIR, SOULS_DIR } from "@/lib/config";
+import { checkSoulAccess } from "@/lib/soul-access";
 
 interface PromptRequest {
   taskId?: string;
@@ -160,8 +155,11 @@ export async function POST(
       // No capabilities.json
     }
 
-    // 5. Handoff context
-    if (body.taskId) {
+    // 5. Handoff context, only for a soul its capabilities.json lets read handoffs/
+    const handoffAccess = body.taskId ? await checkSoulAccess(soulId, "handoffs", "read", SOULS_DIR) : null;
+    if (handoffAccess && !handoffAccess.granted) {
+      sections.push("# Task Handoff Context\n\nWithheld: " + handoffAccess.reason);
+    } else if (body.taskId) {
       try {
         const handoffDoc = await fs.readFile(
           path.join(HANDOFFS_DIR, `${body.taskId}-handoff.md`),

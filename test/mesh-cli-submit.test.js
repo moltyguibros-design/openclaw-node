@@ -2,7 +2,8 @@
 /**
  * mesh-cli-submit.test.js — the REAL `mesh submit` CLI against the live task
  * daemon (the CI mesh stack; a visible skip elsewhere), through all three of
- * its inputs: a YAML file, YAML on stdin, and `--id` from the kanban.
+ * its inputs: a YAML file, YAML on stdin, and `--id` from the kanban (which
+ * queues the card for the mesh bridge rather than submitting it).
  *
  * cmdSubmit's first line required the `yaml` module, which the package never
  * declared. So `mesh submit` failed on every clean install with "Cannot find
@@ -18,14 +19,14 @@ const skipReason = meshSkipReason();
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { natsConnectOpts } = require('../lib/nats-resolve');
 const { signOperatorRequest } = require('../lib/operator-auth.mjs');
 
 const REPO = path.join(__dirname, '..');
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-submit-'));
+const { tmpDir } = require('./helpers/tmp-dir.cjs');
+const TMP = tmpDir('cli-submit-');
 let nc;
 let sc;
 
@@ -111,7 +112,7 @@ describe('mesh submit reaches the daemon', { skip: skipReason }, () => {
     assert.equal((await rpc('mesh.tasks.get', { task_id: id })).data?.status, 'queued');
   });
 
-  it('with --id from the kanban, and marks the card submitted', async () => {
+  it('with --id from the kanban, hands the card to the bridge instead of the daemon', async () => {
     const id = uniqueTaskId();
     const home = fs.mkdtempSync(path.join(TMP, 'home-'));
     const kanban = path.join(home, '.openclaw', 'workspace', 'memory', 'active-tasks.md');
@@ -121,8 +122,11 @@ describe('mesh submit reaches the daemon', { skip: skipReason }, () => {
     // The CLI reads the kanban from $HOME; its NATS identity comes from OPENCLAW_IDENTITY_DIR.
     const r = mesh(['submit', '--id', id], { env: { HOME: home } });
     assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, new RegExp(`Submitted: ${id} \\[queued\\]`));
-    assert.match(fs.readFileSync(kanban, 'utf8'), /status: submitted/);
-    assert.equal((await rpc('mesh.tasks.get', { task_id: id })).data?.status, 'queued');
+    assert.match(r.stdout, new RegExp(`Queued for mesh: ${id}`));
+    const card = fs.readFileSync(kanban, 'utf8');
+    assert.match(card, /status: queued/);
+    assert.match(card, /execution: mesh/);
+    // The bridge submits it (test/mesh-submit-id-bridge.test.mjs); the CLI no longer does.
+    assert.equal((await rpc('mesh.tasks.get', { task_id: id })).ok, false);
   });
 });

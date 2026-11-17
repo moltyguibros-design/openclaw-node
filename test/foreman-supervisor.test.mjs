@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
@@ -27,7 +27,7 @@ function fakeChild() {
   return child;
 }
 function timelineFor(name) {
-  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), `foreman-sup-${name}-`)), 'task-42.jsonl');
+  return path.join(tmpDir(`foreman-sup-${name}-`), 'task-42.jsonl');
 }
 function readTimeline(file) {
   return fs.readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
@@ -150,7 +150,7 @@ describe('foreman supervisor — shadow loop', () => {
   });
 
   it('keeps running without a timeline when the directory cannot be created', async () => {
-    const blocker = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-block-')), 'file');
+    const blocker = path.join(tmpDir('foreman-block-'), 'file');
     fs.writeFileSync(blocker, 'not a directory');
     const logs = [];
     const supervisor = createSupervisor({ task, assessor: createSimulatedAssessor([HEALTHY]), config: fastConfig, timelinePath: path.join(blocker, 'task-42.jsonl'), log: (m) => logs.push(m) }).start();
@@ -177,7 +177,7 @@ describe('foreman supervisor — shadow loop', () => {
 });
 
 function tempRepo() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-sup-repo-'));
+  const dir = tmpDir('foreman-sup-repo-');
   execFileSync('git', ['init', '-q', dir]);
   execFileSync('git', ['-C', dir, 'config', 'user.email', 't@example.com']);
   execFileSync('git', ['-C', dir, 'config', 'user.name', 'test']);

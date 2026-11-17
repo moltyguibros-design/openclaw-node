@@ -9,25 +9,6 @@
  * Run: node --test test/mesh-plans.test.js
  */
 
-// ── Mock 'nats' before any require ──
-const Module = require('module');
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-const mockNats = {
-  StringCodec: () => ({
-    encode: (str) => encoder.encode(str),
-    decode: (buf) => decoder.decode(buf),
-  }),
-};
-const origResolve = Module._resolveFilename;
-Module._resolveFilename = function (request, parent, ...rest) {
-  if (request === 'nats') return 'nats';
-  return origResolve.call(this, request, parent, ...rest);
-};
-require.cache['nats'] = {
-  id: 'nats', filename: 'nats', loaded: true, exports: mockNats,
-};
-
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const {

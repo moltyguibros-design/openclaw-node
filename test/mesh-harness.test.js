@@ -12,6 +12,7 @@ const {
   scanOutputForBlocks,
   formatHarnessForPrompt,
   runMeshHarness,
+  runPreChecks,
 } = require('../lib/mesh-harness');
 
 // ── loadHarnessRules ─────────────────────────────
@@ -254,5 +255,163 @@ describe('runMeshHarness', () => {
     });
     assert.ok(!result.pass, 'Should fail on rm -rf');
     assert.ok(result.violations.some(v => v.rule === 'block-rm-rf'));
+  });
+});
+
+// ── preCommitSecretScan ─────────────────────────
+
+describe('preCommitSecretScan', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const { execFileSync } = require('child_process');
+  const { preCommitSecretScan } = require('../lib/mesh-harness');
+
+  // A worker's edits are still unstaged when the harness runs (commitWorktree
+  // stages them afterwards), so the scan must see unstaged and untracked files.
+  function repoWith(files) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-harness-scan-'));
+    const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.invalid');
+    git('config', 'user.name', 'test');
+    fs.writeFileSync(path.join(dir, 'README.md'), 'clean\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'init');
+    for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), content);
+    return { dir, git };
+  }
+
+  it('blocks a secret in an untracked, unstaged file and leaves the index untouched', (t) => {
+    // Assembled at runtime so this fixture is not itself a secret-shaped line in the diff.
+    const { dir, git } = repoWith({ 'config.js': `const ${'pass' + 'word'} = "hunter2-not-real";\n` });
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const result = preCommitSecretScan(dir);
+    assert.strictEqual(result.blocked, true);
+    assert.ok(result.findings.some(f => f.includes('password')));
+    assert.strictEqual(git('diff', '--cached', '--name-only').toString(), '');
+  });
+
+  it('passes a clean change', (t) => {
+    const { dir } = repoWith({ 'notes.md': 'nothing sensitive here\n' });
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    assert.strictEqual(preCommitSecretScan(dir).blocked, false);
+  });
+});
+
+describe('enforceScopeCheck directory-style scope entries', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const { execFileSync } = require('child_process');
+  const { enforceScopeCheck, scopeEntryMatches } = require('../lib/mesh-harness');
+
+  it('a trailing-slash or bare name covers the files under it; globs and exact files are unchanged', () => {
+    assert.strictEqual(scopeEntryMatches('docs/', 'docs/x.md'), true);
+    assert.strictEqual(scopeEntryMatches('src/lib/', 'src/lib/deep/a.ts'), true);
+    assert.strictEqual(scopeEntryMatches('src', 'src/a.js'), true);
+    assert.strictEqual(scopeEntryMatches('src', 'src'), true);
+    assert.strictEqual(scopeEntryMatches('src', 'srcfoo.js'), false);
+    assert.strictEqual(scopeEntryMatches('docs/', 'docs'), false);
+    assert.strictEqual(scopeEntryMatches('src/*.js', 'src/a.js'), true);
+    assert.strictEqual(scopeEntryMatches('src/*.js', 'src/lib/a.js'), false);
+  });
+
+  it('keeps work under docs/ and src, and reverts only what is outside', (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-harness-scope-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.invalid');
+    git('config', 'user.name', 'test');
+    fs.mkdirSync(path.join(dir, 'src/lib'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'docs'));
+    fs.writeFileSync(path.join(dir, 'src/a.js'), 'v1\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'init');
+
+    fs.writeFileSync(path.join(dir, 'src/a.js'), 'v2\n');
+    fs.writeFileSync(path.join(dir, 'src/lib/b.js'), 'new\n');
+    fs.writeFileSync(path.join(dir, 'docs/x.md'), 'doc\n');
+    fs.writeFileSync(path.join(dir, 'srcfoo.js'), 'out\n');
+
+    const result = enforceScopeCheck(dir, ['docs/', 'src']);
+    assert.deepStrictEqual(result.violations, ['srcfoo.js']);
+    assert.strictEqual(fs.readFileSync(path.join(dir, 'src/a.js'), 'utf8'), 'v2\n');
+    assert.ok(fs.existsSync(path.join(dir, 'src/lib/b.js')));
+    assert.ok(fs.existsSync(path.join(dir, 'docs/x.md')));
+    assert.ok(!fs.existsSync(path.join(dir, 'srcfoo.js')));
+  });
+});
+
+// ── postCommitValidate ──────────────────────────
+
+describe('postCommitValidate (shipped git-conventional-commits rule)', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const { execFileSync } = require('child_process');
+  const { postCommitValidate } = require('../lib/mesh-harness');
+
+  const rules = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'harness-rules.json'), 'utf8'));
+  const command = rules.find(r => r.id === 'git-conventional-commits').mesh_validate_command;
+
+  function repoWithSubject(subject) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-harness-postcommit-'));
+    const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.invalid');
+    git('config', 'user.name', 'test');
+    git('commit', '-q', '--allow-empty', '-m', subject);
+    return dir;
+  }
+
+  for (const subject of ['mesh(T-1): work', 'fix(auth): correct token refresh', 'chore: bump deps']) {
+    it(`passes "${subject}"`, (t) => {
+      const dir = repoWithSubject(subject);
+      t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+      const result = postCommitValidate(dir, command);
+      assert.strictEqual(result.passed, true, result.output);
+    });
+  }
+
+  it('fails a non-conventional subject', (t) => {
+    const dir = repoWithSubject('bad message');
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const result = postCommitValidate(dir, command);
+    assert.strictEqual(result.passed, false);
+    assert.doesNotMatch(result.output, /blocked/);
+  });
+});
+
+// ── runPreChecks (install-infra-packaging#23) ────
+// no-assume-running declares a pre_check of nats; nothing used to run it.
+
+describe('runPreChecks', () => {
+  const shipped = () => loadHarnessRules(path.join(__dirname, '..', 'config', 'harness-rules.json'), 'mesh');
+  const rule = (services) => [{ id: 'svc', mesh_enforcement: 'pre_check', mesh_pre_checks: services }];
+
+  it('probes the services the shipped no-assume-running rule lists', async () => {
+    const probed = [];
+    const result = await runPreChecks({ rules: shipped(), probes: { nats: async () => { probed.push('nats'); } } });
+    assert.deepStrictEqual(probed, ['nats']);
+    assert.deepStrictEqual(result, { pass: true, failures: [] });
+  });
+
+  it('fails when a probe throws, naming the rule, service and reason', async () => {
+    const result = await runPreChecks({ rules: shipped(), probes: { nats: async () => { throw new Error('connection closed'); } } });
+    assert.strictEqual(result.pass, false);
+    assert.deepStrictEqual(result.failures, [{ rule: 'no-assume-running', service: 'nats', reason: 'connection closed' }]);
+  });
+
+  it('fails a listed service that has no probe', async () => {
+    const result = await runPreChecks({ rules: rule(['redis']), probes: {} });
+    assert.deepStrictEqual(result.failures, [{ rule: 'svc', service: 'redis', reason: 'no probe for this service' }]);
+  });
+
+  it('fails a probe that never answers', async () => {
+    const result = await runPreChecks({ rules: rule(['nats']), probes: { nats: () => new Promise(() => {}) }, timeoutMs: 20 });
+    assert.deepStrictEqual(result.failures, [{ rule: 'svc', service: 'nats', reason: 'no answer within 20ms' }]);
+  });
+
+  it('passes when no rule declares a pre_check', async () => {
+    assert.deepStrictEqual(await runPreChecks({ rules: [{ id: 'x', mesh_enforcement: 'scope_check' }] }), { pass: true, failures: [] });
   });
 });

@@ -14,7 +14,7 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -109,6 +109,7 @@ describe('importSession', () => {
     const first = await store.importSession(p);
     assert.equal(first.imported, true);
     assert.equal(first.messageCount, 2);
+    assert.equal(first.previousCount, 0);
 
     // Simulate session growth: rewrite JSONL with 4 messages
     writeJsonl('growing.jsonl', [
@@ -120,6 +121,7 @@ describe('importSession', () => {
     const second = await store.importSession(p);
     assert.equal(second.imported, true);
     assert.equal(second.messageCount, 4); // full re-import, not a delta graft
+    assert.equal(second.previousCount, 2);
 
     // Verify total messages in DB
     const db = new Database(DB_PATH, { readonly: true });
@@ -219,12 +221,67 @@ describe('importDirectory', () => {
     assert.equal(result.total, 0);
   });
 
+  it('one failing transcript is reported and does not end the pass for the others', async () => {
+    writeJsonl('a.jsonl', [{ type: 'user', message: { content: 'a' } }]);
+    // A directory with a .jsonl name: importSession's read throws EISDIR.
+    mkdirSync(join(TMP, 'm-broken.jsonl'));
+    writeJsonl('z.jsonl', [{ type: 'user', message: { content: 'z' } }]);
+    const result = await store.importDirectory(TMP);
+    assert.equal(result.imported, 2);
+    assert.deepEqual(result.failed.map(f => f.file), [join(TMP, 'm-broken.jsonl')]);
+    assert.match(result.failed[0].error, /EISDIR/);
+  });
+
   it('counts re-imports as skipped on second pass', async () => {
     writeJsonl('reimport.jsonl', [{ type: 'user', message: { content: 'a' } }]);
     await store.importDirectory(TMP);
     const second = await store.importDirectory(TMP);
     assert.equal(second.imported, 0);
     assert.equal(second.skipped, 1);
+  });
+});
+
+// ─── source marker ──────────────────────────────────────────────────────────
+
+describe('source marker skip', () => {
+  it('skips an unchanged transcript without parsing it', async () => {
+    const q = JSON.stringify({ type: 'user', message: { content: 'q1' } });
+    const a = JSON.stringify({ type: 'assistant', message: { content: 'a1' } });
+    const p = join(TMP, 'marker.jsonl');
+    writeFileSync(p, `${q}\n${' '.repeat(a.length)}\n`);
+    utimesSync(p, 1_700_000_000, 1_700_000_000);
+    await store.importSession(p);
+    // Same size and mtime, one more message: only a parse could notice.
+    writeFileSync(p, `${q}\n${a}\n`);
+    utimesSync(p, 1_700_000_000, 1_700_000_000);
+    const second = await store.importSession(p);
+    assert.equal(second.imported, false);
+    assert.equal(store.getSession('marker').message_count, 1);
+  });
+
+  it('re-parses once the file size or mtime changes', async () => {
+    const p = writeJsonl('marker2.jsonl', [{ type: 'user', message: { content: 'q1' } }]);
+    await store.importSession(p);
+    writeJsonl('marker2.jsonl', [
+      { type: 'user', message: { content: 'q1' } },
+      { type: 'assistant', message: { content: 'a1' } },
+    ]);
+    const second = await store.importSession(p);
+    assert.equal(second.imported, true);
+    assert.equal(second.messageCount, 2);
+  });
+
+  it('adds source_marker to an existing database without touching the shared user_version', () => {
+    store.close();
+    const legacy = new Database(DB_PATH);
+    legacy.exec('ALTER TABLE sessions DROP COLUMN source_marker');
+    legacy.pragma('user_version = 7');
+    legacy.close();
+    store = new SessionStore({ dbPath: DB_PATH });
+    const db = new Database(DB_PATH, { readonly: true });
+    assert.ok(db.prepare('PRAGMA table_info(sessions)').all().some(c => c.name === 'source_marker'));
+    assert.equal(db.pragma('user_version', { simple: true }), 7);
+    db.close();
   });
 });
 
@@ -336,5 +393,28 @@ describe('close', () => {
   it('closes the DB cleanly + subsequent ops error', () => {
     store.close();
     assert.throws(() => store.getStats());
+  });
+});
+
+describe('state.db user_version belongs to the extraction store', () => {
+  it('SessionStore leaves user_version alone and records its version in session_store_meta', () => {
+    const raw = new Database(DB_PATH, { readonly: true });
+    try {
+      assert.equal(raw.pragma('user_version', { simple: true }), 0);
+      assert.equal(raw.prepare("SELECT value FROM session_store_meta WHERE key = 'session_store_version'").get().value, '1');
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('the extraction store then opens the sessions-only state.db as new: no pre-migration backup', async () => {
+    const { createExtractionStore } = await import('../lib/extraction-store.mjs');
+    const ex = createExtractionStore({ dbPath: DB_PATH });
+    try {
+      assert.equal(ex.db.pragma('user_version', { simple: true }), 8);
+    } finally {
+      ex.close();
+    }
+    assert.throws(() => statSync(join(TMP, 'backups')), { code: 'ENOENT' });
   });
 });

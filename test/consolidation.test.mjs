@@ -1,4 +1,5 @@
 import { describe, it, before, after } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import {
@@ -16,13 +17,31 @@ import {
   evaluatePromotionCandidates,
 } from '../lib/consolidation.mjs';
 import { runConsolidationCycle } from '../bin/consolidate.mjs';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 // Never let a cycle default to the REAL vault (getVaultPath) — fixture notes
 // were landing in production ~/.openclaw/obsidian-local (memory review 2026-07-04).
-const TEST_VAULT = mkdtempSync(join(tmpdir(), 'consolidation-vault-'));
+const TEST_VAULT = tmpDir('consolidation-vault-');
+// The values config/promotion-policy.yaml ships with.
+const POLICY = { mentionThreshold: 10, confidenceThreshold: 0.95 };
+
+describe('consolidate CLI --dry-run', () => {
+  it('refuses instead of running a writing cycle against state.db', () => {
+    const dir = tmpDir('consolidate-dry-');
+    const dbPath = join(dir, 'state.db');
+    const r = spawnSync(process.execPath, [
+      fileURLToPath(new URL('../bin/consolidate.mjs', import.meta.url)),
+      '--dry-run', '--no-events', '--db', dbPath, '--vault-path', join(dir, 'vault'),
+    ], { env: { ...process.env, HOME: dir }, encoding: 'utf8' });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /--dry-run is not implemented/);
+    assert.equal(existsSync(dbPath), false);
+  });
+});
 
 describe('consolidation event publication lifetime', () => {
   it('awaits both actual cycle publications before returning, retaining best-effort rejection', async () => {
@@ -131,6 +150,7 @@ function createTestDb() {
       decision TEXT NOT NULL,
       rationale TEXT NOT NULL,
       confidence REAL NOT NULL DEFAULT 0.5,
+      superseded_by INTEGER,
       created_at TEXT NOT NULL,
       salience REAL DEFAULT 0.5,
       last_recalled TEXT,
@@ -494,7 +514,7 @@ describe('P5-2: pruneStale — decay is terminal, and what it removes is not des
                 VALUES ('s', 'dead', 'r', 0.99, ?, 0.01, 'local'), ('s', 'alive', 'r', 0.99, ?, 0.4, 'local')`).run(iso(1), iso(1));
     db.prepare(`INSERT INTO themes (label, first_seen, last_seen, mention_count) VALUES ('stale', ?, ?, 1), ('fresh', ?, ?, 1)`).run(iso(400), iso(300), iso(5), iso(5));
 
-    const r = pruneStale(db, { now, backupDir: mkdtempSync(join(tmpdir(), 'consolidation-backup-')) });
+    const r = pruneStale(db, { now, backupDir: tmpDir('consolidation-backup-') });
     assert.equal(r.archivedDecisions, 1);
     assert.equal(r.prunedThemes, 1);
     assert.equal(r.themesSkipped, null);
@@ -511,7 +531,7 @@ describe('P5-2: pruneStale — decay is terminal, and what it removes is not des
     const db = createTestDb();
     db.prepare(`INSERT INTO decisions (session_id, decision, rationale, confidence, created_at, salience, source_type)
                 VALUES ('s', 'planted', 'r', 0.99, ?, 0.0, 'local')`).run(new Date().toISOString());
-    assert.equal(evaluatePromotionCandidates(db).decisionCandidates.length, 0);
+    assert.equal(evaluatePromotionCandidates(db, POLICY).decisionCandidates.length, 0);
     db.close();
   });
 });
@@ -523,7 +543,7 @@ describe('evaluatePromotionCandidates', () => {
     insertEntity(db, 'popular', 'concept', { mentionCount: 15, sourceType: 'local' });
     insertEntity(db, 'unpopular', 'concept', { mentionCount: 3, sourceType: 'local' });
 
-    const result = evaluatePromotionCandidates(db);
+    const result = evaluatePromotionCandidates(db, POLICY);
 
     assert.equal(result.entityCandidates.length, 1);
     assert.equal(result.entityCandidates[0].name, 'popular');
@@ -544,11 +564,90 @@ describe('evaluatePromotionCandidates', () => {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run('s2', 'Low-conf decision', 'Weak reasons', 0.5, new Date().toISOString(), 0.5, 'local');
 
-    const result = evaluatePromotionCandidates(db);
+    const result = evaluatePromotionCandidates(db, POLICY);
 
     assert.equal(result.decisionCandidates.length, 1);
     assert.equal(result.decisionCandidates[0].decision, 'High-conf decision');
 
+    db.close();
+  });
+
+  it('a superseded decision is not a promotion candidate', () => {
+    const db = createTestDb();
+    const insert = db.prepare(`
+      INSERT INTO decisions (session_id, decision, rationale, confidence, created_at, salience, source_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    insert.run('s1', 'old plan', 'first take', 0.99, new Date().toISOString(), 0.5, 'local');
+    insert.run('s2', 'new plan', 'revised', 0.99, new Date().toISOString(), 0.5, 'local');
+    db.prepare(`
+      UPDATE decisions SET superseded_by = (SELECT id FROM decisions WHERE decision = 'new plan')
+      WHERE decision = 'old plan'
+    `).run();
+
+    const result = evaluatePromotionCandidates(db, POLICY);
+
+    assert.deepEqual(result.decisionCandidates.map(d => d.decision), ['new plan']);
+    db.close();
+  });
+});
+
+describe('promotion thresholds come from the policy file', () => {
+  const policyWith = (mentions) => {
+    const dir = tmpDir('promotion-policy-');
+    const file = join(dir, 'promotion-policy.yaml');
+    const shipped = readFileSync(fileURLToPath(new URL('../config/promotion-policy.yaml', import.meta.url)), 'utf8');
+    writeFileSync(file, shipped.replace(/concept_mention_count: \d+/, `concept_mention_count: ${mentions}`));
+    return file;
+  };
+
+  it('editing concept_mention_count changes the cycle\'s candidate set', async () => {
+    const db = createTestDb();
+    insertEntity(db, 'five-mentions', 'concept', { mentionCount: 5, sourceType: 'local' });
+    const shipped = await runConsolidationCycle({ vaultPath: TEST_VAULT, db });
+    assert.equal(shipped.promotionCandidates.entityCandidates.length, 0);
+    const tuned = await runConsolidationCycle({ vaultPath: TEST_VAULT, db, promotionPolicyPath: policyWith(3) });
+    assert.deepEqual(tuned.promotionCandidates.entityCandidates.map(e => e.name), ['five-mentions']);
+    db.close();
+  });
+
+  it('without an explicit path the cycle resolves $PROMOTION_POLICY first', async () => {
+    const db = createTestDb();
+    insertEntity(db, 'five-mentions', 'concept', { mentionCount: 5, sourceType: 'local' });
+    const saved = process.env.PROMOTION_POLICY;
+    process.env.PROMOTION_POLICY = policyWith(3);
+    try {
+      const result = await runConsolidationCycle({ vaultPath: TEST_VAULT, db });
+      assert.deepEqual(result.promotionCandidates.entityCandidates.map(e => e.name), ['five-mentions']);
+    } finally {
+      if (saved === undefined) delete process.env.PROMOTION_POLICY; else process.env.PROMOTION_POLICY = saved;
+      db.close();
+    }
+  });
+
+  it('a missing policy file fails the cycle instead of falling back to built-in values', async () => {
+    const db = createTestDb();
+    await assert.rejects(
+      runConsolidationCycle({ vaultPath: TEST_VAULT, db, promotionPolicyPath: join(tmpdir(), 'no-such-policy.yaml') }),
+      /promotion step: cannot load promotion policy/,
+    );
+    db.close();
+  });
+
+  it('evaluatePromotionCandidates has no built-in thresholds of its own', () => {
+    const db = createTestDb();
+    assert.throws(() => evaluatePromotionCandidates(db), /needs mentionThreshold and confidenceThreshold/);
+    db.close();
+  });
+
+  it('candidates carry their row id, so the fingerprint keys same-named entities apart', () => {
+    const db = createTestDb();
+    insertEntity(db, 'popular', 'concept', { mentionCount: 15, sourceType: 'local' });
+    db.prepare(`INSERT INTO decisions (session_id, decision, rationale, confidence, created_at, salience, source_type)
+                VALUES ('s', 'sure', 'r', 0.99, ?, 0.5, 'local')`).run(new Date().toISOString());
+    const { entityCandidates, decisionCandidates } = evaluatePromotionCandidates(db, POLICY);
+    assert.ok(Number.isInteger(entityCandidates[0].id));
+    assert.ok(Number.isInteger(decisionCandidates[0].id));
     db.close();
   });
 });
@@ -581,6 +680,22 @@ describe('runConsolidationCycle', () => {
     db.close();
   });
 
+  it('reports wall time for every phase it ran, and none for phases it skipped', async () => {
+    const db = createTestDb();
+    insertEntity(db, 'timed-entity', 'concept', { mentionCount: 2 });
+
+    const result = await runConsolidationCycle({ vaultPath: tmpDir('cycle-phases-'), db });
+    assert.deepEqual(Object.keys(result.phaseMs), ['init', 'decay', 'prune', 'reinforce', 'clusters',
+      'vault-surfaces', 'summaries', 'contradictions', 'promotion']);
+    for (const ms of Object.values(result.phaseMs)) assert.ok(Number.isInteger(ms) && ms >= 0);
+
+    const ac = new AbortController();
+    ac.abort(new Error('hard cap'));
+    const aborted = await runConsolidationCycle({ vaultPath: TEST_VAULT, db, signal: ac.signal });
+    assert.deepEqual(Object.keys(aborted.phaseMs), ['init']);
+    db.close();
+  });
+
   it('the cycle backfills session notes for DB sessions lacking one (memory review V1-2)', async () => {
     const db = createTestDb();
     insertEntity(db, 'backfilled-concept', 'concept', {
@@ -588,7 +703,7 @@ describe('runConsolidationCycle', () => {
       sessions: ['cafe0001-1111-2222-3333-444455556666'],
     });
 
-    const vault = mkdtempSync(join(tmpdir(), 'cycle-vault-'));
+    const vault = tmpDir('cycle-vault-');
     const result = await runConsolidationCycle({ vaultPath: vault, db });
 
     assert.ok(result.vaultSurfaces, 'cycle reports vault surfaces');
@@ -602,6 +717,27 @@ describe('runConsolidationCycle', () => {
     // Second cycle: nothing new to backfill — idempotent.
     const again = await runConsolidationCycle({ vaultPath: vault, db });
     assert.equal(again.vaultSurfaces.sessionNotes, 0);
+
+    db.close();
+  });
+
+  it('writes the weekly digest on the first cycle of each ISO week only', async () => {
+    const db = createTestDb();
+    const vault = tmpDir('cycle-weekly-');
+    const { readdirSync } = await import('node:fs');
+    const weekly = () => readdirSync(join(vault, 'daily')).filter((f) => f.endsWith('-weekly.md')).sort();
+
+    const monday = Date.parse('2026-06-08T10:00:00Z');
+    const first = await runConsolidationCycle({ vaultPath: vault, db, now: monday });
+    assert.equal(first.vaultSurfaces.weeklyDigest, 1);
+    assert.deepEqual(weekly(), ['2026-06-07-weekly.md'], 'the ISO week that just ended');
+
+    const later = await runConsolidationCycle({ vaultPath: vault, db, now: monday + 2 * 86400000 });
+    assert.equal(later.vaultSurfaces.weeklyDigest, 0, 'same ISO week: skipped');
+
+    const nextWeek = await runConsolidationCycle({ vaultPath: vault, db, now: monday + 7 * 86400000 });
+    assert.equal(nextWeek.vaultSurfaces.weeklyDigest, 1);
+    assert.deepEqual(weekly(), ['2026-06-07-weekly.md', '2026-06-14-weekly.md']);
 
     db.close();
   });

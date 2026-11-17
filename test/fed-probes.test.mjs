@@ -3,6 +3,7 @@
 // UNKNOWN when unobservable. Never green without evidence.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { gradeClusterQuorum, gradeGrappeMembers, gradeSessionLiveness, gradeCoordinator, parseLaunchdPrint, toMemberHealth, FED_STATUS } from '../lib/fed-probes.mjs';
 
 // Real `jsz.meta_cluster`, captured verbatim from the live 3-node cluster
@@ -102,11 +103,38 @@ test('grappe members: all fresh → WORKING; stale member → BROKEN', () => {
   assert.match(v.detail, /wg-alpha\/b/);
 });
 
+test('grappe members: a dissolved grappe is intentionally inactive → OFF, not BROKEN', () => {
+  const now = Date.now();
+  assert.equal(gradeGrappeMembers({ grappes: [{ id: 'wg-alpha', status: 'dissolved', members: ['a'] }], memberHealth: {}, now }).status, FED_STATUS.OFF);
+  const mixed = gradeGrappeMembers({
+    grappes: [{ id: 'old', status: 'dissolved', members: ['gone'] }, { id: 'wg-b', status: 'live', members: ['a'] }],
+    memberHealth: { a: now },
+    now,
+  });
+  assert.equal(mixed.status, FED_STATUS.WORKING);
+});
+
+test('openclaw-grappe: only form may create the registry; read-modify-write commands compare-and-set', () => {
+  const src = readFileSync(new URL('../bin/openclaw-grappe.mjs', import.meta.url), 'utf8');
+  const formEnd = src.indexOf('async function cmdStatus(');
+  const opens = [...src.matchAll(/openKv\(js,[^)]*\)/g)].filter((m) => m.index > formEnd).map((m) => m[0]);
+  assert.equal(opens.length, 5);
+  for (const call of opens) assert.match(call, /bindOnly: true/, call);
+  assert.equal(src.split('kv.put(').length - 1, 1, 'only cmdForm writes without an expected revision');
+  assert.equal(src.split('kv.update(').length - 1, 3, 'dissolve, issue-token and join use kv.update(key, value, entry.revision)');
+  assert.match(src, /ageSec <= 90 \?/, 'CLI liveness window matches gradeGrappeMembers freshMs 90_000');
+});
+
 test('session liveness: none active → OFF; active advancing → WORKING; stalled → BROKEN', () => {
   const now = 10_000_000;
   assert.equal(gradeSessionLiveness({ sessions: [{ status: 'completed' }], now }).status, FED_STATUS.OFF);
   assert.equal(gradeSessionLiveness({ sessions: [{ status: 'active', lastActivityMs: now - 1000 }], now }).status, FED_STATUS.WORKING);
   assert.equal(gradeSessionLiveness({ sessions: [{ status: 'active', lastActivityMs: now - 20 * 60000 }], now }).status, FED_STATUS.BROKEN);
+});
+test('session liveness: a circling step is graded against its 30 min step budget, not the 15 min round one', () => {
+  const now = 10_000_000;
+  assert.equal(gradeSessionLiveness({ sessions: [{ status: 'active', circling: true, lastActivityMs: now - 20 * 60000 }], now }).status, FED_STATUS.WORKING);
+  assert.equal(gradeSessionLiveness({ sessions: [{ status: 'active', circling: true, lastActivityMs: now - 40 * 60000 }], now }).status, FED_STATUS.BROKEN);
 });
 test('session liveness: KV unreadable → UNKNOWN', () => {
   assert.equal(gradeSessionLiveness({ sessions: null, now: Date.now() }).status, FED_STATUS.UNKNOWN);

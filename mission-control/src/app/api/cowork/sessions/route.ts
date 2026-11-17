@@ -4,11 +4,14 @@ import type { CollabSession } from "@/lib/hooks";
 
 export const dynamic = "force-dynamic";
 
+const KV_GET_BATCH = 64;
+
 /**
  * GET /api/cowork/sessions
  *
- * Read all collab sessions from NATS MESH_COLLAB KV.
+ * Read collab sessions from NATS MESH_COLLAB KV.
  * Optional ?status= filter (e.g., "active", "recruiting", "completed").
+ * Optional ?limit=N keeps only the N newest matches by created_at.
  * Returns { sessions[], natsAvailable }.
  */
 export async function GET(request: NextRequest) {
@@ -20,6 +23,8 @@ export async function GET(request: NextRequest) {
   // Supports single status (?status=active) or comma-separated (?status=active,recruiting)
   const statusParam = request.nextUrl.searchParams.get("status");
   const statusFilter = statusParam ? new Set(statusParam.split(",")) : null;
+  const limitParam = Number(request.nextUrl.searchParams.get("limit"));
+  const limit = Number.isInteger(limitParam) && limitParam > 0 ? limitParam : null;
 
   const sessions: CollabSession[] = [];
   try {
@@ -27,15 +32,26 @@ export async function GET(request: NextRequest) {
     const keyIter = await kv.keys();
     for await (const key of keyIter) keys.push(key);
 
-    for (const key of keys) {
-      try {
-        const entry = await kv.get(key);
-        if (!entry || !entry.value) continue;
-        const session = JSON.parse(sc.decode(entry.value));
-        if (statusFilter && !statusFilter.has(session.status)) continue;
-        sessions.push(session);
-      } catch {
-        // Skip malformed entries
+    // MESH_COLLAB keeps every session ever created (federation tools read
+    // finished ones as evidence), so the gets go out in parallel batches
+    // instead of one round trip at a time.
+    for (let i = 0; i < keys.length; i += KV_GET_BATCH) {
+      const entries = await Promise.all(
+        keys
+          .slice(i, i + KV_GET_BATCH)
+          // The daemon's live-session index (lib/mesh-collab.js LIVE_INDEX_KEY), not a session.
+          .filter((key) => key !== "index.live")
+          .map((key) => kv.get(key).catch(() => null))
+      );
+      for (const entry of entries) {
+        try {
+          if (!entry || !entry.value) continue;
+          const session = JSON.parse(sc.decode(entry.value));
+          if (statusFilter && !statusFilter.has(session.status)) continue;
+          sessions.push(session);
+        } catch {
+          // Skip malformed entries
+        }
       }
     }
   } catch (err) {
@@ -51,15 +67,16 @@ export async function GET(request: NextRequest) {
     aborted: 4,
   };
 
-  sessions.sort((a, b) => {
+  const newest = (a: CollabSession, b: CollabSession) =>
+    new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+  const selected = limit ? sessions.sort(newest).slice(0, limit) : sessions;
+
+  selected.sort((a, b) => {
     const aOrder = statusOrder[a.status] ?? 5;
     const bOrder = statusOrder[b.status] ?? 5;
     if (aOrder !== bOrder) return aOrder - bOrder;
-    return (
-      new Date(b.created_at || 0).getTime() -
-      new Date(a.created_at || 0).getTime()
-    );
+    return newest(a, b);
   });
 
-  return NextResponse.json({ sessions, natsAvailable: true });
+  return NextResponse.json({ sessions: selected, natsAvailable: true });
 }

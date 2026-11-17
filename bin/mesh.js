@@ -4,87 +4,48 @@
  * mesh — CLI bridge for OpenClaw ↔ NATS mesh interaction.
  *
  * ARCHITECTURE:
- *   OpenClaw (via bash tool) → mesh CLI → NATS → agent.js on target node → result back
+ *   OpenClaw (via bash tool) → mesh CLI → NATS → mesh-task-daemon / mesh-deploy-listener
  *
  * This is a short-lived process: connects to NATS, sends the request,
  * waits for a response, prints the result, exits. No daemon. No state.
  *
- * SUBCOMMANDS:
- *   mesh status                          — show all online nodes
- *   mesh exec "<command>"                — run command on remote (Ubuntu) node
- *   mesh exec --node <id> "<command>"    — run command on specific node
- *   mesh capture                         — screenshot local machine
- *   mesh capture --node ubuntu           — screenshot remote node
- *   mesh ls [subdir]                     — list shared folder contents
- *   mesh put <filepath> [subdir]         — copy file into shared folder
- *   mesh broadcast "<message>"           — send message to all nodes
+ * SUBCOMMANDS (`mesh help` lists them all):
+ *   mesh status                          — every node in MESH_NODE_HEALTH
+ *   mesh health [--all] [--json]         — ok / degraded / down from MESH_NODE_HEALTH
+ *   mesh submit | tasks | plan           — the mesh task daemon (mesh.tasks.*, mesh.plans.*)
+ *   mesh collab gate approve|reject      — resolve a circling session's gate (mesh.collab.gate.*)
+ *   mesh deploy                          — signed fleet deploy trigger (mesh.deploy.trigger)
+ *
+ * The exec/capture/broadcast/repair/ls/put commands were removed: their
+ * responder (~/openclaw/agent.js, subjects openclaw.<node>.*) was retired on
+ * 2026-10-02, mesh-health.sh/mesh-repair.sh never shipped, and nothing synced
+ * ~/openclaw/shared/ between nodes.
  *
  * ENVIRONMENT:
  *   OPENCLAW_NATS  — NATS server URL (auto-detected from env or ~/.openclaw/openclaw.env)
  */
 
-const { connect, StringCodec, createInbox } = require('nats');
+const { connect, StringCodec } = require('nats');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { natsConnectOpts } = require('../lib/nats-resolve');
+const { openMeshKv } = require('../lib/mesh-kv');
+const { RESULTS_BUCKET, RESULTS_KV_OPTS, openLatestKv, writeLatestMarker } = require('../lib/deploy-latest-marker');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-cli');
-const SHARED_DIR = path.join(os.homedir(), 'openclaw', 'shared');
-const LOCAL_NODE = os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+const LOCAL_NODE = require('../lib/node-id').resolveNodeId();
 const sc = StringCodec();
 
 // ─── Known nodes (for --node shortcuts) ──────────────
-const NODE_ALIASES_DEFAULTS = {
-  'ubuntu': 'calos-vmware-virtual-platform',
-  'linux': 'calos-vmware-virtual-platform',
-  'mac': 'moltymacs-virtual-machine-local',
-  'macos': 'moltymacs-virtual-machine-local',
-};
-
-function loadNodeAliases() {
-  const aliasPath = path.join(os.homedir(), '.openclaw', 'mesh-aliases.json');
-  try {
-    if (fs.existsSync(aliasPath)) {
-      const custom = JSON.parse(fs.readFileSync(aliasPath, 'utf8'));
-      return { ...NODE_ALIASES_DEFAULTS, ...custom };
-    }
-  } catch (err) { console.warn(`[mesh] load node aliases: ${err.message}`); }
-  return NODE_ALIASES_DEFAULTS;
-}
+const { loadNodeAliases, resolveNodeName } = require('../lib/node-aliases');
 const NODE_ALIASES = loadNodeAliases();
 
 /**
  * Resolve a node name — accepts aliases, full IDs, or "self"/"local"
  */
 function resolveNode(name) {
-  if (!name || name === 'self' || name === 'local') return LOCAL_NODE;
-  const lower = name.toLowerCase();
-  return NODE_ALIASES[lower] || lower;
-}
-
-/**
- * Find the "other" node (not this one).
- * Used as default target for exec/capture.
- */
-function remoteNode() {
-  const allNodes = Object.values(NODE_ALIASES);
-  return allNodes.find(n => n !== LOCAL_NODE) || LOCAL_NODE;
-}
-
-// ─── Exec safety ─────────────────────────────────────
-
-const { checkDestructivePatterns } = require('../lib/exec-safety');
-
-function checkExecSafety(command) {
-  const result = checkDestructivePatterns(command);
-  if (result.blocked) {
-    console.error(`BLOCKED: Command matches destructive pattern.`);
-    console.error(`  Command: ${command}`);
-    console.error(`  Pattern: ${result.pattern}`);
-    console.error(`\nIf this is intentional, SSH into the node and run it directly.`);
-    process.exit(1);
-  }
+  return resolveNodeName(name, { localId: LOCAL_NODE, aliases: NODE_ALIASES });
 }
 
 // ─── NATS helpers ────────────────────────────────────
@@ -125,7 +86,7 @@ async function natsRequest(nc, subject, payload, timeoutMs = 35000) {
     return JSON.parse(sc.decode(msg.data));
   } catch (err) {
     if (err.code === '503' || err.message?.includes('503')) {
-      console.error(`Error: No responder on subject "${subject}". Is the target node's agent running?`);
+      console.error(`Error: No responder on subject "${subject}". Is mesh-task-daemon running?`);
     } else if (err.code === 'TIMEOUT' || err.message?.includes('TIMEOUT')) {
       console.error(`Error: Request timed out after ${timeoutMs / 1000}s. The target node may be offline or the command is taking too long.`);
     } else {
@@ -139,8 +100,7 @@ async function natsRequest(nc, subject, payload, timeoutMs = 35000) {
  * The task daemon answers { ok: true, data } or { ok: false, error }. A refusal
  * is a normal reply rather than a transport error, and printing fields off one
  * reported approvals that never happened ("Task approved: undefined →
- * undefined"). Every task-daemon call goes through here. The exec and capture
- * responders on other nodes reply in their own shape and keep using natsRequest.
+ * undefined"). Every task-daemon call goes through here.
  */
 async function daemonRequest(nc, subject, payload) {
   const reply = await natsRequest(nc, subject, payload);
@@ -152,231 +112,64 @@ async function daemonRequest(nc, subject, payload) {
 }
 
 /**
- * Collect recent heartbeats to build node status.
+ * MESH_NODE_HEALTH, or exit with why it cannot be read. The openclaw.*
+ * heartbeat/exec/capture subjects this CLI used to talk to have no publisher
+ * or responder anywhere (federation D4), and `mesh status` waited forever on them.
  */
-async function collectHeartbeats(nc, waitMs = 3000) {
-  const nodes = {};
-  const sub = nc.subscribe('openclaw.*.heartbeat');
-
-  // Also grab our own status
-  nodes[LOCAL_NODE] = {
-    node: LOCAL_NODE, platform: os.platform(), status: 'online (local)',
-    mem: { total: Math.round(os.totalmem() / 1048576), free: Math.round(os.freemem() / 1048576) },
-    uptime: os.uptime(),
-  };
-
-  // Listen for heartbeats for a few seconds
-  const deadline = Date.now() + waitMs;
-  for await (const msg of sub) {
-    const s = JSON.parse(sc.decode(msg.data));
-    if (s.node !== LOCAL_NODE) {
-      nodes[s.node] = s;
-    }
-    if (Date.now() >= deadline) break;
+async function loadNodeHealth(nc) {
+  const { readNodeHealth, HEALTH_BUCKET } = require('../lib/mesh-node-health');
+  try {
+    return await readNodeHealth(nc);
+  } catch (err) {
+    console.error(`Error: cannot read ${HEALTH_BUCKET}: ${err.message}`);
+    console.error('Is mesh-health-publisher running on any node?');
+    await nc.close();
+    process.exit(1);
   }
-  sub.unsubscribe();
-  return nodes;
+}
+
+function formatAge(seconds) {
+  if (seconds == null) return '?';
+  if (seconds < 120) return `${seconds}s ago`;
+  if (seconds < 7200) return `${Math.round(seconds / 60)}m ago`;
+  return `${Math.round(seconds / 3600)}h ago`;
 }
 
 // ─── Subcommands ─────────────────────────────────────
 
 /**
- * mesh status — show online nodes with platform, memory, uptime, shared files.
+ * mesh status — every node in MESH_NODE_HEALTH: role, platform, memory, uptime, deployed sha.
  */
 async function cmdStatus() {
+  const { summarizeFleet } = require('../lib/mesh-node-health');
   const nc = await natsConnect();
-  console.log('Scanning mesh...\n');
-  const nodes = await collectHeartbeats(nc, 3000);
+  const { nodes } = summarizeFleet(await loadNodeHealth(nc), { localId: LOCAL_NODE, all: true });
+  await nc.close();
 
-  for (const [id, info] of Object.entries(nodes)) {
-    const memFree = info.mem?.free || '?';
-    const memTotal = info.mem?.total || '?';
-    const upHours = info.uptime ? (info.uptime / 3600).toFixed(1) : '?';
-    const shared = info.sharedFiles ?? '?';
-    const role = id === 'moltymacs-virtual-machine-local' ? 'LEAD' : 'WORKER';
-    const local = id === LOCAL_NODE ? ' (this machine)' : '';
-
-    console.log(`  ${info.status === 'online' || info.status === 'online (local)' ? '●' : '○'} ${id}${local}`);
-    console.log(`    Platform:     ${info.platform}`);
-    console.log(`    Role:         ${role}`);
-    console.log(`    Memory:       ${memFree}MB free / ${memTotal}MB total`);
-    console.log(`    Uptime:       ${upHours}h`);
-    console.log(`    Shared files: ${shared}`);
+  for (const n of nodes) {
+    const local = n.nodeId === LOCAL_NODE ? ' (this machine)' : '';
+    console.log(`  ${n.overall === 'down' ? '○' : '●'} ${n.nodeId}${local}  [${n.overall}]`);
+    if (n.reportedAt == null) {
+      console.log(`    ${n.problems.join('; ')}`);
+      console.log('');
+      continue;
+    }
+    console.log(`    Platform:     ${n.platform || '?'}`);
+    console.log(`    Role:         ${n.role || '?'}`);
+    console.log(`    Memory:       ${n.mem?.free ?? '?'}MB free / ${n.mem?.total ?? '?'}MB total`);
+    console.log(`    Uptime:       ${n.uptimeSeconds != null ? (n.uptimeSeconds / 3600).toFixed(1) : '?'}h`);
+    console.log(`    Deployed:     ${n.deployVersion || '?'}`);
+    console.log(`    Reported:     ${formatAge(n.ageSeconds)}`);
     console.log('');
   }
-
-  await nc.close();
-}
-
-/**
- * mesh exec "<command>" — run command on remote node.
- */
-async function cmdExec(args) {
-  // Parse --node flag
-  let targetNode = remoteNode();
-  let command = '';
-
-  let i = 0;
-  while (i < args.length) {
-    if (args[i] === '--node' && args[i + 1]) {
-      targetNode = resolveNode(args[i + 1]);
-      i += 2;
-    } else {
-      command += (command ? ' ' : '') + args[i];
-      i++;
-    }
-  }
-
-  if (!command) {
-    console.error('Usage: mesh exec [--node <name>] "<command>"');
-    process.exit(1);
-  }
-
-  checkExecSafety(command);
-
-  const nc = await natsConnect();
-  const result = await natsRequest(nc, `openclaw.${targetNode}.exec`, command);
-
-  // Print output cleanly
-  if (result.output) process.stdout.write(result.output);
-  if (result.exitCode !== 0) {
-    console.error(`\n[exit code: ${result.exitCode}]`);
-  }
-
-  await nc.close();
-  process.exit(result.exitCode || 0);
-}
-
-/**
- * mesh capture — take screenshot on a node.
- */
-async function cmdCapture(args) {
-  let targetNode = LOCAL_NODE;
-  let label = 'capture';
-
-  let i = 0;
-  while (i < args.length) {
-    if (args[i] === '--node' && args[i + 1]) {
-      targetNode = resolveNode(args[i + 1]);
-      i += 2;
-    } else if (args[i] === '--label' && args[i + 1]) {
-      label = args[i + 1];
-      i += 2;
-    } else {
-      i++;
-    }
-  }
-
-  const nc = await natsConnect();
-  const result = await natsRequest(nc, `openclaw.${targetNode}.capture`, { label });
-
-  if (result.sharedPath) {
-    console.log(result.sharedPath);
-  } else if (result.screenshotPath) {
-    console.log(result.screenshotPath);
-  } else {
-    console.error('Screenshot failed — no path returned.');
-    process.exit(1);
-  }
-
-  await nc.close();
-}
-
-/**
- * mesh ls [subdir] — list shared folder contents.
- */
-function cmdLs(args) {
-  const subdir = args[0] || '';
-  const target = path.join(SHARED_DIR, subdir);
-
-  if (!fs.existsSync(target)) {
-    console.error(`Not found: ${target}`);
-    process.exit(1);
-  }
-
-  const stat = fs.statSync(target);
-  if (!stat.isDirectory()) {
-    // Single file — show info
-    console.log(`${target} (${(stat.size / 1024).toFixed(1)}KB, ${stat.mtime.toISOString()})`);
-    return;
-  }
-
-  // List directory recursively with sizes
-  listDir(target, '');
-}
-
-function listDir(dir, prefix) {
-  const entries = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      console.log(`${prefix}${entry.name}/`);
-      listDir(full, prefix + '  ');
-    } else {
-      const size = fs.statSync(full).size;
-      const sizeStr = size < 1024 ? `${size}B` : size < 1048576 ? `${(size / 1024).toFixed(1)}KB` : `${(size / 1048576).toFixed(1)}MB`;
-      console.log(`${prefix}${entry.name}  (${sizeStr})`);
-    }
-  }
-}
-
-/**
- * mesh put <filepath> [subdir] — copy file into shared folder.
- */
-function cmdPut(args) {
-  const srcPath = args[0];
-  const destSubdir = args[1] || '';
-
-  if (!srcPath) {
-    console.error('Usage: mesh put <filepath> [subdir]');
-    process.exit(1);
-  }
-
-  if (!fs.existsSync(srcPath)) {
-    console.error(`Not found: ${srcPath}`);
-    process.exit(1);
-  }
-
-  const destDir = path.join(SHARED_DIR, destSubdir);
-  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-
-  const filename = path.basename(srcPath);
-  const destPath = path.join(destDir, filename);
-
-  fs.copyFileSync(srcPath, destPath);
-  const relPath = path.relative(SHARED_DIR, destPath);
-  console.log(`~/openclaw/shared/${relPath}`);
-  console.log(`(will sync to other nodes automatically)`);
-}
-
-/**
- * mesh broadcast "<message>" — send to all nodes.
- */
-async function cmdBroadcast(args) {
-  const message = args.join(' ');
-  if (!message) {
-    console.error('Usage: mesh broadcast "<message>"');
-    process.exit(1);
-  }
-
-  const nc = await natsConnect();
-  nc.publish('openclaw.broadcast', sc.encode(JSON.stringify({
-    fromNode: LOCAL_NODE,
-    message,
-    timestamp: new Date().toISOString(),
-  })));
-
-  // Give it a moment to flush
-  await nc.flush();
-  console.log(`Broadcast sent: "${message}"`);
-  await nc.close();
 }
 
 /**
  * mesh submit <task.yaml|-> — submit a task to the mesh.
  *
  * Reads YAML from a file or stdin, publishes to mesh.tasks.submit.
- * Also accepts --id <task-id> to submit a task from active-tasks.md.
+ * Also accepts --id <task-id> to hand a queued active-tasks.md card to the mesh
+ * bridge (sets execution: mesh and wakes the bridge, which dispatches it).
  */
 async function cmdSubmit(args) {
   // js-yaml is the repo's declared YAML parser; the `yaml` module this required
@@ -393,27 +186,15 @@ async function cmdSubmit(args) {
     if (!task) { console.error(`Task ${taskId} not found in active-tasks.md`); process.exit(1); }
     if (task.status !== 'queued') { console.error(`Task ${taskId} is ${task.status}, not queued`); process.exit(1); }
 
+    // The bridge only follows tasks it dispatched itself, so a direct daemon submit
+    // left the card stuck at 'submitted' with its claim, result and log dropped.
+    // Hand the card to the bridge instead: it submits, tracks and writes back.
+    await updateTaskInPlace(ACTIVE_TASKS_PATH, taskId, { execution: 'mesh', updated_at: isoTimestamp() });
     const nc = await natsConnect();
-    const submitted = await daemonRequest(nc, 'mesh.tasks.submit', {
-      task_id: task.task_id,
-      title: task.title,
-      description: task.description || '',
-      budget_minutes: task.budget_minutes || 30,
-      metric: task.metric || null,
-      success_criteria: task.success_criteria || [],
-      scope: task.scope || [],
-      priority: task.auto_priority || 0,
-      llm_provider: task.provider || task.llm_provider || null,
-      llm_model: task.model || task.llm_model || null,
-      preferred_nodes: task.preferred_nodes || [],
-      exclude_nodes: task.exclude_nodes || [],
-    });
-    console.log(`Submitted: ${submitted.task_id} [${submitted.status}]`);
-    // Mark as 'submitted' — NOT 'running'. The card reflects actual mesh state.
-    // The bridge event handler promotes to 'running' when mesh.events.claimed fires.
-    // This prevents the Schrödinger state where kanban says 'running' before any agent has claimed.
-    updateTaskInPlace(ACTIVE_TASKS_PATH, taskId, { status: 'submitted', owner: 'mesh', updated_at: isoTimestamp() });
-    console.log(`Kanban updated: ${taskId} → submitted (will become 'running' on agent claim)`);
+    nc.publish('mesh.bridge.wake');
+    await nc.flush();
+    console.log(`Queued for mesh: ${taskId} (execution: mesh). The mesh bridge submits it and tracks it to completion.`);
+    console.log('Needs a running mesh-bridge; the card stays queued until one picks it up.');
     await nc.close();
     return;
   }
@@ -567,99 +348,26 @@ async function cmdTasks(args) {
 }
 
 /**
- * mesh health [--json] [--all] — run health check on this node or all nodes.
- *
- * --all: also runs health on remote node via NATS exec.
- * --json: structured JSON output for programmatic parsing.
+ * mesh health [--json] [--all] — ok / degraded / down for this node (or every
+ * node) from MESH_NODE_HEALTH. Exits 1 unless everything reported is ok.
  */
 async function cmdHealth(args) {
+  const { summarizeFleet } = require('../lib/mesh-node-health');
   const jsonMode = args.includes('--json');
-  const allNodes = args.includes('--all');
-  const scriptDir = path.join(os.homedir(), 'openclaw', 'bin');
-  const healthScript = path.join(scriptDir, 'mesh-health.sh');
+  const nc = await natsConnect();
+  const report = summarizeFleet(await loadNodeHealth(nc), { localId: LOCAL_NODE, all: args.includes('--all') });
+  await nc.close();
 
-  if (!fs.existsSync(healthScript)) {
-    console.error(`Health script not found at ${healthScript}`);
-    console.error('Run install-mesh-skill.sh to install.');
-    process.exit(1);
-  }
-
-  // Run local health check
-  const localArgs = jsonMode ? '--json' : '';
-  try {
-    const { execSync } = require('child_process');
-    const output = execSync(`bash "${healthScript}" ${localArgs}`, {
-      encoding: 'utf8', timeout: 15000, stdio: ['pipe', 'pipe', 'pipe']
-    });
-    process.stdout.write(output);
-  } catch (err) {
-    // exit code 1 = unhealthy, still valid output
-    if (err.stdout) process.stdout.write(err.stdout);
-    if (err.stderr) process.stderr.write(err.stderr);
-  }
-
-  // If --all, also check the remote node
-  if (allNodes) {
-    const remote = remoteNode();
-    if (!jsonMode) console.log(`\n── Remote node: ${remote} ──\n`);
-    const nc = await natsConnect();
-    try {
-      const remoteCmd = `bash openclaw/bin/mesh-health.sh ${localArgs}`;
-      const result = await natsRequest(nc, `openclaw.${remote}.exec`, remoteCmd, 20000);
-      if (result.output) process.stdout.write(result.output);
-    } catch (e) {
-      console.error('Could not reach remote node for health check.');
+  if (jsonMode) {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    for (const n of report.nodes) {
+      console.log(`${n.overall.toUpperCase().padEnd(9)}${n.nodeId}${n.nodeId === LOCAL_NODE ? ' (this machine)' : ''}`);
+      for (const p of n.problems) console.log(`  - ${p}`);
     }
-    await nc.close();
+    console.log(`\nOverall: ${report.overall}`);
   }
-}
-
-/**
- * mesh repair [--all] — self-repair this node (or all nodes).
- *
- * Runs health check first, then fixes every failed service.
- * Requires sudo for service restarts.
- * --all: also repairs the remote node via NATS exec.
- */
-async function cmdRepair(args) {
-  const allNodes = args.includes('--all');
-  const scriptDir = path.join(os.homedir(), 'openclaw', 'bin');
-  const repairScript = path.join(scriptDir, 'mesh-repair.sh');
-
-  if (!fs.existsSync(repairScript)) {
-    console.error(`Repair script not found at ${repairScript}`);
-    console.error('Run install-mesh-skill.sh to install.');
-    process.exit(1);
-  }
-
-  // Run local repair (needs sudo for service restarts)
-  try {
-    const { execSync } = require('child_process');
-    execSync(`sudo bash "${repairScript}"`, {
-      encoding: 'utf8', timeout: 120000, stdio: 'inherit'
-    });
-  } catch (err) {
-    // repair may exit non-zero if some repairs failed
-  }
-
-  // If --all, also repair remote
-  if (allNodes) {
-    const remote = remoteNode();
-    console.log(`\n══ Remote repair: ${remote} ══\n`);
-    const nc = await natsConnect();
-    try {
-      const result = await natsRequest(nc,
-        `openclaw.${remote}.exec`,
-        `bash openclaw/bin/mesh-repair.sh`,
-        120000
-      );
-      if (result.output) process.stdout.write(result.output);
-    } catch (e) {
-      console.error('Could not reach remote node for repair.');
-      console.error('SSH in and run: sudo bash openclaw/bin/mesh-repair.sh');
-    }
-    await nc.close();
-  }
+  process.exitCode = report.overall === 'ok' ? 0 : 1;
 }
 
 /**
@@ -676,6 +384,16 @@ async function cmdDeploy(args) {
     : path.join(os.homedir(), 'openclaw');
   const repoDir = process.env.OPENCLAW_REPO_DIR || defaultRepo;
   const force = args.includes('--force');
+  // bin/mesh-deploy.js documents --dry-run/--status/--rollback/--local under this
+  // same name; here any of them would still publish a real fleet trigger.
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--component' || args[i] === '--node') { i++; continue; }
+    if (args[i] !== '--force') {
+      console.error(`mesh deploy: unknown option ${args[i]} (this command always triggers a real fleet deploy)`);
+      console.error('  --dry-run, --status, --rollback, --local and --to belong to: node bin/mesh-deploy.js');
+      process.exit(2);
+    }
+  }
 
   // Parse --component flags
   const components = [];
@@ -700,6 +418,7 @@ async function cmdDeploy(args) {
   try {
     sha = execSync('git rev-parse --short HEAD', { cwd: repoDir, encoding: 'utf8' }).trim();
     branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: repoDir, encoding: 'utf8' }).trim();
+    if (branch === 'HEAD') branch = process.env.OPENCLAW_DEPLOY_BRANCH || 'main';
   } catch {
     console.error(`Error: Cannot read git state from ${repoDir}`);
     process.exit(1);
@@ -731,8 +450,8 @@ async function cmdDeploy(args) {
   // an unsigned marker let anyone with KV write access steer catching-up nodes.
   try {
     const js = nc.jetstream();
-    const resultsKv = await js.views.kv('MESH_DEPLOY_RESULTS', { history: 5, ttl: 7 * 24 * 60 * 60 * 1000 });
-    await resultsKv.put('latest', sc.encode(JSON.stringify(signedTrigger)));
+    const resultsKv = await openMeshKv(js, RESULTS_BUCKET, RESULTS_KV_OPTS, { waitMs: 0 });
+    await writeLatestMarker({ latestKv: await openLatestKv(js, { waitMs: 0 }), resultsKv }, signedTrigger);
   } catch (err) { console.warn(`[mesh] write deploy latest marker: ${err.message}`); }
 
   // Publish trigger
@@ -747,13 +466,13 @@ async function cmdDeploy(args) {
 
   try {
     const js = nc.jetstream();
-    const resultsKv = await js.views.kv('MESH_DEPLOY_RESULTS');
+    const resultsKv = await openMeshKv(js, RESULTS_BUCKET, {}, { waitMs: 0 });
+    // The fleet registry, not the alias table: aliases only ever named the two original VMs.
+    const checkNodes = targetNodes.length > 0
+      ? targetNodes
+      : (await require('./fleet-deploy').discoverNodes(nc)).map(n => n.nodeId);
 
     while (Date.now() < deadline) {
-      // Check all nodes
-      const allAliasNodes = [...new Set(Object.values(NODE_ALIASES))];
-      const checkNodes = targetNodes.length > 0 ? targetNodes : allAliasNodes;
-
       for (const nodeId of checkNodes) {
         if (seen.has(nodeId)) continue;
         const key = `${sha}-${nodeId}`;
@@ -784,6 +503,27 @@ async function cmdDeploy(args) {
 
   console.log('');
   await nc.close();
+}
+
+// ── Collab Commands ────────────────────────────────
+
+/**
+ * mesh collab gate approve|reject <session-id> — a circling session waiting at
+ * a gate (tier gate or blocked finalization) resumes only on a signed operator
+ * request; before this nothing could send one but a hand-built NATS message.
+ */
+async function cmdCollab(args) {
+  const [sub, decision, sessionId] = args;
+  if (sub !== 'gate' || !['approve', 'reject'].includes(decision) || !sessionId) {
+    console.error('Usage: mesh collab gate approve|reject <session-id>');
+    process.exit(1);
+  }
+  const nc = await natsConnect();
+  try {
+    const result = await daemonRequest(nc, `mesh.collab.gate.${decision}`, await signOperatorRequest({ session_id: sessionId }));
+    if (decision === 'approve') console.log(`Gate approved: ${sessionId} resumes`);
+    else console.log(`Gate rejected: ${sessionId} → sub-round ${result.new_subround}`);
+  } finally { await nc.close(); }
 }
 
 /**
@@ -904,12 +644,9 @@ async function cmdPlan(args) {
       // Submit to mesh via NATS
       const nc = await connect({ ...natsConnectOpts(), timeout: 5000 });
       try {
-        const reply = await nc.request(
-          'mesh.plans.create',
-          sc.encode(JSON.stringify(plan)),
-          { timeout: 10000 }
-        );
-        const result = JSON.parse(sc.decode(reply.data));
+        // The daemon honours requires_approval:false only on an operator-signed create.
+        const request = plan.requires_approval === false ? await signOperatorRequest(plan) : plan;
+        const result = await daemonRequest(nc, 'mesh.plans.create', request);
         console.log(`Plan created: ${result.plan_id}`);
         console.log(`  Subtasks: ${result.subtasks.length}`);
         console.log(`  Waves: ${result.estimated_waves}`);
@@ -933,12 +670,7 @@ async function cmdPlan(args) {
       const nc = await connect({ ...natsConnectOpts(), timeout: 5000 });
       try {
         const payload = statusFilter ? { status: statusFilter } : {};
-        const reply = await nc.request(
-          'mesh.plans.list',
-          sc.encode(JSON.stringify(payload)),
-          { timeout: 10000 }
-        );
-        const plans = JSON.parse(sc.decode(reply.data));
+        const plans = await daemonRequest(nc, 'mesh.plans.list', payload);
         if (plans.length === 0) {
           console.log('No plans found.');
           return;
@@ -965,16 +697,7 @@ async function cmdPlan(args) {
 
       const nc = await connect({ ...natsConnectOpts(), timeout: 5000 });
       try {
-        const reply = await nc.request(
-          'mesh.plans.get',
-          sc.encode(JSON.stringify({ plan_id: planId })),
-          { timeout: 10000 }
-        );
-        const plan = JSON.parse(sc.decode(reply.data));
-        if (!plan || plan.error) {
-          console.error(plan?.error || `Plan not found: ${planId}`);
-          process.exit(1);
-        }
+        const plan = await daemonRequest(nc, 'mesh.plans.get', { plan_id: planId });
 
         // Header
         console.log(`\nPlan: ${plan.plan_id}`);
@@ -1063,12 +786,7 @@ async function cmdPlan(args) {
 
       const nc = await connect({ ...natsConnectOpts(), timeout: 5000 });
       try {
-        const reply = await nc.request(
-          'mesh.plans.approve',
-          sc.encode(JSON.stringify(await signOperatorRequest({ plan_id: planId }))),
-          { timeout: 10000 }
-        );
-        const result = JSON.parse(sc.decode(reply.data));
+        const result = await daemonRequest(nc, 'mesh.plans.approve', await signOperatorRequest({ plan_id: planId }));
         console.log(`Plan approved: ${result.plan_id}`);
         console.log(`  Status: ${result.status}`);
         console.log(`  Wave 0 dispatched with ${result.subtasks.filter(s => s.status !== 'pending').length} subtasks`);
@@ -1092,12 +810,7 @@ async function cmdPlan(args) {
 
       const nc = await connect({ ...natsConnectOpts(), timeout: 5000 });
       try {
-        const reply = await nc.request(
-          'mesh.plans.abort',
-          sc.encode(JSON.stringify(await signOperatorRequest({ plan_id: planId, reason }))),
-          { timeout: 10000 }
-        );
-        const result = JSON.parse(sc.decode(reply.data));
+        const result = await daemonRequest(nc, 'mesh.plans.abort', await signOperatorRequest({ plan_id: planId, reason }));
         console.log(`Plan aborted: ${result.plan_id}`);
       } finally {
         await nc.close();
@@ -1134,16 +847,9 @@ function cmdHelp() {
     'mesh -- OpenClaw multi-node mesh CLI',
     '',
     'USAGE:',
-    '  mesh status                             Show online nodes',
-    '  mesh exec "<command>"                   Run command on remote node',
-    '  mesh exec --node <n> "<command>"        Run command on specific node',
-    '  mesh capture                            Screenshot this machine',
-    '  mesh capture --node ubuntu              Screenshot remote node',
-    '  mesh ls [subdir]                        List shared folder',
-    '  mesh put <file> [subdir]                Copy file to shared folder',
-    '  mesh broadcast "<message>"              Send message to all nodes',
+    '  mesh status                             Every node in MESH_NODE_HEALTH',
     '  mesh submit <task.yaml>                 Submit a task YAML to the mesh',
-    '  mesh submit --id <task-id>              Submit a kanban card by ID',
+    '  mesh submit --id <task-id>              Queue a kanban card for the mesh bridge',
     '  cat task.yaml | mesh submit             Submit from stdin',
     '  mesh tasks                              List all mesh tasks',
     '  mesh tasks --status running             Filter mesh tasks by status',
@@ -1152,22 +858,21 @@ function cmdHelp() {
     '  mesh tasks reject <task-id>             Reject and re-queue a task',
     '    --reason "..."                         Reason for rejection',
     '  mesh plan <subcommand>                  Plan management (templates, create, approve)',
-    '  mesh health                             Health check this node',
-    '  mesh health --all                       Health check ALL nodes',
-    '  mesh health --json                      Health check (JSON output)',
-    '  mesh repair                             Self-repair this node',
-    '  mesh repair --all                       Self-repair ALL nodes',
+    '  mesh collab gate approve <session-id>   Resume a circling session waiting at its gate',
+    '  mesh collab gate reject <session-id>    Send it back for another sub-round',
+    '  mesh health                             ok / degraded / down for this node',
+    '  mesh health --all                       ... for every node in MESH_NODE_HEALTH',
+    '  mesh health --json                      Same, as JSON (exit 1 unless all ok)',
     '  mesh deploy                             Deploy to all nodes',
     '  mesh deploy --force                     Force deploy (skip cache)',
     '  mesh deploy --node ubuntu               Deploy to specific node',
     '  mesh deploy --component mesh-daemons    Deploy specific component',
     '',
     'NODE ALIASES:',
-    '  ubuntu, linux   = Ubuntu VM (calos-vmware-virtual-platform)',
-    '  mac, macos      = macOS VM (moltymacs-virtual-machine-local)',
-    '',
-    'SHARED FOLDER:',
-    '  ~/openclaw/shared/  -- auto-synced between all nodes via NATS',
+    '  ubuntu, linux, calos  = Ubuntu VM (calos-vmware-virtual-platform)',
+    '  mac, macos, moltymac  = macOS VM (moltymacs-virtual-machine)',
+    '  self, local           = this node',
+    '  ~/.openclaw/mesh-aliases.json adds more (openclaw-node-init writes it)',
     '',
     'ENVIRONMENT:',
     '  OPENCLAW_NATS  -- NATS server URL (auto-detected from env or ~/.openclaw/openclaw.env)',
@@ -1177,14 +882,12 @@ function cmdHelp() {
 
 // --- Tracer Instrumentation -------------------------------------------
 cmdStatus = tracer.wrapAsync('cmdStatus', cmdStatus, { tier: 2 });
-cmdExec = tracer.wrapAsync('cmdExec', cmdExec, { tier: 2 });
-cmdCapture = tracer.wrapAsync('cmdCapture', cmdCapture, { tier: 2 });
 cmdSubmit = tracer.wrapAsync('cmdSubmit', cmdSubmit, { tier: 2 });
 cmdTasks = tracer.wrapAsync('cmdTasks', cmdTasks, { tier: 2 });
 cmdHealth = tracer.wrapAsync('cmdHealth', cmdHealth, { tier: 2 });
-cmdRepair = tracer.wrapAsync('cmdRepair', cmdRepair, { tier: 2 });
 cmdDeploy = tracer.wrapAsync('cmdDeploy', cmdDeploy, { tier: 2 });
 cmdPlan = tracer.wrapAsync('cmdPlan', cmdPlan, { tier: 2 });
+cmdCollab = tracer.wrapAsync('cmdCollab', cmdCollab, { tier: 2 });
 
 // --- Main dispatch ---------------------------------------------------
 
@@ -1193,17 +896,12 @@ async function main() {
 
   switch (cmd) {
     case 'status':    return cmdStatus();
-    case 'exec':      return cmdExec(args);
-    case 'capture':   return cmdCapture(args);
-    case 'ls':        return cmdLs(args);
-    case 'put':       return cmdPut(args);
-    case 'broadcast': return cmdBroadcast(args);
     case 'submit':    return cmdSubmit(args);
     case 'tasks':     return cmdTasks(args);
     case 'health':    return cmdHealth(args);
-    case 'repair':    return cmdRepair(args);
     case 'deploy':    return cmdDeploy(args);
     case 'plan':      return cmdPlan(args);
+    case 'collab':    return cmdCollab(args);
     case 'help':
     case '--help':
     case '-h':        return cmdHelp();

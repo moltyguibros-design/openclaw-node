@@ -1,0 +1,509 @@
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_journal_mount.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_journal_mount.py
+index 868ebc3..69882ba 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_journal_mount.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_journal_mount.py
+@@ -25,11 +25,12 @@ Every failure keeps its primary exception. Cleanup (unmount, eject, absence chec
+ removal) runs on every path, records each attempt and never raises; FAILED.json carries the
+ primary error with the cleanup evidence. An attach or mount that failed or timed out may still
+ have applied, so cleanup finds the clone's attachments in hdiutil's inventory and the mount
+-through statfs, never from the failed command's own output; and since that inventory may be
+-incomplete, the attach result's own disk must also be gone before the run counts as clean. A
+-retried eject first re-reads the inventory, so a number freed by a timed-out eject that applied is
+-never ejected for another image. The mount point is removed only once statfs confirmed it is no
+-longer a mount and it is a plain empty directory.
++through statfs. The failed command's own output is used only as the fallback the inventory cannot
++give: the whole disk the attach output names is ejected once, without retry, when the inventory
++itself cannot be read, and since that inventory may be incomplete it must also be gone before the
++run counts as clean. A retried eject first re-reads the inventory, so a number freed by a
++timed-out eject that applied is never ejected for another image. The mount point is removed only
++once statfs confirmed it is no longer a mount and it is a plain empty directory.
+ 
+ An interrupt (KeyboardInterrupt, SystemExit) that arrives during cleanup stops the cleanup where
+ it arrived, so cleanup stays bounded and never swallows it into further steps; it is recorded
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py
+index e1ffdf8..ec0597a 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/probe_asif_mount_ownership.py
+@@ -16,9 +16,15 @@ the owner and mode the mount reports for both files, whether the runner user can
+ file, and the wrapper's own verify_mount() verdict. The image's sha256, times, flags and xattr
+ names are recorded before and after every read-only mount, and every inventory row with its
+ system entities, so the wrapper's inventory-to-attach binding can be checked. It touches no image,
+-volume or VM it did not create; cleanup ejects what the inventory lists of its image and every
+-disk its own attaches returned, requires those disks gone, and only then removes its directory.
+-The JSON report is written exclusively to the named path, also when the probe is interrupted.
++volume or VM it did not create. Cleanup unmounts its own mount points, ejects the disks the
++inventory binds to its image (retried only while the inventory still binds them, after a pause),
++ejects once, never retried, any disk its own attaches returned that the inventory does not list
++but diskutil still knows (the attach output is harvested before its status is checked, so an
++attach that failed or timed out after it applied is still known), requires every such disk gone,
++and only then removes its directory; a removal failure is recorded. An interrupt during cleanup
++stops it where it arrived, is recorded, and is raised again once the report is written; a phase's
++own earlier interrupt is the one raised. The JSON report is written exclusively to the named path
++on every exit.
+ 
+ Guards, all required, checked before any command: macOS, CI=true and GITHUB_ACTIONS=true (both set
+ by GitHub Actions), OPENCLAW_OWNERSHIP_PROBE=1, the --ci-owned-probe flag, a new output path in an
+@@ -38,9 +44,11 @@ import hashlib
+ import json
+ import os
+ import pathlib
++import plistlib
+ import shutil
+ import sys
+ import tempfile
++import time
+ 
+ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+ 
+@@ -102,11 +110,22 @@ def image_state(image):
+             'xattrs': names['stdout'].decode(errors='replace').split()}
+ 
+ 
++def attached_disk(row):
++    """The whole disk an attach output names, if its output parses at all; its status is not read."""
++    try:
++        entities = plistlib.loads(row['stdout']).get('system-entities') or [{}]
++        disk = entities[0].get('dev-entry')
++    except Exception:
++        return []
++    return [disk] if isinstance(disk, str) and wrapper.DISK.fullmatch(disk) else []
++
++
+ def attach(image, disks, *flags):
+-    row = checked(attempt(DISKUTIL, 'image', 'attach', '--plist', *flags, '--noMount', str(image)), 'attach')
++    row = attempt(DISKUTIL, 'image', 'attach', '--plist', *flags, '--noMount', str(image))
++    # Recorded before the status check: an attach that failed or timed out may still have applied.
++    disks.extend(attached_disk(row))
++    checked(row, 'attach')
+     entities = wrapper.plist_of(row, 'attach').get('system-entities') or []
+-    # Cleanup ejects this disk even if the inventory does not list it.
+-    disks.extend(entity['dev-entry'] for entity in entities[:1] if entity.get('dev-entry'))
+     data = []
+     for entity in entities:
+         if entity.get('content-hint') == 'Apple_APFS_Volume':
+@@ -132,42 +151,71 @@ def mount_at(point, volume, *options):
+ 
+ 
+ def release(image, points, disks):
+-    """Unmount the probe's mount points, eject its image's disks, require them gone; never raises.
++    """Unmount the probe's mount points, eject its image's disks, require them gone.
+ 
+-    `disks` are the disks the probe's own attaches returned: ejected too when the inventory misses
+-    them, and each must be unknown to diskutil afterwards.
++    Returns the cleanup evidence and the interrupt that stopped it (or None); never raises. An
++    eject is retried, after a pause, only while the inventory still binds the disk to the image.
++    `disks` are the whole disks the probe's own attaches returned: one the inventory does not
++    list but diskutil still knows is ejected once (no inventory row justifies a retry), and every
++    one must be unknown to diskutil afterwards.
+     """
+-    rows, errors, remaining, still, gone = [], [], None, None, []
+-
+-    def mounted(point):
+-        return os.path.lexists(point) and wrapper.statfs(point)['mntonname'] == str(point)
++    rows, errors, remaining, still, gone, listed = [], [], None, None, [], None
+ 
+-    for point in points:
++    def recorded(call):
+         try:
+-            if mounted(point):
+-                rows.append(evidence(attempt(DISKUTIL, 'unmount', str(point))))
++            return call()
+         except Exception as error:
+             errors.append(repr(error)[:300])
++            return None
++
++    def mounted(point):
++        return os.path.lexists(point) and wrapper.statfs(point)['mntonname'] == str(point)
++
++    def bound():
++        return [disk for disk in (row.get('system-entities', [{}])[0].get('dev-entry') for row in attachments(image))
++                if isinstance(disk, str)]
++
++    def known(disk):
++        return attempt(DISKUTIL, 'info', '-plist', disk)['returncode'] == 0
++
++    def gone_now(disk):
++        return attempt(DISKUTIL, 'info', '-plist', disk)['returncode'] not in (0, None)
++
+     try:
+-        listed = [row['system-entities'][0]['dev-entry'] for row in attachments(image)]
+-        known = [disk for disk in dict.fromkeys(disks) if disk not in listed
+-                 and attempt(DISKUTIL, 'info', '-plist', disk)['returncode'] == 0]
+-        for disk in listed + known:
+-            for _ in range(wrapper.EJECT_ATTEMPTS):
++        for point in points:
++            # An unknown mount state is unmounted too: unmounting nothing only fails.
++            if recorded(lambda: mounted(point)) is not False:
++                rows.append(evidence(attempt(DISKUTIL, 'unmount', str(point))))
++        listed = recorded(bound)
++        own = [disk for disk in dict.fromkeys(disks)
++               if disk not in (listed or ()) and recorded(lambda: known(disk))]
++        for disk in dict.fromkeys((listed or []) + own):
++            for tries in range(wrapper.EJECT_ATTEMPTS):
++                if tries:
++                    time.sleep(wrapper.EJECT_PAUSE)
++                    # A timed-out eject may have applied and freed the number for another image.
++                    if disk not in (recorded(bound) or ()):
++                        break
+                 rows.append(evidence(attempt(DISKUTIL, 'eject', disk)))
+                 if rows[-1]['returncode'] == 0:
+                     break
+-        remaining = len(attachments(image))
+-        gone = [attempt(DISKUTIL, 'info', '-plist', disk)['returncode'] not in (0, None)
+-                for disk in dict.fromkeys(disks)]
+-    except Exception as error:
+-        errors.append(repr(error)[:300])
+-    try:
+-        still = [str(point) for point in points if mounted(point)]
+-    except Exception as error:
+-        errors.append(repr(error)[:300])
+-    return {'steps': rows, 'errors': errors, 'remaining': remaining, 'mounted': still, 'disks_gone': gone,
+-            'clean': not errors and remaining == 0 and all(gone) and still == []}
++        remaining = recorded(lambda: len(attachments(image)))
++        gone = [recorded(lambda: gone_now(disk)) for disk in dict.fromkeys(disks)]
++        still = recorded(lambda: [str(point) for point in points if mounted(point)])
++    except BaseException as interrupt:
++        rows.append({'interrupted': repr(interrupt)[:300]})
++        return {'steps': rows, 'errors': errors, 'listed': listed, 'clean': False}, interrupt
++    return {'steps': rows, 'errors': errors, 'listed': listed, 'remaining': remaining, 'mounted': still,
++            'disks_gone': gone, 'clean': not errors and remaining == 0 and all(gone) and still == []}, None
++
++
++def settled(record, late, what, disks):
++    """After a phase's own release: an interrupt that stopped it is raised, else it must be clean."""
++    if late is not None:
++        raise late
++    require(record['clean'], what + ' did not release the probe image')
++    # Confirmed gone: a later phase must never eject that number again for another image.
++    disks.clear()
+ 
+ 
+ def write_phase(image, temp, report, disks):
+@@ -191,10 +239,8 @@ def write_phase(image, temp, report, disks):
+             'files': {path.name: {'uid': path.lstat().st_uid, 'gid': path.lstat().st_gid,
+                                   'mode': oct(path.lstat().st_mode & 0o7777)} for path in (user, root)}}
+     finally:
+-        report['write']['release'] = release(image, [point], disks)
+-    require(report['write']['release']['clean'], 'write phase did not release the probe image')
+-    # Confirmed gone: a later phase must never eject that number again for another image.
+-    disks.clear()
++        report['write']['release'], late = release(image, [point], disks)
++    settled(report['write']['release'], late, 'write phase', disks)
+     point.rmdir()
+ 
+ 
+@@ -206,9 +252,8 @@ def disable_ownership(image, temp, report, disks):
+         checked(attempt(SUDO, '-n', DISKUTIL, 'disableOwnership', str(point)), 'disableOwnership')
+         report['disable'] = {'info': info_of(attached['volume'])}
+     finally:
+-        report.setdefault('disable', {})['release'] = release(image, [point], disks)
+-    require(report['disable']['release']['clean'], 'disable phase did not release the probe image')
+-    disks.clear()
++        report.setdefault('disable', {})['release'], late = release(image, [point], disks)
++    settled(report['disable']['release'], late, 'disable phase', disks)
+     point.rmdir()
+ 
+ 
+@@ -239,9 +284,8 @@ def read_only_variant(image, temp, name, options, disks):
+         except Exception as error:
+             row['verify_mount'] = 'refused: ' + str(error)
+     finally:
+-        row['release'] = release(image, [point], disks)
+-    require(row['release']['clean'], name + ' did not release the probe image')
+-    disks.clear()
++        row['release'], late = release(image, [point], disks)
++    settled(row['release'], late, name, disks)
+     point.rmdir()
+     row['image_after'] = image_state(image)
+     return row
+@@ -257,6 +301,7 @@ def run(output):
+               'runner_uid': os.getuid(), 'mount_options': MOUNT_OPTIONS,
+               'os': attempt('/usr/bin/sw_vers')['stdout'].decode(errors='replace'),
+               'variants': {}, 'completed': False}
++    interrupt = None
+     try:
+         checked(attempt(DISKUTIL, 'image', 'create', 'blank', '--format', 'ASIF', '--size', '64m',
+                         '--fs', 'APFS', '--volumeName', 'Data', str(image)), 'create')
+@@ -270,17 +315,24 @@ def run(output):
+         report['completed'] = True
+     except Exception as error:
+         report['error'] = repr(error)[:500]
+-    except BaseException as interrupt:
++    except BaseException as error:
+         # Recorded, then raised again once the image is released and the report is written.
+-        report['error'] = repr(interrupt)[:500]
++        report['error'] = repr(error)[:500]
++        interrupt = error
+         raise
+     finally:
+-        report['cleanup'] = release(image, points, disks)
++        report['cleanup'], late = release(image, points, disks)
+         if report['cleanup']['clean']:
+-            shutil.rmtree(temp)
++            try:
++                shutil.rmtree(temp)
++            except OSError as error:
++                report['cleanup']['rmtree_error'] = repr(error)[:300]
+         report['cleanup']['removed'] = not os.path.lexists(temp)
+         # Plist values reach the report as-is; anything JSON cannot hold is kept as its repr.
+         write_record(output, json.loads(json.dumps(report, default=repr)))
++        # An interrupt that stopped this cleanup is raised; a phase's earlier one takes precedence.
++        if late is not None and interrupt is None:
++            raise late
+     return 0 if report['completed'] and report['cleanup']['clean'] and report['cleanup']['removed'] else 1
+ 
+ 
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
+index 9ede757..a271b1d 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_journal_mount.py
+@@ -1204,39 +1204,214 @@ class Attempt(unittest.TestCase):
+         self.assertEqual((row['returncode'], row['timed_out'], 'no such tool' in row['stderr']), (None, False, True))
+ 
+ 
++class ProbeHost:
++    """diskutil and hdiutil for the probe's cleanup: which disks exist, and which image holds each."""
++
++    def __init__(self, image, held=None):
++        self.image = str(image)
++        self.held = dict(held or {})
++        self.commands = []
++        self.eject = {}
++        self.inventory_fails = False
++        self.interrupt_on = self.interrupt = None
++
++    def attempt(self, *argv, **options):
++        self.commands.append(list(argv))
++        if self.interrupt_on and tuple(argv[:len(self.interrupt_on)]) == self.interrupt_on:
++            self.interrupt_on = None
++            raise self.interrupt
++        row = {'argv': list(argv), 'returncode': 0, 'timed_out': False, 'stdout': b'', 'stderr': ''}
++        if argv[:2] == (DISKUTIL, 'eject'):
++            outcome = self.eject.get(argv[2], ['ok']).pop(0) if self.eject.get(argv[2]) else 'ok'
++            if outcome == 'fail':
++                return {**row, 'returncode': 1}
++            if argv[2] in self.held:
++                del self.held[argv[2]]
++            if outcome == 'timeout-reused':
++                self.held[argv[2]] = FOREIGN['image-path']
++                return {**row, 'returncode': None, 'timed_out': True}
++            return row
++        if argv[:3] == (DISKUTIL, 'info', '-plist'):
++            return {**row, 'returncode': 0 if argv[3] in self.held else 1}
++        return row
++
++    def attachments(self, image):
++        if self.inventory_fails:
++            raise RuntimeError('attached image inventory failed or timed out')
++        return [{'image-path': path, 'system-entities': [{'dev-entry': disk}]}
++                for disk, path in self.held.items() if path == str(image)]
++
++    def ejects(self):
++        return [argv[2] for argv in self.commands if argv[:2] == [DISKUTIL, 'eject']]
++
++
+ class ProbeRelease(unittest.TestCase):
+-    """The probe's cleanup, scripted: its own attach disks are ejected and confirmed gone even when the
+-    inventory does not list them."""
++    """The probe's cleanup, scripted: ejects bound to the inventory, its own disks confirmed gone."""
++
++    IMAGE = pathlib.Path('/nonexistent/openclaw-asif-ownership-x/probe.asif')
+ 
+-    def release(self, eject_works):
+-        present, commands = {'/dev/disk7'}, []
++    def release(self, host, disks, points=()):
++        escaped = None
++        with mock.patch.object(probe, 'attempt', side_effect=host.attempt), \
++                mock.patch.object(probe, 'attachments', side_effect=host.attachments), \
++                mock.patch.object(probe.time, 'sleep') as pause, \
++                mock.patch('subprocess.run', side_effect=AssertionError('command run')):
++            try:
++                record, late = probe.release(self.IMAGE, list(points), disks)
++            except BaseException as error:
++                escaped = error
++        self.assertIsNone(escaped, 'release raised instead of returning')
++        return record, late, pause
++
++    def test_a_listed_disk_is_retried_after_a_pause_only_while_the_inventory_still_binds_it(self):
++        with self.subTest('still bound: retried'):
++            host = ProbeHost(self.IMAGE, {'/dev/disk7': str(self.IMAGE)})
++            host.eject['/dev/disk7'] = ['fail', 'ok']
++            record, late, pause = self.release(host, ['/dev/disk7'])
++            self.assertEqual((host.ejects(), late), (['/dev/disk7', '/dev/disk7'], None))
++            self.assertEqual(pause.call_args_list, [mock.call(wrapper.EJECT_PAUSE)])
++            self.assertEqual((record['disks_gone'], record['clean']), ([True], True))
++        with self.subTest('number reused after a timed-out eject: not retried, not clean'):
++            host = ProbeHost(self.IMAGE, {'/dev/disk7': str(self.IMAGE)})
++            host.eject['/dev/disk7'] = ['timeout-reused']
++            record, late, _ = self.release(host, ['/dev/disk7'])
++            self.assertEqual(host.ejects(), ['/dev/disk7'])
++            self.assertEqual(host.held, {'/dev/disk7': FOREIGN['image-path']})
++            self.assertEqual((record['remaining'], record['disks_gone'], record['clean']), (0, [False], False))
++
++    def test_an_inventory_blind_to_its_own_attach_is_ejected_once_and_confirmed_gone(self):
++        # The disk exists but the inventory binds it to nothing: nothing can justify a retry.
++        host = ProbeHost(self.IMAGE, {'/dev/disk7': ''})
++        record, late, _ = self.release(host, ['/dev/disk7', '/dev/disk7'])
++        self.assertEqual(host.commands, [[DISKUTIL, 'info', '-plist', '/dev/disk7'], [DISKUTIL, 'eject', '/dev/disk7'],
++                                         [DISKUTIL, 'info', '-plist', '/dev/disk7']])
++        self.assertEqual((record['listed'], record['disks_gone'], record['clean']), ([], [True], True))
++        host = ProbeHost(self.IMAGE, {'/dev/disk7': ''})
++        host.eject['/dev/disk7'] = ['fail', 'fail', 'fail']
++        record, late, _ = self.release(host, ['/dev/disk7'])
++        self.assertEqual(host.ejects(), ['/dev/disk7'])
++        self.assertEqual((record['disks_gone'], record['clean']), ([False], False))
++
++    def test_an_unreadable_inventory_still_ejects_the_known_disks_once_and_is_never_clean(self):
++        host = ProbeHost(self.IMAGE, {'/dev/disk7': str(self.IMAGE)})
++        host.inventory_fails = True
++        record, late, _ = self.release(host, ['/dev/disk7'])
++        self.assertEqual(host.ejects(), ['/dev/disk7'])
++        self.assertEqual((record['listed'], record['disks_gone'], record['remaining']), (None, [True], None))
++        self.assertFalse(record['clean'])
++        self.assertTrue(any('inventory failed' in error for error in record['errors']))
++
++    def test_an_interrupt_during_release_stops_it_and_is_returned_never_raised(self):
++        host = ProbeHost(self.IMAGE, {'/dev/disk7': str(self.IMAGE)})
++        host.interrupt_on, host.interrupt = (DISKUTIL, 'eject'), KeyboardInterrupt('during eject')
++        record, late, _ = self.release(host, ['/dev/disk7'])
++        self.assertIs(late, host.interrupt)
++        self.assertEqual((record['clean'], record['steps'][-1]), (False, {'interrupted': repr(host.interrupt)}))
++        self.assertEqual(host.held, {'/dev/disk7': str(self.IMAGE)})
++
++    def test_a_phase_raises_a_late_interrupt_else_requires_clean_before_forgetting_its_disks(self):
++        disks = ['/dev/disk7']
++        with self.assertRaises(KeyboardInterrupt):
++            probe.settled({'clean': True}, KeyboardInterrupt('late'), 'write phase', disks)
++        self.assertEqual(disks, ['/dev/disk7'])
++        with self.assertRaisesRegex(RuntimeError, '^write phase did not release the probe image$'):
++            probe.settled({'clean': False}, None, 'write phase', disks)
++        self.assertEqual(disks, ['/dev/disk7'])
++        probe.settled({'clean': True}, None, 'write phase', disks)
++        self.assertEqual(disks, [])
++
++
++class ProbeAttach(unittest.TestCase):
++    """What an attach leaves for cleanup is harvested from its output before its status is read."""
++
++    def attach(self, row):
++        disks = []
++        with mock.patch.object(probe, 'attempt', return_value={'argv': [], 'stderr': '', **row}), \
++                mock.patch('subprocess.run', side_effect=AssertionError('command run')):
++            with self.assertRaises(RuntimeError) as raised:
++                probe.attach(pathlib.Path('/nonexistent/probe.asif'), disks)
++        return disks, str(raised.exception)
++
++    def test_a_failed_or_timed_out_attach_that_applied_is_still_known_to_cleanup(self):
++        plist = plistlib.dumps({'system-entities': [{'dev-entry': '/dev/disk7'}]})
++        disks, error = self.attach({'returncode': 1, 'timed_out': False, 'stdout': plist})
++        self.assertEqual((disks, error), (['/dev/disk7'], 'attach failed: '))
++        disks, error = self.attach({'returncode': None, 'timed_out': True, 'stdout': plist})
++        self.assertEqual((disks, error), (['/dev/disk7'], 'attach failed: '))
++        # Without parseable output or a whole-disk node there is nothing to harvest: the inventory remains.
++        disks, error = self.attach({'returncode': None, 'timed_out': True, 'stdout': b''})
++        self.assertEqual((disks, error), ([], 'attach failed: '))
++        disks, error = self.attach({'returncode': 0, 'timed_out': False, 'stdout': b'not a plist'})
++        self.assertEqual((disks, error), ([], 'attach output is not a plist'))
++        bogus = plistlib.dumps({'system-entities': [{'dev-entry': 'disk7'}]})
++        disks, error = self.attach({'returncode': 1, 'timed_out': False, 'stdout': bogus})
++        self.assertEqual((disks, error), ([], 'attach failed: '))
++
++
++class ProbeRun(unittest.TestCase):
++    """run(): the report is written on every exit, cleanup interrupts are raised, rmtree is guarded."""
+ 
++    def setUp(self):
++        self.temp = pathlib.Path(tempfile.mkdtemp(prefix='openclaw-probe-run-')).resolve()
++        self.addCleanup(shutil.rmtree, self.temp, True)
++        self.output = self.temp / 'report.json'
++        # run() makes its private directory under RUNNER_TEMP: here, so a kept one is cleaned up.
++        environ = mock.patch.dict(os.environ, {'RUNNER_TEMP': str(self.temp)})
++        environ.start()
++        self.addCleanup(environ.stop)
++        self.clean = {'steps': [], 'errors': [], 'listed': [], 'remaining': 0, 'mounted': [], 'disks_gone': [],
++                      'clean': True}
++
++    def run_probe(self, release, phase=None, rmtree=None):
+         def scripted(*argv, **options):
+-            commands.append(list(argv))
+-            row = {'argv': list(argv), 'returncode': 0, 'timed_out': False, 'stdout': b'', 'stderr': ''}
+-            if argv[:2] == (DISKUTIL, 'eject'):
+-                if not eject_works:
+-                    return {**row, 'returncode': 1}
+-                present.discard(argv[2])
+-            if argv[:3] == (DISKUTIL, 'info', '-plist'):
+-                return {**row, 'returncode': 0 if argv[3] in present else 1}
+-            return row
++            if argv[:3] == (DISKUTIL, 'image', 'create'):
++                pathlib.Path(argv[-1]).write_bytes(b'scripted image\n')
++            return {'argv': list(argv), 'returncode': 0, 'timed_out': False, 'stdout': b'macOS', 'stderr': ''}
+ 
+         with mock.patch.object(probe, 'attempt', side_effect=scripted), \
+-                mock.patch.object(probe, 'attachments', return_value=[]), \
++                mock.patch.object(probe, 'release', side_effect=release), \
++                mock.patch.object(probe, 'image_state', return_value={}), \
++                mock.patch.object(probe, 'write_phase', side_effect=phase), \
++                mock.patch.object(probe, 'disable_ownership'), \
++                mock.patch.object(probe, 'read_only_variant', return_value={}), \
++                mock.patch.object(probe.shutil, 'rmtree', side_effect=rmtree or shutil.rmtree), \
+                 mock.patch('subprocess.run', side_effect=AssertionError('command run')):
+-            found = probe.release(pathlib.Path('/nonexistent/probe.asif'), [], ['/dev/disk7', '/dev/disk7'])
+-        return found, commands
+-
+-    def test_an_inventory_blind_to_its_own_attach_is_still_ejected_and_confirmed_gone(self):
+-        found, commands = self.release(eject_works=True)
+-        self.assertEqual(commands, [[DISKUTIL, 'info', '-plist', '/dev/disk7'], [DISKUTIL, 'eject', '/dev/disk7'],
+-                                    [DISKUTIL, 'info', '-plist', '/dev/disk7']])
+-        self.assertEqual((found['disks_gone'], found['clean']), ([True], True))
+-        found, commands = self.release(eject_works=False)
+-        self.assertEqual([argv for argv in commands if argv[:2] == [DISKUTIL, 'eject']],
+-                         [[DISKUTIL, 'eject', '/dev/disk7']] * wrapper.EJECT_ATTEMPTS)
+-        self.assertEqual((found['disks_gone'], found['clean']), ([False], False))
++            return probe.run(self.output)
++
++    def report(self):
++        return json.loads(self.output.read_bytes())
++
++    def test_a_cleanup_interrupt_after_a_completed_run_is_raised_after_the_report(self):
++        late = KeyboardInterrupt('during the final cleanup')
++        with self.assertRaises(KeyboardInterrupt) as raised:
++            self.run_probe(release=[({**self.clean, 'clean': False, 'steps': [{'interrupted': repr(late)}]}, late)])
++        self.assertIs(raised.exception, late)
++        report = self.report()
++        self.assertEqual((report['completed'], report['cleanup']['clean'], 'error' in report), (True, False, False))
++        # Not clean: the directory and its image are kept for the operator, never removed.
++        kept = [path for path in self.temp.iterdir() if path.name.startswith('openclaw-asif-ownership-')]
++        self.assertEqual((report['cleanup']['removed'], len(kept)), (False, 1))
++        self.assertEqual(sorted(path.name for path in kept[0].iterdir()), ['probe.asif'])
++
++    def test_a_phase_interrupt_takes_precedence_over_a_cleanup_interrupt(self):
++        first, second = KeyboardInterrupt('first'), KeyboardInterrupt('second')
++        with self.assertRaises(KeyboardInterrupt) as raised:
++            self.run_probe(release=[({**self.clean, 'clean': False}, second)], phase=first)
++        self.assertIs(raised.exception, first)
++        self.assertEqual(self.report()['error'], repr(first))
++
++    def test_a_failed_removal_is_recorded_and_the_report_still_written(self):
++        code = self.run_probe(release=[(dict(self.clean), None)], rmtree=OSError(errno.EBUSY, 'scripted busy'))
++        report = self.report()
++        self.assertEqual((code, report['completed'], report['cleanup']['clean'], report['cleanup']['removed']),
++                         (1, True, True, False))
++        self.assertIn('scripted busy', report['cleanup']['rmtree_error'])
++
++    def test_a_completed_clean_run_removes_its_directory_and_exits_zero(self):
++        code = self.run_probe(release=[(dict(self.clean), None)])
++        report = self.report()
++        self.assertEqual((code, report['completed'], report['cleanup']['removed']), (0, True, True))
++        self.assertEqual([path.name for path in self.temp.iterdir()], ['report.json'])
+ 
+ 
+ class ProbeGuards(unittest.TestCase):
+@@ -1310,7 +1485,7 @@ class ProbeGuards(unittest.TestCase):
+ 
+         released = {'steps': [], 'errors': [], 'remaining': 0, 'mounted': [], 'clean': True}
+         with mock.patch.object(probe, 'attempt', side_effect=scripted), \
+-                mock.patch.object(probe, 'release', return_value=released) as release, \
++                mock.patch.object(probe, 'release', return_value=(released, None)) as release, \
+                 mock.patch('subprocess.run', side_effect=AssertionError('command run')):
+             with self.assertRaises(KeyboardInterrupt) as raised:
+                 probe.run(self.output)

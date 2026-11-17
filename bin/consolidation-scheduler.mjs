@@ -12,10 +12,10 @@
  *   - Standalone: reads the daemon's fresh exported queue-state snapshot
  *
  * Usage:
- *   node bin/consolidation-scheduler.mjs [--db <path>] [--vault-path <path>] [--interval <ms>]
+ *   node bin/consolidation-scheduler.mjs [--db <path>] [--vault-path <path>] [--interval <ms>] [--daemon] [--no-events]
  */
 
-import os from 'os';
+import { resolveNodeId } from '../lib/node-id.js';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
@@ -41,7 +41,7 @@ function notifyCycleFailure(message) {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-/** Minimum idle time before triggering a cycle (no extraction for this long). */
+/** Quiet period after the last finished extraction (queue extraction or worker flush). */
 export const IDLE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 
 /** Cancellation deadline; local cleanup still owns the invocation. */
@@ -84,16 +84,22 @@ export function isQueueIdle(getStateFn) {
     return { idle: false, reason: `${external.length} worker ${j.type} job(s) running (elapsed ${j.elapsed_ms}ms)` };
   }
 
-  // Recent extraction activity — check if last extraction was within IDLE_THRESHOLD
-  if (state.history.extraction.count > 0 && state.history.extraction.avg_ms > 0) {
-    // We can't know exact last-completion time from getState(), but if the queue
-    // has no current job and no pending jobs, it's effectively idle now.
-    // The caller should combine this with time-since-last-extraction from the DB.
+  // Quiet periods after the last finished extraction (a queue extraction or a
+  // worker flush) and the last finished analysis. A worker import is a parse,
+  // not an extraction, and holds no quiet period.
+  const now = Date.now();
+  const last = state.last_completed_at || {};
+  const lastExtraction = Math.max(last.extraction || 0, last.flush || 0);
+  if (lastExtraction && now - lastExtraction < IDLE_THRESHOLD_MS) {
+    return { idle: false, reason: `extraction finished ${Math.round((now - lastExtraction) / 1000)}s ago (quiet period ${IDLE_THRESHOLD_MS / 1000}s)` };
+  }
+  if (last.analysis && now - last.analysis < ANALYSIS_QUIET_MS) {
+    return { idle: false, reason: `analysis finished ${Math.round((now - last.analysis) / 1000)}s ago (quiet period ${ANALYSIS_QUIET_MS / 1000}s)` };
   }
 
   // Recent analysis activity — check recent fallbacks/alarms for recency
   const recentAnalysis = state.recent_fallbacks.filter(
-    f => (Date.now() - f.ts) < ANALYSIS_QUIET_MS
+    f => (now - f.ts) < ANALYSIS_QUIET_MS
   );
   if (recentAnalysis.length > 0) {
     return { idle: false, reason: `analysis activity within last ${ANALYSIS_QUIET_MS / 1000}s` };
@@ -156,11 +162,15 @@ export async function runScheduledCycle(opts = {}) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(new Error('hard cap')), hardCap);
 
+  let result;
   try {
-    const result = await runCycle({
+    result = await runCycle({
       dbPath: opts.dbPath,
       vaultPath: opts.vaultPath,
       db: opts.db,
+      // Every 30 min, synchronous, inside the hard cap: quick_check, not the
+      // full scan the daemon ran at boot.
+      integrityCheck: 'quick',
       client,
       signal: ac.signal,
       eventLog: opts.eventLog,
@@ -176,10 +186,18 @@ export async function runScheduledCycle(opts = {}) {
       ok: false,
       error: ac.signal.aborted ? `consolidation cycle exceeded hard cap (${hardCap}ms)` : err.message,
       durationMs: Date.now() - startMs,
+      // An overrun still settles with the phases it ran: the profile of the overrun.
+      ...(result ? { result } : {}),
     };
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** ` [phases: decay=12ms summaries=290100ms ...]`, or '' when the cycle reported none. */
+export function formatPhaseTimes(result) {
+  const phases = Object.entries(result?.phaseMs || {});
+  return phases.length ? ` [phases: ${phases.map(([name, ms]) => `${name}=${ms}ms`).join(' ')}]` : '';
 }
 
 // ─── Scheduler Factory ──────────────────────────────────────────────────────
@@ -197,6 +215,8 @@ export async function runScheduledCycle(opts = {}) {
  * @param {number} [opts.hardCapMs]
  * @param {(msg: string) => void} [opts.log] — logger
  * @param {(opts: object) => Promise<object>} [opts.runCycle] — injectable cycle function (for testing)
+ * @param {boolean} [opts.keepAlive] — keep the interval ref'd (CLI --daemon; NATS may be absent)
+ * @param {(result: object) => Promise<unknown>} [opts.onCycleComplete] — after each successful cycle
  * @returns {{ start: () => void, stop: () => Promise<void>, runOnce: () => Promise<object> }}
  */
 export function createConsolidationScheduler(opts = {}) {
@@ -233,9 +253,16 @@ export function createConsolidationScheduler(opts = {}) {
       // then the counts, in the launchd log that outlives the process.
       for (const r of cycleRemovals(result.result)) log(`[consolidation-scheduler] ${formatRemoval(r)}`);
       const summary = summarizeRemovals(result.result);
-      log(`[consolidation-scheduler] cycle complete (${result.durationMs}ms)${summary ? `: ${summary}` : ''}`);
+      log(`[consolidation-scheduler] cycle complete (${result.durationMs}ms)${summary ? `: ${summary}` : ''}${formatPhaseTimes(result.result)}`);
+      if (opts.onCycleComplete) {
+        try {
+          await opts.onCycleComplete(result.result);
+        } catch (err) {
+          log(`[consolidation-scheduler] post-cycle hook failed: ${err.message}`);
+        }
+      }
     } else {
-      log(`[consolidation-scheduler] cycle failed: ${result.error} (${result.durationMs}ms)`);
+      log(`[consolidation-scheduler] cycle failed: ${result.error} (${result.durationMs}ms)${formatPhaseTimes(result.result)}`);
       await (opts.notifyFailure || notifyCycleFailure)(`${result.error} (${result.durationMs}ms)`);
     }
 
@@ -259,8 +286,9 @@ export function createConsolidationScheduler(opts = {}) {
     timer = setInterval(() => {
       runOnce().catch(err => log(`[consolidation-scheduler] error: ${err.message}`));
     }, intervalMs);
-    // Unref so the timer doesn't prevent process exit
-    if (timer.unref) timer.unref();
+    // Embedded in the memory daemon the timer must not hold the process open;
+    // the CLI --daemon has nothing else holding it when NATS is absent.
+    if (!opts.keepAlive) timer.unref();
   }
 
   async function stop() {
@@ -276,6 +304,35 @@ export function createConsolidationScheduler(opts = {}) {
   return { start, stop, runOnce };
 }
 
+// ─── CLI Summary ────────────────────────────────────────────────────────────
+
+/** The single-shot run's summary, one line per stage (unstamped). */
+export function cliSummaryLines(result) {
+  const lines = [`Consolidation complete (${result.durationMs}ms)`];
+  const r = result.result;
+  if (!r) return lines;
+  lines.push(`  Decayed: ${r.decayed?.decayedEntities ?? '?'} entities, ${r.decayed?.decayedDecisions ?? '?'} decisions, ${r.decayed?.archivedEntities ?? '?'} entities archived`);
+  if (r.pruned?.skipped) lines.push(`  Pruned: skipped (${r.pruned.skipped})`);
+  else lines.push(`  Pruned: ${r.pruned?.archivedDecisions ?? '?'} decisions archived, ${r.pruned?.prunedThemes ?? '?'} idle themes deleted${r.pruned?.themesSkipped ? ` — idle themes kept (${r.pruned.themesSkipped})` : ''}${r.pruned?.backup ? ` — backup ${r.pruned.backup.path}` : ''}`);
+  lines.push(`  Reinforced: ${r.reinforced?.reinforcedEntities ?? '?'} entities`);
+  lines.push(`  Clusters: ${r.clusters?.clusters?.length ?? '?'} detected`);
+  lines.push(`  Contradictions: ${r.contradictions?.total ?? '?'} found`);
+  lines.push(`  Promotion: ${r.promotionCandidates?.entityCandidates?.length ?? '?'} entities, ${r.promotionCandidates?.decisionCandidates?.length ?? '?'} decisions`);
+  return lines;
+}
+
+// The observer's activity feed (lib/observer.mjs) only records log lines that
+// carry the memory daemon's `[YYYY-MM-DD, HH:MM:SS]` Montreal stamp.
+export function stampLine(msg, date = new Date()) {
+  const ts = date.toLocaleString('en-CA', {
+    timeZone: 'America/Montreal',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hourCycle: 'h23',
+  });
+  return `[${ts}] ${msg}`;
+}
+
 // ─── CLI Entry ──────────────────────────────────────────────────────────────
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('/consolidation-scheduler.mjs')) {
@@ -287,9 +344,9 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
   const noEvents = args.includes('--no-events');
 
   const natsUrl = process.env.NATS_URL || undefined; // URL override only; resolver supplies URL + credentials
-  const nodeId = process.env.OPENCLAW_NODE_ID || os.hostname();
+  const nodeId = resolveNodeId();
 
-  const cliOpts = { nodeId };
+  const cliOpts = { nodeId, keepAlive: daemon };
   if (dbIdx !== -1 && args[dbIdx + 1]) cliOpts.dbPath = args[dbIdx + 1];
   if (vaultIdx !== -1 && args[vaultIdx + 1]) cliOpts.vaultPath = args[vaultIdx + 1];
   if (intervalIdx !== -1 && args[intervalIdx + 1]) cliOpts.intervalMs = Number(args[intervalIdx + 1]);
@@ -301,9 +358,10 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
       const { connect } = await import('nats');
       const { createLocalEventLog } = await import('../lib/local-event-log.mjs');
       const { natsConnectOpts } = _require('../lib/nats-resolve.js');
-      nc = await connect(natsConnectOpts({ servers: natsUrl, name: 'consolidation-scheduler', timeout: 5000 }));
+      const connectOpts = natsConnectOpts({ servers: natsUrl, name: 'consolidation-scheduler', timeout: 5000 });
+      nc = await connect(connectOpts);
       cliOpts.eventLog = await createLocalEventLog(nc, nodeId);
-      console.log(`NATS connected (${natsUrl}), events will be emitted.`);
+      console.log(`NATS connected (${connectOpts.servers}), events will be emitted.`);
     } catch (err) {
       console.warn(`NATS unavailable (${err.message}); running without event emission.`);
     }
@@ -333,17 +391,7 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
         if (result.skipped) {
           console.log(`Skipped: ${result.reason}`);
         } else if (result.ok) {
-          console.log(`Consolidation complete (${result.durationMs}ms)`);
-          const r = result.result;
-          if (r) {
-            console.log(`  Decayed: ${r.decayed?.decayedEntities ?? '?'} entities, ${r.decayed?.decayedDecisions ?? '?'} decisions, ${r.decayed?.archivedEntities ?? '?'} entities archived`);
-            if (r.pruned?.skipped) console.log(`  Pruned: skipped (${r.pruned.skipped})`);
-            else console.log(`  Pruned: ${r.pruned?.archivedDecisions ?? '?'} decisions archived, ${r.pruned?.prunedThemes ?? '?'} idle themes deleted${r.pruned?.themesSkipped ? ` — idle themes kept (${r.pruned.themesSkipped})` : ''}${r.pruned?.backup ? ` — backup ${r.pruned.backup.path}` : ''}`);
-            console.log(`  Reinforced: ${r.reinforced?.reinforcedEntities ?? '?'} entities`);
-            console.log(`  Clusters: ${r.clusters?.clusters?.length ?? '?'} detected`);
-            console.log(`  Contradictions: ${r.contradictions?.total ?? '?'} found`);
-            console.log(`  Promotion: ${r.promotionCandidates?.entityCandidates?.length ?? '?'} entities, ${r.promotionCandidates?.decisionCandidates?.length ?? '?'} decisions`);
-          }
+          for (const line of cliSummaryLines(result)) console.log(stampLine(line));
         } else {
           console.error(`Consolidation failed: ${result.error} (${result.durationMs}ms)`);
           await cleanup();

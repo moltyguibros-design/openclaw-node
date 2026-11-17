@@ -11,7 +11,7 @@ Injects a reminder to evaluate learnings during agent bootstrap.
 ## What It Does
 
 - Fires on `agent:bootstrap` (before workspace files are injected)
-- Adds a reminder block to check `.learnings/` for relevant entries
+- Adds a reminder block to check and append to `.learnings/lessons.md`
 - Prompts the agent to log corrections, errors, and discoveries
 
 ## Configuration

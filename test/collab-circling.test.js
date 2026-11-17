@@ -10,26 +10,6 @@
  * Run: node --test test/collab-circling.test.js
  */
 
-// ── Mock 'nats' module ──
-const Module = require('module');
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-const mockNats = {
-  StringCodec: () => ({
-    encode: (str) => encoder.encode(str),
-    decode: (buf) => decoder.decode(buf),
-  }),
-  connect: async () => ({}),
-};
-const origResolve = Module._resolveFilename;
-Module._resolveFilename = function (request, parent, ...rest) {
-  if (request === 'nats') return 'nats';
-  return origResolve.call(this, request, parent, ...rest);
-};
-require.cache['nats'] = {
-  id: 'nats', filename: 'nats', loaded: true, exports: mockNats,
-};
-
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const {
@@ -150,6 +130,40 @@ describe('Circling Strategy: Artifact Store', () => {
     session.circling.current_subround = 1;
 
     assert.equal(store.getLatestArtifact(session, 'worker', 'workArtifact'), 'init content');
+  });
+
+  it('getLatestArtifact prefers the finalization artifact over the last sub-round', async () => {
+    const { store, sessionId } = await makeStoreWithSession();
+    await store.storeArtifact(sessionId, 'sr0_step0_worker_workArtifact', 'init');
+    await store.storeArtifact(sessionId, 'sr2_step1_worker_workArtifact', 'sr2 review');
+    await store.storeArtifact(sessionId, 'sr2_step2_worker_workArtifact', 'sr2 revision');
+    await store.storeArtifact(sessionId, 'sr2_step0_worker_workArtifact', 'final');
+    await store.storeArtifact(sessionId, 'sr2_step0_worker_completionDiff', 'diff');
+
+    const session = await store.get(sessionId);
+    session.circling.phase = 'finalization';
+    session.circling.current_subround = 2;
+    session.circling.current_step = 0;
+
+    assert.equal(store.getLatestArtifact(session, 'worker', 'workArtifact'), 'final');
+    assert.equal(store.getLatestArtifact(session, 'worker', 'completionDiff'), 'diff');
+  });
+
+  it('markCompleted keeps the mode-specific result fields', async () => {
+    const { store, sessionId } = await makeStoreWithSession();
+    await store.markCompleted(sessionId, {
+      artifacts: ['workArtifact'],
+      summary: 'done',
+      node_contributions: { 'node-worker': 'built it' },
+      circling_final_artifact: 'final',
+      circling_completion_diff: 'diff',
+    });
+    const { result } = await store.get(sessionId);
+    assert.equal(result.circling_final_artifact, 'final');
+    assert.equal(result.circling_completion_diff, 'diff');
+    assert.deepEqual(result.artifacts, ['workArtifact']);
+    assert.equal(result.summary, 'done');
+    assert.deepEqual(result.node_contributions, { 'node-worker': 'built it' });
   });
 
   it('getLatestArtifact returns null when not found', async () => {

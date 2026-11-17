@@ -2,13 +2,13 @@
 // task-relevant recall path falls back cleanly to the MEMORY.md index when the loopback
 // inject-server isn't reachable/disabled — without ever throwing.
 import { test } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 
-const ws = mkdtempSync(join(tmpdir(), 'mesh-mem-'));
+const ws = tmpDir('mesh-mem-');
 writeFileSync(join(ws, 'MEMORY.md'), '- [Test memory](t.md) — the node remembers project ZED-9.');
 process.env.MESH_WORKSPACE = ws;
 process.env.MESH_MEMORY_RECALL = 'off'; // deterministic fallback (this host has a live inject-server)
@@ -44,11 +44,18 @@ test('HyperAgent strategy is mechanically injected into all worker prompt shapes
   }
 });
 
-test('P1: recallForTask returns null when disabled / no task (clean fallback, never throws)', () => {
-  assert.equal(m.recallForTask(task), null);
-  assert.equal(m.recallForTask(null), null);
+test('P1: recallForTask returns null when disabled / no task (clean fallback, never throws)', async () => {
+  assert.equal(await m.recallForTask(task), null);
+  assert.equal(await m.recallForTask(null), null);
 });
 
 test('P1: readNodeMemory is mtime-cached and returns the node index', () => {
   assert.match(m.readNodeMemory(), /ZED-9/);
+});
+
+test('a review rejection reason reaches both solo prompt builders', () => {
+  const rejected = { ...task, rejection_count: 1, rejection_reason: 'REJ-77: migration drops the audit column' };
+  assert.match(m.buildInitialPrompt(rejected), /REJ-77: migration drops the audit column/);
+  assert.match(m.buildRetryPrompt(rejected, [], 2), /REJ-77/);
+  assert.doesNotMatch(m.buildInitialPrompt(task), /Previous Review/);
 });

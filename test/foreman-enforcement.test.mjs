@@ -1,7 +1,7 @@
 import { describe, it, after } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { DIMENSIONS } from '../lib/foreman/assessment.mjs';
@@ -36,7 +36,7 @@ function worker({ ignoreTerm = false } = {}) {
 }
 const closed = (child) => new Promise((resolve) => child.once('close', (code, signal) => resolve({ code, signal })));
 function timelineFor(name) {
-  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), `foreman-enf-${name}-`)), 'task.jsonl');
+  return path.join(tmpDir(`foreman-enf-${name}-`), 'task.jsonl');
 }
 const rows = (file) => fs.readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
 const waitFor = async (predicate, ms = 3_000) => {

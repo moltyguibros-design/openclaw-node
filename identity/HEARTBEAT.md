@@ -37,7 +37,7 @@ AGENTS.md points here. All heartbeat logic lives here.
 
 ## MANDATORY: Memory Maintenance (every heartbeat)
 
-1. Run `bin/memory-maintenance --force --verbose`
+1. Run `bin/memory-maintenance.mjs --force --verbose`
 2. Read `.tmp/maintenance-results` — if any warnings, report to Gui
 3. Specific attention:
    - ARCHIVAL: daily files >30 days → archived automatically
@@ -51,14 +51,16 @@ AGENTS.md points here. All heartbeat logic lives here.
 ## MANDATORY: Fact Extraction (every heartbeat if MC running)
 **Requires LLM — cannot be automated in bash. Run inline during heartbeat.**
 
-1. Check if Mission Control is running: `curl -s localhost:3000/api/tasks`
-2. If running, check last flush: `curl -s localhost:3000/api/memory/flush`
+`bin/mc-api` sends Mission Control's session token; a bare `curl` gets 401 on every /api path.
+
+1. Check if Mission Control is running: `bin/mc-api /api/tasks` (exit 7 = down, exit 22 = up but refused: flag it)
+2. If running, check last flush: `bin/mc-api /api/memory/flush`
 3. If last flush > 24 hours ago OR no flush ever:
    a. Read today's daily file (`memory/YYYY-MM-DD.md`)
    b. Extract atomic facts using write gate rules (AGENTS.md)
-   c. POST extracted facts to `localhost:3000/api/memory/items`
-   d. POST to `localhost:3000/api/memory/flush` to record the flush
-4. If MC not running, skip silently
+   c. POST extracted facts: `bin/mc-api POST /api/memory/items '<json>'`
+   d. Record the flush: `bin/mc-api POST /api/memory/flush '{"facts":[],"source":"memory/YYYY-MM-DD.md"}'`
+4. If MC not running (exit 7), skip silently
 
 ## Active Job Monitor
 1. Read `memory/active-tasks.md` — check for any task with status `running`
@@ -92,9 +94,9 @@ AGENTS.md points here. All heartbeat logic lives here.
 - Setup: `git config core.hooksPath bin/hooks`
 
 ## Mesh Health
-1. Run `mesh health --json --all` silently (if mesh available)
-2. If any node degraded/down: `mesh repair --all`, retry, log if still broken
-3. If 3 consecutive failures: escalate to user
+1. Run `bin/node-acceptance.mjs --axis network --no-mutate` silently (NATS, JetStream, event stream, pub/sub; read-only). On a clustered node also `--axis federation --no-mutate`.
+2. Exit 0 = healthy (HEARTBEAT_OK). Exit 1 REJECTED or 2 INCOMPLETE: note the failing or skipped probe lines; `node ~/openclaw/bin/openclaw-stack.mjs status` shows which unit is down. Do not delegate work to the mesh while it fails.
+3. If the same probe fails across 3 consecutive heartbeats: escalate to the user with the failing lines. Restarting services is the operator's call.
 
 ## Proactive Work (safe to do without asking)
 
@@ -139,25 +141,3 @@ Before significant decisions, write a structured prediction:
 - Skill Quality Engineering: complete (Phases 1-6)
 - Routing eval baseline: 95.9% accuracy, 29 conflict pairs
 - Security gate: active via core.hooksPath
-
-# Mesh Health (add to ~/.openclaw/workspace/HEARTBEAT.md)
-
-## Mesh maintenance check
-
-Every heartbeat, verify the mesh is operational:
-
-1. Run `mesh health --json --all` silently
-2. Parse the JSON — check if `overall` is `"ok"` for each node
-3. If any node shows `"degraded"` or `"down"`:
-   a. Run `mesh repair --all`
-   b. Wait 10 seconds, then `mesh health --json --all` again
-   c. If still broken, append a timestamped entry to `~/openclaw/shared/mesh-incidents.log`:
-      ```
-      [2026-03-02T14:30:00Z] UNRESOLVED: ubuntu/nats_server down after repair attempt
-      ```
-   d. If the issue persists across 3 consecutive heartbeats, escalate:
-      send a message to the user noting which services are down and what was tried.
-4. If all healthy: HEARTBEAT_OK (no output needed)
-
-**Priority**: Run this check BEFORE any task that involves the remote node.
-If mesh is unhealthy, do not delegate work to the remote node — do it locally or queue it.

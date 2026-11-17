@@ -23,7 +23,7 @@
  * startup complete" hiding three disabled subsystems.
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -49,15 +49,6 @@ function isInvoked(src, factoryName) {
   // Strip out import statements before testing
   const stripped = src.replace(/^\s*import\b[^\n]*$/gm, '');
   return callRe.test(stripped);
-}
-
-/**
- * Test whether a factory is just imported but never called.
- */
-function isImportedNotCalled(src, factoryName) {
-  if (!src) return false;
-  const importRe = new RegExp(`\\bimport\\b[^;]*\\b${factoryName}\\b`);
-  return importRe.test(src) && !isInvoked(src, factoryName);
 }
 
 // ─── Subsystem definitions ──────────────────────────────────────────────────
@@ -119,7 +110,7 @@ const subsystems = [
     notWiredFix: 'Implement projection in onIngest; remove env-gate. Today: OPENCLAW_SUBSCRIBER_PROJECTION=stub enables an ack-without-project mode.',
   },
   {
-    name: 'Real-time extraction trigger (NATS subject mesh.memory.extract_request)',
+    name: 'Real-time extraction trigger (NATS subject mesh.memory.extract_request.<nodeId>)',
     check: () => isInvoked(daemonSrc, 'createExtractionTrigger'),
     notWiredFix: 'Daemon must import + call createExtractionTrigger(nc, nodeId, { runFlush }). Without this, the PreCompact hooks publish to a subject with no subscriber.',
   },
@@ -215,7 +206,7 @@ process.stdout.write(`, ${paint(summary.stub + ' stub', COLOR_STUB)}`);
 process.stdout.write(`, ${paint(summary.notWired + ' not wired', COLOR_NOT)} out of ${rows.length} total.\n`);
 
 if (summary.notWired + summary.stub > 0) {
-  process.stdout.write('\nSee memory-plan/STUB_AUDIT.md for the inventory rationale.\n');
+  process.stdout.write('\nSee memory-plan/plans/legacy/STUB_AUDIT.md for the inventory rationale.\n');
 }
 
 process.exit(summary.notWired > 0 ? 1 : 0);

@@ -25,14 +25,22 @@ BLOCKS=0
 # Check for hardcoded secrets in staged files
 STAGED=$(git diff --cached --name-only 2>/dev/null || true)
 if [ -n "$STAGED" ]; then
-  # Prefer dedicated secret scanners if available (more accurate, fewer false positives)
+  # Prefer dedicated secret scanners if available (more accurate, fewer false positives).
+  # gitleaks is judged by its exit code (0 clean, 1 leaks): its clean-scan line
+  # "no leaks found" matches any text grep, and `detect` has no --staged flag.
+  # Any other exit code is a tool error and falls through to the next scanner.
+  GL_RC=-1
   if command -v gitleaks &>/dev/null; then
-    SECRETS_FOUND=$(gitleaks detect --staged --no-banner 2>&1 || true)
-    if echo "$SECRETS_FOUND" | grep -qiE 'leaks? found|secret|token'; then
+    SECRETS_FOUND=$(gitleaks protect --staged --no-banner --redact 2>&1)
+    GL_RC=$?
+    if [ "$GL_RC" -eq 1 ]; then
       echo "BLOCK: gitleaks detected secrets in staged changes:"
       echo "$SECRETS_FOUND" | head -5
       BLOCKS=$((BLOCKS + 1))
     fi
+  fi
+  if [ "$GL_RC" -eq 0 ] || [ "$GL_RC" -eq 1 ]; then
+    :
   elif command -v trufflehog &>/dev/null; then
     SECRETS_FOUND=$(trufflehog git --staged --no-update --only-verified 2>&1 || true)
     if [ -n "$SECRETS_FOUND" ]; then

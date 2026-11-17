@@ -1,0 +1,446 @@
+diff --git a/.github/workflows/test.yml b/.github/workflows/test.yml
+index f11bc19..e4507c5 100644
+--- a/.github/workflows/test.yml
++++ b/.github/workflows/test.yml
+@@ -102,6 +102,7 @@ jobs:
+           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_nats_identity.py
+           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py
+           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py
++          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_preflight_status.py
+           NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_cluster.py
+       - name: Root unit tests
+         # npm test (not bare node --test): the pretest hook builds the
+@@ -192,6 +193,7 @@ jobs:
+           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py
+           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint_facade.py
+           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py
++          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_preflight_status.py
+           PYTHONPATH="$PWD/memory-plan/plans/node-state-recovery/audits/step12_jetstream" /usr/bin/python3 -m unittest -q test_restore_only
+           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_disabled.py
+           OPENCLAW_CI_FULL_NODE_LISTENER_FIXTURE=1 /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_managed_launchd.py
+diff --git a/memory-plan/plans/node-state-recovery/DECISIONS.md b/memory-plan/plans/node-state-recovery/DECISIONS.md
+index 0c27533..0f069bc 100644
+--- a/memory-plan/plans/node-state-recovery/DECISIONS.md
++++ b/memory-plan/plans/node-state-recovery/DECISIONS.md
+@@ -4031,3 +4031,15 @@ The v2 macOS end-to-end capture test, which Linux CI does not run, would have fa
+ Owned Linux tests drive the real capture worker to publication with only VM facilities stood in (preflight samples, guard receipt, clone, immutable flag, ASIF extraction): the authentic pin and MATCH digest, substitution before and after a match, the pinned-ACK control with CHECKPOINT and its pin rebound, byte-only changes to each commitment file after capture and during a match, a checkpoint rewritten after the stop or between stopped samples, an arm rewritten after the stop, any commitment file swapped between the pin read and validation (and a substitute put back after the authentic CHECKPOINT was validated), an unpinned capture and the pin-before-provenance order. The real-`JournaledHold` control now obtains its commitment only through real `commit()`, `commit_checkpoint()`, the capture worker's pins, `host_match()` and `verify_frozen_checkpoint()`; on Linux it ran only with a simulated kqueue observer, and it stays native on macOS.
+ 
+ The pins are tamper evidence inside one same-uid capture directory: a writer able to rewrite CAPTURE.json together with CHECKPOINT.json is not detected until an acceptance controller or protected store pins CAPTURE.json, which remains part of the open acceptance/abort gate. Production capture still refuses. D64 is unchanged; four histories stay separate; B5/1.2 stay open and B6 closed.
++
++## D188 — Boot out the GUI status agent by its own label on every path, without masking the primary failure (2026-10-15)
++
++`gui_utm_status()` ran `launchctl bootstrap` before its `try/finally`, so a bootstrap whose client failed or timed out after launchd had applied it left that sample's job loaded with no cleanup at all, and the `bootout` in `finally` raised over the original failure whenever it failed. The bootstrap now runs inside the same guard as the status wait. On any failure the sample's unique service `gui/<uid>/ai.openclaw.host-preflight.<uuid4 hex>` is booted out, and when that bootout fails or times out `launchctl print` of the same label is recorded. Each cleanup call keeps the existing 15 s bound and never raises. The results go to `utm-status-cleanup.json` beside the sample: `booted_out`, and after an unsuccessful bootout `absent_at_print`, true only for an answered 113 "Could not find service" (managed_launchd's reading of absence) and describing only that moment. The record is best effort (an unwritable one never replaces the error), and the original exception is re-raised unchanged.
++
++On success the previous rule stands: a bootout that failed or timed out refuses the sample (`GUI UTM status agent bootout did not succeed: <label>`, with the same record), even when the print then reads the label absent. Absence is evidence about cleanup and never turns the unsuccessful action into acceptance. A timed-out bootstrap is never accepted, even when its helper already wrote a valid status. No deadline or expectation changed; a failing preflight can now take at most 30 s longer (one bootout and one print), which only delays a failure the capture worker already records in FAILED.json.
++
++Owned tests drive the real function against a fake `launchctl` that models launchd state (bootstrap ok, failed, hung, applied then hung, or applied only after the cleanup's print; helper status written, absent or malformed; bootout failing, hanging, or removing the label and then failing or hanging; print hanging or refusing), with two unrelated loaded labels that must stay loaded and every bootout/print required to name exactly the sample's label. Subprocess timeouts and the 20 s wait are compressed by the test only. Thirteen tests pass. The unfixed function fails eleven; on the unsuccessful-bootout case it fails only on the message and the missing record, because it already refused there. Fifteen source mutants are killed, among them a success path that accepts absence after an unsuccessful bootout. The test runs on Linux and, under `/usr/bin/python3`, on macOS CI without touching the real launchd.
++
++Residual: a bootstrap request still in flight inside launchd after its client was killed can apply after the cleanup's bootout found nothing and its print read the label absent. The owned test reproduces it. The original error stands and the record names the label with `absent_at_print` true, but the job is loaded afterwards, and nothing re-checks. The job has no KeepAlive, so it runs one read-only `utmctl status`, writes `utm-status.json` (and launchd's out/err files) into the already failed sample, and stays loaded until booted out by that label. No capture, guard, reconcile or dispose step reads that file; they read only `preflight.json`, which a failed sample never has. Closing this would need a wait, which D188 does not add.
++
++This fixes cleanup, not the native B5 end-to-end stall before ARMED.json: whether that sample's bootstrap client was blocked, its job was never spawned or its helper was blocked in `utmctl` is still for the helper-snapshot diagnostic to show. Production capture still refuses. D64 is unchanged; four histories stay separate; B5/1.2 stay open and B6 closed.
+diff --git a/memory-plan/plans/node-state-recovery/INVENTORY.md b/memory-plan/plans/node-state-recovery/INVENTORY.md
+index 1b22633..19ec082 100644
+--- a/memory-plan/plans/node-state-recovery/INVENTORY.md
++++ b/memory-plan/plans/node-state-recovery/INVENTORY.md
+@@ -2699,6 +2699,8 @@ Checkpoint 2026-10-14: D186 local, uncommitted host checkpoint commitment on the
+ 
+ Checkpoint 2026-10-15: D187 local, uncommitted incremental fix on combined v2. CAPTURE.json pins CHECKPOINT.json bytes; `host_match()` checks the pins before provenance and records `checkpoint_sha256` in MATCH.json; `verify_frozen_checkpoint()` requires the pins before `require_committed()` and consumes only the pinned commitment. Three v2 native end-to-end expectations corrected (ACK refusal order, mid-match ACK change, failed capture without `commit_checkpoint()`); the D186 checkpoint's host-test count is corrected from 17 to 18. On Linux 33 owned host tests, 24 checkpoint tests and the host capture suite pass, every D187 source mutant is killed, and the real-facade control passes only with a simulated kqueue observer; the macOS end-to-end capture and facade tests still need native CI. Production capture stays disabled; no production state changed.
+ 
++Checkpoint 2026-10-15: D188 local, uncommitted cleanup fix, separate from the native diagnostics. `gui_utm_status()` now bootstraps inside its cleanup guard; on any failure it boots out only the sample's unique label, records the bootout and (after an unsuccessful one) a print of that label in `utm-status-cleanup.json`, and re-raises the original error. On success a bootout that failed or timed out still refuses the sample, even when the print reads the label absent. 13 owned fake-launchctl tests pass (the unfixed function fails 11) and 15 source mutants are killed; added to Linux and macOS CI. A bootstrap applied by launchd after cleanup can still leave its unique label loaded (reproduced, recorded, not closed). No deadline changed; the native stall before ARMED.json remains undiagnosed pending the helper snapshot. Production capture stays disabled; no production state changed.
++
+ - [ ] B5-serving-NATS persistent-stop producer: a full-node stop path that disables and unloads nats, nats-2 and nats-3 under the original hold with managed-stop receipts; `StopWatch.mutate` refuses this today. Required before any capture-ready checkpoint can be produced outside owned tests. No production state changed.
+ - [ ] B5-serving-NATS recovery adapter: an enable-capable restore for the three serving members that recovery can verify, the precondition `StopWatch` names for a persistent NATS stop. Required with the producer above; member1 stays held and is not part of it. No production state changed.
+ - [ ] B5-stopped-ASIF checkpoint extraction: read-only extraction of the user journal directory, node receipt and NATS config bytes from the stopped image, refusing pending or unknown entries, feeding `verify_frozen_checkpoint()` after CAPTURE.json publication (it requires the D187 pins). No production state changed.
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_vm_preflight.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_vm_preflight.py
+index 9eff170..ac7112c 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_vm_preflight.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_vm_preflight.py
+@@ -107,6 +107,39 @@ def gui_status_helper(utmctl, vm_uuid, output):
+         os.close(fd)
+ 
+ 
++LAUNCHCTL = '/bin/launchctl'
++
++
++def launchctl_attempt(*args):
++    """One bounded launchctl call kept as evidence; it never raises, so it cannot mask an error."""
++    attempt = {'argv': list(args), 'returncode': None, 'timed_out': False, 'stdout': '', 'stderr': ''}
++    try:
++        done = subprocess.run([LAUNCHCTL, *args], capture_output=True, timeout=15)
++    except subprocess.TimeoutExpired:
++        return {**attempt, 'timed_out': True}
++    except OSError as error:
++        return {**attempt, 'stderr': str(error)[:300]}
++    return {**attempt, 'returncode': done.returncode,
++            'stdout': done.stdout.decode(errors='replace').strip()[:300],
++            'stderr': done.stderr.decode(errors='replace').strip()[:300]}
++
++
++def remove_disposable_agent(service):
++    """Boot out only this preflight's own label; returns the cleanup evidence.
++
++    Only a bootout that succeeded removed the agent (`booted_out`). When it failed or timed out,
++    `launchctl print` of the same label is kept as evidence: `absent_at_print` is true only for an
++    answered 113 "Could not find service" (as managed_launchd reads absence). It describes that
++    moment and never makes the unsuccessful bootout a success.
++    """
++    bootout = launchctl_attempt('bootout', service)
++    if bootout['returncode'] == 0:
++        return {'bootout': bootout, 'booted_out': True}
++    listed = launchctl_attempt('print', service)
++    return {'bootout': bootout, 'booted_out': False, 'print': listed,
++            'absent_at_print': listed['returncode'] == 113 and 'Could not find service' in listed['stderr']}
++
++
+ def gui_utm_status(utmctl, vm_uuid, output):
+     label = 'ai.openclaw.host-preflight.' + uuid.uuid4().hex
+     status_path = output / 'utm-status.json'
+@@ -121,15 +154,28 @@ def gui_utm_status(utmctl, vm_uuid, output):
+     }))
+     os.chmod(agent, 0o600)
+     target = 'gui/' + str(os.getuid())
+-    run('/bin/launchctl', 'bootstrap', target, str(agent))
++    service = target + '/' + label
++    cleanup = output / 'utm-status-cleanup.json'
+     try:
++        run(LAUNCHCTL, 'bootstrap', target, str(agent))
+         deadline = time.monotonic() + 20
+         while not status_path.exists() and time.monotonic() < deadline:
+             time.sleep(0.1)
+         require(status_path.exists(), 'GUI UTM status helper timed out')
+         status = json.loads(status_path.read_text())
+-    finally:
+-        run('/bin/launchctl', 'bootout', target + '/' + label)
++    except BaseException as error:
++        # The bootstrap may have applied even though it failed or timed out. Boot out only this
++        # label, keep the evidence beside the sample, and re-raise the original failure as is.
++        evidence = remove_disposable_agent(service)
++        try:
++            write_record(cleanup, {'label': label, 'primary_error': repr(error)[:300], **evidence})
++        except OSError:
++            pass
++        raise
++    evidence = remove_disposable_agent(service)
++    if not evidence['booted_out']:
++        write_record(cleanup, {'label': label, 'primary_error': None, **evidence})
++    require(evidence['booted_out'], 'GUI UTM status agent bootout did not succeed: ' + label)
+     require(status['returncode'] == 0 and not status['stderr']
+             and status['stdout'] in ('started', 'stopped'),
+             'GUI UTM status was not a clear power state')
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_preflight_status.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_preflight_status.py
+new file mode 100644
+index 0000000..a5f4c33
+--- /dev/null
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_preflight_status.py
+@@ -0,0 +1,311 @@
++"""Owned tests for the GUI status agent's cleanup in host_vm_preflight.gui_utm_status (D188).
++
++launchctl is an owned fake that models launchd state in a temporary directory: which labels are
++loaded; a bootstrap that fails, hangs, applies and then hangs (a timed-out bootstrap that still
++took effect), or applies only after the cleanup's print answered (a request still in flight in
++launchd); a bootout that fails, hangs, or removes the label and then fails or hangs; and a print
++that hangs or refuses without finding the label. The helper's status is written by the fake
++bootstrap, as RunAtLoad would. Subprocess timeouts are compressed to 1 s and the 20 s status wait
++runs on a 40x clock, by the test only; production keeps its bounds. Nothing touches the real
++launchd.
++"""
++import json
++import os
++import pathlib
++import plistlib
++import subprocess
++import sys
++import tempfile
++import time
++import types
++import unittest
++from unittest import mock
++
++sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
++
++import host_vm_preflight  # noqa: E402
++
++FAKE_LAUNCHCTL = r'''
++import json, os, pathlib, plistlib, subprocess, sys, time
++state = pathlib.Path(os.environ['FAKE_LAUNCHD'])
++with open(state / 'calls', 'a') as calls:
++    calls.write(json.dumps(sys.argv[1:]) + '\n')
++loaded = state / 'loaded'
++
++
++def mode(name, default='ok'):
++    path = state / name
++    return path.read_text().strip() if path.exists() else default
++
++
++def apply(agent):
++    (loaded / agent['Label']).write_text('')
++    status = pathlib.Path(agent['ProgramArguments'][-1])
++    helper = mode('helper', 'write')
++    if helper == 'write':
++        status.write_text(json.dumps({'at_utc': 'x', 'returncode': 0, 'stdout': 'started', 'stderr': ''}))
++    elif helper == 'garbage':
++        status.write_text('{not json')
++
++
++verb = sys.argv[1]
++if verb == 'late-apply':
++    # launchd applying a bootstrap whose client was already killed: only after the cleanup's
++    # print has answered, and never at all if no print comes within 30 s.
++    deadline = time.monotonic() + 30
++    while not (state / 'printed').exists() and time.monotonic() < deadline:
++        time.sleep(0.05)
++    if (state / 'printed').exists():
++        apply(plistlib.loads(pathlib.Path(sys.argv[2]).read_bytes()))
++    sys.exit(0)
++if verb == 'bootstrap':
++    agent = plistlib.loads(pathlib.Path(sys.argv[3]).read_bytes())
++    how = mode('bootstrap')
++    if how == 'fail':
++        sys.stderr.write('Bootstrap failed: 5: Input/output error\n')
++        sys.exit(5)
++    if how == 'late':
++        subprocess.Popen([sys.executable, __file__, 'late-apply', sys.argv[3]], start_new_session=True,
++                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
++    if how in ('hang', 'late'):
++        time.sleep(60)
++    apply(agent)
++    if how == 'apply-then-hang':
++        time.sleep(60)
++    sys.exit(0)
++label = sys.argv[2].rsplit('/', 1)[-1]
++if verb == 'bootout':
++    how = mode('bootout')
++    if how == 'hang':
++        time.sleep(60)
++    if how == 'fail-keep':
++        sys.stderr.write('Boot-out failed: 5: Input/output error\n')
++        sys.exit(5)
++    if how in ('fail-gone', 'remove-then-hang') and (loaded / label).exists():
++        (loaded / label).unlink()
++        if how == 'remove-then-hang':
++            time.sleep(60)
++        sys.stderr.write('Boot-out failed: 5: Input/output error\n')
++        sys.exit(5)
++    if (loaded / label).exists():
++        (loaded / label).unlink()
++        sys.exit(0)
++    sys.stderr.write('Boot-out failed: 3: No such process\n')
++    sys.exit(3)
++if verb == 'print':
++    how = mode('print')
++    if how == 'hang':
++        time.sleep(60)
++    if how == 'refuse':
++        sys.stderr.write('Bad request.\n')
++        sys.exit(5)
++    if how == 'refuse-113':
++        sys.stderr.write('Could not print service: Operation not permitted\n')
++        sys.exit(113)
++    if how == 'refuse-text':
++        sys.stderr.write('Could not find service "%s" in domain for user gui: 501\n' % label)
++        sys.exit(1)
++    found = (loaded / label).exists()
++    (state / 'printed').write_text('')
++    if found:
++        print('state = not running')
++        sys.exit(0)
++    sys.stderr.write('Could not find service "%s" in domain for user gui: 501\n' % label)
++    sys.exit(113)
++sys.exit(64)
++'''
++OTHERS = ('ai.openclaw.host-preflight.' + 'f' * 32, 'ai.openclaw.mesh-agent')
++LABEL = r'ai\.openclaw\.host-preflight\.[0-9a-f]{32}'
++real_run = subprocess.run
++
++
++def compressed(command, **options):
++    """The real subprocess.run with its timeout compressed to 1 s (test speed only)."""
++    options['timeout'] = min(options.get('timeout', 1), 1.0)
++    return real_run(command, **options)
++
++
++class GuiStatusCleanup(unittest.TestCase):
++    def setUp(self):
++        temporary = tempfile.TemporaryDirectory(prefix='openclaw-gui-status-')
++        self.addCleanup(temporary.cleanup)
++        self.temp = pathlib.Path(temporary.name)
++        self.state = self.temp / 'launchd'
++        (self.state / 'loaded').mkdir(parents=True)
++        for label in OTHERS:  # unrelated loaded jobs that cleanup must never touch
++            (self.state / 'loaded' / label).write_text('')
++        fake = self.temp / 'launchctl'
++        fake.write_text('#!%s\n%s' % (sys.executable, FAKE_LAUNCHCTL))
++        fake.chmod(0o700)
++        origin = time.monotonic()
++        for patcher in (mock.patch.object(host_vm_preflight, 'LAUNCHCTL', str(fake)),
++                        mock.patch.object(host_vm_preflight, 'subprocess',
++                                          types.SimpleNamespace(run=compressed, TimeoutExpired=subprocess.TimeoutExpired)),
++                        mock.patch.object(host_vm_preflight, 'time', types.SimpleNamespace(
++                            monotonic=lambda: origin + (time.monotonic() - origin) * 40, sleep=time.sleep)),
++                        mock.patch.dict(os.environ, {'FAKE_LAUNCHD': str(self.state)})):
++            patcher.start()
++            self.addCleanup(patcher.stop)
++        self.count = 0
++
++    def sample(self, **modes):
++        for name, value in modes.items():
++            (self.state / name).write_text(value)
++        (self.state / 'calls').write_text('')
++        self.count += 1
++        output = self.temp / ('sample-%d' % self.count)
++        output.mkdir(mode=0o700)
++        return output
++
++    def status(self, output):
++        return host_vm_preflight.gui_utm_status('/fixture/utmctl', 'FIXTURE-UUID', output)
++
++    def label(self, output):
++        return plistlib.loads((output / 'utm-status.plist').read_bytes())['Label']
++
++    def loaded(self):
++        return sorted(path.name for path in (self.state / 'loaded').iterdir())
++
++    def evidence(self, output):
++        return json.loads((output / 'utm-status-cleanup.json').read_text())
++
++    def cleanup_calls(self, output):
++        """Every bootout/print names exactly this sample's unique label."""
++        label = self.label(output)
++        self.assertRegex(label, '^' + LABEL + '$')
++        service = 'gui/%d/%s' % (os.getuid(), label)
++        calls = [json.loads(line) for line in (self.state / 'calls').read_text().splitlines()]
++        self.assertTrue(all(call == [call[0], service] for call in calls if call[0] in ('bootout', 'print')), calls)
++        return calls
++
++    def assert_only_own_label(self, output):
++        """Cleanup named only this sample's label and left exactly the unrelated jobs loaded."""
++        calls = self.cleanup_calls(output)
++        self.assertEqual(self.loaded(), sorted(OTHERS))
++        return calls
++
++    def test_success_boots_out_its_own_label_without_cleanup_evidence(self):
++        output = self.sample()
++        self.assertEqual(self.status(output)['stdout'], 'started')
++        calls = self.assert_only_own_label(output)
++        self.assertEqual([call[0] for call in calls], ['bootstrap', 'bootout'])
++        self.assertFalse((output / 'utm-status-cleanup.json').exists())
++
++    def test_timed_out_bootstrap_that_applied_is_booted_out_and_not_accepted(self):
++        # The fake bootstrap loads the job and writes a valid status, then the client times out.
++        output = self.sample(bootstrap='apply-then-hang')
++        with self.assertRaises(subprocess.TimeoutExpired) as raised:
++            self.status(output)
++        self.assertIn('bootstrap', ' '.join(raised.exception.cmd))
++        self.assertTrue((output / 'utm-status.json').exists())
++        self.assert_only_own_label(output)
++        record = self.evidence(output)
++        self.assertEqual((record['booted_out'], record['bootout']['returncode'], 'print' in record), (True, 0, False))
++        self.assertIn('TimeoutExpired', record['primary_error'])
++
++    def test_timed_out_bootstrap_that_never_applied_keeps_its_error_and_absence_evidence(self):
++        output = self.sample(bootstrap='hang')
++        with self.assertRaises(subprocess.TimeoutExpired):
++            self.status(output)
++        self.assert_only_own_label(output)
++        record = self.evidence(output)
++        self.assertEqual((record['booted_out'], record['bootout']['returncode'], record['print']['returncode'],
++                          record['absent_at_print']), (False, 3, 113, True))
++
++    def test_failed_bootstrap_keeps_its_own_error(self):
++        output = self.sample(bootstrap='fail')
++        with self.assertRaisesRegex(RuntimeError, 'launchctl failed: Bootstrap failed: 5'):
++            self.status(output)
++        self.assert_only_own_label(output)
++        record = self.evidence(output)
++        self.assertEqual((record['booted_out'], record['absent_at_print']), (False, True))
++
++    def test_helper_timeout_is_not_masked_by_a_failing_cleanup(self):
++        output = self.sample(helper='none', bootout='fail-keep')
++        with self.assertRaisesRegex(RuntimeError, '^GUI UTM status helper timed out$'):
++            self.status(output)
++        record = self.evidence(output)
++        self.assertEqual((record['booted_out'], record['bootout']['returncode'], record['print']['returncode'],
++                          record['absent_at_print']), (False, 5, 0, False))
++        self.assertIn(self.label(output), self.loaded())  # evidence says so; the error stays the original
++
++    def test_refused_print_is_not_absence(self):
++        # Only 113 with "Could not find service" reads as absence, as managed_launchd reads it.
++        for refusal, code in (('refuse', 5), ('refuse-113', 113), ('refuse-text', 1)):
++            with self.subTest(refusal):
++                output = self.sample(bootstrap='hang', print=refusal)
++                with self.assertRaises(subprocess.TimeoutExpired):
++                    self.status(output)
++                record = self.evidence(output)
++                self.assertEqual((record['booted_out'], record['bootout']['returncode'],
++                                  record['print']['returncode'], record['absent_at_print']), (False, 3, code, False))
++                self.assertNotIn(self.label(output), self.loaded())  # absent in fact, not read as such
++
++    def test_hung_cleanup_does_not_mask_the_original_error(self):
++        output = self.sample(bootstrap='fail', bootout='hang', print='hang')
++        with self.assertRaisesRegex(RuntimeError, 'launchctl failed: Bootstrap failed: 5'):
++            self.status(output)
++        record = self.evidence(output)
++        self.assertEqual((record['booted_out'], record['bootout']['timed_out'], record['print']['timed_out'],
++                          record['absent_at_print']), (False, True, True, False))
++
++    def test_malformed_status_cleans_up_and_keeps_the_parse_error(self):
++        output = self.sample(helper='garbage')
++        with self.assertRaises(ValueError):
++            self.status(output)
++        self.assert_only_own_label(output)
++        self.assertTrue(self.evidence(output)['booted_out'])
++
++    def test_unwritable_evidence_does_not_mask_the_original_error(self):
++        output = self.sample(helper='none')
++        (output / 'utm-status-cleanup.json').write_text('occupied')
++        with self.assertRaisesRegex(RuntimeError, '^GUI UTM status helper timed out$'):
++            self.status(output)
++        self.assert_only_own_label(output)
++
++    def test_good_status_with_an_unremovable_agent_refuses(self):
++        output = self.sample(bootout='fail-keep')
++        with self.assertRaisesRegex(RuntimeError, '^GUI UTM status agent bootout did not succeed: ' + LABEL + '$'):
++            self.status(output)
++        record = self.evidence(output)
++        self.assertEqual((record['primary_error'], record['booted_out'], record['absent_at_print']), (None, False, False))
++
++    def test_good_status_after_an_unanswered_cleanup_refuses(self):
++        output = self.sample(bootout='hang', print='hang')
++        with self.assertRaisesRegex(RuntimeError, '^GUI UTM status agent bootout did not succeed: ' + LABEL + '$'):
++            self.status(output)
++        self.assertEqual(self.evidence(output)['booted_out'], False)
++
++    def test_good_status_refuses_an_unsuccessful_bootout_even_when_the_label_is_gone(self):
++        # The bootout removed the label but reported failure, or timed out after removing it; the
++        # print then reads absence. Absence is evidence only: the unsuccessful action refuses.
++        for how, outcome in (('fail-gone', (5, False)), ('remove-then-hang', (None, True))):
++            with self.subTest(how):
++                output = self.sample(bootout=how)
++                with self.assertRaisesRegex(RuntimeError, '^GUI UTM status agent bootout did not succeed: ' + LABEL + '$'):
++                    self.status(output)
++                self.assert_only_own_label(output)
++                record = self.evidence(output)
++                self.assertEqual((record['primary_error'], record['booted_out'], record['absent_at_print']),
++                                 (None, False, True))
++                self.assertEqual((record['bootout']['returncode'], record['bootout']['timed_out']), outcome)
++
++    def test_late_applied_bootstrap_is_the_documented_residual(self):
++        # Residual, not a guarantee: a bootstrap request launchd applies only after its client was
++        # killed and the cleanup's print answered leaves the job loaded. The original error stands,
++        # and the evidence names the leftover label as absent only at the time of the print.
++        output = self.sample(bootstrap='late')
++        with self.assertRaises(subprocess.TimeoutExpired):
++            self.status(output)
++        record = self.evidence(output)
++        self.assertEqual((record['booted_out'], record['absent_at_print']), (False, True))
++        deadline = time.monotonic() + 10
++        while self.label(output) not in self.loaded() and time.monotonic() < deadline:
++            time.sleep(0.05)
++        self.cleanup_calls(output)
++        self.assertEqual(self.loaded(), sorted(OTHERS + (record['label'],)))
++        self.assertEqual(record['label'], self.label(output))
++
++
++if __name__ == '__main__':
++    unittest.main()

@@ -15,7 +15,7 @@
     <key>ProgramArguments</key>
     <array>
       <string>${NODE_BIN}</string>
-      <string>${HOME}/openclaw/bin/lane-watchdog.js</string>
+      <string>${OPENCLAW_REPO_DIR}/bin/lane-watchdog.js</string>
     </array>
     <key>StandardOutPath</key>
     <string>${HOME}/.openclaw/logs/lane-watchdog.log</string>

@@ -1,0 +1,70 @@
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const SKILLS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills');
+
+function markdown(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) return e.name === '_quarantine' || e.name === 'node_modules' ? [] : markdown(full);
+    return e.name.endsWith('.md') ? [full] : [];
+  });
+}
+
+// Skill installs and updates go only through openclaw-skill-scanner/install-hook.sh
+// (operator decision, audit finding skills-a-l#8).
+describe('skill install gate', () => {
+  it('no loaded skill tells the agent to install or bulk-update skills around the scanner', () => {
+    const bypass = /npx skills (add|update)\b|clawd?hub update --all|npm update -g clawdbot/;
+    const hits = markdown(SKILLS).flatMap((file) => fs.readFileSync(file, 'utf8').split('\n')
+      .map((line, i) => (bypass.test(line) ? `${path.relative(SKILLS, file)}:${i + 1}: ${line.trim()}` : null))
+      .filter(Boolean));
+    assert.deepEqual(hits, []);
+  });
+
+  it('auto-updater is quarantined', () => {
+    assert.ok(!fs.existsSync(path.join(SKILLS, 'auto-updater')));
+    assert.ok(fs.existsSync(path.join(SKILLS, '_quarantine', 'auto-updater', 'SKILL.md')));
+    assert.match(fs.readFileSync(path.join(SKILLS, '_quarantine', 'README.md'), 'utf8'), /\| `auto-updater` \|/);
+  });
+
+  it('find-skills routes any install through the scanner gate without --force or -y', () => {
+    const text = fs.readFileSync(path.join(SKILLS, 'find-skills', 'SKILL.md'), 'utf8');
+    assert.match(text, /bash skills\/openclaw-skill-scanner\/install-hook\.sh <clawhub-slug>/);
+    assert.doesNotMatch(text, /\s-y\b|--yes/);
+    assert.match(text, /Never pass `--force`/);
+  });
+});
+
+// The node runs the openclaw CLI from ~/.openclaw; clawdbot, clawdhub and
+// ~/.clawdbot are gone (audit findings skills-a-l#17, #2). prompt-guard names the
+// old paths on purpose, as attack patterns.
+describe('no clawdbot-era commands or paths', () => {
+  const LEGACY_EXEMPT = new Set(['prompt-guard']);
+  it('no loaded skill runs the clawdbot or clawdhub CLI or touches ~/.clawdbot', () => {
+    const legacy = /(~|\$HOME)\/\.clawdbot\b|(^|[\s`$(])clawdhub\s+[a-z]|(^|[\s`$(])clawdbot\s+(skills|security|doctor|daemon|update|cron|gateway|config)\b/;
+    const hits = markdown(SKILLS)
+      .filter((file) => !LEGACY_EXEMPT.has(path.relative(SKILLS, file).split(path.sep)[0]))
+      .flatMap((file) => fs.readFileSync(file, 'utf8').split('\n')
+        .map((line, i) => (legacy.test(line) ? `${path.relative(SKILLS, file)}:${i + 1}: ${line.trim()}` : null))
+        .filter(Boolean));
+    assert.deepEqual(hits, []);
+  });
+
+  // Every grep against a missing ~/.clawdbot printed nothing, so the audit read as clean.
+  it('clawdbot-security-check audits the openclaw config read-only and never reports a missing one as clean', () => {
+    const dir = path.join(SKILLS, 'clawdbot-security-check');
+    const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
+    const checks = fs.readFileSync(path.join(dir, 'references', 'audit-checks.md'), 'utf8');
+    assert.match(skill, /^name: clawdbot-security-check$/m);
+    assert.match(skill, /`openclaw security audit --deep`/);
+    assert.match(skill, /~\/\.openclaw\/openclaw\.json/);
+    assert.doesNotMatch(skill, /security audit --fix|## Audit Fix Actions/);
+    assert.match(checks, /audit not run/);
+    assert.doesNotMatch(checks, /\.clawdbotrc|clawdbot\.json/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'skill.json'), 'utf8')).scripts, undefined);
+  });
+});

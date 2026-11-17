@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # bootstrap.sh — ONE-COMMAND install of an OpenClaw node on a virgin machine.
 #
-#   curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/bootstrap.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/bootstrap.sh | bash -s -- --role=lead
+#
+# --role=lead|worker is required on a node's first install (install.sh never
+# guesses it from the OS); later runs read the saved one.
 #
 # This is the only entrypoint that works on a machine with nothing on it.
 # `npx openclaw-node-harness` cannot be: npx requires npm requires Node, and
@@ -21,7 +24,7 @@
 #
 # Env overrides:
 #   OPENCLAW_REPO      owner/name to fetch      (default moltyguibros-design/openclaw-node)
-#   OPENCLAW_REF       branch/tag              (default main)
+#   OPENCLAW_REF       branch, tag or commit  (default main)
 #   OPENCLAW_SRC       use an existing checkout instead of downloading
 #   OPENCLAW_NO_INSTALL=1   install deps only, do not run install.sh
 #   plus any install.sh flag passed straight through:
@@ -44,6 +47,8 @@ main() {
 
 REPO="${OPENCLAW_REPO:-moltyguibros-design/openclaw-node}"
 REF="${OPENCLAW_REF:-main}"
+USER_SKIP_LLM=false
+for a in "$@"; do [ "$a" = "--skip-llm" ] && USER_SKIP_LLM=true; done
 
 G='\033[0;32m'; Y='\033[1;33m'; R='\033[0;31m'; B='\033[1m'; N='\033[0m'
 ok()   { echo -e "${G}[+]${N} $*"; }
@@ -52,6 +57,15 @@ err()  { echo -e "${R}[x]${N} $*"; }
 step() { echo -e "\n${B}━━━ $* ━━━${N}"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 die()  { err "$*"; exit 1; }
+
+# install.sh refuses a first install without a role; say so before the
+# dependency wave, not after it.
+ROLE_GIVEN=false
+for a in "$@"; do case "$a" in --role=*) ROLE_GIVEN=true ;; esac; done
+if [ "${OPENCLAW_NO_INSTALL:-0}" != "1" ] && ! $ROLE_GIVEN && [ -z "${OPENCLAW_NODE_ROLE:-}" ] &&
+   ! grep -q '^OPENCLAW_NODE_ROLE=.' "$HOME/.openclaw/openclaw.env" 2>/dev/null; then
+  die "no node role: re-run as  curl ... | bash -s -- --role=lead  (or --role=worker)"
+fi
 
 case "$(uname -s)" in
   Darwin) OS=macos ;;
@@ -105,7 +119,16 @@ if ! have curl && ! have wget; then
 fi
 ok "downloader: $(have curl && echo curl || echo wget)"
 
-node_ok() { have node && [ "$(node -e 'console.log(process.versions.node.split(".")[0])' 2>/dev/null || echo 0)" -ge 22 ]; }
+# 22.12 is the first 22.x whose require() loads an ES module unflagged
+# (bin/mesh-join-token.js and openclaw-node-init load lib/node-identity.mjs).
+node_ok() {
+  have node || return 1
+  local v major minor
+  v="$(node -v 2>/dev/null)"; v="${v#v}"
+  major="${v%%.*}"; minor="${v#*.}"; minor="${minor%%.*}"
+  case "$major$minor" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$major" -gt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 12 ]; }
+}
 
 # ============================================================
 # macOS
@@ -159,7 +182,7 @@ if [ "$OS" = macos ]; then
     ok "node $(node -v)"
   else
     brew install node@22 </dev/null && brew link --overwrite --force node@22
-    node_ok && ok "node $(node -v)" || err "node 22+ install failed"
+    node_ok && ok "node $(node -v)" || err "node 22.12+ install failed"
   fi
 
   # Report on whether the BINARY landed, never on the package manager's exit
@@ -195,9 +218,8 @@ else
   have apt-get || die "only Debian/Ubuntu apt is supported on Linux."
 
   step "APT baseline"
-  # Unconditional. install.sh only refreshes lists inside its node-missing
-  # branch, so a box that already ships Node 22 installs against stale lists
-  # and dies mid-run under `set -e`.
+  # Unconditional: refreshing lists only when Node was missing let a box that
+  # already ships Node 22 install against stale lists and die mid-run.
   $SUDO apt-get update -y || die "apt-get update failed."
   $SUDO apt-get install -y \
     curl git sqlite3 build-essential jq python3 python3-pip ca-certificates gnupg \
@@ -214,7 +236,7 @@ else
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
       | $SUDO tee /etc/apt/sources.list.d/nodesource.list >/dev/null
     $SUDO apt-get update -y && $SUDO apt-get install -y nodejs
-    node_ok && ok "node $(node -v)" || err "node 22+ install failed"
+    node_ok && ok "node $(node -v)" || err "node 22.12+ install failed"
   fi
 
   step "nats-server, ollama, tailscale"
@@ -284,7 +306,7 @@ fi
 step "Verification"
 FAIL=0
 chk() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else err "$1 — MISSING"; FAIL=1; fi; }
-chk "node 22+"      'node_ok'
+chk "node 22.12+"   'node_ok'
 chk "python3 3.8+"  'python3 -c "import sys; sys.exit(0 if sys.version_info>=(3,8) else 1)"'
 chk "PyYAML"        'python3 -c "import yaml"'
 chk "git"           'command -v git'
@@ -293,7 +315,9 @@ chk "build tools"   '{ [ "$OS" = macos ] && xcode-select -p; } || command -v cc'
 chk "curl"          'command -v curl'
 chk "jq"            'command -v jq'
 chk "nats-server"   'command -v nats-server'
-chk "ollama"        'command -v ollama'
+# Still installed under --skip-llm so llm-setup.sh works later, but a box that
+# asked for no LLM is not refused for lacking it (as prereqs.sh does).
+$USER_SKIP_LLM || chk "ollama" 'command -v ollama'
 chk "tailscale"     'command -v tailscale'
 [ "$OS" = macos ] && chk "homebrew" 'command -v brew'
 
@@ -319,7 +343,7 @@ else
   rm -rf "$SRC"; mkdir -p "$SRC"
   # Tarball, not `git clone`: on a virgin Mac `git` is a stub that pops the
   # Xcode GUI prompt, which would stall a piped install.
-  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$REF" \
+  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$REF" \
     | tar xz -C "$SRC" --strip-components=1 \
     || die "could not download $REPO@$REF"
   ok "source at $SRC"
@@ -331,8 +355,6 @@ cd "$SRC" || die "cannot enter $SRC"
 # Wave 1 is binaries + a running node. --skip-llm is forced here so the 5-20 GB
 # model pull never starts unannounced; wave 2 below asks first. If the caller
 # already passed --skip-llm they want no models at all, so wave 2 is skipped too.
-USER_SKIP_LLM=false
-for a in "$@"; do [ "$a" = "--skip-llm" ] && USER_SKIP_LLM=true; done
 
 if [ $# -gt 0 ]; then
   bash install.sh --enable-services --skip-llm "$@"

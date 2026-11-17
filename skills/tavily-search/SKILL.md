@@ -1,12 +1,12 @@
 ---
-name: tavily
-description: "AI-optimized web search via Tavily API. Use when the user needs to search the web, research a topic, find current news, or extract content from a URL."
+name: tavily-search
+description: "AI-optimized web search via Tavily API. Use when the user asks for Tavily by name, or for a deep Tavily research pass or URL extraction; plain web searches go to web-search."
 triggers:
-  - "search the web for"
-  - "look up online"
-  - "find recent news about"
-  - "research this topic"
-  - "what's the latest on"
+  - "search with tavily"
+  - "tavily search for"
+  - "research this topic with tavily"
+  - "use tavily to"
+  - "extract this url with tavily"
 negative_triggers:
   - "search this codebase"
   - "find this file"

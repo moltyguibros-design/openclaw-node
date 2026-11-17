@@ -21,23 +21,32 @@ import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { atomicWriteFile } from '../lib/atomic-write.mjs';
-import { runWatch, formatTable, formatReport, formatHtml, STATUS } from '../lib/node-watch.mjs';
+import { runWatch, formatTable, formatReport, formatHtml, STATUS, watchTransitions, WATCH_TARGETS } from '../lib/node-watch.mjs';
 
-const { values } = parseArgs({
-  options: {
-    watch: { type: 'boolean', default: false },
-    interval: { type: 'string', default: '60' },
-    'deep-interval': { type: 'string', default: '900' },
-    deep: { type: 'boolean', default: false },
-    axis: { type: 'string' },
-    json: { type: 'boolean', default: false },
-    html: { type: 'boolean', default: false },
-    report: { type: 'string' },
-    'html-out': { type: 'string' },
-    'json-out': { type: 'string' },
-    quiet: { type: 'boolean', default: false },
-  },
-});
+let values;
+try {
+  ({ values } = parseArgs({
+    options: {
+      watch: { type: 'boolean', default: false },
+      interval: { type: 'string', default: '60' },
+      'deep-interval': { type: 'string', default: '900' },
+      deep: { type: 'boolean', default: false },
+      axis: { type: 'string' },
+      json: { type: 'boolean', default: false },
+      html: { type: 'boolean', default: false },
+      report: { type: 'string' },
+      'html-out': { type: 'string' },
+      'json-out': { type: 'string' },
+      quiet: { type: 'boolean', default: false },
+    },
+  }));
+} catch (err) {
+  // An uncaught throw here would exit 1, which reads as >=1 BROKEN.
+  process.stderr.write(`[node-watch] ${err.message}\n`
+    + 'Usage: node-watch.mjs [--watch] [--interval <s>] [--deep-interval <s>] [--deep] [--axis <family>]'
+    + ' [--json] [--html] [--report <path>] [--html-out <path>] [--json-out <path>] [--quiet]\n');
+  process.exit(3);
+}
 
 const DEFAULT_REPORT = path.join(os.homedir(), '.openclaw', '.node-watch.md');
 const DEFAULT_HTML = path.join(os.homedir(), '.openclaw', '.node-watch.html');
@@ -75,25 +84,16 @@ async function once(mode, includeHeavy) {
 
 // Status-transition notifications (watch mode only): a ledgered desktop popup
 // on WORKING→BROKEN and BROKEN→WORKING, click-linking to the MC watch page.
-// Only ids present in consecutive reports are compared, so the light/deep probe
-// subsets never fabricate a transition. First report seeds silently.
+// A heavy target skipped on a light tick keeps its last observed status
+// (watchTransitions), so light/deep alternation never fabricates a BROKEN or
+// hides a recovery. First report seeds silently.
 const NOTIFY_CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), 'openclaw-notify.mjs');
 const MC_WATCH_URL = `${process.env.OPENCLAW_MC_URL || 'http://127.0.0.1:3000'}/node-watch`;
 let prevStatuses = null;
 
 function notifyTransitions(report) {
-  const cur = new Map(report.results.map((r) => [r.id, r.status]));
-  const prev = prevStatuses;
-  prevStatuses = cur;
-  if (!prev) return;
-  const broke = [];
-  const recovered = [];
-  for (const [id, status] of cur) {
-    const was = prev.get(id);
-    if (!was || was === status) continue;
-    if (status === STATUS.BROKEN) broke.push(id);
-    else if (was === STATUS.BROKEN && status === STATUS.WORKING) recovered.push(id);
-  }
+  const { next, broke, recovered } = watchTransitions(prevStatuses, report);
+  prevStatuses = next;
   const fire = (source, kind, title, message) => {
     try {
       execFile(process.execPath, [
@@ -119,6 +119,11 @@ async function main() {
     const report = await once('once', true); // one-shot runs every check, incl. heavy
     const broken = report.results.some((r) => r.status === STATUS.BROKEN);
     process.exit(broken ? 1 : 0);
+  }
+
+  // runWatch rejects an unknown axis, but tick() would log it and retry forever.
+  if (values.axis && !WATCH_TARGETS.some((t) => t.family === values.axis)) {
+    throw new Error(`unknown axis '${values.axis}' (families: ${[...new Set(WATCH_TARGETS.map((t) => t.family))].join(', ')})`);
   }
 
   const intervalMs = Math.max(5, Number(values.interval) || 60) * 1000;

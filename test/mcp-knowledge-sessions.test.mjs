@@ -92,6 +92,34 @@ describe('chunkSessionTurns', () => {
   });
 });
 
+// Embedder-free: turns with no content chunk to nothing, so the rebuild's
+// embedBatch([]) never loads the model but still yields at its await.
+describe('indexSessionTurns full rebuild replaces old rows in one step', () => {
+  it('old chunks and vectors survive until the rebuild commits', async () => {
+    const db = initDatabase(':memory:');
+    db.prepare('INSERT INTO session_documents (session_id, source_path, content_hash, last_indexed, turn_count) VALUES (?, ?, ?, ?, ?)')
+      .run('s-rebuild', '/fake/old.jsonl', 'stale-hash', 0, 2);
+    const insertChunk = db.prepare('INSERT INTO session_chunks (session_id, turn_index, role, text, snippet) VALUES (?, ?, ?, ?, ?)');
+    for (let i = 0; i < 2; i++) {
+      const info = insertChunk.run('s-rebuild', i, 'user', `[user] old turn ${i}`, `old turn ${i}`);
+      db.prepare(`INSERT INTO session_chunk_vectors VALUES (${info.lastInsertRowid}, ?)`)
+        .run(Buffer.from(new Float32Array(EMBEDDING_DIM).fill(0.1).buffer));
+    }
+    const countChunks = () => db.prepare('SELECT COUNT(*) as c FROM session_chunks WHERE session_id = ?').get('s-rebuild').c;
+
+    const pending = indexSessionTurns(db, 's-rebuild', '/fake/new.jsonl', [{ role: 'user', content: '   ' }]);
+    assert.strictEqual(countChunks(), 2, 'old chunks still present while the rebuild awaits the embedder');
+    const result = await pending;
+
+    assert.strictEqual(result.mode, 'full');
+    assert.strictEqual(countChunks(), 0);
+    assert.strictEqual(db.prepare('SELECT COUNT(*) as c FROM session_chunk_vectors').get().c, 0, 'old vectors deleted with their chunks');
+    const doc = db.prepare('SELECT source_path, turn_count FROM session_documents WHERE session_id = ?').get('s-rebuild');
+    assert.deepStrictEqual({ ...doc }, { source_path: '/fake/new.jsonl', turn_count: 1 });
+    db.close();
+  });
+});
+
 describe('indexSessionTurns + searchSessions', { skip: EMBED_SKIP }, () => {
   let db;
   let tmpDir;
@@ -161,7 +189,10 @@ describe('indexSessionTurns + searchSessions', { skip: EMBED_SKIP }, () => {
       { role: 'user', content: 'padding turn two' },
     ];
     assert.ok(MUTATED.length > current.turn_count, 'grew past stored turn_count so the append guard is what rejects it');
-    const result = await indexSessionTurns(db, 'test-session-001', '/fake/path.jsonl', MUTATED);
+    const pending = indexSessionTurns(db, 'test-session-001', '/fake/path.jsonl', MUTATED);
+    const during = db.prepare('SELECT COUNT(*) as c FROM session_chunks WHERE session_id = ?').get('test-session-001').c;
+    const result = await pending;
+    assert.ok(during > 0, 'old chunks stay searchable while the rebuild embeds');
     assert.strictEqual(result.indexed, true);
     assert.strictEqual(result.mode, 'full', 'prefix mismatch forces full rebuild');
     const chunkCount = db.prepare('SELECT COUNT(*) as c FROM session_chunks WHERE session_id = ?').get('test-session-001').c;

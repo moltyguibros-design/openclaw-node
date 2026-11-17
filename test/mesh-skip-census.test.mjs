@@ -11,14 +11,19 @@
  * suite files were skipped, as one clearly-named skipped test (so `skipped >= 1`
  * with a reason). Set OPENCLAW_REQUIRE_MESH=1 (e.g. in CI once the mesh stack is
  * provisioned) to turn that silent skip into a hard failure instead.
+ *
+ * The mesh tier runs only with OPENCLAW_TEST_MESH=1: without it the suites
+ * skip (and this census reports it), so `npm test` on a live node never
+ * submits or claims tasks on the production bus.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
+import { natsServerBin } from './helpers/nats-server.mjs';
 
 const require = createRequire(import.meta.url);
 const { meshSkipReason } = require('./helpers/mesh-available.cjs');
@@ -50,14 +55,26 @@ test(`mesh-skip census (${meshFiles.length} mesh-dependent suite file(s))`, (t) 
   censusCheck(t, { files: meshFiles, reason: meshSkipReason(), label: 'mesh-dependent' });
 });
 
+// tests#8: the probe dials the bus natsConnectOpts resolves, which on a live
+// node is production. Without the explicit opt-in the tier must skip before
+// any connection, whatever the probe cache says.
+test('the mesh tier skips unless OPENCLAW_TEST_MESH=1, before dialing any bus', () => {
+  const env = { ...process.env, OPENCLAW_NATS: 'nats://127.0.0.1:1' };
+  delete env.OPENCLAW_TEST_MESH;
+  const helper = join(TEST_DIR, 'helpers', 'mesh-available.cjs');
+  const out = execFileSync(process.execPath, ['-e', `process.stdout.write(String(require(${JSON.stringify(helper)}).meshSkipReason()))`], { env, encoding: 'utf8', timeout: 20_000 });
+  assert.match(out, /^mesh tier not opted in \(set OPENCLAW_TEST_MESH=1/);
+});
+
 // Class 2: federation suites gated on the nats-server BINARY. They skip via
 // their own `{ skip: 'nats-server not found on PATH' }` const — a skipped
 // describe registers zero child tests, so without this census the whole
 // federation-integration tier vanishes with `skipped 0`.
 const natsBinFiles = filesContaining('nats-server not found on PATH');
+// The suites gate on natsServerBin() ($NATS_SERVER_BIN, then PATH); a census
+// that only checked PATH reported them skipped while they ran.
 function natsServerBinReason() {
-  try { execSync('which nats-server', { stdio: 'pipe' }); return null; }
-  catch { return 'nats-server binary not found on PATH'; }
+  return natsServerBin() ? null : 'nats-server binary not found ($NATS_SERVER_BIN or PATH)';
 }
 test(`nats-server-binary census (${natsBinFiles.length} federation suite file(s))`, (t) => {
   censusCheck(t, { files: natsBinFiles, reason: natsServerBinReason(), label: 'nats-server-dependent' });

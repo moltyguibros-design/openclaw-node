@@ -20,7 +20,7 @@
  *   - MEMORY.md character budget with frozen session snapshots
  *   - SQLite session archive with FTS5 for episodic recall
  *
- * Install: bin/install-daemon (detects OS, sets up launchd/systemd/pm2)
+ * Install: install.sh (scripts/install/services.sh renders the launchd/systemd unit)
  * Manual:  node bin/memory-daemon.mjs [--test] [--verbose]
  */
 
@@ -40,9 +40,11 @@ const { createTracer } = require('../lib/tracer');
 const tracer = createTracer('memory-daemon');
 
 // --- Hermes-inspired modules ---
-import { shouldFlush, USE_LLM_EXTRACTION } from '../lib/pre-compression-flush.mjs';
+import { USE_LLM_EXTRACTION } from '../lib/pre-compression-flush.mjs';
 import { createBudget } from '../lib/memory-budget.mjs';
 import { createSessionTraceEmitter } from './session-trace-emitter.mjs';
+import { SessionTracker, STATES } from '../lib/session-tracker.mjs';
+import { renderCompanionState } from '../lib/companion-state.mjs';
 import { createLocalEventLog, buildMemoryEvent } from '../lib/local-event-log.mjs';
 import { createLlmClient, DEFAULT_MODEL } from '../lib/llm-client.mjs';
 import { createExtractionStore } from '../lib/extraction-store.mjs';
@@ -50,11 +52,12 @@ import { createExtractionTrigger } from '../lib/extraction-trigger.mjs';
 import { ensureSharedStream, inspectSharedStream, verifySharedStreamConfig } from '../lib/shared-event-stream.mjs';
 import { NATS_RECONNECT_OPTS } from '../lib/federation-resilience.mjs';
 import { createConcurrencyGuard } from '../lib/concurrency-guard.mjs';
-import { exportStateSnapshot, getState as getOllamaQueueState, setStateObserver, markExternalJob, clearExternalJob } from '../lib/ollama-queue.mjs';
+import { exportStateSnapshot, getState as getOllamaQueueState, setStateObserver, markExternalJob, clearExternalJob, foldWorkerQueueState, applyWorkerLlmMessage } from '../lib/ollama-queue.mjs';
 import { loadEventSchemas } from '../lib/event-schemas.mjs';
 import { createMemoryWatcher, runStoreHealthProbes, appendWatcherRecord } from '../lib/memory-watcher.mjs';
 import { initDatabase as initKnowledgeDb } from '../lib/mcp-knowledge/core.mjs';
 import { createGraphCache } from '../bin/obsidian-graph-cache.mjs';
+import { memoryDaemonPaths } from '../lib/memory-daemon-paths.mjs';
 
 const traceEmitter = createSessionTraceEmitter(tracer);
 
@@ -73,7 +76,7 @@ function getExtractionStore() {
   if (!USE_LLM_EXTRACTION) return null;
   if (!_extractionStore) {
     try {
-      _extractionStore = createExtractionStore();
+      _extractionStore = createExtractionStore({ dbPath: PATHS.stateDb });
       log(`Extraction store initialized`);
     } catch (err) {
       log(`extraction-store unavailable: ${err.message}`);
@@ -83,28 +86,13 @@ function getExtractionStore() {
   return _extractionStore;
 }
 
-// Session store loaded lazily (requires better-sqlite3)
-let _sessionStore = null;
-async function getSessionStore() {
-  if (_sessionStore) return _sessionStore;
-  try {
-    const { SessionStore } = await import('../lib/session-store.mjs');
-    _sessionStore = new SessionStore();
-    console.log('[memory-daemon] Session store initialized');
-    return _sessionStore;
-  } catch (err) {
-    log(`session-store unavailable: ${err.message}`);
-    return null;
-  }
-}
-
 // HyperAgent store loaded lazily (requires better-sqlite3)
 let _haStore = null;
 async function getHyperAgentStore() {
   if (_haStore) return _haStore;
   try {
     const { createHyperAgentStore } = await import('../lib/hyperagent-store.mjs');
-    _haStore = createHyperAgentStore();
+    _haStore = createHyperAgentStore({ dbPath: PATHS.stateDb });
     console.log('[memory-daemon] HyperAgent store initialized');
     return _haStore;
   } catch (err) {
@@ -118,8 +106,7 @@ let _knowledgeDb = null;
 function getKnowledgeDb() {
   if (_knowledgeDb) return _knowledgeDb;
   try {
-    const dbPath = path.join(HOME, '.openclaw/workspace/.knowledge.db');
-    _knowledgeDb = initKnowledgeDb(dbPath);
+    _knowledgeDb = initKnowledgeDb(PATHS.knowledgeDb);
     log('Knowledge DB initialized');
     return _knowledgeDb;
   } catch (err) {
@@ -133,7 +120,7 @@ let _graphCache = null;
 function getGraphCache() {
   if (_graphCache) return _graphCache;
   try {
-    _graphCache = createGraphCache({ extractionStore: getExtractionStore() }); // P2: merge LLM typed edges
+    _graphCache = createGraphCache({ dbPath: PATHS.graphCacheDb, extractionStore: getExtractionStore() }); // P2: merge LLM typed edges
     log('Graph cache initialized');
     return _graphCache;
   } catch (err) {
@@ -154,16 +141,21 @@ const __dirname = path.dirname(__filename);
 // produced ids that failed the event envelope regex and split the node's
 // identity across processes (review I13/P10).
 const NODE_ID = resolveNodeId();
-const WORKSPACE = process.env.OPENCLAW_WORKSPACE || path.dirname(__dirname);
+const PATHS = memoryDaemonPaths();
+const WORKSPACE = PATHS.workspace || path.dirname(__dirname);
 const HOME = os.homedir();
-const CONFIG_PATH = path.join(HOME, '.openclaw/config/daemon.json');
-const TRANSCRIPT_REGISTRY = path.join(HOME, '.openclaw/config/transcript-sources.json');
+const CONFIG_PATH = PATHS.config;
+const TRANSCRIPT_REGISTRY = PATHS.transcriptSources;
+// The unit renders TZ from OPENCLAW_TIMEZONE; daemon.json's timezone, once
+// loaded, governs the daemon's dates, its log stamps and its children's TZ.
+const TIMEZONE = process.env.OPENCLAW_TIMEZONE || process.env.TZ || 'America/Montreal';
+let timezone = TIMEZONE;
 
 function loadConfig() {
   const defaults = {
     nodeId: 'daedalus',
     workspace: WORKSPACE,
-    timezone: 'America/Montreal',
+    timezone: TIMEZONE,
     intervals: {
       pollMs: 30000,
       activityWindowMs: 900000,   // 15 min
@@ -177,7 +169,6 @@ function loadConfig() {
     contextWindowTokens: 200000,     // active model's context window (override per LLM)
     memoryCharBudget: 2200,           // MEMORY.md character cap
     clawvaultBin: 'bin/clawvault-local',
-    obsidianVault: 'projects/arcane-vault',
   };
 
   if (fs.existsSync(CONFIG_PATH)) {
@@ -217,7 +208,7 @@ function ensureDirs() {
 
 function timestamp() {
   return new Date().toLocaleString('en-CA', {
-    timeZone: 'America/Montreal',
+    timeZone: timezone,
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
     hour12: false,
@@ -252,7 +243,7 @@ function loadTranscriptSources() {
   return [
     { name: 'claude-code', path: path.join(HOME, '.claude/projects', slug), format: 'claude-code' },
     { name: 'claude-home', path: path.join(HOME, '.claude/projects', '-' + path.basename(HOME)), format: 'claude-code' },
-    { name: 'gateway', path: path.join(HOME, '.openclaw/agents/main/sessions'), format: 'openclaw-gateway' },
+    { name: 'gateway', path: PATHS.gatewaySessions, format: 'openclaw-gateway' },
   ];
 }
 
@@ -268,10 +259,10 @@ function _detectActivity(sources, activityWindowMs) {
   const now = Date.now();
   const cutoff = now - activityWindowMs;
   let active = false;
-  let newestSession = null;
   let newestMtime = 0;
   let newestSource = null;
-  let newestFormat = null;
+  const recentFiles = [];
+  const activeSessions = [];
 
   for (const source of sources) {
     if (!fs.existsSync(source.path)) {
@@ -296,18 +287,20 @@ function _detectActivity(sources, activityWindowMs) {
       try {
         const stat = fs.statSync(full);
         const mtime = stat.mtimeMs;
-        if (mtime > cutoff) active = true;
+        if (mtime > cutoff) {
+          active = true;
+          recentFiles.push(full);
+          if (stat.size >= MIN_SESSION_BYTES) activeSessions.push({ sessionId: path.basename(f, '.jsonl'), path: full });
+        }
         if (mtime > newestMtime) {
           newestMtime = mtime;
-          newestSession = path.basename(f, '.jsonl');
           newestSource = source.name;
-          newestFormat = source.format || null;
         }
       } catch (err) { console.warn(`[memory-daemon] session file stat failed for ${full}: ${err.message}`); continue; }
     }
   }
 
-  const result = { active, newestSession, newestMtime, newestSource, newestFormat };
+  const result = { active, recentFiles, activeSessions };
   if (process.env.OPENCLAW_LOG_LEVEL === 'debug') {
     const ageMs = newestMtime ? Math.round(Date.now() - newestMtime) : -1;
     console.log(`[memory-daemon] Activity: source=${newestSource || 'none'} age=${ageMs}ms`);
@@ -317,118 +310,14 @@ function _detectActivity(sources, activityWindowMs) {
 const detectActivity = tracer.wrap('detectActivity', _detectActivity, { tier: 1 });
 
 // ============================================================
-// SESSION STATE MACHINE
-// ENDED → BOOT → ACTIVE → IDLE → ENDED
-// ============================================================
-
-const STATES = { ENDED: 'ENDED', BOOT: 'BOOT', ACTIVE: 'ACTIVE', IDLE: 'IDLE' };
-
-class SessionStateMachine {
-  #state = STATES.ENDED;
-  #sessionId = null;
-  #lastActivityTime = 0;
-  #bootStartTime = 0;
-  #config;
-
-  constructor(config) {
-    this.#config = config;
-  }
-
-  get state() { return this.#state; }
-  get sessionId() { return this.#sessionId; }
-  get lastActivityTime() { return this.#lastActivityTime; }
-
-  tick(activity) {
-    const now = Date.now();
-    const transitions = [];
-
-    if (activity.active) {
-      this.#lastActivityTime = now;
-    }
-
-    const timeSinceActivity = now - this.#lastActivityTime;
-    const isNewSession = activity.newestSession
-      && activity.newestSession !== this.#sessionId
-      && activity.active;
-
-    switch (this.#state) {
-      case STATES.ENDED:
-        if (activity.active) {
-          this.#sessionId = activity.newestSession;
-          this.#state = STATES.BOOT;
-          this.#bootStartTime = now;
-          transitions.push({ from: STATES.ENDED, to: STATES.BOOT, sessionId: this.#sessionId });
-        }
-        break;
-
-      case STATES.BOOT:
-        // Boot is transient — completeBoot() transitions to ACTIVE
-        // Safety: force to ACTIVE if boot takes >60s
-        if (now - this.#bootStartTime > 60000) {
-          this.#state = STATES.ACTIVE;
-          transitions.push({ from: STATES.BOOT, to: STATES.ACTIVE, sessionId: this.#sessionId });
-        }
-        break;
-
-      case STATES.ACTIVE:
-        if (isNewSession) {
-          // New session while active — end current, boot new
-          transitions.push({ from: STATES.ACTIVE, to: STATES.ENDED, sessionId: this.#sessionId });
-          this.#sessionId = activity.newestSession;
-          this.#state = STATES.BOOT;
-          this.#bootStartTime = now;
-          transitions.push({ from: STATES.ENDED, to: STATES.BOOT, sessionId: this.#sessionId });
-        } else if (timeSinceActivity > this.#config.intervals.activeThresholdMs) {
-          this.#state = STATES.IDLE;
-          transitions.push({ from: STATES.ACTIVE, to: STATES.IDLE, sessionId: this.#sessionId });
-        }
-        break;
-
-      case STATES.IDLE:
-        if (isNewSession) {
-          transitions.push({ from: STATES.IDLE, to: STATES.ENDED, sessionId: this.#sessionId });
-          this.#sessionId = activity.newestSession;
-          this.#state = STATES.BOOT;
-          this.#bootStartTime = now;
-          transitions.push({ from: STATES.ENDED, to: STATES.BOOT, sessionId: this.#sessionId });
-        } else if (activity.active && timeSinceActivity < this.#config.intervals.activeThresholdMs) {
-          this.#state = STATES.ACTIVE;
-          transitions.push({ from: STATES.IDLE, to: STATES.ACTIVE, sessionId: this.#sessionId });
-        } else if (timeSinceActivity > this.#config.intervals.idleThresholdMs) {
-          this.#state = STATES.ENDED;
-          transitions.push({ from: STATES.IDLE, to: STATES.ENDED, sessionId: this.#sessionId });
-          this.#sessionId = null;
-        }
-        break;
-    }
-
-    return transitions;
-  }
-
-  completeBoot() {
-    if (this.#state === STATES.BOOT) {
-      this.#state = STATES.ACTIVE;
-      return { from: STATES.BOOT, to: STATES.ACTIVE, sessionId: this.#sessionId };
-    }
-    return null;
-  }
-
-  // Restore state from daemon-state.json after crash/restart
-  restore(saved) {
-    if (saved && saved.state && STATES[saved.state]) {
-      this.#state = saved.state;
-      this.#sessionId = saved.sessionId || null;
-      this.#lastActivityTime = saved.lastActivityTime || 0;
-    }
-  }
-}
-
-// ============================================================
 // MEMORY BUDGET (Hermes-inspired frozen snapshot)
 // ============================================================
 
 let memoryBudget = null;
 let localEventLog = null;
+// The inject server and memory budget are built once, possibly before a NATS
+// retry sets localEventLog; they hold this forwarder so a later log reaches them.
+const liveEventLog = { publishLocal: (event) => (localEventLog ? localEventLog.publishLocal(event) : Promise.resolve()) };
 let extractionTrigger = null;
 
 // Serialize runFlush across all trigger paths (D3 port, deep review 2026-07-03).
@@ -458,18 +347,26 @@ function runMemoryWorker(data, timeoutMs = FLUSH_WORKER_TIMEOUT_MS) {
     // process's idle gate. Register the job here for the lifetime of the
     // worker so consolidation cannot start beside a running extraction.
     const jobId = `${data.kind || 'flush'}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    markExternalJob(jobId, { type: data.kind || 'flush', detail: data.jsonlPath ? path.basename(data.jsonlPath) : null });
-    const w = new Worker(FLUSH_WORKER, { workerData: data });
+    const llmJobId = `${jobId}:llm`;
+    const detail = data.jsonlPath ? path.basename(data.jsonlPath) : null;
+    markExternalJob(jobId, { type: data.kind || 'flush', detail });
+    const w = new Worker(FLUSH_WORKER, { workerData: { stateDb: PATHS.stateDb, ...data } });
     let settled = false;
+    const clearJobs = () => { clearExternalJob(jobId); clearExternalJob(llmJobId); };
     const timer = setTimeout(() => {
       settled = true;
-      clearExternalJob(jobId);
+      clearJobs();
       w.terminate();
       reject(new Error(`memory worker (${data.kind || 'flush'}) timed out after ${timeoutMs / 60_000}min`));
     }, timeoutMs);
     timer.unref();
-    const settle = (fn, v) => { if (!settled) { settled = true; clearTimeout(timer); clearExternalJob(jobId); fn(v); } };
-    w.once('message', (m) => settle(m.ok ? resolve : reject, m.ok ? m.result : new Error(m.error)));
+    const settle = (fn, v) => { if (!settled) { settled = true; clearTimeout(timer); clearJobs(); fn(v); } };
+    w.on('message', (m) => {
+      if (settled) return;
+      if (applyWorkerLlmMessage(llmJobId, m, detail)) return;
+      foldWorkerQueueState(m.queue);
+      settle(m.ok ? resolve : reject, m.ok ? m.result : new Error(m.error));
+    });
     w.once('error', (e) => settle(reject, e));
     w.once('exit', (code) => { if (code !== 0) settle(reject, new Error(`memory worker (${data.kind || 'flush'}) exited with code ${code}`)); });
   });
@@ -477,16 +374,39 @@ function runMemoryWorker(data, timeoutMs = FLUSH_WORKER_TIMEOUT_MS) {
 function runFlushInWorker(jsonlPath, memoryMdPath, opts = {}) {
   return runMemoryWorker({ kind: 'flush', jsonlPath, memoryMdPath, ...opts });
 }
+// Session-store imports are serialized: the end-of-session archive, the boot
+// pass and the Phase 2 pass all write the current session's rows, and two
+// workers doing it at once is a duplicate delete-and-reinsert.
+let importChain = Promise.resolve();
+function serializeImport(fn) {
+  const next = importChain.then(fn, fn);
+  importChain = next.catch(() => {});
+  return next;
+}
 function runImportInWorker(jsonlPath, { source, format } = {}) {
-  return runMemoryWorker({ kind: 'import', jsonlPath, source, format }, 10 * 60_000);
+  return serializeImport(() => runMemoryWorker({ kind: 'import', jsonlPath, source, format }, 10 * 60_000));
+}
+// The directory pass parses only files whose size/mtime marker changed, but the
+// first pass after an upgrade parses everything once, hence the long timeout.
+async function runImportDirInWorker(sources) {
+  const present = sources.filter(s => fs.existsSync(s.path)).map(s => ({ path: s.path, name: s.name, format: s.format }));
+  if (present.length === 0) return [];
+  const { results, failed } = await serializeImport(() => runMemoryWorker({ kind: 'importDir', sources: present }));
+  for (const r of results) emitIngestEvent(r.sessionId, r.source, r.messageCount, r.previousCount);
+  for (const f of failed) {
+    log(`  session-store import of ${path.basename(f.file)} (${f.source}) failed: ${f.error}`);
+    emitErrorEvent('ingest', new Error(f.error), path.basename(f.file, '.jsonl'));
+  }
+  return results;
 }
 
-function emitIngestEvent(sessionId, source, messageCount) {
+function emitIngestEvent(sessionId, source, messageCount, previousCount = 0) {
   if (!localEventLog) return;
   const event = buildMemoryEvent('memory.ingested', sessionId, 'memory', {
     session_id: sessionId,
     source: source || 'unknown',
-    messages_added: messageCount,
+    // Clamped: a parser change can re-count a stored session lower, and the schema rejects a negative delta.
+    messages_added: Math.max(0, messageCount - previousCount),
     total_messages: messageCount,
   }, NODE_ID);
   localEventLog.publishLocal(event).catch(err =>
@@ -494,9 +414,8 @@ function emitIngestEvent(sessionId, source, messageCount) {
   );
 }
 
-function emitExtractEvent(sessionId, extraction) {
-  if (!localEventLog) return;
-  const event = buildMemoryEvent('memory.extracted', sessionId, 'memory', {
+function extractedEventData(sessionId, extraction) {
+  return {
     session_id: sessionId,
     entities_count: extraction.entities_count,
     themes_count: extraction.themes_count,
@@ -508,7 +427,15 @@ function emitExtractEvent(sessionId, extraction) {
     decision_texts: extraction.decision_texts,
     model: DEFAULT_MODEL,
     duration_ms: extraction.duration_ms,
-  }, NODE_ID);
+    // An unchanged tail: recorded (noop, still pipeline liveness) but kept out
+    // of the watcher's extraction_failure_rate window.
+    ...(extraction.dedup ? { dedup: true } : {}),
+  };
+}
+
+function emitExtractEvent(sessionId, extraction) {
+  if (!localEventLog) return;
+  const event = buildMemoryEvent('memory.extracted', sessionId, 'memory', extractedEventData(sessionId, extraction), NODE_ID);
   localEventLog.publishLocal(event).catch(err =>
     log(`[event] memory.extracted emit failed: ${err.message}`)
   );
@@ -623,7 +550,7 @@ function initMemoryBudget(config) {
   if (memoryBudget) return memoryBudget;
   memoryBudget = createBudget(config.workspace || WORKSPACE, {
     charBudget: config.memoryCharBudget || 2200,
-    eventLog: localEventLog,
+    eventLog: liveEventLog,
     nodeId: NODE_ID,
   });
 
@@ -644,7 +571,7 @@ function initMemoryBudget(config) {
 // PHASE 0: SESSION-START BOOTSTRAP
 // ============================================================
 
-async function runPhase0Bootstrap(sessionId, config) {
+async function runPhase0Bootstrap(sessionId, config, { othersLive = false } = {}) {
   log(`Phase 0: Bootstrap for session ${sessionId?.slice(0, 8) || 'unknown'}`);
 
   const recap = path.join(WORKSPACE, 'bin/session-recap');
@@ -685,6 +612,10 @@ async function runPhase0Bootstrap(sessionId, config) {
       await runSubprocess('node', [maintenance, '--force'], 60000);
       log('  memory-maintenance --force done');
     } catch (e) { log(`  memory-maintenance failed: ${e.message}`); }
+    // Phase 2 forces maintenance on this stamp alone; without it the boot tick runs it twice.
+    const throttle = loadThrottleState();
+    throttle.lastMaintenance = Date.now();
+    saveThrottleState(throttle);
   }
 
   // 5. Compile boot artifacts
@@ -726,30 +657,21 @@ async function runPhase0Bootstrap(sessionId, config) {
     } catch (e) { log(`  clawvault doctor failed: ${e.message}`); }
   }
 
-  // 9. Freeze MEMORY.md snapshot for deterministic prompt content
-  try {
-    const budget = initMemoryBudget(config);
-    budget.startSession();
-    const stats = budget.getStats();
-    log(`  memory-budget frozen ${stats.meterDisplay}`);
-  } catch (e) { log(`  memory-budget freeze failed: ${e.message}`); }
+  // 9. Freeze MEMORY.md snapshot for deterministic prompt content. A session
+  // that boots beside a live one keeps the snapshot that one is reading.
+  if (!othersLive) {
+    try {
+      const budget = initMemoryBudget(config);
+      budget.startSession();
+      const stats = budget.getStats();
+      log(`  memory-budget frozen ${stats.meterDisplay}`);
+    } catch (e) { log(`  memory-budget freeze failed: ${e.message}`); }
+  }
 
-  // 10. Import recent sessions into SQLite archive
+  // 10. Import changed sessions into SQLite archive (memory worker)
   try {
-    const store = await getSessionStore();
-    if (store) {
-      const sources = loadTranscriptSources();
-      let totalImported = 0;
-      for (const source of sources) {
-        if (!fs.existsSync(source.path)) continue;
-        const result = await store.importDirectory(source.path, {
-          source: source.name, format: source.format,
-          onImported: (r) => emitIngestEvent(r.sessionId, source.name, r.messageCount),
-        });
-        totalImported += result.imported;
-      }
-      if (totalImported > 0) log(`  session-store: imported ${totalImported} sessions`);
-    }
+    const imported = await runImportDirInWorker(loadTranscriptSources());
+    if (imported.length > 0) log(`  session-store: imported ${imported.length} sessions`);
   } catch (e) { log(`  session-store import failed: ${e.message}`); emitErrorEvent('ingest', e); }
 
   log('Phase 0: Bootstrap complete');
@@ -780,7 +702,7 @@ function findPreviousJsonl(sources) {
 // short-but-real conversation from the interval/NATS flush paths and from
 // ended-session targeting; the 1.4 extraction dedup makes re-considering
 // small sessions cheap.
-const MIN_SESSION_BYTES = 1024;
+const { MIN_SESSION_BYTES } = require('../lib/session-floor');
 
 function findCurrentJsonl(sources) {
   const all = [];
@@ -816,12 +738,17 @@ function findJsonlBySessionId(sources, sessionId) {
   return null;
 }
 
+function sourceOfJsonl(sources, jsonlPath) {
+  const dir = path.resolve(path.dirname(jsonlPath));
+  return sources.find(s => path.resolve(s.path) === dir) || null;
+}
+
 // ============================================================
 // PHASE 1: STATUS SYNC
 // Updates .daemon-state-${NODE_ID}.md from active-tasks.md (~5ms)
 // ============================================================
 
-function runPhase1StatusSync(config) {
+function runPhase1StatusSync(config, status, { newSession = false } = {}) {
   const activeTasks = path.join(WORKSPACE, 'memory/active-tasks.md');
   const companion = path.join(WORKSPACE, `.daemon-state-${NODE_ID}.md`);
 
@@ -865,40 +792,9 @@ function runPhase1StatusSync(config) {
     hour12: false,
   }).replace(', ', 'T').replace(/\//g, '-');
 
-  // Preserve started_at from existing companion state
-  let startedAt = now;
-  if (fs.existsSync(companion)) {
-    try {
-      const existing = fs.readFileSync(companion, 'utf-8');
-      const match = existing.match(/started_at:\s*(.+)/);
-      if (match) startedAt = match[1].trim();
-    } catch (err) { console.warn(`[memory-daemon] companion-state read failed: ${err.message}`); }
-  }
-
-  const output = `## Session Status
-status: active
-started_at: ${startedAt}
-last_flush: ${now}
-
-## Active Task
-${runningTasks}
-
-## Current State
-${runningCount} running, ${doneCount} done
-
-## Crash Recovery
-If this file says \`status: active\` but the session is dead:
-1. The session crashed before flush
-2. Read memory/active-tasks.md for last known work state
-3. Resume from the active task listed above
-`;
-
-  let previousContent = '';
-  try { previousContent = fs.readFileSync(companion, 'utf-8'); } catch {}
-  fs.writeFileSync(companion, output);
-  if (output !== previousContent) {
-    console.log('[memory-daemon] Companion state updated');
-  }
+  let existing = '';
+  try { existing = fs.readFileSync(companion, 'utf-8'); } catch {}
+  fs.writeFileSync(companion, renderCompanionState(existing, { status, newSession, now, runningTasks, runningCount, doneCount }));
 }
 
 // ============================================================
@@ -1008,37 +904,13 @@ async function runPhase2ThrottledWork(config, sessionState) {
     }
   }
 
-  // Live session import (every 10min while a session is running) — state.db
-  // ingest used to happen only at boot + session end, so a marathon session
-  // lagged hours behind its own transcript (and the mem.ingest freshness probe
-  // rightly flagged it). importSession is offset-incremental, so this is cheap.
-  if (now - (throttle.lastLiveImport || 0) >= config.intervals.sessionRecapMs) {
-    throttle.lastLiveImport = now;
-    stage1.push((async () => {
-      const currentJsonl = findCurrentJsonl(loadTranscriptSources());
-      if (!currentJsonl) return;
-      const activity = detectActivity(loadTranscriptSources(), config.intervals.activityWindowMs);
-      // importSession fully re-parses the JSONL and bulk-replaces rows — on the
-      // main thread that starved the inject server (same class as the flush);
-      // it runs in the memory worker instead.
-      const result = await runImportInWorker(currentJsonl, {
-        source: activity.newestSource || 'unknown',
-        format: activity.newestFormat,
-      });
-      if (result.imported) {
-        log(`  Phase 2: live session import — ${result.sessionId.slice(0, 8)} (${result.messageCount} msgs)`);
-        emitIngestEvent(result.sessionId, activity.newestSource || 'unknown', result.messageCount);
-      }
-    })().catch(e => log(`  Phase 2: live session import failed: ${e.message}`)));
-  }
-
   // Memory maintenance (every 30min)
   if (now - throttle.lastMaintenance >= config.intervals.maintenanceMs) {
     throttle.lastMaintenance = now;
     const maint = path.join(WORKSPACE, 'bin/memory-maintenance.mjs');
     if (fs.existsSync(maint)) {
       stage1.push(
-        runSubprocess('node', [maint], 60000)
+        runSubprocess('node', [maint, '--force'], 60000)
           .then(() => log('  Phase 2: memory-maintenance done'))
           .catch(e => log(`  Phase 2: memory-maintenance failed: ${e.message}`))
       );
@@ -1058,25 +930,16 @@ async function runPhase2ThrottledWork(config, sessionState) {
     }
   }
 
-  // Session archive import — incremental (every 10min, aligned with recap)
+  // Session archive import — incremental (every 10min, aligned with recap).
+  // This one pass also keeps the live session fresh in state.db (the mem.ingest
+  // freshness probe): its transcript is the file whose marker keeps changing.
   if (now - throttle.lastSessionImport >= config.intervals.sessionRecapMs) {
     throttle.lastSessionImport = now;
     stage1.push(
       (async () => {
         try {
-          const store = await getSessionStore();
-          if (!store) return;
-          const sources = loadTranscriptSources();
-          let totalImported = 0;
-          for (const source of sources) {
-            if (!fs.existsSync(source.path)) continue;
-            const result = await store.importDirectory(source.path, {
-              source: source.name, format: source.format,
-              onImported: (r) => emitIngestEvent(r.sessionId, source.name, r.messageCount),
-            });
-            totalImported += result.imported;
-          }
-          if (totalImported > 0) log(`  Phase 2: session-store imported ${totalImported} sessions`);
+          const imported = await runImportDirInWorker(loadTranscriptSources());
+          if (imported.length > 0) log(`  Phase 2: session-store imported ${imported.length} sessions`);
         } catch (e) { log(`  Phase 2: session-import failed: ${e.message}`); emitErrorEvent('ingest', e); }
       })()
     );
@@ -1088,7 +951,7 @@ async function runPhase2ThrottledWork(config, sessionState) {
     stage1.push(
       (async () => {
         try {
-          const stateDbPath = path.join(HOME, '.openclaw/state.db');
+          const stateDbPath = PATHS.stateDb;
           if (!fs.existsSync(stateDbPath)) return;
           // Child process, NOT the flush worker and NOT this thread: the
           // transformers embedder pinned the daemon's microtask queue for
@@ -1099,7 +962,7 @@ async function runPhase2ThrottledWork(config, sessionState) {
           const jobArgs = [
             path.join(WORKSPACE, 'bin/knowledge-index-job.mjs'),
             stateDbPath,
-            path.join(HOME, '.openclaw/workspace/.knowledge.db'),
+            PATHS.knowledgeDb,
           ];
           let out = '';
           try {
@@ -1227,51 +1090,17 @@ async function runNodeVaultMaintenance(config) {
 // Actions triggered by state machine transitions
 // ============================================================
 
+// Returns the ids of the sessions whose bootstrap finished.
 async function handleTransitions(transitions, config) {
+  const booted = [];
   for (const t of transitions) {
     log(`State: ${t.from} → ${t.to} (session: ${t.sessionId?.slice(0, 8) || '?'})`);
 
-    // ACTIVE → ENDED: Session-end synthesis + quick cleanup before session switch
-    if (t.from === STATES.ACTIVE && t.to === STATES.ENDED) {
-      log('Session switched while active — running session-end synthesis + cleanup');
-
-      // Session-end synthesis: extract + synthesize the ending session (4.4)
-      const sources = loadTranscriptSources();
-      const endingJsonl = findJsonlBySessionId(sources, t.sessionId) || findCurrentJsonl(sources);
-      if (endingJsonl) {
-        try {
-          const memoryMd = path.join(WORKSPACE, 'MEMORY.md');
-          const budget = initMemoryBudget(config);
-          const result = await serializeFlush(() => runFlushInWorker(endingJsonl, memoryMd, {
-            charBudget: budget.charBudget,
-          }));
-          const verdict = handleFlushResult(result, {
-            trigger: 'session-end synthesis',
-            sessionId: t.sessionId,
-            synthesisLabel: 'session_end',
-          });
-          if (!verdict.degraded && result.synthesis) {
-            log(`  session-end synthesis [${result.mode}]: ${result.synthesis.artifacts_written.length} artifacts, ${result.synthesis.duration_ms}ms`);
-          }
-        } catch (e) { log(`  session-end synthesis failed: ${e.message}`); emitErrorEvent('extract', e, t.sessionId); }
-      }
-
-      const recap = path.join(WORKSPACE, 'bin/session-recap');
-      const clawvault = path.join(WORKSPACE, config.clawvaultBin);
-      const tasks = [];
-      if (fs.existsSync(recap)) {
-        tasks.push(runSubprocess('node', [recap], 15000).catch(() => {}));
-      }
-      if (fs.existsSync(clawvault)) {
-        tasks.push(runSubprocess(clawvault, ['observe', '--cron'], 30000).catch(() => {}));
-      }
-      if (tasks.length > 0) await Promise.allSettled(tasks);
-    }
-
     // ENDED → BOOT: Full bootstrap
     if (t.from === STATES.ENDED && t.to === STATES.BOOT) {
-      await runPhase0Bootstrap(t.sessionId, config);
-      return STATES.ACTIVE; // signal to complete boot
+      if (!t.othersLive) runPhase1StatusSync(config, 'active', { newSession: true });
+      await runPhase0Bootstrap(t.sessionId, config, { othersLive: t.othersLive });
+      booted.push(t.sessionId);
     }
 
     // ACTIVE → IDLE: Observe + recap + checkpoint + pre-compression flush
@@ -1282,7 +1111,7 @@ async function handleTransitions(transitions, config) {
 
       // Pre-compression flush: extract durable facts before context may be lost
       const sources = loadTranscriptSources();
-      const currentJsonl = findCurrentJsonl(sources);
+      const currentJsonl = findJsonlBySessionId(sources, t.sessionId);
       if (currentJsonl) {
         try {
           // shouldFlush parses the whole transcript — it runs IN the worker
@@ -1325,18 +1154,17 @@ async function handleTransitions(transitions, config) {
 
     // IDLE → ENDED: Full cleanup pipeline
     if (t.from === STATES.IDLE && t.to === STATES.ENDED) {
-      traceEmitter.reset();
+      if (t.jsonlPath) traceEmitter.forget(t.jsonlPath);
       log('Session ended — running full cleanup pipeline');
       const clawvault = path.join(WORKSPACE, config.clawvaultBin);
       const obsSync = path.join(WORKSPACE, 'bin/obsidian-sync.mjs');
       const subagentAudit = path.join(WORKSPACE, 'bin/subagent-audit.mjs');
 
       // 0. Pre-compression flush (final chance to capture facts).
-      // R17 fix (repair 4.4): flush the ENDED session's own transcript —
-      // when the end is caused by a new session appearing, the newest JSONL
-      // is the new session's, not the one being closed.
+      // R17 fix (repair 4.4): flush the ENDED session's own transcript; with
+      // concurrent sessions the newest JSONL belongs to another one.
       const sources = loadTranscriptSources();
-      const currentJsonl = findJsonlBySessionId(sources, t.sessionId) || findCurrentJsonl(sources);
+      const currentJsonl = findJsonlBySessionId(sources, t.sessionId);
       if (currentJsonl) {
         try {
           const memoryMd = path.join(WORKSPACE, 'MEMORY.md');
@@ -1365,24 +1193,20 @@ async function handleTransitions(transitions, config) {
       // 0b. Archive current session to SQLite
       if (currentJsonl) {
         try {
-          const store = await getSessionStore();
-          if (store) {
-            // Detect which transcript source this JSONL came from
-            const activity = detectActivity(loadTranscriptSources(), config.intervals.activityWindowMs);
-            const result = await store.importSession(currentJsonl, {
-              source: activity.newestSource || 'unknown',
-              format: activity.newestFormat,
-            });
-            if (result.imported) {
-              log(`  session-store: archived ${result.sessionId.slice(0, 8)} (${result.messageCount} msgs)`);
-              emitIngestEvent(result.sessionId, activity.newestSource || 'unknown', result.messageCount);
-            }
+          const src = sourceOfJsonl(sources, currentJsonl);
+          const result = await runImportInWorker(currentJsonl, {
+            source: src?.name || 'unknown',
+            format: src?.format,
+          });
+          if (result.imported) {
+            log(`  session-store: archived ${result.sessionId.slice(0, 8)} (${result.messageCount} msgs)`);
+            emitIngestEvent(result.sessionId, src?.name || 'unknown', result.messageCount, result.previousCount);
           }
         } catch (e) { log(`  session-store archive failed: ${e.message}`); emitErrorEvent('ingest', e); }
       }
 
-      // 0c. Release frozen MEMORY.md snapshot
-      if (memoryBudget) {
+      // 0c. Release frozen MEMORY.md snapshot (shared by every live session)
+      if (memoryBudget && !t.othersLive) {
         memoryBudget.endSession();
         log('  memory-budget: snapshot released');
       }
@@ -1397,13 +1221,9 @@ async function handleTransitions(transitions, config) {
 
       // 2. Sub-agent audit — extract trust data from this session
       // (R17, repair 4.4: same ended-session targeting as the flush above)
-      if (fs.existsSync(subagentAudit)) {
-        const sources = loadTranscriptSources();
-        const currentJsonl = findJsonlBySessionId(sources, t.sessionId) || findCurrentJsonl(sources);
-        if (currentJsonl) {
-          await runSubprocess('node', [subagentAudit, currentJsonl], 30000).catch(() => {});
-          log('  subagent-audit (end-of-session) done');
-        }
+      if (fs.existsSync(subagentAudit) && currentJsonl) {
+        await runSubprocess('node', [subagentAudit, currentJsonl], 30000).catch(() => {});
+        log('  subagent-audit (end-of-session) done');
       }
 
       // 3. Final Obsidian sync — push all changes including new ClawVault data
@@ -1417,9 +1237,13 @@ async function handleTransitions(transitions, config) {
         await runSubprocess(clawvault, ['sleep', 'session ended'], 15000).catch(() => {});
         log('  clawvault sleep done');
       }
+
+      // Written last: a node left at active/idle with no live session is the
+      // crash signal the session-start hook shows the next session.
+      if (!t.othersLive) runPhase1StatusSync(config, 'ended');
     }
   }
-  return null;
+  return booted;
 }
 
 // ============================================================
@@ -1433,7 +1257,9 @@ function runSubprocess(cmd, args, timeoutMs = 30000) {
       env: {
         ...process.env,
         OPENCLAW_WORKSPACE: WORKSPACE,
-        TZ: 'America/Montreal',
+        // Children resolve OPENCLAW_TIMEZONE before TZ, so both carry the daemon's zone.
+        OPENCLAW_TIMEZONE: timezone,
+        TZ: timezone,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -1467,11 +1293,9 @@ function runSubprocess(cmd, args, timeoutMs = 30000) {
 
 const DAEMON_STATE_FILE = path.join(STATE_DIR, 'daemon-state.json');
 
-function saveDaemonState(sm, throttle) {
+function saveDaemonState(sm) {
   const state = {
-    state: sm.state,
-    sessionId: sm.sessionId,
-    lastActivityTime: sm.lastActivityTime,
+    ...sm.toJSON(),
     pid: process.pid,
     updatedAt: Date.now(),
   };
@@ -1480,27 +1304,18 @@ function saveDaemonState(sm, throttle) {
   } catch (err) { console.warn(`[memory-daemon] daemon state write failed: ${err.message}`); }
 }
 
+// The saved PID is not checked: whether the previous daemon crashed, was
+// restarted or its PID was reused, it no longer drives these sessions, and
+// forcing ENDED here dropped their end-of-session pipeline (restore parks them
+// IDLE instead).
 function loadDaemonState() {
-  if (fs.existsSync(DAEMON_STATE_FILE)) {
-    try {
-      const state = JSON.parse(fs.readFileSync(DAEMON_STATE_FILE, 'utf-8'));
-      // Check if previous daemon process is still alive
-      if (state.pid) {
-        try {
-          process.kill(state.pid, 0); // check if alive
-          // PID exists — but might be reused by a different process
-          const staleSec = (Date.now() - (state.updatedAt || 0)) / 1000;
-          if (staleSec > 300) {
-            // >5 min since last update — PID was likely reused
-            log('Stale PID detected (>5 min since last update) — resetting state');
-            state.state = STATES.ENDED;
-          }
-        } catch (err) { console.warn(`[memory-daemon] PID check failed (process not alive): ${err.message}`); state.state = STATES.ENDED; }
-      }
-      return state;
-    } catch (err) { console.warn(`[memory-daemon] daemon state parse failed: ${err.message}`); }
+  if (!fs.existsSync(DAEMON_STATE_FILE)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(DAEMON_STATE_FILE, 'utf-8'));
+  } catch (err) {
+    console.warn(`[memory-daemon] daemon state parse failed: ${err.message}`);
+    return null;
   }
-  return null;
 }
 
 // ── Tracer wrapping ──────────────────────────────────
@@ -1509,7 +1324,7 @@ runPhase1StatusSync = tracer.wrap('runPhase1StatusSync', runPhase1StatusSync, { 
 runHyperagentMaintenance = tracer.wrapAsync('runHyperagentMaintenance', runHyperagentMaintenance, { tier: 1, category: 'lifecycle' });
 runPhase2ThrottledWork = tracer.wrapAsync('runPhase2ThrottledWork', runPhase2ThrottledWork, { tier: 1, category: 'lifecycle' });
 handleTransitions = tracer.wrapAsync('handleTransitions', handleTransitions, { tier: 1, category: 'state_transition' });
-runSubprocess = tracer.wrap('runSubprocess', runSubprocess, { tier: 2 });
+runSubprocess = tracer.wrapAsync('runSubprocess', runSubprocess, { tier: 2 });
 
 // ============================================================
 // FEDERATION SUBSYSTEMS — OPT-IN (OPENCLAW_FEDERATION=1)
@@ -1519,11 +1334,15 @@ runSubprocess = tracer.wrap('runSubprocess', runSubprocess, { tier: 2 });
 // ran). One daemon now owns everything; the federation wiring below is
 // dormant by design until multi-node lands. Default (env unset) is OFF —
 // none of this section executes and no federation module is even imported.
+// One federation piece is outside it: initNatsSubsystems ensures the
+// OPENCLAW_SHARED stream on every node (fatal on mismatch only when ON).
 //
 // What starts when OPENCLAW_FEDERATION=1:
 //   - startFederation (lib/federation-startup.mjs): identity + strict trust
 //     registry + seen-event replay cache + broadcaster/offerer/acceptor
 //     (F-N1/N2/N3). Offerer+acceptor need both DBs; broadcast-only otherwise.
+//     The :7893 inject server drives it per prompt (broadcast, acceptance,
+//     [peer-memory] block) and the scheduler below broadcasts after a cycle.
 //   - memory-subscriber (bin/memory-subscriber.mjs): still gated on
 //     OPENCLAW_SUBSCRIBER_PROJECTION=stub (F-P107/F-P113 — no Block 11
 //     projection yet).
@@ -1549,22 +1368,11 @@ async function initFederationSubsystems(nc) {
   federationState.started = true;
   log('[federation] OPENCLAW_FEDERATION=1 — initializing federation subsystems');
 
-  // Same nodeId convention as the retired daemon: sanitized so it satisfies
-  // the envelope schema's NODE_ID_RE (F-Q101 — apostrophes/spaces in macOS
-  // hostnames otherwise kill every signed event at parse).
-  let fedNodeId = NODE_ID;
-  try {
-    const { defaultNodeId } = await import('../lib/federation-startup.mjs');
-    fedNodeId = defaultNodeId();
-  } catch (err) {
-    log(`[federation] federation-startup unavailable (${err.message}) — using raw NODE_ID`);
-  }
-
   // DB handles — same resolution as the retired daemon. Knowledge DB lives in
   // the workspace (same path the daemon's own knowledge indexing uses);
   // extraction tables live in state.db (C1 fix — one DB for reads and writes).
-  const dbDir = process.env.OPENCLAW_DB_DIR || path.join(HOME, '.openclaw');
-  const workspaceDir = process.env.OPENCLAW_WORKSPACE || path.join(HOME, '.openclaw', 'workspace');
+  const dbDir = process.env.OPENCLAW_DB_DIR || PATHS.root;
+  const workspaceDir = process.env.OPENCLAW_WORKSPACE || path.join(PATHS.root, 'workspace');
   const knowledgeDbPath = process.env.OPENCLAW_KNOWLEDGE_DB || path.join(workspaceDir, '.knowledge.db');
   const extractionDbPath = process.env.OPENCLAW_EXTRACTION_DB || path.join(dbDir, 'state.db');
   try {
@@ -1583,10 +1391,11 @@ async function initFederationSubsystems(nc) {
   // Broadcast trio + identity + registry + replay cache (F-N1/N2/N3).
   try {
     const { startFederation } = await import('../lib/federation-startup.mjs');
-    federationState.federation = await startFederation(nc, fedNodeId, {
+    federationState.federation = await startFederation(nc, NODE_ID, {
       extractionDb: federationState.extractionDb,
       knowledgeDb: federationState.knowledgeDb,
       graphCache: getGraphCache(),
+      llmClient: getLlmClient(),
       log: (m) => log(m),
     });
   } catch (err) {
@@ -1599,7 +1408,7 @@ async function initFederationSubsystems(nc) {
   try {
     if (process.env.OPENCLAW_SUBSCRIBER_PROJECTION === 'stub') {
       const { createSubscriber } = await import('../bin/memory-subscriber.mjs');
-      federationState.subscriber = await createSubscriber(nc, fedNodeId, {
+      federationState.subscriber = await createSubscriber(nc, NODE_ID, {
         onIngest: (event, parsed) => {
           log(`[federation] SUBSCRIBER-STUB acked-without-projection ${parsed.category} ${event.event_id}`);
         },
@@ -1627,6 +1436,7 @@ async function initFederationSubsystems(nc) {
       dbPath: extractionDbPath,
       getStateFn: getOllamaQueueState,
       log: (m) => log(m),
+      onCycleComplete: () => federationState.federation?.broadcastConsolidation(),
     });
     if (federationState.extractionDb) {
       federationState.scheduler.start();
@@ -1654,12 +1464,13 @@ async function main() {
     process.exit(1);
   }
   const config = loadConfig();
+  timezone = config.timezone;
   const sources = loadTranscriptSources();
 
   log(`Daemon starting (pid: ${process.pid}, workspace: ${WORKSPACE})`);
   log(`Transcript sources: ${sources.map(s => s.name).join(', ')}`);
 
-  const sm = new SessionStateMachine(config);
+  const sm = new SessionTracker(config);
   const stopQueueStateObserver = setStateObserver(() => {
     try { exportStateSnapshot(); } catch (snapErr) { log(`queue snapshot export failed: ${snapErr.message}`); }
   });
@@ -1675,7 +1486,7 @@ async function main() {
   const savedState = loadDaemonState();
   if (savedState) {
     sm.restore(savedState);
-    log(`Restored state: ${sm.state} (session: ${sm.sessionId?.slice(0, 8) || 'none'})`);
+    log(`Restored state: ${sm.state} (sessions: ${sm.sessions.map(x => `${x.sessionId.slice(0, 8)}=${x.state}`).join(', ') || 'none'})`);
   }
 
   // Optional NATS subscription for external compaction signals
@@ -1688,10 +1499,14 @@ async function main() {
   // live inside the NATS try block and silently died whenever the broker
   // was down at boot, exactly when disk-level visibility matters most.
   const HEALTH_PROBE_INTERVAL = 5 * 60 * 1000;
-  const watcherOutputPath = path.join(os.homedir(), '.openclaw', 'watcher.jsonl');
+  const watcherOutputPath = PATHS.watcherLog;
   const runProbe = async () => {
     try {
-      const probe = await runStoreHealthProbes();
+      const probe = await runStoreHealthProbes({
+        stateDb: PATHS.stateDb, knowledgeDb: PATHS.knowledgeDb, graphCacheDb: PATHS.graphCacheDb,
+        workspaceLib: path.join(PATHS.root, 'workspace', 'lib'),
+        workspaceDaemon: path.join(PATHS.root, 'workspace', 'bin', 'memory-daemon.mjs'),
+      });
       appendWatcherRecord(watcherOutputPath, probe);
       log(`[watcher] health probe: ${Object.entries(probe.stores).filter(([,v]) => v).length} stores checked`);
     } catch (err) {
@@ -1704,6 +1519,9 @@ async function main() {
   // R16 fix (repair 4.3): NATS init is retryable. A broker down at boot used
   // to permanently disable the event spine (event log, watcher, extraction
   // trigger) until a manual restart; now the daemon retries every 60s.
+  let running = true;
+  let tickInterval = null;
+  let inFlightTick = null;
   let natsRetryTimer = null;
   async function initNatsSubsystems() {
   try {
@@ -1747,6 +1565,7 @@ async function main() {
     if (localEventLog) {
       try {
         memoryWatcher = await createMemoryWatcher(natsConn, NODE_ID, {
+          outputPath: watcherOutputPath,
           log: (m) => log(`[watcher] ${m}`),
         });
       } catch (watchErr) {
@@ -1754,23 +1573,32 @@ async function main() {
       }
     }
 
-    // Ensure shared federation stream (OPENCLAW_SHARED, R=3)
+    // Ensure shared federation stream (OPENCLAW_SHARED, R=3). This runs even
+    // with federation off; a config mismatch is fatal only when federation is
+    // on, since the stream protects nothing else and a crash loop for an
+    // opt-in feature is worse than an idle, misconfigured stream.
     try {
       await ensureSharedStream(natsConn);
       const streamInfo = await inspectSharedStream(natsConn);
       const verification = verifySharedStreamConfig(streamInfo);
       if (!verification.valid) {
-        log(`FATAL: Shared stream config mismatch: ${verification.reasons.join('; ')}`);
-        process.exit(1);
+        const reasons = verification.reasons.join('; ');
+        if (process.env.OPENCLAW_FEDERATION === '1') {
+          log(`FATAL: Shared stream config mismatch: ${reasons}`);
+          process.exit(1);
+        }
+        log(`WARNING: Shared stream config mismatch: ${reasons} — federation is off, continuing`);
+      } else {
+        log(`Shared stream OPENCLAW_SHARED verified (R=${streamInfo.config.num_replicas}, storage=${streamInfo.config.storage})`);
       }
-      log(`Shared stream OPENCLAW_SHARED verified (R=${streamInfo.config.num_replicas}, storage=${streamInfo.config.storage})`);
     } catch (streamErr) {
       log(`Shared stream unavailable (${streamErr.message}) — continuing without federation stream`);
     }
 
-    // Initialize agnostic extraction trigger (mesh.memory.extract_request)
+    // Initialize agnostic extraction trigger (mesh.memory.extract_request.<NODE_ID>)
     try {
       extractionTrigger = createExtractionTrigger(natsConn, NODE_ID, {
+        log,
         onExtract: async (payload) => {
           log(`[nats] extraction requested by ${payload.triggered_by || 'unknown'}`);
           if (sm.state !== STATES.ACTIVE && sm.state !== STATES.IDLE) {
@@ -1852,8 +1680,13 @@ async function main() {
     try {
       const { startInjectionServer } = await import('../lib/memory-inject-server.mjs');
       injectionServer = await startInjectionServer(
-        { knowledgeDb: getKnowledgeDb(), graphCache: getGraphCache(), llmClient: getLlmClient(), extractionDb: getExtractionStore()?.db, eventLog: localEventLog, nodeId: NODE_ID },
-        { log: (m) => log(`[inject-server] ${m}`) },
+        {
+          knowledgeDb: getKnowledgeDb(), graphCache: getGraphCache(), llmClient: getLlmClient(),
+          extractionDb: getExtractionStore()?.db, eventLog: liveEventLog, nodeId: NODE_ID,
+          // A getter: federation starts with NATS, which can come up after this server.
+          getFederation: () => federationState.federation,
+        },
+        { port: PATHS.injectPort, log: (m) => log(`[inject-server] ${m}`) },
       );
     } catch (injErr) {
       log(`Memory inject server unavailable (${injErr.message}) — companion-bridge injection will be silent`);
@@ -1861,9 +1694,6 @@ async function main() {
   }
 
   // Graceful shutdown
-  let running = true;
-  let tickInterval = null;
-  let inFlightTick = null;
   const shutdown = async (signal) => {
     log(`Received ${signal} — shutting down`);
     running = false;
@@ -1913,9 +1743,6 @@ async function main() {
     if (_extractionStore) {
       try { _extractionStore.close(); } catch (_) {}
     }
-    if (_sessionStore) {
-      try { _sessionStore.close(); } catch (_) {}
-    }
     if (_haStore) {
       try { _haStore.close(); } catch (_) {}
     }
@@ -1945,20 +1772,18 @@ async function main() {
       // sessions from extraction for a day, 2026-07-03).
       const activity = detectActivity(loadTranscriptSources(), config.intervals.activityWindowMs);
 
-      // 2. State machine tick
+      // 2. Per-session state machine tick
       const transitions = sm.tick(activity);
 
       // 3. Handle transitions
       if (transitions.length > 0) {
-        const bootResult = await handleTransitions(transitions, config);
-        if (bootResult === STATES.ACTIVE) {
-          sm.completeBoot();
-        }
+        const booted = await handleTransitions(transitions, config);
+        for (const sessionId of booted) sm.completeBoot(sessionId);
       }
 
       // 4. Phase 1: Status sync (when ACTIVE or IDLE)
       if (sm.state === STATES.ACTIVE || sm.state === STATES.IDLE) {
-        runPhase1StatusSync(config);
+        runPhase1StatusSync(config, sm.state === STATES.ACTIVE ? 'active' : 'idle');
       }
 
       // 4.1. Reset extraction trigger idle timer on activity
@@ -1967,24 +1792,13 @@ async function main() {
       }
 
       // 4.5. Phase 1.5: Session trace emission (real-time JSONL → observability feed)
-      // Scan ALL transcript sources for recently-modified JSONL files.
-      // Multiple agents may be active simultaneously (Claude Code + gateway + etc.)
+      // Every recently-modified JSONL across ALL sources, as found by step 1's
+      // scan: multiple agents may be active at once (Claude Code + gateway + etc.).
+      // processNewEntries reads by offset, so a file that turned recent during
+      // the transitions above is caught up on the next tick.
       if (sm.state === STATES.ACTIVE) {
-        const recentCutoff = Date.now() - (config.intervals?.activityWindowMs || 900000);
-        for (const source of loadTranscriptSources()) {
-          if (!fs.existsSync(source.path)) continue;
-          try {
-            const files = fs.readdirSync(source.path).filter(f => f.endsWith('.jsonl'));
-            for (const f of files) {
-              const full = path.join(source.path, f);
-              try {
-                const fstat = fs.statSync(full);
-                if (fstat.mtimeMs > recentCutoff) {
-                  traceEmitter.processNewEntries(full);
-                }
-              } catch { /* skip unreadable files */ }
-            }
-          } catch { /* skip unreadable dirs */ }
+        for (const full of activity.recentFiles) {
+          try { traceEmitter.processNewEntries(full); } catch { /* skip unreadable files */ }
         }
       }
 
@@ -2012,19 +1826,26 @@ async function main() {
 
   // R3 fix: ticks routinely outlive pollMs (LLM extraction, Phase 0 bootstrap);
   // unguarded overlap re-runs the same throttled work off stale on-disk state.
-  const guardedTick = createConcurrencyGuard(tick, { maxAgeMs: 30 * 60_000, log });
+  // Only a run that actually started is fenced: a skipped call must not
+  // replace (and then null) the in-flight run shutdown waits for.
+  const trackedTick = () => {
+    const run = tick();
+    inFlightTick = run;
+    return run.finally(() => { if (inFlightTick === run) inFlightTick = null; });
+  };
+  // One legitimate tick can chain a 30-min flush worker, a 30-min
+  // knowledge-index child and flushes queued behind them; force-clearing it
+  // at 30 min started an overlapping tick that lost throttle-state updates.
+  // The bound only recovers a truly wedged tick.
+  const guardedTick = createConcurrencyGuard(trackedTick, { maxAgeMs: 2 * 60 * 60_000, log });
 
   // Run first tick immediately
-  inFlightTick = guardedTick();
-  await inFlightTick;
-  inFlightTick = null;
+  await guardedTick();
 
   // Schedule recurring ticks. Shutdown owns the exit (R15, repair 4.1).
   tickInterval = setInterval(async () => {
     if (!running) return;
-    inFlightTick = guardedTick();
-    const result = await inFlightTick;
-    inFlightTick = null;
+    const result = await guardedTick();
     if (result?.skipped) log('tick skipped (in-flight)');
   }, config.intervals.pollMs);
 
@@ -2038,4 +1859,4 @@ if (process.env.OPENCLAW_MEMORY_DAEMON_NO_AUTOSTART !== '1') {
   });
 }
 
-export { runNodeVaultMaintenance, handleFlushResult };
+export { runNodeVaultMaintenance, handleFlushResult, sourceOfJsonl, extractedEventData };

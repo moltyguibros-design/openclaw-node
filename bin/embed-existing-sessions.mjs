@@ -5,8 +5,8 @@
  * Reads sessions from the session-store SQLite database, chunks their turns,
  * and indexes embeddings into the mcp-knowledge database via indexSessionTurns().
  *
- * Resumable: tracks progress in a checkpoint file. Already-indexed sessions
- * (by content hash) are skipped automatically by indexSessionTurns().
+ * Resumable: tracks progress in a checkpoint file; sessions already in the
+ * checkpoint are skipped. Later growth is indexed by the daemon's knowledge-index-job.
  *
  * Usage:
  *   node bin/embed-existing-sessions.mjs
@@ -15,17 +15,18 @@
  */
 
 import { openStore } from '../lib/sqlite-store.mjs';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { parseArgs } from 'node:util';
 
 import { initDatabase, indexSessionTurns } from '../lib/mcp-knowledge/core.mjs';
+import { atomicWriteFileSync } from '../lib/atomic-write.mjs';
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
 const DEFAULT_SESSION_DB = join(homedir(), '.openclaw/state.db');
-const DEFAULT_KNOWLEDGE_DB = process.env.KNOWLEDGE_DB
+export const DEFAULT_KNOWLEDGE_DB = process.env.KNOWLEDGE_DB
   || join(process.env.KNOWLEDGE_ROOT || join(homedir(), '.openclaw/workspace'), '.knowledge.db');
 const DEFAULT_CHECKPOINT = join(homedir(), '.openclaw/.embed-migration-checkpoint.json');
 
@@ -45,15 +46,15 @@ function loadCheckpoint(path) {
   }
 }
 
-function saveCheckpoint(path, checkpoint) {
-  const dir = dirname(path);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(path, JSON.stringify({
+// Atomic: an interrupted write used to leave a torn checkpoint, which
+// loadCheckpoint reads as empty and the migration restarts from zero.
+export function saveCheckpoint(path, checkpoint) {
+  atomicWriteFileSync(path, JSON.stringify({
     completed: checkpoint.completed,
     totalChunks: checkpoint.totalChunks,
     startedAt: checkpoint.startedAt,
     lastUpdated: new Date().toISOString(),
-  }, null, 2) + '\n');
+  }, null, 2) + '\n', { mkdirp: true });
 }
 
 // ─── Migration core ──────────────────────────────────────────────────────────

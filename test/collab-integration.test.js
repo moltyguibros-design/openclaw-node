@@ -20,6 +20,7 @@ const { acquireMeshLock, releaseMeshLock } = require('./helpers/mesh-lock.cjs');
 const skipReason = meshSkipReason();
 const assert = require('node:assert/strict');
 const { connect, StringCodec } = require('nats');
+const { withMemberTokens } = require('./helpers/collab-member.cjs');
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
 // require(esm): the operator signer is an ES module.
 const { signOperatorRequest } = require('../lib/operator-auth.mjs');
@@ -41,10 +42,11 @@ let nc;
 
 // ── Helper: NATS request/reply ─────────────────────
 
-async function rpc(subject, payload, timeout = 10000) {
+async function busRpc(subject, payload, timeout = 10000) {
   const msg = await nc.request(subject, sc.encode(JSON.stringify(payload)), { timeout });
   return JSON.parse(sc.decode(msg.data));
 }
+const rpc = withMemberTokens(busRpc);
 
 /**
  * Poll a NATS RPC endpoint until a condition is met, or timeout.
@@ -892,11 +894,12 @@ describe('Collab max rounds exhaustion (live NATS)', { skip: skipReason }, () =>
     assert.equal(status.data.status, 'completed');
   });
 
-  it('parent task is completed with max_rounds_reached flag', async () => {
+  it('parent task waits in pending_review with max_rounds_reached and a digest', async () => {
     const res = await pollUntil('mesh.tasks.get', { task_id: collabTaskId },
-      r => r.ok && r.data.status === 'completed');
-    assert.equal(res.data.status, 'completed');
+      r => r.ok && r.data.status === 'pending_review');
+    assert.equal(res.data.status, 'pending_review');
     assert.equal(res.data.result.max_rounds_reached, true);
+    assert.equal(res.data.result.review_digest.converged_votes, 0);
   });
 });
 

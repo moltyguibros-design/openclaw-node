@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12"
   },
   "scripts": {
     "dev": "next dev -H 127.0.0.1",
@@ -16,9 +16,6 @@
   },
   "dependencies": {
     "@andresaya/edge-tts": "^1.8.0",
-    "@dnd-kit/core": "^6.3.1",
-    "@dnd-kit/sortable": "^8.0.0",
-    "@dnd-kit/utilities": "^3.2.2",
     "better-sqlite3": "^12.6.2",
     "cron-parser": "^5.5.0",
     "date-fns": "^4.1.0",
@@ -27,7 +24,7 @@
     "gray-matter": "^4.0.3",
     "lucide-react": "^0.575.0",
     "nats": "^2.29.3",
-    "next": "16.3.8",
+    "next": "16.4.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-force-graph-2d": "^1.29.1",
@@ -35,8 +32,7 @@
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "swr": "^2.4.0",
-    "three": "^0.183.2",
-    "yaml": "^2.8.2"
+    "three": "^0.183.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.1",
@@ -44,7 +40,6 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "drizzle-kit": "^0.31.9",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4.2.1",
@@ -52,6 +47,6 @@
     "vitest": "^4.1.0"
   },
   "overrides": {
-    "sharp": "^0.35.0"
+    "sharp": "^0.35.5"
   }
 }

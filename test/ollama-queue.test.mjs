@@ -14,7 +14,7 @@ import { describe, it, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import {
   requestExtraction,
   requestAnalysis,
@@ -26,8 +26,15 @@ import {
   readStateSnapshot,
   snapshotLooksStuck,
   setStateObserver,
+  markExternalJob,
+  clearExternalJob,
+  reportExtractionActivity, applyWorkerLlmMessage,
   _resetForTesting,
 } from '../lib/ollama-queue.mjs';
+import { Worker } from 'node:worker_threads';
+
+// Hermetic against an operator's ~/.openclaw/openclaw.env raising the slot count.
+process.env.OLLAMA_NUM_PARALLEL ??= '1';
 
 beforeEach(() => {
   _resetForTesting();
@@ -90,7 +97,7 @@ describe('isTransient classification (verified via retry behavior)', () => {
     await assert.rejects(
       () => requestExtraction(async () => {
         runs++;
-        const err = new Error('LLM server returned HTTP 500: bad');
+        const err = new Error('LLM server returned 500: bad');
         throw err;
       })
     );
@@ -125,10 +132,43 @@ describe('isTransient classification (verified via retry behavior)', () => {
     await assert.rejects(
       () => requestExtraction(async () => {
         runs++;
-        throw new Error('LLM server returned HTTP 502: Bad Gateway');
+        throw new Error('LLM server returned 502: Bad Gateway');
       })
     );
     assert.equal(runs, 4, '502 should retry 3 times → 4 total attempts');
+  });
+
+  it('DOES retry on the real llm-client 503 shape (Ollama "server busy")', async () => {
+    let runs = 0;
+    await assert.rejects(
+      () => requestExtraction(async () => {
+        runs++;
+        throw new Error('LLM server returned 503: {"error":"server busy, please try again.  maximum pending requests exceeded"}');
+      })
+    );
+    assert.equal(runs, 4);
+  });
+
+  it('does NOT retry an Ollama 500 whose body says terminated', async () => {
+    let runs = 0;
+    await assert.rejects(
+      () => requestExtraction(async () => {
+        runs++;
+        throw new Error('LLM server returned 500: {"error":"llama runner process has terminated: signal: killed"}');
+      })
+    );
+    assert.equal(runs, 1);
+  });
+
+  it('DOES retry a bare "terminated" (undici mid-body socket close)', async () => {
+    let runs = 0;
+    await assert.rejects(
+      () => requestExtraction(async () => {
+        runs++;
+        throw new Error('terminated');
+      })
+    );
+    assert.equal(runs, 4);
   });
 
   it('DOES retry on ECONNRESET', async () => {
@@ -251,6 +291,63 @@ describe('requestAnalysis fallback paths', () => {
     await slowExtraction;
   });
 
+  it('runs analysis beside an in-flight extraction when OLLAMA_NUM_PARALLEL > 1', async () => {
+    const prev = process.env.OLLAMA_NUM_PARALLEL;
+    process.env.OLLAMA_NUM_PARALLEL = '2';
+    try {
+      let release;
+      const slowExtraction = requestExtraction(() => new Promise(r => { release = () => r('extract-done'); }));
+      await new Promise(r => setTimeout(r, 10));
+      const result = await requestAnalysis(async () => 'analysis-ran', { waitTimeoutMs: 500 });
+      assert.equal(result.mode, 'llm');
+      assert.equal(result.value, 'analysis-ran');
+      assert.equal(getState().current_job?.type, 'extraction', 'the extraction still holds the queue');
+      markExternalJob('w1', { type: 'extraction' });
+      release();
+      await slowExtraction;
+      const besideWorker = await requestAnalysis(async () => 'beside-worker', { waitTimeoutMs: 500 });
+      assert.equal(besideWorker.mode, 'llm');
+      clearExternalJob('w1');
+      assert.equal(getState().current_job, null);
+    } finally {
+      if (prev === undefined) delete process.env.OLLAMA_NUM_PARALLEL;
+      else process.env.OLLAMA_NUM_PARALLEL = prev;
+    }
+  });
+
+  it('reads OLLAMA_NUM_PARALLEL from ~/.openclaw/openclaw.env when the process env lacks it', async () => {
+    const prev = { slots: process.env.OLLAMA_NUM_PARALLEL, home: process.env.HOME };
+    const home = mkdtempSync(join(tmpdir(), 'ollama-queue-home-'));
+    mkdirSync(join(home, '.openclaw'));
+    writeFileSync(join(home, '.openclaw', 'openclaw.env'), 'LLM_MODEL=x\nOLLAMA_NUM_PARALLEL=4\n');
+    delete process.env.OLLAMA_NUM_PARALLEL;
+    process.env.HOME = home;
+    try {
+      markExternalJob('w1', { type: 'extraction' });
+      const result = await requestAnalysis(async () => 'from-env-file', { waitTimeoutMs: 500 });
+      assert.equal(result.mode, 'llm');
+      clearExternalJob('w1');
+    } finally {
+      process.env.HOME = prev.home;
+      process.env.OLLAMA_NUM_PARALLEL = prev.slots;
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('still answers busy during extraction when OLLAMA_NUM_PARALLEL is 1', async () => {
+    const prev = process.env.OLLAMA_NUM_PARALLEL;
+    process.env.OLLAMA_NUM_PARALLEL = '1';
+    try {
+      markExternalJob('w1', { type: 'extraction' });
+      const result = await requestAnalysis(async () => 'never-runs', { waitTimeoutMs: 500 });
+      assert.equal(result.reason, 'ollama-busy-extraction');
+      clearExternalJob('w1');
+    } finally {
+      if (prev === undefined) delete process.env.OLLAMA_NUM_PARALLEL;
+      else process.env.OLLAMA_NUM_PARALLEL = prev;
+    }
+  });
+
   it('returns fallback with reason "analysis-wait-timeout" when analysis exceeds wait', async () => {
     const result = await requestAnalysis(async () => {
       await new Promise(r => setTimeout(r, 500));
@@ -298,6 +395,20 @@ describe('getState snapshot', () => {
     await requestExtraction(async () => 'b');
     const s = getState();
     assert.equal(s.totals.runs, 2);
+  });
+  it('records when each job type last finished, queue jobs and worker jobs alike', async () => {
+    assert.deepEqual(getState().last_completed_at, {});
+    const before = Date.now();
+    await requestExtraction(async () => 'a');
+    await requestExtraction(async () => { throw Object.assign(new Error('bad'), { status: 500 }); }).catch(() => {});
+    await requestAnalysis(async () => 'b');
+    markExternalJob('flush-1', { type: 'flush' });
+    assert.equal(getState().last_completed_at.flush, undefined, 'a running worker job has not finished');
+    clearExternalJob('flush-1');
+    const last = getState().last_completed_at;
+    for (const type of ['extraction', 'analysis', 'flush']) {
+      assert.ok(last[type] >= before && last[type] <= Date.now(), `${type}: ${last[type]}`);
+    }
   });
 });
 
@@ -576,5 +687,75 @@ describe('cross-process snapshot (R12, repair 3.3)', () => {
     assert.equal(snapshotLooksStuck({ consecutive_timeouts: { analysis: 99, extraction: 0 } }), false,
       'analysis timeouts must not count (F-H17)');
     assert.equal(snapshotLooksStuck(null), false);
+  });
+});
+
+describe('extraction in a worker thread short-circuits analysis (llm-hyperagent#5)', () => {
+  const never = async () => { throw new Error('analysis must not reach the model'); };
+
+  it('a worker-reported LLM extraction makes analysis fall back at once', async () => {
+    assert.equal(applyWorkerLlmMessage('flush-1:llm', { llm: 'start' }), true);
+    const t0 = Date.now();
+    const r = await requestAnalysis(never, { waitTimeoutMs: 5000 });
+    assert.equal(r.mode, 'fallback');
+    assert.equal(r.reason, 'ollama-busy-extraction');
+    assert.ok(Date.now() - t0 < 1000, 'no wait-timeout');
+
+    applyWorkerLlmMessage('flush-1:llm', { llm: 'end' });
+    const after = await requestAnalysis(async () => 'ran', { waitTimeoutMs: 500 });
+    assert.equal(after.mode, 'llm');
+  });
+
+  it("the flush's non-LLM phases do not block analysis", async () => {
+    markExternalJob('flush-2', { type: 'flush' });
+    markExternalJob('import-1', { type: 'import' });
+    const r = await requestAnalysis(async () => 'ran', { waitTimeoutMs: 500 });
+    assert.equal(r.mode, 'llm');
+  });
+
+  it('only {llm} messages are worker LLM signals', () => {
+    assert.equal(applyWorkerLlmMessage('x', { ok: true, result: {} }), false);
+    assert.equal(getState().external_jobs.length, 0);
+  });
+
+  it('reportExtractionActivity posts start/end around each extraction job', async () => {
+    const posted = [];
+    reportExtractionActivity((m) => posted.push(m));
+    await requestExtraction(async () => 'x');
+    await requestAnalysis(async () => 'y', { waitTimeoutMs: 500 });
+    assert.deepEqual(posted, [{ llm: 'start' }, { llm: 'end' }]);
+    setStateObserver(null);
+  });
+
+  it('end to end across a real worker thread', async () => {
+    const queueUrl = new URL('../lib/ollama-queue.mjs', import.meta.url).href;
+    const w = new Worker(`
+      const { parentPort } = require('node:worker_threads');
+      import(${JSON.stringify(queueUrl)}).then(async (q) => {
+        q.reportExtractionActivity((m) => parentPort.postMessage(m));
+        await q.requestExtraction(() => new Promise((r) => parentPort.once('message', r)));
+        parentPort.postMessage({ ok: true });
+      });
+    `, { eval: true });
+    const seen = [];
+    const done = new Promise((resolve) => w.on('message', (m) => {
+      seen.push(m);
+      if (applyWorkerLlmMessage('w:llm', m)) {
+        if (m.llm === 'start') resolve();
+      }
+    }));
+    try {
+      await done;
+      const busy = await requestAnalysis(never, { waitTimeoutMs: 5000 });
+      assert.equal(busy.reason, 'ollama-busy-extraction');
+
+      const finished = new Promise((resolve) => w.on('message', (m) => { if (m.ok) resolve(); }));
+      w.postMessage('go');
+      await finished;
+    } finally {
+      await w.terminate();
+    }
+    assert.deepEqual(seen.map(m => m.llm ?? 'result'), ['start', 'end', 'result']);
+    assert.equal(getState().external_jobs.length, 0);
   });
 });

@@ -7,6 +7,7 @@ import {
   useClusters,
   useTasks,
   addClusterMember,
+  fetcher,
 } from "@/lib/hooks";
 import { SessionCard } from "@/components/cowork/session-card";
 import { ClusterCard } from "@/components/cowork/cluster-card";
@@ -14,8 +15,6 @@ import { CreateClusterDialog } from "@/components/cowork/create-cluster-dialog";
 import { DispatchForm } from "@/components/cowork/dispatch-form";
 import useSWR from "swr";
 import { RolePicker } from "@/components/cowork/role-picker";
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 type Tab = "sessions" | "clusters" | "dispatch";
 
@@ -30,7 +29,8 @@ export default function CoworkPage() {
   );
   const { sessions: recentSessions } = useCollabSessions(
     "converged,completed,aborted",
-    30000
+    30000,
+    8
   );
   const { clusters } = useClusters();
   const { tasks } = useTasks();
@@ -112,7 +112,7 @@ export default function CoworkPage() {
                   Recent Sessions
                 </h2>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  {recentSessions.slice(0, 8).map((s) => (
+                  {recentSessions.map((s) => (
                     <SessionCard key={s.session_id} session={s} linkedTask={taskMap.get(s.task_id)} />
                   ))}
                 </div>

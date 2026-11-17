@@ -84,7 +84,7 @@ export default function GraphPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<ForceGraphMethods | undefined>(undefined);
 
-  // Resize observer
+  // Keyed on `loading`: the container only mounts once loading is false.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -99,7 +99,7 @@ export default function GraphPage() {
     });
     obs.observe(el);
     return () => obs.disconnect();
-  }, []);
+  }, [loading]);
 
   // Fetch data
   useEffect(() => {

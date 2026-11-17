@@ -43,7 +43,7 @@ souls/
 ### Components
 
 1. **Soul Registry** (`registry.json`) — Central catalog of all souls
-2. **Mission Control** (localhost:3000) — Dashboard for tasks, handoffs, evolution
+2. **Mission Control** (localhost:3000) — Dashboard for tasks, handoffs, evolution. Call its /api through `bin/mc-api`, which sends the session token; a bare `curl` gets 401.
 3. **ClawVault** (`memory-vault/`) — Isolated memory storage
 4. **Git** — Version control for evolution history
 
@@ -54,7 +54,7 @@ souls/
 ### Viewing Souls
 
 ```bash
-curl http://localhost:3000/api/souls | jq
+bin/mc-api /api/souls | jq
 ```
 
 Returns:
@@ -108,9 +108,7 @@ Returns:
 
 6. **Register via API:**
    ```bash
-   curl -X POST http://localhost:3000/api/souls \
-     -H "Content-Type: application/json" \
-     -d '{
+   bin/mc-api POST /api/souls '{
        "id": "my-soul",
        "type": "specialist",
        "basePath": "~/.openclaw/souls/my-soul",
@@ -128,9 +126,7 @@ Returns:
 ### Handing Off a Task
 
 ```bash
-curl -X POST http://localhost:3000/api/tasks/T-20260220-001/handoff \
-  -H "Content-Type: application/json" \
-  -d '{
+bin/mc-api POST /api/tasks/T-20260220-001/handoff '{
     "toSoul": "blockchain-auditor",
     "reason": "Requires deep Solidity security expertise",
     "context": {
@@ -185,9 +181,7 @@ Reason: Requires deep Solidity security expertise
 (Typically done automatically by the soul after completing a task)
 
 ```bash
-curl -X POST http://localhost:3000/api/souls/blockchain-auditor/evolution \
-  -H "Content-Type: application/json" \
-  -d '{
+bin/mc-api POST /api/souls/blockchain-auditor/evolution '{
     "eventId": "evt_002",
     "soulId": "blockchain-auditor",
     "category": "attack_pattern",
@@ -219,17 +213,13 @@ curl -X POST http://localhost:3000/api/souls/blockchain-auditor/evolution \
 
 ```bash
 # View pending events
-curl 'http://localhost:3000/api/souls/blockchain-auditor/evolution?status=pending'
+bin/mc-api '/api/souls/blockchain-auditor/evolution?status=pending'
 
 # Approve event
-curl -X PATCH 'http://localhost:3000/api/souls/blockchain-auditor/evolution?eventId=evt_002' \
-  -H "Content-Type: application/json" \
-  -d '{"action":"approve","reviewedBy":"daedalus"}'
+bin/mc-api PATCH '/api/souls/blockchain-auditor/evolution?eventId=evt_002' '{"action":"approve","reviewedBy":"daedalus"}'
 
 # Reject event
-curl -X PATCH 'http://localhost:3000/api/souls/blockchain-auditor/evolution?eventId=evt_002' \
-  -H "Content-Type: application/json" \
-  -d '{"action":"reject","reviewedBy":"daedalus"}'
+bin/mc-api PATCH '/api/souls/blockchain-auditor/evolution?eventId=evt_002' '{"action":"reject","reviewedBy":"daedalus"}'
 ```
 
 ### Evolution Git History
@@ -262,20 +252,32 @@ git revert eae6b23  # Revert specific evolution commit
 
 ```
 memory-vault/
-├── shared/              # Cross-soul knowledge (all can read, only daedalus writes)
+├── shared/              # Cross-soul knowledge (permissions.memory.shared: read or readwrite)
 │   ├── project-arcane/
 │   └── decisions/
-├── private/             # Per-soul isolation (only owner + daedalus can access)
+├── private/             # Per-soul isolation (permissions.memory.private lists whose)
 │   ├── daedalus/
 │   ├── blockchain-auditor/
 │   └── lore-writer/
-└── handoffs/            # Task context transfers (readable by involved souls)
+└── handoffs/            # Task context transfers (permissions.memory.handoffs)
     └── T-20260220-001-handoff.md
 ```
 
 ### Access Control
 
-Enforced by `bin/clawvault-access-control`:
+Each soul declares its access in `capabilities.json` `permissions.memory`:
+`shared` and `handoffs` are `read` or `readwrite`, and `private` lists the souls whose
+private memory it may use. `lib/soul-memory-access.mjs` applies that declaration, and it is
+enforced at:
+
+- `bin/clawvault-local`: with `OPENCLAW_SOUL_ID` set, a vault command spans every category,
+  so it runs only for a soul granted readwrite on `shared`, `handoffs` and every soul's
+  private memory (the `vault` category). Without `OPENCLAW_SOUL_ID` it runs as the orchestrator.
+- `POST /api/tasks/:id/handoff`: the receiving soul must have `handoffs` read, and a soul
+  handing off must have `handoffs` write (HTTP 403 otherwise).
+- `POST /api/souls/:id/prompt`: the handoff doc is included only for a soul with `handoffs` read.
+
+`bin/clawvault-access-control` answers the same question from the command line:
 
 ```bash
 # Check if soul can access category
@@ -283,7 +285,7 @@ clawvault-access-control blockchain-auditor private/blockchain-auditor read
 # Output: GRANTED
 
 clawvault-access-control blockchain-auditor private/lore-writer read
-# Output: DENIED: Can only access own private memory
+# Output: DENIED: blockchain-auditor may not access private/lore-writer
 ```
 
 ---
@@ -294,18 +296,15 @@ clawvault-access-control blockchain-auditor private/lore-writer read
 
 ```bash
 # 1. Daedalus creates task
-curl -X POST http://localhost:3000/api/tasks \
-  -d '{"id":"T-20260220-003","title":"Audit ManaTokenV1.sol",...}'
+bin/mc-api POST /api/tasks '{"id":"T-20260220-003","title":"Audit ManaTokenV1.sol",...}'
 
 # 2. Hand off to blockchain-auditor
-curl -X POST http://localhost:3000/api/tasks/T-20260220-003/handoff \
-  -d '{"toSoul":"blockchain-auditor","reason":"Security expertise needed"}'
+bin/mc-api POST /api/tasks/T-20260220-003/handoff '{"toSoul":"blockchain-auditor","reason":"Security expertise needed"}'
 
 # 3. Blockchain-auditor completes audit, writes to private/blockchain-auditor/
 
 # 4. Blockchain-auditor proposes evolution (new attack pattern discovered)
-curl -X POST http://localhost:3000/api/souls/blockchain-auditor/evolution \
-  -d '{...}'
+bin/mc-api POST /api/souls/blockchain-auditor/evolution '{...}'
 
 # 5. Daedalus reviews and approves evolution via UI
 
@@ -319,12 +318,10 @@ curl -X POST http://localhost:3000/api/souls/blockchain-auditor/evolution \
 # 1. Daedalus receives: "Design gameplay loop and audit smart contracts"
 
 # 2. Hand off lore design to lore-writer
-curl -X POST http://localhost:3000/api/tasks/T-20260220-004/handoff \
-  -d '{"toSoul":"lore-writer","reason":"Need narrative design"}'
+bin/mc-api POST /api/tasks/T-20260220-004/handoff '{"toSoul":"lore-writer","reason":"Need narrative design"}'
 
 # 3. Hand off contract audit to blockchain-auditor (parallel task)
-curl -X POST http://localhost:3000/api/tasks/T-20260220-005/handoff \
-  -d '{"toSoul":"blockchain-auditor","reason":"Security audit"}'
+bin/mc-api POST /api/tasks/T-20260220-005/handoff '{"toSoul":"blockchain-auditor","reason":"Security audit"}'
 
 # 4. Both souls work independently, write to their private/ memory
 
@@ -341,20 +338,20 @@ curl -X POST http://localhost:3000/api/tasks/T-20260220-005/handoff \
 
 ```bash
 # Check registry
-curl http://localhost:3000/api/souls | jq '.[] | .id'
+bin/mc-api /api/souls | jq '.[] | .id'
 
 # Re-register soul if missing
-curl -X POST http://localhost:3000/api/souls -d '{...}'
+bin/mc-api POST /api/souls '{...}'
 ```
 
 ### Handoff Failed
 
 ```bash
 # Check task exists
-curl http://localhost:3000/api/tasks | jq '.[] | {id, title}'
+bin/mc-api /api/tasks | jq '.[] | {id, title}'
 
 # Verify soul ID is correct
-curl http://localhost:3000/api/souls | jq '.[] | .id'
+bin/mc-api /api/souls | jq '.[] | .id'
 ```
 
 ### Evolution Approval Failed
@@ -364,7 +361,7 @@ curl http://localhost:3000/api/souls | jq '.[] | .id'
 cd ~/.openclaw/souls && git status
 
 # If not initialized:
-git init
+git init -b main
 git config user.name "Daedalus"
 git config user.email "daedalus@openclaw.local"
 git add .
@@ -375,7 +372,7 @@ git commit -m "Initial souls commit"
 
 ```bash
 # Verify access control script
-clawvault-access-control <soul-id> <category> <read|write>
+clawvault-access-control <soul-id> <shared|handoffs|private/<soul>|vault> <read|write>
 
 # Check permissions in capabilities.json
 cat ~/.openclaw/souls/<soul-id>/capabilities.json | jq '.permissions.memory'
@@ -441,9 +438,7 @@ bin/soul-prompt lore-writer --extra-context "Focus on Mana Well flavor text"
 ### Using Mission Control API
 
 ```bash
-curl -X POST http://localhost:3000/api/souls/blockchain-auditor/prompt \
-  -H "Content-Type: application/json" \
-  -d '{
+bin/mc-api POST /api/souls/blockchain-auditor/prompt '{
     "taskId": "T-20260220-003",
     "extraContext": "Focus on reentrancy in withdraw()"
   }'
@@ -531,9 +526,7 @@ Genes can include an optional `scope` field controlling propagation:
 
 ```bash
 # Propagate an approved gene to another soul
-curl -X POST http://localhost:3000/api/souls/blockchain-auditor/propagate \
-  -H "Content-Type: application/json" \
-  -d '{
+bin/mc-api POST /api/souls/blockchain-auditor/propagate '{
     "sourceEventId": "evt_001",
     "targetSoulId": "lore-writer"
   }'

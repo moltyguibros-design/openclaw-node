@@ -604,8 +604,8 @@ def scan_skill(skill_path, whitelist, blacklist):
 
     # Scan all scannable files
     for root, dirs, files in os.walk(skill_path):
-        # Skip hidden directories and common non-code dirs
-        dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("node_modules", "__pycache__", ".git", "venv")]
+        # Dot-directories ship with the skill (install-hook copies the whole tree); only .git is not skill content.
+        dirs[:] = [d for d in dirs if d not in (".git", "node_modules", "__pycache__", "venv")]
         for filename in files:
             fp = Path(root) / filename
             suffix = fp.suffix.lower()

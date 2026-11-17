@@ -177,3 +177,42 @@ describe('startup reconcile reports under the kept lease', () => {
     assert.equal(report.payload.lease_token, 'lease-from-claim');
   });
 });
+
+describe('startup reconcile keeps post-mortem branches (mesh-core #17)', () => {
+  for (const [label, task] of [
+    ['released after exhausting attempts', { status: 'released', owner: 'node-self' }],
+    ['failed on budget or stall', { status: 'failed', owner: 'node-self' }],
+  ]) {
+    it(`the partial-work branch of a task ${label} survives a restart`, async () => {
+      await keptForReview();
+      daemonReports(task);
+      await agent.__test.reconcileKeptBranches();
+      assert.equal(branchExists('mesh/T-1'), true);
+    });
+  }
+
+  for (const [label, task] of [
+    ['cancelled', { status: 'cancelled', owner: 'node-self' }],
+    ['failed at the review-rejection cap', { status: 'failed', owner: 'node-self', rejection_count: 3 }],
+  ]) {
+    it(`the branch of a task ${label} is dropped`, async () => {
+      await keptForReview();
+      daemonReports(task);
+      await agent.__test.reconcileKeptBranches();
+      assert.equal(branchExists('mesh/T-1'), false);
+    });
+  }
+
+  it('a post-mortem branch older than the age cap is dropped', async () => {
+    await keptForReview();
+    git('checkout', '-q', 'mesh/T-1');
+    fs.writeFileSync(path.join(WORKSPACE, 'work.txt'), 'partial\n');
+    execFileSync('git', ['commit', '-q', '-am', 'partial: released'], {
+      cwd: WORKSPACE, stdio: 'pipe', env: { ...process.env, GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z' },
+    });
+    git('checkout', '-q', 'main');
+    daemonReports({ status: 'released', owner: 'node-self' });
+    await agent.__test.reconcileKeptBranches();
+    assert.equal(branchExists('mesh/T-1'), false);
+  });
+});

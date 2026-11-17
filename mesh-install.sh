@@ -2,13 +2,13 @@
 # mesh-install.sh — One-command mesh node bootstrapper.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/mesh-install.sh | MESH_JOIN_TOKEN=<token> sh
+#   curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/mesh-install.sh | MESH_JOIN_TOKEN=<token> bash
 #   MESH_JOIN_TOKEN=<token> bash mesh-install.sh
 #   bash mesh-install.sh --token <token>
 #
 # This script:
 #   1. Detects OS (macOS/Linux)
-#   2. Ensures Node.js 18+ and git are available
+#   2. Ensures Node.js 22.12+ and git are available
 #   3. Clones the openclaw mesh code (or updates if exists)
 #   4. Runs openclaw-node-init.js with the join token
 #
@@ -65,25 +65,35 @@ log "Detected OS: $OS ($(uname -m))"
 
 # ── Node.js Check / Install ──────────────────────────
 
+# 22.12 is the first 22.x whose require() loads an ES module unflagged
+# (openclaw-node-init loads lib/node-identity.mjs).
+node_ok() {
+  command -v node >/dev/null 2>&1 || return 1
+  local v major minor
+  v="$(node -v 2>/dev/null)"; v="${v#v}"
+  major="${v%%.*}"; minor="${v#*.}"; minor="${minor%%.*}"
+  case "$major$minor" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$major" -gt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 12 ]; }
+}
+
 ensure_node() {
+  if node_ok; then
+    ok "Node.js $(node --version)"
+    return
+  fi
   if command -v node &>/dev/null; then
-    local ver
-    ver=$(node --version | sed 's/v//' | cut -d. -f1)
-    if [ "$ver" -ge 18 ]; then
-      ok "Node.js $(node --version)"
-      return
-    fi
-    warn "Node.js $(node --version) is too old (need 18+)"
+    warn "Node.js $(node --version) is too old (need 22.12+)"
   else
     warn "Node.js not found"
   fi
 
-  log "Installing Node.js..."
+  log "Installing Node.js 22..."
   if [ "$OS" = "macos" ]; then
     if command -v brew &>/dev/null; then
-      brew install node@22
+      # node@22 is keg-only: without the link the old node (or none) stays on PATH.
+      brew install node@22 && brew link --overwrite --force node@22
     else
-      die "Homebrew not found. Install Node.js 18+ manually or install Homebrew first."
+      die "Homebrew not found. Install Node.js 22.12+ manually or install Homebrew first."
     fi
   else
     # Linux: NodeSource
@@ -97,10 +107,11 @@ ensure_node() {
       curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
       sudo yum install -y nodejs
     else
-      die "No supported package manager. Install Node.js 18+ manually."
+      die "No supported package manager. Install Node.js 22.12+ manually."
     fi
   fi
 
+  node_ok || die "Node.js 22.12+ still unavailable after install (found: $(node --version 2>/dev/null || echo none))"
   ok "Node.js installed: $(node --version)"
 }
 
@@ -201,9 +212,18 @@ ensure_mesh_code() {
     ok "Mesh code exists at $MESH_DIR"
     log "Updating..."
     cd "$MESH_DIR"
-    git pull --ff-only 2>/dev/null || warn "Git pull failed (local changes?) — continuing with existing code"
-    npm install --production 2>/dev/null
-    ok "Dependencies updated"
+    # The deploy listener checks out each signed sha detached; moving that tree
+    # here would update code outside the signed path.
+    if git symbolic-ref -q HEAD >/dev/null; then
+      git pull --ff-only 2>/dev/null || warn "Git pull failed (local changes?) — continuing with existing code"
+    else
+      ok "Code left at $(git rev-parse --short HEAD): signed deploys manage this checkout, and updates arrive only through them"
+    fi
+    if npm install --production 2>/dev/null; then
+      ok "Dependencies updated"
+    else
+      warn "npm install failed — dependencies may be incomplete"
+    fi
     return
   fi
 

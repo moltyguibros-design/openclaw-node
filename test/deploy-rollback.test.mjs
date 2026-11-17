@@ -52,4 +52,14 @@ describe('shouldCatchUp (deploy catch-up verdict)', () => {
     const v = shouldCatchUp({ currentSha: 'bbbbbbb', latestSha: 'bbbbbbb1234567890', lastDeploy: { sha: 'bbbbbbb', status: 'success', attempts: 1 } });
     assert.equal(v.deploy, false);
   });
+
+  it('does not catch up to a deploy targeted at other nodes', () => {
+    const base = { currentSha: 'aaaaaaa', latestSha: 'bbbbbbb', lastDeploy: null, nodeId: 'w1' };
+    const other = shouldCatchUp({ ...base, targetNodes: ['canary'] });
+    assert.equal(other.deploy, false);
+    assert.match(other.reason, /canary/);
+    assert.equal(shouldCatchUp({ ...base, targetNodes: ['w1'] }).deploy, true);
+    assert.equal(shouldCatchUp({ ...base, targetNodes: ['all'] }).deploy, true);
+    assert.equal(shouldCatchUp({ currentSha: 'aaaaaaa', latestSha: 'bbbbbbb', lastDeploy: null }).deploy, true);
+  });
 });

@@ -430,132 +430,134 @@ function formatTimestamp(): string {
 
 export function serializeTasksMarkdown(tasks: ParsedTask[]): string {
   const header = HEADER.replace("{{TIMESTAMP}}", formatTimestamp());
+  return header + "\n" + tasks.map(serializeTaskBlock).join("\n\n") + "\n";
+}
 
-  const blocks = tasks.map((t) => {
-    const lines: string[] = [];
-    lines.push(`- task_id: ${t.id}`);
-    lines.push(`  title: ${t.title}`);
-    lines.push(`  status: ${t.status}`);
-    lines.push(`  owner: ${t.owner ?? "main"}`);
+/** One task's `- task_id:` block, without a trailing newline. */
+export function serializeTaskBlock(t: ParsedTask): string {
+  // A raw newline drops the continuation on re-parse or forges a field/task block (same rule as lib/kanban-io.js).
+  const one = (v: string) => v.replace(/\s*\r?\n\s*/g, " ");
+  const lines: string[] = [];
+  lines.push(`- task_id: ${t.id}`);
+  lines.push(`  title: ${one(t.title)}`);
+  lines.push(`  status: ${one(t.status)}`);
+  lines.push(`  owner: ${one(t.owner ?? "main")}`);
 
-    if (t.successCriteria.length > 0) {
-      lines.push("  success_criteria:");
-      for (const c of t.successCriteria) {
-        lines.push(`    - ${c}`);
-      }
-    } else {
-      lines.push("  success_criteria:");
+  if (t.successCriteria.length > 0) {
+    lines.push("  success_criteria:");
+    for (const c of t.successCriteria) {
+      lines.push(`    - ${one(c)}`);
     }
+  } else {
+    lines.push("  success_criteria:");
+  }
 
-    if (t.artifacts.length > 0) {
-      lines.push("  artifacts:");
-      for (const a of t.artifacts) {
-        lines.push(`    - ${a}`);
-      }
-    } else {
-      lines.push("  artifacts:");
+  if (t.artifacts.length > 0) {
+    lines.push("  artifacts:");
+    for (const a of t.artifacts) {
+      lines.push(`    - ${one(a)}`);
     }
+  } else {
+    lines.push("  artifacts:");
+  }
 
-    lines.push(`  next_action: ${t.nextAction ?? "n/a"}`);
-    if (t.scheduledDate) {
-      lines.push(`  scheduled_date: ${t.scheduledDate}`);
+  lines.push(`  next_action: ${one(t.nextAction ?? "n/a")}`);
+  if (t.scheduledDate) {
+    lines.push(`  scheduled_date: ${one(t.scheduledDate)}`);
+  }
+  if (t.project) {
+    lines.push(`  project: ${one(t.project)}`);
+  }
+  if (t.type && t.type !== "task") {
+    lines.push(`  type: ${one(t.type)}`);
+  }
+  if (t.parentId) {
+    lines.push(`  parent_id: ${one(t.parentId)}`);
+  }
+  if (t.startDate) {
+    lines.push(`  start_date: ${one(t.startDate)}`);
+  }
+  if (t.endDate) {
+    lines.push(`  end_date: ${one(t.endDate)}`);
+  }
+  if (t.color) {
+    lines.push(`  color: ${one(t.color)}`);
+  }
+  if (t.description) {
+    // Escape newlines so multiline descriptions don't break the parser
+    lines.push(`  description: ${t.description.replace(/\n/g, "\\n")}`);
+  }
+  if (!t.needsApproval) {
+    lines.push(`  needs_approval: false`);
+  }
+  if (t.triggerKind !== "none") {
+    lines.push(`  trigger_kind: ${one(t.triggerKind)}`);
+  }
+  if (t.triggerAt) {
+    lines.push(`  trigger_at: ${one(t.triggerAt)}`);
+  }
+  if (t.triggerCron) {
+    lines.push(`  trigger_cron: ${one(t.triggerCron)}`);
+  }
+  if (t.triggerTz && t.triggerTz !== "America/Montreal") {
+    lines.push(`  trigger_tz: ${one(t.triggerTz)}`);
+  }
+  if (t.isRecurring) {
+    lines.push(`  is_recurring: true`);
+  }
+  if (t.capacityClass && t.capacityClass !== "normal") {
+    lines.push(`  capacity_class: ${one(t.capacityClass)}`);
+  }
+  if (t.autoPriority > 0) {
+    lines.push(`  auto_priority: ${t.autoPriority}`);
+  }
+  // Mesh execution fields
+  if (t.execution) {
+    lines.push(`  execution: ${one(t.execution)}`);
+  }
+  if (t.meshTaskId) {
+    lines.push(`  mesh_task_id: ${one(t.meshTaskId)}`);
+  }
+  if (t.meshNode) {
+    lines.push(`  mesh_node: ${one(t.meshNode)}`);
+  }
+  if (t.metric) {
+    lines.push(`  metric: ${one(t.metric)}`);
+  }
+  if (t.budgetMinutes && t.budgetMinutes !== 30) {
+    lines.push(`  budget_minutes: ${t.budgetMinutes}`);
+  }
+  if (t.scope && t.scope.length > 0) {
+    lines.push("  scope:");
+    for (const s of t.scope) {
+      lines.push(`    - ${one(s)}`);
     }
-    if (t.project) {
-      lines.push(`  project: ${t.project}`);
+  }
+  // Collab routing fields
+  if (t.collaboration) {
+    lines.push(`  collaboration: ${JSON.stringify(t.collaboration)}`);
+  }
+  if (t.preferredNodes && t.preferredNodes.length > 0) {
+    lines.push("  preferred_nodes:");
+    for (const n of t.preferredNodes) {
+      lines.push(`    - ${one(n)}`);
     }
-    if (t.type && t.type !== "task") {
-      lines.push(`  type: ${t.type}`);
+  }
+  if (t.excludeNodes && t.excludeNodes.length > 0) {
+    lines.push("  exclude_nodes:");
+    for (const n of t.excludeNodes) {
+      lines.push(`    - ${one(n)}`);
     }
-    if (t.parentId) {
-      lines.push(`  parent_id: ${t.parentId}`);
-    }
-    if (t.startDate) {
-      lines.push(`  start_date: ${t.startDate}`);
-    }
-    if (t.endDate) {
-      lines.push(`  end_date: ${t.endDate}`);
-    }
-    if (t.color) {
-      lines.push(`  color: ${t.color}`);
-    }
-    if (t.description) {
-      // Escape newlines so multiline descriptions don't break the parser
-      lines.push(`  description: ${t.description.replace(/\n/g, "\\n")}`);
-    }
-    if (!t.needsApproval) {
-      lines.push(`  needs_approval: false`);
-    }
-    if (t.triggerKind !== "none") {
-      lines.push(`  trigger_kind: ${t.triggerKind}`);
-    }
-    if (t.triggerAt) {
-      lines.push(`  trigger_at: ${t.triggerAt}`);
-    }
-    if (t.triggerCron) {
-      lines.push(`  trigger_cron: ${t.triggerCron}`);
-    }
-    if (t.triggerTz && t.triggerTz !== "America/Montreal") {
-      lines.push(`  trigger_tz: ${t.triggerTz}`);
-    }
-    if (t.isRecurring) {
-      lines.push(`  is_recurring: true`);
-    }
-    if (t.capacityClass && t.capacityClass !== "normal") {
-      lines.push(`  capacity_class: ${t.capacityClass}`);
-    }
-    if (t.autoPriority > 0) {
-      lines.push(`  auto_priority: ${t.autoPriority}`);
-    }
-    // Mesh execution fields
-    if (t.execution) {
-      lines.push(`  execution: ${t.execution}`);
-    }
-    if (t.meshTaskId) {
-      lines.push(`  mesh_task_id: ${t.meshTaskId}`);
-    }
-    if (t.meshNode) {
-      lines.push(`  mesh_node: ${t.meshNode}`);
-    }
-    if (t.metric) {
-      lines.push(`  metric: ${t.metric}`);
-    }
-    if (t.budgetMinutes && t.budgetMinutes !== 30) {
-      lines.push(`  budget_minutes: ${t.budgetMinutes}`);
-    }
-    if (t.scope && t.scope.length > 0) {
-      lines.push("  scope:");
-      for (const s of t.scope) {
-        lines.push(`    - ${s}`);
-      }
-    }
-    // Collab routing fields
-    if (t.collaboration) {
-      lines.push(`  collaboration: ${JSON.stringify(t.collaboration)}`);
-    }
-    if (t.preferredNodes && t.preferredNodes.length > 0) {
-      lines.push("  preferred_nodes:");
-      for (const n of t.preferredNodes) {
-        lines.push(`    - ${n}`);
-      }
-    }
-    if (t.excludeNodes && t.excludeNodes.length > 0) {
-      lines.push("  exclude_nodes:");
-      for (const n of t.excludeNodes) {
-        lines.push(`    - ${n}`);
-      }
-    }
-    if (t.clusterId) {
-      lines.push(`  cluster_id: ${t.clusterId}`);
-    }
-    // P5-5: re-emit fields we do not model, exactly as parsed
-    for (const [k, v] of Object.entries(t.extra ?? {})) {
-      if (KNOWN_MARKDOWN_KEYS.has(k) || !/^\w[\w_]*$/.test(k)) continue;
-      lines.push(`  ${k}: ${String(v).replace(/\n/g, "\\n")}`);
-    }
-    lines.push(`  updated_at: ${t.updatedAt}`);
+  }
+  if (t.clusterId) {
+    lines.push(`  cluster_id: ${one(t.clusterId)}`);
+  }
+  // P5-5: re-emit fields we do not model, exactly as parsed
+  for (const [k, v] of Object.entries(t.extra ?? {})) {
+    if (KNOWN_MARKDOWN_KEYS.has(k) || !/^\w[\w_]*$/.test(k)) continue;
+    lines.push(`  ${k}: ${String(v).replace(/\n/g, "\\n")}`);
+  }
+  lines.push(`  updated_at: ${t.updatedAt}`);
 
-    return lines.join("\n");
-  });
-
-  return header + "\n" + blocks.join("\n\n") + "\n";
+  return lines.join("\n");
 }

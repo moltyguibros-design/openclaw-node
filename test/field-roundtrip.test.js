@@ -60,6 +60,23 @@ after(async () => {
 });
 
 describe('Routing field round-trip: submit → KV → get', { skip: skipReason }, () => {
+  it('HyperAgent provenance fields survive round-trip; an unknown execution_class is refused', async () => {
+    const taskId = `${TEST_PREFIX}-provenance-1`;
+    createdTaskIds.push(taskId);
+    const provenance = {
+      execution_class: 'synthetic', run_id: 'frt-run', logical_task_id: 'frt-logical',
+      parent_task_id: 'frt-parent', domain: 'infra', subdomain: 'nats',
+    };
+    const res = await rpc('mesh.tasks.submit', { task_id: taskId, title: 'Provenance round-trip', ...provenance });
+    assert.equal(res.ok, true);
+    const get = await rpc('mesh.tasks.get', { task_id: taskId });
+    for (const [k, v] of Object.entries(provenance)) assert.equal(get.data[k], v, k);
+
+    const bad = await rpc('mesh.tasks.submit', { task_id: `${TEST_PREFIX}-provenance-bad`, title: 'Bad', execution_class: 'prod' });
+    assert.equal(bad.ok, false);
+    assert.match(bad.error, /invalid execution_class/);
+  });
+
   it('llm_provider and llm_model survive round-trip', async () => {
     const taskId = `${TEST_PREFIX}-provider-1`;
     createdTaskIds.push(taskId);

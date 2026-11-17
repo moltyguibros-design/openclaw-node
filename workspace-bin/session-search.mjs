@@ -121,6 +121,7 @@ async function main() {
       const result = await store.importDirectory(src.path, { source: src.name, format: src.format });
       totalImported += result.imported;
       totalSkipped += result.skipped;
+      for (const f of result.failed) process.stderr.write(`  ${f.file}: import failed: ${f.error}\n`);
       if (!useJson) {
         process.stderr.write(`  ${src.path}: ${result.imported} imported, ${result.skipped} skipped\n`);
       }

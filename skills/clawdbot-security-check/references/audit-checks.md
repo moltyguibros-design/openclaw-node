@@ -1,6 +1,11 @@
-# Clawdbot Security Audit — Detailed Checks & Patterns
+# OpenClaw Security Audit — Detailed Checks & Patterns
 
 This file contains the full audit checklists, detection commands, remediation examples, and report templates referenced by `SKILL.md`.
+
+Start with `openclaw security audit --deep` (add `--json` for structured output): it is the
+authoritative check. The commands below are supplements. If `~/.openclaw/openclaw.json` does not
+exist, or a command errors, report the audit as **not run**, never as clean: a grep that prints
+nothing only means the key is absent from the file.
 
 ---
 
@@ -10,14 +15,14 @@ This file contains the full audit checklists, detection commands, remediation ex
 
 **What to check:**
 - Where is the gateway binding? (`gateway.bind`)
-- Is authentication configured? (`gateway.auth_token` or `CLAWDBOT_GATEWAY_TOKEN` env var)
+- Is authentication configured? (`gateway.auth_token` or `OPENCLAW_GATEWAY_TOKEN` env var)
 - What port is exposed? (default: 18789)
 - Is WebSocket auth enabled?
 
 **How to detect:**
 ```bash
-cat ~/.clawdbot/clawdbot.json | grep -A10 '"gateway"'
-env | grep CLAWDBOT_GATEWAY_TOKEN
+cat ~/.openclaw/openclaw.json | grep -A10 '"gateway"'
+env | grep -c OPENCLAW_GATEWAY_TOKEN
 ```
 
 **Vulnerability:** Binding to `0.0.0.0` or `lan` without auth allows network access.
@@ -25,8 +30,7 @@ env | grep CLAWDBOT_GATEWAY_TOKEN
 **Remediation:**
 ```bash
 # Generate gateway token
-clawdbot doctor --generate-gateway-token
-export CLAWDBOT_GATEWAY_TOKEN="$(openssl rand -hex 32)"
+openclaw doctor --generate-gateway-token
 ```
 
 ---
@@ -39,10 +43,10 @@ export CLAWDBOT_GATEWAY_TOKEN="$(openssl rand -hex 32)"
 
 **How to detect:**
 ```bash
-cat ~/.clawdbot/clawdbot.json | grep -E '"dm_policy|"allowFrom"'
+cat ~/.openclaw/openclaw.json | grep -E '"dm_policy|"allowFrom"'
 ```
 
-**Vulnerability:** Setting to `allow` or `open` means any user can DM Clawdbot.
+**Vulnerability:** Setting to `allow` or `open` means any user can DM OpenClaw.
 
 **Remediation:**
 ```json
@@ -67,8 +71,8 @@ cat ~/.clawdbot/clawdbot.json | grep -E '"dm_policy|"allowFrom"'
 
 **How to detect:**
 ```bash
-cat ~/.clawdbot/clawdbot.json | grep -E '"groupPolicy"|"groups"'
-cat ~/.clawdbot/clawdbot.json | grep -i "mention"
+cat ~/.openclaw/openclaw.json | grep -E '"groupPolicy"|"groups"'
+cat ~/.openclaw/openclaw.json | grep -i "mention"
 ```
 
 **Vulnerability:** Open group policy allows anyone in the room to trigger commands.
@@ -99,28 +103,28 @@ cat ~/.clawdbot/clawdbot.json | grep -i "mention"
 **Credential Storage Map:**
 | Platform | Path |
 |----------|------|
-| WhatsApp | `~/.clawdbot/credentials/whatsapp/{accountId}/creds.json` |
-| Telegram | `~/.clawdbot/clawdbot.json` or env |
-| Discord | `~/.clawdbot/clawdbot.json` or env |
-| Slack | `~/.clawdbot/clawdbot.json` or env |
-| Pairing allowlists | `~/.clawdbot/credentials/channel-allowFrom.json` |
-| Auth profiles | `~/.clawdbot/agents/{agentId}/auth-profiles.json` |
-| Legacy OAuth | `~/.clawdbot/credentials/oauth.json` |
+| WhatsApp | `~/.openclaw/credentials/whatsapp/{accountId}/creds.json` |
+| Telegram | `~/.openclaw/openclaw.json` or env |
+| Discord | `~/.openclaw/openclaw.json` or env |
+| Slack | `~/.openclaw/openclaw.json` or env |
+| Pairing allowlists | `~/.openclaw/state/openclaw.sqlite` |
+| Auth profiles | `~/.openclaw/agents/{agentId}/agent/openclaw-agent.sqlite` |
+| Legacy OAuth | `~/.openclaw/credentials/oauth.json` |
 
 **How to detect:**
 ```bash
-ls -la ~/.clawdbot/credentials/
-ls -la ~/.clawdbot/agents/*/auth-profiles.json 2>/dev/null
-stat -c "%a" ~/.clawdbot/credentials/oauth.json 2>/dev/null
+ls -la ~/.openclaw/credentials/
+ls -la ~/.openclaw/agents/*/agent/ 2>/dev/null
+stat -c "%a" ~/.openclaw/credentials/oauth.json 2>/dev/null
 ```
 
 **Vulnerability:** Plaintext credentials with loose permissions can be read by any process.
 
 **Remediation:**
 ```bash
-chmod 700 ~/.clawdbot
-chmod 600 ~/.clawdbot/credentials/oauth.json
-chmod 600 ~/.clawdbot/clawdbot.json
+chmod 700 ~/.openclaw
+chmod 600 ~/.openclaw/credentials/oauth.json
+chmod 600 ~/.openclaw/openclaw.json
 ```
 
 ---
@@ -135,9 +139,9 @@ chmod 600 ~/.clawdbot/clawdbot.json
 
 **How to detect:**
 ```bash
-cat ~/.clawdbot/clawdbot.json | grep -A5 '"browser"'
-cat ~/.clawdbot/clawdbot.json | grep -i "controlUi|insecureAuth"
-ls -la ~/.clawdbot/browser/
+cat ~/.openclaw/openclaw.json | grep -A5 '"browser"'
+cat ~/.openclaw/openclaw.json | grep -i "controlUi|insecureAuth"
+ls -la ~/.openclaw/browser/
 ```
 
 **Vulnerability:** Exposed browser control without auth allows remote UI takeover. Browser access allows the model to use logged-in sessions.
@@ -172,8 +176,8 @@ ls -la ~/.clawdbot/browser/
 
 **How to detect:**
 ```bash
-cat ~/.clawdbot/clawdbot.json | grep -A10 '"gateway"'
-cat ~/.clawdbot/clawdbot.json | grep '"tailscale"'
+cat ~/.openclaw/openclaw.json | grep -A10 '"gateway"'
+cat ~/.openclaw/openclaw.json | grep '"tailscale"'
 ```
 
 **Vulnerability:** Public binding without auth allows internet access to gateway.
@@ -204,9 +208,9 @@ cat ~/.clawdbot/clawdbot.json | grep '"tailscale"'
 
 **How to detect:**
 ```bash
-cat ~/.clawdbot/clawdbot.json | grep -i "restrict|mcp|elevated"
-cat ~/.clawdbot/clawdbot.json | grep -i "workspaceAccess|sandbox"
-cat ~/.clawdbot/clawdbot.json | grep -i "openRoom"
+cat ~/.openclaw/openclaw.json | grep -i "restrict|mcp|elevated"
+cat ~/.openclaw/openclaw.json | grep -i "workspaceAccess|sandbox"
+cat ~/.openclaw/openclaw.json | grep -i "openRoom"
 ```
 
 **Workspace Access Levels:**
@@ -244,17 +248,17 @@ cat ~/.clawdbot/clawdbot.json | grep -i "openRoom"
 
 **How to detect:**
 ```bash
-stat -c "%a" ~/.clawdbot
-ls -la ~/.clawdbot/*.json
+stat -c "%a" ~/.openclaw
+ls -la ~/.openclaw/*.json
 ```
 
 **Vulnerability:** Loose permissions allow other users to read sensitive configs.
 
 **Remediation:**
 ```bash
-chmod 700 ~/.clawdbot
-chmod 600 ~/.clawdbot/clawdbot.json
-chmod 600 ~/.clawdbot/credentials/*
+chmod 700 ~/.openclaw
+chmod 600 ~/.openclaw/openclaw.json
+chmod 600 ~/.openclaw/credentials/*
 ```
 
 ---
@@ -267,8 +271,8 @@ chmod 600 ~/.clawdbot/credentials/*
 
 **How to detect:**
 ```bash
-cat ~/.clawdbot/clawdbot.json | grep -i "plugin|allowlist"
-cat ~/.clawdbot/clawdbot.json | grep -i "model|anthropic"
+cat ~/.openclaw/openclaw.json | grep -i "plugin|allowlist"
+cat ~/.openclaw/openclaw.json | grep -i "model|anthropic"
 ```
 
 **Vulnerability:** Untrusted plugins can execute code. Legacy models may lack modern safety.
@@ -299,8 +303,8 @@ cat ~/.clawdbot/clawdbot.json | grep -i "model|anthropic"
 
 **How to detect:**
 ```bash
-cat ~/.clawdbot/clawdbot.json | grep -i "logging|redact"
-ls -la ~/.clawdbot/logs/
+cat ~/.openclaw/openclaw.json | grep -i "logging|redact"
+ls -la ~/.openclaw/logs/
 ```
 
 **Remediation:**
@@ -308,7 +312,7 @@ ls -la ~/.clawdbot/logs/
 {
   "logging": {
     "redactSensitive": "tools",
-    "path": "~/.clawdbot/logs/"
+    "path": "~/.openclaw/logs/"
   }
 }
 ```
@@ -324,7 +328,7 @@ ls -la ~/.clawdbot/logs/
 
 **How to detect:**
 ```bash
-cat ~/.clawdbot/clawdbot.json | grep -i "untrusted|wrap"
+cat ~/.openclaw/openclaw.json | grep -i "untrusted|wrap"
 ```
 
 **Prompt Injection Mitigation Strategies:**
@@ -356,7 +360,7 @@ cat ~/.clawdbot/clawdbot.json | grep -i "untrusted|wrap"
 
 **How to detect:**
 ```bash
-cat ~/.clawdbot/clawdbot.json | grep -A10 '"blocked_commands"'
+cat ~/.openclaw/openclaw.json | grep -A10 '"blocked_commands"'
 ```
 
 **Vulnerability:** Without blocking, a malicious prompt could destroy data or exfiltrate credentials.
@@ -411,19 +415,9 @@ When running a security audit, follow this sequence:
 
 ### Step 1: Locate Configuration
 ```bash
-CONFIG_PATHS=(
-  "$HOME/.clawdbot/clawdbot.json"
-  "$HOME/.clawdbot/config.yaml"
-  "$HOME/.clawdbot/.clawdbotrc"
-  ".clawdbotrc"
-)
-for path in "${CONFIG_PATHS[@]}"; do
-  if [ -f "$path" ]; then
-    echo "Found config: $path"
-    cat "$path"
-    break
-  fi
-done
+CONFIG="${OPENCLAW_CONFIG_PATH:-$HOME/.openclaw/openclaw.json}"
+[ -f "$CONFIG" ] || { echo "No OpenClaw config at $CONFIG: audit not run"; exit 1; }
+openclaw security audit --deep
 ```
 
 ### Step 2: Run Domain Checks
@@ -453,7 +447,7 @@ For each finding, output:
 
 ```
 ===================================================================
-CLAWDBOT SECURITY AUDIT
+OPENCLAW SECURITY AUDIT
 ===================================================================
 Timestamp: $(date -Iseconds)
 
@@ -473,7 +467,7 @@ Timestamp: $(date -Iseconds)
      ...
 --------------------------------------------------------------
 
-This audit was performed by Clawdbot's self-security framework.
+This audit was performed by OpenClaw's self-security framework.
 No changes were made to your configuration.
 ```
 
@@ -513,9 +507,9 @@ env | grep SSH_AUTH_SOCK
 
 When auditing, ask:
 
-1. **Exposure:** What network interfaces can reach Clawdbot?
+1. **Exposure:** What network interfaces can reach OpenClaw?
 2. **Authentication:** What verification does each access point require?
-3. **Isolation:** What boundaries exist between Clawdbot and the host?
+3. **Isolation:** What boundaries exist between OpenClaw and the host?
 4. **Trust:** What content sources are considered "trusted"?
-5. **Auditability:** What evidence exists of Clawdbot's actions?
-6. **Least Privilege:** Does Clawdbot have only necessary permissions?
+5. **Auditability:** What evidence exists of OpenClaw's actions?
+6. **Least Privilege:** Does OpenClaw have only necessary permissions?

@@ -9,10 +9,15 @@ addition. This replaces the companion-bridge proxy as the path memory takes into
 the gateway.
 
 What stays in the daemon: retrieval (the six-channel pipeline), the token
-budget, `@memory` directives, reconsolidation write-back, and **extraction** —
+budget, `@memory` directives (the daemon honours them, but this plugin passes
+the conversation through unchanged, so unlike the publisher wrappers the model
+still sees the directive text), reconsolidation write-back, and **extraction** —
 the daemon already tails `~/.openclaw/agents/*/sessions/*.jsonl` and flushes on
 idle / session end / pre-compaction size, so this plugin records nothing.
-Compaction is delegated to OpenClaw's native compactor.
+Compaction is delegated to OpenClaw's native compactor through
+`openclaw/plugin-sdk/core`. The engine declares `ownsCompaction` only once that
+import has resolved; if it fails, the plugin logs one warning and leaves
+compaction to the host.
 
 ## Install
 
@@ -38,7 +43,7 @@ and the daemon's `memory.injected` events (Mission Control → watcher) show
 | `tokenPath` | `~/.openclaw/config/memory-injection-token` | Re-read on every request. |
 | `autoRecall` | `true` | Inject on every turn. |
 | `maxInjectedChars` | `6000` | Longer blocks are cut on a line boundary. |
-| `timeoutMs` | `4000` | On timeout the turn proceeds without memory. |
+| `timeoutMs` | `12000` | Above the daemon's worst case (up to 8 s of LLM query analysis, then embedding and retrieval: about 9–11 s); the turn can wait that long. On timeout the turn proceeds without memory. |
 | `bypassSessionPatterns` | `[]` | e.g. `agent:*:cron:**` — no recall for matching session keys. |
 
 ## Tools

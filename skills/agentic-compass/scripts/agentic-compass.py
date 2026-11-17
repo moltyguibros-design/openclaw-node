@@ -7,14 +7,12 @@ Local-only reflection that forces objective action for AI agents.
 
 import argparse
 import re
-import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 # Configuration
 DEFAULT_DAILY_PATH = Path.home() / ".openclaw" / "workspace" / "memory" / f"{datetime.now().strftime('%Y-%m-%d')}.md"
 DEFAULT_LONG_PATH = Path.home() / ".openclaw" / "workspace" / "MEMORY.md"
-OUTPUT_PATH = Path.home() / ".openclaw" / "workspace" / "memory" / "agentic-compass.md"
 
 # Agent-specific scoring axes
 AXES = [
@@ -186,7 +184,7 @@ def main():
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
         with open(output_path, 'a', encoding='utf-8') as f:
-            f.write(f"\n\n## Agentic Compass Report — {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}\n\n")
+            f.write(f"\n\n## Agentic Compass Report — {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n")
             f.write(report)
             f.write("\n")
         

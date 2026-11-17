@@ -43,8 +43,8 @@ Kinds: `info` · `success` · `warn` · `error` · `block` (error/block are
 popup to have been delivered. From Node, `import { notify } from 'lib/notify.mjs'`.
 
 Wired emitters: workplan-viewer state transitions (step closed / plan BLOCKED,
-deep-linking `?plan=<id>`), the tick-chain via the `memory-plan-notify.sh` shim,
-and node-watch WORKING↔BROKEN transitions (linking to MC `/node-watch`).
+deep-linking `?plan=<id>`) and node-watch WORKING↔BROKEN transitions (linking to MC
+`/node-watch`).
 
 ## Ledger format
 

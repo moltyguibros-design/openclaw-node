@@ -22,7 +22,7 @@
 12. [Tier Gates and Human Intervention](#12-tier-gates-and-human-intervention)
 13. [Test Infrastructure](#13-test-infrastructure)
 14. [Known Gaps and Future Work](#14-known-gaps-and-future-work)
-15. [Changelog: V1 → V2 → V3](#15-changelog)
+15. [Changelog: V1 → V2 → V3](#15-changelog-v1--v2--v3)
 
 ---
 
@@ -689,6 +689,8 @@ The human sees the reviewer's reason directly on the kanban without running `mes
 ### 12.3 Gate Approve
 
 `mesh.collab.gate.approve` → If finalization: force-complete. If mid-protocol: resume next step.
+
+Both gate requests must be operator-signed; `mesh collab gate approve|reject <session-id>` sends them, and the kanban card names that command.
 
 ### 12.4 Gate Reject
 

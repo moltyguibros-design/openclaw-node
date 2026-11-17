@@ -37,7 +37,16 @@ if [ "$(id -u)" -eq 0 ]; then SUDO=""
 elif have sudo; then SUDO="sudo"
 else SUDO=""; fi
 
-node_ok() { have node && [ "$(node -e 'console.log(process.versions.node.split(".")[0])' 2>/dev/null || echo 0)" -ge 22 ]; }
+# 22.12 is the first 22.x whose require() loads an ES module unflagged
+# (bin/mesh-join-token.js and openclaw-node-init load lib/node-identity.mjs).
+node_ok() {
+  have node || return 1
+  local v major minor
+  v="$(node -v 2>/dev/null)"; v="${v#v}"
+  major="${v%%.*}"; minor="${v#*.}"; minor="${minor%%.*}"
+  case "$major$minor" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$major" -gt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 12 ]; }
+}
 
 # ---------- macOS ----------
 if [ "$PREREQ_OS" = macos ]; then
@@ -64,10 +73,10 @@ if [ "$PREREQ_OS" = macos ]; then
   if node_ok; then
     ok "node $(node -v)"
   elif $CHECK_ONLY; then
-    error "node 22+ MISSING (found: $(node -v 2>/dev/null || echo none))"
+    error "node 22.12+ MISSING (found: $(node -v 2>/dev/null || echo none))"
   else
     brew install node@22 && brew link --overwrite --force node@22
-    node_ok && ok "node $(node -v)" || error "node 22+ still unavailable after install"
+    node_ok && ok "node $(node -v)" || error "node 22.12+ still unavailable after install"
   fi
 
   # Report on the BINARY, never on the package manager's exit code: a formula
@@ -122,7 +131,7 @@ else
   if node_ok; then
     ok "node $(node -v)"
   elif $CHECK_ONLY; then
-    error "node 22+ MISSING (found: $(node -v 2>/dev/null || echo none))"
+    error "node 22.12+ MISSING (found: $(node -v 2>/dev/null || echo none))"
   else
     $SUDO mkdir -p /etc/apt/keyrings
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
@@ -130,7 +139,7 @@ else
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
       | $SUDO tee /etc/apt/sources.list.d/nodesource.list >/dev/null
     $SUDO apt-get update -y && $SUDO apt-get install -y nodejs
-    node_ok && ok "node $(node -v)" || error "node 22+ still unavailable after install"
+    node_ok && ok "node $(node -v)" || error "node 22.12+ still unavailable after install"
   fi
 
   if have nats-server; then
@@ -140,10 +149,28 @@ else
   else
     V="${OPENCLAW_NATS_SERVER_VERSION:-2.12.6}"
     case "$(uname -m)" in aarch64|arm64) A=arm64 ;; *) A=amd64 ;; esac
+    # Same pinned checksums as bootstrap.sh (upstream SHA256SUMS for v2.12.6): the
+    # bus binary is verified before it is installed; an override version must bring
+    # its own OPENCLAW_NATS_SERVER_SHA256 or it is refused.
+    case "${V}-${A}" in
+      2.12.6-amd64) EXPECT_SHA="77fe7dd69ff5144126026b78355900be0ab0bb4339dc61a7621dcc9b9e9d07a6" ;;
+      2.12.6-arm64) EXPECT_SHA="fddaf3f223c7af3f4d0a0d2c2fc084406e6b3ec7adfd1b9e6a37fbd03bfe222f" ;;
+      *) EXPECT_SHA="${OPENCLAW_NATS_SERVER_SHA256:-}" ;;
+    esac
     T=$(mktemp -d)
-    if curl -fsSL "https://github.com/nats-io/nats-server/releases/download/v${V}/nats-server-v${V}-linux-${A}.tar.gz" | tar xz -C "$T"; then
-      $SUDO install "$T/nats-server-v${V}-linux-${A}/nats-server" /usr/local/bin/nats-server
-      have nats-server && ok "nats-server v$V installed" || error "nats-server not on PATH"
+    TGZ="$T/nats-server-v${V}-linux-${A}.tar.gz"
+    if [ -z "$EXPECT_SHA" ]; then
+      error "no pinned checksum for nats-server v${V} (${A}); set OPENCLAW_NATS_SERVER_SHA256 to install it"
+    elif curl -fsSL -o "$TGZ" "https://github.com/nats-io/nats-server/releases/download/v${V}/nats-server-v${V}-linux-${A}.tar.gz"; then
+      ACTUAL_SHA=$(sha256sum "$TGZ" | awk '{print $1}')
+      if [ "$ACTUAL_SHA" != "$EXPECT_SHA" ]; then
+        error "nats-server checksum MISMATCH (got $ACTUAL_SHA, expected $EXPECT_SHA) — not installing"
+      elif tar xzf "$TGZ" -C "$T"; then
+        $SUDO install "$T/nats-server-v${V}-linux-${A}/nats-server" /usr/local/bin/nats-server
+        have nats-server && ok "nats-server v$V installed (sha256 verified)" || error "nats-server not on PATH"
+      else
+        error "nats-server archive could not be extracted"
+      fi
     else
       error "nats-server download failed"
     fi
@@ -188,7 +215,7 @@ PREREQ_FAIL=0
 _chk() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else error "$1 — MISSING"; PREREQ_FAIL=1; fi; }
 echo ""
 echo "───── prerequisite gate ─────"
-_chk "node 22+"      'node_ok'
+_chk "node 22.12+"   'node_ok'
 _chk "python3 3.8+"  'python3 -c "import sys; sys.exit(0 if sys.version_info>=(3,8) else 1)"'
 _chk "PyYAML"        'python3 -c "import yaml"'
 _chk "git"           'command -v git'

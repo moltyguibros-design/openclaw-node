@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       .prepare(
         `WITH RECURSIVE tree AS (
           SELECT id, start_date, end_date, type FROM tasks WHERE id = ?
-          UNION ALL
+          UNION
           SELECT t.id, t.start_date, t.end_date, t.type
           FROM tasks t JOIN tree ON t.parent_id = tree.id
         )
@@ -39,14 +39,12 @@ export async function GET(request: NextRequest) {
       )
       .all(projectId) as TaskRow[];
 
-    const taskIds = new Set(taskRows.map((t) => t.id));
-
     // Get dependencies within subtree (using the same recursive CTE)
     const depRows = raw
       .prepare(
         `WITH RECURSIVE tree AS (
           SELECT id FROM tasks WHERE id = ?
-          UNION ALL
+          UNION
           SELECT t.id FROM tasks t JOIN tree ON t.parent_id = tree.id
         )
         SELECT d.source_id, d.target_id FROM dependencies d
@@ -60,9 +58,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ criticalPath: [], totalDuration: 0 });
     }
 
+    // Activities are only the rows on a dependency edge. The queried root and
+    // other date-spanning containers or unlinked tasks would otherwise set
+    // projectDuration and float every real chain off the critical path.
+    const taskIds = new Set(depRows.flatMap((d) => [d.source_id, d.target_id]));
+
     // Compute task durations (in days)
     const duration = new Map<string, number>();
     for (const t of taskRows) {
+      if (!taskIds.has(t.id)) continue;
       if (t.start_date && t.end_date) {
         const ms =
           new Date(t.end_date).getTime() - new Date(t.start_date).getTime();

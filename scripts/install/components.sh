@@ -129,8 +129,14 @@ if [ -d "$REPO_DIR/obsidian-vault" ]; then
     run rsync -av "$REPO_DIR/obsidian-vault/" "$VAULT_DIR/"
     # Remove .gitkeep files (only needed for git, not for runtime)
     find "$VAULT_DIR" -name '.gitkeep' -delete 2>/dev/null || true
-    info "Obsidian vault scaffold installed (22 domain folders + plugins)"
-    warn "Obsidian Local REST API plugin included. Set API key in $VAULT_DIR/.obsidian-api-key"
+    info "Obsidian vault scaffold installed (22 domain folders)"
+    if $DRY_RUN; then
+      info "  [dry-run] would download the Obsidian Local REST API plugin (pinned release, sha256-verified)"
+    elif bash "$REPO_DIR/scripts/install/obsidian-rest-api.sh" "$VAULT_DIR"; then
+      warn "Obsidian Local REST API plugin installed. Set API key in $VAULT_DIR/.obsidian-api-key"
+    else
+      warn "Obsidian Local REST API plugin not installed — install it from Obsidian's community plugins"
+    fi
   else
     info "Obsidian vault already exists, skipping"
   fi
@@ -143,39 +149,62 @@ fi
 step "Step 11: Mission Control"
 
 MC_DIR="$WORKSPACE/projects/mission-control"
-if [ ! -d "$MC_DIR/src" ]; then
-  run mkdir -p "$MC_DIR"
-  run rsync -av --exclude='node_modules' --exclude='.next' --exclude='*.db' \
+# workspace-docs/RUNBOOK_MC_DEPLOY.md: an exact copy of the repo tree (a route
+# deleted from the repo leaves the live tree too), keeping the node's env,
+# database and build state.
+mc_sync() {
+  run rsync -a --delete --exclude='.env.local' --exclude='node_modules' --exclude='.next' \
+    --exclude='.next.prev' --exclude='data' --exclude='*.db' \
     "$REPO_DIR/mission-control/" "$MC_DIR/"
-  info "Mission Control source copied"
-else
-  info "Mission Control already exists, updating source..."
-  run rsync -av --exclude='node_modules' --exclude='.next' --exclude='*.db' \
-    "$REPO_DIR/mission-control/" "$MC_DIR/"
-fi
+}
 
-if $SANDBOX; then
-  info "Sandbox: skipping Mission Control dependencies + build"
-elif [ ! -d "$MC_DIR/node_modules" ]; then
-  info "Installing Mission Control dependencies (this may take a minute)..."
-  (cd "$MC_DIR" && run npm install)
-elif $UPDATE_ONLY; then
-  info "Updating Mission Control dependencies..."
-  (cd "$MC_DIR" && run npm install)
-else
-  info "Mission Control dependencies already installed"
-fi
-
-# Production build — the unit runs `npm start` (= next start), which needs a
-# .next build; without one the unit crash-loops (2026-07-11 audit).
-if ! $SANDBOX && ! $DRY_RUN && [ -d "$MC_DIR/node_modules" ] && [ ! -d "$MC_DIR/.next" ]; then
+# Next bakes its distDir into every route module, so a build made in a side
+# directory cannot be renamed into place. The previous build is set aside
+# instead and put back if this one fails: the unit always has a build to serve.
+mc_build() {
+  run rm -rf "$MC_DIR/.next.prev"
+  if [ -d "$MC_DIR/.next" ]; then run mv "$MC_DIR/.next" "$MC_DIR/.next.prev"; fi
   info "Building Mission Control (next build)..."
-  if (cd "$MC_DIR" && npm run build); then
+  if (cd "$MC_DIR" && export PATH="$MC_PATH" && run npm run build); then
+    run rm -rf "$MC_DIR/.next.prev"
     info "Mission Control production build ready"
   else
-    warn "Mission Control build FAILED — the unit cannot serve until fixed (known queued tsc errors)."
-    warn "Interim: cd $MC_DIR && npm run dev   — the acceptance gate reports MC honestly either way"
+    run rm -rf "$MC_DIR/.next"
+    if [ -d "$MC_DIR/.next.prev" ]; then
+      run mv "$MC_DIR/.next.prev" "$MC_DIR/.next"
+      warn "Mission Control build FAILED — the previous build is still in place (see the next build output above)."
+    else
+      warn "Mission Control build FAILED — the unit cannot serve until fixed (see the next build output above)."
+    fi
   fi
+}
+
+if [ ! -d "$MC_DIR/src" ]; then
+  run mkdir -p "$MC_DIR"
+  mc_sync
+  info "Mission Control source copied"
+elif $UPDATE_ONLY; then
+  info "Mission Control already exists, updating source..."
+  mc_sync
+else
+  info "Mission Control already exists (use --update to redeploy it)"
+fi
+
+# Dependencies, build and the native rebuild all run under the node the unit
+# runs (NODE_BIN's dir leads the unit PATH): better-sqlite3 built for another
+# node ABI fails every DB route. npm 10 is the npm major the lockfile is kept with.
+MC_PATH="$NODE_BIN_DIR:$PATH"
+if $SANDBOX; then
+  info "Sandbox: skipping Mission Control dependencies + build"
+elif [ ! -d "$MC_DIR/node_modules" ] || [ ! -d "$MC_DIR/.next" ] || $UPDATE_ONLY; then
+  info "Installing Mission Control dependencies (npm ci, this may take a minute)..."
+  if (cd "$MC_DIR" && export PATH="$MC_PATH" && run npx -y npm@10 ci && run npm rebuild better-sqlite3); then
+    mc_build
+  else
+    warn "Mission Control dependency install FAILED — not building (see the npm output above)."
+  fi
+else
+  info "Mission Control dependencies and build already in place"
 fi
 
 # Create .env.local for MC if not exists

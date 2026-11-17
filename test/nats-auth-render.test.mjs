@@ -120,6 +120,31 @@ describe('syncNatsAuth', () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
+  it('nkey mode refuses to guess this node\'s role: unset or unknown renders nothing', () => {
+    const home = tmpHome();
+    const dir = path.join(home, '.openclaw');
+    getOrCreateIdentity(dir);
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !KEYS.includes(k)));
+    const out = path.join(dir, 'config', 'nats-auth.conf');
+    for (const roleLine of ['', 'OPENCLAW_NODE_ROLE=Lead\n']) {
+      fs.writeFileSync(path.join(dir, 'openclaw.env'), `OPENCLAW_NATS_TOKEN=t\nOPENCLAW_NATS_AUTH=nkey\nOPENCLAW_NODE_ID=lead-a\n${roleLine}`);
+      const r = runIsolatedCli(home, 'bin/nats-auth-render.mjs', ['--out', out], { ...env, HOME: home });
+      assert.equal(r.status, 1, `${JSON.stringify(roleLine)}: ${r.stderr}`);
+      assert.match(r.stderr, /OPENCLAW_NODE_ROLE is (not set|"Lead") — nkey mode/);
+      assert.doesNotMatch(r.stderr, /mac|linux|darwin/i);
+      assert.ok(!fs.existsSync(out), 'a render with a guessed role was written');
+    }
+    // Token mode carries no per-node permissions: it needs no role.
+    const r = runIsolatedCli(home, 'bin/nats-auth-render.mjs', ['--out', out, '--mode', 'token'], { ...env, HOME: home });
+    assert.equal(r.status, 0, r.stderr);
+    // An explicit worker role renders the worker entry.
+    fs.writeFileSync(path.join(dir, 'openclaw.env'), 'OPENCLAW_NATS_TOKEN=t\nOPENCLAW_NATS_AUTH=nkey\nOPENCLAW_NODE_ID=lead-a\nOPENCLAW_NODE_ROLE=worker\n');
+    const w = runIsolatedCli(home, 'bin/nats-auth-render.mjs', ['--out', out], { ...env, HOME: home });
+    assert.equal(w.status, 0, w.stderr);
+    assert.match(w.stderr, /\[lead-a:worker\]/);
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
   it('peersFromRegistry maps raw base64 pubkeys to public nkeys with their role', () => {
     const home = tmpHome();
     const a = getOrCreateIdentity(path.join(home, 'a'));
@@ -144,6 +169,35 @@ describe('syncNatsAuth', () => {
     assert.ok(text.includes(publicKeyBase64ToNkey(peer.publicKeyBase64)));
     // The reload is best-effort: with no nats-server around it reports, never fails.
     assert.match(r.stdout, /no running nats-server found|SIGHUP sent|reloaded/);
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('openclaw-trust-peer --sync-nats still syncs when the peer was already trusted with the same key', () => {
+    const home = tmpHome();
+    const dir = path.join(home, '.openclaw');
+    fs.writeFileSync(path.join(dir, 'openclaw.env'), 'OPENCLAW_NATS_TOKEN=t\nOPENCLAW_NATS_AUTH=nkey\nOPENCLAW_NODE_ROLE=lead\nOPENCLAW_NODE_ID=lead-a\n');
+    const peer = getOrCreateIdentity(path.join(home, 'peer'));
+    const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !KEYS.includes(k))), HOME: home, OPENCLAW_IDENTITY_DIR: dir };
+    const first = runIsolatedCli(home, 'bin/openclaw-trust-peer.mjs', ['w2', peer.publicKeyBase64], env);
+    assert.equal(first.status, 0, first.stderr);
+    assert.equal(fs.existsSync(path.join(dir, 'config', 'nats-auth.conf')), false);
+    const again = runIsolatedCli(home, 'bin/openclaw-trust-peer.mjs', ['w2', peer.publicKeyBase64, '--sync-nats'], env);
+    assert.equal(again.status, 0, again.stderr + again.stdout);
+    assert.match(again.stdout, /already trusted with same pubkey/);
+    assert.ok(fs.readFileSync(path.join(dir, 'config', 'nats-auth.conf'), 'utf8').includes(publicKeyBase64ToNkey(peer.publicKeyBase64)));
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('openclaw-trust-peer fails instead of reporting trusted when the registry cannot be written', () => {
+    const home = tmpHome();
+    const notDir = path.join(home, 'identity-is-a-file');
+    fs.writeFileSync(notDir, '');
+    const peer = getOrCreateIdentity(path.join(home, 'peer'));
+    const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !KEYS.includes(k))), HOME: home, OPENCLAW_IDENTITY_DIR: notDir };
+    const r = runIsolatedCli(home, 'bin/openclaw-trust-peer.mjs', ['w2', peer.publicKeyBase64], env);
+    assert.notEqual(r.status, 0);
+    assert.doesNotMatch(r.stdout, /trusted:/);
+    assert.match(r.stderr, /could not be written/);
     fs.rmSync(home, { recursive: true, force: true });
   });
 });

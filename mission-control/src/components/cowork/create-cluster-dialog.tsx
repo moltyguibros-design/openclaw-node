@@ -2,11 +2,9 @@
 
 import { useState } from "react";
 import { X } from "lucide-react";
-import { createCluster } from "@/lib/hooks";
+import { createCluster, fetcher } from "@/lib/hooks";
 import { RolePicker } from "./role-picker";
 import useSWR from "swr";
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 const PRESET_COLORS = [
   "#6366f1", "#8b5cf6", "#06b6d4", "#10b981",

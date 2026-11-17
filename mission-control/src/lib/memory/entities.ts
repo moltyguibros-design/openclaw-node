@@ -55,6 +55,18 @@ const KNOWN_ENTITIES: EntityMatch[] = [
   { name: "memory-daemon", type: "tool", aliases: ["memory daemon", "memory-daemon.mjs"] },
 ];
 
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Whole-word match, so "Gui" does not match "guide" nor "MC" match "mcp".
+// Lookarounds instead of \b, which is ASCII-only: HUMAN_NAME and AGENT_NAME
+// come from the environment and may start or end with a non-ASCII letter.
+const KNOWN_ENTITY_PATTERNS = KNOWN_ENTITIES.map((known) => ({
+  known,
+  patterns: [known.name, ...(known.aliases || [])].map(
+    (n) => new RegExp("(?<![\\p{L}\\p{N}_])" + escapeRegExp(n) + "(?![\\p{L}\\p{N}_])", "iu"),
+  ),
+}));
+
 // ── Relation Pattern Matching ──
 
 const RELATION_PATTERNS: Array<{
@@ -171,19 +183,10 @@ export function linkEntityToItem(entityId: number, itemId: number): void {
 export function extractEntitiesFromFact(factText: string): EntityMatch[] {
   const matches: EntityMatch[] = [];
   const seen = new Set<string>();
-  const factLower = factText.toLowerCase();
-
-  // Match known entities (name + aliases)
-  for (const known of KNOWN_ENTITIES) {
-    const namesToCheck = [known.name, ...(known.aliases || [])];
-    for (const n of namesToCheck) {
-      if (factLower.includes(n.toLowerCase())) {
-        if (!seen.has(known.name.toLowerCase())) {
-          seen.add(known.name.toLowerCase());
-          matches.push(known);
-        }
-        break;
-      }
+  for (const { known, patterns } of KNOWN_ENTITY_PATTERNS) {
+    if (!seen.has(known.name.toLowerCase()) && patterns.some((re) => re.test(factText))) {
+      seen.add(known.name.toLowerCase());
+      matches.push(known);
     }
   }
 

@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = request.nextUrl;
     const limit = parseInt(searchParams.get("limit") || "30", 10);
 
-    const events = getRecentTranscriptActivity(Math.min(limit, 100));
+    const events = await getRecentTranscriptActivity(Math.min(limit, 100));
 
     return NextResponse.json({
       events,

@@ -33,6 +33,11 @@ describe('assertPublicUrl', () => {
     await assert.rejects(assertPublicUrl('http://169.254.169.254/latest/meta-data/'), /private\/reserved/);
     await assert.rejects(assertPublicUrl('http://127.0.0.1:7893/memory/inject'), /private\/reserved/);
     await assert.rejects(assertPublicUrl('http://[::1]:8222/varz'), /private\/reserved/);
+    // The URL parser rewrites mapped/compatible IPv6 literals to hex hextets.
+    for (const u of ['http://[::ffff:127.0.0.1]:7893/', 'http://[::ffff:a9fe:a9fe]/', 'http://[::127.0.0.1]/',
+      'http://[0:0:0:0:0:ffff:7f00:1]/', 'http://[64:ff9b::a9fe:a9fe]/']) {
+      await assert.rejects(assertPublicUrl(u), /private\/reserved/, u);
+    }
     await assert.rejects(assertPublicUrl('http://localhost:3000/'), /local\/internal/);
     await assert.rejects(assertPublicUrl('http://metadata.google.internal/'), /local\/internal/);
   });

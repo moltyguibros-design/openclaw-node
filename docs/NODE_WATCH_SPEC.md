@@ -51,8 +51,9 @@ node bin/node-watch.mjs --json --report ~/.openclaw/.node-watch.md
 ```
 
 Portable: every path/URL/port resolves from the node's own env (`OPENCLAW_HOME`, `OPENCLAW_NODE_ID`,
-`LLM_MODEL`, `MEMORY_INJECT_PORT`, `NATS_MONITOR_URL`, `OBSIDIAN_VAULT_PATH`, …). Writes an evidence
-report to `~/.openclaw/.node-watch.md`.
+`LLM_MODEL`, `MEMORY_INJECT_PORT`, `NATS_MONITOR_URL`, `OBSIDIAN_VAULT_PATH`, …), L1 state.db and
+workspace checks included. Writes an evidence report to `~/.openclaw/.node-watch.md` whatever
+`OPENCLAW_HOME` says, because Mission Control reads it there; pass `--report` for a spawn tree.
 
 ---
 
@@ -68,8 +69,8 @@ delegates to a `node-acceptance` probe · **applic.** = applicability gate (OFF 
 | Memory daemon | process alive | reuse (health) |
 | Session ingest | configured transcript turns match archived counts and last timestamps | live |
 | LLM extraction | entities present, latest `last_seen` | live |
-| Knowledge index | `.knowledge.db` `last_index_time` < 2h | live |
-| Inject server :7893 | authorized POST returns block + items | reuse (`MEM-L2-INJECT`) |
+| Knowledge index | `.knowledge.db` `last_session_index_time` < 2h (stamped by the daemon's knowledge-index-job on every run; `last_index_time` is MCP-client driven and not graded) | live |
+| Inject server :7893 | light tick: authorized `GET /health` answers (no retrieval, no events); deep sweep / one-shot: authorized POST returns block + items | live (light) / reuse (`MEM-L2-INJECT`) |
 | Memory watcher | `watcher.jsonl` fresh < 30min | live |
 
 ### Obsidian (memory subsystem)
@@ -108,7 +109,8 @@ delegates to a `node-acceptance` probe · **applic.** = applicability gate (OFF 
 | Federation (cross-node) | identity-registry + shared stream | applic. (OFF if not deployed) |
 
 The mesh aggregate reads Discord's effective `HOME/.openclaw/openclaw.json`
-from the HOME observed in its loaded launchd environment. Strict
+from the HOME observed in its loaded launchd environment (on Linux, the
+`HOME=` its systemd unit sets). Strict
 `channels.discord.enabled=false`, loaded/not-running state and observed exit0
 are all required to report its optional OFF detail; healthy running peers can
 then make the aggregate WORKING. A disabled running tool, failure exit or another
@@ -122,13 +124,19 @@ service failure keeps BROKEN even when another service or policy is unobservable
 
 | Element | Watch signal | Probe |
 |---|---|---|
-| state.db / knowledge.db / graph-cache.db | opens, `integrity_check` ok | live |
+| state.db / knowledge.db / graph-cache.db | light tick: opens and answers `SELECT 1`, showing the last deep `integrity_check` verdict; deep sweep / one-shot: `integrity_check` ok | live |
+
+`integrity_check` is a synchronous full scan the probe timeout cannot bound,
+so the 60s light tick does not run it (repair 5.6 / R22 removed the same scan
+from the health poll). A light result that only carries the last deep verdict
+is flagged `lightTick` and does not drive BROKEN/recovered notifications; a DB
+that fails to open on a light tick is still BROKEN at once.
 
 ### Agent runtime
 | Element | Watch signal | Probe |
 |---|---|---|
 | OpenClaw gateway | fresh session JSONLs produced | live |
-| companion-bridge :8787 | HTTP responds (OFF if on-demand/down) | live |
+| companion-bridge :8787 | HTTP responds below 500 (BROKEN on 5xx; OFF if on-demand/down) | live |
 
 ### Operations & planning surfaces
 | Element | Watch signal | Probe |
@@ -141,7 +149,7 @@ service failure keeps BROKEN even when another service or policy is unobservable
 ### Node fabric
 | Element | Watch signal | Probe |
 |---|---|---|
-| Core launchd services | required labels have running PIDs; known duplicate NATS jobs absent in other domains | live |
+| Core services | required labels have running PIDs; known duplicate NATS jobs absent in other domains | live |
 | Deploy in sync | `diff -rq` repo lib ↔ workspace lib empty | live |
 | Identity + token + config | token `0600`, identity keypair present | live |
 
@@ -156,11 +164,22 @@ liveness and checks the four known
 NATS labels in `gui`, `user` and `system`; it does not prove binary, UID,
 config, store, JetStream health, or absence of unlisted/unmanaged processes.
 
+Service state comes from launchd on macOS and from systemd user units on Linux.
+For mesh services, core services, the gateway, the grappe coordinator and the
+`FED-L2-COORD` acceptance probe, a label `ai.openclaw.<name>` maps to
+`openclaw-<name>.service` and `systemctl --user show` is read into the same
+record the launchd graders take. A unit counts as loaded when it is enabled or
+currently started (an installed, disabled, inactive unit is not loaded);
+`inactive` is launchd's "not running" and `ExecMainCode`/`ExecMainStatus` give
+the last exit. On Linux, the cohort comes only from `nats-writer-cohort.json`,
+and the other known NATS labels must not be loaded as user units. Other
+platforms stay UNKNOWN.
+
 ---
 
 ## Honest coverage today
 
-- **Implemented (live or reused):** every element above except the three marked UNKNOWN-stub.
+- **Implemented (live or reused):** every element above.
 - **UNKNOWN-stub (no probe yet — reports UNKNOWN, never green):** none — all targets now have a probe.
   (Vault link integrity wraps the read-only `checkVaultLinks`; calendar reads `/api/scheduler/status`;
   cloud-LLM reachability is wired through companion-bridge — see above.)

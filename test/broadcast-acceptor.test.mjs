@@ -417,3 +417,20 @@ describe('createAcceptor.stats', () => {
     assert.equal(acceptor.stats.offersPending, 1);
   });
 });
+
+describe('createAcceptor publishes its counters (dogfood signature_failures)', () => {
+  it('publishes signature_rejected on context.acceptor.stats.<node> when it rejects an offer', async () => {
+    const nc = mockNatsConnection();
+    nc.publish = (subject, data) => nc.published.push({ subject, data: JSON.parse(new TextDecoder().decode(data)) });
+    const acceptor = createAcceptor(nc, 'my-node', { ownBroadcastIds: new Set() });
+
+    const r = await acceptor._processOffer(makeOffer({ node_id: 'peer-x', offerer_node_id: 'peer-y' }));
+    assert.equal(r.reason, 'offerer_node_id_mismatch');
+
+    const stats = nc.published.filter(p => p.subject === 'context.acceptor.stats.my-node');
+    assert.equal(stats.length, 1);
+    assert.equal(stats[0].data.node_id, 'my-node');
+    assert.equal(stats[0].data.signature_rejected, 1);
+    assert.ok(stats[0].data.started_at);
+  });
+});

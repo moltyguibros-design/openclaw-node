@@ -20,7 +20,14 @@ const REPO_ROOT = path.join(__dirname, '..', '..');
 const CACHE_FILE = path.join(os.tmpdir(), 'openclaw-mesh-probe.json');
 const CACHE_TTL_MS = 60_000;
 
+// The probe dials whatever natsConnectOpts resolves: on a live node that is
+// the production bus (openclaw.env or the loopback fallback), where these
+// suites would submit and claim real tasks. Running them is an explicit
+// choice (CI sets it next to OPENCLAW_REQUIRE_MESH=1).
+const NOT_OPTED_IN = 'mesh tier not opted in (set OPENCLAW_TEST_MESH=1 against a test bus; it submits and claims tasks on the bus natsConnectOpts resolves)';
+
 function meshSkipReason() {
+  if (process.env.OPENCLAW_TEST_MESH !== '1') return NOT_OPTED_IN;
   try {
     const cached = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf-8'));
     if (Date.now() - cached.ts < CACHE_TTL_MS) return cached.reason;

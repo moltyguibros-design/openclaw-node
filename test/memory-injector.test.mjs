@@ -11,7 +11,12 @@ import {
   createMemoryInjector,
   recallScore,
   writeBackReconsolidation,
+  curateForRecall,
+  RECALL_CAPS,
+  llmSeedTerms,
 } from '../lib/memory-injector.mjs';
+import { setChannelErrorSink } from '../lib/retrieval-pipeline.mjs';
+import { formatMemoryBlock } from '../lib/memory-formatter.mjs';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -210,7 +215,7 @@ describe('trimToBudget', () => {
   });
 
   it('trims snippets first when over budget', () => {
-    const longSnippet = 'x'.repeat(2000); // 500 tokens
+    const longSnippet = 'x'.repeat(2000); // rendered capped at FIELD_CAPS.snippet: ~34 tokens
     const data = {
       concepts: [{ name: 'A', type: 'tech' }],
       decisions: [{ decision: 'Use X', confidence: 0.9, date: '2026-05-23' }],
@@ -219,12 +224,12 @@ describe('trimToBudget', () => {
         { snippet: longSnippet, score: 0.8 },
       ],
     };
-    // Budget of 100 tokens — concepts + decisions fit, but not both long snippets
-    const result = trimToBudget(data, 100);
+    // Budget of 60 tokens — overhead + concepts + decisions fit, no snippet does
+    const result = trimToBudget(data, 60);
     assert.equal(result.concepts.length, 1);
     assert.equal(result.decisions.length, 1);
     assert.equal(result.snippets.length, 0); // snippets too large
-    assert.ok(result.tokenCount <= 100);
+    assert.ok(result.tokenCount <= 60);
   });
 
   it('returns empty sections for very small budget', () => {
@@ -397,5 +402,101 @@ describe('writeBackReconsolidation — actually writes (F-C8)', () => {
     const row = db.prepare('SELECT last_recalled FROM entities WHERE name = ?').get('NATS');
     assert.equal(row.last_recalled, null);
     db.close();
+  });
+});
+
+describe('curateForRecall — related_sessions caps sessions, not chunks', () => {
+  const snippets = [
+    { sessionId: 'A', snippet: 'a1', score: 0.05 },
+    { sessionId: 'A', snippet: 'a2', score: 0.04 },
+    { sessionId: 'A', snippet: 'a3', score: 0.03 },
+    { sessionId: 'B', snippet: 'b1', score: 0.02 },
+    { sessionId: 'C', snippet: 'c1', score: 0.01 },
+    { sessionId: 'D', snippet: 'd1', score: 0.005 },
+  ];
+
+  it('keeps the best snippet of each of the top sessions', () => {
+    const result = curateForRecall({ concepts: [], decisions: [], snippets });
+    assert.equal(RECALL_CAPS.related_sessions, 3);
+    assert.deepEqual(result.snippets.map(s => s.snippet), ['a1', 'b1', 'c1']);
+  });
+
+  it('the rendered block names every curated session', () => {
+    const block = formatMemoryBlock(curateForRecall({ concepts: [], decisions: [], snippets }));
+    assert.match(block, /\[A\]: a1/);
+    assert.match(block, /\[B\]: b1/);
+    assert.match(block, /\[C\]: c1/);
+  });
+});
+
+describe('curateForRecall — token accounting follows the rendered block', () => {
+  const longDecision = {
+    id: 1, session_id: 's', decision: 'x'.repeat(1000), confidence: 0.9,
+    date: '2026-05-23T12:00:00.000Z',
+  };
+  const snippets = [
+    { sessionId: 'A', snippet: 'y'.repeat(600), score: 0.05 },
+  ];
+
+  it('a long decision is costed at its capped length and does not crowd out a snippet', () => {
+    const result = curateForRecall({ concepts: [], decisions: [longDecision], snippets }, 200);
+    assert.equal(result.decisions.length, 1);
+    assert.deepEqual(result.snippets.map(s => s.sessionId), ['A']);
+  });
+
+  it('tokenCount tracks the rendered block, not the raw fields', () => {
+    const result = curateForRecall({ concepts: [], decisions: [longDecision], snippets }, 1500);
+    const rendered = estimateTokens(formatMemoryBlock(result));
+    assert.ok(result.tokenCount < 250, `tokenCount ${result.tokenCount} counts uncapped text`);
+    assert.ok(Math.abs(result.tokenCount - rendered) <= 40,
+      `tokenCount ${result.tokenCount} vs rendered ${rendered}`);
+  });
+});
+
+// ─── memory-knowledge#5: the LLM analysis steers retrieval ──────────────────
+
+describe('LLM analysis entities/themes seed retrieval', () => {
+  it('llmSeedTerms takes string entities then themes, nothing on fallback', () => {
+    assert.deepEqual(llmSeedTerms(null), []);
+    assert.deepEqual(llmSeedTerms({ intent: 'debug' }), []);
+    assert.deepEqual(
+      llmSeedTerms({ entities: ['NATS', 3], themes: ['messaging', null] }),
+      ['NATS', 'messaging'],
+    );
+  });
+
+  it('an entity the prompt only paraphrases is retrieved via the analysis', async () => {
+    const extractionDb = createTestExtractionDb();
+    seedTestData(extractionDb);
+    const knowledgeDb = new Database(':memory:');
+    knowledgeDb.exec(`CREATE TABLE session_chunks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+      turn_index INTEGER NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL, snippet TEXT NOT NULL)`);
+    knowledgeDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet)
+      VALUES ('session-1', 0, 'user', 'jetstream setup', 'jetstream setup')`).run();
+    const llmClient = {
+      async generateAnalysis() {
+        return { mode: 'llm', value: { content: JSON.stringify({ intent: 'debug', entities: ['NATS'], themes: [] }) } };
+      },
+    };
+    setChannelErrorSink(() => {}); // no FTS/vector tables in this knowledge DB
+    try {
+      const injector = createMemoryInjector({ knowledgeDb, extractionDb, llmClient });
+      const result = await injector.retrieve('why is the message bus dropping events', {
+        embedFn: async () => null,
+        respectPrivacy: false,
+      });
+      assert.equal(result.analysis.mode, 'llm');
+      assert.ok(
+        result.snippets.some(s => s.sessionId === 'session-1'),
+        'the session mentioning the analysis entity must be injected',
+      );
+    } finally {
+      extractionDb.close();
+      knowledgeDb.close();
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
   });
 });

@@ -28,6 +28,8 @@
     <string>${OPENCLAW_NODE_ROLE}</string>
     <key>OPENCLAW_REPO_DIR</key>
     <string>${OPENCLAW_REPO_DIR}</string>
+    <key>OPENCLAW_WORKSPACE</key>
+    <string>${OPENCLAW_WORKSPACE}</string>
   </dict>
   <key>KeepAlive</key>
   <true/>

@@ -1,0 +1,1937 @@
+diff --git a/.github/workflows/test.yml b/.github/workflows/test.yml
+index 3deff1c..f11bc19 100644
+--- a/.github/workflows/test.yml
++++ b/.github/workflows/test.yml
+@@ -100,6 +100,8 @@ jobs:
+           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_timeout.py
+           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_applied_timeout.py
+           python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_nats_identity.py
++          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py
++          python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py
+           NATS_SERVER=/usr/local/bin/nats-server RECOVERY_NODE=node RECOVERY_NATS_MODULE="$PWD/node_modules/nats" python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_cluster.py
+       - name: Root unit tests
+         # npm test (not bare node --test): the pretest hook builds the
+@@ -187,6 +189,9 @@ jobs:
+           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_timeout.py
+           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_kickstart_applied_timeout.py
+           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_nats_identity.py
++          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py
++          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint_facade.py
++          /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py
+           PYTHONPATH="$PWD/memory-plan/plans/node-state-recovery/audits/step12_jetstream" /usr/bin/python3 -m unittest -q test_restore_only
+           /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_launchd_disabled.py
+           OPENCLAW_CI_FULL_NODE_LISTENER_FIXTURE=1 /usr/bin/python3 memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_managed_launchd.py
+diff --git a/memory-plan/plans/node-state-recovery/DECISIONS.md b/memory-plan/plans/node-state-recovery/DECISIONS.md
+index fe1bdcd..d703055 100644
+--- a/memory-plan/plans/node-state-recovery/DECISIONS.md
++++ b/memory-plan/plans/node-state-recovery/DECISIONS.md
+@@ -4003,3 +4003,19 @@ Claude exact-head review at 433248c8 found that a bare trailing quote was retain
+ Claude found the D183 slow-start branch could conceal discarded controller output: missing phases selected the early-start assertions even after the child had reached its blocking phase. Each control now has a separate child-written marker and branches on that file, not on the output being tested. Injected slow startup retains the original deadlines and reaches the marker-absent branch. A local output-discard mutant is killed by the marker-present assertion requiring the blocking phase. Add the missing bare double-quote refusal case.
+ 
+ Required CI at f9b4c37a again failed the real-launchd kickstart test while all added tests passed; the diagnostic first observed no running owner, then final-state verification observed one. The client-blocking cause is still undetermined and recovery stayed partial/closed/unresolved. These control corrections do not claim to fix that cause or complete B5. No production state changed.
++
++## D185 — Terminal capture-ready checkpoint and frozen verifier, owned tests only (2026-10-14)
++
++Under D168/D173/D174, B5 adds a restore-only `capture-ready` journal checkpoint without root decline or transfer. `Journal.capture_ready()` requires the full-node owner and the original hold facade, then the existing forward preconditions (same boot, not reopened, no failure, pending intent, transfer or prior checkpoint) and the exact durable chain. One record-only predicate, shared with the frozen verifier, requires a strictly serial window: a published first execution hold in the exact `JournaledHold` intent shape whose certificate carries a mandatory session, the deploy listener stopped first, every other prior-loaded non-NATS job next and the three serving NATS units last, each exactly once with a class-specific receipt bound to that session (D176–D179); the original, every stop and the live certificate must also name the one published hold receipt, as the real facade's do, launchd loaded/override continuity at every step and nothing managed left loaded. Member1 has no intent or receipt. Fresh observations must show every prior-loaded unit stopped and disabled and every other unit, member1 included, unchanged, under a live certificate valid before and after observation, an unchanged inventory and no NATS writer marker.
++
++The record binds the pre-head, baseline, host arm nonce and digest, canonical guest manifest digest and D181 role identities, rederived from the same config bytes. The manifest must carry the arm nonce, name the pre-head as `journal_head` (new optional `guest_capture` field) and place each role's store at its bound `store_dir`. Afterward, mutation, transfer and a second checkpoint refuse. Same-boot restoration is unchanged; D64's cross-boot recovery refusal is unchanged and pinned. `verify_capture_checkpoint()` is pure. Over extracted records and supplied arm, manifest, pins, config bytes and committed checkpoint digest, it rechecks chain, single terminal checkpoint, boot continuity, cohort and every checkpoint field. A manifest pre-head names only the prior head and cannot pin checkpoint bytes, so the verifier requires the committed digest.
++
++The checkpoint attests application quiescence only, not byte continuity, physical writer exclusion, authorship or production readiness. Its positive controls compose `Journal.mutate` and the real `JournaledHold`; the real-facade control is macOS-native, so on Linux it ran only with a simulated kqueue source. No full-node driver yet produces the cohort: `StopWatch` refuses a persistent serving-NATS stop until a NATS recovery adapter exists, and timer stops exist only as apply/verify helpers. The verifier's digest check is only as strong as its provenance: the host gate must pass the digest from `require_committed()`, never the extracted record's own digest. Host commitment of the checkpoint digest (with `journal_head` required) and read-only stopped-ASIF extraction of journal, node receipt and config bytes (refusing pending/unknown entries) remain open gates, as do the NATS persistent-stop adapter, the durable hold volume binding, planned-reboot admission (D174/D175), disposable macOS rehearsal and the B3 window pin table. No production service, VM, store or topology changed; four histories remain separate, B5/1.2 stay open and B6 closed.
++
++## D186 — Separate host commitment of the capture-ready checkpoint digest (2026-10-14)
++
++D185's frozen verifier is only as strong as the provenance of its checkpoint digest: given the extracted record's own digest it pins nothing. The host therefore commits that digest itself, separately from the manifest, while it still observes the original VM running. `commit()` now requires the guest manifest to carry a 64-hex `journal_head`, and `require_committed()` rechecks it. After the ACK, `commit_checkpoint()` takes the guest's exact capture-ready journal file. It must be intact and canonical, and must bind the armed nonce and digest, the committed manifest digest and `previous == pre_head == journal_head`. Under the arm lock, with the capture worker active and before any guard or capture artifact, the host takes one more running-VM sample matching the ACK. It then writes `CHECKPOINT.json` binding the COMMITTED and ACKED digests, nonce, manifest digest, journal head and checkpoint digest. A second commitment refuses.
++
++`require_committed()` now requires that record too, so the image guard and capture worker refuse without it. It is the only source of the checkpoint digest. `verify_capture_checkpoint()` takes the commitment object it returns, not a digest string: arm digest, nonce, canonical manifest and checkpoint digest all come from host records. The host wrapper `verify_frozen_checkpoint()` obtains that object only from `require_committed()`. Owned tests drive the real journal, `capture_ready()`, `commit()`, `commit_checkpoint()` and the verifier with only host samples mocked. Refusals cover a terminal-record substitution after commitment, a regenerated manifest with a re-derived checkpoint, a foreign arm, nonce or head, non-intact records, a changed or stopped VM sample, a changing handoff file, a double commitment and every recorded field; the substitutions verify under self-input and refuse under the committed digest.
++
++This does not enable production capture, which still refuses without a verified acceptance or abort controller. It commits a digest, not the record's cohort content, which is rechecked only from the journal extracted from the stopped image. That extraction (journal directory listing, node receipt and config bytes, refusing pending or unknown entries) remains an open gate. So do the serving-NATS persistent-stop producer and NATS recovery adapter, native macOS CI for the updated end-to-end capture and facade tests, and D174/D175 admission and rehearsal. D64 is unchanged; four histories stay separate; B5/1.2 stay open and B6 closed.
+diff --git a/memory-plan/plans/node-state-recovery/INVENTORY.md b/memory-plan/plans/node-state-recovery/INVENTORY.md
+index d004bed..5538c4a 100644
+--- a/memory-plan/plans/node-state-recovery/INVENTORY.md
++++ b/memory-plan/plans/node-state-recovery/INVENTORY.md
+@@ -2692,3 +2692,11 @@ Checkpoint 2026-10-13 22:49 EDT: final fixture revision 844413c1…670e supersed
+ Checkpoint 2026-10-14 00:53 EDT: local D183 corrections address the two concrete Claude review findings at 433248c8. Required CI run 38503126157 is red on recurring real-launchd kickstart timeout, while all new reader/fixture tests passed on macOS. Source readiness remains blocked; no flake claim or timeout increase. B5 checkpoint/frozen journal, abort/reboot and macOS access gates remain open. No production state changed.
+ 
+ Checkpoint 2026-10-14 02:53 EDT: D184 local combined suite passed 50 tests in 9.411s. Marker-based branches detect the previously surviving output-discard mutant and retain explicit 1.5-second slow-start controls; bare quote refusals both pinned. Current source validation and real-launchd cause remain open; new exact-head review/CI required. No production state changed.
++
++Checkpoint 2026-10-14: D185 local, uncommitted capture-ready slice on an owned export of exact head 3aea84ad. `Journal.capture_ready()`, a shared record-only cohort predicate and pure `verify_capture_checkpoint()` added; `guest_capture` gains an optional `journal_head`. 24 owned Linux tests pass with a `Journal.mutate` positive control; a real-`JournaledHold` control is macOS-native (Linux run only with simulated kqueue). Every certificate is bound to the published hold receipt. Remaining under the open role-binding row: a NATS persistent-stop producer (StopWatch refuses one), host commitment of the checkpoint digest with `require_committed()` provenance, stopped-ASIF extraction verifier wiring, native macOS facade CI, boot/abort admission and rehearsal. Needs review and exact-head CI; no production state changed.
++
++Checkpoint 2026-10-14: D186 local, uncommitted host checkpoint commitment on the corrected combined patch. Host commit requires `journal_head`; `commit_checkpoint()` writes a separate `CHECKPOINT.json`; `require_committed()` requires it and alone supplies the frozen verifier's digest. 17 owned host tests plus 24 checkpoint tests pass on Linux; the macOS end-to-end capture and facade tests need native CI. Production capture stays disabled; no production state changed.
++
++- [ ] B5-serving-NATS persistent-stop producer: a full-node stop path that disables and unloads nats, nats-2 and nats-3 under the original hold with managed-stop receipts; `StopWatch.mutate` refuses this today. Required before any capture-ready checkpoint can be produced outside owned tests. No production state changed.
++- [ ] B5-serving-NATS recovery adapter: an enable-capable restore for the three serving members that recovery can verify, the precondition `StopWatch` names for a persistent NATS stop. Required with the producer above; member1 stays held and is not part of it. No production state changed.
++- [ ] B5-stopped-ASIF checkpoint extraction: read-only extraction of the user journal directory, node receipt and NATS config bytes from the stopped image, refusing pending or unknown entries, feeding `verify_frozen_checkpoint()`. No production state changed.
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_guest_commit.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_guest_commit.py
+index 8035268..9ea03f5 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_guest_commit.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_guest_commit.py
+@@ -13,10 +13,16 @@ import sys
+ import uuid
+ 
+ from host_vm_preflight import preflight, require, write_record
++from preservation_journal import (CAPTURE_EVENT, CAPTURE_KEYS, CAPTURE_SCOPE,
++                                  encoded as journal_encoded, verify_capture_checkpoint)
+ 
+ 
+ ROLES = {'standalone', 'member1', 'member2', 'member3'}
+ SCOPE = 'guest manifest committed while the host observed the VM running'
++CHECKPOINT_SCOPE = 'guest capture-ready checkpoint digest committed while the host observed the VM running'
++CHECKPOINT_KEYS = {'scope', 'at_utc', 'capture_nonce', 'commit_sha256', 'ack_sha256',
++                   'manifest_sha256', 'journal_head', 'checkpoint_sha256', 'started_sample'}
++HEX = re.compile(r'[0-9a-f]{64}')
+ 
+ 
+ def private_bytes(path):
+@@ -33,12 +39,46 @@ def encoded(value):
+ 
+ 
+ def require_committed(capture_dir):
++    """The host's commitment: arm, manifest, post-commit sample and the separate checkpoint digest.
++
++    This is the only source of the checkpoint digest the frozen verifier may use.
++    """
++    capture_dir = pathlib.Path(capture_dir)
++    committed, committed_bytes, ack_bytes = require_acked(capture_dir)
++    checkpoint = json.loads(private_bytes(capture_dir / 'CHECKPOINT.json'))
++    ack = json.loads(ack_bytes)
++    sample = checkpoint.get('started_sample') if isinstance(checkpoint, dict) else None
++    require(isinstance(checkpoint, dict) and set(checkpoint) == CHECKPOINT_KEYS
++            and checkpoint['scope'] == CHECKPOINT_SCOPE
++            and checkpoint['capture_nonce'] == committed['capture_nonce']
++            and checkpoint['commit_sha256'] == hashlib.sha256(committed_bytes).hexdigest()
++            and checkpoint['ack_sha256'] == hashlib.sha256(ack_bytes).hexdigest()
++            and checkpoint['manifest_sha256'] == committed['manifest_sha256']
++            and checkpoint['journal_head'] == committed['manifest']['journal_head']
++            and isinstance(checkpoint['checkpoint_sha256'], str)
++            and HEX.fullmatch(checkpoint['checkpoint_sha256'])
++            and same_running_vm(sample, ack['started_sample']),
++            'capture checkpoint digest is not committed to this guest manifest')
++    return {**committed, 'checkpoint': checkpoint}
++
++
++def same_running_vm(sample, reference):
++    return (isinstance(sample, dict) and sample.get('state') == 'started'
++            and sample.get('holders_consistent') is True
++            and sample.get('image_holders') == reference['image_holders']
++            and all(sample.get(key) == reference[key] for key in
++                    ('vm_uuid', 'host_boot_session', 'image_device', 'image_inode',
++                     'image_size', 'vmstate')))
++
++
++def require_acked(capture_dir):
+     capture_dir = pathlib.Path(capture_dir)
+     armed_bytes = private_bytes(capture_dir / 'ARMED.json')
+     armed = json.loads(armed_bytes)
+     committed_bytes = private_bytes(capture_dir / 'COMMITTED.json')
+     committed = json.loads(committed_bytes)
+-    ack = json.loads(private_bytes(capture_dir / 'ACKED.json'))
++    ack_bytes = private_bytes(capture_dir / 'ACKED.json')
++    ack = json.loads(ack_bytes)
+     nonce = armed.get('capture_nonce')
+     manifest = committed.get('manifest')
+     require(isinstance(nonce, str) and re.fullmatch(r'[0-9a-f]{64}', nonce)
+@@ -48,6 +88,7 @@ def require_committed(capture_dir):
+             and committed['arm_sha256'] == hashlib.sha256(armed_bytes).hexdigest()
+             and committed['capture_nonce'] == nonce
+             and isinstance(manifest, dict) and manifest.get('capture_nonce') == nonce
++            and isinstance(manifest.get('journal_head'), str) and HEX.fullmatch(manifest['journal_head'])
+             and committed['manifest_sha256'] == hashlib.sha256(encoded(manifest)).hexdigest(),
+             'guest manifest is not committed to this host arm')
+     sample = committed['started_sample']
+@@ -75,7 +116,7 @@ def require_committed(capture_dir):
+             (sample.get('image_device'), sample.get('image_inode'),
+              sample.get('image_size'), sample.get('vmstate')),
+             'guest manifest lacks a matching post-commit host sample')
+-    return committed
++    return committed, committed_bytes, ack_bytes
+ 
+ 
+ def commit(host_spec, store_spec, capture_dir, guest_manifest):
+@@ -112,9 +153,10 @@ def commit(host_spec, store_spec, capture_dir, guest_manifest):
+         spec_raw = private_bytes(store_spec)
+         spec = json.loads(spec_raw)
+         require(raw == encoded(manifest)
+-                and set(manifest) == {'scope', 'at_utc', 'capture_nonce',
++                and set(manifest) == {'scope', 'at_utc', 'capture_nonce', 'journal_head',
+                                       'data_volume_uuid', 'spec_sha256', 'stores',
+                                       'store_paths', 'store_relative_paths'}
++                and isinstance(manifest['journal_head'], str) and HEX.fullmatch(manifest['journal_head'])
+                 and manifest['scope'] ==
+                 'guest stopped-tree content observation; writer exclusion external'
+                 and manifest.get('capture_nonce') == armed['capture_nonce']
+@@ -173,10 +215,81 @@ def commit(host_spec, store_spec, capture_dir, guest_manifest):
+                 private_bytes(capture_dir / 'COMMITTED.json')).hexdigest(),
+             'manifest_sha256': result['manifest_sha256'], 'started_sample': after,
+         })
++        return require_acked(capture_dir)[0]
++
++
++def commit_checkpoint(host_spec, capture_dir, guest_checkpoint):
++    """Commit the guest's terminal capture-ready record digest while the VM still runs.
++
++    The record must be the exact journal file bytes and bind this arm, the committed manifest and
++    its journal head. Only its digest is committed: the record's cohort is rechecked later from
++    the journal extracted out of the stopped image.
++    """
++    os.umask(0o077)
++    host_spec = pathlib.Path(host_spec)
++    capture_dir = pathlib.Path(capture_dir)
++    guest_checkpoint = pathlib.Path(guest_checkpoint)
++    require(capture_dir.resolve() == capture_dir and capture_dir.stat().st_uid == os.getuid()
++            and stat.S_IMODE(capture_dir.stat().st_mode) == 0o700,
++            'capture directory is not owner-private')
++    with (capture_dir / 'ARMED.json').open('rb') as armed_file:
++        fcntl.flock(armed_file, fcntl.LOCK_EX)
++        require(not any(os.path.lexists(capture_dir / name) for name in
++                        ('CHECKPOINT.json', 'GUARD_INTENT.json', 'GUARD.json', 'FAILED.json',
++                         'CAPTURE.json')),
++                'capture checkpoint is already committed or the capture has ended')
++        with (capture_dir / 'CAPTURE_ACTIVE.lock').open('rb') as active:
++            try:
++                fcntl.flock(active, fcntl.LOCK_EX | fcntl.LOCK_NB)
++            except BlockingIOError:
++                pass
++            else:
++                raise RuntimeError('capture worker is no longer active')
++        committed, committed_bytes, ack_bytes = require_acked(capture_dir)
++        raw = private_bytes(guest_checkpoint)
++        try:
++            record = json.loads(raw)
++            body = {key: value for key, value in record.items() if key != 'sha256'}
++            intact = (raw == journal_encoded(record)
++                      and record.get('sha256') == hashlib.sha256(journal_encoded(body)).hexdigest())
++        except (AttributeError, TypeError, ValueError):
++            intact = False
++        require(intact and set(record) == CAPTURE_KEYS and record['event'] == CAPTURE_EVENT
++                and record['scope'] == CAPTURE_SCOPE,
++                'guest checkpoint is not an intact capture-ready journal record')
++        head = committed['manifest']['journal_head']
++        require(record['capture_nonce'] == committed['capture_nonce']
++                and record['arm_sha256'] == committed['arm_sha256']
++                and record['manifest_sha256'] == committed['manifest_sha256']
++                and record['pre_head'] == record['previous'] == head,
++                'guest checkpoint does not bind this arm, committed manifest and journal head')
++        sample = preflight(host_spec, capture_dir / ('checkpoint-preflight-' + uuid.uuid4().hex))
++        require(same_running_vm(sample, json.loads(ack_bytes)['started_sample']),
++                'checkpoint commitment did not observe the original running VM')
++        require(private_bytes(guest_checkpoint) == raw,
++                'guest checkpoint changed during host commitment')
++        write_record(capture_dir / 'CHECKPOINT.json', {
++            'scope': CHECKPOINT_SCOPE,
++            'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
++            'capture_nonce': committed['capture_nonce'],
++            'commit_sha256': hashlib.sha256(committed_bytes).hexdigest(),
++            'ack_sha256': hashlib.sha256(ack_bytes).hexdigest(),
++            'manifest_sha256': committed['manifest_sha256'], 'journal_head': head,
++            'checkpoint_sha256': record['sha256'], 'started_sample': sample})
+         return require_committed(capture_dir)
+ 
+ 
++def verify_frozen_checkpoint(capture_dir, records, *, table, configs, binary, home):
++    """Verify a journal extracted from the stopped image against the host's own commitment only."""
++    return verify_capture_checkpoint(records, require_committed(capture_dir),
++                                     table=table, configs=configs, binary=binary, home=home)
++
++
+ if __name__ == '__main__':
+     require(len(sys.argv) == 5,
+-            'usage: host_guest_commit.py HOST_SPEC STORE_SPEC CAPTURE_DIR GUEST_MANIFEST')
+-    commit(*sys.argv[1:])
++            'usage: host_guest_commit.py HOST_SPEC STORE_SPEC CAPTURE_DIR GUEST_MANIFEST'
++            ' | checkpoint HOST_SPEC CAPTURE_DIR GUEST_CHECKPOINT')
++    if sys.argv[1] == 'checkpoint':
++        commit_checkpoint(*sys.argv[2:])
++    else:
++        commit(*sys.argv[1:])
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/journal_hold.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/journal_hold.py
+index a562eb2..2d2d676 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/journal_hold.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/journal_hold.py
+@@ -3,12 +3,12 @@ import pathlib
+ import secrets
+ 
+ from preservation_checks import require
+-from preservation_journal import FULL_NODE_SCOPE, TIMER_SCOPE, TIMER_UNITS, matches, valid_record
++from preservation_journal import FULL_NODE_SCOPE, HOLD_REASON, TIMER_SCOPE, TIMER_UNITS, matches, valid_record
+ 
+ 
+ ANCHOR = 'scheduler-heartbeat'
+ TIMERS = TIMER_UNITS
+-REASON = 'preservation execution hold'
++REASON = HOLD_REASON
+ 
+ 
+ def describe(gate, cohort):
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/preservation_journal.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/preservation_journal.py
+index ce1ec92..247b692 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/preservation_journal.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/preservation_journal.py
+@@ -12,6 +12,7 @@ import subprocess
+ import sys
+ import uuid
+ 
++from nats_identity import bind_identities
+ from preservation_checks import (RESUME_ORDER, Refused, capture_entrypoint_inventory,
+                                  require, valid_tailscale_exclusion)
+ 
+@@ -29,6 +30,20 @@ NATS_WRITER_MARKER = pathlib.Path('/private/var/db/openclaw-nats/writer-handoff.
+ NATS_ROOT_OUTCOMES = pathlib.Path('/private/var/db/openclaw-nats-outcomes')
+ NATS_ROOT_UID = 0
+ NATS_LEGACY_LOCK = pathlib.Path('/private/var/db/openclaw-nats-writer.lock')
++HOLD_REASON = 'preservation execution hold'
++CAPTURE_EVENT = 'capture-ready'
++CAPTURE_SCOPE = ('application quiescence at this exact journal head; '
++                 'not byte continuity or physical writer exclusion')
++ARM_SCOPE = 'waiting for external guest shutdown; no stop request issued'
++MANIFEST_SCOPE = 'guest stopped-tree content observation; writer exclusion external'
++MANIFEST_KEYS = frozenset(('scope', 'at_utc', 'capture_nonce', 'journal_head', 'data_volume_uuid',
++                           'spec_sha256', 'stores', 'store_paths', 'store_relative_paths'))
++CAPTURE_KEYS = frozenset(('sequence', 'previous', 'event', 'boot', 'at', 'scope', 'pre_head',
++                          'baseline_sha256', 'capture_nonce', 'arm_sha256', 'manifest_sha256',
++                          'identities', 'observations', 'hold_sha256', 'hold_evidence',
++                          'entrypoint_loaded', 'entrypoint_overrides', 'sha256'))
++SERVING_NATS = ('nats', 'nats-2', 'nats-3')
++DIGEST = re.compile(r'[0-9a-f]{64}')
+ 
+ 
+ class CommittedRefusal(Exception):
+@@ -886,6 +901,51 @@ class Journal:
+                            hold_sha256=hashlib.sha256(encoded(hold_evidence)).hexdigest(),
+                            hold_evidence=hold_evidence)
+ 
++    def capture_ready(self, hold, observe, *, armed, manifest, table, configs, binary, home):
++        """Append the terminal capture-ready checkpoint (D173/D174) at the exact quiescent head.
++
++        It attests application quiescence only. The host must still commit this record's digest
++        and verify the journal extracted from the stopped image (verify_capture_checkpoint);
++        the manifest's journal_head names the pre-head and cannot pin this record's bytes.
++        """
++        require(self.scope == FULL_NODE_SCOPE and self.node_lock is not None,
++                'capture checkpoint requires the full-node preservation owner')
++        require(hold is not None and hold.journal is self and callable(observe),
++                'capture checkpoint requires the original execution hold and observations')
++        self.require_forward()
++        require(self._read() == self.records, 'capture checkpoint requires the exact durable journal')
++        require_no_nats_marker()
++        cohort = capture_cohort(self.records)
++        session = cohort['session']
++        identities = bind_identities(self.prior, table, configs, binary=binary, home=home)
++        head = self.records[-1]['sha256']
++        bound = capture_inputs(armed, manifest, head, identities)
++        entrypoints = self.check_entrypoints(forward=True)
++        certificate = hold.check_forward()
++        require(original_hold(certificate, session, cohort['receipt']),
++                'capture checkpoint live hold differs from the original execution hold')
++        observations = {}
++        for unit, prior in self.prior.items():
++            actual = observe(unit, prior)
++            require(held_as_checkpointed(prior, actual),
++                    'capture checkpoint observation is not stopped or held unchanged: ' + unit)
++            observations[unit] = actual
++        require_no_nats_marker()
++        # The live certificate carries event counters, so recheck its validity rather than equality.
++        require(original_hold(hold.check_forward(), session, cohort['receipt']),
++                'capture checkpoint live hold differs from the original execution hold')
++        final = self.check_entrypoints(forward=True)
++        require((final['loaded'], final['overrides']) == (entrypoints['loaded'], entrypoints['overrides']),
++                'capture checkpoint entrypoints changed during observation')
++        require(self.records[-1]['sha256'] == head, 'capture checkpoint head moved during observation')
++        return self.append(CAPTURE_EVENT, scope=CAPTURE_SCOPE, pre_head=head,
++                           baseline_sha256=self.records[0]['sha256'], **bound,
++                           identities=identities, observations=observations,
++                           hold_sha256=hashlib.sha256(encoded(certificate)).hexdigest(),
++                           hold_evidence=certificate,
++                           entrypoint_loaded=entrypoints['loaded'],
++                           entrypoint_overrides=entrypoints['overrides'])
++
+     def pending_intents(self):
+         completed = {r['intent'] for r in self.records if r['event'] == 'verified'}
+         return [r for r in self.records if r['event'] == 'intent' and r['sequence'] not in completed]
+@@ -893,6 +953,8 @@ class Journal:
+     def require_forward(self):
+         require(not any(row['event'] == 'nats-transfer-intent' for row in self.records),
+                 'returned NATS transfer is restore-only')
++        require(not any(row['event'] == CAPTURE_EVENT for row in self.records),
++                'capture checkpoint ended forward work; restore prior services only')
+         require(not self.write_failed, 'failed durable write requires reopening the journal')
+         require(self.boot == self.records[0]['boot'], 'reboot invalidated preservation; restore prior services only')
+         require(not self.reopened, 'reopened preservation may only restore prior services')
+@@ -974,13 +1036,7 @@ class Journal:
+                 and spawn.get('spawns') == [])
+ 
+     def full_node_stop_proven(self, unit, evidence):
+-        kind = self.prior[unit]['class']
+-        return ((kind in ('daemon', 'on-demand', 'known-broken')
+-                 and self.managed_stop_proven(unit, evidence))
+-                or (kind in ('timer', 'on-demand', 'known-broken')
+-                    and self.idle_stop_proven(unit, evidence)
+-                    and evidence['prior']['loaded'] == self.prior[unit]['loaded']
+-                    and evidence['prior']['running'] == self.prior[unit]['running']))
++        return class_stop_proven(self.prior, unit, evidence)
+ 
+     def begin_override_clear(self, unit):
+         require(self.scope == FULL_NODE_SCOPE and unit in self.prior
+@@ -1506,3 +1562,243 @@ class Journal:
+ 
+     def __exit__(self, *args):
+         self.close()
++
++
++def class_stop_proven(prior, unit, evidence):
++    kind = prior[unit]['class']
++    return ((kind in ('daemon', 'on-demand', 'known-broken')
++             and Journal.managed_stop_proven(unit, evidence))
++            or (kind in ('timer', 'on-demand', 'known-broken')
++                and Journal.idle_stop_proven(unit, evidence)
++                and evidence['prior']['loaded'] == prior[unit]['loaded']
++                and evidence['prior']['running'] == prior[unit]['running']))
++
++
++def original_hold(certificate, session, receipt):
++    """A forward certificate of the original session for the one published hold window."""
++    return valid_execution_hold(certificate, session) and certificate.get('receipt') == receipt
++
++
++def held_as_checkpointed(prior, actual):
++    """Every prior-loaded unit is stopped and disabled; everything else (member1 included) is unchanged."""
++    if not (isinstance(actual, dict) and actual.get('verified') is True
++            and actual.get('identity') == prior['identity']
++            and all(isinstance(actual.get(key), bool) for key in ('loaded', 'running', 'disabled'))):
++        return False
++    if prior['loaded']:
++        return not actual['loaded'] and not actual['running'] and actual['disabled']
++    return all(actual[key] == prior[key] for key in ('loaded', 'running', 'disabled'))
++
++
++def capture_cohort(records):
++    """The record-only half of the checkpoint, shared by the live gate and the frozen verifier.
++
++    The forward window must be strictly serial (intent, the anchor's publication, its receipt),
++    start with the original certified hold, stop the deploy listener first, every other
++    prior-loaded non-NATS unit next and the three serving NATS units last, each exactly once
++    with a class-specific receipt bound to the original session. Member1 is never touched.
++    """
++    baseline = records[0]
++    require(baseline.get('event') == 'baseline' and baseline.get('scope') == FULL_NODE_SCOPE,
++            'capture checkpoint requires a full-node baseline')
++    prior = baseline.get('prior')
++    valid_prior(prior, FULL_NODE_SCOPE)
++    inventory = baseline.get('entrypoint_inventory')
++    valid_entrypoint_inventory(inventory, prior)
++    require(all(row.get('boot') == baseline.get('boot') for row in records),
++            'capture checkpoint spans more than one boot')
++    intents, receipts, published, open_intent = [], {}, [], None
++    for row in records[1:]:
++        event = row.get('event')
++        if event == 'intent':
++            require(open_intent is None, 'capture checkpoint forward window is not serial')
++            open_intent = row
++            intents.append(row)
++        elif event == 'hold-published':
++            require(open_intent is not None and len(intents) == 1 and not published
++                    and row.get('intent') == open_intent['sequence'],
++                    'capture checkpoint execution hold publication differs')
++            published.append(row)
++        elif event == 'verified':
++            require(open_intent is not None and row.get('intent') == open_intent['sequence']
++                    and row.get('unit') == open_intent.get('unit')
++                    and row.get('action') == open_intent.get('action'),
++                    'capture checkpoint receipt does not close the open intent')
++            receipts[open_intent['sequence']] = row
++            open_intent = None
++        else:
++            raise Refused('capture checkpoint follows an event outside the uninterrupted forward window')
++    require(open_intent is None, 'capture checkpoint has an unfinished intent')
++    anchor = intents[0] if intents else {}
++    fields = anchor.get('hold')
++    require(anchor.get('unit') == 'scheduler-heartbeat'
++            and anchor.get('action') == 'close-execution-hold'
++            and isinstance(fields, dict) and set(fields) == {'baseline', 'window', 'reason', 'protective'}
++            and fields['baseline'] == baseline['sha256'] and fields['protective'] is False
++            and fields['reason'] == HOLD_REASON
++            and isinstance(fields['window'], str) and re.fullmatch(r'hold-[0-9a-f]{64}', fields['window'])
++            and len(published) == 1 and published[0].get('adopted_for_restoration') is False
++            and isinstance(published[0].get('receipt'), dict)
++            and published[0]['receipt'].get('marker') ==
++            {'window': fields['window'], 'reason': fields.get('reason')},
++            'capture checkpoint has no unique published first execution hold')
++    original = receipts[anchor['sequence']].get('evidence')
++    session = original.get('watch_session_id') if isinstance(original, dict) else None
++    require(isinstance(session, str) and session and valid_execution_hold(original, session),
++            'capture checkpoint requires the original certified execution hold session')
++    receipt = published[0]['receipt']
++    require(original.get('receipt') == receipt,
++            'capture checkpoint execution hold certificate is not for the published hold window')
++    stops = intents[1:]
++    units = [row.get('unit') for row in stops]
++    required = {unit for unit, state in prior.items()
++                if state['loaded'] and unit not in NATS_TRANSFER_UNITS}
++    require(all(row.get('action') == 'disable-and-unload' for row in stops)
++            and len(set(units)) == len(units) and set(units) == required | set(SERVING_NATS),
++            'capture checkpoint stops are not one persistent stop per prior-loaded unit')
++    first = next(index for index, unit in enumerate(units) if unit in SERVING_NATS)
++    require(units[0] == 'mesh-deploy-listener' and set(units[first:]) == set(SERVING_NATS),
++            'capture checkpoint stop order differs: listener, other jobs, then serving NATS')
++    loaded, overrides = inventory['loaded'], inventory['overrides']
++    for intent in intents:
++        unit, evidence = intent['unit'], receipts[intent['sequence']].get('evidence')
++        label = 'ai.openclaw.' + unit
++        require(isinstance(evidence, dict)
++                and isinstance(evidence.get('entrypoint_loaded'), dict)
++                and isinstance(evidence.get('entrypoint_overrides'), dict)
++                and set(evidence['entrypoint_loaded']) == set(loaded)
++                and set(evidence['entrypoint_overrides']) == set(overrides),
++                'capture checkpoint receipt lacks its entrypoint state: ' + unit)
++        after_loaded, after_overrides = evidence['entrypoint_loaded'], evidence['entrypoint_overrides']
++        if intent is anchor:
++            require(after_loaded == loaded and after_overrides == overrides,
++                    'capture checkpoint execution hold changed launchd state')
++        else:
++            require(class_stop_proven(prior, unit, evidence)
++                    and original_hold(evidence.get('execution_hold'), session, receipt),
++                    'capture checkpoint stop lacks class proof or the original hold session: ' + unit)
++            require(all(isinstance(after_loaded[domain], list)
++                        and len(set(after_loaded[domain])) == len(after_loaded[domain])
++                        and set(after_loaded[domain]) == set(loaded[domain]) - {label}
++                        for domain in loaded)
++                    and after_overrides['gui'].get(label) is True
++                    and after_overrides['user'].get(label) is True
++                    and after_overrides['system'].get(label) is not False
++                    and all(isinstance(after_overrides[domain], dict)
++                            and after_overrides[domain].get(label) in (overrides[domain].get(label), True)
++                            and {key: value for key, value in after_overrides[domain].items()
++                                 if key != label} ==
++                            {key: value for key, value in overrides[domain].items() if key != label}
++                            for domain in overrides),
++                    'capture checkpoint launchd continuity differs at the stop of ' + unit)
++        loaded, overrides = after_loaded, after_overrides
++    require(not any(loaded.values()), 'capture checkpoint leaves a managed job loaded')
++    return {'prior': prior, 'session': session, 'receipt': receipt, 'loaded': loaded, 'overrides': overrides}
++
++
++def capture_inputs(armed, manifest, head, identities):
++    """Bind the host arm and the canonical guest manifest to one journal head and the bound roles."""
++    require(isinstance(armed, bytes) and isinstance(manifest, bytes),
++            'capture arm and manifest must be the exact bytes')
++    try:
++        arm = json.loads(armed)
++    except ValueError as error:
++        raise Refused('capture arm or manifest is not JSON') from error
++    require(isinstance(arm, dict) and arm.get('scope') == ARM_SCOPE
++            and isinstance(arm.get('capture_nonce'), str) and DIGEST.fullmatch(arm['capture_nonce']),
++            'host capture is not armed with a nonce')
++    return {'capture_nonce': arm['capture_nonce'],
++            'arm_sha256': hashlib.sha256(armed).hexdigest(),
++            'manifest_sha256': bind_manifest(manifest, arm['capture_nonce'], head, identities)}
++
++
++def bind_manifest(manifest, nonce, head, identities):
++    """The canonical guest manifest names this nonce, this journal head and each role's bound store."""
++    require(isinstance(manifest, bytes), 'capture arm and manifest must be the exact bytes')
++    try:
++        seen = json.loads(manifest)
++    except ValueError as error:
++        raise Refused('capture arm or manifest is not JSON') from error
++    require(isinstance(seen, dict) and set(seen) == MANIFEST_KEYS
++            and manifest == (json.dumps(seen, sort_keys=True, separators=(',', ':')) + '\n').encode()
++            and seen['scope'] == MANIFEST_SCOPE,
++            'guest manifest is not the canonical capture form')
++    require(seen['capture_nonce'] == nonce, 'guest manifest nonce differs from the host arm')
++    require(seen['journal_head'] == head, 'guest manifest was not taken at this journal head')
++    require(all(isinstance(seen[key], dict) and set(seen[key]) == set(identities)
++                for key in ('stores', 'store_paths', 'store_relative_paths'))
++            and all(isinstance(rows, list) and rows for rows in seen['stores'].values()),
++            'guest manifest roles differ from the bound identities')
++    for role, identity in identities.items():
++        require(seen['store_paths'][role] == identity['store_dir']
++                and seen['store_relative_paths'][role] == identity['store_dir'][1:],
++                'guest manifest store differs from the bound ' + role)
++    return hashlib.sha256(manifest).hexdigest()
++
++
++def verify_capture_checkpoint(records, commitment, *, table, configs, binary, home):
++    """Pure check of a frozen user journal that must end in exactly one capture-ready checkpoint.
++
++    Reads nothing. `commitment` is what host_guest_commit.require_committed() returns: the arm
++    digest, nonce and manifest the host committed while the VM ran, and the separately committed
++    checkpoint digest. The manifest's journal_head names only the pre-head and cannot pin the
++    checkpoint's bytes, and a digest taken from the extracted records would pin nothing.
++    """
++    checkpointed = commitment.get('checkpoint') if isinstance(commitment, dict) else None
++    try:
++        manifest = (json.dumps(commitment['manifest'], sort_keys=True, separators=(',', ':')) + '\n').encode()
++        committed = (isinstance(checkpointed, dict)
++                     and DIGEST.fullmatch(commitment['capture_nonce'])
++                     and DIGEST.fullmatch(commitment['arm_sha256'])
++                     and hashlib.sha256(manifest).hexdigest() == commitment['manifest_sha256']
++                     == checkpointed['manifest_sha256']
++                     and checkpointed['capture_nonce'] == commitment['capture_nonce']
++                     and DIGEST.fullmatch(checkpointed['checkpoint_sha256'])
++                     and DIGEST.fullmatch(checkpointed['journal_head']))
++    except (KeyError, TypeError, ValueError) as error:
++        raise Refused('capture checkpoint lacks a host commitment') from error
++    require(committed, 'capture checkpoint lacks a host commitment')
++    require(isinstance(records, list) and len(records) >= 2, 'capture journal is incomplete')
++    previous = None
++    for index, row in enumerate(records):
++        try:
++            body = {key: value for key, value in row.items() if key != 'sha256'}
++            intact = hashlib.sha256(encoded(body)).hexdigest() == row.get('sha256')
++        except (AttributeError, TypeError, ValueError) as error:
++            raise Refused('capture journal record is incomplete') from error
++        require(intact and row.get('sequence') == index and row.get('previous') == previous,
++                'capture journal chain differs')
++        previous = row['sha256']
++    checkpoint = records[-1]
++    require(checkpoint.get('event') == CAPTURE_EVENT, 'capture checkpoint is not the terminal record')
++    require(checkpoint['sha256'] == checkpointed['checkpoint_sha256'],
++            'capture checkpoint differs from the committed digest')
++    # Extracted records are untrusted: malformed content refuses rather than escaping as a crash.
++    try:
++        cohort = capture_cohort(records[:-1])
++        identities = bind_identities(cohort['prior'], table, configs, binary=binary, home=home)
++        head = records[-2]['sha256']
++        require(checkpointed['journal_head'] == head, 'guest manifest was not taken at this journal head')
++        bound = {'capture_nonce': commitment['capture_nonce'], 'arm_sha256': commitment['arm_sha256'],
++                 'manifest_sha256': bind_manifest(manifest, commitment['capture_nonce'], head, identities)}
++        certificate = checkpoint.get('hold_evidence')
++        require(set(checkpoint) == CAPTURE_KEYS and checkpoint['scope'] == CAPTURE_SCOPE
++                and checkpoint['boot'] == records[0]['boot']
++                and checkpoint['pre_head'] == records[-2]['sha256']
++                and checkpoint['baseline_sha256'] == records[0]['sha256']
++                and all(checkpoint[key] == value for key, value in bound.items())
++                and checkpoint['identities'] == identities
++                and original_hold(certificate, cohort['session'], cohort['receipt'])
++                and checkpoint['hold_sha256'] == hashlib.sha256(encoded(certificate)).hexdigest()
++                and checkpoint['entrypoint_loaded'] == cohort['loaded']
++                and checkpoint['entrypoint_overrides'] == cohort['overrides'],
++                'capture checkpoint fields differ from the frozen journal, arm, manifest or pins')
++        observations = checkpoint['observations']
++        require(isinstance(observations, dict) and set(observations) == set(cohort['prior'])
++                and all(held_as_checkpointed(state, observations[unit])
++                        for unit, state in cohort['prior'].items()),
++                'capture checkpoint observations do not show the stopped and held cohort')
++    except (AttributeError, IndexError, KeyError, TypeError) as error:
++        raise Refused('capture journal content is malformed') from error
++    return {'checkpoint_sha256': checkpoint['sha256'], 'pre_head': checkpoint['pre_head'],
++            'session': cohort['session'], 'identities': identities}
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_tree_match.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_tree_match.py
+index 0229c39..1e38a2b 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_tree_match.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_tree_match.py
+@@ -93,7 +93,7 @@ def new_output(output):
+     output.mkdir(mode=0o700)
+ 
+ 
+-def guest_capture(spec_path, output, root=pathlib.Path('/'), capture_nonce=None):
++def guest_capture(spec_path, output, root=pathlib.Path('/'), capture_nonce=None, journal_head=None):
+     os.umask(0o077)
+     spec_path = pathlib.Path(spec_path)
+     output = pathlib.Path(output)
+@@ -101,6 +101,10 @@ def guest_capture(spec_path, output, root=pathlib.Path('/'), capture_nonce=None)
+     require(capture_nonce is None or isinstance(capture_nonce, str)
+             and re.fullmatch(r'[0-9a-f]{64}', capture_nonce),
+             'guest capture nonce is invalid')
++    # The quiescent user-journal head the capture-ready checkpoint must directly follow.
++    require(journal_head is None or capture_nonce is not None and isinstance(journal_head, str)
++            and re.fullmatch(r'[0-9a-f]{64}', journal_head),
++            'guest capture journal head is invalid or lacks a nonce')
+     new_output(output)
+     try:
+         stores = {}
+@@ -135,6 +139,8 @@ def guest_capture(spec_path, output, root=pathlib.Path('/'), capture_nonce=None)
+                                            for row in spec['stores']}}
+         if capture_nonce is not None:
+             result['capture_nonce'] = capture_nonce
++        if journal_head is not None:
++            result['journal_head'] = journal_head
+         write_json(output / 'manifest.json', result)
+         return result
+     except Exception as error:
+@@ -280,9 +286,11 @@ def host_match(guest_path, extracted, output):
+ 
+ 
+ if __name__ == '__main__':
+-    require(len(sys.argv) in (4, 5), 'usage: stopped_tree_match.py capture SPEC OUTPUT [NONCE] | match GUEST EXTRACTED OUTPUT')
+-    if sys.argv[1] == 'capture' and len(sys.argv) in (4, 5):
+-        guest_capture(sys.argv[2], sys.argv[3], capture_nonce=(sys.argv[4] if len(sys.argv) == 5 else None))
++    require(len(sys.argv) in (4, 5, 6),
++            'usage: stopped_tree_match.py capture SPEC OUTPUT [NONCE [HEAD]] | match GUEST EXTRACTED OUTPUT')
++    if sys.argv[1] == 'capture' and len(sys.argv) in (4, 5, 6):
++        guest_capture(sys.argv[2], sys.argv[3], capture_nonce=(sys.argv[4] if len(sys.argv) >= 5 else None),
++                      journal_head=(sys.argv[5] if len(sys.argv) == 6 else None))
+     elif sys.argv[1] == 'match' and len(sys.argv) == 5:
+         host_match(sys.argv[2], sys.argv[3], sys.argv[4])
+     else:
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py
+new file mode 100644
+index 0000000..8a592f6
+--- /dev/null
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint.py
+@@ -0,0 +1,696 @@
++"""Owned tests for the B5 capture-ready checkpoint (D173/D174) and its pure frozen verifier.
++
++Every positive journal is written by the honest Journal.mutate path under a certified hold facade;
++negatives forge only the one row or input under test. No launchd, NATS, store or VM is touched.
++"""
++import copy
++import hashlib
++import json
++import os
++import pathlib
++import secrets
++import sys
++import tempfile
++import unittest
++from types import SimpleNamespace
++from unittest.mock import patch
++
++sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
++
++import preservation_journal  # noqa: E402
++import stopped_tree_match  # noqa: E402
++import test_nats_identity as identity_fixture  # noqa: E402
++from nats_identity import ROLES  # noqa: E402
++from preservation_checks import STOP_ORDER  # noqa: E402
++from preservation_journal import (ARM_SCOPE, CAPTURE_EVENT, FULL_NODE_SCOPE, MANIFEST_KEYS,  # noqa: E402
++                                  MANIFEST_SCOPE, SERVING_NATS, Journal, Refused, encoded,
++                                  verify_capture_checkpoint)
++from test_preservation_journal import (fence_listener, fence_unit, full_entrypoint_evidence,  # noqa: E402
++                                       full_node_inventory, listener_stop_evidence,
++                                       timer_stop_evidence)
++
++SESSION = 'owned-session'
++WINDOW = 'hold-' + 'a' * 64
++# The real ClosedGate certificate carries the receipt its window published (journal_hold._published).
++RECEIPT = {'marker': {'window': WINDOW, 'reason': 'preservation execution hold'}}
++CERTIFICATE = {'verified': True, 'restoration_only': False, 'kernel_file_watch': True,
++               'path_watch': {'kernel_path_watch': True}, 'watch_session_id': SESSION, 'receipt': RECEIPT}
++FOREIGN = {'marker': {'window': 'hold-' + 'f' * 64, 'reason': 'preservation execution hold'}}
++# Each way a hold certificate can stop certifying the original session and window (D176-D179).
++BROKEN = (('verified', False), ('restoration_only', True), ('kernel_file_watch', False),
++          ('path_watch', {'kernel_path_watch': False}), ('watch_session_id', 'stale-session'),
++          ('receipt', FOREIGN))
++UNIT_OF = {role: unit for unit, role in ROLES.items()}
++
++
++def canonical(value):
++    return (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode()
++
++
++def rechain(records, start):
++    """Re-hash from start onward, as a forger controlling the user journal could."""
++    rows = copy.deepcopy(records)
++    for index in range(start, len(rows)):
++        row = rows[index]
++        row.pop('sha256', None)
++        row['sequence'] = index
++        row['previous'] = rows[index - 1]['sha256'] if index else None
++        row['sha256'] = hashlib.sha256(encoded(row)).hexdigest()
++    return rows
++
++
++class CaptureCheckpoint(unittest.TestCase):
++    def setUp(self):
++        temp = tempfile.TemporaryDirectory(prefix='openclaw-capture-owned-')
++        self.addCleanup(temp.cleanup)
++        self.temp = pathlib.Path(temp.name)
++        self.parent = self.temp / 'journals'
++        self.parent.mkdir(mode=0o700)
++        self.root = self.parent / 'journal'
++        self.node_lock = self.temp / 'node.lock'
++        lock = self.temp / 'writer.lock'
++        lock.write_bytes(b'owned writer lock')
++        for name, value in (('NATS_WRITER_MARKER', self.temp / 'writer-handoff.json'),
++                            ('NATS_LEGACY_LOCK', lock), ('NATS_ROOT_UID', os.getuid())):
++            guarded = patch.object(preservation_journal, name, value)
++            guarded.start()
++            self.addCleanup(guarded.stop)
++        # Serving and held NATS identities in the exact bound config form of the D181 binder.
++        self.prior = full_node_inventory()
++        bound_prior, self.table, self.configs = identity_fixture.fixture()
++        for unit in ROLES:
++            self.prior[unit]['identity'] = bound_prior[unit]['identity']
++        self.loaded = full_entrypoint_evidence(self.prior)
++        inventory = patch('preservation_journal.capture_entrypoint_inventory',
++                          side_effect=lambda _: copy.deepcopy(self.loaded))
++        inventory.start()
++        self.addCleanup(inventory.stop)
++        self.journal = Journal(self.root, self.prior, boot='boot-a', node_lock=self.node_lock,
++                               scope=FULL_NODE_SCOPE)
++        self.addCleanup(self.journal.close)
++        self.live = dict(CERTIFICATE)
++        self.hold = SimpleNamespace(journal=self.journal, check_forward=lambda: copy.deepcopy(self.live))
++        self.nonce = secrets.token_hex(32)
++        self.armed = canonical({'scope': ARM_SCOPE, 'capture_nonce': self.nonce,
++                                'vm_uuid': '00000000-0000-0000-0000-000000000002'})
++
++    # --- honest journal construction -------------------------------------------------------
++
++    def anchor(self, certificate=None):
++        fields = {'baseline': self.journal.records[0]['sha256'], 'window': WINDOW,
++                  'reason': 'preservation execution hold', 'protective': False}
++        def publish():
++            intent = self.journal.records[-1]
++            self.journal.append('hold-published', intent=intent['sequence'], receipt=copy.deepcopy(RECEIPT),
++                                adopted_for_restoration=False)
++        if certificate is None:
++            # The JournaledHold.close_and_drain shape: publication during apply, certificate as proof.
++            self.journal.mutate('scheduler-heartbeat', 'close-execution-hold', publish,
++                                lambda: dict(CERTIFICATE), intent_fields={'hold': fields}, hold=self.hold)
++            return
++        intent = self.journal.append('intent', unit='scheduler-heartbeat',
++                                     action='close-execution-hold', hold=fields)
++        publish()
++        self.journal.append('verified', intent=intent['sequence'], unit='scheduler-heartbeat',
++                            action='close-execution-hold',
++                            evidence={**certificate, 'entrypoint_loaded': copy.deepcopy(self.loaded['loaded']),
++                                      'entrypoint_overrides': copy.deepcopy(self.loaded['overrides'])})
++
++    def stop_evidence(self, unit):
++        state = self.prior[unit]
++        if state['class'] in ('timer', 'on-demand') or state['class'] == 'known-broken' and not state['running']:
++            return timer_stop_evidence(unit)
++        return listener_stop_evidence(unit)
++
++    def stop(self, unit):
++        fence = fence_listener if unit == 'mesh-deploy-listener' else (lambda loaded: fence_unit(loaded, unit))
++        self.journal.mutate(unit, 'disable-and-unload', lambda: fence(self.loaded),
++                            lambda: self.stop_evidence(unit), hold=self.hold)
++
++    def forged_stop(self, unit, certificate=CERTIFICATE, evidence=None):
++        intent = self.journal.append('intent', unit=unit, action='disable-and-unload')
++        if 'ai.openclaw.' + unit in self.loaded['loaded']['gui']:
++            fence_unit(self.loaded, unit)
++        self.journal.append('verified', intent=intent['sequence'], unit=unit, action='disable-and-unload',
++                            evidence={**(evidence if evidence is not None else self.stop_evidence(unit)),
++                                      'execution_hold': certificate,
++                                      'entrypoint_loaded': copy.deepcopy(self.loaded['loaded']),
++                                      'entrypoint_overrides': copy.deepcopy(self.loaded['overrides'])})
++
++    def build(self, forge=None, skip=()):
++        """Anchor, listener, other non-NATS jobs, then serving NATS; member1 is never touched."""
++        forge = forge or {}
++        self.anchor()
++        for unit in (*STOP_ORDER, *SERVING_NATS):
++            if unit in skip:
++                continue
++            if unit in forge:
++                self.forged_stop(unit, forge[unit])
++            else:
++                self.stop(unit)
++
++    def observe(self, unit, saved):
++        if saved['loaded']:
++            return {**saved, 'loaded': False, 'running': False, 'disabled': True, 'verified': True}
++        return {**saved, 'verified': True}
++
++    def manifest(self, head=None, **changes):
++        value = {'scope': MANIFEST_SCOPE, 'at_utc': '2026-10-14T15:00:00+00:00',
++                 'capture_nonce': self.nonce,
++                 'journal_head': head if head is not None else self.journal.records[-1]['sha256'],
++                 'data_volume_uuid': 'A' * 36, 'spec_sha256': '5' * 64,
++                 'stores': {role: [{'path': 'stream.dat', 'type': 'file', 'size': 1, 'sha256': '0' * 64}]
++                            for role in UNIT_OF},
++                 'store_paths': {role: identity_fixture.STORES[UNIT_OF[role]] for role in UNIT_OF},
++                 'store_relative_paths': {role: identity_fixture.STORES[UNIT_OF[role]][1:] for role in UNIT_OF}}
++        value.update(changes)
++        return canonical(value)
++
++    def checkpoint(self, hold=None, observe=None, **inputs):
++        values = {'armed': self.armed, 'manifest': self.manifest(), 'table': self.table,
++                  'configs': self.configs, 'binary': identity_fixture.BINARY, 'home': identity_fixture.HOME}
++        values.update(inputs)
++        return self.journal.capture_ready(hold if hold is not None else self.hold,
++                                          observe or self.observe, **values)
++
++    def refused(self, pattern, call):
++        before = list(self.journal._read())
++        with self.assertRaisesRegex(Refused, pattern):
++            call()
++        self.assertEqual(self.journal._read(), before, 'a refusal must not append')
++
++    # --- frozen verifier helpers ------------------------------------------------------------
++
++    def authentic(self):
++        self.build()
++        manifest = self.manifest()
++        record = self.checkpoint(manifest=manifest)
++        return self.journal._read(), record, manifest
++
++    def verify(self, records, digest=None, **inputs):
++        """Rule tests: the commitment is shaped as require_committed() returns it.
++
++        The default digest is the record's own, so these tests isolate content rules; digest
++        provenance is pinned by the host-commitment tests, where it comes only from CHECKPOINT.json.
++        """
++        armed, manifest = inputs.pop('armed', self.armed), inputs.pop('manifest')
++        values = {'table': self.table, 'configs': self.configs,
++                  'binary': identity_fixture.BINARY, 'home': identity_fixture.HOME}
++        values.update(inputs)
++        nonce, committed = json.loads(armed)['capture_nonce'], json.loads(manifest)
++        sha = hashlib.sha256(manifest).hexdigest()
++        commitment = {'capture_nonce': nonce, 'arm_sha256': hashlib.sha256(armed).hexdigest(),
++                      'manifest_sha256': sha, 'manifest': committed,
++                      'checkpoint': {'capture_nonce': nonce, 'manifest_sha256': sha,
++                                     'journal_head': committed['journal_head'],
++                                     'checkpoint_sha256': digest or records[-1]['sha256']}}
++        return verify_capture_checkpoint(records, commitment, **values)
++
++
++class Authentic(CaptureCheckpoint):
++    def test_authentic_checkpoint_binds_head_arm_manifest_roles_and_verifies_frozen(self):
++        self.build()
++        head = self.journal.records[-1]['sha256']
++        manifest = self.manifest(head)
++        record = self.checkpoint(manifest=manifest)
++        self.assertEqual(record['event'], CAPTURE_EVENT)
++        self.assertEqual((record['previous'], record['pre_head']), (head, head))
++        self.assertEqual(record['capture_nonce'], self.nonce)
++        self.assertEqual(record['arm_sha256'], hashlib.sha256(self.armed).hexdigest())
++        self.assertEqual(record['manifest_sha256'], hashlib.sha256(manifest).hexdigest())
++        self.assertEqual({role: row['unit'] for role, row in record['identities'].items()}, UNIT_OF)
++        self.assertTrue(record['identities']['member1']['held'])
++        self.assertEqual(record['observations']['nats-1']['loaded'], False)
++        self.assertEqual(record['hold_evidence']['watch_session_id'], SESSION)
++        self.assertEqual(record['entrypoint_loaded'], {'gui': [], 'user': [], 'system': []})
++        self.journal.close()
++        with Journal(self.root, boot='boot-a', node_lock=self.node_lock) as reopened:
++            frozen = reopened._read()
++        summary = self.verify(frozen, record['sha256'], manifest=manifest)
++        self.assertEqual(summary['checkpoint_sha256'], record['sha256'])
++        self.assertEqual(summary['pre_head'], head)
++        self.assertEqual(summary['session'], SESSION)
++
++    def test_guest_capture_manifest_has_the_checkpoint_shape(self):
++        root = self.temp / 'guest'
++        stores = []
++        for role in sorted(UNIT_OF):
++            relative = 'Users/owned/.openclaw/nats/' + role
++            (root / relative).mkdir(parents=True)
++            (root / relative / 'stream.dat').write_text(role)
++            stores.append({'role': role, 'relative_path': relative})
++        spec = self.temp / 'stores.json'
++        spec.write_text(json.dumps({'data_volume_uuid': 'A' * 36, 'stores': stores}))
++        spec.chmod(0o600)
++        head = 'b' * 64
++        with patch.object(stopped_tree_match, 'data_volume_uuid', return_value='A' * 36):
++            stopped_tree_match.guest_capture(spec, self.temp / 'with-head', root, self.nonce, head)
++            raw = (self.temp / 'with-head' / 'manifest.json').read_bytes()
++            value = json.loads(raw)
++            self.assertEqual(set(value), MANIFEST_KEYS)
++            self.assertEqual(raw, canonical(value))
++            self.assertEqual((value['capture_nonce'], value['journal_head']), (self.nonce, head))
++            stopped_tree_match.guest_capture(spec, self.temp / 'legacy', root, self.nonce)
++            self.assertNotIn('journal_head', json.loads((self.temp / 'legacy' / 'manifest.json').read_bytes()))
++            for nonce, bad in ((None, head), (self.nonce, 'B' * 64), (self.nonce, head[:-1])):
++                with self.subTest(nonce=nonce, head=bad):
++                    output = self.temp / ('refused-' + secrets.token_hex(4))
++                    with self.assertRaisesRegex(Exception, 'journal head is invalid'):
++                        stopped_tree_match.guest_capture(spec, output, root, nonce, bad)
++                    self.assertFalse(output.exists())
++
++
++class LiveGate(CaptureCheckpoint):
++    def test_forward_mutation_transfer_and_second_checkpoint_refuse_after_checkpoint(self):
++        self.build()
++        self.checkpoint()
++        for call in (lambda: self.journal.mutate('nats', 'disable-and-unload', lambda: None,
++                                                 lambda: {'verified': True}, hold=self.hold),
++                     lambda: self.journal.transfer_nats('00000000-0000-4000-8000-000000000000',
++                                                        self.hold, self.observe),
++                     lambda: self.checkpoint(manifest=self.manifest(self.journal.records[-2]['sha256'])),
++                     lambda: self.checkpoint()):
++            self.refused('capture checkpoint ended forward work', call)
++
++    def test_d64_cross_boot_recovery_refusal_is_unchanged(self):
++        self.build()
++        self.checkpoint()
++        self.journal.close()
++        with Journal(self.root, boot='boot-b', node_lock=self.node_lock) as rebooted:
++            before = rebooted._read()
++            with self.assertRaisesRegex(Refused, 'full-node reboot recovery requires a verified boot hold decision'):
++                rebooted.recover(lambda *_: self.fail('restore ran'), lambda *_: self.fail('observe ran'),
++                                 lambda: self.fail('final check ran'), hold=self.hold,
++                                 deploy_fence=lambda *_: self.fail('fence ran'))
++            self.assertEqual(rebooted._read(), before)
++
++    def test_reboot_before_checkpoint_refuses(self):
++        self.build()
++        self.journal.close()
++        self.journal = Journal(self.root, boot='boot-b', node_lock=self.node_lock)
++        self.addCleanup(self.journal.close)
++        self.hold.journal = self.journal
++        self.refused('reboot invalidated preservation', self.checkpoint)
++
++    def test_absent_foreign_or_uncertified_live_hold_refuses(self):
++        self.build()
++        self.refused('original execution hold and observations',
++                     lambda: self.journal.capture_ready(None, self.observe, armed=self.armed,
++                                                        manifest=self.manifest(), table=self.table,
++                                                        configs=self.configs, binary=identity_fixture.BINARY,
++                                                        home=identity_fixture.HOME))
++        self.refused('original execution hold and observations',
++                     lambda: self.checkpoint(hold=SimpleNamespace(journal=object(),
++                                                                  check_forward=lambda: dict(CERTIFICATE))))
++        for field, value in BROKEN:
++            with self.subTest(field=field):
++                self.live = {**CERTIFICATE, field: value}
++                self.refused('live hold differs from the original', self.checkpoint)
++        # Drift in either direction between the first check and the post-observation recheck.
++        for field, value in (('verified', False), ('receipt', FOREIGN)):
++            for bad_first in (False, True):
++                with self.subTest(drift=field, bad_first=bad_first):
++                    calls = []
++                    def drifting(field=field, value=value, bad_first=bad_first, calls=calls):
++                        calls.append(1)
++                        bad = (len(calls) == 1) == bad_first
++                        return {**CERTIFICATE, field: value} if bad else dict(CERTIFICATE)
++                    self.refused('live hold differs from the original', lambda: self.checkpoint(
++                        hold=SimpleNamespace(journal=self.journal, check_forward=drifting)))
++
++    def test_sessionless_or_uncertified_original_hold_refuses(self):
++        self.live = {key: value for key, value in CERTIFICATE.items() if key != 'watch_session_id'}
++        self.anchor({key: value for key, value in CERTIFICATE.items() if key != 'watch_session_id'})
++        for unit in (*STOP_ORDER, *SERVING_NATS):
++            self.stop(unit)
++        self.refused('original certified execution hold session', self.checkpoint)
++
++    def test_forged_original_anchor_flags_refuse(self):
++        for field, value in (*BROKEN[:4], BROKEN[5]):
++            with self.subTest(field=field):
++                self.setUp()
++                self.anchor({**CERTIFICATE, field: value})
++                for unit in (*STOP_ORDER, *SERVING_NATS):
++                    self.forged_stop(unit)
++                self.refused('not for the published hold window' if field == 'receipt'
++                             else 'original certified execution hold session', self.checkpoint)
++
++    def test_receipt_hold_session_is_checked_for_each_stop_class(self):
++        for unit in ('mesh-deploy-listener', 'observer', 'mission-control', 'nats-2'):
++            for field, value in BROKEN:
++                with self.subTest(unit=unit, field=field):
++                    self.setUp()
++                    self.anchor(CERTIFICATE)
++                    for name in (*STOP_ORDER, *SERVING_NATS):
++                        self.forged_stop(name, {**CERTIFICATE, field: value} if name == unit else CERTIFICATE)
++                    self.refused('stop lacks class proof or the original hold session: ' + unit,
++                                 self.checkpoint)
++
++    def test_class_proof_missing_serving_member1_and_order_refuse(self):
++        weak = {'verified': True, 'unit_label': 'ai.openclaw.nats-3'}
++        self.anchor(CERTIFICATE)
++        for unit in (*STOP_ORDER, *SERVING_NATS):
++            self.forged_stop(unit, evidence=weak if unit == 'nats-3' else None)
++        self.refused('stop lacks class proof or the original hold session: nats-3', self.checkpoint)
++        self.setUp()
++        self.build(skip=('nats-3',))
++        self.refused('not one persistent stop per prior-loaded unit', self.checkpoint)
++        self.setUp()
++        self.build()
++        self.forged_stop('nats-1')
++        self.refused('not one persistent stop per prior-loaded unit', self.checkpoint)
++        self.setUp()
++        self.anchor()
++        self.stop('mesh-deploy-listener')
++        self.forged_stop('nats')
++        for unit in (*STOP_ORDER[1:], 'nats-2', 'nats-3'):
++            self.stop(unit)
++        self.refused('stop order differs', self.checkpoint)
++
++    def test_unpublished_execution_hold_refuses(self):
++        fields = {'baseline': self.journal.records[0]['sha256'], 'window': WINDOW,
++                  'reason': 'preservation execution hold', 'protective': False}
++        intent = self.journal.append('intent', unit='scheduler-heartbeat', action='close-execution-hold',
++                                     hold=fields)
++        self.journal.append('verified', intent=intent['sequence'], unit='scheduler-heartbeat',
++                            action='close-execution-hold',
++                            evidence={**CERTIFICATE, 'entrypoint_loaded': copy.deepcopy(self.loaded['loaded']),
++                                      'entrypoint_overrides': copy.deepcopy(self.loaded['overrides'])})
++        for unit in (*STOP_ORDER, *SERVING_NATS):
++            self.stop(unit)
++        self.refused('no unique published first execution hold', self.checkpoint)
++
++    def test_fresh_observations_require_stopped_cohort_and_unchanged_member1(self):
++        self.build()
++        cases = {
++            'nats-2': lambda saved: {**self.observe('nats-2', saved), 'running': True},
++            'nats-1': lambda saved: {**saved, 'loaded': True, 'verified': True},
++            'mission-control': lambda saved: {**self.observe('mission-control', saved), 'loaded': True},
++            'nats': lambda saved: {**self.observe('nats', saved), 'identity': {**saved['identity'], 'argv': ['/x']}},
++            'nats-3': lambda saved: {**self.observe('nats-3', saved), 'verified': False},
++            'observer': lambda saved: {**self.observe('observer', saved), 'disabled': False},
++        }
++        for target, change in cases.items():
++            with self.subTest(unit=target):
++                self.refused('observation is not stopped or held unchanged: ' + target,
++                             lambda: self.checkpoint(observe=lambda unit, saved: change(saved)
++                                                     if unit == target else self.observe(unit, saved)))
++        def reload(unit, saved):
++            if unit == 'nats-3':
++                self.loaded['loaded']['gui'].append('ai.openclaw.nats-3')
++            return self.observe(unit, saved)
++        self.refused('loaded jobs changed inside the forward window', lambda: self.checkpoint(observe=reload))
++
++    def test_arm_nonce_head_and_manifest_form_are_bound(self):
++        self.build()
++        head = self.journal.records[-1]['sha256']
++        cases = (
++            ('not armed with a nonce', {'armed': canonical({'scope': 'armed elsewhere', 'capture_nonce': self.nonce})}),
++            ('not armed with a nonce', {'armed': canonical({'scope': ARM_SCOPE, 'capture_nonce': 'A' * 64})}),
++            ('nonce differs from the host arm', {'manifest': self.manifest(capture_nonce=secrets.token_hex(32))}),
++            ('not taken at this journal head', {'manifest': self.manifest(self.journal.records[-2]['sha256'])}),
++            ('not the canonical capture form', {'manifest': self.manifest(head)[:-1]}),
++            ('not the canonical capture form', {'manifest': self.manifest(head).replace(b'":', b'": ', 1)}),
++            ('not the canonical capture form', {'manifest': self.manifest(head, scope='other scope')}),
++            ('not the canonical capture form', {'manifest': self.manifest(head, extra=1)}),
++            ('not the canonical capture form', {'manifest': canonical({key: value for key, value in
++                                                 json.loads(self.manifest(head)).items() if key != 'journal_head'})}),
++            ('roles differ from the bound identities', {'manifest': self.manifest(head, stores={
++                **json.loads(self.manifest(head))['stores'], 'member2': []})}),
++            ('arm and manifest must be the exact bytes', {'manifest': json.loads(self.manifest(head))}),
++        )
++        for pattern, inputs in cases:
++            with self.subTest(pattern=pattern, inputs=sorted(inputs)):
++                self.refused(pattern, lambda: self.checkpoint(**inputs))
++
++    def test_role_store_and_config_bindings_refuse(self):
++        self.build()
++        base = json.loads(self.manifest())
++        swapped = dict(base['store_paths'], member2=base['store_paths']['member3'],
++                       member3=base['store_paths']['member2'])
++        relative = dict(base['store_relative_paths'], member1='Users/owned/.openclaw/nats/jetstream-2')
++        nats2 = identity_fixture.config_path(identity_fixture.HOME, 'nats-2')
++        changed = dict(self.configs, **{nats2: self.configs[nats2] + b'\n'})
++        pins = dict(self.table, member2=self.table['member3'], member3=self.table['member2'])
++        cases = (
++            ('store differs from the bound member2', {'manifest': self.manifest(store_paths=swapped)}),
++            ('store differs from the bound member1', {'manifest': self.manifest(store_relative_paths=relative)}),
++            ('nats-2: config bytes differ from the baseline hash', {'configs': changed}),
++            ('nats-2: baseline config hash differs from the window pin', {'table': pins}),
++            ('config bytes are not exactly the four bound paths',
++             {'configs': {path: raw for path, raw in self.configs.items() if path != nats2}}),
++        )
++        for pattern, inputs in cases:
++            with self.subTest(pattern=pattern):
++                self.refused(pattern, lambda: self.checkpoint(**inputs))
++
++    def test_transfer_pending_and_marker_refuse(self):
++        self.build()
++        self.journal.transfer_nats('00000000-0000-4000-8000-000000000000', self.hold, self.observe)
++        self.refused('returned NATS transfer is restore-only', self.checkpoint)
++        self.setUp()
++        self.build()
++        self.journal.append('intent', unit='nats-1', action='disable-and-unload')
++        self.refused('incomplete durable intent', self.checkpoint)
++        self.setUp()
++        self.build()
++        (self.root / '.pending-owned').write_bytes(b'{}')
++        self.refused('incomplete durable intent', self.checkpoint)
++        (self.root / '.pending-owned').unlink()
++        marker = preservation_journal.NATS_WRITER_MARKER
++        marker.write_text('{}')
++        self.refused('marker already exists', self.checkpoint)
++        def clears(unit, saved):
++            if marker.exists():
++                marker.unlink()
++            return self.observe(unit, saved)
++        marker.write_text('{}')
++        self.refused('marker already exists', lambda: self.checkpoint(observe=clears))
++        marker.unlink()
++        def appears(unit, saved):
++            if unit == 'nats-3':
++                marker.write_text('{}')
++            return self.observe(unit, saved)
++        self.refused('marker already exists', lambda: self.checkpoint(observe=appears))
++
++
++class Frozen(CaptureCheckpoint):
++    def test_chain_digest_terminal_and_duplicate_rules(self):
++        records, record, manifest = self.authentic()
++        altered = copy.deepcopy(records)
++        altered[5]['at'] = 'forged'
++        with self.assertRaisesRegex(Refused, 'chain differs'):
++            self.verify(altered, record['sha256'], manifest=manifest)
++        with self.assertRaisesRegex(Refused, 'differs from the committed digest'):
++            self.verify(rechain(altered, 5), record['sha256'], manifest=manifest)
++        with self.assertRaisesRegex(Refused, 'chain differs'):
++            self.verify(records[:5] + records[6:], record['sha256'], manifest=manifest)
++        later = rechain(records + [{'event': 'recovery-started', 'boot': 'boot-a', 'at': 'later'}], len(records))
++        with self.assertRaisesRegex(Refused, 'not the terminal record'):
++            self.verify(later, manifest=manifest)
++        twice = rechain(records + [copy.deepcopy(records[-1])], len(records))
++        with self.assertRaisesRegex(Refused, 'outside the uninterrupted forward window'):
++            self.verify(twice, manifest=manifest)
++        with self.assertRaisesRegex(Refused, 'not the terminal record'):
++            self.verify(records[:-1], manifest=manifest)
++
++    def test_inserted_or_removed_rows_before_the_checkpoint_refuse(self):
++        records, _, manifest = self.authentic()
++        last = len(records) - 1
++        def inserted(row):
++            return rechain(records[:last] + [{**row, 'boot': 'boot-a', 'at': 'x'}] + records[last:], last)
++        cases = (
++            ('outside the uninterrupted forward window', inserted({'event': 'failed', 'unit': 'nats'})),
++            ('outside the uninterrupted forward window', inserted({'event': 'nats-transfer-intent'})),
++            ('outside the uninterrupted forward window', inserted({'event': 'nats-transfer-closed'})),
++            ('outside the uninterrupted forward window', inserted({'event': 'recovery-started'})),
++            ('unfinished intent', inserted({'event': 'intent', 'unit': 'nats-1', 'action': 'disable-and-unload'})),
++            ('unfinished intent', rechain(records[:last - 1] + records[last:], last - 1)),
++        )
++        for pattern, rows in cases:
++            with self.subTest(pattern=pattern):
++                with self.assertRaisesRegex(Refused, pattern):
++                    self.verify(rows, manifest=manifest)
++
++    def test_boot_continuity_refuses(self):
++        records, _, manifest = self.authentic()
++        middle = copy.deepcopy(records)
++        middle[7]['boot'] = 'boot-b'
++        with self.assertRaisesRegex(Refused, 'spans more than one boot'):
++            self.verify(rechain(middle, 7), manifest=manifest)
++        terminal = copy.deepcopy(records)
++        terminal[-1]['boot'] = 'boot-b'
++        with self.assertRaisesRegex(Refused, 'fields differ'):
++            self.verify(rechain(terminal, len(records) - 1), manifest=manifest)
++
++    def test_original_and_receipt_holds_are_rechecked(self):
++        records, _, manifest = self.authentic()
++        anchor = next(index for index, row in enumerate(records)
++                      if row['event'] == 'verified' and row['action'] == 'close-execution-hold')
++        for field, value in BROKEN:
++            with self.subTest(row='anchor', field=field):
++                rows = copy.deepcopy(records)
++                rows[anchor]['evidence'][field] = value
++                # A well-formed foreign anchor session orphans every receipt; the first one refuses.
++                pattern = ('original hold session: mesh-deploy-listener' if field == 'watch_session_id'
++                           else 'not for the published hold window' if field == 'receipt'
++                           else 'original certified execution hold session')
++                with self.assertRaisesRegex(Refused, pattern):
++                    self.verify(rechain(rows, anchor), manifest=manifest)
++        for unit in ('mesh-deploy-listener', 'scheduler-heartbeat', 'mesh-agent', 'nats-2'):
++            receipt = next(index for index, row in enumerate(records) if row['event'] == 'verified'
++                           and row['unit'] == unit and row['action'] == 'disable-and-unload')
++            for field, value in BROKEN:
++                with self.subTest(row=unit, field=field):
++                    rows = copy.deepcopy(records)
++                    rows[receipt]['evidence']['execution_hold'][field] = value
++                    with self.assertRaisesRegex(Refused, 'original hold session: ' + unit):
++                        self.verify(rechain(rows, receipt), manifest=manifest)
++            with self.subTest(row=unit, field='class proof'):
++                rows = copy.deepcopy(records)
++                rows[receipt]['evidence']['verified'] = False
++                with self.assertRaisesRegex(Refused, 'class proof or the original hold session: ' + unit):
++                    self.verify(rechain(rows, receipt), manifest=manifest)
++
++    def test_execution_hold_publication_is_rechecked(self):
++        records, _, manifest = self.authentic()
++        published = next(index for index, row in enumerate(records) if row['event'] == 'hold-published')
++        intent = published - 1
++        cases = (
++            (published, lambda row: row.update(adopted_for_restoration=True)),
++            (published, lambda row: row['receipt']['marker'].update(window='hold-' + 'b' * 64)),
++            (intent, lambda row: row['hold'].update(protective=True)),
++            (intent, lambda row: row['hold'].update(baseline='0' * 64)),
++            (intent, lambda row: row['hold'].update(extra=True)),
++        )
++        for index, change in cases:
++            with self.subTest(index=index):
++                rows = copy.deepcopy(records)
++                change(rows[index])
++                with self.assertRaisesRegex(Refused, 'no unique published first execution hold'):
++                    self.verify(rechain(rows, index), manifest=manifest)
++
++    def test_consistent_foreign_window_forgeries_refuse(self):
++        """A guest-side forger can rechain and re-derive the manifest head; only content rules remain."""
++        records, _, manifest = self.authentic()
++        def forged(rows, start):
++            rows = rechain(rows, start)
++            head = rows[-2]['sha256']
++            again = canonical({**json.loads(manifest), 'journal_head': head})
++            rows[-1].update(pre_head=head, manifest_sha256=hashlib.sha256(again).hexdigest())
++            return rechain(rows, len(rows) - 1), again
++        rows, again = forged(copy.deepcopy(records), 1)
++        self.verify(rows, manifest=again)
++        index = {key: next(i for i, row in enumerate(records) if test(row)) for key, test in (
++            ('anchor', lambda row: row['event'] == 'verified' and row['action'] == 'close-execution-hold'),
++            ('published', lambda row: row['event'] == 'hold-published'),
++            ('nats', lambda row: row['event'] == 'verified' and row['unit'] == 'nats'))}
++        def anchor(rows):
++            rows[index['anchor']]['evidence']['receipt'] = FOREIGN
++        def window(rows):
++            rows[index['published'] - 1]['hold']['window'] = 'not-a-window'
++            rows[index['published']]['receipt']['marker']['window'] = 'not-a-window'
++        def reason(rows):
++            rows[index['published'] - 1]['hold']['reason'] = 'other reason'
++            rows[index['published']]['receipt']['marker']['reason'] = 'other reason'
++        def nats(rows):
++            rows[index['nats']]['evidence']['execution_hold']['receipt'] = FOREIGN
++        for change, start, pattern in (
++                (anchor, index['anchor'], 'not for the published hold window'),
++                (window, index['published'] - 1, 'no unique published first execution hold'),
++                (reason, index['published'] - 1, 'no unique published first execution hold'),
++                (nats, index['nats'], 'original hold session: nats')):
++            with self.subTest(change=change.__name__):
++                rows = copy.deepcopy(records)
++                change(rows)
++                rows, again = forged(rows, start)
++                with self.assertRaisesRegex(Refused, pattern):
++                    self.verify(rows, manifest=again)
++
++    def test_member1_stop_and_launchd_continuity_refuse(self):
++        records, _, manifest = self.authentic()
++        last = len(records) - 1
++        receipt = copy.deepcopy(records[last - 1])
++        intent = {'event': 'intent', 'unit': 'nats-1', 'action': 'disable-and-unload', 'boot': 'boot-a', 'at': 'x'}
++        verified = {**receipt, 'unit': 'nats-1', 'intent': last}
++        rows = rechain(records[:last] + [intent, verified] + records[last:], last)
++        with self.assertRaisesRegex(Refused, 'not one persistent stop per prior-loaded unit'):
++            self.verify(rows, manifest=manifest)
++        receipt_index = next(index for index, row in enumerate(records) if row['event'] == 'verified'
++                             and row['unit'] == 'observer' and row['action'] == 'disable-and-unload')
++        rows = copy.deepcopy(records)
++        rows[receipt_index]['evidence']['entrypoint_overrides']['gui'] = []
++        with self.assertRaisesRegex(Refused, 'capture journal content is malformed'):
++            self.verify(rechain(rows, receipt_index), manifest=manifest)
++        for change in ('loaded', 'override'):
++            with self.subTest(change=change):
++                rows = copy.deepcopy(records)
++                evidence = rows[receipt_index]['evidence']
++                if change == 'loaded':
++                    evidence['entrypoint_loaded']['gui'].append('ai.openclaw.nats-1')
++                else:
++                    evidence['entrypoint_overrides']['gui']['ai.openclaw.nats-1'] = False
++                with self.assertRaisesRegex(Refused, 'launchd continuity differs at the stop of observer'):
++                    self.verify(rechain(rows, receipt_index), manifest=manifest)
++
++    def test_checkpoint_fields_are_rederived(self):
++        records, _, manifest = self.authentic()
++        member2 = dict(records[-1]['identities']['member2'], store_dir='/Users/owned/.openclaw/nats/jetstream-3')
++        observed = {**records[-1]['observations'],
++                    'nats-1': {**records[-1]['observations']['nats-1'], 'loaded': True}}
++        cases = {
++            'capture_nonce': secrets.token_hex(32), 'arm_sha256': '0' * 64, 'manifest_sha256': '0' * 64,
++            'pre_head': '0' * 64, 'baseline_sha256': '0' * 64, 'scope': 'writer exclusion',
++            'identities': {**records[-1]['identities'], 'member2': member2},
++            'hold_sha256': '0' * 64,
++            'entrypoint_loaded': {'gui': ['ai.openclaw.nats'], 'user': [], 'system': []},
++            'observations': observed,
++        }
++        for field, value in cases.items():
++            with self.subTest(field=field):
++                rows = copy.deepcopy(records)
++                rows[-1][field] = value
++                pattern = 'observations do not show' if field == 'observations' else 'fields differ'
++                with self.assertRaisesRegex(Refused, pattern):
++                    self.verify(rechain(rows, len(rows) - 1), manifest=manifest)
++        for field, value in BROKEN:
++            with self.subTest(hold=field):
++                rows = copy.deepcopy(records)
++                rows[-1]['hold_evidence'] = {**rows[-1]['hold_evidence'], field: value}
++                rows[-1]['hold_sha256'] = hashlib.sha256(encoded(rows[-1]['hold_evidence'])).hexdigest()
++                with self.assertRaisesRegex(Refused, 'fields differ'):
++                    self.verify(rechain(rows, len(rows) - 1), manifest=manifest)
++        rows = copy.deepcopy(records)
++        rows[-1]['note'] = 'extra'
++        with self.assertRaisesRegex(Refused, 'fields differ'):
++            self.verify(rechain(rows, len(rows) - 1), manifest=manifest)
++
++    def test_verifier_inputs_must_be_the_committed_ones(self):
++        records, record, manifest = self.authentic()
++        value = json.loads(manifest)
++        nats2 = identity_fixture.config_path(identity_fixture.HOME, 'nats-2')
++        cases = (
++            ('differs from the committed digest', {'digest': '0' * 64}),
++            ('fields differ', {'armed': canonical({**json.loads(self.armed), 'vm_uuid': 'other'})}),
++            ('nonce differs from the host arm',
++             {'armed': canonical({**json.loads(self.armed), 'capture_nonce': secrets.token_hex(32)})}),
++            ('fields differ', {'manifest': canonical({**value, 'at_utc': 'later'})}),
++            ('not taken at this journal head', {'manifest': canonical({**value, 'journal_head': records[-3]['sha256']})}),
++            ('store differs from the bound member2', {'manifest': canonical({**value, 'store_paths': {
++                **value['store_paths'], 'member3': value['store_paths']['member2'],
++                'member2': value['store_paths']['member3']}})}),
++            ('config bytes differ from the baseline hash', {'configs': {**self.configs, nats2: b'x'}}),
++            ('baseline config hash differs from the window pin',
++             {'table': {**self.table, 'member2': self.table['member3'], 'member3': self.table['member2']}}),
++        )
++        for pattern, inputs in cases:
++            with self.subTest(pattern=pattern):
++                inputs = dict(inputs)
++                digest = inputs.pop('digest', record['sha256'])
++                inputs.setdefault('manifest', manifest)
++                with self.assertRaisesRegex(Refused, pattern):
++                    self.verify(records, digest, **inputs)
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint_facade.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint_facade.py
+new file mode 100644
+index 0000000..930adcf
+--- /dev/null
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint_facade.py
+@@ -0,0 +1,137 @@
++"""Real JournaledHold positive control for the capture-ready checkpoint (macOS native observer).
++
++The hold, gate, full-node journal opener and checkpoint are the real code; only launchd and the
++stop evidence are owned stand-ins. Serving NATS stops go through JournaledHold.mutate directly:
++StopWatch refuses a persistent full-node NATS stop until a NATS recovery adapter exists.
++"""
++import contextlib
++import copy
++import hashlib
++import json
++import os
++import pathlib
++import secrets
++import sys
++import tempfile
++import unittest
++from unittest.mock import patch
++
++sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
++
++import preservation_journal  # noqa: E402
++import test_nats_identity as identity_fixture  # noqa: E402
++from full_node_baseline import open_full_node_journal  # noqa: E402
++from journal_hold import ANCHOR, JournaledHold, describe  # noqa: E402
++from nats_identity import ROLES  # noqa: E402
++from preservation_checks import STOP_ORDER  # noqa: E402
++from preservation_journal import (ARM_SCOPE, MANIFEST_SCOPE, SERVING_NATS, TIMER_UNITS, Refused,  # noqa: E402
++                                  verify_capture_checkpoint)
++from test_journal_hold import gate_module, gated_identity  # noqa: E402
++from test_preservation_journal import (full_entrypoint_evidence, full_node_inventory,  # noqa: E402
++                                       listener_stop_evidence, timer_stop_evidence)
++
++UNIT_OF = {role: unit for unit, role in ROLES.items()}
++
++
++def canonical(value):
++    return (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode()
++
++
++@unittest.skipUnless(sys.platform == 'darwin', 'the real hold facade needs the native gate observer')
++class RealFacadeCheckpoint(unittest.TestCase):
++    def test_real_hold_facade_checkpoint_verifies_frozen(self):
++        self.exercise()
++
++    def exercise(self):
++        with tempfile.TemporaryDirectory(prefix='openclaw-capture-facade-') as place, \
++                contextlib.ExitStack() as stack:
++            root = pathlib.Path(place).resolve()
++            writer_lock = root / 'writer.lock'
++            writer_lock.write_bytes(b'owned writer lock')
++            writer_lock.chmod(0o644)
++            gate_root = root / 'gate'
++            pins = gate_module.initialize(gate_root)
++            for name, value in (('NATS_WRITER_MARKER', root / 'writer-handoff.json'),
++                                ('NATS_LEGACY_LOCK', writer_lock), ('NATS_ROOT_UID', os.getuid())):
++                stack.enter_context(patch.object(preservation_journal, name, value))
++            gate = stack.enter_context(gate_module.Gate(gate_root, pins))
++            prior = full_node_inventory()
++            bound_prior, table, configs = identity_fixture.fixture()
++            for unit in ROLES:
++                prior[unit]['identity'] = bound_prior[unit]['identity']
++            for unit in TIMER_UNITS:
++                prior[unit]['identity'] = gated_identity(unit, gate_root, pins)
++            prior[ANCHOR]['execution_hold'] = describe(gate, sorted(TIMER_UNITS))
++            current = copy.deepcopy(prior)
++            entrypoints = full_entrypoint_evidence(prior)
++            stack.enter_context(patch('full_node_baseline.capture_full_node_prior',
++                                      return_value=(prior, copy.deepcopy(entrypoints))))
++            stack.enter_context(patch('preservation_journal.capture_entrypoint_inventory',
++                                      side_effect=lambda _: copy.deepcopy(entrypoints)))
++            journal = stack.enter_context(open_full_node_journal(
++                root / 'journals' / 'window', gate, {}, boot='owned-boot', node_lock=root / 'node.lock'))
++            hold = JournaledHold(journal, gate, lambda: {'verified': True,
++                                                         'baseline_sha256': journal.records[0]['sha256']})
++            stack.callback(hold.close)
++            hold.close_and_drain()
++
++            def evidence(unit):
++                state = prior[unit]
++                if state['class'] in ('timer', 'on-demand') or (
++                        state['class'] == 'known-broken' and not state['running']):
++                    return timer_stop_evidence(unit)
++                return listener_stop_evidence(unit)
++
++            def fence(unit):
++                label = 'ai.openclaw.' + unit
++                entrypoints['loaded']['gui'].remove(label)
++                for domain in ('gui', 'user'):
++                    entrypoints['overrides'][domain][label] = True
++                current[unit].update(loaded=False, running=False, disabled=True)
++
++            for unit in (*STOP_ORDER, *SERVING_NATS):
++                hold.mutate(unit, 'disable-and-unload', lambda unit=unit: fence(unit),
++                            lambda unit=unit: evidence(unit))
++            events = [row['event'] for row in journal.records]
++            self.assertEqual(events[:4], ['baseline', 'intent', 'hold-published', 'verified'])
++            self.assertEqual(events[4:], ['intent', 'verified'] * (len(STOP_ORDER) + len(SERVING_NATS)))
++
++            nonce = secrets.token_hex(32)
++            armed = canonical({'scope': ARM_SCOPE, 'capture_nonce': nonce})
++            head = journal.records[-1]['sha256']
++            manifest = canonical({
++                'scope': MANIFEST_SCOPE, 'at_utc': '2026-10-14T15:00:00+00:00', 'capture_nonce': nonce,
++                'journal_head': head, 'data_volume_uuid': 'A' * 36, 'spec_sha256': '5' * 64,
++                'stores': {role: [{'path': 'stream.dat', 'type': 'file'}] for role in UNIT_OF},
++                'store_paths': {role: identity_fixture.STORES[UNIT_OF[role]] for role in UNIT_OF},
++                'store_relative_paths': {role: identity_fixture.STORES[UNIT_OF[role]][1:]
++                                         for role in UNIT_OF}})
++            inputs = {'armed': armed, 'manifest': manifest, 'table': table, 'configs': configs,
++                      'binary': identity_fixture.BINARY, 'home': identity_fixture.HOME}
++            record = journal.capture_ready(
++                hold, lambda unit, saved: {**copy.deepcopy(current[unit]), 'verified': True}, **inputs)
++            self.assertEqual(record['pre_head'], head)
++            self.assertEqual(record['hold_evidence']['watch_session_id'], hold.original_session)
++            self.assertTrue(record['hold_evidence']['kernel_file_watch'])
++            # The honest relation the checkpoint enforces: one published receipt in every certificate.
++            publication = journal.records[2]['receipt']
++            self.assertEqual(journal.records[3]['evidence']['receipt'], publication)
++            self.assertEqual(record['hold_evidence']['receipt'], publication)
++            self.assertTrue(all(row['evidence']['execution_hold']['receipt'] == publication
++                                for row in journal.records[5:-1:2]))
++            nonce_sha = hashlib.sha256(manifest).hexdigest()
++            commitment = {'capture_nonce': nonce, 'arm_sha256': hashlib.sha256(armed).hexdigest(),
++                          'manifest_sha256': nonce_sha, 'manifest': json.loads(manifest),
++                          'checkpoint': {'capture_nonce': nonce, 'manifest_sha256': nonce_sha,
++                                         'journal_head': head, 'checkpoint_sha256': record['sha256']}}
++            summary = verify_capture_checkpoint(journal._read(), commitment, table=table, configs=configs,
++                                                binary=identity_fixture.BINARY, home=identity_fixture.HOME)
++            self.assertEqual(summary['session'], hold.original_session)
++            self.assertEqual(hashlib.sha256(manifest).hexdigest(), record['manifest_sha256'])
++            with self.assertRaisesRegex(Refused, 'capture checkpoint ended forward work'):
++                hold.mutate('nats', 'disable-and-unload', lambda: self.fail('applied'),
++                            lambda: self.fail('verified'))
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py
+new file mode 100644
+index 0000000..d193a63
+--- /dev/null
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py
+@@ -0,0 +1,383 @@
++"""Owned tests for the host's separate capture-ready checkpoint commitment (B5, D186).
++
++The guest journal, manifest and checkpoint are produced by the real Journal and checkpoint code;
++the host records are written by the real commit()/commit_checkpoint(). Only host VM samples
++(preflight) are owned stand-ins. No VM, launchd job, NATS server or store is touched.
++"""
++import copy
++import fcntl
++import hashlib
++import json
++import os
++import pathlib
++import secrets
++import sys
++import unittest
++from unittest import mock
++
++sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
++
++import host_vm_guard  # noqa: E402
++import test_capture_checkpoint as guest  # noqa: E402
++import test_nats_identity as identity_fixture  # noqa: E402
++from host_guest_commit import (CHECKPOINT_KEYS, commit, commit_checkpoint, require_acked,  # noqa: E402
++                               require_committed, verify_frozen_checkpoint)
++from host_vm_preflight import write_record  # noqa: E402
++from preservation_journal import (ARM_SCOPE, CAPTURE_EVENT, CAPTURE_SCOPE, Refused,  # noqa: E402
++                                  encoded as journal_encoded)
++
++PRIOR = {'state': 'started', 'vm_uuid': '00000000-0000-0000-0000-000000000002',
++         'host_boot_session': 'boot', 'image_device': 1, 'image_inode': 2, 'image_size': 3,
++         'vmstate': None}
++STARTED = dict(PRIOR, holders_consistent=True, image_holders=[42])
++
++
++def sha(raw):
++    return hashlib.sha256(raw).hexdigest()
++
++
++def write_private(path, raw):
++    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
++    with os.fdopen(fd, 'wb') as handle:
++        handle.write(raw)
++
++
++def write_checkpoint_record(path, committed, **changes):
++    """A capture-ready record bound to a host commitment, for flows that run no guest journal."""
++    head = committed['manifest']['journal_head']
++    record = {'sequence': 1, 'previous': head, 'event': CAPTURE_EVENT, 'boot': 'owned-boot',
++              'at': '2026-10-14T15:00:00+00:00', 'scope': CAPTURE_SCOPE, 'pre_head': head,
++              'baseline_sha256': '0' * 64, 'capture_nonce': committed['capture_nonce'],
++              'arm_sha256': committed['arm_sha256'], 'manifest_sha256': committed['manifest_sha256'],
++              'identities': {}, 'observations': {}, 'hold_sha256': '0' * 64, 'hold_evidence': {},
++              'entrypoint_loaded': {}, 'entrypoint_overrides': {}, **changes}
++    record['sha256'] = sha(journal_encoded(record))
++    write_private(path, journal_encoded(record))
++    return record
++
++
++class HostCheckpoint(guest.CaptureCheckpoint):
++    def setUp(self):
++        super().setUp()
++        self.capture = (self.temp / 'capture').resolve()
++        self.capture.mkdir(mode=0o700)
++        (self.capture / 'before-shutdown').mkdir(mode=0o700)
++        write_record(self.capture / 'before-shutdown' / 'preflight.json', PRIOR)
++        self.nonce = secrets.token_hex(32)
++        write_record(self.capture / 'ARMED.json', {
++            'scope': ARM_SCOPE, 'capture_nonce': self.nonce, 'vm_uuid': PRIOR['vm_uuid'],
++            'host_boot_session': 'boot', 'image_device': 1, 'image_inode': 2})
++        self.armed = (self.capture / 'ARMED.json').read_bytes()
++        self.spec = self.temp / 'stores.json'
++        write_record(self.spec, {'data_volume_uuid': 'A' * 36, 'stores': [
++            {'role': role, 'relative_path': identity_fixture.STORES[guest.UNIT_OF[role]][1:]}
++            for role in sorted(guest.UNIT_OF)]})
++        self.host = self.temp / 'host.json'
++        # The capture worker holds this lock for the whole running-VM window.
++        self.active = os.open(self.capture / 'CAPTURE_ACTIVE.lock', os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
++        fcntl.flock(self.active, fcntl.LOCK_EX)
++        self.addCleanup(os.close, self.active)
++
++    def host_manifest(self, head=None, **changes):
++        return self.manifest(head, spec_sha256=sha(self.spec.read_bytes()), **changes)
++
++    def host_commit(self, manifest):
++        path = self.temp / ('guest-manifest-' + secrets.token_hex(4) + '.json')
++        write_private(path, manifest)
++        with mock.patch('host_guest_commit.preflight', side_effect=[STARTED, STARTED]):
++            return commit(self.host, self.spec, self.capture, path)
++
++    def journal_file(self, record):
++        return self.root / ('%06d.json' % record['sequence'])
++
++    def host_checkpoint(self, path, sample=STARTED):
++        with mock.patch('host_guest_commit.preflight', return_value=sample):
++            return commit_checkpoint(self.host, self.capture, path)
++
++    def committed_flow(self):
++        """Guest stops, captures its manifest at the quiescent head, host commits, guest checkpoints."""
++        self.build()
++        manifest = self.host_manifest()
++        committed = self.host_commit(manifest)
++        record = self.checkpoint(manifest=manifest)
++        return manifest, committed, record
++
++    def frozen(self, records=None):
++        return verify_frozen_checkpoint(self.capture, records if records is not None else self.journal._read(),
++                                        table=self.table, configs=self.configs,
++                                        binary=identity_fixture.BINARY, home=identity_fixture.HOME)
++
++    def refuses_checkpoint(self, pattern, path, **options):
++        with self.assertRaisesRegex(RuntimeError, pattern):
++            self.host_checkpoint(path, **options)
++        self.assertFalse((self.capture / 'CHECKPOINT.json').exists())
++
++
++class Authentic(HostCheckpoint):
++    def test_commitment_chain_verifies_the_frozen_journal_from_host_records_only(self):
++        manifest, committed, record = self.committed_flow()
++        self.assertEqual(committed['manifest'], json.loads(manifest))
++        self.assertEqual(committed['manifest_sha256'], sha(manifest))
++        commitment = self.host_checkpoint(self.journal_file(record))
++        checkpoint = json.loads((self.capture / 'CHECKPOINT.json').read_bytes())
++        self.assertEqual(set(checkpoint), CHECKPOINT_KEYS)
++        self.assertEqual(checkpoint['checkpoint_sha256'], record['sha256'])
++        self.assertEqual(checkpoint['journal_head'], record['pre_head'])
++        self.assertEqual(checkpoint['commit_sha256'], sha((self.capture / 'COMMITTED.json').read_bytes()))
++        self.assertEqual(checkpoint['ack_sha256'], sha((self.capture / 'ACKED.json').read_bytes()))
++        self.assertEqual(commitment, require_committed(self.capture))
++        self.assertEqual({key: value for key, value in commitment.items() if key != 'checkpoint'},
++                         require_acked(self.capture)[0])
++        self.journal.close()
++        with guest.Journal(self.root, boot='boot-a', node_lock=self.node_lock) as reopened:
++            frozen = reopened._read()
++        summary = self.frozen(frozen)
++        self.assertEqual(summary['checkpoint_sha256'], record['sha256'])
++        self.assertEqual(summary['pre_head'], json.loads(manifest)['journal_head'])
++
++    def test_synthetic_record_helper_is_accepted_by_the_host(self):
++        manifest = self.host_manifest('b' * 64)
++        committed = self.host_commit(manifest)
++        record = write_checkpoint_record(self.temp / 'checkpoint.json', committed)
++        self.assertEqual(self.host_checkpoint(self.temp / 'checkpoint.json')['checkpoint']['checkpoint_sha256'],
++                         record['sha256'])
++
++
++class HostRefusals(HostCheckpoint):
++    def test_host_commit_requires_a_journal_head(self):
++        value = json.loads(self.host_manifest('b' * 64))
++        for label, manifest in (
++                ('absent', guest.canonical({key: item for key, item in value.items() if key != 'journal_head'})),
++                ('uppercase', guest.canonical({**value, 'journal_head': 'B' * 64})),
++                ('short', guest.canonical({**value, 'journal_head': 'b' * 63})),
++                ('not text', guest.canonical({**value, 'journal_head': 7}))):
++            with self.subTest(head=label):
++                with self.assertRaisesRegex(RuntimeError, 'does not bind this arm'):
++                    self.host_commit(manifest)
++                self.assertFalse((self.capture / 'COMMITTED.json').exists())
++
++    def test_recorded_commitment_without_a_valid_journal_head_refuses(self):
++        committed = self.host_commit(self.host_manifest('b' * 64))
++        write_checkpoint_record(self.temp / 'checkpoint.json', committed)
++        self.host_checkpoint(self.temp / 'checkpoint.json')
++        forged = copy.deepcopy(committed)
++        forged['manifest']['journal_head'] = 'B' * 64
++        forged['manifest_sha256'] = sha(guest.canonical(forged['manifest']))
++        (self.capture / 'COMMITTED.json').unlink()
++        write_record(self.capture / 'COMMITTED.json', forged)
++        ack = json.loads((self.capture / 'ACKED.json').read_bytes())
++        ack.update(commit_sha256=sha((self.capture / 'COMMITTED.json').read_bytes()),
++                   manifest_sha256=forged['manifest_sha256'])
++        (self.capture / 'ACKED.json').unlink()
++        write_record(self.capture / 'ACKED.json', ack)
++        with self.assertRaisesRegex(RuntimeError, 'not committed to this host arm'):
++            require_committed(self.capture)
++
++    def test_checkpoint_needs_an_acked_commitment_and_an_active_worker(self):
++        committed = {'capture_nonce': self.nonce, 'arm_sha256': sha(self.armed), 'manifest_sha256': '0' * 64,
++                     'manifest': {'journal_head': 'b' * 64}}
++        path = self.temp / 'checkpoint.json'
++        write_checkpoint_record(path, committed)
++        self.refuses_checkpoint('COMMITTED.json', path)
++        self.host_commit(self.host_manifest('b' * 64))
++        fcntl.flock(self.active, fcntl.LOCK_UN)
++        self.refuses_checkpoint('capture worker is no longer active', path)
++
++    def test_checkpoint_must_bind_this_arm_manifest_and_head(self):
++        manifest, committed, record = self.committed_flow()
++        cases = {
++            'regenerated manifest': {'manifest_sha256': sha(self.host_manifest(
++                json.loads(manifest)['journal_head'], at_utc='2026-10-14T16:00:00+00:00'))},
++            'foreign arm': {'arm_sha256': '0' * 64},
++            'foreign nonce': {'capture_nonce': secrets.token_hex(32)},
++            'later head': {'pre_head': '0' * 64, 'previous': '0' * 64},
++            'pre-head not previous': {'pre_head': '0' * 64},
++            'previous not the committed head': {'previous': '0' * 64},
++        }
++        for label, changes in cases.items():
++            with self.subTest(case=label):
++                path = self.temp / ('checkpoint-' + secrets.token_hex(4) + '.json')
++                write_checkpoint_record(path, committed, **changes)
++                self.refuses_checkpoint('does not bind this arm, committed manifest and journal head', path)
++
++    def test_regenerated_manifest_checkpoint_from_the_real_journal_refuses(self):
++        self.build()
++        manifest = self.host_manifest()
++        self.host_commit(manifest)
++        regenerated = self.host_manifest(at_utc='2026-10-14T16:00:00+00:00')
++        record = self.checkpoint(manifest=regenerated)
++        self.refuses_checkpoint('does not bind this arm, committed manifest and journal head',
++                                self.journal_file(record))
++        with self.assertRaisesRegex(RuntimeError, 'already committed or ended'):
++            self.host_commit(regenerated)
++
++    def test_checkpoint_must_be_an_intact_capture_ready_journal_record(self):
++        _, committed, record = self.committed_flow()
++        raw = self.journal_file(record).read_bytes()
++        value = json.loads(raw)
++        body = {key: item for key, item in value.items() if key != 'sha256'}
++        rehashed = lambda changed: journal_encoded({**changed, 'sha256': sha(journal_encoded(changed))})  # noqa: E731
++        cases = {
++            'content changed': journal_encoded({**value, 'at': 'later'}),
++            'pretty bytes': json.dumps(value, indent=2).encode(),
++            'trailing newline': raw + b'\n',
++            'other event': rehashed({**body, 'event': 'verified'}),
++            'other scope': rehashed({**body, 'scope': 'writer exclusion'}),
++            'extra key': rehashed({**body, 'note': 'x'}),
++            'not an object': b'[]',
++        }
++        for label, data in cases.items():
++            with self.subTest(case=label):
++                path = self.temp / ('checkpoint-' + secrets.token_hex(4) + '.json')
++                write_private(path, data)
++                self.refuses_checkpoint('not an intact capture-ready journal record', path)
++
++    def test_checkpoint_commitment_samples_the_same_running_vm(self):
++        _, committed, record = self.committed_flow()
++        for label, sample in (('stopped', dict(STARTED, state='stopped')),
++                              ('holder', dict(STARTED, image_holders=[43])),
++                              ('image', dict(STARTED, image_inode=9)),
++                              ('vmstate', dict(STARTED, vmstate={'changed': True})),
++                              ('inconsistent', dict(STARTED, holders_consistent=False))):
++            with self.subTest(sample=label):
++                self.refuses_checkpoint('did not observe the original running VM',
++                                        self.journal_file(record), sample=sample)
++
++    def test_checkpoint_changed_during_commitment_and_second_commitment_refuse(self):
++        _, committed, record = self.committed_flow()
++        path = self.temp / 'handoff.json'
++        write_private(path, self.journal_file(record).read_bytes())
++        def swapped(*_args, **_kwargs):
++            path.write_bytes(path.read_bytes().replace(b'"boot-a"', b'"boot-z"'))
++            return STARTED
++        with mock.patch('host_guest_commit.preflight', side_effect=swapped):
++            with self.assertRaisesRegex(RuntimeError, 'changed during host commitment'):
++                commit_checkpoint(self.host, self.capture, path)
++        self.assertFalse((self.capture / 'CHECKPOINT.json').exists())
++        self.host_checkpoint(self.journal_file(record))
++        with self.assertRaisesRegex(RuntimeError, 'already committed'):
++            self.host_checkpoint(self.journal_file(record))
++        (self.capture / 'CHECKPOINT.json').unlink()
++        write_record(self.capture / 'GUARD.json', {})
++        self.refuses_checkpoint('already committed or the capture has ended', self.journal_file(record))
++
++    def test_capture_guard_refuses_without_a_checkpoint_commitment(self):
++        self.host_commit(self.host_manifest('b' * 64))
++        with self.assertRaisesRegex(RuntimeError, 'CHECKPOINT.json'):
++            require_committed(self.capture)
++        with mock.patch.object(host_vm_guard, 'preflight', side_effect=AssertionError('guard sampled')):
++            with self.assertRaisesRegex(RuntimeError, 'CHECKPOINT.json'):
++                host_vm_guard.guard_locked(self.host, self.capture)
++        self.assertFalse((self.capture / 'GUARD_INTENT.json').exists())
++
++    def test_recorded_ack_is_rechecked(self):
++        self.host_commit(self.host_manifest('b' * 64))
++        original = json.loads((self.capture / 'ACKED.json').read_bytes())
++        for label, change in (
++                ('scope', {'scope': 'other'}), ('commit', {'commit_sha256': '0' * 64}),
++                ('manifest', {'manifest_sha256': '0' * 64}), ('extra key', {'note': 'x'}),
++                ('stopped', {'started_sample': dict(original['started_sample'], state='stopped')}),
++                ('holder', {'started_sample': dict(original['started_sample'], image_holders=[43])}),
++                ('vmstate', {'started_sample': dict(original['started_sample'], vmstate={'changed': True})})):
++            with self.subTest(field=label):
++                (self.capture / 'ACKED.json').unlink()
++                write_record(self.capture / 'ACKED.json', {**original, **change})
++                with self.assertRaisesRegex(RuntimeError, 'matching post-commit host sample'):
++                    require_acked(self.capture)
++        (self.capture / 'ACKED.json').unlink()
++        write_record(self.capture / 'ACKED.json', original)
++        require_acked(self.capture)
++
++    def test_recorded_checkpoint_commitment_fields_are_rechecked(self):
++        _, committed, record = self.committed_flow()
++        self.host_checkpoint(self.journal_file(record))
++        original = json.loads((self.capture / 'CHECKPOINT.json').read_bytes())
++        for label, change in (
++                ('scope', {'scope': 'other'}), ('nonce', {'capture_nonce': '0' * 64}),
++                ('commit', {'commit_sha256': '0' * 64}), ('ack', {'ack_sha256': '0' * 64}),
++                ('manifest', {'manifest_sha256': '0' * 64}), ('head', {'journal_head': '0' * 64}),
++                ('digest shape', {'checkpoint_sha256': 'X' * 64}),
++                ('stopped sample', {'started_sample': dict(original['started_sample'], state='stopped')}),
++                ('other holder', {'started_sample': dict(original['started_sample'], image_holders=[43])}),
++                ('extra key', {'note': 'x'})):
++            with self.subTest(field=label):
++                (self.capture / 'CHECKPOINT.json').unlink()
++                write_record(self.capture / 'CHECKPOINT.json', {**original, **change})
++                with self.assertRaisesRegex(RuntimeError, 'not committed to this guest manifest'):
++                    require_committed(self.capture)
++                with self.assertRaisesRegex(RuntimeError, 'not committed to this guest manifest'):
++                    self.frozen()
++        (self.capture / 'CHECKPOINT.json').unlink()
++        write_record(self.capture / 'CHECKPOINT.json', original)
++        self.frozen()
++
++
++class FrozenSubstitution(HostCheckpoint):
++    def substituted(self, records, **changes):
++        """A guest rewrite of its terminal record after the host committed: internally consistent."""
++        rows = copy.deepcopy(records)
++        rows[-1].update(changes)
++        return guest.rechain(rows, len(rows) - 1)
++
++    def test_terminal_checkpoint_substitution_refuses_only_via_the_committed_digest(self):
++        manifest, committed, record = self.committed_flow()
++        self.host_checkpoint(self.journal_file(record))
++        records = self.journal._read()
++        swapped = self.substituted(records, at='2026-10-14T16:00:00+00:00')
++        # Self-input would accept the substitute: the record's own digest pins nothing.
++        self.verify(swapped, manifest=manifest)
++        with self.assertRaisesRegex(Refused, 'differs from the committed digest'):
++            self.frozen(swapped)
++        self.frozen(records)
++
++    def test_regenerated_manifest_with_rederived_checkpoint_refuses(self):
++        manifest, committed, record = self.committed_flow()
++        self.host_checkpoint(self.journal_file(record))
++        records = self.journal._read()
++        regenerated = self.host_manifest(json.loads(manifest)['journal_head'], at_utc='2026-10-14T16:00:00+00:00')
++        swapped = self.substituted(records, manifest_sha256=sha(regenerated))
++        # Internally consistent against the regenerated manifest, as the guest would make it.
++        self.verify(swapped, manifest=regenerated)
++        with self.assertRaisesRegex(Refused, 'differs from the committed digest'):
++            self.frozen(swapped)
++
++    def test_rows_after_the_committed_checkpoint_refuse(self):
++        _, committed, record = self.committed_flow()
++        self.host_checkpoint(self.journal_file(record))
++        self.journal.append('recovery-started')
++        with self.assertRaisesRegex(Refused, 'not the terminal record'):
++            self.frozen()
++
++    def test_checkpoint_from_another_capture_refuses(self):
++        _, committed, record = self.committed_flow()
++        self.host_checkpoint(self.journal_file(record))
++        records = self.journal._read()
++        other = self.substituted(records, capture_nonce=secrets.token_hex(32))
++        with self.assertRaisesRegex(Refused, 'differs from the committed digest'):
++            self.frozen(other)
++
++    def test_pure_verifier_refuses_a_missing_or_malformed_commitment(self):
++        manifest, committed, record = self.committed_flow()
++        commitment = self.host_checkpoint(self.journal_file(record))
++        records = self.journal._read()
++        options = {'table': self.table, 'configs': self.configs,
++                   'binary': identity_fixture.BINARY, 'home': identity_fixture.HOME}
++        broken = (None, record['sha256'], {**commitment, 'checkpoint': None},
++                  {**commitment, 'manifest_sha256': '0' * 64},
++                  {**commitment, 'checkpoint': {**commitment['checkpoint'], 'manifest_sha256': '0' * 64}},
++                  {**commitment, 'checkpoint': {**commitment['checkpoint'], 'capture_nonce': '0' * 64}},
++                  {**commitment, 'checkpoint': {**commitment['checkpoint'], 'checkpoint_sha256': 'X'}},
++                  {**commitment, 'arm_sha256': 'X'})
++        for index, value in enumerate(broken):
++            with self.subTest(case=index):
++                with self.assertRaisesRegex(Refused, 'lacks a host commitment'):
++                    guest.verify_capture_checkpoint(records, value, **options)
++        moved = {**commitment, 'checkpoint': {**commitment['checkpoint'], 'journal_head': '0' * 64}}
++        with self.assertRaisesRegex(Refused, 'not taken at this journal head'):
++            guest.verify_capture_checkpoint(records, moved, **options)
++        self.assertEqual(guest.verify_capture_checkpoint(records, commitment, **options)['checkpoint_sha256'],
++                         record['sha256'])
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py
+index 6c0d032..d5bc64c 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py
+@@ -18,7 +18,7 @@ from unittest import mock
+ import host_vm_capture
+ import host_vm_guard
+ import stopped_tree_match
+-from host_guest_commit import commit, require_committed
++from host_guest_commit import commit, commit_checkpoint, require_committed
+ from stopped_tree_match import guest_capture, host_match
+ from host_clone_dispose import cleanup_failed, dispose
+ from host_vm_capture import capture, clone_only, publish_capture_record
+@@ -67,7 +67,7 @@ class VmstateGateTest(unittest.TestCase):
+             write_record(claim, {
+                 'scope': 'guest stopped-tree content observation; writer exclusion external',
+                 'at_utc': '2020-01-01T00:00:00+00:00',
+-                'capture_nonce': nonce,
++                'capture_nonce': nonce, 'journal_head': 'b' * 64,
+                 'spec_sha256': hashlib.sha256(spec.read_bytes()).hexdigest(),
+                 'data_volume_uuid': spec_data['data_volume_uuid'],
+                 'stores': {row['role']: [{'path': 'stream.dat', 'type': 'file',
+@@ -813,9 +813,14 @@ class HostCaptureTest(unittest.TestCase):
+         self.assertFalse((output / 'COMMITTED.json').exists())
+         observed = json.loads((guest_output / 'manifest.json').read_text())
+         observed['capture_nonce'] = nonce
++        observed['journal_head'] = 'b' * 64
+         (guest_output / 'manifest.json').unlink()
+         write_record(guest_output / 'manifest.json', observed)
+-        commit(spec, store_spec, output, guest_output / 'manifest.json')
++        committed = commit(spec, store_spec, output, guest_output / 'manifest.json')
++        # The guard below needs the separately committed capture-ready digest (D186).
++        from test_host_checkpoint_commit import write_checkpoint_record
++        write_checkpoint_record(self.root / 'guest-checkpoint.json', committed)
++        commit_checkpoint(spec, output, self.root / 'guest-checkpoint.json')
+         ack_path = output / 'ACKED.json'
+         valid_ack = json.loads(ack_path.read_text())
+         started = valid_ack['started_sample']

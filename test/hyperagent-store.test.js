@@ -629,6 +629,80 @@ describe('HyperAgentStore: integrity regressions', () => {
     assert.equal(result.tasks_in_window, 1);
   }));
 
+  it('a second observation window reports only its own telemetry', async () => withFreshStore((fresh, dbPath) => {
+    for (let i = 0; i < 5; i++) {
+      fresh.logTelemetry({
+        node_id: 'node-a', soul_id: 'alpha', domain: 'testing', outcome: 'success', iterations: 1,
+        meta_notes: `Baseline task ${i} before two consecutive observation windows.`,
+      });
+    }
+    const [reflection] = fresh.createPendingReflections(5);
+    const proposal = fresh.putProposal({
+      reflection_id: reflection.id, title: 'Observe twice', description: 'Observe matching test work twice',
+      proposal_type: 'strategy_new',
+      diff_content: JSON.stringify({ domain: 'testing', content: 'Run focused tests first.' }),
+    });
+    const Database = require('better-sqlite3');
+    const closeWindow = () => {
+      const db = new Database(dbPath);
+      db.prepare("UPDATE ha_proposals SET eval_window_end = datetime('now', '-1 minute') WHERE id = ?").run(proposal.id);
+      db.close();
+      assert.equal(fresh.checkObservationWindows(), 1);
+      return fresh.getProposals().find((row) => row.id === proposal.id);
+    };
+
+    fresh.startObservation(proposal.id, 60);
+    const first = fresh.logTelemetry({
+      node_id: 'node-a', soul_id: 'alpha', domain: 'testing', outcome: 'success', iterations: 1,
+      meta_notes: 'Matching success inside the first observation window for this strategy.',
+    });
+    assert.equal(JSON.parse(closeWindow().eval_result).tasks_in_window, 1);
+
+    const db = new Database(dbPath);
+    db.prepare("UPDATE ha_telemetry SET created_at = datetime('now', '-5 minutes') WHERE id = ?").run(first.id);
+    db.close();
+
+    fresh.startObservation(proposal.id, 60);
+    fresh.logTelemetry({
+      node_id: 'node-a', soul_id: 'alpha', domain: 'testing', outcome: 'failure', iterations: 1,
+      meta_notes: 'Matching failure inside the second observation window for this strategy.',
+    });
+    const closed = closeWindow();
+    const result = JSON.parse(closed.eval_result);
+    assert.equal(result.tasks_in_window, 1);
+    assert.equal(result.success_rate_during, 0);
+    assert.equal(closed.eval_telemetry_count, 1);
+  }));
+
+  it('chains previous hypotheses past an expired reflection', async () => withFreshStore((fresh, dbPath) => {
+    const identity = { node_id: 'node-a', soul_id: 'alpha' };
+    const reflect = (i) => {
+      fresh.logTelemetry({
+        ...identity, domain: 'testing', outcome: 'success', iterations: 1,
+        meta_notes: `Reflection window ${i} source task with enough detail to synthesize.`,
+      });
+      const last = fresh.getLastReflection(identity);
+      const stats = fresh.computeStats(last ? last.telemetry_to_id : 0, identity);
+      return fresh.putReflection({
+        ...identity, telemetry_from_id: stats.fromId, telemetry_to_id: stats.toId,
+        telemetry_count: stats.totalTasks, raw_stats: stats,
+      });
+    };
+
+    const r1 = reflect(1);
+    fresh.synthesizeReflection(r1.id, { hypotheses: ['real-h'] });
+    const r2 = reflect(2);
+    const Database = require('better-sqlite3');
+    const db = new Database(dbPath);
+    db.prepare("UPDATE ha_reflections SET created_at = datetime('now', '-25 hours') WHERE id = ?").run(r2.id);
+    db.close();
+    assert.equal(fresh.expireStalePending(), 1);
+    const r3 = reflect(3);
+
+    assert.deepEqual(JSON.parse(fresh.getPreviousReflection(r3.id).hypotheses), ['real-h']);
+    assert.notEqual(fresh.listReflections(identity).find((row) => row.id === r2.id).hypotheses, null);
+  }));
+
   it('rejects invalid numeric telemetry', async () => withFreshStore((fresh) => {
     assert.throws(() => fresh.logTelemetry({
       node_id: 'node-a', soul_id: 'alpha', domain: 'testing', outcome: 'success', iterations: -1,

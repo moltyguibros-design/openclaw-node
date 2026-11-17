@@ -133,3 +133,20 @@ describe('llm-client with mock server', () => {
     assert.ok(Array.isArray(parsed.themes));
   });
 });
+
+describe('bin/llm-benchmark runBenchmark', () => {
+  it('imports without running the CLI and parses fenced output like production does', async () => {
+    const { runBenchmark, generateSyntheticSession } = await import('../bin/llm-benchmark.mjs');
+    const client = {
+      generate: async () => ({
+        content: '```json\n{"entities":[],"themes":[],"decisions":[]}\n```',
+        usage: null,
+        finishReason: 'stop',
+      }),
+    };
+    const result = await runBenchmark(client, generateSyntheticSession(3));
+    assert.equal(result.json_valid, true);
+    assert.equal(result.has_entities, true);
+    assert.equal(generateSyntheticSession(3).length, 3);
+  });
+});

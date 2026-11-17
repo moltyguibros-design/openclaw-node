@@ -68,7 +68,7 @@ Every compliant node MUST have these files at its workspace root:
 | File | Required | Purpose |
 |------|----------|---------|
 | `bin/auto-checkpoint` | YES | Memory daemon (session start, flush, recap, maintenance) |
-| `bin/memory-maintenance` | YES | Periodic maintenance (archival, predictions, stale tasks, sync) |
+| `bin/memory-maintenance.mjs` | YES | Periodic maintenance (archival, predictions, stale tasks, sync) |
 | `bin/session-recap` | YES | Rolling conversation digest |
 
 ### Tier 5 — Optional Infrastructure
@@ -217,7 +217,7 @@ last_flush: <ISO-8601>
 
 A node is **Principle 11 compliant** if:
 1. `bin/auto-checkpoint` exists and is executable
-2. `bin/memory-maintenance` exists and is executable
+2. `bin/memory-maintenance.mjs` exists and is executable
 3. `bin/session-recap` exists and is executable
 4. `.tmp/last-maintenance` exists and its timestamp is within 60 min of current time (during an active session)
 5. No maintenance operation requires manual invocation to function
@@ -244,7 +244,7 @@ These internal references MUST be consistent:
 ### 5.1 Self-Check (node checks itself)
 
 ```bash
-bin/memory-maintenance --force --verbose
+bin/memory-maintenance.mjs --force --verbose
 # Exit 0 = healthy
 # Exit 1 = warnings (non-critical degradation)
 # Exit 2 = critical failure (structurally broken)

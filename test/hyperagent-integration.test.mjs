@@ -4,12 +4,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hyperagent-cli-'));
 const cli = path.resolve('bin/hyperagent.mjs');
 const env = {
   ...process.env,
   OPENCLAW_HOME: home,
+  OPENCLAW_STATE_DB: path.join(home, 'state.db'),
   OPENCLAW_NODE_ID: 'integration-node',
   OPENCLAW_SOUL_ID: 'integration-soul',
 };
@@ -77,9 +79,34 @@ describe('hyperagent CLI integration', () => {
     const proposals = run(['proposals']);
     const proposalId = Number(proposals.stdout.match(/^\s*(\d+)\s+pending/m)?.[1]);
     assert.ok(proposalId > 0, proposals.stdout);
-    const approved = run(['approve', String(proposalId)]);
+    // reviewed_by used to be stamped 'human' for whoever ran the CLI; the
+    // reviewer must now be named, and is recorded verbatim.
+    const unnamed = run(['approve', String(proposalId)]);
+    assert.notEqual(unnamed.status, 0);
+    assert.match(unnamed.stderr, /--reviewer <name> is required/);
+    assert.match(run(['proposals']).stdout, new RegExp(`^\\s*${proposalId}\\s+pending`, 'm'));
+
+    const approved = run(['approve', '--reviewer', 'alice', String(proposalId)]);
     assert.equal(approved.status, 0, approved.stderr);
+    assert.match(approved.stdout, /by alice$/m);
     assert.match(run(['consult', '--domain', 'integration']).stdout, /Keep integration tasks focused/);
+  });
+
+  it('reject records the named reviewer and keeps the reason', () => {
+    const require = createRequire(import.meta.url);
+    const Database = require('better-sqlite3');
+    const db = new Database(env.OPENCLAW_STATE_DB);
+    const { lastInsertRowid: id } = db.prepare(`INSERT INTO ha_proposals
+      (reflection_id, node_id, soul_id, title, description, proposal_type, diff_content)
+      VALUES ((SELECT max(id) FROM ha_reflections), 'integration-node', 'integration-soul', 'r', 'r',
+        'strategy_new', '{"domain":"x","content":"rejected content"}')`).run();
+    db.close();
+    assert.notEqual(run(['reject', String(id), 'not', 'useful']).status, 0);
+    const rejected = run(['reject', String(id), '--reviewer', 'bob', 'not', 'useful']);
+    assert.equal(rejected.status, 0, rejected.stderr);
+    const row = new Database(env.OPENCLAW_STATE_DB, { readonly: true })
+      .prepare('SELECT status, reviewed_by, review_reason FROM ha_proposals WHERE id = ?').get(id);
+    assert.deepEqual(row, { status: 'rejected', reviewed_by: 'bob', review_reason: 'not useful' });
   });
 });
 
@@ -125,5 +152,87 @@ describe('cohort provenance through the real producer funnel', () => {
       delete process.env.OPENCLAW_HA_RUN_ID;
       fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 3 });
     }
+  });
+});
+
+// With no identity exported in the operator's shell, the CLI must resolve the
+// node, soul and store the mesh-agent writer used, or reflect/consult/log work
+// on another identity's rows in another database. The writer runs in a child so
+// its load-time node id comes from the same env the CLI sees.
+describe('CLI identity and store match the mesh-agent telemetry writer', () => {
+  it('reflects rows recorded by recordHyperagentTask with no identity env', async () => {
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-ident-'));
+    const cliHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-ident-home-'));
+    const dbPath = path.join(scratch, 'state.db');
+    const bare = { ...process.env };
+    delete bare.OPENCLAW_NODE_ID;
+    delete bare.MESH_NODE_ID;
+    delete bare.OPENCLAW_SOUL_ID;
+    delete bare.OPENCLAW_HA_RUN_ID;
+    const sharedEnv = { ...bare, OPENCLAW_STATE_DB: dbPath };
+    try {
+      const writer = spawnSync(process.execPath, ['-e', `
+        const { recordHyperagentTask } = require(process.argv[1]);
+        (async () => {
+          for (let i = 0; i < 5; i++) {
+            await recordHyperagentTask(
+              { task_id: 'identity-' + i, title: 'identity', domain: 'integration', llm_provider: 'shell' },
+              { outcome: 'success', iterations: 1, startedAt: Date.now(), notes: 'identity ' + i });
+          }
+        })();
+      `, path.resolve('bin/mesh-agent.js')], {
+        env: { ...sharedEnv, OPENCLAW_HOME: scratch, HOME: scratch },
+        encoding: 'utf8',
+        timeout: 30000,
+      });
+      assert.equal(writer.status, 0, writer.stderr);
+
+      const cliEnv = { ...sharedEnv, OPENCLAW_HOME: cliHome };
+      const reflected = spawnSync(process.execPath, [cli, 'reflect'], { env: cliEnv, encoding: 'utf8' });
+      assert.equal(reflected.status, 0, reflected.stderr);
+      assert.match(reflected.stdout, /reflection \d+ created \(5 tasks\)/);
+
+      const logged = spawnSync(process.execPath, [cli, 'log', '--stdin'], {
+        env: cliEnv,
+        input: JSON.stringify({ task_id: 'identity-cli', domain: 'integration', outcome: 'success' }),
+        encoding: 'utf8',
+      });
+      assert.equal(logged.status, 0, logged.stderr);
+
+      const expected = createRequire(import.meta.url)('../lib/node-id.js').resolveNodeId(bare);
+      const { createHyperAgentStore } = await import('../lib/hyperagent-store.mjs');
+      const store = createHyperAgentStore({ dbPath });
+      try {
+        const rows = store.getTelemetry({ last: 10 });
+        assert.equal(rows.length, 6);
+        assert.equal(rows[0].task_id, 'identity-cli');
+        for (const row of rows) {
+          assert.equal(row.node_id, expected, row.task_id);
+          assert.equal(row.soul_id, expected, row.task_id);
+        }
+      } finally {
+        store.close();
+      }
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 3 });
+      fs.rmSync(cliHome, { recursive: true, force: true, maxRetries: 3 });
+    }
+  });
+});
+
+// The header usage and --help drifted from the dispatch switch (report,
+// consult and reflect --pending missing). Every dispatched command is listed.
+describe('hyperagent usage text', () => {
+  it('header and --help list every dispatched command', () => {
+    const src = fs.readFileSync(cli, 'utf8');
+    const commands = [...src.matchAll(/^\s+case '([a-z-]+)':/gm)].map((m) => m[1]);
+    assert.ok(commands.includes('report') && commands.includes('consult'));
+    const header = src.slice(src.indexOf('Usage:'), src.indexOf('*/'));
+    const help = run(['--help']).stdout;
+    for (const c of commands) {
+      assert.match(header, new RegExp(`hyperagent ${c}\\b`), `header misses ${c}`);
+      assert.match(help, new RegExp(`^  ${c}\\b`, 'm'), `--help misses ${c}`);
+    }
+    assert.match(header, /hyperagent reflect --pending/);
   });
 });

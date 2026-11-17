@@ -31,11 +31,14 @@ launchctl kickstart -k gui/501/ai.openclaw.mission-control
 ## Verify (all must hold — matrix from audits/mc_auth)
 ```bash
 TOK=$(cat ~/.openclaw/config/mc-session-token)
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/                       # 200
-curl -s http://127.0.0.1:3000/api/system/health | head -c 80                          # real JSON, not ABI error
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/                       # 401 (page gate up; body = bootstrap hint)
+curl -s -o /dev/null -w '%{http_code}\n' -b "mc_session=$TOK" http://127.0.0.1:3000/   # 200
+curl -s -H "Authorization: Bearer $TOK" http://127.0.0.1:3000/api/system/health | head -c 80  # {"status":"healthy"..., not an ABI error
 curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:3000/api/resolve-path  # 401 (auth gate up)
 curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:3000/api/resolve-path \
   -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"name":"x"}'  # 200
 curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: evil.example' http://127.0.0.1:3000/api/tasks  # 403
 ```
-Browser tabs open from before the deploy need one refresh to pick up the session cookie.
+A browser without the `mc_session` cookie gets 401 on every page and API call. Bootstrap once with
+`http://127.0.0.1:3000/?token=$TOK` (the cookie is set and the token stripped from the URL); the cookie
+keeps working across deploys as long as `~/.openclaw/config/mc-session-token` is unchanged.

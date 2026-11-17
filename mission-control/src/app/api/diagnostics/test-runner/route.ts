@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
-import { getDb, getRawDb } from "@/lib/db";
+import type Database from "better-sqlite3";
+import { getDb, getRawDb, openThrowawayDb } from "@/lib/db";
 import { tasks, clusters, clusterMembers, dependencies } from "@/lib/db/schema";
 import { eq, or } from "drizzle-orm";
 import { statusToKanban, kanbanToStatus, parseTasksMarkdown, serializeTasksMarkdown } from "@/lib/parsers/task-markdown";
 import { syncTasksToMarkdown, syncTasksFromMarkdown } from "@/lib/sync/tasks";
 import { schedulerTick, computeWaves } from "@/lib/scheduler";
 import { getNats } from "@/lib/nats";
+import { applyDoneGate } from "@/lib/done-gate";
 import fs from "fs";
 import { ACTIVE_TASKS_MD, WORKSPACE_ROOT } from "@/lib/config";
+import { runInSandbox, activeTasksMd } from "@/lib/sandbox";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -35,12 +38,23 @@ async function runTest(suite: string, name: string, fn: TestFn): Promise<TestRes
 /**
  * POST /api/diagnostics/test-runner
  *
- * Runs a comprehensive integration test suite against the live MC system.
- * Creates test data, verifies behavior, and cleans up after itself.
- *
- * All test tasks use the prefix __TEST__ so they can be safely cleaned up.
+ * Runs the integration suites against a throw-away database and workspace:
+ * the scheduler ticks they drive used to dispatch phantom tasks to the live
+ * agent, and their markdown syncs published test tasks into the live
+ * active-tasks.md. Only read-only checks (memory tables, schema, workspace,
+ * NATS) look at the live system.
  */
 export async function POST() {
+  const liveRaw = getRawDb();
+  const sandbox = openThrowawayDb();
+  try {
+    return await runInSandbox(sandbox, () => runSuites(liveRaw));
+  } finally {
+    sandbox.dispose();
+  }
+}
+
+async function runSuites(liveRaw: Database.Database) {
   const results: TestResult[] = [];
   const db = getDb();
   const raw = getRawDb();
@@ -130,17 +144,9 @@ export async function POST() {
       createdAt: now,
     }).run();
 
-    // Simulate what the PATCH API does: setting done without force_done
-    const targetStatus = "done";
-    const redirected = targetStatus === "done"; // would be redirected
-    const effectiveStatus = redirected ? "waiting-user" : "done";
-    const effectiveColumn = redirected ? "review" : "done";
-
-    db.update(tasks).set({
-      status: effectiveStatus,
-      kanbanColumn: effectiveColumn,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(tasks.id, doneGateTaskId)).run();
+    const update: Record<string, unknown> = { status: "done", kanbanColumn: "done", updatedAt: new Date().toISOString() };
+    applyDoneGate(update, undefined);
+    db.update(tasks).set(update).where(eq(tasks.id, doneGateTaskId)).run();
 
     const row = db.select().from(tasks).where(eq(tasks.id, doneGateTaskId)).get();
     const ok = !!row && row.status === "waiting-user" && row.kanbanColumn === "review";
@@ -162,12 +168,9 @@ export async function POST() {
       createdAt: now,
     }).run();
 
-    // With force_done, no redirect
-    db.update(tasks).set({
-      status: "done",
-      kanbanColumn: "done",
-      updatedAt: new Date().toISOString(),
-    }).where(eq(tasks.id, doneGateTaskId + "_force")).run();
+    const update: Record<string, unknown> = { status: "done", kanbanColumn: "done", updatedAt: new Date().toISOString() };
+    applyDoneGate(update, true);
+    db.update(tasks).set(update).where(eq(tasks.id, doneGateTaskId + "_force")).run();
 
     const row = db.select().from(tasks).where(eq(tasks.id, doneGateTaskId + "_force")).get();
     const ok = !!row && row.status === "done" && row.kanbanColumn === "done";
@@ -230,12 +233,14 @@ export async function POST() {
   }));
 
   results.push(await runTest("Sync", "DB -> Markdown -> DB round-trip preserves tasks", async () => {
+    const seeded = new Date().toISOString();
+    db.insert(tasks).values({ id: "SYNC-ROUNDTRIP", title: "Sync round-trip", status: "queued", kanbanColumn: "backlog", updatedAt: seeded, createdAt: seeded }).run();
     // Count tasks before
-    const before = (raw.prepare("SELECT COUNT(*) as c FROM tasks WHERE id NOT LIKE '__TEST__%' AND id != '__LIVE_SESSION__'").get() as { c: number }).c;
+    const before = (raw.prepare("SELECT COUNT(*) as c FROM tasks WHERE id NOT GLOB '__TEST__*' AND id != '__LIVE_SESSION__'").get() as { c: number }).c;
     // Force a sync cycle
     syncTasksToMarkdown(db);
     syncTasksFromMarkdown(db);
-    const after = (raw.prepare("SELECT COUNT(*) as c FROM tasks WHERE id NOT LIKE '__TEST__%' AND id != '__LIVE_SESSION__'").get() as { c: number }).c;
+    const after = (raw.prepare("SELECT COUNT(*) as c FROM tasks WHERE id NOT GLOB '__TEST__*' AND id != '__LIVE_SESSION__'").get() as { c: number }).c;
     // Should be same count (or close — live session may change)
     const diff = Math.abs(after - before);
     return { ok: diff <= 2, detail: `before=${before}, after=${after}, diff=${diff}` };
@@ -285,28 +290,28 @@ export async function POST() {
   // ═══════════════════════════════════════════════════════════
 
   results.push(await runTest("Memory", "memory_docs table accessible", async () => {
-    const count = (raw.prepare("SELECT COUNT(*) as c FROM memory_docs").get() as { c: number }).c;
+    const count = (liveRaw.prepare("SELECT COUNT(*) as c FROM memory_docs").get() as { c: number }).c;
     return { ok: true, detail: `${count} docs indexed` };
   }));
 
   results.push(await runTest("Memory", "memory_items table accessible", async () => {
-    const count = (raw.prepare("SELECT COUNT(*) as c FROM memory_items").get() as { c: number }).c;
+    const count = (liveRaw.prepare("SELECT COUNT(*) as c FROM memory_items").get() as { c: number }).c;
     return { ok: true, detail: `${count} items total` };
   }));
 
   results.push(await runTest("Knowledge Graph", "Entities table accessible", async () => {
-    const count = (raw.prepare("SELECT COUNT(*) as c FROM memory_entities").get() as { c: number }).c;
+    const count = (liveRaw.prepare("SELECT COUNT(*) as c FROM memory_entities").get() as { c: number }).c;
     return { ok: true, detail: `${count} entities` };
   }));
 
   results.push(await runTest("Knowledge Graph", "Relations table accessible", async () => {
-    const count = (raw.prepare("SELECT COUNT(*) as c FROM memory_relations").get() as { c: number }).c;
+    const count = (liveRaw.prepare("SELECT COUNT(*) as c FROM memory_relations").get() as { c: number }).c;
     return { ok: true, detail: `${count} relations` };
   }));
 
   results.push(await runTest("Knowledge Graph", "FTS index works", async () => {
     try {
-      raw.prepare("SELECT COUNT(*) FROM memory_items_fts").get();
+      liveRaw.prepare("SELECT COUNT(*) FROM memory_items_fts").get();
       return { ok: true, detail: "FTS5 operational" };
     } catch (err) {
       return { ok: false, detail: (err as Error).message };
@@ -367,13 +372,9 @@ export async function POST() {
     const tick = schedulerTick();
     const row = db.select().from(tasks).where(eq(tasks.id, localTaskA)).get();
 
-    // Should have been dispatched (or skipped if Daedalus already has a running task)
-    const dispatched = tick.dispatched.includes(localTaskA);
-    const skipped = tick.skipped.includes(localTaskA);
-    const ok = dispatched || skipped; // both are valid outcomes
-    const detail = dispatched
-      ? `Dispatched to Daedalus, status=${row?.status}, owner=${row?.owner}`
-      : `Skipped (Daedalus busy), status=${row?.status}`;
+    // The sandbox has no running agent task, so the tick must dispatch it.
+    const ok = tick.dispatched.includes(localTaskA) && row?.status === "running";
+    const detail = `dispatched=${tick.dispatched.join(",") || "none"}, status=${row?.status}, owner=${row?.owner}`;
 
     return { ok, detail };
   }));
@@ -444,8 +445,8 @@ export async function POST() {
 
   results.push(await runTest("Mesh Dispatch", "Mesh task syncs to markdown with execution fields", async () => {
     syncTasksToMarkdown(db);
-    if (!fs.existsSync(ACTIVE_TASKS_MD)) return { ok: false, detail: "active-tasks.md missing" };
-    const content = fs.readFileSync(ACTIVE_TASKS_MD, "utf-8");
+    if (!fs.existsSync(activeTasksMd())) return { ok: false, detail: "active-tasks.md missing" };
+    const content = fs.readFileSync(activeTasksMd(), "utf-8");
     const hasMeshId = content.includes(meshTaskId);
     const hasExecution = content.includes("execution: mesh");
     const hasMetric = content.includes("metric: tests pass");
@@ -550,9 +551,9 @@ export async function POST() {
 
   results.push(await runTest("Collab Dispatch", "Collab spec survives markdown round-trip", async () => {
     syncTasksToMarkdown(db);
-    if (!fs.existsSync(ACTIVE_TASKS_MD)) return { ok: false, detail: "active-tasks.md missing" };
+    if (!fs.existsSync(activeTasksMd())) return { ok: false, detail: "active-tasks.md missing" };
 
-    const content = fs.readFileSync(ACTIVE_TASKS_MD, "utf-8");
+    const content = fs.readFileSync(activeTasksMd(), "utf-8");
     const parsed = parseTasksMarkdown(content);
     const task = parsed.find((t) => t.id === collabTaskId);
     if (!task) return { ok: false, detail: "Task not found in markdown" };
@@ -847,7 +848,6 @@ export async function POST() {
   // ═══════════════════════════════════════════════════════════
 
   const triggerAtId = `${TEST_PREFIX}trig_at_${Date.now()}`;
-  const triggerCronId = `${TEST_PREFIX}trig_cron_${Date.now()}`;
   const recurringId = `${TEST_PREFIX}recur_${Date.now()}`;
 
   results.push(await runTest("Trigger Dispatch", "At-trigger fires when time has passed", async () => {
@@ -939,7 +939,6 @@ export async function POST() {
 
   // Cleanup trigger tests
   db.delete(tasks).where(eq(tasks.id, triggerAtId)).run();
-  db.delete(tasks).where(eq(tasks.id, triggerCronId)).run();
 
   // ═══════════════════════════════════════════════════════════
   // SUITE 16: DB Schema Integrity
@@ -955,31 +954,13 @@ export async function POST() {
   for (const table of expectedTables) {
     results.push(await runTest("Schema", `Table '${table}' exists`, async () => {
       try {
-        raw.prepare(`SELECT COUNT(*) FROM ${table}`).get();
+        liveRaw.prepare(`SELECT COUNT(*) FROM ${table}`).get();
         return { ok: true };
       } catch (err) {
         return { ok: false, detail: (err as Error).message };
       }
     }));
   }
-
-  // ═══════════════════════════════════════════════════════════
-  // CLEANUP: Remove any leftover test data
-  // ═══════════════════════════════════════════════════════════
-
-  // GLOB (not LIKE): in LIKE, `_` is a single-char wildcard, so
-  // `LIKE '__TEST__%'` also matched e.g. `XXTESTXX...`. GLOB treats `_`
-  // literally and `*` as the wildcard, so this deletes exactly the test rows.
-  raw.prepare(`DELETE FROM dependencies WHERE source_id GLOB '${TEST_PREFIX}*' OR target_id GLOB '${TEST_PREFIX}*'`).run();
-  raw.prepare(`DELETE FROM tasks WHERE id GLOB '${TEST_PREFIX}*'`).run();
-  raw.prepare(`DELETE FROM cluster_members WHERE cluster_id GLOB '${TEST_PREFIX}*'`).run();
-  raw.prepare(`DELETE FROM clusters WHERE id GLOB '${TEST_PREFIX}*'`).run();
-
-  // The run wrote __TEST__ tasks into the live active-tasks.md via
-  // syncTasksToMarkdown; deleting them from the DB alone left them in the file
-  // until the next unrelated write. Re-sync so the markdown matches the
-  // cleaned DB and the daemon never sees a lingering __TEST__ task.
-  try { syncTasksToMarkdown(db); } catch { /* best-effort: cleanup must not throw */ }
 
   // ═══════════════════════════════════════════════════════════
   // Summary

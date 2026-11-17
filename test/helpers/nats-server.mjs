@@ -27,6 +27,17 @@ export function freePort() {
   });
 }
 
+// Callers rm the store dir right after stop(), so a server that ignores SIGTERM
+// is SIGKILLed rather than left writing into a deleted tree.
+function stopProcess(proc, graceMs = 3000) {
+  return new Promise((res) => {
+    if (proc.exitCode !== null || proc.signalCode !== null) return res();
+    const force = setTimeout(() => proc.kill('SIGKILL'), graceMs);
+    proc.once('exit', () => { clearTimeout(force); res(); });
+    proc.kill('SIGTERM');
+  });
+}
+
 /**
  * Start nats-server with `-c configPath`. Resolves once it listens for clients.
  * @returns {Promise<{ proc: import('node:child_process').ChildProcess, stop: () => Promise<void>, reload: () => void, log: () => string }>}
@@ -46,7 +57,7 @@ export function startNatsServer(configPath, { bin = natsServerBin(), timeoutMs =
           proc,
           log: () => out,
           reload: () => proc.kill('SIGHUP'),
-          stop: () => new Promise((res) => { if (proc.exitCode !== null) return res(); proc.once('exit', () => res()); proc.kill('SIGTERM'); }),
+          stop: () => stopProcess(proc),
         });
       }
     };
@@ -57,10 +68,11 @@ export function startNatsServer(configPath, { bin = natsServerBin(), timeoutMs =
   });
 }
 
-/** Write a minimal loopback + JetStream config that includes nats-auth.conf. */
-export function writeServerConfig(dir, port) {
+/** Write a minimal loopback + JetStream config; `auth` includes nats-auth.conf from `dir`. */
+export function writeServerConfig(dir, port, { auth = true } = {}) {
   fs.mkdirSync(path.join(dir, 'js'), { recursive: true });
   const conf = path.join(dir, 'nats.conf');
-  fs.writeFileSync(conf, `listen: 127.0.0.1:${port}\njetstream { store_dir: ${JSON.stringify(path.join(dir, 'js'))} }\ninclude "nats-auth.conf"\n`);
+  const include = auth ? 'include "nats-auth.conf"\n' : '';
+  fs.writeFileSync(conf, `listen: 127.0.0.1:${port}\njetstream { store_dir: ${JSON.stringify(path.join(dir, 'js'))} }\n${include}`);
   return conf;
 }

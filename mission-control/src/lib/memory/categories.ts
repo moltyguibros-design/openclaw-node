@@ -12,9 +12,9 @@
 import fs from "fs";
 import path from "path";
 import { getActiveItems } from "./extract";
+import { MEMORY_DIR } from "../config";
 
-const WORKSPACE = process.env.WORKSPACE_ROOT || "/Users/moltymac/.openclaw/workspace";
-const CATEGORIES_DIR = path.join(WORKSPACE, "memory", "categories");
+const CATEGORIES_DIR = path.join(MEMORY_DIR, "categories");
 
 export const VALID_CATEGORIES = [
   "work",

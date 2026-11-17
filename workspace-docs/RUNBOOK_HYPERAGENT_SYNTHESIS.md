@@ -31,8 +31,8 @@ JSON
 4. Review proposals — the ONLY approval surface is this CLI:
 ```bash
 node $H proposals
-node $H approve <id>      # applies strategy data transactionally — nothing else
-node $H reject <id> [reason]
+node $H approve <id> --reviewer <your-name>   # applies strategy data transactionally — nothing else
+node $H reject <id> --reviewer <your-name> [reason]
 ```
 
 ## Rules

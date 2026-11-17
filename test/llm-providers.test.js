@@ -11,8 +11,16 @@ const { resolveProvider, resolveModel, PROVIDERS } = require('../lib/llm-provide
 
 describe('resolveProvider', () => {
   it('task.llm_provider takes priority over env and CLI', () => {
-    const provider = resolveProvider({ llm_provider: 'shell' }, 'openai', 'gemini');
-    assert.equal(provider.name, 'shell');
+    const provider = resolveProvider({ llm_provider: 'openai' }, 'claude', 'gemini');
+    assert.equal(provider.name, 'openai');
+  });
+
+  it('P1-3: a task may select shell only on a node whose own provider is shell', () => {
+    for (const [cli, env] of [['openai', 'gemini'], ['claude', null], [null, 'claude'], [null, null], ['shell', 'claude']]) {
+      assert.throws(() => resolveProvider({ task_id: 'T-sh', llm_provider: 'shell' }, cli, env), /only on a node configured for it/, `${cli}/${env}`);
+    }
+    assert.equal(resolveProvider({ llm_provider: 'shell' }, null, 'shell').name, 'shell');
+    assert.equal(resolveProvider({ llm_provider: 'shell' }, 'shell', null).name, 'shell');
   });
 
   it('env takes priority over CLI when task has no provider', () => {
@@ -44,7 +52,7 @@ describe('resolveProvider', () => {
 
   it('resolves all built-in providers', () => {
     for (const name of ['claude', 'openai', 'gemini', 'deepseek', 'shell', 'ollama', 'aider']) {
-      const provider = resolveProvider({ llm_provider: name }, null, null);
+      const provider = resolveProvider({ llm_provider: name }, null, name);
       assert.equal(provider.name, name);
     }
   });
@@ -103,5 +111,87 @@ describe('shell provider buildArgs', () => {
       () => provider.buildArgs('some prompt', null, task),
       /blocked by security filter/
     );
+  });
+});
+
+describe('claude provider --add-dir scope', () => {
+  const addDirs = (scope) => {
+    const args = PROVIDERS.claude.buildArgs('p', null, { scope }, '/home/u/proj');
+    return args.flatMap((a, i) => (a === '--add-dir' ? [args[i + 1]] : []));
+  };
+
+  it('grants a directory inside the target', () => {
+    assert.deepEqual(addDirs(['src/lib/a.js']), ['/home/u/proj', '/home/u/proj/src/lib']);
+  });
+
+  it('never grants the target\'s parent or a sibling sharing its name prefix', () => {
+    assert.deepEqual(addDirs(['.', './', '../proj-secrets/x', '../../etc/passwd']), ['/home/u/proj']);
+  });
+
+  it('allows a /tmp scope but not a /tmpfoo lookalike', () => {
+    assert.deepEqual(addDirs(['/tmp/work/f']), ['/home/u/proj', '/tmp/work']);
+    assert.deepEqual(addDirs(['/tmpfoo/f']), ['/home/u/proj']);
+  });
+});
+
+describe('llm-providers header', () => {
+  it('does not document a default vendor that resolveProvider refuses to pick', () => {
+    const src = require('node:fs').readFileSync(require.resolve('../lib/llm-providers'), 'utf8');
+    const header = src.slice(0, src.indexOf('*/'));
+    assert.doesNotMatch(header, /Default:/);
+    assert.match(header, /No default: resolveProvider\(\) throws/);
+  });
+});
+
+// Flags checked against each CLI's own argument parser (see the provider comments):
+// codex exec (codex-rs exec/src/cli.rs + utils/cli shared_options.rs), gemini
+// (packages/cli/src/config/config.ts, strict yargs), aider (aider/args.py),
+// ollama (cmd/cmd.go `run MODEL [PROMPT]`, --think).
+describe('non-claude provider argv', () => {
+  const PROMPT = '# Task\n--not-a-flag';
+
+  it('openai runs `codex exec` non-interactively in the target, prompt last after --', () => {
+    const args = PROVIDERS.openai.buildArgs(PROMPT, 'm1', {}, '/wt', null);
+    assert.deepEqual(args, ['exec', '--sandbox', 'workspace-write', '--skip-git-repo-check', '--model', 'm1', '--cd', '/wt', '--', PROMPT]);
+    assert.ok(!args.includes('-p'), '-p is --profile in codex, not a prompt flag');
+    assert.ok(!args.includes('--cwd'), 'codex has --cd, no --cwd');
+  });
+
+  it('openai grants the workspace as a writable extra dir only when it differs from the target', () => {
+    assert.deepEqual(PROVIDERS.openai.buildArgs('p', 'm1', {}, '/ws', '/ws').filter((a) => a === '--add-dir'), []);
+    const args = PROVIDERS.openai.buildArgs('p', 'm1', {}, '/wt', '/ws');
+    assert.equal(args[args.indexOf('--add-dir') + 1], '/ws');
+    assert.ok(args.indexOf('--add-dir') < args.indexOf('--'));
+  });
+
+  it('gemini runs headless with -p, auto-approves, and reaches the target through --include-directories', () => {
+    assert.deepEqual(
+      PROVIDERS.gemini.buildArgs(PROMPT, 'm2', {}, '/wt', null),
+      ['-p', PROMPT, '--model', 'm2', '--approval-mode', 'yolo', '--include-directories', '/wt'],
+    );
+    assert.deepEqual(
+      PROVIDERS.gemini.buildArgs('p', 'm2', {}, '/ws', '/ws').filter((a) => a === '--include-directories').length, 1,
+    );
+    assert.ok(!PROVIDERS.gemini.buildArgs('p', 'm2', {}, '/wt').includes('--cwd'), 'gemini parses strictly: --cwd is an error');
+  });
+
+  it('gemini trusts its work dir, or an untrusted folder forces approval back to default', () => {
+    assert.equal(PROVIDERS.gemini.cleanEnv({ A: '1' }).GEMINI_CLI_TRUST_WORKSPACE, 'true');
+  });
+
+  it('aider sends one message, answers its own prompts, and leaves committing and history to the mesh', () => {
+    const os = require('node:os');
+    assert.deepEqual(PROVIDERS.aider.buildArgs(PROMPT, 'm3', {}, '/wt'), [
+      '--message', PROMPT, '--model', 'm3',
+      '--yes-always', '--no-auto-commits', '--no-gitignore', '--no-pretty',
+      '--input-history-file', os.devNull, '--chat-history-file', os.devNull,
+    ]);
+    assert.ok(!PROVIDERS.aider.buildArgs('p', null).includes('--model'));
+    assert.equal(PROVIDERS.aider.spawnCwd('/wt'), '/wt');
+  });
+
+  it('ollama runs `ollama run MODEL PROMPT`, disabling thinking only for thinking families', () => {
+    assert.deepEqual(PROVIDERS.ollama.buildArgs('p', 'llama3'), ['run', 'llama3', 'p']);
+    assert.deepEqual(PROVIDERS.ollama.buildArgs('p', 'qwen3:8b'), ['run', '--think=false', 'qwen3:8b', 'p']);
   });
 });

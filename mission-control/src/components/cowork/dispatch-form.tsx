@@ -2,10 +2,8 @@
 
 import { useState } from "react";
 import useSWR from "swr";
-import { dispatchCollabTask, useClusters } from "@/lib/hooks";
+import { dispatchCollabTask, fetcher, useClusters } from "@/lib/hooks";
 import { RolePicker, RoleBadge } from "./role-picker";
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 const MODES = ["parallel", "sequential", "review"] as const;
 const CONVERGENCES = ["unanimous", "majority", "coordinator"] as const;

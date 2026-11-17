@@ -1,9 +1,7 @@
 import { randomBytes, timingSafeEqual } from "crypto";
 import fs from "fs";
 import path from "path";
-import os from "os";
-
-const TOKEN_PATH = path.join(os.homedir(), ".openclaw", "config", "mc-session-token");
+import { MC_SESSION_TOKEN_PATH as TOKEN_PATH } from "./config";
 
 let cachedToken: string | null = null;
 let bootstrapHintLogged = false;
@@ -89,6 +87,11 @@ export function decide(
 
   if (input.origin !== null && input.origin !== undefined && !originMatchesHost(input.origin, input.host)) {
     return { action: "deny", status: 403, reason: "origin" };
+  }
+
+  // An emptied token file reads as "", and timingSafeEqualStr("", "") is true: an empty cookie would pass.
+  if (!sessionToken) {
+    return { action: "deny", status: 401, reason: "token" };
   }
 
   const cookieOk = input.cookieToken != null && timingSafeEqualStr(input.cookieToken, sessionToken);

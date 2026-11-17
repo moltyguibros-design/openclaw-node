@@ -6,15 +6,18 @@
  * Responsibilities:
  *   - Watch MESH_TASKS KV bucket for real-time updates
  *   - Mirror KV entries into local SQLite (upsert with revision tracking)
- *   - Push local task changes to KV via CAS writes
+ *   - Task creation and edits are NOT written here: they go through the task
+ *     daemon (mesh.tasks.submit / the signed mesh.tasks.update), whose
+ *     lib/mesh-tasks.js EDITABLE_TASK_FIELDS is the one list of editable fields
  *   - Handle conflict resolution (KV wins on workers, SQLite wins on lead)
  *
- * This module is imported by the sync/tasks.ts module and the hooks layer.
+ * The /api/mesh/tasks routes read through listMeshTasks and getMeshTask; the
+ * rest is groundwork for a multi-node Mission Control.
  * It does NOT run as a standalone daemon — it's part of the MC process.
  */
 
 import { getTasksKv, sc } from "@/lib/nats";
-import { NODE_ID, NODE_ROLE } from "@/lib/config";
+import { NODE_ROLE } from "@/lib/config";
 
 // ── Types ──
 
@@ -87,11 +90,11 @@ export async function getMeshTask(
   };
 }
 
-// ── KV Write Operations (CAS) ──
+// ── KV Write Operations ──
 
 /**
  * Write a task to KV. Used by the lead to publish task state.
- * No CAS — overwrites unconditionally. Use updateMeshTaskCAS for safe updates.
+ * No CAS — overwrites unconditionally.
  */
 export async function putMeshTask(task: MeshTaskEntry): Promise<number> {
   const kv = await getTasksKv();
@@ -99,64 +102,6 @@ export async function putMeshTask(task: MeshTaskEntry): Promise<number> {
 
   const rev = await kv.put(task.task_id, sc.encode(JSON.stringify(task)));
   return rev;
-}
-
-/**
- * Update a task with CAS (Compare-And-Swap).
- * Fails if the revision doesn't match (another node wrote since our read).
- *
- * @returns New revision number on success
- * @throws On revision mismatch (caller should re-read and retry)
- */
-export async function updateMeshTaskCAS(
-  taskId: string,
-  updates: Partial<MeshTaskEntry>,
-  expectedRevision: number
-): Promise<number> {
-  const kv = await getTasksKv();
-  if (!kv) throw new Error("NATS KV unavailable");
-
-  // Read current
-  const entry = await kv.get(taskId);
-  if (!entry?.value) throw new Error(`Task ${taskId} not found in KV`);
-
-  const current = JSON.parse(sc.decode(entry.value));
-
-  // Authority check
-  if (NODE_ROLE !== "lead" && current.origin !== NODE_ID) {
-    throw new Error(
-      `Authority denied: worker ${NODE_ID} cannot update task from ${current.origin}`
-    );
-  }
-
-  // Merge and write
-  const updated = { ...current, ...updates };
-  const rev = await kv.update(
-    taskId,
-    sc.encode(JSON.stringify(updated)),
-    expectedRevision
-  );
-  return rev;
-}
-
-/**
- * Propose a new task from a worker node.
- * Task is created with status "proposed" — the lead daemon validates.
- */
-export async function proposeMeshTask(
-  task: Omit<MeshTaskEntry, "status" | "origin">
-): Promise<MeshTaskEntry> {
-  const kv = await getTasksKv();
-  if (!kv) throw new Error("NATS KV unavailable");
-
-  const proposed: MeshTaskEntry = {
-    ...task,
-    status: NODE_ROLE === "lead" ? "queued" : "proposed",
-    origin: NODE_ID,
-  } as MeshTaskEntry;
-
-  await kv.put(proposed.task_id, sc.encode(JSON.stringify(proposed)));
-  return proposed;
 }
 
 // ── KV Watcher ──
@@ -182,17 +127,22 @@ export async function watchMeshTasks(): Promise<{
   if (!kv) return null;
 
   const watcher = await kv.watch();
+  // nats.js hands out a fresh generator on every [Symbol.asyncIterator]() call
+  // and refuses a second one while the first is suspended ("already yielding").
+  const source = watcher[Symbol.asyncIterator]();
 
   const events: AsyncIterable<KvWatchEvent> = {
     [Symbol.asyncIterator]() {
       return {
         async next() {
-          const result = await watcher[Symbol.asyncIterator]().next();
+          const result = await source.next();
           if (result.done) return { value: undefined, done: true };
 
           const entry = result.value;
+          // A DEL or PURGE entry carries an empty, still truthy, value.
+          const operation = entry.operation === "PUT" ? "PUT" : "DEL";
           let task: MeshTaskEntry | null = null;
-          if (entry.value) {
+          if (operation === "PUT") {
             try {
               task = JSON.parse(sc.decode(entry.value));
             } catch {
@@ -203,7 +153,7 @@ export async function watchMeshTasks(): Promise<{
           return {
             value: {
               key: entry.key,
-              operation: entry.value ? "PUT" : ("DEL" as const),
+              operation,
               task,
               revision: entry.revision,
             },

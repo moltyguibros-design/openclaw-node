@@ -16,7 +16,7 @@ Inter-node L3 is specified but deferred (§8).
 node bin/node-acceptance.mjs            # full single-node gate, hard-tests every component
 npm run node-check                      # same, via package script
 openclaw-node-check                     # same, after `npm i -g` / link (bin entry)
-node bin/node-acceptance.mjs --axis llm # one axis: memory | llm | network | storage
+node bin/node-acceptance.mjs --axis llm # one axis: memory | llm | network | storage | federation
 node bin/node-acceptance.mjs --no-mutate# skip probes that write synthetic data
 node bin/node-acceptance.mjs --deep     # include invasive probes (e.g. extract-trigger)
 node bin/node-acceptance.mjs --json --report /path/report.md
@@ -27,7 +27,9 @@ report to `~/.openclaw/.node-acceptance.md` by default. **Portable:** every path
 from the same env vars the deployed components read (`OPENCLAW_HOME`, `OPENCLAW_WORKSPACE`,
 `OPENCLAW_NODE_ID`, `LLM_BASE_URL`, `LLM_MODEL`, `MEMORY_INJECT_PORT`, `NATS_MONITOR_URL`,
 `OPENCLAW_NATS`, …), so the same binary self-tests any node, including `spawn-node` trees via
-`OPENCLAW_HOME=~/.openclaw-<id>`.
+`OPENCLAW_HOME=~/.openclaw-<id>`: the L1 state.db and workspace checks follow it too. The default
+evidence report stays at `~/.openclaw/.node-acceptance.md` (Mission Control reads it there), so pass
+`--report` for a spawn tree, and a `~` in a transcript source means the user's home, as in the daemon.
 
 **Deployment integration:** run as a post-deploy gate (CI / `mesh-deploy-listener`), or schedule
 periodically alongside `health-watch`. A non-zero exit means the node is not 100% — see §10.
@@ -74,7 +76,7 @@ cardinal failure (same rule the tick-chain runs on, PROTOCOL §7).
 | `single-node` (default) | L0, L1, L2, L4; L3 → `N/A` | Accept one deployed node (today's reality). |
 | `federated` (future) | + L3 against a real or `spawn-node` peer | Accept a node's links to other nodes (§8). |
 
-The harness also accepts `--axis memory|llm|network|storage|e2e` to run one axis in isolation.
+The harness also accepts `--axis memory|llm|network|storage|federation` to run one axis in isolation.
 
 ---
 
@@ -106,7 +108,7 @@ accepted  ⇔  (no FAIL) ∧ (no BLOCK) ∧ (every required check is PASS)
 ```
 
 The harness runs **all** layers (no early abort) so one report shows the full picture, then computes the
-gate. Exit code: `0` accepted, `1` rejected.
+gate. Exit code: `0` accepted, `1` rejected, `2` incomplete, `3` harness error.
 
 ---
 
@@ -176,11 +178,11 @@ that a server is listening.
 | NET-L1-1 | port listening | TCP connect `:4222` | connects | socket ok | 7.1 |
 | NET-L1-2 | monitor healthy | `GET :8222/healthz` | HTTP 200 | body | health-check `checkNats` |
 | NET-L1-3 | **JetStream enabled** | `GET :8222/jsz` | returns JS stats (api level, limits) | jsz JSON | 7.1 |
-| NET-L1-4 | per-node stream exists | stream info for `local-events-<NODE_ID>` | stream present, subjects `local.>` | stream config | 1.7 |
+| NET-L1-4 | per-node stream exists | stream info for `local-events-<NODE_ID>` | stream present, subjects exactly `local.<NODE_ID>.>` (a legacy `local.>` stream fails: it blocks every other node's stream) | stream config | 1.7 |
 | NET-L2-1 | **core pub/sub round-trip** | subscribe a probe subject, publish a nonce, await delivery | message received within 1s, payload matches | sent/received nonce + ms | nats-resolve |
 | NET-L2-2 | **JetStream durability** | publish a nonce to the stream, read it back via consumer | the published message is read back intact | seq + payload | 1.7 done-criterion |
 | NET-L2-3 | daemon connected | grep daemon log for `NATS connected` + stream-init line at boot | both lines present, current boot | log lines + ts | 0.4 |
-| NET-L2-4 | **extraction trigger round-trip** | publish `mesh.memory.extract_request`; watch for a flush boundary (log/event) | a flush fires within `N` s | trigger→flush log pair | 1.6 done-criterion |
+| NET-L2-4 | **extraction trigger round-trip** | publish `mesh.memory.extract_request.<nodeId>`; watch for a flush boundary (log/event) | a flush fires within `N` s | trigger→flush log pair | 1.6 done-criterion |
 | NET-L1-5 | mesh services loaded | `launchctl list` for the 5 `mesh-*` jobs | all loaded | launchctl rows | 4.1 |
 
 > NET-L2-1/L2-2 distinguish "server up" (L1) from "messaging works" (L2). NET-L2-4 is the
@@ -201,16 +203,16 @@ bin/node-acceptance.mjs [--profile single-node|federated] [--axis <axis>] [--jso
 - Each check is a pure async fn returning
   `{ id, layer, axis, status, required, threshold, evidence, detail, latency_ms }`.
 - Runs all layers (no early abort), then computes the §3 gate.
-- Exit `0` accepted · `1` rejected.
+- Exit `0` accepted · `1` rejected · `2` incomplete · `3` harness error.
 - **Reality-first (§4.5):** every value is re-probed live. The harness trusts no doc, including this one
   and COMPONENT_REGISTRY.
-- **Composition, not duplication:** reuses `lib/health-check.mjs` for L1 liveness, `ollama-queue`
-  snapshot for LLM-L2-4, `node-identity` for L3 (future), `spawn-node` for the `federated` peer.
+- **Composition, not duplication:** reuses `lib/health-check.mjs` for L1 liveness; LLM-L2-4 (`ollama-queue`
+  snapshot) is not built yet; `node-identity` for L3 (future), `spawn-node` for the `federated` peer.
 
 ### 7.2 Output
 
 Human table (default) + `--json` machine object. Always writes a dated report to
-`~/.openclaw/.node-acceptance.md` (sibling of `.daemon-health.md`) and `--report` if given. The report
+`~/.openclaw/.node-acceptance.md` and `--report` if given. The report
 embeds the captured evidence verbatim — it **is** the §5 runtime-evidence artifact for a deploy.
 
 ```
@@ -252,8 +254,8 @@ reliability" intent by leaving the next round a complete contract; it does **not
 | NODE-2 | **broadcast→offer→accept** | node A broadcasts a context theme; B offers; A accepts | a `[peer-memory:]` block surfaces in A's next injection | broadcast-emitter/offerer/acceptor, 1.5 done-criterion |
 | NODE-3 | signature enforcement | inject an unsigned/forged broadcast | it is **rejected**, not surfaced | broadcast-schemas, federation-startup |
 | NODE-4 | replay dedup | resend a broadcast with a seen event id | ignored (seenIds cache) | `createSeenEventCache` |
-| NODE-5 | **resilience to peer drop** | kill peer B mid-exchange | A degrades gracefully (no crash, local-first continues) then reconnects when B returns | federation-resilience, heartbeat-detect |
-| NODE-6 | heartbeat/liveness | each node observes the other's heartbeat | dead-node detection fires when a peer drops | heartbeat-detect |
+| NODE-5 | **resilience to peer drop** | kill peer B mid-exchange | A degrades gracefully (no crash, local-first continues) then reconnects when B returns | federation-resilience |
+| NODE-6 | heartbeat/liveness | each node observes the other's heartbeat | dead-node detection fires when a peer drops | mesh-health-publisher (MESH_NODES KV TTL) |
 | NODE-7 | **partition / offline tolerance** | make *all* peers unreachable | full local function continues (local-first guarantee) | MASTER_PLAN 3.2 local-first |
 
 Observability for these already exists: `bin/dogfood-council.mjs` (docs/DOGFOOD_PROTOCOL.md) subscribes to

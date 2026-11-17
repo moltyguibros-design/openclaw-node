@@ -13,7 +13,8 @@
  *   token  → authorization { token: "<OPENCLAW_NATS_TOKEN>" }   (pre-Phase-7 behaviour)
  *   nkey   → authorization { users: [ …nkeys from identity + registry…, legacy user ] }
  *            - this node's identity nkey: allow-all when OPENCLAW_NODE_ROLE=lead,
- *              worker permissions otherwise
+ *              worker permissions when it is worker; any other value, or none,
+ *              refuses the render (a guessed role silently demotes a lead)
  *            - every identity-registry peer: allow-all when its entry carries
  *              role "lead", worker permissions otherwise
  *            - a legacy { user, password: <token> } entry so clients that still
@@ -38,7 +39,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { createIdentityRegistry, IDENTITY_REGISTRY_FILE } from '../lib/node-identity.mjs';
 import { atomicWriteFileSync } from '../lib/atomic-write.mjs';
 import { assertLegacyNatsWriterAllowed } from '../lib/nats-writer-ownership.mjs';
@@ -153,12 +154,18 @@ export async function syncNatsAuth({
   let self = null;
   let peers = [];
   if (effectiveMode === 'nkey') {
+    const role = resolve.resolveEnvKey('OPENCLAW_NODE_ROLE');
+    if (role !== 'lead' && role !== 'worker') {
+      throw new Error(`OPENCLAW_NODE_ROLE is ${role ? JSON.stringify(role).slice(0, 40) : 'not set'} — nkey mode ` +
+        'grants this node its own permissions from it: set OPENCLAW_NODE_ROLE=lead or OPENCLAW_NODE_ROLE=worker ' +
+        'in ~/.openclaw/openclaw.env, then render again');
+    }
     const pair = identityToNkey(identityDir);
     if (pair) {
       self = {
         nodeId: resolve.resolveEnvKey('OPENCLAW_NODE_ID') || require('../lib/node-id.js').resolveNodeId(),
         nkey: pair.publicNkey,
-        role: (resolve.resolveEnvKey('OPENCLAW_NODE_ROLE') || 'worker') === 'lead' ? 'lead' : 'worker',
+        role,
       };
     } else {
       log(`no identity.key under ${identityDir} — this node itself gets no nkey entry`);

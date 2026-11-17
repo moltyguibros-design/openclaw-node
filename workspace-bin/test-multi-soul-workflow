@@ -1,32 +1,102 @@
 #!/usr/bin/env bash
 # Multi-Soul Workflow Test Script
-# Tests: soul registry, task handoff, evolution
+# Tests: soul registry, task handoff, evolution, memory isolation
+#
+# Runs against a disposable Mission Control: its own HOME, task DB, souls repo
+# and handoff vault under a temp dir that is removed on exit. The live MC,
+# task DB and ~/.openclaw/souls history are never touched.
 
 set -euo pipefail
 
-API_BASE="http://localhost:3000/api"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MC_DIR="${OPENCLAW_MC_DIR:-${OPENCLAW_WORKSPACE:-$HOME/.openclaw/workspace}/projects/mission-control}"
+NEXT_BIN="$MC_DIR/node_modules/.bin/next"
+MC_PORT="${MULTI_SOUL_TEST_PORT:-3917}"
+API_BASE="http://127.0.0.1:${MC_PORT}/api"
+START_TIMEOUT_S="${MULTI_SOUL_TEST_START_TIMEOUT:-90}"
+
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-echo "=== Multi-Soul Workflow Test ==="
+fail() { echo -e "${RED}✗ $*${NC}"; exit 1; }
+
+[[ -x "$NEXT_BIN" ]] || fail "Mission Control not built at $MC_DIR (set OPENCLAW_MC_DIR)"
+
+SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/multi-soul-test.XXXXXX")"
+MC_PID=""
+cleanup() {
+  if [[ -n "$MC_PID" ]]; then
+    kill "$MC_PID" 2>/dev/null || true
+    wait "$MC_PID" 2>/dev/null || true
+  fi
+  rm -rf "$SANDBOX"
+}
+trap cleanup EXIT
+
+SOULS_DIR="$SANDBOX/.openclaw/souls"
+WORKSPACE="$SANDBOX/.openclaw/workspace"
+MC_TOKEN_FILE="$SANDBOX/.openclaw/config/mc-session-token"
+
+# Seed three souls, a genes.json to evolve, and the git repo approval commits into.
+mkdir -p "$WORKSPACE" "$SOULS_DIR/blockchain-auditor/evolution"
+for soul in daedalus blockchain-auditor lore-writer; do
+  mkdir -p "$SOULS_DIR/$soul"
+  echo '{"capabilities":[]}' > "$SOULS_DIR/$soul/capabilities.json"
+done
+cat > "$SOULS_DIR/registry.json" <<'JSON'
+{"version":"1.0.0","souls":[
+  {"id":"daedalus","name":"Daedalus","type":"orchestrator"},
+  {"id":"blockchain-auditor","name":"Blockchain Auditor","type":"specialist"},
+  {"id":"lore-writer","name":"Lore Writer","type":"specialist"}
+]}
+JSON
+echo '{"genes":[]}' > "$SOULS_DIR/blockchain-auditor/evolution/genes.json"
+printf '[user]\n\tname = multi-soul-test\n\temail = multi-soul-test@localhost\n' > "$SANDBOX/.gitconfig"
+HOME="$SANDBOX" git -C "$SOULS_DIR" init -q -b main
+HOME="$SANDBOX" git -C "$SOULS_DIR" add -A
+HOME="$SANDBOX" git -C "$SOULS_DIR" commit -qm "seed"
+
+# A clean environment: nothing inherited can point the instance at live
+# state, and OPENCLAW_NATS names a closed port so it stays off the mesh bus.
+(cd "$MC_DIR" && exec env -i \
+  PATH="$PATH" HOME="$SANDBOX" NODE_ENV=production \
+  OPENCLAW_WORKSPACE="$WORKSPACE" WORKSPACE_ROOT="$WORKSPACE" \
+  DB_PATH="$SANDBOX/mission-control.db" OPENCLAW_STATE_DB="$SANDBOX/state.db" \
+  OBSIDIAN_DIR="$SANDBOX/vault" OPENCLAW_NATS="nats://127.0.0.1:9" \
+  "$NEXT_BIN" start -H 127.0.0.1 -p "$MC_PORT") > "$SANDBOX/mc.log" 2>&1 &
+MC_PID=$!
+
+# The token is created on the first request the auth layer sees.
+deadline=$((SECONDS + START_TIMEOUT_S))
+until [[ -s "$MC_TOKEN_FILE" ]] && curl -sf -o /dev/null \
+    -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$MC_TOKEN_FILE")") "${API_BASE}/souls"; do
+  kill -0 "$MC_PID" 2>/dev/null || { cat "$SANDBOX/mc.log" >&2; fail "disposable Mission Control exited"; }
+  (( SECONDS < deadline )) || { cat "$SANDBOX/mc.log" >&2; fail "disposable Mission Control did not start in ${START_TIMEOUT_S}s"; }
+  curl -s -o /dev/null "${API_BASE}/souls" || true
+  sleep 1
+done
+
+# The token goes through a header file, never curl's argv (ps exposes argv).
+mc_curl() { curl -s -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$MC_TOKEN_FILE")") "$@"; }
+
+echo "=== Multi-Soul Workflow Test (disposable MC on :${MC_PORT}) ==="
 echo
 
 # Test 1: Soul Registry
 echo "Test 1: Soul Registry"
-SOUL_COUNT=$(curl -s ${API_BASE}/souls | jq '. | length')
+SOUL_COUNT=$(mc_curl ${API_BASE}/souls | jq '. | length')
 if [[ "$SOUL_COUNT" -ge 3 ]]; then
   echo -e "${GREEN}✓ Soul registry has $SOUL_COUNT souls${NC}"
 else
-  echo -e "${RED}✗ Expected at least 3 souls, got $SOUL_COUNT${NC}"
-  exit 1
+  fail "Expected at least 3 souls, got $SOUL_COUNT"
 fi
 
 # Test 2: Task Handoff
 echo
 echo "Test 2: Task Handoff"
 TASK_ID="TEST-$(date +%s)"
-curl -s -X POST ${API_BASE}/tasks -H "Content-Type: application/json" -d "{
+mc_curl -X POST ${API_BASE}/tasks -H "Content-Type: application/json" -d "{
   \"id\": \"$TASK_ID\",
   \"title\": \"Test handoff workflow\",
   \"status\": \"running\",
@@ -35,31 +105,28 @@ curl -s -X POST ${API_BASE}/tasks -H "Content-Type: application/json" -d "{
   \"soulId\": \"daedalus\"
 }" > /dev/null
 
-HANDOFF_RESULT=$(curl -s -X POST ${API_BASE}/tasks/${TASK_ID}/handoff \
+HANDOFF_RESULT=$(mc_curl -X POST ${API_BASE}/tasks/${TASK_ID}/handoff \
   -H "Content-Type: application/json" \
   -d '{"toSoul":"blockchain-auditor","reason":"Test handoff"}' | jq -r '.success')
 
 if [[ "$HANDOFF_RESULT" == "true" ]]; then
   echo -e "${GREEN}✓ Task handoff successful${NC}"
 else
-  echo -e "${RED}✗ Task handoff failed${NC}"
-  exit 1
+  fail "Task handoff failed"
 fi
 
-# Verify handoff document created
-HANDOFF_DOC="${HOME}/.openclaw/workspace/memory-vault/handoffs/${TASK_ID}-handoff.md"
+HANDOFF_DOC="${WORKSPACE}/memory-vault/handoffs/${TASK_ID}-handoff.md"
 if [[ -f "$HANDOFF_DOC" ]]; then
   echo -e "${GREEN}✓ Handoff document created${NC}"
 else
-  echo -e "${RED}✗ Handoff document not found${NC}"
-  exit 1
+  fail "Handoff document not found"
 fi
 
 # Test 3: Evolution Event
 echo
 echo "Test 3: Evolution System"
 EVENT_ID="evt_test_$(date +%s)"
-curl -s -X POST ${API_BASE}/souls/blockchain-auditor/evolution \
+mc_curl -X POST ${API_BASE}/souls/blockchain-auditor/evolution \
   -H "Content-Type: application/json" \
   -d "{
     \"eventId\": \"$EVENT_ID\",
@@ -78,52 +145,48 @@ curl -s -X POST ${API_BASE}/souls/blockchain-auditor/evolution \
     \"reviewStatus\": \"pending\"
   }" > /dev/null
 
-PENDING_COUNT=$(curl -s "${API_BASE}/souls/blockchain-auditor/evolution?status=pending" | jq '. | length')
+PENDING_COUNT=$(mc_curl "${API_BASE}/souls/blockchain-auditor/evolution?status=pending" | jq '. | length')
 if [[ "$PENDING_COUNT" -ge 1 ]]; then
   echo -e "${GREEN}✓ Evolution event created (${PENDING_COUNT} pending)${NC}"
 else
-  echo -e "${RED}✗ Evolution event not found${NC}"
-  exit 1
+  fail "Evolution event not found"
 fi
 
 # Test 4: Evolution Approval
 echo
 echo "Test 4: Evolution Approval"
-APPROVAL_RESULT=$(curl -s -X PATCH "${API_BASE}/souls/blockchain-auditor/evolution?eventId=${EVENT_ID}" \
+APPROVAL_RESULT=$(mc_curl -X PATCH "${API_BASE}/souls/blockchain-auditor/evolution?eventId=${EVENT_ID}" \
   -H "Content-Type: application/json" \
   -d '{"action":"approve","reviewedBy":"daedalus"}' | jq -r '.success')
 
 if [[ "$APPROVAL_RESULT" == "true" ]]; then
   echo -e "${GREEN}✓ Evolution approved${NC}"
 else
-  echo -e "${RED}✗ Evolution approval failed${NC}"
-  exit 1
+  fail "Evolution approval failed"
 fi
 
-# Verify git commit created
-cd ~/.openclaw/souls
-if git log --oneline | grep -q "$EVENT_ID"; then
+if HOME="$SANDBOX" git -C "$SOULS_DIR" log --oneline | grep -q "$EVENT_ID"; then
   echo -e "${GREEN}✓ Git commit created${NC}"
 else
-  echo -e "${RED}✗ Git commit not found${NC}"
-  exit 1
+  fail "Git commit not found"
 fi
 
 # Test 5: Memory Isolation
 echo
 echo "Test 5: Memory Isolation"
-if ${HOME}/.openclaw/workspace/bin/clawvault-access-control blockchain-auditor "private/blockchain-auditor" read | grep -q "GRANTED"; then
+# The helper exits 1 on DENIED, so capture its output instead of piping it
+# (under pipefail a piped DENIED check can never pass).
+access() { HOME="$SANDBOX" "$SCRIPT_DIR/clawvault-access-control" "$@" || true; }
+if [[ "$(access blockchain-auditor "private/blockchain-auditor" read)" == *GRANTED* ]]; then
   echo -e "${GREEN}✓ Soul can access own private memory${NC}"
 else
-  echo -e "${RED}✗ Access control failed${NC}"
-  exit 1
+  fail "Access control failed"
 fi
 
-if ${HOME}/.openclaw/workspace/bin/clawvault-access-control blockchain-auditor "private/lore-writer" read | grep -q "DENIED"; then
+if [[ "$(access blockchain-auditor "private/lore-writer" read)" == *DENIED* ]]; then
   echo -e "${GREEN}✓ Soul cannot access other's private memory${NC}"
 else
-  echo -e "${RED}✗ Access control failed (should deny)${NC}"
-  exit 1
+  fail "Access control failed (should deny)"
 fi
 
 echo

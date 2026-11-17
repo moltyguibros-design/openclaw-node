@@ -33,6 +33,12 @@ describe('unit discovery', () => {
       ['mission-control', false], ['mesh-agent', true], ['log-rotate', false],
     ]);
   });
+  it('marks the oneshot .service behind a timer as its job, not a unit to start or report', () => {
+    const exec = () => 'openclaw-observer.service static\nopenclaw-observer.timer enabled\nopenclaw-node-watch.service enabled\n';
+    assert.deepEqual(scanSystemdUnits(exec).map(u => [u.label, u.timerJob]), [
+      ['openclaw-observer.service', true], ['openclaw-observer.timer', false], ['openclaw-node-watch.service', false],
+    ]);
+  });
   it('shortId strips both platform prefixes', () => {
     assert.equal(shortId('ai.openclaw.workplan-viewer.plist'), 'workplan-viewer');
     assert.equal(shortId('openclaw-node-watch.service'), 'node-watch');

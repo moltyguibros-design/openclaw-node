@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { HEARTBEAT_TIMEOUT_MS, runSchedulerHeartbeat, validateHeartbeatEndpoint } from '../bin/scheduler-heartbeat.mjs';
+import { defaultMcTokenPath } from '../lib/mc-session-token.mjs';
+import { readFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 function response(status, body = {}) {
   return {
@@ -42,6 +47,7 @@ test('endpoint is restricted to the exact loopback scheduler route', () => {
   assert.throws(() => validateHeartbeatEndpoint('https://127.0.0.1/api/scheduler/tick'), /loopback HTTP/);
   assert.throws(() => validateHeartbeatEndpoint('http://example.com/api/scheduler/tick'), /loopback HTTP/);
   assert.throws(() => validateHeartbeatEndpoint('http://127.0.0.1:3000/api/tasks'), /loopback HTTP/);
+  assert.throws(() => validateHeartbeatEndpoint('http://[::1]:3000/api/scheduler/tick'), /loopback HTTP/);
 });
 
 test('HTTP auth failure exits through a bounded error without echoing the token', async () => {
@@ -51,4 +57,18 @@ test('HTTP auth failure exits through a bounded error without echoing the token'
   }).then(() => null, (error) => error);
   assert.match(err.message, /HTTP 401/);
   assert.doesNotMatch(err.message, /do-not-print-me/);
+});
+
+test('the token path follows the workspace root Mission Control derives, and both heartbeat units pass it', () => {
+  assert.equal(defaultMcTokenPath({ OPENCLAW_WORKSPACE: '/srv/oc/workspace' }), '/srv/oc/config/mc-session-token');
+  assert.equal(defaultMcTokenPath({ WORKSPACE_ROOT: '/a/workspace', OPENCLAW_WORKSPACE: '/b/workspace' }), '/a/config/mc-session-token');
+  assert.equal(defaultMcTokenPath({}), path.join(os.homedir(), '.openclaw', 'config', 'mc-session-token'));
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const systemd = readFileSync(path.join(root, 'services/systemd/openclaw-scheduler-heartbeat.service'), 'utf8');
+  const launchd = readFileSync(path.join(root, 'services/launchd/ai.openclaw.scheduler-heartbeat.plist'), 'utf8');
+  assert.match(systemd, /^Environment=OPENCLAW_WORKSPACE=\$\{OPENCLAW_WORKSPACE\}$/m);
+  assert.match(launchd, /<key>OPENCLAW_WORKSPACE<\/key>\s*<string>\$\{OPENCLAW_WORKSPACE\}<\/string>/);
+  for (const rel of ['bin/scheduler-heartbeat.mjs', 'workspace-bin/memory-maintenance.mjs']) {
+    assert.doesNotMatch(readFileSync(path.join(root, rel), 'utf8'), /'\.openclaw', 'config', 'mc-session-token'/, rel);
+  }
 });

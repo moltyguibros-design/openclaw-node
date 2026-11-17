@@ -201,3 +201,101 @@ describe('node-init join-token trust provisioning', () => {
     });
   });
 });
+
+// mesh-node-remove must undo every unit node-init installs (plus the health
+// publisher a full install adds): a deploy listener left behind keeps the
+// "removed" node on the bus and crash-loops once --purge deletes ~/openclaw.
+describe('mesh-node-remove removes every unit node-init installs', () => {
+  it('stops and deletes the agent, deploy listener and health publisher units, and prints the revoke step', (t) => {
+    const platform = process.platform;
+    if (platform !== 'linux' && platform !== 'darwin') return t.skip(`no service manager on ${platform}`);
+    const initSrc = readFileSync(join(ROOT, 'bin', 'openclaw-node-init.js'), 'utf8');
+    const listName = platform === 'darwin' ? 'LAUNCHD_SERVICES' : 'SYSTEMD_SERVICES';
+    const listSrc = initSrc.match(new RegExp(`const ${listName} = \\[([^\\]]*)\\]`))[1];
+    const installed = [...listSrc.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    assert.equal(installed.length, 2, `${listName} parsed`);
+    const publisher = platform === 'darwin' ? 'ai.openclaw.mesh-health-publisher.plist' : 'openclaw-mesh-health-publisher.service';
+    const units = [...installed, publisher];
+
+    const home = mkdtempSync(join(tmpdir(), 'openclaw-remove-'));
+    try {
+      const unitDir = platform === 'darwin' ? join(home, 'Library', 'LaunchAgents') : join(home, '.config', 'systemd', 'user');
+      mkdirSync(unitDir, { recursive: true });
+      for (const u of units) writeFileSync(join(unitDir, u), 'unit\n');
+      const fakeBin = join(home, 'fakebin');
+      mkdirSync(fakeBin);
+      const callLog = join(home, 'calls.log');
+      for (const tool of ['systemctl', 'launchctl']) {
+        writeFileSync(join(fakeBin, tool), `#!/bin/sh\necho "${tool} $*" >> "${callLog}"\n`, { mode: 0o755 });
+      }
+
+      const r = spawnSync(process.execPath, [join(ROOT, 'bin', 'mesh-node-remove.js'), '--force'], {
+        encoding: 'utf8',
+        timeout: 30000,
+        env: { ...process.env, HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, OPENCLAW_NATS: 'nats://127.0.0.1:1' },
+      });
+      assert.equal(r.status, 0, r.stderr);
+      const left = readdirSync(unitDir);
+      for (const u of units) assert.ok(!left.includes(u), `${u} removed`);
+      const calls = readFileSync(callLog, 'utf8');
+      for (const u of units) {
+        const name = u.replace(/\.(plist|service)$/, '');
+        assert.ok(calls.includes(name), `${name} stopped before its file was deleted`);
+      }
+      assert.match(r.stdout, /openclaw-trust-peer\.mjs --remove \S+ --sync-nats/);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+// The agent is on demand (manifest autostart:false, plist RunAtLoad false). On
+// macOS node-init loaded it, then failed the join because it had no PID; on
+// Linux it enabled and started it at boot. Both now leave it off, and the join
+// is judged on the deploy listener.
+describe('node-init leaves the mesh agent on demand', () => {
+  for (const serviceType of ['systemd', 'launchd']) {
+    it(`${serviceType}: the listener is started and verified, the agent is neither started nor enabled`, () => {
+      const home = mkdtempSync(join(tmpdir(), 'node-init-ondemand-'));
+      try {
+        const fakeBin = join(home, 'fakebin');
+        mkdirSync(fakeBin);
+        const callLog = join(home, 'calls.log');
+        const stub = (tool, body = '') => writeFileSync(join(fakeBin, tool),
+          `#!/bin/sh\necho "${tool} $*" >> "${callLog}"\n${body}exit 0\n`, { mode: 0o755 });
+        stub('systemctl', 'if [ "$2" = is-active ]; then if [ "$3" = openclaw-mesh-deploy-listener ]; then echo active; else echo inactive; exit 3; fi; fi\n');
+        stub('launchctl', 'if [ "$1" = list ]; then printf "321\\t0\\tai.openclaw.mesh-deploy-listener\\n-\\t0\\tai.openclaw.mesh-agent\\n"; fi\n');
+        stub('loginctl');
+        stub('sudo');
+
+        const script = `
+          const ni = require(${JSON.stringify(join(ROOT, 'bin', 'openclaw-node-init.js'))});
+          const osInfo = { serviceType: ${JSON.stringify(serviceType)} };
+          ni.installService(osInfo, ${JSON.stringify(ROOT)}, { nats: 'nats://127.0.0.1:4222', provider: 'shell' });
+          console.log('VERIFIED=' + ni.verifyServiceRunning(osInfo));
+          console.log('START=' + ni.agentStartCommand(osInfo));
+        `;
+        const r = spawnSync(process.execPath, ['-e', script], {
+          encoding: 'utf8', timeout: 30000,
+          env: { ...process.env, HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, OPENCLAW_NODE_ID: 'worker-7' },
+        });
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /VERIFIED=true/);
+        const calls = readFileSync(callLog, 'utf8').split('\n').filter(Boolean);
+        if (serviceType === 'systemd') {
+          assert.ok(calls.includes('systemctl --user enable openclaw-mesh-deploy-listener'), calls.join('\n'));
+          assert.ok(calls.includes('systemctl --user restart openclaw-mesh-deploy-listener'));
+          assert.deepEqual(calls.filter((c) => /(enable|restart|start) openclaw-mesh-agent/.test(c)), []);
+          assert.match(r.stdout, /START=systemctl --user start openclaw-mesh-agent/);
+        } else {
+          assert.ok(calls.some((c) => /^launchctl load .*ai\.openclaw\.mesh-agent\.plist$/.test(c)), calls.join('\n'));
+          assert.ok(calls.some((c) => /^launchctl load .*ai\.openclaw\.mesh-deploy-listener\.plist$/.test(c)));
+          assert.deepEqual(calls.filter((c) => /kickstart|start ai\.openclaw\.mesh-agent/.test(c)), []);
+          assert.match(r.stdout, /START=launchctl kickstart gui\/\$\(id -u\)\/ai\.openclaw\.mesh-agent/);
+        }
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+  }
+});

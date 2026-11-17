@@ -31,13 +31,6 @@ Things like:
 - Default speaker: Kitchen HomePod
 ```
 
-### ClawVault
-
-- clawvault binary: `/Users/moltymac/.openclaw/workspace/.npm-global/bin/clawvault`
-- wrapper (preferred): `/Users/moltymac/.openclaw/workspace/bin/clawvault-local`
-- default vault: `/Users/moltymac/.openclaw/workspace/memory-vault`
-- qmd binary: `/Users/moltymac/.bun/bin/qmd`
-
 ## Why Separate?
 
 Skills are shared. Your setup is yours. Keeping them apart means you can update skills without losing your notes, and share skills without leaking your infrastructure.

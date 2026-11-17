@@ -1,6 +1,6 @@
 ---
 name: find-skills
-description: "Discover and install agent skills from the open ecosystem via the skills CLI. Use when the user asks how to do something that might exist as a skill, wants to search for tools/workflows, or wants to extend agent capabilities."
+description: "Search the open agent-skills ecosystem and present matching skills. Never installs or updates a skill itself: installs go only through the openclaw-skill-scanner gate. Use when the user asks how to do something that might exist as a skill, wants to search for tools/workflows, or wants to extend agent capabilities."
 triggers:
   - "find a skill for"
   - "is there a skill that can"
@@ -15,7 +15,9 @@ negative_triggers:
 
 # Find Skills
 
-This skill helps you discover and install skills from the open agent skills ecosystem.
+This skill helps you discover skills from the open agent skills ecosystem and present them to
+the user. It does not install or update anything: a third-party skill is unreviewed code, and the
+only install path on this node is the scanner gate (see "If the User Wants to Install").
 
 ## When to Use This Skill
 
@@ -32,12 +34,12 @@ Use this skill when the user:
 
 The Skills CLI (`npx skills`) is the package manager for the open agent skills ecosystem. Skills are modular packages that extend agent capabilities with specialized knowledge, workflows, and tools.
 
-**Key commands:**
+**The one command this skill uses:**
 
-- `npx skills find [query]` - Search for skills interactively or by keyword
-- `npx skills add <package>` - Install a skill from GitHub or other sources
-- `npx skills check` - Check for skill updates
-- `npx skills update` - Update all installed skills
+- `npx skills find [query]` - Search for skills by keyword
+
+Do not run the CLI's install or update commands: they write unscanned code straight into the
+skills tree and can overwrite the repo-managed skills.
 
 **Browse skills at:** https://skills.sh/
 
@@ -68,8 +70,6 @@ For example:
 The command will return results like:
 
 ```
-Install with npx skills add <owner/repo@skill>
-
 vercel-labs/agent-skills@vercel-react-best-practices
 └ https://skills.sh/vercel-labs/agent-skills/vercel-react-best-practices
 ```
@@ -79,8 +79,7 @@ vercel-labs/agent-skills@vercel-react-best-practices
 When you find relevant skills, present them to the user with:
 
 1. The skill name and what it does
-2. The install command they can run
-3. A link to learn more at skills.sh
+2. A link to learn more at skills.sh
 
 Example response:
 
@@ -88,21 +87,27 @@ Example response:
 I found a skill that might help! The "vercel-react-best-practices" skill provides
 React and Next.js performance optimization guidelines from Vercel Engineering.
 
-To install it:
-npx skills add vercel-labs/agent-skills@vercel-react-best-practices
-
 Learn more: https://skills.sh/vercel-labs/agent-skills/vercel-react-best-practices
 ```
 
-### Step 4: Offer to Install
+Stop there. Searching and presenting is the whole job of this skill.
 
-If the user wants to proceed, you can install the skill for them:
+### If the User Wants to Install
+
+Installing is the user's decision, and it goes only through the scanner gate, which downloads
+the skill to a temp directory, scans it, blocks blacklisted or dangerous skills and asks before
+installing one with warnings:
 
 ```bash
-npx skills add <owner/repo@skill> -g -y
+bash skills/openclaw-skill-scanner/install-hook.sh <clawhub-slug>
 ```
 
-The `-g` flag installs globally (user-level) and `-y` skips confirmation prompts.
+- Run it only when the user explicitly asks for that slug, and leave its confirmation prompt to
+  the user. Never pass `--force`.
+- The gate installs ClawHub slugs. A skills.sh package that is not on ClawHub has no scanned
+  install path on this node: say so and stop.
+- Never update installed skills in bulk: many of them carry local fixes that an update would
+  overwrite.
 
 ## Common Skill Categories
 

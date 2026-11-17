@@ -16,6 +16,7 @@
  */
 
 import fs from 'fs';
+import { scrubSecrets } from '../lib/injection-logger.mjs';
 
 /**
  * Map JSONL entry types to trace categories and tiers.
@@ -43,64 +44,95 @@ const ENTRY_MAP = {
   summary:            { fn: 'session.summary',     tier: 1, category: 'lifecycle' },
 };
 
+// Gateway transcripts wrap every turn as {type:'message', message:{role}}.
+const GATEWAY_ROLE_TYPE = { user: 'user', assistant: 'assistant', system: 'system', toolResult: 'tool_result' };
+
+// Excerpts land in the obs DB and on the NATS trace subject. Scrub before
+// slicing so a cut never leaves a key too short for its pattern to catch.
+const excerpt = (text, max = 100) => scrubSecrets(String(text)).slice(0, max);
+
+function textOf(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.filter(b => b?.type === 'text').map(b => b.text || '').join('\n');
+}
+
 /**
- * Extract a human-readable summary from a JSONL entry.
- * Handles multiple transcript formats (Claude Code, gateway, etc.).
+ * Extract a human-readable summary from an entry without content blocks.
  */
 function summarizeEntry(entry) {
-  // Tool call summary
   if (entry.type === 'tool_use') {
-    const tool = entry.tool || entry.name || entry.tool_name || 'unknown';
-    return `tool=${tool}`;
+    return `tool=${entry.tool || entry.name || entry.tool_name || 'unknown'}`;
   }
-
-  // Message summary (truncated content)
-  if (entry.message?.content) {
-    const content = typeof entry.message.content === 'string'
-      ? entry.message.content
-      : JSON.stringify(entry.message.content);
-    return content.slice(0, 100);
-  }
-
-  // Permission request
+  if (entry.message?.content) return excerpt(textOf(entry.message.content));
   if (entry.type === 'permission_request') {
     return entry.tool || entry.permission || 'permission_requested';
   }
-
-  // Error
   if (entry.type === 'error') {
-    return (entry.error || entry.message || 'unknown error').slice?.(0, 100) || 'error';
+    const err = entry.error || entry.message || 'unknown error';
+    return typeof err === 'string' ? excerpt(err) : 'error';
   }
-
-  // Summary
-  if (entry.type === 'summary' && entry.summary) {
-    return entry.summary.slice(0, 100);
-  }
-
-  // Fallback
+  if (entry.type === 'summary' && entry.summary) return excerpt(entry.summary);
   return entry.type || 'unknown';
 }
 
 /**
- * Extract cost info from an entry if present.
- * Handles multiple cost field formats.
+ * Cost info from an entry: Claude Code keeps usage under `message`, other
+ * writers at the top level.
  */
 function extractCost(entry) {
   if (entry.costUSD) return { cost: entry.costUSD };
   if (entry.estimatedCostUsd) return { cost: entry.estimatedCostUsd };
-  if (entry.usage) {
+  const usage = entry.message?.usage ?? entry.usage;
+  if (usage) {
     return {
-      input_tokens: entry.usage.input_tokens || 0,
-      output_tokens: entry.usage.output_tokens || 0,
-      cache_read: entry.usage.cache_read_input_tokens || 0,
+      input_tokens: usage.input_tokens || 0,
+      output_tokens: usage.output_tokens || 0,
+      cache_read: usage.cache_read_input_tokens || 0,
     };
   }
   return null;
 }
 
+/**
+ * The trace events one transcript entry yields, as [ENTRY_MAP key, summary].
+ * A turn's content blocks carry its tool calls and results: Claude Code
+ * `tool_use`/`tool_result`, gateway `toolCall` and `toolResult` turns.
+ */
+function entryEvents(entry, toolNames) {
+  const msg = entry.message && typeof entry.message === 'object' ? entry.message : null;
+  const type = entry.type === 'message' ? GATEWAY_ROLE_TYPE[msg?.role] : entry.type;
+  if (!type || !ENTRY_MAP[type]) return [];
+
+  if (entry.type === 'message' && type === 'tool_result') {
+    return [[type, `tool=${msg.toolName || 'unknown'}${msg.isError ? ' error' : ''}`]];
+  }
+  if (!Array.isArray(msg?.content) || (type !== 'user' && type !== 'assistant')) {
+    return [[type, summarizeEntry(entry)]];
+  }
+
+  const events = [];
+  const text = textOf(msg.content).trim();
+  if (text) events.push([type, excerpt(text)]);
+  for (const block of msg.content) {
+    if (block?.type === 'tool_use' || block?.type === 'toolCall') {
+      const name = block.name || 'unknown';
+      if (block.id) toolNames.set(block.id, name);
+      events.push(['tool_use', `tool=${name}`]);
+    } else if (block?.type === 'tool_result') {
+      const name = toolNames.get(block.tool_use_id) || 'unknown';
+      toolNames.delete(block.tool_use_id);
+      events.push(['tool_result', `tool=${name}${block.is_error ? ' error' : ''}`]);
+    }
+  }
+  return events;
+}
+
 export function createSessionTraceEmitter(tracer) {
   // Track file positions per path so multiple JSONL files can be watched simultaneously
-  const _fileState = new Map(); // path → { lastSize }
+  const _fileState = new Map(); // path → { lastSize, lastCostMsgId }
+  // tool_use id → tool name, so a later tool_result can say which tool it answers.
+  const toolNames = new Map();
 
   return {
     /**
@@ -134,17 +166,13 @@ export function createSessionTraceEmitter(tracer) {
 
       if (stat.size <= state.lastSize) return; // No new data
 
-      // Read only the new portion
       const fd = fs.openSync(jsonlPath, 'r');
       try {
-        const newBytes = stat.size - state.lastSize;
-        // Cap at 64KB per tick to avoid blocking
-        const readSize = Math.min(newBytes, 65536);
-        const offset = stat.size - readSize;
-        const buffer = Buffer.alloc(readSize);
-        fs.readSync(fd, buffer, 0, readSize, offset);
-
-        const chunk = buffer.toString('utf8');
+        const buffer = Buffer.alloc(stat.size - state.lastSize);
+        fs.readSync(fd, buffer, 0, buffer.length, state.lastSize);
+        const lastNl = buffer.lastIndexOf(0x0a);
+        if (lastNl < 0) return; // only a partial line so far
+        const chunk = buffer.toString('utf8', 0, lastNl);
         const lines = chunk.split('\n').filter(Boolean);
 
         let emitted = 0;
@@ -156,26 +184,33 @@ export function createSessionTraceEmitter(tracer) {
             continue; // Skip malformed lines (including partial first line)
           }
 
-          const mapping = ENTRY_MAP[entry.type];
-          if (!mapping) continue; // Unknown type — skip
-
           // Skip high-frequency progress events unless in dev mode
           if (entry.type === 'progress' && process.env.OPENCLAW_TRACE_MODE !== 'dev') continue;
 
-          const summary = summarizeEntry(entry);
-          const cost = extractCost(entry);
+          const events = entryEvents(entry, toolNames);
+          if (events.length === 0) continue;
 
-          tracer.emit(mapping.fn, {
-            tier: mapping.tier,
-            category: mapping.category,
-            args_summary: summary,
-            result_summary: entry.model || '',
-            meta: cost ? JSON.stringify(cost) : null,
+          // Claude Code writes one line per content block of a turn, each
+          // repeating the turn's usage; count it once.
+          const msgId = entry.message?.id;
+          const cost = msgId && msgId === state.lastCostMsgId ? null : extractCost(entry);
+          if (cost && msgId) state.lastCostMsgId = msgId;
+          const model = entry.message?.model ?? entry.model ?? '';
+
+          events.forEach(([type, summary], i) => {
+            const mapping = ENTRY_MAP[type];
+            tracer.emit(mapping.fn, {
+              tier: mapping.tier,
+              category: mapping.category,
+              args_summary: summary,
+              result_summary: model,
+              meta: cost && i === 0 ? JSON.stringify(cost) : null,
+            });
+            emitted++;
           });
-          emitted++;
         }
 
-        state.lastSize = stat.size;
+        state.lastSize += lastNl + 1;
 
         if (emitted > 0) {
           console.log(`[session-trace] Emitted ${emitted} events from ${jsonlPath.split('/').pop()}`);
@@ -186,10 +221,11 @@ export function createSessionTraceEmitter(tracer) {
     },
 
     /**
-     * Reset tracking state (call on session end).
+     * Stop tracking one transcript (call when its session ends). Other live
+     * transcripts keep their offsets, so their entries are not re-emitted.
      */
-    reset() {
-      _fileState.clear();
+    forget(jsonlPath) {
+      _fileState.delete(jsonlPath);
     },
   };
 }

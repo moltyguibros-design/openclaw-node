@@ -1,13 +1,16 @@
 import fs from "fs";
 import path from "path";
 import { eq } from "drizzle-orm";
-import { tasks } from "@/lib/db/schema";
+import { tasks, taskSyncBase } from "@/lib/db/schema";
 import { ACTIVE_TASKS_MD } from "@/lib/config";
-import { NODE_ROLE } from "@/lib/config";
+import { activeTasksMd } from "@/lib/sandbox";
+import { NODE_ID, NODE_ROLE } from "@/lib/config";
 import {
   parseTasksMarkdown,
   serializeTasksMarkdown,
+  serializeTaskBlock,
   statusToKanban,
+  type ParsedTask,
 } from "@/lib/parsers/task-markdown";
 
 type DrizzleDb = ReturnType<typeof import("@/lib/db")["getDb"]>;
@@ -56,11 +59,13 @@ function markdownChangedExternally(): boolean {
  * Merges markdown state into DB without blindly overwriting DB-only fields.
  */
 export function syncTasksFromMarkdown(db: DrizzleDb): void {
-  if (!fs.existsSync(ACTIVE_TASKS_MD)) return;
+  const file = activeTasksMd();
+  if (!fs.existsSync(file)) return;
 
-  lastImportTime = Date.now(); // stamp BEFORE work — prevents re-entry during long imports
+  // The mtime/debounce state tracks the live file only; a sandboxed sync must not move it.
+  if (file === ACTIVE_TASKS_MD) lastImportTime = Date.now(); // stamp BEFORE work — prevents re-entry during long imports
 
-  const raw = fs.readFileSync(ACTIVE_TASKS_MD, "utf-8");
+  const raw = fs.readFileSync(file, "utf-8");
   const parsed = parseTasksMarkdown(raw);
   const now = new Date().toISOString();
 
@@ -206,6 +211,10 @@ export function syncTasksFromMarkdown(db: DrizzleDb): void {
       db.delete(tasks).where(eq(tasks.id, row.id)).run();
     }
   }
+
+  // What the file holds is now what MC has seen: a later MC write only
+  // carries fields whose DB value differs from it (done-gate redirects included).
+  saveBaseline(db, new Map(parsed.map((t) => [t.id, fieldsOf(serializeTaskBlock(t))])));
 }
 
 /**
@@ -219,85 +228,253 @@ export function syncTasksFromMarkdownIfChanged(db: DrizzleDb): void {
 }
 
 /**
- * Sync tasks from SQLite back to active-tasks.md.
- * Reads all tasks from the DB, converts to parsed format,
- * serializes to markdown, and writes atomically (tmp + rename).
- * Tracks the mtime after write to avoid re-importing our own changes.
+ * Write MC's task changes to active-tasks.md: only the tasks and fields MC
+ * changed since it last imported or wrote the file, edited in place under the
+ * kanban lock (the kanban-io updateTaskInPlace contract). The mesh bridge and
+ * memory daemon edit the same file; a full rewrite from the DB reverted
+ * whatever they wrote after MC's last import.
+ *
+ * "Changed" = the task's serialized field differs from task_sync_base (its
+ * lines as MC last imported or wrote them). New DB tasks are appended, tasks
+ * MC deleted are removed, everything else in the file is left as it is.
  */
 export function syncTasksToMarkdown(db: DrizzleDb): void {
   // Workers must NOT write to active-tasks.md — the lead owns this file.
   // Writing from workers would cause conflict loops in the mesh sync.
   if (NODE_ROLE === "worker") return;
 
-  const allTasks = db
+  const current = db
     .select()
     .from(tasks)
     .orderBy(tasks.sortOrder, tasks.id)
-    .all();
-
-  // Filter out the live session task — it's synthetic
-  const parsed = allTasks
+    .all()
+    // The live session task is synthetic
     .filter((t) => t.id !== "__LIVE_SESSION__")
-    .map((t) => ({
-      id: t.id,
-      title: t.title,
-      status: t.status,
-      owner: t.owner || "",
-      successCriteria: t.successCriteria ? JSON.parse(t.successCriteria) : [],
-      artifacts: t.artifacts ? JSON.parse(t.artifacts) : [],
-      nextAction: t.nextAction || "",
-      scheduledDate: t.scheduledDate || null,
-      project: t.project || null,
-      type: t.type || null,
-      parentId: t.parentId || null,
-      startDate: t.startDate || null,
-      endDate: t.endDate || null,
-      color: t.color || null,
-      description: t.description || null,
-      needsApproval: !!t.needsApproval,
-      triggerKind: t.triggerKind || "none",
-      triggerAt: t.triggerAt || null,
-      triggerCron: t.triggerCron || null,
-      triggerTz: t.triggerTz || "America/Montreal",
-      isRecurring: !!t.isRecurring,
-      capacityClass: t.capacityClass || "normal",
-      autoPriority: t.autoPriority || 0,
-      // Mesh execution fields — MUST be preserved on DB→markdown round-trip
-      execution: t.execution || null,
-      meshTaskId: t.meshTaskId || null,
-      meshNode: t.meshNode || null,
-      metric: t.metric || null,
-      budgetMinutes: t.budgetMinutes || 30,
-      scope: t.scope ? JSON.parse(t.scope) : [],
-      // Collab routing fields
-      collaboration: t.collaboration ? JSON.parse(t.collaboration) : null,
-      preferredNodes: t.preferredNodes ? JSON.parse(t.preferredNodes) : [],
-      excludeNodes: t.excludeNodes ? JSON.parse(t.excludeNodes) : [],
-      clusterId: t.clusterId || null,
-      extra: parseExtra(t.extra),
-      updatedAt: t.updatedAt,
-    }));
-
-  const markdown = serializeTasksMarkdown(parsed);
+    .map(rowToParsed);
+  const after = new Map(current.map((t) => [t.id, fieldsOf(serializeTaskBlock(t))]));
+  const stored = loadBaseline(db);
 
   // P5-5: the mesh bridge and memory daemon write this file under the
   // kanban-io mkdir lock; MC used to write beside them unlocked (lost-update
   // race). Same lock dir, same protocol — refuse to write without it.
-  withKanbanLockSync(ACTIVE_TASKS_MD, () => {
-    // Atomic write: write to .tmp, then rename over original
-    const tmpPath = ACTIVE_TASKS_MD + ".tmp";
-    const dir = path.dirname(ACTIVE_TASKS_MD);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+  const file = activeTasksMd();
+  withKanbanLockSync(file, () => {
+    const exists = fs.existsSync(file);
+    const content = exists ? fs.readFileSync(file, "utf-8") : "";
+    const unseenExternalWrite = exists && file === ACTIVE_TASKS_MD && !isOwnMtime(fs.statSync(file).mtimeMs);
+    let next: string;
+    if (/^## Live Tasks/m.test(content)) {
+      const edited = applyTaskChanges(content, current, after, stored);
+      if (edited === null) return;
+      next = edited;
+    } else {
+      // No file (or no Live Tasks section to edit in place): write it whole.
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      next = serializeTasksMarkdown(current);
     }
-    fs.writeFileSync(tmpPath, markdown, "utf-8");
-    fs.renameSync(tmpPath, ACTIVE_TASKS_MD);
 
-    // Record mtime of our own write so we don't re-import it
-    const stat = fs.statSync(ACTIVE_TASKS_MD);
-    lastWriteMtime = stat.mtimeMs;
-    lastKnownMtime = stat.mtimeMs;
+    // Atomic write: write to .tmp, then rename over original
+    const tmpPath = file + ".tmp";
+    fs.writeFileSync(tmpPath, next, "utf-8");
+    fs.renameSync(tmpPath, file);
+
+    // Our own write is not re-imported — unless it carried another writer's
+    // edits MC has not imported yet: then the next read must import them.
+    if (file !== ACTIVE_TASKS_MD) return;
+    const mtime = fs.statSync(file).mtimeMs;
+    lastWriteMtime = unseenExternalWrite ? 0 : mtime;
+    lastKnownMtime = unseenExternalWrite ? 0 : mtime;
   });
+  saveBaseline(db, after);
+}
+
+function isOwnMtime(mtime: number): boolean {
+  return Math.abs(mtime - lastWriteMtime) < 50 || Math.abs(mtime - lastKnownMtime) < 50;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Surgical task-block edits                                          */
+/* ------------------------------------------------------------------ */
+
+/** Field key → its lines: the `  key:` line plus any `    - item` lines under it. */
+type FieldLines = Map<string, string[]>;
+
+export function fieldsOf(block: string): FieldLines {
+  const fields: FieldLines = new Map();
+  let open: string[] | null = null;
+  for (const line of block.split("\n").slice(1)) {
+    const key = line.match(/^  (\w[\w_]*):/)?.[1];
+    if (key) {
+      open = fields.has(key) ? null : [line];
+      if (open) fields.set(key, open);
+    } else if (open && /^    - /.test(line)) {
+      open.push(line);
+    } else {
+      open = null;
+    }
+  }
+  return fields;
+}
+
+function sameLines(a: string[] | undefined, b: string[] | undefined): boolean {
+  return (a ?? []).join("\n") === (b ?? []).join("\n");
+}
+
+/** One parsed `- task_id:` block in the file: [start, end) line range. */
+interface FileBlock { id: string; start: number; end: number }
+
+function taskBlocks(lines: string[], from: number): FileBlock[] {
+  const blocks: FileBlock[] = [];
+  for (let i = from; i < lines.length; i++) {
+    const id = lines[i].match(/^- task_id:\s*(.+)$/)?.[1]?.trim();
+    if (id === undefined) continue;
+    if (blocks.length > 0) blocks[blocks.length - 1].end = i;
+    blocks.push({ id, start: i, end: lines.length });
+  }
+  return blocks;
+}
+
+/** Replace, insert or drop one field's lines inside a block (without its trailing blank lines). */
+function setField(block: string[], key: string, value: string[] | undefined): void {
+  const at = block.findIndex((l, i) => i > 0 && l.startsWith(`  ${key}:`));
+  if (at >= 0) {
+    let end = at + 1;
+    while (end < block.length && /^    - /.test(block[end])) end++;
+    block.splice(at, end - at, ...(value ?? []));
+  } else if (value) {
+    const updatedAt = block.findIndex((l, i) => i > 0 && l.startsWith("  updated_at:"));
+    block.splice(updatedAt > 0 ? updatedAt : block.length, 0, ...value);
+  }
+}
+
+/** The file (which has a `## Live Tasks` section) with MC's changes applied, or null when there are none. */
+export function applyTaskChanges(
+  content: string,
+  current: ParsedTask[],
+  after: Map<string, FieldLines>,
+  stored: Map<string, FieldLines>,
+): string | null {
+  const lines = content.split("\n");
+  const live = lines.findIndex((l) => l.startsWith("## Live Tasks"));
+  const blocks = taskBlocks(lines, live + 1);
+  const fileFields = new Map<string, FieldLines>();
+  for (const b of blocks) {
+    if (!fileFields.has(b.id)) fileFields.set(b.id, fieldsOf(lines.slice(b.start, b.end).join("\n")));
+  }
+  // No stored base at all (first run with this table): the file stands in for
+  // it, which is the old full-rewrite behaviour, once.
+  const base = stored.size > 0 ? stored : fileFields;
+
+  const edits = new Map<string, Map<string, string[] | undefined>>();
+  const appended: ParsedTask[] = [];
+  for (const t of current) {
+    const now = after.get(t.id)!;
+    const before = base.get(t.id) ?? fileFields.get(t.id);
+    if (!before) {
+      if (!fileFields.has(t.id)) appended.push(t);
+      continue;
+    }
+    const changed = new Map<string, string[] | undefined>();
+    for (const key of new Set([...before.keys(), ...now.keys()])) {
+      if (!sameLines(before.get(key), now.get(key))) changed.set(key, now.get(key));
+    }
+    if (changed.size > 0) edits.set(t.id, changed);
+  }
+  const removed = new Set([...base.keys()].filter((id) => !after.has(id)));
+  if (edits.size === 0 && appended.length === 0 && ![...removed].some((id) => fileFields.has(id))) return null;
+
+  const out = lines.slice(0, live + 1);
+  let cursor = live + 1;
+  const done = new Set<string>();
+  for (const b of blocks) {
+    out.push(...lines.slice(cursor, b.start));
+    cursor = b.end;
+    if (removed.has(b.id)) continue;
+    const block = lines.slice(b.start, b.end);
+    const change = done.has(b.id) ? undefined : edits.get(b.id);
+    done.add(b.id);
+    if (change) {
+      let body = block.length;
+      while (body > 1 && block[body - 1].trim() === "") body--;
+      const head = block.slice(0, body);
+      for (const [key, value] of change) setField(head, key, value);
+      out.push(...head, ...block.slice(body));
+    } else {
+      out.push(...block);
+    }
+  }
+  out.push(...lines.slice(cursor));
+
+  let text = out.join("\n");
+  if (appended.length > 0) {
+    text = text.replace(/\n*$/, "\n\n") + appended.map(serializeTaskBlock).join("\n\n") + "\n";
+  }
+  return text;
+}
+
+function loadBaseline(db: DrizzleDb): Map<string, FieldLines> {
+  const base = new Map<string, FieldLines>();
+  for (const row of db.select().from(taskSyncBase).all()) {
+    try {
+      base.set(row.id, new Map(Object.entries(JSON.parse(row.fields) as Record<string, string[]>)));
+    } catch { /* unreadable row: treated as no base for that task */ }
+  }
+  return base;
+}
+
+function saveBaseline(db: DrizzleDb, base: Map<string, FieldLines>): void {
+  db.transaction((tx) => {
+    tx.delete(taskSyncBase).run();
+    for (const [id, fields] of base) {
+      tx.insert(taskSyncBase).values({ id, fields: JSON.stringify(Object.fromEntries(fields)) }).run();
+    }
+  });
+}
+
+type TaskRow = typeof tasks.$inferSelect;
+
+function rowToParsed(t: TaskRow): ParsedTask {
+  return {
+    id: t.id,
+    title: t.title,
+    status: t.status,
+    // null, as the parser yields for a blank owner / `n/a`: an imported row then
+    // serializes to exactly its file lines, so only real edits count as changes.
+    owner: t.owner || null,
+    successCriteria: t.successCriteria ? JSON.parse(t.successCriteria) : [],
+    artifacts: t.artifacts ? JSON.parse(t.artifacts) : [],
+    nextAction: t.nextAction || null,
+    scheduledDate: t.scheduledDate || null,
+    project: t.project || null,
+    type: t.type || null,
+    parentId: t.parentId || null,
+    startDate: t.startDate || null,
+    endDate: t.endDate || null,
+    color: t.color || null,
+    description: t.description || null,
+    needsApproval: !!t.needsApproval,
+    triggerKind: t.triggerKind || "none",
+    triggerAt: t.triggerAt || null,
+    triggerCron: t.triggerCron || null,
+    triggerTz: t.triggerTz || "America/Montreal",
+    isRecurring: !!t.isRecurring,
+    capacityClass: t.capacityClass || "normal",
+    autoPriority: t.autoPriority || 0,
+    // Mesh execution fields — MUST be preserved on DB→markdown round-trip
+    execution: t.execution || null,
+    meshTaskId: t.meshTaskId || null,
+    meshNode: t.meshNode || null,
+    metric: t.metric || null,
+    budgetMinutes: t.budgetMinutes || 30,
+    scope: t.scope ? JSON.parse(t.scope) : [],
+    // Collab routing fields
+    collaboration: t.collaboration ? JSON.parse(t.collaboration) : null,
+    preferredNodes: t.preferredNodes ? JSON.parse(t.preferredNodes) : [],
+    excludeNodes: t.excludeNodes ? JSON.parse(t.excludeNodes) : [],
+    clusterId: t.clusterId || null,
+    extra: parseExtra(t.extra),
+    updatedAt: t.updatedAt,
+  };
 }
 
 function parseExtra(raw: string | null): Record<string, string> {
@@ -307,6 +484,47 @@ function parseExtra(raw: string | null): Record<string, string> {
     return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, string>) : {};
   } catch {
     return {};
+  }
+}
+
+// Same rule as lib/kanban-io.js: a lock older than this was left by a writer
+// killed while holding it, and is removed (accepting that two writers may race it).
+const STALE_LOCK_MS = 30000;
+// Shared with lib/kanban-io.js: `<file>.lk/owner` holds {pid, node, acquiredAt}
+// so a stale or contended lock names its holder.
+const LOCK_OWNER = "owner";
+
+function recordLockOwner(lockDir: string): void {
+  try {
+    fs.writeFileSync(path.join(lockDir, LOCK_OWNER),
+      JSON.stringify({ pid: process.pid, node: NODE_ID, acquiredAt: Date.now() }));
+  } catch { /* attribution only; the mkdir is the lock */ }
+}
+
+function describeLockOwner(lockDir: string): string {
+  try {
+    const { pid, node, acquiredAt } = JSON.parse(fs.readFileSync(path.join(lockDir, LOCK_OWNER), "utf-8"));
+    return `pid ${pid} on ${node} since ${new Date(acquiredAt).toISOString()}`;
+  } catch {
+    return "holder unrecorded";
+  }
+}
+
+function removeLock(lockDir: string): void {
+  try { fs.unlinkSync(path.join(lockDir, LOCK_OWNER)); } catch { /* none recorded */ }
+  fs.rmdirSync(lockDir);
+}
+
+function breakStaleLock(lockDir: string): boolean {
+  try {
+    const age = Date.now() - fs.statSync(lockDir).mtimeMs;
+    if (age <= STALE_LOCK_MS) return false;
+    const holder = describeLockOwner(lockDir);
+    removeLock(lockDir);
+    console.warn(`[sync] removed stale lock ${lockDir} (${Math.round(age / 1000)}s old; ${holder})`);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -322,8 +540,10 @@ export function withKanbanLockSync<T>(filePath: string, fn: () => T, maxWaitMs =
   while (Date.now() - start < maxWaitMs) {
     try {
       fs.mkdirSync(lockDir);
+      recordLockOwner(lockDir);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+        if (breakStaleLock(lockDir)) continue;
         Atomics.wait(sleep, 0, 0, 50);
         continue;
       }
@@ -332,8 +552,8 @@ export function withKanbanLockSync<T>(filePath: string, fn: () => T, maxWaitMs =
     try {
       return fn();
     } finally {
-      try { fs.rmdirSync(lockDir); } catch { /* already released */ }
+      try { removeLock(lockDir); } catch { /* already released */ }
     }
   }
-  throw new Error(`active-tasks.md lock acquisition timeout after ${maxWaitMs}ms — another writer holds ${lockDir}`);
+  throw new Error(`active-tasks.md lock acquisition timeout after ${maxWaitMs}ms — another writer holds ${lockDir} (${describeLockOwner(lockDir)})`);
 }

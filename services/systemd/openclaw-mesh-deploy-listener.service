@@ -17,7 +17,7 @@ Environment=OPENCLAW_NODE_ROLE=${OPENCLAW_NODE_ROLE}
 Environment=OPENCLAW_REPO_DIR=${OPENCLAW_REPO_DIR}
 Environment=OPENCLAW_REQUIRE_SIGNED_DEPLOY=1
 Environment=OPENCLAW_DEPLOY_TRUSTED_KEYS=${OPENCLAW_DEPLOY_TRUSTED_KEYS}
-Environment=TZ=America/Montreal
+Environment=TZ=${OPENCLAW_TIMEZONE}
 WorkingDirectory=${OPENCLAW_REPO_DIR}
 StandardOutput=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-mesh-deploy-listener.log
 StandardError=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-mesh-deploy-listener.err

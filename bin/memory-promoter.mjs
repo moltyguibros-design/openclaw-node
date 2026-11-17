@@ -7,24 +7,25 @@
  * against the promotion policy, and publishes eligible events to the shared
  * cluster (OPENCLAW_SHARED) with provenance tracking.
  *
- * Includes exponential backoff on shared cluster errors and health-check
- * integration. Single-node operation works fully without the cluster.
+ * Includes exponential backoff on shared cluster errors. queue_for_review
+ * events are counted and logged only; review-queue persistence is deferred
+ * (legacy step 4.2). Single-node operation works fully without the cluster.
  *
  * Usage:
  *   node bin/memory-promoter.mjs
  *
  * Environment:
  *   NATS_URL           — NATS server URL (default: nats://localhost:4222)
- *   OPENCLAW_NODE_ID   — Node identifier (default: os.hostname())
- *   PROMOTION_POLICY   — Path to policy YAML (default: config/promotion-policy.yaml)
+ *   OPENCLAW_NODE_ID   — Node identifier (default: lib/node-id resolveNodeId())
+ *   PROMOTION_POLICY   — Path to policy YAML (default: ~/.openclaw/config/promotion-policy.yaml, else the repo copy)
  */
 
 import crypto from 'node:crypto';
-import os from 'node:os';
+import { resolveNodeId } from '../lib/node-id.js';
 import { createRequire } from 'node:module';
 import { loadPromotionPolicy } from '../lib/promotion-policy.mjs';
-import { ensureSharedStream, SHARED_STREAM_NAME } from '../lib/shared-event-stream.mjs';
-import { canonicalNodeId, localEventStreamName } from '../lib/local-event-log.mjs';
+import { ensureSharedStream } from '../lib/shared-event-stream.mjs';
+import { canonicalNodeId, localEventStreamName, localEventSubjectPrefix } from '../lib/local-event-log.mjs';
 
 const _require = createRequire(import.meta.url);
 const { natsConnectOpts } = _require('../lib/nats-resolve.js');
@@ -248,9 +249,11 @@ export async function createPromoter(nc, nodeId, opts = {}) {
   try {
     await jsm.consumers.info(streamName, consumerName);
   } catch {
+    // A legacy stream on `local.>` also holds other nodes' events.
     await jsm.consumers.add(streamName, {
       durable_name: consumerName,
       deliver_policy: 'new',
+      filter_subject: `${localEventSubjectPrefix(canonicalId)}.>`,
     });
   }
 
@@ -346,10 +349,10 @@ export async function createPromoter(nc, nodeId, opts = {}) {
 async function main() {
   const { connect } = _require('nats');
 
-  const nodeId = process.env.OPENCLAW_NODE_ID || os.hostname();
+  const nodeId = resolveNodeId();
 
   const nc = await connect(natsConnectOpts({ servers: process.env.NATS_URL }));
-  console.log(`[promoter] connected to ${natsUrl} as node ${nodeId}`);
+  console.log(`[promoter] connected to ${nc.getServer()} as node ${nodeId}`);
 
   const promoter = await createPromoter(nc, nodeId, {
     policyPath: process.env.PROMOTION_POLICY || undefined,

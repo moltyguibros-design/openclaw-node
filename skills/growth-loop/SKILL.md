@@ -74,7 +74,7 @@ Every growth activity — TikTok slideshows, blog SEO, email sequences, product 
 
 **Output:** `campaign/research.md` — competitive landscape, engagement patterns, identified gaps, initial hypotheses.
 
-**Tools to consider:** `tavily-search`, `web-search`, `deep-research`, `twitter` (timeline reads), platform-specific APIs.
+**Tools to consider:** `tavily-search`, `web-search`, `gemini-deep-research`, `twitter` (timeline reads), platform-specific APIs.
 
 ### Phase 2: GENERATE
 

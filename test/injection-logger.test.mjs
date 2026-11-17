@@ -20,7 +20,7 @@ process.env.INJECTION_LOG_PATH = LOG_PATH;
 process.env.INJECTION_LOG_ROTATE_BYTES = '1024';  // small for rotation tests
 delete process.env.INJECTION_LOG_DISABLED;
 
-const { logInjection, flushInjectionLog, channelStats, promptExcerpt, getLogPath } = await import('../lib/injection-logger.mjs');
+const { logInjection, flushInjectionLog, channelStats, promptExcerpt, scrubSecrets, getLogPath } = await import('../lib/injection-logger.mjs');
 
 after(() => {
   rmSync(TMP, { recursive: true, force: true });
@@ -75,6 +75,13 @@ describe('promptExcerpt', () => {
 
   it('stringifies non-string input', () => {
     assert.equal(promptExcerpt(42), '42');
+  });
+});
+
+describe('scrubSecrets', () => {
+  it('redacts key-shaped text and keeps the rest, newlines included', () => {
+    assert.equal(scrubSecrets('export OPENAI_KEY=sk-' + 'A'.repeat(40)), 'export OPENAI_KEY=[REDACTED]');
+    assert.equal(scrubSecrets('line1\nline2'), 'line1\nline2');
   });
 });
 

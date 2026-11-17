@@ -8,22 +8,24 @@
  * Usage:
  *   node bin/memory-maintenance.mjs [--force] [--dry-run] [--verbose]
  *
- * Exit codes: 0 = clean, 1 = warnings, 2 = critical failure
+ * Exit codes: 0 = ran (warnings, if any, are in .tmp/maintenance-results and the
+ * log), 2 = fatal error. Warnings used to exit 1, which the memory daemon's
+ * runSubprocess logs as "memory-maintenance failed" on every routine warning.
  */
 
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import path from 'path';
-import { execFile, spawn } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import http from 'http';
 import os from 'os';
-import { mcAuthHeaders } from '../lib/mc-session-token.mjs';
+import { mcAuthHeaders, DEFAULT_MC_TOKEN_PATH } from '../lib/mc-session-token.mjs';
+import { resolveNodeId } from '../lib/node-id.js';
 
 const execFileAsync = promisify(execFile);
-const MC_TOKEN_PATH = process.env.MC_SESSION_TOKEN_PATH
-  || process.env.OPENCLAW_MC_TOKEN_FILE
-  || path.join(os.homedir(), '.openclaw', 'config', 'mc-session-token');
+// OPENCLAW_MC_TOKEN_FILE is test-only (lib/mc-session-token.mjs).
+const MC_TOKEN_PATH = process.env.OPENCLAW_MC_TOKEN_FILE || DEFAULT_MC_TOKEN_PATH;
 const MC_LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const MC_URL = process.env.MC_URL || 'http://127.0.0.1:3000';
 const mcOrigin = new URL(MC_URL);
@@ -92,7 +94,8 @@ const PREDICTIONS = path.join(MEMORY_DIR, 'predictions.md');
 const ACTIVE_TASKS = path.join(MEMORY_DIR, 'active-tasks.md');
 const MEMORY_MD = path.join(WORKSPACE, 'MEMORY.md');
 const ERRORS_MD = path.join(WORKSPACE, '.learnings/ERRORS.md');
-const COMPANION = path.join(WORKSPACE, '.companion-state.md');
+// The memory daemon's per-node state file (memory-daemon.mjs updateCompanionState).
+const COMPANION = path.join(WORKSPACE, `.daemon-state-${resolveNodeId()}.md`);
 const CLAWVAULT = path.join(WORKSPACE, 'bin/clawvault-local');
 
 const MAINTENANCE_INTERVAL = 1800000; // 30 min in ms
@@ -101,11 +104,16 @@ const MAINTENANCE_INTERVAL = 1800000; // 30 min in ms
 const args = process.argv.slice(2);
 const FORCE = args.includes('--force');
 const DRY_RUN = args.includes('--dry-run');
+// The checks read this; runMaintenance sets it from opts.dryRun.
+let dryRun = DRY_RUN;
 const VERBOSE = args.includes('--verbose');
+const TIMEZONE = process.env.OPENCLAW_TIMEZONE || process.env.TZ || 'America/Montreal';
+// Wall-time stamps carry their IANA zone as a suffix: "2026-02-21 09:15 America/Montreal".
+const ZONE_SUFFIX = /\s+[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)+\s*$/;
 
 function timestamp() {
   return new Date().toLocaleString('en-CA', {
-    timeZone: 'America/Montreal',
+    timeZone: TIMEZONE,
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
   });
@@ -129,12 +137,12 @@ function daysBetween(d1, d2) {
 }
 
 function today() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Montreal' });
+  return new Date().toLocaleDateString('en-CA', { timeZone: TIMEZONE });
 }
 
 function parseDate(str) {
-  // Handle YYYY-MM-DD, ISO, or "America/Montreal" suffix
-  const cleaned = str.trim().replace(/\s*America\/Montreal\s*$/, '').trim();
+  // Handle YYYY-MM-DD, ISO, or an IANA zone suffix
+  const cleaned = str.trim().replace(ZONE_SUFFIX, '').trim();
   const d = new Date(cleaned);
   return isNaN(d.getTime()) ? null : d;
 }
@@ -152,22 +160,26 @@ function checkPredictions() {
   if (!fs.existsSync(PREDICTIONS)) return;
 
   let content = readFileOr(PREDICTIONS);
-  const predRegex = /^### (\d{4}-\d{2}-\d{2})/gm;
   const now = new Date();
   let expiredCount = 0;
-  let match;
 
-  while ((match = predRegex.exec(content)) !== null) {
-    const predDate = new Date(match[1] + 'T00:00:00');
-    if (isNaN(predDate.getTime())) continue;
-    if (daysBetween(predDate, now) > 7) expiredCount++;
-  }
+  // Per prediction block: a global replace filled the empty Outcome of fresh predictions too
+  // whenever any one prediction was older than 7 days.
+  const blocks = content.split(/^(?=### )/m).map((block) => {
+    const m = block.match(/^### (\d{4}-\d{2}-\d{2})/);
+    if (!m) return block;
+    const predDate = new Date(m[1] + 'T00:00:00');
+    if (isNaN(predDate.getTime()) || daysBetween(predDate, now) <= 7) return block;
+    if (!/^\*\*Outcome:\*\*$/m.test(block)) return block;
+    expiredCount++;
+    return block
+      .replace(/^\*\*Outcome:\*\*$/m, '**Outcome:** [expired — no signal observed within review window]')
+      .replace(/^\*\*Delta:\*\*$/m, '**Delta:** [not measured — prediction expired]')
+      .replace(/^\*\*Lesson:\*\*$/m, '**Lesson:** [auto-expired by memory-maintenance; no observable outcome within 7-day window]');
+  });
 
-  if (expiredCount > 0 && !DRY_RUN) {
-    content = content
-      .replace(/^\*\*Outcome:\*\*$/gm, '**Outcome:** [expired — no signal observed within review window]')
-      .replace(/^\*\*Delta:\*\*$/gm, '**Delta:** [not measured — prediction expired]')
-      .replace(/^\*\*Lesson:\*\*$/gm, '**Lesson:** [auto-expired by memory-maintenance; no observable outcome within 7-day window]')
+  if (expiredCount > 0 && !dryRun) {
+    content = blocks.join('')
       .replace(/\*\*Last calibration review:\*\*.*/g, `**Last calibration review:** ${today()}`);
     fs.writeFileSync(PREDICTIONS, content);
     log(`Expired ${expiredCount} predictions`);
@@ -230,7 +242,7 @@ function checkCompanionFreshness() {
   const stat = fs.statSync(COMPANION);
   const ageHours = Math.floor((Date.now() - stat.mtimeMs) / 3600000);
   if (ageHours > 2) {
-    report(`COMPANION_STALE: .companion-state.md is ${ageHours} hours old`);
+    report(`COMPANION_STALE: ${path.basename(COMPANION)} is ${ageHours} hours old`);
     // Don't increment warnings — daemon handles this
   }
 }
@@ -240,7 +252,7 @@ async function checkClawVault() {
   if (!fs.existsSync(CLAWVAULT)) return;
   log('Running ClawVault checkpoint...');
 
-  if (DRY_RUN) { log('DRY RUN: Would run clawvault checkpoint'); return; }
+  if (dryRun) { log('DRY RUN: Would run clawvault checkpoint'); return; }
 
   const taskContent = readFileOr(ACTIVE_TASKS);
   let workingOn = 'maintenance cycle';
@@ -248,15 +260,11 @@ async function checkClawVault() {
   if (runningMatch) workingOn = runningMatch[1];
 
   try {
-    const proc = spawn(CLAWVAULT, ['checkpoint', '--working-on', workingOn, '--focus', 'memory-maintenance'], {
+    await execFileAsync(CLAWVAULT, ['checkpoint', '--working-on', workingOn, '--focus', 'memory-maintenance'], {
       cwd: WORKSPACE,
-      stdio: 'ignore',
-      detached: true,
+      timeout: 10000,
     });
-    proc.unref();
-    // Kill after 10s
-    setTimeout(() => { try { proc.kill(); } catch {} }, 10000);
-    log('ClawVault checkpoint dispatched (background, 10s timeout)');
+    log('ClawVault checkpoint done');
     actions++;
   } catch (e) {
     log(`ClawVault checkpoint failed: ${e.message}`);
@@ -301,7 +309,7 @@ async function checkMissionControl() {
   const db = healthResult.body?.db || {};
   log(`MC healthy: tasks=${db.taskCount} obs=${db.obsEventCount} db=${db.dbSizeMB}MB wal=${db.walSizeMB}MB`);
 
-  if (DRY_RUN) { log('DRY RUN: Would sync Mission Control'); return; }
+  if (dryRun) { log('DRY RUN: Would sync Mission Control'); return; }
 
   try {
     const r = await postAuthenticatedMutation(`${MC_URL}/api/memory/sync`, { timeoutMs: 5000 });
@@ -320,7 +328,7 @@ function checkTimestamps() {
 
   const content = readFileOr(ACTIVE_TASKS);
   const updatedLines = content.split('\n').filter(l => l.includes('updated_at:'));
-  const nonIso = updatedLines.filter(l => !l.includes('T') && !l.includes('America/Montreal'));
+  const nonIso = updatedLines.filter(l => !l.includes('T') && !ZONE_SUFFIX.test(l));
 
   if (nonIso.length > 0) {
     report(`TIMESTAMP_WARN: ${nonIso.length} tasks have non-standard timestamp format`);
@@ -360,7 +368,7 @@ async function checkConsolidation() {
   });
 
   if (!isUp) { log('MC not running — skipping consolidation'); return; }
-  if (DRY_RUN) { log('DRY RUN: Would run consolidation'); return; }
+  if (dryRun) { log('DRY RUN: Would run consolidation'); return; }
 
   try {
     const r = await postAuthenticatedMutation(`${MC_URL}/api/memory/consolidate`, { timeoutMs: 10000 });
@@ -389,7 +397,7 @@ async function checkGraphHealth() {
 
   try {
     // Seed known entities if graph is empty
-    if (!DRY_RUN) {
+    if (!dryRun) {
       const r = await postAuthenticatedMutation(`${MC_URL}/api/memory/graph`, { timeoutMs: 5000 });
       log(`Graph seed: HTTP ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
     }
@@ -417,11 +425,22 @@ async function checkGraphHealth() {
   }
 }
 
+// obsidian-sync writes shared-lessons.md under its own config's vaultPath.
+function obsidianVaultPath() {
+  const configPath = process.env.OPENCLAW_OBSIDIAN_SYNC_CONFIG
+    || path.join(os.homedir(), '.openclaw/config/obsidian-sync.json');
+  try {
+    const { vaultPath } = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    if (vaultPath) return vaultPath;
+  } catch {}
+  return 'projects/arcane-vault';
+}
+
 // 13. Cross-soul lesson propagation health
 function checkSharedLessons() {
   log('Checking shared lessons propagation...');
 
-  const vaultPath = path.join(WORKSPACE, 'projects/arcane-vault/00-meta/shared-lessons.md');
+  const vaultPath = path.join(WORKSPACE, obsidianVaultPath(), '00-meta', 'shared-lessons.md');
   if (!fs.existsSync(vaultPath)) {
     log('shared-lessons.md not found — will be created on next obsidian-sync');
     report('SHARED_LESSONS: not yet generated (pending first obsidian-sync)');
@@ -447,7 +466,7 @@ function checkSharedLessons() {
 
 export async function runMaintenance(opts = {}) {
   const force = opts.force ?? FORCE;
-  const dryRun = opts.dryRun ?? DRY_RUN;
+  dryRun = opts.dryRun ?? DRY_RUN;
 
   fs.mkdirSync(path.join(WORKSPACE, '.tmp'), { recursive: true });
 
@@ -497,7 +516,7 @@ if (isMain) {
         console.log(`\nDone: ${r.actions} actions, ${r.warnings} warnings`);
         if (r.results.length) console.log(r.results.join('\n'));
       }
-      process.exit(r.warnings > 0 ? 1 : 0);
+      process.exit(0);
     })
     .catch(e => {
       console.error(`Fatal: ${e.message}`);

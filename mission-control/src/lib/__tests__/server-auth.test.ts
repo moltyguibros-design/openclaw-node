@@ -16,6 +16,14 @@ function input(overrides: Partial<Parameters<typeof decide>[0]> = {}) {
 }
 
 describe("decide", () => {
+  it("denies everything when the session token is empty — an empty credential never matches", () => {
+    const deny = { action: "deny", status: 401, reason: "token" };
+    expect(decide(input({ pathname: "/api/status", cookieToken: "" }), "")).toEqual(deny);
+    expect(decide(input({ pathname: "/api/status", bearerToken: "" }), "")).toEqual(deny);
+    expect(decide(input({ cookieToken: "" }), "")).toEqual(deny);
+    expect(decide(input({ queryToken: "" }), "")).toEqual(deny);
+  });
+
   it("denies 403 host for any non-loopback Host", () => {
     for (const host of ["evil.com", "evil.com:3000", "192.168.1.10:3000", null]) {
       expect(decide(input({ host, cookieToken: TOKEN }), TOKEN)).toEqual({

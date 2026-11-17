@@ -15,11 +15,12 @@ OpenClaw uses workspace-based prompt injection combined with event-driven hooks.
 │   ├── SOUL.md                 # Behavioral guidelines and personality
 │   ├── TOOLS.md                # Tool capabilities and gotchas
 │   ├── MEMORY.md               # Long-term memory (main session only)
-│   └── memory/                 # Daily memory files
-│       └── YYYY-MM-DD.md
-├── skills/                      # Installed skills
-│   └── <skill-name>/
-│       └── SKILL.md
+│   ├── .learnings/lessons.md   # This skill's log, read at boot
+│   ├── memory/                 # Daily memory files
+│   │   └── YYYY-MM-DD.md
+│   └── skills/                 # Installed skills
+│       └── <skill-name>/
+│           └── SKILL.md
 └── hooks/                       # Custom hooks
     └── <hook-name>/
         ├── HOOK.md
@@ -30,15 +31,7 @@ OpenClaw uses workspace-based prompt injection combined with event-driven hooks.
 
 ### 1. Install the Skill
 
-```bash
-clawdhub install self-improving-agent
-```
-
-Or copy manually:
-
-```bash
-cp -r self-improving-agent ~/.openclaw/skills/
-```
+The OpenClaw installer ships it to `~/.openclaw/workspace/skills/self-improving-agent/`.
 
 ### 2. Install the Hook (Optional)
 
@@ -54,19 +47,11 @@ Enable the hook:
 openclaw hooks enable self-improvement
 ```
 
-### 3. Create Learning Files
+### 3. Learning File
 
-Create the `.learnings/` directory in your workspace:
-
-```bash
-mkdir -p ~/.openclaw/workspace/.learnings
-```
-
-Or in the skill directory:
-
-```bash
-mkdir -p ~/.openclaw/skills/self-improving-agent/.learnings
-```
+The installer creates `~/.openclaw/workspace/.learnings/lessons.md`, which boot reads. Append one
+line per lesson, `[tag] Lesson text (YYYY-MM-DD)`, and never start a second log (in the skill
+directory or elsewhere) next to it.
 
 ## Injected Prompt Files
 
@@ -104,7 +89,7 @@ Purpose: Behavioral guidelines and communication style.
 ## Error Handling
 - Admit mistakes promptly
 - Provide corrected information immediately
-- Log significant errors to learnings
+- Log significant errors to `.learnings/lessons.md` as `[error]` lines
 ```
 
 ### TOOLS.md
@@ -115,7 +100,7 @@ Purpose: Tool capabilities, integration gotchas, local configuration.
 # Tool Knowledge
 
 ## Self-Improvement Skill
-Log learnings to `.learnings/` for continuous improvement.
+Log learnings to `.learnings/lessons.md` for continuous improvement.
 
 ## Local Tools
 - Document tool-specific gotchas here
@@ -127,14 +112,14 @@ Log learnings to `.learnings/` for continuous improvement.
 
 ### Capturing Learnings
 
-1. **In-session**: Log to `.learnings/` as usual
+1. **In-session**: Append to `.learnings/lessons.md`
 2. **Cross-session**: Promote to workspace files
 
 ### Promotion Decision Tree
 
 ```
 Is the learning project-specific?
-├── Yes → Keep in .learnings/
+├── Yes → Keep in .learnings/lessons.md
 └── No → Is it behavioral/style-related?
     ├── Yes → Promote to SOUL.md
     └── No → Is it tool-related?
@@ -211,7 +196,7 @@ sessions_spawn(task="Research X and report back", label="research")
 | Tool call error | Log to TOOLS.md with tool name |
 | Session handoff confusion | Log to AGENTS.md with delegation pattern |
 | Model behavior surprise | Log to SOUL.md with expected vs actual |
-| Skill issue | Log to .learnings/ or report upstream |
+| Skill issue | Log to .learnings/lessons.md or report upstream |
 
 ## Verification
 
@@ -237,7 +222,7 @@ openclaw status
 
 ### Learnings not persisting
 
-1. Verify `.learnings/` directory exists
+1. Verify `.learnings/lessons.md` exists in the workspace
 2. Check file permissions
 3. Ensure workspace path is configured correctly
 

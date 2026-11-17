@@ -150,6 +150,24 @@ describe('spreadingActivation', () => {
     const map = new Map(result);
     assert.equal(map.get('B'), 0.7);
   });
+
+  it("fetches each node's edges once per call", () => {
+    const inner = makeGraph({ A: ['B'], B: ['C'], C: ['D'] });
+    const calls = new Map();
+    const graph = {
+      edgesFrom(nodeId) {
+        calls.set(nodeId, (calls.get(nodeId) ?? 0) + 1);
+        return inner.edgesFrom(nodeId);
+      },
+    };
+    const result = spreadingActivation({ A: 1.0 }, graph, {
+      steps: 3,
+      decay: 0.5,
+      threshold: 0.01,
+    });
+    assert.deepEqual(result, [['A', 1], ['B', 0.5], ['C', 0.25], ['D', 0.125]]);
+    for (const [nodeId, n] of calls) assert.equal(n, 1, `edgesFrom(${nodeId}) called ${n} times`);
+  });
 });
 
 describe('createGraphAdapter', () => {

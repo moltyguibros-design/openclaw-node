@@ -1,19 +1,16 @@
 ---
 name: mesh
 description: >
-  Multi-node mesh network for cross-machine file sharing, remote command execution,
-  screenshots, and visual verification. Two nodes: macOS (lead) and Ubuntu (worker).
-  Files dropped in ~/openclaw/shared/ auto-sync to all nodes via NATS.
-  Use when you need to: run commands on the other machine, take screenshots on either
-  node, share files between machines, verify visual output across nodes, or coordinate
-  work across the mesh.
-version: 1.0.0
+  Multi-node mesh over NATS: see which nodes are online and healthy, submit and
+  review tasks for the mesh task daemon, manage multi-step plans, trigger a signed
+  fleet deploy, and check mesh health. Use when you need to: see whether a node (or
+  the whole mesh) is healthy, hand work to a mesh worker, see or approve mesh tasks,
+  create or approve a plan, deploy the repo to every node, or check whether the
+  NATS bus and federation are healthy before delegating.
+version: 2.0.0
 user-invocable: true
 metadata:
   openclaw:
-    requires:
-      bins:
-        - mesh
     os:
       - macos
       - linux
@@ -21,164 +18,112 @@ metadata:
 
 # Mesh — Multi-Node Coordination
 
-You have access to a **two-node mesh network** connected via NATS over Tailscale.
+Nodes share one NATS bus. On it run the **mesh task daemon** (coordinator, on the lead),
+**mesh agents** (workers that claim and execute tasks) and a **deploy listener** on every node.
 
-## Nodes
+## The CLI
 
-| Node | Platform | Role | Tailscale IP |
-|------|----------|------|-------------|
-| macOS (this machine) | darwin | **Lead** — orchestrates, delegates | 100.65.201.114 |
-| Ubuntu | linux | **Worker** — executes, renders | 100.91.131.61 |
+There is no `mesh` on PATH. The CLI is `bin/mesh.js`, which install.sh and mesh deploy put in
+`~/openclaw/bin/`:
 
-## Shared Folder
-
-**`~/openclaw/shared/`** exists on both machines with identical contents.
-Files placed here by either node are automatically synced to the other within seconds via NATS.
-
-Use this folder for:
-- Sharing code, configs, markdown, images between nodes
-- Receiving screenshots from either node
-- Passing build artifacts, test results, or renders between machines
-- Any file that both nodes need access to
-
-Screenshots are saved to `~/openclaw/shared/captures/`.
-
-**The path is the same on both machines.** You can reference `~/openclaw/shared/whatever.png`
-and it resolves correctly on both nodes.
-
-## CLI — `mesh` command
-
-The `mesh` CLI is available in your PATH. Use it via bash:
-
-### Check mesh status
 ```bash
-mesh status
-```
-Returns: which nodes are online, memory, uptime, number of shared files.
-
-### Run a command on the Ubuntu node
-```bash
-mesh exec "ls -la /home/calos/projects/"
-mesh exec "docker ps"
-mesh exec "cat /etc/os-release"
-```
-Runs the command on the **remote** Ubuntu node and returns stdout/stderr.
-Timeout: 30 seconds. For long-running tasks, background them.
-
-### Take a screenshot on a specific node
-```bash
-mesh capture              # Screenshot this machine (macOS)
-mesh capture --node ubuntu  # Screenshot the Ubuntu node
-```
-Screenshots are saved to `~/openclaw/shared/captures/` and auto-synced.
-The command returns the file path.
-
-### Health check the mesh
-```bash
-mesh health              # Check this node only
-mesh health --all        # Check ALL nodes (local + remote)
-mesh health --json       # Machine-readable JSON output
-```
-Checks every service: Tailscale, NATS, MeshCentral, Mumble, OpenClaw agent,
-shared folder, mesh CLI, disk space, peer reachability.
-Returns per-service status: ok / degraded / down.
-
-### Self-repair the mesh
-```bash
-mesh repair              # Repair this node
-mesh repair --all        # Repair ALL nodes (local + remote)
-```
-Runs health check first, then for each failed service:
-- Restarts the systemd unit (Ubuntu) or LaunchDaemon (macOS)
-- Recreates missing directories and fixes permissions
-- Reconnects Tailscale if disconnected
-- Clears stale logs and PID files
-- Reports what it did and whether it worked
-
-Requires sudo. Safe to re-run (idempotent).
-
-### List shared files
-```bash
-mesh ls
-mesh ls captures/
+node ~/openclaw/bin/mesh.js help
 ```
 
-### Send a file to the shared folder
+Every example below writes `mesh` for `node ~/openclaw/bin/mesh.js`.
+
+### Nodes
+
+Every node runs `mesh-health-publisher`, which writes its health to the `MESH_NODE_HEALTH`
+KV every 15 seconds (entries expire after 2 minutes) — the same source Mission Control and
+fleet deploy read.
+
 ```bash
-mesh put /path/to/local/file.txt
-mesh put /path/to/image.png captures/
+mesh status                 # every node: ok / degraded / down, platform, role, memory, uptime, deployed sha
+mesh health                 # this node only
+mesh health --all           # every node in MESH_NODE_HEALTH (and this one)
+mesh health --json          # {"overall": ..., "nodes": [{"nodeId", "overall", "problems", "services", ...}]}
 ```
-Copies the file into `~/openclaw/shared/` (optionally into a subdirectory).
-It will auto-sync to the other node.
 
-### Broadcast a message to all nodes
+Per node: `down` — no health entry, or the last report is older than 60 seconds;
+`degraded` — a listed service is not `active` (services `not-found` on that node are
+ignored), or the disk is ≥ 90% full; `ok` — otherwise. `mesh health` exits 1 unless
+everything reported is `ok`; `problems` says what is wrong on that node.
+
+### Tasks
+
 ```bash
-mesh broadcast "Build starting — do not reboot"
+mesh submit task.yaml                 # submit a task YAML
+cat task.yaml | mesh submit           # from stdin
+mesh submit --id T-20260220-001       # a queued card from memory/active-tasks.md
+mesh tasks                            # list mesh tasks
+mesh tasks --status running           # filter by status
+mesh tasks review                     # tasks waiting for human review
+mesh tasks approve <task-id>          # approve a pending_review task
+mesh tasks reject <task-id> --reason "..."   # reject and re-queue
 ```
 
-## When to use this skill
+To run something on another node, submit it as a task: a worker claims it and reports back.
 
-- **"Run this on Linux"** -> `mesh exec "<command>"`
-- **"Check what the Ubuntu machine is showing"** -> `mesh capture --node ubuntu`
-- **"Share this file with the other node"** -> `mesh put <file>`
-- **"Is the other node online?"** -> `mesh status`
-- **"Take a screenshot"** -> `mesh capture`
-- **"Deploy to the Linux server"** -> `mesh exec` + `mesh put` for files
-- **"Verify the UI on both platforms"** -> `mesh capture` + `mesh capture --node ubuntu`
-- **"Is the mesh healthy?"** -> `mesh health --all`
-- **"Something's broken / not responding"** -> `mesh health --all` then `mesh repair --all`
-- **"Fix the mesh"** -> `mesh repair --all`
-- **Before delegating work to the remote node** -> `mesh health --all` first
-- **During heartbeat checks** -> `mesh health --json --all` for structured diagnostics
-- **When a remote exec fails or times out** -> `mesh health` then `mesh repair` then retry
-- Any cross-machine coordination
+### Plans
 
-## Autonomous maintenance pattern
+```bash
+mesh plan templates                                   # available templates
+mesh plan create --template <id> --context "<text>"   # [--parent-task <id>] [--set subtask.field=value]
+mesh plan list [--status <status>]
+mesh plan show <plan-id>                              # full plan with subtask tree
+mesh plan approve <plan-id>                           # approve and start executing
+mesh plan abort <plan-id> --reason "..."
+```
 
-When using the mesh in HEARTBEAT.md or cron jobs, follow this pattern:
+### Collab gates
 
-1. `mesh health --json --all` -- get structured status of entire mesh
-2. If overall != "ok", run `mesh repair --all`
-3. `mesh health --json --all` -- verify repair worked
-4. If still broken, log the failure to `~/openclaw/shared/mesh-incidents.log`
-   and alert the user
-5. Only proceed with delegated work if mesh is healthy
+```bash
+mesh collab gate approve <session-id>     # resume a circling session waiting at its gate (signed operator request)
+mesh collab gate reject <session-id>      # send it back for another sub-round
+```
 
-This ensures the mesh self-heals before attempting cross-node operations.
+### Deploy
+
+```bash
+mesh deploy                               # deploy the repo HEAD to every node
+mesh deploy --node ubuntu                 # one node (alias or node id)
+mesh deploy --component mesh-daemons      # one component
+mesh deploy --force                       # reinstall even when nothing changed
+```
+
+The trigger carries the repo's current sha and branch, read from `$OPENCLAW_REPO_DIR`
+(else `~/openclaw-node`, else `~/openclaw`). Each node's listener checks out that sha and
+reports to the `MESH_DEPLOY_RESULTS` store; the CLI waits about 15 s for answers.
+
+## Health
+
+```bash
+bin/node-acceptance.mjs --axis network --no-mutate      # NATS, JetStream, local event stream, pub/sub
+bin/node-acceptance.mjs --axis federation --no-mutate   # coordinator present, raft quorum (clustered nodes)
+node ~/openclaw/bin/openclaw-stack.mjs status           # which openclaw units are up on this node
+```
+
+`node-acceptance` exits 0 ACCEPTED, 1 REJECTED, 2 INCOMPLETE (a probe could not run), 3 error.
+`openclaw-stack status` exits 1 when any unit is DOWN. Both only read; neither restarts anything.
+The node-watch service keeps a live map at Mission Control's `/node-watch` page.
+
+Check health (`mesh health --all` and the probes above) before delegating work to the mesh. If
+a probe is REJECTED or a node is not `ok`, do the work locally or queue it, and tell the user
+what failed. Restarting services is the operator's call.
 
 ## Security model
 
-**Network isolation:** NATS listens on `0.0.0.0:4222` but is only reachable via Tailscale.
-Tailscale is the authentication layer — no device outside the tailnet can connect.
-There is no additional NATS auth (no tokens, no TLS) because the tailnet is the trust boundary.
+- Approve, reject and plan actions are signed with this node's identity key
+  (`~/.openclaw/identity.key`), and the task daemon refuses unsigned ones. Run them on the lead.
+- Deploy triggers are signed the same way; listeners accept only triggers signed by a key in
+  `OPENCLAW_DEPLOY_TRUSTED_KEYS` unless an operator disabled that check.
+- The bus itself uses the install's NATS auth (`~/.openclaw/config/nats-auth.conf`).
+- Task metrics and shell tasks go through the shared command filter (`lib/exec-safety.js`).
 
-**Exec audit log:** Every command run via `mesh exec` is logged to
-`~/openclaw/shared/mesh-audit.log` with timestamp, node ID, command, and exit code.
-This log auto-syncs to both nodes. Review it periodically.
+## Not available
 
-**Destructive command blocklist:** The CLI blocks known-destructive patterns before they
-reach the remote node:
-- `rm -rf`, `mkfs`, `dd of=`, `curl|sh`, `chmod 777 /`, fork bombs
-- If you need to run a blocked command, SSH into the node directly.
-
-**Path traversal protection:** The agent validates all incoming file sync paths stay within
-`~/openclaw/shared/`. Paths containing `../` that escape the shared directory are rejected
-and logged to the audit log.
-
-**Node discovery:** Use `mesh status` to discover online nodes dynamically.
-Do not rely on hardcoded Tailscale IPs — they may change if nodes rejoin the tailnet.
-
-## Anti-patterns — do NOT do these
-
-- **Don't use `mesh exec` for long-running daemons.** The 30s timeout will kill them. Use systemd/launchd on the target node instead.
-- **Don't sync files larger than 10MB via `mesh put`.** Use `scp` over Tailscale directly: `scp file calos@100.91.131.61:~/path/`
-- **Don't run `mesh repair --all` in a tight loop.** It needs time for services to stabilize. Use the autonomous maintenance pattern with backoff.
-- **Don't store secrets in `~/openclaw/shared/`.** It syncs to all nodes unencrypted over NATS. Use Tailscale's built-in file transfer for sensitive data.
-- **Don't assume the shared folder is instant.** Polling interval is 2 seconds. If you write a file and immediately read it on the other node, it may not be there yet. Wait or verify.
-
-## Important notes
-
-- The Ubuntu node runs headless most of the time. Screenshots may show a terminal or desktop depending on session state.
-- Commands on the remote node run as the `calos` user on Ubuntu.
-- Max file sync size is 10MB per file. For larger files, use `scp` over Tailscale directly.
-- The mesh agent runs as a systemd service (Ubuntu) and LaunchDaemon (macOS) — it survives reboots.
+Remote `exec`, screenshot `capture`, `broadcast`, `repair`, and the `~/openclaw/shared/` sync
+folder (`ls`, `put`) are gone. Their responder, `~/openclaw/agent.js`, was retired on 2026-10-02,
+and the repair script was never in this repo. Use a task for remote work, and `mesh status` /
+`mesh health` or the probes above for status.

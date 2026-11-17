@@ -1,0 +1,70 @@
+#!/usr/bin/env node
+/**
+ * mc-api — call Mission Control's /api with its session token.
+ *
+ * Usage:
+ *   mc-api <path>                       GET
+ *   mc-api <METHOD> <path> [body]       body: a JSON string, @file, or - (stdin)
+ *
+ *   mc-api /api/tasks
+ *   mc-api POST /api/memory/items '{"content":"..."}'
+ *   mc-api PATCH '/api/souls/x/evolution?eventId=e1' @review.json
+ *
+ * Every /api method needs the token MC writes to ~/.openclaw/config/mc-session-token
+ * (lib/mc-session-token.mjs). It goes in a header, never on argv, where ps shows it.
+ *
+ * Prints the response body. Exit codes: 0 = 2xx, 22 = HTTP error (401 = the
+ * token is missing or stale), 7 = Mission Control unreachable (down), 2 = usage.
+ * A bare `curl -s` exits 0 on a 401, which reads as neither "up" nor "down".
+ */
+
+const fs = require('node:fs');
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+
+const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
+const USAGE = 'usage: mc-api [GET|POST|PUT|PATCH|DELETE] <path> [json | @file | -]';
+
+function fail(code, msg) {
+  process.stderr.write(`mc-api: ${msg}\n`);
+  process.exit(code);
+}
+
+function readBody(arg) {
+  if (arg === undefined) return undefined;
+  if (arg === '-') return fs.readFileSync(0, 'utf8');
+  if (arg.startsWith('@')) return fs.readFileSync(arg.slice(1), 'utf8');
+  return arg;
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+  if (args.length === 0 || args[0] === '-h' || args[0] === '--help') fail(2, USAGE);
+  const method = METHODS.has(args[0].toUpperCase()) ? args.shift().toUpperCase() : 'GET';
+  const [rawPath, bodyArg] = args;
+  if (!rawPath) fail(2, USAGE);
+  const apiPath = rawPath.startsWith('/api/') ? rawPath : `/api/${rawPath.replace(/^\/+(api\/)?/, '')}`;
+  const body = readBody(bodyArg);
+
+  const tokenLib = path.join(__dirname, '..', 'lib', 'mc-session-token.mjs');
+  const { mcAuthHeaders, DEFAULT_MC_TOKEN_PATH } = await import(pathToFileURL(tokenLib).href);
+  const base = (process.env.OPENCLAW_MC_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+  const headers = { ...mcAuthHeaders() };
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+
+  let res;
+  try {
+    res = await fetch(base + apiPath, { method, headers, body });
+  } catch (err) {
+    fail(7, `Mission Control unreachable at ${base} (${err.cause?.code || err.message})`);
+  }
+  const text = await res.text();
+  process.stdout.write(text.endsWith('\n') || text === '' ? text : `${text}\n`);
+  if (!res.ok) {
+    const tokenFile = process.env.OPENCLAW_MC_TOKEN_FILE || DEFAULT_MC_TOKEN_PATH;
+    const hint = res.status === 401 ? ` — session token missing or stale (${tokenFile})` : '';
+    fail(22, `HTTP ${res.status} on ${method} ${apiPath}${hint}`);
+  }
+}
+
+main().catch(err => fail(1, err.message));

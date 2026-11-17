@@ -11,7 +11,7 @@ fi
 
 cd "$REPO_PATH"
 
-if [[ ! -d .git ]]; then
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
   echo "ERROR: $REPO_PATH is not a git repository"
   exit 1
 fi
@@ -19,23 +19,23 @@ fi
 echo "== Arcane pre-push check =="
 echo "Repo: $(pwd)"
 
-echo "\n[1/6] Branch"
+printf '\n[1/6] Branch\n'
 git rev-parse --abbrev-ref HEAD
 
-echo "\n[2/6] Remotes"
+printf '\n[2/6] Remotes\n'
 git remote -v || true
 
-echo "\n[3/6] Working tree summary"
+printf '\n[3/6] Working tree summary\n'
 git status --short
 
-echo "\n[4/6] Staged files"
+printf '\n[4/6] Staged files\n'
 git diff --cached --name-only || true
 
-echo "\n[5/6] Last commit"
+printf '\n[5/6] Last commit\n'
 git log -1 --oneline || true
 
-echo "\n[6/6] Full test command (manual confirmation required)"
+printf '\n[6/6] Full test command (manual confirmation required)\n'
 echo "$FULL_TEST_CMD"
 echo "Run it yourself now if not already green."
 
-echo "\nDone."
+printf '\nDone.\n'

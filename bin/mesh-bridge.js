@@ -20,13 +20,13 @@ const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-bridge');
 const fs = require('fs');
 const path = require('path');
-const { readTasks, updateTaskInPlace, isoTimestamp, ACTIVE_TASKS_PATH } = require('../lib/kanban-io');
+const { readTasks, updateTaskInPlace: updateTaskInPlaceAsync, appendTaskBlock, isoTimestamp, WORKSPACE, ACTIVE_TASKS_PATH } = require('../lib/kanban-io');
 
 const sc = StringCodec();
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
+const { subtaskReportForCard } = require('../lib/mesh-plans');
 const DISPATCH_INTERVAL = parseInt(process.env.BRIDGE_DISPATCH_INTERVAL || '10000'); // 10s
-const LOG_DIR = path.join(process.env.HOME, '.openclaw', 'workspace', 'memory', 'mesh-logs');
-const WORKSPACE = path.join(process.env.HOME, '.openclaw', 'workspace');
+const LOG_DIR = path.join(WORKSPACE, 'memory', 'mesh-logs');
 
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
@@ -57,6 +57,15 @@ const _logger = require('../lib/logger').createLogger('mesh-bridge');
 _logger.attachTracer(tracer);
 const { info: log, warn, error: logError, debug } = _logger;
 
+// kanban-io's updateTaskInPlace is async and rejects on a lock timeout or a card that
+// is no longer in active-tasks.md. Call sites here fire and forget, and on Node >=22
+// an unhandled rejection terminates the bridge, so failures are logged instead.
+function updateTaskInPlace(...args) {
+  return updateTaskInPlaceAsync(...args).catch((err) => {
+    logError(`kanban update failed: ${err.message}`);
+  });
+}
+
 // ── NATS Helpers ────────────────────────────────────
 
 async function natsRequest(subject, payload, timeoutMs = 10000) {
@@ -76,7 +85,7 @@ async function natsRequest(subject, payload, timeoutMs = 10000) {
 
 // ── Startup Reconciliation ──────────────────────────
 // On restart, recover state for any tasks that were in-flight when we crashed.
-// Scans kanban for status:running + owner:mesh-agent, checks daemon KV for
+// Scans kanban for execution:mesh cards in submitted/running, checks daemon KV for
 // actual state. Processes completed/failed results we missed, resumes tracking
 // for still-running tasks. Fixes #2 and #10 from the pipeline audit.
 
@@ -89,10 +98,10 @@ async function reconcile() {
     return;
   }
 
+  // A claimed card's owner is the claiming node id, not 'mesh'; the daemon lookup below decides.
   const inflight = tasks.filter(t =>
     t.execution === 'mesh' &&
-    (t.status === 'running' || t.status === 'submitted') &&
-    (t.owner === 'mesh-agent' || t.owner === 'mesh')
+    (t.status === 'running' || t.status === 'submitted')
   );
   if (inflight.length === 0) {
     log('RECONCILE: no orphaned mesh tasks found');
@@ -103,7 +112,13 @@ async function reconcile() {
 
   for (const task of inflight) {
     try {
-      const meshTask = await natsRequest('mesh.tasks.get', { task_id: task.task_id });
+      // The daemon refuses an unknown id ("Task <id> not found") and natsRequest throws
+      // on refusals; read that one refusal as "absent" so the branch below handles it
+      // instead of tracking a purged task forever (and stalling serial dispatch).
+      const meshTask = await natsRequest('mesh.tasks.get', { task_id: task.task_id }).catch((err) => {
+        if (err.message === `Task ${task.task_id} not found`) return null;
+        throw err;
+      });
 
       if (!meshTask) {
         // Task doesn't exist in daemon KV. Two possible causes:
@@ -172,14 +187,17 @@ function findDispatchable() {
   }
 
   const meshTasks = tasks.filter(t => t.execution === 'mesh');
-  const queued = meshTasks.filter(t => t.status === 'queued');
+  // A card with a trigger (a scheduled or recurring task) is due only once
+  // Mission Control's scheduler flips it to 'ready' at its trigger time;
+  // dispatching it from 'queued' ran a recurring task again on every completion.
+  const queued = meshTasks.filter(t => t.status === 'ready' || (t.status === 'queued' && t.trigger_kind === 'none'));
   const filtered = queued.filter(t => !dispatched.has(t.task_id));
   const candidates = filtered.sort((a, b) => (b.auto_priority || 0) - (a.auto_priority || 0));
 
   const candidate = candidates[0] || null;
   if (!candidate) {
     if (meshTasks.length > 0) {
-      debug(`findDispatchable: ${tasks.length} total, ${meshTasks.length} mesh, ${queued.length} queued, ${filtered.length} undispatched`);
+      debug(`findDispatchable: ${tasks.length} total, ${meshTasks.length} mesh, ${queued.length} due, ${filtered.length} undispatched`);
     } else {
       debug('findDispatchable: no candidates');
     }
@@ -235,7 +253,8 @@ function handleCollabEvent(eventType, taskId, data) {
   // Only process events for tasks we dispatched
   if (!dispatched.has(taskId)) return;
 
-  const session = data; // collab events include the session object
+  // Mission Control's operator interventions publish collab events with no session.
+  const session = data || {};
 
   switch (eventType) {
     case 'collab.created':
@@ -274,9 +293,9 @@ function handleCollabEvent(eventType, taskId, data) {
     }
 
     case 'collab.converged':
-      log(`COLLAB CONVERGED: ${taskId} after ${session.current_round} rounds`);
+      log(`COLLAB CONVERGED: ${taskId} after ${session.current_round ?? '?'} rounds`);
       updateTaskInPlace(ACTIVE_TASKS_PATH, taskId, {
-        next_action: `Converged after ${session.current_round} rounds. Collecting artifacts...`,
+        next_action: `Converged after ${session.current_round ?? '?'} rounds. Collecting artifacts...`,
         updated_at: isoTimestamp(),
       });
       break;
@@ -305,17 +324,6 @@ function handleCollabEvent(eventType, taskId, data) {
 
     // Circling Strategy events
     case 'collab.circling_step_started': {
-      if (!dispatched.has(taskId)) {
-        // Auto-track CLI-submitted circling tasks
-        try {
-          const tasks = readTasks(ACTIVE_TASKS_PATH);
-          if (tasks.find(t => t.task_id === taskId && t.execution === 'mesh')) {
-            dispatched.add(taskId);
-            lastHeartbeat.set(taskId, Date.now());
-            log(`CIRCLING AUTO-TRACK: ${taskId} (CLI-submitted)`);
-          } else { break; }
-        } catch { break; }
-      }
       const c = session.circling || {};
       const stepName = c.phase === 'init' ? 'Init'
         : c.phase === 'finalization' ? 'Finalization'
@@ -341,8 +349,9 @@ function handleCollabEvent(eventType, taskId, data) {
         const reason = blockedVotes.map(r => r.summary).filter(Boolean).join('; ').slice(0, 150);
         gateMsg = `[GATE] SR${cg.current_subround} blocked — ${reason || 'reviewer flagged concern'}`;
       } else {
-        gateMsg = `[GATE] SR${cg.current_subround} complete — review reconciliationDoc and approve/reject`;
+        gateMsg = `[GATE] SR${cg.current_subround} complete — review reconciliationDoc`;
       }
+      gateMsg += ` — mesh collab gate approve|reject ${session.session_id}`;
       log(`CIRCLING GATE: ${taskId} — SR${cg.current_subround} waiting for approval`);
       updateTaskInPlace(ACTIVE_TASKS_PATH, taskId, {
         status: 'waiting-user',
@@ -450,43 +459,78 @@ function handlePlanEvent(eventType, data) {
  * For local/soul/human delegation modes only — mesh subtasks use the existing mesh dispatch.
  */
 function materializeSubtask(plan, subtask) {
+  const mode = subtask.delegation?.mode || 'local';
+  const soulId = subtask.delegation?.soul_id || null;
+
+  const taskEntry = {
+    task_id: subtask.subtask_id,
+    title: subtask.title,
+    status: mode === 'human' ? 'blocked' : 'queued',
+    owner: mode === 'soul' ? 'Daedalus' : null,
+    soul_id: soulId,
+    success_criteria: subtask.success_criteria || [],
+    artifacts: [],
+    next_action: mode === 'human'
+      ? 'Needs Gui input'
+      : `Plan subtask (${mode}${soulId ? `: ${soulId}` : ''})`,
+    parent_id: plan.parent_task_id,
+    plan_id: plan.plan_id,
+    project: null, // inherited from parent via MC
+    description: `${subtask.description || ''}\n\n_Delegation: ${mode}${soulId ? ` → ${soulId}` : ''} | Plan: ${plan.plan_id} | Budget: ${subtask.budget_minutes}m_`,
+    updated_at: isoTimestamp(),
+  };
+
+  return appendTaskBlock(ACTIVE_TASKS_PATH, subtask.subtask_id, formatTaskYaml(taskEntry))
+    .then((added) => log(added
+      ? `  MATERIALIZED: ${subtask.subtask_id} → kanban (${mode})`
+      : `  SKIP: ${subtask.subtask_id} already in kanban`))
+    .catch((err) => log(`  ERROR materializing ${subtask.subtask_id}: ${err.message}`));
+}
+
+// ── Plan subtasks: Kanban → Mesh ────────────────────
+//
+// Nothing else reports a local, soul or human subtask: its card is the only
+// record of the work, so a plan holding one stayed executing forever. When
+// such a card (materializeSubtask stamps it with plan_id) reaches done or
+// cancelled, the bridge reports it with a signed mesh.plans.subtask.update, the
+// operator action the daemon requires, signed with this node's identity.
+
+const reportedSubtasks = new Set();
+let _operatorAuth = null;
+
+async function signOperatorRequest(payload) {
+  if (!_operatorAuth) _operatorAuth = await import('../lib/operator-auth.mjs');
+  return _operatorAuth.signOperatorRequest(payload);
+}
+
+async function reportPlanSubtasks() {
+  let tasks;
   try {
-    const tasks = readTasks(ACTIVE_TASKS_PATH);
-
-    // Check if already materialized
-    if (tasks.find(t => t.task_id === subtask.subtask_id)) {
-      log(`  SKIP: ${subtask.subtask_id} already in kanban`);
-      return;
+    tasks = readTasks(ACTIVE_TASKS_PATH);
+  } catch {
+    return;
+  }
+  for (const card of tasks) {
+    if (!card.plan_id || (card.status !== 'done' && card.status !== 'cancelled')) continue;
+    const key = `${card.plan_id}/${card.task_id}`;
+    if (reportedSubtasks.has(key)) continue;
+    try {
+      // After a restart the settled cards are still on the board; ask the daemon first.
+      const plan = await natsRequest('mesh.plans.get', { plan_id: card.plan_id });
+      const st = (plan?.subtasks || []).find(s => s.subtask_id === card.task_id);
+      const report = subtaskReportForCard(card, st);
+      if (report) {
+        await natsRequest('mesh.plans.subtask.update', await signOperatorRequest({
+          plan_id: card.plan_id,
+          subtask_id: card.task_id,
+          ...report,
+        }));
+        log(`PLAN SUBTASK REPORTED: ${key} → ${report.status}`);
+      }
+      reportedSubtasks.add(key);
+    } catch (err) {
+      log(`PLAN SUBTASK REPORT FAILED: ${key}: ${err.message} (retrying next poll)`);
     }
-
-    const mode = subtask.delegation?.mode || 'local';
-    const soulId = subtask.delegation?.soul_id || null;
-
-    const taskEntry = {
-      task_id: subtask.subtask_id,
-      title: subtask.title,
-      status: mode === 'human' ? 'blocked' : 'queued',
-      owner: mode === 'soul' ? 'Daedalus' : null,
-      soul_id: soulId,
-      success_criteria: subtask.success_criteria || [],
-      artifacts: [],
-      next_action: mode === 'human'
-        ? 'Needs Gui input'
-        : `Plan subtask (${mode}${soulId ? `: ${soulId}` : ''})`,
-      parent_id: plan.parent_task_id,
-      project: null, // inherited from parent via MC
-      description: `${subtask.description || ''}\n\n_Delegation: ${mode}${soulId ? ` → ${soulId}` : ''} | Plan: ${plan.plan_id} | Budget: ${subtask.budget_minutes}m_`,
-      updated_at: isoTimestamp(),
-    };
-
-    // Append to active-tasks.md
-    const content = fs.readFileSync(ACTIVE_TASKS_PATH, 'utf-8');
-    const yamlEntry = formatTaskYaml(taskEntry);
-    fs.writeFileSync(ACTIVE_TASKS_PATH, content + '\n' + yamlEntry);
-
-    log(`  MATERIALIZED: ${subtask.subtask_id} → kanban (${mode})`);
-  } catch (err) {
-    log(`  ERROR materializing ${subtask.subtask_id}: ${err.message}`);
   }
 }
 
@@ -507,14 +551,28 @@ function formatTaskYaml(task) {
     }
   }
   lines.push(`  artifacts:`);
-  if (task.next_action) lines.push(`  next_action: "${task.next_action.replace(/"/g, '\\"')}"`);
+  if (task.next_action) lines.push(`  next_action: ${task.next_action.replace(/\s*\r?\n\s*/g, ' ')}`);
   if (task.parent_id) lines.push(`  parent_id: ${task.parent_id}`);
-  if (task.description) lines.push(`  description: "${task.description.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`);
+  if (task.plan_id) lines.push(`  plan_id: ${task.plan_id}`);
+  if (task.description) lines.push(`  description: ${task.description.replace(/\r?\n/g, '\\n')}`);
   lines.push(`  updated_at: ${task.updated_at}`);
   return lines.join('\n');
 }
 
 // ── Results: Mesh → Kanban (event-driven) ───────────
+
+/**
+ * Route one mesh.events.> message. The daemon's payload.event is the bare name
+ * ('created', 'completed'); only the subject carries the plan./collab. prefix,
+ * so plan and collab events are told apart by subject (matching a 'plan.'
+ * event name dropped every real plan event and no subtask was materialized).
+ */
+function routeEvent(subject, payload) {
+  const type = subject.slice('mesh.events.'.length);
+  if (type.startsWith('plan.')) handlePlanEvent(type, payload.plan || payload);
+  else if (type.startsWith('collab.')) handleCollabEvent(type, payload.task_id, payload.session);
+  else handleEvent(type, payload.task_id, payload.task);
+}
 
 /**
  * Handle a mesh event. Called immediately when the daemon publishes to mesh.events.>
@@ -559,11 +617,6 @@ function handleEvent(eventType, taskId, meshTask) {
         lastHeartbeat.set(taskId, Date.now());
         return;
       default:
-        // Handle collab events
-        if (eventType.startsWith('collab.')) {
-          handleCollabEvent(eventType, taskId, meshTask);
-          return;
-        }
         // submitted, started — informational only
         log(`EVENT: ${eventType} ${taskId}`);
         return;
@@ -747,7 +800,7 @@ handleFailed = tracer.wrap('handleFailed', handleFailed, { tier: 1, category: 's
 handleCancelled = tracer.wrap('handleCancelled', handleCancelled, { tier: 1, category: 'state_transition' });
 handleCollabEvent = tracer.wrap('handleCollabEvent', handleCollabEvent, { tier: 1, category: 'state_transition' });
 handlePlanEvent = tracer.wrap('handlePlanEvent', handlePlanEvent, { tier: 1, category: 'state_transition' });
-materializeSubtask = tracer.wrap('materializeSubtask', materializeSubtask, { tier: 1, category: 'state_transition' });
+materializeSubtask = tracer.wrapAsync('materializeSubtask', materializeSubtask, { tier: 1, category: 'state_transition' });
 checkStaleness = tracer.wrap('checkStaleness', checkStaleness, { tier: 2 });
 writeLog = tracer.wrap('writeLog', writeLog, { tier: 3 });
 
@@ -795,19 +848,14 @@ async function main() {
 
   // Subscribe to ALL mesh events (wildcard)
   const sub = nc.subscribe('mesh.events.>');
+  await nc.flush();
   log('Subscribed to mesh.events.>');
 
   // Event listener (runs in background)
   (async () => {
     for await (const msg of sub) {
       try {
-        const payload = JSON.parse(sc.decode(msg.data));
-        // Route plan events separately (they use plan_id, not task_id)
-        if (payload.event && payload.event.startsWith('plan.')) {
-          handlePlanEvent(payload.event, payload.plan || payload);
-        } else {
-          handleEvent(payload.event, payload.task_id, payload.task);
-        }
+        routeEvent(msg.subject, JSON.parse(sc.decode(msg.data)));
       } catch (err) {
         log(`ERROR parsing event: ${err.message}`);
       }
@@ -832,6 +880,8 @@ async function main() {
   while (running) {
     debug(`Dispatch poll: dispatched=${dispatched.size}`);
     try {
+      await reportPlanSubtasks();
+
       // Only dispatch if no active tasks in the mesh from this bridge
       if (dispatched.size === 0) {
         const task = findDispatchable();

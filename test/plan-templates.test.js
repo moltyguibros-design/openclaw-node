@@ -39,6 +39,14 @@ describe('substituteVars', () => {
     assert.deepStrictEqual(result.scope, ['src/auth/']);
   });
 
+  it('keeps $ sequences literal and matches var keys exactly', () => {
+    assert.strictEqual(substituteVars('Fix: {{context}}', 'cost $& and $$5'), 'Fix: cost $& and $$5');
+    assert.strictEqual(
+      substituteVars('{{vars.a.b}} {{vars.aXb}}', 'c', { 'a.b': "x$'y" }),
+      "x$'y {{vars.aXb}}"
+    );
+  });
+
   it('leaves non-string values unchanged', () => {
     assert.strictEqual(substituteVars(42, 'ctx'), 42);
     assert.strictEqual(substituteVars(true, 'ctx'), true);

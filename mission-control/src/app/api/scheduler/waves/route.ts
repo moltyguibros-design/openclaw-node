@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq, and, or } from "drizzle-orm";
+import { eq, and, or, ne, isNull } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { tasks, dependencies } from "@/lib/db/schema";
 import { computeWaves } from "@/lib/scheduler";
@@ -18,6 +18,7 @@ export async function GET() {
     .where(
       and(
         eq(tasks.needsApproval, 0),
+        or(isNull(tasks.execution), ne(tasks.execution, "mesh")),
         or(
           eq(tasks.status, "ready"),
           and(eq(tasks.status, "queued"), eq(tasks.triggerKind, "none"))

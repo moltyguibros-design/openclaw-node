@@ -271,7 +271,7 @@ describe('schema v7 migration', () => {
     makeV6(dbPath);
 
     const s1 = createExtractionStore({ dbPath });
-    assert.equal(s1.db.pragma('user_version', { simple: true }), 7);
+    assert.equal(s1.db.pragma('user_version', { simple: true }), 8, 'v7, then v8 on top');
     for (const t of ['decisions_archived', 'mentions_archived', 'entity_aliases_archived']) {
       assert.ok(s1.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(t), `${t} created`);
     }
@@ -369,7 +369,7 @@ describe('schema v7 migration', () => {
       copy.close();
     }
     createExtractionStore({ dbPath }).close();
-    assert.equal(fs.readdirSync(dir).length, 1, 'a store already at v7 takes no other');
+    assert.equal(fs.readdirSync(dir).length, 1, 'a store already at the current version takes no other');
   });
 
   it('no backup, no migration: the store stays at its version', () => {
@@ -389,7 +389,7 @@ describe('schema v7 migration', () => {
 
     fs.rmSync(blocker);
     const s = createExtractionStore({ dbPath });
-    assert.equal(s.db.pragma('user_version', { simple: true }), 7, 'migrates once a backup can be taken');
+    assert.equal(s.db.pragma('user_version', { simple: true }), 8, 'migrates once a backup can be taken');
     s.close();
   });
 });
