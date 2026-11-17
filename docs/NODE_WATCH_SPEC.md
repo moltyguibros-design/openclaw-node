@@ -108,7 +108,8 @@ delegates to a `node-acceptance` probe · **applic.** = applicability gate (OFF 
 | Federation (cross-node) | identity-registry + shared stream | applic. (OFF if not deployed) |
 
 The mesh aggregate reads Discord's effective `HOME/.openclaw/openclaw.json`
-from the HOME observed in its loaded launchd environment. Strict
+from the HOME observed in its loaded launchd environment (on Linux, the
+`HOME=` its systemd unit sets). Strict
 `channels.discord.enabled=false`, loaded/not-running state and observed exit0
 are all required to report its optional OFF detail; healthy running peers can
 then make the aggregate WORKING. A disabled running tool, failure exit or another
@@ -141,7 +142,7 @@ service failure keeps BROKEN even when another service or policy is unobservable
 ### Node fabric
 | Element | Watch signal | Probe |
 |---|---|---|
-| Core launchd services | required labels have running PIDs; known duplicate NATS jobs absent in other domains | live |
+| Core services | required labels have running PIDs; known duplicate NATS jobs absent in other domains | live |
 | Deploy in sync | `diff -rq` repo lib ↔ workspace lib empty | live |
 | Identity + token + config | token `0600`, identity keypair present | live |
 
@@ -155,6 +156,17 @@ existing NATS installation does not guess its cohort. The watcher reports PID
 liveness and checks the four known
 NATS labels in `gui`, `user` and `system`; it does not prove binary, UID,
 config, store, JetStream health, or absence of unlisted/unmanaged processes.
+
+Service state comes from launchd on macOS and from systemd user units on Linux.
+For mesh services, core services, the gateway, the grappe coordinator and the
+`FED-L2-COORD` acceptance probe, a label `ai.openclaw.<name>` maps to
+`openclaw-<name>.service` and `systemctl --user show` is read into the same
+record the launchd graders take. A unit counts as loaded when it is enabled or
+currently started (an installed, disabled, inactive unit is not loaded);
+`inactive` is launchd's "not running" and `ExecMainCode`/`ExecMainStatus` give
+the last exit. On Linux, the cohort comes only from `nats-writer-cohort.json`,
+and the other known NATS labels must not be loaded as user units. Other
+platforms stay UNKNOWN.
 
 ---
 

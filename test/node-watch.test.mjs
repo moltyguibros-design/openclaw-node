@@ -9,7 +9,9 @@ import { fileURLToPath } from 'node:url';
 import {
   WATCH_TARGETS, runWatch, formatHtml, STATUS, watchTransitions, buildSourceMap,
   parseLaunchdPrint, gradeMeshServices, gradeRequiredServices, gradeGateway, probeCoreLaunchdServices, probeMeshServices,
+  probeGateway, probeCoordinator,
 } from '../lib/node-watch.mjs';
+import { parseSystemdShow } from '../lib/fed-probes.mjs';
 import { resolveNodeConfig } from '../lib/node-acceptance.mjs';
 import { createRuntimeContext } from '../lib/node-acceptance-probes.mjs';
 
@@ -219,6 +221,99 @@ describe('node-watch honesty invariants', () => {
     const verdict = await probeCoreLaunchdServices(ctx, { platform: 'darwin' });
     assert.equal(verdict.status, STATUS.UNKNOWN);
     assert.match(verdict.detail, /EACCES/);
+  });
+
+  describe('Linux systemd units', () => {
+    const unit = (over = {}) => Object.entries({
+      LoadState: 'loaded', UnitFileState: 'enabled', ActiveState: 'active', SubState: 'running',
+      MainPID: '4242', ExecMainCode: '0', ExecMainStatus: '0', Result: 'success',
+      Environment: 'HOME=/home/op PATH=/usr/bin', ...over,
+    }).map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
+    const RUNNING = unit();
+    const DEAD_OK = unit({ ActiveState: 'inactive', SubState: 'dead', MainPID: '0', ExecMainCode: '1' });
+    const FAILED = unit({ ActiveState: 'failed', SubState: 'failed', MainPID: '0', ExecMainCode: '1', ExecMainStatus: '1', Result: 'exit-code' });
+    const DISABLED = unit({ UnitFileState: 'disabled', ActiveState: 'inactive', SubState: 'dead', MainPID: '0' });
+    const NOT_FOUND = 'LoadState=not-found\nActiveState=inactive\nMainPID=0\n';
+    const systemdCtx = (units, over = {}) => {
+      const calls = [];
+      return { calls, ctx: makeCtx({
+        exec: async (bin, args) => {
+          assert.equal(bin, 'systemctl');
+          const name = args.at(-1);
+          calls.push(name);
+          return { code: 0, stdout: units[name] ?? NOT_FOUND, stderr: '' };
+        },
+        ...over,
+      }) };
+    };
+
+    it('maps systemctl show onto the launchd-shaped record', () => {
+      assert.deepEqual(parseSystemdShow({ code: 0, stdout: RUNNING }), {
+        observable: true, loaded: true, running: true, pid: 4242, state: 'running',
+        lastExitCode: null, exitKnown: true, terminatingSignal: false, home: '/home/op' });
+      const dead = parseSystemdShow({ code: 0, stdout: DEAD_OK });
+      assert.equal(dead.running, false);
+      assert.equal(dead.state, 'not running');
+      assert.equal(dead.lastExitCode, 0);
+      assert.equal(parseSystemdShow({ code: 0, stdout: FAILED }).state, 'failed/failed');
+      assert.equal(parseSystemdShow({ code: 0, stdout: unit({ ExecMainCode: '2', ActiveState: 'inactive', MainPID: '0' }) }).terminatingSignal, true);
+      assert.equal(parseSystemdShow({ code: 0, stdout: DISABLED }).loaded, false);
+      assert.equal(parseSystemdShow({ code: 0, stdout: NOT_FOUND }).loaded, false);
+      assert.equal(parseSystemdShow({ code: 1, stdout: '', stderr: 'Failed to connect to bus' }).observable, false);
+    });
+
+    it('mesh services grade openclaw-mesh-*.service units', async () => {
+      const units = Object.fromEntries(['agent', 'bridge', 'deploy-listener', 'health-publisher', 'task-daemon', 'tool-discord']
+        .map((name) => [`openclaw-mesh-${name}.service`, RUNNING]));
+      const { ctx, calls } = systemdCtx(units, { fsp: { readFile: async () => JSON.stringify({ channels: { discord: { enabled: true } } }) } });
+      const working = await probeMeshServices(ctx, { platform: 'linux' });
+      assert.equal(working.status, STATUS.WORKING);
+      assert.ok(calls.includes('openclaw-mesh-task-daemon.service'));
+      units['openclaw-mesh-bridge.service'] = FAILED;
+      const broken = await probeMeshServices(ctx, { platform: 'linux' });
+      assert.equal(broken.status, STATUS.BROKEN);
+      assert.match(broken.detail, /mesh-bridge/);
+      assert.equal((await probeMeshServices(ctx, { platform: 'freebsd' })).status, STATUS.UNKNOWN);
+    });
+
+    it('core services read the cohort and refuse a stray NATS unit', async () => {
+      const units = {
+        'openclaw-memory-daemon.service': RUNNING,
+        'openclaw-nats.service': RUNNING,
+        'openclaw-mission-control.service': RUNNING,
+      };
+      const { ctx } = systemdCtx(units, { fsp: {
+        lstat: async () => { throw new Error('the launchd handoff marker must not be read on Linux'); },
+        readFile: async () => JSON.stringify({ schema: 1, activeLabels: ['ai.openclaw.nats'] }),
+      } });
+      assert.equal((await probeCoreLaunchdServices(ctx, { platform: 'linux' })).status, STATUS.WORKING);
+      units['openclaw-nats-2.service'] = RUNNING;
+      const stray = await probeCoreLaunchdServices(ctx, { platform: 'linux' });
+      assert.equal(stray.status, STATUS.BROKEN);
+      assert.match(stray.detail, /nats-2/);
+      delete units['openclaw-nats-2.service'];
+      units['openclaw-mission-control.service'] = FAILED;
+      assert.equal((await probeCoreLaunchdServices(ctx, { platform: 'linux' })).status, STATUS.BROKEN);
+      units['openclaw-mission-control.service'] = DISABLED;
+      assert.match((await probeCoreLaunchdServices(ctx, { platform: 'linux' })).detail, /not loaded/);
+    });
+
+    it('gateway and coordinator grade their units instead of staying UNKNOWN', async () => {
+      const units = { 'openclaw-gateway.service': RUNNING, 'openclaw-mesh-task-daemon.service': RUNNING };
+      const { ctx } = systemdCtx(units, { fsp: {
+        readdir: async () => ['s.jsonl'], stat: async () => ({ mtimeMs: Date.now() }),
+      } });
+      assert.equal((await probeGateway(ctx, config, { platform: 'linux' })).status, STATUS.WORKING);
+      assert.equal((await probeCoordinator(ctx, { platform: 'linux' })).status, STATUS.WORKING);
+      units['openclaw-gateway.service'] = FAILED;
+      units['openclaw-mesh-task-daemon.service'] = FAILED;
+      assert.equal((await probeGateway(ctx, config, { platform: 'linux' })).status, STATUS.BROKEN);
+      assert.equal((await probeCoordinator(ctx, { platform: 'linux' })).status, STATUS.BROKEN);
+      delete units['openclaw-gateway.service'];
+      delete units['openclaw-mesh-task-daemon.service'];
+      assert.equal((await probeGateway(ctx, config, { platform: 'linux' })).status, STATUS.OFF);
+      assert.equal((await probeCoordinator(ctx, { platform: 'linux' })).status, STATUS.OFF);
+    });
   });
 
   it('an old gateway JSONL cannot earn WORKING even when the service has a PID', () => {
