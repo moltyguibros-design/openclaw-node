@@ -85,3 +85,41 @@ test('bin/mesh-join-token.js warns on stderr when the token would carry a loopba
   assert.doesNotMatch(r.stdout, /loopback/);
   fs.rmSync(home, { recursive: true, force: true });
 });
+
+function verifyCli(home, token) {
+  const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('OPENCLAW_'))), HOME: home };
+  return spawnSync(process.execPath, [path.join(ROOT, 'bin/mesh-join-token.js'), '--verify', token], { encoding: 'utf8', env });
+}
+
+test('mesh-join-token --verify accepts only a live token this lead signed', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-jt-'));
+  fs.mkdirSync(path.join(home, '.openclaw'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.openclaw', '.mesh-secret'), 'lead-key-material\n');
+  const payload = { v: CURRENT_VERSION, nats: 'nats://10.0.0.1:4222', role: 'worker', lead_node_id: 'lead-x', expires: Date.now() + 60_000 };
+
+  const good = verifyCli(home, encodeJoinToken(payload, 'lead-key-material').token);
+  assert.equal(good.status, 0, good.stderr);
+  assert.match(good.stdout, /VALID: v4 worker token for nats:\/\/10\.0\.0\.1:4222, issued by lead-x/);
+
+  const foreign = verifyCli(home, encodeJoinToken(payload, 'other-lead').token);
+  assert.equal(foreign.status, 1);
+  assert.match(foreign.stderr, /signature does not match/);
+
+  const expired = verifyCli(home, encodeJoinToken({ ...payload, expires: Date.now() - 1 }, 'lead-key-material').token);
+  assert.equal(expired.status, 1);
+  assert.match(expired.stderr, /INVALID: expired/);
+
+  const garbage = verifyCli(home, 'not-a-token');
+  assert.equal(garbage.status, 1);
+  assert.match(garbage.stderr, /base64url JSON/);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('mesh-join-token --verify on a node with no mesh secret refuses and creates none', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-jt-'));
+  const r = verifyCli(home, encodeJoinToken({ v: 4, nats: 'x', expires: Date.now() + 1000 }, 's').token);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /no mesh secret/);
+  assert.equal(fs.existsSync(path.join(home, '.openclaw', '.mesh-secret')), false);
+  fs.rmSync(home, { recursive: true, force: true });
+});

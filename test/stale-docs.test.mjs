@@ -28,8 +28,11 @@ test('the 2026-09-06 remediation plan says it is historical and what has landed'
   assert.match(head, /^\*\*Status:\*\* historical\. Phases 0–3 landed/m);
 });
 
-test('deploy tooling carries no dead status responder, mesh-deploy-v2 pointer or unused imports', () => {
-  assert.doesNotMatch(read('bin/mesh-deploy-listener.js'), /mesh\.deploy\.status/, 'nothing sends mesh.deploy.status');
+// The listener's mesh.deploy.status.<nodeId> responder stays: fleet-deploy --status
+// queries it (mesh-ops-nats#27), so mesh-ops-nats~2#21 removed only the leftovers.
+test('deploy tooling carries no mesh-deploy-v2 pointer or unused imports, and its status responder has a caller', () => {
+  assert.match(read('bin/mesh-deploy-listener.js'), /mesh\.deploy\.status\.\$\{NODE_ID\}/);
+  assert.match(read('bin/fleet-deploy.js'), /mesh\.deploy\.status\.\$\{nodeId\}/);
   const fleet = read('bin/fleet-deploy.js');
   assert.doesNotMatch(fleet, /mesh-deploy-v2/);
   assert.doesNotMatch(fleet, /require\('fs'\)/);

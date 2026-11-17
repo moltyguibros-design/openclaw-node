@@ -107,17 +107,43 @@ async function discoverNodes(nc) {
 
 // ── Fleet Status ─────────────────────────────────────────────────────────
 
+const STATUS_REPLY_MS = 3000;
+
+/**
+ * Ask one node's deploy listener for its live state (mesh.deploy.status.<nodeId>).
+ * Null when it does not answer in time, or its id cannot be a subject token.
+ */
+async function queryNodeStatus(nc, nodeId, timeoutMs = STATUS_REPLY_MS) {
+  if (typeof nodeId !== 'string' || !/^[A-Za-z0-9._-]+$/.test(nodeId)) return null;
+  try {
+    const msg = await nc.request(`mesh.deploy.status.${nodeId}`, sc.encode(''), { timeout: timeoutMs });
+    return JSON.parse(sc.decode(msg.data));
+  } catch {
+    return null;
+  }
+}
+
+// The branch a fleet deploy from here would send (triggerBranch), so nodes are measured
+// against what `fleet-deploy` would deploy rather than a hardcoded main.
+function statusBranch(repoDir) {
+  let branch;
+  try { branch = triggerBranch(repoDir); } catch { branch = process.env.OPENCLAW_DEPLOY_BRANCH || 'main'; }
+  if (!/^[a-zA-Z0-9._/-]+$/.test(branch)) throw new Error(`Unsafe branch name: ${branch}`);
+  return branch;
+}
+
 async function showStatus(nc) {
   header('Fleet Deploy Status');
 
   const nodes = await discoverNodes(nc);
+  const branch = statusBranch(REPO_DIR);
   const localSha = exec('git rev-parse --short HEAD', { cwd: REPO_DIR, ignoreError: true });
 
   // Fetch to see if remote is ahead
-  exec(`git fetch origin main`, { cwd: REPO_DIR, ignoreError: true });
-  const remoteSha = exec('git rev-parse --short origin/main', { cwd: REPO_DIR, ignoreError: true });
+  exec(`git fetch origin ${branch}`, { cwd: REPO_DIR, ignoreError: true });
+  const remoteSha = exec(`git rev-parse --short origin/${branch}`, { cwd: REPO_DIR, ignoreError: true });
 
-  console.log(`  Repo:     main @ ${remoteSha} ${localSha === remoteSha ? C.green('(pushed)') : C.yellow('(local: ' + localSha + ')')}`);
+  console.log(`  Repo:     ${branch} @ ${remoteSha || '?'} ${localSha === remoteSha ? C.green('(pushed)') : C.yellow('(local: ' + localSha + ')')}`);
   console.log(`  Nodes:    ${nodes.length} registered\n`);
 
   if (nodes.length === 0) {
@@ -125,20 +151,32 @@ async function showStatus(nc) {
     return;
   }
 
+  // The registry entry can be a minute old; a node's own answer is current.
+  const live = await Promise.all(nodes.map((node) => queryNodeStatus(nc, node.nodeId)));
+  const sameSha = (a, b) => !!a && !!b && (a.startsWith(b) || b.startsWith(a));
+
   // Table header
-  const pad = (s, n) => (s || '').slice(0, n).padEnd(n);
+  // Colour codes take no columns: slicing a coloured cell cut its label and its reset.
+  const pad = (s, n) => {
+    const text = s || '';
+    const shown = text.replace(/\x1b\[[0-9;]*m/g, '');
+    return shown === text ? text.slice(0, n).padEnd(n) : text + ' '.repeat(Math.max(0, n - shown.length));
+  };
   console.log(`  ${C.dim(pad('NODE', 22) + pad('ROLE', 10) + pad('VERSION', 10) + pad('STATUS', 10) + 'LAST SEEN')}`);
   console.log(`  ${C.dim('─'.repeat(70))}`);
 
-  for (const node of nodes) {
-    const version = node.deployVersion || '—';
-    const isCurrent = version === remoteSha;
+  nodes.forEach((node, i) => {
+    const reply = live[i];
+    const reported = reply ? reply.deployVersion : node.deployVersion;
+    const version = reported && reported !== 'unknown' ? reported : '—';
+    const isCurrent = sameSha(version, remoteSha);
     const isUs = node.nodeId === NODE_ID;
 
-    // Calculate staleness from lastSeen
     let lastSeen = '—';
-    let online = false;
-    if (node.lastSeen) {
+    let online = Boolean(reply);
+    if (reply) {
+      lastSeen = 'now (live)';
+    } else if (node.lastSeen) {
       const ageMs = Date.now() - new Date(node.lastSeen).getTime();
       const ageSec = Math.round(ageMs / 1000);
       online = ageSec < 120;
@@ -146,9 +184,11 @@ async function showStatus(nc) {
       else if (ageSec < 3600) lastSeen = `${Math.floor(ageSec / 60)}m ago`;
       else if (ageSec < 86400) lastSeen = `${Math.floor(ageSec / 3600)}h ago`;
       else lastSeen = `${Math.floor(ageSec / 86400)}d ago`;
+      lastSeen += ', no reply';
     }
 
     const status = !online ? C.red('OFFLINE')
+      : reply?.deploying ? C.cyan('DEPLOYING')
       : !isCurrent && version !== '—' ? C.yellow('BEHIND')
       : version === '—' ? C.dim('UNKNOWN')
       : C.green('current');
@@ -156,7 +196,7 @@ async function showStatus(nc) {
     const nameStr = isUs ? C.bold(node.nodeId) + C.dim(' (you)') : node.nodeId;
 
     console.log(`  ${pad(nameStr, 22)}${pad(node.role || '—', 10)}${pad(version, 10)}${pad(status, 10)}${lastSeen}`);
-  }
+  });
   console.log('');
 }
 
@@ -379,7 +419,7 @@ async function main() {
   }
 }
 
-module.exports = { fleetDeploy, showStatus, discoverNodes, triggerBranch };
+module.exports = { fleetDeploy, showStatus, discoverNodes, triggerBranch, queryNodeStatus, statusBranch };
 
 // Standalone mode
 if (require.main === module) {

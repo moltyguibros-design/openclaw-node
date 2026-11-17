@@ -12,6 +12,7 @@
  *
  * NATS subjects:
  *   mesh.deploy.trigger    — deploy command from lead
+ *   mesh.deploy.status.<nodeId> — per-node status query from `fleet-deploy --status` (request/reply)
  *
  * NATS KV buckets:
  *   MESH_DEPLOY_RESULTS    — write deploy result per node per SHA
@@ -615,6 +616,27 @@ async function main() {
         deployQueue.offer(trigger);
       } catch (err) {
         console.error(`[deploy-listener] Error handling trigger: ${err.message}`);
+      }
+    }
+  })();
+
+  // Per-node status query from `fleet-deploy --status` (request/reply).
+  const statusSub = nc.subscribe(`mesh.deploy.status.${NODE_ID}`);
+  (async () => {
+    for await (const msg of statusSub) {
+      let currentSha = 'unknown';
+      try {
+        currentSha = git('rev-parse', '--short', 'HEAD');
+      } catch (err) { console.warn(`[deploy-listener] read git HEAD: ${err.message}`); }
+
+      if (msg.reply) {
+        msg.respond(sc.encode(JSON.stringify({
+          nodeId: NODE_ID,
+          deployVersion: currentSha,
+          deploying,
+          repoDir: REPO_DIR,
+          platform: os.platform(),
+        })));
       }
     }
   })();
