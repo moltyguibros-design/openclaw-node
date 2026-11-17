@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
  * migrate-companion-state.mjs — One-time migration for daemon state file rename.
+ * Archived: nothing runs it; kept for a node that still carries the old file.
  *
  * Detects old `.companion-state.md` written by the daemon (identified by
  * `## Session Status` / `last_flush` markers) and renames it to
@@ -12,13 +13,13 @@
  *   - If the source exists but has no daemon markers, no-op (it's companion-bridge's file).
  *
  * Usage:
- *   node scripts/migrate-companion-state.mjs [--dry-run] [--verbose]
+ *   node scripts/archive/migrate-companion-state.mjs [--dry-run] [--verbose]
  */
 
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { resolveNodeId } from '../lib/node-id.js';
+import { resolveNodeId } from '../../lib/node-id.js';
 
 const WORKSPACE = process.env.OPENCLAW_WORKSPACE
   || path.join(os.homedir(), '.openclaw', 'workspace');

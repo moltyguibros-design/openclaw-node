@@ -1,5 +1,6 @@
-import { querySessionNoteData, generateSessionNote } from './lib/obsidian-session-notes.mjs';
-import { openStore } from './lib/sqlite-store.mjs';
+// Archived one-off: the runtime check for the Obsidian session-note step (redesign 4.3). Nothing runs it.
+import { querySessionNoteData, generateSessionNote } from '../../lib/obsidian-session-notes.mjs';
+import { openStore } from '../../lib/sqlite-store.mjs';
 import { readFileSync } from 'fs';
 import { homedir } from 'os';
 
