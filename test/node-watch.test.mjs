@@ -995,6 +995,79 @@ describe('mem.ingest configured-source parity', () => {
   });
 });
 
+describe('mem.ingest incremental transcript parse', () => {
+  it('parses only the appended bytes of a grown transcript and re-parses a rewritten one', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'node-watch-ingest-delta-'));
+    try {
+      const home = path.join(root, '.openclaw');
+      const source = path.join(root, 'transcripts');
+      await fs.mkdir(path.join(home, 'config'), { recursive: true });
+      await fs.mkdir(source);
+      await fs.writeFile(path.join(home, 'config', 'transcript-sources.json'), JSON.stringify({
+        sources: [{ name: 'test', path: source, format: 'claude-code', enabled: true }],
+      }));
+      const file = path.join(source, 'live.jsonl');
+      const base = Date.now() - 60_000;
+      const turn = (n) => JSON.stringify({ type: n % 2 ? 'user' : 'assistant', message: { content: `turn ${n}` },
+        timestamp: new Date(base + n).toISOString() });
+      await fs.writeFile(file, `${turn(1)}\n${turn(2)}\n`);
+      let archived = { count: 2, last: JSON.parse(turn(2)).timestamp };
+      const starts = [];
+      const ctx = makeCtx({
+        config: { ...config, home, stateDb: path.join(home, 'state.db') },
+        fsp: { ...fs, open: async (candidate, flags) => {
+          const handle = await fs.open(candidate, flags);
+          const createReadStream = handle.createReadStream.bind(handle);
+          handle.createReadStream = (opts) => { starts.push(opts?.start ?? 0); return createReadStream(opts); };
+          return handle;
+        } },
+        observeIngestLag: () => ({ overdue: [], lower: [] }),
+        queryDb: (_p, fn) => fn({ prepare: (sql) => ({ get: () => sql.includes('archived_session_id')
+          ? { archived_session_id: 'live', message_count: archived.count, end_time: archived.last, actual_count: archived.count }
+          : { n: archived.count } }) }),
+      });
+      const verdict = async () => (await target('mem.ingest').run(envFor(ctx))).status;
+      assert.equal(await verdict(), STATUS.WORKING);
+      assert.deepEqual(starts, [0]);
+
+      const grownFrom = (await fs.stat(file)).size;
+      await fs.appendFile(file, `${turn(3)}\n`);
+      archived = { count: 3, last: JSON.parse(turn(3)).timestamp };
+      starts.length = 0;
+      assert.equal(await verdict(), STATUS.WORKING);
+      assert.deepEqual(starts, [grownFrom], 'only the appended line is parsed');
+
+      // An unterminated final line counts exactly as a full parse would count it.
+      const partialFrom = (await fs.stat(file)).size;
+      await fs.appendFile(file, turn(4));
+      archived = { count: 4, last: JSON.parse(turn(4)).timestamp };
+      starts.length = 0;
+      assert.equal(await verdict(), STATUS.WORKING);
+      assert.deepEqual(starts, [partialFrom]);
+      await fs.appendFile(file, `\n${turn(5)}\n`);
+      archived = { count: 5, last: JSON.parse(turn(5)).timestamp };
+      starts.length = 0;
+      assert.equal(await verdict(), STATUS.WORKING);
+      assert.deepEqual(starts, [partialFrom], 'the uncommitted tail is re-read once it completes');
+
+      // Same inode, different prefix, larger size: the cached prefix is no longer valid.
+      await fs.writeFile(file, [7, 8, 9, 10, 11, 12].map(turn).join('\n') + '\n');
+      archived = { count: 6, last: JSON.parse(turn(12)).timestamp };
+      starts.length = 0;
+      assert.equal(await verdict(), STATUS.WORKING);
+      assert.deepEqual(starts, [0]);
+
+      await fs.writeFile(file, `${turn(1)}\n`);
+      archived = { count: 1, last: JSON.parse(turn(1)).timestamp };
+      starts.length = 0;
+      assert.equal(await verdict(), STATUS.WORKING);
+      assert.deepEqual(starts, [0], 'a shrunk transcript is re-parsed from the start');
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('node-watch CLI exit contract', () => {
   it('a bad flag exits 3 (harness error), not 1 (BROKEN)', () => {
     const r = spawnSync(process.execPath, [BIN, '--bogus'], { encoding: 'utf8' });
