@@ -46,6 +46,7 @@ function fakeNc(results) {
       w2: { nodeId: 'w2', role: 'worker', lastSeen: now },
     }),
     MESH_DEPLOY_RESULTS: memKv((k) => results[k.slice(k.lastIndexOf('-') + 1)]),
+    MESH_DEPLOY_LATEST: memKv({}),
   };
   return {
     publish() {},

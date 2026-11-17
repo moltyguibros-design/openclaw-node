@@ -16,6 +16,7 @@
  *
  * NATS KV buckets:
  *   MESH_DEPLOY_RESULTS    — write deploy result per node per SHA
+ *   MESH_DEPLOY_LATEST     — the signed `latest` catch-up marker (no TTL)
  *   MESH_NODES             — this node's registry entry (nodeId, role, platform,
  *                            deployVersion, lastSeen): created at startup,
  *                            updated after each successful deploy
@@ -49,9 +50,9 @@ const execFileAsync = promisify(execFile);
 
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
 const { openMeshKv } = require('../lib/mesh-kv');
+const { RESULTS_BUCKET, RESULTS_KV_OPTS, LATEST_BUCKET, openLatestKv, readLatestMarker } = require('../lib/deploy-latest-marker');
 const sc = StringCodec();
 
-const RESULTS_BUCKET = 'MESH_DEPLOY_RESULTS';
 const NODES_BUCKET = 'MESH_NODES';
 const NODE_REGISTRY_HEARTBEAT_MS = 60 * 1000;
 
@@ -446,13 +447,14 @@ async function registerNode(nodesKv, { readHead = true } = {}) {
  * On startup, check if we're behind the latest deployed version.
  * If another deploy happened while we were offline, catch up now.
  */
-async function checkAndCatchUp(resultsKv, nodesKv) {
+async function checkAndCatchUp(resultsKv, nodesKv, latestKv) {
   try {
-    // Read the latest deploy marker from the "latest" key
-    const latest = await resultsKv.get('latest');
-    if (!latest || !latest.value) return;
-
-    const marker = JSON.parse(sc.decode(latest.value));
+    const found = await readLatestMarker({ latestKv, resultsKv });
+    if (!found) {
+      console.warn(`[deploy-listener] Catch-up: no catch-up marker in ${LATEST_BUCKET} or ${RESULTS_BUCKET} — staying at the current tree`);
+      return;
+    }
+    const marker = found.marker;
 
     // C2: the marker steers a checkout + deploy exactly like a live trigger —
     // it gets the same signature+trust gate (no freshness: markers are state,
@@ -519,7 +521,8 @@ async function main() {
 
   // Get KV buckets
   const js = nc.jetstream();
-  const resultsKv = await openMeshKv(js, RESULTS_BUCKET, { history: 5, ttl: 7 * 24 * 60 * 60 * 1000 });
+  const resultsKv = await openMeshKv(js, RESULTS_BUCKET, RESULTS_KV_OPTS);
+  const latestKv = await openLatestKv(js);
   let nodesKv = null;
   try {
     nodesKv = await openMeshKv(js, NODES_BUCKET, { history: 1 }); // No TTL — node identity persists
@@ -532,7 +535,7 @@ async function main() {
   }
 
   // Check for missed deploys while we were offline
-  await checkAndCatchUp(resultsKv, nodesKv);
+  await checkAndCatchUp(resultsKv, nodesKv, latestKv);
 
   // Subscribe to deploy triggers
   const sub = nc.subscribe('mesh.deploy.trigger');
@@ -599,7 +602,7 @@ async function main() {
       console.log(`[deploy-listener] NATS: ${s.type}`);
       // On reconnect, check for missed deploys
       if (s.type === 'reconnect') {
-        await checkAndCatchUp(resultsKv, nodesKv);
+        await checkAndCatchUp(resultsKv, nodesKv, latestKv);
       }
     }
   })();
@@ -616,7 +619,7 @@ async function main() {
   console.log(`[deploy-listener] ═══ Ready ═══`);
 }
 
-module.exports = { shouldCatchUp, runDeploy, scheduleSelfRestart, upsertNodeRegistry };
+module.exports = { shouldCatchUp, runDeploy, scheduleSelfRestart, upsertNodeRegistry, checkAndCatchUp };
 
 if (require.main === module) {
   main().catch(err => {

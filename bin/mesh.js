@@ -31,6 +31,7 @@ const path = require('path');
 const os = require('os');
 const { natsConnectOpts } = require('../lib/nats-resolve');
 const { openMeshKv } = require('../lib/mesh-kv');
+const { RESULTS_BUCKET, RESULTS_KV_OPTS, openLatestKv, writeLatestMarker } = require('../lib/deploy-latest-marker');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-cli');
 const LOCAL_NODE = require('../lib/node-id').resolveNodeId();
@@ -449,8 +450,8 @@ async function cmdDeploy(args) {
   // an unsigned marker let anyone with KV write access steer catching-up nodes.
   try {
     const js = nc.jetstream();
-    const resultsKv = await openMeshKv(js, 'MESH_DEPLOY_RESULTS', { history: 5, ttl: 7 * 24 * 60 * 60 * 1000 }, { waitMs: 0 });
-    await resultsKv.put('latest', sc.encode(JSON.stringify(signedTrigger)));
+    const resultsKv = await openMeshKv(js, RESULTS_BUCKET, RESULTS_KV_OPTS, { waitMs: 0 });
+    await writeLatestMarker({ latestKv: await openLatestKv(js, { waitMs: 0 }), resultsKv }, signedTrigger);
   } catch (err) { console.warn(`[mesh] write deploy latest marker: ${err.message}`); }
 
   // Publish trigger
@@ -465,7 +466,7 @@ async function cmdDeploy(args) {
 
   try {
     const js = nc.jetstream();
-    const resultsKv = await openMeshKv(js, 'MESH_DEPLOY_RESULTS', {}, { waitMs: 0 });
+    const resultsKv = await openMeshKv(js, RESULTS_BUCKET, {}, { waitMs: 0 });
     // The fleet registry, not the alias table: aliases only ever named the two original VMs.
     const checkNodes = targetNodes.length > 0
       ? targetNodes

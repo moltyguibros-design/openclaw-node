@@ -21,11 +21,11 @@ const tracer = createTracer('fleet-deploy');
 
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
 const { openMeshKv } = require('../lib/mesh-kv');
+const { RESULTS_BUCKET, RESULTS_KV_OPTS, openLatestKv, writeLatestMarker } = require('../lib/deploy-latest-marker');
 const sc = StringCodec();
 const REPO_DIR = process.env.OPENCLAW_REPO_DIR || path.join(os.homedir(), 'openclaw');
 const NODE_ID = require('../lib/node-id').resolveNodeId();
 
-const RESULTS_BUCKET = 'MESH_DEPLOY_RESULTS';
 const NODES_BUCKET = 'MESH_NODES';
 const HEALTH_BUCKET = 'MESH_NODE_HEALTH';
 
@@ -216,7 +216,8 @@ async function fleetDeploy(nc, opts) {
 
   // Get the results KV bucket
   const js = nc.jetstream();
-  const resultsKv = await openMeshKv(js, RESULTS_BUCKET, { history: 5, ttl: 7 * 24 * 60 * 60 * 1000 }, { waitMs: 0 });
+  const resultsKv = await openMeshKv(js, RESULTS_BUCKET, RESULTS_KV_OPTS, { waitMs: 0 });
+  const latestKv = await openLatestKv(js, { waitMs: 0 });
 
   const trigger = {
     sha,
@@ -235,7 +236,7 @@ async function fleetDeploy(nc, opts) {
 
   // The "latest" catch-up marker carries the SAME signed trigger — an unsigned
   // marker let anyone with KV write access steer every catching-up node.
-  await resultsKv.put('latest', sc.encode(JSON.stringify(signedTrigger)));
+  await writeLatestMarker({ latestKv, resultsKv }, signedTrigger);
 
   console.log(`Publishing deploy trigger: sha=${sha} nodes=${(targetNodes || ['all']).join(',')}`);
   nc.publish('mesh.deploy.trigger', sc.encode(JSON.stringify(signedTrigger)));
