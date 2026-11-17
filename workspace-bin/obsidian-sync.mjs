@@ -27,6 +27,8 @@ const WORKSPACE = process.env.OPENCLAW_WORKSPACE || path.dirname(__dirname);
 const CONFIG_PATH = process.env.OPENCLAW_OBSIDIAN_SYNC_CONFIG
   || path.join(os.homedir(), '.openclaw/config/obsidian-sync.json');
 const SYNC_STATE_PATH = path.join(WORKSPACE, '.tmp/obsidian-sync-state.json');
+// Sync-state marker: the flattened notes written before `**` routes kept subdirectories are gone.
+const FLATTENED_CLEANUP_KEY = '__flattenedNotesRemoved';
 
 // ============================================================
 // CONFIG
@@ -250,6 +252,22 @@ function toKebabCase(filename) {
 }
 
 /**
+ * Under a `**` pattern, keep the path below the pattern's static prefix so
+ * same-named files in different subdirectories (ledger/observations/2026/01/05.md
+ * and .../2026/02/05.md) land on different notes. `legacyDest` is the flattened
+ * path earlier versions wrote, for the one-time cleanup in syncToObsidian.
+ */
+function placeUnder(destDir, relPath, pattern, fields) {
+  const filename = toKebabCase(path.basename(relPath));
+  const flat = path.join(destDir, filename);
+  if (!pattern.includes('**')) return { dest: flat, ...fields };
+  const staticLen = pattern.split('/').findIndex(seg => !isLiteralPattern(seg));
+  const subdir = path.posix.dirname(relPath.split('/').slice(staticLen).join('/'));
+  if (subdir === '.') return { dest: flat, ...fields };
+  return { dest: path.join(destDir, subdir, filename), legacyDest: flat, ...fields };
+}
+
+/**
  * Route a workspace-relative file path to its vault destination.
  * Returns { dest, domain, type: 'private'|'shared' } or null if excluded.
  */
@@ -263,27 +281,20 @@ export function routeFile(relPath, config) {
   // Check node-private routes first (more specific)
   for (const route of config.nodePrivateRoutes) {
     if (matchesGlob(relPath, route.pattern)) {
-      const destDir = route.dest.replace('{nodeId}', config.nodeId);
-      const filename = toKebabCase(path.basename(relPath));
-      return {
-        dest: path.join(destDir, filename),
+      return placeUnder(route.dest.replace('{nodeId}', config.nodeId), relPath, route.pattern, {
         domain: null,
         type: 'private',
-      };
+      });
     }
   }
 
   // Check shared routes
   for (const route of config.sharedRoutes) {
     if (matchesGlob(relPath, route.pattern)) {
-      const domainDir = route.domain;
-      const subfolder = route.subfolder || '';
-      const filename = toKebabCase(path.basename(relPath));
-      return {
-        dest: path.join(domainDir, subfolder, filename),
-        domain: domainDir.replace(/^\d+-/, ''), // strip number prefix for frontmatter
+      return placeUnder(path.join(route.domain, route.subfolder || ''), relPath, route.pattern, {
+        domain: route.domain.replace(/^\d+-/, ''), // strip number prefix for frontmatter
         type: 'shared',
-      };
+      });
     }
   }
 
@@ -653,6 +664,8 @@ export async function syncToObsidian(opts = {}) {
     }
   }
   let synced = 0, skipped = 0, errors = 0;
+  const currentDests = new Set();
+  const legacyDests = new Set();
 
   for (const { root, relPath, extra } of entries) {
     const absPath = path.join(root, relPath);
@@ -666,7 +679,14 @@ export async function syncToObsidian(opts = {}) {
       ? routeExtraFile(relPath, extra.routes || [], config.excludePatterns)
       : routeFile(relPath, config);
     if (!route) continue;
-    const stateKey = extra ? `${extra.root}:${relPath}` : relPath;
+    currentDests.add(route.dest);
+    let stateKey = extra ? `${extra.root}:${relPath}` : relPath;
+    if (route.legacyDest) {
+      // The dest in the key re-syncs sources whose hash was recorded under the flattened layout.
+      legacyDests.add(route.legacyDest);
+      delete newState[stateKey];
+      stateKey = `${relPath}=>${route.dest}`;
+    }
 
     // Check if file has changed since last sync
     let currentHash;
@@ -746,6 +766,19 @@ export async function syncToObsidian(opts = {}) {
       errors++;
       if (verbose) console.log(`  [failed] ${relPath} → ${route.dest}`);
     }
+  }
+
+  if (!dryRun && !syncState[FLATTENED_CLEANUP_KEY]) {
+    for (const legacy of legacyDests) {
+      if (currentDests.has(legacy)) continue;
+      try {
+        fs.rmSync(path.join(vaultRoot, legacy), { force: true });
+        if (verbose) console.log(`  [removed flattened] ${legacy}`);
+      } catch (e) {
+        if (verbose) console.log(`  [error] removing ${legacy}: ${e.message}`);
+      }
+    }
+    newState[FLATTENED_CLEANUP_KEY] = true;
   }
 
   // Save sync state
