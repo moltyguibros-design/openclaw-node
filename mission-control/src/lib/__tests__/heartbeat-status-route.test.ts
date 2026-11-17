@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -31,7 +31,24 @@ beforeAll(() => {
   process.env.OPENCLAW_LIB_DIR = LIB_DIR;
 });
 
+beforeEach(() => {
+  vi.restoreAllMocks();
+  for (const f of fs.readdirSync(sessions)) fs.rmSync(path.join(sessions, f));
+});
+
 afterAll(() => fs.rmSync(home, { recursive: true, force: true }));
+
+function writeSession(id: string, firstMessage: string, padLines: number) {
+  const file = path.join(sessions, `${id}.jsonl`);
+  const filler = JSON.stringify({ message: "x".repeat(1000) });
+  fs.writeFileSync(file, [JSON.stringify({ message: firstMessage }), ...Array(padLines).fill(filler)].join("\n") + "\n");
+  return file;
+}
+
+async function status() {
+  const { GET } = await import("@/app/api/settings/heartbeat/status/route");
+  return (await GET()).json();
+}
 
 test("the heartbeat status route answers from lib/heartbeat-detect.mjs", async () => {
   // Past the first 64KB the lib no longer reads, so the trigger must be up front.
@@ -41,9 +58,7 @@ test("the heartbeat status route answers from lib/heartbeat-detect.mjs", async (
   ];
   fs.writeFileSync(path.join(sessions, "hb-1.jsonl"), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
 
-  const { GET } = await import("@/app/api/settings/heartbeat/status/route");
-  const body = await (await GET()).json();
-  expect(body).toMatchObject({
+  expect(await status()).toMatchObject({
     isActive: true,
     sessionId: "hb-1",
     sessionType: "heartbeat",
@@ -52,4 +67,18 @@ test("the heartbeat status route answers from lib/heartbeat-detect.mjs", async (
 
   const route = fs.readFileSync(path.resolve(__dirname, "../../app/api/settings/heartbeat/status/route.ts"), "utf8");
   expect(route).not.toMatch(/HEARTBEAT_PATTERNS|readFileSync/);
+});
+
+// The detector only scans the first 15 lines but read the whole transcript
+// into memory on every call; it now reads a bounded head (64 KB).
+test("detects a heartbeat session without reading the whole transcript", async () => {
+  const file = writeSession("hb-2", "Read HEARTBEAT.md and follow it", 2000);
+  const readFileSync = vi.spyOn(fs, "readFileSync");
+  expect(await status()).toMatchObject({ isActive: true, sessionId: "hb-2", sessionType: "heartbeat" });
+  expect(readFileSync.mock.calls.filter(([p]) => p === file)).toEqual([]);
+});
+
+test("a recent non-heartbeat session reads as main", async () => {
+  writeSession("main-1", "fix the build", 20);
+  expect(await status()).toMatchObject({ isActive: false, sessionId: null, sessionType: "main" });
 });
