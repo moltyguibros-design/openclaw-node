@@ -239,7 +239,8 @@ describe('plan-tick conformance gate — fails closed when plan-lint never reach
     const bin = path.join(tmp, 'tickbin');
     fs.mkdirSync(bin);
     claudeLog = path.join(tmp, 'claude-invocations');
-    fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/bash\ncat >/dev/null\necho "$*" >> '${claudeLog}'\n`);
+    // Prints a line like any real agent run: a silent run that changes nothing is a failed run.
+    fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/bash\ncat >/dev/null\necho "$*" >> '${claudeLog}'\necho '{"type":"result"}'\n`);
     fs.chmodSync(path.join(bin, 'claude'), 0o755);
     const home = path.join(tmp, 'tickhome');
     fs.mkdirSync(home);
@@ -411,7 +412,7 @@ describe('plan-tick shares one repo lock and blames only its own silo for dirt',
     fs.mkdirSync(bin);
     const seen = path.join(tmp, `lockseen${n}`);
     fs.writeFileSync(path.join(bin, 'claude'),
-      `#!/bin/bash\ncat >/dev/null\ncat memory-plan/.tick.lock/plan > '${seen}'\n`);
+      `#!/bin/bash\ncat >/dev/null\ncat memory-plan/.tick.lock/plan > '${seen}'\necho '{"type":"result"}'\n`);
     fs.chmodSync(path.join(bin, 'claude'), 0o755);
     const home = path.join(tmp, `lockhome${n}`);
     fs.mkdirSync(home);
@@ -454,6 +455,149 @@ describe('plan-tick shares one repo lock and blames only its own silo for dirt',
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.equal(fs.readFileSync(f.seen, 'utf8'), 'pruns\n');
     assert.equal(fs.existsSync(path.join(f.root, 'memory-plan', '.tick.lock')), false);
+  });
+});
+
+describe('plan-tick counts failed agent runs and blocks after WORKPLAN_FAIL_LIMIT in a row', () => {
+  const GIT = 'git -c user.name=t -c user.email=t@t';
+  let n = 0;
+
+  function repo(id, { agent, env: extra = {} } = {}) {
+    const root = path.join(tmp, `failrepo${++n}`);
+    const plan = path.join(root, 'memory-plan', 'plans', id);
+    fs.mkdirSync(plan, { recursive: true });
+    fs.mkdirSync(path.join(root, 'workspace-bin'));
+    fs.copyFileSync(path.join(REPO, 'workspace-bin', 'plan-tick.sh'), path.join(root, 'workspace-bin', 'plan-tick.sh'));
+    fs.writeFileSync(path.join(root, 'workspace-bin', 'plan-lint.sh'),
+      '#!/bin/bash\necho "summary: 1 PASS · 0 WARN · 0 FAIL → CONFORMANT"\n');
+    fs.writeFileSync(path.join(plan, 'INVENTORY.md'), '| 1 | 1.1 | v1.1 | [ ] | open step |\n');
+    fs.writeFileSync(path.join(plan, 'VERSION'), 'v1.0\n');
+    fs.writeFileSync(path.join(plan, 'TICK_PROMPT.md'), 'tick\n');
+    fs.writeFileSync(path.join(root, '.gitignore'), 'memory-plan/plans/*/tick-logs/\n');
+    const sh = (cmd) => assert.equal(spawnSync('bash', ['-c', cmd], { cwd: root }).status, 0, cmd);
+    sh(`git init -q . && git add -A && ${GIT} commit -q -m seed`);
+    const bin = path.join(tmp, `failbin${n}`);
+    fs.mkdirSync(bin);
+    const setAgent = (body) => {
+      fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/bash\ncat >/dev/null\n${body}\n`);
+      fs.chmodSync(path.join(bin, 'claude'), 0o755);
+    };
+    if (agent !== undefined) setAgent(agent);
+    const home = path.join(tmp, `failhome${n}`);
+    fs.mkdirSync(home);
+    // Without a fake agent, PATH must not reach a real `claude` installed on this machine.
+    const basePath = process.env.PATH.split(path.delimiter)
+      .filter((d) => d && !fs.existsSync(path.join(d, 'claude'))).join(path.delimiter);
+    const env = { PATH: `${bin}${path.delimiter}${basePath}`, HOME: home, TMPDIR: tmp, WORKPLAN_CLOSE_CHECK: 'none', ...extra };
+    const tick = () => spawnSync('bash', [path.join(root, 'workspace-bin', 'plan-tick.sh'), id], { encoding: 'utf8', env, timeout: 60_000 });
+    const blockPath = path.join(plan, 'BLOCKED.md');
+    const failFile = path.join(plan, 'tick-logs', '.agent-failures');
+    return {
+      root, plan, tick, setAgent,
+      block: () => (fs.existsSync(blockPath) ? fs.readFileSync(blockPath, 'utf8') : null),
+      fails: () => (fs.existsSync(failFile) ? fs.readFileSync(failFile, 'utf8').trim() : null),
+      seedFails: (k) => { fs.mkdirSync(path.dirname(failFile), { recursive: true }); fs.writeFileSync(failFile, `${k}\n`); },
+    };
+  }
+
+  it('an agent that exits 1 fails the tick with exit 1, then blocks and exits 2 on the third in a row', () => {
+    const f = repo('fexit', { agent: 'echo "auth expired" >&2\nexit 1' });
+    for (const k of [1, 2]) {
+      const r = f.tick();
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      assert.match(r.stdout, new RegExp(`agent run failed \\(${k}/3 in a row\\): claude exited rc=1`));
+      assert.equal(f.fails(), String(k));
+      assert.equal(f.block(), null, 'blocked below the limit');
+    }
+    const r = f.tick();
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    const b = f.block();
+    assert.match(b, /^\*\*Trigger\*\*: agent CLI claude failed 3 runs in a row — last: exited rc=1$/m);
+    assert.match(b, /^- Last exit code: 1$/m);
+    assert.match(b, /^- Last log: .*\/tick-logs\/\d{8}-\d{6}\.log$/m);
+    assert.match(b, /^\*\*External action:\*\* sign the agent CLI `claude` in again .*quota.*, then delete this file to resume\.$/m);
+    assert.equal(f.fails(), null, 'the counter outlived the block it produced');
+    const again = f.tick();
+    assert.equal(again.status, 0, 'a blocked plan must short-circuit, not count');
+    assert.match(again.stdout, /skip: .*BLOCKED\.md present/);
+  });
+
+  it('WORKPLAN_FAIL_LIMIT sets N, and a good run resets the count', () => {
+    const f = repo('freset', { agent: 'exit 3', env: { WORKPLAN_FAIL_LIMIT: '2' } });
+    assert.equal(f.tick().status, 1);
+    assert.equal(f.fails(), '1');
+    f.setAgent('echo "{\\"type\\":\\"result\\"}"');
+    const ok = f.tick();
+    assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+    assert.equal(f.fails(), null, 'a good run did not reset the count');
+    f.setAgent('exit 3');
+    assert.equal(f.tick().status, 1);
+    const r = f.tick();
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(f.block(), /failed 2 runs in a row — last: exited rc=3/);
+  });
+
+  it('an agent that prints nothing and changes nothing is a failed run', () => {
+    const f = repo('fsilent', { agent: 'exit 0', env: { WORKPLAN_FAIL_LIMIT: '1' } });
+    const r = f.tick();
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(f.block(), /last: exited 0 with no output and changed nothing/);
+    assert.match(f.block(), /printed nothing and changed nothing/);
+  });
+
+  it('a silent exit-0 run that committed work is not a failure', () => {
+    const f = repo('fcommit', { agent: `${GIT} commit -q --allow-empty -m work` });
+    const r = f.tick();
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(f.fails(), null);
+  });
+
+  it('a hung agent is stopped at the wall-clock limit with its whole process group (rc=124)', () => {
+    const pidFile = path.join(tmp, 'hung-child.pid');
+    const f = repo('fhang', {
+      agent: `sleep 300 &\necho $! > '${pidFile}'\necho working\nwait`,
+      env: { WORKPLAN_TICK_TIMEOUT: '2', WORKPLAN_FAIL_LIMIT: '1' },
+    });
+    const t0 = Date.now();
+    const r = f.tick();
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.ok(Date.now() - t0 < 30_000, 'the limit did not stop the run');
+    assert.match(r.stdout, /agent claude exited rc=124/);
+    assert.match(f.block(), /last: ran past the 2s wall-clock limit and was stopped \(rc=124\)/);
+    const child = fs.readFileSync(pidFile, 'utf8').trim();
+    const st = spawnSync('ps', ['-o', 'stat=', '-p', child], { encoding: 'utf8' }).stdout.trim();
+    assert.ok(st === '' || st.startsWith('Z'), `the agent's child ${child} outlived the timeout (ps stat ${st})`);
+  });
+
+  it('WORKPLAN_TICK_TIMEOUT at or past the 3600 s lock reap falls back to the default', () => {
+    const f = repo('fcap', { agent: 'echo ok', env: { WORKPLAN_TICK_TIMEOUT: '3600' } });
+    const r = f.tick();
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /WORKPLAN_TICK_TIMEOUT=3600 must be 1\.\.3599 s — using 2700/);
+  });
+
+  it('an agent CLI that is not installed counts as a failed run (rc=127), not a FATAL loop', () => {
+    const f = repo('fmissing', { env: { WORKPLAN_FAIL_LIMIT: '1' } });
+    const r = f.tick();
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(f.block(), /last: could not be started \(rc=127\)/);
+    assert.match(f.block(), /not installed, not executable, or not on the PATH/);
+  });
+
+  it("a failing run that moved VERSION or wrote BLOCKED.md keeps the tick's own verdict", () => {
+    const f = repo('fverdict', { agent: "printf 'v1.1-pre\\n' > memory-plan/plans/fverdict/VERSION\nexit 1" });
+    f.seedFails(2);
+    const r = f.tick();
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(f.fails(), null, 'a run that moved VERSION was counted as a failure');
+    assert.equal(f.block(), null);
+
+    const g = repo('fown', { agent: "printf '**Trigger**: own reason\\n' > memory-plan/plans/fown/BLOCKED.md\nexit 1" });
+    g.seedFails(2);
+    const rb = g.tick();
+    assert.equal(rb.status, 2, rb.stdout + rb.stderr);
+    assert.equal(g.block(), '**Trigger**: own reason\n', "the wrapper overwrote the tick's own BLOCKED.md");
+    assert.equal(g.fails(), null);
   });
 });
 
