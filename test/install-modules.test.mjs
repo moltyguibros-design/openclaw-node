@@ -953,6 +953,22 @@ test('unit templates and the daemon installer render TZ from OPENCLAW_TIMEZONE',
   }
 });
 
+// daemon.json's timezone governed only the daily file name and the Phase 1
+// stamp; the log stamps and the children's TZ kept the unit's zone, and the
+// children read OPENCLAW_TIMEZONE first, so a TZ alone did not reach them.
+test('the memory daemon applies daemon.json timezone to its log stamps and its children', () => {
+  const daemon = readFileSync(join(ROOT, 'workspace-bin/memory-daemon.mjs'), 'utf8');
+  assert.match(daemon, /const config = loadConfig\(\);\n  timezone = config\.timezone;/);
+  const stamp = daemon.match(/function timestamp\(\) \{[\s\S]*?\n\}/)[0];
+  assert.match(stamp, /timeZone: timezone,/);
+  const spawnEnv = daemon.match(/function runSubprocess\([\s\S]*?stdio:/)[0];
+  assert.match(spawnEnv, /OPENCLAW_TIMEZONE: timezone,/);
+  assert.match(spawnEnv, /TZ: timezone,/);
+  for (const text of [daemon, readFileSync(join(ROOT, 'config/daemon.json.template'), 'utf8')]) {
+    assert.doesNotMatch(text, /obsidianVault/, 'a key nothing reads implies a setting that does nothing');
+  }
+});
+
 // install_rule compared the local copy with the NEW source on a version bump;
 // an unmodified copy always differs from a newer version, so shipped rule
 // updates never landed and every bump wrote .new with a false "modified" warning.

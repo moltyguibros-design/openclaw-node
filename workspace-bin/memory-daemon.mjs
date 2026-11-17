@@ -145,8 +145,10 @@ const WORKSPACE = PATHS.workspace || path.dirname(__dirname);
 const HOME = os.homedir();
 const CONFIG_PATH = PATHS.config;
 const TRANSCRIPT_REGISTRY = PATHS.transcriptSources;
-// The unit renders TZ from OPENCLAW_TIMEZONE; daemon.json's timezone overrides it for the daemon's own dates.
+// The unit renders TZ from OPENCLAW_TIMEZONE; daemon.json's timezone, once
+// loaded, governs the daemon's dates, its log stamps and its children's TZ.
 const TIMEZONE = process.env.OPENCLAW_TIMEZONE || process.env.TZ || 'America/Montreal';
+let timezone = TIMEZONE;
 
 function loadConfig() {
   const defaults = {
@@ -166,7 +168,6 @@ function loadConfig() {
     contextWindowTokens: 200000,     // active model's context window (override per LLM)
     memoryCharBudget: 2200,           // MEMORY.md character cap
     clawvaultBin: 'bin/clawvault-local',
-    obsidianVault: 'projects/arcane-vault',
   };
 
   if (fs.existsSync(CONFIG_PATH)) {
@@ -206,7 +207,7 @@ function ensureDirs() {
 
 function timestamp() {
   return new Date().toLocaleString('en-CA', {
-    timeZone: TIMEZONE,
+    timeZone: timezone,
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
     hour12: false,
@@ -1277,7 +1278,9 @@ function runSubprocess(cmd, args, timeoutMs = 30000) {
       env: {
         ...process.env,
         OPENCLAW_WORKSPACE: WORKSPACE,
-        TZ: TIMEZONE,
+        // Children resolve OPENCLAW_TIMEZONE before TZ, so both carry the daemon's zone.
+        OPENCLAW_TIMEZONE: timezone,
+        TZ: timezone,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -1482,6 +1485,7 @@ async function main() {
     process.exit(1);
   }
   const config = loadConfig();
+  timezone = config.timezone;
   const sources = loadTranscriptSources();
 
   log(`Daemon starting (pid: ${process.pid}, workspace: ${WORKSPACE})`);

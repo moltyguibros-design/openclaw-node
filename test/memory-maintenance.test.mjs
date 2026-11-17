@@ -277,3 +277,24 @@ test('the companion freshness check reads the daemon\'s per-node state file', as
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('the shared-lessons check reads the vault obsidian-sync writes to, not a hard-coded folder', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'maint-vault-path-'));
+  fs.mkdirSync(path.join(root, '.openclaw', 'config'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.openclaw', 'config', 'obsidian-sync.json'),
+    JSON.stringify({ vaultPath: 'projects/node-vault' }));
+  fs.mkdirSync(path.join(root, 'projects', 'node-vault', '00-meta'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'projects', 'node-vault', '00-meta', 'shared-lessons.md'),
+    '# Shared lessons\n- [a] one\n- [b] two\n');
+  try {
+    const result = await promisify(execFile)(process.execPath, [MAINT, '--force', '--verbose'], {
+      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root, MC_URL: 'http://127.0.0.1:9',
+        OPENCLAW_OBSIDIAN_SYNC_CONFIG: '' },
+      timeout: 15000,
+    }).catch((error) => error);
+    assert.match(result.stdout, /SHARED_LESSONS: 2 lessons, updated 0h ago/);
+    assert.doesNotMatch(result.stdout, /SHARED_LESSONS: not yet generated/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

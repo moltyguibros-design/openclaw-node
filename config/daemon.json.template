@@ -12,6 +12,5 @@
     "obsidianSyncMs": 1800000,
     "hyperagentReflectMs": 1800000
   },
-  "clawvaultBin": "bin/clawvault-local",
-  "obsidianVault": "projects/arcane-vault"
+  "clawvaultBin": "bin/clawvault-local"
 }

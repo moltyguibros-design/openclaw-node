@@ -426,11 +426,22 @@ async function checkGraphHealth() {
   }
 }
 
+// obsidian-sync writes shared-lessons.md under its own config's vaultPath.
+function obsidianVaultPath() {
+  const configPath = process.env.OPENCLAW_OBSIDIAN_SYNC_CONFIG
+    || path.join(os.homedir(), '.openclaw/config/obsidian-sync.json');
+  try {
+    const { vaultPath } = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    if (vaultPath) return vaultPath;
+  } catch {}
+  return 'projects/arcane-vault';
+}
+
 // 13. Cross-soul lesson propagation health
 function checkSharedLessons() {
   log('Checking shared lessons propagation...');
 
-  const vaultPath = path.join(WORKSPACE, 'projects/arcane-vault/00-meta/shared-lessons.md');
+  const vaultPath = path.join(WORKSPACE, obsidianVaultPath(), '00-meta', 'shared-lessons.md');
   if (!fs.existsSync(vaultPath)) {
     log('shared-lessons.md not found — will be created on next obsidian-sync');
     report('SHARED_LESSONS: not yet generated (pending first obsidian-sync)');
