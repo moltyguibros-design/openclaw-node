@@ -466,6 +466,8 @@ def main():
         except Exception:
             pass
 
+    budget = manifest.get("model_overrides", {}).get(args.model, {}).get("max_boot_tokens") if args.model else None
+
     for profile in profiles_to_compile:
         output = compile_profile(profile, manifest, flat_sections, hier_sections, model=args.model)
 
@@ -477,21 +479,23 @@ def main():
         if shared_lessons_block and profile in ("main", "lite"):
             output += "\n\n" + shared_lessons_block
 
+        # Token estimate (rough: words * 1.3)
+        words = len(output.split())
+        tokens = int(words * 1.3)
+
         if args.all:
             out_path = BOOT_DIR / f"{profile}.compiled.md"
             with open(out_path, "w") as f:
                 f.write(output)
-            # Token estimate (rough: words * 1.3)
-            words = len(output.split())
-            tokens = int(words * 1.3)
             print(f"  {profile:12s} → {out_path.name} ({words} words, ~{tokens} tokens)")
         else:
             print(output)
 
             if args.stats:
-                words = len(output.split())
-                tokens = int(words * 1.3)
                 print(f"\n# Stats: {words} words, ~{tokens} tokens", file=sys.stderr)
+
+        if budget and tokens > budget:
+            print(f"compile-boot: WARNING {profile} boot is ~{tokens} tokens, over the {args.model} max_boot_tokens of {budget}", file=sys.stderr)
 
 
 if __name__ == "__main__":

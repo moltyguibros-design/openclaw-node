@@ -69,3 +69,38 @@ describe('compile-boot entity block', { skip: !HAVE_PY_YAML && 'python3 with PyY
     assert.match(r.stderr, /entity block skipped/);
   });
 });
+
+function compileWithBudget(t, args) {
+  const ws = mkdtempSync(join(tmpdir(), 'compile-boot-budget-'));
+  t.after(() => rmSync(ws, { recursive: true, force: true }));
+  mkdirSync(join(ws, 'bin'));
+  mkdirSync(join(ws, '.boot'));
+  copyFileSync(join(ROOT, 'workspace-bin', 'compile-boot'), join(ws, 'bin', 'compile-boot'));
+  writeFileSync(join(ws, 'AGENTS.md'), `# T\n\n## A\n${'word '.repeat(200)}\n`);
+  writeFileSync(join(ws, '.boot', 'manifest.yaml'), [
+    'sections:', '  A: { priority: boot, profile: [main, lite, heartbeat, discord, worker], compile: verbatim }',
+    'model_overrides:', '  openai: { max_boot_tokens: 50 }', '  claude: { max_boot_tokens: 100000 }', '',
+  ].join('\n'));
+  const env = { ...process.env, HOME: ws, OPENCLAW_MC_URL: 'http://127.0.0.1:9', OPENCLAW_MC_TOKEN_FILE: join(ws, 'none') };
+  return spawnSync('python3', [join(ws, 'bin', 'compile-boot'), ...args], { env, encoding: 'utf8' });
+}
+
+describe('compile-boot max_boot_tokens', { skip: !HAVE_PY_YAML && 'python3 with PyYAML not available' }, () => {
+  it('warns on stderr when a --model compile exceeds that model\'s budget, and still emits it', (t) => {
+    const r = compileWithBudget(t, ['--profile', 'main', '--model', 'openai']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /word word/);
+    assert.match(r.stderr, /WARNING main boot is ~\d+ tokens, over the openai max_boot_tokens of 50/);
+  });
+
+  it('warns per profile under --all', (t) => {
+    const r = compileWithBudget(t, ['--all', '--model', 'openai']);
+    assert.equal(r.status, 0, r.stderr);
+    for (const p of ['main', 'lite', 'heartbeat', 'discord', 'worker']) assert.match(r.stderr, new RegExp(`WARNING ${p} boot`));
+  });
+
+  it('is silent within budget and without --model', (t) => {
+    assert.doesNotMatch(compileWithBudget(t, ['--profile', 'main', '--model', 'claude']).stderr, /WARNING/);
+    assert.doesNotMatch(compileWithBudget(t, ['--all']).stderr, /WARNING/);
+  });
+});
