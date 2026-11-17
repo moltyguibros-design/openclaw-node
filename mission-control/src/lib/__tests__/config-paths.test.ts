@@ -52,8 +52,7 @@ test("with neither variable set, every workspace consumer resolves under the rea
       toolUse("Edit", path.join(home, "notes", "x", "y", "z.md")),
     ].join("\n") + "\n",
   );
-  const details = (await import("@/lib/parsers/transcript"))
-    .getRecentTranscriptActivity()
+  const details = (await (await import("@/lib/parsers/transcript")).getRecentTranscriptActivity())
     .map((e) => e.detail);
   expect(details).toEqual(["Edited notes/x/y/z.md", "Wrote projects/a/b/c.md"]);
 });
