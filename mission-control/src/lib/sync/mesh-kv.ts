@@ -9,7 +9,8 @@
  *   - Push local task changes to KV via CAS writes
  *   - Handle conflict resolution (KV wins on workers, SQLite wins on lead)
  *
- * This module is imported by the sync/tasks.ts module and the hooks layer.
+ * Not wired in yet: only api/mesh/tasks/route.ts imports it, and only for the
+ * MeshTaskEntry type. Kept as groundwork for a multi-node Mission Control.
  * It does NOT run as a standalone daemon — it's part of the MC process.
  */
 
@@ -228,17 +229,22 @@ export async function watchMeshTasks(): Promise<{
   if (!kv) return null;
 
   const watcher = await kv.watch();
+  // nats.js hands out a fresh generator on every [Symbol.asyncIterator]() call
+  // and refuses a second one while the first is suspended ("already yielding").
+  const source = watcher[Symbol.asyncIterator]();
 
   const events: AsyncIterable<KvWatchEvent> = {
     [Symbol.asyncIterator]() {
       return {
         async next() {
-          const result = await watcher[Symbol.asyncIterator]().next();
+          const result = await source.next();
           if (result.done) return { value: undefined, done: true };
 
           const entry = result.value;
+          // A DEL or PURGE entry carries an empty, still truthy, value.
+          const operation = entry.operation === "PUT" ? "PUT" : "DEL";
           let task: MeshTaskEntry | null = null;
-          if (entry.value) {
+          if (operation === "PUT") {
             try {
               task = JSON.parse(sc.decode(entry.value));
             } catch {
@@ -249,7 +255,7 @@ export async function watchMeshTasks(): Promise<{
           return {
             value: {
               key: entry.key,
-              operation: entry.value ? "PUT" : ("DEL" as const),
+              operation,
               task,
               revision: entry.revision,
             },
