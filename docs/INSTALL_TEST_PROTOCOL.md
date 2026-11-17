@@ -23,7 +23,7 @@ evidence (command + output) for every level you claim.
 
 ## T1 — Install exit state (files + renders)
 
-Run `bash install.sh` (no flags), then:
+Run `bash install.sh --role=lead` (no other flags; the first install refuses without a role), then:
 
 ```bash
 # 1. Env has the functional parameters (NODE_SPEC §3)

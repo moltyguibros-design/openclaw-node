@@ -101,12 +101,11 @@ fi
 if [ -z "$NODE_ROLE" ] && [ -f "$ENV_FILE" ]; then
   NODE_ROLE="$(grep -m1 '^OPENCLAW_NODE_ROLE=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d "\"'" | xargs || true)"
 fi
+# Never guessed from the OS: a Mac is not necessarily the lead. A node's first
+# install names it; config.sh saves it for every later run.
 if [ -z "$NODE_ROLE" ]; then
-  if [ "$OS" = "macos" ]; then
-    NODE_ROLE="lead"
-  else
-    NODE_ROLE="worker"
-  fi
+  error "No node role: pass --role=lead or --role=worker (saved to $ENV_FILE for later runs)"
+  exit 1
 fi
 if [ "$NODE_ROLE" != "lead" ] && [ "$NODE_ROLE" != "worker" ]; then
   error "Invalid role: $NODE_ROLE (must be 'lead' or 'worker')"

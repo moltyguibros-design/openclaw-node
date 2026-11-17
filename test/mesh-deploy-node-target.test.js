@@ -60,6 +60,7 @@ describe('mesh-deploy.js --node', () => {
       ...process.env,
       HOME: tmp,
       OPENCLAW_NODE_ID: 'lead-x',
+      OPENCLAW_NODE_ROLE: 'lead',
       OPENCLAW_REPO_DIR: path.join(tmp, 'no-repo'),
       OPENCLAW_OBS_DB: path.join(tmp, 'obs.db'),
       OPENCLAW_NATS: 'nats://127.0.0.1:1',

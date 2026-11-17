@@ -20,10 +20,10 @@ Installable package for deploying an OpenClaw node. Includes the full infrastruc
 ### On a new machine — one command
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/bootstrap.sh | bash -s -- --role=lead
 ```
 
-This is the **only** entrypoint that works on a machine with nothing on it. It assumes
+(`--role=worker` for a worker; the first install refuses to guess it.) This is the **only** entrypoint that works on a machine with nothing on it. It assumes
 just `bash` + `curl` (stock on macOS and Ubuntu) and a sudo-capable user, then installs
 Homebrew (macOS), the Xcode Command Line Tools, Node 22, Python 3, Git, SQLite3, build
 tools, jq, nats-server, ollama and Tailscale — verifies each one is actually on `PATH` —
@@ -102,8 +102,8 @@ npx openclaw-node-harness --mesh-only # Worker nodes — mesh agent + NATS only,
 git clone https://github.com/moltyguibros-design/openclaw-node.git
 cd openclaw-node
 bash scripts/install/prereqs.sh       # Install/verify system deps (--check to verify only)
-bash install.sh --enable-services     # Full install: start everything + acceptance gate
-bash install.sh                       # Files/units only (start later with --update --enable-services)
+bash install.sh --role=lead --enable-services   # Full install: start everything + acceptance gate
+bash install.sh --role=lead           # Files/units only (start later with --update --enable-services)
 bash install.sh --update              # Update existing
 ```
 
@@ -200,8 +200,12 @@ bash uninstall.sh --purge  # Remove everything including all data
 
 OpenClaw targets lightweight **consumer hardware** (see [docs/NODE_SPEC.md §1](docs/NODE_SPEC.md)). It runs on:
 
-- **macOS** (primary dev target; nodes default to the `lead` role, services via launchd)
-- **Linux with systemd** (Ubuntu 20.04+; nodes default to `worker`, services via systemd)
+- **macOS** (primary dev target; services via launchd)
+- **Linux with systemd** (Ubuntu 20.04+; services via systemd)
+
+The role is never taken from the OS: a node's first install names it with `--role=lead|worker`,
+which is saved as `OPENCLAW_NODE_ROLE` in `openclaw.env`. The installer and the deploy tools refuse
+to run on a node without one.
 
 Baseline: **Node.js 22.12+** (the `engines` floor; Mission Control requires it), Python 3.8+,
 Git, SQLite 3, plus a working compiler for `better-sqlite3`.

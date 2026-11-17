@@ -446,7 +446,7 @@ test('mesh-install.sh refuses a join token pointing at a repo outside the allowl
 test('install.sh --dry-run writes nothing under $HOME', () => {
   const home = mkdtempSync(join(tmpdir(), 'openclaw-dry-'));
   mkdirSync(join(home, '.openclaw'), { recursive: true });
-  const r = spawnSync('bash', [INSTALL_SH, '--dry-run', '--sandbox'], {
+  const r = spawnSync('bash', [INSTALL_SH, '--dry-run', '--sandbox', '--role=worker'], {
     encoding: 'utf8', timeout: 300_000,
     env: { ...process.env, HOME: home, OPENCLAW_HOME: join(home, '.openclaw') },
   });
@@ -467,7 +467,7 @@ test('install.sh --dry-run leaves an existing env file untouched', () => {
   writeFileSync(envFile, 'OTHER=kept\n');
   const env = { ...process.env, HOME: home, OPENCLAW_HOME: join(home, '.openclaw') };
   delete env.OPENCLAW_NATS_TOKEN;
-  const r = spawnSync('bash', [INSTALL_SH, '--dry-run', '--sandbox'], { encoding: 'utf8', timeout: 300_000, env });
+  const r = spawnSync('bash', [INSTALL_SH, '--dry-run', '--sandbox', '--role=worker'], { encoding: 'utf8', timeout: 300_000, env });
   assert.equal(readFileSync(envFile, 'utf8'), 'OTHER=kept\n');
   assert.equal(r.status, 0, `dry-run must complete: exit ${r.status}\n${r.stdout.slice(-2000)}\n${r.stderr.slice(-500)}`);
 });
@@ -504,6 +504,15 @@ test('env.sh reads the persisted role and config.sh persists the resolved one', 
   const r = spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { PATH: process.env.PATH } });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, 'lead|lead');
+
+  // Nothing saved and no --role: refused on either OS, never a platform default.
+  writeFileSync(envFile, 'OTHER=1\n');
+  for (const os of ['macos', 'linux']) {
+    const none = spawnSync('bash', ['-c', script.replace('OS=linux', `OS=${os}`)], { encoding: 'utf8', env: { PATH: process.env.PATH } });
+    assert.equal(none.status, 1, `${os}: ${none.stdout}`);
+    assert.equal(none.stdout, '');
+    assert.match(none.stderr, /No node role: pass --role=lead or --role=worker/);
+  }
   assert.match(moduleSrc['config.sh'], /set_env_key OPENCLAW_NODE_ROLE "\$NODE_ROLE"\nfi\nexport OPENCLAW_NODE_ROLE="\$NODE_ROLE"/);
 });
 

@@ -133,7 +133,7 @@ Written to `~/.openclaw/openclaw.env` by install (generated where marked ⚙; RA
 
 **Required humans steps — exactly these, in order:**
 1. macOS only: Homebrew must be present (bootstrap.sh installs it on a bare machine); install.sh then installs node@22, nats-server and ollama via brew. Linux: none.
-2. Run `bash install.sh --enable-services` (add `--role=lead|worker` if the default is wrong).
+2. Run `bash install.sh --enable-services --role=lead|worker` (required on the first install: the role is never guessed from the OS; it is saved for later runs).
 3. Wait for model pulls (5–18 GB) and the embedder prefetch (~2 GB) — one-time.
 4. **Seat the mind:** run `claude` once interactively to sign in (install already put the CLI in
    place if it was missing). Verify any time: `bash install.sh --update --verify-frontend`.

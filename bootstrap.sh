@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # bootstrap.sh — ONE-COMMAND install of an OpenClaw node on a virgin machine.
 #
-#   curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/bootstrap.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/bootstrap.sh | bash -s -- --role=lead
+#
+# --role=lead|worker is required on a node's first install (install.sh never
+# guesses it from the OS); later runs read the saved one.
 #
 # This is the only entrypoint that works on a machine with nothing on it.
 # `npx openclaw-node-harness` cannot be: npx requires npm requires Node, and
@@ -54,6 +57,15 @@ err()  { echo -e "${R}[x]${N} $*"; }
 step() { echo -e "\n${B}━━━ $* ━━━${N}"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 die()  { err "$*"; exit 1; }
+
+# install.sh refuses a first install without a role; say so before the
+# dependency wave, not after it.
+ROLE_GIVEN=false
+for a in "$@"; do case "$a" in --role=*) ROLE_GIVEN=true ;; esac; done
+if [ "${OPENCLAW_NO_INSTALL:-0}" != "1" ] && ! $ROLE_GIVEN && [ -z "${OPENCLAW_NODE_ROLE:-}" ] &&
+   ! grep -q '^OPENCLAW_NODE_ROLE=.' "$HOME/.openclaw/openclaw.env" 2>/dev/null; then
+  die "no node role: re-run as  curl ... | bash -s -- --role=lead  (or --role=worker)"
+fi
 
 case "$(uname -s)" in
   Darwin) OS=macos ;;

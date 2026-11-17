@@ -54,25 +54,14 @@ const sc = StringCodec();
 const RESULTS_BUCKET = 'MESH_DEPLOY_RESULTS';
 const NODES_BUCKET = 'MESH_NODES';
 const NODE_REGISTRY_HEARTBEAT_MS = 60 * 1000;
-const IS_MAC = os.platform() === 'darwin';
 
-// Node role — determines which components this node runs.
-function resolveNodeRole() {
-  if (process.env.OPENCLAW_NODE_ROLE) return process.env.OPENCLAW_NODE_ROLE;
-  try {
-    const envFile = path.join(os.homedir(), '.openclaw', 'openclaw.env');
-    if (fs.existsSync(envFile)) {
-      const content = fs.readFileSync(envFile, 'utf8');
-      const match = content.match(/^\s*OPENCLAW_NODE_ROLE\s*=\s*(.+)/m);
-      if (match && match[1].trim()) return match[1].trim();
-    }
-  } catch (err) { console.warn(`[deploy-listener] resolve node role: ${err.message}`); }
-  return IS_MAC ? 'lead' : 'worker';
-}
-const NODE_ROLE = resolveNodeRole();
-
-const { FLEET_COMPONENTS } = require('../lib/mesh-roles');
-const NODE_COMPONENTS = new Set(FLEET_COMPONENTS[NODE_ROLE] || FLEET_COMPONENTS.worker);
+// Node role — determines which components this node runs. main() refuses to
+// start without a saved one.
+const { FLEET_COMPONENTS, requireNodeRole } = require('../lib/mesh-roles');
+let NODE_ROLE = null;
+let NODE_ROLE_ERROR = null;
+try { NODE_ROLE = requireNodeRole(); } catch (err) { NODE_ROLE_ERROR = err; }
+const NODE_COMPONENTS = new Set(FLEET_COMPONENTS[NODE_ROLE] || []);
 
 let deploying = false; // prevent concurrent deploys
 
@@ -503,6 +492,7 @@ checkAndCatchUp = tracer.wrapAsync('checkAndCatchUp', checkAndCatchUp, { tier: 2
 // ── Main ─────────────────────────────────────────────────────────────────
 
 async function main() {
+  if (NODE_ROLE_ERROR) throw NODE_ROLE_ERROR;
   console.log(`[deploy-listener] Node: ${NODE_ID}`);
   console.log(`[deploy-listener] Repo: ${REPO_DIR}`);
   console.log(`[deploy-listener] NATS: ${NATS_URL}`);

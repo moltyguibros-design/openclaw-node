@@ -49,10 +49,21 @@ test('bootstrap gate passes a --skip-llm box without ollama and still refuses on
 
 test('bootstrap fetches OPENCLAW_REF by bare ref, so a tag or commit resolves', (t) => {
   const { run, curlLog } = sandbox(t);
-  const r = run(['--skip-llm'], { OPENCLAW_REF: 'v1.2.3' });
+  const r = run(['--skip-llm', '--role=worker'], { OPENCLAW_REF: 'v1.2.3' });
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stdout + r.stderr, /could not download/);
   const fetch = curlLog().split('\n').find((l) => l.includes('codeload.github.com'));
   assert.ok(fetch, curlLog());
   assert.match(fetch, /codeload\.github\.com\/[^/\s]+\/[^/\s]+\/tar\.gz\/v1\.2\.3(\s|$)/);
+});
+
+// install.sh refuses a first install without a role (no OS default); bootstrap
+// says so before the dependency wave instead of after it.
+test('bootstrap refuses up front when no node role is given or saved', (t) => {
+  const { run, curlLog } = sandbox(t);
+  const r = run(['--skip-llm']);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout + r.stderr, /no node role: re-run as .* --role=lead/);
+  assert.doesNotMatch(r.stdout, /platform:/, 'refused before anything else ran');
+  assert.equal(curlLog(), '');
 });

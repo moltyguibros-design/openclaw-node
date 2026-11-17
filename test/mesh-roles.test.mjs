@@ -104,3 +104,46 @@ describe('mesh-deploy MANIFEST and the role table are one list', () => {
     assert.match(run.stderr, /not in MANIFEST: gateway/);
   });
 });
+
+// A node's role was guessed from its OS when none was saved: a Mac that never
+// saved one was deployed as the lead, a Linux box as a worker.
+describe('a node without a saved role is refused, never given an OS default', () => {
+  const { requireNodeRole } = require('../lib/mesh-roles.js');
+  const noRoleEnv = (home) => {
+    const env = { ...process.env, HOME: home, OPENCLAW_OBS_DB: path.join(home, 'obs.db'), OPENCLAW_NATS: 'nats://127.0.0.1:1' };
+    delete env.OPENCLAW_NODE_ROLE;
+    return env;
+  };
+
+  it('requireNodeRole reads the env, then openclaw.env, and refuses anything else', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-roles-role-'));
+    const envFile = path.join(dir, 'openclaw.env');
+    assert.throws(() => requireNodeRole({ env: {}, envFile }), /OPENCLAW_NODE_ROLE is not set/);
+    fs.writeFileSync(envFile, 'OPENCLAW_NODE_ROLE="worker"\n');
+    assert.equal(requireNodeRole({ env: {}, envFile }), 'worker');
+    assert.equal(requireNodeRole({ env: { OPENCLAW_NODE_ROLE: 'lead' }, envFile }), 'lead');
+    assert.throws(() => requireNodeRole({ env: { OPENCLAW_NODE_ROLE: 'Lead' }, envFile }), /OPENCLAW_NODE_ROLE is "Lead"/);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('the deploy listener exits at startup with the reason', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-roles-listener-'));
+    const run = spawnSync(process.execPath, [path.join(REPO, 'bin/mesh-deploy-listener.js')], {
+      encoding: 'utf8', timeout: 15_000, env: noRoleEnv(home),
+    });
+    fs.rmSync(home, { recursive: true, force: true });
+    assert.equal(run.status, 1, `listener must refuse, not start: ${run.stdout}${run.stderr}`);
+    assert.match(run.stderr, /OPENCLAW_NODE_ROLE is not set/);
+  });
+
+  it('mesh-deploy refuses a deploy with the reason', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-roles-deploy-'));
+    const run = spawnSync(process.execPath, [path.join(REPO, 'bin/mesh-deploy.js'), '--to', 'HEAD', '--dry-run'], {
+      encoding: 'utf8', timeout: 60_000, env: { ...noRoleEnv(home), OPENCLAW_REPO_DIR: REPO },
+    });
+    fs.rmSync(home, { recursive: true, force: true });
+    assert.equal(run.status, 1, run.stdout + run.stderr);
+    assert.match(run.stdout, /DEPLOY_ERROR .*OPENCLAW_NODE_ROLE is not set/);
+    assert.doesNotMatch(run.stdout, /Pinned deploy \(/);
+  });
+});

@@ -108,21 +108,12 @@ const DIRS = {
   DEPLOY_STATE:     path.join(HOME, '.openclaw', '.deploy-state.json'),
 };
 
-// Node role — determines which components deploy here.
-// Reads from OPENCLAW_NODE_ROLE env, or openclaw.env, or defaults by platform.
-function resolveNodeRole() {
-  if (process.env.OPENCLAW_NODE_ROLE) return process.env.OPENCLAW_NODE_ROLE;
-  try {
-    const envFile = path.join(HOME, '.openclaw', 'openclaw.env');
-    if (fs.existsSync(envFile)) {
-      const content = fs.readFileSync(envFile, 'utf8');
-      const match = content.match(/^\s*OPENCLAW_NODE_ROLE\s*=\s*(.+)/m);
-      if (match && match[1].trim()) return match[1].trim();
-    }
-  } catch (err) { console.warn(`[mesh-deploy] resolve node role: ${err.message}`); }
-  return IS_MAC ? 'lead' : 'worker';
+// Node role — determines which components deploy here. Resolved when a deploy
+// plans its components; an unset or unknown role refuses there.
+let NODE_ROLE = null;
+function nodeRole() {
+  return (NODE_ROLE ??= require('../lib/mesh-roles').requireNodeRole({ envFile: path.join(HOME, '.openclaw', 'openclaw.env') }));
 }
-const NODE_ROLE = resolveNodeRole();
 
 // ── Console helpers ──────────────────────────────────────────────────────
 
@@ -837,7 +828,7 @@ function planComponents(changes, { filterIds = [], force = false, listAll }) {
   const plans = [];
 
   for (const comp of MANIFEST) {
-    if (comp.nodeFilter !== 'all' && comp.nodeFilter !== NODE_ROLE) continue;
+    if (comp.nodeFilter !== 'all' && comp.nodeFilter !== nodeRole()) continue;
     if (named.length > 0 && !named.includes(comp.id)) continue;
 
     if (comp.repoPaths.length === 0) {
@@ -1325,7 +1316,7 @@ async function main() {
   // ── Pinned mode: no fetch, this node only (the deploy listener's forward
   // deploy and its rollback). DEPLOY_RESULT is the line the listener parses.
   if (toArg) {
-    header(`Pinned deploy (${NODE_ROLE})`);
+    header(`Pinned deploy (${nodeRole()})`);
     const toSha = resolveCommit(REPO_DIR, toArg);
     if (!toSha) throw new Error(`--to ${toArg} is not a commit in ${REPO_DIR} (pinned mode never fetches)`);
     const fromSha = fromArg ? resolveCommit(REPO_DIR, fromArg) : deployedBase(REPO_DIR);
@@ -1338,7 +1329,7 @@ async function main() {
   // ═══ Normal deploy flow ═══
 
   if (deployLocal) {
-    header(`Deploying to ${IS_MAC ? 'macOS (lead)' : 'Ubuntu (worker)'}`);
+    header(`Deploying to ${IS_MAC ? 'macOS' : 'Linux'} (${nodeRole()})`);
 
     if (!fs.existsSync(REPO_DIR)) {
       fail(`Repo not found at ${REPO_DIR}`);
