@@ -8,7 +8,9 @@
  * Usage:
  *   node bin/memory-maintenance.mjs [--force] [--dry-run] [--verbose]
  *
- * Exit codes: 0 = clean, 1 = warnings, 2 = critical failure
+ * Exit codes: 0 = ran (warnings, if any, are in .tmp/maintenance-results and the
+ * log), 2 = fatal error. Warnings used to exit 1, which the memory daemon's
+ * runSubprocess logs as "memory-maintenance failed" on every routine warning.
  */
 
 import { fileURLToPath } from 'url';
@@ -19,6 +21,7 @@ import { promisify } from 'util';
 import http from 'http';
 import os from 'os';
 import { mcAuthHeaders } from '../lib/mc-session-token.mjs';
+import { resolveNodeId } from '../lib/node-id.js';
 
 const execFileAsync = promisify(execFile);
 const MC_TOKEN_PATH = process.env.MC_SESSION_TOKEN_PATH
@@ -92,7 +95,8 @@ const PREDICTIONS = path.join(MEMORY_DIR, 'predictions.md');
 const ACTIVE_TASKS = path.join(MEMORY_DIR, 'active-tasks.md');
 const MEMORY_MD = path.join(WORKSPACE, 'MEMORY.md');
 const ERRORS_MD = path.join(WORKSPACE, '.learnings/ERRORS.md');
-const COMPANION = path.join(WORKSPACE, '.companion-state.md');
+// The memory daemon's per-node state file (memory-daemon.mjs updateCompanionState).
+const COMPANION = path.join(WORKSPACE, `.daemon-state-${resolveNodeId()}.md`);
 const CLAWVAULT = path.join(WORKSPACE, 'bin/clawvault-local');
 
 const MAINTENANCE_INTERVAL = 1800000; // 30 min in ms
@@ -101,6 +105,8 @@ const MAINTENANCE_INTERVAL = 1800000; // 30 min in ms
 const args = process.argv.slice(2);
 const FORCE = args.includes('--force');
 const DRY_RUN = args.includes('--dry-run');
+// The checks read this; runMaintenance sets it from opts.dryRun.
+let dryRun = DRY_RUN;
 const VERBOSE = args.includes('--verbose');
 const TIMEZONE = process.env.OPENCLAW_TIMEZONE || process.env.TZ || 'America/Montreal';
 // Wall-time stamps carry their IANA zone as a suffix: "2026-02-21 09:15 America/Montreal".
@@ -173,7 +179,7 @@ function checkPredictions() {
       .replace(/^\*\*Lesson:\*\*$/m, '**Lesson:** [auto-expired by memory-maintenance; no observable outcome within 7-day window]');
   });
 
-  if (expiredCount > 0 && !DRY_RUN) {
+  if (expiredCount > 0 && !dryRun) {
     content = blocks.join('')
       .replace(/\*\*Last calibration review:\*\*.*/g, `**Last calibration review:** ${today()}`);
     fs.writeFileSync(PREDICTIONS, content);
@@ -237,7 +243,7 @@ function checkCompanionFreshness() {
   const stat = fs.statSync(COMPANION);
   const ageHours = Math.floor((Date.now() - stat.mtimeMs) / 3600000);
   if (ageHours > 2) {
-    report(`COMPANION_STALE: .companion-state.md is ${ageHours} hours old`);
+    report(`COMPANION_STALE: ${path.basename(COMPANION)} is ${ageHours} hours old`);
     // Don't increment warnings — daemon handles this
   }
 }
@@ -247,7 +253,7 @@ async function checkClawVault() {
   if (!fs.existsSync(CLAWVAULT)) return;
   log('Running ClawVault checkpoint...');
 
-  if (DRY_RUN) { log('DRY RUN: Would run clawvault checkpoint'); return; }
+  if (dryRun) { log('DRY RUN: Would run clawvault checkpoint'); return; }
 
   const taskContent = readFileOr(ACTIVE_TASKS);
   let workingOn = 'maintenance cycle';
@@ -304,7 +310,7 @@ async function checkMissionControl() {
   const db = healthResult.body?.db || {};
   log(`MC healthy: tasks=${db.taskCount} obs=${db.obsEventCount} db=${db.dbSizeMB}MB wal=${db.walSizeMB}MB`);
 
-  if (DRY_RUN) { log('DRY RUN: Would sync Mission Control'); return; }
+  if (dryRun) { log('DRY RUN: Would sync Mission Control'); return; }
 
   try {
     const r = await postAuthenticatedMutation(`${MC_URL}/api/memory/sync`, { timeoutMs: 5000 });
@@ -363,7 +369,7 @@ async function checkConsolidation() {
   });
 
   if (!isUp) { log('MC not running — skipping consolidation'); return; }
-  if (DRY_RUN) { log('DRY RUN: Would run consolidation'); return; }
+  if (dryRun) { log('DRY RUN: Would run consolidation'); return; }
 
   try {
     const r = await postAuthenticatedMutation(`${MC_URL}/api/memory/consolidate`, { timeoutMs: 10000 });
@@ -392,7 +398,7 @@ async function checkGraphHealth() {
 
   try {
     // Seed known entities if graph is empty
-    if (!DRY_RUN) {
+    if (!dryRun) {
       const r = await postAuthenticatedMutation(`${MC_URL}/api/memory/graph`, { timeoutMs: 5000 });
       log(`Graph seed: HTTP ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
     }
@@ -450,7 +456,7 @@ function checkSharedLessons() {
 
 export async function runMaintenance(opts = {}) {
   const force = opts.force ?? FORCE;
-  const dryRun = opts.dryRun ?? DRY_RUN;
+  dryRun = opts.dryRun ?? DRY_RUN;
 
   fs.mkdirSync(path.join(WORKSPACE, '.tmp'), { recursive: true });
 
@@ -500,7 +506,7 @@ if (isMain) {
         console.log(`\nDone: ${r.actions} actions, ${r.warnings} warnings`);
         if (r.results.length) console.log(r.results.join('\n'));
       }
-      process.exit(r.warnings > 0 ? 1 : 0);
+      process.exit(0);
     })
     .catch(e => {
       console.error(`Fatal: ${e.message}`);
