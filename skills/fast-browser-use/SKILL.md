@@ -16,7 +16,7 @@ install:
     formula: rknoche6/tap/fast-browser-use
   - kind: cargo
     package: fast-browser-use
-description: "Rust-powered browser automation engine driving Chrome via CDP for fast DOM extraction, scraping, screenshots, and session management. Use for high-performance web scraping, infinite-scroll harvesting, vision-mapped interaction, or site structure analysis."
+description: "Rust-powered browser automation engine driving Chrome via CDP for fast DOM extraction, scraping, screenshots, and session management. Use for high-performance web scraping, infinite-scroll harvesting, page snapshots, or site structure analysis."
 triggers:
   - "scrape this website fast"
   - "use fast-browser-use to"
@@ -27,49 +27,50 @@ negative_triggers:
   - "browse my local files"
   - "use agent-browser"
   - "fetch a single URL and summarize"
-config:
-  requiredEnv:
-    - CHROME_PATH
-  example: |
-    # Standard headless setup
-    export CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-    export BROWSER_HEADLESS="true"
 ---
 
 # Fastest Browser Use
 
 A Rust-based browser automation engine that provides a lightweight binary driving Chrome directly via CDP. It is optimized for token-efficient DOM extraction, robust session management, and speed.
 
-![Terminal Demo](https://placehold.co/800x400/1e1e1e/ffffff?text=Terminal+Demo+Coming+Soon)
+Chrome or Chromium must be installed; the binaries locate it themselves (there is no CHROME_PATH setting).
 
-## 🧪 Recipes for Agents
+## Sandbox
 
-### 1. Bypass "Bot Detection" via Human Emulation
-Simulate mouse jitter and random delays to scrape protected sites.
+Chrome runs with its sandbox **on**: these commands load arbitrary, untrusted pages. Pass `--no-sandbox`
+(to the CLI or to `mcp-server`) only where the sandbox cannot start, such as running as root in a container.
+
+## CLI
+
+The `fast-browser-use` binary has seven subcommands: `navigate`, `snapshot`, `login`, `harvest`, `markdown`,
+`screenshot`, `sitemap`. Each invocation launches its own Chrome and closes it on exit, so nothing carries
+over between commands: every command that reads a page needs its own `--url`.
+
+### 1. Check that a page loads
+
+`navigate` prints nothing; it succeeds once the page (or `--wait-for-selector`) has loaded.
+`--human-emulation` only adds a random 1-3 s pause after navigation.
 
 ```bash
-fast-browser-use navigate --url "https://protected-site.com" \
-  --human-emulation \
-  --wait-for-selector "#content"
+fast-browser-use navigate --url "https://example.com" --wait-for-selector "#content"
 ```
 
-### 2. The "Deep Freeze" Snapshot
-Capture the entire DOM state *and* computed styles for perfect reconstruction later.
+### 2. Snapshot a page
+
+An AI-oriented YAML rendering of the page's accessibility tree, to stdout or `--output`.
 
 ```bash
-fast-browser-use snapshot --include-styles --output state.json
+fast-browser-use snapshot --url "https://example.com" --output state.yaml
 ```
 
-### 3. Login & Cookie Heist
-Log in manually once, then steal the session for headless automation.
+### 3. Reuse a logged-in session
 
-**Step 1: Open non-headless for manual login**
+`login` opens a visible browser, waits for Enter after you log in, and saves the cookies.
+`navigate --load-session` loads them before navigating, which with `--wait-for-selector` confirms the
+session is still accepted; no other subcommand takes a session.
+
 ```bash
 fast-browser-use login --url "https://github.com/login" --save-session ./auth.json
-```
-
-**Step 2: Reuse session later**
-```bash
 fast-browser-use navigate --url "https://github.com/dashboard" --load-session ./auth.json
 ```
 
@@ -171,6 +172,12 @@ fast-browser-use sitemap \
 
 Use this to understand site architecture before scraping, map navigation flows, or audit SEO structure.
 
+### 7. 📝 Page to Markdown
+
+```bash
+fast-browser-use markdown --url "https://example.com" --output page.md
+```
+
 ## ⚡ Performance Comparison
 
 | Feature | Fast Browser Use (Rust) | Puppeteer (Node) | Selenium (Java) |
@@ -179,38 +186,30 @@ Use this to understand site architecture before scraping, map navigation flows, 
 | **Memory Footprint** | **15 MB** | 100 MB+ | 200 MB+ |
 | **DOM Extract** | **Zero-Copy** | JSON Serialize | Slow Bridge |
 
-## Capabilities & Tools
+## MCP server tools
 
-### Vision & Extraction
-- **vision_map**: Returns a screenshot overlay with numbered bounding boxes for all interactive elements.
-- **snapshot**: Capture the raw HTML snapshot (YAML/Markdown optimized for AI).
-- **screenshot**: Capture a visual image of the page.
-- **extract**: Get structured data from the DOM.
-- **markdown**: Convert the current page content to Markdown.
-- **sitemap**: Analyze site structure via robots.txt, sitemaps, and page semantic analysis.
+The `mcp-server` binary (stdio by default; `--transport sse|http`) keeps one browser session open across calls
+and registers these tools:
 
 ### Navigation & Lifecycle
-- **navigate**: Visit a specific URL.
-- **go_back** / **go_forward**: Traverse browser history.
-- **wait**: Pause execution or wait for specific conditions.
-- **new_tab**: Open a new browser tab.
-- **switch_tab**: Switch focus to a specific tab.
-- **close_tab**: Close the current or specified tab.
-- **tab_list**: List all open tabs.
-- **close**: Terminate the browser session.
+- **browser_navigate**: Visit a URL.
+- **browser_go_back** / **browser_go_forward**: Traverse browser history.
+- **browser_wait**: Wait for an element to appear.
+- **browser_close**: Terminate the browser session.
+
+### Extraction
+- **browser_snapshot**: The page with indexed interactive elements (indices feed the interaction tools).
+- **browser_get_markdown**: The page content as Markdown (extraction only).
+- **browser_screenshot**: Capture the page as an image.
+- **browser_evaluate**: Run JavaScript in the page.
 
 ### Interaction
-- **click**: Click elements via CSS selectors or DOM indices.
-- **input**: Type text into fields.
-- **press_key**: Send specific keyboard events.
-- **hover**: Hover over elements.
-- **scroll**: Scroll the viewport.
-- **select**: Choose options in dropdowns.
+- **browser_click**, **browser_hover**, **browser_select**, **browser_input_fill**: Act on an element by CSS selector or snapshot index.
+- **browser_press_key**: Send a keyboard event.
+- **browser_scroll**: Scroll the viewport.
 
-### State & Debugging
-- **cookies**: Manage session cookies (get/set).
-- **local_storage**: Manage local storage data.
-- **debug**: Access console logs and debug information.
+### Tabs
+- **browser_new_tab**, **browser_tab_list**, **browser_switch_tab**, **browser_close_tab**.
 
 ## Usage
 

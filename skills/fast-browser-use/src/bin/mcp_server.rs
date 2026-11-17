@@ -27,6 +27,10 @@ struct Cli {
     #[arg(long, short = 'H')]
     headed: bool,
 
+    /// Launch Chrome without its sandbox (only where the sandbox cannot start, e.g. as root in a container)
+    #[arg(long)]
+    no_sandbox: bool,
+
     /// Path to custom browser executable
     #[arg(long, value_name = "PATH")]
     executable_path: Option<String>,
@@ -73,7 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let options = LaunchOptions { headless: !cli.headed, ..Default::default() };
+    let options = LaunchOptions { headless: !cli.headed, sandbox: !cli.no_sandbox, ..Default::default() };
 
     info!("Browser-use MCP Server v{}", env!("CARGO_PKG_VERSION"));
     info!("Browser mode: {}", if options.headless { "headless" } else { "headed" });

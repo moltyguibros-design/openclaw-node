@@ -9,6 +9,10 @@ use std::{fs, path::PathBuf, thread, time::Duration};
 #[command(version)]
 #[command(about = "Fastest Browser Use CLI", long_about = None)]
 struct Cli {
+    /// Launch Chrome without its sandbox (only where the sandbox cannot start, e.g. as root in a container)
+    #[arg(long, global = true)]
+    no_sandbox: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -137,11 +141,13 @@ struct SessionData {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let cli = Cli::parse();
+    // These subcommands load arbitrary untrusted pages: Chrome's sandbox stays on unless opted out.
+    let sandbox = !cli.no_sandbox;
 
     match cli.command {
         Commands::Navigate { url, human_emulation, wait_for_selector, load_session } => {
             info!("Navigating to: {}", url);
-            let options = LaunchOptions::default().sandbox(false);
+            let options = LaunchOptions::default().sandbox(sandbox);
             
             let session = BrowserSession::launch(options)?;
 
@@ -193,7 +199,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("Navigation complete.");
         }
         Commands::Snapshot { url, include_styles, output } => {
-            let session = BrowserSession::launch(LaunchOptions::default().sandbox(false))?;
+            let session = BrowserSession::launch(LaunchOptions::default().sandbox(sandbox))?;
             
             if let Some(u) = url {
                 info!("Navigating to {}", u);
@@ -229,7 +235,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Login { url, save_session } => {
             info!("Opening headed browser for login at {}", url);
-            let options = LaunchOptions::default().headless(false).sandbox(false);
+            let options = LaunchOptions::default().headless(false).sandbox(sandbox);
             let session = BrowserSession::launch(options)?;
             
             session.navigate(&url)?;
@@ -251,7 +257,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Harvest { url, selector, scrolls, delay, output } => {
             info!("🚜 Harvesting from {} (selector: {}, scrolls: {})", url, selector, scrolls);
-            let session = BrowserSession::launch(LaunchOptions::default().sandbox(false))?;
+            let session = BrowserSession::launch(LaunchOptions::default().sandbox(sandbox))?;
             
             session.navigate(&url)?;
             session.wait_for_navigation()?;
@@ -307,7 +313,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Markdown { url, output } => {
             info!("Converting {} to markdown", url);
-            let session = BrowserSession::launch(LaunchOptions::default().sandbox(false))?;
+            let session = BrowserSession::launch(LaunchOptions::default().sandbox(sandbox))?;
             
             session.navigate(&url)?;
             session.wait_for_navigation()?;
@@ -328,7 +334,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Screenshot { url, output, full_page } => {
             info!("📸 Screenshotting {}", url);
-            let session = BrowserSession::launch(LaunchOptions::default().sandbox(false))?;
+            let session = BrowserSession::launch(LaunchOptions::default().sandbox(sandbox))?;
 
             session.navigate(&url)?;
             session.wait_for_navigation()?;
@@ -346,7 +352,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Sitemap { url, analyze_structure, max_pages, max_sitemaps, output } => {
             info!("🗺️  Analyzing sitemap for {}", url);
-            let session = BrowserSession::launch(LaunchOptions::default().sandbox(false))?;
+            let session = BrowserSession::launch(LaunchOptions::default().sandbox(sandbox))?;
 
             let sitemap_result = browser_use::tools::sitemap::analyze_sitemap(
                 &session,
