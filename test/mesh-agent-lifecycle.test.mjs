@@ -125,7 +125,7 @@ async function fixture(t, interval = 1_000) {
   const proc = spawn(process.execPath, [entry], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(proc);
   const worker = observe(proc);
-  const subjects = ['alive', 'approved', 'rejected'].map(suffix => `mesh.agent.${nodeId}.${suffix}`);
+  const subjects = ['alive', 'approved', 'rejected', 'stall', 'budget_exceeded'].map(suffix => `mesh.agent.${nodeId}.${suffix}`);
   subjects.push('mesh.collab.*.recruit');
   await until(async () => {
     assert.equal(worker.result, null, worker.output);

@@ -47,7 +47,7 @@ const { getSessionInfo } = require('../lib/agent-activity');
 const { loadAllRules, matchRules, formatRulesForPrompt, detectFrameworks, activateFrameworkRules } = require('../lib/rule-loader');
 const { loadHarnessRules, runMeshHarness, runPostCommitValidation, runPreChecks, formatHarnessForPrompt } = require('../lib/mesh-harness');
 const { validateMetricCommand } = require('../lib/exec-safety');
-const { TASK_TERMINAL } = require('../lib/mesh-tasks');
+const { TASK_TERMINAL, TERMINAL_STATES } = require('../lib/mesh-tasks');
 const { findRole, formatRoleForPrompt, validateRequiredOutputs } = require('../lib/role-loader');
 
 const sc = StringCodec();
@@ -339,6 +339,8 @@ let currentTaskId = null; // tracks active task for alive-check responses
 // each take this slot synchronously before their first await. Checking
 // currentTaskId and setting it after an await let two of them start a task at once.
 let taskSlotHeld = false;
+// The provider CLI runLLM is running, so a confirmed stall or budget notice can stop it.
+let activeWorker = null;
 
 function acquireTaskSlot() {
   if (taskSlotHeld) return false;
@@ -1026,6 +1028,39 @@ async function onReviewRejected(taskId) {
   return true;
 }
 
+// The daemon's stall and budget notices are core publishes too, so a forged one
+// must not kill a healthy worker: the running child is stopped only once the
+// daemon reports the task ended, or no longer this node's (another owner, or,
+// for a collab member, no live seat in its session).
+async function taskWithdrawn(taskId) {
+  const task = await natsRequest('mesh.tasks.get', { task_id: taskId }, 5000).catch(() => null);
+  if (!task) return false;
+  if (TERMINAL_STATES.has(task.status)) return true;
+  if (task.owner === NODE_ID) return false;
+  if (!isCollabTask(task)) return true;
+  if (!task.collab_session_id) return false;
+  const session = await natsRequest('mesh.collab.status', { session_id: task.collab_session_id }, 5000).catch(() => null);
+  if (!session) return false;
+  if (session.status === 'completed' || session.status === 'aborted') return true;
+  const seat = (session.nodes || []).find(n => n.id === NODE_ID);
+  return !seat || seat.status === 'dead';
+}
+
+async function onTaskWithdrawn(taskId, notice) {
+  if (!activeWorker || activeWorker.taskId !== taskId) {
+    warn(`${notice} ${taskId} ignored — not running it`);
+    return false;
+  }
+  if (!(await taskWithdrawn(taskId))) {
+    warn(`${notice} ${taskId} ignored — the daemon still has it running on this node`);
+    return false;
+  }
+  if (!activeWorker || activeWorker.taskId !== taskId) return false;
+  log(`${notice} ${taskId} — the daemon ended this node's run; stopping the worker`);
+  activeWorker.stop();
+  return true;
+}
+
 // Partial-work branches of released and budget/stall-failed tasks are kept for
 // post-mortem until an operator deletes them or their tip is older than this
 // (0 keeps them indefinitely).
@@ -1176,10 +1211,14 @@ function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null)
     const signalGroup = (signal) => {
       try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* gone */ } }
     };
-    const budgetTimer = setTimeout(() => {
+    const stopGroup = () => {
       signalGroup('SIGTERM');
       setTimeout(() => signalGroup('SIGKILL'), 5000).unref();
-    }, timeoutMs ?? (task.budget_minutes || 30) * 60 * 1000);
+    };
+    const budgetTimer = setTimeout(stopGroup, timeoutMs ?? (task.budget_minutes || 30) * 60 * 1000);
+    const worker = { taskId: task.task_id, stop: stopGroup };
+    activeWorker = worker;
+    const forgetWorker = () => { if (activeWorker === worker) activeWorker = null; };
 
     // Heartbeat: renews the lease and keeps the daemon's stall detector quiet.
     let lastHeartbeatWarn = 0;
@@ -1204,6 +1243,7 @@ function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null)
     child.on('close', (code, signal) => {
       clearInterval(heartbeatTimer);
       clearTimeout(budgetTimer);
+      forgetWorker();
       if (supervisor) supervisor.workerExited({ exitCode: code, signal });
       // A provider that reports its own result record (claude's json output) yields the
       // answer text and the CLI's own cost; everything downstream reads only the text.
@@ -1216,6 +1256,7 @@ function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null)
     child.on('error', (err) => {
       clearInterval(heartbeatTimer);
       clearTimeout(budgetTimer);
+      forgetWorker();
       if (supervisor) supervisor.workerExited({ exitCode: 1, signal: null });
       resolve({ exitCode: 1, stdout: '', stderr: err.message, provider: provider.name, model });
     });
@@ -2733,6 +2774,24 @@ async function main() {
     }
   })();
   log(`  Listening: mesh.agent.${NODE_ID}.approved / .rejected`);
+
+  // The daemon's stall detector and budget enforcer (and MC's remove_node) end a
+  // task without this worker's help; these notices stop the CLI still running it.
+  const stallSub = nc.subscribe(`mesh.agent.${NODE_ID}.stall`);
+  const budgetSub = nc.subscribe(`mesh.agent.${NODE_ID}.budget_exceeded`);
+  for (const [sub, notice] of [[stallSub, 'STALL'], [budgetSub, 'BUDGET EXCEEDED']]) {
+    (async () => {
+      for await (const msg of sub) {
+        try {
+          const { task_id } = JSON.parse(sc.decode(msg.data));
+          if (task_id) await onTaskWithdrawn(task_id, notice);
+        } catch (err) {
+          warn(`${notice.toLowerCase()} handler: ${err.message}`);
+        }
+      }
+    })();
+  }
+  log(`  Listening: mesh.agent.${NODE_ID}.stall / .budget_exceeded`);
   await reconcileKeptBranches();
 
   // Subscribe to collab recruit broadcasts — allows this node to join
@@ -2770,6 +2829,8 @@ async function main() {
   aliveSub.unsubscribe();
   approvedSub.unsubscribe();
   rejectedSub.unsubscribe();
+  stallSub.unsubscribe();
+  budgetSub.unsubscribe();
   recruitSub.unsubscribe();
   draining = true;
   log('Draining NATS...');
@@ -2799,7 +2860,7 @@ module.exports = { buildCirclingPrompt, buildCollabPrompt, buildInitialPrompt, b
 // loop, against a real git workspace, with only the NATS connection injected.
 module.exports.__test = {
   setContext(ctx) { if (ctx.nc !== undefined) nc = ctx.nc; },
-  mergeIfApproved, onReviewApproved, onReviewRejected, reconcileKeptBranches,
+  mergeIfApproved, onReviewApproved, onReviewRejected, reconcileKeptBranches, onTaskWithdrawn,
   natsRequest, createWorktree, onWorkerError, executeCollabTask, executeTask,
   onRecruit, checkRecruitingSessions,
   claimAndRun,
