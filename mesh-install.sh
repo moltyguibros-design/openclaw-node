@@ -212,9 +212,18 @@ ensure_mesh_code() {
     ok "Mesh code exists at $MESH_DIR"
     log "Updating..."
     cd "$MESH_DIR"
-    git pull --ff-only 2>/dev/null || warn "Git pull failed (local changes?) — continuing with existing code"
-    npm install --production 2>/dev/null
-    ok "Dependencies updated"
+    # The deploy listener checks out each signed sha detached; moving that tree
+    # here would update code outside the signed path.
+    if git symbolic-ref -q HEAD >/dev/null; then
+      git pull --ff-only 2>/dev/null || warn "Git pull failed (local changes?) — continuing with existing code"
+    else
+      ok "Code left at $(git rev-parse --short HEAD): signed deploys manage this checkout, and updates arrive only through them"
+    fi
+    if npm install --production 2>/dev/null; then
+      ok "Dependencies updated"
+    else
+      warn "npm install failed — dependencies may be incomplete"
+    fi
     return
   fi
 

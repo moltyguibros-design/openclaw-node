@@ -512,16 +512,33 @@ function configureNats(natsUrl) {
 
 // ── Mesh Code Installation ───────────────────────────
 
-function installMeshCode(repoUrl) {
-  const meshDir = path.join(os.homedir(), 'openclaw');
+function outputTail(res) {
+  return (res.stderr || res.error?.message || '').trim().split('\n').slice(-5).join(' | ');
+}
+
+function installMeshCode(repoUrl, { meshDir = path.join(os.homedir(), 'openclaw'), run = spawnSync } = {}) {
+  const inMesh = { cwd: meshDir, stdio: 'pipe', encoding: 'utf8' };
 
   if (fs.existsSync(path.join(meshDir, 'package.json'))) {
     ok(`Mesh code exists at ${meshDir}`);
     if (!DRY_RUN) {
-      log('  Pulling latest + installing deps...');
-      spawnSync('git', ['pull', '--ff-only'], { cwd: meshDir, stdio: 'pipe' });
-      spawnSync('npm', ['install', '--production'], { cwd: meshDir, stdio: 'pipe' });
-      ok('Updated');
+      // The deploy listener checks out each signed sha detached. Moving that
+      // tree here would update code outside the signed path.
+      const onBranch = run('git', ['symbolic-ref', '-q', 'HEAD'], inMesh).status === 0;
+      let pulled = false;
+      if (onBranch) {
+        log('  Pulling latest...');
+        const pull = run('git', ['pull', '--ff-only'], inMesh);
+        pulled = pull.status === 0;
+        if (!pulled) warn(`git pull failed — code not updated: ${outputTail(pull)}`);
+      } else {
+        const head = (run('git', ['rev-parse', '--short', 'HEAD'], inMesh).stdout || '').trim();
+        ok(`Code left at ${head || 'its deployed commit'}: signed deploys manage this checkout, and updates arrive only through them`);
+      }
+      log('  Installing deps...');
+      const deps = run('npm', ['install', '--production'], inMesh);
+      if (deps.status !== 0) warn(`npm install failed: ${outputTail(deps)}`);
+      else ok(pulled ? 'Updated' : 'Dependencies installed');
     }
     return meshDir;
   }
@@ -534,12 +551,16 @@ function installMeshCode(repoUrl) {
   log(`Cloning mesh code from ${repoUrl}...`);
   try {
     execSync(`git clone "${repoUrl}" "${meshDir}"`, { stdio: 'inherit', timeout: 60000 });
-    spawnSync('npm', ['install', '--production'], { cwd: meshDir, stdio: 'pipe' });
-    ok('Mesh code installed');
   } catch (e) {
     fail(`Failed to clone mesh code: ${e.message}`);
     process.exit(1);
   }
+  const deps = run('npm', ['install', '--production'], inMesh);
+  if (deps.status !== 0) {
+    fail(`npm install failed in ${meshDir}: ${outputTail(deps)}`);
+    process.exit(1);
+  }
+  ok('Mesh code installed');
 
   return meshDir;
 }
@@ -1019,5 +1040,5 @@ if (require.main === module) main().catch(err => {
 
 module.exports = {
   renderServiceTemplate, serviceTemplateVars, SERVICE_TEMPLATE_VARS, parseJoinToken, updateEnvFile, provisionTrust,
-  installService, verifyServiceRunning, agentStartCommand,
+  installService, verifyServiceRunning, agentStartCommand, installMeshCode,
 };
