@@ -44,6 +44,7 @@ import { USE_LLM_EXTRACTION } from '../lib/pre-compression-flush.mjs';
 import { createBudget } from '../lib/memory-budget.mjs';
 import { createSessionTraceEmitter } from './session-trace-emitter.mjs';
 import { SessionTracker, STATES } from '../lib/session-tracker.mjs';
+import { renderCompanionState } from '../lib/companion-state.mjs';
 import { createLocalEventLog, buildMemoryEvent } from '../lib/local-event-log.mjs';
 import { createLlmClient, DEFAULT_MODEL } from '../lib/llm-client.mjs';
 import { createExtractionStore } from '../lib/extraction-store.mjs';
@@ -747,7 +748,7 @@ function sourceOfJsonl(sources, jsonlPath) {
 // Updates .daemon-state-${NODE_ID}.md from active-tasks.md (~5ms)
 // ============================================================
 
-function runPhase1StatusSync(config) {
+function runPhase1StatusSync(config, status, { newSession = false } = {}) {
   const activeTasks = path.join(WORKSPACE, 'memory/active-tasks.md');
   const companion = path.join(WORKSPACE, `.daemon-state-${NODE_ID}.md`);
 
@@ -791,40 +792,9 @@ function runPhase1StatusSync(config) {
     hour12: false,
   }).replace(', ', 'T').replace(/\//g, '-');
 
-  // Preserve started_at from existing companion state
-  let startedAt = now;
-  if (fs.existsSync(companion)) {
-    try {
-      const existing = fs.readFileSync(companion, 'utf-8');
-      const match = existing.match(/started_at:\s*(.+)/);
-      if (match) startedAt = match[1].trim();
-    } catch (err) { console.warn(`[memory-daemon] companion-state read failed: ${err.message}`); }
-  }
-
-  const output = `## Session Status
-status: active
-started_at: ${startedAt}
-last_flush: ${now}
-
-## Active Task
-${runningTasks}
-
-## Current State
-${runningCount} running, ${doneCount} done
-
-## Crash Recovery
-If this file says \`status: active\` but the session is dead:
-1. The session crashed before flush
-2. Read memory/active-tasks.md for last known work state
-3. Resume from the active task listed above
-`;
-
-  let previousContent = '';
-  try { previousContent = fs.readFileSync(companion, 'utf-8'); } catch {}
-  fs.writeFileSync(companion, output);
-  if (output !== previousContent) {
-    console.log('[memory-daemon] Companion state updated');
-  }
+  let existing = '';
+  try { existing = fs.readFileSync(companion, 'utf-8'); } catch {}
+  fs.writeFileSync(companion, renderCompanionState(existing, { status, newSession, now, runningTasks, runningCount, doneCount }));
 }
 
 // ============================================================
@@ -1128,6 +1098,7 @@ async function handleTransitions(transitions, config) {
 
     // ENDED → BOOT: Full bootstrap
     if (t.from === STATES.ENDED && t.to === STATES.BOOT) {
+      if (!t.othersLive) runPhase1StatusSync(config, 'active', { newSession: true });
       await runPhase0Bootstrap(t.sessionId, config, { othersLive: t.othersLive });
       booted.push(t.sessionId);
     }
@@ -1266,6 +1237,10 @@ async function handleTransitions(transitions, config) {
         await runSubprocess(clawvault, ['sleep', 'session ended'], 15000).catch(() => {});
         log('  clawvault sleep done');
       }
+
+      // Written last: a node left at active/idle with no live session is the
+      // crash signal the session-start hook shows the next session.
+      if (!t.othersLive) runPhase1StatusSync(config, 'ended');
     }
   }
   return booted;
@@ -1808,7 +1783,7 @@ async function main() {
 
       // 4. Phase 1: Status sync (when ACTIVE or IDLE)
       if (sm.state === STATES.ACTIVE || sm.state === STATES.IDLE) {
-        runPhase1StatusSync(config);
+        runPhase1StatusSync(config, sm.state === STATES.ACTIVE ? 'active' : 'idle');
       }
 
       // 4.1. Reset extraction trigger idle timer on activity
