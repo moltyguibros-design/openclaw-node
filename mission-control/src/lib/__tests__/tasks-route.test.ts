@@ -140,12 +140,25 @@ describe("mesh cancel must be accepted before the row changes", () => {
     requestSpy.mockImplementation(daemonSays({ ok: false, error: "cancel refused: not authorized" }));
     const { PATCH } = await import("@/app/api/tasks/[id]/route");
 
-    // force_done: without it the done-gate turns a move to the done column into waiting-user.
-    const req = new NextRequest("http://x/api/tasks/M", { method: "PATCH", body: JSON.stringify({ status: "cancelled", force_done: true }) });
+    const req = new NextRequest("http://x/api/tasks/M", { method: "PATCH", body: JSON.stringify({ status: "cancelled" }) });
     const res = await PATCH(req, params("M"));
 
     expect(res.status).toBe(502);
     expect(await rowStatus("M")).toBe("running");
+  });
+
+  // The done-gate rewrote cancelled (column done) to waiting-user, so the cancel never reached the mesh.
+  it("PATCH to cancelled without force_done sends the mesh cancel and cancels the row", async () => {
+    await insertTask({ id: "M", status: "running", kanbanColumn: "in_progress", execution: "mesh" });
+    const { PATCH } = await import("@/app/api/tasks/[id]/route");
+
+    const req = new NextRequest("http://x/api/tasks/M", { method: "PATCH", body: JSON.stringify({ status: "cancelled" }) });
+    const res = await PATCH(req, params("M"));
+
+    expect(res.status).toBe(200);
+    const cancels = requestSpy.mock.calls.filter((c) => (c as unknown[])[0] === "mesh.tasks.cancel");
+    expect(cancels.map((c) => JSON.parse((c as unknown[])[1] as string).task_id)).toEqual(["M"]);
+    expect(await rowStatus("M")).toBe("cancelled");
   });
 });
 

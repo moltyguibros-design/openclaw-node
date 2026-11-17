@@ -20,6 +20,12 @@ describe("applyDoneGate", () => {
     expect(update).toEqual({ status: "done", kanbanColumn: "done" });
   });
 
+  it("lets cancelled through to the done column", () => {
+    const update: Record<string, unknown> = { status: "cancelled", kanbanColumn: "done" };
+    applyDoneGate(update, undefined);
+    expect(update).toEqual({ status: "cancelled", kanbanColumn: "done" });
+  });
+
   it("leaves non-done updates unchanged", () => {
     const update: Record<string, unknown> = { status: "running", kanbanColumn: "in_progress" };
     applyDoneGate(update, undefined);
