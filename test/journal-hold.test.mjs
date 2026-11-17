@@ -11,6 +11,7 @@ test('sole preservation journal restores interrupted execution holds without cer
   const result = spawnSync('python3', [fileURLToPath(new URL('../memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_journal_hold.py', import.meta.url))], {
     timeout,
     encoding: 'utf8',
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
   });
   console.log(result.stderr);
   assert.ifError(result.error);
@@ -21,6 +22,7 @@ test('preservation journal keeps timer commissioning scope separate from full-no
   const result = spawnSync('python3', [fileURLToPath(new URL('../memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_preservation_journal.py', import.meta.url))], {
     timeout,
     encoding: 'utf8',
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
   });
   console.log(result.stderr);
   assert.ifError(result.error);
