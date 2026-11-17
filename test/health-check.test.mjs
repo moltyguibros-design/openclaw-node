@@ -237,3 +237,24 @@ describe('constants', () => {
     assert.equal(ALERT_TARGETS_DEFAULT, 'file,nats,banner');
   });
 });
+
+describe('runHealthCheck node paths', () => {
+  it('probes the state.db and workspace it is given, not the ~/.openclaw defaults', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'hc-node-paths-'));
+    try {
+      const { openStore } = await import('../lib/sqlite-store.mjs');
+      const stateDb = join(root, 'state.db');
+      openStore(stateDb).close();
+      const r = await runHealthCheck({
+        checkDaemon: mockOk, checkNats: mockOk, checkOllama: mockOk, checkEmbedder: mockOk,
+        stateDb, workspace: root,
+      });
+      assert.equal(r.sqlite.ok, true, r.sqlite.detail);
+      assert.ok(r.sqlite.detail.includes(stateDb), r.sqlite.detail);
+      assert.equal(r.workspace_writable.ok, true, r.workspace_writable.detail);
+      assert.ok(r.workspace_writable.detail.includes(root), r.workspace_writable.detail);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

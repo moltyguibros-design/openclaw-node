@@ -51,8 +51,9 @@ node bin/node-watch.mjs --json --report ~/.openclaw/.node-watch.md
 ```
 
 Portable: every path/URL/port resolves from the node's own env (`OPENCLAW_HOME`, `OPENCLAW_NODE_ID`,
-`LLM_MODEL`, `MEMORY_INJECT_PORT`, `NATS_MONITOR_URL`, `OBSIDIAN_VAULT_PATH`, …). Writes an evidence
-report to `~/.openclaw/.node-watch.md`.
+`LLM_MODEL`, `MEMORY_INJECT_PORT`, `NATS_MONITOR_URL`, `OBSIDIAN_VAULT_PATH`, …), L1 state.db and
+workspace checks included. Writes an evidence report to `~/.openclaw/.node-watch.md` whatever
+`OPENCLAW_HOME` says, because Mission Control reads it there; pass `--report` for a spawn tree.
 
 ---
 

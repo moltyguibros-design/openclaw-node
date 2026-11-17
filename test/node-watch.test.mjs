@@ -1156,3 +1156,32 @@ describe('node-watch CLI exit contract', () => {
     assert.match(r.stderr, /unknown axis 'TYPO_AXIS'/);
   });
 });
+
+describe('OPENCLAW_HOME node isolation', () => {
+  it('runWatch hands the spawn tree state.db and workspace to the L1 health check', async () => {
+    const spawn = resolveNodeConfig({ OPENCLAW_HOME: '/tmp/spawn/.openclaw-n2', OPENCLAW_NODE_ID: 'n2' });
+    let seen;
+    await runWatch({ ctx: makeCtx({ config: spawn }), config: spawn, probes: {}, targets: [target('obs.links')],
+      includeHeavy: false, healthCheckFn: async (o) => { seen = o; return {}; } });
+    assert.equal(seen.stateDb, '/tmp/spawn/.openclaw-n2/state.db');
+    assert.equal(seen.workspace, '/tmp/spawn/.openclaw-n2/workspace');
+  });
+
+  it('a ~ transcript source expands to the user home, not into a spawn tree', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'node-watch-tilde-'));
+    try {
+      const home = path.join(root, '.openclaw-n2');
+      await fs.mkdir(path.join(home, 'config'), { recursive: true });
+      await fs.writeFile(path.join(home, 'config', 'transcript-sources.json'), JSON.stringify({
+        sources: [{ name: 'tilde', path: '~/.no-such-openclaw-source-dir/', format: 'claude-code', enabled: true }],
+      }));
+      const ctx = makeCtx({ config: { ...config, home, stateDb: path.join(home, 'state.db') }, fsp: fs,
+        queryDb: (_p, fn) => fn({ prepare: () => ({ get: () => ({ n: 0 }) }) }) });
+      const v = await target('mem.ingest').run(envFor(ctx));
+      assert.ok(v.detail.includes(path.join(os.homedir(), '.no-such-openclaw-source-dir')), v.detail);
+      assert.ok(!v.detail.includes(home), v.detail);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});

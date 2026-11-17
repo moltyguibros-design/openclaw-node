@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { runAcceptance, computeGate, resolveNodeConfig, VERDICT } from '../lib/node-acceptance.mjs';
+import os from 'node:os';
+import path from 'node:path';
+import { runAcceptance, computeGate, resolveNodeConfig, expandHome, VERDICT } from '../lib/node-acceptance.mjs';
 
 const BIN = fileURLToPath(new URL('../bin/node-acceptance.mjs', import.meta.url));
 
@@ -127,5 +129,21 @@ describe('node-acceptance config', () => {
     assert.equal(resolveNodeConfig({ MESH_NODE_ID: 'legacy-id' }).nodeId, 'legacy-id');
     assert.equal(resolveNodeConfig({ OPENCLAW_NODE_ID: 'x', MESH_NODE_ID: 'legacy-id' }).nodeId, 'x');
     assert.equal(resolveNodeConfig({}).nodeId, resolveNodeId({}));
+  });
+});
+
+describe('OPENCLAW_HOME node isolation', () => {
+  it('L1 health checks target the spawn tree state.db and workspace', async () => {
+    const config = resolveNodeConfig({ OPENCLAW_HOME: '/tmp/spawn/.openclaw-n2', OPENCLAW_NODE_ID: 'n2' });
+    let seen;
+    await runAcceptance({ profile: 'single-node', probes: [], config,
+      healthCheckFn: async (o) => { seen = o; return allHealthy; } });
+    assert.equal(seen.stateDb, '/tmp/spawn/.openclaw-n2/state.db');
+    assert.equal(seen.workspace, '/tmp/spawn/.openclaw-n2/workspace');
+  });
+
+  it('expandHome resolves ~ to the user home, never into OPENCLAW_HOME', () => {
+    assert.equal(expandHome('~/.claude/projects'), path.join(os.homedir(), '.claude/projects'));
+    assert.equal(expandHome('/abs/dir'), '/abs/dir');
   });
 });

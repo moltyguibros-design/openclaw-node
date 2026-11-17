@@ -27,7 +27,9 @@ report to `~/.openclaw/.node-acceptance.md` by default. **Portable:** every path
 from the same env vars the deployed components read (`OPENCLAW_HOME`, `OPENCLAW_WORKSPACE`,
 `OPENCLAW_NODE_ID`, `LLM_BASE_URL`, `LLM_MODEL`, `MEMORY_INJECT_PORT`, `NATS_MONITOR_URL`,
 `OPENCLAW_NATS`, …), so the same binary self-tests any node, including `spawn-node` trees via
-`OPENCLAW_HOME=~/.openclaw-<id>`.
+`OPENCLAW_HOME=~/.openclaw-<id>`: the L1 state.db and workspace checks follow it too. The default
+evidence report stays at `~/.openclaw/.node-acceptance.md` (Mission Control reads it there), so pass
+`--report` for a spawn tree, and a `~` in a transcript source means the user's home, as in the daemon.
 
 **Deployment integration:** run as a post-deploy gate (CI / `mesh-deploy-listener`), or schedule
 periodically alongside `health-watch`. A non-zero exit means the node is not 100% — see §10.
