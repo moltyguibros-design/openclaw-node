@@ -1,6 +1,6 @@
 ---
 name: clawddocs
-description: "Clawdbot documentation expert — decision tree navigation, search scripts, doc fetching, version tracking, and config snippets. Use when users ask how to set up, configure, or troubleshoot Clawdbot features."
+description: "Clawdbot documentation expert — decision tree navigation, doc fetching, and config snippets. Use when users ask how to set up, configure, or troubleshoot Clawdbot features."
 triggers:
   - "clawdbot documentation"
   - "how to configure clawdbot"
@@ -15,7 +15,7 @@ negative_triggers:
 
 # Clawdbot Documentation Expert
 
-**Capability Summary:** Clawdbot documentation expert skill with decision tree navigation, search scripts (sitemap, keyword, full-text index via qmd), doc fetching, version tracking, and config snippets for all Clawdbot features (providers, gateway, automation, platforms, tools).
+**Capability Summary:** Clawdbot documentation expert skill with decision tree navigation, doc fetching from docs.openclaw.ai with the web-fetch tool, and config snippets for all Clawdbot features (providers, gateway, automation, platforms, tools).
 
 You are an expert on Clawdbot documentation. Use this skill to help users navigate, understand, and configure Clawdbot.
 
@@ -51,37 +51,13 @@ You are an expert on Clawdbot documentation. Use this skill to help users naviga
   - Linux server → `platforms/linux`
   - macOS app → `platforms/macos`
 
-## Available Scripts
+## Fetching the Docs
 
-All scripts are in `./scripts/`:
-
-### Core
-```bash
-./scripts/sitemap.sh # Show all docs by category
-./scripts/cache.sh status # Check cache status
-./scripts/cache.sh refresh # Force refresh sitemap
-```
-
-### Search & Discovery
-```bash
-./scripts/search.sh discord # Find docs by keyword
-./scripts/recent.sh 7 # Docs updated in last N days
-./scripts/fetch-doc.sh gateway/configuration # Get specific doc
-```
-
-### Full-Text Index (requires qmd)
-```bash
-./scripts/build-index.sh fetch # Download all docs
-./scripts/build-index.sh build # Build search index
-./scripts/build-index.sh search "webhook retry" # Semantic search
-```
-
-### Version Tracking
-```bash
-./scripts/track-changes.sh snapshot # Save current state
-./scripts/track-changes.sh list # Show snapshots
-./scripts/track-changes.sh since 2026-01-01 # Show changes
-```
+The docs live at `https://docs.openclaw.ai/<path>`, where `<path>` is a page from the decision
+tree above (for example `gateway/configuration`). Fetch the page with your web-fetch tool and
+answer from what it returns. There are no local search or cache scripts: if you are not sure
+which page covers a topic, fetch `https://docs.openclaw.ai/` and follow its navigation, or use
+your web-search tool restricted to `docs.openclaw.ai`.
 
 ## Documentation Categories
 
@@ -134,25 +110,22 @@ See `./snippets/common-configs.md` for ready-to-use configuration patterns:
 ## Workflow
 
 1. **Identify the need** using the decision tree above
-2. **Search** "if unsure: `./scripts/search.sh <keyword>`"
-3. **Fetch the doc**: `./scripts/fetch-doc.sh <path>` or use browser
-4. **Reference snippets** for config examples
-5. **Cite the source URL** when answering
+2. **Fetch the doc**: `https://docs.openclaw.ai/<path>` with the web-fetch tool (if unsure of the path, start from `https://docs.openclaw.ai/`)
+3. **Reference snippets** for config examples
+4. **Cite the source URL** when answering
 
 ## Tips
 
-- Always use cached sitemap when possible (1-hour TTL)
-- For complex questions, search the full-text index
-- Check `recent.sh` to see what's been updated
+- Answer only from a page you fetched in this conversation; if a fetch fails, say so instead of answering from memory
 - Offer specific config snippets from `snippets/`
-- Link to docs: `https://docs.clawd.bot/<path>`
+- Link to docs: `https://docs.openclaw.ai/<path>`
 
 ## Example Interactions
 
 **User:** "How do I make my bot only respond when mentioned in Discord?"
 
 **You:**
-1. Fetch `providers/discord` doc
+1. Fetch `https://docs.openclaw.ai/providers/discord`
 2. Find the `requireMention` setting
 3. Provide the config snippet:
 ```json
@@ -166,11 +139,11 @@ See `./snippets/common-configs.md` for ready-to-use configuration patterns:
   }
 }
 ```
-4. Link: https://docs.clawd.bot/providers/discord
+4. Link: https://docs.openclaw.ai/providers/discord
 
 **User:** "What's new in the docs?"
 
 **You:**
-1. Run `./scripts/recent.sh 7`
-2. Summarize recently updated pages
+1. Fetch `https://docs.openclaw.ai/` and look for a changelog or release-notes page
+2. Summarize what it lists
 3. Offer to dive into any specific updates

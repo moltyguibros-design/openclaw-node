@@ -122,3 +122,21 @@ describe('growth-loop init-campaign.sh', () => {
     assert.equal(config.platform, 'blog');
   });
 });
+
+// clawddocs shipped seven echo-only stubs (fetch-doc printed the URL, cache always
+// said "OK"), so an agent following SKILL.md believed it had read docs it never saw.
+describe('clawddocs', () => {
+  const DIR = join(SKILLS, 'clawddocs');
+  const skill = readFileSync(join(DIR, 'SKILL.md'), 'utf8');
+
+  it('ships no helper scripts', () => {
+    assert.equal(existsSync(join(DIR, 'scripts')), false);
+    assert.doesNotMatch(skill, /scripts\//);
+  });
+
+  it('fetches the current docs site with the web-fetch tool', () => {
+    assert.match(skill, /https:\/\/docs\.openclaw\.ai\/<path>/);
+    assert.match(skill, /web-fetch tool/);
+    assert.doesNotMatch(skill, /docs\.clawd\.bot/);
+  });
+});
