@@ -40,11 +40,35 @@ async function loadRegistry(): Promise<SoulRegistry> {
   return JSON.parse(content);
 }
 
+async function writeAtomic(file: string, content: string): Promise<void> {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${crypto.randomUUID()}.tmp`;
+  await fs.writeFile(tmp, content);
+  await fs.rename(tmp, file);
+}
+
 async function saveRegistry(registry: SoulRegistry): Promise<void> {
-  await fs.mkdir(SOULS_DIR, { recursive: true });
-  const tmp = `${REGISTRY_PATH}.${crypto.randomUUID()}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(registry, null, 2));
-  await fs.rename(tmp, REGISTRY_PATH);
+  await writeAtomic(REGISTRY_PATH, JSON.stringify(registry, null, 2));
+}
+
+// souls/sync-registry.js rebuilds registry.json from each soul's
+// capabilities.json and drops a soul that has none, so every capability
+// change made here lands there too. Other keys (permissions) are kept.
+async function saveCapabilities(id: string, capabilities: Partial<Soul["capabilities"]> | undefined): Promise<void> {
+  const file = path.join(SOULS_DIR, id, "capabilities.json");
+  let existing: Record<string, unknown> = {};
+  try {
+    existing = JSON.parse(await fs.readFile(file, "utf-8"));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+  const pick = (key: keyof Soul["capabilities"]) => {
+    const given = capabilities?.[key];
+    const kept = existing[key];
+    return Array.isArray(given) ? given : Array.isArray(kept) ? kept : [];
+  };
+  const next = { ...existing, skills: pick("skills"), tools: pick("tools"), mcpServers: pick("mcpServers") };
+  await writeAtomic(file, JSON.stringify(next, null, 2) + "\n");
 }
 
 // GET /api/souls - List all souls
@@ -97,6 +121,7 @@ export async function POST(request: NextRequest) {
     };
 
     registry.souls.push(newSoul);
+    await saveCapabilities(newSoul.id, newSoul.capabilities);
     await saveRegistry(registry);
 
     return NextResponse.json(newSoul, { status: 201 });
@@ -139,6 +164,9 @@ export async function PATCH(request: NextRequest) {
       updatedAt: new Date().toISOString(),
     };
 
+    if (body?.capabilities !== undefined) {
+      await saveCapabilities(soulId, registry.souls[soulIndex].capabilities);
+    }
     await saveRegistry(registry);
 
     return NextResponse.json(registry.souls[soulIndex]);

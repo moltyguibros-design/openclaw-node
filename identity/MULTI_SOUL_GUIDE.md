@@ -349,7 +349,7 @@ bin/mc-api /api/souls | jq '.[] | .id'
 cd ~/.openclaw/souls && git status
 
 # If not initialized:
-git init
+git init -b main
 git config user.name "Daedalus"
 git config user.email "daedalus@openclaw.local"
 git add .

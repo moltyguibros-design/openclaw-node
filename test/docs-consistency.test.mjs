@@ -149,3 +149,9 @@ test('README Federation section carries the plan status while the federation blo
   assert.match(fed, /\*\*D16\*\*[^\n]*retired consensus gating/);
   assert.ok(fed.includes('(memory-plan/plans/federation/BLOCKED.md)'));
 });
+
+test('the souls recovery recipe initializes main, as the installer does', () => {
+  const guide = read('identity/MULTI_SOUL_GUIDE.md');
+  assert.match(guide, /^git init -b main$/m);
+  assert.doesNotMatch(guide, /^git init$/m);
+});
