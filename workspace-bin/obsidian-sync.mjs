@@ -18,6 +18,7 @@ import path from 'path';
 import crypto from 'crypto';
 import https from 'https';
 import os from 'os';
+import yaml from 'js-yaml';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -144,94 +145,66 @@ function fileHash(filePath) {
 }
 
 // ============================================================
-// FRONTMATTER — YAML-lite parser/injector
+// FRONTMATTER — js-yaml parse, object-level merge
 // ============================================================
 
 const FM_REGEX = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
-/**
- * Parse YAML frontmatter (simple key: value, arrays, strings).
- * Not a full YAML parser — handles the subset Obsidian actually uses.
- */
-function parseFrontmatter(content) {
-  const match = content.match(FM_REGEX);
-  if (!match) return { meta: {}, body: content };
+// JSON_SCHEMA keeps dates as strings instead of coercing them to Date objects.
+const YAML_OPTS = { schema: yaml.JSON_SCHEMA };
 
-  const yaml = match[1];
-  const body = content.slice(match[0].length);
-  const meta = {};
-
-  for (const line of yaml.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-
-    const colonIdx = trimmed.indexOf(':');
-    if (colonIdx < 0) continue;
-
-    const key = trimmed.slice(0, colonIdx).trim();
-    let value = trimmed.slice(colonIdx + 1).trim();
-
-    // Inline array: [a, b, c]
-    if (value.startsWith('[') && value.endsWith(']')) {
-      meta[key] = value.slice(1, -1).split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
-    } else if (value.startsWith('"') && value.endsWith('"')) {
-      meta[key] = value.slice(1, -1);
-    } else if (value.startsWith("'") && value.endsWith("'")) {
-      meta[key] = value.slice(1, -1);
-    } else if (value === 'true') {
-      meta[key] = true;
-    } else if (value === 'false') {
-      meta[key] = false;
-    } else if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-      meta[key] = value; // keep dates as strings
-    } else if (value === '') {
-      meta[key] = '';
-    } else {
-      meta[key] = value;
-    }
-  }
-
-  return { meta, body };
+function dumpFrontmatter(meta) {
+  return yaml.dump(meta, { ...YAML_OPTS, lineWidth: -1 }).replace(/\n$/, '');
 }
 
-/**
- * Serialize frontmatter back to YAML string.
- */
-function serializeFrontmatter(meta) {
-  const lines = [];
-  for (const [key, value] of Object.entries(meta)) {
-    if (Array.isArray(value)) {
-      lines.push(`${key}: [${value.join(', ')}]`);
-    } else if (typeof value === 'boolean') {
-      lines.push(`${key}: ${value}`);
-    } else if (typeof value === 'string' && value.includes(':')) {
-      lines.push(`${key}: "${value}"`);
-    } else {
-      lines.push(`${key}: ${value}`);
-    }
-  }
-  return lines.join('\n');
+function today() {
+  return new Date().toISOString().split('T')[0];
 }
 
 /**
  * Inject/merge frontmatter into file content.
- * Preserves existing fields, adds missing defaults.
+ * Existing fields win, injected fields fill gaps, injected tags are unioned in.
+ * Frontmatter that does not parse as a YAML map is kept verbatim and only the
+ * missing injected keys are appended.
  */
-function injectFrontmatter(content, injected) {
-  const { meta: existing, body } = parseFrontmatter(content);
+export function injectFrontmatter(content, injected) {
+  const match = content.match(FM_REGEX);
+  const body = match ? content.slice(match[0].length) : content;
 
-  // Merge: existing wins for fields already set, injected fills gaps
-  const merged = { ...injected, ...existing };
-
-  // Always update 'updated' timestamp
-  merged.updated = new Date().toISOString().split('T')[0];
-
-  // Set created if missing
-  if (!merged.created) {
-    merged.created = merged.updated;
+  let existing = {};
+  if (match) {
+    let parsed;
+    try {
+      parsed = yaml.load(match[1], YAML_OPTS);
+    } catch {
+      parsed = undefined;
+    }
+    if (!match[1].trim()) {
+      existing = {};
+    } else if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      existing = parsed;
+    } else {
+      const present = new Set(
+        [...match[1].matchAll(/^([^\s#:][^:]*):/gm)].map(m => m[1].trim().replace(/^["']|["']$/g, '')),
+      );
+      const missing = { ...injected, updated: today(), created: today() };
+      for (const key of Object.keys(missing)) if (present.has(key)) delete missing[key];
+      const appended = Object.keys(missing).length ? `\n${dumpFrontmatter(missing)}` : '';
+      return `---\n${match[1]}${appended}\n---\n${body}`;
+    }
   }
 
-  return `---\n${serializeFrontmatter(merged)}\n---\n${body}`;
+  const merged = { ...injected, ...existing };
+  if (Array.isArray(injected.tags)) {
+    const own = Array.isArray(existing.tags) ? existing.tags
+      : typeof existing.tags === 'string' && existing.tags ? [existing.tags] : [];
+    merged.tags = [...own, ...injected.tags.filter(t => !own.includes(t))];
+  }
+
+  merged.updated = today();
+  if (!merged.created) merged.created = merged.updated;
+
+  return `---\n${dumpFrontmatter(merged)}\n---\n${body}`;
 }
 
 // ============================================================
