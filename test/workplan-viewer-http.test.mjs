@@ -426,6 +426,22 @@ fs.readdirSync = function (dir, ...rest) {
   assert.ok(switched, 'a newer session transcript is picked up within the cache window');
 });
 
+// The repo prefix that Progress strips from tool paths was one operator's
+// checkout, so every other checkout showed full (or ~-relative) paths.
+test('progress shortens tool paths relative to the checkout the viewer runs from', async t => {
+  const f = await fixture(t, { prepare(root, plan) {
+    const event = { type: 'assistant', message: { content: [
+      { type: 'tool_use', name: 'Read', input: { file_path: path.join(fs.realpathSync(root), 'lib', 'probe.mjs') } },
+    ] } };
+    fs.writeFileSync(path.join(plan, 'tick-logs/sample.jsonl'), JSON.stringify(event) + '\n');
+    return {};
+  } });
+  const activity = await sseEvents(t, f, '/api/plans/fixture/activity-stream');
+  const read = await activity.waitFor(e => e.event === 'activity');
+  assert.ok(read, f.output());
+  assert.match(JSON.parse(read.data).body, /^lib\/probe\.mjs\b/);
+});
+
 test('a log stream keeps a multi-byte character split across writes', async t => {
   const f = await fixture(t);
   const file = path.join(f.plan, 'tick-logs/sample.log');

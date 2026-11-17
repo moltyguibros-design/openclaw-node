@@ -9,11 +9,9 @@
 //
 // Independent from mission-control (which runs on :3000).
 //
-// Discovery roots (in priority order):
-//   1. $WORKPLAN_ROOTS — colon-separated list of dirs to scan
-//   2. <cwd>/memory-plan/plans (only when $WORKPLAN_ROOTS is unset)
-// Within each root, every immediate subdirectory that contains BOTH
-// INVENTORY.md and VERSION is registered as a plan.
+// Discovery roots: $WORKPLAN_ROOTS (colon-separated) if set, else
+// <cwd>/memory-plan/plans. Within each root, every immediate subdirectory
+// that contains BOTH INVENTORY.md and VERSION is registered as a plan.
 //
 // Usage:
 //   ./workspace-bin/workplan-viewer.mjs                       # bind :7892
@@ -1226,7 +1224,7 @@ function generatedBlockDoc({ trigger, detail, version }) {
 // converts each event into ONE concise activity line. Powers the "Progress"
 // tab — different rendering of the same source data the Live tab uses.
 
-const ACTIVITY_REPO_PREFIX = '/Users/moltymac/openclaw-nodedev/';
+const ACTIVITY_REPO_PREFIX = process.cwd() + path.sep;
 const ACTIVITY_HOME = os.homedir();
 
 function relPath(p) {
