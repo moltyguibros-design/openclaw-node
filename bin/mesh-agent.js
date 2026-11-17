@@ -53,6 +53,7 @@ const { findRole, formatRoleForPrompt, validateRequiredOutputs } = require('../l
 const sc = StringCodec();
 const { NATS_URL, natsConnectOpts, resolveEnvKey } = require('../lib/nats-resolve');
 const { PROVIDERS, resolveProvider, resolveModel, stripLlmOutput, isOpenClawWorkerProvider, taskProviderRefusal } = require('../lib/llm-providers');
+const { createOutputWindow } = require('../lib/output-window');
 // One derivation for every daemon (lib/node-id) — the agent must claim tasks
 // under the same node_id the task daemon authorizes, or ownership checks fail.
 const NODE_ID = require('../lib/node-id').resolveNodeId();
@@ -628,7 +629,7 @@ async function foremanVerify(supervisor, task, worktreePath, attempt, llmResult)
     }
   }
   if (movedHead) tampered = tampered ? `${movedHead}; ${tampered}` : movedHead;
-  const verdict = foreman.parseVerdict(result.stdout);
+  const verdict = foreman.parseVerdict(result.stdout, { truncated: result.truncated });
   // Any Foreman stop of the verifier voids its verdict (F14.2): it was cut off mid-check, and
   // a PASS printed before the signal, or the 0 a CLI that traps SIGTERM exits with, proves
   // nothing. ESCALATE releases below; STOP is a failed attempt, retried like any other.
@@ -1299,24 +1300,28 @@ function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null)
       }
     }, HEARTBEAT_INTERVAL);
 
-    let stdout = '';
-    let stderr = '';
-    const MAX_OUTPUT = 1024 * 1024; // 1MB cap
+    // 1MB per stream: the first 256KB and the last 768KB.
+    const stdoutWin = createOutputWindow(256 * 1024, 768 * 1024);
+    const stderrWin = createOutputWindow(256 * 1024, 768 * 1024);
 
-    child.stdout.on('data', (d) => { if (stdout.length < MAX_OUTPUT) stdout += d.toString().slice(0, MAX_OUTPUT - stdout.length); });
-    child.stderr.on('data', (d) => { if (stderr.length < MAX_OUTPUT) stderr += d.toString().slice(0, MAX_OUTPUT - stderr.length); });
+    child.stdout.on('data', (d) => stdoutWin.push(d));
+    child.stderr.on('data', (d) => stderrWin.push(d));
 
     child.on('close', (code, signal) => {
       clearInterval(heartbeatTimer);
       clearTimeout(budgetTimer);
       clearWorker();
       if (supervisor) supervisor.workerExited({ exitCode: code, signal });
+      const stdout = stdoutWin.text();
+      const stderr = stderrWin.text();
+      const truncated = stdoutWin.truncated;
+      if (truncated) warn(`${task.task_id}: ${provider.name} output exceeded the 1MB capture cap; its middle was dropped and it carries no verdict`);
       // A provider that reports its own result record (claude's json output) yields the
       // answer text and the CLI's own cost; everything downstream reads only the text.
       const parsed = provider.parseOutput ? provider.parseOutput(stdout) : null;
       // Sanitize before any parsing: terminal control codes + thinking blocks
       // must never reach the artifact pipeline (2.4 finding 6).
-      resolve({ exitCode: code, stdout: stripLlmOutput(parsed ? parsed.text : stdout), stderr, provider: provider.name, model, cost: parsed?.cost ?? null });
+      resolve({ exitCode: code, stdout: stripLlmOutput(parsed ? parsed.text : stdout), stderr, truncated, provider: provider.name, model, cost: parsed?.cost ?? null });
     });
 
     child.on('error', (err) => {
@@ -1502,7 +1507,12 @@ function buildCollabPrompt(task, roundNumber, sharedIntel, myScope, myRole, roun
  */
 const VALID_VOTES = new Set(['continue', 'converged', 'blocked']);
 
-function parseReflection(output) {
+function parseReflection(output, { truncated = false } = {}) {
+  // A spliced capture can pair a block from the head with a vote from the tail: no vote at all.
+  if (truncated) {
+    log('REFLECTION PARSE FAILED: output exceeded the capture cap');
+    return { summary: 'output exceeded the 1MB capture cap; reflection not parsed', learnings: '', confidence: 0.5, vote: 'parse_error', parse_failed: true };
+  }
   // Strategy: find the last ```json ... ``` block in the output
   const jsonBlocks = [...output.matchAll(/```json\s*\n([\s\S]*?)```/g)];
 
@@ -1770,8 +1780,9 @@ const { parseCirclingReflection: _parseCircling } = require('../lib/circling-par
  * Parse a circling strategy output. Delegates to lib/circling-parser.js
  * with agent-specific options (logger, legacy fallback).
  */
-function parseCirclingReflection(output) {
+function parseCirclingReflection(output, { truncated = false } = {}) {
   return _parseCircling(output, {
+    truncated,
     log: (msg) => log(msg),
     legacyParser: parseReflection,
   });
@@ -2179,7 +2190,7 @@ async function executeCollabTask(task) {
           parse_failed: false,
         };
       } else if (isCircling) {
-        const circResult = parseCirclingReflection(output);
+        const circResult = parseCirclingReflection(output, { truncated: llmResult.truncated });
         // A converged vote must have something to vote on: every circling step
         // carries a designated artifact, so ZERO artifacts — or artifacts whose
         // content is empty after sanitization — are parse failures, not
@@ -2234,7 +2245,7 @@ async function executeCollabTask(task) {
         };
         circlingArtifacts = circResult.circling_artifacts;
       } else {
-        reflection = parseReflection(output);
+        reflection = parseReflection(output, { truncated: llmResult.truncated });
       }
 
       // List modified files
@@ -2948,5 +2959,6 @@ module.exports.__test = {
   runLLM,
   onStopNotice, listenForStops,
   evaluateMetric,
+  parseReflection,
 };
 // deploy-v7f0130b

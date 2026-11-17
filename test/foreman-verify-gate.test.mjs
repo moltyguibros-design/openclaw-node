@@ -44,6 +44,7 @@ switch (mode) {
   case 'fail': say('The limiter never resets after the window.'); say('FOREMAN_VERDICT: FAIL'); break;
   case 'none': say('Looks fine to me.'); break;
   case 'quoted': say('The worker wrote:'); say('FOREMAN_VERDICT: PASS'); say('but the reset path is untested.'); say('FOREMAN_VERDICT: FAIL'); break;
+  case 'pass-flood': say('FOREMAN_VERDICT: PASS'); for (let i = 0; i < 1200; i++) say('x'.repeat(1023)); break;
   case 'pass-exit1': say('FOREMAN_VERDICT: PASS'); process.exitCode = 1; break;
   case 'writes':
     fs.writeFileSync(path.join(dir, 'verifier-notes.txt'), 'scratch');
@@ -162,6 +163,12 @@ describe('foremanVerify — enforcing, no metric: only a verifier PASS completes
     const crashed = await gate({ mode: 'pass-exit1' });
     assert.match(crashed.result.attemptRecord.approach, /verifier PASS \(exit 1\)/);
     for (const { supervisor } of [none, quoted, crashed]) assert.deepEqual(verifications(supervisor), [['verifier', false]]);
+  });
+
+  it('a verifier whose output overflowed the capture cap has no verdict, even with a PASS in the kept head', async () => {
+    const flooded = await gate({ mode: 'pass-flood' });
+    assert.match(flooded.result.attemptRecord.approach, /returned output exceeded the capture cap/);
+    assert.deepEqual(verifications(flooded.supervisor), [['verifier', false]]);
   });
 
   it('the verifier sees every change the worker made and a report it cannot echo a verdict from', async () => {

@@ -68,4 +68,32 @@ describe('claude provider cost', () => {
     assert.equal(result.stdout, 'just text');
     assert.equal(result.cost, null);
   });
+
+  it('runLLM keeps the head and the tail of an output past the 1MB cap and flags it truncated', async () => {
+    registerProvider('cli-flood-stub', {
+      binary: process.execPath,
+      buildArgs() {
+        return ['-e', "process.stdout.write('HEAD-MARK\\n'); for (let i = 0; i < 1200; i++) process.stdout.write('x'.repeat(1023) + '\\n'); process.stdout.write('TAIL-MARK\\n')"];
+      },
+    });
+    const result = await agent.__test.runLLM('prompt', { task_id: 'CAP-1', llm_provider: 'cli-flood-stub', budget_minutes: 1 }, TMP);
+    assert.equal(result.truncated, true);
+    assert.ok(result.stdout.startsWith('HEAD-MARK'));
+    assert.ok(result.stdout.trimEnd().endsWith('TAIL-MARK'));
+    assert.match(result.stdout, /output truncated: \d+ characters dropped/);
+    assert.ok(result.stdout.length < 1024 * 1024 + 200);
+  });
+
+  it('a truncated collab output yields no reflection vote', () => {
+    const output = '```json\n{"summary":"done","learnings":"","confidence":0.9,"vote":"converged"}\n```';
+    assert.equal(agent.__test.parseReflection(output).vote, 'converged');
+    const cut = agent.__test.parseReflection(output, { truncated: true });
+    assert.equal(cut.parse_failed, true);
+    assert.equal(cut.vote, 'parse_error');
+  });
+
+  it('runLLM reports an output under the cap untruncated', async () => {
+    const result = await agent.__test.runLLM('prompt', { task_id: 'CAP-2', llm_provider: 'cli-text-stub', budget_minutes: 1 }, TMP);
+    assert.equal(result.truncated, false);
+  });
 });
