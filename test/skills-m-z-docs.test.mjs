@@ -12,6 +12,7 @@ const frontName = (rel) => read(rel).match(/^---\n([\s\S]*?)\n---/)?.[1].match(/
 test('renamed skills declare their directory id as their name', () => {
   assert.equal(frontName('tavily-search/SKILL.md'), 'tavily-search');
   assert.equal(frontName('moltbook-interact/SKILL.md'), 'moltbook-interact');
+  assert.equal(frontName('_quarantine/refactor-suggest/SKILL.md'), 'refactor-suggest');
 });
 
 test('user-story example quotes its arguments as bash will read them', () => {

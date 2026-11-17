@@ -1,5 +1,5 @@
 ---
-name: refactor-assist
+name: refactor-suggest
 description: "Analyze code files and suggest refactoring improvements with colored diffs via GPT-4o-mini. Use when you want automated refactoring suggestions before a code review or during tech debt cleanup."
 triggers:
   - "refactor suggestions"
