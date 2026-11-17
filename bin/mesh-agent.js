@@ -52,8 +52,8 @@ const { findRole, formatRoleForPrompt, validateRequiredOutputs } = require('../l
 
 const sc = StringCodec();
 const { NATS_URL, natsConnectOpts, resolveEnvKey } = require('../lib/nats-resolve');
-const { PROVIDERS, resolveProvider, resolveModel, stripLlmOutput, isOpenClawWorkerProvider, taskProviderRefusal } = require('../lib/llm-providers');
-const { createOutputWindow } = require('../lib/output-window');
+const { PROVIDERS, resolveProvider, resolveModel, isOpenClawWorkerProvider, taskProviderRefusal } = require('../lib/llm-providers');
+const { runProvider } = require('../lib/llm-run');
 // One derivation for every daemon (lib/node-id) — the agent must claim tasks
 // under the same node_id the task daemon authorizes, or ownership checks fail.
 const NODE_ID = require('../lib/node-id').resolveNodeId();
@@ -1260,7 +1260,8 @@ function cleanupWorktree(worktreePath, keep = false) {
 // ── LLM Execution ────────────────────────────────────
 
 /**
- * Run an LLM CLI with a prompt. Returns { exitCode, stdout, stderr, provider, model }.
+ * Run an LLM CLI with a prompt through the shared runner (lib/llm-run.js).
+ * Returns { exitCode, stdout, stderr, truncated, provider, model, cost, outcome }.
  * LLM-agnostic: provider is resolved per-task from task.llm_provider, env, or CLI flag.
  * Sends heartbeats to the daemon every HEARTBEAT_INTERVAL to prevent stall detection.
  *
@@ -1268,97 +1269,62 @@ function cleanupWorktree(worktreePath, keep = false) {
  * @param {object} task
  * @param {string|null} worktreePath - If set, LLM accesses this worktree instead of WORKSPACE
  */
-function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null) {
-  return new Promise((resolve) => {
-    const provider = resolveProvider(task, CLI_PROVIDER, ENV_PROVIDER);
-    const model = resolveModel(task, CLI_MODEL, provider);
+async function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null) {
+  const provider = resolveProvider(task, CLI_PROVIDER, ENV_PROVIDER);
+  const model = resolveModel(task, CLI_MODEL, provider);
+  const targetDir = worktreePath || WORKSPACE;
 
-    const targetDir = worktreePath || WORKSPACE;
-    // D14: an isolated task sees ONLY its worktree — passing WORKSPACE too
-    // gave every worker read access to the dirty parent checkout (uncommitted
-    // edits leaked into artifacts, and reproducibility died with them).
-    const llmArgs = provider.buildArgs(prompt, model, task, targetDir, worktreePath ? null : WORKSPACE);
+  // Clean per-agent temp cwd: avoids loading workspace config files AND
+  // keeps each agent's Claude session JSONLs private — with a shared dir,
+  // concurrent agents misattribute each other's cost (getSessionInfo reads
+  // the latest session file in this cwd's project dir).
+  const cleanCwd = AGENT_WORK_DIR;
+  if (!fs.existsSync(cleanCwd)) fs.mkdirSync(cleanCwd, { recursive: true });
 
-    log(`Spawning [${provider.name}]: ${provider.binary} ${llmArgs.slice(0, 6).join(' ')} ... (target: ${worktreePath ? 'worktree' : 'workspace'})`);
-
-    // Clean per-agent temp cwd: avoids loading workspace config files AND
-    // keeps each agent's Claude session JSONLs private — with a shared dir,
-    // concurrent agents misattribute each other's cost (getSessionInfo reads
-    // the latest session file in this cwd's project dir).
-    const cleanCwd = AGENT_WORK_DIR;
-    if (!fs.existsSync(cleanCwd)) fs.mkdirSync(cleanCwd, { recursive: true });
-
-    const cleanEnv = provider.cleanEnv(process.env);
-
-    const child = spawn(provider.binary, llmArgs, {
-      cwd: cleanCwd,
-      env: cleanEnv,
-      stdio: ['ignore', 'pipe', 'pipe'],  // stdin must be 'ignore' — some CLIs block on piped stdin
-      // Own process group: a Foreman STOP and the budget timeout must end the CLI and everything it spawned.
-      detached: true,
-    });
-    if (supervisor) supervisor.attach(child);
-
-    // Kill the whole group if it exceeds the budget; the verifier passes what is left of the task
-    // deadline (F14.5). spawn's own `timeout` signals only the CLI's pid.
-    const signalGroup = (signal) => {
-      try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* gone */ } }
-    };
-    const terminate = () => {
-      signalGroup('SIGTERM');
-      setTimeout(() => signalGroup('SIGKILL'), 5000).unref();
-    };
-    const budgetTimer = setTimeout(terminate, timeoutMs ?? (task.budget_minutes || 30) * 60 * 1000);
-    const worker = { taskId: task.task_id, stop: terminate };
-    activeWorker = worker;
-    if (stoppedFor(task.task_id)) terminate();
-    const clearWorker = () => { if (activeWorker === worker) activeWorker = null; };
-
-    // Heartbeat: renews the lease and keeps the daemon's stall detector quiet.
-    let lastHeartbeatWarn = 0;
-    const heartbeatTimer = setInterval(async () => {
-      try {
-        await natsRequest('mesh.tasks.heartbeat', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token });
-      } catch (err) {
-        if (!lastHeartbeatWarn || Date.now() - lastHeartbeatWarn > 60000) {
-          warn(`heartbeat: ${err.message}`);
-          lastHeartbeatWarn = Date.now();
-        }
+  // Heartbeat: renews the lease and keeps the daemon's stall detector quiet.
+  let lastHeartbeatWarn = 0;
+  const heartbeatTimer = setInterval(async () => {
+    try {
+      await natsRequest('mesh.tasks.heartbeat', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token });
+    } catch (err) {
+      if (!lastHeartbeatWarn || Date.now() - lastHeartbeatWarn > 60000) {
+        warn(`heartbeat: ${err.message}`);
+        lastHeartbeatWarn = Date.now();
       }
-    }, HEARTBEAT_INTERVAL);
+    }
+  }, HEARTBEAT_INTERVAL);
 
-    // 1MB per stream: the first 256KB and the last 768KB.
-    const stdoutWin = createOutputWindow(256 * 1024, 768 * 1024);
-    const stderrWin = createOutputWindow(256 * 1024, 768 * 1024);
+  // A confirmed stop notice (onStopNotice) aborts the run: the runner stops the whole process group.
+  const stop = new AbortController();
+  const worker = { taskId: task.task_id, stop: () => stop.abort() };
+  activeWorker = worker;
+  if (stoppedFor(task.task_id)) stop.abort();
 
-    child.stdout.on('data', (d) => stdoutWin.push(d));
-    child.stderr.on('data', (d) => stderrWin.push(d));
-
-    child.on('close', (code, signal) => {
-      clearInterval(heartbeatTimer);
-      clearTimeout(budgetTimer);
-      clearWorker();
-      if (supervisor) supervisor.workerExited({ exitCode: code, signal });
-      const stdout = stdoutWin.text();
-      const stderr = stderrWin.text();
-      const truncated = stdoutWin.truncated;
-      if (truncated) warn(`${task.task_id}: ${provider.name} output exceeded the 1MB capture cap; its middle was dropped and it carries no verdict`);
-      // A provider that reports its own result record (claude's json output) yields the
-      // answer text and the CLI's own cost; everything downstream reads only the text.
-      const parsed = provider.parseOutput ? provider.parseOutput(stdout) : null;
-      // Sanitize before any parsing: terminal control codes + thinking blocks
-      // must never reach the artifact pipeline (2.4 finding 6).
-      resolve({ exitCode: code, stdout: stripLlmOutput(parsed ? parsed.text : stdout), stderr, truncated, provider: provider.name, model, cost: parsed?.cost ?? null });
+  let run;
+  try {
+    run = await runProvider(provider, {
+      prompt, model, task, targetDir,
+      // D14: an isolated task sees ONLY its worktree — passing WORKSPACE too
+      // gave every worker read access to the dirty parent checkout (uncommitted
+      // edits leaked into artifacts, and reproducibility died with them).
+      workspaceDir: worktreePath ? null : WORKSPACE,
+      cwd: cleanCwd,
+      // The verifier passes what is left of the task deadline (F14.5).
+      timeoutMs: timeoutMs ?? (task.budget_minutes || 30) * 60 * 1000,
+      signal: stop.signal,
+      onSpawn(child, { binary, args }) {
+        log(`Spawning [${provider.name}]: ${binary} ${args.slice(0, 6).join(' ')} ... (target: ${worktreePath ? 'worktree' : 'workspace'})`);
+        if (supervisor) supervisor.attach(child);
+      },
     });
-
-    child.on('error', (err) => {
-      clearInterval(heartbeatTimer);
-      clearTimeout(budgetTimer);
-      clearWorker();
-      if (supervisor) supervisor.workerExited({ exitCode: 1, signal: null });
-      resolve({ exitCode: 1, stdout: '', stderr: err.message, provider: provider.name, model });
-    });
-  });
+  } finally {
+    clearInterval(heartbeatTimer);
+    if (activeWorker === worker) activeWorker = null;
+  }
+  if (supervisor) supervisor.workerExited({ exitCode: run.exitCode, signal: run.signal });
+  if (run.outcome !== 'ok') log(`[${provider.name}] run outcome: ${run.outcome} (exit status ${run.exitStatus})`);
+  if (run.truncated) warn(`${task.task_id}: ${provider.name} output exceeded the 1MB capture cap; its middle was dropped and it carries no verdict`);
+  return { exitCode: run.exitCode, stdout: run.stdout, stderr: run.stderr, truncated: run.truncated, provider: provider.name, model, cost: run.cost, outcome: run.outcome };
 }
 
 // ── Metric Evaluation ─────────────────────────────────

@@ -97,3 +97,23 @@ describe('claude provider cost', () => {
     assert.equal(result.truncated, false);
   });
 });
+
+describe('runLLM through the shared runner (lib/llm-run)', () => {
+  it('a CLI that cannot start is classified spawn_failed (127) and reported to the supervisor once', async () => {
+    registerProvider('missing-cli-stub', { binary: path.join(TMP, 'no-such-cli'), buildArgs: () => [] });
+    const exits = [];
+    const supervisor = { attach() {}, workerExited: (e) => exits.push(e) };
+    const result = await agent.__test.runLLM('prompt', { task_id: 'RUN-1', llm_provider: 'missing-cli-stub', budget_minutes: 1 }, TMP, supervisor);
+    assert.equal(result.exitCode, 127);
+    assert.equal(result.outcome, 'spawn_failed');
+    assert.match(result.stderr, /ENOENT/);
+    assert.deepEqual(exits, [{ exitCode: 127, signal: null }]);
+  });
+
+  it('an exit-0 run with no answer is classified empty', async () => {
+    registerProvider('silent-cli-stub', { binary: process.execPath, buildArgs: () => ['-e', ''] });
+    const result = await agent.__test.runLLM('prompt', { task_id: 'RUN-2', llm_provider: 'silent-cli-stub', budget_minutes: 1 }, TMP);
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.outcome, 'empty');
+  });
+});
