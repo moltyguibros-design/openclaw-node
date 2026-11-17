@@ -84,7 +84,7 @@ function findPlan(id) {
 }
 
 // ── State-transition notifications (server-side banner + sound) ────────────────
-// Fires the shared memory-plan-notify.sh on plan transitions, so the operator
+// Fires bin/openclaw-notify.mjs on plan transitions, so the operator
 // hears/sees them whether or not a browser tab is open:
 //   forward (step closed / version advanced) → 'closed' → Glass chime
 //   plan became BLOCKED                       → 'blocked' → Sosumi alert

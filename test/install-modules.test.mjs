@@ -309,6 +309,19 @@ test('sync-to-harness is gone from the repo and an --update moves the installed 
   assert.equal(existsSync(join(bin, 'kept')), true);
 });
 
+test('the pre-silo plan tools are gone, retired on --update, and nothing points at them', () => {
+  const retired = readFileSync(join(ROOT, 'scripts/install/retired-files.txt'), 'utf8');
+  for (const f of ['memory-plan-status.sh', 'memory-plan-timeline.sh', 'memory-plan-notify.sh']) {
+    assert.equal(existsSync(join(ROOT, 'workspace-bin', f)), false, `${f} still ships`);
+    assert.match(retired, new RegExp(`^workspace-bin ${f.replace(/\./g, '\\.')}$`, 'm'));
+    for (const doc of ['docs/NOTIFICATIONS.md', 'workspace-bin/workplan-viewer.mjs', 'bin/health-watch.mjs']) {
+      assert.ok(!readFileSync(join(ROOT, doc), 'utf8').includes(f), `${doc} still names ${f}`);
+    }
+  }
+  assert.doesNotMatch(readFileSync(join(ROOT, '.gitignore'), 'utf8'), /TIMELINE\.md/);
+  assert.doesNotMatch(readFileSync(join(ROOT, 'workspace-bin/memory-plan-pretty-stream.sh'), 'utf8'), /memory-plan-tick\.sh/);
+});
+
 test('skills that ship memory or code off the node are quarantined, and an --update removes installed copies', () => {
   const quarantine = readFileSync(join(ROOT, 'skills/_quarantine/README.md'), 'utf8');
   for (const s of ['second-brain', 'refactor-suggest']) {

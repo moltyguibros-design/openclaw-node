@@ -14,3 +14,8 @@ mesh-bin session-search.mjs
 # sync-to-harness: its "dry run" rewrote ~/openclaw (the deploy checkout) with
 # --delete and pushed to main.
 workspace-bin sync-to-harness
+# Pre-silo plan tools: they read memory-plan/VERSION, INVENTORY.md and tick-logs,
+# which moved into memory-plan/plans/<id>/; nothing called the notify shim.
+workspace-bin memory-plan-status.sh
+workspace-bin memory-plan-timeline.sh
+workspace-bin memory-plan-notify.sh
