@@ -123,7 +123,13 @@ service failure keeps BROKEN even when another service or policy is unobservable
 
 | Element | Watch signal | Probe |
 |---|---|---|
-| state.db / knowledge.db / graph-cache.db | opens, `integrity_check` ok | live |
+| state.db / knowledge.db / graph-cache.db | light tick: opens and answers `SELECT 1`, showing the last deep `integrity_check` verdict; deep sweep / one-shot: `integrity_check` ok | live |
+
+`integrity_check` is a synchronous full scan the probe timeout cannot bound,
+so the 60s light tick does not run it (repair 5.6 / R22 removed the same scan
+from the health poll). A light result that only carries the last deep verdict
+is flagged `lightTick` and does not drive BROKEN/recovered notifications; a DB
+that fails to open on a light tick is still BROKEN at once.
 
 ### Agent runtime
 | Element | Watch signal | Probe |

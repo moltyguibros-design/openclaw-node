@@ -52,6 +52,7 @@ function makeCtx(over = {}) {
 }
 
 const target = (id) => WATCH_TARGETS.find((t) => t.id === id);
+const W_OK = { status: STATUS.WORKING, detail: 'opens; integrity ok', evidence: '' };
 const envFor = (ctx, extra = {}) => ({ ctx, config: ctx.config, hc: {}, probes: {}, includeHeavy: true, ...extra });
 
 describe('node-watch honesty invariants', () => {
@@ -603,6 +604,49 @@ describe('node-watch observed verdicts', () => {
     assert.equal((await target('store.state_db').run(envFor(makeCtx({ queryDb: makeQueryDb({ integrity: 'ok' }) })))).status, STATUS.WORKING);
     const absent = makeCtx({ queryDb: () => { throw new Error('unable to open database file'); } });
     assert.equal((await target('store.state_db').run(envFor(absent))).status, STATUS.BROKEN);
+  });
+
+  it('a light tick never runs integrity_check: it proves the DB answers and carries the last deep verdict', async () => {
+    const sql = [];
+    let integrity = 'ok';
+    const cfg = { ...config, stateDb: '/tmp/acc/light-tick-state.db' };
+    const ctx = makeCtx({ config: cfg, queryDb: (_p, fn) => fn({ prepare: (q) => { sql.push(q); return {
+      get: () => (/integrity_check/i.test(q) ? { integrity_check: integrity } : { 1: 1 }) }; } }) });
+    const light = async () => target('store.state_db').run(envFor(ctx, { includeHeavy: false }));
+    const deep = async () => target('store.state_db').run(envFor(ctx, { includeHeavy: true }));
+
+    const first = await light();
+    assert.equal(first.status, STATUS.WORKING);
+    assert.equal(first.lightTick, true);
+    assert.deepEqual(sql, ['SELECT 1']);
+
+    integrity = '*** in database main ***\nPage 7: btreeInitPage() returns error code 11';
+    sql.length = 0;
+    const corrupt = await deep();
+    assert.equal(corrupt.status, STATUS.BROKEN);
+    assert.equal(corrupt.lightTick, undefined);
+    assert.match(sql[0], /integrity_check/);
+
+    sql.length = 0;
+    const carried = await light();
+    assert.deepEqual(sql, ['SELECT 1']);
+    assert.equal(carried.status, STATUS.BROKEN, 'a light tick must not turn a corrupt DB green');
+    assert.match(carried.detail, /last integrity_check \d+min ago/);
+
+    // Deep BROKEN, light carries it, deep BROKEN again: one alert, no flapping.
+    const asResult = (v) => ({ results: [{ id: 'store.state_db', ...v }] });
+    let state = watchTransitions(null, asResult(W_OK));
+    state = watchTransitions(state.next, asResult(corrupt));
+    assert.deepEqual(state.broke, ['store.state_db']);
+    state = watchTransitions(state.next, asResult({ ...carried, status: STATUS.WORKING }));
+    assert.deepEqual(state.recovered, [], 'a light-tick result never registers a recovery');
+    state = watchTransitions(state.next, asResult(corrupt));
+    assert.deepEqual(state.broke, [], 'and the next deep BROKEN is not a new alert');
+
+    const unopenable = await target('store.state_db').run(envFor(
+      makeCtx({ config: cfg, queryDb: () => { throw new Error('unable to open database file'); } }), { includeHeavy: false }));
+    assert.equal(unopenable.status, STATUS.BROKEN);
+    assert.equal(unopenable.lightTick, undefined, 'an observed open failure still alerts on a light tick');
   });
 
   it('knowledge index grades the daemon job stamp, not the MCP-client-only workspace stamp', async () => {
