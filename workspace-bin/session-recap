@@ -6,9 +6,10 @@
  * (skips tool calls/results), flattens to single-line entries, and writes a
  * structured recap to memory/last-session-recap.md.
  *
- * Scans ALL transcript sources:
- *   - Claude Code workspace sessions (~/.claude/projects/-Users-moltymac--openclaw-workspace/)
- *   - Claude Code home sessions (~/.claude/projects/-Users-moltymac/)
+ * Scans every enabled source in ~/.openclaw/config/transcript-sources.json, or
+ * without it:
+ *   - Claude Code workspace sessions (~/.claude/projects/<workspace path slug>/)
+ *   - Claude Code home sessions (~/.claude/projects/-<home dir name>/)
  *   - OpenClaw Gateway sessions (~/.openclaw/agents/main/sessions/)
  *
  * Handles both JSONL formats:
@@ -33,6 +34,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { MIN_SESSION_BYTES } = require("../lib/session-floor");
 const TIMEZONE = process.env.OPENCLAW_TIMEZONE || process.env.TZ || "America/Montreal";
 
 // --- Config (portable — derives paths from script location) ---
@@ -97,8 +99,7 @@ function findJsonlFiles() {
       const full = path.join(dir, f);
       try {
         const stat = fs.statSync(full);
-        // Skip tiny files (< 50KB) — empty/aborted/heartbeat-only sessions
-        if (stat.size < 50 * 1024) continue;
+        if (stat.size < MIN_SESSION_BYTES) continue;
         all.push({ name: f, path: full, mtime: stat.mtimeMs, size: stat.size, source: dir });
       } catch { /* skip unreadable */ }
     }
@@ -306,10 +307,7 @@ function main() {
   let targets = [];
   if (allRecentMode) {
     // Skip offset 0 (current session), take next 3
-    for (let i = 1; i <= 3; i++) {
-      const f = findJsonlByOffset(i);
-      if (f) targets.push(f);
-    }
+    targets = findJsonlFiles().slice(1, 4);
   } else if (previousMode) {
     const f = findJsonlByOffset(1);
     if (f) targets.push(f);

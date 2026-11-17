@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { createConcurrencyGuard } from '../lib/concurrency-guard.mjs';
 
 const daemonSrc = fs.readFileSync(
@@ -156,7 +157,9 @@ test('IDLE→ENDED targets the ended session\'s own JSONL (R17, repair 4.4)', ()
 
 test('the session-size floor is a named 1KB constant, not a bare 50KB (repair 4.6)', () => {
   assert.doesNotMatch(daemonSrc, /50 \* 1024/);
-  assert.match(daemonSrc, /const MIN_SESSION_BYTES = 1024;/);
+  assert.match(daemonSrc, /const \{ MIN_SESSION_BYTES \} = require\('\.\.\/lib\/session-floor'\);/);
+  const { MIN_SESSION_BYTES } = createRequire(import.meta.url)('../lib/session-floor.js');
+  assert.equal(MIN_SESSION_BYTES, 1024);
   const uses = daemonSrc.match(/MIN_SESSION_BYTES/g) || [];
   assert.equal(uses.length, 5, 'declaration + the activity scan + all three lookup sites (previous/current/by-id)');
 });

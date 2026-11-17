@@ -702,7 +702,7 @@ function findPreviousJsonl(sources) {
 // short-but-real conversation from the interval/NATS flush paths and from
 // ended-session targeting; the 1.4 extraction dedup makes re-considering
 // small sessions cheap.
-const MIN_SESSION_BYTES = 1024;
+const { MIN_SESSION_BYTES } = require('../lib/session-floor');
 
 function findCurrentJsonl(sources) {
   const all = [];
