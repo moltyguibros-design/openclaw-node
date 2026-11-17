@@ -40,7 +40,6 @@
  *                                         (~/.openclaw/mesh-aliases.json; legacy: ubuntu,
  *                                         linux, calos, mac, macos, moltymac); unknown ids
  *                                         are refused
- *   mesh deploy --include-services      — also update launchd/systemd units
  *   mesh deploy --rollback              — revert last deploy
  *   mesh deploy --status                — show what's deployed vs what's in git
  *
@@ -564,34 +563,6 @@ const MANIFEST = [
     notes: 'openclaw.env is NEVER deployed — it contains API keys and is per-node.',
   },
 
-  // ── SERVICE DEFINITIONS ─────────────────────────────────────────────────
-
-  {
-    id: 'services',
-    name: 'Service Definitions',
-    description: 'launchd plists (macOS) / systemd units (Ubuntu)',
-    risk: 'manual',
-    repoPaths: IS_MAC ? ['services/launchd/'] : ['services/systemd/'],
-    targets: [IS_MAC ? DIRS.SERVICES_MAC : DIRS.SERVICES_LINUX],
-    servicesMac: [],
-    servicesLinux: [],
-    preInstall: () => {
-      warn('Service definitions require --include-services flag');
-      warn('A bad plist/unit can prevent services from starting');
-      return false;
-    },
-    postInstall: () => {
-      if (IS_MAC) {
-        info('Plists updated — run this to reload:');
-        console.log('    launchctl unload ~/Library/LaunchAgents/ai.openclaw.*.plist');
-        console.log('    launchctl load ~/Library/LaunchAgents/ai.openclaw.*.plist');
-      } else {
-        info('Units updated — run: systemctl --user daemon-reload');
-        exec('systemctl --user daemon-reload', { ignoreError: true });
-      }
-    },
-  },
-
   // ── OPENCLAW GATEWAY (npm package) ──────────────────────────────────────
 
   {
@@ -1002,7 +973,7 @@ function restartService(svc, { probeOnly = false } = {}) {
  * all files are in place, so no daemon boots new bin/ against old lib/.
  * Throws on any failed step. Never fetches: the caller brought toSha in.
  */
-function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false, includeServices = false,
+function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false,
                   dryRun = false, noRestart = false, pinned = false }) {
   assertCommitted(repoDir);
   if (!dryRun && gitLine(repoDir, ['rev-parse', 'HEAD']) !== toSha) {
@@ -1031,14 +1002,8 @@ function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false, includ
 
     // Skip manual-risk components unless forced or named
     if (comp.risk === 'manual' && !force && !filterIds.includes(comp.id)) {
-      if (comp.id === 'services' && !includeServices) {
-        skip(`    Skipped (use --include-services)`);
-        continue;
-      }
-      if (comp.id !== 'services') {
-        skip(`    Skipped (use --force or --component ${comp.id})`);
-        continue;
-      }
+      skip(`    Skipped (use --force or --component ${comp.id})`);
+      continue;
     }
 
     // Pre-install hook (backup, merge protection, etc.) — false vetoes the component
@@ -1170,7 +1135,12 @@ async function main() {
   const localOnly = args.includes('--local');
   const noRestart = args.includes('--no-restart');
   const doRollback = args.includes('--rollback');
-  const includeServices = args.includes('--include-services');
+  // Its component could never install (its preInstall always vetoed), and units
+  // hold templates only the installer renders: refused rather than ignored.
+  if (args.includes('--include-services')) {
+    throw new Error('--include-services was removed: service units change only through install.sh ' +
+      '(scripts/install/services.sh)');
+  }
   const forceAll = args.includes('--force');
   const showStatus = args.includes('--status');
 
@@ -1321,7 +1291,7 @@ async function main() {
     if (!toSha) throw new Error(`--to ${toArg} is not a commit in ${REPO_DIR} (pinned mode never fetches)`);
     const fromSha = fromArg ? resolveCommit(REPO_DIR, fromArg) : deployedBase(REPO_DIR);
     if (!fromSha) throw new Error(`--from ${fromArg} is not a commit in ${REPO_DIR}`);
-    const result = deploy({ repoDir: REPO_DIR, fromSha, toSha, filterIds, force: forceAll, includeServices, dryRun, noRestart, pinned: true });
+    const result = deploy({ repoDir: REPO_DIR, fromSha, toSha, filterIds, force: forceAll, dryRun, noRestart, pinned: true });
     console.log(`DEPLOY_RESULT ${JSON.stringify(result)}`);
     return;
   }
@@ -1355,7 +1325,7 @@ async function main() {
       ok(`Fast-forwarded ${DEPLOY_BRANCH}: ${head.slice(0, 7)} → ${toSha.slice(0, 7)}`);
     }
     const result = deploy({
-      repoDir: REPO_DIR, fromSha, toSha, filterIds, force: forceAll, includeServices, dryRun, noRestart,
+      repoDir: REPO_DIR, fromSha, toSha, filterIds, force: forceAll, dryRun, noRestart,
     });
     console.log(`DEPLOY_RESULT ${JSON.stringify(result)}`);
   }

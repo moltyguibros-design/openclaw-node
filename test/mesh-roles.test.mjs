@@ -28,12 +28,12 @@ describe('fleet component filter', () => {
   it('lets every repo-sourced MANIFEST id through on the role that runs it', () => {
     assert.deepEqual(FLEET_COMPONENTS.lead, [
       'mesh-daemons', 'mesh-cli', 'shared-lib', 'mc', 'memory-daemon', 'workspace-bin', 'memory-harness',
-      'souls', 'skills', 'boot', 'workspace-docs', 'harness-rules', 'config', 'services', 'lane-watchdog',
+      'souls', 'skills', 'boot', 'workspace-docs', 'harness-rules', 'config', 'lane-watchdog',
       'log-rotate', 'mesh-tool-discord',
     ]);
     assert.deepEqual(FLEET_COMPONENTS.worker, [
       'mesh-daemons', 'mesh-cli', 'shared-lib', 'workspace-bin', 'souls', 'skills', 'workspace-docs',
-      'harness-rules', 'config', 'services',
+      'harness-rules', 'config',
     ]);
   });
 
@@ -63,14 +63,14 @@ describe('fleet component filter', () => {
 
 // mesh-deploy.js runs main() on load, so it is exercised as a process: a copy of
 // the script beside an edited mesh-roles.js.
-function runDeployWithRoles(rolesSource) {
+function runDeployWithRoles(rolesSource, args = ['--status']) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-roles-manifest-'));
   for (const rel of ['bin/mesh-deploy.js', 'lib/tracer.js', 'lib/obs-db.js', 'lib/node-id.js', 'lib/node-aliases.js']) {
     fs.mkdirSync(path.join(dir, path.dirname(rel)), { recursive: true });
     fs.copyFileSync(path.join(REPO, rel), path.join(dir, rel));
   }
   fs.writeFileSync(path.join(dir, 'lib/mesh-roles.js'), rolesSource);
-  const run = spawnSync(process.execPath, [path.join(dir, 'bin/mesh-deploy.js'), '--status'], {
+  const run = spawnSync(process.execPath, [path.join(dir, 'bin/mesh-deploy.js'), ...args], {
     encoding: 'utf8',
     env: { ...process.env, HOME: path.join(dir, 'home'), OPENCLAW_REPO_DIR: path.join(dir, 'no-repo'),
       NODE_PATH: path.join(REPO, 'node_modules') },
@@ -87,6 +87,16 @@ describe('mesh-deploy MANIFEST and the role table are one list', () => {
     const ids = [...block.matchAll(/^ {4}id: '([^']+)'/gm)].map(m => m[1]);
     assert.deepEqual(ids, DEPLOY_COMPONENTS.map(c => c.id));
     assert.doesNotMatch(block, /nodeFilter:/, 'nodeFilter is taken from lib/mesh-roles.js');
+  });
+
+  // The services component's preInstall vetoed it unconditionally, so the flag
+  // never installed a unit; units change only through the installer's renderer.
+  it('has no services component, and refuses --include-services instead of ignoring it', () => {
+    assert.ok(!DEPLOY_COMPONENTS.some(c => c.id === 'services'));
+    const src = fs.readFileSync(path.join(REPO, 'lib/mesh-roles.js'), 'utf8');
+    const run = runDeployWithRoles(src, ['--include-services']);
+    assert.notEqual(run.status, 0);
+    assert.match(run.stdout + run.stderr, /--include-services was removed: service units change only through install\.sh/);
   });
 
   it('mesh-deploy refuses to run when the table lacks a MANIFEST id', () => {
