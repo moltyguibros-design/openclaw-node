@@ -6,16 +6,18 @@
  * Responsibilities:
  *   - Watch MESH_TASKS KV bucket for real-time updates
  *   - Mirror KV entries into local SQLite (upsert with revision tracking)
- *   - Push local task changes to KV via CAS writes
+ *   - Task creation and edits are NOT written here: they go through the task
+ *     daemon (mesh.tasks.submit / the signed mesh.tasks.update), whose
+ *     lib/mesh-tasks.js EDITABLE_TASK_FIELDS is the one list of editable fields
  *   - Handle conflict resolution (KV wins on workers, SQLite wins on lead)
  *
- * Not wired in yet: only api/mesh/tasks/route.ts imports it, and only for the
- * MeshTaskEntry type. Kept as groundwork for a multi-node Mission Control.
+ * The /api/mesh/tasks routes read through listMeshTasks and getMeshTask; the
+ * rest is groundwork for a multi-node Mission Control.
  * It does NOT run as a standalone daemon — it's part of the MC process.
  */
 
 import { getTasksKv, sc } from "@/lib/nats";
-import { NODE_ID, NODE_ROLE } from "@/lib/config";
+import { NODE_ROLE } from "@/lib/config";
 
 // ── Types ──
 
@@ -88,11 +90,11 @@ export async function getMeshTask(
   };
 }
 
-// ── KV Write Operations (CAS) ──
+// ── KV Write Operations ──
 
 /**
  * Write a task to KV. Used by the lead to publish task state.
- * No CAS — overwrites unconditionally. Use updateMeshTaskCAS for safe updates.
+ * No CAS — overwrites unconditionally.
  */
 export async function putMeshTask(task: MeshTaskEntry): Promise<number> {
   const kv = await getTasksKv();
@@ -100,110 +102,6 @@ export async function putMeshTask(task: MeshTaskEntry): Promise<number> {
 
   const rev = await kv.put(task.task_id, sc.encode(JSON.stringify(task)));
   return rev;
-}
-
-/**
- * The task fields a node may edit in KV. Everything else (status, owner,
- * lease, budget deadline, result, attempts, plan links, review override,
- * metric) is the task daemon's: its RPCs check ownership, leases and operator
- * signatures, and its submit and proposal gates validate the metric. A merge of
- * arbitrary fields here let any Mission Control instance complete, reassign or
- * re-route a task without those checks.
- */
-export const MESH_TASK_EDITABLE_FIELDS: ReadonlySet<string> = new Set([
-  "title",
-  "description",
-  "priority",
-  "budget_minutes",
-  "success_criteria",
-  "scope",
-  "tags",
-  "preferred_nodes",
-  "exclude_nodes",
-]);
-
-/** An edit the sync engine refused; `status` is the HTTP status a route answers with. */
-export class MeshTaskEditError extends Error {
-  status: number;
-  constructor(message: string, status: number) {
-    super(message);
-    this.status = status;
-  }
-}
-
-/**
- * Update a task with CAS (Compare-And-Swap).
- * Fails if the revision doesn't match (another node wrote since our read).
- * Only MESH_TASK_EDITABLE_FIELDS may change.
- *
- * @returns New revision number on success
- * @throws MeshTaskEditError for a refused field (400), a missing task (404) or a
- *   foreign task on a worker (403); the KV error on a revision mismatch (caller
- *   should re-read and retry)
- */
-export async function updateMeshTaskCAS(
-  taskId: string,
-  updates: Partial<MeshTaskEntry>,
-  expectedRevision: number
-): Promise<number> {
-  const kv = await getTasksKv();
-  if (!kv) throw new Error("NATS KV unavailable");
-
-  const refused = Object.keys(updates).filter((k) => !MESH_TASK_EDITABLE_FIELDS.has(k));
-  if (refused.length) {
-    throw new MeshTaskEditError(`Fields not editable: ${refused.join(", ")}`, 400);
-  }
-
-  // Read current
-  const entry = await kv.get(taskId);
-  if (!entry?.value) throw new MeshTaskEditError(`Task ${taskId} not found in KV`, 404);
-
-  const current = JSON.parse(sc.decode(entry.value));
-
-  // Authority check
-  if (NODE_ROLE !== "lead" && current.origin !== NODE_ID) {
-    throw new MeshTaskEditError(
-      `Authority denied: worker ${NODE_ID} cannot update task from ${current.origin}`,
-      403
-    );
-  }
-
-  // Merge and write
-  const updated = { ...current, ...updates };
-  const rev = await kv.update(
-    taskId,
-    sc.encode(JSON.stringify(updated)),
-    expectedRevision
-  );
-  return rev;
-}
-
-/**
- * Propose a new task from a worker node.
- * Task is created with status "proposed" — the lead daemon validates.
- * Never overwrites: a proposal reusing an existing task_id is refused (409).
- */
-export async function proposeMeshTask(
-  task: Omit<MeshTaskEntry, "status" | "origin">
-): Promise<MeshTaskEntry> {
-  const kv = await getTasksKv();
-  if (!kv) throw new Error("NATS KV unavailable");
-
-  const proposed: MeshTaskEntry = {
-    ...task,
-    status: NODE_ROLE === "lead" ? "queued" : "proposed",
-    origin: NODE_ID,
-  } as MeshTaskEntry;
-
-  try {
-    await kv.create(proposed.task_id, sc.encode(JSON.stringify(proposed)));
-  } catch (err) {
-    if (/wrong last sequence/.test((err as Error).message)) {
-      throw new MeshTaskEditError(`Task ${proposed.task_id} already exists`, 409);
-    }
-    throw err;
-  }
-  return proposed;
 }
 
 // ── KV Watcher ──

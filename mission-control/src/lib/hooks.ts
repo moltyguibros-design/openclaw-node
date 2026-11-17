@@ -748,13 +748,22 @@ export async function createMeshTask(task: {
 
 export async function updateMeshTask(
   id: string,
-  updates: Record<string, unknown>,
-  revision: number
+  updates: {
+    title?: string;
+    description?: string;
+    priority?: number;
+    budget_minutes?: number;
+    success_criteria?: string[];
+    scope?: string[];
+    tags?: string[];
+    preferred_nodes?: string[];
+    exclude_nodes?: string[];
+  }
 ) {
   const res = await fetch(`/api/mesh/tasks/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...updates, revision }),
+    body: JSON.stringify(updates),
   });
   const data = await res.json();
   await mutate("/api/mesh/tasks");

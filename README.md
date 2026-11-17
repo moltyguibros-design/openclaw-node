@@ -992,11 +992,10 @@ The system has two layers:
    - SSE event broadcast to UI
    - All other MC instances receive the KV watch event and update their local mirrors
 
-2. **Worker proposes a task** via `POST /api/mesh/tasks` (on the lead, POST writes the task directly as `queued`; only worker POSTs land as `proposed` for daemon validation). A `task_id` that already exists is refused with 409, never overwritten
-   - Task written to KV with `status: proposed`, `origin: <worker-node-id>`
-   - Lead's `mesh-task-daemon` picks it up in the next enforcement loop (< 30s)
-   - Daemon validates and transitions: `proposed` → `queued` (or `rejected`)
-   - Worker's MC sees the status change via KV watch
+2. **Any node submits a task** via `POST /api/mesh/tasks`
+   - MC sends it to the task daemon as `mesh.tasks.submit`; it never writes KV itself
+   - The daemon validates it (safe `task_id`, no daemon-owned fields, metric gate) and creates it `queued`
+   - An existing `task_id` is refused with HTTP 409, never overwritten
 
 3. **Worker reads mesh state** via `GET /api/mesh/tasks`
    - Returns all tasks from NATS KV (not local SQLite)
@@ -1004,12 +1003,10 @@ The system has two layers:
    - On workers: KV version preferred (more current for mesh tasks)
    - On lead: SQLite version preferred (has richer fields like `kanbanColumn`, `sortOrder`)
 
-4. **Anyone updates a task** via `PATCH /api/mesh/tasks/:id` (both routes go through `mission-control/src/lib/sync/mesh-kv.ts`)
-   - Only the descriptive fields can change (`MESH_TASK_EDITABLE_FIELDS`: title, description, priority, budget_minutes, success_criteria, scope, tags, preferred_nodes, exclude_nodes); a body naming any other field (status, owner, lease, result, metric, ...) is refused with 400, because those belong to the task daemon's authorized RPCs
-   - The lead can edit any task
-   - Workers can update tasks they own (`origin` matches)
-   - Uses CAS (Compare-And-Swap) to prevent stale writes — the `revision` field must match
-   - On revision mismatch: HTTP 409 with the current state, so the client can retry
+4. **The operator edits a live task** via `PATCH /api/mesh/tasks/:id`
+   - MC signs the edit with the node identity and sends it as `mesh.tasks.update`
+   - The daemon accepts only the fields in `lib/mesh-tasks.js` `EDITABLE_TASK_FIELDS` (title, description, priority, budget_minutes, success_criteria, scope, tags, preferred_nodes, exclude_nodes), on a task that has not ended, and writes them with its own CAS; a body naming any other field is refused whole with 400
+   - Status, owner, lease, result, plan linkage and `requires_review` change only through the daemon's lifecycle RPCs
 
 ### Authority Model
 
@@ -1018,7 +1015,8 @@ The system enforces explicit authority boundaries:
 | Action | Who Can Do It | Mechanism |
 |--------|--------------|-----------|
 | Create local task | Lead only | Direct SQLite + KV write |
-| Propose mesh task | Any node | KV write with `status: proposed` |
+| Submit mesh task | Any node | daemon `mesh.tasks.submit` (MC `POST /api/mesh/tasks`) |
+| Edit a live mesh task | Signed operator | daemon `mesh.tasks.update` (MC `PATCH /api/mesh/tasks/:id`) |
 | Accept/reject proposal | Lead only | Daemon enforcement loop |
 | Claim a queued task | Any node | CAS on KV (daemon RPC; Phase 3 for MC) |
 | Complete a task | Task owner only | CAS with `origin` check (daemon-side; Phase 3) |
@@ -1032,8 +1030,8 @@ mission-control/
 ├── src/
 │   ├── app/api/mesh/
 │   │   ├── tasks/
-│   │   │   ├── route.ts          # GET (list from KV) + POST (propose)
-│   │   │   └── [id]/route.ts     # GET (single) + PATCH (CAS update)
+│   │   │   ├── route.ts          # GET (list from KV) + POST (daemon submit)
+│   │   │   └── [id]/route.ts     # GET (single) + PATCH (signed daemon update)
 │   │   ├── identity/route.ts     # Node role/ID for sidebar badge
 │   │   └── events/route.ts       # SSE: dual-iterator (NATS sub + KV watch)
 │   ├── lib/

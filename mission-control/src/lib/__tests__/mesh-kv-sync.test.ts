@@ -40,8 +40,6 @@ import {
   listMeshTasks,
   getMeshTask,
   putMeshTask,
-  updateMeshTaskCAS,
-  proposeMeshTask,
   watchMeshTasks,
   mergeTasks,
   type MeshTaskEntry,
@@ -104,115 +102,9 @@ describe("put/get/list roundtrip (production)", () => {
   });
 });
 
-// ── Authority model (production rule in updateMeshTaskCAS) ──
-
-describe("authority model (production)", () => {
-  it("lead can update a task originated elsewhere", async () => {
-    cfg.nodeRole = "lead";
-    cfg.nodeId = "lead-node";
-    const rev = await putMeshTask(task({ origin: "worker-9" }));
-    const newRev = await updateMeshTaskCAS("t1", { title: "renamed" }, rev);
-    expect(newRev).toBeGreaterThan(rev);
-    expect((await getMeshTask("t1"))?.task.title).toBe("renamed");
-  });
-
-  it("worker can update its OWN task", async () => {
-    const rev = await putMeshTask(task({ origin: "worker-1" }));
-    await updateMeshTaskCAS("t1", { title: "renamed" }, rev);
-    expect((await getMeshTask("t1"))?.task.title).toBe("renamed");
-  });
-
-  it("worker is DENIED updating a foreign-origin task", async () => {
-    const rev = await putMeshTask(task({ origin: "lead-node" }));
-    await expect(updateMeshTaskCAS("t1", { title: "renamed" }, rev)).rejects.toThrow(
-      /Authority denied: worker worker-1/
-    );
-    expect((await getMeshTask("t1"))?.task.title).toBe("Test task");
-  });
-});
-
-// ── CAS semantics ──
-
-describe("CAS update (production)", () => {
-  it("succeeds on the expected revision and merges partial updates", async () => {
-    const rev = await putMeshTask(task({ origin: "worker-1", priority: 1 }));
-    await updateMeshTaskCAS("t1", { priority: 5 }, rev);
-    const got = await getMeshTask("t1");
-    expect(got?.task.priority).toBe(5);
-    expect(got?.task.title).toBe("Test task"); // untouched fields survive
-  });
-
-  it("throws on a stale revision (another node wrote since our read)", async () => {
-    const rev = await putMeshTask(task({ origin: "worker-1" }));
-    await updateMeshTaskCAS("t1", { priority: 2 }, rev);
-    await expect(updateMeshTaskCAS("t1", { priority: 3 }, rev)).rejects.toThrow(
-      /wrong last sequence/
-    );
-  });
-
-  it("throws when the task does not exist", async () => {
-    await expect(updateMeshTaskCAS("nope", { title: "x" }, 1)).rejects.toThrow(/not found/);
-  });
-});
-
-// ── Field whitelist (audit mission-control-app#19, part 2 option B) ──
-
-describe("updateMeshTaskCAS edits only node-editable fields", () => {
-  for (const [field, value] of [
-    ["status", "completed"],
-    ["owner", "lead-node"],
-    ["lease_token", "forged"],
-    ["result", { success: true }],
-    ["requires_review", false],
-    ["plan_id", "PLAN-x"],
-    ["metric", "npm test"],
-  ] as const) {
-    it(`refuses ${field}, even on the lead`, async () => {
-      cfg.nodeRole = "lead";
-      cfg.nodeId = "lead-node";
-      const rev = await putMeshTask(task({ status: "running", owner: "worker-2" }));
-      await expect(updateMeshTaskCAS("t1", { [field]: value }, rev)).rejects.toThrow(
-        new RegExp(`Fields not editable: ${field}`)
-      );
-      const after = (await getMeshTask("t1"))!;
-      expect(after.revision).toBe(rev);
-      expect(after.task.status).toBe("running");
-    });
-  }
-
-  it("a mixed update is refused whole", async () => {
-    const rev = await putMeshTask(task({ origin: "worker-1" }));
-    await expect(updateMeshTaskCAS("t1", { title: "ok", status: "completed" }, rev)).rejects.toThrow(
-      /Fields not editable: status/
-    );
-    expect((await getMeshTask("t1"))?.task.title).toBe("Test task");
-  });
-});
-
-// ── Proposal lifecycle ──
-
-describe("proposeMeshTask (production)", () => {
-  it("a worker proposal lands as status=proposed with the worker's origin", async () => {
-    const proposed = await proposeMeshTask(task({ task_id: "p1" }));
-    expect(proposed.status).toBe("proposed");
-    expect(proposed.origin).toBe("worker-1");
-    expect((await getMeshTask("p1"))?.task.status).toBe("proposed");
-  });
-
-  it("a proposal never overwrites an existing task", async () => {
-    await putMeshTask(task({ task_id: "taken", status: "running", owner: "worker-2" }));
-    await expect(proposeMeshTask(task({ task_id: "taken" }))).rejects.toThrow(/already exists/);
-    expect((await getMeshTask("taken"))?.task.status).toBe("running");
-  });
-
-  it("a lead proposal is queued directly", async () => {
-    cfg.nodeRole = "lead";
-    cfg.nodeId = "lead-node";
-    const proposed = await proposeMeshTask(task({ task_id: "p2" }));
-    expect(proposed.status).toBe("queued");
-    expect(proposed.origin).toBe("lead-node");
-  });
-});
+// Task creation and edits (with their authority, CAS and editable-field rules)
+// moved to the task daemon: test/daemon-task-update.test.js and
+// mesh-tasks-route.test.ts cover them.
 
 // ── Watcher ──
 

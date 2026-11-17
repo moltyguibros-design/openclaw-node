@@ -1,5 +1,7 @@
-import { getTasksKv } from "@/lib/nats";
-import { listMeshTasks, proposeMeshTask, MeshTaskEditError } from "@/lib/sync/mesh-kv";
+import { getNats, getTasksKv } from "@/lib/nats";
+import { listMeshTasks } from "@/lib/sync/mesh-kv";
+import { isSafeId } from "@/lib/safe-path";
+import { requestDaemon } from "@/lib/mesh-request";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -22,18 +24,19 @@ export async function GET() {
   return Response.json({ tasks, natsAvailable: true });
 }
 
+/** The fields a proposer sets; the daemon owns the rest (status, owner, lease, plan linkage). */
+const SUBMIT_FIELDS = [
+  "description", "priority", "budget_minutes", "metric", "success_criteria",
+  "scope", "tags", "preferred_nodes", "exclude_nodes",
+] as const;
+
 /**
- * POST /api/mesh/tasks — Propose a new task (lib/sync/mesh-kv.ts proposeMeshTask).
+ * POST /api/mesh/tasks — Submit a new task through the task daemon (mesh.tasks.submit).
  *
- * On lead: creates directly with status "queued".
- * On worker: creates with status "proposed" — daemon validates within 30s.
- * An existing task_id is refused (409), never overwritten.
+ * The daemon creates it, so its checks hold here too: an existing task_id, a
+ * daemon-owned field and a refused metric are all refused, never overwritten.
  */
 export async function POST(req: Request) {
-  if (!(await getTasksKv())) {
-    return Response.json({ error: "NATS unavailable" }, { status: 503 });
-  }
-
   const body = await req.json();
   if (!body.title) {
     return Response.json({ error: "title is required" }, { status: 400 });
@@ -45,34 +48,17 @@ export async function POST(req: Request) {
     now.getFullYear().toString() +
     (now.getMonth() + 1).toString().padStart(2, "0") +
     now.getDate().toString().padStart(2, "0");
-
-  try {
-    const task = await proposeMeshTask({
-      task_id: body.task_id || `T-${dateStr}-${suffix}`,
-      title: body.title,
-      description: body.description || "",
-      owner: null,
-      priority: body.priority || 0,
-      budget_minutes: body.budget_minutes || 30,
-      metric: body.metric || null,
-      success_criteria: body.success_criteria || [],
-      scope: body.scope || [],
-      tags: body.tags || [],
-      preferred_nodes: body.preferred_nodes || [],
-      exclude_nodes: body.exclude_nodes || [],
-      created_at: now.toISOString(),
-      claimed_at: null,
-      started_at: null,
-      completed_at: null,
-      last_activity: null,
-      result: null,
-      attempts: [],
-    });
-    return Response.json({ ok: true, task }, { status: 201 });
-  } catch (err) {
-    if (err instanceof MeshTaskEditError) {
-      return Response.json({ error: err.message }, { status: err.status });
-    }
-    throw err;
+  const taskId = body.task_id ?? `T-${dateStr}-${suffix}`;
+  if (!isSafeId(taskId)) {
+    return Response.json({ error: "task_id must be letters, digits, '.', '_' or '-'" }, { status: 400 });
   }
+
+  const submission: Record<string, unknown> = { task_id: taskId, title: body.title };
+  for (const key of SUBMIT_FIELDS) if (body[key] !== undefined) submission[key] = body[key];
+
+  const outcome = await requestDaemon(await getNats(), "mesh.tasks.submit", () => submission);
+  if (!outcome.ok) {
+    return Response.json({ error: outcome.error }, { status: outcome.code === "TASK_EXISTS" ? 409 : outcome.status });
+  }
+  return Response.json({ ok: true, task: outcome.reply.data }, { status: 201 });
 }

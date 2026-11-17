@@ -23,6 +23,7 @@
  *   mesh.tasks.list          — list tasks with optional filter (request/reply)
  *   mesh.tasks.get           — get a single task by ID (request/reply)
  *   mesh.tasks.cancel        — cancel a task (request/reply)
+ *   mesh.tasks.update        — signed operator edit of a live task's editable fields (request/reply)
  *   mesh.tasks.approve / reject / merged — review gate and merge report (request/reply)
  *   mesh.collab.*            — create, join, leave, status, find, reflect, recruiting, gate.approve, gate.reject
  *   mesh.plans.*             — create, get, list, approve, abort, subtask.update
@@ -37,7 +38,7 @@
 const { connect, StringCodec } = require('nats');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-task-daemon');
-const { createTask, TaskStore, TASK_STATUS, TERMINAL_STATES, TASK_TERMINAL, DEFAULT_MAX_REJECTIONS, DEFAULT_LEASE_MS, KV_BUCKET } = require('../lib/mesh-tasks');
+const { createTask, TaskStore, EDITABLE_TASK_FIELDS, TASK_STATUS, TERMINAL_STATES, TASK_TERMINAL, DEFAULT_MAX_REJECTIONS, DEFAULT_LEASE_MS, KV_BUCKET } = require('../lib/mesh-tasks');
 const { validateMetricCommand } = require('../lib/exec-safety');
 const { createSession, issueMemberToken, CollabStore, COLLAB_STATUS, COLLAB_KV_BUCKET, COLLAB_MODE, isModeImplemented } = require('../lib/mesh-collab');
 const { createPlan, autoRoutePlan, PlanStore, PLAN_STATUS, SUBTASK_STATUS, PLANS_KV_BUCKET } = require('../lib/mesh-plans');
@@ -208,7 +209,7 @@ async function handleSubmit(msg) {
   // Check if task already exists
   const existing = await store.get(params.task_id);
   if (existing) {
-    return respondError(msg, `Task ${params.task_id} already exists`);
+    return respondError(msg, `Task ${params.task_id} already exists`, { code: 'TASK_EXISTS' });
   }
 
   let task;
@@ -687,6 +688,50 @@ async function handleCancel(msg) {
   log(`CANCEL ${task_id}: ${reason || 'no reason'}`);
   publishEvent('cancelled', task);
   await cleanupTaskCollabSession(task, `Parent task ${task_id} cancelled: ${reason || 'no reason'}`);
+  respond(msg, task);
+}
+
+// What an operator may edit on a live task is lib/mesh-tasks.js EDITABLE_TASK_FIELDS.
+// Mission Control's PATCH used to write any field straight into KV (mission-control-app~2#6).
+function invalidTaskEdit(fields) {
+  const strings = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string');
+  if ('title' in fields && (typeof fields.title !== 'string' || !fields.title.trim())) return 'title must be a non-empty string';
+  if ('description' in fields && typeof fields.description !== 'string') return 'description must be a string';
+  if ('priority' in fields && !Number.isFinite(fields.priority)) return 'priority must be a number';
+  if ('budget_minutes' in fields && !(Number.isFinite(fields.budget_minutes) && fields.budget_minutes > 0)) return 'budget_minutes must be a positive number';
+  for (const list of ['success_criteria', 'scope', 'tags', 'preferred_nodes', 'exclude_nodes']) {
+    if (list in fields && !strings(fields[list])) return `${list} must be a list of strings`;
+  }
+  return null;
+}
+
+/**
+ * mesh.tasks.update — a signed operator edit of a live task.
+ * Expects: { task_id, ...fields } with fields from EDITABLE_TASK_FIELDS; any other
+ * field refuses the whole request rather than being dropped.
+ */
+async function handleUpdate(msg) {
+  const params = parseRequest(msg);
+  const { task_id } = params;
+  if (!task_id) return respondError(msg, 'task_id is required');
+
+  const existing = await store.get(task_id);
+  if (!existing) return respondError(msg, `Task ${task_id} not found`, { code: 'TASK_NOT_FOUND' });
+  if (!(await authorize(msg, params, existing, { action: 'update' }))) return;
+
+  const { OPERATOR_ENVELOPE_FIELDS } = await operatorAuth();
+  const fields = Object.fromEntries(Object.entries(params).filter(([k]) => k !== 'task_id' && !OPERATOR_ENVELOPE_FIELDS.includes(k)));
+  const refused = Object.keys(fields).filter((k) => !EDITABLE_TASK_FIELDS.includes(k));
+  const invalid = refused.length
+    ? `${refused.join(', ')} cannot be edited (editable: ${EDITABLE_TASK_FIELDS.join(', ')})`
+    : Object.keys(fields).length ? invalidTaskEdit(fields) : 'no editable field given';
+  if (invalid) return respondError(msg, `Update refused: ${invalid}`, { code: 'INVALID_UPDATE' });
+
+  const task = await store.updateFields(task_id, fields);
+  if (!task) return respondUnchanged(msg, task_id);
+
+  log(`UPDATE ${task_id}: ${Object.keys(fields).join(', ')}`);
+  publishEvent('updated', task);
   respond(msg, task);
 }
 
@@ -3007,6 +3052,7 @@ handleGet = tracer.wrapAsync('handleGet', handleGet, { tier: 1, category: 'state
 handleHeartbeat = tracer.wrapAsync('handleHeartbeat', handleHeartbeat, { tier: 1, category: 'state_transition' });
 handleRelease = tracer.wrapAsync('handleRelease', handleRelease, { tier: 1, category: 'state_transition' });
 handleCancel = tracer.wrapAsync('handleCancel', handleCancel, { tier: 1, category: 'state_transition' });
+handleUpdate = tracer.wrapAsync('handleUpdate', handleUpdate, { tier: 1, category: 'state_transition' });
 handleTaskApprove = tracer.wrapAsync('handleTaskApprove', handleTaskApprove, { tier: 1, category: 'state_transition' });
 handleTaskReject = tracer.wrapAsync('handleTaskReject', handleTaskReject, { tier: 1, category: 'state_transition' });
 handleCollabCreate = tracer.wrapAsync('handleCollabCreate', handleCollabCreate, { tier: 1, category: 'state_transition' });
@@ -3109,6 +3155,7 @@ async function main() {
     'mesh.tasks.list':      handleList,
     'mesh.tasks.get':       handleGet,
     'mesh.tasks.cancel':    handleCancel,
+    'mesh.tasks.update':    handleUpdate,
     'mesh.tasks.approve':   handleTaskApprove,
     'mesh.tasks.reject':    handleTaskReject,
     'mesh.tasks.merged':    handleTaskMerged,
@@ -3261,6 +3308,7 @@ if (require.main === module) {
     handleCollabReflect: (msg) => handleCollabReflect(msg),
     handleTaskReject: (msg) => handleTaskReject(msg),
     handleCancel: (msg) => handleCancel(msg),
+    handleUpdate: (msg) => handleUpdate(msg),
     handleTaskMerged: (msg) => handleTaskMerged(msg),
     handlePlanCreate: (msg) => handlePlanCreate(msg),
     handlePlanApprove: (msg) => handlePlanApprove(msg),

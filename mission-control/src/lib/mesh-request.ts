@@ -21,7 +21,7 @@ export interface DaemonReply {
 
 export type DaemonOutcome =
   | { ok: true; reply: DaemonReply }
-  | { ok: false; status: number; error: string };
+  | { ok: false; status: number; error: string; code?: string };
 
 /**
  * @param build — the request body; a throw (e.g. signing unavailable) is a failure
@@ -48,7 +48,7 @@ export async function requestDaemon(
     return { ok: false, status: 503, error: `task daemon unreachable for ${subject}: ${(err as Error).message}` };
   }
   if (reply.ok === true || accept(reply)) return { ok: true, reply };
-  return { ok: false, status: 502, error: `task daemon refused ${subject}: ${reply.error ?? "no reason given"}` };
+  return { ok: false, status: 502, error: `task daemon refused ${subject}: ${reply.error ?? "no reason given"}`, code: reply.code };
 }
 
 /** Cancel succeeded if the daemon cancelled it or it had already ended. */
