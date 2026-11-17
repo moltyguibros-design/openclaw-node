@@ -24,6 +24,7 @@ const { readTasks, updateTaskInPlace: updateTaskInPlaceAsync, appendTaskBlock, i
 
 const sc = StringCodec();
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
+const { subtaskReportForCard } = require('../lib/mesh-plans');
 const DISPATCH_INTERVAL = parseInt(process.env.BRIDGE_DISPATCH_INTERVAL || '10000'); // 10s
 const LOG_DIR = path.join(WORKSPACE, 'memory', 'mesh-logs');
 
@@ -489,9 +490,9 @@ function materializeSubtask(plan, subtask) {
 //
 // Nothing else reports a local, soul or human subtask: its card is the only
 // record of the work, so a plan holding one stayed executing forever. When
-// such a card (materializeSubtask stamps it with plan_id) reaches done, the
-// bridge reports it with a signed mesh.plans.subtask.update, the operator
-// action the daemon requires, signed with this node's identity.
+// such a card (materializeSubtask stamps it with plan_id) reaches done or
+// cancelled, the bridge reports it with a signed mesh.plans.subtask.update, the
+// operator action the daemon requires, signed with this node's identity.
 
 const reportedSubtasks = new Set();
 let _operatorAuth = null;
@@ -509,21 +510,21 @@ async function reportPlanSubtasks() {
     return;
   }
   for (const card of tasks) {
-    if (!card.plan_id || card.status !== 'done') continue;
+    if (!card.plan_id || (card.status !== 'done' && card.status !== 'cancelled')) continue;
     const key = `${card.plan_id}/${card.task_id}`;
     if (reportedSubtasks.has(key)) continue;
     try {
-      // After a restart the done cards are still on the board; ask the daemon first.
+      // After a restart the settled cards are still on the board; ask the daemon first.
       const plan = await natsRequest('mesh.plans.get', { plan_id: card.plan_id });
       const st = (plan?.subtasks || []).find(s => s.subtask_id === card.task_id);
-      if (st && st.status !== 'completed') {
+      const report = subtaskReportForCard(card, st);
+      if (report) {
         await natsRequest('mesh.plans.subtask.update', await signOperatorRequest({
           plan_id: card.plan_id,
           subtask_id: card.task_id,
-          status: 'completed',
-          result: { success: true, summary: `Kanban card ${card.task_id} marked done` },
+          ...report,
         }));
-        log(`PLAN SUBTASK REPORTED: ${key} → completed`);
+        log(`PLAN SUBTASK REPORTED: ${key} → ${report.status}`);
       }
       reportedSubtasks.add(key);
     } catch (err) {

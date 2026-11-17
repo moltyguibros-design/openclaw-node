@@ -2582,7 +2582,8 @@ async function abortPlan(planId, reason) {
 /**
  * mesh.plans.subtask.update — Update a subtask's status.
  * Called by mesh-bridge when the kanban card of a local, soul or human subtask
- * reaches done (mesh subtasks report through their mesh task).
+ * reaches done (completed) or cancelled (failed); mesh subtasks report through
+ * their mesh task.
  * Expects: { plan_id, subtask_id, status, result?, mesh_task_id?, kanban_task_id?, owner? }
  */
 async function handlePlanSubtaskUpdate(msg) {
@@ -2600,7 +2601,18 @@ async function handlePlanSubtaskUpdate(msg) {
   const updates = {};
   for (const k of SUBTASK_UPDATABLE) if (body[k] !== undefined) updates[k] = body[k];
 
-  const plan = await planStore.updateSubtask(plan_id, subtask_id, updates);
+  // A failed subtask blocks its dependents in the same CAS, as a failed mesh
+  // subtask does in checkPlanProgress; otherwise they stay pending forever.
+  let st = null;
+  let blockedIds = new Set();
+  const plan = await planStore._updateWithCAS(plan_id, (p) => {
+    blockedIds = new Set();
+    st = p.subtasks.find(s => s.subtask_id === subtask_id);
+    if (!st) return null;
+    Object.assign(st, updates);
+    if (updates.status === SUBTASK_STATUS.FAILED) blockedIds = cascadeFailure(p, subtask_id);
+    return p;
+  });
   if (!plan) return respondError(msg, `Plan ${plan_id} or subtask ${subtask_id} not found`);
 
   log(`PLAN SUBTASK ${plan_id}/${subtask_id}: ${updates.status || 'updated'}`);
@@ -2609,6 +2621,8 @@ async function handlePlanSubtaskUpdate(msg) {
     publishPlanEvent('subtask_completed', plan);
     // Check if next wave should dispatch
     await advancePlanWave(plan_id);
+  } else if (updates.status === SUBTASK_STATUS.FAILED) {
+    await applySubtaskFailure(plan, st, blockedIds);
   }
 
   respond(msg, plan);
@@ -2866,7 +2880,14 @@ async function checkPlanProgress(taskId, status) {
     return;
   }
 
-  // Subtask failed — apply failure policy
+  await applySubtaskFailure(plan, st, blockedIds);
+}
+
+/**
+ * A subtask failed (blockedIds: the dependents its cascade blocked): apply the
+ * plan's failure policy, then advance whatever branches remain.
+ */
+async function applySubtaskFailure(plan, st, blockedIds) {
   publishPlanEvent('subtask_failed', plan);
 
   const policy = plan.failure_policy || 'continue_best_effort';
@@ -3199,6 +3220,8 @@ if (require.main === module) {
     handlePlanCreate: (msg) => handlePlanCreate(msg),
     handlePlanApprove: (msg) => handlePlanApprove(msg),
     handlePlanAbort: (msg) => handlePlanAbort(msg),
+    handlePlanGet: (msg) => handlePlanGet(msg),
+    handlePlanSubtaskUpdate: (msg) => handlePlanSubtaskUpdate(msg),
     processProposals: () => processProposals(),
     detectStalls: () => detectStalls(),
     enforceBudgets: () => enforceBudgets(),
