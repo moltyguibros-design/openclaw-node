@@ -44,4 +44,30 @@ describe('soul skill lists', () => {
     assert.ok(lists['daedalus/capabilities.json'].includes('gemini-deep-research'));
     assert.ok(lists['identity-architect/capabilities.json'].includes('gemini-deep-research'));
   });
+
+  // Placeholders souls still list (lore-writer, blockchain-auditor); this list may
+  // only shrink. A skill a soul advertises must not be a new empty stub.
+  const KNOWN_STUBS = new Set(['narrative-designer', 'world-builder', 'solidity-audit', 'slither-analyzer', 'mythril-scanner']);
+  const isStub = (name) => /Status: stub/.test(fs.readFileSync(path.join(SKILLS, name, 'SKILL.md'), 'utf8'));
+
+  it('no soul lists an unimplemented stub skill beyond the tracked placeholders', () => {
+    for (const [where, skills] of soulSkillLists()) {
+      for (const s of skills) {
+        if (fs.existsSync(path.join(SKILLS, s, 'SKILL.md')) && isStub(s)) {
+          assert.ok(KNOWN_STUBS.has(s), `${where} lists ${s}, which is an empty stub`);
+        }
+      }
+    }
+    for (const s of KNOWN_STUBS) assert.ok(isStub(s), `${s} is implemented now; drop it from KNOWN_STUBS`);
+  });
+
+  it('flavor-text-writer is a real skill with routing triggers', () => {
+    const text = fs.readFileSync(path.join(SKILLS, 'flavor-text-writer', 'SKILL.md'), 'utf8');
+    const fm = text.split('---')[1];
+    assert.match(fm, /^name: flavor-text-writer$/m);
+    assert.match(fm, /^description: .*Use when/m);
+    assert.ok((fm.match(/^triggers:\n((?:  - .+\n)+)/m)?.[1].split('\n').filter(Boolean).length ?? 0) >= 3);
+    assert.ok((fm.match(/^negative_triggers:\n((?:  - .+\n)+)/m)?.[1].split('\n').filter(Boolean).length ?? 0) >= 2);
+    assert.match(text, /^## Output format$/m);
+  });
 });
