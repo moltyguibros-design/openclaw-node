@@ -595,6 +595,38 @@ describe('node-watch observed verdicts', () => {
     assert.equal((await target('ops.hyperagent').run(envFor(stale, { probes }))).status, STATUS.BROKEN);
   });
 
+  it('HyperAgent reuses a proven CLI import on light ticks until a dependency changes', async () => {
+    let spawns = 0;
+    let status = 'PASS';
+    const probes = { 'L0-HYPERAGENT': { run: async () => { spawns++; return { status, detail: 'imports' }; } } };
+    const mtimes = new Map();
+    const ctx = makeCtx({
+      config: { ...config, workspace: '/tmp/acc/ha-cache-ws' },
+      fsp: { ...makeCtx().fsp,
+        stat: async (p) => ({ ino: 1, size: 10, mtimeMs: mtimes.get(p) ?? 1000 }),
+        readFile: async () => JSON.stringify({ lastHyperagentReflect: Date.now() - 60_000 }) },
+      queryDb: makeQueryDb({ count: 2 }),
+    });
+    const tick = async (includeHeavy) => (await target('ops.hyperagent').run(envFor(ctx, { probes, includeHeavy }))).status;
+    assert.equal(await tick(false), STATUS.WORKING);
+    assert.equal(await tick(false), STATUS.WORKING);
+    assert.equal(await tick(false), STATUS.WORKING);
+    assert.equal(spawns, 1, 'unchanged dependencies are not re-proven every minute');
+
+    mtimes.set('/tmp/acc/ha-cache-ws/lib/hyperagent-store.mjs', 2000);
+    assert.equal(await tick(false), STATUS.WORKING);
+    assert.equal(spawns, 2, 'a redeployed store is re-proven');
+
+    assert.equal(await tick(true), STATUS.WORKING);
+    assert.equal(spawns, 3, 'a deep sweep always re-proves');
+
+    status = 'FAIL';
+    mtimes.set('/tmp/acc/ha-cache-ws/bin/hyperagent.mjs', 3000);
+    assert.equal(await tick(false), STATUS.BROKEN);
+    assert.equal(await tick(false), STATUS.BROKEN);
+    assert.equal(spawns, 5, 'a failed import is never cached');
+  });
+
   it('daemon WORKING/BROKEN from health-check', async () => {
     assert.equal((await target('mem.daemon').run(envFor(makeCtx(), { hc: { daemon: { ok: true, detail: 'pid=1' } } }))).status, STATUS.WORKING);
     assert.equal((await target('mem.daemon').run(envFor(makeCtx(), { hc: { daemon: { ok: false, detail: 'down' } } }))).status, STATUS.BROKEN);
