@@ -9,7 +9,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -48,5 +49,65 @@ describe('skill Python scripts', { skip: !HAVE_PY && 'python3 not available' }, 
     const r = spawnSync('python3', ['-B', join(SKILLS, 'crypto-price', 'scripts', 'get_price_chart.py')], { encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
     assert.equal(JSON.parse(r.stdout).error, 'missing symbol');
+  });
+
+  it('gemini-deep-research sets HTTP timeouts and stops polling a cancelled interaction', () => {
+    const stubDir = mkdtempSync(join(tmpdir(), 'deep-research-stub-'));
+    try {
+      writeFileSync(join(stubDir, 'requests.py'), `
+calls = []
+class R:
+    status_code = 200
+    def __init__(self, body): self.body = body
+    def json(self): return self.body
+def post(url, **kw):
+    calls.append(("post", kw.get("timeout")))
+    return R({"id": "i1"})
+def get(url, **kw):
+    calls.append(("get", kw.get("timeout")))
+    if len(calls) > 3: raise SystemExit("polled a cancelled interaction again")
+    return R({"status": "cancelled"})
+`);
+      const probe = `
+import sys, time
+sys.path[:0] = [sys.argv[1], sys.argv[2]]
+time.sleep = lambda s: None
+import requests, deep_research
+deep_research.create_interaction("k", "q")
+try:
+    deep_research.poll_interaction("k", "i1")
+    print("RETURNED")
+except SystemExit as e:
+    print("EXIT", e.code)
+print(requests.calls)
+`;
+      const r = spawnSync('python3', ['-I', '-B', '-c', probe, stubDir,
+        join(SKILLS, 'gemini-deep-research', 'scripts')], { encoding: 'utf8' });
+      assert.equal(r.status, 0, r.stderr);
+      const [outcome, calls] = r.stdout.trim().split('\n');
+      assert.equal(outcome, 'EXIT 1', r.stdout + r.stderr);
+      assert.equal(calls, "[('post', 60), ('get', 60)]");
+    } finally {
+      rmSync(stubDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('skill Python dependencies', () => {
+  it('every skill script that imports requests declares it in the skill requirements.txt', () => {
+    const files = skillPythonFiles().filter(f => /^\s*(import requests|from requests )/m.test(readFileSync(f, 'utf8')));
+    assert.ok(files.length > 0);
+    for (const f of files) {
+      const skill = f.slice(SKILLS.length + 1).split(sep)[0];
+      const req = join(SKILLS, skill, 'requirements.txt');
+      assert.ok(existsSync(req), `${skill} imports requests without a requirements.txt`);
+      assert.match(readFileSync(req, 'utf8'), /^requests\b/m, `${skill}/requirements.txt`);
+    }
+  });
+
+  it('gemini-deep-research runs its script through python3, which needs no exec bit', () => {
+    const md = readFileSync(join(SKILLS, 'gemini-deep-research', 'SKILL.md'), 'utf8');
+    assert.doesNotMatch(md, /^scripts\/deep_research\.py/m);
+    assert.match(md, /^python3 \{baseDir\}\/scripts\/deep_research\.py --query/m);
   });
 });

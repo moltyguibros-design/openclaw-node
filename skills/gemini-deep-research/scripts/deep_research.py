@@ -42,7 +42,8 @@ def create_interaction(api_key, query, output_format=None, file_search_store=Non
     response = requests.post(
         f"{API_BASE}/interactions",
         headers=headers,
-        json=payload
+        json=payload,
+        timeout=60
     )
     
     if response.status_code != 200:
@@ -62,7 +63,8 @@ def poll_interaction(api_key, interaction_id, stream=False):
     while True:
         response = requests.get(
             f"{API_BASE}/interactions/{interaction_id}",
-            headers=headers
+            headers=headers,
+            timeout=60
         )
         
         if response.status_code != 200:
@@ -80,7 +82,7 @@ def poll_interaction(api_key, interaction_id, stream=False):
         
         if status == "completed":
             return data
-        elif status == "failed":
+        elif status in ("failed", "cancelled"):
             print(f"Research failed: {data.get('error', 'Unknown error')}", file=sys.stderr)
             sys.exit(1)
         

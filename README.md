@@ -242,6 +242,8 @@ The installer auto-detects and installs these:
 - ~~memorylayer~~ / ~~moltbook-registry~~ / ~~auto-updater~~ — **quarantined** (`skills/_quarantine/README.md`): external memory exfil, mainnet wallet actions and unscanned scheduled skill updates by design; not installed.
 - **prompt-guard** — pip: `pyyaml`
 - **crypto-price** — pip: `matplotlib`
+- **gemini-deep-research** — pip: `requests`
+- **n8n** — pip: `requests`
 - **fast-browser-use** — Rust (requires manual `cargo build` if needed)
 
 ## Obsidian Setup
