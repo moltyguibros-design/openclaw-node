@@ -379,7 +379,7 @@ describe('extractStructured', () => {
         content: '"entities": [{"name": "NATS", "type": "technology", "salience": 0.9}], "themes": [',
       }),
     };
-    await assert.rejects(() => extractStructured(mockClient, []), /no extraction fields/);
+    await assert.rejects(() => extractStructured(mockClient, []), /not valid JSON/);
   });
 });
 
