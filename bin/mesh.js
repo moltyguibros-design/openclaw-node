@@ -13,6 +13,7 @@
  *   mesh status                          — every node in MESH_NODE_HEALTH
  *   mesh health [--all] [--json]         — ok / degraded / down from MESH_NODE_HEALTH
  *   mesh submit | tasks | plan           — the mesh task daemon (mesh.tasks.*, mesh.plans.*)
+ *   mesh collab gate approve|reject      — resolve a circling session's gate (mesh.collab.gate.*)
  *   mesh deploy                          — signed fleet deploy trigger (mesh.deploy.trigger)
  *
  * The exec/capture/broadcast/repair/ls/put commands were removed: their
@@ -503,6 +504,27 @@ async function cmdDeploy(args) {
   await nc.close();
 }
 
+// ── Collab Commands ────────────────────────────────
+
+/**
+ * mesh collab gate approve|reject <session-id> — a circling session waiting at
+ * a gate (tier gate or blocked finalization) resumes only on a signed operator
+ * request; before this nothing could send one but a hand-built NATS message.
+ */
+async function cmdCollab(args) {
+  const [sub, decision, sessionId] = args;
+  if (sub !== 'gate' || !['approve', 'reject'].includes(decision) || !sessionId) {
+    console.error('Usage: mesh collab gate approve|reject <session-id>');
+    process.exit(1);
+  }
+  const nc = await natsConnect();
+  try {
+    const result = await daemonRequest(nc, `mesh.collab.gate.${decision}`, await signOperatorRequest({ session_id: sessionId }));
+    if (decision === 'approve') console.log(`Gate approved: ${sessionId} resumes`);
+    else console.log(`Gate rejected: ${sessionId} → sub-round ${result.new_subround}`);
+  } finally { await nc.close(); }
+}
+
 /**
  * mesh help — show usage.
  */
@@ -833,6 +855,8 @@ function cmdHelp() {
     '  mesh tasks reject <task-id>             Reject and re-queue a task',
     '    --reason "..."                         Reason for rejection',
     '  mesh plan <subcommand>                  Plan management (templates, create, approve)',
+    '  mesh collab gate approve <session-id>   Resume a circling session waiting at its gate',
+    '  mesh collab gate reject <session-id>    Send it back for another sub-round',
     '  mesh health                             ok / degraded / down for this node',
     '  mesh health --all                       ... for every node in MESH_NODE_HEALTH',
     '  mesh health --json                      Same, as JSON (exit 1 unless all ok)',
@@ -860,6 +884,7 @@ cmdTasks = tracer.wrapAsync('cmdTasks', cmdTasks, { tier: 2 });
 cmdHealth = tracer.wrapAsync('cmdHealth', cmdHealth, { tier: 2 });
 cmdDeploy = tracer.wrapAsync('cmdDeploy', cmdDeploy, { tier: 2 });
 cmdPlan = tracer.wrapAsync('cmdPlan', cmdPlan, { tier: 2 });
+cmdCollab = tracer.wrapAsync('cmdCollab', cmdCollab, { tier: 2 });
 
 // --- Main dispatch ---------------------------------------------------
 
@@ -873,6 +898,7 @@ async function main() {
     case 'health':    return cmdHealth(args);
     case 'deploy':    return cmdDeploy(args);
     case 'plan':      return cmdPlan(args);
+    case 'collab':    return cmdCollab(args);
     case 'help':
     case '--help':
     case '-h':        return cmdHelp();

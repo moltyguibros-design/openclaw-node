@@ -114,6 +114,7 @@ test('bridge routes real daemon plan and collab events to their kanban handlers'
   await send(collabEvent('circling_gate', session));
   await until(async () => (await card('collab-1')).status === 'waiting-user');
   assert.match((await card('collab-1')).next_action, /^\[GATE\] SR2 complete/);
+  assert.match((await card('collab-1')).next_action, /mesh collab gate approve\|reject collab-collab-1$/);
 
   // Mission Control's force-converge carries no session object.
   await send(['mesh.events.collab.converged', { session_id: session.session_id, task_id: 'collab-1', forced: true }]);

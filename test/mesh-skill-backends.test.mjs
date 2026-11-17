@@ -27,7 +27,7 @@ const RETIRED = ['exec', 'capture', 'ls', 'put', 'broadcast', 'repair'];
 const dispatched = new Set([...MESH.matchAll(/case '([a-z-]+)':\s+return cmd(?!Help)/g)].map((m) => m[1]));
 
 test('bin/mesh.js dispatches only commands with a live backend', () => {
-  assert.deepEqual([...dispatched].sort(), ['deploy', 'health', 'plan', 'status', 'submit', 'tasks']);
+  assert.deepEqual([...dispatched].sort(), ['collab', 'deploy', 'health', 'plan', 'status', 'submit', 'tasks']);
   for (const sub of RETIRED) assert.ok(!dispatched.has(sub), `mesh ${sub} has no backend`);
   assert.doesNotMatch(MESH, /openclaw\.\$\{|openclaw\.broadcast|openclaw\.\*\.heartbeat|install-mesh-skill/);
   const r = spawnSync(process.execPath, [join(ROOT, 'bin', 'mesh.js'), 'exec', 'ls'], { encoding: 'utf8', timeout: 30_000 });

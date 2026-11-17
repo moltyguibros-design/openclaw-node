@@ -690,6 +690,8 @@ The human sees the reviewer's reason directly on the kanban without running `mes
 
 `mesh.collab.gate.approve` → If finalization: force-complete. If mid-protocol: resume next step.
 
+Both gate requests must be operator-signed; `mesh collab gate approve|reject <session-id>` sends them, and the kanban card names that command.
+
 ### 12.4 Gate Reject
 
 `mesh.collab.gate.reject` → `max_subrounds++`, reset to circling phase, start new step. Existing artifacts and context preserved. No special recovery logic.

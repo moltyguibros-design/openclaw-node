@@ -349,8 +349,9 @@ function handleCollabEvent(eventType, taskId, data) {
         const reason = blockedVotes.map(r => r.summary).filter(Boolean).join('; ').slice(0, 150);
         gateMsg = `[GATE] SR${cg.current_subround} blocked — ${reason || 'reviewer flagged concern'}`;
       } else {
-        gateMsg = `[GATE] SR${cg.current_subround} complete — review reconciliationDoc and approve/reject`;
+        gateMsg = `[GATE] SR${cg.current_subround} complete — review reconciliationDoc`;
       }
+      gateMsg += ` — mesh collab gate approve|reject ${session.session_id}`;
       log(`CIRCLING GATE: ${taskId} — SR${cg.current_subround} waiting for approval`);
       updateTaskInPlace(ACTIVE_TASKS_PATH, taskId, {
         status: 'waiting-user',

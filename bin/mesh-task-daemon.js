@@ -2190,15 +2190,18 @@ async function handleCirclingGateReject(msg) {
     subround: session.circling.current_subround,
   });
 
-  // Reset to circling phase, increment subround, step 1
-  session.circling.phase = 'circling';
-  session.circling.max_subrounds++; // allow one more
-  session.circling.current_step = 1;
-  session.circling.current_subround++;
-  await collabStore.put(session);
+  // CAS, not a blind put: `session` predates the gate_rejected audit append above.
+  const updated = await collabStore._updateWithCAS(session_id, (s) => {
+    s.circling.phase = 'circling';
+    s.circling.max_subrounds++; // allow one more
+    s.circling.current_step = 1;
+    s.circling.current_subround++;
+    return s;
+  });
+  if (!updated) return respondError(msg, 'Not a circling session');
 
   await startCirclingStep(session_id);
-  respond(msg, { rejected: true, new_subround: session.circling.current_subround });
+  respond(msg, { rejected: true, new_subround: updated.circling.current_subround });
 }
 
 // ── Collab Recruiting Timer ─────────────────────────
@@ -3193,6 +3196,8 @@ if (require.main === module) {
       collabStore.isRecruitingDone(session) ? startRecruitedSession(session.session_id) : false,
     evaluateRound: (id) => evaluateRound(id),
     handleCirclingStepTimeout: (id, snap) => handleCirclingStepTimeout(id, snap),
+    handleCirclingGateApprove: (msg) => handleCirclingGateApprove(msg),
+    handleCirclingGateReject: (msg) => handleCirclingGateReject(msg),
     // test/daemon-circling-handlers.test.js, test/circling-parse-retry.test.mjs
     handleCollabReflect: (msg) => handleCollabReflect(msg),
     completeCirclingSession: (id) => completeCirclingSession(id),
