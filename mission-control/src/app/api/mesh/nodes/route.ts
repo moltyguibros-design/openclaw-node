@@ -525,7 +525,7 @@ export const GET = withTrace("mesh", "GET /api/mesh/nodes", async () => {
       GROUP BY node_id
     `
       )
-      .all(`${today}T00:00:00`) as Array<{
+      .all(`${today} 00:00:00`) as Array<{
       node_id: string;
       task_count: number;
       total_cost: number;

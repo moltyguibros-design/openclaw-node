@@ -16,6 +16,7 @@ const cp = vi.hoisted(() => ({
     throw new Error("execSync must not be used by this route");
   }),
   exec: vi.fn(),
+  rawAll: vi.fn((..._args: unknown[]) => [] as unknown[]),
 }));
 
 vi.mock("child_process", () => ({ execSync: cp.execSync, exec: cp.exec }));
@@ -27,7 +28,7 @@ vi.mock("@/lib/nats", () => ({
 
 vi.mock("@/lib/db", () => ({
   getDb: () => ({ select: () => ({ from: () => ({ where: () => ({ all: () => [] }) }) }) }),
-  getRawDb: () => ({ prepare: () => ({ all: () => [] }) }),
+  getRawDb: () => ({ prepare: () => ({ all: cp.rawAll }) }),
 }));
 
 vi.mock("@/lib/tracer", () => ({
@@ -115,6 +116,13 @@ describe("GET /api/mesh/nodes", () => {
     const body: RouteBody = await res.json();
     return Object.fromEntries(body.nodes.map((n) => [n.nodeId, n]));
   }
+
+  it("bounds today's token stats in token_usage's own 'YYYY-MM-DD HH:MM:SS' format", async () => {
+    cp.rawAll.mockClear();
+    await (await loadGet())();
+    const today = new Date().toISOString().slice(0, 10);
+    expect(cp.rawAll).toHaveBeenCalledWith(`${today} 00:00:00`);
+  });
 
   it("does not give an offline peer whose name extends the local id this node's health", async () => {
     const nodes = await nodesFor("moltymac", { Peer: { a: { HostName: "moltymacs-virtual-machine" } } });
