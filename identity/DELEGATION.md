@@ -72,7 +72,7 @@ Apply by task size:
 - Expert-tier: stage 1 only, trust their quality
 - High-criticality (contracts, auth): `bin/multi-review` → 3 parallel reviewers
 
-See `skills/code-review/SKILL.md` for full protocol.
+No `skills/code-review` playbook ships (see AGENTS.md, Skill Enforcement); the two stages above are the full protocol.
 
 ## Subagent Isolation Pattern
 

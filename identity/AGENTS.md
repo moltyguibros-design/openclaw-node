@@ -109,8 +109,8 @@ When a task has `needs_approval: false` (auto-start enabled), the kanban daemon 
    - **ALWAYS read the full task first.** Title alone is NOT enough. Read description, success criteria, artifacts, next_action — understand the full spec before writing a single line of code. Never assume from the title. If the description references documents (TECH_ARCHITECTURE.md, lore specs, design docs, etc.), READ THOSE TOO before starting. No excuses.
 3. **If blocked → contact Gui.** Move to `status: blocked` with clear explanation of what's stopping you. The daemon will push the next task.
 4. **When finished → ALWAYS `status: waiting-user`.** Daedalus NEVER marks a task `done`. Every completed task goes to review. Only Gui moves it to `done`. The daemon sees the slot is free and dispatches the next queued auto-start task.
-6. **Priority order.** Higher `auto_priority` tasks dispatch first. Dependencies respected (predecessors must be done).
-7. **Backlog visibility.** Queued auto-start tasks are visible in the kanban backlog. They get pushed one-by-one as Daedalus completes work.
+5. **Priority order.** Higher `auto_priority` tasks dispatch first. Dependencies respected (predecessors must be done).
+6. **Backlog visibility.** Queued auto-start tasks are visible in the kanban backlog. They get pushed one-by-one as Daedalus completes work.
 
 **Flow:** Queued → [daemon dispatches 1] → Running (Daedalus **executes**) → Review/Blocked → [Gui approves → Done] → [daemon dispatches next]
 
