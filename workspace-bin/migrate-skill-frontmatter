@@ -6,7 +6,8 @@ Moves non-spec fields under metadata.openclaw namespace.
 Generates compatibility field from os/requires/config.
 
 Spec-allowed top-level fields: name, description, license, compatibility, metadata, allowed-tools
-Everything else → metadata.openclaw.*
+MIGRATE_FIELDS → metadata.openclaw.*. triggers and negative_triggers stay at the
+top level, where skill-audit, skill-routing-eval and Mission Control read them.
 
 Usage:
     bin/migrate-skill-frontmatter                    # Dry run (default)
@@ -41,7 +42,7 @@ SPEC_FIELDS = {"name", "description", "license", "compatibility", "metadata", "a
 
 # Fields to move under metadata.openclaw
 MIGRATE_FIELDS = {
-    "triggers", "negative_triggers", "displayName", "emoji", "summary",
+    "displayName", "emoji", "summary",
     "primaryEnv", "os", "requires", "install", "config", "version", "homepage",
 }
 

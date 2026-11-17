@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 const script = fileURLToPath(new URL('../workspace-bin/migrate-skill-frontmatter', import.meta.url));
 const HAVE_PY = spawnSync('python3', ['--version'], { encoding: 'utf8' }).status === 0;
 
-const SKILL = '---\nname: demo\ndescription: >-\n  Folded text.\ntriggers:\n  - "do the thing"\n---\n\nBody\n';
+const SKILL = '---\nname: demo\ndescription: >-\n  Folded text.\nversion: 1.0.0\ntriggers:\n  - "do the thing"\n---\n\nBody\n';
+const HAVE_PY_YAML = HAVE_PY && spawnSync('python3', ['-c', 'import yaml']).status === 0;
 
 // A yaml.py that raises ImportError on PYTHONPATH reproduces a python3 without PyYAML.
 function fixture(t) {
@@ -42,5 +43,22 @@ describe('migrate-skill-frontmatter without PyYAML', { skip: !HAVE_PY && 'python
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.match(r.stdout, /would migrate/);
     assert.equal(fs.readFileSync(skillMd, 'utf8'), SKILL);
+  });
+});
+
+describe('migrate-skill-frontmatter keeps triggers top-level', { skip: !HAVE_PY_YAML && 'python3 with PyYAML not available' }, () => {
+  it('moves version under metadata.openclaw but leaves triggers where skill-audit reads them', (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'migrate-skill-fm-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const skillMd = path.join(root, 'demo', 'SKILL.md');
+    fs.mkdirSync(path.dirname(skillMd));
+    fs.writeFileSync(skillMd, SKILL.replace('  - "do the thing"\n', '  - "do the thing"\nnegative_triggers:\n  - "not that"\n'));
+    const r = spawnSync('python3', ['-B', script, '--apply', '--skills-dir', root], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /\[version\]/);
+    const fm = fs.readFileSync(skillMd, 'utf8').split('\n---')[0];
+    assert.match(fm, /^triggers:\n- do the thing$/m);
+    assert.match(fm, /^negative_triggers:\n- not that$/m);
+    assert.match(fm, /^metadata:\n {2}openclaw:\n {4}version: 1\.0\.0$/m);
   });
 });

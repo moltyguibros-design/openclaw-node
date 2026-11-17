@@ -5,8 +5,8 @@ Batch fix skill quality issues across all SKILL.md files.
 Fixes (in order):
   1. Name mismatch: set name field to match directory name
   2. Description quality: add "Use when..." clause, trim to <=300 chars
-  3. Triggers: add metadata.openclaw.triggers for skills missing them
-  4. Negative triggers: add metadata.openclaw.negative_triggers
+  3. Triggers: add top-level triggers for skills missing them
+  4. Negative triggers: add top-level negative_triggers
   5. Stale README.md: delete if SKILL.md exists
   6. References dir: create references/ for skills >200 lines
 
@@ -239,87 +239,21 @@ def patch_frontmatter(text: str, fixes: dict) -> str:
             escaped = new_desc.replace('"', '\\"')
             fm_raw = fm_raw[:match.start()] + f'description: "{escaped}"' + fm_raw[match.end():]
 
-    # Fix triggers / negative_triggers
-    if "triggers" in fixes or "negative_triggers" in fixes:
-        # Check if metadata.openclaw section exists
-        has_metadata = bool(re.search(r"^metadata:", fm_raw, re.MULTILINE))
-        has_openclaw = bool(re.search(r"^\s+openclaw:", fm_raw, re.MULTILINE))
-
-        if not has_metadata:
-            # Add entire metadata.openclaw block before closing ---
-            lines = ["metadata:", "  openclaw:"]
-            if "triggers" in fixes:
-                lines.append("    triggers:")
-                for t in fixes["triggers"]:
-                    lines.append(f'    - "{t}"')
-            if "negative_triggers" in fixes:
-                lines.append("    negative_triggers:")
-                for t in fixes["negative_triggers"]:
-                    lines.append(f'    - "{t}"')
-            fm_raw = fm_raw.rstrip("\n") + "\n" + "\n".join(lines) + "\n"
-
-        elif not has_openclaw:
-            # Add openclaw section inside metadata
-            meta_match = re.search(r"^metadata:\s*$", fm_raw, re.MULTILINE)
-            if meta_match:
-                insert_pos = meta_match.end()
-                lines = ["\n  openclaw:"]
-                if "triggers" in fixes:
-                    lines.append("    triggers:")
-                    for t in fixes["triggers"]:
-                        lines.append(f'    - "{t}"')
-                if "negative_triggers" in fixes:
-                    lines.append("    negative_triggers:")
-                    for t in fixes["negative_triggers"]:
-                        lines.append(f'    - "{t}"')
-                fm_raw = fm_raw[:insert_pos] + "\n".join(lines) + fm_raw[insert_pos:]
-
-        else:
-            # openclaw section exists — add missing fields
-            # Find the openclaw block to insert after
-            oc_match = re.search(r"^(\s+)openclaw:\s*$", fm_raw, re.MULTILINE)
-            if oc_match:
-                oc_indent = oc_match.group(1)
-                child_indent = oc_indent + "  "
-
-                # Find end of openclaw block
-                after_oc = fm_raw[oc_match.end():]
-                oc_lines = after_oc.split("\n")
-                end_pos = oc_match.end()
-
-                for i, line in enumerate(oc_lines):
-                    if not line.strip():
-                        end_pos += len(line) + 1
-                        continue
-                    indent = len(line) - len(line.lstrip())
-                    if indent <= len(oc_indent) and line.strip():
-                        break
-                    end_pos += len(line) + 1
-
-                insert_lines = []
-                if "triggers" in fixes:
-                    # Check if triggers already exist (even empty)
-                    has_triggers = bool(re.search(r"^\s+triggers:", fm_raw[oc_match.start():end_pos], re.MULTILINE))
-                    if not has_triggers:
-                        insert_lines.append(f"{child_indent}triggers:")
-                        for t in fixes["triggers"]:
-                            insert_lines.append(f'{child_indent}- "{t}"')
-
-                if "negative_triggers" in fixes:
-                    has_neg = bool(re.search(r"^\s+negative_triggers:", fm_raw[oc_match.start():end_pos], re.MULTILINE))
-                    if not has_neg:
-                        insert_lines.append(f"{child_indent}negative_triggers:")
-                        for t in fixes["negative_triggers"]:
-                            insert_lines.append(f'{child_indent}- "{t}"')
-
-                if insert_lines:
-                    insert_text = "\n".join(insert_lines) + "\n"
-                    fm_raw = fm_raw[:end_pos] + insert_text + fm_raw[end_pos:]
+    # Triggers live at the top level, where skill-audit, skill-routing-eval
+    # and Mission Control read them. An empty key is replaced, never nested.
+    for key in ("triggers", "negative_triggers"):
+        if key in fixes:
+            fm_raw = re.sub(rf"^{key}:[ \t]*(?:\[[ \t]*\])?[ \t]*\n(?![ \t]*-)", "", fm_raw, flags=re.MULTILINE)
+            fm_raw = fm_raw.rstrip("\n") + f"\n{key}:\n" + "".join(f'  - "{t}"\n' for t in fixes[key])
 
     return before + fm_raw + after_fm + body
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
+
+def has_top_level_list(fm_raw: str, key: str) -> bool:
+    return bool(re.search(rf"^{key}:[ \t]*(?:\n[ \t]*-[ \t]+|\[[ \t]*[^\]\s])", fm_raw, re.MULTILINE))
+
 
 def audit_and_fix(skill_path: Path, apply: bool, fix_filter: str | None) -> dict:
     """Analyze a skill and return proposed fixes."""
@@ -365,8 +299,8 @@ def audit_and_fix(skill_path: Path, apply: bool, fix_filter: str | None) -> dict
             fixes["description"] = new_desc
             fix_log.append(f"description: trimmed/added WHEN ({len(current_desc)} → {len(new_desc)} chars)")
 
-    # 3. Triggers (check if missing via the audit parser approach)
-    has_triggers = bool(re.search(r"^\s+triggers:\s*\n\s+-\s+", fm_raw, re.MULTILINE))
+    # 3. Triggers (top-level, as skill-audit reads them)
+    has_triggers = has_top_level_list(fm_raw, "triggers")
     if (not fix_filter or fix_filter == "triggers") and not has_triggers:
         desc_for_gen = fixes.get("description", current_desc)
         triggers = generate_triggers(dir_name, desc_for_gen)
@@ -374,7 +308,7 @@ def audit_and_fix(skill_path: Path, apply: bool, fix_filter: str | None) -> dict
         fix_log.append(f"triggers: +{len(triggers)} generated")
 
     # 4. Negative triggers
-    has_neg_triggers = bool(re.search(r"^\s+negative_triggers:\s*\n\s+-\s+", fm_raw, re.MULTILINE))
+    has_neg_triggers = has_top_level_list(fm_raw, "negative_triggers")
     if (not fix_filter or fix_filter == "negative_triggers") and not has_neg_triggers:
         desc_for_gen = fixes.get("description", current_desc)
         trig_for_gen = fixes.get("triggers", [])

@@ -92,4 +92,40 @@ describe('skill-batch-fix', { skip: !HAVE_PY && 'python3 not available' }, () =>
     assert.deepEqual(JSON.parse(r.stdout)[0].fixes, []);
     assert.equal(readFileSync(join(dir, 'SKILL.md'), 'utf8'), original);
   });
+
+  it('treats top-level triggers as present and writes missing ones top-level, never under metadata.openclaw', () => {
+    const home = mkdtempSync(join(tmpdir(), 'skill-batch-fix-'));
+    const skills = join(home, '.openclaw', 'workspace', 'skills');
+    const has = join(skills, 'has-triggers');
+    const lacks = join(skills, 'lacks-triggers');
+    mkdirSync(has, { recursive: true });
+    mkdirSync(lacks, { recursive: true });
+    const withTriggers = [
+      '---', 'name: has-triggers', 'description: "Does a thing. Use when a thing is needed."',
+      'metadata:', '  openclaw:', '    emoji: "x"',
+      'triggers:', '  - "do the thing"', '  - "run the thing"', '  - "start the thing"',
+      'negative_triggers:', '- "not the thing"', '---', '# Body', '',
+    ].join('\n');
+    writeFileSync(join(has, 'SKILL.md'), withTriggers);
+    writeFileSync(join(lacks, 'SKILL.md'), [
+      '---', 'name: lacks-triggers', 'description: "Makes widgets. Use when widgets are needed."',
+      'metadata:', '  openclaw:', '    emoji: "y"', 'triggers: []', '---', '# Body', '',
+    ].join('\n'));
+    const run = (skill) => spawnSync('python3',
+      ['-B', join(ROOT, 'workspace-bin', 'skill-batch-fix'), '--apply', '--skill', skill, '--fix', 'triggers', '--json'],
+      { encoding: 'utf8', env: { ...process.env, HOME: home } });
+
+    const r1 = run('has-triggers');
+    assert.equal(r1.status, 0, r1.stderr);
+    assert.deepEqual(JSON.parse(r1.stdout)[0].fixes, []);
+    assert.equal(readFileSync(join(has, 'SKILL.md'), 'utf8'), withTriggers);
+
+    const r2 = run('lacks-triggers');
+    assert.equal(r2.status, 0, r2.stderr);
+    const fm = readFileSync(join(lacks, 'SKILL.md'), 'utf8').split('\n---\n')[0];
+    assert.equal(fm.match(/^triggers:/gm).length, 1);
+    assert.match(fm, /^triggers:\n {2}- "/m);
+    assert.doesNotMatch(fm, /^ +triggers:/m);
+    assert.doesNotMatch(fm, /triggers: \[\]/);
+  });
 });
