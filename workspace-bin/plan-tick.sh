@@ -48,6 +48,38 @@ esac
 ts() { date '+%Y-%m-%dT%H:%M:%S%z'; }
 log() { printf '[%s] [%s] %s\n' "$(ts)" "${PLAN_ID}" "$*"; }
 
+# The plan's agent CLI: automation.json `agent_provider`, which the viewer exports as
+# WORKPLAN_AGENT_PROVIDER. Each profile reads TICK_PROMPT.md on stdin and must be able to
+# edit files and run git/npm/node unattended; any other CLI is refused, never run read-only.
+AGENT_PROVIDER="${WORKPLAN_AGENT_PROVIDER:-claude}"
+case "${AGENT_PROVIDER}" in
+  claude|codex|gemini) AGENT_BIN="${AGENT_PROVIDER}" ;;
+  *) AGENT_BIN="" ;;
+esac
+run_agent() {
+  case "${AGENT_PROVIDER}" in
+    claude)
+      claude \
+        --print \
+        --permission-mode acceptEdits \
+        --allowedTools "Bash(node:*),Bash(nats:*),Bash(/opt/homebrew/bin/nats:*),Bash(curl:*),Bash(lsof:*),Bash(npm:*),Bash(git:*),Bash(jq:*),Bash(launchctl:*)" \
+        --add-dir "${HOME}/.openclaw/workspace" \
+        --add-dir "${HOME}/.openclaw" \
+        --output-format stream-json \
+        --verbose ;;
+    # codex's workspace-write sandbox keeps .git read-only, so a sandboxed tick could
+    # never commit its step; claude's Bash(node:*) grant is no narrower in practice.
+    codex)
+      codex exec --dangerously-bypass-approvals-and-sandbox --json - ;;
+    gemini)
+      gemini \
+        --approval-mode yolo \
+        --include-directories "${HOME}/.openclaw/workspace" \
+        --include-directories "${HOME}/.openclaw" \
+        --output-format stream-json ;;
+  esac
+}
+
 # Find the first [ ] or [A] inventory row → "next step". Echoes "version|step|desc" or empty.
 # Whitespace-tolerant (same tolerance as the viewer and plan-lint — one row format,
 # one parse contract). [D] (deferred) rows are never a next step and never block
@@ -87,7 +119,9 @@ if [ "${MODE}" = "preflight" ]; then
   else
     log "next step:   NONE — all steps closed (plan complete)"
   fi
-  command -v claude >/dev/null 2>&1 && log "claude CLI:  present" || log "claude CLI:  MISSING (a real tick would fail with rc=127)"
+  if [ -z "${AGENT_BIN}" ]; then log "agent CLI:   '${AGENT_PROVIDER}' is not a known agent_provider (real tick would FATAL)"
+  elif command -v "${AGENT_BIN}" >/dev/null 2>&1; then log "${AGENT_BIN} CLI:  present"
+  else log "${AGENT_BIN} CLI:  MISSING (a real tick would fail with rc=127)"; fi
   LINT="${REPO}/workspace-bin/plan-lint.sh"
   LINT_RC=0
   LINT_LINE="$(bash "${LINT}" "${PLAN_ID}" --summary 2>/dev/null)" || LINT_RC=$?
@@ -101,10 +135,10 @@ fi
 
 # ── Real tick ─────────────────────────────────────────────────────────────────
 
+[ -n "${AGENT_BIN}" ] || { log "FATAL: unknown agent_provider '${AGENT_PROVIDER}' (claude, codex or gemini)"; exit 1; }
 # A missing agent CLI is not a FATAL here: the run below exits 127 and counts as a
 # failed run, so a chain whose CLI vanished blocks after WORKPLAN_FAIL_LIMIT tries
 # instead of relaunching forever.
-AGENT_NAME="claude"
 [ -f "${PROMPT_FILE}" ] || { log "FATAL: ${PROMPT_FILE} missing"; exit 1; }
 mkdir -p "${TICK_LOG_DIR}"
 FAIL_FILE="${TICK_LOG_DIR}/.agent-failures"
@@ -272,20 +306,13 @@ PRE_HEAD=$(git -C "${REPO}" rev-parse -q --verify HEAD 2>/dev/null || true)
   printf '## Tick started (%s): %s\n' "${PLAN_ID}" "$(ts)"
   printf '## VERSION at start: %s\n' "${VERSION:-<unset>}"
   printf '## Next step: %s\n' "${NEXT}"
-  printf '## ─── live agent work (%s) ───\n' "${AGENT_NAME}"
+  printf '## ─── live %s work ───\n' "${AGENT_PROVIDER}"
   set +e
   # set -m gives the background run its own process group (pgid = its pid), so the
   # wall-clock limit can kill the agent and every tool process it spawned.
   set -m
   (
-    claude \
-      --print \
-      --permission-mode acceptEdits \
-      --allowedTools "Bash(node:*),Bash(nats:*),Bash(/opt/homebrew/bin/nats:*),Bash(curl:*),Bash(lsof:*),Bash(npm:*),Bash(git:*),Bash(jq:*),Bash(launchctl:*)" \
-      --add-dir "${HOME}/.openclaw/workspace" \
-      --add-dir "${HOME}/.openclaw" \
-      --output-format stream-json \
-      --verbose \
+    run_agent \
       < "${PROMPT_FILE}" \
       | tee "${TICK_RAW}" \
       | { [ -x "${PRETTY}" ] && "${PRETTY}" || cat; }
@@ -312,12 +339,12 @@ PRE_HEAD=$(git -C "${REPO}" rev-parse -q --verify HEAD 2>/dev/null || true)
   AGENT_RC=$?
   [ "${AGENT_TIMED_OUT}" = "1" ] && AGENT_RC=124
   set -e
-  printf '\n## ─── end agent %s (rc=%d) ───\n' "${AGENT_NAME}" "${AGENT_RC}"
+  printf '\n## ─── end %s (rc=%d) ───\n' "${AGENT_PROVIDER}" "${AGENT_RC}"
   printf '## Tick ended: %s\n' "$(ts)"
 } >>"${TICK_LOG}" 2>&1
 
 TICK_DURATION=$(( $(date +%s) - ${TICK_START_EPOCH:-0} ))
-log "agent ${AGENT_NAME} exited rc=${AGENT_RC:-?} after ${TICK_DURATION}s"
+log "${AGENT_PROVIDER} exited rc=${AGENT_RC:-?} after ${TICK_DURATION}s"
 
 mkdir -p "$(dirname "${DIGEST_FILE}")"
 [ -f "${DIGEST_FILE}" ] || printf '# %s plan — Progress digest\n\nOne line per autonomous tick. Newest at bottom.\n\n' "${PLAN_ID}" > "${DIGEST_FILE}"
@@ -416,10 +443,10 @@ fi
 
 agent_fix_hint() {
   case "${AGENT_RC}" in
-    126|127) printf 'the agent CLI `%s` is not installed, not executable, or not on the PATH this job runs with (launchd units get a minimal PATH): install it or add its directory to the unit PATH' "${AGENT_NAME}" ;;
+    126|127) printf 'the agent CLI `%s` is not installed, not executable, or not on the PATH this job runs with (launchd units get a minimal PATH): install it or add its directory to the unit PATH' "${AGENT_BIN}" ;;
     124) printf 'the run hung past the %ss limit: read the last log for where it stalled, review any uncommitted work it left, and raise WORKPLAN_TICK_TIMEOUT (max 3599) only if the step genuinely needs longer' "${TICK_TIMEOUT}" ;;
-    0) printf 'the agent CLI `%s` printed nothing and changed nothing: run it by hand on this plan TICK_PROMPT.md to see what it does' "${AGENT_NAME}" ;;
-    *) printf 'sign the agent CLI `%s` in again (run it interactively), check the account quota or billing, or read the last log for a crash' "${AGENT_NAME}" ;;
+    0) printf 'the agent CLI `%s` printed nothing and changed nothing: run it by hand on this plan TICK_PROMPT.md to see what it does' "${AGENT_BIN}" ;;
+    *) printf 'sign the agent CLI `%s` in again (run it interactively), check the account quota or billing, or read the last log for a crash' "${AGENT_BIN}" ;;
   esac
 }
 
@@ -429,23 +456,23 @@ if [ -n "${AGENT_FAILURE}" ]; then
   FAILS=$(( FAILS + 1 ))
   printf '%s\n' "${FAILS}" > "${FAIL_FILE}"
   if [ "${FAILS}" -lt "${FAIL_LIMIT}" ]; then
-    printf -- '- `%s` agent run failed (%s/%s): %s %s\n' "$(ts)" "${FAILS}" "${FAIL_LIMIT}" "${AGENT_NAME}" "${AGENT_FAILURE}" >> "${DIGEST_FILE}"
-    log "agent run failed (${FAILS}/${FAIL_LIMIT} in a row): ${AGENT_NAME} ${AGENT_FAILURE} — see ${TICK_LOG}"
+    printf -- '- `%s` agent run failed (%s/%s): %s %s\n' "$(ts)" "${FAILS}" "${FAIL_LIMIT}" "${AGENT_BIN}" "${AGENT_FAILURE}" >> "${DIGEST_FILE}"
+    log "agent run failed (${FAILS}/${FAIL_LIMIT} in a row): ${AGENT_BIN} ${AGENT_FAILURE} — see ${TICK_LOG}"
     exit 1
   fi
   {
     printf '# CONTINUATION_BLOCKED — %s\n\n' "$(ts)"
     printf '**Step**: %s\n' "$(printf '%s' "${NEXT}" | awk -F'|' '{print $2": "$3}')"
     printf '**Phase you were in**: agent run (post-tick wrapper check)\n'
-    printf '**Trigger**: agent CLI %s failed %s runs in a row — last: %s\n\n' "${AGENT_NAME}" "${FAILS}" "${AGENT_FAILURE}"
+    printf '**Trigger**: agent CLI %s failed %s runs in a row — last: %s\n\n' "${AGENT_BIN}" "${FAILS}" "${AGENT_FAILURE}"
     printf '## What failed\n\n'
     printf -- '- Agent CLI: `%s`\n- Last exit code: %s\n- Last log: %s\n- Failures in a row: %s (WORKPLAN_FAIL_LIMIT=%s)\n\n' \
-      "${AGENT_NAME}" "${AGENT_RC}" "${TICK_LOG}" "${FAILS}" "${FAIL_LIMIT}"
+      "${AGENT_BIN}" "${AGENT_RC}" "${TICK_LOG}" "${FAILS}" "${FAIL_LIMIT}"
     printf '**External action:** %s, then delete this file to resume.\n' "$(agent_fix_hint)"
   } > "${BLOCK_FILE}"
   rm -f "${FAIL_FILE}"
-  printf -- '- `%s` BLOCKED at `%s` — agent CLI %s failed %s runs in a row\n' "$(ts)" "${POST_VERSION}" "${AGENT_NAME}" "${FAILS}" >> "${DIGEST_FILE}"
-  log "wrote ${BLOCK_FILE} — agent CLI ${AGENT_NAME} failed ${FAILS} runs in a row (operator action required)"
+  printf -- '- `%s` BLOCKED at `%s` — agent CLI %s failed %s runs in a row\n' "$(ts)" "${POST_VERSION}" "${AGENT_BIN}" "${FAILS}" >> "${DIGEST_FILE}"
+  log "wrote ${BLOCK_FILE} — agent CLI ${AGENT_BIN} failed ${FAILS} runs in a row (operator action required)"
   maybe_autopause "agent CLI failed ${FAILS} runs in a row"; exit 2
 fi
 rm -f "${FAIL_FILE}"

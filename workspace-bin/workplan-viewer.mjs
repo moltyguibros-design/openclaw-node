@@ -477,6 +477,7 @@ function planSummary(plan, { dirty = true } = {}) {
 //   "stdout_path":      "...",
 //   "stderr_path":      "...",
 //   "close_check":      "node --test test/foo.test.mjs",   // optional; "none" disables
+//   "agent_provider":   "codex",                           // optional; claude | codex | gemini, default claude
 //   "env": { "PATH": "...", "HOME": "..." }
 // }
 
@@ -534,6 +535,7 @@ function writeAutomationConfig(plan, cfg) {
     stdout_path: cfg.stdout_path,
     stderr_path: cfg.stderr_path,
     ...(cfg.close_check ? { close_check: String(cfg.close_check) } : {}),
+    ...(cfg.agent_provider ? { agent_provider: String(cfg.agent_provider) } : {}),
     env: cfg.env || {},
   };
   fs.writeFileSync(file, JSON.stringify(out, null, 2) + '\n');
@@ -545,10 +547,15 @@ function plistEscape(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// plan-tick.sh reads the close gate's test command from WORKPLAN_CLOSE_CHECK;
-// without it every plan gates its closes on the root `npm test`.
-function closeCheckEnv(cfg) {
-  return cfg.close_check ? { WORKPLAN_CLOSE_CHECK: String(cfg.close_check) } : {};
+// plan-tick.sh reads the close gate's test command from WORKPLAN_CLOSE_CHECK and
+// the plan's agent CLI from WORKPLAN_AGENT_PROVIDER; without them every plan gates
+// its closes on the root `npm test` and ticks with claude.
+const AGENT_PROVIDERS = ['claude', 'codex', 'gemini'];
+function tickEnv(cfg) {
+  return {
+    ...(cfg.close_check ? { WORKPLAN_CLOSE_CHECK: String(cfg.close_check) } : {}),
+    ...(cfg.agent_provider ? { WORKPLAN_AGENT_PROVIDER: String(cfg.agent_provider) } : {}),
+  };
 }
 
 function generatePlistXml(cfg) {
@@ -557,7 +564,7 @@ function generatePlistXml(cfg) {
   // chain mode polls the wall forever and interval mode wastes a slot per tick.
   const env = {
     ...(cfg.env || {}),
-    ...closeCheckEnv(cfg),
+    ...tickEnv(cfg),
     WORKPLAN_AUTOPAUSE: '1',
     WORKPLAN_PLIST_LABEL: cfg.plist_label,
   };
@@ -1888,10 +1895,14 @@ const server = http.createServer(async (req, res) => {
           stdout_path:      body.stdout_path      ?? current.stdout_path,
           stderr_path:      body.stderr_path      ?? current.stderr_path,
           close_check:      body.close_check      ?? current.close_check,
+          agent_provider:   body.agent_provider   ?? current.agent_provider,
           env:              body.env              ?? current.env,
         };
         if (next.mode !== 'interval' && next.mode !== 'chain') {
           return json(res, { error: 'mode must be "interval" or "chain"' }, 400);
+        }
+        if (next.agent_provider && !AGENT_PROVIDERS.includes(next.agent_provider)) {
+          return json(res, { error: `agent_provider must be one of ${AGENT_PROVIDERS.join(', ')}` }, 400);
         }
         if (next.mode === 'interval' && (!Number.isFinite(next.interval_seconds) || next.interval_seconds < 60)) {
           return json(res, { error: 'interval_seconds must be ≥ 60' }, 400);
@@ -1980,7 +1991,7 @@ const server = http.createServer(async (req, res) => {
           stdio: 'ignore',
           env: {
             ...process.env,
-            ...closeCheckEnv(cfg),
+            ...tickEnv(cfg),
             // Don't auto-pause launchd for manual runs (in case it IS loaded).
             WORKPLAN_AUTOPAUSE: '0',
             // Clear nested-claude guard so the manual fire works from inside

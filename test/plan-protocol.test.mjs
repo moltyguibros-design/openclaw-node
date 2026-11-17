@@ -562,7 +562,7 @@ describe('plan-tick counts failed agent runs and blocks after WORKPLAN_FAIL_LIMI
     const r = f.tick();
     assert.equal(r.status, 2, r.stdout + r.stderr);
     assert.ok(Date.now() - t0 < 30_000, 'the limit did not stop the run');
-    assert.match(r.stdout, /agent claude exited rc=124/);
+    assert.match(r.stdout, /\] claude exited rc=124 after /);
     assert.match(f.block(), /last: ran past the 2s wall-clock limit and was stopped \(rc=124\)/);
     const child = fs.readFileSync(pidFile, 'utf8').trim();
     const st = spawnSync('ps', ['-o', 'stat=', '-p', child], { encoding: 'utf8' }).stdout.trim();
@@ -598,6 +598,135 @@ describe('plan-tick counts failed agent runs and blocks after WORKPLAN_FAIL_LIMI
     assert.equal(rb.status, 2, rb.stdout + rb.stderr);
     assert.equal(g.block(), '**Trigger**: own reason\n', "the wrapper overwrote the tick's own BLOCKED.md");
     assert.equal(g.fails(), null);
+  });
+});
+
+describe("plan-tick runs the plan's agent CLI chosen by WORKPLAN_AGENT_PROVIDER", () => {
+  const ID = 'tagent';
+  const GIT = 'git -c user.name=t -c user.email=t@t';
+  const AGENTS = ['claude', 'codex', 'gemini'];
+  let n = 0;
+
+  function agentTick({ provider, installed = AGENTS, args = [] } = {}) {
+    const root = path.join(tmp, `agentrepo${++n}`);
+    const plan = path.join(root, 'memory-plan', 'plans', ID);
+    fs.mkdirSync(plan, { recursive: true });
+    fs.mkdirSync(path.join(root, 'workspace-bin'));
+    fs.copyFileSync(path.join(REPO, 'workspace-bin', 'plan-tick.sh'), path.join(root, 'workspace-bin', 'plan-tick.sh'));
+    fs.writeFileSync(path.join(root, 'workspace-bin', 'plan-lint.sh'),
+      '#!/bin/bash\necho "summary: 1 PASS · 0 WARN · 0 FAIL → CONFORMANT"\n');
+    fs.writeFileSync(path.join(plan, 'INVENTORY.md'), '| 1 | 1.1 | v1.1 | [ ] | open step |\n');
+    fs.writeFileSync(path.join(plan, 'VERSION'), 'v1.0\n');
+    fs.writeFileSync(path.join(plan, 'TICK_PROMPT.md'), 'the tick prompt\n');
+    assert.equal(spawnSync('bash', ['-c', `git init -q . && git add -A && ${GIT} commit -q -m seed`], { cwd: root }).status, 0);
+    const bin = path.join(tmp, `agentbin${n}`);
+    const seen = path.join(tmp, `agentseen${n}`);
+    fs.mkdirSync(bin);
+    fs.mkdirSync(seen);
+    for (const name of installed) {
+      fs.writeFileSync(path.join(bin, name),
+        `#!/bin/bash\nprintf '%s\\n' "$@" > '${seen}/${name}.argv'\ncat > '${seen}/${name}.stdin'\necho '{"type":"result"}'\n`);
+      fs.chmodSync(path.join(bin, name), 0o755);
+    }
+    const home = path.join(tmp, `agenthome${n}`);
+    fs.mkdirSync(home);
+    // A bare PATH: a real agent CLI on the developer's machine must not stand in for a missing fake.
+    const env = { PATH: `${bin}:/usr/bin:/bin`, HOME: home, TMPDIR: tmp, WORKPLAN_CLOSE_CHECK: 'none',
+      ...(provider === undefined ? {} : { WORKPLAN_AGENT_PROVIDER: provider }) };
+    const r = spawnSync('bash', [path.join(root, 'workspace-bin', 'plan-tick.sh'), ID, ...args], { encoding: 'utf8', env });
+    const ran = AGENTS.filter((a) => fs.existsSync(path.join(seen, `${a}.argv`)));
+    const argv = (a) => fs.readFileSync(path.join(seen, `${a}.argv`), 'utf8').split('\n').slice(0, -1);
+    const stdin = (a) => fs.readFileSync(path.join(seen, `${a}.stdin`), 'utf8');
+    return { r, ran, argv, stdin, home, root };
+  }
+
+  it('without a provider the tick runs claude with the argv it always had', () => {
+    const t = agentTick();
+    assert.equal(t.r.status, 0, t.r.stdout + t.r.stderr);
+    assert.deepEqual(t.ran, ['claude']);
+    assert.deepEqual(t.argv('claude'), [
+      '--print',
+      '--permission-mode', 'acceptEdits',
+      '--allowedTools', 'Bash(node:*),Bash(nats:*),Bash(/opt/homebrew/bin/nats:*),Bash(curl:*),Bash(lsof:*),Bash(npm:*),Bash(git:*),Bash(jq:*),Bash(launchctl:*)',
+      '--add-dir', path.join(t.home, '.openclaw', 'workspace'),
+      '--add-dir', path.join(t.home, '.openclaw'),
+      '--output-format', 'stream-json',
+      '--verbose',
+    ]);
+    assert.equal(t.stdin('claude'), 'the tick prompt\n');
+  });
+
+  it('codex runs headless through exec with the prompt on stdin', () => {
+    const t = agentTick({ provider: 'codex' });
+    assert.equal(t.r.status, 0, t.r.stdout + t.r.stderr);
+    assert.deepEqual(t.ran, ['codex']);
+    assert.deepEqual(t.argv('codex'), ['exec', '--dangerously-bypass-approvals-and-sandbox', '--json', '-']);
+    assert.equal(t.stdin('codex'), 'the tick prompt\n');
+  });
+
+  it('gemini runs headless with the same extra directories claude gets', () => {
+    const t = agentTick({ provider: 'gemini' });
+    assert.equal(t.r.status, 0, t.r.stdout + t.r.stderr);
+    assert.deepEqual(t.ran, ['gemini']);
+    assert.deepEqual(t.argv('gemini'), [
+      '--approval-mode', 'yolo',
+      '--include-directories', path.join(t.home, '.openclaw', 'workspace'),
+      '--include-directories', path.join(t.home, '.openclaw'),
+      '--output-format', 'stream-json',
+    ]);
+    assert.equal(t.stdin('gemini'), 'the tick prompt\n');
+  });
+
+  it('an unknown provider is refused before the lock and no agent runs', () => {
+    const t = agentTick({ provider: 'ollama' });
+    assert.equal(t.r.status, 1, t.r.stdout + t.r.stderr);
+    assert.match(t.r.stdout, /FATAL: unknown agent_provider 'ollama' \(claude, codex or gemini\)/);
+    assert.deepEqual(t.ran, []);
+    assert.equal(fs.existsSync(path.join(t.root, 'memory-plan', '.tick.lock')), false);
+  });
+
+  // follow-up#14 step 1: a missing CLI is a failed run (rc=127) counted toward
+  // WORKPLAN_FAIL_LIMIT, not a FATAL the chain relaunches forever.
+  it("a chosen provider whose CLI is missing is a failed run naming it, even when claude is installed", () => {
+    const t = agentTick({ provider: 'codex', installed: ['claude'] });
+    assert.equal(t.r.status, 1, t.r.stdout + t.r.stderr);
+    assert.match(t.r.stdout, /agent run failed \(1\/3 in a row\): codex could not be started \(rc=127\)/);
+    assert.deepEqual(t.ran, []);
+  });
+
+  it('BLOCKED.md names the chosen provider\'s CLI, and the log markers name it', () => {
+    const t = agentTick({ provider: 'gemini', installed: [] });
+    const blockFile = path.join(t.root, 'memory-plan', 'plans', ID, 'BLOCKED.md');
+    const tick = () => spawnSync('bash', [path.join(t.root, 'workspace-bin', 'plan-tick.sh'), ID],
+      { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', HOME: t.home, TMPDIR: tmp, WORKPLAN_CLOSE_CHECK: 'none', WORKPLAN_AGENT_PROVIDER: 'gemini' } });
+    tick();
+    const r = tick();
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(fs.readFileSync(blockFile, 'utf8'), /^\*\*Trigger\*\*: agent CLI gemini failed 3 runs in a row — last: could not be started \(rc=127\)$/m);
+    const logs = path.join(t.root, 'memory-plan', 'plans', ID, 'tick-logs');
+    const last = fs.readdirSync(logs).filter((f) => /^\d{8}-\d{6}\.log$/.test(f)).sort().pop();
+    const text = fs.readFileSync(path.join(logs, last), 'utf8');
+    assert.match(text, /^## ─── live gemini work ───$/m);
+    assert.match(text, /^## ─── end gemini \(rc=127\) ───$/m);
+  });
+
+  it('the claude default keeps its log markers byte for byte', () => {
+    const t = agentTick();
+    const logs = path.join(t.root, 'memory-plan', 'plans', ID, 'tick-logs');
+    const last = fs.readdirSync(logs).filter((f) => /^\d{8}-\d{6}\.log$/.test(f)).sort().pop();
+    const text = fs.readFileSync(path.join(logs, last), 'utf8');
+    assert.match(text, /^## ─── live claude work ───$/m);
+    assert.match(text, /^## ─── end claude \(rc=0\) ───$/m);
+    assert.match(t.r.stdout, /\] claude exited rc=0 after \d+s$/m);
+  });
+
+  it('--preflight reports the chosen agent CLI', () => {
+    assert.match(agentTick({ provider: 'gemini', args: ['--preflight'] }).r.stdout, /\[tagent\] gemini CLI: {2}present$/m);
+    assert.match(agentTick({ provider: 'codex', installed: [], args: ['--preflight'] }).r.stdout,
+      /\[tagent\] codex CLI: {2}MISSING \(a real tick would fail with rc=127\)$/m);
+    assert.match(agentTick({ args: ['--preflight'] }).r.stdout, /\[tagent\] claude CLI: {2}present$/m);
+    assert.match(agentTick({ provider: 'ollama', args: ['--preflight'] }).r.stdout,
+      /\[tagent\] agent CLI: {3}'ollama' is not a known agent_provider \(real tick would FATAL\)$/m);
   });
 });
 

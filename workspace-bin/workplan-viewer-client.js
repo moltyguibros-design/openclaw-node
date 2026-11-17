@@ -851,6 +851,7 @@ async function renderAutomation() {
   html += '<div class="k">stdout log</div><div class="v">' + esc(cfg.stdout_path) + '</div>';
   html += '<div class="k">stderr log</div><div class="v">' + esc(cfg.stderr_path) + '</div>';
   html += '<div class="k">close check</div><div class="v">' + esc(cfg.close_check || 'npm test (default)') + '</div>';
+  html += '<div class="k">agent CLI</div><div class="v">' + esc(cfg.agent_provider || 'claude (default)') + '</div>';
   html += '<div class="k">env</div><div class="v">' + esc(Object.entries(cfg.env || {}).map(([k,v]) => k + '=' + v).join('  ')) + '</div>';
   html += '</div>';
   html += '<div style="margin-top:14px;font-size:11px;color:var(--dim);">Stored at <code>' + esc(state.planId) + '/automation.json</code>. Hand-edit then re-save from the UI to apply.</div>';
