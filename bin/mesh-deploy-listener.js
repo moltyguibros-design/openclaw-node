@@ -336,6 +336,38 @@ function scheduleSelfRestart(services, { platform = os.platform(), spawnFn = spa
   return scheduled;
 }
 
+/**
+ * Verified triggers wait here while a deploy runs, and only the newest waits:
+ * each one deploys its own signed sha, so an older pending trigger would only
+ * be undone by the next. `offer` never blocks, so the subscription loop keeps
+ * verifying triggers on receipt — one that sat in the buffer through a long
+ * deploy used to fail the 15-minute freshness check and raise a false
+ * "Mesh deploy REJECTED" alarm.
+ */
+function createTriggerQueue(run, { onSuperseded = () => {} } = {}) {
+  let pending = null;
+  let running = false;
+  async function pump() {
+    running = true;
+    try {
+      while (pending) {
+        const next = pending;
+        pending = null;
+        try { await run(next); } catch (err) { console.error(`[deploy-listener] deploy ${next.sha}: ${err.message}`); }
+      }
+    } finally {
+      running = false;
+    }
+  }
+  return {
+    offer(trigger) {
+      if (pending) onSuperseded(pending, trigger);
+      pending = trigger;
+      if (!running) pump();
+    },
+  };
+}
+
 async function executeDeploy(trigger, resultsKv, nodesKv, opts = {}) {
   if (deploying) {
     console.log(`[deploy-listener] Already deploying — ignoring trigger for ${trigger.sha} (from ${trigger.initiator || 'unknown'})`);
@@ -547,6 +579,21 @@ async function main() {
   // ESM helper loaded dynamically (this is CJS).
   const { verifyDeployTrigger } = await import('../lib/deploy-trigger-auth.mjs');
 
+  const deployQueue = createTriggerQueue(t => executeDeploy(t, resultsKv, nodesKv), {
+    onSuperseded: async (old, next) => {
+      console.log(`[deploy-listener] Pending trigger ${old.sha} superseded by ${next.sha}`);
+      // The same sha re-sent keeps its key for the deploy that is about to run.
+      if (old.sha === next.sha) return;
+      const safeSha = (old.sha || 'unknown').replace(/[^a-fA-F0-9.-]/g, '');
+      try {
+        await resultsKv.put(`${safeSha}-${NODE_ID}`, sc.encode(JSON.stringify({
+          nodeId: NODE_ID, sha: old.sha, status: 'skipped', log: `superseded by ${next.sha} before it started`,
+          completedAt: new Date().toISOString(),
+        })));
+      } catch (err) { console.warn(`[deploy-listener] write superseded result: ${err.message}`); }
+    },
+  });
+
   (async () => {
     for await (const msg of sub) {
       try {
@@ -565,7 +612,7 @@ async function main() {
           continue;
         }
 
-        await executeDeploy(trigger, resultsKv, nodesKv);
+        deployQueue.offer(trigger);
       } catch (err) {
         console.error(`[deploy-listener] Error handling trigger: ${err.message}`);
       }
@@ -595,7 +642,7 @@ async function main() {
   console.log(`[deploy-listener] ═══ Ready ═══`);
 }
 
-module.exports = { shouldCatchUp, runDeploy, scheduleSelfRestart, upsertNodeRegistry, checkAndCatchUp };
+module.exports = { shouldCatchUp, runDeploy, scheduleSelfRestart, upsertNodeRegistry, checkAndCatchUp, createTriggerQueue };
 
 if (require.main === module) {
   main().catch(err => {
