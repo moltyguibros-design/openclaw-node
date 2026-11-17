@@ -1,17 +1,15 @@
 import fs from "fs";
-import os from "os";
-import path from "path";
 
 /**
  * The agent's name: OPENCLAW_AGENT_NAME from the environment, else from openclaw.env
- * (MC's unit does not pass that file), else Daedalus. The server reads it here;
- * next.config.ts inlines the same value into the client bundle as NEXT_PUBLIC_AGENT_NAME
- * at build time; workspace-bin/auto-checkpoint applies the same rule to find the
+ * (MC's unit does not pass that file), else Daedalus. config.ts resolves AGENT_NAME
+ * here with the openclaw.env under its OPENCLAW_ROOT; next.config.ts inlines that
+ * value into the client bundle as NEXT_PUBLIC_AGENT_NAME at build time; workspace-bin/auto-checkpoint applies the same rule to find the
  * dispatch signal file.
  */
 export function resolveAgentName(
   env: Record<string, string | undefined> = process.env,
-  envFile: string = path.join(os.homedir(), ".openclaw", "openclaw.env"),
+  envFile: string,
 ): string {
   const fromEnv = (env.OPENCLAW_AGENT_NAME || "").trim();
   if (fromEnv) return fromEnv;

@@ -67,7 +67,7 @@ export const LORE_DIRS = [
 // Override via env vars to use any agent name or human name.
 
 /** Name of the autonomous agent (shown in kanban, scheduler, notifications) */
-export const AGENT_NAME = resolveAgentName();
+export const AGENT_NAME = resolveAgentName(process.env, path.join(OPENCLAW_ROOT, "openclaw.env"));
 
 /** Name of the human operator (shown in done-gate, manual task ownership) */
 export const HUMAN_NAME = process.env.OPENCLAW_HUMAN_NAME || "Gui";

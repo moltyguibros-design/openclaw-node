@@ -19,7 +19,7 @@ beforeEach(async () => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), "mc-soul-access-"));
   vi.stubEnv("HOME", home);
   vi.stubEnv("DB_PATH", path.join(home, "mission-control.db"));
-  vi.stubEnv("WORKSPACE_ROOT", home);
+  vi.stubEnv("WORKSPACE_ROOT", path.join(home, ".openclaw", "workspace"));
   vi.resetModules();
   soul("reader", "read");
   soul("writer", "readwrite");
