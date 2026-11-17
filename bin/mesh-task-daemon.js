@@ -279,7 +279,8 @@ async function reviewRecipients(task) {
 
 /**
  * Abort any collab session tied to a task that is being terminated.
- * Shared by handleFail, handleRelease, handleCancel.
+ * Shared by handleFail, handleRelease, handleCancel, the budget enforcer, and the
+ * lease reaper's and stall detector's releases.
  *
  * NOT called from handleComplete — that path goes through evaluateRound
  * which already calls collabStore.markCompleted() on the session.
@@ -818,7 +819,12 @@ async function detectStalls() {
     for (const id of reaped.released) {
       log(`LEASE EXPIRED ${id}: too many expiries — RELEASED for triage`);
       const t = await store.get(id);
-      if (t) { publishEvent('released', t); await checkPlanProgress(id, 'failed'); }
+      if (!t) continue;
+      publishEvent('released', t);
+      // The reaper spares a parent whose session is live (collabSessionLive), so this
+      // only ends a session that already stopped recruiting and running rounds.
+      await cleanupTaskCollabSession(t, `Lease expired: parent task ${id} released for triage`);
+      await checkPlanProgress(id, 'failed');
     }
   } catch (err) {
     warn(`reapExpiredLeases: ${err.message}`);
@@ -890,6 +896,7 @@ async function detectStalls() {
     // Null: another path ended the task meanwhile and already moved its plan.
     if (!releasedTask) continue;
     publishEvent('released', releasedTask);
+    await cleanupTaskCollabSession(releasedTask, `Stall detected: parent task ${task.task_id} released for triage`);
 
     // Update plan progress if this task belongs to a plan
     await checkPlanProgress(task.task_id, 'failed');
@@ -968,15 +975,7 @@ async function enforceBudgets() {
     if (!failedTask) continue;
     publishEvent('failed', failedTask);
 
-    // Clean up any collab session for this task
-    if (collabStore && task.collab_session_id) {
-      try {
-        await collabStore.markAborted(task.collab_session_id, `Budget exceeded for task ${task.task_id}`);
-        log(`BUDGET → COLLAB: aborted session ${task.collab_session_id}`);
-      } catch (err) {
-        log(`BUDGET → COLLAB ERROR: ${err.message}`);
-      }
-    }
+    await cleanupTaskCollabSession(failedTask, `Budget exceeded for task ${task.task_id}`);
 
     // Update plan progress if this task belongs to a plan
     await checkPlanProgress(task.task_id, 'failed');

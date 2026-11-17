@@ -143,3 +143,55 @@ describe("a session that ends a parent already ended announces nothing", () => {
       `unexpected: ${h.events.map(e => e.subject).join(', ')}`);
   });
 });
+
+// Audit mesh-core~2#17: every terminal path for a collab parent ends its session
+// the same way (cleanupTaskCollabSession): aborted, audited and announced on
+// mesh.events.collab.aborted, which Mission Control and the bridge consume.
+describe('a parent the daemon ends takes its session down with it', () => {
+  async function activeSession(h) {
+    const sid = await claimedCollab(h);
+    await h.collabStore.addNode(sid, 'a');
+    await h.collabStore.addNode(sid, 'b');
+    await h.collabStore.startRound(sid);
+    h.events.length = 0;
+    return sid;
+  }
+  async function assertAborted(h, sid, reason) {
+    const session = await h.collabStore.get(sid);
+    assert.equal(session.status, 'aborted');
+    assert.match(session.result.summary, reason);
+    assert.ok(session.audit_log.some(e => e.event === 'session_aborted'), 'the abort is audited');
+    assert.ok(h.events.some(e => e.subject === 'mesh.events.collab.aborted' && e.body.session_id === sid),
+      `no collab.aborted event: ${h.events.map(e => e.subject).join(', ')}`);
+  }
+
+  it('the budget enforcer', async () => {
+    const h = harness();
+    const sid = await activeSession(h);
+    await h.store._updateWithCAS('C-1', (t) => ({ ...t, budget_deadline: PAST }));
+    await daemon.__test.enforceBudgets();
+    assert.equal((await h.store.get('C-1')).status, 'failed');
+    await assertAborted(h, sid, /Budget exceeded/);
+  });
+
+  it('the stall detector', async () => {
+    const h = harness();
+    const sid = await activeSession(h);
+    const silent = new Date(Date.now() - 60 * 60_000).toISOString();
+    await h.store._updateWithCAS('C-1', (t) => ({ ...t, last_activity: silent }));
+    await daemon.__test.detectStalls();
+    assert.equal((await h.store.get('C-1')).status, 'released');
+    await assertAborted(h, sid, /Stall detected/);
+  });
+
+  it('the lease reaper, once the session is no longer live', async () => {
+    const h = harness();
+    const sid = await activeSession(h);
+    await h.collabStore._updateWithCAS(sid, (s) => ({ ...s, status: 'converged' }));
+    await h.store._updateWithCAS('C-1', (t) => ({ ...t, lease_requeues: 2 }));
+    await expireLease(h, 'C-1');
+    await daemon.__test.detectStalls();
+    assert.equal((await h.store.get('C-1')).status, 'released');
+    await assertAborted(h, sid, /Lease expired/);
+  });
+});
