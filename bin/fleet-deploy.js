@@ -11,7 +11,6 @@
  */
 
 const { connect, StringCodec } = require('nats');
-const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
@@ -380,7 +379,6 @@ async function main() {
   }
 }
 
-// Export for integration into mesh-deploy-v2.js
 module.exports = { fleetDeploy, showStatus, discoverNodes, triggerBranch };
 
 // Standalone mode

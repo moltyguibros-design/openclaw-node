@@ -21,7 +21,6 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mkdir, writeFile, stat, readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
-import { createRequire } from 'node:module';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 

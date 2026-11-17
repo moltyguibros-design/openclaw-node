@@ -27,3 +27,12 @@ test('the 2026-09-06 remediation plan says it is historical and what has landed'
   const head = read('REMEDIATION_PLAN_2026-09-06.md').split('\n').slice(0, 6).join('\n');
   assert.match(head, /^\*\*Status:\*\* historical\. Phases 0–3 landed/m);
 });
+
+test('deploy tooling carries no dead status responder, mesh-deploy-v2 pointer or unused imports', () => {
+  assert.doesNotMatch(read('bin/mesh-deploy-listener.js'), /mesh\.deploy\.status/, 'nothing sends mesh.deploy.status');
+  const fleet = read('bin/fleet-deploy.js');
+  assert.doesNotMatch(fleet, /mesh-deploy-v2/);
+  assert.doesNotMatch(fleet, /require\('fs'\)/);
+  assert.doesNotMatch(read('bin/mesh.js'), /createInbox/);
+  assert.doesNotMatch(read('bin/spawn-node.mjs'), /createRequire/);
+});
