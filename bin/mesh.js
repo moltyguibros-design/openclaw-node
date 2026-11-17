@@ -643,7 +643,9 @@ async function cmdPlan(args) {
       // Submit to mesh via NATS
       const nc = await connect({ ...natsConnectOpts(), timeout: 5000 });
       try {
-        const result = await daemonRequest(nc, 'mesh.plans.create', plan);
+        // The daemon honours requires_approval:false only on an operator-signed create.
+        const request = plan.requires_approval === false ? await signOperatorRequest(plan) : plan;
+        const result = await daemonRequest(nc, 'mesh.plans.create', request);
         console.log(`Plan created: ${result.plan_id}`);
         console.log(`  Subtasks: ${result.subtasks.length}`);
         console.log(`  Waves: ${result.estimated_waves}`);

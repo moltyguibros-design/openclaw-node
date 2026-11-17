@@ -167,7 +167,7 @@ function publishEvent(eventType, task) {
 // follows task.plan_id/subtask_id, and requires_review:false skips the human
 // gate, so a submitter setting them could complete, fail or abort another plan's
 // subtask, or wave its own work past review (review 2026-09-15 F1). Only
-// advancePlanWave sets them, plus handleFail's escalation, which copies them from
+// advancePlanWave sets them, plus escalateTask, which copies them from
 // a task the daemon dispatched. A bus submit or KV proposal carrying them is refused.
 const DAEMON_OWNED_TASK_FIELDS = ['plan_id', 'subtask_id', 'requires_review'];
 
@@ -2465,16 +2465,32 @@ function publishPlanEvent(eventType, plan) {
 /**
  * mesh.plans.create — Create a new plan from decomposition.
  * Expects: { parent_task_id, title, description, planner, subtasks[], requires_approval? }
+ * requires_approval:false starts the plan at once, but only on an operator-signed
+ * create: any bus peer can send mesh.plans.create, and execution otherwise needs
+ * the signed mesh.plans.approve. An unsigned create is stored as a draft that
+ * requires approval, whatever it asked for.
  */
 async function handlePlanCreate(msg) {
-  const params = parseRequest(msg);
-  if (!params.parent_task_id || !params.title) {
+  const raw = parseRequest(msg);
+  if (!raw.parent_task_id || !raw.title) {
     return respondError(msg, 'parent_task_id and title are required');
   }
 
   // Verify parent task exists
-  const parentTask = await store.get(params.parent_task_id);
-  if (!parentTask) return respondError(msg, `Parent task ${params.parent_task_id} not found`);
+  const parentTask = await store.get(raw.parent_task_id);
+  if (!parentTask) return respondError(msg, `Parent task ${raw.parent_task_id} not found`);
+
+  const { verifyOperatorRequest, stripOperatorEnvelope } = await operatorAuth();
+  const params = stripOperatorEnvelope(raw);
+  let autoApprove = false;
+  if (params.requires_approval === false) {
+    const verdict = verifyOperatorRequest(raw);
+    autoApprove = verdict.ok;
+    if (!autoApprove) {
+      warn(`PLAN CREATE ${raw.parent_task_id}: requires_approval:false ignored on an unsigned create (${verdict.reason}) — stored as a draft`);
+      params.requires_approval = true;
+    }
+  }
 
   let plan = createPlan(params);
 
@@ -2487,6 +2503,15 @@ async function handlePlanCreate(msg) {
 
   log(`PLAN CREATE ${plan.plan_id}: "${plan.title}" (${plan.subtasks.length} subtasks, ${plan.estimated_waves} waves)`);
   publishPlanEvent('created', plan);
+
+  if (autoApprove) {
+    const approved = await planStore.approve(plan.plan_id, 'operator (signed create)');
+    log(`PLAN AUTO-APPROVED ${plan.plan_id}: signed create with requires_approval:false`);
+    publishPlanEvent('approved', approved);
+    await planStore.startExecuting(plan.plan_id);
+    await advancePlanWave(plan.plan_id);
+    plan = await planStore.get(plan.plan_id);
+  }
 
   respond(msg, plan);
 }

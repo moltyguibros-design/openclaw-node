@@ -313,7 +313,7 @@ When a task is too complex for a single agent (>5min, multi-file, multi-domain),
 
 ```
 Task arrives → Planner decomposes → Plan (draft)
-  → Gui approves (or auto-approve) → Plan (approved)
+  → Gui approves (or auto-approve: requires_approval:false on an operator-signed create) → Plan (approved)
   → Subtasks materialized → Wave-based dispatch
   → All subtasks complete → Parent task waiting-user
 ```
