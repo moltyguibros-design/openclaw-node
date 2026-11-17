@@ -38,11 +38,13 @@ function notifyIntervention(message) {
 // --- Configuration ---
 const GATEWAY_LOG = process.env.GATEWAY_LOG
   || path.join(process.env.HOME, '.openclaw/logs/gateway.log');
+// The launchd plist writes gateway.err.log; the systemd unit writes gateway.err.
 const GATEWAY_ERR_LOG = process.env.GATEWAY_ERR_LOG
-  || path.join(process.env.HOME, '.openclaw/logs/gateway.err.log');
+  || path.join(process.env.HOME, process.platform === 'darwin'
+    ? '.openclaw/logs/gateway.err.log' : '.openclaw/logs/gateway.err');
 
 const LANE_STUCK_THRESHOLD_MS = 5 * 60 * 1000;   // 5 min before intervention
-const POLL_INTERVAL_MS = 15_000;                   // check every 15s
+const POLL_INTERVAL_MS = 15_000;                   // re-check for a missing or rotated log every 15s
 const COOLDOWN_MS = 60_000;                        // 1 min cooldown after SIGUSR1
 const INCIDENT_LOG = path.join(process.env.HOME, 'openclaw/shared/lane-watchdog.log');
 
@@ -173,47 +175,87 @@ function checkForDeadlock() {
 }
 
 // --- Log Tailing ---
-function tailLog(filePath, label) {
-  let fileSize = 0;
-  try {
-    const stat = fs.statSync(filePath);
-    fileSize = stat.size; // Start from current end
-  } catch {
-    log(`WARNING: log file not found: ${filePath}`);
-    return null;
+// A missing log is waited for, not fatal: on a node where the gateway never
+// ran, exiting made systemd/launchd respawn the watchdog every 5s. The poll
+// also catches rotations fs.watch misses. Reads are serialized (a watch event
+// during a read only marks it pending) and a trailing partial line is carried
+// into the next read, so no line is parsed twice or split in two.
+function tailLog(filePath, label, onLine = parseLine, { pollMs = POLL_INTERVAL_MS } = {}) {
+  let offset = null;
+  let ino = null;
+  let partial = '';
+  let watcher = null;
+  let reading = false;
+  let pending = false;
+  let warnedMissing = false;
+  let closed = false;
+
+  function stopWatching() {
+    if (watcher) watcher.close();
+    watcher = null;
   }
 
-  log(`Tailing ${label}: ${filePath} (from byte ${fileSize})`);
-
-  const watcher = fs.watch(filePath, { persistent: true }, () => {
+  function check() {
+    if (closed) return;
+    if (reading) { pending = true; return; }
+    let stat;
     try {
-      const stat = fs.statSync(filePath);
-      if (stat.size < fileSize) {
-        // Log was rotated
-        fileSize = 0;
-      }
-      if (stat.size > fileSize) {
-        const stream = fs.createReadStream(filePath, {
-          start: fileSize,
-          end: stat.size,
-          encoding: 'utf8'
-        });
-        let buffer = '';
-        stream.on('data', chunk => { buffer += chunk; });
-        stream.on('end', () => {
-          const lines = buffer.split('\n').filter(Boolean);
-          for (const line of lines) {
-            parseLine(line);
-          }
-          fileSize = stat.size;
-        });
-      }
-    } catch (err) {
-      log(`ERROR: reading ${label}: ${err.message}`);
+      stat = fs.statSync(filePath);
+    } catch {
+      if (!warnedMissing) log(`WARNING: log file not found: ${filePath} (re-checking every ${pollMs / 1000}s)`);
+      warnedMissing = true;
+      stopWatching();
+      if (offset !== null) { offset = 0; ino = null; partial = ''; }
+      return;
     }
-  });
+    if (!watcher) {
+      // The first sighting at startup tails from the end; a log that appears
+      // later is all new.
+      if (offset === null) offset = warnedMissing ? 0 : stat.size;
+      log(`Tailing ${label}: ${filePath} (from byte ${offset})`);
+      try {
+        watcher = fs.watch(filePath, { persistent: true }, check);
+        watcher.on('error', () => stopWatching());
+      } catch (err) {
+        log(`ERROR: watching ${label}: ${err.message}`);
+      }
+    }
+    if (ino !== null && stat.ino !== ino) { offset = 0; partial = ''; stopWatching(); return check(); }
+    ino = stat.ino;
+    if (stat.size < offset) { offset = 0; partial = ''; }
+    if (stat.size === offset) return;
 
-  return watcher;
+    reading = true;
+    const end = stat.size;
+    let buffer = '';
+    const stream = fs.createReadStream(filePath, { start: offset, end: end - 1, encoding: 'utf8' });
+    stream.on('data', chunk => { buffer += chunk; });
+    stream.on('error', (err) => { log(`ERROR: reading ${label}: ${err.message}`); finish(); });
+    stream.on('end', () => {
+      offset = end;
+      const lines = (partial + buffer).split('\n');
+      partial = lines.pop();
+      for (const line of lines) if (line) onLine(line);
+      finish();
+    });
+  }
+
+  function finish() {
+    reading = false;
+    if (pending) { pending = false; check(); }
+  }
+
+  const timer = setInterval(check, pollMs);
+  check();
+
+  return {
+    check,
+    close() {
+      closed = true;
+      clearInterval(timer);
+      stopWatching();
+    },
+  };
 }
 
 // --- Main ---
@@ -229,7 +271,7 @@ function main() {
   }
 
   logWatcher = tailLog(GATEWAY_LOG, 'gateway.log');
-  errWatcher = tailLog(GATEWAY_ERR_LOG, 'gateway.err.log');
+  errWatcher = tailLog(GATEWAY_ERR_LOG, path.basename(GATEWAY_ERR_LOG));
 
   // Graceful shutdown
   for (const sig of ['SIGTERM', 'SIGINT']) {
@@ -244,4 +286,6 @@ function main() {
   log('Lane watchdog active');
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { tailLog, GATEWAY_ERR_LOG };
