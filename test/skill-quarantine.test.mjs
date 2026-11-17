@@ -37,6 +37,13 @@ describe('skill quarantine', () => {
     assert.match(readFileSync(join(QUARANTINE, 'README.md'), 'utf8'), /`capability-evolver` \|.*H-11/);
   });
 
+  it('self-reflection, which ships no CLI, is quarantined with its reason recorded', () => {
+    assert.ok(quarantined.includes('self-reflection'));
+    assert.ok(!existsSync(join(ROOT, 'skills', 'self-reflection')));
+    assert.ok(!existsSync(join(QUARANTINE, 'self-reflection', 'bin')));
+    assert.match(readFileSync(join(QUARANTINE, 'README.md'), 'utf8'), /^\| `self-reflection` \| Ships no CLI/m);
+  });
+
   it('no quarantined skill is also in the live skills tree', () => {
     assert.deepEqual(quarantined.filter(name => existsSync(join(ROOT, 'skills', name))), []);
   });

@@ -323,7 +323,7 @@ test('skills that ship memory or code off the node are quarantined, and an --upd
   assert.ok(start >= 0, 'workspace.sh lists retired skills');
   const block = src.slice(start, src.indexOf('\ndone\n', start) + '\ndone\n'.length);
   const ws = mkdtempSync(join(tmpdir(), 'retired-skills-'));
-  for (const s of ['second-brain', 'refactor-suggest', 'memory-setup', 'memory-hygiene', 'kept']) {
+  for (const s of ['second-brain', 'refactor-suggest', 'memory-setup', 'memory-hygiene', 'self-reflection', 'kept']) {
     mkdirSync(join(ws, 'skills', s), { recursive: true });
     writeFileSync(join(ws, 'skills', s, 'SKILL.md'), '# x\n');
   }
