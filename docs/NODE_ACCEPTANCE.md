@@ -252,8 +252,8 @@ reliability" intent by leaving the next round a complete contract; it does **not
 | NODE-2 | **broadcast→offer→accept** | node A broadcasts a context theme; B offers; A accepts | a `[peer-memory:]` block surfaces in A's next injection | broadcast-emitter/offerer/acceptor, 1.5 done-criterion |
 | NODE-3 | signature enforcement | inject an unsigned/forged broadcast | it is **rejected**, not surfaced | broadcast-schemas, federation-startup |
 | NODE-4 | replay dedup | resend a broadcast with a seen event id | ignored (seenIds cache) | `createSeenEventCache` |
-| NODE-5 | **resilience to peer drop** | kill peer B mid-exchange | A degrades gracefully (no crash, local-first continues) then reconnects when B returns | federation-resilience, heartbeat-detect |
-| NODE-6 | heartbeat/liveness | each node observes the other's heartbeat | dead-node detection fires when a peer drops | heartbeat-detect |
+| NODE-5 | **resilience to peer drop** | kill peer B mid-exchange | A degrades gracefully (no crash, local-first continues) then reconnects when B returns | federation-resilience |
+| NODE-6 | heartbeat/liveness | each node observes the other's heartbeat | dead-node detection fires when a peer drops | mesh-health-publisher (MESH_NODES KV TTL) |
 | NODE-7 | **partition / offline tolerance** | make *all* peers unreachable | full local function continues (local-first guarantee) | MASTER_PLAN 3.2 local-first |
 
 Observability for these already exists: `bin/dogfood-council.mjs` (docs/DOGFOOD_PROTOCOL.md) subscribes to

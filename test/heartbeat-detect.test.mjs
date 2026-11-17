@@ -214,6 +214,26 @@ describe('detectHeartbeat — robustness', () => {
   });
 });
 
+describe('detectHeartbeat — bounded read', () => {
+  it('reads only the file head: a trigger past the first 64KB is not seen', () => {
+    writeSession('long-main.jsonl', [
+      { message: 'x'.repeat(70_000) },
+      { message: 'Read HEARTBEAT.md' },
+    ]);
+    const result = detectHeartbeat({ workspace: WORKSPACE });
+    assert.equal(result.sessionType, 'main');
+    assert.equal(result.isActive, false);
+  });
+
+  it('still finds a trigger at the head of a long session', () => {
+    writeSession('long-hb.jsonl', [
+      { message: 'Read HEARTBEAT.md' },
+      { message: 'x'.repeat(200_000) },
+    ]);
+    assert.equal(detectHeartbeat({ workspace: WORKSPACE }).isActive, true);
+  });
+});
+
 describe('isHeartbeatActive convenience wrapper', () => {
   it('returns true when detectHeartbeat reports isActive:true', () => {
     writeSession('hb.jsonl', [{ message: 'HEARTBEAT trigger' }]);

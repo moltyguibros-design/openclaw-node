@@ -494,8 +494,8 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 
 | Function | Module | Tier | Why Logged |
 |----------|--------|------|------------|
-| `detectHeartbeat` | heartbeat-detect | 2 | Detects presence of heartbeat signal — logged to track liveness detection accuracy. |
-| `isHeartbeatActive` | heartbeat-detect | 2 | Checks if heartbeat is currently active — logged to feed into stall detection logic. |
+| `detectHeartbeat` | heartbeat-detect | 2 | Classifies the newest gateway session as heartbeat-triggered or main (Mission Control's heartbeat status route) — logged to track detection accuracy. |
+| `isHeartbeatActive` | heartbeat-detect | 2 | Boolean shorthand for `detectHeartbeat().isActive` — logged alongside it. |
 
 ---
 
