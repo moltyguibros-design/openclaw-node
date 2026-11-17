@@ -40,10 +40,10 @@ describe('skill install gate', () => {
 });
 
 // The node runs the openclaw CLI from ~/.openclaw; clawdbot, clawdhub and
-// ~/.clawdbot are gone (audit finding skills-a-l#17). prompt-guard names the old
-// paths on purpose, as attack patterns.
+// ~/.clawdbot are gone (audit findings skills-a-l#17, #2). prompt-guard names the
+// old paths on purpose, as attack patterns.
 describe('no clawdbot-era commands or paths', () => {
-  const LEGACY_EXEMPT = new Set(['prompt-guard', 'clawdbot-security-check']);
+  const LEGACY_EXEMPT = new Set(['prompt-guard']);
   it('no loaded skill runs the clawdbot or clawdhub CLI or touches ~/.clawdbot', () => {
     const legacy = /(~|\$HOME)\/\.clawdbot\b|(^|[\s`$(])clawdhub\s+[a-z]|(^|[\s`$(])clawdbot\s+(skills|security|doctor|daemon|update|cron|gateway|config)\b/;
     const hits = markdown(SKILLS)
@@ -52,5 +52,19 @@ describe('no clawdbot-era commands or paths', () => {
         .map((line, i) => (legacy.test(line) ? `${path.relative(SKILLS, file)}:${i + 1}: ${line.trim()}` : null))
         .filter(Boolean));
     assert.deepEqual(hits, []);
+  });
+
+  // Every grep against a missing ~/.clawdbot printed nothing, so the audit read as clean.
+  it('clawdbot-security-check audits the openclaw config read-only and never reports a missing one as clean', () => {
+    const dir = path.join(SKILLS, 'clawdbot-security-check');
+    const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
+    const checks = fs.readFileSync(path.join(dir, 'references', 'audit-checks.md'), 'utf8');
+    assert.match(skill, /^name: clawdbot-security-check$/m);
+    assert.match(skill, /`openclaw security audit --deep`/);
+    assert.match(skill, /~\/\.openclaw\/openclaw\.json/);
+    assert.doesNotMatch(skill, /security audit --fix|## Audit Fix Actions/);
+    assert.match(checks, /audit not run/);
+    assert.doesNotMatch(checks, /\.clawdbotrc|clawdbot\.json/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'skill.json'), 'utf8')).scripts, undefined);
   });
 });

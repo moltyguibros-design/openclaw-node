@@ -1,15 +1,15 @@
-# Clawdbot Security Check
+# OpenClaw Security Check
 
-🔒 **Self-security audit framework for Clawdbot**
+🔒 **Self-security audit framework for OpenClaw**
 
-Inspired by the security hardening framework from [ᴅᴀɴɪᴇʟ ᴍɪᴇssʟᴇʀ](https://x.com/DanielMiessler) and integrated with [official ClawdBot security documentation](https://docs.clawd.bot/gateway/security).
+Inspired by the security hardening framework from [ᴅᴀɴɪᴇʟ ᴍɪᴇssʟᴇʀ](https://x.com/DanielMiessler) and integrated with [official OpenClaw security documentation](https://docs.openclaw.ai/gateway/security).
 
-This skill teaches Clawdbot to audit its own security posture using first-principles reasoning. Not a hard-coded script—it's a **knowledge framework** that Clawdbot applies dynamically to detect vulnerabilities, understand their impact, and recommend specific remediations.
+This skill teaches OpenClaw to audit its own security posture using first-principles reasoning. Not a hard-coded script—it's a **knowledge framework** that OpenClaw applies dynamically to detect vulnerabilities, understand their impact, and recommend specific remediations.
 
 ## What This Is
 
-- 🧠 **Knowledge-based** - Embeds the security framework directly in Clawdbot
-- 🔍 **Dynamic detection** - Clawdbot learns to find issues, not just run a script
+- 🧠 **Knowledge-based** - Embeds the security framework directly in OpenClaw
+- 🔍 **Dynamic detection** - OpenClaw learns to find issues, not just run a script
 - 📚 **Extensible** - Add new checks by updating the skill
 - 🔒 **100% Read-only** - Only audits; never modifies configuration
 
@@ -33,23 +33,22 @@ This skill teaches Clawdbot to audit its own security posture using first-princi
 ## Installation
 
 ```bash
-# Via ClawdHub
-clawdhub install clawdbot-security-check
+# Through the node's scanner gate
+bash skills/openclaw-skill-scanner/install-hook.sh clawdbot-security-check
 
 # Or clone for manual installation
 git clone https://github.com/TheSethRose/Clawdbot-Security-Check.git
-cp -r Clawdbot-Security-Check ~/.clawdbot/skills/
+cp -r Clawdbot-Security-Check ~/.openclaw/workspace/skills/clawdbot-security-check
 ```
 
 ## Usage
 
-### Via Clawdbot
+### Via the agent
 ```
-@clawdbot audit my security
-@clawdbot run security check
-@clawdbot what vulnerabilities do I have?
-@clawdbot security audit --deep
-@clawdbot security audit --fix
+audit my security
+run security check
+what vulnerabilities do I have?
+openclaw security audit --deep
 ```
 
 ## Security Principles
@@ -59,14 +58,6 @@ Running an AI agent with shell access requires caution. Focus on:
 1. **Who can talk to the bot** — DM policies, group allowlists, channel restrictions
 2. **Where the bot is allowed to act** — Network exposure, gateway binding, proxy configs
 3. **What the bot can touch** — Tool access, file permissions, credential storage
-
-## Audit Functions
-
-The `--fix` flag applies these guardrails:
-- Changes `groupPolicy` from `open` to `allowlist` for common channels
-- Resets `logging.redactSensitive` from `off` to `tools`
-- Tightens permissions: `.clawdbot` to `700`, configs to `600`
-- Secures state files including credentials and auth profiles
 
 ## High-Level Checklist
 
@@ -106,12 +97,12 @@ command-to-check-config
 ```
 Clawdbot-Security-Check/
 ├── SKILL.md      # Knowledge framework (the skill - source of truth)
-├── skill.json    # Clawdbot metadata
+├── skill.json    # OpenClaw metadata
 ├── README.md     # This file
 └── .gitignore
 ```
 
-**SKILL.md** is the source of truth—it teaches Clawdbot everything it needs to know.
+**SKILL.md** is the source of truth—it teaches OpenClaw everything it needs to know.
 
 ## Why This Approach?
 
@@ -119,7 +110,7 @@ Hard-coded scripts get stale. A knowledge framework evolves:
 
 - ✅ Add new vulnerabilities without code changes
 - ✅ Customize checks for your environment
-- ✅ Clawdbot understands the "why" behind each check
+- ✅ OpenClaw understands the "why" behind each check
 - ✅ Enables intelligent follow-up questions
 
 > "The goal isn't to find vulnerabilities—it's to understand security deeply enough that vulnerabilities can't hide." — Daniel Miessler
@@ -128,7 +119,7 @@ Hard-coded scripts get stale. A knowledge framework evolves:
 
 ```
 ═══════════════════════════════════════════════════════════════
-🔒 CLAWDBOT SECURITY AUDIT
+🔒 OPENCLAW SECURITY AUDIT
 ═══════════════════════════════════════════════════════════════
 Timestamp: 2026-01-26T15:30:00.000Z
 
@@ -149,7 +140,7 @@ Timestamp: 2026-01-26T15:30:00.000Z
 │    → Fix: Set dm_policy to "allowlist" with trusted users
 └────────────────────────────────────────────────────────
 
-This audit was performed by Clawdbot's self-security framework.
+This audit was performed by OpenClaw's self-security framework.
 No changes were made to your configuration.
 ```
 
@@ -165,4 +156,4 @@ MIT - Security-first, open source forever.
 
 ---
 
-**Clawdbot knows its attack surface. Do you?**
+**OpenClaw knows its attack surface. Do you?**
