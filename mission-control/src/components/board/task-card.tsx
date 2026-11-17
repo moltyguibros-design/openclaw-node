@@ -1,6 +1,6 @@
 "use client";
 
-const AGENT_NAME = process.env.NEXT_PUBLIC_AGENT_NAME || "Daedalus";
+import { AGENT_NAME } from "@/lib/client-agent-name";
 
 import { useState, useMemo } from "react";
 import { formatDistanceToNow } from "date-fns";
@@ -93,7 +93,7 @@ export function TaskCard({
   const colIdx = COLUMNS_ORDER.indexOf(currentColumn);
   const isLive = task.id === "__LIVE_SESSION__";
   const isActive = !isLive && task.status === "running";
-  const isDaedalusWorking = isActive && task.owner?.toLowerCase() === AGENT_NAME.toLowerCase() && !!task.acknowledgedAt;
+  const isAgentWorking = isActive && task.owner?.toLowerCase() === AGENT_NAME.toLowerCase() && !!task.acknowledgedAt;
   const isMeta = isMetaTask(task);
   const metaColor = task.color || '#7c3aed';
   const MetaIcon = isMeta ? TYPE_ICONS[task.type || ''] || null : null;
@@ -149,7 +149,7 @@ export function TaskCard({
       className={`group rounded-lg border p-3 transition-all hover:shadow-md hover:shadow-black/20 ${
         selected
           ? "border-primary ring-2 ring-primary/30 bg-primary/5"
-          : isDaedalusWorking
+          : isAgentWorking
           ? "border-red-500/50 bg-red-500/5"
           : isLive
           ? "border-green-500/30 bg-green-500/5"
@@ -160,7 +160,7 @@ export function TaskCard({
           : "border-border bg-card"
       } ${bulkMode ? "cursor-pointer" : isLive ? "" : "cursor-grab active:cursor-grabbing"}`}
       style={
-        isDaedalusWorking && !selected
+        isAgentWorking && !selected
           ? {
               borderColor: 'rgba(239, 68, 68, 0.5)',
               boxShadow: '0 0 12px rgba(239, 68, 68, 0.3), 0 0 4px rgba(239, 68, 68, 0.2)',

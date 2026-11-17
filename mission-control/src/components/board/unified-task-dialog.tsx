@@ -1,6 +1,6 @@
 "use client";
 
-const AGENT_NAME = process.env.NEXT_PUBLIC_AGENT_NAME || "Daedalus";
+import { AGENT_NAME } from "@/lib/client-agent-name";
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { X, Zap, Paperclip, Trash2, ArrowLeftFromLine, ArrowRightFromLine, Clock, User, Cpu } from "lucide-react";
@@ -464,7 +464,7 @@ export function UnifiedTaskDialog({
                 Send to review
               </span>
             </label>
-            {/* Daedalus acknowledgment checkbox — shows when auto-dispatched */}
+            {/* Agent acknowledgment checkbox — shows when auto-dispatched */}
             {item && status === "running" && owner?.toLowerCase() === AGENT_NAME.toLowerCase() && (
               <label className="flex items-center gap-2 cursor-pointer group ml-2">
                 <input
@@ -478,7 +478,7 @@ export function UnifiedTaskDialog({
                   className="h-5 w-5 rounded border-red-500/50 text-red-500 focus:ring-red-500/50 accent-red-500 cursor-pointer"
                 />
                 <span className={`text-sm font-medium transition-colors ${acknowledgedAt ? "text-red-400" : "text-muted-foreground group-hover:text-foreground"}`}>
-                  Daedalus
+                  {AGENT_NAME}
                 </span>
               </label>
             )}

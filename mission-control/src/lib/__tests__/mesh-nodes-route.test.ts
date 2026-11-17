@@ -41,6 +41,7 @@ vi.mock("@/lib/config", () => ({
   },
   NODE_PLATFORM: "Linux",
   NODE_ROLE: "lead",
+  AGENT_NAME: "Daedalus",
 }));
 
 interface RouteNode {

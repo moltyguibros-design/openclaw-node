@@ -108,9 +108,9 @@ recreates what it needs on next tick.
 - **Lifetime:** Ephemeral. If anything writes it, `auto-checkpoint` reads and deletes it on its next hook invocation.
 - **Consumers:** `auto-checkpoint` — reads, echoes to stdout (visible in Claude context), then deletes.
 
-### `.tmp/daedalus-dispatch.json`
+### `.tmp/<agent>-dispatch.json` (`daedalus-dispatch.json` by default)
 
-- **Owner:** Scheduler (external writer)
+- **Owner:** Scheduler (Mission Control). `<agent>` is the lowercased agent name: `OPENCLAW_AGENT_NAME` from the environment, else from `~/.openclaw/openclaw.env`, else `Daedalus`. Mission Control and `auto-checkpoint` resolve it the same way.
 - **Format:** JSON. Contains `taskId` and `title` for auto-dispatched tasks.
 - **Lifetime:** Ephemeral. Created by scheduler, read and deleted by `auto-checkpoint` on next hook invocation.
 - **Consumers:** `auto-checkpoint` — reads, echoes task info to stdout, then deletes.

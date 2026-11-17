@@ -1,6 +1,7 @@
 "use client";
 
 import { useTasks } from "@/lib/hooks";
+import { AGENT_NAME } from "@/lib/client-agent-name";
 import { Loader2, Coffee, Zap, Server } from "lucide-react";
 
 const CAP_WEIGHTS: Record<string, number> = { light: 0.5, normal: 1.0, heavy: 2.0 };
@@ -30,7 +31,7 @@ export function StatusBanner() {
         <Coffee className="h-4 w-4 text-muted-foreground" />
         <div>
           <p className="text-sm font-medium text-muted-foreground">
-            Daedalus is idle — no active work
+            {AGENT_NAME} is idle — no active work
           </p>
           <p className="text-[10px] text-muted-foreground/60">
             Waiting for instructions or drag a task to In Progress

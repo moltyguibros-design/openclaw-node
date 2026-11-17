@@ -5,7 +5,7 @@ import { getDb, getRawDb } from "@/lib/db";
 import { tasks } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { withTrace } from "@/lib/tracer";
-import { NODE_ID, NODE_PLATFORM, NODE_ROLE, OPENCLAW_ROOT } from "@/lib/config";
+import { AGENT_NAME, NODE_ID, NODE_PLATFORM, NODE_ROLE, OPENCLAW_ROOT } from "@/lib/config";
 import { exec } from "child_process";
 import { promisify } from "util";
 import os from "os";
@@ -355,7 +355,7 @@ async function gatherLocalHealth(): Promise<NodeHealth> {
       // No runtime state — derive from config + service status
       const agentSvc = services.find((s) => s.name.includes("agent") && !s.name.includes("audit"));
       // Read configured agent name and LLM from env/defaults
-      const agentName = process.env.OPENCLAW_AGENT_NAME || "Daedalus";
+      const agentName = AGENT_NAME;
       const llmProvider = process.env.LLM_PROVIDER || "anthropic";
       return {
         status: agentSvc?.status === "active" ? "idle" : agentSvc ? "stopped" : "not installed",

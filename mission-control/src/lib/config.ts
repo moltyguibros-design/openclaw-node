@@ -1,6 +1,7 @@
 import path from "path";
 import fs from "fs";
 import os from "os";
+import { resolveAgentName } from "./agent-name";
 
 export const WORKSPACE_ROOT =
   process.env.WORKSPACE_ROOT ||
@@ -66,7 +67,7 @@ export const LORE_DIRS = [
 // Override via env vars to use any agent name or human name.
 
 /** Name of the autonomous agent (shown in kanban, scheduler, notifications) */
-export const AGENT_NAME = process.env.OPENCLAW_AGENT_NAME || "Daedalus";
+export const AGENT_NAME = resolveAgentName();
 
 /** Name of the human operator (shown in done-gate, manual task ownership) */
 export const HUMAN_NAME = process.env.OPENCLAW_HUMAN_NAME || "Gui";
