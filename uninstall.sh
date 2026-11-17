@@ -49,12 +49,6 @@ echo ""
 echo "OpenClaw Node Uninstaller"
 echo ""
 
-# Stop and remove daemon service
-if [ -f "$WORKSPACE/bin/install-daemon" ]; then
-  info "Stopping memory daemon..."
-  bash "$WORKSPACE/bin/install-daemon" --uninstall 2>/dev/null || true
-fi
-
 # Stop and remove services
 OS="$(uname -s)"
 if [ "$OS" = "Linux" ]; then

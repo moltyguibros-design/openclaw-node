@@ -962,8 +962,6 @@ test('unit templates and the daemon installer render TZ from OPENCLAW_TIMEZONE',
     assert.equal(tz, '${OPENCLAW_TIMEZONE}', `${f} pins TZ=${tz}`);
   }
   assert.ok(withTz >= 20, `TZ-setting templates found: ${withTz}`);
-  const installDaemon = readFileSync(join(ROOT, 'workspace-bin/install-daemon'), 'utf8');
-  assert.doesNotMatch(installDaemon, /TZ=America|<string>America\//);
   for (const f of ['workspace-bin/memory-maintenance.mjs', 'workspace-bin/session-recap', 'bin/discord-read.js',
     'workspace-bin/proactive-scan', 'workspace-bin/memory-daemon.mjs']) {
     const code = readFileSync(join(ROOT, f), 'utf8')

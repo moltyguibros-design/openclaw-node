@@ -20,7 +20,7 @@
  *   - MEMORY.md character budget with frozen session snapshots
  *   - SQLite session archive with FTS5 for episodic recall
  *
- * Install: bin/install-daemon (detects OS, sets up launchd/systemd/pm2)
+ * Install: install.sh (scripts/install/services.sh renders the launchd/systemd unit)
  * Manual:  node bin/memory-daemon.mjs [--test] [--verbose]
  */
 

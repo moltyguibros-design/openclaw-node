@@ -56,7 +56,7 @@ OpenClaw's memory system is a **platform-level service** independent of any fron
 | Gateway | `ai.openclaw.gateway` | KeepAlive | Discord/Telegram bridge (port 18789) |
 | Mission Control | `ai.openclaw.mission-control` | KeepAlive | Dashboard + API (port 3000) |
 
-Install: `bin/install-daemon` (detects OS: launchd on macOS, systemd on Linux, pm2 elsewhere)
+Install: `install.sh` — `scripts/install/services.sh` renders `services/launchd/ai.openclaw.memory-daemon.plist` (macOS) or `services/systemd/openclaw-memory-daemon.service` (Linux)
 
 ## Scripts (`workspace/bin/`)
 
@@ -72,7 +72,6 @@ Install: `bin/install-daemon` (detects OS: launchd on macOS, systemd on Linux, p
 | `clawvault-local` | bash | ClawVault wrapper with auto vault-path injection | memory-daemon + on-demand |
 | `clawvault-access-control` | bash | Access control for ClawVault operations | on-demand |
 | `compile-boot` | python | Compiles AGENTS.md into profile-aware boot artifacts (.boot/*.compiled.md). Fetches entity context from MC graph API (Option B: top 10 entities). | memory-daemon (session start) |
-| `install-daemon` | bash | Cross-platform service installer (macOS/Linux/Windows) | manual (once) |
 
 ### Frontend Adapters
 
@@ -364,11 +363,9 @@ cd projects/mission-control && npm install && cd ../..
 # 7. Compile boot artifacts
 python3 bin/compile-boot --all
 
-# 8. Install daemon service (auto-detects OS)
-bin/install-daemon
-# macOS: generates + loads launchd plist (KeepAlive)
-# Linux: generates + enables systemd unit
-# Other: uses pm2
+# 8. Install daemon service: run the repo installer (install.sh --enable-services).
+# scripts/install/services.sh renders the memory-daemon launchd plist (macOS)
+# or systemd user unit (Linux) from services/.
 
 # 9. (Optional) Mission Control + Gateway services
 # Same pattern — see their respective plist/unit files
@@ -437,7 +434,7 @@ This means:
 - **Claude Code project dir** — derived from workspace absolute path
 - **Transcript dirs** — configurable via `~/.openclaw/config/transcript-sources.json`
 
-The only machine-specific file is the launchd plist (macOS-only). `bin/install-daemon` generates the appropriate service file for each OS.
+The only machine-specific files are the service units. `scripts/install/services.sh` renders them from `services/` for each OS.
 
 ## Validation Report — 2026-03-04 11:30 America/Montreal
 
@@ -469,7 +466,7 @@ Daemon v2 deployment (bash → Node.js): **COMPLETE**. 6 bugs fixed, all modules
 | Obsidian sync | Not included | obsidian-sync.mjs: hash-based, 14 private + 39 shared routes |
 | Subagent audit | Not included | subagent-audit.mjs: JSONL scanning, trust registry |
 | New frontend registration | Edit script source code | Add entry to transcript-sources.json |
-| Install | Manual plist creation | `bin/install-daemon` (macOS/Linux/pm2) |
+| Install | Manual plist creation | `bin/install-daemon` (macOS/Linux/pm2); since retired for `install.sh` |
 
 ### Knowledge Graph Integration — 2026-03-04 13:00
 

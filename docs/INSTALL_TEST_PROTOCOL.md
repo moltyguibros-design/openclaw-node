@@ -64,7 +64,7 @@ for i in 1 2; do ps -eo pid,etime,comm | grep -E 'mesh-task-daemon|memory-daemon
 # PASS: same PIDs both samples, etime increasing (a crash-looper resets etime)
 
 # memory-daemon booted past its imports (the 2026-07-11 regression)
-# stderr: memory-daemon.err (launchd plist, install-daemon) · openclaw-memory-daemon.err (install.sh systemd unit)
+# stderr: memory-daemon.err (launchd plist) · openclaw-memory-daemon.err (systemd unit)
 grep -c ERR_MODULE_NOT_FOUND ~/.openclaw/workspace/.tmp/memory-daemon.err ~/.openclaw/workspace/.tmp/openclaw-memory-daemon.err 2>/dev/null
 # PASS: every printed count is 0 (or file absent)
 ```

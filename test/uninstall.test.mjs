@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,6 +66,24 @@ test('uninstall removes launchers and installed code trees, keeps memory, never 
     ]) assert.equal(existsSync(join(fx.home, rel)), false, rel);
     assert.equal(existsSync(join(fx.home, '.openclaw/workspace/memory/keep.md')), true);
     assert.equal(existsSync(join(fx.home, 'lsof-called')), false);
+  } finally {
+    rmSync(fx.home, { recursive: true, force: true });
+  }
+});
+
+test('install-daemon is retired: uninstall removes the memory-daemon unit itself and never runs a stale copy', linuxOnly, () => {
+  assert.equal(existsSync(join(ROOT, 'workspace-bin/install-daemon')), false);
+  assert.match(readFileSync(join(ROOT, 'scripts/install/retired-files.txt'), 'utf8'), /^workspace-bin install-daemon$/m);
+  const fx = fixture();
+  try {
+    const unit = join(fx.home, '.config/systemd/user/openclaw-memory-daemon.service');
+    mkdirSync(dirname(unit), { recursive: true });
+    writeFileSync(unit, '[Service]\n');
+    writeFileSync(join(fx.home, '.openclaw/workspace/bin/install-daemon'), 'touch "$HOME/install-daemon-ran"\n');
+    const r = runUninstall(fx);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(existsSync(unit), false);
+    assert.equal(existsSync(join(fx.home, 'install-daemon-ran')), false);
   } finally {
     rmSync(fx.home, { recursive: true, force: true });
   }

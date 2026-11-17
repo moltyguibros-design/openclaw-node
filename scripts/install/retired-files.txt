@@ -21,3 +21,5 @@ workspace-bin memory-plan-timeline.sh
 workspace-bin memory-plan-notify.sh
 # pair-session.js read prompt templates that never shipped, so every run crashed.
 workspace-bin pair-session.js
+# install-daemon wrote its own memory-daemon unit over the one services.sh renders.
+workspace-bin install-daemon
