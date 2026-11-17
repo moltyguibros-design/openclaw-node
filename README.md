@@ -809,7 +809,7 @@ Subtasks can be marked `critical: true` to indicate their failure should trigger
 When a subtask fails:
 1. **Cascade**: BFS blocks all transitive dependents (follows `depends_on` graph)
 2. **Blocked-critical check**: if any blocked subtask is `critical: true`, abort the plan
-3. **Escalation**: if the role defines an escalation target, create a recovery task
+3. **Escalation**: if the role defines a target for the failure, create a recovery task with 1.5x the budget: `on_metric_failure` when the worker released the task after its metric failed on every attempt, `on_budget_exceeded` when the daemon failed it for running over budget. A worker's setup failure (worktree isolation, collab discovery) and a Foreman-escalated release do not escalate; `on_scope_violation` is not raised yet (scope reverts are a harness warning, not a failure)
 4. **Recovery**: if the escalation task succeeds, override FAILED → COMPLETED and unblock dependents
 
 ### Plan-Task Back-References

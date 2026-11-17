@@ -2358,13 +2358,19 @@ async function superviseTask(supervisor, run) {
 /** The attempt loop — try → measure → keep/discard → retry — then release. */
 async function runAttempts(task, worktreePath, supervisor, startedAt) {
   const attempts = [];
+  // The daemon escalates to the role's on_metric_failure target only when every
+  // attempt ran and the last one failed its metric, never on an early stop.
+  let stoppedEarly = false;
+  let lastMetricFailed = false;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    lastMetricFailed = false;
     // Check budget before each attempt
     const budgetDeadline = new Date(task.budget_deadline);
     const remaining = (budgetDeadline - Date.now()) / 60000;
     if (remaining <= 0) {
       log(`Budget exhausted before attempt ${attempt}`);
+      stoppedEarly = true;
       break;
     }
     log(`Attempt ${attempt}/${MAX_ATTEMPTS} (${remaining.toFixed(1)}m remaining)`);
@@ -2412,6 +2418,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
       await natsRequest('mesh.tasks.attempt', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token, ...attemptRecord });
       if (escalated) {
         log(`Attempt ${attempt}: Foreman escalated (${foremanStop.reason}). Releasing for human triage.`);
+        stoppedEarly = true;
         break;
       }
       log(`Attempt ${attempt}: stopped by Foreman (${foremanStop.reason}). Retrying with the guidance.`);
@@ -2486,6 +2493,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
         await natsRequest('mesh.tasks.attempt', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token, ...verification.attemptRecord });
         if (verification.escalate) {
           log(`Attempt ${attempt}: ${verification.attemptRecord.approach}. Releasing for human triage.`);
+          stoppedEarly = true;
           break;
         }
         log(`Attempt ${attempt}: ${verification.attemptRecord.approach}. Retrying with the findings.`);
@@ -2606,6 +2614,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
     };
     attempts.push(attemptRecord);
     await natsRequest('mesh.tasks.attempt', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token, ...attemptRecord });
+    lastMetricFailed = true;
     log(`Attempt ${attempt}: metric failed. Quick retry (1s). Output: ${metricResult.output.slice(0, 200)}`);
     await new Promise(r => setTimeout(r, 1000)); // two-tier: normal exit → 1s continuation
   }
@@ -2625,6 +2634,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
     lease_token: task.lease_token,
     reason,
     attempts,
+    metric_exhausted: !stoppedEarly && lastMetricFailed && !escalated,
   });
   // Keep worktree branch on release for post-mortem debugging (don't merge partial
   // work); startup reconcile keeps it until MESH_KEPT_BRANCH_MAX_DAYS.

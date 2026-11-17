@@ -522,54 +522,49 @@ async function handleFail(msg) {
   publishEvent('failed', task);
   await cleanupTaskCollabSession(task, `Parent task ${task_id} failed: ${reason}`);
 
-  // Phase F: Escalation — if the task has a role with escalation mapping,
-  // create an escalation task before cascading failure through the plan.
-  let escalated = false;
-  let escalationTaskId = null;
-  if (task.role) {
-    const role = findRole(task.role, ROLE_DIRS);
-    if (role && role.escalation) {
-      // Determine failure type for escalation routing
-      let failureType = 'on_metric_failure';
-      if (reason && reason.includes('Budget exceeded')) failureType = 'on_budget_exceeded';
-      if (reason && reason.includes('scope')) failureType = 'on_scope_violation';
-
-      const escalationTarget = role.escalation[failureType];
-      if (escalationTarget) {
-        const escalationTask = createTask({
-          task_id: `ESC-${task_id}-${Date.now()}`,
-          title: `[Escalation] ${task.title}`,
-          description: [
-            `Escalated from ${task_id} (role: ${task.role}, failure: ${failureType}).`,
-            `Original reason: ${reason}`,
-            '',
-            `Original description: ${task.description}`,
-          ].join('\n'),
-          budget_minutes: Math.ceil(task.budget_minutes * 1.5), // 50% more budget
-          metric: task.metric,
-          scope: task.scope,
-          success_criteria: task.success_criteria,
-          role: escalationTarget === 'human' ? null : escalationTarget,
-          requires_review: escalationTarget === 'human' ? true : null,
-          tags: [...(task.tags || []), 'escalation', `escalated_from:${task_id}`],
-          plan_id: task.plan_id,
-          subtask_id: task.subtask_id, // Wire back to original plan subtask for recovery
-        });
-        await store.put(escalationTask);
-        publishEvent('submitted', escalationTask);
-        log(`ESCALATED ${task_id} → ${escalationTask.task_id} (target role: ${escalationTarget})`);
-        escalated = true;
-        escalationTaskId = escalationTask.task_id;
-      }
-    }
-  }
-
-  // Check if this task belongs to a plan (escalation doesn't block cascade —
-  // the escalation task is independent. If the plan has abort_on_critical_fail
-  // and this was critical, it still aborts. The escalation is a parallel attempt.)
+  // An agent fails a task only when it could not set up (worktree isolation,
+  // collab discovery, a provider it cannot serve); that is no reason to hand the
+  // work to another role.
   await checkPlanProgress(task_id, 'failed');
 
-  respond(msg, { ...task, escalated, escalation_task_id: escalationTaskId });
+  respond(msg, task);
+}
+
+/**
+ * Phase F escalation: hand a task that failed for one of its role's named
+ * reasons to the role (or human) the role's escalation map names, with 1.5x the
+ * budget. Called when attempts are exhausted on a failing metric
+ * (on_metric_failure) and when the budget runs out (on_budget_exceeded). The
+ * escalation task runs beside the plan cascade; it does not block it.
+ */
+async function escalateTask(task, failureType, reason) {
+  if (!task.role) return null;
+  const role = findRole(task.role, ROLE_DIRS);
+  const escalationTarget = role?.escalation?.[failureType];
+  if (!escalationTarget) return null;
+  const escalationTask = createTask({
+    task_id: `ESC-${task.task_id}-${Date.now()}`,
+    title: `[Escalation] ${task.title}`,
+    description: [
+      `Escalated from ${task.task_id} (role: ${task.role}, failure: ${failureType}).`,
+      `Original reason: ${reason}`,
+      '',
+      `Original description: ${task.description}`,
+    ].join('\n'),
+    budget_minutes: Math.ceil(task.budget_minutes * 1.5),
+    metric: task.metric,
+    scope: task.scope,
+    success_criteria: task.success_criteria,
+    role: escalationTarget === 'human' ? null : escalationTarget,
+    requires_review: escalationTarget === 'human' ? true : null,
+    tags: [...(task.tags || []), 'escalation', `escalated_from:${task.task_id}`],
+    plan_id: task.plan_id,
+    subtask_id: task.subtask_id, // Wire back to original plan subtask for recovery
+  });
+  await store.put(escalationTask);
+  publishEvent('submitted', escalationTask);
+  log(`ESCALATED ${task.task_id} → ${escalationTask.task_id} (${failureType}, target role: ${escalationTarget})`);
+  return escalationTask.task_id;
 }
 
 /**
@@ -665,6 +660,11 @@ async function handleRelease(msg) {
   log(`RELEASED ${task_id}: ${reason || 'no reason'} (needs human triage)`);
   publishEvent('released', task);
   await cleanupTaskCollabSession(task, `Parent task ${task_id} released: ${reason || 'human triage'}`);
+  // The agent sets metric_exhausted only when every attempt ran and its metric
+  // kept failing; a Foreman escalation, a pre-check or a declined provider does not.
+  if (params.metric_exhausted === true && task.metric) {
+    await escalateTask(task, 'on_metric_failure', reason || 'metric failed on every attempt');
+  }
   await checkPlanProgress(task_id, 'failed');
   respond(msg, task);
 }
@@ -976,6 +976,7 @@ async function enforceBudgets() {
     publishEvent('failed', failedTask);
 
     await cleanupTaskCollabSession(failedTask, `Budget exceeded for task ${task.task_id}`);
+    await escalateTask(failedTask, 'on_budget_exceeded', failedTask.result?.summary || 'Budget exceeded');
 
     // Update plan progress if this task belongs to a plan
     await checkPlanProgress(task.task_id, 'failed');
