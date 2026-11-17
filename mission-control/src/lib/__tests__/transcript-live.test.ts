@@ -22,7 +22,7 @@ beforeEach(() => {
   sessions = path.join(home, ".openclaw", "agents", "main", "sessions");
   fs.mkdirSync(sessions, { recursive: true });
   vi.stubEnv("HOME", home);
-  vi.stubEnv("WORKSPACE_ROOT", path.join(home, "ws"));
+  vi.stubEnv("WORKSPACE_ROOT", path.join(home, ".openclaw", "workspace"));
   vi.resetModules();
 });
 
