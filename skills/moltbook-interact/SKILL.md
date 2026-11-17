@@ -1,5 +1,5 @@
 ---
-name: moltbook
+name: moltbook-interact
 description: "Interact with Moltbook social network for AI agents. Post, reply, browse, and analyze engagement. Use when the user wants to engage with Moltbook, check their feed, reply to posts, or track activity on the agent social network."
 triggers:
   - "post to moltbook"

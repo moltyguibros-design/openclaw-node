@@ -1,5 +1,5 @@
 ---
-name: tavily
+name: tavily-search
 description: "AI-optimized web search via Tavily API. Use when the user asks for Tavily by name, or for a deep Tavily research pass or URL extraction; plain web searches go to web-search."
 triggers:
   - "search with tavily"
