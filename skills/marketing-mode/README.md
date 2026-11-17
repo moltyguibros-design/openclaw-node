@@ -5,7 +5,7 @@
 ## Activation
 
 ```bash
-clawdhub install marketing-mode
+bash skills/openclaw-skill-scanner/install-hook.sh marketing-mode
 ```
 
 Then tell Clawdbot to switch modes.

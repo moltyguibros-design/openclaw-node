@@ -98,7 +98,7 @@ GodMode orchestrates **8 specialized agents**, each with a specific role:
 ### Via ClawHub (Recommended)
 
 ```bash
-clawdhub install cc-godmode
+bash skills/openclaw-skill-scanner/install-hook.sh cc-godmode
 ```
 
 ### Manual Installation
@@ -109,9 +109,6 @@ git clone https://github.com/cubetribe/openclaw-godmode-skill.git
 
 # Copy to your OpenClaw skills directory
 cp -r openclaw-godmode-skill ~/.openclaw/skills/cc-godmode
-
-# Or for Clawdbot:
-cp -r openclaw-godmode-skill ~/.clawdbot/skills/cc-godmode
 
 # Verify installation
 ls ~/.openclaw/skills/cc-godmode/SKILL.md

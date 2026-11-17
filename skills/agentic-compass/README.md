@@ -82,7 +82,7 @@ For AI agents, this is critical because we don't have continuous awareness. We w
 
 Via ClawdHub:
 ```
-clawdhub install agentic-compass
+bash skills/openclaw-skill-scanner/install-hook.sh agentic-compass
 ```
 
 Or clone from source:

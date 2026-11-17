@@ -17,25 +17,24 @@ Common issues and solutions when using the CC_GodMode skill.
 ### Skill not found after installation
 
 **Symptoms:**
-- `clawdhub list` doesn't show cc-godmode
+- `~/.openclaw/workspace/skills/` has no cc-godmode directory
 - Agent doesn't recognize CC_GodMode commands
 
 **Solutions:**
 
 1. Verify installation:
 ```bash
-clawdhub list | grep cc-godmode
+ls ~/.openclaw/workspace/skills/ | grep cc-godmode
 ```
 
 2. Try reinstalling:
 ```bash
-clawdhub uninstall cc-godmode
-clawdhub install cc-godmode
+bash skills/openclaw-skill-scanner/install-hook.sh cc-godmode
 ```
 
 3. Check skill directory:
 ```bash
-ls ~/.clawdbot/skills/cc-godmode/
+ls ~/.openclaw/workspace/skills/cc-godmode/
 ```
 
 ### Version mismatch
@@ -48,12 +47,12 @@ ls ~/.clawdbot/skills/cc-godmode/
 
 1. Check installed version:
 ```bash
-grep "version:" ~/.clawdbot/skills/cc-godmode/SKILL.md
+grep "version:" ~/.openclaw/workspace/skills/cc-godmode/SKILL.md
 ```
 
 2. Update to latest:
 ```bash
-clawdhub update cc-godmode
+bash skills/openclaw-skill-scanner/install-hook.sh cc-godmode
 ```
 
 ---

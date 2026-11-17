@@ -38,3 +38,19 @@ describe('skill install gate', () => {
     assert.match(text, /Never pass `--force`/);
   });
 });
+
+// The node runs the openclaw CLI from ~/.openclaw; clawdbot, clawdhub and
+// ~/.clawdbot are gone (audit finding skills-a-l#17). prompt-guard names the old
+// paths on purpose, as attack patterns.
+describe('no clawdbot-era commands or paths', () => {
+  const LEGACY_EXEMPT = new Set(['prompt-guard', 'clawdbot-security-check']);
+  it('no loaded skill runs the clawdbot or clawdhub CLI or touches ~/.clawdbot', () => {
+    const legacy = /(~|\$HOME)\/\.clawdbot\b|(^|[\s`$(])clawdhub\s+[a-z]|(^|[\s`$(])clawdbot\s+(skills|security|doctor|daemon|update|cron|gateway|config)\b/;
+    const hits = markdown(SKILLS)
+      .filter((file) => !LEGACY_EXEMPT.has(path.relative(SKILLS, file).split(path.sep)[0]))
+      .flatMap((file) => fs.readFileSync(file, 'utf8').split('\n')
+        .map((line, i) => (legacy.test(line) ? `${path.relative(SKILLS, file)}:${i + 1}: ${line.trim()}` : null))
+        .filter(Boolean));
+    assert.deepEqual(hits, []);
+  });
+});

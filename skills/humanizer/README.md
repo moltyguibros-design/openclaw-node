@@ -7,7 +7,7 @@ A Clawdbot skill that removes signs of AI-generated writing from text, making it
 Install via ClawdHub:
 
 ```bash
-clawdhub install humanizer
+bash skills/openclaw-skill-scanner/install-hook.sh humanizer
 ```
 
 ## Usage

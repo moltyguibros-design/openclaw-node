@@ -15,14 +15,14 @@ A Clawdbot skill for fetching cryptocurrency token prices and generating beautif
 ### Via ClawdHub
 
 ```bash
-clawdhub install evgyur/crypto-price
+bash skills/openclaw-skill-scanner/install-hook.sh crypto-price
 ```
 
 ### Manual Installation
 
-1. Clone or copy this skill to your Clawdbot workspace:
+1. Clone or copy this skill to your OpenClaw workspace:
    ```bash
-   cd ~/.clawdbot/workspace/skills
+   cd ~/.openclaw/workspace/skills
    git clone https://github.com/evgyur/crypto-price.git
    ```
 
@@ -38,7 +38,7 @@ clawdhub install evgyur/crypto-price
 
 4. Verify installation:
    ```bash
-   clawdbot skills info crypto-price
+   openclaw skills info crypto-price
    ```
 
 ## Usage
