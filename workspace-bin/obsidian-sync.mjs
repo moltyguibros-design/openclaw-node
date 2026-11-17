@@ -61,11 +61,26 @@ function loadConfig() {
 // GLOB MATCHING — minimal, zero dependencies
 // ============================================================
 
+const globCache = new Map();
+
+function globToRegex(pattern) {
+  let cached = globCache.get(pattern);
+  if (!cached) {
+    cached = compileGlob(pattern);
+    globCache.set(pattern, cached);
+  }
+  return cached;
+}
+
+function isLiteralPattern(pattern) {
+  return !/[*?{]/.test(pattern);
+}
+
 /**
  * Convert a glob pattern to a regex.
  * Supports: *, **, ?, {a,b}
  */
-function globToRegex(pattern) {
+function compileGlob(pattern) {
   let re = '';
   let i = 0;
   while (i < pattern.length) {
@@ -238,9 +253,12 @@ function toKebabCase(filename) {
  * Route a workspace-relative file path to its vault destination.
  * Returns { dest, domain, type: 'private'|'shared' } or null if excluded.
  */
-function routeFile(relPath, config) {
-  // Check excludes
-  if (matchesAnyGlob(relPath, config.excludePatterns)) return null;
+export function routeFile(relPath, config) {
+  // A route naming one exact file is an explicit opt-in that outranks the broad
+  // excludes: .tmp/trust-registry.json lives under the `**/.tmp/**` exclude.
+  const namedExactly = [...config.nodePrivateRoutes, ...config.sharedRoutes]
+    .some(r => isLiteralPattern(r.pattern) && r.pattern === relPath);
+  if (!namedExactly && matchesAnyGlob(relPath, config.excludePatterns)) return null;
 
   // Check node-private routes first (more specific)
   for (const route of config.nodePrivateRoutes) {
@@ -338,7 +356,15 @@ function discoverFiles(config) {
 
   // Extract top-level directories to scan from patterns
   const dirsToScan = new Set();
+  const allFiles = [];
   for (const pattern of allPatterns) {
+    // Exact-file routes are read directly so their directory (e.g. .tmp) is never walked.
+    if (isLiteralPattern(pattern)) {
+      try {
+        if (fs.statSync(path.join(WORKSPACE, pattern)).isFile()) allFiles.push(pattern);
+      } catch { /* absent */ }
+      continue;
+    }
     const firstSeg = pattern.split('/')[0];
     if (firstSeg.startsWith('.')) {
       // Dotfiles at workspace root
@@ -361,7 +387,6 @@ function discoverFiles(config) {
   dirsToScan.add('.learnings');
   dirsToScan.add('.'); // for root-level files like ARCHITECTURE.md, .companion-state.md
 
-  const allFiles = [];
   for (const dir of dirsToScan) {
     if (dir === '.') {
       // Only root-level files, not recursive
