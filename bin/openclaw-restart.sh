@@ -1,30 +1,25 @@
 #!/usr/bin/env bash
-# openclaw-restart.sh — Manual graceful restart of all OpenClaw memory daemons.
+# openclaw-restart.sh — restart the memory daemon and the health watch through
+# their service manager (launchd on macOS, systemd user units on Linux).
 #
 # Usage:
-#   bin/openclaw-restart.sh           # restart all memory daemons
+#   bin/openclaw-restart.sh           # restart both
 #   bin/openclaw-restart.sh --status  # show status only
 #
-# On macOS, uses launchctl for managed services. Falls back to pgrep/kill for
-# processes not managed by launchd.
+# For the whole stack use `openclaw-stack down/up`.
 
 set -euo pipefail
 
-SERVICES=(
+LABELS=(
   "ai.openclaw.memory-daemon"
+  "ai.openclaw.health-watch"
 )
 
-UNMANAGED_PROCESSES=(
-  "memory-promoter.mjs"
-  "memory-subscriber.mjs"
-  "health-watch.mjs"
-)
+OS="$(uname -s)"
 
-WAIT_SEC=10
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+unit_for() {
+  echo "openclaw-${1#ai.openclaw.}.service"
+}
 
 status_launchd() {
   local label="$1"
@@ -43,84 +38,69 @@ status_launchd() {
   fi
 }
 
-status_process() {
-  local pattern="$1"
-  local pid
-  pid=$(pgrep -f "$pattern" 2>/dev/null | head -1)
-  if [ -n "$pid" ]; then
+status_systemd() {
+  local unit out load active pid
+  unit="$(unit_for "$1")"
+  if ! out=$(systemctl --user show -p LoadState -p ActiveState -p MainPID -- "$unit" 2>/dev/null); then
+    echo "unobservable (systemctl --user failed)"
+    return
+  fi
+  load=$(printf '%s\n' "$out" | sed -n 's/^LoadState=//p')
+  active=$(printf '%s\n' "$out" | sed -n 's/^ActiveState=//p')
+  pid=$(printf '%s\n' "$out" | sed -n 's/^MainPID=//p')
+  if [ "$load" != "loaded" ]; then
+    echo "not installed"
+  elif [ "$active" = "active" ] && [ -n "$pid" ] && [ "$pid" != "0" ]; then
     echo "running (pid=$pid)"
   else
-    echo "not running"
+    echo "installed ($active)"
   fi
 }
-
-stop_process() {
-  local pattern="$1"
-  local pids
-  pids=$(pgrep -f "$pattern" 2>/dev/null || true)
-  if [ -n "$pids" ]; then
-    echo "  Sending SIGTERM to $pattern (pids: $(echo $pids | tr '\n' ' '))"
-    echo "$pids" | xargs kill -TERM 2>/dev/null || true
-    return 0
-  fi
-  return 1
-}
-
-# ---------------------------------------------------------------------------
-# Status command
-# ---------------------------------------------------------------------------
 
 show_status() {
-  echo "=== OpenClaw Memory Daemons ==="
+  echo "=== OpenClaw memory daemon + health watch ==="
   echo ""
-  for svc in "${SERVICES[@]}"; do
-    printf "  %-45s %s\n" "$svc" "$(status_launchd "$svc")"
-  done
-  for proc in "${UNMANAGED_PROCESSES[@]}"; do
-    printf "  %-45s %s\n" "$proc" "$(status_process "$proc")"
+  for label in "${LABELS[@]}"; do
+    case "$OS" in
+      Darwin) printf "  %-45s %s\n" "$label" "$(status_launchd "$label")" ;;
+      *)      printf "  %-45s %s\n" "$(unit_for "$label")" "$(status_systemd "$label")" ;;
+    esac
   done
   echo ""
 }
-
-# ---------------------------------------------------------------------------
-# Restart command
-# ---------------------------------------------------------------------------
 
 restart_all() {
-  echo "=== Stopping memory daemons ==="
-
-  # Stop launchd-managed services
-  for svc in "${SERVICES[@]}"; do
-    echo "  Stopping $svc via launchctl..."
-    launchctl kickstart -k "gui/$(id -u)/$svc" 2>/dev/null \
-      && echo "  $svc restarted via kickstart" \
-      || echo "  $svc: kickstart failed (may not be loaded)"
+  local failed=0
+  echo "=== Restarting ==="
+  for label in "${LABELS[@]}"; do
+    case "$OS" in
+      Darwin)
+        if launchctl kickstart -k "gui/$(id -u)/$label"; then
+          echo "  $label restarted (launchctl kickstart -k)"
+        else
+          echo "  $label: kickstart failed (not loaded?)" >&2
+          failed=1
+        fi
+        ;;
+      *)
+        if systemctl --user restart -- "$(unit_for "$label")"; then
+          echo "  $(unit_for "$label") restarted (systemctl --user restart)"
+        else
+          echo "  $(unit_for "$label"): restart failed (not installed?)" >&2
+          failed=1
+        fi
+        ;;
+    esac
   done
-
-  # Stop unmanaged processes
-  local stopped=0
-  for proc in "${UNMANAGED_PROCESSES[@]}"; do
-    if stop_process "$proc"; then
-      stopped=1
-    else
-      echo "  $proc: not running"
-    fi
-  done
-
-  if [ $stopped -eq 1 ]; then
-    echo ""
-    echo "  Waiting ${WAIT_SEC}s for graceful shutdown..."
-    sleep "$WAIT_SEC"
-  fi
-
   echo ""
-  echo "=== Post-restart status ==="
   show_status
+  return "$failed"
 }
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+if [ "$OS" != "Darwin" ] && [ "$OS" != "Linux" ]; then
+  echo "openclaw-restart.sh: unsupported OS $OS (launchd or systemd required)" >&2
+  exit 1
+fi
 
 case "${1:-restart}" in
   --status|-s|status)
