@@ -120,9 +120,9 @@ describe('plan-lint — [D] deferred state and drift checks', () => {
   let root, lint;
   const CANON_DOCS = ['MASTER_PLAN.md', 'PROTOCOL.md', 'FRAMEWORK_CANONICAL.md', 'COWORK_MODEL.md', 'BLOCK_TEMPLATE.md'];
 
-  function silo(id, { inventory, audits = true }) {
+  function silo(id, { inventory, audits = true, clone = false, shim: withShim = true }) {
     const plan = path.join(root, 'memory-plan', 'plans', id);
-    fs.mkdirSync(path.join(plan, 'tick-logs'), { recursive: true });
+    fs.mkdirSync(clone ? plan : path.join(plan, 'tick-logs'), { recursive: true });
     if (audits) fs.mkdirSync(path.join(plan, 'audits'), { recursive: true });
     for (const d of CANON_DOCS) fs.copyFileSync(path.join(root, 'memory-plan', 'canonical', d), path.join(plan, d));
     fs.writeFileSync(path.join(plan, 'INVENTORY.md'), inventory);
@@ -132,9 +132,12 @@ describe('plan-lint — [D] deferred state and drift checks', () => {
     fs.writeFileSync(path.join(plan, 'ROADMAP.md'), '# roadmap\n');
     fs.writeFileSync(path.join(plan, 'TICK_PROMPT.md'), 'tick\n');
     const shim = path.join(root, 'workspace-bin', `${id}-tick.sh`);
-    fs.writeFileSync(shim, '#!/bin/bash\ntrue\n');
-    fs.chmodSync(shim, 0o755);
-    fs.writeFileSync(path.join(plan, 'automation.json'),
+    if (withShim) {
+      fs.writeFileSync(shim, '#!/bin/bash\ntrue\n');
+      fs.chmodSync(shim, 0o755);
+    }
+    // A fresh clone carries neither: both are gitignored.
+    if (!clone) fs.writeFileSync(path.join(plan, 'automation.json'),
       JSON.stringify({ plist_label: `ai.openclaw.${id}-tick`, tick_command: shim }));
     return plan;
   }
@@ -188,6 +191,21 @@ describe('plan-lint — [D] deferred state and drift checks', () => {
     assert.equal(r2.status, 0, r2.stdout + r2.stderr);
     assert.match(r2.stdout, /\[WARN\] steps +audit coverage: no audits\/ dir for 1 closed step\(s\)/);
     assert.match(r2.stdout, /^summary: .* → CONFORMANT$/m);
+  });
+
+  it('a fresh clone (no automation.json, no tick-logs/) is CONFORMANT on derived defaults', () => {
+    const inv = `# INV\n\n${ROW('1.1', ' ', 'open')}\n\n${CONTRACT('1.1')}`;
+    silo('tclone', { inventory: inv, clone: true });
+    const r = spawnSync('bash', [lint, 'tclone'], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /\[PASS\] automation +no automation\.json — derived defaults \(tick_command workspace-bin\/tclone-tick\.sh\)/);
+    assert.match(r.stdout, /\[WARN\] history +tick-logs\/ missing/);
+    assert.match(r.stdout, /^summary: .* → CONFORMANT$/m);
+
+    silo('tclone-noshim', { inventory: inv, clone: true, shim: false });
+    const r2 = spawnSync('bash', [lint, 'tclone-noshim'], { encoding: 'utf8' });
+    assert.equal(r2.status, 0, r2.stdout + r2.stderr);
+    assert.match(r2.stdout, /\[WARN\] automation +no automation\.json and no derived tick shim/);
   });
 
 });
