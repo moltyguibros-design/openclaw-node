@@ -59,8 +59,8 @@ Why this knowledge matters. What problems it prevents. Context from the original
 ## Source
 
 Extracted from learning entry.
-- **Learning ID**: LRN-YYYYMMDD-XXX
-- **Original Category**: correction | insight | knowledge_gap | best_practice
+- **Lesson**: `[tag] Lesson text (YYYY-MM-DD)` from `.learnings/lessons.md`
+- **Original Tag**: correction | pattern | error | preference | workflow
 - **Extraction Date**: YYYY-MM-DD
 ```
 
@@ -86,7 +86,7 @@ description: "What this skill does and when to use it."
 
 ## Source
 
-- Learning ID: LRN-YYYYMMDD-XXX
+- Lesson: `[tag] Lesson text (YYYY-MM-DD)` from `.learnings/lessons.md`
 ```
 
 ---
@@ -134,7 +134,7 @@ description: "What this skill does and when to use it."
 
 ## Source
 
-- Learning ID: LRN-YYYYMMDD-XXX
+- Lesson: `[tag] Lesson text (YYYY-MM-DD)` from `.learnings/lessons.md`
 ```
 
 ---
