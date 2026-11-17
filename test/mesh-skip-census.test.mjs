@@ -19,10 +19,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
-import { execSync, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
+import { natsServerBin } from './helpers/nats-server.mjs';
 
 const require = createRequire(import.meta.url);
 const { meshSkipReason } = require('./helpers/mesh-available.cjs');
@@ -70,9 +71,10 @@ test('the mesh tier skips unless OPENCLAW_TEST_MESH=1, before dialing any bus', 
 // describe registers zero child tests, so without this census the whole
 // federation-integration tier vanishes with `skipped 0`.
 const natsBinFiles = filesContaining('nats-server not found on PATH');
+// The suites gate on natsServerBin() ($NATS_SERVER_BIN, then PATH); a census
+// that only checked PATH reported them skipped while they ran.
 function natsServerBinReason() {
-  try { execSync('which nats-server', { stdio: 'pipe' }); return null; }
-  catch { return 'nats-server binary not found on PATH'; }
+  return natsServerBin() ? null : 'nats-server binary not found ($NATS_SERVER_BIN or PATH)';
 }
 test(`nats-server-binary census (${natsBinFiles.length} federation suite file(s))`, (t) => {
   censusCheck(t, { files: natsBinFiles, reason: natsServerBinReason(), label: 'nats-server-dependent' });

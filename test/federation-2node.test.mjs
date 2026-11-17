@@ -19,11 +19,11 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { execSync, spawn as spawnProcess } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
+import { natsServerBin, freePort, startNatsServer, writeServerConfig } from './helpers/nats-server.mjs';
 
 import { spawnNode } from '../bin/spawn-node.mjs';
 import {
@@ -51,96 +51,7 @@ import {
 
 const _require = createRequire(import.meta.url);
 
-// ─── nats-server availability check ──────────────────────────────────────────
-
-let NATS_SERVER_BIN = null;
-try {
-  NATS_SERVER_BIN = execSync('which nats-server', { encoding: 'utf8' }).trim();
-} catch {
-  // nats-server not on PATH
-}
-
-const SKIP = !NATS_SERVER_BIN;
-
-// ─── Helper: start a real nats-server with JetStream ─────────────────────────
-
-/**
- * Start a nats-server process with JetStream enabled.
- *
- * @param {{ port: number, storeDir: string }} opts
- * @returns {Promise<{ proc: ChildProcess, port: number }>}
- */
-function startNatsServer(opts) {
-  return new Promise((resolve, reject) => {
-    const args = [
-      '-p', String(opts.port),
-      '-a', '127.0.0.1',
-      '-js',
-      '-sd', opts.storeDir,
-    ];
-
-    const proc = spawnProcess(NATS_SERVER_BIN, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let stderr = '';
-    let resolved = false;
-    const timeout = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        proc.kill('SIGTERM');
-        reject(new Error(`nats-server failed to start within 10s. stderr: ${stderr}`));
-      }
-    }, 10_000);
-
-    proc.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-      // nats-server prints "Listening for client connections on 127.0.0.1:PORT"
-      if (!resolved && stderr.includes('Listening for client connections')) {
-        resolved = true;
-        clearTimeout(timeout);
-        resolve({ proc, port: opts.port });
-      }
-    });
-
-    proc.on('error', (err) => {
-      if (!resolved) {
-        resolved = true;
-        clearTimeout(timeout);
-        reject(err);
-      }
-    });
-
-    proc.on('exit', (code) => {
-      if (!resolved) {
-        resolved = true;
-        clearTimeout(timeout);
-        reject(new Error(`nats-server exited with code ${code}. stderr: ${stderr}`));
-      }
-    });
-  });
-}
-
-/**
- * Kill a nats-server process and wait for it to exit.
- * @param {ChildProcess} proc
- * @returns {Promise<void>}
- */
-function stopNatsServer(proc) {
-  return new Promise((resolve) => {
-    if (!proc || proc.killed) {
-      resolve();
-      return;
-    }
-    proc.on('exit', () => resolve());
-    proc.kill('SIGTERM');
-    // Force kill after 3s
-    setTimeout(() => {
-      try { proc.kill('SIGKILL'); } catch { /* already dead */ }
-      resolve();
-    }, 3000);
-  });
-}
+const SKIP = !natsServerBin();
 
 /**
  * Create the OPENCLAW_SHARED stream on a single-node NATS (R=1).
@@ -173,13 +84,12 @@ function mockRetrieval(results) {
 // ─── Test Suite ──────────────────────────────────────────────────────────────
 
 describe('federation-2node: real NATS integration', { skip: SKIP ? 'nats-server not found on PATH' : false }, () => {
-  const TEST_PORT = 14_222 + Math.floor(Math.random() * 1000);
   const NODE_A = 'test-alpha';
   const NODE_B = 'test-beta';
 
   let tmpDir;
   let natsStoreDir;
-  let natsProc;
+  let nats;
   let ncA; // NATS connection for node A
   let ncB; // NATS connection for node B
   let identityA;
@@ -203,13 +113,13 @@ describe('federation-2node: real NATS integration', { skip: SKIP ? 'nats-server 
     identityB = getOrCreateIdentity(nodeRootB);
 
     // 4. Start real nats-server
-    const server = await startNatsServer({ port: TEST_PORT, storeDir: natsStoreDir });
-    natsProc = server.proc;
+    const port = await freePort();
+    nats = await startNatsServer(writeServerConfig(natsStoreDir, port, { auth: false }));
 
     // 5. Connect both nodes
     const { connect } = _require('nats');
-    ncA = await connect({ servers: `nats://127.0.0.1:${TEST_PORT}` });
-    ncB = await connect({ servers: `nats://127.0.0.1:${TEST_PORT}` });
+    ncA = await connect({ servers: `nats://127.0.0.1:${port}` });
+    ncB = await connect({ servers: `nats://127.0.0.1:${port}` });
 
     // 6. Create shared stream (R=1 for single-server test)
     await createTestSharedStream(ncA);
@@ -221,7 +131,7 @@ describe('federation-2node: real NATS integration', { skip: SKIP ? 'nats-server 
     try { if (ncB) await ncB.drain(); } catch { /* ignore */ }
 
     // Stop nats-server
-    if (natsProc) await stopNatsServer(natsProc);
+    await nats?.stop();
 
     // Clean up temp directories
     if (tmpDir) {

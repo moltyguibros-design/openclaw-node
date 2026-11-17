@@ -14,10 +14,10 @@
 import { describe, it, before, after, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { execSync, spawn as spawnProcess } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { natsServerBin, freePort, startNatsServer, writeServerConfig } from './helpers/nats-server.mjs';
 
 const require = createRequire(import.meta.url);
 const { CollabStore, COLLAB_MODE, createSession, issueMemberToken } = require('../lib/mesh-collab');
@@ -251,33 +251,17 @@ describe('parse-failure retry (paper §14.2) — unit', () => {
 // "runtime:" evidence for step 2.3: a mock session where the worker sends
 // parse_failed ×2 then succeeds — session completes with failure_count=2 (not degraded).
 
-let NATS_BIN = null;
-try { NATS_BIN = execSync('which nats-server', { encoding: 'utf8' }).trim(); } catch { /* skip */ }
-const NATS_SKIP = NATS_BIN ? undefined : 'nats-server not found on PATH';
-
-function startNatsServer({ port, storeDir }) {
-  return new Promise((resolve, reject) => {
-    const proc = spawnProcess(NATS_BIN, ['-p', String(port), '-a', '127.0.0.1', '-js', '-sd', storeDir], { stdio: 'pipe' });
-    let ready = false;
-    proc.stderr.on('data', (chunk) => {
-      if (!ready && chunk.toString().includes('Server is ready')) {
-        ready = true; resolve({ proc, port });
-      }
-    });
-    proc.on('error', reject);
-    setTimeout(() => { if (!ready) reject(new Error('nats-server start timeout')); }, 5000);
-  });
-}
+const NATS_SKIP = natsServerBin() ? undefined : 'nats-server not found on PATH';
 
 describe('parse-failure retry — integration (real NATS KV)', { skip: NATS_SKIP }, () => {
   let storeDir, nats, nc, kv, collab;
-  const PORT = 14880;
 
   before(async () => {
     const { connect } = await import('nats');
     storeDir = await mkdtemp(join(tmpdir(), 'circling-retry-nats-'));
-    nats = await startNatsServer({ port: PORT, storeDir });
-    nc = await connect({ servers: `nats://127.0.0.1:${PORT}` });
+    const port = await freePort();
+    nats = await startNatsServer(writeServerConfig(storeDir, port, { auth: false }));
+    nc = await connect({ servers: `nats://127.0.0.1:${port}` });
     const js = nc.jetstream();
     const jsm = await nc.jetstreamManager();
     await jsm.streams.add({ name: 'KV_MESH_COLLAB', subjects: ['$KV.MESH_COLLAB.>'] });
@@ -288,8 +272,8 @@ describe('parse-failure retry — integration (real NATS KV)', { skip: NATS_SKIP
 
   after(async () => {
     await nc?.close();
-    nats?.proc?.kill();
-    await rm(storeDir, { recursive: true, force: true });
+    await nats?.stop();
+    if (storeDir) await rm(storeDir, { recursive: true, force: true });
   });
 
   it('double parse failure then success: session completes, failure_count=2 (not degraded)', async () => {
