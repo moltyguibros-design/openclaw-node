@@ -474,3 +474,30 @@ test('a step resolves its own audit dir by step id, never by row position', asyn
     .filter(e => e.kind === 'step').map(e => e.name).sort();
   assert.deepEqual(history, ['1.1 shadow', '1.2 timeline', '2.3 sequential-era', '3.1 service gate', '3.10 first transition', 'remediation_2026-09-26']);
 });
+
+// Pre-protocol silos number audit dirs in closing order (legacy step45 is step
+// 9.1), so History read the first dir digit as the block. The AUDIT_POST title
+// now names the step; the dir digits are only the fallback.
+test('history labels a sequentially numbered audit dir by its title step id', async t => {
+  const audits = {
+    step45_broadcast_schemas: '# AUDIT_POST — Step 9.1: Broadcast schemas',
+    step59_dogfood_harness: '# AUDIT_POST — step 10.9 · Dogfood harness',
+    step31_service_gate: '# AUDIT_POST',
+  };
+  const f = await fixture(t, { prepare: (root, plan) => {
+    fs.writeFileSync(path.join(plan, 'INVENTORY.md'), [
+      '| Block | Step | Version | Status | Description |', '|---|---|---|---|---|',
+      ...['3.1', '9.1', '10.9'].map(s => `| ${s.split('.')[0]} | ${s} | v1.0 | [x] | step ${s} |`),
+    ].join('\n') + '\n');
+    for (const [d, title] of Object.entries(audits)) {
+      fs.mkdirSync(path.join(plan, 'audits', d), { recursive: true });
+      fs.writeFileSync(path.join(plan, 'audits', d, 'AUDIT_POST.md'), `${title}\n\nStep 4.5 is mentioned below the title.\n`);
+    }
+    return {};
+  } });
+  const history = JSON.parse((await f.request('/api/plans/fixture/logs', { token: f.master })).text)
+    .filter(e => e.kind === 'step').map(e => e.name).sort();
+  assert.deepEqual(history, ['10.9 dogfood harness', '3.1 service gate', '9.1 broadcast schemas']);
+  const row = JSON.parse((await f.request('/api/plans/fixture/audits/1', { token: f.master })).text);
+  assert.equal(row.dirName, 'step45_broadcast_schemas');
+});

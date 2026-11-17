@@ -293,18 +293,23 @@ function tickLogs(plan, limit = 100) {
 }
 
 // The step an audit dir belongs to. An explicit `<!-- step-id: B.S -->` line in
-// its AUDIT_PRE.md or AUDIT_POST.md wins; otherwise the canonical name
+// its AUDIT_PRE.md or AUDIT_POST.md wins; then the step id in the audit's title
+// line ("# AUDIT_POST — Step 9.1: ..."); otherwise the canonical name
 // step<B><S>_<slug> (one block digit, then the step digits: step31 = 3.1,
-// step310 = 3.10). Sequential-era dirs (step01..step10 numbered in closing
-// order) decode to the wrong step by name, so they need the marker.
+// step310 = 3.10). Pre-protocol silos (legacy, repair, protocol's step01..07)
+// number audit dirs sequentially, so their dir digits decode to the wrong step.
 const AUDIT_STEP_MARKER = /^<!--\s*step-id:\s*(\d+\.\d+)\s*-->\s*$/m;
+const AUDIT_TITLE_STEP = /\bstep\s*(\d+\.\d+)/i;
 function auditStepId(auditsDir, dirName) {
-  for (const f of ['AUDIT_PRE.md', 'AUDIT_POST.md']) {
+  let titled = null;
+  for (const f of ['AUDIT_POST.md', 'AUDIT_PRE.md']) {
     let text;
     try { text = fs.readFileSync(path.join(auditsDir, dirName, f), 'utf8'); } catch { continue; }
     const marker = text.match(AUDIT_STEP_MARKER);
     if (marker) return marker[1];
+    titled ??= text.split('\n', 1)[0].match(AUDIT_TITLE_STEP)?.[1] ?? null;
   }
+  if (titled) return titled;
   const m = dirName.match(/^step(\d)(\d+)_/);
   return m ? `${m[1]}.${m[2]}` : null;
 }
