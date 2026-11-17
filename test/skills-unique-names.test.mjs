@@ -24,3 +24,16 @@ test('shipped skills have unique frontmatter names', () => {
   const dupes = [...owners].filter(([, dirs]) => dirs.length > 1);
   assert.deepEqual(dupes, []);
 });
+
+// web-search and tavily-search both fired on "search the web for" and two
+// more phrases; Tavily now answers only when asked for by name.
+test('tavily-search shares no trigger phrase with web-search', () => {
+  const triggers = (dir) => {
+    const front = readFileSync(join(SKILLS, dir, 'SKILL.md'), 'utf8').match(/^---\n([\s\S]*?)\n---/)[1];
+    const block = front.match(/^triggers:\n((?:[ \t]+-.*\n?)+)/m)[1];
+    return [...block.matchAll(/^\s+-\s*["']?(.+?)["']?\s*$/gm)].map((m) => m[1].toLowerCase());
+  };
+  const tavily = triggers('tavily-search');
+  assert.ok(tavily.length > 0 && tavily.every((t) => t.includes('tavily')), tavily.join(', '));
+  assert.deepEqual(tavily.filter((t) => triggers('web-search').includes(t)), []);
+});
