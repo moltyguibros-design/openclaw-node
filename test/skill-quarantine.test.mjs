@@ -44,6 +44,14 @@ describe('skill quarantine', () => {
     assert.match(readFileSync(join(QUARANTINE, 'README.md'), 'utf8'), /^\| `self-reflection` \| Ships no CLI/m);
   });
 
+  // Its docs promised write-time validation (a forbidden-properties guard against
+  // credentials) that ontology.py never ran.
+  it('ontology is quarantined, with its reason recorded', () => {
+    assert.ok(quarantined.includes('ontology'));
+    assert.ok(!existsSync(join(ROOT, 'skills', 'ontology')));
+    assert.match(readFileSync(join(QUARANTINE, 'README.md'), 'utf8'), /`ontology` \|.*skills-m-z-souls-identity#19/);
+  });
+
   it('no quarantined skill is also in the live skills tree', () => {
     assert.deepEqual(quarantined.filter(name => existsSync(join(ROOT, 'skills', name))), []);
   });
