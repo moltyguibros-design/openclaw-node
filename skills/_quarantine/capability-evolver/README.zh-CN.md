@@ -67,33 +67,6 @@ node index.js --loop
 | `EVOLVE_REPORT_TOOL` |用于报告结果的工具名称（例如 `feishu-card`） | `message` |
 | `MEMORY_DIR` | 记忆文件路径 | `./memory` |
 
-## Public 发布
-
-本仓库为公开发行版本。
-
-- 构建公开产物：`npm run build`
-- 发布公开产物：`npm run publish:public`
-- 演练：`DRY_RUN=true npm run publish:public`
-
-必填环境变量：
-
-- `PUBLIC_REMOTE`（默认：`public`）
-- `PUBLIC_REPO`（例如 `autogame-17/evolver`）
-- `PUBLIC_OUT_DIR`（默认：`dist-public`）
-- `PUBLIC_USE_BUILD_OUTPUT`（默认：`true`）
-
-可选环境变量：
-
-- `SOURCE_BRANCH`（默认：`main`）
-- `PUBLIC_BRANCH`（默认：`main`）
-- `RELEASE_TAG`（例如 `v1.0.41`）
-- `RELEASE_TITLE`（例如 `v1.0.41 - GEP protocol`）
-- `RELEASE_NOTES` 或 `RELEASE_NOTES_FILE`
-- `GITHUB_TOKEN`（或 `GH_TOKEN` / `GITHUB_PAT`，用于创建 GitHub Release）
-- `RELEASE_SKIP`（`true` 则跳过创建 GitHub Release；默认会创建）
-- `RELEASE_USE_GH`（`true` 则使用 `gh` CLI，否则默认走 GitHub API）
-- `PUBLIC_RELEASE_ONLY`（`true` 则仅为已存在的 tag 创建 Release；不发布代码）
-
 ## 版本号规则（SemVer）
 
 MAJOR.MINOR.PATCH

@@ -1,7 +1,5 @@
 # 🧬 Capability Evolver
 
-![Capability Evolver Cover](assets/cover.png)
-
 [Chinese Docs](README.zh-CN.md)
 
 **"Evolution is not optional. Adapt or die."**
@@ -98,33 +96,6 @@ node index.js --review
 ```bash
 node index.js --loop
 ```
-
-## Public Release
-
-This repository is the public distribution.
-
-- Build public output: `npm run build`
-- Publish public output: `npm run publish:public`
-- Dry run: `DRY_RUN=true npm run publish:public`
-
-Required env vars:
-
-- `PUBLIC_REMOTE` (default: `public`)
-- `PUBLIC_REPO` (e.g. `autogame-17/evolver`)
- - `PUBLIC_OUT_DIR` (default: `dist-public`)
- - `PUBLIC_USE_BUILD_OUTPUT` (default: `true`)
-
-Optional env vars:
-
-- `SOURCE_BRANCH` (default: `main`)
-- `PUBLIC_BRANCH` (default: `main`)
-- `RELEASE_TAG` (e.g. `v1.0.41`)
-- `RELEASE_TITLE` (e.g. `v1.0.41 - GEP protocol`)
-- `RELEASE_NOTES` or `RELEASE_NOTES_FILE`
-- `GITHUB_TOKEN` (or `GH_TOKEN` / `GITHUB_PAT`) for GitHub Release creation
-- `RELEASE_SKIP` (`true` to skip creating a GitHub Release; default is to create)
-- `RELEASE_USE_GH` (`true` to use `gh` CLI instead of GitHub API)
-- `PUBLIC_RELEASE_ONLY` (`true` to only create a Release for an existing tag; no publish)
 
 ## Versioning (SemVer)
 
