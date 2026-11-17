@@ -14,7 +14,7 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, statSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -219,6 +219,17 @@ describe('importDirectory', () => {
   it('returns zeros for a missing directory', async () => {
     const result = await store.importDirectory(join(TMP, 'does-not-exist'));
     assert.equal(result.total, 0);
+  });
+
+  it('one failing transcript is reported and does not end the pass for the others', async () => {
+    writeJsonl('a.jsonl', [{ type: 'user', message: { content: 'a' } }]);
+    // A directory with a .jsonl name: importSession's read throws EISDIR.
+    mkdirSync(join(TMP, 'm-broken.jsonl'));
+    writeJsonl('z.jsonl', [{ type: 'user', message: { content: 'z' } }]);
+    const result = await store.importDirectory(TMP);
+    assert.equal(result.imported, 2);
+    assert.deepEqual(result.failed.map(f => f.file), [join(TMP, 'm-broken.jsonl')]);
+    assert.match(result.failed[0].error, /EISDIR/);
   });
 
   it('counts re-imports as skipped on second pass', async () => {

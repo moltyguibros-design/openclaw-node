@@ -390,8 +390,12 @@ function runImportInWorker(jsonlPath, { source, format } = {}) {
 async function runImportDirInWorker(sources) {
   const present = sources.filter(s => fs.existsSync(s.path)).map(s => ({ path: s.path, name: s.name, format: s.format }));
   if (present.length === 0) return [];
-  const { results } = await serializeImport(() => runMemoryWorker({ kind: 'importDir', sources: present }));
+  const { results, failed } = await serializeImport(() => runMemoryWorker({ kind: 'importDir', sources: present }));
   for (const r of results) emitIngestEvent(r.sessionId, r.source, r.messageCount, r.previousCount);
+  for (const f of failed) {
+    log(`  session-store import of ${path.basename(f.file)} (${f.source}) failed: ${f.error}`);
+    emitErrorEvent('ingest', new Error(f.error), path.basename(f.file, '.jsonl'));
+  }
   return results;
 }
 

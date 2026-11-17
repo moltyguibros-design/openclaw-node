@@ -30,6 +30,11 @@ test('the separate live-import job is gone, so it cannot overlap the directory p
   assert.match(daemonSrc, /serializeImport\(\(\) => runMemoryWorker\(\{ kind: 'importDir'/);
 });
 
+test('a transcript the directory pass could not import is logged and emitted as an ingest error', () => {
+  const dirImport = daemonSrc.match(/async function runImportDirInWorker[\s\S]*?\n\}\n/)[0];
+  assert.match(dirImport, /for \(const f of failed\) \{[\s\S]*?emitErrorEvent\('ingest'/);
+});
+
 test('the importDir worker imports changed transcripts and skips them on the next pass', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'import-dir-worker-'));
   try {
@@ -61,6 +66,14 @@ test('the importDir worker imports changed transcripts and skips them on the nex
 
     const second = run();
     assert.deepEqual(second.result.results, []);
+
+    // A failing transcript is reported per file and the pass goes on.
+    fs.mkdirSync(path.join(src, 's0-broken.jsonl'));
+    fs.writeFileSync(path.join(src, 's3.jsonl'), JSON.stringify({ type: 'user', message: { content: 'hello s3' } }) + '\n');
+    const third = run();
+    assert.equal(third.ok, true, third.error);
+    assert.deepEqual(third.result.results.map(x => x.sessionId), ['s3']);
+    assert.deepEqual(third.result.failed.map(f => [path.basename(f.file), f.source]), [['s0-broken.jsonl', 'claude-code']]);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

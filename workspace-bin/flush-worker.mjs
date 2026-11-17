@@ -39,11 +39,13 @@ try {
     const { SessionStore } = await import('../lib/session-store.mjs');
     const store = new SessionStore({ dbPath: stateDb, integrityCheck: 'quick' });
     const results = [];
+    const failed = [];
     for (const source of sources) {
       const r = await store.importDirectory(source.path, { source: source.name, format: source.format });
       for (const imported of r.results) results.push({ ...imported, source: source.name });
+      for (const f of r.failed) failed.push({ ...f, source: source.name });
     }
-    post({ ok: true, result: { results } });
+    post({ ok: true, result: { results, failed } });
   } else {
     const { jsonlPath, memoryMdPath, charBudget, checkShouldFlush, contextWindowTokens } = workerData;
     const { runFlush, shouldFlush, USE_LLM_EXTRACTION } = await import('../lib/pre-compression-flush.mjs');
