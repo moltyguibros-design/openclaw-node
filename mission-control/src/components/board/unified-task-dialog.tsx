@@ -154,7 +154,7 @@ export function UnifiedTaskDialog({
       setTriggerAt(item.triggerAt ?? "");
       setTriggerCron(item.triggerCron ?? "");
       setTriggerTz(item.triggerTz ?? "America/Montreal");
-      setIsRecurring(!!item.isRecurring);
+      setIsRecurring(!!item.isRecurring && item.triggerKind !== "at");
       setCapacityClass(item.capacityClass ?? "normal");
       setAutoPriority(item.autoPriority ?? 0);
       setShowInCalendar(!!item.showInCalendar);
@@ -821,7 +821,10 @@ export function UnifiedTaskDialog({
                   <button
                     key={kind}
                     type="button"
-                    onClick={() => setTriggerKind(kind)}
+                    onClick={() => {
+                      setTriggerKind(kind);
+                      if (kind === "at") setIsRecurring(false);
+                    }}
                     className={`px-2.5 py-1 text-[10px] rounded-md border transition-colors ${
                       triggerKind === kind
                         ? "border-primary bg-primary/10 text-primary"
@@ -876,16 +879,19 @@ export function UnifiedTaskDialog({
               </div>
             )}
 
-            <label className="flex items-center gap-2 cursor-pointer">
+            <label className={`flex items-center gap-2 ${triggerKind === "at" ? "opacity-50" : "cursor-pointer"}`}>
               <input
                 type="checkbox"
                 checked={isRecurring}
+                disabled={triggerKind === "at"}
                 onChange={(e) => setIsRecurring(e.target.checked)}
                 className="rounded border-border"
               />
               <span className="text-xs text-foreground">Recurring</span>
               <span className="text-[10px] text-muted-foreground">
-                Auto-recreates after completion
+                {triggerKind === "at"
+                  ? "A one-time trigger cannot repeat; use Cron"
+                  : "Auto-recreates after completion"}
               </span>
             </label>
 

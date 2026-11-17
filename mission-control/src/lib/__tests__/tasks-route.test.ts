@@ -203,6 +203,44 @@ describe("PATCH /api/tasks/[id]", () => {
   });
 });
 
+// The scheduler's recurring copy of a one-time trigger has no next time and never fires.
+describe("recurring one-time triggers are refused", () => {
+  const row = async (id: string) => {
+    const { getRawDb } = await import("@/lib/db");
+    return getRawDb().prepare("SELECT trigger_kind, is_recurring, status FROM tasks WHERE id = ?").get(id);
+  };
+
+  it("POST refuses is_recurring with trigger_kind at, and accepts it with cron", async () => {
+    const { POST } = await import("@/app/api/tasks/route");
+    const post = (body: object) => POST(new NextRequest("http://x/api/tasks", { method: "POST", body: JSON.stringify({ title: "t", ...body }) }));
+
+    expect((await post({ id: "A", trigger_kind: "at", trigger_at: "2026-12-01T10:00:00Z", is_recurring: true })).status).toBe(400);
+    expect(await row("A")).toBeUndefined();
+    expect((await post({ id: "C", trigger_kind: "cron", trigger_cron: "0 10 * * 1", is_recurring: true })).status).toBe(201);
+  });
+
+  it("PATCH refuses making an at task recurring, or a recurring task one-time", async () => {
+    await insertTask({ id: "A", status: "queued", triggerKind: "at", triggerAt: "2026-12-01T10:00:00Z" });
+    await insertTask({ id: "R", status: "queued", triggerKind: "cron", triggerCron: "0 10 * * 1", isRecurring: 1 });
+    const { PATCH } = await import("@/app/api/tasks/[id]/route");
+    const patch = (id: string, body: object) =>
+      PATCH(new NextRequest(`http://x/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify(body) }), params(id));
+
+    expect((await patch("A", { is_recurring: true })).status).toBe(400);
+    expect((await patch("R", { trigger_kind: "at", trigger_at: "2026-12-01T10:00:00Z" })).status).toBe(400);
+    expect(await row("A")).toMatchObject({ trigger_kind: "at", is_recurring: 0 });
+    expect(await row("R")).toMatchObject({ trigger_kind: "cron", is_recurring: 1 });
+    expect((await patch("R", { trigger_kind: "at", is_recurring: false })).status).toBe(200);
+  });
+
+  it("PATCH still moves an existing at+recurring row when it touches neither field", async () => {
+    await insertTask({ id: "L", status: "queued", triggerKind: "at", isRecurring: 1 });
+    const { PATCH } = await import("@/app/api/tasks/[id]/route");
+    const res = await PATCH(new NextRequest("http://x/api/tasks/L", { method: "PATCH", body: JSON.stringify({ status: "blocked" }) }), params("L"));
+    expect(res.status).toBe(200);
+  });
+});
+
 // A custom id is written raw as the `- task_id:` line, so a newline in it forges a second task block.
 describe("custom ids stay on one line", () => {
   it("POST /api/tasks refuses an id with a newline", async () => {

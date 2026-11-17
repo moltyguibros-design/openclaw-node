@@ -161,6 +161,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "id must be a single line" }, { status: 400 });
     }
 
+    // A recurring copy of a one-time trigger has no next time, so it never fires.
+    if (body.trigger_kind === "at" && body.is_recurring) {
+      return NextResponse.json(
+        { error: "A one-time (at) trigger cannot be recurring; use a cron trigger to repeat" },
+        { status: 400 }
+      );
+    }
+
     const status = body.status || "not started";
     const now = new Date();
     // Allow custom IDs for projects/pipelines/phases; auto-generate for tasks

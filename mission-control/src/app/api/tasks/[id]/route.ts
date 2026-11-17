@@ -177,6 +177,19 @@ export async function PATCH(
       }
     }
 
+    // A recurring copy of a one-time trigger has no next time, so it never fires.
+    // Checked only when the request touches either field, so an old row can still move.
+    if (body.trigger_kind !== undefined || body.is_recurring !== undefined) {
+      const kind = body.trigger_kind !== undefined ? body.trigger_kind : existing.triggerKind;
+      const recurring = body.is_recurring !== undefined ? !!body.is_recurring : !!existing.isRecurring;
+      if (kind === "at" && recurring) {
+        return NextResponse.json(
+          { error: "A one-time (at) trigger cannot be recurring; use a cron trigger to repeat" },
+          { status: 400 }
+        );
+      }
+    }
+
     // Build the update set from provided fields
     const update: Record<string, unknown> = { updatedAt: now };
 
