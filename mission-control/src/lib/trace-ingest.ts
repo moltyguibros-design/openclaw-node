@@ -54,11 +54,11 @@ export function traceRowFromWire(subject: string, data: Uint8Array): Row | null 
   if (!e || typeof e !== "object") return null;
   const id = str(e.id, 128);
   const nodeId = str(e.node_id ?? e.nodeId, 128);
-  const module = str(e.module, 128);
+  const moduleName = str(e.module, 128);
   const fn = str(e.function ?? e.fn, 256);
   const category = str(e.category, 64);
   const timestamp = e.timestamp;
-  if (!id || !nodeId || !module || !fn || !category) return null;
+  if (!id || !nodeId || !moduleName || !fn || !category) return null;
   if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) return null;
   if (nodeId !== subjectNode) return null;
   const tier = Number.isInteger(e.tier) ? (e.tier as number) : 2;
@@ -68,7 +68,7 @@ export function traceRowFromWire(subject: string, data: Uint8Array): Row | null 
     id,
     timestamp: Math.trunc(timestamp),
     node_id: nodeId,
-    module,
+    module: moduleName,
     function: fn,
     tier,
     category,
