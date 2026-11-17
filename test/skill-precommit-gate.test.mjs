@@ -7,10 +7,10 @@
  * scanned the deployed ~/.openclaw tree instead of the one being committed.
  */
 import { describe, it } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, copyFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -25,7 +25,7 @@ function git(cwd, ...args) {
 }
 
 function repoWithSkill(files) {
-  const repo = mkdtempSync(join(tmpdir(), 'skill-gate-'));
+  const repo = tmpDir('skill-gate-');
   git(repo, 'init', '-q');
   const scannerDir = join(repo, 'skills', 'openclaw-skill-scanner');
   mkdirSync(scannerDir, { recursive: true });

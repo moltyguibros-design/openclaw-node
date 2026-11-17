@@ -5,10 +5,10 @@
  * change.
  */
 import { describe, it } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -44,7 +44,7 @@ function skill(dir, name, triggers, negatives) {
 
 describe('skill-routing-eval', { skip: !HAVE_PY && 'python3 not available' }, () => {
   it('tokenizes each distinct string once and keeps the scores', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'routing-eval-'));
+    const dir = tmpDir('routing-eval-');
     skill(dir, 'weather', ['check the weather forecast', 'will it rain tomorrow'], ['weather station hardware repair']);
     skill(dir, 'calendar', ['schedule a meeting tomorrow', 'check the calendar forecast'], ['calendar app development']);
     const r = spawnSync('python3', ['-B', '-c', PROBE, SCRIPT, dir], { encoding: 'utf8' });

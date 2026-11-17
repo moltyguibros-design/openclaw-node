@@ -8,10 +8,10 @@
  * unvalidated name into a path ("../x" escaped campaigns/) and into JSON.
  */
 import { describe, it } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -32,7 +32,7 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, env: GIT_ENV, enc
 
 describe('arcane-dev-ops prepush_check.sh', () => {
   const SCRIPT = join(SKILLS, 'arcane-dev-ops', 'scripts', 'prepush_check.sh');
-  const tmp = mkdtempSync(join(tmpdir(), 'prepush-'));
+  const tmp = tmpDir('prepush-');
   const repo = join(tmp, 'repo');
   mkdirSync(repo);
   git(repo, 'init', '-q');
@@ -58,7 +58,7 @@ describe('arcane-dev-ops prepush_check.sh', () => {
   });
 
   it('still refuses a directory outside any repository', () => {
-    const plain = mkdtempSync(join(tmpdir(), 'prepush-plain-'));
+    const plain = tmpDir('prepush-plain-');
     const r = run(plain);
     assert.equal(r.status, 1);
     assert.match(r.stdout, /is not a git repository/);
@@ -67,7 +67,7 @@ describe('arcane-dev-ops prepush_check.sh', () => {
 
 describe('discord-telegram-triage triage_snapshot.sh', () => {
   it('prints section headers on their own lines', () => {
-    const bin = mkdtempSync(join(tmpdir(), 'triage-bin-'));
+    const bin = tmpDir('triage-bin-');
     writeFileSync(join(bin, 'openclaw'), '#!/bin/sh\nexit 0\n');
     chmodSync(join(bin, 'openclaw'), 0o755);
     const r = spawnSync('bash', [join(SKILLS, 'discord-telegram-triage', 'scripts', 'triage_snapshot.sh')], {
@@ -82,7 +82,7 @@ describe('discord-telegram-triage triage_snapshot.sh', () => {
 
 describe('agentic-compass.py --write', { skip: !HAVE_PY && 'python3 not available' }, () => {
   it('labels the report timestamp with the local zone, not UTC', () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'compass-'));
+    const tmp = tmpDir('compass-');
     const r = spawnSync('python3', [
       join(SKILLS, 'agentic-compass', 'scripts', 'agentic-compass.py'),
       '--daily', join(tmp, 'd.md'), '--long', join(tmp, 'M.md'), '--write',
@@ -99,7 +99,7 @@ describe('growth-loop init-campaign.sh', () => {
   const run = (cwd, name) => spawnSync('bash', [SCRIPT, name, 'blog'], { cwd, encoding: 'utf8' });
 
   it('refuses a name that escapes campaigns/', () => {
-    const cwd = join(mkdtempSync(join(tmpdir(), 'campaign-')), 'x');
+    const cwd = join(tmpDir('campaign-'), 'x');
     mkdirSync(cwd);
     const r = run(cwd, '../escape');
     assert.notEqual(r.status, 0);
@@ -107,14 +107,14 @@ describe('growth-loop init-campaign.sh', () => {
   });
 
   it('refuses a name that would break config.json', () => {
-    const cwd = mkdtempSync(join(tmpdir(), 'campaign-'));
+    const cwd = tmpDir('campaign-');
     const r = run(cwd, 'a"b');
     assert.notEqual(r.status, 0);
     assert.equal(existsSync(join(cwd, 'campaigns', 'a"b')), false);
   });
 
   it('scaffolds a plain name with valid JSON config', () => {
-    const cwd = mkdtempSync(join(tmpdir(), 'campaign-'));
+    const cwd = tmpDir('campaign-');
     const r = run(cwd, 'spring-launch');
     assert.equal(r.status, 0, r.stdout + r.stderr);
     const config = JSON.parse(readFileSync(join(cwd, 'campaigns', 'spring-launch', 'config.json'), 'utf8'));

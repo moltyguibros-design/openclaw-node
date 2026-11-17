@@ -6,10 +6,10 @@
  * host's Ollama answers.
  */
 import { test } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -36,7 +36,7 @@ exit 7`,
 };
 
 function machine(vars = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'llm-host-'));
+  const dir = tmpDir('llm-host-');
   for (const [name, body] of Object.entries(STUBS)) {
     const file = join(dir, name);
     writeFileSync(file, `#!/bin/bash\n${body}\n`);

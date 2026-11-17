@@ -4,10 +4,10 @@
  * could inject extra keys. curl is stubbed to capture the -d payload.
  */
 import { describe, it } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,7 +15,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = join(ROOT, 'skills', 'moltbook-interact', 'scripts', 'moltbook.sh');
 
 function run(args) {
-  const home = mkdtempSync(join(tmpdir(), 'moltbook-'));
+  const home = tmpDir('moltbook-');
   mkdirSync(join(home, '.config', 'moltbook'), { recursive: true });
   writeFileSync(join(home, '.config', 'moltbook', 'credentials.json'), JSON.stringify({ api_key: 'k' }));
   const stub = join(home, 'bin');

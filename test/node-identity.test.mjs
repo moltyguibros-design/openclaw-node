@@ -1,8 +1,8 @@
-import { describe, it, before, after, beforeEach } from 'node:test';
+import { describe, it, before, beforeEach } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import crypto from 'node:crypto';
 
 import {
@@ -17,7 +17,7 @@ import {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function makeTmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-identity-test-'));
+  return tmpDir('openclaw-identity-test-');
 }
 
 function makeEvent(overrides = {}) {
@@ -45,10 +45,6 @@ describe('node-identity', () => {
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
-  });
-
-  after(() => {
-    // Cleanup all tmp dirs (best effort)
   });
 
   describe('getOrCreateIdentity', () => {

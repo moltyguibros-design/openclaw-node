@@ -7,11 +7,11 @@
  * curl, date and `openssl rand` shimmed so nonce and timestamp are fixed.
  */
 import { describe, it } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHmac } from 'node:crypto';
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,7 +43,7 @@ function expectedSignature(method, baseUrl, extra = []) {
 }
 
 function run(args) {
-  const dir = mkdtempSync(join(tmpdir(), 'twitter-oauth-'));
+  const dir = tmpDir('twitter-oauth-');
   const out = join(dir, 'curl-args');
   const shim = (name, body) => {
     writeFileSync(join(dir, name), `#!/usr/bin/env bash\n${body}\n`);

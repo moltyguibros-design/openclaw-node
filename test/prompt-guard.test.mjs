@@ -6,10 +6,10 @@
  * on an OpenClaw node it found nothing and passed vacuously.
  */
 import { describe, it } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,7 +28,7 @@ describe('prompt-guard', () => {
   });
 
   it('audit.py inspects ~/.openclaw', { skip: !HAVE_PY && 'python3 not available' }, () => {
-    const home = mkdtempSync(join(tmpdir(), 'pg-audit-'));
+    const home = tmpDir('pg-audit-');
     const dir = join(home, '.openclaw');
     mkdirSync(dir, { mode: 0o700 });
     chmodSync(dir, 0o700);

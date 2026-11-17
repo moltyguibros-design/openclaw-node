@@ -2,9 +2,9 @@
 // MEMORY.md. When the LLM path is unavailable/fails, the regex fallback must divert its
 // speaker-tagged facts to a sibling file and leave the structured index byte-intact.
 import { test } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { runFlush } from '../lib/pre-compression-flush.mjs';
 
@@ -24,7 +24,7 @@ const JSONL =
   JSON.stringify({ type: 'assistant', message: { content: "I'll wire the harness into the circling worker now" } }) + '\n';
 
 function setup() {
-  const dir = mkdtempSync(join(tmpdir(), 'flush-p0-'));
+  const dir = tmpDir('flush-p0-');
   const jsonl = join(dir, 's.jsonl');
   const memoryMd = join(dir, 'MEMORY.md');
   writeFileSync(jsonl, JSONL);

@@ -13,10 +13,10 @@
  * Run: node --test test/plan-abort-cancels.test.js
  */
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-abort-'));
+const { tmpDir } = require('./helpers/tmp-dir.cjs');
+const TMP = tmpDir('plan-abort-');
 process.env.OPENCLAW_OBS_DB = path.join(TMP, 'obs.db');
 
 const { describe, it } = require('node:test');

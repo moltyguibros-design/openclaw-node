@@ -19,14 +19,14 @@ const skipReason = meshSkipReason();
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { natsConnectOpts } = require('../lib/nats-resolve');
 const { signOperatorRequest } = require('../lib/operator-auth.mjs');
 
 const REPO = path.join(__dirname, '..');
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-submit-'));
+const { tmpDir } = require('./helpers/tmp-dir.cjs');
+const TMP = tmpDir('cli-submit-');
 let nc;
 let sc;
 

@@ -13,10 +13,10 @@
  * Run: node --test test/collab-member-token.test.js
  */
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'collab-token-'));
+const { tmpDir } = require('./helpers/tmp-dir.cjs');
+const TMP = tmpDir('collab-token-');
 process.env.OPENCLAW_OBS_DB = path.join(TMP, 'obs.db');
 
 const { describe, it } = require('node:test');

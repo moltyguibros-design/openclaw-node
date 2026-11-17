@@ -1,4 +1,5 @@
 import { describe, it, before, after } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import {
@@ -16,7 +17,7 @@ import {
   evaluatePromotionCandidates,
 } from '../lib/consolidation.mjs';
 import { runConsolidationCycle } from '../bin/consolidate.mjs';
-import { mkdtempSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -24,13 +25,13 @@ import { fileURLToPath } from 'node:url';
 
 // Never let a cycle default to the REAL vault (getVaultPath) — fixture notes
 // were landing in production ~/.openclaw/obsidian-local (memory review 2026-07-04).
-const TEST_VAULT = mkdtempSync(join(tmpdir(), 'consolidation-vault-'));
+const TEST_VAULT = tmpDir('consolidation-vault-');
 // The values config/promotion-policy.yaml ships with.
 const POLICY = { mentionThreshold: 10, confidenceThreshold: 0.95 };
 
 describe('consolidate CLI --dry-run', () => {
   it('refuses instead of running a writing cycle against state.db', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'consolidate-dry-'));
+    const dir = tmpDir('consolidate-dry-');
     const dbPath = join(dir, 'state.db');
     const r = spawnSync(process.execPath, [
       fileURLToPath(new URL('../bin/consolidate.mjs', import.meta.url)),
@@ -513,7 +514,7 @@ describe('P5-2: pruneStale — decay is terminal, and what it removes is not des
                 VALUES ('s', 'dead', 'r', 0.99, ?, 0.01, 'local'), ('s', 'alive', 'r', 0.99, ?, 0.4, 'local')`).run(iso(1), iso(1));
     db.prepare(`INSERT INTO themes (label, first_seen, last_seen, mention_count) VALUES ('stale', ?, ?, 1), ('fresh', ?, ?, 1)`).run(iso(400), iso(300), iso(5), iso(5));
 
-    const r = pruneStale(db, { now, backupDir: mkdtempSync(join(tmpdir(), 'consolidation-backup-')) });
+    const r = pruneStale(db, { now, backupDir: tmpDir('consolidation-backup-') });
     assert.equal(r.archivedDecisions, 1);
     assert.equal(r.prunedThemes, 1);
     assert.equal(r.themesSkipped, null);
@@ -593,7 +594,7 @@ describe('evaluatePromotionCandidates', () => {
 
 describe('promotion thresholds come from the policy file', () => {
   const policyWith = (mentions) => {
-    const dir = mkdtempSync(join(tmpdir(), 'promotion-policy-'));
+    const dir = tmpDir('promotion-policy-');
     const file = join(dir, 'promotion-policy.yaml');
     const shipped = readFileSync(fileURLToPath(new URL('../config/promotion-policy.yaml', import.meta.url)), 'utf8');
     writeFileSync(file, shipped.replace(/concept_mention_count: \d+/, `concept_mention_count: ${mentions}`));
@@ -683,7 +684,7 @@ describe('runConsolidationCycle', () => {
     const db = createTestDb();
     insertEntity(db, 'timed-entity', 'concept', { mentionCount: 2 });
 
-    const result = await runConsolidationCycle({ vaultPath: mkdtempSync(join(tmpdir(), 'cycle-phases-')), db });
+    const result = await runConsolidationCycle({ vaultPath: tmpDir('cycle-phases-'), db });
     assert.deepEqual(Object.keys(result.phaseMs), ['init', 'decay', 'prune', 'reinforce', 'clusters',
       'vault-surfaces', 'summaries', 'contradictions', 'promotion']);
     for (const ms of Object.values(result.phaseMs)) assert.ok(Number.isInteger(ms) && ms >= 0);
@@ -702,7 +703,7 @@ describe('runConsolidationCycle', () => {
       sessions: ['cafe0001-1111-2222-3333-444455556666'],
     });
 
-    const vault = mkdtempSync(join(tmpdir(), 'cycle-vault-'));
+    const vault = tmpDir('cycle-vault-');
     const result = await runConsolidationCycle({ vaultPath: vault, db });
 
     assert.ok(result.vaultSurfaces, 'cycle reports vault surfaces');
@@ -722,7 +723,7 @@ describe('runConsolidationCycle', () => {
 
   it('writes the weekly digest on the first cycle of each ISO week only', async () => {
     const db = createTestDb();
-    const vault = mkdtempSync(join(tmpdir(), 'cycle-weekly-'));
+    const vault = tmpDir('cycle-weekly-');
     const { readdirSync } = await import('node:fs');
     const weekly = () => readdirSync(join(vault, 'daily')).filter((f) => f.endsWith('-weekly.md')).sort();
 

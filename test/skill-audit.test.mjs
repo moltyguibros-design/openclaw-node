@@ -6,10 +6,10 @@
  * still run end to end.
  */
 import { describe, it } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,7 +24,7 @@ describe('skill-audit', { skip: !HAVE_PY && 'python3 not available' }, () => {
   });
 
   it('audits a skills dir and prints JSON', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'skill-audit-'));
+    const dir = tmpDir('skill-audit-');
     mkdirSync(join(dir, 'weather'));
     writeFileSync(join(dir, 'weather', 'SKILL.md'), [
       '---',
@@ -45,7 +45,7 @@ describe('skill-audit', { skip: !HAVE_PY && 'python3 not available' }, () => {
   });
 
   it('--verbose lists every failing check in the table', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'skill-audit-'));
+    const dir = tmpDir('skill-audit-');
     mkdirSync(join(dir, 'bare'));
     writeFileSync(join(dir, 'bare', 'SKILL.md'), 'hi\n');
     const audit = (...extra) => spawnSync('python3', ['-B', SCRIPT, '--skills-dir', dir, ...extra], { encoding: 'utf8' });
@@ -71,7 +71,7 @@ describe('skill-batch-fix', { skip: !HAVE_PY && 'python3 not available' }, () =>
   const BATCH = join(ROOT, 'workspace-bin', 'skill-batch-fix');
 
   it('leaves a block-scalar (>-) description as written under --apply', () => {
-    const home = mkdtempSync(join(tmpdir(), 'skill-batch-fix-'));
+    const home = tmpDir('skill-batch-fix-');
     const dir = join(home, '.openclaw', 'workspace', 'skills', 'humanizer');
     mkdirSync(dir, { recursive: true });
     const original = [

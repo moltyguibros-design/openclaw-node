@@ -10,10 +10,10 @@
  * Run: node --test test/mesh-agent-metric-sink.test.js
  */
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-metric-'));
+const { tmpDir } = require('./helpers/tmp-dir.cjs');
+const TMP = tmpDir('agent-metric-');
 const WORKTREE = path.join(TMP, 'worktree');
 fs.mkdirSync(path.join(TMP, '.openclaw', '.tmp'), { recursive: true });
 fs.mkdirSync(WORKTREE, { recursive: true });

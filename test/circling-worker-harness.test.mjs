@@ -3,14 +3,14 @@
 // circling worker prompt now carries the node's harness context — specifically the
 // long-term memory, which it previously injected nowhere.
 import { test } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 
 // WORKSPACE is captured at module load, so set MESH_WORKSPACE before requiring.
-const ws = mkdtempSync(join(tmpdir(), 'mesh-ws-'));
+const ws = tmpDir('mesh-ws-');
 writeFileSync(join(ws, 'MEMORY.md'), '- [Test memory](t.md) — the node remembers project ACME-42.');
 process.env.MESH_WORKSPACE = ws;
 process.env.MESH_MEMORY_RECALL = 'off'; // force the deterministic MEMORY.md fallback (this host has a live inject-server)

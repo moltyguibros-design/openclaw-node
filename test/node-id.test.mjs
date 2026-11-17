@@ -1,8 +1,8 @@
 import { describe, it } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, chmodSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deriveNodeId, resolveNodeId } from '../lib/node-id.js';
@@ -70,7 +70,7 @@ describe('session-start.sh reads the daemon-state file the memory daemon writes'
   const HOOK = fileURLToPath(new URL('../.claude/hooks/session-start.sh', import.meta.url));
 
   function runHook({ envFile, stateId }) {
-    const home = mkdtempSync(join(tmpdir(), 'session-start-home-'));
+    const home = tmpDir('session-start-home-');
     const stub = join(home, 'stub-bin');
     mkdirSync(stub);
     writeFileSync(join(stub, 'hostname'),

@@ -13,12 +13,12 @@
  * Run: node --test test/mesh-lease-authz.test.js
  */
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
 // Pin the side channels before the daemon loads: the tracer's obs DB, and an
 // operator allowlist holding a throwaway key (never ~/.openclaw/identity.key).
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-authz-'));
+const { tmpDir } = require('./helpers/tmp-dir.cjs');
+const TMP = tmpDir('lease-authz-');
 process.env.OPENCLAW_OBS_DB = path.join(TMP, 'obs.db');
 
 const { describe, it } = require('node:test');

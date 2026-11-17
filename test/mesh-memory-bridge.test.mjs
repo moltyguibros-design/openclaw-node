@@ -2,13 +2,13 @@
 // task-relevant recall path falls back cleanly to the MEMORY.md index when the loopback
 // inject-server isn't reachable/disabled — without ever throwing.
 import { test } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 
-const ws = mkdtempSync(join(tmpdir(), 'mesh-mem-'));
+const ws = tmpDir('mesh-mem-');
 writeFileSync(join(ws, 'MEMORY.md'), '- [Test memory](t.md) — the node remembers project ZED-9.');
 process.env.MESH_WORKSPACE = ws;
 process.env.MESH_MEMORY_RECALL = 'off'; // deterministic fallback (this host has a live inject-server)

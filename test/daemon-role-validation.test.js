@@ -15,10 +15,10 @@
  * Run: node --test test/daemon-role-validation.test.js
  */
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'role-validation-'));
+const { tmpDir } = require('./helpers/tmp-dir.cjs');
+const TMP = tmpDir('role-validation-');
 process.env.OPENCLAW_OBS_DB = path.join(TMP, 'obs.db');
 process.env.HOME = TMP;
 

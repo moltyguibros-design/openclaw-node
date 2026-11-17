@@ -8,9 +8,10 @@
  * behavior is pinned.
  */
 import { describe, it } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,7 +39,7 @@ describe('quality-gate --check-all', () => {
   });
 
   it('checks the de-duplicated staged and unstaged files', () => {
-    const ws = mkdtempSync(join(tmpdir(), 'quality-gate-'));
+    const ws = tmpDir('quality-gate-');
     git(ws, 'init', '-q');
     writeFileSync(join(ws, 'a.txt'), 'one\n');
     git(ws, 'add', 'a.txt');
@@ -63,7 +64,7 @@ describe('quality-gate --check-all', () => {
   });
 
   it('passes a staged deletion without an input warning', () => {
-    const ws = mkdtempSync(join(tmpdir(), 'quality-gate-'));
+    const ws = tmpDir('quality-gate-');
     git(ws, 'init', '-q');
     writeFileSync(join(ws, 'gone.txt'), 'one\n');
     git(ws, 'add', 'gone.txt');
@@ -81,7 +82,7 @@ describe('quality-gate --files', () => {
     encoding: 'utf8',
     env: { ...process.env, OPENCLAW_WORKSPACE: ws },
   });
-  const ws = mkdtempSync(join(tmpdir(), 'quality-gate-files-'));
+  const ws = tmpDir('quality-gate-files-');
   mkdirSync(join(ws, 'src'));
   writeFileSync(join(ws, 'src', 'a.js'), 'eval("x")\n');
 
