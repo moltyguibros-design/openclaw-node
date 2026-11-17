@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,4 +47,37 @@ test('real archive filters transcripts, updates existing copies and retains remo
   const lines = readFileSync(join(archive, 'archive.log'), 'utf8').trim().split('\n');
   assert.equal(lines.length, 3);
   for (const line of lines) assert.match(line, /archived ok — 2 transcripts,/);
+});
+
+function runWithRsyncExit(t, code) {
+  const home = mkdtempSync(join(tmpdir(), 'openclaw-archive-rc-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  mkdirSync(join(home, '.claude/projects/p'), { recursive: true });
+  writeFileSync(join(home, '.claude/projects/p/c.jsonl'), '{}\n');
+  const bin = join(home, 'fakebin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'rsync'), `#!/bin/sh\necho "rsync: simulated failure" >&2\nexit ${code}\n`);
+  chmodSync(join(bin, 'rsync'), 0o755);
+  const result = spawnSync('/bin/sh', [script], {
+    env: { ...process.env, HOME: home, PATH: `${bin}:/usr/bin:/bin` }, encoding: 'utf8', timeout: 10_000,
+  });
+  const log = readFileSync(join(home, '.openclaw/transcript-archive/archive.log'), 'utf8');
+  return { result, log };
+}
+
+test('a failing rsync is logged as FAILED and exits non-zero, not "archived ok"', t => {
+  const { result, log } = runWithRsyncExit(t, 11);
+  assert.notEqual(result.status, 0);
+  assert.match(log, /archive FAILED \(rsync rc=11\)/);
+  assert.doesNotMatch(log, /archived ok/);
+  assert.match(result.stderr, /rsync: simulated failure/);
+  assert.match(result.stderr, /archive FAILED \(rsync rc=11\)/);
+});
+
+test('rsync partial-transfer and vanished-file exits (23/24) still count as archived', t => {
+  for (const code of [23, 24]) {
+    const { result, log } = runWithRsyncExit(t, code);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(log, /archived ok/);
+  }
 });
