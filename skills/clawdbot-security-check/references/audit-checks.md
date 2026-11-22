@@ -15,13 +15,13 @@ nothing only means the key is absent from the file.
 
 **What to check:**
 - Where is the gateway binding? (`gateway.bind`)
-- Is authentication configured? (`gateway.auth_token` or `OPENCLAW_GATEWAY_TOKEN` env var)
+- Is authentication configured? (`gateway.auth.mode` and `gateway.auth.token`, or the `OPENCLAW_GATEWAY_TOKEN` env var)
 - What port is exposed? (default: 18789)
 - Is WebSocket auth enabled?
 
-**How to detect:**
+**How to detect** (never print token values: command output goes into the session transcript):
 ```bash
-cat ~/.openclaw/openclaw.json | grep -A10 '"gateway"'
+python3 -c 'import json,os; g=json.load(open(os.path.expanduser("~/.openclaw/openclaw.json"))).get("gateway",{}); a=g.get("auth",{}); print({"bind":g.get("bind"),"port":g.get("port"),"auth.mode":a.get("mode"),"token set":bool(a.get("token")),"trustedProxies":g.get("trustedProxies")})'
 env | grep -c OPENCLAW_GATEWAY_TOKEN
 ```
 
@@ -38,12 +38,12 @@ openclaw doctor --generate-gateway-token
 ### 2. DM Policy Configuration (High)
 
 **What to check:**
-- What is `dm_policy` set to?
+- What is `dmPolicy` set to under each `channels.<name>`?
 - If `allowlist`, who is explicitly allowed via `allowFrom`?
 
 **How to detect:**
 ```bash
-cat ~/.openclaw/openclaw.json | grep -E '"dm_policy|"allowFrom"'
+cat ~/.openclaw/openclaw.json | grep -E '"dmPolicy"|"allowFrom"'
 ```
 
 **Vulnerability:** Setting to `allow` or `open` means any user can DM OpenClaw.
@@ -115,7 +115,6 @@ cat ~/.openclaw/openclaw.json | grep -i "mention"
 ```bash
 ls -la ~/.openclaw/credentials/
 ls -la ~/.openclaw/agents/*/agent/ 2>/dev/null
-stat -c "%a" ~/.openclaw/credentials/oauth.json 2>/dev/null
 ```
 
 **Vulnerability:** Plaintext credentials with loose permissions can be read by any process.
@@ -140,7 +139,7 @@ chmod 600 ~/.openclaw/openclaw.json
 **How to detect:**
 ```bash
 cat ~/.openclaw/openclaw.json | grep -A5 '"browser"'
-cat ~/.openclaw/openclaw.json | grep -i "controlUi|insecureAuth"
+cat ~/.openclaw/openclaw.json | grep -Ei "controlUi|insecureAuth"
 ls -la ~/.openclaw/browser/
 ```
 
@@ -176,7 +175,7 @@ ls -la ~/.openclaw/browser/
 
 **How to detect:**
 ```bash
-cat ~/.openclaw/openclaw.json | grep -A10 '"gateway"'
+python3 -c 'import json,os; g=json.load(open(os.path.expanduser("~/.openclaw/openclaw.json"))).get("gateway",{}); a=g.get("auth",{}); print({"bind":g.get("bind"),"port":g.get("port"),"auth.mode":a.get("mode"),"token set":bool(a.get("token")),"trustedProxies":g.get("trustedProxies")})'
 cat ~/.openclaw/openclaw.json | grep '"tailscale"'
 ```
 
@@ -186,7 +185,7 @@ cat ~/.openclaw/openclaw.json | grep '"tailscale"'
 ```json
 {
   "gateway": {
-    "bind": "127.0.0.1",
+    "bind": "loopback",
     "mode": "local",
     "trustedProxies": ["127.0.0.1", "10.0.0.0/8"],
     "tailscale": {
@@ -208,8 +207,8 @@ cat ~/.openclaw/openclaw.json | grep '"tailscale"'
 
 **How to detect:**
 ```bash
-cat ~/.openclaw/openclaw.json | grep -i "restrict|mcp|elevated"
-cat ~/.openclaw/openclaw.json | grep -i "workspaceAccess|sandbox"
+cat ~/.openclaw/openclaw.json | grep -Ei "restrict|mcp|elevated"
+cat ~/.openclaw/openclaw.json | grep -Ei "workspaceAccess|sandbox"
 cat ~/.openclaw/openclaw.json | grep -i "openRoom"
 ```
 
@@ -248,7 +247,7 @@ cat ~/.openclaw/openclaw.json | grep -i "openRoom"
 
 **How to detect:**
 ```bash
-stat -c "%a" ~/.openclaw
+ls -ld ~/.openclaw
 ls -la ~/.openclaw/*.json
 ```
 
@@ -271,8 +270,8 @@ chmod 600 ~/.openclaw/credentials/*
 
 **How to detect:**
 ```bash
-cat ~/.openclaw/openclaw.json | grep -i "plugin|allowlist"
-cat ~/.openclaw/openclaw.json | grep -i "model|anthropic"
+cat ~/.openclaw/openclaw.json | grep -Ei "plugin|allowlist"
+cat ~/.openclaw/openclaw.json | grep -Ei "model|anthropic"
 ```
 
 **Vulnerability:** Untrusted plugins can execute code. Legacy models may lack modern safety.
@@ -303,7 +302,7 @@ cat ~/.openclaw/openclaw.json | grep -i "model|anthropic"
 
 **How to detect:**
 ```bash
-cat ~/.openclaw/openclaw.json | grep -i "logging|redact"
+cat ~/.openclaw/openclaw.json | grep -Ei "logging|redact"
 ls -la ~/.openclaw/logs/
 ```
 
@@ -328,7 +327,7 @@ ls -la ~/.openclaw/logs/
 
 **How to detect:**
 ```bash
-cat ~/.openclaw/openclaw.json | grep -i "untrusted|wrap"
+cat ~/.openclaw/openclaw.json | grep -Ei "untrusted|wrap"
 ```
 
 **Prompt Injection Mitigation Strategies:**

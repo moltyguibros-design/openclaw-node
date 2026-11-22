@@ -56,7 +56,7 @@ See [references/audit-checks.md](references/audit-checks.md) for full audit chec
 
 | # | Domain | Severity | Key Config |
 |---|--------|----------|------------|
-| 1 | Gateway Exposure | Critical | `gateway.bind`, `gateway.auth_token` |
+| 1 | Gateway Exposure | Critical | `gateway.bind`, `gateway.auth.token` |
 | 2 | DM Policy | High | `dmPolicy`, `allowFrom` |
 | 3 | Group Access Control | High | `groupPolicy`, `groups` |
 | 4 | Credentials Security | Critical | `~/.openclaw/credentials/` permissions |
@@ -108,7 +108,7 @@ Slash commands are only available to authorized senders based on channel allowli
 
 ### Containment
 1. Stop the gateway process — `openclaw gateway stop`
-2. Set gateway.bind to loopback — `"bind": "127.0.0.1"`
+2. Set gateway.bind to loopback — `"bind": "loopback"`
 3. Disable risky DMs and groups — set to `disabled`
 
 ### Rotation

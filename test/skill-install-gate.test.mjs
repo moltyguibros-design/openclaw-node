@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -84,5 +86,44 @@ describe('no clawdbot-era commands or paths', () => {
     assert.match(checks, /audit not run/);
     assert.doesNotMatch(checks, /\.clawdbotrc|clawdbot\.json/);
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'skill.json'), 'utf8')).scripts, undefined);
+  });
+
+  // A basic-regex `grep -i "a|b"` treats '|' as a literal and prints nothing, which read as clean.
+  it('clawdbot-security-check detection commands match the node config keys and never print the gateway token', () => {
+    const dir = path.join(SKILLS, 'clawdbot-security-check');
+    const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
+    const checks = fs.readFileSync(path.join(dir, 'references', 'audit-checks.md'), 'utf8');
+    for (const text of [skill, checks]) {
+      assert.doesNotMatch(text, /dm_policy|auth_token/);
+      assert.doesNotMatch(text, /stat -c/);
+      assert.doesNotMatch(text, /grep -A\d+ '"gateway"'/);
+      assert.doesNotMatch(text, /"bind": "127\.0\.0\.1"/);
+    }
+
+    const greps = checks.split('\n').flatMap((line) => {
+      const m = line.match(/^cat ~\/\.openclaw\/openclaw\.json \| grep((?:\s+-[A-Za-z0-9]+)*)\s+(['"])(.*)\2$/);
+      return m ? [{ flags: m[1].trim().split(/\s+/).filter(Boolean), pattern: m[3] }] : [];
+    });
+    assert.ok(greps.length >= 12, `expected the domain grep commands, found ${greps.length}`);
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'security-check-'));
+    try {
+      for (const { flags, pattern } of greps) {
+        for (const term of pattern.split('|')) {
+          const file = path.join(tmp, 'term.json');
+          fs.writeFileSync(file, `  ${term}: true\n`);
+          const r = spawnSync('grep', [...flags, pattern, file], { encoding: 'utf8' });
+          assert.equal(r.status, 0, `grep ${flags.join(' ')} '${pattern}' misses a line containing ${term}`);
+        }
+      }
+      // Keys OpenClaw supports that the node's template does not set.
+      const TEMPLATE_ABSENT = new Set(['"browser"', 'controlUi|insecureAuth', 'restrict|mcp|elevated',
+        'workspaceAccess|sandbox', 'openRoom', 'logging|redact', 'untrusted|wrap', '"blocked_commands"']);
+      const template = path.join(path.dirname(SKILLS), 'config', 'openclaw.json.template');
+      const silent = greps.filter(({ flags, pattern }) => !TEMPLATE_ABSENT.has(pattern)
+        && spawnSync('grep', [...flags, pattern, template]).status !== 0).map(({ pattern }) => pattern);
+      assert.deepEqual(silent, []);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
