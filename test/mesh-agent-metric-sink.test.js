@@ -70,6 +70,16 @@ describe('evaluateMetric', () => {
     assert.equal((await run('node ../outside.js')).passed, false);
   });
 
+  it('traces the metric run for as long as it ran, with its result', async () => {
+    fs.writeFileSync(path.join(WORKTREE, 'slow.js'), 'setTimeout(() => {}, 150);\n');
+    await run('node slow.js');
+    const { getRecentEvents } = require('../lib/tracer.js');
+    const ev = getRecentEvents(50).find((e) => e.function === 'evaluateMetric' && e.args_summary.includes('slow.js'));
+    assert.ok(ev, 'an evaluateMetric trace event was emitted');
+    assert.ok(ev.duration_ms >= 150, `duration_ms ${ev.duration_ms}`);
+    assert.equal(ev.result_summary, '{passed,output}');
+  });
+
   it('passes a metric that exits 0 without printing anything', async () => {
     fs.writeFileSync(path.join(WORKTREE, 'silent.js'), '');
     assert.equal((await run('node silent.js')).passed, true);

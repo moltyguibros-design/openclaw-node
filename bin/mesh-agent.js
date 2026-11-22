@@ -2766,8 +2766,8 @@ async function onWorkerError(task, startedAt, err) {
 // ── Tracer wrapping ──────────────────────────────────
 executeTask = tracer.wrapAsync('executeTask', executeTask, { tier: 1, category: 'state_transition' });
 executeCollabTask = tracer.wrapAsync('executeCollabTask', executeCollabTask, { tier: 1, category: 'state_transition' });
-evaluateMetric = tracer.wrap('evaluateMetric', evaluateMetric, { tier: 2, category: 'compute' });
-runLLM = tracer.wrap('runLLM', runLLM, { tier: 2, category: 'compute' });
+evaluateMetric = tracer.wrapAsync('evaluateMetric', evaluateMetric, { tier: 2, category: 'compute' });
+runLLM = tracer.wrapAsync('runLLM', runLLM, { tier: 2, category: 'compute' });
 createWorktree = tracer.wrap('createWorktree', createWorktree, { tier: 2, category: 'compute' });
 commitWorktree = tracer.wrap('commitWorktree', commitWorktree, { tier: 2, category: 'compute' });
 mergeTaskBranch = tracer.wrap('mergeTaskBranch', mergeTaskBranch, { tier: 2, category: 'compute' });
