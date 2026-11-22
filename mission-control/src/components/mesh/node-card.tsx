@@ -17,7 +17,7 @@ import {
   CheckCircle2,
   XCircle,
 } from "lucide-react";
-import type { MeshNode, PeerView } from "./types";
+import type { MeshNode } from "./types";
 
 interface Props {
   node: MeshNode;
@@ -246,7 +246,7 @@ export function NodeCard({ node, isExpanded: controlledExpanded, onToggle }: Pro
             <div className="pt-1 border-t border-border/30">
               <div className="text-muted-foreground/50 mb-1">Peers</div>
               <div className="space-y-1 pl-1">
-                {(node.tailscale!.peers! as PeerView[]).map((peer, i) => (
+                {node.tailscale!.peers.map((peer, i) => (
                   <div key={peer.hostname || i} className="flex items-center gap-2">
                     <span className={`h-1.5 w-1.5 rounded-full ${peer.online ? "bg-green-400" : "bg-red-400"}`} />
                     <span className="text-foreground/70">{peer.hostname || "unknown"}</span>
@@ -256,9 +256,6 @@ export function NodeCard({ node, isExpanded: controlledExpanded, onToggle }: Pro
                         {peer.direct ? "direct" : peer.relay ? `relay (${peer.relay})` : "relay"}
                         {peer.latency?.latencyMs != null && (
                           <span className="font-mono ml-1">{Math.round(peer.latency.latencyMs)}ms</span>
-                        )}
-                        {peer.latencyMs != null && !peer.latency && (
-                          <span className="font-mono ml-1">{Math.round(peer.latencyMs)}ms</span>
                         )}
                       </span>
                     ) : (

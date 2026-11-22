@@ -12,20 +12,17 @@ function formatNodeShort(nodeId: string): string {
   return nodeId.split("-")[0];
 }
 
-/** Look up latency from node A to node B using tailscale peer data */
-function getPeerInfo(
+export function getPeerInfo(
   from: MeshNode,
   to: MeshNode
 ): { latencyMs: number | null; relay: boolean; online: boolean } | null {
-  const peers = from.tailscale?.peers ?? [];
-  const peer = peers.find(
-    (p) => p.nodeId === to.nodeId || p.ip === to.health?.tailscaleIp
-  );
+  const toIp = to.tailscale?.selfIp || to.health?.tailscaleIp;
+  const peer = (from.tailscale?.peers ?? []).find((p) => p.ip && p.ip === toIp);
   if (!peer) return null;
-  return { latencyMs: peer.latencyMs, relay: peer.relay, online: peer.online };
+  return { latencyMs: peer.latency?.latencyMs ?? null, relay: !peer.direct, online: !!peer.online };
 }
 
-function CellContent({
+export function CellContent({
   info,
 }: {
   info: ReturnType<typeof getPeerInfo>;

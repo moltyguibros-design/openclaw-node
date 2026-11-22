@@ -380,9 +380,9 @@ export function NetworkTopology({ nodes, meshStatus }: Props) {
                           ) : (
                             <span className="text-zinc-400">Connected</span>
                           )}
-                          {(peer.latency?.latencyMs ?? peer.latencyMs) != null && (
+                          {peer.latency?.latencyMs != null && (
                             <span className="font-mono ml-2">
-                              {Math.round(peer.latency?.latencyMs ?? peer.latencyMs ?? 0)}ms RTT
+                              {Math.round(peer.latency.latencyMs)}ms RTT
                             </span>
                           )}
                         </>
