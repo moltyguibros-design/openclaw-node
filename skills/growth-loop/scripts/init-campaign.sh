@@ -20,6 +20,12 @@ case "$CAMPAIGN_NAME" in
     exit 1 ;;
 esac
 
+case "$PLATFORM" in
+  *\"*|*\\*|*[[:cntrl:]]*)
+    echo "Error: platform must not contain '\"', '\\' or control characters"
+    exit 1 ;;
+esac
+
 CAMPAIGN_DIR="$(pwd)/campaigns/${CAMPAIGN_NAME}"
 
 if [ -d "$CAMPAIGN_DIR" ]; then

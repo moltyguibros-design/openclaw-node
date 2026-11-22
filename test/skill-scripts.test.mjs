@@ -143,6 +143,20 @@ describe('growth-loop init-campaign.sh', () => {
     assert.equal(config.name, 'spring-launch');
     assert.equal(config.platform, 'blog');
   });
+
+  it('refuses a platform that would break config.json', () => {
+    const cwd = tmpDir('campaign-');
+    const r = spawnSync('bash', [SCRIPT, 'spring', 'a"b'], { cwd, encoding: 'utf8' });
+    assert.notEqual(r.status, 0);
+    assert.equal(existsSync(join(cwd, 'campaigns', 'spring')), false);
+  });
+
+  it('accepts an unlisted platform, which gets the generic rules', () => {
+    const cwd = tmpDir('campaign-');
+    const r = spawnSync('bash', [SCRIPT, 'spring', 'newsletter'], { cwd, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(JSON.parse(readFileSync(join(cwd, 'campaigns', 'spring', 'config.json'), 'utf8')).platform, 'newsletter');
+  });
 });
 
 // clawddocs shipped seven echo-only stubs (fetch-doc printed the URL, cache always
