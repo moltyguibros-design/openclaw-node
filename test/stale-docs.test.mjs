@@ -23,6 +23,15 @@ test('mission-control/README.md points at the deploy runbook and the token boots
   assert.doesNotMatch(readme, /create-next-app/);
 });
 
+test('the Mission Control deploy runbook leads with install.sh --update and covers both service managers', () => {
+  const runbook = read('workspace-docs/RUNBOOK_MC_DEPLOY.md');
+  assert.match(runbook, /install\.sh --update/);
+  assert.match(runbook, /systemctl --user restart openclaw-mission-control/);
+  assert.match(runbook, /launchctl kickstart -k gui\/\$\(id -u\)\/ai\.openclaw\.mission-control/);
+  assert.doesNotMatch(runbook, /gui\/501|only via this procedure|~\/openclaw-nodedev/);
+  assert.doesNotMatch(read('workspace-docs/RUNBOOK_HYPERAGENT_SYNTHESIS.md'), /until 1\.1 lands/);
+});
+
 test('the 2026-09-06 remediation plan says it is historical and what has landed', () => {
   const head = read('REMEDIATION_PLAN_2026-09-06.md').split('\n').slice(0, 6).join('\n');
   assert.match(head, /^\*\*Status:\*\* historical\. Phases 0–3 landed/m);

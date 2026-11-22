@@ -9,8 +9,7 @@ descriptive, never "A/B"; nothing here self-modifies.
 ## When
 The memory daemon creates a reflection window automatically once a node/soul accumulates ≥5
 unreflected telemetry rows. A pending reflection awaits synthesis and **expires after 24h**.
-You'll get a desktop notification (`hyperagent` source — step 1.1; until 1.1 lands, check
-manually during active mesh periods).
+You'll get a desktop notification (`hyperagent` source).
 
 ## Workflow
 ```bash
