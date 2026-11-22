@@ -341,12 +341,17 @@ if [ -n "${OPENCLAW_SRC:-}" ]; then
 else
   SRC="$HOME/.openclaw-src/openclaw-node"
   mkdir -p "$(dirname "$SRC")"
-  rm -rf "$SRC"; mkdir -p "$SRC"
+  rm -rf "$SRC.new"; mkdir -p "$SRC.new"
   # Tarball, not `git clone`: on a virgin Mac `git` is a stub that pops the
   # Xcode GUI prompt, which would stall a piped install.
   curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$REF" \
-    | tar xz -C "$SRC" --strip-components=1 \
-    || die "could not download $REPO@$REF"
+    | tar xz -C "$SRC.new" --strip-components=1 \
+    || { rm -rf "$SRC.new"; die "could not download $REPO@$REF"; }
+  # On a re-run the units exec from $SRC: swap only once the new tree is whole,
+  # and keep the old one until install.sh succeeds.
+  rm -rf "$SRC.old"
+  if [ -d "$SRC" ]; then mv "$SRC" "$SRC.old"; fi
+  mv "$SRC.new" "$SRC"
   ok "source at $SRC"
 fi
 
@@ -369,6 +374,7 @@ if [ $RC -ne 0 ]; then
   err "install.sh exited $RC — dependencies were fine, the failure is downstream."
   exit $RC
 fi
+rm -rf "$SRC.old"
 ok "wave 1 complete — node installed and running (no models yet)"
 
 # ============================================================
