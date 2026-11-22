@@ -82,7 +82,7 @@ describe('readLastExtraction', () => {
 
 describe('coreServiceRoster — Linux', () => {
   const units = ['openclaw-nats', 'openclaw-memory-daemon', 'openclaw-mission-control', 'openclaw-node-watch',
-    'openclaw-nats-1', 'openclaw-nats-2', 'openclaw-nats-3'];
+    'openclaw-health-watch', 'openclaw-nats-1', 'openclaw-nats-2', 'openclaw-nats-3'];
   const systemctl = (states) => (cmd, args) => {
     assert.equal(cmd, 'systemctl');
     assert.deepEqual(args, ['--user', 'is-active', ...units]);
@@ -94,15 +94,17 @@ describe('coreServiceRoster — Linux', () => {
   it('counts the autostarted units only, so a healthy node reads fully up', () => {
     const r = coreServiceRoster({ platform: 'linux', execFile: systemctl({
       'openclaw-nats': 'active', 'openclaw-memory-daemon': 'active',
-      'openclaw-mission-control': 'active', 'openclaw-node-watch': 'active',
+      'openclaw-mission-control': 'active', 'openclaw-node-watch': 'active', 'openclaw-health-watch': 'active',
     }) });
     assert.deepEqual(r, { up: coreServices('linux'), down: [] });
-    assert.equal(coreServices('linux').length, 4);
-    assert.ok(!coreServices('linux').some((s) => /gateway|health-watch/.test(s)));
+    assert.equal(coreServices('linux').length, 5);
+    assert.ok(coreServices('linux').includes('openclaw-health-watch'));
+    assert.ok(!coreServices('linux').some((s) => /gateway/.test(s)));
   });
 
   it('credits the nats slot to the single-host R=3 cluster only when all three nodes run', () => {
-    const base = { 'openclaw-memory-daemon': 'active', 'openclaw-mission-control': 'active', 'openclaw-node-watch': 'active' };
+    const base = { 'openclaw-memory-daemon': 'active', 'openclaw-mission-control': 'active', 'openclaw-node-watch': 'active',
+      'openclaw-health-watch': 'active' };
     const all = coreServiceRoster({ platform: 'linux', execFile: systemctl({ ...base,
       'openclaw-nats-1': 'active', 'openclaw-nats-2': 'active', 'openclaw-nats-3': 'active' }) });
     assert.deepEqual(all.down, []);
@@ -125,6 +127,24 @@ describe('coreServiceRoster — Linux', () => {
     const t = readTimeline(samples.join('\n'), { now: t0 + 3 * 60_000 + 1000 });
     assert.equal(t.layers.node.uptimePct, 100, 'unknown intervals are not downtime');
     assert.equal(t.layers.node.current, '?');
+  });
+});
+
+describe('coreServiceRoster — macOS', () => {
+  const launchctl = (labels) => (cmd, args) => {
+    assert.equal(cmd, 'launchctl');
+    assert.deepEqual(args, ['list']);
+    return ['PID\tStatus\tLabel', ...labels.map((l) => `123\t0\t${l}`)].join('\n') + '\n';
+  };
+  const rest = coreServices('darwin').filter((s) => s !== 'ai.openclaw.nats');
+
+  it('credits the nats slot to the nats-1..3 cohort only when all three run', () => {
+    const all = coreServiceRoster({ platform: 'darwin', execFile: launchctl([...rest,
+      'ai.openclaw.nats-1', 'ai.openclaw.nats-2', 'ai.openclaw.nats-3']) });
+    assert.deepEqual(all, { up: coreServices('darwin'), down: [] });
+    const two = coreServiceRoster({ platform: 'darwin', execFile: launchctl([...rest,
+      'ai.openclaw.nats-1', 'ai.openclaw.nats-2']) });
+    assert.deepEqual(two.down, ['ai.openclaw.nats']);
   });
 });
 
