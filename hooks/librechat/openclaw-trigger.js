@@ -5,7 +5,7 @@
  * to fire extraction events after each conversation turn.
  *
  * Usage in LibreChat config:
- *   const { onResponse } = require('./openclaw-trigger.js');
+ *   import { onResponse } from './openclaw-trigger.js';
  *   // Call onResponse() in your endpoint's post-response hook
  *
  * Or as a standalone trigger:

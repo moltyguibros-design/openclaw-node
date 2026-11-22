@@ -328,4 +328,12 @@ describe('hook files exist', () => {
   it('hooks/continue/openclaw-config.json exists', () => {
     assert.ok(fs.existsSync(path.join(repoRoot, 'hooks/continue/openclaw-config.json')));
   });
+
+  // The module is ESM with top-level await: require() throws ERR_REQUIRE_ASYNC_MODULE.
+  it('hooks/librechat/openclaw-trigger.js documents an import, not require()', () => {
+    const src = fs.readFileSync(path.join(repoRoot, 'hooks/librechat/openclaw-trigger.js'), 'utf8');
+    const header = src.slice(0, src.indexOf('*/'));
+    assert.doesNotMatch(header, /require\(['"]\.\/openclaw-trigger\.js['"]\)/);
+    assert.match(header, /import \{ onResponse \} from '\.\/openclaw-trigger\.js'/);
+  });
 });
