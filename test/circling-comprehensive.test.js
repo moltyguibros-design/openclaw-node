@@ -11,7 +11,6 @@
  *      adaptive convergence edge cases
  *   3. Orchestration (daemon logic) — timeout handler, sweep logic, step lifecycle
  *   4. Prompt — see test/circling-worker-harness.test.mjs (drives the real buildCirclingPrompt)
- *   5. Bridge (gate message) — step_started event, gate formatting
  *
  * Run: node --test test/circling-comprehensive.test.js
  */
@@ -498,69 +497,6 @@ describe('Daemon: sweepCirclingStepTimeouts simulation', () => {
 
     const after = await store.get(sessionId);
     assert.equal(after.circling.step_started_at, startedAt);
-  });
-});
-
-// ═══════════════════════════════════════════════════════
-// 5. BRIDGE — Gate message formatting
-// ═══════════════════════════════════════════════════════
-
-describe('Bridge: gate message formatting edge cases', () => {
-  function buildGateMsg(session) {
-    const cg = session.circling || {};
-    const lastRound = session.rounds?.[session.rounds.length - 1];
-    const blockedVotes = lastRound?.reflections?.filter(r => r.vote === 'blocked') || [];
-    if (blockedVotes.length > 0) {
-      const reason = blockedVotes.map(r => r.summary).filter(Boolean).join('; ').slice(0, 150);
-      return `[GATE] SR${cg.current_subround} blocked — ${reason || 'reviewer flagged concern'}`;
-    }
-    return `[GATE] SR${cg.current_subround} complete — review reconciliationDoc and approve/reject`;
-  }
-
-  it('multiple blocked votes joined with semicolon', () => {
-    const msg = buildGateMsg({
-      circling: { current_subround: 2 },
-      rounds: [{
-        reflections: [
-          { vote: 'blocked', summary: 'reentrancy in withdraw()' },
-          { vote: 'blocked', summary: 'unchecked external call in deposit()' },
-          { vote: 'converged', summary: 'looks good' },
-        ],
-      }],
-    });
-    assert.ok(msg.includes('reentrancy'));
-    assert.ok(msg.includes('unchecked external call'));
-    assert.ok(msg.includes('; '), 'multiple reasons joined with semicolon');
-  });
-
-  it('truncates reason to 150 chars', () => {
-    const longReason = 'A'.repeat(200);
-    const msg = buildGateMsg({
-      circling: { current_subround: 1 },
-      rounds: [{
-        reflections: [{ vote: 'blocked', summary: longReason }],
-      }],
-    });
-    // "[GATE] SR1 blocked — " = 21 chars, so reason portion should be ≤150
-    assert.ok(msg.length < 200, 'total message should be under 200 chars');
-  });
-
-  it('handles blocked vote with empty summary', () => {
-    const msg = buildGateMsg({
-      circling: { current_subround: 1 },
-      rounds: [{
-        reflections: [{ vote: 'blocked', summary: '' }],
-      }],
-    });
-    assert.ok(msg.includes('reviewer flagged concern'), 'should fall back to generic reason');
-  });
-
-  it('handles missing rounds gracefully', () => {
-    const msg = buildGateMsg({
-      circling: { current_subround: 1 },
-      rounds: [],
-    });
-    assert.ok(msg.includes('review reconciliationDoc'), 'no rounds → generic message');
   });
 });
 
