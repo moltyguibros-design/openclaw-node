@@ -34,8 +34,13 @@
     "LICENSE",
     "README.md",
     "packages/",
-    "packages/event-schemas/dist/",
-    "packages/event-schemas/package.json"
+    "!**/node_modules/",
+    "!**/.env*",
+    "!mission-control/.next/",
+    "!mission-control/data/",
+    "!**/*.tsbuildinfo",
+    "!**/__pycache__/",
+    "!**/*.pyc"
   ],
   "keywords": [
     "openclaw",

@@ -1,7 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { builtinModules } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
@@ -59,5 +61,60 @@ describe('event-schemas workspace dependencies', () => {
 
   it('matches its lockfile workspace entry, as npm ci requires', () => {
     assert.deepEqual(lock.packages['packages/event-schemas'].dependencies, manifest.dependencies);
+  });
+});
+
+// With root "workspaces", npm pack reads no .gitignore/.npmignore below the root, so a
+// publish from a dev checkout shipped mission-control/node_modules (~830 MB), .env.local,
+// data/ and .next. The negations in "files" are what keep them out.
+describe('published tarball', () => {
+  const hasNpm = spawnSync('npm', ['--version'], { encoding: 'utf8' }).status === 0;
+  it('ships the workspace dist but no node_modules, env files, build output or local data',
+    { skip: !hasNpm && 'npm not on PATH' }, (t) => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pack-files-'));
+      t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+      const put = (rel, text = 'x\n') => {
+        fs.mkdirSync(path.dirname(path.join(tmp, rel)), { recursive: true });
+        fs.writeFileSync(path.join(tmp, rel), text);
+      };
+      const { name, version, files, workspaces } = pkg;
+      put('package.json', JSON.stringify({ name, version, files, workspaces }));
+      put('.gitignore', fs.readFileSync(path.join(ROOT, '.gitignore'), 'utf8'));
+      put('mission-control/.gitignore', fs.readFileSync(path.join(ROOT, 'mission-control/.gitignore'), 'utf8'));
+      put('packages/event-schemas/.npmignore', fs.readFileSync(path.join(ROOT, 'packages/event-schemas/.npmignore'), 'utf8'));
+      put('packages/event-schemas/package.json', JSON.stringify({ name: 'event-schemas', version: '1.0.0' }));
+      put('packages/event-schemas/dist/index.js');
+      put('packages/event-schemas/src/index.ts');
+      put('packages/openclaw-memory-context-engine/package.json', JSON.stringify({ name: 'context-engine', version: '1.0.0' }));
+      put('packages/openclaw-memory-context-engine/index.js');
+      put('lib/mcp-knowledge/package.json', JSON.stringify({ name: 'mcp-knowledge', version: '1.0.0' }));
+      put('lib/mcp-knowledge/core.mjs');
+      put('mission-control/package.json', JSON.stringify({ name: 'mission-control', version: '1.0.0', private: true }));
+      put('mission-control/page.ts');
+      for (const decoy of [
+        'mission-control/node_modules/decoy/x.js',
+        'mission-control/.env.local',
+        'mission-control/data/a.db',
+        'mission-control/.next/x.js',
+        'mission-control/tsconfig.tsbuildinfo',
+        'packages/event-schemas/node_modules/decoy/x.js',
+        'workspace-bin/__pycache__/x.cpython-312.pyc',
+      ]) put(decoy);
+
+      const r = spawnSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
+        cwd: tmp, encoding: 'utf8', env: { ...process.env, npm_config_cache: path.join(tmp, '.npm-cache') },
+      });
+      assert.equal(r.status, 0, r.stderr);
+      const packed = JSON.parse(r.stdout)[0].files.map((f) => f.path);
+      assert.ok(packed.includes('packages/event-schemas/dist/index.js'), packed.join('\n'));
+      assert.ok(packed.includes('mission-control/page.ts'), packed.join('\n'));
+      const leaked = packed.filter((f) =>
+        /(^|\/)node_modules\/|(^|\/)\.env|\.tsbuildinfo$|^mission-control\/(data|\.next)\/|__pycache__|\.pyc$/.test(f));
+      assert.deepEqual(leaked, []);
+    });
+
+  it('lists each workspace path once: "packages/" already ships event-schemas', () => {
+    assert.ok(pkg.files.includes('packages/'));
+    assert.deepEqual(pkg.files.filter((f) => f.startsWith('packages/') && f !== 'packages/'), []);
   });
 });

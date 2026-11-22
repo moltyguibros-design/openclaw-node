@@ -132,7 +132,17 @@ jobs:
       - name: Packed-tarball smoke — the two past packaging escapes stay caught
         if: matrix.node-version == 22
         run: |
+          # Decoys a dev checkout has: npm pack reads no nested .gitignore here, so only
+          # the root "files" negations keep them out.
+          mkdir -p mission-control/node_modules/decoy mission-control/data
+          echo x > mission-control/node_modules/decoy/x.js
+          echo T=1 > mission-control/.env.local
+          echo x > mission-control/data/a.db
           npm pack --dry-run 2>&1 | tee /tmp/pack.txt
+          if grep -E ' (\S*/)?node_modules/| \S*/\.env| mission-control/data/' /tmp/pack.txt; then
+            echo "::error::the tarball ships node_modules, an env file or local data"
+            exit 1
+          fi
           grep -q " install.sh" /tmp/pack.txt
           # Drift-lock: every install module in the tree must ship in the tarball.
           # Compared against the tree, not a hard-coded count, so adding a module

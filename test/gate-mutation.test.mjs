@@ -14,7 +14,7 @@ import { DEFAULT_ANALYSIS_TIMEOUT } from '../lib/llm-client.mjs';
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 // ── 1. Tarball-smoke assertions ─────────────────────────────────────────────
-// Replicates the workflow's three asserts against doctored pack listings. The
+// Replicates the workflow's four asserts against doctored pack listings. The
 // drift-lock test pins the YAML so the replica can't silently diverge.
 
 const MODULES = readdirSync(join(REPO, 'scripts/install')).filter(f => f.endsWith('.sh')).map(f => f.slice(0, -3));
@@ -29,7 +29,8 @@ function smokePasses(listing) {
   const hasInstall = / install\.sh/.test(listing);
   const moduleCount = (listing.match(/ scripts\/install\/.*\.sh/g) || []).length === MODULES.length;
   const hasDist = / packages\/event-schemas\/dist\//.test(listing);
-  return hasInstall && moduleCount && hasDist;
+  const leaks = / (\S*\/)?node_modules\/| \S*\/\.env| mission-control\/data\//.test(listing);
+  return hasInstall && moduleCount && hasDist && !leaks;
 }
 
 describe('tarball-smoke gate rejects doctored listings', () => {
@@ -46,12 +47,20 @@ describe('tarball-smoke gate rejects doctored listings', () => {
   it('rejects a listing missing the event-schemas dist', () => {
     assert.equal(smokePasses(goodListing().replace(/^.*event-schemas.*$/m, '')), false);
   });
+  it('rejects a listing that ships node_modules, an env file or local data', () => {
+    for (const leak of ['mission-control/node_modules/decoy/x.js', 'mission-control/.env.local', 'mission-control/data/a.db']) {
+      assert.equal(smokePasses(`${goodListing()}\nnpm notice 2B ${leak}`), false, leak);
+    }
+    assert.equal(smokePasses(`${goodListing()}\nnpm notice 1kB openclaw.env.example`), true);
+  });
   it('drift-lock: the workflow still carries the three assertion strings this replica mirrors', () => {
     const yml = readFileSync(join(REPO, '.github/workflows/test.yml'), 'utf8');
     assert.ok(yml.includes('grep -q " install.sh"'), 'install.sh grep changed — re-sync smokePasses()');
     assert.ok(yml.includes('grep -c " scripts/install/.*\\.sh"'), 'module-count grep changed — re-sync smokePasses()');
     assert.ok(yml.includes('$(ls scripts/install/*.sh | wc -l'), 'module count is no longer compared against the tree — re-sync smokePasses()');
     assert.ok(yml.includes('grep -q " packages/event-schemas/dist/"'), 'dist grep changed — re-sync smokePasses()');
+    assert.ok(yml.includes("if grep -E ' (\\S*/)?node_modules/| \\S*/\\.env| mission-control/data/' /tmp/pack.txt; then"),
+      'leak grep changed — re-sync smokePasses()');
   });
 });
 
