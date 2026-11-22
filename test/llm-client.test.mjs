@@ -275,10 +275,34 @@ describe('LLM_NATIVE_API=false — OpenAI-compat path', () => {
   it('uses response_format:json_object instead of format:json for openai-compat', async () => {
     process.env.LLM_NATIVE_API = 'false';
     delete process.env.LLM_FORCE_FREE_FORM;
-    const c = createLlmClient({ baseUrl: baseUrl() });
+    const c = createLlmClient({ baseUrl: baseUrl(), model: 'llama3.2' });
     nextResponse = { status: 200, body: { choices: [{ message: { content: '{}' } }] } };
     await c.generate([], { bypassQueue: true, jsonMode: true });
     assert.deepEqual(lastRequest.body.response_format, { type: 'json_object' });
     delete process.env.LLM_NATIVE_API;
+  });
+
+  // The same gate as the native format:json: a JSON grammar stalls thinking-family models,
+  // and LLM_FORCE_FREE_FORM=1 turns it off for every model.
+  it('sends no response_format to a thinking-family model or under LLM_FORCE_FREE_FORM=1', async () => {
+    process.env.LLM_NATIVE_API = 'false';
+    delete process.env.LLM_FORCE_FREE_FORM;
+    try {
+      nextResponse = { status: 200, body: { choices: [{ message: { content: '{}' } }] } };
+      await createLlmClient({ baseUrl: baseUrl(), model: 'qwen3:8b' }).generate([], { bypassQueue: true, jsonMode: true });
+      assert.equal(lastRequest.body.response_format, undefined);
+
+      await createLlmClient({ baseUrl: baseUrl(), model: 'qwen3:8b' })
+        .generateAnalysis([{ role: 'user', content: 'q' }], { jsonMode: true, waitTimeoutMs: 5000 });
+      assert.equal(lastRequest.url, '/v1/chat/completions');
+      assert.equal(lastRequest.body.response_format, undefined);
+
+      process.env.LLM_FORCE_FREE_FORM = '1';
+      await createLlmClient({ baseUrl: baseUrl(), model: 'llama3.2' }).generate([], { bypassQueue: true, jsonMode: true });
+      assert.equal(lastRequest.body.response_format, undefined);
+    } finally {
+      delete process.env.LLM_FORCE_FREE_FORM;
+      delete process.env.LLM_NATIVE_API;
+    }
   });
 });
