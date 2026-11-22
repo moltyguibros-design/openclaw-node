@@ -3,7 +3,7 @@
  *
  * Covers: requestExtraction happy path, retry behavior (transient vs persistent),
  * OLLAMA_QUEUE_RETRIES env override, requestAnalysis fallback paths, getState
- * snapshot, isStuck logic, recordAutoRestart, shutdown drain, and the
+ * snapshot, stuck detection, shutdown drain, and the
  * tightened isTransient classification (HTTP 500 not retried, fetch failed
  * not retried, ECONNRESET retried).
  *
@@ -19,8 +19,6 @@ import {
   requestExtraction,
   requestAnalysis,
   getState,
-  isStuck,
-  recordAutoRestart,
   shutdown,
   exportStateSnapshot,
   readStateSnapshot,
@@ -412,12 +410,9 @@ describe('getState snapshot', () => {
   });
 });
 
-describe('isStuck logic', () => {
-  it('returns false when no timeouts recorded', () => {
-    assert.equal(isStuck(), false);
-  });
-
-  it('returns true after STUCK_TIMEOUTS (3) consecutive timeouts on one type', async () => {
+describe('stuck detection', () => {
+  it('snapshotLooksStuck(getState()) turns true after STUCK_TIMEOUTS (3) consecutive extraction timeouts', async () => {
+    assert.equal(snapshotLooksStuck(getState()), false);
     for (let i = 0; i < 3; i++) {
       await assert.rejects(
         () => requestExtraction(async () => {
@@ -427,25 +422,14 @@ describe('isStuck logic', () => {
         })
       );
     }
-    assert.equal(isStuck(), true);
+    assert.equal(snapshotLooksStuck(getState()), true);
   });
 
-  it('recordAutoRestart resets the stuck counters', async () => {
-    for (let i = 0; i < 3; i++) {
-      await assert.rejects(
-        () => requestExtraction(async () => {
-          const err = new Error('AbortError: timeout');
-          err.name = 'AbortError';
-          throw err;
-        })
-      );
-    }
-    assert.equal(isStuck(), true);
-    recordAutoRestart('test-restart');
-    assert.equal(isStuck(), false);
-    const s = getState();
-    assert.ok(s.recent_restarts.length >= 1);
-    assert.equal(s.recent_restarts[s.recent_restarts.length - 1].reason, 'test-restart');
+  it('exports no in-process restart path (health-watch restarts and rate-limits)', async () => {
+    const mod = await import('../lib/ollama-queue.mjs');
+    assert.equal(mod.isStuck, undefined);
+    assert.equal(mod.recordAutoRestart, undefined);
+    assert.ok(!('recent_restarts' in getState()));
   });
 });
 
