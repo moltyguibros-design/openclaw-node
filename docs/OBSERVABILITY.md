@@ -20,7 +20,7 @@ OpenClaw ships a unified tracer (`lib/tracer.js`) that instruments every signifi
 - `/api/observability/nodes` — per-node health aggregation
 - `/api/observability/config` — trace mode switch. Daemons start in `OPENCLAW_TRACE_MODE` (default `smart`). A PATCH publishes `{ mode }` on `openclaw.trace.config` as a signed operator request (`lib/operator-auth.mjs`); each daemon's tracer verifies it against the operator allowlist and switches. A daemon that restarts returns to `OPENCLAW_TRACE_MODE`.
 
-The dashboard UI includes a live feed, event timeline, and system map for real-time visibility into all mesh nodes.
+The dashboard page is a trace log that polls `/api/observability/events` every 3 s (last 24 h, all nodes) with module, level and text filters.
 
 **Trace Event Schema:** Every event carries: `id`, `timestamp`, `node_id`, `module`, `function`, `tier` (1-3), `category` (lifecycle/state_transition/error/cross_node/compute), `args_summary`, `result_summary`, `duration_ms`, `error`, and optional `meta`.
 

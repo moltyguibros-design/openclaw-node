@@ -89,32 +89,23 @@ function fmtDuration(ms: number): string {
 
 // ── Main page ──────────────────────────────────────────
 
+const NO_EVENTS: TraceEvent[] = [];
+
 export default function ObservabilityPage() {
-  const [events, setEvents] = useState<TraceEvent[]>([]);
   const [filterModule, setFilterModule] = useState<string>("all");
   const [filterLevel, setFilterLevel] = useState<string>("all");
   const [searchText, setSearchText] = useState("");
   const [follow, setFollow] = useState(true);
   const [limit, setLimit] = useState(500);
   const containerRef = useRef<HTMLDivElement>(null);
-  const eventIdSet = useRef(new Set<string>());
 
   // Fetch all events from DB — no artificial cap, real data
   const { data: historyData, mutate } = useSWR<{ events: TraceEvent[] }>(
     `/api/observability/events?hours=24&limit=${limit}`,
     fetcher,
-    { refreshInterval: 3000 }
+    { refreshInterval: 3000, keepPreviousData: true }
   );
-
-  // Seed events
-  useEffect(() => {
-    if (!historyData?.events) return;
-    const incoming = historyData.events;
-    const ids = new Set(incoming.map((e) => e.id));
-    eventIdSet.current = ids;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- seeds an append-only live event list from the initial fetch; live SSE appends afterwards
-    setEvents(incoming);
-  }, [historyData]);
+  const events = historyData?.events ?? NO_EVENTS;
 
   // Auto-scroll to bottom when following
   useEffect(() => {

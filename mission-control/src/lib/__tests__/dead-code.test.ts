@@ -48,4 +48,9 @@ describe("removed dead code stays removed", () => {
     expect(read("components/mesh/index.ts")).not.toMatch(/NodeHealth|TailscalePeer|ActiveTask/);
     expect(read("components/memory/memory-list.tsx")).not.toContain("Group by date");
   });
+
+  it("the observability page and its doc describe the 3 s poll, not the removed live feed", () => {
+    expect(read("app/observability/page.tsx")).not.toMatch(/eventIdSet|live SSE appends/);
+    expect(read("../../docs/OBSERVABILITY.md")).not.toMatch(/system map|event timeline/i);
+  });
 });
