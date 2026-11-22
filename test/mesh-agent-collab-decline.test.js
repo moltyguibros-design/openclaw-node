@@ -26,7 +26,7 @@ Object.assign(process.env, {
 delete process.env.MESH_ALLOW_LOCAL_WORKERS;
 delete process.env.MESH_LLM_PROVIDER;
 
-const { describe, it, beforeEach, after } = require('node:test');
+const { describe, it, beforeEach, afterEach, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { StringCodec } = require('nats');
 const { isOpenClawWorkerProvider } = require('../lib/llm-providers.js');
@@ -123,6 +123,37 @@ describe('D11 decline on a local-model node', () => {
     await agent.__test.checkRecruitingSessions();
 
     assert.equal(calls.filter((c) => c.subject === 'mesh.collab.join').length, 1, 'the node joins');
+  });
+});
+
+describe('recruit node filter (preferred_nodes / exclude_nodes)', () => {
+  // Admit ollama so the D11 decline cannot mask the node filter.
+  beforeEach(() => {
+    fs.mkdirSync(path.join(TMP, '.openclaw'), { recursive: true });
+    fs.writeFileSync(path.join(TMP, '.openclaw', 'openclaw.env'), 'MESH_ALLOW_LOCAL_WORKERS=ollama\n');
+  });
+  afterEach(() => fs.rmSync(path.join(TMP, '.openclaw'), { recursive: true, force: true }));
+
+  async function recruit(extra) {
+    const task = recruitingTask(extra);
+    const calls = fakeBus(task);
+    await agent.__test.onRecruit({ session_id: task.collab_session_id, task_id: task.task_id });
+    return calls;
+  }
+  const joins = (calls) => calls.filter((c) => c.subject === 'mesh.collab.join').length;
+
+  it('an excluded node does not join', async () => {
+    const calls = await recruit({ exclude_nodes: ['node-local'] });
+    assert.equal(calls.filter((c) => c.subject === 'mesh.tasks.get').length, 1);
+    assert.equal(joins(calls), 0);
+  });
+
+  it('a node missing from preferred_nodes does not join', async () => {
+    assert.equal(joins(await recruit({ preferred_nodes: ['node-other'] })), 0);
+  });
+
+  it('a preferred node joins', async () => {
+    assert.equal(joins(await recruit({ preferred_nodes: ['node-local'] })), 1);
   });
 });
 

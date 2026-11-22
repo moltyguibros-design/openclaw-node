@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * agent-recruit.test.js — Tests for collab recruit signal and node filtering.
+ * agent-recruit.test.js — Tests for the collab recruit signal.
  * Covers Step 5 (recruit listener) from the plan.
  *
  * Requires: NATS + mesh-task-daemon running.
@@ -107,60 +107,5 @@ describe('Collab recruit signal', { skip: skipReason }, () => {
     assert.equal(session.mode, 'parallel');
     assert.equal(session.min_nodes, 2);
     assert.equal(session.current_nodes, 0);
-  });
-
-  it('preferred_nodes filtering: non-preferred node should not match', async () => {
-    const taskId = `${TEST_PREFIX}-prefer-1`;
-    createdTaskIds.push(taskId);
-
-    await rpc('mesh.tasks.submit', {
-      task_id: taskId,
-      title: 'Preferred nodes test',
-      preferred_nodes: ['specific-node-only'],
-      collaboration: { mode: 'parallel', min_nodes: 2, max_nodes: 2, join_window_s: 30, max_rounds: 1, convergence: { type: 'unanimous' }, scope_strategy: 'shared' },
-    });
-
-    // Simulate agent checking: fetch task and check preferred_nodes
-    const task = await rpc('mesh.tasks.get', { task_id: taskId });
-    const agentNodeId = 'some-other-node';
-    const isPreferred = !task.data.preferred_nodes.length ||
-      task.data.preferred_nodes.includes(agentNodeId);
-    assert.equal(isPreferred, false, 'Agent not in preferred_nodes should not match');
-  });
-
-  it('exclude_nodes filtering: excluded node should not match', async () => {
-    const taskId = `${TEST_PREFIX}-exclude-1`;
-    createdTaskIds.push(taskId);
-
-    await rpc('mesh.tasks.submit', {
-      task_id: taskId,
-      title: 'Exclude nodes test',
-      exclude_nodes: ['blocked-agent'],
-      collaboration: { mode: 'parallel', min_nodes: 2, max_nodes: 2, join_window_s: 30, max_rounds: 1, convergence: { type: 'unanimous' }, scope_strategy: 'shared' },
-    });
-
-    const task = await rpc('mesh.tasks.get', { task_id: taskId });
-    const agentNodeId = 'blocked-agent';
-    const isExcluded = task.data.exclude_nodes.includes(agentNodeId);
-    assert.equal(isExcluded, true, 'Agent in exclude_nodes should be blocked');
-  });
-
-  it('node with no preference restrictions can join', async () => {
-    const taskId = `${TEST_PREFIX}-open-1`;
-    createdTaskIds.push(taskId);
-
-    await rpc('mesh.tasks.submit', {
-      task_id: taskId,
-      title: 'Open recruit test',
-      collaboration: { mode: 'parallel', min_nodes: 2, max_nodes: 2, join_window_s: 30, max_rounds: 1, convergence: { type: 'unanimous' }, scope_strategy: 'shared' },
-    });
-
-    const task = await rpc('mesh.tasks.get', { task_id: taskId });
-    const agentNodeId = 'any-node';
-    const isPreferred = !task.data.preferred_nodes.length ||
-      task.data.preferred_nodes.includes(agentNodeId);
-    const isExcluded = task.data.exclude_nodes.includes(agentNodeId);
-    assert.equal(isPreferred, true, 'No preferred_nodes = open to all');
-    assert.equal(isExcluded, false, 'No exclude_nodes = nobody blocked');
   });
 });
