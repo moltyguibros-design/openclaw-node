@@ -8,32 +8,46 @@ import { fileURLToPath } from 'node:url';
 
 const script = fileURLToPath(new URL('../workspace-bin/soul-prompt', import.meta.url));
 const trustRegistry = fileURLToPath(new URL('../workspace-bin/trust-registry', import.meta.url));
+const accessControl = fileURLToPath(new URL('../workspace-bin/clawvault-access-control', import.meta.url));
+const soulMemoryAccess = fileURLToPath(new URL('../lib/soul-memory-access.mjs', import.meta.url));
 
 const asJson = v => (typeof v === 'string' ? v : JSON.stringify(v));
 const lastLine = s => s.trim().split('\n').at(-1);
 
-function run(t, registry, { soulId = 'probe', registryJson, caps, genes } = {}) {
+function run(t, registry, { soulId = 'probe', registryJson, caps, genes, taskId, handoff, accessCli = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soul-prompt-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const soulDir = path.join(root, 'home/.openclaw/souls', soulId);
+  const home = path.join(root, 'home');
+  const ws = path.join(home, '.openclaw/workspace');
+  const soulDir = path.join(home, '.openclaw/souls', soulId);
   fs.mkdirSync(soulDir, { recursive: true });
   if (caps !== undefined) fs.writeFileSync(path.join(soulDir, 'capabilities.json'), asJson(caps));
   if (genes !== undefined) {
     fs.mkdirSync(path.join(soulDir, 'evolution'));
     fs.writeFileSync(path.join(soulDir, 'evolution/genes.json'), asJson(genes));
   }
-  fs.mkdirSync(path.join(root, 'ws/bin'), { recursive: true });
-  fs.copyFileSync(script, path.join(root, 'ws/bin/soul-prompt'));
-  if (registry === 'real') fs.copyFileSync(trustRegistry, path.join(root, 'ws/bin/trust-registry'));
-  else if (registry) fs.writeFileSync(path.join(root, 'ws/bin/trust-registry'), registry, { mode: 0o755 });
+  fs.mkdirSync(path.join(ws, 'bin'), { recursive: true });
+  fs.copyFileSync(script, path.join(ws, 'bin/soul-prompt'));
+  if (registry === 'real') fs.copyFileSync(trustRegistry, path.join(ws, 'bin/trust-registry'));
+  else if (registry) fs.writeFileSync(path.join(ws, 'bin/trust-registry'), registry, { mode: 0o755 });
   if (registryJson) {
-    fs.mkdirSync(path.join(root, 'ws/.tmp'), { recursive: true });
-    fs.writeFileSync(path.join(root, 'ws/.tmp/trust-registry.json'), JSON.stringify(registryJson));
+    fs.mkdirSync(path.join(ws, '.tmp'), { recursive: true });
+    fs.writeFileSync(path.join(ws, '.tmp/trust-registry.json'), JSON.stringify(registryJson));
   }
-  const r = spawnSync('bash', [path.join(root, 'ws/bin/soul-prompt'), soulId], {
-    env: { ...process.env, HOME: path.join(root, 'home'), TMPDIR: root }, encoding: 'utf8',
+  if (accessCli) {
+    fs.copyFileSync(accessControl, path.join(ws, 'bin/clawvault-access-control'));
+    fs.mkdirSync(path.join(ws, 'lib'));
+    fs.copyFileSync(soulMemoryAccess, path.join(ws, 'lib/soul-memory-access.mjs'));
+  }
+  if (handoff !== undefined) {
+    fs.mkdirSync(path.join(ws, 'memory-vault/handoffs'), { recursive: true });
+    fs.writeFileSync(path.join(ws, `memory-vault/handoffs/${taskId}-handoff.md`), handoff);
+  }
+  const args = [path.join(ws, 'bin/soul-prompt'), soulId, ...(taskId === undefined ? [] : ['--task-id', taskId])];
+  const r = spawnSync('bash', args, {
+    env: { ...process.env, HOME: home, TMPDIR: root }, encoding: 'utf8',
   });
-  return { ...r, wsBin: path.join(root, 'ws/bin'), root };
+  return { ...r, wsBin: path.join(ws, 'bin'), root };
 }
 
 test('a half-open breaker with a probe allowed is not reported as open', t => {
@@ -99,4 +113,32 @@ test('an unreadable capabilities.json is reported instead of silently dropped', 
   assert.ok(r.stdout.includes('## g1'), r.stdout);
   assert.equal(lastLine(r.stderr), 'general-purpose');
   assert.deepEqual(fs.readdirSync(r.root).filter(f => f.startsWith('soul-prompt-meta')), []);
+});
+
+const memoryCaps = handoffs => ({ tools: ['Read'], permissions: { memory: { shared: 'read', private: ['probe'], handoffs } } });
+
+test('a soul without handoffs read gets the handoff doc withheld', t => {
+  const r = run(t, null, { caps: memoryCaps('none'), taskId: 'T-1', handoff: 'SECRET HANDOFF' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!r.stdout.includes('SECRET HANDOFF'), r.stdout);
+  assert.ok(r.stdout.includes('# Task Handoff Context\n\nWithheld: probe may not read handoffs/'), r.stdout);
+});
+
+test('a soul with handoffs read gets the handoff doc', t => {
+  const r = run(t, null, { caps: memoryCaps('read'), taskId: 'T-1', handoff: 'SECRET HANDOFF' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes('# Task Handoff Context\n\nSECRET HANDOFF'), r.stdout);
+});
+
+test('a task id that is not a plain id is refused', t => {
+  const r = run(t, null, { caps: memoryCaps('read'), taskId: '../x' });
+  assert.equal(r.status, 1);
+  assert.ok(r.stderr.includes('invalid task id'), r.stderr);
+});
+
+test('the handoff doc is withheld when the access check cannot run', t => {
+  const r = run(t, null, { caps: memoryCaps('read'), taskId: 'T-1', handoff: 'SECRET HANDOFF', accessCli: false });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!r.stdout.includes('SECRET HANDOFF'), r.stdout);
+  assert.ok(r.stdout.includes('Withheld: access check unavailable'), r.stdout);
 });

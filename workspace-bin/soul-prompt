@@ -10,6 +10,7 @@
 
 set -euo pipefail
 
+WORKSPACE="$(cd "$(dirname "$0")/.." && pwd)"
 SOULS_DIR="${HOME}/.openclaw/souls"
 HANDOFFS_DIR="${HOME}/.openclaw/workspace/memory-vault/handoffs"
 
@@ -41,6 +42,11 @@ done
 
 if [[ -z "$SOUL_ID" ]]; then
   echo "Usage: soul-prompt <soul-id> [--task-id T-xxx] [--extra-context \"...\"]" >&2
+  exit 1
+fi
+
+if [[ -n "$TASK_ID" && ! "$TASK_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  echo "ERROR: invalid task id '${TASK_ID}'" >&2
   exit 1
 fi
 
@@ -157,10 +163,20 @@ if [[ -n "$PARSED" ]]; then
   echo "$PARSED"
 fi
 
-# 5. Handoff context (if task-id provided)
+# 5. Handoff context (if task-id provided), only for a soul whose
+# capabilities.json lets it read handoffs/; an access check that cannot run withholds it.
 if [[ -n "$TASK_ID" ]]; then
+  ACCESS=$(OPENCLAW_SOULS_DIR="$SOULS_DIR" "$WORKSPACE/bin/clawvault-access-control" "$SOUL_ID" handoffs read 2>/dev/null) || true
   HANDOFF_DOC="${HANDOFFS_DIR}/${TASK_ID}-handoff.md"
-  if [[ -f "$HANDOFF_DOC" ]]; then
+  if [[ "$ACCESS" != GRANTED* ]]; then
+    REASON="${ACCESS#DENIED: }"
+    echo "---"
+    echo ""
+    echo "# Task Handoff Context"
+    echo ""
+    echo "Withheld: ${REASON:-access check unavailable}"
+    echo ""
+  elif [[ -f "$HANDOFF_DOC" ]]; then
     echo "---"
     echo ""
     echo "# Task Handoff Context"
@@ -181,7 +197,6 @@ if [[ -n "$EXTRA_CONTEXT" ]]; then
 fi
 
 # 7. Trust tier + autonomy level (from trust-registry)
-WORKSPACE="$(cd "$(dirname "$0")/.." && pwd)"
 TRUST_REGISTRY="${WORKSPACE}/.tmp/trust-registry.json"
 if [[ -f "$TRUST_REGISTRY" ]]; then
   # trust-registry owns the scoring; -B keeps the import from writing a
