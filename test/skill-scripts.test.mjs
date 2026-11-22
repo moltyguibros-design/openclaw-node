@@ -11,7 +11,7 @@ import { describe, it } from 'node:test';
 import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -138,5 +138,28 @@ describe('clawddocs', () => {
     assert.match(skill, /https:\/\/docs\.openclaw\.ai\/<path>/);
     assert.match(skill, /web-fetch tool/);
     assert.doesNotMatch(skill, /docs\.clawd\.bot/);
+  });
+});
+
+// The installer installs a skill's Python deps only from its requirements.txt, so
+// web-search, without one, exited "Missing required dependency" on every node.
+describe('skill Python dependencies', () => {
+  const PIP = { duckduckgo_search: 'duckduckgo-search', requests: 'requests', yaml: 'pyyaml', matplotlib: 'matplotlib' };
+  const IMPORT = new RegExp(`^\\s*(?:import|from)\\s+(${Object.keys(PIP).join('|')})\\b`, 'gm');
+  const py = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    if (e.isDirectory()) return e.name === 'node_modules' ? [] : py(join(dir, e.name));
+    return e.name.endsWith('.py') ? [join(dir, e.name)] : [];
+  });
+
+  it('every shipped skill that imports a pip package lists it in requirements.txt', () => {
+    const missing = [];
+    for (const e of readdirSync(SKILLS, { withFileTypes: true })) {
+      if (!e.isDirectory() || e.name === '_quarantine') continue;
+      const dir = join(SKILLS, e.name);
+      const needs = new Set(py(dir).flatMap((f) => [...readFileSync(f, 'utf8').matchAll(IMPORT)].map((m) => PIP[m[1]])));
+      const req = existsSync(join(dir, 'requirements.txt')) ? readFileSync(join(dir, 'requirements.txt'), 'utf8').toLowerCase() : '';
+      for (const pkg of needs) if (!new RegExp(`^${pkg}\\b`, 'm').test(req)) missing.push(`${e.name}: ${pkg}`);
+    }
+    assert.deepEqual(missing, []);
   });
 });

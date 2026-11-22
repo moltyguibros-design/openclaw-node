@@ -855,6 +855,35 @@ test('env.sh builds the event-schemas dist the memory daemon needs at startup', 
 // (lib/llm-providers.js); the installer used to detect three and silently
 // `npm install -g` one vendor's CLI when none was found, and the env example
 // shipped that vendor as the default. Lock the agnostic behaviour.
+test('skill pip deps retry past PEP 668 like PyYAML does, and report success only when one install worked', () => {
+  const src = moduleSrc['workspace.sh'];
+  const start = src.indexOf('for skill_dir in "$WORKSPACE/skills"/*/; do');
+  assert.ok(start >= 0);
+  const loop = src.slice(start, src.indexOf('\ndone\n', start) + '\ndone\n'.length);
+  const tmp = mkdtempSync(join(tmpdir(), 'oc-skill-pip-'));
+  mkdirSync(join(tmp, 'ws/skills/a'), { recursive: true });
+  writeFileSync(join(tmp, 'ws/skills/a/requirements.txt'), 'requests>=2\n');
+  mkdirSync(join(tmp, 'bin'));
+  const runLoop = (pip) => {
+    writeFileSync(join(tmp, 'bin/pip3'), `#!/bin/sh\necho "$*" >> "${tmp}/pip.log"\n${pip}\n`, { mode: 0o755 });
+    rmSync(join(tmp, 'pip.log'), { force: true });
+    const r = spawnSync('bash', ['-c', `run() { "$@"; }; info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }\nWORKSPACE="$1"\n${loop}`, 'x', join(tmp, 'ws')], {
+      encoding: 'utf8', env: { ...process.env, PATH: `${join(tmp, 'bin')}:${process.env.PATH}` },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    return { out: r.stdout, log: readFileSync(join(tmp, 'pip.log'), 'utf8').trim().split('\n') };
+  };
+  let { out, log } = runLoop('case "$*" in *--break-system-packages*) exit 0 ;; esac; exit 1');
+  assert.equal(log.length, 2);
+  assert.match(log[1], /--user --break-system-packages -r .*\/skills\/a\/+requirements\.txt/);
+  assert.match(out, /INFO {3}pip: a/);
+  assert.doesNotMatch(out, /pip failed/);
+  ({ out } = runLoop('exit 1'));
+  assert.match(out, /WARN {3}pip failed: a/);
+  assert.doesNotMatch(out, /INFO {3}pip: a/);
+  rmSync(tmp, { recursive: true, force: true });
+});
+
 test('installer seats the operator\'s provider and never installs a vendor CLI unasked', () => {
   assert.ok(FLAGS.includes('--provider='));
   const env = moduleSrc['env.sh'];

@@ -245,6 +245,7 @@ The installer auto-detects and installs these:
 - **crypto-price** — pip: `matplotlib`
 - **gemini-deep-research** — pip: `requests`
 - **n8n** — pip: `requests`
+- **web-search** — pip: `duckduckgo-search`
 - **fast-browser-use** — Rust (requires manual `cargo build` if needed)
 
 ## Obsidian Setup

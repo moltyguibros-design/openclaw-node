@@ -250,8 +250,13 @@ for skill_dir in "$WORKSPACE/skills"/*/; do
   fi
   # pip-based skills
   if [ -f "$skill_dir/requirements.txt" ]; then
-    run pip3 install --user -r "$skill_dir/requirements.txt" 2>/dev/null || warn "  pip failed: $skill_name"
-    info "  pip: $skill_name"
+    # PEP 668 system Pythons (Ubuntu 24.04, Homebrew) refuse --user alone, as prereqs.sh found for PyYAML.
+    if run pip3 install --user -r "$skill_dir/requirements.txt" 2>/dev/null \
+      || run pip3 install --user --break-system-packages -r "$skill_dir/requirements.txt"; then
+      info "  pip: $skill_name"
+    else
+      warn "  pip failed: $skill_name"
+    fi
   fi
 done
 fi
