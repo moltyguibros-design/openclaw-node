@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useMemo, useRef } from "react";
 import { useMemorySearch, useMemoryDocs } from "@/lib/hooks";
+import { AGENT_NAME } from "@/lib/client-agent-name";
 import { MemoryList } from "@/components/memory/memory-list";
 import { SearchResults } from "@/components/memory/search-results";
 import { DocReader } from "@/components/memory/doc-reader";
@@ -59,7 +60,7 @@ export default function MemoryPage() {
           <div>
             <h1 className="text-xl font-bold text-foreground">Memory</h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Every memory Daedalus has ever created
+              Every memory {AGENT_NAME} has ever created
             </p>
           </div>
           <div className="flex items-center gap-4 text-xs text-muted-foreground">

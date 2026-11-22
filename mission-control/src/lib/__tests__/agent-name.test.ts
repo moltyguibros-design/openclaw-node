@@ -49,6 +49,8 @@ describe("one agent name everywhere", () => {
     "components/board/unified-task-dialog.tsx",
     "components/board/status-banner.tsx",
     "components/live/chat-bubble.tsx",
+    "app/layout.tsx",
+    "app/memory/page.tsx",
   ])("%s labels with the shared client name, not a literal", (file) => {
     const src = fs.readFileSync(path.join(SRC, file), "utf8");
     expect(src).toContain('from "@/lib/client-agent-name"');
