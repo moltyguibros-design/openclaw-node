@@ -14,6 +14,7 @@ test('renamed skills declare their directory id as their name', () => {
   assert.equal(frontName('moltbook-interact/SKILL.md'), 'moltbook-interact');
   assert.equal(frontName('self-improving-agent/SKILL.md'), 'self-improving-agent');
   assert.equal(frontName('_quarantine/refactor-suggest/SKILL.md'), 'refactor-suggest');
+  assert.equal(frontName('agent-browser/SKILL.md'), 'agent-browser');
 });
 
 test('user-story example quotes its arguments as bash will read them', () => {
