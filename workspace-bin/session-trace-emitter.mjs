@@ -117,7 +117,8 @@ function entryEvents(entry, toolNames) {
   for (const block of msg.content) {
     if (block?.type === 'tool_use' || block?.type === 'toolCall') {
       const name = block.name || 'unknown';
-      if (block.id) toolNames.set(block.id, name);
+      // Gateway results carry their own toolName; only Claude Code results need the id.
+      if (block.type === 'tool_use' && block.id) toolNames.set(block.id, name);
       events.push(['tool_use', `tool=${name}`]);
     } else if (block?.type === 'tool_result') {
       const name = toolNames.get(block.tool_use_id) || 'unknown';

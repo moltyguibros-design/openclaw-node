@@ -66,6 +66,19 @@ test('gateway turns are emitted by role, with their tool calls and results', (t)
   ]);
 });
 
+test('gateway toolCall ids are not kept: their results name the tool themselves', (t) => {
+  const events = capture(t, [
+    { type: 'message', message: { role: 'assistant', content: [{ type: 'toolCall', id: 'c1', name: 'exec' }] } },
+    { type: 'message', message: { role: 'toolResult', toolName: 'exec', toolCallId: 'c1' } },
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c1' }] } },
+  ]);
+  assert.deepEqual(events.map((e) => [e.fn, e.args_summary]), [
+    ['tool.call', 'tool=exec'],
+    ['tool.result', 'tool=exec'],
+    ['tool.result', 'tool=unknown'],
+  ]);
+});
+
 test('Claude Code tool_use blocks, model and usage are emitted, usage once per turn', (t) => {
   const usage = { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 2 };
   const turn = (content) => ({ type: 'assistant', message: { id: 'm1', model: 'model-x', role: 'assistant', content, usage } });
