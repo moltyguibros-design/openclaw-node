@@ -929,6 +929,9 @@ test('the retired list names only files the repo no longer ships, and both deplo
   const entries = readFileSync(join(ROOT, 'scripts/install/retired-files.txt'), 'utf8').split('\n')
     .filter((l) => l.trim() && !l.startsWith('#')).map((l) => l.trim().split(/\s+/));
   assert.ok(entries.length > 0);
+  for (const name of ['extract-existing-sessions.mjs', 'fed-benchmark-driver.mjs', 'grappe-benchmark.mjs']) {
+    assert.ok(entries.some(([g, n]) => g === 'mesh-bin' && n === name), `mesh-bin ${name} is not retired`);
+  }
   const source = { 'workspace-bin': 'workspace-bin', 'mesh-bin': 'bin' };
   for (const [group, name] of entries) {
     assert.ok(source[group], `unknown group ${group}`);

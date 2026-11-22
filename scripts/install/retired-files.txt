@@ -11,6 +11,11 @@ workspace-bin daily-log-writer.mjs
 workspace-bin mesh-bridge.mjs
 workspace-bin lane-watchdog.js
 mesh-bin session-search.mjs
+# The session backfill CLI diverged from the live flush; the benchmark tools
+# belonged to the retired federation premise benchmark.
+mesh-bin extract-existing-sessions.mjs
+mesh-bin fed-benchmark-driver.mjs
+mesh-bin grappe-benchmark.mjs
 # sync-to-harness: its "dry run" rewrote ~/openclaw (the deploy checkout) with
 # --delete and pushed to main.
 workspace-bin sync-to-harness
