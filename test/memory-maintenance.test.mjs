@@ -21,7 +21,7 @@ const MAINT = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   '..', 'workspace-bin', 'memory-maintenance.mjs'
 );
-const { postAuthenticatedMutation } = await import(MAINT);
+const { postAuthenticatedMutation, runningTaskTitle } = await import(MAINT);
 
 test('the MC token path has one override, documented test-only, and no third spelling', () => {
   const repo = path.join(path.dirname(MAINT), '..');
@@ -37,6 +37,13 @@ const res = (status, body, { json = true } = {}) => ({
   ok: status >= 200 && status < 300,
   status,
   text: async () => (json ? JSON.stringify(body) : String(body)),
+});
+
+test('the ClawVault checkpoint names the running task, not the first title in the file', () => {
+  const tasks = '- task_id: T1\n  title: "Old done task"\n  status: done\n- task_id: T2\n  title: "Live work"\n  status: running\n';
+  assert.equal(runningTaskTitle(tasks), 'Live work');
+  assert.equal(runningTaskTitle('- task_id: T1\n  title: "Old done task"\n  status: done\n'), null);
+  assert.equal(runningTaskTitle('# Active tasks\n'), null);
 });
 
 test('rejects the 401 that was previously reported as success', async () => {

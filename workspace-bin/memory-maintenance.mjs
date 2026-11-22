@@ -247,6 +247,15 @@ function checkCompanionFreshness() {
   }
 }
 
+export function runningTaskTitle(content) {
+  for (const block of content.split(/(?=^- task_id:)/m)) {
+    if (!block.includes('status: running')) continue;
+    const titleMatch = block.match(/title:\s*"?(.+?)"?\s*$/m);
+    if (titleMatch) return titleMatch[1];
+  }
+  return null;
+}
+
 // 6. ClawVault checkpoint
 async function checkClawVault() {
   if (!fs.existsSync(CLAWVAULT)) return;
@@ -254,10 +263,7 @@ async function checkClawVault() {
 
   if (dryRun) { log('DRY RUN: Would run clawvault checkpoint'); return; }
 
-  const taskContent = readFileOr(ACTIVE_TASKS);
-  let workingOn = 'maintenance cycle';
-  const runningMatch = taskContent.match(/title:\s*"?(.+?)"?\s*$/m);
-  if (runningMatch) workingOn = runningMatch[1];
+  const workingOn = runningTaskTitle(readFileOr(ACTIVE_TASKS)) || 'maintenance cycle';
 
   try {
     await execFileAsync(CLAWVAULT, ['checkpoint', '--working-on', workingOn, '--focus', 'memory-maintenance'], {
