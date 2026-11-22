@@ -173,11 +173,10 @@ See `.github/workflows/test.yml`.
 
 ## Coverage Gaps (known)
 
-These modules have no direct unit tests, or only for one helper. Integration tests cover some indirectly.
+These modules have no direct unit tests, or only for the functions named. Integration tests cover some indirectly.
 
 | Module | Reason |
 |--------|--------|
-| `mission-control/.../memory/entities.ts` | NLP-like entity extraction |
-| `mission-control/.../memory/extract.ts` | Heuristic-based fact extraction (only `getItemsWithSource` is unit-tested) |
-| `mission-control/.../scheduler.ts` | Cron evaluation, timezone handling |
-| `mission-control/.../hooks.ts` | Lifecycle hooks (only `memoryContentKey` is unit-tested) |
+| `mission-control/.../memory/entities.ts` | NLP-like entity extraction (only `extractEntitiesFromFact` is unit-tested) |
+| `mission-control/.../memory/extract.ts` | Heuristic-based fact extraction (only `storeExtractedFacts`, `getActiveItems`, `getItemsWithSource`, `searchItems`, `getExtractionStats` are unit-tested) |
+| `mission-control/.../hooks.ts` | Lifecycle hooks (only `fetcher`, `interveneSession`, `memoryContentKey` are unit-tested) |

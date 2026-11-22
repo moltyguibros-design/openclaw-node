@@ -61,6 +61,22 @@ test('TEST.md names the CI Node matrix and lists no tested module as a coverage 
     const covering = testFiles.find((f) => f.startsWith(`${mod}.test.`) || f.startsWith(`${mod}-lifecycle.test.`));
     assert.equal(covering, undefined, `${mod} is listed as untested but test/${covering} exists`);
   }
+
+  const mcTests = readdirSync(new URL('../mission-control/src/lib/__tests__/', import.meta.url))
+    .filter((f) => f.endsWith('.ts')).map((f) => read(`mission-control/src/lib/__tests__/${f}`));
+  const mcRows = [...gaps.matchAll(/^\| `mission-control\/\.\.\.\/([\w/-]+)\.tsx?` \| (.*) \|$/gm)];
+  assert.ok(mcRows.length >= 1, 'Mission Control gap rows parse');
+  for (const [, tail, reason] of mcRows) {
+    const fns = [...read(`mission-control/src/lib/${tail}.ts`).matchAll(/^export (?:async )?function (\w+)/gm)].map((m) => m[1]);
+    const valueImport = new RegExp(`(?:import (?!type )[^;]*from |import\\()["'](?:@/lib|\\.\\.)/${tail}["']`);
+    const importers = mcTests.filter((src) => valueImport.test(src));
+    const tested = fns.filter((fn) => importers.some((src) => new RegExp(`\\b${fn}\\b`).test(src)));
+    if (tested.length === 0) continue;
+    assert.ok(tested.length < fns.length, `${tail}.ts: every exported function is unit-tested; drop the gap row`);
+    const named = reason.match(/\(only ((?:`\w+`(?:, )?)+) (?:is|are) unit-tested\)$/);
+    assert.ok(named, `${tail}.ts row must say which functions are unit-tested: ${tested.join(', ')}`);
+    assert.deepEqual([...named[1].matchAll(/`(\w+)`/g)].map((m) => m[1]).sort(), [...tested].sort(), `${tail}.ts row names the wrong tested functions`);
+  }
 });
 
 test('README hooks table says validate-push.sh refuses force pushes, as the hook does', () => {
