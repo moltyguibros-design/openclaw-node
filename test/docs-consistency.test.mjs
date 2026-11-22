@@ -238,3 +238,22 @@ test('INSTALL_TEST_PROTOCOL T1 unit counts match the service manifest per role',
   assert.ok(doc.includes(`openclaw-*.timer: ${timers}`), `T1.5 must give ${timers} timers`);
   assert.doesNotMatch(doc, /macOS lead: \d+ files/);
 });
+
+test('INSTALL_TEST_PROTOCOL T3 extraction-mode grep matches the lines the daemon logs', () => {
+  const protocol = read('docs/INSTALL_TEST_PROTOCOL.md');
+  const t3 = protocol.slice(protocol.indexOf('\n## T3 '), protocol.indexOf('\n## T4 '));
+  const grep = t3.split('\n').find((l) => l.startsWith('grep -E ') && l.includes('memory-daemon.log'));
+  assert.ok(grep, 'T3 extraction-mode grep');
+  const re = new RegExp(grep.match(/^grep -E (['"])(.+?)\1 /)[2]);
+  const templates = [...read('workspace-bin/memory-daemon.mjs').matchAll(/log\(`([^`]*(?:flush|synthesis) \[\$\{result\.mode \|\| 'regex'\}\][^`]*)`\)/g)].map((m) => m[1]);
+  assert.ok(templates.length >= 4, 'daemon extraction log templates');
+  const modes = [...new Set([...read('lib/pre-compression-flush.mjs').matchAll(/mode: (?:isStructured \? )?'([a-z-]+)'(?: : '([a-z-]+)')?/g)].flatMap((m) => m.slice(1)).filter((m) => m && m !== 'none'))];
+  assert.deepEqual(modes.sort(), ['llm', 'llm-dedup', 'regex', 'regex-diverted']);
+  for (const template of templates) {
+    for (const mode of modes) {
+      const line = template.replace("${result.mode || 'regex'}", mode).replace(/\$\{[^}]+\}/g, '0');
+      assert.match(line, re, `T3 grep misses the daemon line "${line}"`);
+    }
+  }
+  assert.match(t3, /# PASS: \[llm\] or \[llm-dedup\]/);
+});

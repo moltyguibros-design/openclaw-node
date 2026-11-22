@@ -79,8 +79,8 @@ grep -c ERR_MODULE_NOT_FOUND ~/.openclaw/workspace/.tmp/memory-daemon.err ~/.ope
 # 2. Watch ingestion
 tail -20 ~/.openclaw/workspace/.tmp/memory-daemon.log      # expect: session detected → flush → extraction
 # 3. Extraction is LLM-mode, not silently regex
-grep -E "mode.*(llm|regex)" ~/.openclaw/workspace/.tmp/memory-daemon.log | tail -3
-# PASS: llm (regex acceptable ONLY if --skip-llm or below RAM floor — then it must ALSO show in node-watch)
+grep -E '(flush|synthesis) \[(llm|llm-dedup|regex|regex-diverted)\]' ~/.openclaw/workspace/.tmp/memory-daemon.log | tail -3
+# PASS: [llm] or [llm-dedup] (regex / regex-diverted acceptable ONLY if --skip-llm or below RAM floor — then it must ALSO show in node-watch)
 # 4. Inject answers
 curl -s -X POST 127.0.0.1:7893/memory/inject -H 'Content-Type: application/json' \
   -d '{"prompt":"what did we work on"}' | head -c 400
