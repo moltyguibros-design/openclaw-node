@@ -102,3 +102,14 @@ describe("hyperagent-read (readonly evidence layer)", () => {
     expect(STATE_DB_PATH).toBe(dbPath);
   });
 });
+
+describe("HyperAgent page", () => {
+  it("styles exactly the proposal statuses ha_proposals allows", () => {
+    const store = fs.readFileSync(path.join(__dirname, "../../../../lib/hyperagent-store.mjs"), "utf8");
+    const allowed = store.match(/status TEXT NOT NULL DEFAULT 'pending' CHECK\(status IN \(([^)]*)\)\)/)![1];
+    const page = fs.readFileSync(path.join(__dirname, "../../app/hyperagent/page.tsx"), "utf8");
+    const start = page.indexOf("const STATUS_TEXT");
+    const keys = [...page.slice(start, page.indexOf("};", start)).matchAll(/(\w+):\s*"text-/g)].map((m) => m[1]);
+    expect(keys.sort()).toEqual([...allowed.matchAll(/'(\w+)'/g)].map((m) => m[1]).sort());
+  });
+});
