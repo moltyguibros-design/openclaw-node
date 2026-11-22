@@ -20,7 +20,13 @@ import {
   updateTask,
 } from "../hooks";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.mocked(mutate).mockClear();
+});
+
+const matchers = () =>
+  vi.mocked(mutate).mock.calls.map(([key]) => key).filter((key): key is (k: unknown) => boolean => typeof key === "function");
 
 const reply = (body: unknown, status: number) =>
   vi.fn(async () => new Response(JSON.stringify(body), { status }));
@@ -78,4 +84,21 @@ describe("mutation helpers reject a refused write instead of resolving the error
     vi.stubGlobal("fetch", reply({ id: "x" }, 201));
     await expect(createTask({ title: "x" })).resolves.toEqual({ id: "x" });
   });
+});
+
+it("revalidates every keyed variant of the session list, not a bare key no hook uses", async () => {
+  vi.stubGlobal("fetch", reply({ ok: true, action: "aborted" }, 200));
+  await interveneSession({ action: "abort", sessionId: "s1" });
+  const calls = vi.mocked(mutate).mock.calls.map(([key]) => key);
+  expect(calls).not.toContain("/api/cowork/sessions");
+  const sessions = matchers().find((m) => m("/api/cowork/sessions?status=recruiting,active"));
+  expect(sessions?.("/api/cowork/sessions?status=converged,completed,aborted&limit=8")).toBe(true);
+  expect(sessions?.("/api/tasks")).toBe(false);
+});
+
+it("dispatchCollabTask revalidates the keyed session list", async () => {
+  vi.stubGlobal("fetch", reply({ ok: true }, 200));
+  await dispatchCollabTask({ title: "t" });
+  expect(vi.mocked(mutate).mock.calls.map(([key]) => key)).not.toContain("/api/cowork/sessions");
+  expect(matchers().some((m) => m("/api/cowork/sessions?status=recruiting,active"))).toBe(true);
 });

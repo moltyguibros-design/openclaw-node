@@ -1,6 +1,11 @@
 import useSWR, { mutate } from "swr";
 import { useEffect, useRef } from "react";
 
+// The session list and the activity feed are keyed with query strings, and a bare
+// key passed to mutate matches none of them.
+const revalidatePrefix = (prefix: string) =>
+  mutate((key) => typeof key === "string" && key.startsWith(prefix));
+
 // SWR sets `error` only when the fetcher throws; API routes answer failures with a JSON {error} body.
 export async function fetcher(url: string) {
   const res = await fetch(url);
@@ -12,10 +17,11 @@ export async function fetcher(url: string) {
 }
 
 // A refused write still revalidates, so a view that moved the item locally snaps back to the server's state.
-async function send(url: string, init: RequestInit, revalidate: string[]) {
+async function send(url: string, init: RequestInit, revalidate: string[], prefixes: string[] = []) {
   const res = await fetch(url, init);
   const body = await res.json().catch(() => null);
   for (const key of revalidate) await mutate(key);
+  for (const prefix of prefixes) await revalidatePrefix(prefix);
   if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
   return body;
 }
@@ -557,11 +563,7 @@ export async function dispatchCollabTask(params: {
   metric?: string;
   scope?: string[];
 }) {
-  return send("/api/cowork/dispatch", json("POST", params), [
-    "/api/cowork/sessions",
-    "/api/cowork/clusters",
-    "/api/tasks",
-  ]);
+  return send("/api/cowork/dispatch", json("POST", params), ["/api/cowork/clusters", "/api/tasks"], ["/api/cowork/sessions"]);
 }
 
 export async function interveneSession(params: {
@@ -569,7 +571,7 @@ export async function interveneSession(params: {
   sessionId: string;
   nodeId?: string;
 }) {
-  return send("/api/cowork/intervene", json("POST", params), ["/api/cowork/sessions", "/api/tasks"]);
+  return send("/api/cowork/intervene", json("POST", params), ["/api/tasks"], ["/api/cowork/sessions"]);
 }
 
 // --- Mesh SSE integration ---
@@ -588,14 +590,14 @@ export function useMeshSSE() {
     const invalidate = () => {
       mutate("/api/tasks");
       mutate("/api/mesh/nodes");
-      mutate("/api/activity");
+      revalidatePrefix("/api/activity");
     };
 
     const invalidateCollab = () => {
-      mutate("/api/cowork/sessions");
+      revalidatePrefix("/api/cowork/sessions");
       mutate("/api/cowork/clusters");
       mutate("/api/tasks");
-      mutate("/api/activity");
+      revalidatePrefix("/api/activity");
     };
 
     // Task events
