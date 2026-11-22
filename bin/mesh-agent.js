@@ -2495,7 +2495,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
     // release when the stop was an escalation.
     const foremanStop = supervisor?.state.last_stop?.attempt === attempt ? supervisor.state.last_stop : null;
     if (foremanStop) {
-      const escalated = Boolean(supervisor.state.escalation);
+      const escalated = foremanStop.action === 'ESCALATE';
       const attemptRecord = {
         approach: `Attempt ${attempt}: ${escalated ? 'escalated' : 'stopped'} by Foreman — ${foremanStop.reason}`,
         result: (foremanStop.guidance || foremanStop.reason).slice(-500),
@@ -2951,6 +2951,7 @@ module.exports.__test = {
   onRecruit, checkRecruitingSessions,
   claimAndRun,
   runLLM,
+  runAttempts,
   onStopNotice, listenForStops,
   evaluateMetric,
   parseReflection,

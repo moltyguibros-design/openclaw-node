@@ -145,3 +145,29 @@ describe('the reported cost is every attempt the task paid for, not the last one
     near(completed.result.cost?.estimatedCostUsd, 0.2);
   });
 });
+
+describe('a Foreman stop is an escalation only when the stop itself escalated', () => {
+  beforeEach(freshWorkspace);
+
+  it('an earlier advisory escalation does not turn a STOP_WORKER into a release', async () => {
+    const seen = fakeDaemon();
+    const t = { ...task('F-1', 'exhaust-ok-stub'), budget_deadline: new Date(Date.now() + 5 * 60_000).toISOString() };
+    const worktreePath = agent.__test.createWorktree(t.task_id);
+    fs.writeFileSync(path.join(worktreePath, 'check.js'), 'process.exit(0)\n');
+    const supervisor = {
+      enforce: true,
+      closed: false,
+      state: {
+        task_id: t.task_id,
+        escalation: { reason: 'needs_human' },
+        last_stop: { attempt: 1, action: 'STOP_WORKER', reason: 'stuck', guidance: 'try X' },
+      },
+      workerStarted() {}, attach() {}, workerExited() {}, recordVerification() {},
+      async close() { this.closed = true; },
+      summaryLine: () => '',
+    };
+    await agent.__test.runAttempts(t, worktreePath, supervisor, Date.now());
+    assert.ok(seen['mesh.tasks.complete'], 'attempt 2 ran and completed');
+    assert.equal(seen['mesh.tasks.release'], undefined);
+  });
+});
