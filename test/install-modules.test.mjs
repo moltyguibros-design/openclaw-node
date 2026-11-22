@@ -1240,6 +1240,48 @@ exit 0
   assert.match(moduleSrc['env.sh'], /export NODE_BIN_DIR="\$\(dirname "\$NODE_BIN"\)"/);
 });
 
+// session-stop.sh was wired to Stop, which Claude Code fires after every assistant turn,
+// so each turn appended a false "Session ended" block to the day's memory log.
+test('session-stop.sh runs on SessionEnd, and an --update merge drops its old Stop entry', (t) => {
+  const SESSION_STOP = 'bash .claude/hooks/session-stop.sh';
+  const settings = JSON.parse(readFileSync(join(ROOT, 'config/claude-settings.json'), 'utf8'));
+  assert.equal(settings.hooks.Stop, undefined);
+  assert.ok(settings.hooks.SessionEnd.some((e) => e.hooks.some((h) => h.command === SESSION_STOP)));
+
+  if (spawnSync('sh', ['-c', 'command -v jq'], { encoding: 'utf8' }).status !== 0) {
+    t.skip('jq not installed');
+    return;
+  }
+  const integ = moduleSrc['integrations.sh'];
+  const start = integ.indexOf('MERGED=$(jq -s');
+  const endMark = `' "$SETTINGS_DST" "$SETTINGS_SRC")`;
+  const end = integ.indexOf(endMark, start);
+  assert.ok(start > 0 && end > start, 'the settings merge must be found');
+  const block = integ.slice(start, end + endMark.length);
+  const root = mkdtempSync(join(tmpdir(), 'openclaw-settings-merge-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const merge = (existing) => {
+    const dst = join(root, 'settings.json');
+    writeFileSync(dst, JSON.stringify(existing));
+    const r = spawnSync('bash', ['-c', `set -euo pipefail\n${block}\necho "$MERGED"`], {
+      encoding: 'utf8', env: { ...process.env, SETTINGS_SRC: join(ROOT, 'config/claude-settings.json'), SETTINGS_DST: dst },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout);
+  };
+  const entry = (...commands) => ({ matcher: '', hooks: commands.map((command) => ({ type: 'command', command })) });
+  const permissions = { allow: ['Bash(make *)'] };
+
+  const mixed = merge({ permissions, hooks: { Stop: [entry(SESSION_STOP, 'my-own.sh')] } });
+  assert.deepEqual(mixed.permissions, permissions);
+  assert.deepEqual(mixed.hooks.Stop, [entry('my-own.sh')]);
+  assert.ok(mixed.hooks.SessionEnd.some((e) => e.hooks.some((h) => h.command === SESSION_STOP)));
+
+  const only = merge({ permissions, hooks: { Stop: [entry(SESSION_STOP)] } });
+  assert.equal(only.hooks.Stop, undefined);
+  assert.ok(only.hooks.SessionEnd.some((e) => e.hooks.some((h) => h.command === SESSION_STOP)));
+});
+
 // The PreCompact hook the installer deploys (and wires in config/claude-settings.json)
 // was a no-op stub, so no extraction fired on compaction. It now runs the trigger
 // CLI from the checkout, both as the repo copy and as the deployed copy.

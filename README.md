@@ -946,7 +946,7 @@ Full implementation reference: `docs/circling-strategy-implementationV3.md` (its
 | `validate-commit.sh` | PreToolUse (Bash) | Blocks secrets, validates JSON, warns on bare TODOs, checks commit format |
 | `validate-push.sh` | PreToolUse (Bash) | Refuses force-push (exit 2); warns on protected-branch pushes |
 | `pre-compact.sh` | PreCompact | Publishes `mesh.memory.extract_request` (via `bin/openclaw-extract-now.mjs`, detached) so the memory daemon extracts before compaction |
-| `session-stop.sh` | Stop | Logs session end to daily memory file |
+| `session-stop.sh` | SessionEnd | Logs session end to daily memory file |
 | `log-agent.sh` | SubagentStart | Audit trail of every subagent spawn |
 
 Git hooks (`pre-commit`, `pre-push`) delegate to the same scripts — enforcement works regardless of IDE or AI tool.

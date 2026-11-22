@@ -216,6 +216,15 @@ if [ -f "$SETTINGS_SRC" ]; then
           )
         )
       }
+      # session-stop.sh moved from Stop, which fires after every turn, to SessionEnd.
+      | if .hooks.Stop then
+          .hooks.Stop |= map(
+            .hooks |= map(select(.command != "bash .claude/hooks/session-stop.sh"))
+            | select(.hooks | length > 0)
+          )
+          | if .hooks.Stop == [] then del(.hooks.Stop) else . end
+        else .
+        end
     ' "$SETTINGS_DST" "$SETTINGS_SRC")
     echo "$MERGED" > "$SETTINGS_DST"
     info "Merged OpenClaw hooks into existing settings.json (permissions preserved)"
