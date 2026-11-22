@@ -4,7 +4,6 @@ description: "Produce founder-grade strategic takes on links, posts, threads, do
 triggers:
   - "what do you think of this"
   - "give me your take on"
-  - "summarize this article"
   - "break down this thread"
 negative_triggers:
   - "write a blog post"

@@ -25,15 +25,26 @@ test('shipped skills have unique frontmatter names', () => {
   assert.deepEqual(dupes, []);
 });
 
+const triggers = (dir) => {
+  const front = readFileSync(join(SKILLS, dir, 'SKILL.md'), 'utf8').match(/^---\n([\s\S]*?)\n---/)?.[1] ?? '';
+  const block = front.match(/^triggers:\n((?:[ \t]+-.*\n?)+)/m)?.[1] ?? '';
+  return [...block.matchAll(/^\s+-\s*["']?(.+?)["']?\s*$/gm)].map((m) => m[1].toLowerCase());
+};
+
 // web-search and tavily-search both fired on "search the web for" and two
 // more phrases; Tavily now answers only when asked for by name.
 test('tavily-search shares no trigger phrase with web-search', () => {
-  const triggers = (dir) => {
-    const front = readFileSync(join(SKILLS, dir, 'SKILL.md'), 'utf8').match(/^---\n([\s\S]*?)\n---/)[1];
-    const block = front.match(/^triggers:\n((?:[ \t]+-.*\n?)+)/m)[1];
-    return [...block.matchAll(/^\s+-\s*["']?(.+?)["']?\s*$/gm)].map((m) => m[1].toLowerCase());
-  };
   const tavily = triggers('tavily-search');
   assert.ok(tavily.length > 0 && tavily.every((t) => t.includes('tavily')), tavily.join(', '));
   assert.deepEqual(tavily.filter((t) => triggers('web-search').includes(t)), []);
+});
+
+test('no trigger phrase is shared by two shipped skills', () => {
+  const owners = new Map();
+  for (const dir of readdirSync(SKILLS, { withFileTypes: true })) {
+    if (!dir.isDirectory() || dir.name === '_quarantine' || !existsSync(join(SKILLS, dir.name, 'SKILL.md'))) continue;
+    for (const t of new Set(triggers(dir.name))) owners.set(t, [...(owners.get(t) || []), dir.name]);
+  }
+  assert.ok(owners.size > 100, 'trigger parse');
+  assert.deepEqual([...owners].filter(([, dirs]) => dirs.length > 1), []);
 });
