@@ -765,25 +765,18 @@ describe('runConsolidationCycle', () => {
     insertEntity(db, 'e1', 'concept', { mentionCount: 1 });
 
     const ac = new AbortController();
-    // Fire abort on next microtask — the first checkpoint will catch it after
-    // decay runs (because checkpoints fire BEFORE each step, the cycle runs
-    // init+decay synchronously before yielding).
+    // With no eventLog, decay..clusters run synchronously; the queued abort
+    // fires during the first await (backfillSessionNotes) and is caught at the
+    // next 'vault-surfaces' checkpoint.
     queueMicrotask(() => ac.abort(new Error('mid-cycle hard cap')));
 
     const result = await runConsolidationCycle({ vaultPath: TEST_VAULT, db, signal: ac.signal });
 
-    // Either aborted at one of the checkpoints, or completed before microtask
-    // depending on scheduling — both are valid. The key assertion: when
-    // aborted, abortedAt is set and downstream steps didn't run.
-    if (result.aborted) {
-      // F-Q307 added 'summaries-midloop' as a valid abortedAt value when the
-      // per-concept summary loop catches the signal mid-iteration (vs. the
-      // between-step checkpoints).
-      assert.ok(['decay', 'prune', 'reinforce', 'clusters', 'summaries',
-                 'summaries-midloop', 'vault-surfaces',
-                 'contradictions', 'promotion'].includes(result.abortedAt),
-        `abortedAt should be a known step, got: ${result.abortedAt}`);
-    }
+    assert.equal(result.aborted, true);
+    assert.equal(result.abortedAt, 'vault-surfaces');
+    assert.deepEqual(result.summariesRegenerated, { regenerated: 0 }, 'summaries never ran');
+    assert.equal(result.contradictions, undefined, 'contradictions never ran');
+    assert.equal(result.promotionCandidates, undefined, 'promotion never ran');
     db.close();
   });
 });
