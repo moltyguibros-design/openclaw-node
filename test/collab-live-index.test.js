@@ -26,6 +26,26 @@ class CountingKV {
   async keys() { this.scans++; return this.store.keys(); }
 }
 
+// Honors put's previousSeq like JetStream: a stale expected sequence is a CAS conflict.
+class CasKV {
+  constructor() { this.store = new Map(); this.seq = 0; this.onFirstKeys = null; }
+  async put(key, value, opts) {
+    const current = this.store.get(key)?.revision ?? 0;
+    if (opts?.previousSeq !== undefined && opts.previousSeq !== current) {
+      const err = new Error('wrong last sequence'); err.code = '10071'; throw err;
+    }
+    this.store.set(key, { value, revision: ++this.seq });
+  }
+  async get(key) { return this.store.get(key) || null; }
+  async keys() {
+    const snapshot = [...this.store.keys()];
+    const hook = this.onFirstKeys;
+    this.onFirstKeys = null;
+    if (hook) await hook();
+    return snapshot[Symbol.iterator]();
+  }
+}
+
 const spec = { mode: 'parallel', min_nodes: 2, max_nodes: 3, max_rounds: 2 };
 const writeRaw = (kv, session) => kv.put(session.session_id, sc.encode(JSON.stringify(session)));
 
@@ -110,6 +130,23 @@ describe('the live-session index', () => {
     assert.deepEqual(await store.list(), []);
     kv.store.set(LIVE_INDEX_KEY, tombstone);
     assert.deepEqual((await store._readLiveIndex()).index, {});
+  });
+
+  it('a rebuild keeps a session another store indexed while it was scanning', async () => {
+    const kv = new CasKV();
+    await history(kv, 2);
+    const race = createSession('T-race', spec);
+    race.session_id = 'collab-race';
+    kv.onFirstKeys = () => new CollabStore(kv).put(race);
+    const index = await new CollabStore(kv).rebuildLiveIndex();
+    assert.deepEqual(index, { 'collab-race': COLLAB_STATUS.RECRUITING });
+    assert.deepEqual(JSON.parse(sc.decode(kv.store.get(LIVE_INDEX_KEY).value)), index);
+  });
+
+  it('a rebuild on an empty bucket creates the index', async () => {
+    const kv = new CasKV();
+    assert.deepEqual(await new CollabStore(kv).rebuildLiveIndex(), {});
+    assert.deepEqual(JSON.parse(sc.decode(kv.store.get(LIVE_INDEX_KEY).value)), {});
   });
 
   it('a full listing and a task lookup never return the index as a session', async () => {
