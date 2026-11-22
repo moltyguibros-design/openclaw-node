@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const { tmpDir } = createRequire(import.meta.url)('./helpers/tmp-dir.cjs');
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const INSTALL_SH = join(ROOT, 'install.sh');
 
@@ -139,7 +139,7 @@ test('gateway units run the openclaw package npm -g actually installed', () => {
 
   const line = moduleSrc['env.sh'].split('\n').find((l) => l.startsWith('export OPENCLAW_GATEWAY_JS='));
   assert.ok(line, 'env.sh exports OPENCLAW_GATEWAY_JS');
-  const dir = mkdtempSync(join(tmpdir(), 'oc-gateway-js-'));
+  const dir = tmpDir('oc-gateway-js-');
   const npm = join(dir, 'npm');
   writeFileSync(npm, '#!/bin/sh\n[ "$1 $2 $3" = "root -g --logs-max=0" ] && echo /opt/homebrew/lib/node_modules\n', { mode: 0o755 });
   const resolve = (npmBin) => spawnSync('bash', ['-c', `${line}\necho "$OPENCLAW_GATEWAY_JS"`], {
@@ -344,7 +344,7 @@ test('sync-to-harness is gone from the repo and an --update moves the installed 
   assert.equal(existsSync(join(ROOT, 'workspace-bin/sync-to-harness')), false);
   assert.match(readFileSync(join(ROOT, 'scripts/install/retired-files.txt'), 'utf8'), /^workspace-bin sync-to-harness$/m);
   assert.ok(moduleSrc['workspace.sh'].includes('retire_shipped_files workspace-bin "$WORKSPACE/bin"'));
-  const root = mkdtempSync(join(tmpdir(), 'retired-ws-'));
+  const root = tmpDir('retired-ws-');
   const bin = join(root, 'workspace', 'bin');
   mkdirSync(bin, { recursive: true });
   writeFileSync(join(bin, 'sync-to-harness'), '#!/bin/sh\n');
@@ -390,7 +390,7 @@ test('skills that ship memory or code off the node are quarantined, and an --upd
   const start = src.indexOf('RETIRED_SKILLS=(');
   assert.ok(start >= 0, 'workspace.sh lists retired skills');
   const block = src.slice(start, src.indexOf('\ndone\n', start) + '\ndone\n'.length);
-  const ws = mkdtempSync(join(tmpdir(), 'retired-skills-'));
+  const ws = tmpDir('retired-skills-');
   for (const s of ['second-brain', 'refactor-suggest', 'memory-setup', 'memory-hygiene', 'self-reflection', 'kept']) {
     mkdirSync(join(ws, 'skills', s), { recursive: true });
     writeFileSync(join(ws, 'skills', s, 'SKILL.md'), '# x\n');
@@ -416,21 +416,17 @@ test('the promotion policy ships beside the workspace lib/ that consolidation lo
 
 test('the installer makes ~/.openclaw/souls a git repo on main that Mission Control can commit evolutions to', () => {
   const block = moduleSrc['workspace.sh'].match(/if \[ ! -d "\$OPENCLAW_ROOT\/souls\/\.git" \]; then\n[\s\S]*?\nfi\n/)[0];
-  const root = mkdtempSync(join(tmpdir(), 'souls-git-init-'));
-  try {
-    mkdirSync(join(root, 'souls', 'daedalus', 'evolution'), { recursive: true });
-    writeFileSync(join(root, 'souls', 'daedalus', 'evolution', 'genes.json'), '{"genes":[]}');
-    const script = `run() { "$@"; }\ninfo() { :; }\nOPENCLAW_ROOT=${JSON.stringify(root)}\n${block}${block}`;
-    const r = spawnSync('bash', ['-c', script], { env: { ...process.env, HOME: root }, encoding: 'utf8' });
-    assert.equal(r.status, 0, r.stderr);
-    const git = (...a) => spawnSync('git', ['-C', join(root, 'souls'), ...a], { env: { ...process.env, HOME: root }, encoding: 'utf8' }).stdout.trim();
-    assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'main');
-    assert.equal(git('status', '--porcelain'), '');
-    assert.equal(git('rev-list', '--count', 'HEAD'), '1', 'a second install run leaves the existing history alone');
-    assert.equal(git('config', 'user.email'), 'mission-control@openclaw.local');
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  const root = tmpDir('souls-git-init-');
+  mkdirSync(join(root, 'souls', 'daedalus', 'evolution'), { recursive: true });
+  writeFileSync(join(root, 'souls', 'daedalus', 'evolution', 'genes.json'), '{"genes":[]}');
+  const script = `run() { "$@"; }\ninfo() { :; }\nOPENCLAW_ROOT=${JSON.stringify(root)}\n${block}${block}`;
+  const r = spawnSync('bash', ['-c', script], { env: { ...process.env, HOME: root }, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const git = (...a) => spawnSync('git', ['-C', join(root, 'souls'), ...a], { env: { ...process.env, HOME: root }, encoding: 'utf8' }).stdout.trim();
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+  assert.equal(git('status', '--porcelain'), '');
+  assert.equal(git('rev-list', '--count', 'HEAD'), '1', 'a second install run leaves the existing history alone');
+  assert.equal(git('config', 'user.email'), 'mission-control@openclaw.local');
 });
 
 test('scheduler heartbeat helper is installer-owned and both units invoke it', () => {
@@ -512,7 +508,7 @@ test('mesh-install.sh refuses a join token pointing at a repo outside the allowl
 // writers (write_file), generate_config, service renders, sed -i edits,
 // chmods and launchctl/systemctl calls all used to bypass run().
 test('install.sh --dry-run writes nothing under $HOME', () => {
-  const home = mkdtempSync(join(tmpdir(), 'openclaw-dry-'));
+  const home = tmpDir('openclaw-dry-');
   mkdirSync(join(home, '.openclaw'), { recursive: true });
   const r = spawnSync('bash', [INSTALL_SH, '--dry-run', '--sandbox', '--role=worker'], {
     encoding: 'utf8', timeout: 300_000,
@@ -529,7 +525,7 @@ test('install.sh --dry-run writes nothing under $HOME', () => {
 // config.sh appended a generated token and the LLM defaults to an EXISTING env
 // file with no dry-run guard; the empty-HOME run above has no env file to hit.
 test('install.sh --dry-run leaves an existing env file untouched', () => {
-  const home = mkdtempSync(join(tmpdir(), 'openclaw-dry-env-'));
+  const home = tmpDir('openclaw-dry-env-');
   mkdirSync(join(home, '.openclaw'), { recursive: true });
   const envFile = join(home, '.openclaw', 'openclaw.env');
   writeFileSync(envFile, 'OTHER=kept\n');
@@ -559,7 +555,7 @@ test('env.sh reads the persisted role and config.sh persists the resolved one', 
   const end = env.indexOf('# Lead pubkey handed');
   assert.ok(start > 0 && end > start, 'role block must exist in env.sh');
   const block = env.slice(start, end);
-  const root = mkdtempSync(join(tmpdir(), 'openclaw-role-'));
+  const root = tmpDir('openclaw-role-');
   const envFile = join(root, 'openclaw.env');
   writeFileSync(envFile, 'OPENCLAW_NODE_ROLE=lead\n');
   const script = `
@@ -590,7 +586,7 @@ test('config.sh never overwrites a rendered config, --update or not: the render 
   const cfg = moduleSrc['config.sh'];
   const start = cfg.indexOf('generate_config() {');
   const fn = cfg.slice(start, cfg.indexOf('\n}\n', start) + 3);
-  const dir = mkdtempSync(join(tmpdir(), 'oc-genconfig-'));
+  const dir = tmpDir('oc-genconfig-');
   const template = join(dir, 'openclaw.json.template');
   const out = join(dir, 'openclaw.json');
   writeFileSync(template, '{"node":"${OPENCLAW_NODE_ID}","auth":{"profiles":{}}}\n');
@@ -635,7 +631,7 @@ test('config.sh saves the cluster peers and bind, and a flagless --update re-ren
   const end = cfg.indexOf('generate_config "$REPO_DIR/config/obsidian-sync.json.template"');
   assert.ok(start > 0 && end > start, 'NATS render block must exist in config.sh');
   const block = cfg.slice(start, end);
-  const root = mkdtempSync(join(tmpdir(), 'oc-cluster-'));
+  const root = tmpDir('oc-cluster-');
   mkdirSync(join(root, 'config'));
   const envFile = join(root, 'openclaw.env');
   writeFileSync(envFile, 'OPENCLAW_NATS_TOKEN=tok\nOPENCLAW_NATS=nats://127.0.0.1:4222\n');
@@ -687,7 +683,6 @@ ${exported.map((k) => `bash -c 'echo "EXPORTED_${k}=\${${k}:-}"'`).join('\n')}`]
   assert.equal(r.status, 0, r.stderr);
   assert.equal(readFileSync(conf, 'utf8'), operator, 'a flagless --update kept the operator edit');
   assert.equal(readFileSync(`${conf}.new`, 'utf8'), rendered);
-  rmSync(root, { recursive: true, force: true });
 });
 
 test('config.sh env-file parse keeps quotes, spacing and backslashes like renderConfigTemplate', () => {
@@ -695,7 +690,7 @@ test('config.sh env-file parse keeps quotes, spacing and backslashes like render
   const start = cfg.indexOf('# Source env file for config generation');
   const end = cfg.indexOf('# Persist the node id');
   assert.ok(start > 0 && end > start, 'env-file loop must exist in config.sh');
-  const root = mkdtempSync(join(tmpdir(), 'openclaw-envparse-'));
+  const root = tmpDir('openclaw-envparse-');
   const envFile = join(root, 'openclaw.env');
   writeFileSync(envFile, [`NAME=Gui's node`, 'Q="quoted value"', "S='single'", '  SPACED  =  a  b  ', 'B=a\\b', ''].join('\n'));
   const script = `set -euo pipefail\n${cfg.slice(start, end)}\nprintf '%s|%s|%s|%s|%s' "$NAME" "$Q" "$S" "$SPACED" "$B"`;
@@ -719,7 +714,7 @@ test('config.sh seeds trust allowlists with the raw base64 identity pubkey and m
   assert.ok(start > 0 && end > start, 'seeding helpers must exist in config.sh');
   const helpers = cfg.slice(start, end);
 
-  const root = mkdtempSync(join(tmpdir(), 'openclaw-trust-'));
+  const root = tmpDir('openclaw-trust-');
   const identity = getOrCreateIdentity(root);
   const envFile = join(root, 'openclaw.env');
   writeFileSync(envFile, 'OPENCLAW_DEPLOY_TRUSTED_KEYS=operatorKeyAAA\n');
@@ -861,8 +856,8 @@ test('installer seeds but never overwrites learned soul genes/events', (t) => {
     t.skip('rsync not on PATH');
     return;
   }
-  const repo = mkdtempSync(join(tmpdir(), 'oc-souls-repo-'));
-  const root = mkdtempSync(join(tmpdir(), 'oc-souls-root-'));
+  const repo = tmpDir('oc-souls-repo-');
+  const root = tmpDir('oc-souls-root-');
   const put = (base, rel, body) => {
     mkdirSync(dirname(join(base, rel)), { recursive: true });
     writeFileSync(join(base, rel), body);
@@ -891,8 +886,8 @@ test('installer seeds but never overwrites learned soul genes/events', (t) => {
 });
 
 test('installer archives the retired files it once shipped, never backups or operator tools', () => {
-  const repo = mkdtempSync(join(tmpdir(), 'oc-retire-repo-'));
-  const root = mkdtempSync(join(tmpdir(), 'oc-retire-root-'));
+  const repo = tmpDir('oc-retire-repo-');
+  const root = tmpDir('oc-retire-root-');
   const bin = join(root, 'workspace', 'bin');
   mkdirSync(join(repo, 'scripts/install'), { recursive: true });
   writeFileSync(join(repo, 'scripts/install/retired-files.txt'),
@@ -1072,7 +1067,7 @@ test('install_rule updates unmodified rules on a version bump and keeps edited o
   const src = moduleSrc['integrations.sh'];
   const start = src.indexOf('run mkdir -p "$RULES_DIR"\n') + 'run mkdir -p "$RULES_DIR"\n'.length;
   const fns = src.slice(start, src.indexOf('\n}\n', src.indexOf('install_rule() {')) + 3);
-  const dir = mkdtempSync(join(tmpdir(), 'openclaw-rule-'));
+  const dir = tmpDir('openclaw-rule-');
   const s = join(dir, 'src.md');
   const d = join(dir, 'rule.md');
   const install = () => spawnSync('bash', ['-c', [
@@ -1136,7 +1131,7 @@ function fakeRepo(root) {
 }
 
 test('installer touches neither cwd nor $HOME repos without --project', () => {
-  const base = mkdtempSync(join(tmpdir(), 'openclaw-proj-'));
+  const base = tmpDir('openclaw-proj-');
   const home = fakeRepo(join(base, 'home'));
   const cwd = fakeRepo(join(base, 'cwd'));
   const r = runIntegrations({ cwd, home });
@@ -1150,7 +1145,7 @@ test('installer touches neither cwd nor $HOME repos without --project', () => {
 });
 
 test('--project drives framework rules and git hooks', () => {
-  const base = mkdtempSync(join(tmpdir(), 'openclaw-proj-'));
+  const base = tmpDir('openclaw-proj-');
   const home = join(base, 'home');
   mkdirSync(home, { recursive: true });
   const project = fakeRepo(join(base, 'project'));
@@ -1252,7 +1247,7 @@ test('install --update redeploys Mission Control: exact sync, npm@10 ci, rebuild
     comp.indexOf('# Create .env.local for MC if not exists'));
   assert.ok(block.includes('mc_build'), 'the Mission Control step must be found');
 
-  const root = mkdtempSync(join(tmpdir(), 'openclaw-mc-update-'));
+  const root = tmpDir('openclaw-mc-update-');
   const put = (rel, text) => { mkdirSync(dirname(join(root, rel)), { recursive: true }); writeFileSync(join(root, rel), text); };
   const read = (rel) => readFileSync(join(root, rel), 'utf8');
   const mc = 'ws/projects/mission-control';
@@ -1369,7 +1364,7 @@ test('the deployed PreCompact hook fires the extraction trigger from the checkou
   assert.ok(block.includes('pre-compact'), 'the hook deploy step must be found');
   assert.match(readFileSync(join(ROOT, 'config/claude-settings.json'), 'utf8'), /"command": "bash \.claude\/hooks\/pre-compact\.sh"/);
 
-  const root = mkdtempSync(join(tmpdir(), 'openclaw-precompact-'));
+  const root = tmpDir('openclaw-precompact-');
   const claudeDir = join(root, 'workspace', '.claude');
   mkdirSync(join(claudeDir, 'hooks'), { recursive: true });
   mkdirSync(join(root, 'fakebin'));

@@ -12,7 +12,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
+const { tmpDir } = require('./helpers/tmp-dir.cjs');
 const path = require('node:path');
 const {
   checkDestructivePatterns,
@@ -447,8 +447,8 @@ describe('validateMetricCommand (shared worker + daemon gate)', () => {
   });
 
   it('refuses a symlink that leads out of the worktree when the worktree is known', () => {
-    const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'metric-wt-'));
-    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'metric-out-'));
+    const wt = tmpDir('metric-wt-');
+    const outside = tmpDir('metric-out-');
     fs.writeFileSync(path.join(outside, 'x.js'), '');
     fs.symlinkSync(path.join(outside, 'x.js'), path.join(wt, 'link.js'));
     fs.writeFileSync(path.join(wt, 'ok.js'), '');

@@ -27,6 +27,18 @@ test('every test file that mkdtemps under the temp dir also removes it', () => {
   assert.deepEqual(offenders, [], 'use tmpDir() from ./helpers/tmp-dir.cjs, or remove the dir in an after hook');
 });
 
+// The check above passes any file that removes something; a file on tmpDir()
+// gets its dirs removed only if every one of them goes through it.
+test('a test file on tmpDir() makes no raw mkdtemp under the temp dir', () => {
+  const offenders = readdirSync(TEST_DIR)
+    .filter((f) => /\.test\.(js|mjs|cjs)$/.test(f))
+    .filter((f) => {
+      const src = readFileSync(join(TEST_DIR, f), 'utf8');
+      return src.includes('helpers/tmp-dir.cjs') && MKDTEMP_UNDER_TMP.test(src);
+    });
+  assert.deepEqual(offenders, [], 'route every temp dir through tmpDir()');
+});
+
 test('tmpDir() removes its dirs on exit, even after a failure', () => {
   const helper = join(TEST_DIR, 'helpers', 'tmp-dir.cjs');
   const r = spawnSync(process.execPath, ['-e', `
