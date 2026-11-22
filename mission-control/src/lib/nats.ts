@@ -7,7 +7,8 @@ import { natsAuthOptions, resolveEnvKey, resolveNatsAuthMode } from "./nats-auth
 
 interface NatsGlobals {
   __nats_nc?: NatsConnection | null;
-  __nats_connectingSince?: number | null;
+  __nats_connecting?: Promise<NatsConnection | null> | null;
+  __nats_failedAt?: number | null;
   __nats_healthKv?: KV | null;
   __nats_collabKv?: KV | null;
   __nats_tasksKv?: KV | null;
@@ -17,7 +18,9 @@ const g = globalThis as unknown as NatsGlobals;
 
 const sc = StringCodec();
 
-const CONNECT_TIMEOUT_MS = 10_000;
+// Every traced call asks for the connection; while NATS is down each one would
+// otherwise open a fresh TCP connect and log the failure again.
+const RETRY_AFTER_FAIL_MS = 5_000;
 const NATS_FALLBACK = "nats://127.0.0.1:4222";
 
 /**
@@ -59,15 +62,16 @@ const TASKS_BUCKET = "MESH_TASKS";
  */
 export async function getNats(): Promise<NatsConnection | null> {
   if (g.__nats_nc && !g.__nats_nc.isClosed()) return g.__nats_nc;
+  if (g.__nats_connecting) return g.__nats_connecting;
+  if (g.__nats_failedAt && Date.now() - g.__nats_failedAt < RETRY_AFTER_FAIL_MS) return null;
 
-  // Reset stale guard (self-heal if previous attempt hung)
-  if (g.__nats_connectingSince && Date.now() - g.__nats_connectingSince > CONNECT_TIMEOUT_MS) {
-    console.warn("[nats] connecting guard stale, resetting");
-    g.__nats_connectingSince = null;
-  }
-  if (g.__nats_connectingSince) return null;
+  g.__nats_connecting = connectNats().finally(() => {
+    g.__nats_connecting = null;
+  });
+  return g.__nats_connecting;
+}
 
-  g.__nats_connectingSince = Date.now();
+async function connectNats(): Promise<NatsConnection | null> {
   try {
     // Phase 7: token, this host's identity nkey, or the legacy user — nats-auth.ts.
     g.__nats_nc = await connect({
@@ -81,6 +85,7 @@ export async function getNats(): Promise<NatsConnection | null> {
       timeout: 5000,
     });
     console.log("[nats] connected to", NATS_URL, `(auth: ${resolveNatsAuthMode()})`);
+    g.__nats_failedAt = null;
 
     // Reset KV handles on reconnect so they're re-fetched fresh
     g.__nats_healthKv = null;
@@ -104,9 +109,8 @@ export async function getNats(): Promise<NatsConnection | null> {
   } catch (err) {
     console.error("[nats] connection failed:", (err as Error).message);
     g.__nats_nc = null;
+    g.__nats_failedAt = Date.now();
     return null;
-  } finally {
-    g.__nats_connectingSince = null;
   }
 }
 

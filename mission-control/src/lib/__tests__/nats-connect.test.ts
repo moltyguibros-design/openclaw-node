@@ -11,10 +11,13 @@ vi.mock("nats", async (orig) => ({ ...(await orig<typeof import("nats")>()), con
 let home: string | undefined;
 
 afterEach(() => {
-  delete (globalThis as { __nats_nc?: unknown }).__nats_nc;
+  for (const k of ["__nats_nc", "__nats_connecting", "__nats_failedAt"]) delete (globalThis as Record<string, unknown>)[k];
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   vi.resetModules();
-  connect.mockClear();
+  connect.mockReset();
+  connect.mockImplementation(async () => ({ isClosed: () => false, closed: () => new Promise(() => {}) }));
   if (home) fs.rmSync(home, { recursive: true, force: true });
 });
 
@@ -66,4 +69,32 @@ test("a bucket MC creates carries OPENCLAW_KV_REPLICAS from openclaw.env", async
   }
   expect(kv).toHaveBeenCalledTimes(3);
   for (const [, opts] of kv.mock.calls) expect(opts).toEqual(expect.objectContaining({ replicas: 3 }));
+});
+
+test("concurrent callers during a connect share the attempt instead of getting null", async () => {
+  vi.spyOn(console, "log").mockImplementation(() => {});
+  connect.mockImplementationOnce(async () => {
+    await new Promise((r) => setTimeout(r, 10));
+    return { isClosed: () => false, closed: () => new Promise(() => {}) };
+  });
+  const { getNats } = await import("@/lib/nats");
+  const [a, b] = await Promise.all([getNats(), getNats()]);
+  expect(a).not.toBeNull();
+  expect(b).toBe(a);
+  expect(connect).toHaveBeenCalledTimes(1);
+});
+
+test("after a failed connect, calls within 5s return null without reconnecting or logging again", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  connect.mockRejectedValue(new Error("down"));
+  const { getNats } = await import("@/lib/nats");
+  expect(await getNats()).toBeNull();
+  expect(await getNats()).toBeNull();
+  expect(connect).toHaveBeenCalledTimes(1);
+  expect(error).toHaveBeenCalledTimes(1);
+
+  vi.advanceTimersByTime(5001);
+  expect(await getNats()).toBeNull();
+  expect(connect).toHaveBeenCalledTimes(2);
 });
