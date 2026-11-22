@@ -154,7 +154,13 @@ async function main() {
   } else {
     const existing = registry.get(nodeId);
     if (existing.pubkey === pubkey) {
-      process.stdout.write(`${nodeId} already trusted with same pubkey (no-op)\n`);
+      // `role` defaults to worker, so only an explicit --role may change a known peer.
+      const prior = existing.role || 'worker';
+      if (roleIdx >= 0 && registry.setRole(nodeId, role)) {
+        process.stdout.write(`${nodeId}: role ${prior} -> ${role}\n`);
+      } else {
+        process.stdout.write(`${nodeId} already trusted with same pubkey (no-op)\n`);
+      }
       if (SYNC) await syncNats();
     } else {
       process.stderr.write(`refused: ${nodeId} already registered with a DIFFERENT pubkey.\n`);
