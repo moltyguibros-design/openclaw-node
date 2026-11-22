@@ -185,6 +185,35 @@ test('README Federation section carries the plan status while the federation blo
   assert.doesNotMatch(spec, /retry ×3 pending/);
 });
 
+test('OBSERVABILITY names only functions that exist, and only the mesh-deploy functions the tracer wraps', () => {
+  const doc = read('docs/OBSERVABILITY.md');
+  const names = [...new Set([...doc.matchAll(/^\| `([A-Za-z_$][\w$]*)` \| [\w./-]+ \| \d \|/gm)].map((m) => m[1]))];
+  assert.ok(names.length > 200, 'OBSERVABILITY row parse');
+  const sources = [];
+  const walk = (rel) => {
+    for (const entry of readdirSync(new URL(`../${rel}/`, import.meta.url), { withFileTypes: true })) {
+      if (entry.name === 'node_modules' || entry.name === '__tests__' || entry.name.startsWith('.')) continue;
+      const path = `${rel}/${entry.name}`;
+      if (entry.isDirectory()) walk(path);
+      else if (/\.(?:m?js|cjs|tsx?)$/.test(entry.name) || (rel === 'bin' && !entry.name.includes('.'))) sources.push(read(path));
+    }
+  };
+  for (const dir of ['bin', 'lib', 'workspace-bin', 'mission-control/src', 'packages']) walk(dir);
+  const corpus = sources.join('\n');
+  const missing = names.filter((n) => !new RegExp(`\\b${n.replace(/\$/g, '\\$')}\\b`).test(corpus));
+  assert.deepEqual(missing, [], 'OBSERVABILITY lists functions no source defines');
+
+  const deploySrc = read('bin/mesh-deploy.js');
+  const wrapped = [...deploySrc.matchAll(/^(\w+) = tracer\.wrap\('\1', \1, \{ tier: (\d)/gm)].map((m) => `${m[1]}:${m[2]}`);
+  const listed = [...section(doc, '### 13.2 Mesh Deploy').text.matchAll(/^\| `(\w+)` \| mesh-deploy \| (\d) \|/gm)].map((m) => `${m[1]}:${m[2]}`);
+  assert.ok(wrapped.length >= 3, 'mesh-deploy tracer.wrap parse');
+  assert.deepEqual(listed.sort(), wrapped.sort());
+
+  assert.doesNotMatch(read('workspace-bin/memory-maintenance.mjs'), /createTracer|tracer\./);
+  assert.match(doc, /^### 8\.3 Memory Maintenance \(not instrumented\)$/m);
+  assert.doesNotMatch(doc, /\| memory-maintenance \|/);
+});
+
 test('FEDERATION_SPEC cites code by file and symbol, never by drifting line number', () => {
   const spec = read('docs/FEDERATION_SPEC.md');
   for (const [hit] of spec.matchAll(/[\w./-]+\.(?:m?js|ts|sh):\d+/g)) assert.fail(`FEDERATION_SPEC line anchor ${hit}`);

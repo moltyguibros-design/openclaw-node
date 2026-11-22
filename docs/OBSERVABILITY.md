@@ -45,16 +45,16 @@ The dashboard page is a trace log that polls `/api/observability/events` every 3
 | Agent Execution Layer | 5 | 4 | 0 | 9 |
 | Security & Enforcement Layer | 4 | 16 | 5 | 25 |
 | Memory System | 2 | 16 | 4 | 22 |
-| Local Workspace Daemons | 3 | 37 | 7 | 47 |
+| Local Workspace Daemons | 2 | 25 | 7 | 34 |
 | Kanban & Scheduler | 2 | 4 | 3 | 9 |
 | HyperAgent Evidence Loop | 2 | 18 | 2 | 22 |
 | Knowledge & Search | 1 | 4 | 3 | 8 |
 | Communication | 1 | 4 | 1 | 6 |
-| Deployment & Provisioning | 3 | 16 | 4 | 23 |
+| Deployment & Provisioning | 2 | 15 | 4 | 21 |
 | LLM Provider Abstraction | 1 | 1 | 0 | 2 |
-| **Total** | **71** | **198** | **47** | **316** |
+| **Total** | **69** | **185** | **47** | **301** |
 
-> Note: Some functions appear in multiple protocol sections when they serve dual roles. The total unique instrumented functions across all source modules is **~316**.
+> Note: Some functions appear in multiple protocol sections when they serve dual roles. The total unique instrumented functions across all source modules is **~301**.
 
 ---
 
@@ -446,23 +446,9 @@ The dashboard page is a trace log that polls `/api/observability/events` every 3
 | `loadSyncState` | obsidian-sync | 2 | Loads persistent sync state (last sync times, hashes) — logged to detect stale sync state. |
 | `saveSyncState` | obsidian-sync | 2 | Saves sync state — confirms state persistence for crash recovery. |
 
-### 8.3 Memory Maintenance (13 health checks)
+### 8.3 Memory Maintenance (not instrumented)
 
-| Function | Module | Tier | Why Logged |
-|----------|--------|------|------------|
-| `runMaintenance` | memory-maintenance | 1 | Top-level maintenance orchestrator — logs how many checks ran and how many passed/failed. |
-| `checkArchival` | memory-maintenance | 2 | Checks if old sessions need archival — logged to track archival backlog. |
-| `checkPredictions` | memory-maintenance | 2 | Validates prediction accuracy from previous sessions — logged for self-improvement metrics. |
-| `checkStaleTasks` | memory-maintenance | 2 | Detects tasks stuck in active state — prevents memory corruption from abandoned tasks. |
-| `checkMemoryFreshness` | memory-maintenance | 2 | Verifies memory files are not stale — logged to detect memory system failures. |
-| `checkCompanionFreshness` | memory-maintenance | 2 | Checks companion state file freshness — ensures companion context is current. |
-| `checkClawVault` | memory-maintenance | 2 | Validates ClawVault integrity — logged to detect vault corruption. |
-| `checkMissionControl` | memory-maintenance | 2 | Checks MC connectivity and data freshness — logged to detect MC sync failures. |
-| `checkTimestamps` | memory-maintenance | 2 | Validates timestamp consistency across memory files — detects clock skew or file corruption. |
-| `checkErrors` | memory-maintenance | 2 | Scans for error patterns in recent memory — logged to surface recurring issues. |
-| `checkConsolidation` | memory-maintenance | 2 | Checks if memory consolidation is needed — logged to trigger proactive consolidation. |
-| `checkGraphHealth` | memory-maintenance | 2 | Validates knowledge graph connectivity — detects orphaned nodes or broken links. |
-| `checkSharedLessons` | memory-maintenance | 2 | Verifies shared lessons are propagated — logged to ensure cross-workspace lesson sync. |
+`workspace-bin/memory-maintenance.mjs` creates no tracer, so its checks emit no trace events.
 
 ### 8.4 Subagent Audit
 
@@ -630,13 +616,11 @@ The dashboard page is a trace log that polls `/api/observability/events` every 3
 
 | Function | Module | Tier | Why Logged |
 |----------|--------|------|------------|
-| `gitFetchAndDiff` | mesh-deploy | 2 | Fetches latest code and computes diff — logs changed file count and affected components. |
-| `gitMerge` | mesh-deploy | 2 | Merges fetched code — logs merge result and conflict status. |
-| `getAffectedComponents` | mesh-deploy | 2 | Determines which components need redeployment — logs component list for deploy scoping. |
-| `installComponentFiles` | mesh-deploy | 2 | Installs updated component files — logs file count and install duration. |
-| `restartComponentServices` | mesh-deploy | 1 | Restarts affected services — critical operation; logs restart success/failure for each component. |
-| `loadDeployState` | mesh-deploy | 2 | Loads deployment state — logged for deploy continuity. |
-| `saveDeployState` | mesh-deploy | 2 | Saves deployment state — confirms deploy state persistence. |
+| `planComponents` | mesh-deploy | 2 | Plans which components the diff touches and with which files — logs the deploy scope. |
+| `installFiles` | mesh-deploy | 2 | Copies a component's changed files to its targets — logs what was installed. |
+| `removeFiles` | mesh-deploy | 2 | Removes files the diff deleted, keeping locally edited copies — logs what was removed or kept. |
+| `restartService` | mesh-deploy | 2 | Restarts one affected service; a failed restart throws and the listener rolls back — logs each restart. |
+| `deploy` | mesh-deploy | 2 | Top-level deploy of a commit range on this node — logs the whole run's outcome. |
 
 ### 13.3 Fleet Deploy
 
@@ -730,13 +714,12 @@ The dashboard page is a trace log that polls `/api/observability/events` every 3
 | heartbeat-detect | 2 |
 | memory-daemon | 13 |
 | obsidian-sync | 12 |
-| memory-maintenance | 13 |
 | subagent-audit | 6 |
 | lane-watchdog | 3 |
 | health-publisher | 2 |
 | mesh CLI | 13 |
 | fleet-deploy | 3 |
-| mesh-deploy | 7 |
+| mesh-deploy | 5 |
 | deploy-listener | 2 |
 | mesh-join-token | 2 |
 | mesh-node-remove | 3 |
@@ -745,6 +728,6 @@ The dashboard page is a trace log that polls `/api/observability/events` every 3
 | discord-read | 1 |
 | discord-tool | 4 |
 | hyperagent CLI | 11 |
-| **Grand Total** | **~301** |
+| **Grand Total** | **~286** |
 
 > The exact count varies slightly due to MeshRegistry and MCP knowledge server having dynamic method counts. All functions listed above are wrapped by `tracer.wrapClass()`, `tracer.wrapAsync()`, or `tracer.wrap()` and emit structured trace events through the unified observability pipeline.
