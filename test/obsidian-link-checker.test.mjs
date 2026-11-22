@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
-import { checkVaultLinks, checkReferentialCoverage } from '../lib/obsidian-link-checker.mjs';
+import { checkVaultLinks, checkReferentialCoverage, missingConceptNames } from '../lib/obsidian-link-checker.mjs';
 
 describe('checkVaultLinks', () => {
   let vault;
@@ -130,5 +130,32 @@ describe('checkVaultLinks with same-named notes in different folders', () => {
     assert.equal(r.resolved, 3);
     assert.deepEqual(r.dangling, []);
     assert.deepEqual(r.orphans, []);
+  });
+});
+
+describe('concept coverage threshold', () => {
+  it('follows OBSIDIAN_CONCEPT_THRESHOLD like the concept writer', async () => {
+    const vault = await mkdtemp(join(tmpdir(), 'vault-threshold-'));
+    const db = new Database(':memory:');
+    db.exec(`CREATE TABLE entities (id INTEGER PRIMARY KEY, name TEXT, mention_count INTEGER)`);
+    db.exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, session_id TEXT, decision TEXT, rationale TEXT, confidence REAL, created_at TEXT, salience REAL)`);
+    db.exec(`CREATE TABLE themes (id INTEGER PRIMARY KEY, label TEXT, mention_count INTEGER)`);
+    db.prepare(`INSERT INTO entities (name, mention_count) VALUES (?, ?)`).run('Seven Mentions', 7);
+    const saved = process.env.OBSIDIAN_CONCEPT_THRESHOLD;
+    try {
+      delete process.env.OBSIDIAN_CONCEPT_THRESHOLD;
+      assert.deepEqual(missingConceptNames(db, vault).missing, ['Seven Mentions']);
+
+      process.env.OBSIDIAN_CONCEPT_THRESHOLD = '10';
+      assert.deepEqual(missingConceptNames(db, vault).missing, []);
+      const cov = checkReferentialCoverage({ db, vaultPath: vault });
+      assert.equal(cov.threshold, 10);
+      assert.equal(cov.concepts.eligible, 0);
+    } finally {
+      if (saved === undefined) delete process.env.OBSIDIAN_CONCEPT_THRESHOLD;
+      else process.env.OBSIDIAN_CONCEPT_THRESHOLD = saved;
+      db.close();
+      await rm(vault, { recursive: true, force: true });
+    }
   });
 });
