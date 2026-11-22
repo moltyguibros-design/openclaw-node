@@ -47,14 +47,14 @@ This library provides a simple Python interface to DuckDuckGo's search API witho
 ### 1. Basic Web Search
 
 ```bash
-python scripts/search.py "<query>"
-python scripts/search.py "<query>" --max-results <N>
+python3 {baseDir}/scripts/search.py "<query>"
+python3 {baseDir}/scripts/search.py "<query>" --max-results <N>
 ```
 
 ### 2. Time Range Filtering
 
 ```bash
-python scripts/search.py "<query>" --time-range <d|w|m|y>
+python3 {baseDir}/scripts/search.py "<query>" --time-range <d|w|m|y>
 ```
 
 Options: `d` (day), `w` (week), `m` (month), `y` (year)
@@ -62,15 +62,15 @@ Options: `d` (day), `w` (week), `m` (month), `y` (year)
 ### 3. News Search
 
 ```bash
-python scripts/search.py "<query>" --type news
-python scripts/search.py "<query>" --type news --time-range w --max-results 15
+python3 {baseDir}/scripts/search.py "<query>" --type news
+python3 {baseDir}/scripts/search.py "<query>" --type news --time-range w --max-results 15
 ```
 
 ### 4. Image Search
 
 ```bash
-python scripts/search.py "<query>" --type images
-python scripts/search.py "<query>" --type images --image-size Large --image-color Blue
+python3 {baseDir}/scripts/search.py "<query>" --type images
+python3 {baseDir}/scripts/search.py "<query>" --type images --image-size Large --image-color Blue
 ```
 
 Image filters: `--image-size` (Small/Medium/Large/Wallpaper), `--image-color`, `--image-type` (photo/clipart/gif/transparent/line), `--image-layout` (Square/Tall/Wide)
@@ -78,14 +78,14 @@ Image filters: `--image-size` (Small/Medium/Large/Wallpaper), `--image-color`, `
 ### 5. Video Search
 
 ```bash
-python scripts/search.py "<query>" --type videos
-python scripts/search.py "<query>" --type videos --video-duration short --video-resolution high
+python3 {baseDir}/scripts/search.py "<query>" --type videos
+python3 {baseDir}/scripts/search.py "<query>" --type videos --video-duration short --video-resolution high
 ```
 
 ### 6. Region-Specific Search
 
 ```bash
-python scripts/search.py "<query>" --region <region-code>
+python3 {baseDir}/scripts/search.py "<query>" --region <region-code>
 ```
 
 Common codes: `us-en`, `uk-en`, `ca-en`, `au-en`, `de-de`, `fr-fr`, `wt-wt` (worldwide, default)
@@ -93,29 +93,29 @@ Common codes: `us-en`, `uk-en`, `ca-en`, `au-en`, `de-de`, `fr-fr`, `wt-wt` (wor
 ### 7. Safe Search Control
 
 ```bash
-python scripts/search.py "<query>" --safe-search <on|moderate|off>
+python3 {baseDir}/scripts/search.py "<query>" --safe-search <on|moderate|off>
 ```
 
 ### 8. Output Formats
 
 ```bash
-python scripts/search.py "<query>"                    # text (default)
-python scripts/search.py "<query>" --format markdown   # markdown
-python scripts/search.py "<query>" --format json       # JSON
+python3 {baseDir}/scripts/search.py "<query>"                    # text (default)
+python3 {baseDir}/scripts/search.py "<query>" --format markdown   # markdown
+python3 {baseDir}/scripts/search.py "<query>" --format json       # JSON
 ```
 
 ### 9. Saving Results
 
 ```bash
-python scripts/search.py "<query>" --output <file-path>
-python scripts/search.py "<query>" --format json --output results.json
+python3 {baseDir}/scripts/search.py "<query>" --output <file-path>
+python3 {baseDir}/scripts/search.py "<query>" --format json --output results.json
 ```
 
 ## Quick Reference
 
 **Command structure:**
 ```bash
-python scripts/search.py "<query>" [options]
+python3 {baseDir}/scripts/search.py "<query>" [options]
 ```
 
 **Essential options:**
@@ -133,7 +133,7 @@ python scripts/search.py "<query>" [options]
 
 **Get full help:**
 ```bash
-python scripts/search.py --help
+python3 {baseDir}/scripts/search.py --help
 ```
 
 ## Best Practices
