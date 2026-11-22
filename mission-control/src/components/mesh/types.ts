@@ -47,6 +47,7 @@ export interface ActiveTask {
 
 export interface MeshNode {
   nodeId: string;
+  isLocal: boolean;
   status: "online" | "degraded" | "offline";
   health: NodeHealth | null;
   activeTasks: ActiveTask[];

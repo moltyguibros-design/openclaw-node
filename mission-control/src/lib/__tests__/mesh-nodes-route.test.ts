@@ -21,8 +21,10 @@ const cp = vi.hoisted(() => ({
 
 vi.mock("child_process", () => ({ execSync: cp.execSync, exec: cp.exec }));
 
+const kvState = vi.hoisted(() => ({ kv: null as unknown }));
+
 vi.mock("@/lib/nats", () => ({
-  getHealthKv: async () => null,
+  getHealthKv: async () => kvState.kv,
   sc: { decode: (b: Uint8Array) => new TextDecoder().decode(b) },
 }));
 
@@ -49,6 +51,7 @@ vi.mock("@/lib/config", () => ({
 
 interface RouteNode {
   nodeId: string;
+  isLocal: boolean;
   status: string;
   health: {
     nodeId: string;
@@ -90,6 +93,7 @@ beforeEach(() => {
   cfg.nodeId = "test-node";
   tailscaleStatus = {};
   systemctlUnits = "";
+  kvState.kv = null;
 });
 
 afterEach(() => {
@@ -124,6 +128,31 @@ describe("GET /api/mesh/nodes", () => {
     const body: RouteBody = await res.json();
     return Object.fromEntries(body.nodes.map((n) => [n.nodeId, n]));
   }
+
+  it("marks which node is local even when a remote node with health is listed first", async () => {
+    const health = (nodeId: string) => ({
+      nodeId,
+      services: [],
+      diskPercent: 10,
+      reportedAt: new Date().toISOString(),
+    });
+    kvState.kv = {
+      keys: async () =>
+        (async function* () {
+          yield "peer-a";
+          yield "test-node";
+        })(),
+      get: async (key: string) => ({ value: new TextEncoder().encode(JSON.stringify(health(key))) }),
+    };
+    const res = await (await loadGet())();
+    const body: RouteBody = await res.json();
+    expect(body.nodes.map((n) => n.nodeId)).toEqual(["peer-a", "test-node"]);
+    expect(body.nodes[0].health).not.toBeNull();
+    expect(Object.fromEntries(body.nodes.map((n) => [n.nodeId, n.isLocal]))).toEqual({
+      "peer-a": false,
+      "test-node": true,
+    });
+  });
 
   it("bounds today's token stats in token_usage's own 'YYYY-MM-DD HH:MM:SS' format", async () => {
     cp.rawAll.mockClear();

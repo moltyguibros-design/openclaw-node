@@ -78,6 +78,7 @@ interface NodeHealth {
 
 interface MeshNode {
   nodeId: string;
+  isLocal: boolean;
   status: "online" | "degraded" | "offline";
   health: NodeHealth | null;
   activeTasks: Array<{
@@ -492,6 +493,7 @@ export const GET = withTrace("mesh", "GET /api/mesh/nodes", async () => {
 
     nodes.push({
       nodeId,
+      isLocal,
       status,
       health,
       activeTasks,

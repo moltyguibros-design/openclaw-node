@@ -10,6 +10,7 @@ function node(nodeId: string, selfIp: string, peers: PeerView[]): MeshNode {
   const tailscale = { peers, selfIp, natType: "unknown" };
   return {
     nodeId,
+    isLocal: false,
     status: "online",
     health: { tailscaleIp: selfIp, tailscale } as unknown as MeshNode["health"],
     activeTasks: [],
@@ -20,7 +21,7 @@ function node(nodeId: string, selfIp: string, peers: PeerView[]): MeshNode {
     cpuLoadPercent: null,
     isNatsHost: false,
     peerConnectivity: "unknown",
-  } as MeshNode;
+  };
 }
 
 const cell = (info: ReturnType<typeof getPeerInfo>) => renderToStaticMarkup(createElement(CellContent, { info }));

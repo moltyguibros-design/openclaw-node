@@ -70,7 +70,7 @@ export function NetworkTopology({ nodes, meshStatus }: Props) {
   const natsHostOnline = natsHostNode ? natsHostNode.status !== "offline" : null;
 
   // ── Tailscale state ──
-  const localNode = nodes.find((n) => n.health !== null);
+  const localNode = nodes.find((n) => n.isLocal);
   const allPeers: PeerView[] = localNode?.tailscale?.peers || [];
   const onlinePeers = allPeers.filter((p) => p.online);
   const offlinePeers = allPeers.filter((p) => !p.online);
