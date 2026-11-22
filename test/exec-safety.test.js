@@ -19,6 +19,7 @@ const {
   isAllowedExecCommand,
   validateExecCommand,
   containsShellChaining,
+  DESTRUCTIVE_PATTERNS,
 } = require('../lib/exec-safety');
 
 // ---------------------------------------------------------------------------
@@ -71,6 +72,16 @@ describe('checkDestructivePatterns', () => {
       assert.equal(result.pattern, undefined);
     });
   }
+
+  it('every destructive pattern matches at least one sample', () => {
+    const samples = [
+      ...destructive.map(([cmd]) => cmd),
+      'cat foo>/dev/sda', 'echo x >/etc/hosts', 'nft flush ruleset', 'systemctl disable sshd',
+    ];
+    for (const re of DESTRUCTIVE_PATTERNS) {
+      assert.ok(samples.some(s => re.test(s)), `${re} matches nothing`);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
