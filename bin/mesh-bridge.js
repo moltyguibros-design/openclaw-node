@@ -463,7 +463,7 @@ function materializeSubtask(plan, subtask) {
   const mode = subtask.delegation?.mode || 'local';
   const soulId = subtask.delegation?.soul_id || null;
   // Plans queued before kanban ids were namespaced carry no kanban_task_id.
-  const cardId = subtask.kanban_task_id || subtask.subtask_id;
+  const cardId = oneLine(subtask.kanban_task_id || subtask.subtask_id);
 
   const taskEntry = {
     task_id: cardId,
@@ -537,26 +537,30 @@ async function reportPlanSubtasks() {
   }
 }
 
+// A field is one line (the lib/kanban-io.js rule): a newline in a bus-supplied value
+// would start a new field on the card.
+const oneLine = (v) => String(v).replace(/\s*\r?\n\s*/g, ' ');
+
 /**
  * Format a task entry as YAML for active-tasks.md.
  */
 function formatTaskYaml(task) {
   const lines = [];
-  lines.push(`- task_id: ${task.task_id}`);
-  lines.push(`  title: ${task.title}`);
-  lines.push(`  status: ${task.status}`);
-  if (task.owner) lines.push(`  owner: ${task.owner}`);
-  if (task.soul_id) lines.push(`  soul_id: ${task.soul_id}`);
+  lines.push(`- task_id: ${oneLine(task.task_id)}`);
+  lines.push(`  title: ${oneLine(task.title)}`);
+  lines.push(`  status: ${oneLine(task.status)}`);
+  if (task.owner) lines.push(`  owner: ${oneLine(task.owner)}`);
+  if (task.soul_id) lines.push(`  soul_id: ${oneLine(task.soul_id)}`);
   if (task.success_criteria?.length > 0) {
     lines.push('  success_criteria:');
     for (const sc of task.success_criteria) {
-      lines.push(`    - ${sc}`);
+      lines.push(`    - ${oneLine(sc)}`);
     }
   }
   lines.push(`  artifacts:`);
-  if (task.next_action) lines.push(`  next_action: ${task.next_action.replace(/\s*\r?\n\s*/g, ' ')}`);
-  if (task.parent_id) lines.push(`  parent_id: ${task.parent_id}`);
-  if (task.plan_id) lines.push(`  plan_id: ${task.plan_id}`);
+  if (task.next_action) lines.push(`  next_action: ${oneLine(task.next_action)}`);
+  if (task.parent_id) lines.push(`  parent_id: ${oneLine(task.parent_id)}`);
+  if (task.plan_id) lines.push(`  plan_id: ${oneLine(task.plan_id)}`);
   if (task.description) lines.push(`  description: ${task.description.replace(/\r?\n/g, '\\n')}`);
   lines.push(`  updated_at: ${task.updated_at}`);
   return lines.join('\n');
@@ -960,12 +964,14 @@ async function main() {
   log('Bridge stopped.');
 }
 
-// ── Shutdown ────────────────────────────────────────
+module.exports = { formatTaskYaml };
 
-process.on('SIGINT', () => { running = false; log('SIGINT received...'); });
-process.on('SIGTERM', () => { running = false; log('SIGTERM received...'); });
+if (require.main === module) {
+  process.on('SIGINT', () => { running = false; log('SIGINT received...'); });
+  process.on('SIGTERM', () => { running = false; log('SIGTERM received...'); });
 
-main().catch(err => {
-  console.error(`[mesh-bridge] Fatal: ${err.message}`);
-  process.exit(1);
-});
+  main().catch(err => {
+    console.error(`[mesh-bridge] Fatal: ${err.message}`);
+    process.exit(1);
+  });
+}

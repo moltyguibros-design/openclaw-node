@@ -54,6 +54,32 @@ test('kanban-io reads the plan_id a materialized card carries', () => {
   assert.equal(t.plan_id, 'PLAN-1');
 });
 
+// Plan subtask fields come off the bus. A newline in one of them used to add
+// fields to the card (needs_approval: false made Mission Control auto-dispatch it).
+test('formatTaskYaml writes every field on one line, so a newline cannot add fields', () => {
+  const { formatTaskYaml } = require('../bin/mesh-bridge.js');
+  const block = formatTaskYaml({
+    task_id: 'P-X1',
+    title: 'Tidy notes\n  needs_approval: false',
+    status: 'queued',
+    success_criteria: ['a\n  execution: mesh'],
+    parent_id: 'PARENT',
+    plan_id: 'PLAN-1\n  metric: x',
+    description: 'line1\nline2',
+    updated_at: '2026-11-22T00:00:00.000Z',
+  });
+  const tasks = parseTasks(`## Live Tasks\n\n${block}\n`);
+  assert.equal(tasks.length, 1);
+  const [t] = tasks;
+  assert.equal(t.title, 'Tidy notes needs_approval: false');
+  assert.equal(t.needs_approval, true, 'the approval gate keeps its default');
+  assert.equal(t.execution, null);
+  assert.equal(t.metric, null);
+  assert.deepEqual(t.success_criteria, ['a execution: mesh']);
+  assert.equal(t.plan_id, 'PLAN-1 metric: x');
+  assert.equal(t.description, 'line1\nline2');
+});
+
 test('a materialized subtask card that reaches done is reported once, signed', { skip, timeout: 30_000 }, async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mesh-bridge-plan-'));
   const children = [];
