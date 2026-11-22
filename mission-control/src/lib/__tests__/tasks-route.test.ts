@@ -214,6 +214,18 @@ describe("PATCH /api/tasks/[id]", () => {
     expect(notifySpy).toHaveBeenCalledTimes(1);
     expect((notifySpy.mock.calls[0] as unknown as [string])[0]).toMatch(/to waiting-user$/);
   });
+
+  // NULL is local; the dialog sends execution "local" for a NULL row on every save.
+  it("saving a running local task with execution 'local' is not an execution-mode change", async () => {
+    await insertTask({ id: "T", status: "running", kanbanColumn: "in_progress", execution: null });
+    const { PATCH } = await import("@/app/api/tasks/[id]/route");
+
+    const req = new NextRequest("http://x/api/tasks/T", { method: "PATCH", body: JSON.stringify({ title: "x", execution: "local" }) });
+    const res = await PATCH(req, params("T"));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).title).toBe("x");
+  });
 });
 
 // The scheduler's recurring copy of a one-time trigger has no next time and never fires.

@@ -121,4 +121,21 @@ describe("syncTasksToMarkdown writes only what MC changed", () => {
     expect(get("T-B")?.status).toBe("running");
     expect(get("T-A")?.status).toBe("ready");
   });
+
+  // A startup backfill to execution='local' made the first write after a restart add it to every block without one.
+  it("a restart does not make the next write add execution: local to blocks that had none", async () => {
+    fs.writeFileSync(file, FILE);
+    const first = await load();
+    first.sync.syncTasksFromMarkdown(first.db);
+
+    vi.resetModules();
+    const { db, sync, set, get } = await load();
+    set("T-A", { title: "renamed" });
+    sync.syncTasksToMarkdown(db);
+
+    const out = fs.readFileSync(file, "utf-8");
+    expect(out).toContain("title: renamed");
+    expect(out).not.toContain("execution: local");
+    expect(get("T-A")?.execution).toBeNull();
+  });
 });

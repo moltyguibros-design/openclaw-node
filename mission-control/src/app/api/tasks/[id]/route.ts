@@ -162,7 +162,7 @@ export async function PATCH(
     const now = new Date().toISOString();
 
     // Transition guard: block execution mode changes on in-flight mesh tasks
-    if (body.execution !== undefined && body.execution !== existing.execution) {
+    if (body.execution !== undefined && (body.execution || "local") !== (existing.execution || "local")) {
       if (existing.meshTaskId) {
         return NextResponse.json(
           { error: "Cannot change execution mode after task has been submitted to mesh" },

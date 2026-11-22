@@ -457,9 +457,6 @@ function runMigrations(sqlite: Database.Database) {
       : "UPDATE cluster_members SET created_at = datetime('now')");
   }
 
-  // Normalize: set execution='local' for pre-existing rows where it's NULL
-  sqlite.exec("UPDATE tasks SET execution = 'local' WHERE execution IS NULL");
-
   // Add cluster_id to tasks if missing
   if (!colNames.includes("cluster_id")) {
     sqlite.exec("ALTER TABLE tasks ADD COLUMN cluster_id TEXT");
