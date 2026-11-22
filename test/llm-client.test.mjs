@@ -196,9 +196,8 @@ describe('generateAnalysis — separate budget', () => {
     const c = createLlmClient({ baseUrl: baseUrl() });
     nextResponse = { status: 200, body: { message: { content: 'a' }, done_reason: 'stop' } };
     const result = await c.generateAnalysis([{ role: 'user', content: 'q' }]);
-    if (result.mode === 'llm') {
-      assert.equal(lastRequest.body.options.num_predict, DEFAULT_ANALYSIS_MAX_TOKENS);
-    }
+    assert.equal(result.mode, 'llm');
+    assert.equal(lastRequest.body.options.num_predict, DEFAULT_ANALYSIS_MAX_TOKENS);
   });
 
   it('applies the same format:json gate as generate (no thinking-family stall)', async () => {
@@ -212,14 +211,6 @@ describe('generateAnalysis — separate budget', () => {
       .generateAnalysis([{ role: 'user', content: 'q' }], { jsonMode: true, waitTimeoutMs: 5000 });
     assert.equal(plain.mode, 'llm');
     assert.equal(lastRequest.body.format, 'json');
-  });
-
-  it('returns mode:llm shape on success path', async () => {
-    const c = createLlmClient({ baseUrl: baseUrl() });
-    nextResponse = { status: 200, body: { message: { content: 'r' }, done_reason: 'stop' } };
-    const result = await c.generateAnalysis([{ role: 'user', content: 'q' }]);
-    // Either mode:llm or mode:fallback (if queue is contended); both acceptable
-    assert.ok(result.mode === 'llm' || result.mode === 'fallback');
   });
 });
 
