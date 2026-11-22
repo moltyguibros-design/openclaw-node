@@ -72,8 +72,8 @@ recreates what it needs on next tick.
 
 - **Owner:** `memory-daemon.mjs` → `log()` function
 - **Format:** Plain text. Timestamped log lines, one per event.
-- **Lifetime:** Append-only. Grows indefinitely (no rotation). Recreated if missing.
-- **Consumers:** Operator debugging only. No in-repo code reads this file.
+- **Lifetime:** Append-only; rotated by `bin/log-rotate` (weekly timer) when above 10 MB, 5 gzip copies kept. Recreated if missing.
+- **Consumers:** Operator debugging; `lib/observer.mjs` reads it (`DEFAULT_DAEMON_LOG`).
 
 ### `.tmp/daemon-throttle.json`
 
@@ -121,19 +121,31 @@ recreates what it needs on next tick.
 
 ### `state.db`
 
-- **Owner:** `session-store.mjs` (sessions + messages tables); `hyperagent-store.mjs` (ha_* tables). Shared database, WAL mode.
+- **Owner:** `session-store.mjs` (sessions + messages tables); `extraction-store.mjs` (extracted memory tables); `memory-archive.mjs` (`*_archived` tables); `hyperagent-store.mjs` (ha_* tables). Shared database, WAL mode.
 - **Format:** SQLite with WAL. Tables:
   - `sessions` — session metadata (id, source, start_time, end_time, summary, message_count)
   - `messages` — per-message content with turn index
   - `messages_fts` — FTS5 virtual table for full-text search over messages
+  - `session_store_meta` — session-store schema version
+  - `entities` — named things (people, projects, technologies, etc.)
+  - `entity_aliases` — alternate names that resolve to an entity
+  - `themes` — hierarchical topic labels
+  - `theme_mentions` — which sessions touched which theme
+  - `mentions` — per-session entity occurrences with salience
+  - `decisions` — explicit decisions with rationale and confidence (`superseded_by` links a replacement)
+  - `decisions_fts` — FTS5 virtual table over decisions
+  - `concept_edges` — typed links between concepts
+  - `published_items` — entities/decisions already promoted, so consolidation does not re-emit them
+  - `entities_archived`, `decisions_archived`, `mentions_archived`, `entity_aliases_archived` — rows archived by consolidation, resurrected on re-mention
   - `ha_telemetry` — per-task performance data
   - `ha_strategies` — reusable approaches indexed by domain
   - `ha_reflections` — periodic structured analysis
   - `ha_proposals` — self-modification proposals
   - `ha_telemetry_proposals` — junction table
+  - `ha_notify_outbox` — reflection/proposal notifications awaiting delivery
 - **Lifetime:** Persistent. Grows with session history. WAL mode enables concurrent reads.
 - **Consumers:**
-  - `memory-daemon.mjs` — imports sessions on IDLE→ENDED transition
+  - `memory-daemon.mjs` — imports sessions on IDLE→ENDED transition; extraction writes through `createExtractionStore` on this file
   - `workspace-bin/session-search.mjs` — CLI search tool (state.db FTS, `--import`/`--stats`)
   - `hyperagent-store.mjs` — HyperAgent protocol reads/writes
 
@@ -188,6 +200,6 @@ They were deleted in Step 0.6.
 
 ## Notes
 
-- **NODE_ID** is derived consistently as `process.env.OPENCLAW_NODE_ID || os.hostname()` (JS/TS) and `${OPENCLAW_NODE_ID:-$(hostname)}` (shell).
+- **NODE_ID**: see **NODE_ID source** under `.daemon-state-${NODE_ID}.md` above (`lib/node-id.js` `resolveNodeId()`: `OPENCLAW_NODE_ID`, then `MESH_NODE_ID`, then the sanitized short hostname).
 - **Workspace files are not git-tracked.** They exist only at runtime in the operator's home directory.
 - **`docs/ARCHITECTURE.md`** contains some stale references to removed files (`frontend-activity`, `session-fingerprint.json`). Cleanup is deferred to a later block.

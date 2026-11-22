@@ -267,3 +267,25 @@ test('NODE_WATCH_SPEC has a row for every element node-watch grades', () => {
     assert.ok(elements.some((cell) => cell.includes(name)), `NODE_WATCH_SPEC has no row for ${id} (${name})`);
   }
 });
+
+test('STATE_FILES names every state.db table, the daemon log rotation and reader, and the NODE_ID rule', () => {
+  const doc = read('docs/STATE_FILES.md');
+  const stateDb = section(doc, '### `state.db`').text;
+  const stores = ['lib/session-store.mjs', 'lib/hyperagent-store.mjs', 'lib/extraction-store.mjs', 'lib/memory-archive.mjs'];
+  assert.match(read('lib/extraction-store.mjs'), /const DEFAULT_DB_PATH = path\.join\(os\.homedir\(\), '\.openclaw\/state\.db'\);/);
+  for (const store of stores) {
+    const tables = [...read(store).matchAll(/CREATE (?:VIRTUAL )?TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1]);
+    assert.ok(tables.length >= 3, `${store}: table parse`);
+    for (const t of tables) assert.ok(stateDb.includes(`\`${t}\``), `STATE_FILES state.db lacks ${t} (${store})`);
+  }
+
+  assert.match(read('bin/log-rotate'), /^rotate_dir "\$OPENCLAW_ROOT\/workspace\/\.tmp"$/m);
+  assert.match(read('lib/observer.mjs'), /DEFAULT_DAEMON_LOG = path\.join\(HOME, '\.openclaw', 'workspace', '\.tmp', 'memory-daemon\.log'\)/);
+  const daemonLog = section(doc, '### `.tmp/memory-daemon.log`').text;
+  assert.match(daemonLog, /`bin\/log-rotate`/);
+  assert.match(daemonLog, /`lib\/observer\.mjs`/);
+  assert.doesNotMatch(doc, /Grows indefinitely \(no rotation\)|No in-repo code reads this file/);
+
+  assert.match(read('lib/node-id.js'), /OPENCLAW_NODE_ID[\s\S]*MESH_NODE_ID/);
+  assert.doesNotMatch(doc, /\|\| os\.hostname\(\)|OPENCLAW_NODE_ID:-\$\(hostname\)/);
+});
