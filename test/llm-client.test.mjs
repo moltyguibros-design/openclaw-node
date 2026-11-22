@@ -296,4 +296,45 @@ describe('LLM_NATIVE_API=false — OpenAI-compat path', () => {
       delete process.env.LLM_NATIVE_API;
     }
   });
+
+  it('healthCheck reads /v1/models', async () => {
+    process.env.LLM_NATIVE_API = 'false';
+    try {
+      const c = createLlmClient({ baseUrl: baseUrl() });
+      nextResponse = { status: 200, body: { object: 'list', data: [{ id: 'test-model' }] } };
+      const health = await c.healthCheck();
+      assert.equal(lastRequest.method, 'GET');
+      assert.equal(lastRequest.url, '/v1/models');
+      assert.equal(health.ok, true);
+      assert.equal(health.model, 'test-model');
+      assert.deepEqual(health.models, ['test-model']);
+      assert.equal(health.error, null);
+    } finally {
+      delete process.env.LLM_NATIVE_API;
+    }
+  });
+
+  it('a queued generate passes model and messages through and maps usage', async () => {
+    process.env.LLM_NATIVE_API = 'false';
+    try {
+      const c = createLlmClient({ baseUrl: baseUrl(), model: 'test-model' });
+      const usage = { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 };
+      nextResponse = { status: 200, body: { choices: [{ message: { content: 'Hello' }, finish_reason: 'stop' }], usage } };
+      const messages = [
+        { role: 'system', content: 'You are a helpful assistant.' },
+        { role: 'user', content: 'Hello' },
+      ];
+      const out = await c.generate(messages);
+      assert.equal(lastRequest.url, '/v1/chat/completions');
+      assert.equal(lastRequest.body.model, 'test-model');
+      assert.deepEqual(lastRequest.body.messages, messages);
+      assert.equal(typeof lastRequest.body.max_tokens, 'number');
+      assert.equal(typeof lastRequest.body.temperature, 'number');
+      assert.equal(out.content, 'Hello');
+      assert.equal(out.finishReason, 'stop');
+      assert.deepEqual(out.usage, usage);
+    } finally {
+      delete process.env.LLM_NATIVE_API;
+    }
+  });
 });
