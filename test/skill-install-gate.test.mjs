@@ -86,6 +86,20 @@ describe('no clawdbot-era commands or paths', () => {
     assert.deepEqual(hitsOf(docs, legacy), []);
   });
 
+  it('no loaded skill shell block uses a clawdbot-named variable, socket or path', () => {
+    const legacy = /\bCLAWDBOT_[A-Z_]+|clawdbot-(?!security-check\b)[a-z][a-z.-]*/;
+    const hits = markdown(SKILLS)
+      .filter((file) => !LEGACY_EXEMPT.has(path.relative(SKILLS, file).split(path.sep)[0]))
+      .flatMap((file) => {
+        let fenced = false;
+        return fs.readFileSync(file, 'utf8').split('\n').flatMap((line, i) => {
+          if (/^\s*```/.test(line)) { fenced = !fenced; return []; }
+          return fenced && legacy.test(line) ? [`${path.relative(SKILLS, file)}:${i + 1}: ${line.trim()}`] : [];
+        });
+      });
+    assert.deepEqual(hits, []);
+  });
+
   // Every grep against a missing ~/.clawdbot printed nothing, so the audit read as clean.
   it('clawdbot-security-check audits the openclaw config read-only and never reports a missing one as clean', () => {
     const dir = path.join(SKILLS, 'clawdbot-security-check');
