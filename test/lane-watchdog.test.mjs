@@ -39,13 +39,10 @@ const waitFor = async (cond, ms = 2000) => {
 };
 
 test('the default err log matches the file the platform gateway unit writes', () => {
-  if (process.platform === 'darwin') {
-    assert.match(read('services/launchd/ai.openclaw.gateway.plist'), /logs\/gateway\.err\.log</);
-    assert.ok(GATEWAY_ERR_LOG.endsWith('/.openclaw/logs/gateway.err.log'));
-  } else {
-    assert.match(read('services/systemd/openclaw-gateway.service'), /StandardError=append:\$\{HOME\}\/\.openclaw\/logs\/gateway\.err$/m);
-    assert.ok(GATEWAY_ERR_LOG.endsWith('/.openclaw/logs/gateway.err'), GATEWAY_ERR_LOG);
-  }
+  assert.match(read('services/launchd/ai.openclaw.gateway.plist'), /logs\/gateway\.err\.log</);
+  assert.match(read('services/systemd/openclaw-gateway.service'), /StandardError=append:\$\{HOME\}\/\.openclaw\/logs\/gateway\.err$/m);
+  const suffix = process.platform === 'darwin' ? '/.openclaw/logs/gateway.err.log' : '/.openclaw/logs/gateway.err';
+  assert.ok(GATEWAY_ERR_LOG.endsWith(suffix), GATEWAY_ERR_LOG);
 });
 
 test('a missing log is waited for, then tailed from its start once it appears', async () => {

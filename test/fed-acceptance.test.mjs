@@ -14,8 +14,6 @@ import path from 'node:path';
 import { buildProbes, VERDICT } from '../lib/node-acceptance-probes.mjs';
 import { resolveNodeConfig } from '../lib/node-acceptance.mjs';
 
-const IS_DARWIN = process.platform === 'darwin';
-
 // Real `jsz.meta_cluster` captured from the live 3-node cluster (2026-07-16T11:21Z),
 // and the same group with quorum lost (raft can't elect a leader without a majority).
 const META_HEALTHY = Object.freeze({
@@ -49,18 +47,20 @@ describe('node-acceptance federation axis (step 6.4)', () => {
     const other = await fedProbe('FED-L2-COORD', { platform: 'win32' }).run();
     assert.equal(other.status, VERDICT.SKIP);
     assert.match(other.detail, /no service-manager probe for win32/);
-    if (!IS_DARWIN) return;
     const running = await fedProbe('FED-L2-COORD', {
+      platform: 'darwin',
       exec: async () => ({ code: 0, stdout: 'state = running\npid = 123\n', stderr: '' }),
     }).run();
     assert.equal(running.status, VERDICT.PASS);
 
     const absent = await fedProbe('FED-L2-COORD', {
+      platform: 'darwin',
       exec: async () => ({ code: 113, stdout: '', stderr: 'Could not find service "ai.openclaw.mesh-task-daemon"' }),
     }).run();
     assert.equal(absent.status, VERDICT.SKIP);
 
     const stopped = await fedProbe('FED-L2-COORD', {
+      platform: 'darwin',
       exec: async () => ({ code: 0, stdout: 'state = not running\nlast exit code = 1\n', stderr: '' }),
     }).run();
     assert.equal(stopped.status, VERDICT.FAIL);
