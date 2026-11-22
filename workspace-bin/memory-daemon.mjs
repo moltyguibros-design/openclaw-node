@@ -21,7 +21,7 @@
  *   - SQLite session archive with FTS5 for episodic recall
  *
  * Install: install.sh (scripts/install/services.sh renders the launchd/systemd unit)
- * Manual:  node bin/memory-daemon.mjs [--test] [--verbose]
+ * Manual:  node bin/memory-daemon.mjs [--verbose]
  */
 
 import { fileURLToPath } from 'url';
@@ -153,8 +153,6 @@ let timezone = TIMEZONE;
 
 function loadConfig() {
   const defaults = {
-    nodeId: 'daedalus',
-    workspace: WORKSPACE,
     timezone: TIMEZONE,
     intervals: {
       pollMs: 30000,
@@ -199,7 +197,6 @@ function resolvePath(p) {
 const STATE_DIR = path.join(WORKSPACE, '.tmp');
 const LOG_FILE = path.join(STATE_DIR, 'memory-daemon.log');
 const VERBOSE = process.argv.includes('--verbose');
-const TEST_MODE = process.argv.includes('--test');
 
 function ensureDirs() {
   fs.mkdirSync(STATE_DIR, { recursive: true });
@@ -556,7 +553,7 @@ function handleFlushResult(result, ctx = {}) {
 
 function initMemoryBudget(config) {
   if (memoryBudget) return memoryBudget;
-  memoryBudget = createBudget(config.workspace || WORKSPACE, {
+  memoryBudget = createBudget(WORKSPACE, {
     charBudget: config.memoryCharBudget || 2200,
     eventLog: liveEventLog,
     nodeId: NODE_ID,

@@ -1,6 +1,4 @@
 {
-  "nodeId": "${OPENCLAW_NODE_ID}",
-  "workspace": "${OPENCLAW_WORKSPACE}",
   "timezone": "${OPENCLAW_TIMEZONE}",
   "intervals": {
     "pollMs": 30000,

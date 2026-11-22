@@ -1177,6 +1177,17 @@ test('the memory daemon applies daemon.json timezone to its log stamps and its c
   }
 });
 
+// The node id comes from lib/node-id and the workspace from the unit, so daemon.json's
+// nodeId was never read and its workspace moved only the MEMORY.md budget.
+test('daemon.json carries no node id or workspace key, and the daemon reads neither', () => {
+  const template = JSON.parse(readFileSync(join(ROOT, 'config/daemon.json.template'), 'utf8'));
+  assert.equal(template.nodeId, undefined);
+  assert.equal(template.workspace, undefined);
+  const daemon = readFileSync(join(ROOT, 'workspace-bin/memory-daemon.mjs'), 'utf8');
+  assert.doesNotMatch(daemon, /nodeId:\s*'daedalus'|config\.workspace|TEST_MODE|\[--test\]/);
+  assert.match(daemon, /createBudget\(WORKSPACE, \{/);
+});
+
 // install_rule compared the local copy with the NEW source on a version bump;
 // an unmodified copy always differs from a newer version, so shipped rule
 // updates never landed and every bump wrote .new with a false "modified" warning.
