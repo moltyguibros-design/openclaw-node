@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, readdir } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, readdir, writeFile } from 'node:fs/promises';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
@@ -520,6 +521,41 @@ describe('queryConceptData + generateConceptNotes integration', () => {
       assert.match(note, /mention_count: 11/);
       assert.match(note, /Prose number 3/);
     } finally {
+      db.close();
+    }
+  });
+
+  it('walks the vault for boundary scores only when a remaining candidate already has a note', async () => {
+    const db = seedDb();
+    const vaultPath = join(tmpDir, 'vault-walk');
+    const proseClient = {
+      generateAnalysis: async () => ({ mode: 'llm', value: { content: 'A concept summary that is long enough.' } }),
+    };
+    const fsp = createRequire(import.meta.url)('node:fs/promises');
+    const realReadFile = fsp.readFile;
+    const sentinel = join(vaultPath, 'sessions', 'sentinel.md');
+    let sentinelReads = 0;
+    fsp.readFile = function (p, ...rest) {
+      if (String(p) === sentinel) sentinelReads++;
+      return realReadFile.call(this, p, ...rest);
+    };
+    syncBuiltinESMExports();
+
+    try {
+      await generateConceptNotes({ db, vaultPath, threshold: 5, client: proseClient });
+      await writeFile(sentinel, '# sentinel\n');
+      sentinelReads = 0;
+
+      const idle = await generateConceptNotes({ db, vaultPath, threshold: 5, client: proseClient });
+      assert.equal(idle.unchanged, 2);
+      assert.equal(sentinelReads, 0, 'nothing left to rank: no vault walk');
+
+      db.prepare(`UPDATE entities SET mention_count = 11, last_seen = '2026-05-21' WHERE name = 'NATS JetStream'`).run();
+      await generateConceptNotes({ db, vaultPath, threshold: 5, client: proseClient });
+      assert.equal(sentinelReads, 1, 'a stale existing note is ranked by boundary score');
+    } finally {
+      fsp.readFile = realReadFile;
+      syncBuiltinESMExports();
       db.close();
     }
   });
