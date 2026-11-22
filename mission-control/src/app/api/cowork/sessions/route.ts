@@ -1,10 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { KV } from "nats";
 import { getCollabKv, sc } from "@/lib/nats";
 import type { CollabSession } from "@/lib/hooks";
 
 export const dynamic = "force-dynamic";
 
 const KV_GET_BATCH = 64;
+// The daemon's live-session index (lib/mesh-collab.js LIVE_INDEX_KEY): session_id -> status
+// for the recruiting and active sessions, so a live-only query reads just those.
+const LIVE_INDEX_KEY = "index.live";
+const LIVE_STATUSES = new Set(["recruiting", "active"]);
+
+async function liveIndexKeys(kv: KV): Promise<string[] | null> {
+  const entry = await kv.get(LIVE_INDEX_KEY).catch(() => null);
+  if (!entry?.value) return null;
+  try {
+    return Object.keys(JSON.parse(sc.decode(entry.value)));
+  } catch {
+    return null;
+  }
+}
 
 /**
  * GET /api/cowork/sessions
@@ -28,20 +43,21 @@ export async function GET(request: NextRequest) {
 
   const sessions: CollabSession[] = [];
   try {
-    const keys: string[] = [];
-    const keyIter = await kv.keys();
-    for await (const key of keyIter) keys.push(key);
+    // The status filter below still drops an id the index has not caught up on.
+    const liveOnly = statusFilter !== null && [...statusFilter].every((s) => LIVE_STATUSES.has(s));
+    let keys = liveOnly ? await liveIndexKeys(kv) : null;
+    if (!keys) {
+      keys = [];
+      const keyIter = await kv.keys();
+      for await (const key of keyIter) if (key !== LIVE_INDEX_KEY) keys.push(key);
+    }
 
     // MESH_COLLAB keeps every session ever created (federation tools read
     // finished ones as evidence), so the gets go out in parallel batches
     // instead of one round trip at a time.
     for (let i = 0; i < keys.length; i += KV_GET_BATCH) {
       const entries = await Promise.all(
-        keys
-          .slice(i, i + KV_GET_BATCH)
-          // The daemon's live-session index (lib/mesh-collab.js LIVE_INDEX_KEY), not a session.
-          .filter((key) => key !== "index.live")
-          .map((key) => kv.get(key).catch(() => null))
+        keys.slice(i, i + KV_GET_BATCH).map((key) => kv.get(key).catch(() => null))
       );
       for (const entry of entries) {
         try {

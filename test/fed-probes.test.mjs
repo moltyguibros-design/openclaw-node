@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { gradeClusterQuorum, gradeGrappeMembers, gradeSessionLiveness, gradeCoordinator, parseLaunchdPrint, toMemberHealth, FED_STATUS } from '../lib/fed-probes.mjs';
+import { gradeClusterQuorum, gradeGrappeMembers, gradeSessionLiveness, gradeCoordinator, parseLaunchdPrint, toMemberHealth, readLiveCollabSessions, FED_STATUS } from '../lib/fed-probes.mjs';
 
 // Real `jsz.meta_cluster`, captured verbatim from the live 3-node cluster
 // (curl :8222/jsz, 2026-07-16T11:21Z). Tests feed the SHAPE production emits —
@@ -145,3 +145,40 @@ test('coordinator: running PID → WORKING; loaded without PID → BROKEN; absen
   assert.equal(gradeCoordinator({ loaded: true, running: false, pid: null, state: 'not running' }).status, FED_STATUS.BROKEN);
   assert.equal(gradeCoordinator({ loaded: false }).status, FED_STATUS.OFF);
 });
+
+// MESH_COLLAB keeps every session ever run; the daemon's index.live lists the live ones.
+function fakeCollabKv({ completed = 100, live = { a1: 'active', a2: 'recruiting' }, index = true } = {}) {
+  const rows = new Map();
+  const put = (k, v) => rows.set(k, new TextEncoder().encode(JSON.stringify(v)));
+  const now = new Date().toISOString();
+  for (let i = 0; i < completed; i++) put(`done-${i}`, { session_id: `done-${i}`, status: 'completed', created_at: now });
+  for (const [id, status] of Object.entries(live)) put(id, { session_id: id, status, created_at: now });
+  if (index) put('index.live', { ...live, gone: 'active' });
+  const kv = {
+    gets: 0,
+    async get(k) { kv.gets++; return rows.has(k) ? { value: rows.get(k) } : null; },
+    async keys() { return (async function* () { yield* rows.keys(); })(); },
+  };
+  return kv;
+}
+
+test('live collab sessions come from index.live: one get for the index plus one per listed id', async () => {
+  const kv = fakeCollabKv();
+  const sessions = await readLiveCollabSessions(kv);
+  assert.deepEqual(sessions.map((s) => s.session_id).sort(), ['a1', 'a2']);
+  assert.equal(kv.gets, 4);
+  const graded = gradeSessionLiveness({ sessions: sessions.map((s) => ({ status: s.status, lastActivityMs: Date.now() })), now: Date.now() });
+  assert.equal(graded.status, FED_STATUS.WORKING);
+});
+
+test('without index.live the live sessions are found by scanning the bucket', async () => {
+  const sessions = await readLiveCollabSessions(fakeCollabKv({ completed: 10, index: false }));
+  assert.deepEqual(sessions.map((s) => s.session_id).sort(), ['a1', 'a2']);
+});
+
+test('an index.live naming only a session that is gone yields none, without a scan', async () => {
+  const kv = fakeCollabKv({ live: {}, index: true });
+  assert.deepEqual(await readLiveCollabSessions(kv), []);
+  assert.equal(kv.gets, 2);
+});
+

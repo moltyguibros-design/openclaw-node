@@ -7,6 +7,7 @@ import { NextRequest } from "next/server";
 const store = new Map<string, Uint8Array>();
 let inFlight = 0;
 let maxInFlight = 0;
+let gets = 0;
 
 vi.mock("@/lib/nats", () => ({
   sc: { decode: (b: Uint8Array) => new TextDecoder().decode(b) },
@@ -16,6 +17,7 @@ vi.mock("@/lib/nats", () => ({
         yield* store.keys();
       })(),
     get: async (key: string) => {
+      gets++;
       inFlight++;
       maxInFlight = Math.max(maxInFlight, inFlight);
       await new Promise((r) => setTimeout(r, 1));
@@ -40,6 +42,7 @@ afterEach(() => {
   store.clear();
   inFlight = 0;
   maxInFlight = 0;
+  gets = 0;
 });
 
 test("terminal sessions: the gets run concurrently and only the newest N come back", async () => {
@@ -61,3 +64,27 @@ test("without a limit every matching session is returned", async () => {
   expect(sessions).toHaveLength(12);
   expect(sessions[0].session_id).toBe("s-11");
 });
+
+test("live sessions are read through the daemon's index.live, not a scan of every session", async () => {
+  for (let i = 0; i < 50; i++) seed(`done-${i}`, "completed", i);
+  seed("a1", "active", 51);
+  seed("a2", "recruiting", 52);
+  seed("gone", "completed", 53);
+  store.set("index.live", new TextEncoder().encode(JSON.stringify({ a1: "active", a2: "recruiting", gone: "active" })));
+
+  const { sessions } = await get("?status=recruiting,active");
+
+  expect(sessions.map((s) => s.session_id).sort()).toEqual(["a1", "a2"]);
+  expect(gets).toBe(4);
+});
+
+test("without index.live a live query still finds the live sessions by scanning", async () => {
+  for (let i = 0; i < 5; i++) seed(`done-${i}`, "completed", i);
+  seed("a1", "active", 10);
+  seed("a2", "recruiting", 11);
+
+  const { sessions } = await get("?status=recruiting,active");
+
+  expect(sessions.map((s) => s.session_id).sort()).toEqual(["a1", "a2"]);
+});
+
