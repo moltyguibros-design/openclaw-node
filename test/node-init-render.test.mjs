@@ -224,6 +224,50 @@ describe('node-init join-token trust provisioning', () => {
   });
 });
 
+// MESH_NODE_HEALTH and MESH_TOOLS belong to their publishers, which create them
+// with a 120 s TTL. A reader that opened them with create semantics made a
+// TTL-less bucket when it ran first, so a dead node's entry never expired.
+describe('read-only mesh CLIs bind to KV buckets, never create them', () => {
+  it('node-init discoverTopology binds MESH_NODE_HEALTH', async () => {
+    const { discoverTopology } = require('../bin/openclaw-node-init.js');
+    const Module = require('node:module');
+    const opened = [];
+    const fakeNats = {
+      StringCodec: () => ({ decode: (b) => String(b) }),
+      connect: async () => ({
+        jetstream: () => ({ views: { kv: async (bucket, opts) => {
+          opened.push({ bucket, opts });
+          if (opts.bindOnly) throw new Error('stream not found');
+          return { keys: async () => [][Symbol.iterator](), get: async () => null };
+        } } }),
+        drain: async () => {},
+      }),
+    };
+    const home = mkdtempSync(join(tmpdir(), 'node-init-topology-'));
+    const savedHome = process.env.HOME;
+    const realLoad = Module._load;
+    process.env.HOME = home;
+    mkdirSync(join(home, '.openclaw'), { recursive: true });
+    Module._load = function (request, ...rest) { return request === 'nats' ? fakeNats : realLoad.call(this, request, ...rest); };
+    try {
+      await discoverTopology('nats://127.0.0.1:4222', 'worker-7');
+    } finally {
+      Module._load = realLoad;
+      process.env.HOME = savedHome;
+      rmSync(home, { recursive: true, force: true });
+    }
+    assert.deepEqual(opened.map((o) => o.bucket), ['MESH_NODE_HEALTH']);
+    assert.equal(opened[0].opts.bindOnly, true);
+  });
+
+  it('discord-read binds MESH_TOOLS at every open', () => {
+    const src = readFileSync(join(ROOT, 'bin', 'discord-read.js'), 'utf8');
+    const opens = [...src.matchAll(/openMeshKv\(js, 'MESH_TOOLS', ([^,]+),/g)].map((m) => m[1]);
+    assert.equal(opens.length, 2);
+    for (const o of opens) assert.equal(o, '{ bindOnly: true }');
+  });
+});
+
 // mesh-node-remove must undo every unit node-init installs (plus the health
 // publisher a full install adds): a deploy listener left behind keeps the
 // "removed" node on the bus and crash-loops once --purge deletes ~/openclaw.

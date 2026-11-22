@@ -864,7 +864,7 @@ async function discoverTopology(natsUrl, localNodeId) {
 
     // Query MESH_NODE_HEALTH for all known nodes
     try {
-      const kv = await openMeshKv(js, 'MESH_NODE_HEALTH', {}, { waitMs: 0 });
+      const kv = await openMeshKv(js, 'MESH_NODE_HEALTH', { bindOnly: true }, { waitMs: 0 });
       const keys = await kv.keys();
       for await (const key of keys) {
         const entry = await kv.get(key);
@@ -1035,5 +1035,5 @@ if (require.main === module) main().catch(err => {
 
 module.exports = {
   renderServiceTemplate, serviceTemplateVars, SERVICE_TEMPLATE_VARS, parseJoinToken, updateEnvFile, provisionTrust,
-  installService, verifyServiceRunning, agentStartCommand, installMeshCode, discoverNats,
+  installService, verifyServiceRunning, agentStartCommand, installMeshCode, discoverNats, discoverTopology,
 };
