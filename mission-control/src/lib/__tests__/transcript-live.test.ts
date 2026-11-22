@@ -101,3 +101,44 @@ test("an older session that resumes is picked up by the periodic rescan", async 
   vi.spyOn(Date, "now").mockReturnValue(now + 61_000);
   expect((await getRecentTranscriptActivity()).map((e) => e.detail)).toEqual(["Wrote a/resumed", "Wrote a/one"]);
 });
+
+test("gateway toolCall blocks are reported like Claude Code tool_use blocks", async () => {
+  const toolCall = (name: string, args: Record<string, unknown>) =>
+    JSON.stringify({
+      timestamp: "2026-11-17T12:00:00Z",
+      type: "message",
+      message: { role: "assistant", content: [{ type: "toolCall", name, arguments: args }] },
+    }) + "\n";
+  fs.writeFileSync(
+    path.join(sessions, "g.jsonl"),
+    toolCall("read", { file_path: "/x/a/b.md" }) + toolCall("exec", { command: "ls -la /tmp" }) + toolCall("browse", {}),
+  );
+
+  const { getRecentTranscriptActivity } = await import("@/lib/parsers/transcript");
+  expect((await getRecentTranscriptActivity()).map((e) => e.detail)).toEqual(["ls -la /tmp", "Read a/b.md"]);
+});
+
+test("enabled transcript-sources.json entries are scanned besides the default dirs", async () => {
+  const config = path.join(home, ".openclaw", "config");
+  fs.mkdirSync(config, { recursive: true });
+  fs.writeFileSync(
+    path.join(config, "transcript-sources.json"),
+    JSON.stringify({
+      sources: [
+        { name: "claude-code-home", path: "~/extra/", format: "claude-code", enabled: true },
+        { name: "off", path: "~/off/", format: "claude-code", enabled: false },
+      ],
+    }),
+  );
+  fs.writeFileSync(path.join(sessions, "old.jsonl"), toolUse("/x/s/s/old"));
+  for (const dir of ["extra", "off"]) {
+    fs.mkdirSync(path.join(home, dir));
+    const file = path.join(home, dir, `${dir}.jsonl`);
+    fs.writeFileSync(file, toolUse(`/x/${dir}/${dir}/new`));
+    const later = new Date(Date.now() + (dir === "off" ? 9000 : 5000));
+    fs.utimesSync(file, later, later);
+  }
+
+  const { getRecentTranscriptActivity } = await import("@/lib/parsers/transcript");
+  expect((await getRecentTranscriptActivity()).map((e) => e.detail)).toEqual(["Wrote extra/new"]);
+});

@@ -26,15 +26,34 @@ function toAgentProjectPath(workspacePath: string): string {
 
 const HOME = process.env.HOME || os.homedir();
 
-/**
- * Transcript source directories — scans ALL frontend transcript stores.
- */
+const PARSED_FORMATS = new Set(["claude-code", "openclaw-gateway"]);
+
+function registryDirs(): string[] {
+  try {
+    const reg = JSON.parse(
+      fs.readFileSync(path.join(OPENCLAW_ROOT, "config", "transcript-sources.json"), "utf-8"),
+    ) as { sources?: Array<{ path: string; format?: string; enabled?: boolean }> };
+    return (reg.sources || [])
+      .filter((s) => s.enabled !== false && PARSED_FORMATS.has(s.format || ""))
+      .map((s) => (s.path.startsWith("~") ? path.join(HOME, s.path.slice(1)) : s.path));
+  } catch {
+    return [];
+  }
+}
+
+// The two defaults stay in the union: the registry template hard-codes
+// ~/.openclaw/agents/main/sessions/, which is wrong under a non-default OPENCLAW_ROOT.
 const TRANSCRIPT_DIRS = [
-  // Agent CLI workspace sessions (cross-platform path encoding)
-  path.join(HOME, ".claude/projects", toAgentProjectPath(WORKSPACE_ROOT)),
-  // OpenClaw Gateway sessions (Discord, Telegram, etc.)
-  path.join(OPENCLAW_ROOT, "agents", "main", "sessions"),
+  ...new Set(
+    [
+      path.join(HOME, ".claude/projects", toAgentProjectPath(WORKSPACE_ROOT)),
+      path.join(OPENCLAW_ROOT, "agents", "main", "sessions"),
+      ...registryDirs(),
+    ].map((d) => path.resolve(d)),
+  ),
 ];
+
+const GATEWAY_TOOL_NAMES: Record<string, string> = { read: "Read", write: "Write", edit: "Edit", exec: "Bash" };
 
 // The live sidebar polls every 5s. A full readdir + stat of every transcript per
 // poll grows with every session, so each directory is re-listed only when its
@@ -180,9 +199,10 @@ function extractEvents(entries: object[]): TranscriptEvent[] {
       if (!Array.isArray(content)) continue;
 
       for (const block of content) {
-        if (block.type === "tool_use") {
-          const toolName = block.name as string;
-          const input = (block.input || {}) as Record<string, unknown>;
+        const gateway = block.type === "toolCall";
+        if (block.type === "tool_use" || gateway) {
+          const toolName = gateway ? GATEWAY_TOOL_NAMES[block.name as string] : (block.name as string);
+          const input = ((gateway ? block.arguments : block.input) || {}) as Record<string, unknown>;
 
           switch (toolName) {
             case "Write": {
