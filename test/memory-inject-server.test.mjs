@@ -2,7 +2,7 @@
  * memory-inject-server.test.mjs — Unit tests for lib/memory-inject-server.mjs
  *
  * Covers: getOrCreateToken (generate + reuse), startInjectionServer lifecycle,
- * /health endpoint, /memory/inject auth (401), missing-prompt (400),
+ * /health endpoint, /memory/inject auth (401), missing-prompt (200 noop),
  * body-size cap (400), happy path (200), @memory directives (off/none/deep/only:X),
  * graceful close.
  *

@@ -609,7 +609,7 @@ Dead peers are tracked by the offerer and acceptor. A dead peer's offers are fil
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INJECTION_TOKEN_BUDGET` | `750` | Max tokens for ambient memory injection |
+| `INJECTION_TOKEN_BUDGET` | `1500` | Safety ceiling (tokens) for the injected related-sessions list; per-category recall caps are the primary limit |
 | `ANALYSIS_MODE` | (auto) | `embedding` or `llm` for query analysis |
 | `EXTRACTION_IDLE_THRESHOLD_SEC` | `2700` | Seconds of idle before auto-extraction |
 

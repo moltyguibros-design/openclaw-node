@@ -32,3 +32,16 @@ test('every owner/consumer script named in docs/STATE_FILES.md exists', () => {
   assert.ok(names.length > 5, `parsed only ${names.length} script names`);
   assert.deepEqual(names.filter((name) => !exists(name)), []);
 });
+
+test('the .knowledge.db entry names the embedding model and dimension core.mjs uses', () => {
+  const doc = fs.readFileSync(path.join(ROOT, 'docs', 'STATE_FILES.md'), 'utf-8');
+  const start = doc.indexOf('\n### `.knowledge.db`');
+  assert.ok(start >= 0, '.knowledge.db section missing');
+  const entry = doc.slice(start, doc.indexOf('\n#', start + 5));
+  const core = fs.readFileSync(path.join(ROOT, 'lib', 'mcp-knowledge', 'core.mjs'), 'utf-8');
+  const model = core.match(/KNOWLEDGE_MODEL \|\| '([^']+)'/)[1];
+  const dim = core.match(/EMBEDDING_DIM = (\d+)/)[1];
+  assert.ok(entry.includes(model), `entry must name ${model}`);
+  assert.ok(entry.includes(`${dim}-dim`), `entry must say ${dim}-dim`);
+  assert.doesNotMatch(entry, /MiniLM|384-dim/);
+});

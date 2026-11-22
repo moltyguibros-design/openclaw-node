@@ -151,11 +151,15 @@ recreates what it needs on next tick.
 
 ### `.knowledge.db`
 
-- **Owner:** `lib/mcp-knowledge/core.mjs` (MCP knowledge server)
-- **Format:** SQLite with WAL + sqlite-vec extension. Stores document chunks with 384-dim embeddings (Xenova/all-MiniLM-L6-v2 via `@huggingface/transformers`).
-- **Lifetime:** Persistent. Rebuilt on reindex. Stores embedded workspace documents for semantic search.
+- **Owner:** `lib/mcp-knowledge/core.mjs` (schema, embedding, search)
+- **Format:** SQLite with WAL + sqlite-vec extension. Stores chunks with 1024-dim embeddings (Xenova/bge-m3 via `@huggingface/transformers`): workspace document chunks, and session turn chunks (`session_chunks`, `session_chunks_fts`, `session_chunk_vectors`).
+- **Lifetime:** Persistent. Rebuilt on reindex.
+- **Writers:**
+  - MCP knowledge server — workspace documents.
+  - `workspace-bin/knowledge-index-job.mjs` (memory daemon) and the one-time `bin/embed-existing-sessions.mjs` — session turns.
 - **Consumers:**
   - MCP knowledge server (registered in `.mcp.json`). Accessed via MCP tool calls from Claude sessions.
+  - `lib/memory-inject-server.mjs` — retrieval channels 1 (FTS) and 2 (vector) over the session turns.
   - `bin/knowledge-session-search.mjs` (installed to `~/openclaw/bin/`) — CLI semantic / hybrid / FTS search over the indexed session turns (`session_chunks`). `--fts` input is reduced to AND-joined keywords, so a natural-language question still matches.
 
 ---

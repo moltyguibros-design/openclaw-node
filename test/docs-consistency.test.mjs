@@ -426,3 +426,10 @@ test('README Distributed Mission Control describes the daemon submit path, daemo
   const row = read('TEST.md').split('\n').find((l) => l.startsWith('| `mesh-kv-sync.test.ts` |'));
   assert.doesNotMatch(row, /CAS|conflict resolution|KV-to-DB/);
 });
+
+test('MULTI_NODE_DEPLOY gives the INJECTION_TOKEN_BUDGET default memory-injector falls back to', () => {
+  const fallback = read('lib/memory-injector.mjs').match(/INJECTION_TOKEN_BUDGET\) \|\| (\d+)/)[1];
+  const rows = read('docs/MULTI_NODE_DEPLOY.md').split('\n').filter((l) => l.startsWith('| `INJECTION_TOKEN_BUDGET`'));
+  assert.ok(rows.length > 0, 'INJECTION_TOKEN_BUDGET row missing');
+  for (const row of rows) assert.ok(row.includes(`| \`${fallback}\` |`), row);
+});
