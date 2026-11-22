@@ -71,6 +71,11 @@ describe('runCli outcome', () => {
     const small = await node("process.stdout.write('answer')");
     assert.equal(small.truncated, false);
   });
+
+  it('decodes a multi-byte character split across two pipe chunks', async () => {
+    const run = await node("const b = Buffer.from('é—ok'); process.stdout.write(b.subarray(0, 1)); setTimeout(() => process.stdout.write(b.subarray(1)), 200)");
+    assert.equal(run.stdout, 'é—ok');
+  });
 });
 
 describe('runCli abort', () => {
