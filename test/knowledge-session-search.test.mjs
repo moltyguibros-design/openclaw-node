@@ -52,3 +52,20 @@ test('--fts finds a turn for a natural-language question', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('uses the workspace DB, not <cwd>/.knowledge.db', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'session-search-cwd-'));
+  const home = mkdtempSync(join(tmpdir(), 'session-search-home-'));
+  try {
+    const env = { ...process.env, HOME: home };
+    delete env.KNOWLEDGE_DB;
+    delete env.KNOWLEDGE_ROOT;
+    const r = spawnSync(process.execPath, [CLI, 'nats', '--fts'], { cwd, env, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(existsSync(join(cwd, '.knowledge.db')), false);
+    assert.equal(existsSync(join(home, '.openclaw', 'workspace', '.knowledge.db')), true);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
