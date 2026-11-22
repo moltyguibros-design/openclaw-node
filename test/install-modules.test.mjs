@@ -237,6 +237,19 @@ test('every unit whose entrypoint reads OPENCLAW_REPO_DIR sets it, on both OSes'
   }
 });
 
+// The memory-daemon and Mission Control systemd units kept NODE_PATH on the ~/openclaw copy,
+// which nothing they run resolves through and their launchd twins never set. The gateway
+// unit's NODE_PATH is an open operator decision (agent-run scripts may rely on it).
+test('no unit but the gateway points NODE_PATH at the ~/openclaw copy', () => {
+  const units = [
+    ...readdirSync(join(ROOT, 'services/launchd')).map((f) => `services/launchd/${f}`),
+    ...readdirSync(join(ROOT, 'services/systemd')).map((f) => `services/systemd/${f}`),
+  ].filter((rel) => rel !== 'services/systemd/openclaw-gateway.service');
+  for (const rel of units) {
+    assert.doesNotMatch(readFileSync(join(ROOT, rel), 'utf8'), /NODE_PATH[^\n]*\$\{HOME\}\/openclaw\//, rel);
+  }
+});
+
 test('preserved behaviors sit in their modules', () => {
   assert.ok(moduleSrc['env.sh'].includes('claude_project_path() {'));
   assert.ok(moduleSrc['env.sh'].includes("sed 's|[/.]|-|g'"));
