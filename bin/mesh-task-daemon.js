@@ -641,19 +641,19 @@ async function handleHeartbeat(msg) {
 
 /**
  * mesh.tasks.release — Mark task as released (automation gave up, human triage needed).
- * Expects: { task_id, reason, attempts? }
+ * Expects: { task_id, reason, attempts?, cost?, metric_exhausted? }
  * Different from fail: "released" means all retries exhausted, escalation required.
  */
 async function handleRelease(msg) {
   const params = parseRequest(msg);
-  const { task_id, reason, attempts } = params;
+  const { task_id, reason, attempts, cost } = params;
   if (!task_id) return respondError(msg, 'task_id is required');
 
   const existing = await store.get(task_id);
   if (!existing) return respondError(msg, `Task ${task_id} not found`);
   if (!(await authorize(msg, params, existing, { action: 'release', allowOwner: true, allowOperator: true }))) return;
 
-  const task = await store.markReleased(task_id, reason || 'released for human triage', attempts || []);
+  const task = await store.markReleased(task_id, reason || 'released for human triage', attempts || [], { cost });
   if (!task) return respondUnchanged(msg, task_id);
 
   log(`RELEASED ${task_id}: ${reason || 'no reason'} (needs human triage)`);

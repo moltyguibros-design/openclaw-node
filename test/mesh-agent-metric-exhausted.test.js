@@ -36,7 +36,7 @@ Object.assign(process.env, {
 const { describe, it, beforeEach, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { StringCodec } = require('nats');
-const { registerProvider } = require('../lib/llm-providers.js');
+const { registerProvider, parseClaudeJsonResult } = require('../lib/llm-providers.js');
 const agent = require('../bin/mesh-agent.js');
 
 const sc = StringCodec();
@@ -49,6 +49,29 @@ registerProvider('exhaust-ok-stub', {
 registerProvider('exhaust-crash-stub', {
   binary: process.execPath,
   buildArgs() { return ['-e', 'process.exit(3)']; },
+});
+
+// A claude-shaped result record: each run reports $0.10 of its own.
+const COST_RECORD = JSON.stringify({
+  type: 'result', subtype: 'success', is_error: false, result: 'did it',
+  total_cost_usd: 0.1, usage: { input_tokens: 10, output_tokens: 5 },
+});
+registerProvider('cost-stub', {
+  binary: process.execPath,
+  parseOutput: parseClaudeJsonResult,
+  buildArgs() { return ['-e', `process.stdout.write(${JSON.stringify(COST_RECORD)})`]; },
+});
+// Fixes check.js on its second run, so the metric passes on attempt 2.
+const fixRuns = new Map();
+registerProvider('cost-fix-stub', {
+  binary: process.execPath,
+  parseOutput: parseClaudeJsonResult,
+  buildArgs(prompt, model, t, targetDir) {
+    const run = (fixRuns.get(t.task_id) || 0) + 1;
+    fixRuns.set(t.task_id, run);
+    const fix = run === 2 ? `require('fs').writeFileSync(${JSON.stringify(path.join(targetDir, 'check.js'))}, 'process.exit(0)\\n');` : '';
+    return ['-e', `${fix}process.stdout.write(${JSON.stringify(COST_RECORD)})`];
+  },
 });
 
 after(() => fs.rmSync(TMP, { recursive: true, force: true }));
@@ -97,5 +120,28 @@ describe('the release says whether the metric was exhausted', () => {
     await agent.__test.executeTask(task('M-2', 'exhaust-crash-stub'));
     assert.ok(seen['mesh.tasks.release'], 'the task was released');
     assert.equal(seen['mesh.tasks.release'].metric_exhausted, false);
+  });
+});
+
+describe('the reported cost is every attempt the task paid for, not the last one', () => {
+  beforeEach(freshWorkspace);
+  const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} != ${expected}`);
+
+  it('a released task reports the cost of both attempts', async () => {
+    const seen = fakeDaemon();
+    await agent.__test.executeTask(task('C-1', 'cost-stub'));
+    const released = seen['mesh.tasks.release'];
+    assert.ok(released, 'the task was released');
+    near(released.cost?.estimatedCostUsd, 0.2);
+    assert.equal(released.cost.inputTokens, 20);
+    assert.equal(released.cost.outputTokens, 10);
+  });
+
+  it('a task completed on attempt 2 reports attempt 1 too', async () => {
+    const seen = fakeDaemon();
+    await agent.__test.executeTask(task('C-2', 'cost-fix-stub'));
+    const completed = seen['mesh.tasks.complete'];
+    assert.ok(completed, 'the task completed');
+    near(completed.result.cost?.estimatedCostUsd, 0.2);
   });
 });

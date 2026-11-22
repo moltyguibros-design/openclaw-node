@@ -195,6 +195,26 @@ describe("markFailed() keeps the attempt history", () => {
   });
 });
 
+describe("markReleased() keeps the cost the worker reports", () => {
+  const running = (id) => ({ ...createTask({ task_id: id, title: id }), status: TASK_STATUS.RUNNING, owner: "w1" });
+  const cost = { estimatedCostUsd: 0.2, inputTokens: 1, outputTokens: 1 };
+
+  it("stores the reported cost on the released result", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, running("T-R1"));
+    const t = await store.markReleased("T-R1", "r", [], { cost });
+    assert.equal(t.status, TASK_STATUS.RELEASED);
+    assert.deepEqual(t.result.cost, cost);
+  });
+
+  it("a release without a cost leaves the result without one", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, running("T-R2"));
+    const t = await store.markReleased("T-R2", "r");
+    assert.deepEqual(t.result, { success: false, summary: "r", released: true });
+  });
+});
+
 describe("recordMerge() merge-after-review (P4-4)", () => {
   it("records the merge on a completed task without touching the rest of the result", async () => {
     const store = new TaskStore(mockKv());

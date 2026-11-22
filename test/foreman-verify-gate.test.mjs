@@ -85,6 +85,11 @@ before(() => {
       return [stubPath, targetDir, task.stub_mode];
     },
   });
+  registerProvider('foreman-cost-stub', {
+    binary: process.execPath,
+    buildArgs(prompt, model, task, targetDir) { return [stubPath, targetDir, task.stub_mode]; },
+    parseOutput: (raw) => ({ text: raw, cost: { inputTokens: 3, outputTokens: 2, estimatedCostUsd: 0.05 } }),
+  });
 });
 after(() => fs.rmSync(scratch, { recursive: true, force: true }));
 
@@ -132,7 +137,7 @@ const verifications = (supervisor) => supervisor.state.verification_results.map(
 describe('foremanVerify — enforcing, no metric: only a verifier PASS completes', () => {
   it('a PASS from the verifier completes the attempt', async () => {
     const { result, spawned, supervisor } = await gate({ mode: 'pass' });
-    assert.deepEqual(result, { escalate: false, attemptRecord: null });
+    assert.deepEqual(result, { escalate: false, attemptRecord: null, cost: null });
     assert.equal(spawned.length, 1);
     assert.deepEqual(verifications(supervisor), [['verifier', true]]);
     assert.equal(supervisor.state.workers.filter((w) => w.kind === 'verifier').length, 1);
@@ -144,6 +149,13 @@ describe('foremanVerify — enforcing, no metric: only a verifier PASS completes
       assert.equal(spawned.length, 1, `verifier must run (assessor ${assessor.name})`);
       assert.ok(result.attemptRecord, 'a FAIL never completes');
       assert.deepEqual(verifications(supervisor), [['verifier', false]]);
+    }
+  });
+
+  it('the verifier pass reports what it cost, whatever its verdict', async () => {
+    for (const mode of ['pass', 'fail']) {
+      const { result } = await gate({ mode, provider: 'foreman-cost-stub' });
+      assert.deepEqual(result.cost, { inputTokens: 3, outputTokens: 2, estimatedCostUsd: 0.05 }, mode);
     }
   });
 

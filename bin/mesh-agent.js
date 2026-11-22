@@ -642,11 +642,12 @@ async function foremanVerify(supervisor, task, worktreePath, attempt, llmResult)
   const outcome = tampered ? 'modified the worktree' : stop ? `stopped — ${stop.reason}` : verdict.verdict ? `${verdict.verdict} (exit ${result.exitCode})` : `returned ${verdict.reason}`;
   log(`FOREMAN ${task.task_id}: verifier ${outcome}`);
 
+  const { cost } = result;
   if (stop?.action === 'ESCALATE') {
-    return record(`escalated by Foreman during verification — ${stop.reason}`, stop.reason, true);
+    return { ...record(`escalated by Foreman during verification — ${stop.reason}`, stop.reason, true), cost };
   }
-  if (passed) return complete;
-  return record(`Foreman verifier ${outcome}`, findings);
+  if (passed) return { ...complete, cost };
+  return { ...record(`Foreman verifier ${outcome}`, findings), cost };
 }
 
 async function closeSupervision(supervisor, outcome) {
@@ -2436,6 +2437,21 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
   // attempt ran and the last one failed its metric, never on an early stop.
   let stoppedEarly = false;
   let lastMetricFailed = false;
+  // Every run the task paid for: each attempt and each verifier pass.
+  const spent = { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
+  let costReported = false;
+  const addCost = (cost) => {
+    if (!cost) return;
+    costReported = true;
+    spent.inputTokens += cost.inputTokens || 0;
+    spent.outputTokens += cost.outputTokens || 0;
+    spent.estimatedCostUsd += cost.estimatedCostUsd || 0;
+  };
+  // The session-log estimate only when no run reported its own cost, read once: it re-reads
+  // the latest session file, so summing it per attempt would multiply one stale figure.
+  const reportedCost = async () => (costReported
+    ? spent
+    : (await getSessionInfo(AGENT_WORK_DIR).catch(() => null))?.cost || null);
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     lastMetricFailed = false;
@@ -2470,13 +2486,9 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
 
     log(`${llmResult.provider} exited with code ${llmResult.exitCode}`);
 
-    // The CLI's own total when the provider reports one; otherwise an estimate from
-    // the session JSONL.
-    const sessionInfo = llmResult.cost
-      ? { cost: llmResult.cost }
-      : await getSessionInfo(AGENT_WORK_DIR).catch(() => null);
-    if (sessionInfo?.cost) {
-      log(`Cost: $${sessionInfo.cost.estimatedCostUsd.toFixed(4)} (${sessionInfo.cost.inputTokens} in / ${sessionInfo.cost.outputTokens} out)`);
+    addCost(llmResult.cost);
+    if (llmResult.cost) {
+      log(`Cost: $${llmResult.cost.estimatedCostUsd.toFixed(4)} (${llmResult.cost.inputTokens} in / ${llmResult.cost.outputTokens} out)`);
     }
 
     // A worker Foreman stopped is over whatever its exit code says (a CLI that traps
@@ -2568,6 +2580,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
     // (D3); in shadow mode or without Foreman, trust the LLM output as before.
     if (!task.metric) {
       const verification = await foremanVerify(supervisor, task, worktreePath, attempt, llmResult);
+      addCost(verification.cost);
       if (verification.attemptRecord) {
         attempts.push(verification.attemptRecord);
         await natsRequest('mesh.tasks.attempt', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token, ...verification.attemptRecord });
@@ -2605,7 +2618,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
         result: {
           success: true, summary, artifacts,
           ...(roleValidation ? { role_validation: roleValidation } : {}),
-          cost: sessionInfo?.cost || null,
+          cost: await reportedCost(),
           harness: {
             violations: harnessResult.violations,
             warnings: harnessResult.warnings,
@@ -2664,7 +2677,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
           output: llmResult.stdout,
           artifacts,
           ...(roleValidation ? { role_validation: roleValidation } : {}),
-          cost: sessionInfo?.cost || null,
+          cost: await reportedCost(),
           sha: commit?.sha || null,
           branch: commit?.branch || null,
           merged: commit?.committed ? false : null,
@@ -2715,6 +2728,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
     reason,
     attempts,
     metric_exhausted: !stoppedEarly && lastMetricFailed && !escalated,
+    cost: await reportedCost(),
   });
   // Keep worktree branch on release for post-mortem debugging (don't merge partial
   // work); startup reconcile keeps it until MESH_KEPT_BRANCH_MAX_DAYS.
