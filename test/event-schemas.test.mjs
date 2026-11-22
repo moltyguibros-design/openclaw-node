@@ -520,3 +520,17 @@ describe('toJsonSchema', () => {
     assert.ok(variants.every((v) => v.required?.includes('data')), 'each variant requires data');
   });
 });
+
+describe('memory.error boundaries the daemon emits', () => {
+  it('every emitErrorEvent boundary in memory-daemon.mjs passes the schema', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { buildMemoryEvent } = await import('../lib/local-event-log.mjs');
+    const src = readFileSync(new URL('../workspace-bin/memory-daemon.mjs', import.meta.url), 'utf8');
+    const boundaries = [...new Set([...src.matchAll(/emitErrorEvent\('([a-z_]+)'/g)].map((m) => m[1]))];
+    for (const b of ['ingest', 'extract', 'knowledge_index', 'graph_cache_refresh']) assert.ok(boundaries.includes(b), `missing ${b}`);
+    for (const boundary of boundaries) {
+      const event = buildMemoryEvent('memory.error', 'x', 'memory', { boundary, error_code: 'E', error_message: 'm' }, 'node-a');
+      assert.equal(MemoryEventSchema.safeParse(event).success, true, `boundary ${boundary} is rejected`);
+    }
+  });
+});
