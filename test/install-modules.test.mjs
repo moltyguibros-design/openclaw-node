@@ -212,6 +212,31 @@ test('every unit that runs a repo-shipped bin/ tool execs it from ${OPENCLAW_REP
   assert.ok(binUnits >= 16, `bin/ units found: ${binUnits}`);
 });
 
+// The systemd health-publisher unit omitted OPENCLAW_REPO_DIR, so Linux nodes reported the
+// HEAD of ~/openclaw as their deployVersion; Mission Control's local fallback hardcoded it.
+test('every unit whose entrypoint reads OPENCLAW_REPO_DIR sets it, on both OSes', () => {
+  const units = [
+    ...readdirSync(join(ROOT, 'services/launchd')).map((f) => `services/launchd/${f}`),
+    ...readdirSync(join(ROOT, 'services/systemd')).map((f) => `services/systemd/${f}`),
+  ];
+  const setsRepoDir = (src) => /^Environment=OPENCLAW_REPO_DIR=\$\{OPENCLAW_REPO_DIR\}$/m.test(src)
+    || /<key>OPENCLAW_REPO_DIR<\/key>\s*<string>\$\{OPENCLAW_REPO_DIR\}<\/string>/.test(src);
+  let readers = 0;
+  for (const rel of units) {
+    const src = readFileSync(join(ROOT, rel), 'utf8');
+    const name = src.match(/\/bin\/([\w.-]+\.m?js)\b/)?.[1];
+    if (!name) continue;
+    const entry = [join(ROOT, 'bin', name), join(ROOT, 'workspace-bin', name)].find((f) => existsSync(f));
+    if (!entry || !readFileSync(entry, 'utf8').includes('process.env.OPENCLAW_REPO_DIR')) continue;
+    readers++;
+    assert.ok(setsRepoDir(src), `${rel} runs ${name}, which reads OPENCLAW_REPO_DIR`);
+  }
+  assert.ok(readers >= 4, `units whose entrypoint reads OPENCLAW_REPO_DIR: ${readers}`);
+  for (const rel of ['services/systemd/openclaw-mission-control.service', 'services/launchd/ai.openclaw.mission-control.plist']) {
+    assert.ok(setsRepoDir(readFileSync(join(ROOT, rel), 'utf8')), `${rel} must set OPENCLAW_REPO_DIR for its deployVersion fallback`);
+  }
+});
+
 test('preserved behaviors sit in their modules', () => {
   assert.ok(moduleSrc['env.sh'].includes('claude_project_path() {'));
   assert.ok(moduleSrc['env.sh'].includes("sed 's|[/.]|-|g'"));

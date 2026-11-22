@@ -215,4 +215,18 @@ describe("GET /api/mesh/nodes", () => {
     ]);
     expect(nodes["test-node"].status).toBe("degraded");
   });
+
+  it("reads the local deployVersion from OPENCLAW_REPO_DIR, not a hardcoded ~/openclaw", async () => {
+    const realRepoDir = process.env.OPENCLAW_REPO_DIR;
+    process.env.OPENCLAW_REPO_DIR = "/opt/o'c";
+    try {
+      await (await loadGet())();
+    } finally {
+      if (realRepoDir === undefined) delete process.env.OPENCLAW_REPO_DIR;
+      else process.env.OPENCLAW_REPO_DIR = realRepoDir;
+    }
+    const cmds = cp.exec.mock.calls.map((c) => c[0] as string);
+    expect(cmds).toContain("git -C '/opt/o'\\''c' rev-parse --short HEAD 2>/dev/null");
+    expect(cmds.some((c) => c.includes("~/openclaw"))).toBe(false);
+  });
 });

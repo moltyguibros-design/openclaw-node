@@ -232,6 +232,7 @@ async function execSafe(cmd: string): Promise<string> {
 }
 
 async function gatherLocalHealth(): Promise<NodeHealth> {
+  const repoDir = process.env.OPENCLAW_REPO_DIR || path.join(os.homedir(), "openclaw");
   const mem = { total: Math.round(os.totalmem() / 1024 / 1024), free: Math.round(os.freemem() / 1024 / 1024) };
   const cpuLoad = Math.round((os.loadavg()[0] / os.cpus().length) * 100);
 
@@ -367,7 +368,8 @@ async function gatherLocalHealth(): Promise<NodeHealth> {
     stats: { tasksToday: 0, successRate: 1.0, tokenSpendTodayUsd: 0 },
     tailscale: tailscaleData,
     nats: { serverUrl: natsUrl, connected: false, serverVersion: "unknown", isHost: false },
-    deployVersion: (await execSafe("cd ~/openclaw && git rev-parse --short HEAD 2>/dev/null")) || "unknown",
+    deployVersion:
+      (await execSafe(`git -C '${repoDir.replace(/'/g, "'\\''")}' rev-parse --short HEAD 2>/dev/null`)) || "unknown",
     reportedAt: new Date().toISOString(),
     // Local fallback blob drifts from the mesh NodeHealth contract
     // (peer field names, extra dnsName/agent.name) — cast, don't reshape.
