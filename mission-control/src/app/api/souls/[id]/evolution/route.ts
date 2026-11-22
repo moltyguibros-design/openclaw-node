@@ -154,27 +154,29 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { action, reviewedBy } = body; // action: "approve" | "reject"
+    const { action, reviewedBy } = body;
+    if (action !== "approve" && action !== "reject") {
+      return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+    }
 
     const db = getDb();
 
-    if (action === "approve") {
-      // Approve is the only path that changes genes.json, and only once: a
-      // non-pending row (approved, rejected, unknown) never applies again.
-      const [row] = await db
-        .select()
-        .from(soulEvolutionLog)
-        .where(and(eq(soulEvolutionLog.eventId, eventId), eq(soulEvolutionLog.soulId, soulId)));
-      if (!row) {
-        return NextResponse.json({ error: "Event not found" }, { status: 404 });
-      }
-      if (row.reviewStatus !== "pending") {
-        return NextResponse.json(
-          { error: `event is ${row.reviewStatus}, not pending` },
-          { status: 409 }
-        );
-      }
+    // Only a pending event of this soul is reviewed, and only once: approve
+    // is the only path that changes genes.json, and a reviewed row never
+    // changes again.
+    const thisEvent = and(eq(soulEvolutionLog.eventId, eventId), eq(soulEvolutionLog.soulId, soulId));
+    const [row] = await db.select().from(soulEvolutionLog).where(thisEvent);
+    if (!row) {
+      return NextResponse.json({ error: "Event not found" }, { status: 404 });
+    }
+    if (row.reviewStatus !== "pending") {
+      return NextResponse.json(
+        { error: `event is ${row.reviewStatus}, not pending` },
+        { status: 409 }
+      );
+    }
 
+    if (action === "approve") {
       // Load full event from events.jsonl
       const eventsPath = path.join(
         SOULS_DIR,
@@ -296,23 +298,21 @@ export async function PATCH(
           reviewedBy,
           reviewedAt: new Date().toISOString(),
         })
-        .where(eq(soulEvolutionLog.eventId, eventId));
+        .where(thisEvent);
 
       return NextResponse.json({ success: true, commitHash });
-    } else if (action === "reject") {
-      await db
-        .update(soulEvolutionLog)
-        .set({
-          reviewStatus: "rejected",
-          reviewedBy,
-          reviewedAt: new Date().toISOString(),
-        })
-        .where(eq(soulEvolutionLog.eventId, eventId));
-
-      return NextResponse.json({ success: true });
-    } else {
-      return NextResponse.json({ error: "Invalid action" }, { status: 400 });
     }
+
+    await db
+      .update(soulEvolutionLog)
+      .set({
+        reviewStatus: "rejected",
+        reviewedBy,
+        reviewedAt: new Date().toISOString(),
+      })
+      .where(thisEvent);
+
+    return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Failed to review evolution:", error);
     return NextResponse.json(

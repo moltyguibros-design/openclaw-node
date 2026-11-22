@@ -137,3 +137,33 @@ test("an action other than add is refused instead of failing at commit on a stra
   expect(git("branch", "--list", "evolution/*")).toBe("");
   expect((await status()).review_status).toBe("pending");
 });
+
+async function reject(eventId = "evt_1", soul = "s1") {
+  const { PATCH } = await import("@/app/api/souls/[id]/evolution/route");
+  return PATCH(
+    new NextRequest(`http://127.0.0.1/api/souls/${soul}/evolution?eventId=${eventId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "reject", reviewedBy: "operator" }),
+    }),
+    { params: Promise.resolve({ id: soul }) },
+  );
+}
+
+test("reject marks a pending event rejected", async () => {
+  expect((await reject()).status).toBe(200);
+  expect((await status()).review_status).toBe("rejected");
+});
+
+test("reject refuses an event that is no longer pending", async () => {
+  const { getRawDb } = await import("@/lib/db");
+  getRawDb().prepare("UPDATE soul_evolution_log SET review_status = 'approved' WHERE event_id = 'evt_1'").run();
+  expect((await reject()).status).toBe(409);
+  expect((await status()).review_status).toBe("approved");
+});
+
+test("reject answers 404 for an unknown event or another soul's event", async () => {
+  expect((await reject("evt_missing")).status).toBe(404);
+  expect((await reject("evt_1", "s2")).status).toBe(404);
+  expect((await status()).review_status).toBe("pending");
+});
