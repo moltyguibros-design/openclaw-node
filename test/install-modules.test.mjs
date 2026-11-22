@@ -627,6 +627,8 @@ generate_config "$1" "$2"`, 'x', template, out], {
 
 // A cluster node's --update ran without --cluster-peers and rendered the
 // single-node nats.conf (as .new), since the peers and bind were never saved.
+// The joining run wrote the bound OPENCLAW_NATS to the env file only, so the units
+// it rendered next still pointed at 127.0.0.1, where the cluster server no longer listens.
 test('config.sh saves the cluster peers and bind, and a flagless --update re-renders the cluster nats.conf', () => {
   const cfg = moduleSrc['config.sh'];
   const start = cfg.indexOf("# A cluster node's peers and bind address");
@@ -636,13 +638,15 @@ test('config.sh saves the cluster peers and bind, and a flagless --update re-ren
   const root = mkdtempSync(join(tmpdir(), 'oc-cluster-'));
   mkdirSync(join(root, 'config'));
   const envFile = join(root, 'openclaw.env');
-  writeFileSync(envFile, 'OPENCLAW_NATS_TOKEN=tok\n');
+  writeFileSync(envFile, 'OPENCLAW_NATS_TOKEN=tok\nOPENCLAW_NATS=nats://127.0.0.1:4222\n');
   const conf = join(root, 'config', 'nats.conf');
+  const exported = ['OPENCLAW_NATS', 'OPENCLAW_KV_REPLICAS', 'OPENCLAW_NATS_CLUSTER_PEERS', 'OPENCLAW_NATS_CLUSTER_BIND'];
   const run = (flags) => spawnSync('bash', ['-c', `set -euo pipefail
 step() { :; }; info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }; error() { echo "ERR $*" >&2; }
 run() { "$@"; }; generate_config() { echo "GEN $(basename "$2")"; }
 while IFS='=' read -r k v; do export "$k=$v"; done < "$ENV_FILE"
-${block}`], {
+${block}
+${exported.map((k) => `bash -c 'echo "EXPORTED_${k}=\${${k}:-}"'`).join('\n')}`], {
     encoding: 'utf8',
     env: {
       PATH: process.env.PATH, HOME: root, OPENCLAW_ROOT: root, ENV_FILE: envFile, REPO_DIR: ROOT,
@@ -650,11 +654,22 @@ ${block}`], {
     },
   });
 
-  let r = run({ CLUSTER_PEERS: '100.64.0.2,100.64.0.3', CLUSTER_BIND: '100.64.0.1' });
+  let r = run({ DRY_RUN: 'true', CLUSTER_PEERS: '100.64.0.2,100.64.0.3', CLUSTER_BIND: '100.64.0.1' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^EXPORTED_OPENCLAW_NATS=nats:\/\/100\.64\.0\.1:4222$/m, 'a dry run previews the bound address');
+  assert.ok(!existsSync(conf), 'a dry run renders nothing');
+
+  r = run({ CLUSTER_PEERS: '100.64.0.2,100.64.0.3', CLUSTER_BIND: '100.64.0.1' });
   assert.equal(r.status, 0, r.stderr);
   const env = readFileSync(envFile, 'utf8');
   assert.match(env, /^OPENCLAW_NATS_CLUSTER_PEERS=100\.64\.0\.2,100\.64\.0\.3$/m);
   assert.match(env, /^OPENCLAW_NATS_CLUSTER_BIND=100\.64\.0\.1$/m);
+  for (const k of exported) {
+    const saved = env.match(new RegExp(`^${k}=(.*)$`, 'm'))?.[1];
+    assert.ok(saved, `${k} is saved`);
+    assert.ok(r.stdout.split('\n').includes(`EXPORTED_${k}=${saved}`), `the joining run renders the units with the saved ${k}=${saved}`);
+  }
+  assert.match(env, /^OPENCLAW_NATS=nats:\/\/100\.64\.0\.1:4222$/m);
   const rendered = readFileSync(conf, 'utf8');
   assert.match(rendered, /100\.64\.0\.1/);
   assert.match(rendered, /100\.64\.0\.3/);

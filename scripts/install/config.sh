@@ -236,6 +236,7 @@ if [ -n "$CLUSTER_PEERS" ]; then
 
   if [ "$DRY_RUN" = true ]; then
     info "[dry-run] would render cluster nats.conf (server=$CLUSTER_SERVER_NAME, bind=$CLUSTER_BIND) routing to: $CLUSTER_PEERS"
+    export OPENCLAW_NATS="nats://$CLUSTER_BIND:4222"
   else
     KV_REPLICAS="$(OPENCLAW_NATS_SERVER_NAME="$CLUSTER_SERVER_NAME" \
       OPENCLAW_NATS_TOKEN="$OPENCLAW_NATS_TOKEN" \
@@ -266,10 +267,12 @@ if [ -n "$CLUSTER_PEERS" ]; then
     fi
     # Persist: replica target, cluster pass, the peers and bind address (re-renders
     # on --update), and point every local consumer at the bound address (the
-    # server no longer listens on 127.0.0.1).
+    # server no longer listens on 127.0.0.1). Exported too: the units and
+    # .env.local rendered later in this run read the environment, not the file.
     for kv in "OPENCLAW_KV_REPLICAS=$KV_REPLICAS" "OPENCLAW_NATS_CLUSTER_PASS=$OPENCLAW_NATS_CLUSTER_PASS" \
               "OPENCLAW_NATS_CLUSTER_PEERS=$CLUSTER_PEERS" "OPENCLAW_NATS_CLUSTER_BIND=$CLUSTER_BIND" \
               "OPENCLAW_NATS=nats://$CLUSTER_BIND:4222"; do
+      export "$kv"
       key="${kv%%=*}"
       if grep -q "^$key=" "$ENV_FILE" 2>/dev/null; then
         run sed -i.bak "s|^$key=.*|$kv|" "$ENV_FILE" && run rm -f "$ENV_FILE.bak"
