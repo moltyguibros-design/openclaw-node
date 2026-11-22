@@ -116,12 +116,16 @@ describe('runCli deadline', () => {
       const c = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
       require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(c.pid));
       setInterval(() => {}, 1000);`;
-    const run = await node(code, { timeoutMs: 500, killGraceMs: 200 });
+    const running = node(code, { timeoutMs: 2000, killGraceMs: 200 });
+    const deadline = Date.now() + 10_000;
+    while (!fs.existsSync(pidFile) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+    assert.ok(fs.existsSync(pidFile), 'the child spawned its grandchild before the deadline');
+    const run = await running;
     assert.equal(run.outcome, 'timeout');
     assert.equal(run.timedOut, true);
     assert.equal(run.exitStatus, 124);
     const grandchild = Number(fs.readFileSync(pidFile, 'utf8'));
-    await new Promise((r) => setTimeout(r, 400));
+    for (let i = 0; i < 50 && alive(grandchild); i++) await new Promise((r) => setTimeout(r, 20));
     assert.equal(alive(grandchild), false, 'the CLI\'s own child died with it');
   });
 
