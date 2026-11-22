@@ -139,6 +139,8 @@ function mockKv() {
   const rows = new Map();
   let rev = 0;
   return {
+    purges: 0,
+    async purgeDeletes() { this.purges++; return { purged: 0 }; },
     async get(k) { const r = rows.get(k); return r ? { value: r.value, revision: r.revision } : null; },
     async put(k, v) { rows.set(k, { value: v, revision: ++rev }); },
     async update(k, v, expected) {
@@ -165,6 +167,8 @@ function tombstoneKv() {
       rows.set(k, { value: v, revision: ++rev, operation: "PUT" });
     },
     async delete(k) { rows.set(k, { value: new Uint8Array(0), revision: ++rev, operation: "DEL" }); },
+    // Markers younger than 30 minutes survive a purgeDeletes, as every marker here is.
+    async purgeDeletes() { return { purged: 0 }; },
     async keys() {
       const live = [...rows].filter(([, r]) => r.operation !== "DEL").map(([k]) => k);
       return (async function* () { yield* live; })();
@@ -272,7 +276,8 @@ describe("pruneTerminal() KV hygiene (P4-5)", () => {
   const fresh = new Date(now - 1 * DAY).toISOString();
 
   it("deletes old terminal tasks, keeps fresh ones and every non-terminal task", async () => {
-    const store = new TaskStore(mockKv());
+    const kv = mockKv();
+    const store = new TaskStore(kv);
     await seed(store, { ...createTask({ task_id: "old-done", title: "t" }), status: TASK_STATUS.COMPLETED, completed_at: old });
     await seed(store, { ...createTask({ task_id: "old-failed", title: "t" }), status: TASK_STATUS.FAILED, completed_at: old });
     await seed(store, { ...createTask({ task_id: "fresh-done", title: "t" }), status: TASK_STATUS.COMPLETED, completed_at: fresh });
@@ -281,20 +286,25 @@ describe("pruneTerminal() KV hygiene (P4-5)", () => {
     assert.deepEqual(pruned.sort(), ["old-done", "old-failed"]);
     assert.ok(await store.get("fresh-done"));
     assert.ok(await store.get("old-running"));
+    assert.equal(kv.purges, 1, "the DEL markers the prune left are purged once");
   });
 
   it("keeps a terminal task still referenced by a live task's depends_on (a pruned dep would strand it)", async () => {
-    const store = new TaskStore(mockKv());
+    const kv = mockKv();
+    const store = new TaskStore(kv);
     await seed(store, { ...createTask({ task_id: "dep", title: "t" }), status: TASK_STATUS.COMPLETED, completed_at: old });
     await seed(store, { ...createTask({ task_id: "child", title: "t", depends_on: ["dep"] }), status: TASK_STATUS.QUEUED });
     assert.deepEqual(await store.pruneTerminal({ maxAgeMs: 14 * DAY, now }), []);
     assert.ok(await store.get("dep"));
+    assert.equal(kv.purges, 0);
   });
 
   it("is a no-op when disabled (maxAgeMs 0)", async () => {
-    const store = new TaskStore(mockKv());
+    const kv = mockKv();
+    const store = new TaskStore(kv);
     await seed(store, { ...createTask({ task_id: "x", title: "t" }), status: TASK_STATUS.COMPLETED, completed_at: old });
     assert.deepEqual(await store.pruneTerminal({ maxAgeMs: 0, now }), []);
+    assert.equal(kv.purges, 0);
   });
 });
 
