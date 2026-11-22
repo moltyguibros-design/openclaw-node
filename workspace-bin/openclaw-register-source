@@ -48,20 +48,22 @@ switch (command) {
       console.error('Usage: openclaw-register-source add --name <name> --path <dir> [--format generic|claude-code|openclaw-gateway]');
       process.exit(1);
     }
+    // The daemon and the archiver resolve a relative path against their own cwd.
+    const storedPath = opts.path.startsWith('~') ? opts.path : path.resolve(opts.path);
     const reg = loadRegistry();
     const existing = reg.sources.findIndex(s => s.name === opts.name);
     const entry = {
       name: opts.name,
-      path: opts.path,
+      path: storedPath,
       format: opts.format || 'generic',
       enabled: true
     };
     if (existing >= 0) {
       reg.sources[existing] = entry;
-      console.log(`Updated source: ${opts.name}`);
+      console.log(`Updated source: ${opts.name} → ${storedPath}`);
     } else {
       reg.sources.push(entry);
-      console.log(`Added source: ${opts.name} → ${opts.path}`);
+      console.log(`Added source: ${opts.name} → ${storedPath}`);
     }
     saveRegistry(reg);
     break;
