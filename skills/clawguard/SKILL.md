@@ -91,13 +91,10 @@ openclaw config set plugins.clawguard.metricsEnabled false
 
 ClawGuard calls the gateway's `/v1/chat/completions` endpoint internally. If you see 401 Unauthorized errors:
 
-1. Check the gateway token in your environment matches the config:
+1. Check the gateway token in your environment matches the config. Never print token values:
+   command output goes into the session transcript.
    ```bash
-   # Check env var
-   printenv OPENCLAW_GATEWAY_TOKEN
-
-   # Check config token
-   cat ~/.openclaw/openclaw.json | grep -A2 '"token"'
+   python3 -c 'import json,os; t=json.load(open(os.path.expanduser("~/.openclaw/openclaw.json"))).get("gateway",{}).get("auth",{}).get("token",""); e=os.environ.get("OPENCLAW_GATEWAY_TOKEN",""); print("env unset" if not e else "config token empty" if not t else "match" if t==e else "mismatch")'
    ```
 
 2. If tokens don't match, update your environment and restart the gateway.

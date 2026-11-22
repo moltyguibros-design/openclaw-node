@@ -49,6 +49,18 @@ describe('skill install gate', () => {
     assert.deepEqual(hits, []);
   });
 
+  // Command output lands in the session transcript, the model provider and the memory store.
+  it('no loaded skill prints a token, key or secret value', () => {
+    const leak = /printenv\s+\S*(TOKEN|KEY|SECRET)|openclaw\.json[^\n]*grep[^\n]*"token"/;
+    const hits = markdown(SKILLS).flatMap((file) => fs.readFileSync(file, 'utf8').split('\n')
+      .map((line, i) => (leak.test(line) ? `${path.relative(SKILLS, file)}:${i + 1}: ${line.trim()}` : null))
+      .filter(Boolean));
+    assert.deepEqual(hits, []);
+    const clawguard = fs.readFileSync(path.join(SKILLS, 'clawguard', 'SKILL.md'), 'utf8');
+    assert.match(clawguard, /"match" if t==e else "mismatch"/);
+    assert.match(clawguard, /Never print token values/);
+  });
+
   it('auto-updater is quarantined', () => {
     assert.ok(!fs.existsSync(path.join(SKILLS, 'auto-updater')));
     assert.ok(fs.existsSync(path.join(SKILLS, '_quarantine', 'auto-updater', 'SKILL.md')));
