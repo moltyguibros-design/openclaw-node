@@ -13,8 +13,9 @@
 #   bin/obsidian help                     Show this help
 #
 # Requires: Obsidian running with Local REST API plugin enabled
-# Vault root and API key file: vaultPath / apiKeyFile in ~/.openclaw/config/obsidian-sync.json
-# (as obsidian-sync.mjs reads them). OBSIDIAN_API_KEY overrides the key file.
+# Vault root, API key file and API port: vaultPath / apiKeyFile / apiPort in
+# ~/.openclaw/config/obsidian-sync.json (as obsidian-sync.mjs reads them).
+# OBSIDIAN_API_KEY overrides the key file, OBSIDIAN_API_PORT the port.
 
 set -euo pipefail
 
@@ -22,14 +23,20 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OC_WORKSPACE="${OPENCLAW_WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 # Not OBSIDIAN_VAULT_PATH: that names the memory pipeline's subtree inside the
 # vault (lib/obsidian-vault.mjs getVaultPath), not the vault root.
-{ read -r VAULT_PATH; read -r API_KEY_FILE; } < <(OPENCLAW_WORKSPACE="$OC_WORKSPACE" node --input-type=module -e '
+{ read -r VAULT_PATH; read -r API_KEY_FILE; read -r CONFIG_API_PORT; } < <(OPENCLAW_WORKSPACE="$OC_WORKSPACE" node --input-type=module -e '
   const { pathToFileURL } = await import("node:url");
   const v = await import(pathToFileURL(process.argv[1]).href);
   console.log(v.getObsidianVaultRoot());
   console.log(v.getObsidianApiKeyFile());
+  console.log(v.getObsidianApiPort());
 ' "$SCRIPT_DIR/../lib/obsidian-vault.mjs")
-API_PORT="${OBSIDIAN_API_PORT:-27124}"
+API_PORT="${OBSIDIAN_API_PORT:-$CONFIG_API_PORT}"
 API_BASE="https://127.0.0.1:${API_PORT}"
+if [ "$(uname -s)" = Darwin ]; then OPENER=open; else OPENER=xdg-open; fi
+
+uri_quote() {
+  python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$1"
+}
 
 # Load API key
 if [ -n "${OBSIDIAN_API_KEY:-}" ]; then
@@ -72,8 +79,8 @@ cmd_open() {
   if api_call POST "/open/${note_path}" -f > /dev/null 2>&1; then
     echo "Opened: $note_path"
   else
-    # Fallback to URI scheme
-    open "obsidian://open?vault=arcane-vault&file=${note_path}"
+    # Fallback to URI scheme: Obsidian opens the registered vault holding this path
+    "$OPENER" "obsidian://open?path=$(uri_quote "$VAULT_PATH/$note_path")"
     echo "Opened via URI: $note_path"
   fi
 }
@@ -102,7 +109,7 @@ cmd_active() {
 }
 
 cmd_launch() {
-  open "obsidian://open?path=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$VAULT_PATH'))")"
+  "$OPENER" "obsidian://open?path=$(uri_quote "$VAULT_PATH")"
   echo "Opening vault in Obsidian..."
   echo "After Obsidian loads:"
   echo "  1. Go to Settings → Community Plugins → Enable 'Local REST API'"
