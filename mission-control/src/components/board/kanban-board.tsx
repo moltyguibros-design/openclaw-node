@@ -250,6 +250,7 @@ export function KanbanBoard() {
   };
 
   const handleTaskClick = (task: Task) => {
+    if (task.id === "__LIVE_SESSION__") return;
     if (bulkMode) {
       toggleBulkSelect(task.id);
       return;
