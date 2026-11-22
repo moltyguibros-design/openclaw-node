@@ -194,9 +194,14 @@ const isBlocked = (p) => fs.existsSync(path.join(p.dir, 'BLOCKED.md'));
 // plan-tick.sh holds one lock for the whole repo at memory-plan/.tick.lock (plan.root
 // is <repo>/memory-plan/plans); its `plan` file names the plan that holds it.
 const tickLockDir = (p) => path.join(p.root, '..', '.tick.lock');
+// plan-tick.sh reaps a lock this old as stale; keep the two equal.
+const TICK_LOCK_STALE_MS = 3600 * 1000;
 const tickLockHolder = (p) => {
+  let st;
+  try { st = fs.statSync(tickLockDir(p)); } catch { return null; }
+  if (Date.now() - st.mtimeMs >= TICK_LOCK_STALE_MS) return null;
   try { return fs.readFileSync(path.join(tickLockDir(p), 'plan'), 'utf8').trim(); }
-  catch { return fs.existsSync(tickLockDir(p)) ? '?' : null; }
+  catch { return '?'; }
 };
 const isLocked  = (p) => tickLockHolder(p) === p.id;
 // Newest-content signal for the plan: max mtime across its top-level *.md +

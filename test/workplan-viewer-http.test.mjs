@@ -313,6 +313,13 @@ test("the repo-level tick lock refuses run-once and shows only on the plan that 
   assert.equal(JSON.parse((await f.request('/api/plans/fixture/state', opts)).text).locked, true);
   await sleep(100);
   assert.equal(fs.existsSync(path.join(f.root, 'ran')), false);
+
+  const old = new Date(Date.now() - 2 * 3600 * 1000);
+  fs.utimesSync(lock, old, old);
+  assert.equal(JSON.parse((await f.request('/api/plans/fixture/state', opts)).text).locked, false);
+  assert.equal((await f.request('/api/plans/fixture/automation/run-once', { ...opts, method: 'POST' })).status, 200);
+  for (let i = 0; i < 50 && !fs.existsSync(path.join(f.root, 'ran')); i++) await sleep(20);
+  assert.equal(fs.readFileSync(path.join(f.root, 'ran'), 'utf8'), 'ran');
 });
 
 test('default automation config points at the repo that holds memory-plan/plans', async t => {
