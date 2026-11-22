@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 
 import {
   EXTRACT_SUBJECT,
@@ -80,7 +81,7 @@ describe('createNatsPublisher', () => {
     const saved = { OPENCLAW_NODE_ID: process.env.OPENCLAW_NODE_ID, MESH_NODE_ID: process.env.MESH_NODE_ID, HOME: process.env.HOME };
     delete process.env.OPENCLAW_NODE_ID;
     process.env.MESH_NODE_ID = 'legacy-node';
-    process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pub-home-')); // no openclaw.env
+    process.env.HOME = tmpDir('pub-home-'); // no openclaw.env
     try {
       const published = [];
       const mockNc = {

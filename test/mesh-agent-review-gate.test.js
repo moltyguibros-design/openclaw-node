@@ -16,19 +16,19 @@
  * Run: node --test test/mesh-agent-review-gate.test.js
  */
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { tmpDir } = require('./helpers/tmp-dir.cjs');
 
 // The agent reads its workspace, lease dir, node id and obs DB at require time.
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'review-gate-'));
+const TMP = tmpDir('review-gate-');
 const WORKSPACE = path.join(TMP, 'workspace');
 const LEASE_DIR = path.join(TMP, 'leases');
 Object.assign(process.env, {
   MESH_WORKSPACE: WORKSPACE,
   MESH_LEASE_DIR: LEASE_DIR,
   OPENCLAW_NODE_ID: 'node-self',
-  OPENCLAW_OBS_DB: path.join(TMP, 'obs.db'),
+  OPENCLAW_OBS_DB: ':memory:',
   // git in a sandbox: no user/system config (hooks, signing), fixed identity.
   GIT_CONFIG_GLOBAL: '/dev/null',
   GIT_CONFIG_NOSYSTEM: '1',

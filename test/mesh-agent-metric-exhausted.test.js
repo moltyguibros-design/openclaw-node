@@ -25,7 +25,7 @@ Object.assign(process.env, {
   MESH_LEASE_DIR: path.join(TMP, 'leases'),
   MESH_MAX_ATTEMPTS: '2',
   OPENCLAW_NODE_ID: 'node-self',
-  OPENCLAW_OBS_DB: path.join(TMP, 'obs.db'),
+  OPENCLAW_OBS_DB: ':memory:',
   OPENCLAW_STATE_DB: path.join(TMP, 'state.db'),
   MESH_MEMORY_RECALL: 'off',
   MESH_FOREMAN: '0',

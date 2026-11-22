@@ -20,7 +20,7 @@ Object.assign(process.env, {
   HOME: TMP,
   MESH_WORKSPACE: path.join(TMP, 'workspace'),
   OPENCLAW_NODE_ID: 'node-self',
-  OPENCLAW_OBS_DB: path.join(TMP, 'obs.db'),
+  OPENCLAW_OBS_DB: ':memory:',
   MESH_MEMORY_RECALL: 'off',
 });
 

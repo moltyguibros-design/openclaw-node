@@ -17,7 +17,7 @@ const path = require('node:path');
 
 const { tmpDir } = require('./helpers/tmp-dir.cjs');
 const TMP = tmpDir('plan-abort-');
-process.env.OPENCLAW_OBS_DB = path.join(TMP, 'obs.db');
+process.env.OPENCLAW_OBS_DB = ':memory:';
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');

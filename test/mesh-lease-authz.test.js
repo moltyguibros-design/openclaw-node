@@ -19,7 +19,7 @@ const path = require('node:path');
 // operator allowlist holding a throwaway key (never ~/.openclaw/identity.key).
 const { tmpDir } = require('./helpers/tmp-dir.cjs');
 const TMP = tmpDir('lease-authz-');
-process.env.OPENCLAW_OBS_DB = path.join(TMP, 'obs.db');
+process.env.OPENCLAW_OBS_DB = ':memory:';
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');

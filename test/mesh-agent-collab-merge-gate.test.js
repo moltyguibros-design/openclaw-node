@@ -20,7 +20,7 @@ Object.assign(process.env, {
   MESH_WORKSPACE: WORKSPACE,
   MESH_WORKTREE_BASE: path.join(TMP, 'worktrees'),
   OPENCLAW_NODE_ID: 'node-self',
-  OPENCLAW_OBS_DB: path.join(TMP, 'obs.db'),
+  OPENCLAW_OBS_DB: ':memory:',
   OPENCLAW_STATE_DB: path.join(TMP, 'state.db'),
   OPENCLAW_HARNESS_RULES: path.join(__dirname, '..', 'config', 'harness-rules.json'),
   MESH_MEMORY_RECALL: 'off',

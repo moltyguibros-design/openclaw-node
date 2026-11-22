@@ -20,7 +20,7 @@ Object.assign(process.env, {
   MESH_WORKTREE_BASE: path.join(TMP, 'worktrees'),
   MESH_HEARTBEAT_INTERVAL: '50',
   OPENCLAW_NODE_ID: 'node-self',
-  OPENCLAW_OBS_DB: path.join(TMP, 'obs.db'),
+  OPENCLAW_OBS_DB: ':memory:',
   OPENCLAW_STATE_DB: path.join(TMP, 'state.db'),
   MESH_MEMORY_RECALL: 'off',
   GIT_CONFIG_GLOBAL: '/dev/null',

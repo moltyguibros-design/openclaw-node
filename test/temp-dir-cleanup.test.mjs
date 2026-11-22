@@ -10,6 +10,7 @@ import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const MKDTEMP_UNDER_TMP = /mkdtemp(?:Sync)?\((?:path\.)?join\((?:os\.)?tmpdir\(\)/;
@@ -54,3 +55,27 @@ test('tmpDir() removes its dirs on exit, even after a failure', () => {
   assert.equal(dirs.length, 2);
   for (const d of dirs) assert.equal(existsSync(d), false, `${d} left behind`);
 });
+
+// mesh-agent's per-node work dir is a fixed path reused across runs, not a
+// per-run leak.
+const FIXED_WORK_DIR = /^mesh-agent-work-/;
+
+for (const suite of [
+  'mesh-agent-metric-sink.test.js',
+  'plan-cas.test.js',
+  'mesh-agent-cli-cost.test.js',
+  'mesh-agent-memory-recall.test.mjs',
+  'mesh-agent-review-gate.test.js',
+  'mesh-agent-terminal-task.test.js',
+  'obsidian-decision-theme-notes.test.mjs',
+  'publishers.test.mjs',
+]) {
+  test(`${suite} leaves its temp dir empty after it exits`, () => {
+    const tmp = tmpDir('tmp-dir-run-');
+    const env = { ...process.env, TMPDIR: tmp };
+    delete env.NODE_TEST_CONTEXT;
+    const r = spawnSync(process.execPath, ['--test', join(TEST_DIR, suite)], { encoding: 'utf8', env, timeout: 120_000 });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual(readdirSync(tmp).filter((f) => !FIXED_WORK_DIR.test(f)), []);
+  });
+}

@@ -16,7 +16,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-cancelled-card-'));
-process.env.OPENCLAW_OBS_DB = path.join(TMP, 'obs.db');
+process.env.OPENCLAW_OBS_DB = ':memory:';
 
 const { describe, it, after } = require('node:test');
 const assert = require('node:assert/strict');

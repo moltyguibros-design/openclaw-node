@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import Database from 'better-sqlite3';
 import yaml from 'js-yaml';
 import {
@@ -82,7 +83,7 @@ describe('decision notes (repair 2.9)', () => {
     assert.match(r1.notes[0], /^2026-06-02-adopt-time-anchored-decay/);
 
     // maxNotes caps the surface: only the top by salience survives an N=1 run
-    const capped = await generateDecisionNotes({ db, vaultPath: await mkdtemp(join(tmpdir(), 'vault-dec2-')), maxNotes: 1 });
+    const capped = await generateDecisionNotes({ db, vaultPath: tmpDir('vault-dec2-'), maxNotes: 1 });
     assert.equal(capped.generated, 1);
     assert.match(capped.notes[0], /adopt-time-anchored-decay/);
 

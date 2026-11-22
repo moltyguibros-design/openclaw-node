@@ -33,6 +33,7 @@ Object.assign(process.env, {
   MESH_WORKSPACE: join(home, 'workspace'),
   MEMORY_INJECT_PORT: String(server.address().port),
   OPENCLAW_NODE_ID: 'node-recall',
+  OPENCLAW_OBS_DB: ':memory:',
 });
 delete process.env.MESH_MEMORY_RECALL;
 

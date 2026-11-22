@@ -13,12 +13,12 @@
  * Run: node --test test/mesh-agent-terminal-task.test.js
  */
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { tmpDir } = require('./helpers/tmp-dir.cjs');
 
 // The agent reads its paths and identity at require time; keep all of them in a sandbox.
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-terminal-'));
+const TMP = tmpDir('agent-terminal-');
 const WORKSPACE = path.join(TMP, 'workspace');
 const STATE_DB = path.join(TMP, 'state.db');
 const AGENT_STATE = path.join(TMP, '.openclaw', '.tmp', 'agent-state.json');
@@ -28,7 +28,7 @@ Object.assign(process.env, {
   MESH_WORKSPACE: WORKSPACE,
   MESH_WORKTREE_BASE: path.join(TMP, 'worktrees'),
   OPENCLAW_NODE_ID: 'node-self',
-  OPENCLAW_OBS_DB: path.join(TMP, 'obs.db'),
+  OPENCLAW_OBS_DB: ':memory:',
   OPENCLAW_STATE_DB: STATE_DB,
   MESH_LLM_PROVIDER: 'claude', // telemetry resolves the worker's provider; nothing is run
   // git in a sandbox: no user/system config (hooks, signing), fixed identity.

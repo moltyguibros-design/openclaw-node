@@ -24,7 +24,7 @@ const { spawn } = require('node:child_process');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-collab-gate-'));
 Object.assign(process.env, {
   HOME: TMP,
-  OPENCLAW_OBS_DB: path.join(TMP, 'obs.db'),
+  OPENCLAW_OBS_DB: ':memory:',
 });
 
 const { describe, it, before, after, mock } = require('node:test');

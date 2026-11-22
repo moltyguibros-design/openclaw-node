@@ -24,7 +24,7 @@ Object.assign(process.env, {
   MESH_WORKTREE_BASE: path.join(TMP, 'worktrees'),
   MESH_LEASE_DIR: path.join(TMP, 'leases'),
   OPENCLAW_NODE_ID: 'node-self',
-  OPENCLAW_OBS_DB: path.join(TMP, 'obs.db'),
+  OPENCLAW_OBS_DB: ':memory:',
   OPENCLAW_STATE_DB: path.join(TMP, 'state.db'),
   MESH_MEMORY_RECALL: 'off',
   MESH_FOREMAN: '0',
