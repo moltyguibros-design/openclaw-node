@@ -41,4 +41,11 @@ describe("removed dead code stays removed", () => {
     for (const name of ["touchItem", "archiveItem"]) expect(extract, name).toMatch(new RegExp(`export function ${name}\\b`));
     expect(read("lib/tracer.ts")).not.toMatch(/batchInsertEvents/);
   });
+
+  it("the unread board state, unpassed column props, orphan comment and unused type re-exports are gone", () => {
+    expect(read("components/board/kanban-board.tsx")).not.toMatch(/_bulkAction|setBulkAction/);
+    expect(read("components/board/kanban-column.tsx")).not.toMatch(/\blabel\?:|dotColor|cardSize\?:/);
+    expect(read("components/mesh/index.ts")).not.toMatch(/NodeHealth|TailscalePeer|ActiveTask/);
+    expect(read("components/memory/memory-list.tsx")).not.toContain("Group by date");
+  });
 });

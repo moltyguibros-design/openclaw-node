@@ -75,8 +75,6 @@ export function MemoryList({
     );
   }
 
-  // Group by date for chronological display
-
   return (
     <div className="space-y-1">
       {docs.map((doc, docIndex) => {

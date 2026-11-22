@@ -59,7 +59,6 @@ export function KanbanBoard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkSelection, setBulkSelection] = useState<Set<string>>(new Set());
-  const [_bulkAction, setBulkAction] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   // Column widths as flex-basis percentages (default: equal)
   const [colWidths, setColWidths] = useState<number[]>(
@@ -194,7 +193,6 @@ export function KanbanBoard() {
   const handleBulkMove = async (targetColumn: string) => {
     await updateEach(bulkSelection, { kanbanColumn: targetColumn });
     setBulkSelection(new Set());
-    setBulkAction(null);
   };
 
   const toggleBulkSelect = (taskId: string) => {
@@ -379,7 +377,6 @@ export function KanbanBoard() {
             onClick={() => {
               updateEach(bulkSelection, { status: "done", force_done: true });
               setBulkSelection(new Set());
-              setBulkAction(null);
             }}
             className="px-2.5 py-1 text-xs rounded-md bg-green-500/15 text-green-400 border border-green-500/20 hover:bg-green-500/25 transition-colors"
           >
