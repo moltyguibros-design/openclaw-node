@@ -71,7 +71,7 @@ The tables list representative files, not the whole suite: `test/*.test.*` and
 | `memory-md.test.ts` | `parsers/memory-md.ts` | H1 title extraction, `##` section parsing state machine, empty sections, full content preservation |
 | `task-markdown.test.ts` | `parsers/task-markdown.ts` | Task YAML parsing, status mapping, mesh fields, collaboration fields, serialization round-trip |
 | `status-kanban.test.ts` | `parsers/task-markdown.ts` | Status-to-kanban mapping, kanban-to-status reverse mapping |
-| `mesh-kv-sync.test.ts` | `sync/mesh-kv.ts` | KV-to-DB sync, CAS writes, watcher notifications, conflict resolution |
+| `mesh-kv-sync.test.ts` | `sync/mesh-kv.ts` | KV put/get/list round-trip, watcher (PUT/DEL), merge precedence |
 
 ## Mock Patterns
 

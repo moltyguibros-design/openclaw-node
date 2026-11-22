@@ -962,7 +962,7 @@ The system has two layers:
 
 **Layer 1 — KV Mirror (read visibility):** Every MC instance watches NATS KV bucket `MESH_TASKS` in real-time. When the lead creates, updates, or completes a task, all connected MC instances see the change within milliseconds. Worker nodes display these tasks as read-only cards in the Kanban.
 
-**Layer 2 — Sync Engine (write participation):** Worker nodes can *propose* new tasks to the mesh. Proposals land in the KV bucket with `status: proposed`. The lead's task daemon validates proposals within its 30-second enforcement loop and transitions them to `queued` (accepted) or `rejected`. Once queued, any node with the `claim` capability can execute the task.
+**Layer 2 — Sync Engine (write participation):** Any node submits a task through `POST /api/mesh/tasks`; MC sends it to the task daemon as `mesh.tasks.submit`, and the daemon validates it and creates it `queued` (see Data Flow below). Worker nodes can *propose* new tasks to the mesh. Proposals land in the KV bucket with `status: proposed`. The lead's task daemon validates proposals within its 30-second enforcement loop and transitions them to `queued` (accepted) or `rejected`. Once queued, any node with the `claim` capability can execute the task.
 
 ```
                      NATS KV: MESH_TASKS
@@ -1037,11 +1037,11 @@ mission-control/
 │   │   └── events/route.ts       # SSE: dual-iterator (NATS sub + KV watch)
 │   ├── lib/
 │   │   └── sync/
-│   │       └── mesh-kv.ts        # Sync engine (KV watch → SQLite, CAS push)
+│   │       └── mesh-kv.ts        # MESH_TASKS reads for /api/mesh/tasks (list/get)
 │   └── components/layout/
 │       └── sidebar.tsx            # Node badge (⬢ Lead / ◇ Worker)
 ├── src/lib/__tests__/
-│   ├── mesh-kv-sync.test.ts      # 18 unit tests (CAS, authority, merge, proposals, watcher)
+│   ├── mesh-kv-sync.test.ts      # put/get/list, watcher, merge
 │   └── mocks/mock-kv.ts          # Shared MockKV for all KV tests
 bin/
 └── mesh-task-daemon.js            # Proposal processing (30s enforcement loop)
@@ -1049,22 +1049,12 @@ lib/
 └── mesh-tasks.js                  # PROPOSED + REJECTED task statuses
 test/
 ├── mesh-tasks-status.test.js      # unit tests (status enum, defaults)
-└── distributed-mc.test.js         # 9 integration tests (needs NATS + daemon)
+└── distributed-mc.test.js         # RPC, lifecycle, IDs, events (needs NATS + daemon)
 ```
 
 ### CAS (Compare-And-Swap) Explained
 
-Every task in the KV bucket has a `revision` number that increments on each write. To update a task, you must provide the current revision. If another node wrote between your read and your write, the revision won't match and the update fails with a 409.
-
-This eliminates race conditions without locks or a central coordinator:
-
-```
-Node A reads T-001 (revision 5)
-Node B reads T-001 (revision 5)
-Node A writes T-001 with revision 5 → succeeds (now revision 6)
-Node B writes T-001 with revision 5 → FAILS (expected 5, got 6)
-Node B re-reads T-001 (revision 6), retries → succeeds
-```
+The task daemon writes `MESH_TASKS` with revision CAS (`lib/mesh-tasks.js` `_updateWithCAS`): it updates a task only at the revision it read and re-reads and retries on a conflict. Mission Control never writes KV (submit and update go through daemon RPCs), so clients do not handle revisions.
 
 ### SSE Dual-Iterator
 
@@ -1098,7 +1088,7 @@ No configuration needed on the lead — it works exactly as before. Workers just
 
 ```bash
 # MC KV-sync unit tests (no dependencies — run anywhere)
-cd mission-control && npx vitest run src/lib/__tests__/mesh-kv-sync.test.ts   # 18 tests: CAS, authority, merge, proposals, watcher
+cd mission-control && npx vitest run src/lib/__tests__/mesh-kv-sync.test.ts   # put/get/list, watcher, merge
 # (cd mission-control && npm run test:unit runs the full MC unit suite)
 
 # Mesh task-status unit tests
@@ -1106,7 +1096,7 @@ node --test test/mesh-tasks-status.test.js   # status enum, task creation
 # (npm run test:unit at the repo root runs the whole suite — 1700+ tests)
 
 # Integration tests (needs live NATS + mesh-task-daemon)
-node --test test/distributed-mc.test.js      # 9 tests: proposal lifecycle, RPC, events
+node --test test/distributed-mc.test.js      # RPC, lifecycle, IDs, events
                                              # Skips gracefully if daemon not running
 
 # Everything

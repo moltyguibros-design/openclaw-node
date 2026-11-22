@@ -303,3 +303,22 @@ test('NODE_ACCEPTANCE says who runs the gate after a deploy and names the federa
     for (const id of fed) assert.ok(text.includes(id), `NODE_ACCEPTANCE "${heading}" calls federation unbuilt but ${id} ships`);
   }
 });
+
+test('README Distributed Mission Control describes the daemon submit path, daemon-side CAS and the tests that exist', () => {
+  const readme = read('README.md');
+  const start = readme.indexOf('\n## Distributed Mission Control\n');
+  const dmc = readme.slice(start, readme.indexOf('\n## ', start + 1));
+  assert.match(read('mission-control/src/app/api/mesh/tasks/route.ts'), /requestDaemon\(await getNats\(\), "mesh\.tasks\.submit"/);
+  assert.match(read('lib/mesh-tasks.js'), /await this\.kv\.update\(key, sc\.encode\(JSON\.stringify\(updated\)\), entry\.revision\);/);
+  const layer2 = dmc.split('\n').find((l) => l.startsWith('**Layer 2 '));
+  assert.match(layer2, /`POST \/api\/mesh\/tasks`[^\n]*`mesh\.tasks\.submit`/);
+  const cas = section(dmc, '### CAS (Compare-And-Swap) Explained').text;
+  assert.match(cas, /Mission Control never writes KV/);
+  assert.doesNotMatch(cas, /you must provide the current revision|fails with a 409/);
+  assert.doesNotMatch(dmc, /mesh-kv\.ts +# Sync engine|CAS push/);
+  assert.doesNotMatch(dmc, /\d+ (?:unit |integration )?tests\b/, 'test counts drift; name what the files cover instead');
+  for (const line of dmc.split('\n').filter((l) => l.includes('mesh-kv-sync.test.ts'))) assert.doesNotMatch(line, /CAS|authority|proposals/, line);
+  for (const line of dmc.split('\n').filter((l) => l.includes('distributed-mc.test.js'))) assert.doesNotMatch(line, /proposal/, line);
+  const row = read('TEST.md').split('\n').find((l) => l.startsWith('| `mesh-kv-sync.test.ts` |'));
+  assert.doesNotMatch(row, /CAS|conflict resolution|KV-to-DB/);
+});
