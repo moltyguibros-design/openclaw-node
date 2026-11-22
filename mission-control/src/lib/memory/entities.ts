@@ -404,9 +404,7 @@ export function expandQueryWithGraph(query: string): string[] {
     // Get 1-hop related entities
     const related = getEntityRelations(entity.id, 3);
     for (const rel of related) {
-      const relName =
-        rel.relatedEntityName ||
-        (rel as unknown as { related_entity_name: string }).related_entity_name;
+      const relName = rel.relatedEntityName;
       if (!seen.has(relName.toLowerCase()) && !queryLower.includes(relName.toLowerCase())) {
         seen.add(relName.toLowerCase());
         expansions.push(relName);
@@ -430,14 +428,7 @@ export function formatEntityContextBlock(): string {
     const relations = getEntityRelations(entity.id, 3);
     const relParts = relations.map(r => {
       const arrow = r.direction === "outgoing" ? "→" : "←";
-      // SQLite raw queries return snake_case; typed interface has camelCase
-      const raw = r as unknown as {
-        relation_type?: string;
-        related_entity_name?: string;
-      };
-      const relType = r.relationType || raw.relation_type;
-      const relName = r.relatedEntityName || raw.related_entity_name;
-      return `${arrow} ${relType} ${relName}`;
+      return `${arrow} ${r.relationType} ${r.relatedEntityName}`;
     });
 
     const relStr = relParts.length > 0 ? ` [${relParts.join(", ")}]` : "";

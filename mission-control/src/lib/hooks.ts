@@ -179,12 +179,11 @@ export function useActivity(limit = 50) {
 
 export interface LiveEvent {
   timestamp: string;
-  type: "file_write" | "file_edit" | "file_read" | "bash_command" | "message";
+  type: "file_write" | "file_edit" | "file_read" | "bash_command";
   tool: string;
   detail: string;
   filePath?: string;
   command?: string;
-  success?: boolean;
 }
 
 export function useLiveActivity(limit = 30) {

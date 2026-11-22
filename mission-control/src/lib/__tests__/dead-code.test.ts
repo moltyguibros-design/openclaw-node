@@ -57,4 +57,13 @@ describe("removed dead code stays removed", () => {
   it("the Live chat's canned replies no longer describe the removed Arcane pipeline", () => {
     expect(read("app/live/page.tsx")).not.toMatch(/Arcane|March 2nd|478 tasks/);
   });
+
+  it("no snake_case relation fallbacks, MEMORY.md sections, unproduced event kinds or scripts/ ignore remain", () => {
+    expect(read("lib/memory/entities.ts")).not.toMatch(/related_entity_name: string \}\)\.related_entity_name|relation_type\?: string/);
+    expect(read("lib/parsers/memory-md.ts")).not.toMatch(/MemorySection|sections/);
+    expect(read("lib/parsers/transcript.ts")).not.toMatch(/bash_result|success\?/);
+    expect(read("lib/hooks.ts")).not.toMatch(/"bash_command" \| "message"|success\?: boolean/);
+    expect(fs.existsSync(path.join(src, "..", "scripts"))).toBe(false);
+    expect(fs.readFileSync(path.join(src, "..", "eslint.config.mjs"), "utf8")).not.toMatch(/"scripts\/\*\*"/);
+  });
 });

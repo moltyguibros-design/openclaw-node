@@ -8,12 +8,11 @@ import { OPENCLAW_ROOT, WORKSPACE_ROOT } from "../config";
  */
 export interface TranscriptEvent {
   timestamp: string;
-  type: "file_write" | "file_edit" | "file_read" | "bash_command" | "bash_result" | "message";
+  type: "file_write" | "file_edit" | "file_read" | "bash_command";
   tool: string;
   detail: string;       // human-readable summary
   filePath?: string;     // for file operations
   command?: string;      // for bash commands
-  success?: boolean;     // for bash results (exit code 0 = true)
 }
 
 /**
