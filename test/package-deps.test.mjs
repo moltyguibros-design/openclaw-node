@@ -40,3 +40,24 @@ describe('root package.json dependencies', () => {
     assert.deepEqual(lock.packages[''].dependencies, pkg.dependencies);
   });
 });
+
+describe('event-schemas workspace dependencies', () => {
+  const dir = path.join(ROOT, 'packages', 'event-schemas');
+  const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+  const tsSources = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? tsSources(path.join(d, e.name)) : e.name.endsWith('.ts') ? [path.join(d, e.name)] : []);
+
+  it('declares only packages its src imports', () => {
+    const imported = new Set();
+    for (const file of tsSources(path.join(dir, 'src'))) {
+      for (const m of fs.readFileSync(file, 'utf8').matchAll(/from\s+['"]([^'"]+)['"]/g)) {
+        if (!m[1].startsWith('.')) imported.add(packageName(m[1]));
+      }
+    }
+    assert.deepEqual(Object.keys(manifest.dependencies).filter((name) => !imported.has(name)), []);
+  });
+
+  it('matches its lockfile workspace entry, as npm ci requires', () => {
+    assert.deepEqual(lock.packages['packages/event-schemas'].dependencies, manifest.dependencies);
+  });
+});
