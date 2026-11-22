@@ -38,7 +38,7 @@ const LOCAL_NODE = require('../lib/node-id').resolveNodeId();
 const sc = StringCodec();
 
 // ─── Known nodes (for --node shortcuts) ──────────────
-const { loadNodeAliases, resolveNodeName } = require('../lib/node-aliases');
+const { loadNodeAliases, resolveNodeName, unknownNodes } = require('../lib/node-aliases');
 const NODE_ALIASES = loadNodeAliases();
 
 /**
@@ -430,6 +430,14 @@ async function cmdDeploy(args) {
   else console.log('  Targets: all nodes');
 
   const nc = await natsConnect();
+  // The fleet registry, not the alias table: aliases only ever named the two original VMs.
+  const known = await require('./fleet-deploy').discoverNodes(nc);
+  const unknown = unknownNodes(targetNodes, known);
+  if (unknown.length > 0) {
+    console.error(`mesh deploy: unknown node ${unknown.join(', ')} — known: ${known.map(n => n.nodeId).join(', ') || 'none'}`);
+    await nc.close();
+    process.exit(2);
+  }
 
   const trigger = {
     sha,
@@ -467,10 +475,7 @@ async function cmdDeploy(args) {
   try {
     const js = nc.jetstream();
     const resultsKv = await openMeshKv(js, RESULTS_BUCKET, {}, { waitMs: 0 });
-    // The fleet registry, not the alias table: aliases only ever named the two original VMs.
-    const checkNodes = targetNodes.length > 0
-      ? targetNodes
-      : (await require('./fleet-deploy').discoverNodes(nc)).map(n => n.nodeId);
+    const checkNodes = targetNodes.length > 0 ? targetNodes : known.map(n => n.nodeId);
 
     while (Date.now() < deadline) {
       for (const nodeId of checkNodes) {
