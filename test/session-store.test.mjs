@@ -271,6 +271,38 @@ describe('source marker skip', () => {
     assert.equal(second.messageCount, 2);
   });
 
+  it('a transcript that parses to no messages is skipped by its marker until it changes', async () => {
+    const summary = JSON.stringify({ type: 'summary', summary: 'x' });
+    const q = JSON.stringify({ type: 'user', message: { content: 'q1' } });
+    const p = join(TMP, 'summary-only.jsonl');
+    writeFileSync(p, `${summary}\n${' '.repeat(q.length)}\n`);
+    utimesSync(p, 1_700_000_000, 1_700_000_000);
+    const first = await store.importDirectory(TMP);
+    assert.equal(first.imported, 0);
+    assert.equal(store.getSession('summary-only'), undefined);
+    const st = statSync(p);
+    const raw = new Database(DB_PATH, { readonly: true });
+    const row = raw.prepare("SELECT source_marker FROM session_import_markers WHERE session_id = 'summary-only'").get();
+    raw.close();
+    assert.ok(row?.source_marker.startsWith(`${st.size}:${st.mtimeMs}:`), 'marker recorded for the empty parse');
+
+    // Same size and mtime, now one message: only a parse could notice.
+    writeFileSync(p, `${summary}\n${q}\n`);
+    utimesSync(p, 1_700_000_000, 1_700_000_000);
+    const second = await store.importDirectory(TMP);
+    assert.equal(second.imported, 0);
+    assert.equal(second.skipped, 1);
+    assert.equal(store.getSession('summary-only'), undefined);
+
+    writeFileSync(p, `${summary}\n${q}\n${JSON.stringify({ type: 'assistant', message: { content: 'a1' } })}\n`);
+    const third = await store.importDirectory(TMP);
+    assert.equal(third.imported, 1);
+    assert.equal(store.getSession('summary-only').message_count, 2);
+    const after = new Database(DB_PATH, { readonly: true });
+    assert.equal(after.prepare("SELECT COUNT(*) AS n FROM session_import_markers WHERE session_id = 'summary-only'").get().n, 0);
+    after.close();
+  });
+
   it('a marker from an older parse version re-imports a same-count transcript', async () => {
     const p = writeJsonl('reparse-same.jsonl', [
       { type: 'user', message: { content: 'alpha one' } },
