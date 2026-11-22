@@ -4,7 +4,8 @@
  * LLM latency benchmark for the local extraction LLM (default: Qwen3-8B via Ollama).
  *
  * Generates a synthetic 40-turn session and measures structured-output extraction
- * latency. Target: total ≤30 seconds (per Block 3 frozen decisions).
+ * latency through production's extractStructured (its prompt, primer, parser and
+ * schema). Target: total ≤30 seconds (per Block 3 frozen decisions).
  *
  * Usage:
  *   node bin/llm-benchmark.mjs [--base-url URL] [--model NAME] [--turns N]
@@ -17,7 +18,7 @@
 
 import { parseArgs } from 'node:util';
 import { createLlmClient, DEFAULT_BASE_URL, DEFAULT_MODEL } from '../lib/llm-client.mjs';
-import { extractJsonFromText } from '../lib/extraction-prompt.mjs';
+import { extractStructured } from '../lib/extraction-prompt.mjs';
 
 // --- Synthetic session generator ---
 
@@ -74,45 +75,27 @@ export function generateSyntheticSession(turnCount = 40) {
 
 // --- Benchmark runner ---
 
-const EXTRACTION_SYSTEM_PROMPT = `You are a structured data extraction assistant. Given a conversation transcript, extract the following as JSON:
-
-{
-  "entities": [{ "name": "string", "type": "person|project|technology|file|concept|company", "salience": 0.0-1.0 }],
-  "themes": [{ "label": "string", "hierarchy": ["parent", "child"] }],
-  "actions": ["debugging", "designing", "planning", "implementing", "reviewing", "researching"],
-  "decisions": [{ "decision": "string", "rationale": "string", "confidence": 0.0-1.0 }],
-  "friction_signals": [{ "signal": "string", "severity": "low|medium|high" }],
-  "relationships": [{ "source": "string", "target": "string", "type": "depends_on|contradicts|instance_of|causes|follows" }]
-}
-
-Return ONLY valid JSON. No markdown, no explanation.`;
-
 export async function runBenchmark(client, turns) {
-  const transcript = turns.map(t => `[${t.role}]: ${t.content}`).join('\n');
-
-  const messages = [
-    { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
-    { role: 'user', content: `Extract structured data from this conversation:\n\n${transcript}` },
-  ];
-
-  const start = performance.now();
-  const result = await client.generate(messages, { jsonMode: true, maxTokens: 4096, temperature: 0.1 });
-  const elapsed = performance.now() - start;
+  // The raw reply is kept for the report: extractStructured returns only the validated result.
+  let raw = null;
+  const spy = { model: client.model, generate: async (...args) => (raw = await client.generate(...args)) };
 
   let parsed = null;
   let parseError = null;
+  const start = performance.now();
   try {
-    parsed = JSON.parse(extractJsonFromText(result.content));
+    parsed = await extractStructured(spy, turns);
   } catch (e) {
     parseError = e.message;
   }
+  const elapsed = performance.now() - start;
 
   return {
     elapsed_ms: Math.round(elapsed),
     elapsed_s: (elapsed / 1000).toFixed(1),
-    content_length: result.content.length,
-    finish_reason: result.finishReason,
-    usage: result.usage,
+    content_length: raw?.content?.length ?? 0,
+    finish_reason: raw?.finishReason ?? null,
+    usage: raw?.usage ?? null,
     json_valid: parsed !== null,
     parse_error: parseError,
     has_entities: Array.isArray(parsed?.entities),
