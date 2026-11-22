@@ -246,6 +246,7 @@ The installer auto-detects and installs these:
 - **gemini-deep-research** — pip: `requests`
 - **n8n** — pip: `requests`
 - **web-search** — pip: `duckduckgo-search`
+- **excel** — pip: `openpyxl`
 - **fast-browser-use** — Rust (requires manual `cargo build` if needed)
 
 ## Obsidian Setup

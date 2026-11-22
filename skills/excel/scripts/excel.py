@@ -264,7 +264,7 @@ def cmd_cell(args):
     require_openpyxl()
     
     try:
-        wb = load_workbook(args.file, read_only=True, data_only=False)
+        wb = load_workbook(args.file, data_only=False)
     except Exception as e:
         fail(f"Failed to open file: {e}")
     

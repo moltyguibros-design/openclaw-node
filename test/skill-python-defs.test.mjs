@@ -111,16 +111,59 @@ print(requests.calls)
   });
 });
 
-describe('skill Python dependencies', () => {
-  it('every skill script that imports requests declares it in the skill requirements.txt', () => {
-    const files = skillPythonFiles().filter(f => /^\s*(import requests|from requests )/m.test(readFileSync(f, 'utf8')));
-    assert.ok(files.length > 0);
-    for (const f of files) {
-      const skill = f.slice(SKILLS.length + 1).split(sep)[0];
-      const req = join(SKILLS, skill, 'requirements.txt');
-      assert.ok(existsSync(req), `${skill} imports requests without a requirements.txt`);
-      assert.match(readFileSync(req, 'utf8'), /^requests\b/m, `${skill}/requirements.txt`);
+const HAVE_OPENPYXL = HAVE_PY && spawnSync('python3', ['-c', 'import openpyxl'], { encoding: 'utf8' }).status === 0;
+
+describe('excel skill script', { skip: !HAVE_OPENPYXL && 'openpyxl not available' }, () => {
+  const EXCEL = join(SKILLS, 'excel', 'scripts', 'excel.py');
+  const run = (...args) => {
+    const r = spawnSync('python3', ['-B', EXCEL, ...args], { encoding: 'utf8' });
+    return { status: r.status, out: r.stdout ? JSON.parse(r.stdout) : null, stderr: r.stderr };
+  };
+
+  it('cell returns the value and merge state, and format accepts an A1-style column range', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'excel-skill-'));
+    try {
+      const book = join(dir, 't.xlsx');
+      assert.equal(run('create', book).status, 0);
+      assert.equal(run('write', book, '--data', '[["hello"]]').status, 0);
+      const written = run('cell', book, 'A1');
+      assert.equal(written.status, 0, JSON.stringify(written));
+      assert.equal(written.out.value, 'hello');
+      assert.equal(written.out.is_merged, false);
+      const empty = run('cell', book, 'Z9');
+      assert.equal(empty.status, 0, JSON.stringify(empty));
+      assert.equal(empty.out.value, null);
+      const fmt = run('format', book, 'A1:A10', '--align', 'center', '--valign', 'top');
+      assert.equal(fmt.status, 0, JSON.stringify(fmt));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('skill Python dependencies', () => {
+  for (const mod of ['requests', 'openpyxl']) {
+    it(`every skill script that imports ${mod} declares it in the skill requirements.txt`, () => {
+      const imports = new RegExp(`^\\s*(import ${mod}\\b|from ${mod}[. ])`, 'm');
+      const files = skillPythonFiles().filter(f => imports.test(readFileSync(f, 'utf8')));
+      assert.ok(files.length > 0);
+      for (const f of files) {
+        const skill = f.slice(SKILLS.length + 1).split(sep)[0];
+        const req = join(SKILLS, skill, 'requirements.txt');
+        assert.ok(existsSync(req), `${skill} imports ${mod} without a requirements.txt`);
+        assert.match(readFileSync(req, 'utf8'), new RegExp(`^${mod}\\b`, 'm'), `${skill}/requirements.txt`);
+        assert.match(readFileSync(join(ROOT, 'README.md'), 'utf8'), new RegExp(`^- \\*\\*${skill}\\*\\* — pip: .*\\b${mod}\\b`, 'm'),
+          `README "Skills with their own dependencies" omits ${skill}`);
+      }
+    });
+  }
+
+  it('excel cell reads a full worksheet and SKILL.md formats only A1-style ranges', () => {
+    const py = readFileSync(join(SKILLS, 'excel', 'scripts', 'excel.py'), 'utf8');
+    const cell = py.match(/^def cmd_cell\(args\):\n([\s\S]*?)^def /m);
+    assert.ok(cell);
+    assert.doesNotMatch(cell[1], /read_only=True/, 'a read-only worksheet has no merged_cells');
+    assert.doesNotMatch(readFileSync(join(SKILLS, 'excel', 'SKILL.md'), 'utf8'), /excel\.py format \S+ [A-Z]+:[A-Z]+ /);
   });
 
   it('gemini-deep-research runs its script through python3, which needs no exec bit', () => {
