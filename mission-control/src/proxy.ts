@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BOOTSTRAP_HINT, decide, loadOrCreateSessionToken } from "@/lib/server-auth";
 
-// Next 16 with a src/ app dir only detects this file at src/middleware.ts
-// (build scans path.join(appDir, '..'), not the project root).
+// Next 16 with a src/ app dir only detects this file at src/proxy.ts
+// (build scans path.join(appDir, '..'), not the project root). A proxy always
+// runs on Node.js and may not declare a runtime.
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
-  runtime: "nodejs",
 };
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const sessionToken = loadOrCreateSessionToken();
   const authorization = request.headers.get("authorization");
   const pathname = request.nextUrl.pathname;
