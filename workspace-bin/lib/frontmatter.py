@@ -41,7 +41,7 @@ def _parse_yaml_lite(raw: str) -> dict:
       - key: value (scalar)
       - key: "quoted value"
       - key: |  (multiline block)
-      - key:\\n  - item1\\n  - item2  (list)
+      - key:\\n  - item1\\n  - item2  (list, indented or indentless)
       - Nested metadata blocks (treated as raw string)
     """
     result = {}
@@ -68,16 +68,16 @@ def _parse_yaml_lite(raw: str) -> dict:
         # Check if next lines are list items
         if value == "" and i + 1 < len(lines):
             next_line = lines[i + 1] if i + 1 < len(lines) else ""
-            if re.match(r"^\s+-\s+", next_line):
-                # Parse list
+            if re.match(r"^\s*-\s+", next_line):
+                # Parse list (indented, or indentless as PyYAML writes it)
                 items = []
                 i += 1
-                while i < len(lines) and re.match(r"^\s+-\s+", lines[i]):
+                while i < len(lines) and re.match(r"^\s*-\s+", lines[i]):
                     item_match = _LIST_ITEM_RE.match(lines[i])
                     if item_match:
                         items.append(item_match.group(1))
                     else:
-                        val = re.sub(r"^\s+-\s+", "", lines[i]).strip().strip('"')
+                        val = re.sub(r"^\s*-\s+", "", lines[i]).strip().strip('"')
                         items.append(val)
                     i += 1
                 result[key] = items

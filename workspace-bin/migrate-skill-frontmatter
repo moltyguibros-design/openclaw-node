@@ -94,8 +94,11 @@ def serialize_frontmatter(fm: dict) -> str:
     """Serialize dict to YAML frontmatter string."""
     if HAS_YAML:
         # Custom representer to handle multiline strings nicely
+        # Indented sequences and unfolded scalars keep the output inside what
+        # lib/frontmatter.py (skill-audit's parser) reads.
         class CustomDumper(yaml.SafeDumper):
-            pass
+            def increase_indent(self, flow=False, indentless=False):
+                return super().increase_indent(flow, False)
 
         def str_representer(dumper, data):
             if "\n" in data:
@@ -116,7 +119,7 @@ def serialize_frontmatter(fm: dict) -> str:
                 ordered[key] = fm[key]
 
         return yaml.dump(ordered, Dumper=CustomDumper, default_flow_style=False,
-                         allow_unicode=True, sort_keys=False, width=120)
+                         allow_unicode=True, sort_keys=False, width=float("inf"))
     else:
         # Fallback: JSON-ish
         lines = []
