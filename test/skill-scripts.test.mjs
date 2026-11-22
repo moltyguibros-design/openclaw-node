@@ -92,6 +92,28 @@ describe('agentic-compass.py --write', { skip: !HAVE_PY && 'python3 not availabl
     assert.match(out, /^## Agentic Compass Report — \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} XYZ$/m);
     assert.doesNotMatch(out, /UTC/);
   });
+
+  // 'incorrect' and 'corrections' matched the unbounded 'correct' confirmation pattern.
+  it('counts whole-word confirmations and corrections only', () => {
+    const probe = `
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("compass", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m.score_response_relevance("That was incorrect. Wrong again. Two corrections needed."))
+print(m.score_response_relevance("That is correct, thanks that helped")[1])
+`;
+    const r = spawnSync('python3', ['-I', '-B', '-c', probe,
+      join(SKILLS, 'agentic-compass', 'scripts', 'agentic-compass.py')], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(r.stdout.trim().split('\n'),
+      ["(0.0, '0 confirmations, 2 corrections')", '2 confirmations, 0 corrections']);
+  });
+
+  it('documents that only the proactive plan line is derived from the scores', () => {
+    const doc = readFileSync(join(SKILLS, 'agentic-compass', 'SKILL.md'), 'utf8');
+    assert.match(doc, /deferred, avoidance and ship lines are fixed\s+prompts/i);
+    assert.match(doc, /^- Deferred: retry any blocked items after diagnostic$/m);
+  });
 });
 
 describe('growth-loop init-campaign.sh', () => {

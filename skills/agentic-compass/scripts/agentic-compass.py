@@ -49,8 +49,8 @@ def score_completion_rate(content):
 
 def score_response_relevance(content):
     """Score based on user confirmations vs corrections."""
-    confirmations = count_markers(content, r'confirmed|correct|yes that works|thanks that helped')
-    corrections = count_markers(content, r'wrong|incorrect|no that.s not|try again')
+    confirmations = count_markers(content, r'\b(?:confirmed|correct|yes that works|thanks that helped)\b')
+    corrections = count_markers(content, r'\b(?:wrong|incorrect|no that.s not|try again)\b')
     total = confirmations + corrections
     if total == 0:
         return 5.0, "No feedback yet"
