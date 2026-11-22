@@ -298,6 +298,10 @@ export function createMetricCollector(nc, opts = {}) {
    */
   async function recordMetric(type, data, nodeId) {
     if (stopped) return;
+    return writeMetric(type, data, nodeId);
+  }
+
+  async function writeMetric(type, data, nodeId) {
     const entry = createMetricEntry(type, data, nodeId);
     const line = formatMetricLine(entry) + '\n';
     lines.push(line.trim());
@@ -420,7 +424,7 @@ export function createMetricCollector(nc, opts = {}) {
       } catch { /* ignore */ }
     }
 
-    await recordMetric(METRIC_TYPES.HARNESS_STOP, {
+    await writeMetric(METRIC_TYPES.HARNESS_STOP, {
       total_lines: lines.length,
     });
 

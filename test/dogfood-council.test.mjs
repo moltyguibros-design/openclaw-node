@@ -322,6 +322,30 @@ describe('createMetricCollector.processMessage', () => {
   });
 });
 
+// stop() set `stopped` before recording harness_stop, which recordMetric then
+// skipped, so --stats measured the run up to now instead of its duration.
+describe('createMetricCollector.stop', () => {
+  it('writes harness_stop last, and nothing after it', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dogfood-stop-'));
+    try {
+      const metricsPath = join(dir, 'metrics.jsonl');
+      const nc = { subscribe: () => ({
+        unsubscribe() {},
+        [Symbol.asyncIterator]() { return { next() { return { done: true }; } }; },
+      }) };
+      const collector = createMetricCollector(nc, { metricsPath, nodeIds: [], log: () => {} });
+      await collector.start();
+      await collector.stop();
+      await collector.processMessage('context.broadcast.alpha', { source_node_id: 'alpha', event_id: 'late', data: {} });
+      const entries = (await readFile(metricsPath, 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+      assert.deepEqual(entries.map((e) => e.type), ['harness_start', 'harness_stop']);
+      assert.equal(entries[1].data.total_lines, 1);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ─── formatStatsReport ──────────────────────────────────────────────────────
 
 describe('formatStatsReport', () => {
