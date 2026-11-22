@@ -60,17 +60,16 @@ if [ -n "$STAGED" ]; then
     fi
   fi
 
-  # Validate JSON files
-  for file in $STAGED; do
-    if [[ "$file" == *.json ]] && [ -f "$file" ]; then
-      if command -v node &>/dev/null; then
-        if ! node -e "JSON.parse(require('fs').readFileSync('$file','utf-8'))" 2>/dev/null; then
-          echo "BLOCK: Invalid JSON in $file"
-          BLOCKS=$((BLOCKS + 1))
-        fi
+  # Validate JSON files. The path goes in as an argument, never into the JS source.
+  if command -v node &>/dev/null; then
+    while IFS= read -r -d '' file; do
+      [ -f "$file" ] || continue
+      if ! node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "$file" 2>/dev/null; then
+        echo "BLOCK: Invalid JSON in $file"
+        BLOCKS=$((BLOCKS + 1))
       fi
-    fi
-  done
+    done < <(git diff --cached --name-only -z --diff-filter=ACMR -- '*.json')
+  fi
 
   # Check for TODO without assignee
   BARE_TODOS=$(git diff --cached -U0 2>/dev/null | grep -E '^\+.*TODO[^(]' | head -3 || true)

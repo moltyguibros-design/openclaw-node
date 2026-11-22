@@ -139,14 +139,18 @@ describe('validate-commit hook — gitleaks judged by exit code, not its text', 
     const repo = path.join(tmp, `gl-repo-${n++}`);
     fs.mkdirSync(repo);
     spawnSync('git', ['init', '-q'], { cwd: repo });
-    for (const [f, body] of Object.entries(files)) fs.writeFileSync(path.join(repo, f), body);
+    for (const [f, body] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true });
+      fs.writeFileSync(path.join(repo, f), body);
+    }
     spawnSync('git', ['add', ...Object.keys(files)], { cwd: repo });
     const PATH = [pathFirst, bin, process.env.PATH].filter(Boolean).join(':');
-    return spawnSync('bash', [hook], {
+    const r = spawnSync('bash', [hook], {
       cwd: repo, encoding: 'utf8',
       input: JSON.stringify({ tool_input: { command } }),
       env: { ...process.env, PATH, FAKE_GL_OUT: out, FAKE_GL_RC: String(rc), FAKE_GL_CALLS: calls },
     });
+    return { ...r, repo };
   }
   it('passes a clean scan even though its output reads "no leaks found"', () => {
     const r = commit({ 'a.txt': 'hello\n' }, { out: 'INF no leaks found', rc: 0 });
@@ -190,6 +194,26 @@ describe('validate-commit hook — gitleaks judged by exit code, not its text', 
       assert.equal(ok.status, 0, ok.stdout + ok.stderr);
       assert.doesNotMatch(ok.stdout, WARN, command);
     }
+  });
+  // Each staged .json name was spliced into a node -e source string, so a crafted name ran
+  // as JavaScript before the commit was blocked, and a name with a space was never checked.
+  it('validates staged JSON without running its file name as code', () => {
+    const clean = { out: 'INF no leaks found', rc: 0 };
+    const evil = "x'+require('fs').writeFileSync('PWNED','')+'.json";
+    const injected = commit({ [evil]: '{bad' }, clean);
+    assert.equal(injected.status, 2, injected.stdout + injected.stderr);
+    assert.match(injected.stdout, /Invalid JSON/);
+    assert.equal(fs.existsSync(path.join(injected.repo, 'PWNED')), false, 'the file name ran as JavaScript');
+
+    const spaced = commit({ 'a b.json': '{bad' }, clean);
+    assert.equal(spaced.status, 2, spaced.stdout + spaced.stderr);
+    assert.match(spaced.stdout, /Invalid JSON in a b\.json/);
+
+    const valid = commit({ 'ok.json': '{"a":1}', 'sub/dir/n.json': '{}' }, clean);
+    assert.equal(valid.status, 0, valid.stdout + valid.stderr);
+    const nested = commit({ 'sub/dir/bad.json': '{bad' }, clean);
+    assert.equal(nested.status, 2, nested.stdout + nested.stderr);
+    assert.match(nested.stdout, /Invalid JSON in sub\/dir\/bad\.json/);
   });
 });
 
