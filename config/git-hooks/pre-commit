@@ -3,7 +3,13 @@
 # Installed by openclaw-node installer. LLM-agnostic: works regardless of AI tool.
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+# A copy installed into another project (install.sh --project) has no validators
+# beside it: the installer writes the deployed hooks dir here.
+DEPLOYED_HOOK_DIR=""
 HOOK_DIR="${ROOT}/.claude/hooks"
+if [ ! -x "${HOOK_DIR}/validate-commit.sh" ] && [ -n "$DEPLOYED_HOOK_DIR" ]; then
+  HOOK_DIR="$DEPLOYED_HOOK_DIR"
+fi
 
 if [ -x "${HOOK_DIR}/validate-commit.sh" ]; then
   # Simulate the input format the hook expects (git commit context)

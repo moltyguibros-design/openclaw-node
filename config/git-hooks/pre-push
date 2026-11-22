@@ -3,7 +3,13 @@
 # then delegates to the Claude Code hook for the protected-branch warning.
 # Installed by openclaw-node installer. LLM-agnostic: works regardless of AI tool.
 
+# A copy installed into another project (install.sh --project) has no validators
+# beside it: the installer writes the deployed hooks dir here.
+DEPLOYED_HOOK_DIR=""
 HOOK_DIR="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/hooks"
+if [ ! -x "${HOOK_DIR}/validate-push.sh" ] && [ -n "$DEPLOYED_HOOK_DIR" ]; then
+  HOOK_DIR="$DEPLOYED_HOOK_DIR"
+fi
 
 # git gives "<local ref> <local sha> <remote ref> <remote sha>" per ref on stdin; the
 # command line (--force, a +refspec) is not visible here, so judge the update itself.

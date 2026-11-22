@@ -1086,6 +1086,43 @@ test('--project drives framework rules and git hooks', () => {
   assert.ok(!rules.includes('unity.md'));
 });
 
+// The git hooks copied into a --project repo delegated to ${ROOT}/.claude/hooks, which
+// only this checkout has, so in the project they validated nothing and exited 0.
+test('--project git hooks run the deployed validators', () => {
+  for (const hook of ['pre-commit', 'pre-push']) {
+    assert.match(readFileSync(join(ROOT, 'config/git-hooks', hook), 'utf8'), /^DEPLOYED_HOOK_DIR=""$/m,
+      `this checkout's own ${hook} keeps using its in-repo validators`);
+  }
+  const base = mkdtempSync(join(tmpdir(), 'openclaw-proj-hooks-'));
+  const home = join(base, 'home');
+  mkdirSync(home, { recursive: true });
+  const project = join(base, 'project');
+  mkdirSync(project);
+  const git = (...args) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: project, encoding: 'utf8' });
+  git('init', '-q', '-b', 'main');
+  const r = runIntegrations({ cwd: base, home, project });
+  assert.equal(r.status, 0, r.stderr);
+  const deployed = join(home, '.openclaw', 'workspace', '.claude', 'hooks');
+  assert.match(readFileSync(join(project, '.git', 'hooks', 'pre-commit'), 'utf8'),
+    new RegExp(`^DEPLOYED_HOOK_DIR="${deployed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"$`, 'm'));
+
+  const fakebin = join(base, 'fakebin');
+  mkdirSync(fakebin);
+  writeFileSync(join(fakebin, 'gitleaks'), '#!/bin/sh\necho "WRN leaks found: 1" >&2\nexit 1\n', { mode: 0o755 });
+  const env = { ...process.env, PATH: `${fakebin}:${process.env.PATH}` };
+  writeFileSync(join(project, 'a.txt'), 'hello\n');
+  git('add', 'a.txt');
+  const commit = spawnSync('bash', [join(project, '.git', 'hooks', 'pre-commit')], { cwd: project, encoding: 'utf8', env });
+  assert.equal(commit.status, 2, commit.stdout + commit.stderr);
+  assert.match(commit.stdout, /gitleaks detected secrets/);
+
+  git('-c', 'core.hooksPath=/dev/null', 'commit', '-q', '-m', 'a');
+  const push = spawnSync('bash', [join(project, '.git', 'hooks', 'pre-push'), 'origin', 'url'], { cwd: project, encoding: 'utf8', input: '' });
+  assert.equal(push.status, 0, push.stdout + push.stderr);
+  assert.match(push.stdout, /protected branch 'main'/);
+  rmSync(base, { recursive: true, force: true });
+});
+
 // On macOS workspace.sh holds the timer-source copy lock on fd 9 for the whole run. The
 // detached `ollama serve` fallback inherited fd 9, kept the lock after install.sh exited,
 // and every later install (and install-timer-hold.py) refused to run.

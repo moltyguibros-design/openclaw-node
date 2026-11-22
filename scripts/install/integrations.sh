@@ -252,6 +252,8 @@ if [ -n "$PROJECT_DIR" ]; then
       GHOOK_DST="${GIT_HOOKS_DIR}/${ghook}"
       if [ -f "$GHOOK_SRC" ] && [ ! -f "$GHOOK_DST" ]; then
         run cp "$GHOOK_SRC" "$GHOOK_DST"
+        run sed -i.bak "s|^DEPLOYED_HOOK_DIR=\"\"\$|DEPLOYED_HOOK_DIR=\"${CLAUDE_DIR}/hooks\"|" "$GHOOK_DST"
+        run rm -f "$GHOOK_DST.bak"
         run chmod +x "$GHOOK_DST"
         info "Installed git hook: ${ghook}"
       fi
