@@ -8,10 +8,11 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCANNER_DIR = join(ROOT, 'skills', 'openclaw-skill-scanner');
@@ -19,7 +20,7 @@ const py = spawnSync('python3', ['--version'], { encoding: 'utf8' });
 const HAVE_PY = py.status === 0;
 
 function scan(files) {
-  const dir = mkdtempSync(join(tmpdir(), 'skill-scan-'));
+  const dir = tmpDir('skill-scan-');
   const skill = join(dir, 'evil-skill');
   mkdirSync(skill);
   for (const [name, body] of Object.entries(files)) {
@@ -28,8 +29,10 @@ function scan(files) {
     writeFileSync(p, body);
   }
   const r = spawnSync('python3', [join(SCANNER_DIR, 'scanner.py'), '--file', skill, '--json'], { encoding: 'utf8' });
-  const json = JSON.parse(r.stdout || '{}');
-  return json.skills?.[0] ?? { risk_score: 0, findings: [] };
+  assert.ok(r.status === 0 || r.status === 1, r.stderr);
+  const report = r.stdout && JSON.parse(r.stdout).skills?.[0];
+  assert.ok(report, `scanner produced no report: ${r.stderr}`);
+  return report;
 }
 
 describe('scanner.py flags obfuscated payloads', { skip: !HAVE_PY && 'python3 not available' }, () => {

@@ -19,8 +19,10 @@ test('every test file that mkdtemps under the temp dir also removes it', () => {
   const offenders = readdirSync(TEST_DIR)
     .filter((f) => /\.test\.(js|mjs|cjs)$/.test(f))
     .filter((f) => {
-      const src = readFileSync(join(TEST_DIR, f), 'utf8');
-      return MKDTEMP_UNDER_TMP.test(src) && !REMOVES.test(src);
+      const code = readFileSync(join(TEST_DIR, f), 'utf8')
+        .replace(/^\s*\/\*[\s\S]*?\*\//gm, '')
+        .replace(/^\s*\/\/.*$/gm, '');
+      return MKDTEMP_UNDER_TMP.test(code) && !REMOVES.test(code);
     });
   assert.deepEqual(offenders, [], 'use tmpDir() from ./helpers/tmp-dir.cjs, or remove the dir in an after hook');
 });
