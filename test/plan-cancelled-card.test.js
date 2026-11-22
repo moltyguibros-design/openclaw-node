@@ -111,3 +111,31 @@ describe('a failed local subtask settles its plan', () => {
     assert.equal(parent.result.success, false);
   });
 });
+
+// Template subtask ids are generic ('design', 'diagnose'). A second plan from the
+// same template reused the first plan's card id, so its card was skipped as
+// already on the board and the plan never advanced.
+describe('local plan subtask cards are namespaced by their plan', () => {
+  async function approvedPlan(h, parent, subtasks) {
+    assert.equal((await h.rpc('handleSubmit', { task_id: parent, title: parent })).ok, true);
+    assert.equal((await h.rpc('handleClaim', { node_id: `planner-${parent}` })).data.task_id, parent);
+    const created = await h.rpc('handlePlanCreate', { parent_task_id: parent, title: 'plan', subtasks });
+    assert.equal(created.ok, true, created.error);
+    assert.equal((await h.rpc('handlePlanApprove', signed({ plan_id: created.data.plan_id }))).ok, true);
+    return h.planStore.get(created.data.plan_id);
+  }
+
+  it('two plans with the same subtask id get distinct card ids; an auto id is not prefixed twice', async () => {
+    const h = harness();
+    const spec = [{ subtask_id: 'diagnose', title: 'diagnose', delegation: { mode: 'local' } }];
+    const p1 = await approvedPlan(h, 'PARENT-A', spec);
+    const p2 = await approvedPlan(h, 'PARENT-B', spec);
+    assert.equal(p1.subtasks[0].kanban_task_id, `${p1.plan_id}-diagnose`);
+    assert.equal(p2.subtasks[0].kanban_task_id, `${p2.plan_id}-diagnose`);
+    assert.notEqual(p1.subtasks[0].kanban_task_id, p2.subtasks[0].kanban_task_id);
+
+    const p3 = await approvedPlan(h, 'PARENT-C', [{ title: 'auto id', delegation: { mode: 'human' } }]);
+    assert.equal(p3.subtasks[0].subtask_id, `${p3.plan_id}-S01`);
+    assert.equal(p3.subtasks[0].kanban_task_id, p3.subtasks[0].subtask_id);
+  });
+});

@@ -462,9 +462,11 @@ function handlePlanEvent(eventType, data) {
 function materializeSubtask(plan, subtask) {
   const mode = subtask.delegation?.mode || 'local';
   const soulId = subtask.delegation?.soul_id || null;
+  // Plans queued before kanban ids were namespaced carry no kanban_task_id.
+  const cardId = subtask.kanban_task_id || subtask.subtask_id;
 
   const taskEntry = {
-    task_id: subtask.subtask_id,
+    task_id: cardId,
     title: subtask.title,
     status: mode === 'human' ? 'blocked' : 'queued',
     owner: mode === 'soul' ? 'Daedalus' : null,
@@ -481,11 +483,11 @@ function materializeSubtask(plan, subtask) {
     updated_at: isoTimestamp(),
   };
 
-  return appendTaskBlock(ACTIVE_TASKS_PATH, subtask.subtask_id, formatTaskYaml(taskEntry))
+  return appendTaskBlock(ACTIVE_TASKS_PATH, cardId, formatTaskYaml(taskEntry))
     .then((added) => log(added
-      ? `  MATERIALIZED: ${subtask.subtask_id} → kanban (${mode})`
-      : `  SKIP: ${subtask.subtask_id} already in kanban`))
-    .catch((err) => log(`  ERROR materializing ${subtask.subtask_id}: ${err.message}`));
+      ? `  MATERIALIZED: ${cardId} → kanban (${mode})`
+      : `  SKIP: ${cardId} already in kanban`))
+    .catch((err) => log(`  ERROR materializing ${cardId}: ${err.message}`));
 }
 
 // ── Plan subtasks: Kanban → Mesh ────────────────────
@@ -518,12 +520,12 @@ async function reportPlanSubtasks() {
     try {
       // After a restart the settled cards are still on the board; ask the daemon first.
       const plan = await natsRequest('mesh.plans.get', { plan_id: card.plan_id });
-      const st = (plan?.subtasks || []).find(s => s.subtask_id === card.task_id);
+      const st = (plan?.subtasks || []).find(s => (s.kanban_task_id || s.subtask_id) === card.task_id);
       const report = subtaskReportForCard(card, st);
       if (report) {
         await natsRequest('mesh.plans.subtask.update', await signOperatorRequest({
           plan_id: card.plan_id,
-          subtask_id: card.task_id,
+          subtask_id: st.subtask_id,
           ...report,
         }));
         log(`PLAN SUBTASK REPORTED: ${key} → ${report.status}`);

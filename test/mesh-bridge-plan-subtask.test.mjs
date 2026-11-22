@@ -82,9 +82,12 @@ test('a materialized subtask card that reaches done is reported once, signed', {
 
   nc = await connect({ servers: `nats://127.0.0.1:${port}`, token, maxReconnectAttempts: 0 });
   const updates = [];
-  const statuses = { 'P-L1': 'queued', 'P-L2': 'queued', 'P-L3': 'completed' };
+  // Cards carry the plan-namespaced kanban_task_id; P-L3 was queued before that
+  // existed, so its card id is its bare subtask id.
+  const kanbanIds = { L1: 'P-L1', L2: 'P-L2', 'P-L3': undefined };
+  const statuses = { L1: 'queued', L2: 'queued', 'P-L3': 'completed' };
   nc.subscribe('mesh.plans.get', { callback: (_err, msg) => {
-    const subtasks = Object.entries(statuses).map(([subtask_id, status]) => ({ subtask_id, status }));
+    const subtasks = Object.entries(statuses).map(([subtask_id, status]) => ({ subtask_id, kanban_task_id: kanbanIds[subtask_id], status }));
     msg.respond(sc.encode(JSON.stringify({ ok: true, data: { plan_id: 'PLAN-1', subtasks } })));
   } });
   nc.subscribe('mesh.plans.subtask.update', { callback: (_err, msg) => {
@@ -118,7 +121,7 @@ test('a materialized subtask card that reaches done is reported once, signed', {
     event: 'wave_started', plan_id: 'PLAN-1', parent_task_id: 'PARENT',
     plan: {
       plan_id: 'PLAN-1', parent_task_id: 'PARENT',
-      subtasks: ['P-L1', 'P-L2'].map((subtask_id) => ({ subtask_id, title: subtask_id, status: 'queued', delegation: { mode: 'local' }, budget_minutes: 5 })),
+      subtasks: ['L1', 'L2'].map((subtask_id) => ({ subtask_id, kanban_task_id: kanbanIds[subtask_id], title: subtask_id, status: 'queued', delegation: { mode: 'local' }, budget_minutes: 5 })),
     },
   })));
   await until(async () => parseTasks(await fs.readFile(kanban, 'utf8')).length === 3, 10_000)
@@ -137,7 +140,7 @@ test('a materialized subtask card that reaches done is reported once, signed', {
   assert.equal(updates.length, 1, `exactly one report:\n${output}`);
   const [u] = updates;
   assert.equal(u.plan_id, 'PLAN-1');
-  assert.equal(u.subtask_id, 'P-L1');
+  assert.equal(u.subtask_id, 'L1', 'the report names the subtask, not its card');
   assert.equal(u.status, 'completed');
   const verdict = verifyOperatorRequest(u, { trustedKeys: [identity.publicKeyBase64], seenIds: null });
   assert.equal(verdict.ok, true, `the daemon requires an operator signature: ${verdict.reason}`);

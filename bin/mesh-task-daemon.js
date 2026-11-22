@@ -2755,13 +2755,13 @@ async function advancePlanWave(planId) {
         case 'collab_mesh':
           st.mesh_task_id = `${planId}-${st.subtask_id}`;
           break;
-        case 'local':
-        case 'soul':
-          st.kanban_task_id = st.subtask_id;
-          break;
         case 'human':
           st.status = SUBTASK_STATUS.BLOCKED;
-          st.kanban_task_id = st.subtask_id;
+          // falls through
+        case 'local':
+        case 'soul':
+          // Template subtask ids repeat across plans; createPlan's auto ids already carry the plan id.
+          st.kanban_task_id = st.subtask_id.startsWith(`${planId}-`) ? st.subtask_id : `${planId}-${st.subtask_id}`;
           break;
       }
     }
