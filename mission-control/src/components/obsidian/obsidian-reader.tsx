@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { format } from "date-fns";
 import { FileText, BookOpen, Database, BookMarked, X } from "lucide-react";
@@ -132,6 +132,7 @@ export function ObsidianReader({
       <div className="px-6 py-4">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
+          urlTransform={(url) => (url.startsWith("wikilink://") ? url : defaultUrlTransform(url))}
           components={{
             h1: ({ children }) => (
               <h1 className="text-xl font-bold text-foreground mt-6 mb-3 first:mt-0">
