@@ -3,7 +3,7 @@
  *
  * Mirrors lib/nats-resolve.js + lib/nats-nkey.js from the node repo, in
  * TypeScript, because MC's build and vitest run without ../lib present (the
- * runtime-path probing in mesh-sign.ts exists precisely because that is
+ * runtime-path probing in root-lib.ts exists precisely because that is
  * fragile) and everything needed — `nkeyAuthenticator`, `nkeys` — ships in
  * the `nats` package MC already imports.
  *
