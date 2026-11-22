@@ -87,6 +87,14 @@ describe('syncNatsAuth', () => {
     fs.mkdirSync(path.join(home, '.openclaw'), { recursive: true });
     return home;
   }
+  // --sync-nats reloads nats-server; a stub first on PATH takes that call so
+  // the host's own nats-server is never signalled.
+  function stubNatsServer(home) {
+    const dir = path.join(home, 'stubbin');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'nats-server'), '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$NATS_STUB_LOG"\nexit 0\n', { mode: 0o755 });
+    return { dir, log: path.join(home, 'nats-server.log') };
+  }
   const KEYS = ['HOME', 'OPENCLAW_NATS_TOKEN', 'OPENCLAW_NATS_AUTH', 'OPENCLAW_NODE_ROLE', 'OPENCLAW_NODE_ID', 'OPENCLAW_IDENTITY_DIR', 'OPENCLAW_NATS_LEGACY_USER'];
 
   it('renders from the identity + registry through the CLI, mode 600, no secret on argv', () => {
@@ -160,15 +168,16 @@ describe('syncNatsAuth', () => {
     const dir = path.join(home, '.openclaw');
     fs.writeFileSync(path.join(dir, 'openclaw.env'), 'OPENCLAW_NATS_TOKEN=t\nOPENCLAW_NATS_AUTH=nkey\nOPENCLAW_NODE_ROLE=lead\nOPENCLAW_NODE_ID=lead-a\n');
     const peer = getOrCreateIdentity(path.join(home, 'peer'));
+    const stub = stubNatsServer(home);
     const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !KEYS.includes(k)));
-    const r = runIsolatedCli(home, 'bin/openclaw-trust-peer.mjs', ['w2', peer.publicKeyBase64, '--sync-nats'], { ...env, HOME: home, OPENCLAW_IDENTITY_DIR: dir });
+    const r = runIsolatedCli(home, 'bin/openclaw-trust-peer.mjs', ['w2', peer.publicKeyBase64, '--sync-nats'], { ...env, HOME: home, OPENCLAW_IDENTITY_DIR: dir, NATS_STUB_LOG: stub.log, PATH: `${stub.dir}${path.delimiter}${process.env.PATH}` });
     assert.equal(r.status, 0, r.stderr + r.stdout);
     assert.match(r.stdout, /trusted: w2 \(worker\)/);
     assert.match(r.stdout, /nats-auth: nkey mode/);
     const text = fs.readFileSync(path.join(dir, 'config', 'nats-auth.conf'), 'utf8');
     assert.ok(text.includes(publicKeyBase64ToNkey(peer.publicKeyBase64)));
-    // The reload is best-effort: with no nats-server around it reports, never fails.
-    assert.match(r.stdout, /no running nats-server found|SIGHUP sent|reloaded/);
+    assert.match(r.stdout, /reloaded via nats-server --signal reload/);
+    assert.equal(fs.readFileSync(stub.log, 'utf8').trim(), '--signal reload');
     fs.rmSync(home, { recursive: true, force: true });
   });
 
@@ -177,7 +186,8 @@ describe('syncNatsAuth', () => {
     const dir = path.join(home, '.openclaw');
     fs.writeFileSync(path.join(dir, 'openclaw.env'), 'OPENCLAW_NATS_TOKEN=t\nOPENCLAW_NATS_AUTH=nkey\nOPENCLAW_NODE_ROLE=lead\nOPENCLAW_NODE_ID=lead-a\n');
     const peer = getOrCreateIdentity(path.join(home, 'peer'));
-    const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !KEYS.includes(k))), HOME: home, OPENCLAW_IDENTITY_DIR: dir };
+    const stub = stubNatsServer(home);
+    const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !KEYS.includes(k))), HOME: home, OPENCLAW_IDENTITY_DIR: dir, NATS_STUB_LOG: stub.log, PATH: `${stub.dir}${path.delimiter}${process.env.PATH}` };
     const first = runIsolatedCli(home, 'bin/openclaw-trust-peer.mjs', ['w2', peer.publicKeyBase64], env);
     assert.equal(first.status, 0, first.stderr);
     assert.equal(fs.existsSync(path.join(dir, 'config', 'nats-auth.conf')), false);
@@ -185,6 +195,8 @@ describe('syncNatsAuth', () => {
     assert.equal(again.status, 0, again.stderr + again.stdout);
     assert.match(again.stdout, /already trusted with same pubkey/);
     assert.ok(fs.readFileSync(path.join(dir, 'config', 'nats-auth.conf'), 'utf8').includes(publicKeyBase64ToNkey(peer.publicKeyBase64)));
+    assert.match(again.stdout, /reloaded via nats-server --signal reload/);
+    assert.equal(fs.readFileSync(stub.log, 'utf8').trim(), '--signal reload');
     fs.rmSync(home, { recursive: true, force: true });
   });
 
