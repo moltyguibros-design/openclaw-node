@@ -101,7 +101,8 @@ if (IS_MAC) {
 }
 
 // What a node's clone needs to run bin/mesh-deploy.js.
-const DEPLOY_SCRIPT_FILES = ['bin/mesh-deploy.js', 'lib/mesh-roles.js', 'lib/tracer.js', 'lib/obs-db.js', 'lib/node-id.js', 'lib/node-aliases.js'];
+const DEPLOY_SCRIPT_FILES = ['bin/mesh-deploy.js', 'lib/mesh-roles.js', 'lib/tracer.js', 'lib/obs-db.js', 'lib/node-id.js', 'lib/node-aliases.js',
+  'scripts/install/retired-files.txt'];
 git(ROOT, 'init', '-q', '--bare', '-b', 'main', ORIGIN);
 git(ROOT, 'init', '-q', '-b', 'main', SEED);
 git(SEED, 'remote', 'add', 'origin', ORIGIN);
@@ -344,6 +345,10 @@ describe('`mesh deploy --force` on a live node leaves what the node owns alone',
     write(fx.home, '.openclaw/skills/dist/demo.skill', 'packaged\n');
     write(fx.home, '.openclaw/skills/mesh/SKILL.md', '# mesh\n');
     write(fx.home, '.openclaw/skills/operator-own/SKILL.md', '# mine\n');
+    // Installed before memorylayer was quarantined and deep-research deleted.
+    write(fx.home, '.openclaw/skills/memorylayer/SKILL.md', '# memorylayer, stale managed copy\n');
+    write(fx.home, '.openclaw/workspace/skills/memorylayer/SKILL.md', '# memorylayer, workspace copy\n');
+    write(fx.home, '.openclaw/workspace/skills/deep-research/SKILL.md', '# deep-research, workspace copy\n');
     write(fx.home, '.openclaw/openclaw.json', LIVE_CONFIG);
     write(fx.home, '.openclaw/openclaw.env', 'DISCORD_BOT_TOKEN=discord-fixture\n');
     write(fx.home, '.openclaw/souls/daedalus/evolution/genes.json', LEARNED_GENES);
@@ -382,7 +387,17 @@ describe('`mesh deploy --force` on a live node leaves what the node owns alone',
     const archive = fx.rt(`.openclaw/${archives[0]}`);
     assert.equal(read(path.join(archive, 'demo', 'SKILL.md')), '# demo, stale managed copy\n');
     assert.ok(fs.existsSync(path.join(archive, 'dist', 'demo.skill')));
+    assert.equal(read(path.join(archive, 'memorylayer', 'SKILL.md')), '# memorylayer, stale managed copy\n');
     assert.deepEqual(fs.readdirSync(fx.rt('.openclaw/skills')).sort(), ['mesh', 'operator-own']);
+  });
+
+  it('archives the workspace copies of quarantined and deleted skills where install.sh does', () => {
+    const [dated] = fs.readdirSync(fx.rt('.openclaw/retired'));
+    const archive = fx.rt(`.openclaw/retired/${dated}/skills`);
+    assert.equal(read(path.join(archive, 'memorylayer', 'SKILL.md')), '# memorylayer, workspace copy\n');
+    assert.equal(read(path.join(archive, 'deep-research', 'SKILL.md')), '# deep-research, workspace copy\n');
+    assert.ok(!fs.existsSync(fx.rt('.openclaw/workspace/skills/memorylayer')));
+    assert.ok(!fs.existsSync(fx.rt('.openclaw/workspace/skills/deep-research')));
   });
 
   it('never installs skills/_quarantine', () => {

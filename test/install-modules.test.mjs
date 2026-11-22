@@ -396,27 +396,46 @@ test('the directory step leaves ~/.openclaw private to its owner, on a fresh ins
   rmSync(tmp, { recursive: true, force: true });
 });
 
-test('skills that ship memory or code off the node are quarantined, and an --update removes installed copies', () => {
-  const quarantine = readFileSync(join(ROOT, 'skills/_quarantine/README.md'), 'utf8');
-  for (const s of ['second-brain', 'refactor-suggest']) {
+test('every quarantined or deleted skill is archived out of an installed workspace on --update', () => {
+  const readme = readFileSync(join(ROOT, 'skills/_quarantine/README.md'), 'utf8');
+  const quarantined = readdirSync(join(ROOT, 'skills/_quarantine'), { withFileTypes: true })
+    .filter((d) => d.isDirectory()).map((d) => d.name);
+  assert.ok(quarantined.includes('capability-evolver'));
+  for (const s of quarantined) {
     assert.equal(existsSync(join(ROOT, 'skills', s)), false, `${s} still ships`);
-    assert.equal(existsSync(join(ROOT, 'skills/_quarantine', s, 'SKILL.md')), true, `${s} not in _quarantine`);
-    assert.match(quarantine, new RegExp(`^\\| \`${s}\` \\|`, 'm'), `${s} has no README row`);
+    assert.equal(existsSync(join(ROOT, 'skills/_quarantine', s, 'SKILL.md')), true, `${s} has no SKILL.md in _quarantine`);
+    assert.match(readme, new RegExp(`^\\| \`${s}\` \\|`, 'm'), `${s} has no README row`);
   }
-  for (const s of ['memory-setup', 'memory-hygiene']) assert.equal(existsSync(join(ROOT, 'skills', s)), false, `${s} still ships`);
+  // Deleted outright rather than quarantined; named here because CI checkouts are shallow.
+  const deleted = ['clawdbot-filesystem', 'deep-research', 'markdown-formatter', 'memory-hygiene', 'memory-setup',
+    'save-money', 'search', 'self-improving-agent-1-0-2'];
+  for (const s of deleted) assert.equal(existsSync(join(ROOT, 'skills', s)), false, `${s} still ships`);
+  const listed = readFileSync(join(ROOT, 'scripts/install/retired-files.txt'), 'utf8').split('\n')
+    .map((l) => l.trim().split(/\s+/)).filter(([g]) => g === 'skills').map(([, n]) => n);
+  const expected = [...quarantined, ...deleted].sort();
+  for (const s of expected) assert.ok(listed.includes(s), `skills ${s} is not in retired-files.txt`);
 
   const src = moduleSrc['workspace.sh'];
-  const start = src.indexOf('RETIRED_SKILLS=(');
-  assert.ok(start >= 0, 'workspace.sh lists retired skills');
-  const block = src.slice(start, src.indexOf('\ndone\n', start) + '\ndone\n'.length);
-  const ws = tmpDir('retired-skills-');
-  for (const s of ['second-brain', 'refactor-suggest', 'memory-setup', 'memory-hygiene', 'self-reflection', 'kept']) {
-    mkdirSync(join(ws, 'skills', s), { recursive: true });
-    writeFileSync(join(ws, 'skills', s, 'SKILL.md'), '# x\n');
+  assert.ok(src.includes('retire_shipped_files skills "$WORKSPACE/skills"'));
+  assert.ok(!src.includes('RETIRED_SKILLS'), 'skills are archived by retire_shipped_files, never rm -rf');
+  const root = tmpDir('retired-skills-');
+  const skills = join(root, 'workspace', 'skills');
+  for (const s of [...expected, 'kept']) {
+    mkdirSync(join(skills, s), { recursive: true });
+    writeFileSync(join(skills, s, 'SKILL.md'), '# x\n');
   }
-  const r = spawnSync('bash', ['-euc', `run() { "$@"; }\nWORKSPACE="$1"\n${block}`, 'bash', ws], { encoding: 'utf8' });
+  mkdirSync(join(skills, 'capability-evolver/assets/gep'), { recursive: true });
+  writeFileSync(join(skills, 'capability-evolver/assets/gep/events.jsonl'), '{"learned":1}\n');
+  const r = spawnSync('bash', ['-euc', `source "${join(ROOT, 'scripts/install/helpers.sh')}"; retire_shipped_files skills "$1"`, 'x', skills], {
+    encoding: 'utf8', env: { ...process.env, DRY_RUN: 'false', REPO_DIR: ROOT, OPENCLAW_ROOT: root },
+  });
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(readdirSync(join(ws, 'skills')), ['kept']);
+  assert.deepEqual(readdirSync(skills), ['kept']);
+  const [dated] = readdirSync(join(root, 'retired'));
+  const archive = join(root, 'retired', dated, 'skills');
+  assert.deepEqual(readdirSync(archive).sort(), expected);
+  assert.equal(readFileSync(join(archive, 'capability-evolver/assets/gep/events.jsonl'), 'utf8'), '{"learned":1}\n');
+  rmSync(root, { recursive: true, force: true });
 });
 
 test('installer links scoped packages into both deployed parent trees', () => {
@@ -951,7 +970,7 @@ test('the retired list names only files the repo no longer ships, and both deplo
   for (const name of ['extract-existing-sessions.mjs', 'fed-benchmark-driver.mjs', 'grappe-benchmark.mjs']) {
     assert.ok(entries.some(([g, n]) => g === 'mesh-bin' && n === name), `mesh-bin ${name} is not retired`);
   }
-  const source = { 'workspace-bin': 'workspace-bin', 'mesh-bin': 'bin' };
+  const source = { 'workspace-bin': 'workspace-bin', 'mesh-bin': 'bin', skills: 'skills' };
   for (const [group, name] of entries) {
     assert.ok(source[group], `unknown group ${group}`);
     assert.ok(!existsSync(join(ROOT, source[group], name)), `${group} ${name} is still shipped`);

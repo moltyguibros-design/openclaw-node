@@ -4,8 +4,10 @@
 # name in that deployed dir:
 #   workspace-bin  ~/.openclaw/workspace/bin   (from workspace-bin/)
 #   mesh-bin       ~/openclaw/bin              (from bin/)
-# Add a line when you delete or rename a shipped file. *.bak* backups are never
-# listed and never touched.
+#   skills         ~/.openclaw/workspace/skills (from skills/; mesh-deploy also
+#                  archives ~/.openclaw/skills copies)
+# Add a line when you delete or rename a shipped file, or quarantine a skill.
+# *.bak* backups are never listed and never touched.
 workspace-bin brainstorm-server
 workspace-bin daily-log-writer.mjs
 workspace-bin mesh-bridge.mjs
@@ -28,3 +30,22 @@ workspace-bin memory-plan-notify.sh
 workspace-bin pair-session.js
 # install-daemon wrote its own memory-daemon unit over the one services.sh renders.
 workspace-bin install-daemon
+# Quarantined skills (skills/_quarantine/README.md): none may stay installed.
+skills memorylayer
+skills moltbook-registry
+skills second-brain
+skills refactor-suggest
+skills capability-evolver
+skills auto-updater
+skills proactive-messages
+skills self-reflection
+skills ontology
+# Skills deleted from the repo.
+skills memory-setup
+skills memory-hygiene
+skills deep-research
+skills save-money
+skills markdown-formatter
+skills search
+skills self-improving-agent-1-0-2
+skills clawdbot-filesystem

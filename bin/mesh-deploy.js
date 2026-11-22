@@ -721,24 +721,50 @@ function deployedBase(repoDir) {
  * loaded. Move each leftover repo skill the workspace now holds (and the
  * dist/ and scripts/ packaging dirs) into a dated archive; never delete. The
  * mesh skill stays: integrations.sh installs it there for every agent.
+ *
+ * A skill retired-files.txt lists (quarantined or deleted) is archived from
+ * both dirs, as install.sh does: the diff misses it on a node this deploy has
+ * not recorded, and archiving only the workspace copy would un-shadow an old
+ * managed one.
  */
 function retireManagedSkillCopies() {
+  const date = new Date().toISOString().slice(0, 10);
+  const retired = retiredSkillNames();
+  const archiveTo = (src, dst) => {
+    if (fs.existsSync(dst)) {
+      warn(`  ${src} left in place — ${dst} already exists`);
+      return;
+    }
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.renameSync(src, dst);
+    console.log(`  ${C.dim('retire')} ${src} → ${dst}`);
+  };
+  for (const name of retired) {
+    const src = path.join(DIRS.SKILLS, name);
+    if (fs.existsSync(src)) archiveTo(src, path.join(DIRS.OPENCLAW_HOME, 'retired', date, 'skills', name));
+  }
   if (!fs.existsSync(DIRS.MANAGED_SKILLS)) return;
   const repoSkills = new Set(fs.readdirSync(path.join(REPO_DIR, 'skills')));
-  const archive = path.join(DIRS.OPENCLAW_HOME, `skills.retired-${new Date().toISOString().slice(0, 10)}`);
+  const archive = path.join(DIRS.OPENCLAW_HOME, `skills.retired-${date}`);
   for (const name of fs.readdirSync(DIRS.MANAGED_SKILLS)) {
-    if (name === 'mesh' || !repoSkills.has(name)) continue;
-    const packaging = name === 'dist' || name === 'scripts';
-    if (!packaging && !fs.existsSync(path.join(DIRS.SKILLS, name))) continue;
-    const dst = path.join(archive, name);
-    if (fs.existsSync(dst)) {
-      warn(`  ${path.join(DIRS.MANAGED_SKILLS, name)} left in place — ${dst} already exists`);
-      continue;
+    if (name === 'mesh') continue;
+    if (!retired.includes(name)) {
+      if (!repoSkills.has(name)) continue;
+      const packaging = name === 'dist' || name === 'scripts';
+      if (!packaging && !fs.existsSync(path.join(DIRS.SKILLS, name))) continue;
     }
-    fs.mkdirSync(archive, { recursive: true });
-    fs.renameSync(path.join(DIRS.MANAGED_SKILLS, name), dst);
-    console.log(`  ${C.dim('retire')} ${path.join(DIRS.MANAGED_SKILLS, name)} → ${dst}`);
+    archiveTo(path.join(DIRS.MANAGED_SKILLS, name), path.join(archive, name));
   }
+}
+
+// The `skills` names in retired-files.txt, refused like retire_shipped_files
+// refuses them so nothing outside the skill dirs and no backup is ever moved.
+function retiredSkillNames() {
+  return fs.readFileSync(path.join(REPO_DIR, 'scripts', 'install', 'retired-files.txt'), 'utf8')
+    .split('\n')
+    .map(line => line.trim().split(/\s+/))
+    .filter(([group, name]) => group === 'skills' && name && !name.includes('/') && !name.startsWith('.') && !name.includes('.bak'))
+    .map(([, name]) => name);
 }
 
 /**
