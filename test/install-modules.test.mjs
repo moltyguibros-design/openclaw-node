@@ -377,6 +377,25 @@ test('pair-session and its Teams transport are retired: not shipped, not documen
   assert.doesNotMatch(readFileSync(join(ROOT, 'docs/OBSERVABILITY.md'), 'utf8'), /pair-transport-teams|TeamsTransport/);
 });
 
+test('the directory step leaves ~/.openclaw private to its owner, on a fresh install and on --update', () => {
+  const src = moduleSrc['workspace.sh'];
+  const block = src.slice(0, src.indexOf('# Step 3'));
+  const tmp = mkdtempSync(join(tmpdir(), 'oc-root-mode-'));
+  const root = join(tmp, '.openclaw');
+  const step2 = () => spawnSync('bash', ['-c', `set -e; run() { "$@"; }; step() { :; }; info() { :; }\n${block}`], {
+    encoding: 'utf8', env: { ...process.env, OPENCLAW_ROOT: root, WORKSPACE: join(root, 'workspace') },
+  });
+  let r = step2();
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(statSync(root).mode & 0o777, 0o700);
+  assert.ok(existsSync(join(root, 'workspace', 'memory')));
+  spawnSync('chmod', ['755', root]);
+  r = step2();
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(statSync(root).mode & 0o777, 0o700);
+  rmSync(tmp, { recursive: true, force: true });
+});
+
 test('skills that ship memory or code off the node are quarantined, and an --update removes installed copies', () => {
   const quarantine = readFileSync(join(ROOT, 'skills/_quarantine/README.md'), 'utf8');
   for (const s of ['second-brain', 'refactor-suggest']) {

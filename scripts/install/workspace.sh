@@ -34,6 +34,8 @@ for dir in "${DIRS[@]}"; do
     info "Created $dir"
   fi
 done
+# Transcripts, state.db and memory live under here, and only the owner's units read them.
+run chmod 700 "$OPENCLAW_ROOT"
 info "Directory structure ready"
 
 # ============================================================
