@@ -435,8 +435,9 @@ export function serializeTasksMarkdown(tasks: ParsedTask[]): string {
 
 /** One task's `- task_id:` block, without a trailing newline. */
 export function serializeTaskBlock(t: ParsedTask): string {
-  // A raw newline drops the continuation on re-parse or forges a field/task block (same rule as lib/kanban-io.js).
-  const one = (v: string) => v.replace(/\s*\r?\n\s*/g, " ");
+  // A raw newline drops the continuation on re-parse or forges a field/task block (lib/kanban-io.js flattens too);
+  // a lone CR or U+2028/U+2029 makes the parser's `(.*)$` miss the line, dropping the field.
+  const one = (v: string) => v.replace(/\s*(?:\r\n|[\r\n\u2028\u2029])\s*/g, " ");
   const lines: string[] = [];
   lines.push(`- task_id: ${t.id}`);
   lines.push(`  title: ${one(t.title)}`);
@@ -485,7 +486,7 @@ export function serializeTaskBlock(t: ParsedTask): string {
   }
   if (t.description) {
     // Escape newlines so multiline descriptions don't break the parser
-    lines.push(`  description: ${t.description.replace(/\n/g, "\\n")}`);
+    lines.push(`  description: ${t.description.replace(/\r\n|[\r\n\u2028\u2029]/g, "\\n")}`);
   }
   if (!t.needsApproval) {
     lines.push(`  needs_approval: false`);

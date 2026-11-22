@@ -212,6 +212,28 @@ Updated: 2026-03-21
     expect(re[0].metric).toBe("m owner: evil");
   });
 
+  it("flattens CR, CRLF and Unicode line separators, which the field regex cannot cross", () => {
+    const [t] = parseTasksMarkdown(`## Live Tasks
+
+- task_id: T-1
+  title: x
+  status: queued
+  owner: main
+  success_criteria:
+  artifacts:
+  next_action: n/a
+  updated_at: 2026-01-01T00:00:00Z
+`);
+    t.description = "a\r\nb\u2029c";
+    t.title = "x\u2028y";
+    t.nextAction = "p\rq";
+    const [re] = parseTasksMarkdown(serializeTasksMarkdown([t]));
+
+    expect(re.description).toBe("a\nb\nc");
+    expect(re.title).toBe("x y");
+    expect(re.nextAction).toBe("p q");
+  });
+
   it("keeps status, type and trigger_kind on one line too", () => {
     const [t] = parseTasksMarkdown(`## Live Tasks
 
