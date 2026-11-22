@@ -1114,8 +1114,9 @@ async function handleTransitions(transitions, config) {
       const currentJsonl = findJsonlBySessionId(sources, t.sessionId);
       if (currentJsonl) {
         try {
-          // shouldFlush parses the whole transcript — it runs IN the worker
-          // (checkShouldFlush) so the event loop never touches the JSONL.
+          // shouldFlush only stats the transcript; the flush that may follow
+          // parses it, so both run IN the worker (checkShouldFlush) and the
+          // event loop never touches the JSONL.
           const memoryMd = path.join(WORKSPACE, 'MEMORY.md');
           const budget = initMemoryBudget(config);
           const result = await serializeFlush(() => runFlushInWorker(currentJsonl, memoryMd, {
@@ -1613,8 +1614,9 @@ async function main() {
           if (!currentJsonl) return;
           natsFlushQueued = true;
           try {
-            // shouldFlush parses the whole transcript — it runs IN the worker
-            // (checkShouldFlush) so the event loop never touches the JSONL.
+            // shouldFlush only stats the transcript; the flush that may follow
+            // parses it, so both run IN the worker (checkShouldFlush) and the
+            // event loop never touches the JSONL.
             const memoryMd = path.join(WORKSPACE, 'MEMORY.md');
             const budget = initMemoryBudget(config);
             const result = await serializeFlush(() => runFlushInWorker(currentJsonl, memoryMd, {
