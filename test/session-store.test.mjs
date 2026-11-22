@@ -271,6 +271,40 @@ describe('source marker skip', () => {
     assert.equal(second.messageCount, 2);
   });
 
+  it('a marker from an older parse version re-imports a same-count transcript', async () => {
+    const p = writeJsonl('reparse-same.jsonl', [
+      { type: 'user', message: { content: 'alpha one' } },
+      { type: 'assistant', message: { content: 'alpha two' } },
+    ]);
+    assert.equal((await store.importSession(p)).imported, true);
+    writeJsonl('reparse-same.jsonl', [
+      { type: 'user', message: { content: 'beta one' } },
+      { type: 'assistant', message: { content: 'beta two' } },
+    ]);
+    const raw = new Database(DB_PATH);
+    raw.prepare("UPDATE sessions SET source_marker = '1:1:0' WHERE id = 'reparse-same'").run();
+    raw.close();
+    const second = await store.importSession(p);
+    assert.equal(second.imported, true);
+    assert.deepEqual(store.search('beta').map(r => r.sessionId), ['reparse-same']);
+    assert.deepEqual(store.search('alpha'), []);
+  });
+
+  it('a same-count re-parse by the current parser keeps the stored rows', async () => {
+    const p = writeJsonl('same-count.jsonl', [
+      { type: 'user', message: { content: 'alpha one' } },
+      { type: 'assistant', message: { content: 'alpha two' } },
+    ]);
+    await store.importSession(p);
+    writeJsonl('same-count.jsonl', [
+      { type: 'user', message: { content: 'beta one' } },
+      { type: 'assistant', message: { content: 'beta two' } },
+    ]);
+    const second = await store.importSession(p);
+    assert.equal(second.imported, false);
+    assert.deepEqual(store.search('alpha').map(r => r.sessionId), ['same-count']);
+  });
+
   it('adds source_marker to an existing database without touching the shared user_version', () => {
     store.close();
     const legacy = new Database(DB_PATH);
