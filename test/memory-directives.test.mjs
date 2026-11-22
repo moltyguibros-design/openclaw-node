@@ -111,6 +111,20 @@ describe('parseMemoryDirective', () => {
     assert.equal(result.type, 'none');
     assert.equal(result.cleanedText, '');
   });
+
+  it('a directive word must end at a word boundary', () => {
+    assert.equal(parseMemoryDirective('set @memory offline mode').type, null);
+    assert.equal(parseMemoryDirective('@memory nonexistent').type, null);
+    assert.equal(parseMemoryDirective('a @memory deep-dive').type, null);
+    assert.equal(parseMemoryDirective('please @memory off.').type, 'off');
+    assert.equal(parseMemoryDirective('@memory offline, then @memory deep').type, 'deep');
+  });
+
+  it('keeps the prompt\'s line breaks and indentation', () => {
+    assert.equal(parseMemoryDirective('@memory deep\n\ndef f():\n    return 1').cleanedText, 'def f():\n    return 1');
+    assert.equal(parseMemoryDirective('a\n@memory off\nb').cleanedText, 'a\n\nb');
+    assert.equal(parseMemoryDirective('fix  this @memory off  now').cleanedText, 'fix  this now');
+  });
 });
 
 // ─── replaceLastUserContent ──────────────────────────────────────────────────

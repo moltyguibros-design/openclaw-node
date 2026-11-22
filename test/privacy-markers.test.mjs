@@ -220,6 +220,10 @@ describe('parsePublishDirective', () => {
     assert.equal(result.name, 'nats');
   });
 
+  it('keeps the rest of the text\'s line breaks and indentation', () => {
+    assert.equal(parsePublishDirective('x @publish nats\n  y').cleanedText, 'x\n  y');
+  });
+
   it('PUBLISH_DIRECTIVE_REGEX matches expected patterns', () => {
     assert.ok(PUBLISH_DIRECTIVE_REGEX.test('@publish nats'));
     assert.ok(PUBLISH_DIRECTIVE_REGEX.test('@publish "multi word"'));
