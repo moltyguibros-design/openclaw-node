@@ -180,3 +180,25 @@ test('OBSERVABILITY.md PlanStore and role-loader rows name functions those modul
     assert.ok(doc.includes(`\n| ${mod} | ${rows.length} |\n`), `OBSERVABILITY.md total for ${mod} must be ${rows.length}`);
   }
 });
+
+test('federation recipes start every memory daemon with OPENCLAW_FEDERATION=1 while the daemon gates on it', () => {
+  const daemon = read('workspace-bin/memory-daemon.mjs');
+  assert.match(daemon, /if \(process\.env\.OPENCLAW_FEDERATION === '1'\) \{\n\s+try \{\n\s+await initFederationSubsystems/);
+  assert.match(daemon, /if \(process\.env\.OPENCLAW_FEDERATION === '1'\) \{\n\s+log\(`FATAL: Shared stream config mismatch/);
+  for (const doc of ['docs/DOGFOOD_PROTOCOL.md', 'docs/MULTI_NODE_DEPLOY.md']) {
+    const blocks = read(doc).split('```').filter((_, i) => i % 2 === 1);
+    let daemons = 0;
+    for (const block of blocks) {
+      const runs = block.split('\n').filter((l) => /\bnode .*memory-daemon\.mjs|^ExecStart=.*memory-daemon\.mjs/.test(l)).length;
+      daemons += runs;
+      assert.equal((block.match(/OPENCLAW_FEDERATION=1/g) || []).length, runs, `${doc}: a block starts ${runs} daemon(s) without OPENCLAW_FEDERATION=1:\n${block}`);
+    }
+    assert.ok(daemons >= 3, `${doc}: daemon command parse`);
+  }
+  const deploy = read('docs/MULTI_NODE_DEPLOY.md');
+  for (const line of deploy.split('\n').filter((l) => /[Rr]efuse(s)? to start if/.test(l))) {
+    assert.match(line, /OPENCLAW_FEDERATION=1/, `MULTI_NODE_DEPLOY promises a refusal the daemon makes only with the flag: ${line}`);
+  }
+  assert.match(section(deploy, '### Federation').text, /^\| `OPENCLAW_FEDERATION` \|/m);
+  assert.match(section(read('docs/DOGFOOD_PROTOCOL.md'), '### All zeros in stats').text, /OPENCLAW_FEDERATION=1/);
+});

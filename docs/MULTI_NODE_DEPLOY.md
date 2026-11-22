@@ -188,10 +188,13 @@ node root (`bin/spawn-node.mjs` prints this line for each node): the daemon keep
 `config/daemon.json`, `state.db`, `workspace/` (with `.knowledge.db`), `graph-cache.db` and
 `watcher.jsonl` there, so the three daemons share nothing but the bus. Each needs its own
 `MEMORY_INJECT_PORT`, since they all bind 127.0.0.1. The bus token still comes from
-`OPENCLAW_NATS_TOKEN` or `~/.openclaw/openclaw.env`.
+`OPENCLAW_NATS_TOKEN` or `~/.openclaw/openclaw.env`. Federation is opt-in: without
+`OPENCLAW_FEDERATION=1` the daemon never starts the broadcaster, offerer or acceptor, so the
+round-trip below never happens.
 
 ```bash
 # Node alpha
+OPENCLAW_FEDERATION=1 \
 OPENCLAW_NODE_ID=alpha \
 OPENCLAW_HOME=$HOME/.openclaw-alpha \
 OPENCLAW_NATS=nats://localhost:4222 \
@@ -199,6 +202,7 @@ MEMORY_INJECT_PORT=7900 \
 node workspace-bin/memory-daemon.mjs &
 
 # Node bravo
+OPENCLAW_FEDERATION=1 \
 OPENCLAW_NODE_ID=bravo \
 OPENCLAW_HOME=$HOME/.openclaw-bravo \
 OPENCLAW_NATS=nats://localhost:4223 \
@@ -206,6 +210,7 @@ MEMORY_INJECT_PORT=7901 \
 node workspace-bin/memory-daemon.mjs &
 
 # Node charlie
+OPENCLAW_FEDERATION=1 \
 OPENCLAW_NODE_ID=charlie \
 OPENCLAW_HOME=$HOME/.openclaw-charlie \
 OPENCLAW_NATS=nats://localhost:4224 \
@@ -216,8 +221,9 @@ node workspace-bin/memory-daemon.mjs &
 The daemon will:
 1. Connect to NATS with auto-reconnect (infinite retries, 2s wait, 1s jitter)
 2. Ensure `OPENCLAW_SHARED` stream exists with R=3
-3. Refuse to start if the shared stream exists with wrong config
+3. With `OPENCLAW_FEDERATION=1`, refuse to start if the shared stream exists with wrong config (without it, log a WARNING and continue)
 4. Log reconnect/disconnect/error events to stdout
+5. With `OPENCLAW_FEDERATION=1`, start the broadcaster, offerer and acceptor
 
 ### 1.6 End-to-end round-trip test
 
@@ -471,6 +477,7 @@ Requires=openclaw-nats.service
 
 [Service]
 Type=simple
+Environment=OPENCLAW_FEDERATION=1
 Environment=OPENCLAW_NODE_ID=%H
 Environment=OPENCLAW_HOME=%h/.openclaw-%H
 Environment=OPENCLAW_NATS=nats://localhost:4222
@@ -570,6 +577,12 @@ All three require `nats-server` on PATH. Tests auto-skip if not available.
 
 The daemon uses auto-reconnect with infinite retries, 2-second base wait, and 1-second jitter (`NATS_RECONNECT_OPTS` from `lib/federation-resilience.mjs`).
 
+### Federation
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENCLAW_FEDERATION` | unset (off) | `1` starts the broadcaster/offerer/acceptor and makes a shared-stream config mismatch fatal |
+
 ### Federation resilience
 
 | Variable | Default | Description |
@@ -656,7 +669,7 @@ sudo systemctl stop nats-server
 
 ### Daemon won't start (shared stream config mismatch)
 
-The daemon refuses to start if `OPENCLAW_SHARED` exists with wrong config (e.g., R=1 instead of R=3). Fix:
+With `OPENCLAW_FEDERATION=1` the daemon refuses to start if `OPENCLAW_SHARED` exists with wrong config (e.g., R=1 instead of R=3); without it, it logs a WARNING and continues. Fix:
 
 ```bash
 # Delete the stream and let the daemon recreate it
@@ -702,5 +715,5 @@ rm -rf ~/.openclaw/nats/jetstream-{1,2,3}
 2. **Shared stream** — first daemon to start creates `OPENCLAW_SHARED` (R=3)
 3. **Node trees** — `spawn-node.mjs` for each node (idempotent)
 4. **Identity keys** — generated on first use (idempotent)
-5. **Daemons** — start each node's `memory-daemon.mjs` with correct env vars
+5. **Daemons** — start each node's `memory-daemon.mjs` with `OPENCLAW_FEDERATION=1` and the node's env vars
 6. **Verify** — run integration tests or manual broadcast round-trip

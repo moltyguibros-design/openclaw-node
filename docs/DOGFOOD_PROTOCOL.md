@@ -11,7 +11,7 @@ The dogfood harness (`bin/dogfood-council.mjs`) is the observability layer for l
 - **Node.js >= 22.12** (package.json engines)
 - **NATS cluster running** — see [docs/MULTI_NODE_DEPLOY.md](MULTI_NODE_DEPLOY.md) for setup
 - **3 openclaw node trees** — spawned via `bin/spawn-node.mjs` or configured manually
-- **Memory daemon running** on at least one node (to produce broadcasts)
+- **Memory daemon running with `OPENCLAW_FEDERATION=1`** on at least one node (to produce broadcasts)
 
 ---
 
@@ -31,10 +31,13 @@ See [docs/NATS_CLUSTER.md](NATS_CLUSTER.md) or [docs/MULTI_NODE_DEPLOY.md](MULTI
 
 ### 3. Start node daemons
 
+Federation is opt-in: without `OPENCLAW_FEDERATION=1` the daemon never starts the
+broadcaster, offerer or acceptor, and the harness records nothing.
+
 ```bash
-OPENCLAW_HOME=~/.openclaw-alpha OPENCLAW_NODE_ID=alpha node workspace-bin/memory-daemon.mjs &
-OPENCLAW_HOME=~/.openclaw-bravo OPENCLAW_NODE_ID=bravo node workspace-bin/memory-daemon.mjs &
-OPENCLAW_HOME=~/.openclaw-charlie OPENCLAW_NODE_ID=charlie node workspace-bin/memory-daemon.mjs &
+OPENCLAW_FEDERATION=1 OPENCLAW_HOME=~/.openclaw-alpha OPENCLAW_NODE_ID=alpha node workspace-bin/memory-daemon.mjs &
+OPENCLAW_FEDERATION=1 OPENCLAW_HOME=~/.openclaw-bravo OPENCLAW_NODE_ID=bravo node workspace-bin/memory-daemon.mjs &
+OPENCLAW_FEDERATION=1 OPENCLAW_HOME=~/.openclaw-charlie OPENCLAW_NODE_ID=charlie node workspace-bin/memory-daemon.mjs &
 ```
 
 ### 4. Run the dogfood harness
@@ -188,7 +191,7 @@ These fire when a node has been silent for longer than `DEAD_PEER_TIMEOUT_MIN` (
 
 ### All zeros in stats
 
-The harness only records events it observes. If no daemons are broadcasting, there are no metrics. Start at least one daemon and have an active Claude Code or other LLM frontend session to generate broadcasts.
+Every daemon must run with `OPENCLAW_FEDERATION=1`; without it the daemon never starts the broadcaster/offerer/acceptor. The harness only records events it observes. If no daemons are broadcasting, there are no metrics. Start at least one daemon and have an active Claude Code or other LLM frontend session to generate broadcasts.
 
 ### Metrics file grows very large
 
