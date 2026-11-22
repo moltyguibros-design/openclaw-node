@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { memoryDocs } from "@/lib/db/schema";
+import { WORKSPACE_ROOT } from "@/lib/config";
 import {
   extractAllReferences,
   buildResolutionMaps,
+  toGraphId,
 } from "@/lib/memory/wikilinks";
 
 /**
  * GET /api/memory/wikilinks
  * Compute the document-level cross-reference graph from all indexed memory_docs.
  * Auto-detects: [[wikilinks]], task IDs (ARCANE-M01, T-xxx), file path mentions.
+ * Node ids and link endpoints are workspace-relative, like the file tree's paths.
  */
 export async function GET() {
   try {
@@ -35,30 +38,32 @@ export async function GET() {
 
     for (const doc of docs) {
       const refs = extractAllReferences(doc.content, maps, doc.filePath);
+      const sourceId = toGraphId(doc.filePath, WORKSPACE_ROOT);
       for (const target of refs) {
         const edgeKey = `${doc.filePath}::${target}`;
         if (!seenEdges.has(edgeKey)) {
           seenEdges.add(edgeKey);
-          links.push({ source: doc.filePath, target });
-          linkCounts.set(
-            doc.filePath,
-            (linkCounts.get(doc.filePath) || 0) + 1
-          );
-          linkCounts.set(target, (linkCounts.get(target) || 0) + 1);
+          const targetId = toGraphId(target, WORKSPACE_ROOT);
+          links.push({ source: sourceId, target: targetId });
+          linkCounts.set(sourceId, (linkCounts.get(sourceId) || 0) + 1);
+          linkCounts.set(targetId, (linkCounts.get(targetId) || 0) + 1);
         }
       }
     }
 
-    const nodes = docs.map((d) => ({
-      id: d.filePath,
-      title:
-        d.title ||
-        d.filePath.split("/").pop()?.replace(/\.md$/, "") ||
-        d.filePath,
-      source: d.source,
-      category: d.category,
-      linkCount: linkCounts.get(d.filePath) || 0,
-    }));
+    const nodes = docs.map((d) => {
+      const id = toGraphId(d.filePath, WORKSPACE_ROOT);
+      return {
+        id,
+        title:
+          d.title ||
+          d.filePath.split("/").pop()?.replace(/\.md$/, "") ||
+          d.filePath,
+        source: d.source,
+        category: d.category,
+        linkCount: linkCounts.get(id) || 0,
+      };
+    });
 
     return NextResponse.json({
       nodes,

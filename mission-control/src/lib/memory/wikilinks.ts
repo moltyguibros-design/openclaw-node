@@ -3,6 +3,18 @@
  * Pure functions — no DB dependency.
  */
 
+import path from "path";
+
+/**
+ * The graph id of an indexed document: workspace-relative, the form the file
+ * tree selects. A path outside the workspace (or already relative) is kept.
+ */
+export function toGraphId(filePath: string, root: string): string {
+  if (!path.isAbsolute(filePath)) return filePath;
+  const rel = path.relative(root, filePath);
+  return rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel) ? filePath : rel;
+}
+
 /** Extract all [[wikilink]] targets from markdown content, ignoring code blocks. */
 export function extractWikilinks(content: string): string[] {
   const cleaned = stripCode(content);
