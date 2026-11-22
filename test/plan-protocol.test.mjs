@@ -377,6 +377,21 @@ describe('plan-lint — the history surface grades the commit that closed VERSIO
     assert.equal(r.status, 1, r.stdout + r.stderr);
     assert.match(r.stdout, /\[FAIL\] history +VERSION \(v1\.1\) was closed by [0-9a-f]{7} with no Runtime-Evidence: trailer/);
   });
+
+  it('the committed v0.0 scaffold carrier closes nothing; a later close without the trailer still FAILs', () => {
+    const src = gitSilo('tv0', { version: 'v0.0', inventory: `# INV\n\n${ROW('1.1', ' ')}\n\n${CONTRACT('1.1')}` });
+    sh(src.root, `git add -A && ${GIT} commit -q -m 'scaffold plan tv0'`);
+    const r = lint(src.root, 'tv0');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.doesNotMatch(r.stdout, /was closed by/);
+    assert.match(r.stdout, /^summary: .* → CONFORMANT$/m);
+
+    fs.writeFileSync(path.join(src.plan, 'VERSION'), 'v1.1\n');
+    sh(src.root, `${GIT} commit -qam 'v1.1 close'`);
+    const r2 = lint(src.root, 'tv0');
+    assert.equal(r2.status, 1, r2.stdout + r2.stderr);
+    assert.match(r2.stdout, /\[FAIL\] history +VERSION \(v1\.1\) was closed by [0-9a-f]{7} with no Runtime-Evidence: trailer/);
+  });
 });
 
 describe('plan-tick conformance gate — fails closed when plan-lint never reaches its verdict', () => {

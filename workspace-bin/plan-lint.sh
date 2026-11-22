@@ -197,7 +197,7 @@ if [ "${OPEN_ROWS:-0}" -gt 0 ] && [ ! -f "$PLAN/BLOCKED.md" ] && git -C "$REPO" 
   shallow=$(git -C "$REPO" rev-parse --path-format=absolute --git-path shallow 2>/dev/null || true)
   if [ -n "$vh" ] && [ -f "$shallow" ] && grep -qx "$vh" "$shallow"; then
     report WARN history "VERSION's closing commit is outside this shallow clone (graft ${vh:0:7}) — git fetch --unshallow to grade it"
-  elif [ -n "$vh" ] && [ -f "$PLAN/VERSION" ] && printf '%s' "$ver" | grep -qvE -- '-pre$|-mid$'; then
+  elif [ -n "$vh" ] && [ -f "$PLAN/VERSION" ] && [ "$ver" != "v0.0" ] && printf '%s' "$ver" | grep -qvE -- '-pre$|-mid$'; then
     if git -C "$REPO" log -1 --format='%B' "$vh" 2>/dev/null | grep -qE '^Runtime-Evidence:'; then
       report PASS history "closing commit ${vh:0:7} carries a Runtime-Evidence: trailer"
     else
