@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 // install.sh and mesh-deploy copy identity/*.md into every node's workspace,
@@ -46,6 +47,16 @@ test('AGENTS.md "Every Session" is the one boot list, and CLAUDE.md points at it
   assert.doesNotMatch(bootstrap, /^\d+\. /m, 'CLAUDE.md must not carry a second boot list');
   assert.match(bootstrap, /AGENTS\.md.*"Every Session"/);
   for (const [f, text] of docs) assert.doesNotMatch(text, /bin\/memory-daemon(?!\.mjs)/, f);
+});
+
+test('every identity doc is installed into the workspace or referenced from outside identity/', () => {
+  const installed = fs.readFileSync(path.join(ROOT, 'scripts/install/workspace.sh'), 'utf8')
+    .match(/^for f in (.+); do\n  if \[ -f "\$REPO_DIR\/identity\/\$f" \]/m)[1].split(' ');
+  for (const [f] of docs) {
+    if (installed.includes(f)) continue;
+    const r = spawnSync('git', ['grep', '-l', '-F', '-e', f, '--', '.', ':!memory-plan', ':!identity'], { cwd: ROOT, encoding: 'utf8' });
+    assert.ok(r.stdout.trim(), `identity/${f} is neither installed nor referenced`);
+  }
 });
 
 // soul-prompt and POST /api/souls/daedalus/prompt build the daedalus preamble
