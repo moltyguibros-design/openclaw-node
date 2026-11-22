@@ -3,13 +3,14 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { format } from "date-fns";
-import { FileText, BookOpen, Database } from "lucide-react";
+import { FileText, BookOpen, BookMarked, Database } from "lucide-react";
 import { useMemoryDoc } from "@/lib/hooks";
 
 const SOURCE_LABELS: Record<string, { label: string; icon: typeof FileText }> = {
   daily_log: { label: "Daily Log", icon: FileText },
   long_term_memory: { label: "Long-Term Memory", icon: BookOpen },
   clawvault: { label: "ClawVault", icon: Database },
+  lore: { label: "Lore", icon: BookMarked },
 };
 
 interface DocReaderProps {
