@@ -1668,10 +1668,17 @@ function computeNodeScopes(nodes, taskScope, strategy) {
   return scopes;
 }
 
+// startRound refuses an ended session; without this check its null would read as
+// an insufficient-nodes abort and settle the parent a second time.
+function isLiveSession(session) {
+  return !!session && (session.status === COLLAB_STATUS.RECRUITING || session.status === COLLAB_STATUS.ACTIVE);
+}
+
 /**
  * Start a new round: compile shared intel and notify all nodes.
  */
 async function startCollabRound(sessionId) {
+  if (!isLiveSession(await collabStore.get(sessionId))) return;
   const round = await collabStore.startRound(sessionId);
   if (!round) {
     // startRound returns null if session is aborted (e.g., too few nodes after pruning dead)
@@ -1970,7 +1977,7 @@ function notConvergedDigest(session) {
  */
 async function startCirclingStep(sessionId) {
   const session = await collabStore.get(sessionId);
-  if (!session || !session.circling) return;
+  if (!isLiveSession(session) || !session.circling) return;
   await renewCollabParentLease(session.task_id);
 
   const { phase, current_subround, current_step } = session.circling;
@@ -2184,6 +2191,7 @@ async function handleCirclingGateApprove(msg) {
 
   const session = await collabStore.get(session_id);
   if (!session || !session.circling) return respondError(msg, 'Not a circling session');
+  if (session.status !== COLLAB_STATUS.ACTIVE) return respondError(msg, `Session ${session_id} is ${session.status}, not active`);
 
   log(`CIRCLING GATE APPROVED: ${session_id} — resuming`);
   await collabStore.appendAudit(session_id, 'gate_approved', {
@@ -2196,7 +2204,7 @@ async function handleCirclingGateApprove(msg) {
     // Force complete
     const lastRound = session.rounds[session.rounds.length - 1];
     const finalArtifact = collabStore.getLatestArtifact(session, 'worker', 'workArtifact');
-    await collabStore.markConverged(session_id);
+    if (!(await collabStore.markConverged(session_id))) return respondError(msg, `Session ${session_id} is no longer active`);
     await collabStore.markCompleted(session_id, {
       artifacts: finalArtifact ? ['workArtifact'] : [],
       summary: `Circling completed via gate approval after ${session.circling.current_subround} sub-rounds`,
@@ -2230,6 +2238,7 @@ async function handleCirclingGateReject(msg) {
 
   const session = await collabStore.get(session_id);
   if (!session || !session.circling) return respondError(msg, 'Not a circling session');
+  if (session.status !== COLLAB_STATUS.ACTIVE) return respondError(msg, `Session ${session_id} is ${session.status}, not active`);
 
   log(`CIRCLING GATE REJECTED: ${session_id} — forcing another sub-round`);
   await collabStore.appendAudit(session_id, 'gate_rejected', {

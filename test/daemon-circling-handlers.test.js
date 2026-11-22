@@ -20,10 +20,15 @@
  * Run: node --test test/daemon-circling-handlers.test.js
  */
 
-const { describe, it, beforeEach, afterEach, mock } = require('node:test');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { describe, it, after, beforeEach, afterEach, mock } = require('node:test');
 const assert = require('node:assert/strict');
 const { StringCodec } = require('nats');
 
+const { getOrCreateIdentity } = require('../lib/node-identity.mjs');
+const { signOperatorRequest } = require('../lib/operator-auth.mjs');
 const daemon = require('../bin/mesh-task-daemon.js');
 const { createSession, issueMemberToken, CollabStore, COLLAB_STATUS } = require('../lib/mesh-collab');
 
@@ -317,6 +322,59 @@ describe('Daemon Circling: handleCirclingStepTimeout', () => {
     const s = await h.collabStore.get(sid);
     assert.ok(s.nodes.every(n => n.status !== 'dead'));
     assert.equal(s.status, COLLAB_STATUS.ACTIVE);
+  });
+});
+
+// A session the budget enforcer aborted while it waited at a gate: a late answer
+// must not complete it (approve) or send its members new steps (reject).
+describe('Daemon Circling: a gate answer on an ended session', () => {
+  let h;
+  const operatorDir = fs.mkdtempSync(path.join(os.tmpdir(), 'circling-gate-op-'));
+  const operator = getOrCreateIdentity(operatorDir);
+  const savedKeys = process.env.OPENCLAW_OPERATOR_TRUSTED_KEYS;
+  beforeEach(() => {
+    h = harness();
+    process.env.OPENCLAW_OPERATOR_TRUSTED_KEYS = operator.publicKeyBase64;
+  });
+  afterEach(() => {
+    if (savedKeys === undefined) delete process.env.OPENCLAW_OPERATOR_TRUSTED_KEYS;
+    else process.env.OPENCLAW_OPERATOR_TRUSTED_KEYS = savedKeys;
+  });
+  after(() => fs.rmSync(operatorDir, { recursive: true, force: true }));
+
+  async function abortedAtFinalization() {
+    const sid = await makeActiveSession(h.collabStore);
+    const s = await h.collabStore.get(sid);
+    s.circling.phase = 'finalization';
+    await h.collabStore.put(s);
+    await h.collabStore.markAborted(sid, 'parent task exceeded its budget');
+    return sid;
+  }
+  async function gate(handler, sid) {
+    let reply;
+    await daemon.__test[handler]({
+      data: sc.encode(JSON.stringify(signOperatorRequest({ session_id: sid }, { identity: operator }))),
+      respond(data) { reply = JSON.parse(sc.decode(data)); },
+    });
+    return reply;
+  }
+
+  it('approve is refused and the session stays aborted', async () => {
+    const sid = await abortedAtFinalization();
+    const reply = await gate('handleCirclingGateApprove', sid);
+    assert.equal(reply.ok, false, JSON.stringify(reply));
+    assert.equal((await h.collabStore.get(sid)).status, COLLAB_STATUS.ABORTED);
+    assert.deepEqual(h.completed, []);
+    assert.ok(!h.published.some(p => p.subject === 'mesh.events.collab.completed'));
+  });
+
+  it('reject is refused, the session stays aborted and no member gets a step', async () => {
+    const sid = await abortedAtFinalization();
+    const notices = h.roundNotices(sid).length;
+    const reply = await gate('handleCirclingGateReject', sid);
+    assert.equal(reply.ok, false, JSON.stringify(reply));
+    assert.equal((await h.collabStore.get(sid)).status, COLLAB_STATUS.ABORTED);
+    assert.equal(h.roundNotices(sid).length, notices);
   });
 });
 

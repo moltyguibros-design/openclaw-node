@@ -453,6 +453,36 @@ describe('startRound — dead node pruning', () => {
   });
 });
 
+// A late gate answer or round start must not resurrect a session that already ended.
+describe('ended sessions stay ended', () => {
+  it('markConverged and markCompleted refuse an aborted session', async () => {
+    const store = makeStore();
+    const sid = await setupActiveSession(store);
+    await store.markAborted(sid, 'parent failed');
+    assert.equal(await store.markConverged(sid), null);
+    assert.equal(await store.markCompleted(sid, { artifacts: [], summary: 'late' }), null);
+    assert.equal((await store.get(sid)).status, 'aborted');
+  });
+
+  it('startRound refuses an aborted session', async () => {
+    const store = makeStore();
+    const sid = await setupActiveSession(store);
+    await store.markAborted(sid, 'parent failed');
+    assert.equal(await store.startRound(sid), null);
+    const after = await store.get(sid);
+    assert.equal(after.status, 'aborted');
+    assert.equal(after.current_round, 1);
+  });
+
+  it('startRound still opens the next round of an active session', async () => {
+    const store = makeStore();
+    const sid = await setupActiveSession(store);
+    const round = await store.startRound(sid);
+    assert.equal(round.round_number, 2);
+    assert.equal((await store.get(sid)).status, 'active');
+  });
+});
+
 // ════════════════════════════════════════════════════
 // submitReflection — duplicate prevention
 // ════════════════════════════════════════════════════
