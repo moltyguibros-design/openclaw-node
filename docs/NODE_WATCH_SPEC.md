@@ -1,6 +1,7 @@
 # Node Watch Spec — the elements to watch, and how
 
-**Status:** LOCKED list, watcher BUILT (2026-06-15). `bin/node-watch.mjs` + `lib/node-watch.mjs`
+**Status:** LOCKED list (2026-06-15; the HyperAgent and Federation rows were added later to match
+`lib/node-watch.mjs`), watcher BUILT (2026-06-15). `bin/node-watch.mjs` + `lib/node-watch.mjs`
 report the real per-element status; 12 mocked tests green. **Not yet run against a live node** — the
 operator runs it on the deployment to get real status. Reuses `lib/health-check.mjs` + the read-only
 `node-acceptance` probes (no parallel implementation, MASTER_PLAN §4.6).
@@ -142,6 +143,7 @@ that fails to open on a light tick is still BROKEN at once.
 | Element | Watch signal | Probe |
 |---|---|---|
 | Task board (kanban) | `active-tasks.md` parses | live |
+| HyperAgent evidence loop | the deployed CLI and store import, and the daemon's HyperAgent scheduler ticked within 90 min (`.tmp/daemon-throttle.json` `lastHyperagentReflect`); BROKEN on a stale or missing tick or unreadable `ha_*` tables | reuse (`L0-HYPERAGENT`) + live |
 | Calendar / scheduler | `/api/scheduler/status` reachable; no overdue triggers | live (read-only GET `/api/scheduler/status`) |
 | Workplan viewer :7892 | HTTP 200 + plans discovered | live |
 | Diagnostics (MC + health report) | `/api/diagnostics` 200 + `.daemon-health.md` fresh | live |
@@ -174,6 +176,14 @@ currently started (an installed, disabled, inactive unit is not loaded);
 the last exit. On Linux, the cohort comes only from `nats-writer-cohort.json`,
 and the other known NATS labels must not be loaded as user units. Other
 platforms stay UNKNOWN.
+
+### Federation
+| Element | Watch signal | Probe |
+|---|---|---|
+| Grappe coordinator | `mesh-task-daemon` launchd/systemd unit has a running PID (OFF when not loaded: worker or standalone node; BROKEN when loaded without a PID; UNKNOWN when the service manager is unobservable) | live |
+| NATS bus quorum | `:8222/jsz` `meta_cluster` has an elected raft leader, so a majority is reachable (a single-node bus with no raft cluster is WORKING; BROKEN when jsz is unreachable or no leader is elected; UNKNOWN when its body does not parse) | live |
+| Grappe member heartbeats | every member of each non-dissolved `GRAPPE_REGISTRY` grappe heartbeated in `MESH_NODE_HEALTH` within 90 s (OFF when no grappe is formed; BROKEN on a stale member; UNKNOWN when the registry is unreadable) | live |
+| Collab session liveness | no active or recruiting `MESH_COLLAB` session is idle past its budget: 15 min per round, 32 min per circling step (OFF when none is active; UNKNOWN when the session KV is unreadable) | live |
 
 ---
 

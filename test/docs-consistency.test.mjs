@@ -257,3 +257,13 @@ test('INSTALL_TEST_PROTOCOL T3 extraction-mode grep matches the lines the daemon
   }
   assert.match(t3, /# PASS: \[llm\] or \[llm-dedup\]/);
 });
+
+test('NODE_WATCH_SPEC has a row for every element node-watch grades', () => {
+  const targets = [...read('lib/node-watch.mjs').matchAll(/\{ id: '([^']+)', family: '[a-z-]+', label: '([^']+)'/g)];
+  assert.ok(targets.length >= 30, 'watch target parse');
+  const elements = read('docs/NODE_WATCH_SPEC.md').split('\n').filter((l) => l.startsWith('| ')).map((l) => l.slice(2).split(' | ')[0]);
+  for (const [, id, label] of targets) {
+    const name = label.split(' (')[0];
+    assert.ok(elements.some((cell) => cell.includes(name)), `NODE_WATCH_SPEC has no row for ${id} (${name})`);
+  }
+});
