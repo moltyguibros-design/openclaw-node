@@ -1415,6 +1415,7 @@ function buildCollabPrompt(task, roundNumber, sharedIntel, myScope, myRole, roun
   injectRole(parts, task.role);
   injectMemory(parts, task);
   injectHyperagentStrategy(parts, task);
+  injectRejection(parts, task);
   injectSuccessCriteria(parts, task);
 
   parts.push('## Instructions');
@@ -1672,6 +1673,7 @@ function buildCirclingPrompt(task, circlingData) {
   injectRole(parts, task.role);
   injectMemory(parts, task);
   injectHyperagentStrategy(parts, task);
+  injectRejection(parts, task);
 
   // Add directed input
   if (directed_input) {

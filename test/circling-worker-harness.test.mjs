@@ -85,3 +85,17 @@ test('every phase carries the anti-preamble rule', () => {
     assert.ok(branch(phase, step, 'worker').includes('Begin your output with the artifact content DIRECTLY'), phase);
   }
 });
+
+test('a rejected task re-run by a grappe carries the reviewer\'s reason', () => {
+  const rejected = { task_id: 'REJ-1', title: 't', scope: [], role: null, rejection_reason: 'REJ-REASON', rejection_count: 1, collaboration: { mode: 'parallel' } };
+  const { buildCollabPrompt } = require('../bin/mesh-agent.js');
+  for (const prompt of [
+    buildCollabPrompt(rejected, 1, '', [], 'worker'),
+    buildCirclingPrompt(rejected, { circling_phase: 'init', circling_step: 0, my_role: 'worker' }),
+  ]) {
+    assert.match(prompt, /## Previous Review\n.*REJ-REASON/);
+  }
+  const fresh = { ...rejected, rejection_reason: undefined, rejection_count: 0 };
+  assert.doesNotMatch(buildCollabPrompt(fresh, 1, '', [], 'worker'), /## Previous Review/);
+  assert.doesNotMatch(buildCirclingPrompt(fresh, { circling_phase: 'init', circling_step: 0, my_role: 'worker' }), /## Previous Review/);
+});
