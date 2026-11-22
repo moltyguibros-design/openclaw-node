@@ -31,6 +31,26 @@ describe('skill markdown links', () => {
     }
     assert.deepEqual(broken, []);
   });
+
+  // business-health-diagnostic and finance-based-pricing-advisor pointed at an examples/
+  // folder that never shipped.
+  it('every backticked skill-relative path in a SKILL.md exists', () => {
+    const missing = [];
+    for (const dir of readdirSync(SKILLS, { withFileTypes: true })) {
+      if (!dir.isDirectory() || dir.name === '_quarantine') continue;
+      const file = join(SKILLS, dir.name, 'SKILL.md');
+      if (!existsSync(file)) continue;
+      let fenced = false;
+      readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
+        if (/^\s*```/.test(line)) { fenced = !fenced; return; }
+        if (fenced) return;
+        for (const [, path] of line.matchAll(/`((?:examples|references|scripts)\/[^`\s]*|template\.md)`/g)) {
+          if (!existsSync(join(SKILLS, dir.name, path))) missing.push(`${dir.name}/SKILL.md:${i + 1} -> ${path}`);
+        }
+      });
+    }
+    assert.deepEqual(missing, []);
+  });
 });
 
 // proactive-messages told the agent to send check-ins silently ("never ask
