@@ -59,7 +59,11 @@ describe('hyperagent CLI integration', () => {
       });
       assert.equal(result.status, 0, result.stderr);
     }
-    assert.equal(run(['reflect']).status, 0);
+    const reflected = run(['reflect']);
+    assert.equal(reflected.status, 0, reflected.stderr);
+    // The harness rules that once picked reflections up are retired; the operator synthesizes.
+    assert.doesNotMatch(reflected.stdout, /harness rule/);
+    assert.match(reflected.stdout, /synthesis runbook/);
     const pendingResult = run(['reflect', '--pending']);
     assert.equal(pendingResult.status, 0, pendingResult.stderr);
     const pending = JSON.parse(pendingResult.stdout);
@@ -234,5 +238,6 @@ describe('hyperagent usage text', () => {
       assert.match(help, new RegExp(`^  ${c}\\b`, 'm'), `--help misses ${c}`);
     }
     assert.match(header, /hyperagent reflect --pending/);
+    assert.doesNotMatch(src.slice(0, src.indexOf('*/')), /harness rule/);
   });
 });

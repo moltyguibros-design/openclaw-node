@@ -3,8 +3,8 @@
  * hyperagent.mjs — CLI for the HyperAgent evidence-driven strategy protocol.
  *
  * Pure data infrastructure — no LLM calls. Manages telemetry, strategies,
- * reflections, and proposals in SQLite. LLM synthesis happens at the agent
- * level via harness rules.
+ * reflections, and proposals in SQLite. Reflection synthesis is an operator
+ * step (the synthesis runbook: `reflect --pending`, then `reflect --write-synthesis`).
  *
  * Usage:
  *   hyperagent status
@@ -311,14 +311,14 @@ async function cmdReflect(store, args) {
   console.log(`  success rate: ${stats.successRate}%`);
   console.log(`  avg iterations: ${stats.avgIterations}`);
   console.log(`  strategy hit rate: ${stats.strategyHitRate}%`);
-  console.log(`  pending synthesis — agent will pick up via harness rule`);
+  console.log('  pending synthesis — run the synthesis runbook (reflect --pending, then reflect --write-synthesis) within 24 h');
 }
 
 function cmdReflectPending(store) {
   // Query for reflections awaiting synthesis (hypotheses IS NULL, < 24h old)
   const pending = store.getPendingSynthesis();
   if (!pending) {
-    // Silent — no output means nothing to do. Harness rule exits cleanly.
+    // Silent — no output means nothing to do.
     return;
   }
 
