@@ -744,15 +744,15 @@ function installSystemdService(meshDir, vars) {
 
 // ── Service Health Polling ───────────────────────────
 
-function verifyServiceRunning(osInfo) {
+function verifyServiceRunning(osInfo, { settleMs = 8000 } = {}) {
   if (DRY_RUN) {
     warn('[DRY RUN] Would verify service is running');
     return true;
   }
 
-  log('Waiting 8s for service to stabilize...');
+  log(`Waiting ${settleMs / 1000}s for service to stabilize...`);
   const start = Date.now();
-  while (Date.now() - start < 8000) {
+  while (Date.now() - start < settleMs) {
     spawnSync('sleep', ['1']);
   }
 

@@ -361,15 +361,17 @@ describe('node-init leaves the mesh agent on demand', () => {
           const ni = require(${JSON.stringify(join(ROOT, 'bin', 'openclaw-node-init.js'))});
           const osInfo = { serviceType: ${JSON.stringify(serviceType)} };
           ni.installService(osInfo, ${JSON.stringify(ROOT)}, { nats: 'nats://127.0.0.1:4222', provider: 'shell' });
-          console.log('VERIFIED=' + ni.verifyServiceRunning(osInfo));
+          console.log('VERIFIED=' + ni.verifyServiceRunning(osInfo, { settleMs: 0 }));
           console.log('START=' + ni.agentStartCommand(osInfo));
         `;
+        const t0 = Date.now();
         const r = spawnSync(process.execPath, ['-e', script], {
           encoding: 'utf8', timeout: 30000,
           env: { ...process.env, HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, OPENCLAW_NODE_ID: 'worker-7' },
         });
         assert.equal(r.status, 0, r.stderr);
         assert.match(r.stdout, /VERIFIED=true/);
+        assert.ok(Date.now() - t0 < 5000, 'the settle wait is skipped when the caller asks');
         const calls = readFileSync(callLog, 'utf8').split('\n').filter(Boolean);
         if (serviceType === 'systemd') {
           assert.ok(calls.includes('systemctl --user enable openclaw-mesh-deploy-listener'), calls.join('\n'));
