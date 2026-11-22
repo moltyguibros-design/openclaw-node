@@ -863,6 +863,29 @@ test('env.sh builds the event-schemas dist the memory daemon needs at startup', 
 // (lib/llm-providers.js); the installer used to detect three and silently
 // `npm install -g` one vendor's CLI when none was found, and the env example
 // shipped that vendor as the default. Lock the agnostic behaviour.
+test('install --update keeps an existing notify.json and writes the default only when it is missing', () => {
+  const src = moduleSrc['services.sh'];
+  const start = src.indexOf('NOTIFY_CONFIG="$OPENCLAW_ROOT/config/notify.json"');
+  assert.ok(start >= 0);
+  const block = src.slice(start, src.indexOf('\nif $SANDBOX; then', start));
+  const root = mkdtempSync(join(tmpdir(), 'oc-notify-'));
+  mkdirSync(join(root, 'config'));
+  const notify = join(root, 'config', 'notify.json');
+  const muted = '{"enabled": false, "sources": {"x": false}}\n';
+  writeFileSync(notify, muted);
+  const runBlock = () => spawnSync('bash', ['-c', `source "${join(ROOT, 'scripts/install/helpers.sh')}"\n${block}`], {
+    encoding: 'utf8', env: { ...process.env, OPENCLAW_ROOT: root, DRY_RUN: 'false', UPDATE_ONLY: 'true' },
+  });
+  let r = runBlock();
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(notify, 'utf8'), muted);
+  rmSync(notify);
+  r = runBlock();
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(readFileSync(notify, 'utf8'), /"icons"/);
+  rmSync(root, { recursive: true, force: true });
+});
+
 test('skill pip deps retry past PEP 668 like PyYAML does, and report success only when one install worked', () => {
   const src = moduleSrc['workspace.sh'];
   const start = src.indexOf('for skill_dir in "$WORKSPACE/skills"/*/; do');
