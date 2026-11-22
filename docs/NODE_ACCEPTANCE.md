@@ -68,6 +68,8 @@ cardinal failure (same rule the tick-chain runs on, PROTOCOL §7).
   here (§8) so the later round starts from a contract, but it is not built this round and is reported
   `N/A (deferred)` on a single node — never `PASS`, never `FAIL`. Rationale: federation is `ABSENT` in the
   live runtime (COMPONENT_REGISTRY 1.5; NATS is loopback-only single-node per 7.1; redesign D4 deferred it).
+- **Since then:** a `federation` axis ships two advisory L2 probes, `FED-L2-COORD` and `FED-L2-QUORUM`
+  (`required: false`, `lib/node-acceptance-probes.mjs`); inter-node L3 (NODE-1..7) stays `N/A (deferred)`.
 
 ### Profiles
 
@@ -247,6 +249,8 @@ Federation is `ABSENT` in the live runtime, so these are specified, not built, a
 on `single-node`. They activate under `--profile federated`, validated against a `bin/spawn-node.mjs`
 peer on one machine or a real second node. This honors the original "be thorough about other-node
 reliability" intent by leaving the next round a complete contract; it does **not** authorize build now.
+Since then a `federation` axis ships two advisory L2 probes, `FED-L2-COORD` and `FED-L2-QUORUM`
+(`required: false`, `lib/node-acceptance-probes.mjs`); the L3 checks below stay `N/A (deferred)`.
 
 | ID | Proves | Method | PASS threshold | Builds on |
 |---|---|---|---|---|
@@ -281,8 +285,9 @@ E2E-L4-2 depends on companion-bridge running as a daemon, which it currently is 
 This protocol has teeth only if a deploy is *not done* until the gate is green:
 
 1. **Manual gate** — `node bin/node-acceptance.mjs` after any deploy/restart. Non-zero exit = not done.
-2. **Deploy-listener gate** — the mesh deploy path (`mesh-deploy-listener`) runs the harness post-restart;
-   a red gate refuses to mark the deploy complete and alerts via the existing `health-watch` channels.
+2. **Deploy-listener gate — not built.** `mesh-deploy-listener` does not run the harness; run
+   `openclaw-node-check` (or `node bin/node-acceptance.mjs`) after a mesh deploy. Whether a red gate
+   should block the listener is open decision D2 (§12).
 3. **Done-contract binding** — the harness report at `~/.openclaw/.node-acceptance.md` is the
    `Runtime-Evidence:` artifact (MASTER_PLAN §5.4) any node-touching step cites.
 4. **Continuous** — optionally schedule the harness (cron / launchd) so acceptance is re-verified, not
@@ -293,7 +298,9 @@ the deployed-node truth gate.
 
 ---
 
-## 11. Proposed build plan (after operator review)
+## 11. Build plan record (2026-06-15)
+
+Steps 1–5 shipped as the harness; step 6's deploy-listener hook and schedule are not built (§10).
 
 Each step is atomic, runtime-verifiable, and maps to a layer — suitable as a `node-acceptance` plan silo
 (`new-plan.sh`) or a single scoped feature, operator's call:

@@ -289,3 +289,17 @@ test('STATE_FILES names every state.db table, the daemon log rotation and reader
   assert.match(read('lib/node-id.js'), /OPENCLAW_NODE_ID[\s\S]*MESH_NODE_ID/);
   assert.doesNotMatch(doc, /\|\| os\.hostname\(\)|OPENCLAW_NODE_ID:-\$\(hostname\)/);
 });
+
+test('NODE_ACCEPTANCE says who runs the gate after a deploy and names the federation probes that ship', () => {
+  const doc = read('docs/NODE_ACCEPTANCE.md');
+  if (!read('bin/mesh-deploy-listener.js').includes('node-acceptance')) {
+    assert.doesNotMatch(doc, /runs the harness post-restart/, 'mesh-deploy-listener does not run the acceptance harness');
+    assert.match(section(doc, '## 10. How it enforces "100%"').text, /Deploy-listener gate — not built/);
+  }
+  const fed = [...read('lib/node-acceptance-probes.mjs').matchAll(/id: '([A-Z0-9-]+)', layer: '\w+', axis: 'federation'/g)].map((m) => m[1]);
+  assert.ok(fed.length >= 2, 'federation probe parse');
+  for (const heading of ['## 2. Scope of this round', '## 8. Inter-node reliability — L3 (DEFERRED this round; contract for the next)']) {
+    const text = section(doc, heading).text;
+    for (const id of fed) assert.ok(text.includes(id), `NODE_ACCEPTANCE "${heading}" calls federation unbuilt but ${id} ships`);
+  }
+});
