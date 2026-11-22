@@ -60,3 +60,18 @@ describe('mesh-node-remove --node', () => {
     assert.doesNotMatch(r.stdout, /Removed \S+ from MESH_NODES/);
   });
 });
+
+// The deploy listener re-registers in MESH_NODES every minute and MESH_NODES has
+// no TTL, so local removal must stop the services before it deletes the entry.
+// Running local mode for real would drive systemctl/launchctl, so the order is
+// checked on the source.
+describe('mesh-node-remove local mode', () => {
+  it('stops the local services before it cleans NATS state', () => {
+    const src = readFileSync(SCRIPT, 'utf8');
+    const main = src.slice(src.indexOf('async function main()'));
+    const stop = main.indexOf('removeLocalService()');
+    const clean = main.indexOf('await cleanNatsState(');
+    assert.ok(stop > 0 && clean > 0);
+    assert.ok(stop < clean, 'removeLocalService runs before cleanNatsState');
+  });
+});

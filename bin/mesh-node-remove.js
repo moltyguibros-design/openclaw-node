@@ -244,15 +244,16 @@ async function main() {
     return;
   }
 
-  // 1. Clean NATS state (both modes)
-  log('Cleaning mesh state...');
-  await cleanNatsState(NODE_ID);
-
-  // 2. Stop local service (local mode only)
+  // 1. Stop local service first (local mode only): the running deploy listener
+  //    re-registers in MESH_NODES, which has no TTL.
   if (LOCAL_MODE) {
     log('Removing local service...');
     removeLocalService();
   }
+
+  // 2. Clean NATS state (both modes)
+  log('Cleaning mesh state...');
+  await cleanNatsState(NODE_ID);
 
   // 3. Purge files (local mode + --purge only)
   if (LOCAL_MODE && PURGE) {
