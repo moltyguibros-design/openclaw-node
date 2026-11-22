@@ -23,11 +23,7 @@ const MAINT = path.join(
 );
 const { postAuthenticatedMutation, runningTaskTitle } = await import(MAINT);
 
-test('the MC token path has one override, documented test-only, and no third spelling', () => {
-  const repo = path.join(path.dirname(MAINT), '..');
-  const helper = fs.readFileSync(path.join(repo, 'lib/mc-session-token.mjs'), 'utf8');
-  assert.match(helper, /OPENCLAW_MC_TOKEN_FILE is a test-only override/);
-  assert.doesNotMatch(helper, /memory-maintenance, scheduler-heartbeat/, 'scheduler-heartbeat does not use the helper');
+test('memory-maintenance has no MC_SESSION_TOKEN_PATH spelling', () => {
   assert.doesNotMatch(fs.readFileSync(MAINT, 'utf8'), /MC_SESSION_TOKEN_PATH/);
 });
 

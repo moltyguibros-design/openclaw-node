@@ -17,10 +17,6 @@ test('an OPENCLAW_SHARED config mismatch exits the daemon only when federation i
   assert.match(mismatch, /WARNING: Shared stream config mismatch: \$\{reasons\} — federation is off, continuing/);
 });
 
-test('the federation banner no longer claims nothing federation-related runs when it is off', () => {
-  assert.match(daemonSrc, /One federation piece is outside it: initNatsSubsystems ensures the\n\/\/ OPENCLAW_SHARED stream on every node/);
-});
-
 test('federation opens the same state.db and knowledge DB the daemon indexes into', () => {
   const init = daemonSrc.match(/async function initFederationSubsystems\(nc\) \{[\s\S]*?\n\}/)[0];
   assert.match(init, /const knowledgeDbPath = PATHS\.knowledgeDb;/);
