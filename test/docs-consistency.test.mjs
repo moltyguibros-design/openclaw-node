@@ -226,3 +226,15 @@ test('MULTI_NODE_DEPLOY Part 2 runs the daemon as the operator on the spawned tr
   assert.match(tree, /^ {2}state\.db +#/m);
   assert.doesNotMatch(tree, /MEMORY\.md|\.companion-state\.md/);
 });
+
+test('INSTALL_TEST_PROTOCOL T1 unit counts match the service manifest per role', () => {
+  const manifest = JSON.parse(read('services/service-manifest.json'));
+  const forRole = (role) => manifest.filter((s) => s.role === 'both' || s.role === role);
+  const [lead, worker] = [forRole('lead').length, forRole('worker').length];
+  const timers = manifest.filter((s) => s.timer && s.role === 'both').length;
+  assert.equal(forRole('lead').filter((s) => s.timer).length, timers, 'every timer unit renders on both roles');
+  const doc = read('docs/INSTALL_TEST_PROTOCOL.md');
+  assert.equal(doc.split(`${lead} on a lead, ${worker} on a worker`).length - 1, 2, `T1.5 must give ${lead}/${worker} for macOS and Linux`);
+  assert.ok(doc.includes(`openclaw-*.timer: ${timers}`), `T1.5 must give ${timers} timers`);
+  assert.doesNotMatch(doc, /macOS lead: \d+ files/);
+});

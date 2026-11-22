@@ -46,7 +46,10 @@ ls "$REPO_DIR/node_modules/nats" ~/.openclaw/config/nats.conf ~/.openclaw/identi
 # PASS: all exist (identity.key / identity.pub are the ed25519 node keypair)
 
 # 5. Every manifest unit rendered (role-filtered count printed by install)
-ls ~/Library/LaunchAgents/ai.openclaw.*.plist | wc -l   # macOS lead: 19 files
+ls ~/Library/LaunchAgents/ai.openclaw.*.plist | wc -l       # macOS: 21 on a lead, 18 on a worker
+ls ~/.config/systemd/user/openclaw-*.service | wc -l        # Linux: 21 on a lead, 18 on a worker; openclaw-*.timer: 5
+# Expected = manifest entries with role both + this node's role:
+(cd "$REPO_DIR" && node -e 'const m=require("./services/service-manifest.json");console.log(m.filter(s=>s.role==="both"||s.role===process.argv[1]).length)' lead)
 ```
 
 **PASS T1** = all five green. **Nothing is running yet — that is correct** (default install places, `--enable-services` starts).
