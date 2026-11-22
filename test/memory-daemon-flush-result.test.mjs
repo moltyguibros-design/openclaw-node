@@ -163,3 +163,18 @@ test('a dedup flush is recorded as a tagged noop and stays out of the extraction
   assert.equal(alerts[0]?.alert_type, 'extraction_failure_rate');
   assert.deepEqual(alerts[0].window, { total: 3, failures: 3, rate: 1 });
 });
+
+test('memory.synthesized caps artifacts_written at the schema limit and counts the rest', async () => {
+  const { buildMemoryEvent } = await import('../lib/local-event-log.mjs');
+  const { MemoryEventSchema } = await import('../packages/event-schemas/dist/index.js');
+  const { synthesizedEventData } = await import(DAEMON);
+  assert.equal(typeof synthesizedEventData, 'function');
+  const many = { artifacts_written: Array.from({ length: 150 }, (_, i) => `concepts/c${i}.md`), duration_ms: 5 };
+  const parsed = MemoryEventSchema.safeParse(buildMemoryEvent('memory.synthesized', 'sess-a', 'memory', synthesizedEventData('sess-a', 'interval', many), 'node-a'));
+  assert.equal(parsed.success, true, parsed.error?.message);
+  assert.equal(parsed.data.data.artifacts_written.length, 100);
+  assert.equal(parsed.data.data.artifacts_more, 50);
+  const few = synthesizedEventData('sess-a', 'interval', { artifacts_written: ['MEMORY.md', 'a.md', 'b.md'], duration_ms: 5 });
+  assert.equal(few.artifacts_written.length, 3);
+  assert.equal('artifacts_more' in few, false);
+});

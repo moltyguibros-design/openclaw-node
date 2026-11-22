@@ -12,6 +12,7 @@ export const MemorySynthesizedSchema = EventEnvelopeSchema.extend({
     // previously mislabeled 'interval'.
     trigger: z.enum(['session_end', 'interval', 'manual', 'idle']),
     artifacts_written: z.array(z.string().max(500)).max(100),
+    artifacts_more: z.number().int().nonnegative().optional(),
     duration_ms: z.number().int().nonnegative(),
     // Vault referential-integrity counts, measured on the synthesis cadence
     // (repair 2.5). The watcher/mission-control render these per flush.

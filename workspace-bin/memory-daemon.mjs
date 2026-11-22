@@ -464,15 +464,23 @@ function emitDegradeEvent(sessionId, result) {
   );
 }
 
-function emitSynthesizeEvent(sessionId, trigger, synthesis) {
-  if (!localEventLog) return;
-  const event = buildMemoryEvent('memory.synthesized', sessionId, 'memory', {
+// The schema caps artifacts_written at 100 (R31); a flush that writes more
+// sends the first 100 and the count of the rest.
+function synthesizedEventData(sessionId, trigger, synthesis) {
+  const written = synthesis.artifacts_written;
+  return {
     session_id: sessionId,
     trigger,
-    artifacts_written: synthesis.artifacts_written,
+    artifacts_written: written.slice(0, 100),
+    ...(written.length > 100 ? { artifacts_more: written.length - 100 } : {}),
     duration_ms: synthesis.duration_ms,
     ...(synthesis.vault_integrity ? { vault_integrity: synthesis.vault_integrity } : {}),
-  }, NODE_ID);
+  };
+}
+
+function emitSynthesizeEvent(sessionId, trigger, synthesis) {
+  if (!localEventLog) return;
+  const event = buildMemoryEvent('memory.synthesized', sessionId, 'memory', synthesizedEventData(sessionId, trigger, synthesis), NODE_ID);
   localEventLog.publishLocal(event).catch(err =>
     log(`[event] memory.synthesized emit failed: ${err.message}`)
   );
@@ -1863,4 +1871,4 @@ if (process.env.OPENCLAW_MEMORY_DAEMON_NO_AUTOSTART !== '1') {
   });
 }
 
-export { runNodeVaultMaintenance, handleFlushResult, sourceOfJsonl, extractedEventData };
+export { runNodeVaultMaintenance, handleFlushResult, sourceOfJsonl, extractedEventData, synthesizedEventData };
