@@ -89,9 +89,8 @@ AGENTS.md points here. All heartbeat logic lives here.
 3. Only spawn agents for triggers that align with active project priorities
 
 ## Security Gate
-- Pre-commit hook active: `bin/hooks/pre-commit`
-- Any skill change auto-scanned before commit
-- Setup: `git config core.hooksPath bin/hooks`
+- Install or update skills only with `bash skills/openclaw-skill-scanner/install-hook.sh <clawhub-slug>`
+- If this workspace is a git repo, enable the commit-time skill scan once with `git config core.hooksPath bin/hooks`
 
 ## Mesh Health
 1. Run `bin/node-acceptance.mjs --axis network --no-mutate` silently (NATS, JetStream, event stream, pub/sub; read-only). On a clustered node also `--axis federation --no-mutate`.
@@ -138,6 +137,3 @@ Before significant decisions, write a structured prediction:
 ## Current State
 - Memory maintenance: automated by the memory daemon (every 30 min while a session is live, and at session start); the heartbeat runs it when it is due
 - Principle 11 active: all structural systems must be automated
-- Skill Quality Engineering: complete (Phases 1-6)
-- Routing eval baseline: 95.9% accuracy, 29 conflict pairs
-- Security gate: active via core.hooksPath

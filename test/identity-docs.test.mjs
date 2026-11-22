@@ -66,3 +66,9 @@ test('the daedalus soul mirrors the workspace SOUL and PRINCIPLES', () => {
     assert.equal(fs.readFileSync(path.join(ROOT, 'souls', 'daedalus', f), 'utf8'), fs.readFileSync(path.join(ROOT, 'identity', f), 'utf8'), f);
   }
 });
+
+test('HEARTBEAT.md claims no commit gate the installer never enables and no single node\'s eval numbers', () => {
+  const text = docs.find(([f]) => f === 'HEARTBEAT.md')[1];
+  assert.doesNotMatch(text, /95\.9%|Pre-commit hook active|active via core\.hooksPath/);
+  assert.match(text, /bash skills\/openclaw-skill-scanner\/install-hook\.sh <clawhub-slug>/);
+});
