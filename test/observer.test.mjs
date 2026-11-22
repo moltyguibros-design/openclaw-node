@@ -233,7 +233,7 @@ describe('consolidation activity', () => {
     const logPosPath = path.join(tmp, 'pos.json');
     fs.writeFileSync(logPath, '');
     const at = new Date('2026-07-04T16:00:00Z');
-    const consolidationLog = cliSummaryLines(cycle).map((l) => stampLine(l, at)).join('\n') + '\n';
+    const consolidationLog = cliSummaryLines(cycle).map((l) => stampLine(l, at, 'America/Montreal')).join('\n') + '\n';
     fs.writeFileSync(path.join(tmp, 'consolidation-scheduler.log'), 'Skipped: busy\n' + consolidationLog);
 
     const a1 = await scanMemoryActivity({ daemonLogPath: logPath, activityPath, logPosPath });
@@ -244,6 +244,17 @@ describe('consolidation activity', () => {
     assert.equal(a1.appended, 2);
     assert.equal((await scanMemoryActivity({ daemonLogPath: logPath, activityPath, logPosPath })).appended, 0,
       'the consolidation log keeps its own offset');
+  });
+
+  it("consolidation timer stamps in the node's configured zone", () => {
+    const saved = process.env.OPENCLAW_TIMEZONE;
+    process.env.OPENCLAW_TIMEZONE = 'Europe/Paris';
+    try {
+      assert.equal(stampLine('x', new Date('2026-07-04T16:00:00Z')), '[2026-07-04, 18:00:00] x');
+    } finally {
+      if (saved === undefined) delete process.env.OPENCLAW_TIMEZONE;
+      else process.env.OPENCLAW_TIMEZONE = saved;
+    }
   });
 
   it("matches the in-process scheduler's cycle-complete line in the daemon log", () => {

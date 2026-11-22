@@ -322,10 +322,11 @@ export function cliSummaryLines(result) {
 }
 
 // The observer's activity feed (lib/observer.mjs) only records log lines that
-// carry the memory daemon's `[YYYY-MM-DD, HH:MM:SS]` Montreal stamp.
-export function stampLine(msg, date = new Date()) {
+// carry the memory daemon's `[YYYY-MM-DD, HH:MM:SS]` stamp, read as the same
+// local time, so the zone follows the daemon's chain (memory-daemon.mjs).
+export function stampLine(msg, date = new Date(), timeZone = process.env.OPENCLAW_TIMEZONE || process.env.TZ || 'America/Montreal') {
   const ts = date.toLocaleString('en-CA', {
-    timeZone: 'America/Montreal',
+    timeZone,
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
     hourCycle: 'h23',
