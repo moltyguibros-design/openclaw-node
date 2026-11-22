@@ -273,6 +273,32 @@ describe('buildDirectorySummaries', () => {
     assert.equal(embeds, 0);
   });
 
+  const vectorCounts = () => ({
+    summaries: db.prepare('SELECT COUNT(*) AS n FROM directory_summaries').get().n,
+    vectors: db.prepare('SELECT COUNT(*) AS n FROM directory_vectors').get().n,
+  });
+
+  it('an embed failure does not leave a directory without a vector', async () => {
+    let calls = 0;
+    const flaky = async (t) => {
+      if (++calls === 1) throw new Error('embedder offline');
+      return stubEmbed(t);
+    };
+    await assert.rejects(buildDirectorySummaries(db, { embed: flaky }), /embedder offline/);
+    await buildDirectorySummaries(db, { embed: flaky });
+    assert.deepEqual(vectorCounts(), { summaries: 6, vectors: 6 });
+  });
+
+  it('heals an unchanged summary that has no vector', async () => {
+    await buildDirectorySummaries(db, { embed: stubEmbed });
+    db.prepare('DELETE FROM directory_vectors WHERE rowid = (SELECT id FROM directory_summaries WHERE dir_path = ?)')
+      .run('projects/arcane/lore');
+    const r = await buildDirectorySummaries(db, { embed: stubEmbed });
+    assert.deepEqual(vectorCounts(), { summaries: 6, vectors: 6 });
+    assert.equal(r.unchanged, 6);
+    assert.equal(r.built, 0);
+  });
+
   it('listDirectoryTree respects prefix and depth', async () => {
     await buildDirectorySummaries(db);
     const all = listDirectoryTree(db, { depth: 1 });
