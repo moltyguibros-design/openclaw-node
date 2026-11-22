@@ -1,6 +1,10 @@
 # FEDERATION_SPEC — OpenClaw Node Federation
 
-**Status:** v0.2 (initial, 2026-07-10). This is the living contract for the federation system.
+**Status:** v0.2 design (2026-07-10). **Federation is BLOCKED (D15):** the premise benchmark failed.
+**D16** (operator ruling) retired consensus gating from the forward design: the 3/5-quorum management
+design (§4) and the vote-based layer contracts (§8) must be re-derived before anything is built. The
+shipped adversarial worker mode (§3.1) still uses the finalization vote, the mechanism the benchmark
+found unreliable. See memory-plan/plans/federation/BLOCKED.md and DECISIONS D15/D16.
 Implementation-discovered divergences go into DECISIONS.md (append-only), not into silent
 rewrites of this spec.
 
@@ -46,7 +50,7 @@ shared protocol — and layers those grappes into three tiers:
 1. Consumer hardware: one grappe (3 logical nodes) + NATS cluster runs on one MacBook/box.
 2. Local-first: a node outside any grappe keeps full single-node function.
 3. One daemon, one session layer: all protocol handlers live in `bin/mesh-task-daemon.js`
-   (see `lib/mesh-collab.js:30` — `COLLAB_MODE`); no second daemon, no parallel impl.
+   (see `lib/mesh-collab.js` `COLLAB_MODE`); no second daemon, no parallel impl.
 4. Quality amplifier, not throughput engine: ~35 GPU-min per adversarial session (18 serialised
    inferences × ~120s); step 2.6 benchmarks whether circling beats solo before Phase 2 opens.
 5. Savant proposals are never auto-applied: signed → notification + OUT_OF_SCOPE entry → gate.
@@ -70,7 +74,7 @@ Three local-dev NATS nodes form an R=3 JetStream cluster (adopted from
 
 ### 2.2 Logical nodes (`bin/spawn-node.mjs`)
 
-Each federation node is an isolated tree spawned by `bin/spawn-node.mjs:131` (`spawnNode()`):
+Each federation node is an isolated tree spawned by `bin/spawn-node.mjs` `spawnNode()`:
 `~/.openclaw-<id>/` with its own `state.db`, `config/node.json`, `workspace/`, vault, logs.
 Nodes share only the NATS cluster and the repo code; no filesystem coupling.
 
@@ -88,16 +92,16 @@ same protocol over Tailscale; `spawn-node.mjs` is the single code path for both 
 ### 2.3 Node identity and signing (`lib/node-identity.mjs`, `lib/deploy-trigger-auth.mjs`)
 
 Each node holds an ed25519 keypair at `<nodeRoot>/identity.key` provisioned by
-`lib/node-identity.mjs:76` (`getOrCreateIdentity()`). Signing pattern:
+`lib/node-identity.mjs` `getOrCreateIdentity()`. Signing pattern:
 
 ```
-lib/node-identity.mjs:374  signEvent(event, privateKey)   → adds { signature, signer_pubkey }; event_id is caller-injected before signEvent
-lib/node-identity.mjs:463  verifyEvent(event, opts)       → boolean (legacy) or { ok, reason } (strict); opts.expectedNodeId validates event.node_id
-lib/node-identity.mjs:76   getOrCreateIdentity(dir)       → { privateKey, publicKey, publicKeyBase64 }
-lib/deploy-trigger-auth.mjs:58  signDeployTrigger(trigger) → reuses signEvent for deploy triggers
+lib/node-identity.mjs  signEvent(event, privateKey)      → adds { signature, signer_pubkey }; event_id is caller-injected before signEvent
+lib/node-identity.mjs  verifyEvent(event, opts)          → boolean (legacy) or { ok, reason } (strict); opts.expectedNodeId validates event.node_id
+lib/node-identity.mjs  getOrCreateIdentity(dir)          → { privateKey, publicKey, publicKeyBase64 }
+lib/deploy-trigger-auth.mjs  signDeployTrigger(trigger) → reuses signEvent for deploy triggers
 ```
 
-Callers MUST populate `event_id` on the event object before invoking `signEvent`; `signEvent` does not generate this field. All four current call sites comply: `buildMemoryEvent()` (`lib/local-event-log.mjs:104`), `lib/broadcast-emitter.mjs:266`, `lib/broadcast-offerer.mjs:444`, and `lib/broadcast-acceptor.mjs:472`.
+Callers MUST populate `event_id` on the event object before invoking `signEvent`; `signEvent` does not generate this field. The federation event call sites comply: `publishLocal` in `lib/local-event-log.mjs` (the id comes from `buildMemoryEvent()`), `publishBroadcast` in `lib/broadcast-emitter.mjs`, `processBroadcast` in `lib/broadcast-offerer.mjs`, and `checkAcceptance` in `lib/broadcast-acceptor.mjs`.
 
 The same sign/verify pair is used for **join tokens** (1.4) and **task envelopes** (4.2, §5).
 Token authenticates *connection to the bus*; envelope signature authenticates *the sender*.
@@ -128,7 +132,7 @@ Management layer addresses grappes by registry `id`.
 
 All three architectures share the same state layer (`lib/mesh-collab.js`), session subject
 namespace (`mesh.collab.*`), and daemon handlers (`bin/mesh-task-daemon.js`). The only
-structural difference is the session `mode` field (set in `lib/mesh-collab.js:54`
+structural difference is the session `mode` field (set in `lib/mesh-collab.js`
 `createSession()`): `"circling_strategy"` for adversarial; new values for
 cooperative/collaborative.
 
@@ -141,14 +145,14 @@ cooperative/collaborative.
 TASK SUBMITTED (mesh.collab.create)
   │
   ▼ RECRUITING — 3 nodes join; roles stored once at close
-  │   worker_node_id, reviewerA_node_id, reviewerB_node_id (lib/mesh-collab.js:105)
-  │   bin/mesh-task-daemon.js:754  handleCollabJoin()
+  │   worker_node_id, reviewerA_node_id, reviewerB_node_id (lib/mesh-collab.js createSession() circling block)
+  │   bin/mesh-task-daemon.js  handleCollabJoin()
   │
   ▼ INIT STEP — all nodes receive task plan
   │   Worker → workArtifact (v0)
   │   Reviewer A → reviewStrategy
   │   Reviewer B → reviewStrategy
-  │   bin/mesh-task-daemon.js:1253  startCirclingStep()
+  │   bin/mesh-task-daemon.js  startCirclingStep()
   │
   ▼ SUB-ROUND LOOP (SR 1 .. max_subrounds, default 3)
   │
@@ -157,45 +161,47 @@ TASK SUBMITTED (mesh.collab.create)
   │    Worker  produces: workerReviewsAnalysis
   │    Reviewer receives: workArtifact [+ reconciliationDoc in SR2+]
   │    Reviewer produces: reviewArtifact
-  │    lib/mesh-collab.js:619  compileDirectedInput()
-  │    lib/mesh-collab.js:704  isCirclingStepComplete()
+  │    lib/mesh-collab.js  compileDirectedInput()
+  │    lib/mesh-collab.js  isCirclingStepComplete()
   │
   │  STEP 2 — Integration + Refinement (barrier: 3/3, 10 min)
   │    Worker  receives: both reviewArtifacts
   │    Worker  produces: workArtifact (updated) + reconciliationDoc [multi-artifact]
   │    Reviewer receives: workerReviewsAnalysis + cross-review (other reviewer)
   │    Reviewer produces: reviewStrategy (refined)
-  │    lib/mesh-collab.js:727  advanceCirclingStep()
+  │    lib/mesh-collab.js  advanceCirclingStep()
   │
   │  [tier gate if automation_tier == 3]
   │
   ▼ FINALIZATION — all nodes receive final workArtifact + task plan (barrier: 3/3)
   │   Worker   → workArtifact (final) + completionDiff + vote
   │   Reviewer → vote (converged | blocked)
-  │   bin/mesh-task-daemon.js:1393  completeCirclingSession()
+  │   bin/mesh-task-daemon.js  completeCirclingSession()
   │
-  │  if ANY vote == "blocked": gate fires (kanban bin/mesh-bridge.js:334)
+  │  if ANY vote == "blocked": gate fires (kanban: bin/mesh-bridge.js collab.circling_gate)
   │  if ALL non-blocked: SESSION COMPLETE
   ▼
 DONE — artifacts in JetStream KV, parent task completed
 ```
 
-**Key parse contract** (`lib/circling-parser.js:26` — `parseCirclingReflection()`):
+**Key parse contract** (`lib/circling-parser.js` `parseCirclingReflection()`):
 - Single-artifact: all content before `===CIRCLING_REFLECTION===` is the artifact.
 - Multi-artifact: content between `===CIRCLING_ARTIFACT===` / `===END_ARTIFACT===` pairs.
-- `parse_failed: true` → `lib/mesh-collab.js:791` `recordArtifactFailure()` tracks it;
-  step advances with degraded input (gap §14.2 — retry ×3 pending, step 2.3).
+- `parse_failed: true` → `lib/mesh-collab.js` `recordArtifactFailure()` counts it and
+  `bin/mesh-task-daemon.js` `retryCirclingNodeStep()` re-prompts that node with the same directed
+  input, up to 3 attempts, without advancing the barrier (gap §14.2, built); on the 3rd failure the
+  node degrades and the step advances with an `[UNAVAILABLE: ...]` placeholder for its artifact.
 - Adaptive convergence (gap §14.1 — early exit when all converged): step 2.2.
 
-**Timeouts:** dual-layer — in-memory `setTimeout` in `bin/mesh-task-daemon.js:1310` + 60s cron
+**Timeouts:** dual-layer — in-memory `setTimeout` armed by `bin/mesh-task-daemon.js` `startCirclingStep()` + 60s cron
 sweep via `sweepCirclingStepTimeouts()` that rehydrates from `step_started_at` after restart.
-Default `CIRCLING_STEP_TIMEOUT_MS` = 10 min (`bin/mesh-task-daemon.js:54`).
+Default `CIRCLING_STEP_TIMEOUT_MS` = 10 min (`bin/mesh-task-daemon.js`, env `MESH_CIRCLING_STEP_TIMEOUT_MS`).
 
-**Prompt construction:** `bin/mesh-agent.js:779` `buildCirclingPrompt(task, circlingData)` builds
-phase-specific instructions; agent imports the standalone parser at `bin/mesh-agent.js:962`.
+**Prompt construction:** `bin/mesh-agent.js` `buildCirclingPrompt(task, circlingData)` builds
+phase-specific instructions; the agent requires the standalone parser from `lib/circling-parser.js`.
 
-**Session field anchor:** `session.mode = "circling_strategy"` (`lib/mesh-collab.js:34`
-`COLLAB_MODE.CIRCLING_STRATEGY`; set at `lib/mesh-collab.js:59` in `createSession()`).
+**Session field anchor:** `session.mode = "circling_strategy"` (`lib/mesh-collab.js`
+`COLLAB_MODE.CIRCLING_STRATEGY`; set in `createSession()`).
 
 ### 3.2 Mode B — Cooperative
 
@@ -227,7 +233,7 @@ DONE — integrationArtifact is the work product
 ```
 
 **Session field anchor (step 3.1):** `session.mode = "cooperative"` on the
-`lib/mesh-collab.js:54` (`createSession()`) schema. Existing `circling` block stays null.
+`lib/mesh-collab.js` `createSession()` schema. Existing `circling` block stays null.
 The round-state (integrator_node_id, round_number) is the cooperative equivalent of the
 circling sub-round state — added to the session schema in step 3.2.
 
@@ -339,7 +345,7 @@ management: {
 ### 5.1 Task envelope (management → worker grappe)
 
 ```javascript
-// Task envelope — signed by the coordinator node (lib/node-identity.mjs:374 signEvent)
+// Task envelope — signed by the coordinator node (lib/node-identity.mjs signEvent)
 {
   envelope_type: "task",
   task_id: "<uuid>",                // management session subtask id
@@ -348,9 +354,9 @@ management: {
   preferred_mode: "adversarial",    // "adversarial" | "cooperative" | "collaborative"
   description: "<task text>",
   deadline_ms: 3600000,             // wall-clock budget (ms)
-  timestamp: "<ISO timestamp>",     // read by checkEventFreshness (lib/node-identity.mjs:419)
+  timestamp: "<ISO timestamp>",     // read by checkEventFreshness (lib/node-identity.mjs)
 
-  // ed25519 signature (from lib/deploy-trigger-auth.mjs:58 signDeployTrigger pattern)
+  // ed25519 signature (from lib/deploy-trigger-auth.mjs signDeployTrigger pattern)
   signature: "<base64>",
   signer_pubkey: "<base64>",        // coordinator node's public key
   signer_node_id: "<node id>",      // enables opts.expectedNodeId check in verifyEvent
@@ -376,7 +382,7 @@ the sender. Both required.
   artifact: "<text content>",       // the work product (or null on failure)
   artifact_key: "<KV key>",         // JetStream KV key for the full artifact
   converged: true,                  // whether finalization was unanimous
-  timestamp: "<ISO timestamp>",     // read by checkEventFreshness (lib/node-identity.mjs:419)
+  timestamp: "<ISO timestamp>",     // read by checkEventFreshness (lib/node-identity.mjs)
 
   signature: "<base64>",
   signer_pubkey: "<base64>",
@@ -417,7 +423,7 @@ the sender. Both required.
   signer_pubkey: "<base64>",
   signer_node_id: "<node id>",      // enables opts.expectedNodeId check in verifyEvent
   event_id: "<uuid>",               // caller-injected before signEvent is called
-  timestamp: "<ISO timestamp>",     // read by checkEventFreshness (lib/node-identity.mjs:419)
+  timestamp: "<ISO timestamp>",     // read by checkEventFreshness (lib/node-identity.mjs)
 }
 ```
 
@@ -454,7 +460,7 @@ Savant session COMPLETE
   │ change-set artifact produced (§5.3)
   │ validated against schema
   ▼
-SIGN — signed by the savant coordinator (lib/node-identity.mjs:374)
+SIGN — signed by the savant coordinator (lib/node-identity.mjs signEvent)
   ▼
 NOTIFY — openclaw-notify event: level + change_set_id + summary (click-through to MC)
   │ notification ledger entry (same path every other grappe event uses)
@@ -514,31 +520,35 @@ All federation subjects use `mesh.*` — the `openclaw.*` fleet namespace is ret
 
 ---
 
-## 9. Cross-reference index (file:line → spec section)
+## 9. Cross-reference index (file → symbol → spec section)
 
-| File:line | What | Spec section |
+Symbols, not line numbers: grep the symbol in the file.
+
+| File | Symbol | Spec section |
 |---|---|---|
-| `lib/mesh-collab.js:30` | `COLLAB_MODE` enum | §3 (session layer shared by all modes) |
-| `lib/mesh-collab.js:54` | `createSession()` | §3.1/3.2/3.3 (mode field — real discriminator) |
-| `lib/mesh-collab.js:65` | `min_nodes` default (3 for circling) | §3.1 adversarial recruiting |
-| `lib/mesh-collab.js:105` | `circling` block in session schema | §3.1 flow (role IDs) |
-| `lib/mesh-collab.js:619` | `compileDirectedInput()` | §3.1 per-node directed input |
-| `lib/mesh-collab.js:704` | `isCirclingStepComplete()` | §3.1 barriers |
-| `lib/mesh-collab.js:727` | `advanceCirclingStep()` | §3.1 state machine |
-| `lib/mesh-collab.js:791` | `recordArtifactFailure()` | §3.1 parse failure tracking |
-| `lib/circling-parser.js:26` | `parseCirclingReflection()` | §3.1 parse contract |
-| `bin/mesh-task-daemon.js:54` | `CIRCLING_STEP_TIMEOUT_MS` | §3.1 timeouts |
-| `bin/mesh-task-daemon.js:754` | `handleCollabJoin()` | §3.1 recruiting + role assignment |
-| `bin/mesh-task-daemon.js:872` | `handleCollabReflect()` | §3.1 reflection → barrier |
-| `bin/mesh-task-daemon.js:1253` | `startCirclingStep()` | §3.1 step start + directed input |
-| `bin/mesh-task-daemon.js:1393` | `completeCirclingSession()` | §3.1 finalization + gate |
-| `bin/mesh-agent.js:779` | `buildCirclingPrompt()` | §3.1 prompt construction |
-| `bin/mesh-agent.js:962` | parser import | §3.1 agent parse path |
-| `bin/mesh-bridge.js:307` | `circling_step_started` handler | §3.1 kanban materialization |
-| `bin/mesh-bridge.js:334` | `circling_gate` handler | §3.1 gate message |
-| `lib/deploy-trigger-auth.mjs:58` | `signDeployTrigger()` | §5.1 envelope signing pattern |
-| `lib/node-identity.mjs:76` | `getOrCreateIdentity()` | §2.3 node identity |
-| `lib/node-identity.mjs:374` | `signEvent()` | §5.1/5.3 envelope + change-set signing |
-| `lib/node-identity.mjs:463` | `verifyEvent()` | §5.1/5.2/5.3 envelope verification; `opts.expectedNodeId` guards |
-| `bin/spawn-node.mjs:131` | `spawnNode()` | §2.2 logical node trees |
+| `lib/mesh-collab.js` | `COLLAB_MODE` enum | §3 (session layer shared by all modes) |
+| `lib/mesh-collab.js` | `createSession()` | §3.1/3.2/3.3 (mode field — real discriminator) |
+| `lib/mesh-collab.js` | `min_nodes` default in `createSession()` (3 for circling) | §3.1 adversarial recruiting |
+| `lib/mesh-collab.js` | `circling` block in the `createSession()` schema | §3.1 flow (role IDs) |
+| `lib/mesh-collab.js` | `CollabStore.compileDirectedInput()` | §3.1 per-node directed input |
+| `lib/mesh-collab.js` | `CollabStore.isCirclingStepComplete()` | §3.1 barriers |
+| `lib/mesh-collab.js` | `CollabStore.advanceCirclingStep()` | §3.1 state machine |
+| `lib/mesh-collab.js` | `CollabStore.recordArtifactFailure()` | §3.1 parse failure tracking |
+| `lib/circling-parser.js` | `parseCirclingReflection()` | §3.1 parse contract |
+| `bin/mesh-task-daemon.js` | `CIRCLING_STEP_TIMEOUT_MS` | §3.1 timeouts |
+| `bin/mesh-task-daemon.js` | `handleCollabJoin()` | §3.1 recruiting + role assignment |
+| `bin/mesh-task-daemon.js` | `handleCollabReflect()` | §3.1 reflection → barrier |
+| `bin/mesh-task-daemon.js` | `retryCirclingNodeStep()` | §3.1 parse-failure retry ×3 |
+| `bin/mesh-task-daemon.js` | `startCirclingStep()` | §3.1 step start + directed input |
+| `bin/mesh-task-daemon.js` | `completeCirclingSession()` | §3.1 finalization + gate |
+| `bin/mesh-agent.js` | `buildCirclingPrompt()` | §3.1 prompt construction |
+| `bin/mesh-agent.js` | `parseCirclingReflection` (required from `lib/circling-parser.js`) | §3.1 agent parse path |
+| `bin/mesh-bridge.js` | `collab.circling_step_started` handler | §3.1 kanban materialization |
+| `bin/mesh-bridge.js` | `collab.circling_gate` handler | §3.1 gate message |
+| `lib/deploy-trigger-auth.mjs` | `signDeployTrigger()` | §5.1 envelope signing pattern |
+| `lib/node-identity.mjs` | `getOrCreateIdentity()` | §2.3 node identity |
+| `lib/node-identity.mjs` | `signEvent()` | §5.1/5.3 envelope + change-set signing |
+| `lib/node-identity.mjs` | `verifyEvent()` | §5.1/5.2/5.3 envelope verification; `opts.expectedNodeId` guards |
+| `lib/node-identity.mjs` | `checkEventFreshness()` | §5 envelope `timestamp` freshness |
+| `bin/spawn-node.mjs` | `spawnNode()` | §2.2 logical node trees |
 | `services/nats/nats-1.conf:16` | cluster block | §2.1 NATS cluster (step 1.1 hardens) |

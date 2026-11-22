@@ -175,6 +175,26 @@ test('README Federation section carries the plan status while the federation blo
   assert.match(decisions, /^## D16 — Consensus gating is DEAD/m);
   assert.match(fed, /\*\*D16\*\*[^\n]*retired consensus gating/);
   assert.ok(fed.includes('(memory-plan/plans/federation/BLOCKED.md)'));
+  assert.match(fed, /The full v0\.2 design \(pre-D16\) lives in \[docs\/FEDERATION_SPEC\.md\]/);
+
+  const spec = read('docs/FEDERATION_SPEC.md');
+  const head = spec.split('\n').slice(0, 15).join('\n');
+  assert.match(head, /BLOCKED \(D15\)/, 'FEDERATION_SPEC must carry the plan status');
+  assert.match(head, /\*\*D16\*\*[^\n]*retired consensus gating/);
+  assert.doesNotMatch(head, /living contract/);
+  assert.doesNotMatch(spec, /retry ×3 pending/);
+});
+
+test('FEDERATION_SPEC cites code by file and symbol, never by drifting line number', () => {
+  const spec = read('docs/FEDERATION_SPEC.md');
+  for (const [hit] of spec.matchAll(/[\w./-]+\.(?:m?js|ts|sh):\d+/g)) assert.fail(`FEDERATION_SPEC line anchor ${hit}`);
+  const index = section(spec, '## 9. Cross-reference index (file → symbol → spec section)').text;
+  const rows = [...index.matchAll(/^\| `([\w./-]+)` \| `([\w.]+)(?:\(\))?`/gm)];
+  assert.ok(rows.length >= 20, 'index parse');
+  for (const [, file, symbol] of rows) {
+    const name = symbol.split('.').pop();
+    assert.match(read(file), new RegExp(`\\b${name}\\b`), `${file} has no ${symbol}`);
+  }
 });
 
 test('the souls recovery recipe initializes main, as the installer does', () => {

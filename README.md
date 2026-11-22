@@ -580,7 +580,7 @@ A **grappe** is a set of full OpenClaw nodes joined by signed membership that ex
 
 > **Requirement (D11):** a grappe/cluster member's mind is an **advanced LLM** (Claude / GPT / Kimi / DeepSeek-class), never a raw local model. The local qwen model is the harness's extraction/embedding/probe organ only. **This project is not to be used for anything less than a local OpenClaw driven by an advanced LLM** — the single-box qwen mesh-agent scaffold that proved the choreography is retired as a worker.
 
-The full contract lives in [docs/FEDERATION_SPEC.md](docs/FEDERATION_SPEC.md) (v0.2). The design layers grappes into three tiers — worker grappes (3 nodes, one mode each), a management grappe (5 nodes: intake → decompose → dispatch → assemble → verify → deliver), and a savant grappe (3 nodes, adversarial; observes the whole system and emits operator-gated change-sets). Today the shipped surface is the **substrate**: the grappe registry, the CLI, and the adversarial worker mode.
+The full v0.2 design (pre-D16) lives in [docs/FEDERATION_SPEC.md](docs/FEDERATION_SPEC.md). The design layers grappes into three tiers — worker grappes (3 nodes, one mode each), a management grappe (5 nodes: intake → decompose → dispatch → assemble → verify → deliver), and a savant grappe (3 nodes, adversarial; observes the whole system and emits operator-gated change-sets). Today the shipped surface is the **substrate**: the grappe registry, the CLI, and the adversarial worker mode.
 
 ### The `openclaw-grappe` CLI
 
