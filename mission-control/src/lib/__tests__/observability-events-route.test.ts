@@ -49,3 +49,21 @@ test("polling the events feed does not trace itself into the table it serves", a
   const { c } = getRawDb().prepare("SELECT COUNT(*) AS c FROM observability_events").get() as { c: number };
   expect(c).toBe(1);
 });
+
+// lib/tracer.js writes a warn log as category 'error' with a null error; the page's 'errors only' shows it.
+test("error=true returns error-category rows as well as rows with an error", async () => {
+  const { getRawDb } = await import("@/lib/db");
+  const insert = getRawDb().prepare(
+    "INSERT INTO observability_events (id, timestamp, node_id, module, function, tier, category, error) VALUES (?, ?, 'n1', 'daemon', 'f', 1, ?, ?)",
+  );
+  const now = Date.now();
+  insert.run("warn-log", now - 3, "error", null);
+  insert.run("failed-call", now - 2, "call", "boom");
+  insert.run("plain", now - 1, "lifecycle", null);
+
+  const { GET } = await import("@/app/api/observability/events/route");
+  const res = await GET(new NextRequest("http://127.0.0.1/api/observability/events?hours=24&error=true"));
+  const { events } = (await res.json()) as { events: { id: string }[] };
+
+  expect(events.map((e) => e.id)).toEqual(["failed-call", "warn-log"]);
+});
