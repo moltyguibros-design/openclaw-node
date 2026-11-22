@@ -1,5 +1,5 @@
 ---
-name: self-improvement
+name: self-improving-agent
 description: "Captures learnings, errors, and corrections to enable continuous improvement. Use when a command fails, user corrects the agent, a capability is missing, or a better approach is discovered. Also reviews learnings before major tasks."
 triggers:
   - "log this as a learning"

@@ -12,6 +12,7 @@ const frontName = (rel) => read(rel).match(/^---\n([\s\S]*?)\n---/)?.[1].match(/
 test('renamed skills declare their directory id as their name', () => {
   assert.equal(frontName('tavily-search/SKILL.md'), 'tavily-search');
   assert.equal(frontName('moltbook-interact/SKILL.md'), 'moltbook-interact');
+  assert.equal(frontName('self-improving-agent/SKILL.md'), 'self-improving-agent');
   assert.equal(frontName('_quarantine/refactor-suggest/SKILL.md'), 'refactor-suggest');
 });
 
@@ -19,6 +20,10 @@ test('user-story example quotes its arguments as bash will read them', () => {
   const doc = read('user-story/SKILL.md');
   assert.doesNotMatch(doc, /\\"/);
   assert.match(doc, /python3 \{baseDir\}\/scripts\/user-story-template\.py --persona "trial user"/);
+});
+
+test('pdf sends the agent to no companion file the skill does not ship', () => {
+  assert.doesNotMatch(read('pdf/SKILL.md'), /\b(reference|forms)\.md\b/);
 });
 
 test('soulcraft README links its research report relative to the skill', () => {
