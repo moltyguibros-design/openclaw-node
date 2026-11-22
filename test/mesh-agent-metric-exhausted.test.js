@@ -17,6 +17,7 @@ const { execFileSync } = require('node:child_process');
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-metric-exhausted-'));
 const WORKSPACE = path.join(TMP, 'workspace');
+fs.mkdirSync(path.join(TMP, '.openclaw', '.tmp'), { recursive: true });
 Object.assign(process.env, {
   HOME: TMP,
   MESH_WORKSPACE: WORKSPACE,
@@ -45,6 +46,16 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf-8'
 registerProvider('exhaust-ok-stub', {
   binary: process.execPath,
   buildArgs() { return ['-e', "process.stdout.write('did the work')"]; },
+});
+// Records the agent state the worker wrote while it was running.
+const statesSeen = [];
+registerProvider('state-stub', {
+  binary: process.execPath,
+  defaultModel: 'state-model',
+  buildArgs() {
+    statesSeen.push(JSON.parse(fs.readFileSync(path.join(TMP, '.openclaw', '.tmp', 'agent-state.json'), 'utf8')));
+    return ['-e', "process.stdout.write('did the work')"];
+  },
 });
 registerProvider('exhaust-crash-stub', {
   binary: process.execPath,
@@ -169,5 +180,17 @@ describe('a Foreman stop is an escalation only when the stop itself escalated', 
     await agent.__test.runAttempts(t, worktreePath, supervisor, Date.now());
     assert.ok(seen['mesh.tasks.complete'], 'attempt 2 ran and completed');
     assert.equal(seen['mesh.tasks.release'], undefined);
+  });
+});
+
+describe('agent state names the provider and model a task runs on', () => {
+  beforeEach(freshWorkspace);
+
+  it('working on a task: its provider and model, not "unknown"', async () => {
+    fakeDaemon();
+    statesSeen.length = 0;
+    await agent.__test.executeTask(task('S-1', 'state-stub'));
+    assert.ok(statesSeen.length > 0, 'the stub provider ran');
+    assert.deepEqual(statesSeen[0], { status: 'working', taskId: 'S-1', llm: 'state-stub', model: 'state-model' });
   });
 });

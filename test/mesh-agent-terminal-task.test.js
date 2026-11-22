@@ -107,6 +107,7 @@ describe('the worker stops cleanly on a task the daemon ended', () => {
     assert.match(git(WORKSPACE, 'log', '-1', '--format=%s', 'mesh/T-1'), /partial: the daemon ended this task \(failed\)/);
     assert.equal(git(WORKSPACE, 'show', 'mesh/T-1:partial.txt'), 'half done');
     assert.equal(JSON.parse(fs.readFileSync(AGENT_STATE, 'utf8')).status, 'idle');
+    assert.equal(JSON.parse(fs.readFileSync(AGENT_STATE, 'utf8')).llm, 'claude', "an idle agent still names the node's provider");
     const rows = await telemetryFor('T-1');
     assert.equal(rows.length, 1);
     assert.equal(rows[0].outcome, 'failure');

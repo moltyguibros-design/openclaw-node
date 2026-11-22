@@ -42,12 +42,19 @@ vi.mock("@/lib/config", () => ({
   NODE_PLATFORM: "Linux",
   NODE_ROLE: "lead",
   AGENT_NAME: "Daedalus",
+  get OPENCLAW_ROOT() {
+    return path.join(process.env.HOME as string, ".openclaw");
+  },
 }));
 
 interface RouteNode {
   nodeId: string;
   status: string;
-  health: { nodeId: string; services: Array<{ name: string; status: string }> } | null;
+  health: {
+    nodeId: string;
+    services: Array<{ name: string; status: string }>;
+    agent: { status: string; llm: string | null };
+  } | null;
 }
 
 interface RouteBody {
@@ -143,6 +150,26 @@ describe("GET /api/mesh/nodes", () => {
     const nodes = await nodesFor("calos.lan", { Self: { HostName: "calos" } });
     expect(nodes["calos"].health?.nodeId).toBe("calos.lan");
     expect(nodes["calos"].status).toBe("online");
+  });
+
+  it("names no LLM vendor the agent did not record, with or without a state file", async () => {
+    const realProvider = process.env.LLM_PROVIDER;
+    process.env.LLM_PROVIDER = "anthropic";
+    try {
+      expect((await nodesFor("test-node", {}))["test-node"].health?.agent.llm).toBeNull();
+      const stateFile = path.join(home, ".openclaw", ".tmp", "agent-state.json");
+      fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+      // A fresh module each time: the route keeps the local health for 30 s.
+      fs.writeFileSync(stateFile, JSON.stringify({ status: "idle", taskId: null }));
+      vi.resetModules();
+      expect((await nodesFor("test-node", {}))["test-node"].health?.agent).toMatchObject({ status: "idle", llm: null });
+      fs.writeFileSync(stateFile, JSON.stringify({ status: "idle", taskId: null, llm: "gemini" }));
+      vi.resetModules();
+      expect((await nodesFor("test-node", {}))["test-node"].health?.agent.llm).toBe("gemini");
+    } finally {
+      if (realProvider === undefined) delete process.env.LLM_PROVIDER;
+      else process.env.LLM_PROVIDER = realProvider;
+    }
   });
 
   it.skipIf(process.platform === "darwin")("reports systemd user units in the local fallback on Linux", async () => {

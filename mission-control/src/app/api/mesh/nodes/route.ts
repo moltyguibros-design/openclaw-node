@@ -347,22 +347,19 @@ async function gatherLocalHealth(): Promise<NodeHealth> {
           return {
             status: state.status || "idle",
             currentTask: state.taskId || null,
-            llm: state.llm || process.env.LLM_PROVIDER || "anthropic",
+            llm: state.llm || null,
             model: state.model || null,
           };
         }
       } catch (err) { console.warn(`[mesh/nodes] agent-state.json read failed: ${(err as Error).message}`); }
       // No runtime state — derive from config + service status
       const agentSvc = services.find((s) => s.name.includes("agent") && !s.name.includes("audit"));
-      // Read configured agent name and LLM from env/defaults
-      const agentName = AGENT_NAME;
-      const llmProvider = process.env.LLM_PROVIDER || "anthropic";
       return {
         status: agentSvc?.status === "active" ? "idle" : agentSvc ? "stopped" : "not installed",
         currentTask: null,
-        llm: llmProvider,
+        llm: null,
         model: null,
-        name: agentName,
+        name: AGENT_NAME,
       };
     })(),
     capabilities: [],

@@ -73,6 +73,20 @@ describe('mesh-health-publisher probes', () => {
     }
   });
 
+  it('the agent status carries the provider the agent recorded, and no vendor it did not', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'health-agent-'));
+    const stateFile = join(home, '.openclaw', '.tmp', 'agent-state.json');
+    try {
+      mkdirSync(join(home, '.openclaw', '.tmp'), { recursive: true });
+      writeFileSync(stateFile, JSON.stringify({ status: 'idle', taskId: null, llm: null, model: null }));
+      assert.equal((await publisher.getAgentStatus(home)).llm, null);
+      writeFileSync(stateFile, JSON.stringify({ status: 'idle', taskId: null, llm: 'gemini', model: null }));
+      assert.equal((await publisher.getAgentStatus(home)).llm, 'gemini');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('gatherHealth runs its probes concurrently and leaves the event loop free', async () => {
     const DELAY = 150;
     let inFlight = 0;

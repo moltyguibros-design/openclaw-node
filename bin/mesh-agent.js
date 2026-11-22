@@ -339,6 +339,8 @@ const CLI_PROVIDER = (() => {
   return idx >= 0 && args[idx + 1] ? args[idx + 1] : null;
 })();
 const ENV_PROVIDER = process.env.MESH_LLM_PROVIDER || null;
+// The node's own mind, in resolveProvider's env-before-CLI order.
+const NODE_PROVIDER = ENV_PROVIDER || CLI_PROVIDER;
 
 let nc;
 let running = true;
@@ -447,10 +449,16 @@ function writeAgentState(status, taskId, provider, model) {
   try {
     fs.writeFileSync(AGENT_STATE_PATH, JSON.stringify({
       status, taskId: taskId || null,
-      llm: status === 'working' ? (provider || 'unknown') : null,
+      llm: provider || NODE_PROVIDER,
       model: status === 'working' ? (model || null) : null,
     }));
   } catch { /* best-effort */ }
+}
+
+// Not resolveProvider/resolveModel: they throw, and the 'working' writes sit outside the task's try.
+function taskMind(task) {
+  const provider = task.llm_provider || NODE_PROVIDER;
+  return [provider, task.llm_model || CLI_MODEL || PROVIDERS[provider]?.defaultModel || null];
 }
 
 // Cohort provenance (hyperagent-evidence 0.2): derived MECHANICALLY here, the
@@ -2047,7 +2055,7 @@ async function executeCollabTask(task) {
   }
 
   log(`COLLAB JOINED: ${sessionId} (${session.nodes.length} nodes)`);
-  writeAgentState('working', task.task_id);
+  writeAgentState('working', task.task_id, ...taskMind(task));
   await prepareHyperagentStrategy(task);
 
   // Create worktree for isolation — FAIL-CLOSED (D14 rerun): a member that
@@ -2397,7 +2405,7 @@ async function executeTask(task) {
   // node_id: the daemon now enforces ownership on start/complete/release
   // (only the claiming node may drive its task) — the same check fail had.
   await natsRequest('mesh.tasks.start', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token, workspace_isolated: workspaceIsolated });
-  writeAgentState('working', task.task_id);
+  writeAgentState('working', task.task_id, ...taskMind(task));
   log(`Started: ${task.task_id} (dir: ${worktreePath ? 'worktree' : 'workspace'})`);
 
   const supervisor = await createTaskSupervisor(task, worktreePath);

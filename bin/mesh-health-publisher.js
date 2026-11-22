@@ -150,7 +150,7 @@ async function getAgentStatus(home = os.homedir()) {
     const state = JSON.parse(raw);
     status.status = state.status || "idle";
     status.currentTask = state.taskId || null;
-    status.llm = state.llm || "claude";
+    status.llm = state.llm || null;
     status.model = state.model || null;
   } catch (err) {
     if (err.code !== "ENOENT") console.warn(`[health-publisher] read agent state: ${err.message}`);
@@ -409,4 +409,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { gatherHealth, getServices, resolveConfiguredRole, reconcileRole, LINUX_USER_SERVICES };
+module.exports = { gatherHealth, getServices, getAgentStatus, resolveConfiguredRole, reconcileRole, LINUX_USER_SERVICES };
