@@ -292,6 +292,16 @@ test('the retired npx openclaw-mesh layer is neither advertised nor run', () => 
   assert.doesNotMatch(code, /npx\s+(--yes\s+)?openclaw-mesh/);
 });
 
+// integrations.sh probed for a `mesh` binary nothing ships, then copied the mesh skill the
+// unconditional install below copies again; components.sh had a dry-run branch inside a
+// block that already requires ! $DRY_RUN.
+test('the install modules carry no dead mesh-CLI probe or unreachable dry-run branch', () => {
+  const integ = moduleSrc['integrations.sh'];
+  assert.doesNotMatch(integ, /openclaw\/bin\/mesh"/);
+  assert.equal(integ.split('\n').filter((l) => /^\s*run cp .*skills\/mesh\/SKILL\.md/.test(l)).length, 1);
+  assert.doesNotMatch(moduleSrc['components.sh'], /would start ollama/);
+});
+
 test('sync-to-harness is gone from the repo and an --update moves the installed copy out of bin/', () => {
   assert.equal(existsSync(join(ROOT, 'workspace-bin/sync-to-harness')), false);
   assert.match(readFileSync(join(ROOT, 'scripts/install/retired-files.txt'), 'utf8'), /^workspace-bin sync-to-harness$/m);

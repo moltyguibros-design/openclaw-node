@@ -25,24 +25,6 @@ else
 fi
 
 if $MESH_AVAILABLE; then
-  # Check if mesh is already deployed
-  if [ -x "$HOME/openclaw/bin/mesh" ] || command -v mesh >/dev/null 2>&1; then
-    info "Mesh CLI already installed"
-    # Update the mesh skill in the managed skills dir
-    if [ -f "$REPO_DIR/skills/mesh/SKILL.md" ]; then
-      run mkdir -p "$HOME/.openclaw/skills/mesh"
-      run cp "$REPO_DIR/skills/mesh/SKILL.md" "$HOME/.openclaw/skills/mesh/SKILL.md"
-      info "Mesh skill updated in ~/.openclaw/skills/mesh/"
-    fi
-  else
-    # The standalone `npx openclaw-mesh` fleet layer was retired (federation
-    # DECISIONS D4); the package name on the public registry is now owned by an
-    # unrelated third party, so running it here was a supply-chain hole. The mesh
-    # is served by this repo's own bin/mesh*.js and the rendered service units.
-    info "Mesh CLI not on PATH — mesh daemons are provided by the rendered service units"
-    info "and \$REPO_DIR/bin/mesh.js; nothing further to install here."
-  fi
-
   # Install mesh skill to managed location (tier 2: visible to all agents)
   if [ -f "$REPO_DIR/skills/mesh/SKILL.md" ]; then
     run mkdir -p "$HOME/.openclaw/skills/mesh"
