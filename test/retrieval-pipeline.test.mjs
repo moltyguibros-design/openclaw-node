@@ -725,4 +725,12 @@ describe('activationSearch on path-keyed graph nodes', () => {
     const graphCache = cacheOf([{ source_id: 'concepts/nats', target_id: 'themes/sqlite', weight: 1 }]);
     assert.deepEqual(activationSearch(extractionDb, knowledgeDb, graphCache, 'NATS'), []);
   });
+
+  it('session notes linking the seed do not use up the activation cut', () => {
+    const edges = Array.from({ length: 25 }, (_, i) => ({ source_id: `sessions/s${i}`, target_id: 'concepts/nats', weight: 1 }));
+    edges.push({ source_id: 'concepts/nats', target_id: 'concepts/sqlite', weight: 1 });
+    const results = activationSearch(extractionDb, knowledgeDb, cacheOf(edges), 'NATS');
+    assert.ok(results.length > 0);
+    assert.ok(results.every(r => r.session_id === 'session-002'), JSON.stringify(results));
+  });
 });
