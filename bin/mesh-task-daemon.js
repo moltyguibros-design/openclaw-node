@@ -3290,6 +3290,7 @@ if (require.main === module) {
     completeCirclingSession: (id) => completeCirclingSession(id),
     sweepCollabRoundTimeouts: () => sweepCollabRoundTimeouts(),
     sweepCirclingStepTimeouts: () => sweepCirclingStepTimeouts(),
+    computeNodeScopes: (nodes, scope, strategy) => computeNodeScopes(nodes, scope, strategy),
     handleCollabLeave: (msg) => handleCollabLeave(msg),
     handleFail: (msg) => handleFail(msg),
     // F1/R1 (test/mesh-lease-authz.test.js): the handlers a stranger on the bus reaches.
