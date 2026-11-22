@@ -164,6 +164,12 @@ describe('node-acceptance probes — network', () => {
     const ctx = baseCtx({ httpGet: async () => ({ status: 503, json: null }) });
     assert.equal((await probeById(ctx, 'NET-L2-JSZ').run()).status, VERDICT.FAIL);
   });
+  it('NET-L2-JSZ FAIL when jsz reports JetStream disabled', async () => {
+    const ctx = baseCtx({ httpGet: async () => ({ status: 200, json: { disabled: true, config: {}, memory: 0, storage: 0, streams: 0 } }) });
+    const r = await probeById(ctx, 'NET-L2-JSZ').run();
+    assert.equal(r.status, VERDICT.FAIL);
+    assert.match(r.detail, /disabled/);
+  });
   it('NET-L2-STREAM PASS when per-node stream exists', async () => {
     assert.equal((await probeById(baseCtx(), 'NET-L2-STREAM').run()).status, VERDICT.PASS);
   });

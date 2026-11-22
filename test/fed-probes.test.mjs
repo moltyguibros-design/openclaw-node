@@ -51,6 +51,11 @@ test('REGRESSION: R=3 with NO raft leader → BROKEN (quorum loss must be detect
 test('cluster quorum: jsz answered but unparseable → UNKNOWN, never green', () => {
   assert.equal(gradeClusterQuorum({ jszReachable: true, jszParsed: false }).status, FED_STATUS.UNKNOWN);
 });
+test('cluster quorum: JetStream disabled → BROKEN, never single-node WORKING', () => {
+  const v = gradeClusterQuorum({ jszReachable: true, jsDisabled: true, metaCluster: null });
+  assert.equal(v.status, FED_STATUS.BROKEN);
+  assert.match(v.detail, /JetStream disabled/);
+});
 
 // A real MESH_NODE_HEALTH row, captured verbatim from the live bucket
 // (2026-07-16T11:21Z). The publisher writes `nodeId` + `reportedAt` — NOT

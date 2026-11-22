@@ -714,6 +714,13 @@ describe('node-watch observed verdicts', () => {
     assert.equal((await target('ops.roadmap').run(envFor(up))).status, STATUS.WORKING);
   });
 
+  it('fed.cluster.quorum grades a JetStream-disabled server BROKEN, not single-node WORKING', async () => {
+    const off = makeCtx({ httpGet: async () => ({ status: 200, json: { disabled: true, config: {}, memory: 0, storage: 0, streams: 0 } }) });
+    const r = await target('fed.cluster.quorum').run(envFor(off));
+    assert.equal(r.status, STATUS.BROKEN);
+    assert.match(r.detail, /JetStream disabled/);
+  });
+
   it('quorum, bridge and viewer targets probe the endpoints the node env configures', async () => {
     const seen = [];
     const recording = (cfg) => makeCtx({ config: cfg, httpGet: async (u) => { seen.push(u); throw new Error('ECONNREFUSED'); } });

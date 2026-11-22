@@ -116,6 +116,12 @@ describe('node-acceptance federation axis (step 6.4)', () => {
     assert.match(r.detail, /network axis owns/);
   });
 
+  it('FED-L2-QUORUM: JetStream disabled → SKIP (network axis owns it), never single-node PASS', async () => {
+    const r = await fedProbe('FED-L2-QUORUM', { httpGet: jszOnly({ disabled: true, config: {}, memory: 0, storage: 0, streams: 0 }) }).run();
+    assert.equal(r.status, VERDICT.SKIP);
+    assert.match(r.detail, /network axis/);
+  });
+
   it('FED-L2-QUORUM: jsz answers but body unparseable → SKIP (unobservable), never PASS', async () => {
     const r = await fedProbe('FED-L2-QUORUM', {
       httpGet: async (url) => (url.includes('/jsz') ? { status: 200, json: null } : { status: 200, json: {} }),
