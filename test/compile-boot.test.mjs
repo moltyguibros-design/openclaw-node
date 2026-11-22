@@ -105,6 +105,41 @@ describe('compile-boot max_boot_tokens', { skip: !HAVE_PY_YAML && 'python3 with 
   });
 });
 
+function compileWithLessons(t, { vaultPath }) {
+  const ws = mkdtempSync(join(tmpdir(), 'compile-boot-lessons-'));
+  t.after(() => rmSync(ws, { recursive: true, force: true }));
+  mkdirSync(join(ws, 'bin'));
+  mkdirSync(join(ws, '.boot'));
+  copyFileSync(join(ROOT, 'workspace-bin', 'compile-boot'), join(ws, 'bin', 'compile-boot'));
+  writeFileSync(join(ws, 'AGENTS.md'), '# T\n\n## A\nx\n');
+  writeFileSync(join(ws, '.boot', 'manifest.yaml'), 'sections: {}\n');
+  const meta = join(ws, vaultPath || 'projects/arcane-vault', '00-meta');
+  mkdirSync(meta, { recursive: true });
+  writeFileSync(join(meta, 'shared-lessons.md'), '---\ntitle: t\n---\n- [error] lesson one\n');
+  const env = { ...process.env, HOME: ws, OPENCLAW_MC_URL: 'http://127.0.0.1:9', OPENCLAW_MC_TOKEN_FILE: join(ws, 'none') };
+  delete env.OPENCLAW_OBSIDIAN_SYNC_CONFIG;
+  if (vaultPath) {
+    const cfg = join(ws, 'obsidian-sync.json');
+    writeFileSync(cfg, JSON.stringify({ vaultPath }));
+    env.OPENCLAW_OBSIDIAN_SYNC_CONFIG = cfg;
+  }
+  return spawnSync('python3', [join(ws, 'bin', 'compile-boot'), '--profile', 'main'], { env, encoding: 'utf8' });
+}
+
+describe('compile-boot shared lessons', { skip: !HAVE_PY_YAML && 'python3 with PyYAML not available' }, () => {
+  it('reads shared-lessons.md under the vaultPath obsidian-sync writes it to', (t) => {
+    const r = compileWithLessons(t, { vaultPath: 'vaults/x' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /## Shared Lessons \(cross-soul\)\n- \[error\] lesson one/);
+  });
+
+  it('falls back to projects/arcane-vault without an obsidian-sync config', (t) => {
+    const r = compileWithLessons(t, { vaultPath: null });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /## Shared Lessons \(cross-soul\)\n- \[error\] lesson one/);
+  });
+});
+
 function compileShipped(t, profile) {
   const ws = mkdtempSync(join(tmpdir(), 'compile-boot-shipped-'));
   t.after(() => rmSync(ws, { recursive: true, force: true }));

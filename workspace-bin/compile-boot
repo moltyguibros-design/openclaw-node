@@ -19,6 +19,7 @@ Output goes to stdout by default, or to .boot/{profile}.compiled.md with --all.
 """
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -30,6 +31,17 @@ WORKSPACE = Path(__file__).resolve().parent.parent
 AGENTS_MD = WORKSPACE / "AGENTS.md"
 MANIFEST = WORKSPACE / ".boot" / "manifest.yaml"
 BOOT_DIR = WORKSPACE / ".boot"
+
+def obsidian_vault_path():
+    """The vaultPath obsidian-sync writes shared-lessons.md under."""
+    config = os.environ.get("OPENCLAW_OBSIDIAN_SYNC_CONFIG") or Path.home() / ".openclaw" / "config" / "obsidian-sync.json"
+    try:
+        vault_path = json.loads(Path(config).read_text()).get("vaultPath")
+        if vault_path:
+            return vault_path
+    except Exception:
+        pass
+    return "projects/arcane-vault"
 
 # ────────────────────────────────────────────────────────────
 # Markdown parser — extract sections by header
@@ -444,7 +456,6 @@ def main():
         token_path = Path(os.environ.get("OPENCLAW_MC_TOKEN_FILE") or Path.home() / ".openclaw" / "config" / "mc-session-token")
         req.add_header("Authorization", "Bearer " + token_path.read_text().strip())
         with urllib.request.urlopen(req, timeout=3) as resp:
-            import json
             data = json.loads(resp.read().decode())
             entity_block = data.get("block", "")
     except Exception as e:
@@ -452,7 +463,8 @@ def main():
 
     # Load shared lessons from vault (cross-soul propagation, non-blocking)
     shared_lessons_block = ""
-    vault_lessons = WORKSPACE / "projects" / "arcane-vault" / "00-meta" / "shared-lessons.md"
+    # lstrip: obsidian-sync's path.join(WORKSPACE, vaultPath) keeps even an absolute vaultPath inside the workspace.
+    vault_lessons = WORKSPACE / obsidian_vault_path().lstrip("/") / "00-meta" / "shared-lessons.md"
     if vault_lessons.exists():
         try:
             raw = vault_lessons.read_text()
