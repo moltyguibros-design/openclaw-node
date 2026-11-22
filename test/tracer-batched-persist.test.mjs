@@ -61,3 +61,12 @@ test('queued lines are written when the process exits', () => {
   db.close();
   assert.equal(n, 1);
 });
+
+test('the tracer keeps no in-memory event copy, and its docs name only the SQLite and NATS transports', () => {
+  const tracer = require('../lib/tracer.js');
+  assert.equal('getRecentEvents' in tracer, false);
+  assert.equal('getTotalEventCount' in tracer, false);
+  for (const rel of ['lib/tracer.js', 'lib/logger.js', 'docs/OBSERVABILITY.md', 'docs/logging-strategy.md']) {
+    assert.doesNotMatch(fs.readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8'), /ring buffer/i, rel);
+  }
+});
