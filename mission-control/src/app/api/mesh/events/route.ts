@@ -1,4 +1,4 @@
-import type { KvEntry, QueuedIterator } from "nats";
+import { KvWatchInclude, type KvEntry, type QueuedIterator } from "nats";
 import { getNats, getTasksKv, sc } from "@/lib/nats";
 
 export const dynamic = "force-dynamic";
@@ -7,7 +7,8 @@ export const dynamic = "force-dynamic";
  * MANUAL VERIFICATION PROTOCOL (SSE dual-iterator cleanup):
  *
  * The zombie watcher leak is the highest-risk bug in this route.
- * It cannot be unit tested (no real HTTP server in Vitest).
+ * mesh-events-route.test.ts covers only the cancel() wiring against mocks;
+ * the real subscription count needs a live server.
  *
  * To verify after deployment:
  * 1. Open MC on worker node in browser
@@ -29,7 +30,7 @@ export const dynamic = "force-dynamic";
  * SSE endpoint: dual-iterator (NATS pub/sub + KV watcher).
  *
  * Iterator 1: NATS subscription on mesh.events.> (task lifecycle events)
- * Iterator 2: KV watcher on MESH_TASKS (real-time task state changes)
+ * Iterator 2: KV watcher on MESH_TASKS (task state changes after connect; no replay)
  *
  * Both feed into a single SSE stream. On client disconnect, both are cleaned up.
  */
@@ -85,27 +86,19 @@ export async function GET() {
       // Iterator 2: KV watcher (task state changes)
       if (kv) {
         try {
-          watcher = await kv.watch();
+          watcher = await kv.watch({ include: KvWatchInclude.UpdatesOnly });
           (async () => {
             try {
               for await (const entry of watcher) {
                 if (closed) break;
-                try {
-                  const task = entry.value
-                    ? JSON.parse(sc.decode(entry.value))
-                    : null;
-                  const payload = JSON.stringify({
-                    key: entry.key,
-                    operation: entry.value ? "PUT" : "DEL",
-                    task,
-                    revision: entry.revision,
-                  });
-                  controller.enqueue(
-                    encoder.encode(`event: kv.task.updated\ndata: ${payload}\n\n`)
-                  );
-                } catch {
-                  // skip malformed
-                }
+                const payload = JSON.stringify({
+                  key: entry.key,
+                  operation: entry.operation === "PUT" ? "PUT" : "DEL",
+                  revision: entry.revision,
+                });
+                controller.enqueue(
+                  encoder.encode(`event: kv.task.updated\ndata: ${payload}\n\n`)
+                );
               }
             } catch {
               // watcher ended
