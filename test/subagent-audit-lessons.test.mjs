@@ -21,7 +21,17 @@ test('an auto-extracted failure lesson is written in the MEMORY_SPEC form and ke
   const written = fs.readFileSync(path.join(root, '.learnings', 'lessons.md'), 'utf8').trim();
   assert.match(written, /^\[error\] .+ \(\d{4}-\d{2}-\d{2}\)$/);
   const [lesson] = parseLessons(written, 'n');
-  assert.equal(lesson.date, new Date().toISOString().split('T')[0]);
+  assert.match(lesson.date, /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test('an auto-extracted lesson is dated in the node\'s time zone, not UTC', async (t) => {
+  const saved = process.env.OPENCLAW_TIMEZONE;
+  t.after(() => { if (saved === undefined) delete process.env.OPENCLAW_TIMEZONE; else process.env.OPENCLAW_TIMEZONE = saved; });
+  process.env.OPENCLAW_TIMEZONE = 'America/Montreal';
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-22T03:00:00Z') });
+  await processResults([{ result: 'failure', soulId: 's', errorPattern: 'late evening', turnsConsumed: 1, taskDescription: 't' }]);
+  const last = fs.readFileSync(path.join(root, '.learnings', 'lessons.md'), 'utf8').trim().split('\n').pop();
+  assert.match(last, /late evening .*\(2026-11-21\)$/);
 });
 
 test('the CLI the daemon runs reports only; trust-registry and lessons are written only with --apply', () => {

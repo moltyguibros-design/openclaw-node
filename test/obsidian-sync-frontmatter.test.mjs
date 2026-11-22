@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import yaml from 'js-yaml';
 import { injectFrontmatter } from '../workspace-bin/obsidian-sync.mjs';
 
@@ -29,6 +30,18 @@ describe('obsidian-sync injectFrontmatter', () => {
     assert.equal(meta.created, '2026-01-05');
     assert.match(meta.updated, /^\d{4}-\d{2}-\d{2}$/);
     assert.doesNotMatch(raw, /T\d\d:\d\d/);
+  });
+
+  it('dates frontmatter in the node\'s time zone, not UTC', (t) => {
+    const saved = process.env.OPENCLAW_TIMEZONE;
+    t.after(() => { if (saved === undefined) delete process.env.OPENCLAW_TIMEZONE; else process.env.OPENCLAW_TIMEZONE = saved; });
+    process.env.OPENCLAW_TIMEZONE = 'America/Montreal';
+    t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-22T03:00:00Z') });
+    const { meta } = frontmatterOf(injectFrontmatter('body\n', { title: 'x' }));
+    assert.equal(meta.updated, '2026-11-21');
+    assert.equal(meta.created, '2026-11-21');
+    const src = fs.readFileSync(new URL('../workspace-bin/obsidian-sync.mjs', import.meta.url), 'utf8');
+    assert.doesNotMatch(src, /toISOString\(\)\.split\('T'\)\[0\]/, 'index pages and shared-lessons.md use the same local date');
   });
 
   it('adds frontmatter to a file without one', () => {

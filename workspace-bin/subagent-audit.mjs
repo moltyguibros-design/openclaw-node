@@ -254,7 +254,7 @@ export async function processResults(resultsList, dryRun = false) {
 
       // Append failures to lessons
       if (r.result === 'failure' && r.errorPattern) {
-        const today = new Date().toISOString().split('T')[0];
+        const today = new Date().toLocaleDateString('en-CA', { timeZone: process.env.OPENCLAW_TIMEZONE || process.env.TZ || 'America/Montreal' });
         const entry = `[error] Sub-agent ${r.soulId} failed: ${r.errorPattern} (auto-extracted) (${today})\n`;
         if (!knownLessons) {
           let existing = '';
