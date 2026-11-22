@@ -7,6 +7,8 @@
  * No external dependencies — runs with node:test.
  */
 
+process.env.OPENCLAW_OBS_DB = ":memory:";
+
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const { createTask, TaskStore, TASK_STATUS, DEFAULT_MAX_REJECTIONS, DEFAULT_MAX_LEASE_REQUEUES } = require("../lib/mesh-tasks");

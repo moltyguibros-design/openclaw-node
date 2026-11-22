@@ -12,6 +12,7 @@ const ws = tmpDir('mesh-mem-');
 writeFileSync(join(ws, 'MEMORY.md'), '- [Test memory](t.md) — the node remembers project ZED-9.');
 process.env.MESH_WORKSPACE = ws;
 process.env.MESH_MEMORY_RECALL = 'off'; // deterministic fallback (this host has a live inject-server)
+process.env.OPENCLAW_OBS_DB = ':memory:';
 
 const require = createRequire(import.meta.url);
 const m = require('../bin/mesh-agent.js');

@@ -9,6 +9,8 @@
  * Run: node --test test/mesh-plans.test.js
  */
 
+process.env.OPENCLAW_OBS_DB = ':memory:';
+
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const {

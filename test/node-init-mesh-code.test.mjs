@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+process.env.OPENCLAW_OBS_DB = ':memory:';
 const { installMeshCode } = require('../bin/openclaw-node-init.js');
 
 const tmp = mkdtempSync(join(tmpdir(), 'node-init-mesh-'));

@@ -8,6 +8,8 @@
  * Run: node --test test/nats-resolve.test.js
  */
 
+process.env.OPENCLAW_OBS_DB = ':memory:';
+
 const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
