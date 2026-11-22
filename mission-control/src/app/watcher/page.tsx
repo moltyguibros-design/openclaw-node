@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Activity, AlertTriangle, Bell, Database, HardDrive } from "lucide-react";
 import { useWatcher, useMemoryContent, WatcherEvent, WatcherAlert, WatcherHealth } from "@/lib/hooks";
+import { watcherViews } from "@/lib/watcher-view";
 
 function statusColor(status?: string): string {
   if (status === "error") return "text-red-400";
@@ -447,15 +448,10 @@ function AlertRow({ alert }: { alert: WatcherAlert }) {
 export default function WatcherPage() {
   const [view, setView] = useState<"stream" | "failures" | "alerts">("stream");
 
-  const { events: allEvents, alerts, health, isLoading, source } = useWatcher(100);
+  const { events, alerts, health, isLoading, source } = useWatcher(500);
   // The server's ~/.openclaw: watcher.jsonl sits at its root.
   const openclawRoot = source.slice(0, source.lastIndexOf("/"));
-  const { events: failureEvents } = useWatcher(100, "noop");
-  const { events: errorEvents } = useWatcher(50, "error");
-
-  const failures = [...failureEvents, ...errorEvents]
-    .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
-    .slice(0, 100);
+  const { stream: allEvents, failures } = watcherViews(events);
 
   return (
     <div className="h-full flex flex-col bg-background text-foreground">
