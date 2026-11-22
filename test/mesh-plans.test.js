@@ -106,6 +106,16 @@ describe('createPlan', () => {
     });
     assert.equal(plan.subtasks[0].budget_minutes, 15); // parseInt fallback
   });
+
+  it('a non-positive subtask budget takes the default, a fraction is kept', () => {
+    const plan = createPlan({
+      parent_task_id: 'T-005',
+      title: 'Odd budgets',
+      subtasks: [{ title: 'A', budget_minutes: -3 }, { title: 'B', budget_minutes: 2.5 }, { title: 'C', budget_minutes: 0 }],
+    });
+    assert.deepEqual(plan.subtasks.map((s) => s.budget_minutes), [15, 2.5, 15]);
+    assert.equal(plan.total_budget_minutes, 32.5);
+  });
 });
 
 // ── assignWaves ──

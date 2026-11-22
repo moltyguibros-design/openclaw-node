@@ -66,6 +66,17 @@ describe("createTask()", () => {
     assert.equal(task.budget_minutes, 30);
   });
 
+  it("budget_minutes: a non-positive or unparseable budget takes the default, fractions are kept", () => {
+    const budget = (v) => createTask({ task_id: "b", title: "b", budget_minutes: v }).budget_minutes;
+    assert.equal(budget(-5), 30);
+    assert.equal(budget(0), 30);
+    assert.equal(budget("abc"), 30);
+    assert.equal(budget(undefined), 30);
+    assert.equal(budget("45m"), 45);
+    assert.equal(budget(1.5), 1.5);
+    assert.equal(budget(0.5), 0.5);
+  });
+
   it("overrides defaults when provided", () => {
     const task = createTask({
       task_id: "T-003",

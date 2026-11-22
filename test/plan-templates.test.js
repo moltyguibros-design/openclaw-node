@@ -204,6 +204,15 @@ describe('instantiateTemplate', () => {
     assert.ok(impl.delegation.mode !== 'auto', 'auto should be resolved by autoRoutePlan');
   });
 
+  it('a non-positive template budget takes the default, a fraction is kept', () => {
+    const template = {
+      id: 'odd-budgets',
+      phases: [{ subtasks: [{ id: 'neg', title: 'neg', budget_minutes: -1 }, { id: 'frac', title: 'frac', budget_minutes: 1.5 }] }],
+    };
+    const plan = instantiateTemplate(template, 'x');
+    assert.deepStrictEqual(plan.subtasks.map(s => s.budget_minutes), [15, 1.5]);
+  });
+
   it('marks critical subtasks', () => {
     const dir = path.join(__dirname, '..', 'config', 'plan-templates');
     const template = loadTemplate(path.join(dir, 'team-feature.yaml'));
