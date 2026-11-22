@@ -128,4 +128,23 @@ describe('skill-batch-fix', { skip: !HAVE_PY && 'python3 not available' }, () =>
     assert.doesNotMatch(fm, /^ +triggers:/m);
     assert.doesNotMatch(fm, /triggers: \[\]/);
   });
+
+  it('--skills-dir points it at another skills tree and a missing one is a clear error', () => {
+    const root = tmpDir('skill-batch-fix-');
+    const skill = join(root, 'skills', 'x');
+    mkdirSync(skill, { recursive: true });
+    writeFileSync(join(skill, 'SKILL.md'),
+      ['---', 'name: x', 'description: "Makes x. Use when x is needed."', '---', '# Body', ''].join('\n'));
+    const run = (...args) => spawnSync('python3', ['-B', BATCH, ...args],
+      { encoding: 'utf8', env: { ...process.env, HOME: join(root, 'home') } });
+
+    const missing = run('--skills-dir', join(root, 'missing'), '--json');
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /skills directory not found/);
+    assert.doesNotMatch(missing.stderr, /Traceback/);
+
+    const r = run('--skills-dir', join(root, 'skills'), '--skill', 'x', '--fix', 'triggers', '--apply', '--json');
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(readFileSync(join(skill, 'SKILL.md'), 'utf8'), /^triggers:\n {2}- "/m);
+  });
 });

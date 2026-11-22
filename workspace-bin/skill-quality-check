@@ -13,7 +13,7 @@ CACHE_FILE="${CACHE_DIR}/last-skill-audit.json"
 mkdir -p "$CACHE_DIR"
 
 # Run current audit
-if ! CURRENT=$(python3 "${SCRIPT_DIR}/skill-audit" --json 2>/dev/null); then
+if ! CURRENT=$(python3 "${SCRIPT_DIR}/skill-audit" --json --skills-dir "${WORKSPACE}/skills" 2>/dev/null); then
   echo "ERROR: skill-audit failed"
   exit 1
 fi

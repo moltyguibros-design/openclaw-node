@@ -11,8 +11,8 @@
 set -euo pipefail
 
 WORKSPACE="$(cd "$(dirname "$0")/.." && pwd)"
-SOULS_DIR="${HOME}/.openclaw/souls"
-HANDOFFS_DIR="${HOME}/.openclaw/workspace/memory-vault/handoffs"
+SOULS_DIR="$(dirname "$WORKSPACE")/souls"
+HANDOFFS_DIR="${WORKSPACE}/memory-vault/handoffs"
 
 # --- Parse args ---
 SOUL_ID=""

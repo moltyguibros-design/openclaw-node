@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -24,9 +24,15 @@ function workspace(t, { prevGrade, currGrade }) {
   mkdirSync(bin);
   mkdirSync(join(ws, '.tmp'));
   copyFileSync(SCRIPT, join(bin, 'skill-quality-check'));
-  writeFileSync(join(bin, 'skill-audit'), `import json\nprint(json.dumps(${JSON.stringify(audit(currGrade))}))\n`);
+  const argv = join(ws, 'audit-argv.json');
+  writeFileSync(join(bin, 'skill-audit'), [
+    'import json, sys',
+    `json.dump(sys.argv[1:], open(${JSON.stringify(argv)}, 'w'))`,
+    `print(json.dumps(${JSON.stringify(audit(currGrade))}))`,
+    '',
+  ].join('\n'));
   writeFileSync(join(ws, '.tmp', 'last-skill-audit.json'), JSON.stringify(audit(prevGrade)));
-  return { ws, cache: join(ws, '.tmp', 'last-skill-audit.json') };
+  return { ws, cache: join(ws, '.tmp', 'last-skill-audit.json'), argv };
 }
 
 function run(ws) {
@@ -54,6 +60,15 @@ describe('skill-quality-check', { skip: !HAVE_PY && 'python3 not available' }, (
     const r = run(w.ws);
     assert.equal(r.stdout, '');
     assert.deepEqual(JSON.parse(readFileSync(w.cache, 'utf8')), audit('A'));
+  });
+
+  it("audits its own workspace's skills dir, not ~/.openclaw's", t => {
+    const w = workspace(t, { prevGrade: 'A', currGrade: 'A' });
+    run(w.ws);
+    const argv = JSON.parse(readFileSync(w.argv, 'utf8'));
+    const i = argv.indexOf('--skills-dir');
+    assert.ok(i >= 0, JSON.stringify(argv));
+    assert.equal(resolve(argv[i + 1]), join(w.ws, 'skills'));
   });
 
   it('has no unread PREV_AVG and no capability-evolver reference', () => {

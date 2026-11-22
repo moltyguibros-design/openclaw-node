@@ -7,6 +7,7 @@ import { WORKSPACE_ROOT } from "@/lib/config";
 const execFileAsync = promisify(execFile);
 
 const SKILL_AUDIT = path.join(WORKSPACE_ROOT, "bin", "skill-audit");
+const SKILLS_DIR = path.join(WORKSPACE_ROOT, "skills");
 
 let cache: { data: unknown; ts: number } | null = null;
 const CACHE_TTL = 60_000; // 60 seconds
@@ -22,7 +23,7 @@ export async function GET() {
   }
 
   try {
-    const { stdout } = await execFileAsync("python3", [SKILL_AUDIT, "--json"], {
+    const { stdout } = await execFileAsync("python3", [SKILL_AUDIT, "--json", "--skills-dir", SKILLS_DIR], {
       timeout: 15_000,
       cwd: WORKSPACE_ROOT,
     });

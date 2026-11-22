@@ -18,8 +18,9 @@ function run(t, registry, { soulId = 'probe', registryJson, caps, genes, taskId,
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soul-prompt-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const home = path.join(root, 'home');
-  const ws = path.join(home, '.openclaw/workspace');
-  const soulDir = path.join(home, '.openclaw/souls', soulId);
+  const ws = path.join(root, 'oc/workspace');
+  const soulDir = path.join(root, 'oc/souls', soulId);
+  fs.mkdirSync(home);
   fs.mkdirSync(soulDir, { recursive: true });
   if (caps !== undefined) fs.writeFileSync(path.join(soulDir, 'capabilities.json'), asJson(caps));
   if (genes !== undefined) {

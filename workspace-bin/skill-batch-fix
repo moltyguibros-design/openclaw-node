@@ -15,6 +15,7 @@ Usage:
     bin/skill-batch-fix --apply            # apply all fixes
     bin/skill-batch-fix --skill github     # single skill
     bin/skill-batch-fix --fix triggers     # only fix triggers
+    bin/skill-batch-fix --skills-dir DIR   # another skills tree (default ~/.openclaw/workspace/skills)
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import json
 import argparse
 from pathlib import Path
 
-SKILLS_DIR = Path.home() / ".openclaw" / "workspace" / "skills"
+DEFAULT_SKILLS_DIR = Path.home() / ".openclaw" / "workspace" / "skills"
 
 # ── Trigger generation ────────────────────────────────────────────────────────
 
@@ -352,13 +353,19 @@ def main():
     parser.add_argument("--fix", choices=["name", "description", "triggers", "negative_triggers", "readme", "references"],
                         help="Only apply this fix type")
     parser.add_argument("--json", action="store_true", help="JSON output")
+    parser.add_argument("--skills-dir", default=str(DEFAULT_SKILLS_DIR), help="Skills directory")
     args = parser.parse_args()
 
+    skills_dir = Path(args.skills_dir)
+    if not skills_dir.is_dir():
+        print(f"ERROR: skills directory not found: {skills_dir}", file=sys.stderr)
+        sys.exit(1)
+
     if args.skill:
-        skill_dirs = [SKILLS_DIR / args.skill]
+        skill_dirs = [skills_dir / args.skill]
     else:
         skill_dirs = sorted(
-            [d for d in SKILLS_DIR.iterdir() if d.is_dir() and (d / "SKILL.md").exists()],
+            [d for d in skills_dir.iterdir() if d.is_dir() and (d / "SKILL.md").exists()],
             key=lambda d: d.name,
         )
 
