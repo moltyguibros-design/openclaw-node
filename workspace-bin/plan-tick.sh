@@ -360,12 +360,6 @@ if [ -f "${BLOCK_FILE}" ] || [ "${POST_VERSION}" != "${VERSION:-}" ]; then
   rm -f "${FAIL_FILE}"
 fi
 
-if [ -f "${BLOCK_FILE}" ]; then
-  TRIG=$(grep -m1 '^\*\*Trigger\*\*:' "${BLOCK_FILE}" 2>/dev/null | sed 's/^\*\*Trigger\*\*: //' | cut -c1-120)
-  printf -- '- `%s` BLOCKED at `%s` — %s\n' "$(ts)" "${POST_VERSION}" "${TRIG:-see BLOCKED.md}" >> "${DIGEST_FILE}"
-  log "tick blocked — see ${BLOCK_FILE}"; exit 2
-fi
-
 # ── Close gate (mechanical done-contract, MASTER_PLAN §5) ────────────────────
 # Before: the wrapper declared a step "closed" because the VERSION string changed
 # to something without -pre/-mid — a self-written string, no tests, no evidence
@@ -396,7 +390,15 @@ close_gate() {
     fi
   fi
   [ "${#reasons[@]}" -eq 0 ] && return 0
-  if [ ! -f "${BLOCK_FILE}" ]; then
+  # A run can close its step and then block in the macro re-orient: keep the agent's
+  # block (its External action stays the headline) and add the refusal below it.
+  if [ -f "${BLOCK_FILE}" ]; then
+    {
+      printf '\n## Close gate refused (post-tick wrapper gate, %s)\n\n' "$(ts)"
+      printf -- '- %s\n' "${reasons[@]}"
+      printf '\nThe tick advanced VERSION %s → %s but the done-contract does not hold: supply the evidence or revert the close before resuming.\n' "${VERSION:-?}" "${POST_VERSION}"
+    } >> "${BLOCK_FILE}"
+  else
     {
       printf '# CONTINUATION_BLOCKED — %s\n\n' "$(ts)"
       printf '**Step**: %s\n' "$(printf '%s' "${NEXT}" | awk -F'|' '{print $2": "$3}')"
@@ -410,13 +412,25 @@ close_gate() {
   return 1
 }
 
+# Ahead of the BLOCKED.md exit, so a run that closed and then blocked is graded too.
+CLOSED=0
 if [ "${POST_VERSION}" != "${VERSION:-}" ] && printf '%s' "${POST_VERSION}" | grep -qvE -- '-pre$|-mid$'; then
   if close_gate; then
-    printf -- '- `%s` closed `%s` — %s\n' "$(ts)" "${POST_VERSION}" "${LATEST_COMMIT}" >> "${DIGEST_FILE}"
+    CLOSED=1
   else
     printf -- '- `%s` CLOSE REFUSED at `%s` — see BLOCKED.md\n' "$(ts)" "${POST_VERSION}" >> "${DIGEST_FILE}"
     log "close gate refused — see ${BLOCK_FILE}"; exit 2
   fi
+fi
+
+if [ -f "${BLOCK_FILE}" ]; then
+  TRIG=$(grep -m1 '^\*\*Trigger\*\*:' "${BLOCK_FILE}" 2>/dev/null | sed 's/^\*\*Trigger\*\*: //' | cut -c1-120)
+  printf -- '- `%s` BLOCKED at `%s` — %s\n' "$(ts)" "${POST_VERSION}" "${TRIG:-see BLOCKED.md}" >> "${DIGEST_FILE}"
+  log "tick blocked — see ${BLOCK_FILE}"; exit 2
+fi
+
+if [ "${CLOSED}" = 1 ]; then
+  printf -- '- `%s` closed `%s` — %s\n' "$(ts)" "${POST_VERSION}" "${LATEST_COMMIT}" >> "${DIGEST_FILE}"
 elif [ "${POST_VERSION}" != "${VERSION:-}" ]; then
   printf -- '- `%s` progress: `%s` → `%s`\n' "$(ts)" "${VERSION:-?}" "${POST_VERSION}" >> "${DIGEST_FILE}"
 fi

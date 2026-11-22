@@ -516,7 +516,7 @@ describe('plan-tick close gate — the commit that closed VERSION must carry the
   const GIT = 'git -c user.name=t -c user.email=t@t';
   let n = 0;
 
-  function closeTick(claudeBody) {
+  function closeTick(claudeBody, extraEnv = {}) {
     const root = path.join(tmp, `closerepo${++n}`);
     const plan = path.join(root, 'memory-plan', 'plans', ID);
     fs.mkdirSync(plan, { recursive: true });
@@ -539,10 +539,12 @@ describe('plan-tick close gate — the commit that closed VERSION must carry the
     fs.mkdirSync(home);
     // Not process.env: this suite runs inside a real tick's close gate, and
     // WORKPLAN_CLOSE_CHECK=none keeps the stub tick from running the suite again.
-    const env = { PATH: `${bin}:${process.env.PATH}`, HOME: home, TMPDIR: tmp, WORKPLAN_CLOSE_CHECK: 'none' };
+    const env = { PATH: `${bin}:${process.env.PATH}`, HOME: home, TMPDIR: tmp, WORKPLAN_CLOSE_CHECK: 'none', ...extraEnv };
     const r = spawnSync('bash', [path.join(root, 'workspace-bin', 'plan-tick.sh'), ID], { encoding: 'utf8', env });
     const blockPath = path.join(plan, 'BLOCKED.md');
-    return { r, block: fs.existsSync(blockPath) ? fs.readFileSync(blockPath, 'utf8') : null };
+    const digestPath = path.join(home, '.openclaw', 'workspace', 'memory', `${ID}-progress.md`);
+    return { r, block: fs.existsSync(blockPath) ? fs.readFileSync(blockPath, 'utf8') : null,
+      digest: fs.existsSync(digestPath) ? fs.readFileSync(digestPath, 'utf8') : '' };
   }
 
   it('refuses a close whose VERSION bump was never committed', () => {
@@ -571,6 +573,32 @@ describe('plan-tick close gate — the commit that closed VERSION must carry the
     ].join('\n'));
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.equal(block, null, block ?? '');
+  });
+
+  describe('a closing run that also wrote BLOCKED.md', () => {
+    const AGENT_BLOCK = '# CONTINUATION_BLOCKED\n\n**Trigger**: macro re-orient\n';
+    const closeAndBlock = [
+      `printf 'v1.1\\n' > memory-plan/plans/${ID}/VERSION`,
+      `${GIT} commit -qam $'v1.1 close\\n\\nRuntime-Evidence: observed'`,
+      `printf '# CONTINUATION_BLOCKED\\n\\n**Trigger**: macro re-orient\\n' > memory-plan/plans/${ID}/BLOCKED.md`,
+    ].join('\n');
+
+    it('still runs the close check, and a red one is appended to the agent block', () => {
+      const { r, block, digest } = closeTick(closeAndBlock, { WORKPLAN_CLOSE_CHECK: 'false' });
+      assert.equal(r.status, 2, r.stdout + r.stderr);
+      assert.ok(block.startsWith(AGENT_BLOCK), block);
+      assert.match(block, /## Close gate refused/);
+      assert.match(block, /close check 'false' failed/);
+      assert.match(digest, /CLOSE REFUSED at `v1\.1`/);
+    });
+
+    it('leaves the agent block as written when the close check is green', () => {
+      const { r, block, digest } = closeTick(closeAndBlock, { WORKPLAN_CLOSE_CHECK: 'true' });
+      assert.equal(r.status, 2, r.stdout + r.stderr);
+      assert.equal(block, AGENT_BLOCK);
+      assert.match(digest, /BLOCKED at `v1\.1` — macro re-orient/);
+      assert.doesNotMatch(digest, /CLOSE REFUSED/);
+    });
   });
 });
 
