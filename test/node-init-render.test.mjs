@@ -9,7 +9,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFileSync, readdirSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -109,6 +109,19 @@ describe('node-init renders the shared service templates', () => {
       }
     }
     for (const v of used) assert.ok(SERVICE_TEMPLATE_VARS.includes(v), `template variable ${v} is not rendered by node-init`);
+  });
+
+  // The agent spawns its provider CLI by name; nvm/fnm/volta npm -g bins and Claude Code's
+  // native installer land in the node dir and ~/.local/bin. Appended, so nothing found today moves.
+  it('the mesh-agent PATH reaches the installer node dir and ~/.local/bin, after the dirs it already had', () => {
+    assert.ok(SERVICE_TEMPLATE_VARS.includes('NODE_BIN_DIR'));
+    const tail = `:${dirname(process.execPath)}:${homedir()}/.local/bin`;
+    const unitPath = renderAgent('systemd/openclaw-mesh-agent.service').match(/^Environment=PATH=(.*)$/m)[1];
+    const plistPath = renderAgent('launchd/ai.openclaw.mesh-agent.plist').match(/<key>PATH<\/key>\s*<string>([^<]*)<\/string>/)[1];
+    for (const p of [unitPath, plistPath]) {
+      assert.ok(p.endsWith(tail), p);
+      assert.match(p, /^[^:]*\/\.npm-global\/bin:/);
+    }
   });
 
   it('never writes the legacy second listener name', () => {

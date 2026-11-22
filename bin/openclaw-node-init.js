@@ -579,7 +579,7 @@ function installService(osInfo, meshDir, config) {
 // services/{launchd,systemd} templates install.sh renders, with the same
 // ${VAR} substitution, and retires the legacy second listener.
 const SERVICE_TEMPLATE_VARS = [
-  'HOME', 'NODE_BIN', 'NPM_BIN', 'NATS_SERVER_BIN', 'OPENCLAW_WORKSPACE', 'OPENCLAW_REPO_DIR',
+  'HOME', 'NODE_BIN', 'NODE_BIN_DIR', 'NPM_BIN', 'NATS_SERVER_BIN', 'OPENCLAW_WORKSPACE', 'OPENCLAW_REPO_DIR',
   'OPENCLAW_NATS', 'OPENCLAW_NATS_TOKEN', 'OPENCLAW_NODE_ID', 'OPENCLAW_NODE_ROLE',
   'OPENCLAW_DEPLOY_TRUSTED_KEYS', 'MESH_LLM_PROVIDER', 'LLM_MODEL', 'LLM_BASE_URL',
   'MESH_FOREMAN_ENFORCE', 'OPENCLAW_TIMEZONE',
@@ -593,6 +593,7 @@ function serviceTemplateVars({ meshDir, nodeId, config }) {
   return {
     HOME: home,
     NODE_BIN: process.execPath,
+    NODE_BIN_DIR: path.dirname(process.execPath),
     NPM_BIN: env.NPM_BIN || path.join(path.dirname(process.execPath), 'npm'),
     NATS_SERVER_BIN: env.NATS_SERVER_BIN || '/usr/local/bin/nats-server',
     OPENCLAW_WORKSPACE: env.OPENCLAW_WORKSPACE || path.join(home, '.openclaw', 'workspace'),
