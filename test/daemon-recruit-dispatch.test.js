@@ -38,9 +38,9 @@ function makeContext() {
   const published = [];
   const store = {
     async get() { return { title: 'repro task', description: 'd', scope: [] }; },
-    async markReleased(taskId, reason) { released.push({ taskId, reason }); },
-    async markFailed(taskId, reason) { failed.push({ taskId, reason }); },
-    async markCompleted(taskId, result) { completed.push({ taskId, result }); },
+    async markReleased(taskId, reason) { released.push({ taskId, reason }); return { task_id: taskId, status: 'released' }; },
+    async markFailed(taskId, reason) { failed.push({ taskId, reason }); return { task_id: taskId, status: 'failed' }; },
+    async markCompleted(taskId, result) { completed.push({ taskId, result }); return { task_id: taskId, status: 'completed' }; },
   };
   const nc = { publish(subject) { published.push(subject); }, request: async () => ({}) };
   daemon.__test.setContext({ collabStore, store, nc });
@@ -94,6 +94,7 @@ describe('startRecruitedSession — the ONE dispatch both close paths share', ()
     assert.equal(after.rounds.length, 0, 'no legacy round was started');
     assert.equal(ctx.released.length, 1, 'parent task released');
     assert.match(ctx.released[0].reason, /not yet implemented/);
+    assert.ok(ctx.published.includes('mesh.events.released'), 'the bridge hears the release');
   });
 
   it('deadline-close below min_nodes: aborts + releases (sweep semantics preserved)', async () => {
@@ -114,6 +115,7 @@ describe('startRecruitedSession — the ONE dispatch both close paths share', ()
     const after = await ctx.collabStore.get(session.session_id);
     assert.equal(after.status, COLLAB_STATUS.ABORTED);
     assert.equal(ctx.released.length, 1);
+    assert.ok(ctx.published.includes('mesh.events.released'), 'the bridge hears the release');
   });
 
   it('idempotent: a second close attempt (join+sweep race) no-ops', async () => {
@@ -156,6 +158,7 @@ describe('circling step timeout', () => {
     assert.equal((await ctx.collabStore.get(id)).status, COLLAB_STATUS.ABORTED);
     assert.deepEqual(ctx.released.map((r) => r.taskId), ['task-circ']);
     assert.ok(ctx.published.includes('mesh.events.collab.aborted'));
+    assert.ok(ctx.published.includes('mesh.events.released'), 'the bridge hears the release');
     assert.deepEqual(ctx.completed, []);
   };
 

@@ -43,9 +43,10 @@ function makeContext({ alive = new Set() } = {}) {
     _tasks: tasks,
   };
   const published = [];
+  const payloads = [];
   // An agent answers the alive check only when it is still working on that task.
   const nc = {
-    publish(subject) { published.push(subject); },
+    publish(subject, data) { published.push(subject); payloads.push({ subject, data }); },
     request: async (subject) => {
       const node = /^mesh\.agent\.(.+)\.alive$/.exec(subject)?.[1];
       if (node && alive.has(node)) return { data: new TextEncoder().encode(JSON.stringify({ alive: true })) };
@@ -53,7 +54,7 @@ function makeContext({ alive = new Set() } = {}) {
     },
   };
   daemon.__test.setContext({ collabStore, store, nc, planStore: { list: async () => [] } });
-  return { collabStore, store, failed, completed, released, published };
+  return { collabStore, store, failed, completed, released, published, payloads };
 }
 
 async function activeSession(collabStore, spec, nodeIds, { setup } = {}) {
@@ -355,6 +356,20 @@ describe('round timeout for parallel / review / sequential (mesh-core #9)', () =
     assert.equal(after.current_turn, 'c');
     assert.deepEqual(after.turn_order, ['a', 'c']);
     assert.ok(ctx.published.includes(`mesh.collab.${s.session_id}.node.c.round`));
+  });
+
+  it('a leave that drops an active session below min_nodes fails the parent task and announces it', async (t) => {
+    quiet(t);
+    const ctx = makeContext();
+    const s = await activeSession(ctx.collabStore, { mode: 'parallel' }, ['a', 'b', 'c']);
+    const { token, hash } = issueMemberToken();
+    await ctx.collabStore._updateWithCAS(s.session_id, (sess) => { sess.nodes.find(n => n.node_id === 'b').token_hash = hash; return sess; });
+    await daemon.__test.handleCollabLeave(msg({ session_id: s.session_id, node_id: 'b', member_token: token, reason: 'gone' }));
+    assert.equal((await ctx.collabStore.get(s.session_id)).status, COLLAB_STATUS.ABORTED);
+    assert.deepEqual(ctx.failed.map(f => f.id), [s.task_id]);
+    assert.ok(ctx.published.includes('mesh.events.failed'), 'the bridge hears the failure');
+    const aborted = ctx.payloads.find(p => p.subject === 'mesh.events.collab.aborted');
+    assert.equal(JSON.parse(new TextDecoder().decode(aborted.data)).session.status, COLLAB_STATUS.ABORTED);
   });
 });
 
