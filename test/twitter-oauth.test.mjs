@@ -95,3 +95,53 @@ describe('twitter.sh OAuth 1.0a signatures', { skip: !HAVE_TOOLS && 'openssl or 
     assert.equal(run(['post', 'hi']), expectedSignature('POST', 'https://api.x.com/2/tweets'));
   });
 });
+
+describe('twitter.sh api_get errors', { skip: !HAVE_TOOLS && 'openssl or jq not available' }, () => {
+  function fail(code, args) {
+    const dir = tmpDir('twitter-get-');
+    const count = join(dir, 'calls');
+    writeFileSync(join(dir, 'curl'), [
+      '#!/usr/bin/env bash',
+      'echo call >> "$COUNT"',
+      'prev=""',
+      'for a in "$@"; do',
+      '  [ "$prev" = -D ] && printf "HTTP/2 %s\\r\\nX-Rate-Limit-Reset: 1700000900\\r\\n\\r\\n" "$CODE" > "$a"',
+      '  prev="$a"',
+      'done',
+      'case " $* " in *" -sf "*) exit 22 ;; esac',
+      'printf \'%s\' \'{"title":"error"}\'',
+      'case "$*" in *http_code*) printf "\\n%s\\n" "$CODE" ;; esac',
+    ].join('\n'));
+    chmodSync(join(dir, 'curl'), 0o755);
+    const r = spawnSync('bash', [SCRIPT, ...args], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${dir}:${process.env.PATH}`,
+        COUNT: count,
+        CODE: String(code),
+        TWITTER_API_KEY: 'ck', TWITTER_API_SECRET: 'cs', TWITTER_ACCESS_TOKEN: 'at', TWITTER_ACCESS_TOKEN_SECRET: 'ats',
+      },
+    });
+    return { ...r, calls: readFileSync(count, 'utf8').trim().split('\n').length };
+  }
+
+  for (const args of [['whoami'], ['lookup', 'someone']]) {
+    it(`${args[0]} sends one request on 429 and reports the reset time, not bad credentials`, () => {
+      const r = fail(429, args);
+      assert.equal(r.status, 1);
+      assert.equal(r.calls, 1);
+      assert.match(r.stderr, /HTTP 429/);
+      assert.match(r.stderr, /2023-11-14T22:28:20Z/);
+      assert.doesNotMatch(r.stderr, /Auth failed/);
+    });
+  }
+
+  it('whoami names a 401 as bad credentials', () => {
+    const r = fail(401, ['whoami']);
+    assert.equal(r.status, 1);
+    assert.equal(r.calls, 1);
+    assert.match(r.stderr, /HTTP 401/);
+    assert.match(r.stderr, /Auth failed/);
+  });
+});
