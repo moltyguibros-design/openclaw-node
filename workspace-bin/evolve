@@ -464,7 +464,7 @@ def main():
         return
 
     # ── Step 5: Approval ──────────────────────────────────────────────────
-    print("\n─" * 60)
+    print("\n" + "─" * 60)
     print("  Apply which mutations? (e.g. '1', '1 2', 'all', 'none')")
     try:
         choice = input("  > ").strip().lower()

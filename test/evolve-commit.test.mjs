@@ -68,3 +68,44 @@ describe('evolve git_commit — commits only the genome, labelled with what was 
     assert.doesNotMatch(msg, /Sonnet 4\.6|→/);
   });
 });
+
+// main() with fitness and the model call stubbed, answering 'none' at the prompt.
+const MAIN_PY = `
+import importlib.machinery, importlib.util, sys, types
+from pathlib import Path
+loader = importlib.machinery.SourceFileLoader('evolve', sys.argv[1])
+m = importlib.util.module_from_spec(importlib.util.spec_from_loader('evolve', loader))
+loader.exec_module(m)
+ws = Path(sys.argv[2])
+m.WORKSPACE = ws
+fs = types.ModuleType('fitness_score')
+fs.compute_fitness = lambda days: {
+    'score': 0.5, 'grade': 'C', 'delta': None,
+    'breakdown': {'task_completion_rate': 0.5, 'correction_score': 0.5, 'daily_signal_score': 0.5},
+    'raw': {'tasks_done': 1, 'tasks_failed': 1, 'corrections_recent': 0, 'daily_keyword_hits': 0},
+}
+sys.modules['fitness_score'] = fs
+m.get_lessons_excerpt = lambda: ''
+m.call_claude = lambda prompt, model: '=== MUTATION 1: tighten ===\\nRATIONALE: r\\nCONFIDENCE: high\\nIMPACT: i\\n'
+sys.argv = ['evolve', '--genome', str(ws / 'SOUL.md')]
+m.main()
+`;
+
+describe('evolve approval prompt', () => {
+  it('prints one rule before the prompt, not sixty one-character lines', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'evolve-main-'));
+    try {
+      fs.writeFileSync(path.join(tmp, 'SOUL.md'), 'v1\n');
+      const r = spawnSync('python3', ['-I', '-B', '-c', MAIN_PY, EVOLVE, tmp], { encoding: 'utf8', input: 'none\n' });
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.match(r.stdout, /No mutations applied\./);
+      const lines = r.stdout.split('\n');
+      assert.equal(lines.filter(l => l === '─').length, 0);
+      assert.ok(lines.includes('─'.repeat(60)), r.stdout);
+      const rule = lines.lastIndexOf('─'.repeat(60));
+      assert.match(lines[rule + 1], /Apply which mutations\?/);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
