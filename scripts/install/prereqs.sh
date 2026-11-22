@@ -119,11 +119,11 @@ else
     # and died mid-run under `set -e`.
     $SUDO apt-get update -y || { error "apt-get update failed"; exit 1; }
     $SUDO apt-get install -y \
-      curl git sqlite3 build-essential jq python3 python3-pip ca-certificates gnupg \
+      curl git sqlite3 build-essential jq rsync python3 python3-pip ca-certificates gnupg \
       || error "apt baseline install failed"
   fi
 
-  for bin in git sqlite3 build-essential jq python3 curl; do
+  for bin in git sqlite3 build-essential jq rsync python3 curl; do
     probe="$bin"; [ "$bin" = build-essential ] && probe=cc
     have "$probe" && ok "$bin present" || error "$bin MISSING"
   done
@@ -223,6 +223,7 @@ _chk "sqlite3"       'command -v sqlite3'
 _chk "build tools"   '{ [ "$PREREQ_OS" = macos ] && xcode-select -p; } || command -v cc'
 _chk "curl"          'command -v curl'
 _chk "jq"            'command -v jq'
+_chk "rsync"         'command -v rsync'
 _chk "nats-server"   'command -v nats-server'
 [ "${OPENCLAW_SKIP_LLM:-0}" = "1" ] || _chk "ollama" 'command -v ollama'
 _chk "tailscale"     'command -v tailscale'

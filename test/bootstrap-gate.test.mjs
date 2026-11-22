@@ -23,7 +23,7 @@ function sandbox(t) {
   stub('uname', '[ "$1" = -m ] && echo x86_64 || echo Linux');
   stub('python3', 'exit 0');
   stub('curl', `echo "$*" >> ${JSON.stringify(join(dir, 'curl.log'))}; exit 1`);
-  for (const ok of ['apt-get', 'git', 'sqlite3', 'cc', 'jq', 'nats-server', 'tailscale', 'sh']) stub(ok, 'exit 0');
+  for (const ok of ['apt-get', 'git', 'sqlite3', 'cc', 'jq', 'rsync', 'nats-server', 'tailscale', 'sh']) stub(ok, 'exit 0');
   for (const real of ['node', 'mkdir', 'rm', 'dirname', 'tar']) {
     const p = spawnSync('bash', ['-c', `command -v ${real}`], { encoding: 'utf8' }).stdout.trim();
     symlinkSync(p, join(bin, real));
@@ -32,7 +32,7 @@ function sandbox(t) {
     encoding: 'utf8', timeout: 30_000,
     env: { PATH: bin, HOME: join(dir, 'home'), ...env },
   });
-  return { run, curlLog: () => (existsSync(join(dir, 'curl.log')) ? readFileSync(join(dir, 'curl.log'), 'utf8') : '') };
+  return { run, bin, curlLog: () => (existsSync(join(dir, 'curl.log')) ? readFileSync(join(dir, 'curl.log'), 'utf8') : '') };
 }
 
 test('bootstrap gate passes a --skip-llm box without ollama and still refuses one that wants the LLM', (t) => {
@@ -45,6 +45,15 @@ test('bootstrap gate passes a --skip-llm box without ollama and still refuses on
   const full = run([], { OPENCLAW_NO_INSTALL: '1' });
   assert.equal(full.status, 1, full.stdout + full.stderr);
   assert.match(full.stdout, /ollama — MISSING/);
+});
+
+// install.sh runs rsync under set -e from Step 3 on; minimal Debian images ship without it.
+test('bootstrap refuses a box without rsync before install.sh starts', (t) => {
+  const { run, bin } = sandbox(t);
+  rmSync(join(bin, 'rsync'));
+  const r = run(['--skip-llm'], { OPENCLAW_NO_INSTALL: '1' });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /rsync — MISSING/);
 });
 
 test('bootstrap fetches OPENCLAW_REF by bare ref, so a tag or commit resolves', (t) => {

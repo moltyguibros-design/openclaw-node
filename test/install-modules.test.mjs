@@ -838,6 +838,14 @@ test('prereqs.sh verifies nats-server with the same pinned SHA256 as bootstrap.s
   assert.match(prereqs, /if \[ "\$ACTUAL_SHA" != "\$EXPECT_SHA" \]; then\n\s*error "nats-server checksum MISMATCH/);
 });
 
+test('both dependency installers provide and gate rsync, which install.sh runs from Step 3 on', () => {
+  for (const file of ['scripts/install/prereqs.sh', 'bootstrap.sh']) {
+    const src = readFileSync(join(ROOT, file), 'utf8');
+    assert.match(src, /apt-get install -y \\\n\s+[^\n]*\brsync\b/, `${file} apt baseline`);
+    assert.match(src, /^_?chk "rsync"\s+'command -v rsync'$/m, `${file} gate`);
+  }
+});
+
 // The same virgin-Mac run: install.sh never compiled packages/event-schemas
 // (dist/ is gitignored, the tarball ships .ts only, --omit=dev brings no tsc),
 // so the memory daemon exited at startup. env.sh must build it and refuse to

@@ -222,9 +222,9 @@ else
   # already ships Node 22 install against stale lists and die mid-run.
   $SUDO apt-get update -y || die "apt-get update failed."
   $SUDO apt-get install -y \
-    curl git sqlite3 build-essential jq python3 python3-pip ca-certificates gnupg \
+    curl git sqlite3 build-essential jq rsync python3 python3-pip ca-certificates gnupg \
     || die "apt baseline install failed."
-  ok "git, sqlite3, build-essential, jq, python3 installed"
+  ok "git, sqlite3, build-essential, jq, rsync, python3 installed"
 
   step "Node.js 22"
   if node_ok; then
@@ -314,6 +314,7 @@ chk "sqlite3"       'command -v sqlite3'
 chk "build tools"   '{ [ "$OS" = macos ] && xcode-select -p; } || command -v cc'
 chk "curl"          'command -v curl'
 chk "jq"            'command -v jq'
+chk "rsync"         'command -v rsync'
 chk "nats-server"   'command -v nats-server'
 # Still installed under --skip-llm so llm-setup.sh works later, but a box that
 # asked for no LLM is not refused for lacking it (as prereqs.sh does).
