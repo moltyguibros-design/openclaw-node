@@ -406,7 +406,6 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `detectFormat` | transcript-parser | 3 | Detects transcript file format (JSONL, plain text) — utility; logged in dev. |
 | `parseLine` | transcript-parser | 3 | Parses a single transcript line — very high frequency; dev-mode only. |
 | `parseJsonlFile` | transcript-parser | 2 | Parses an entire JSONL transcript file — logs file size, line count, and parse duration. |
-| `estimateFileTokens` | transcript-parser | 2 | Estimates token count for a file — logged to track budget consumption accuracy. |
 
 ---
 
