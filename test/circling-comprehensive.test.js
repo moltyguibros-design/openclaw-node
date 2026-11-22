@@ -9,7 +9,8 @@
  *   1. Parser (lib/circling-parser.js) — edge cases, opts, legacy fallback
  *   2. State (lib/mesh-collab.js) — storeArtifact blob/exception, compileDirectedInput finalization,
  *      adaptive convergence edge cases
- *   3. Orchestration (daemon logic) — timeout handler, sweep logic, step lifecycle
+ *   3. State — step_started_at across a finalization gate (the daemon's timeout
+ *      handler and sweep are driven for real in test/daemon-circling-handlers.test.js)
  *   4. Prompt — see test/circling-worker-harness.test.mjs (drives the real buildCirclingPrompt)
  *
  * Run: node --test test/circling-comprehensive.test.js
@@ -302,165 +303,10 @@ describe('Adaptive convergence: edge cases', () => {
 });
 
 // ═══════════════════════════════════════════════════════
-// 3. ORCHESTRATION — Timeout handler, sweep, step lifecycle
+// 3. STATE — step_started_at across a finalization gate
 // ═══════════════════════════════════════════════════════
 
-describe('Daemon: handleCirclingStepTimeout simulation', () => {
-  /**
-   * Simulates the timeout handler logic from mesh-task-daemon.js
-   */
-  async function simulateTimeout(store, sessionId, stepSnapshot) {
-    const session = await store.get(sessionId);
-    if (!session || !session.circling) return { action: 'skip', reason: 'no session' };
-
-    const { phase, current_subround, current_step } = session.circling;
-    if (phase !== stepSnapshot.phase ||
-        current_subround !== stepSnapshot.subround ||
-        current_step !== stepSnapshot.step) {
-      return { action: 'skip', reason: 'stale' };
-    }
-
-    const currentRound = session.rounds[session.rounds.length - 1];
-    if (!currentRound) return { action: 'skip', reason: 'no round' };
-
-    const submittedNodeIds = new Set(
-      currentRound.reflections
-        .filter(r => r.circling_step === current_step)
-        .map(r => r.node_id)
-    );
-
-    const deadNodes = [];
-    for (const node of session.nodes) {
-      if (node.status !== 'dead' && !submittedNodeIds.has(node.node_id)) {
-        node.status = 'dead';
-        deadNodes.push(node.node_id);
-      }
-    }
-    await store.put(session);
-
-    const freshSession = await store.get(sessionId);
-    if (store.isCirclingStepComplete(freshSession)) {
-      return { action: 'advance', deadNodes };
-    } else {
-      return { action: 'abort', deadNodes };
-    }
-  }
-
-  it('stale timer: skips if step already advanced', async () => {
-    const { store, sessionId } = await makeActiveSession();
-    await store.advanceCirclingStep(sessionId); // init → SR1/step1
-    await store.startRound(sessionId);
-
-    // Snapshot from init phase — but session is now at step1
-    const staleSnapshot = { phase: 'init', subround: 0, step: 0 };
-    const result = await simulateTimeout(store, sessionId, staleSnapshot);
-    assert.equal(result.action, 'skip');
-    assert.equal(result.reason, 'stale');
-  });
-
-  it('marks unsubmitted nodes as dead and advances', async () => {
-    const { store, sessionId } = await makeActiveSession();
-    await store.advanceCirclingStep(sessionId);
-    await store.startRound(sessionId);
-
-    const s = await store.get(sessionId);
-    // Only 2 of 3 submitted
-    await store.submitReflection(sessionId, {
-      node_id: 'node-worker', vote: 'continue', confidence: 0.8, summary: 'work',
-      circling_step: 1,
-    });
-    await store.submitReflection(sessionId, {
-      node_id: 'node-revA', vote: 'continue', confidence: 0.7, summary: 'review',
-      circling_step: 1,
-    });
-    // node-revB did not submit
-
-    const snapshot = { phase: 'circling', subround: 1, step: 1 };
-    const result = await simulateTimeout(store, sessionId, snapshot);
-
-    assert.equal(result.action, 'advance', 'should advance after marking dead node');
-    assert.deepEqual(result.deadNodes, ['node-revB'], 'node-revB should be marked dead');
-  });
-
-  it('all nodes timed out: marks all dead, barrier does not pass (abort)', async () => {
-    const { store, sessionId } = await makeActiveSession();
-    await store.advanceCirclingStep(sessionId);
-    await store.startRound(sessionId);
-
-    // No reflections submitted — all 3 nodes will be marked dead
-    const snapshot = { phase: 'circling', subround: 1, step: 1 };
-    const result = await simulateTimeout(store, sessionId, snapshot);
-
-    assert.equal(result.deadNodes.length, 3, 'all 3 nodes should be marked dead');
-    assert.equal(result.action, 'abort', 'a step with no live member must not pass its barrier');
-  });
-});
-
-describe('Daemon: sweepCirclingStepTimeouts simulation', () => {
-  /**
-   * Simulates the sweep logic from mesh-task-daemon.js
-   */
-  function shouldSweepFire(session, timeoutMs, hasInMemoryTimer) {
-    if (session.mode !== 'circling_strategy' || !session.circling) return false;
-    if (session.circling.phase === 'complete') return false;
-    if (!session.circling.step_started_at) return false;
-    if (hasInMemoryTimer) return false;
-
-    const elapsed = Date.now() - new Date(session.circling.step_started_at).getTime();
-    return elapsed > timeoutMs;
-  }
-
-  it('fires for expired step without in-memory timer', () => {
-    const session = makeCirclingSession();
-    session.circling.phase = 'circling';
-    session.circling.current_step = 1;
-    session.circling.step_started_at = new Date(Date.now() - 15 * 60 * 1000).toISOString(); // 15 min ago
-    session.mode = 'circling_strategy';
-
-    assert.equal(shouldSweepFire(session, 10 * 60 * 1000, false), true);
-  });
-
-  it('skips when in-memory timer exists', () => {
-    const session = makeCirclingSession();
-    session.circling.phase = 'circling';
-    session.circling.step_started_at = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-    session.mode = 'circling_strategy';
-
-    assert.equal(shouldSweepFire(session, 10 * 60 * 1000, true), false);
-  });
-
-  it('skips completed sessions', () => {
-    const session = makeCirclingSession();
-    session.circling.phase = 'complete';
-    session.circling.step_started_at = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-    session.mode = 'circling_strategy';
-
-    assert.equal(shouldSweepFire(session, 10 * 60 * 1000, false), false);
-  });
-
-  it('skips when step_started_at not set', () => {
-    const session = makeCirclingSession();
-    session.circling.phase = 'circling';
-    session.circling.step_started_at = null;
-    session.mode = 'circling_strategy';
-
-    assert.equal(shouldSweepFire(session, 10 * 60 * 1000, false), false);
-  });
-
-  it('skips non-circling sessions', () => {
-    const session = createSession('test', { mode: 'parallel' });
-    assert.equal(shouldSweepFire(session, 10 * 60 * 1000, false), false);
-  });
-
-  it('does not fire when timeout not yet reached', () => {
-    const session = makeCirclingSession();
-    session.circling.phase = 'circling';
-    session.circling.step_started_at = new Date(Date.now() - 5 * 60 * 1000).toISOString(); // 5 min ago
-    session.mode = 'circling_strategy';
-
-    assert.equal(shouldSweepFire(session, 10 * 60 * 1000, false), false);
-  });
-
+describe('State: step_started_at across a finalization gate', () => {
   async function atConvergedStep2(automationTier) {
     const { store, sessionId } = await makeActiveSession({ automation_tier: automationTier });
     const s = await store.get(sessionId);
@@ -486,7 +332,6 @@ describe('Daemon: sweepCirclingStepTimeouts simulation', () => {
 
     const after = await store.get(sessionId);
     assert.equal(after.circling.step_started_at, null);
-    assert.equal(shouldSweepFire(after, 10 * 60 * 1000, false), false);
   });
 
   it('a tier-1 transition (no gate) leaves step_started_at alone', async () => {

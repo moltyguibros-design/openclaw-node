@@ -3289,6 +3289,7 @@ if (require.main === module) {
     handleCirclingGateReject: (msg) => handleCirclingGateReject(msg),
     completeCirclingSession: (id) => completeCirclingSession(id),
     sweepCollabRoundTimeouts: () => sweepCollabRoundTimeouts(),
+    sweepCirclingStepTimeouts: () => sweepCirclingStepTimeouts(),
     handleCollabLeave: (msg) => handleCollabLeave(msg),
     handleFail: (msg) => handleFail(msg),
     // F1/R1 (test/mesh-lease-authz.test.js): the handlers a stranger on the bus reaches.

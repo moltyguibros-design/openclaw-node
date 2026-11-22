@@ -327,6 +327,48 @@ describe('Daemon Circling: handleCirclingStepTimeout', () => {
 
 // A session the budget enforcer aborted while it waited at a gate: a late answer
 // must not complete it (approve) or send its members new steps (reject).
+describe('Daemon Circling: sweepCirclingStepTimeouts', () => {
+  let h;
+  beforeEach(() => { h = harness(); });
+
+  async function withStepStartedAt(startedAt, phase = 'circling') {
+    const sid = await makeActiveSession(h.collabStore);
+    const s = await h.collabStore.get(sid);
+    s.circling.phase = phase;
+    s.circling.step_started_at = startedAt;
+    await h.collabStore.put(s);
+    return sid;
+  }
+  const minutesAgo = (m) => new Date(Date.now() - m * 60 * 1000).toISOString();
+  const deadMarks = (s) => s.audit_log.filter(e => e.event === 'node_marked_dead').map(e => e.node_id).sort();
+
+  it('a step past the limit with no reflections marks every member dead, aborts and releases the parent', async () => {
+    const sid = await withStepStartedAt(minutesAgo(15));
+    await daemon.__test.sweepCirclingStepTimeouts();
+    const s = await h.collabStore.get(sid);
+    assert.equal(s.status, COLLAB_STATUS.ABORTED);
+    assert.deepEqual(deadMarks(s), ['node-revA', 'node-revB', 'node-worker']);
+    assert.equal(h.released.length, 1);
+  });
+
+  it('a fresh step is left alone', async () => {
+    const sid = await withStepStartedAt(new Date().toISOString());
+    await daemon.__test.sweepCirclingStepTimeouts();
+    const s = await h.collabStore.get(sid);
+    assert.equal(s.status, COLLAB_STATUS.ACTIVE);
+    assert.deepEqual(deadMarks(s), []);
+    assert.deepEqual(h.released, []);
+  });
+
+  it('a session in phase complete is left alone however old its step', async () => {
+    const sid = await withStepStartedAt(minutesAgo(15), 'complete');
+    await daemon.__test.sweepCirclingStepTimeouts();
+    const s = await h.collabStore.get(sid);
+    assert.equal(s.status, COLLAB_STATUS.ACTIVE);
+    assert.deepEqual(deadMarks(s), []);
+  });
+});
+
 describe('Daemon Circling: a gate answer on an ended session', () => {
   let h;
   const operatorDir = fs.mkdtempSync(path.join(os.tmpdir(), 'circling-gate-op-'));
