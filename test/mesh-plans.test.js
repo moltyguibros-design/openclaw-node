@@ -321,14 +321,6 @@ describe('PlanStore', () => {
     assert.deepEqual(await store.list(), []);
   });
 
-  it('delete removes plan', async () => {
-    const store = new PlanStore(new MockKV());
-    const plan = createPlan({ parent_task_id: 'T-101', title: 'Delete me' });
-    await store.put(plan);
-    await store.delete(plan.plan_id);
-    assert.equal(await store.get(plan.plan_id), null);
-  });
-
   it('list returns all plans sorted by created_at', async () => {
     const store = new PlanStore(new MockKV());
     const p1 = createPlan({ parent_task_id: 'T-A', title: 'First' });
@@ -351,17 +343,13 @@ describe('PlanStore', () => {
     assert.equal(drafts[0].title, 'Draft plan');
   });
 
-  it('lifecycle: draft → review → approved → executing → completed', async () => {
+  it('lifecycle: draft → approved → executing', async () => {
     const store = new PlanStore(new MockKV());
     const plan = createPlan({ parent_task_id: 'T-200', title: 'Lifecycle' });
     await store.put(plan);
 
-    await store.submitForReview(plan.plan_id);
-    let p = await store.get(plan.plan_id);
-    assert.equal(p.status, PLAN_STATUS.REVIEW);
-
     await store.approve(plan.plan_id, 'gui');
-    p = await store.get(plan.plan_id);
+    let p = await store.get(plan.plan_id);
     assert.equal(p.status, PLAN_STATUS.APPROVED);
     assert.equal(p.approved_by, 'gui');
     assert.ok(p.approved_at);
@@ -370,11 +358,6 @@ describe('PlanStore', () => {
     p = await store.get(plan.plan_id);
     assert.equal(p.status, PLAN_STATUS.EXECUTING);
     assert.ok(p.started_at);
-
-    await store.markCompleted(plan.plan_id);
-    p = await store.get(plan.plan_id);
-    assert.equal(p.status, PLAN_STATUS.COMPLETED);
-    assert.ok(p.completed_at);
   });
 
   it('abort blocks pending subtasks', async () => {

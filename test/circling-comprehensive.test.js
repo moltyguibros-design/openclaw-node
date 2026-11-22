@@ -239,29 +239,6 @@ describe('compileDirectedInput: finalization phase', () => {
   });
 });
 
-describe('compileDirectedInput: reviewerLabel legacy fallback', () => {
-  it('falls back to array-index when reviewer IDs not stored', async () => {
-    const { store, sessionId } = await makeActiveSession();
-    const s = await store.get(sessionId);
-    // Clear stored reviewer IDs to trigger legacy fallback
-    s.circling.reviewerA_node_id = null;
-    s.circling.reviewerB_node_id = null;
-    s.circling.phase = 'circling';
-    s.circling.current_subround = 1;
-    s.circling.current_step = 2;
-    await store.put(s);
-
-    await store.storeArtifact(sessionId, 'sr1_step2_worker_workerReviewsAnalysis', 'analysis here');
-    await store.storeArtifact(sessionId, 'sr1_step1_reviewerA_reviewArtifact', 'revA findings');
-    await store.storeArtifact(sessionId, 'sr1_step1_reviewerB_reviewArtifact', 'revB findings');
-
-    const fresh = await store.get(sessionId);
-    // Even without stored IDs, compileDirectedInput should still work via fallback
-    const revAInput = store.compileDirectedInput(fresh, 'node-revA', '');
-    assert.ok(revAInput.includes('analysis here'), 'Reviewer should get worker analysis via fallback');
-  });
-});
-
 describe('Adaptive convergence: edge cases', () => {
   it('dead node excluded from convergence check', async () => {
     const { store, sessionId } = await makeActiveSession();

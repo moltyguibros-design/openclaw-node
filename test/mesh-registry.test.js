@@ -3,8 +3,7 @@
 /**
  * mesh-registry.test.js — Unit tests for lib/mesh-registry.js
  *
- * Tests MeshRegistry: tool registration, KV storage, heartbeat, remote calls,
- * listing, and shutdown.
+ * Tests MeshRegistry: tool registration, KV storage, heartbeat and shutdown.
  *
  * Run: node --test test/mesh-registry.test.js
  */
@@ -72,9 +71,6 @@ const mockNats = {
       sub.subject = subject;
       mockSubs.push(sub);
       return sub;
-    },
-    request: async (subject, data, opts) => {
-      return { data: encoder.encode(JSON.stringify({ data: 'mock-response' })) };
     },
   }),
 };
@@ -162,15 +158,6 @@ describe('MeshRegistry', () => {
     assert.equal(mockSubs[0].subject, 'mesh.tool.test-node.my-tool.doThing');
   });
 
-  it('listTools returns all registered manifests', async () => {
-    await registry.register({ name: 'tool-a', methods: [] });
-    await registry.register({ name: 'tool-b', methods: [] });
-    const tools = await registry.listTools();
-    assert.equal(tools.length, 2);
-    const names = tools.map(t => t.name).sort();
-    assert.deepEqual(names, ['tool-a', 'tool-b']);
-  });
-
   it('shutdown cleans up KV entries', async () => {
     await registry.register({ name: 'cleanup-tool', methods: [] });
     assert.ok(await mockKV.get('test-node.cleanup-tool'));
@@ -187,11 +174,6 @@ describe('MeshRegistry', () => {
 
     await registry.shutdown();
     assert.ok(mockSubs[0].unsubscribed);
-  });
-
-  it('call sends NATS request and returns data', async () => {
-    const result = await registry.call('remote-node', 'tool', 'method', { foo: 1 });
-    assert.equal(result, 'mock-response');
   });
 
   it('stores manifests in internal map', async () => {

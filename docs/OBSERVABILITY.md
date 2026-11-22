@@ -212,7 +212,6 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `handlePlanGet` | mesh-task-daemon | 2 | Retrieves plan details — diagnostic for plan inspection. |
 | `handlePlanList` | mesh-task-daemon | 2 | Lists all plans — dashboard and CLI query. |
 | `approve` | PlanStore | 2 | Store-level approval write — confirms plan state transition persisted. |
-| `submitForReview` | PlanStore | 2 | Moves plan to review state — tracks plan review queue depth. |
 | `startExecuting` | PlanStore | 2 | Marks plan as actively executing — establishes execution start time for budget tracking. |
 | `markAborted` | PlanStore | 2 | Store-level abort — confirms abort persisted and prevents further wave dispatch. |
 
@@ -223,19 +222,15 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `handlePlanSubtaskUpdate` | mesh-task-daemon | 1 | Updates subtask status within a plan — triggers wave progression checks and dependency resolution. |
 | `advancePlanWave` | mesh-task-daemon | 1 | Advances to the next wave of subtasks — logs which subtasks are dispatched and their dependency chains. |
 | `updatePlanSubtaskStatus` | mesh-task-daemon | 2 | Internal subtask status update — correlates task completion events with plan progress. |
-| `updateSubtask` | PlanStore | 2 | Store-level subtask update — persists individual subtask state changes. |
 | `checkPlanProgress` | mesh-task-daemon | 2 | Evaluates overall plan completion percentage — provides progress metrics for dashboards. |
 | `get` | PlanStore | 2 | Retrieves a plan record — basic read for plan operations. |
 | `list` | PlanStore | 2 | Lists plans from store — used by query handlers. |
-| `findByParentTask` | PlanStore | 2 | Finds plans associated with a parent task — links task and plan lifecycles. |
 
 ### 3.4 Failure Cascade & Recovery
 
 | Function | Module | Tier | Why Logged |
 |----------|--------|------|------------|
 | `cascadeFailure` | mesh-task-daemon | 1 | Propagates subtask failure up through the plan — logs which downstream subtasks are cancelled and the failure chain. |
-| `markCompleted` | PlanStore | 2 | Marks plan as completed — terminal state; confirms all waves finished successfully. |
-| `delete` | PlanStore | 2 | Removes a plan record — logged for cleanup audit. |
 
 ---
 
@@ -354,7 +349,6 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `loadRole` | role-loader | 2 | Loads an agent role definition — logs role name and capability set for debugging role assignment. |
 | `findRole` | role-loader | 2 | Searches for a role by name or alias — logged to detect role resolution failures. |
 | `listRoles` | role-loader | 3 | Lists all available roles — diagnostic for role inventory. |
-| `validateRole` | role-loader | 2 | Validates role definition completeness — catches malformed roles before they affect agent behavior. |
 | `formatRoleForPrompt` | role-loader | 3 | Formats role for LLM prompt — logged in dev to debug role prompting. |
 | `checkForbiddenPatterns` | role-loader | 1 | Checks agent actions against forbidden patterns — security enforcement; always logged. |
 
@@ -712,13 +706,13 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 |--------------|-------|
 | mesh-task-daemon | 48 |
 | TaskStore | 16 |
-| PlanStore | 11 |
+| PlanStore | 6 |
 | CollabStore | 19 |
 | mesh-agent | 9 |
 | mesh-bridge | 6 |
 | exec-safety | 4 |
 | mesh-harness | 10 |
-| role-loader | 6 |
+| role-loader | 5 |
 | rule-loader | 5 |
 | llm-providers | 2 |
 | kanban-io | 3 |
@@ -752,6 +746,6 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | discord-read | 1 |
 | discord-tool | 4 |
 | hyperagent CLI | 11 |
-| **Grand Total** | **~307** |
+| **Grand Total** | **~301** |
 
 > The exact count varies slightly due to MeshRegistry and MCP knowledge server having dynamic method counts. All functions listed above are wrapped by `tracer.wrapClass()`, `tracer.wrapAsync()`, or `tracer.wrap()` and emit structured trace events through the unified observability pipeline.

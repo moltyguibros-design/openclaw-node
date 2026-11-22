@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const read = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
 
@@ -154,4 +155,18 @@ test('the souls recovery recipe initializes main, as the installer does', () => 
   const guide = read('identity/MULTI_SOUL_GUIDE.md');
   assert.match(guide, /^git init -b main$/m);
   assert.doesNotMatch(guide, /^git init$/m);
+});
+
+test('OBSERVABILITY.md PlanStore and role-loader rows name functions those modules have, and the totals count them', () => {
+  const require = createRequire(import.meta.url);
+  const { PlanStore } = require('../lib/mesh-plans');
+  const roleLoader = require('../lib/role-loader');
+  const doc = read('docs/OBSERVABILITY.md');
+  const has = { PlanStore: (f) => typeof PlanStore.prototype[f] === 'function', 'role-loader': (f) => typeof roleLoader[f] === 'function' };
+  for (const [mod, exists] of Object.entries(has)) {
+    const rows = [...doc.matchAll(new RegExp(`^\\| \`(\\w+)\` \\| ${mod} \\|`, 'gm'))].map((m) => m[1]);
+    assert.ok(rows.length > 0, `no ${mod} rows`);
+    for (const f of rows) assert.ok(exists(f), `OBSERVABILITY.md lists ${mod}.${f}, which does not exist`);
+    assert.ok(doc.includes(`\n| ${mod} | ${rows.length} |\n`), `OBSERVABILITY.md total for ${mod} must be ${rows.length}`);
+  }
 });

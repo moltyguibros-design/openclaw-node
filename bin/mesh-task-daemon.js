@@ -1353,16 +1353,8 @@ async function handleCollabReflect(msg) {
     if (reflection.circling_artifacts && reflection.circling_artifacts.length > 0) {
       const { current_subround, current_step } = session.circling;
       const isWorker = reflection.node_id === session.circling.worker_node_id;
-      // Use stored reviewer IDs for stable identity (falls back to array-index if not set)
-      let nodeRole;
-      if (isWorker) {
-        nodeRole = 'worker';
-      } else if (session.circling.reviewerA_node_id && session.circling.reviewerB_node_id) {
-        nodeRole = reflection.node_id === session.circling.reviewerA_node_id ? 'reviewerA' : 'reviewerB';
-      } else {
-        const reviewerNodes = session.nodes.filter(n => n.node_id !== session.circling.worker_node_id);
-        nodeRole = reviewerNodes[0]?.node_id === reflection.node_id ? 'reviewerA' : 'reviewerB';
-      }
+      const nodeRole = isWorker ? 'worker'
+        : reflection.node_id === session.circling.reviewerA_node_id ? 'reviewerA' : 'reviewerB';
 
       const arts = Array.isArray(reflection.circling_artifacts) ? reflection.circling_artifacts : [];
       if (!Array.isArray(reflection.circling_artifacts)) {

@@ -35,7 +35,7 @@ The tables list representative files, not the whole suite: `test/*.test.*` and
 | File | Module | What it covers |
 |------|--------|----------------|
 | `mesh-plans.test.js` | `lib/mesh-plans.js` | Plan creation, wave computation (DAG), delegation routing decision tree, PlanStore CRUD + lifecycle |
-| `mesh-registry.test.js` | `lib/mesh-registry.js` | Tool registration to KV, NATS subscriptions, listTools, shutdown cleanup, remote call |
+| `mesh-registry.test.js` | `lib/mesh-registry.js` | Tool registration to KV, NATS subscriptions, heartbeat, shutdown cleanup |
 | `nats-resolve.test.js` | `lib/nats-resolve.js` | 4-step URL/token resolution chain (env var, openclaw.env, .mesh-config, fallback), natsConnectOpts |
 | `agent-activity.test.js` | `lib/agent-activity.js` | Path encoding, JSONL session file discovery, activity state detection, cost/summary extraction |
 | `memory-budget.test.mjs` | `lib/memory-budget.mjs` | Freeze/thaw lifecycle, character budget enforcement, trimming, event emission, stats |
