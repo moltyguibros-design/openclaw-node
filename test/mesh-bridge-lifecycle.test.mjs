@@ -42,7 +42,7 @@ async function exited(bridge, timeoutMs = 10_000) {
   return bridge.result;
 }
 
-async function fixture(t, interval = 100, requestMux = false, owner = 'mesh') {
+async function fixture(t, interval = 100, requestMux = false, owner = 'mesh', meshTask = null) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mesh-bridge-drain-'));
   const children = [];
   let nc;
@@ -74,7 +74,7 @@ async function fixture(t, interval = 100, requestMux = false, owner = 'mesh') {
     nc = await connect({ servers: `nats://127.0.0.1:${port}`, token, maxReconnectAttempts: 0 });
     nc.subscribe('mesh.tasks.get', { callback: (_err, msg) => {
       lookups++;
-      msg.respond(Buffer.from('{"ok":true,"data":null}'));
+      msg.respond(Buffer.from(JSON.stringify({ ok: true, data: meshTask })));
     } });
     await nc.flush();
   }
@@ -110,7 +110,7 @@ async function fixture(t, interval = 100, requestMux = false, owner = 'mesh') {
   nc = null;
   if (requestMux) {
     assert.equal(lookups, 1);
-    assert.ok(bridge.output.includes('RECONCILE: done. Tracking 0 in-flight task(s)'), bridge.output);
+    assert.ok(bridge.output.includes(`RECONCILE: done. Tracking ${meshTask ? 1 : 0} in-flight task(s)`), bridge.output);
   } else assert.ok(bridge.output.includes('RECONCILE: no orphaned mesh tasks found'), bridge.output);
   const assertKanban = async () => assert.equal(await fs.readFile(kanban, 'utf8'), original);
   return { bridge, server, assertKanban, kanban, bus: { servers: env.OPENCLAW_NATS, token } };
@@ -207,6 +207,28 @@ test('bridge materializes a plan subtask unquoted, with its description intact',
   assert.equal(sub.plan_id, 'p1', 'the card names its plan so its completion can be reported');
   assert.ok(sub.description.startsWith('say "hi"\nnext'), sub.description);
   assert.ok(!sub.description.includes('\\"'), sub.description);
+  bridge.proc.kill('SIGTERM');
+  assert.deepEqual(await exited(bridge), { code: 0, signal: null }, bridge.output);
+});
+
+test('bridge records the claiming node as mesh_node on reconcile and on claim', { skip, timeout: 20_000 }, async (t) => {
+  const { bridge, kanban, bus } = await fixture(t, 100, true, 'mesh', { task_id: 'owned-missing-card', status: 'running', owner: 'node-b' });
+  await until(async () => /^  mesh_node: node-b$/m.test(await fs.readFile(kanban, 'utf8')));
+  const nc = await connect({ ...bus, maxReconnectAttempts: 0 });
+  try {
+    nc.publish('mesh.events.claimed', Buffer.from(JSON.stringify({
+      event: 'claimed',
+      task_id: 'owned-missing-card',
+      task: { task_id: 'owned-missing-card', status: 'claimed', owner: 'node-c' },
+    })));
+    await nc.flush();
+  } finally {
+    await nc.close();
+  }
+  await until(async () => /^  mesh_node: node-c$/m.test(await fs.readFile(kanban, 'utf8')));
+  const text = await fs.readFile(kanban, 'utf8');
+  assert.equal((text.match(/^  mesh_node:/gm) || []).length, 1, text);
+  assert.match(text, /^  status: running$/m);
   bridge.proc.kill('SIGTERM');
   assert.deepEqual(await exited(bridge), { code: 0, signal: null }, bridge.output);
 });

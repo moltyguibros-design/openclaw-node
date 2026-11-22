@@ -160,6 +160,9 @@ async function reconcile() {
         default:
           // Still queued, claimed, or running — resume tracking
           log(`RECONCILE: ${task.task_id} still ${meshTask.status} — resuming tracking`);
+          if ((meshTask.status === 'claimed' || meshTask.status === 'running') && meshTask.owner) {
+            updateTaskInPlace(ACTIVE_TASKS_PATH, task.task_id, { mesh_node: meshTask.owner });
+          }
           dispatched.add(task.task_id);
           lastHeartbeat.set(task.task_id, Date.now()); // init staleness tracking (#3)
           break;
@@ -607,6 +610,7 @@ function handleEvent(eventType, taskId, meshTask) {
         updateTaskInPlace(ACTIVE_TASKS_PATH, taskId, {
           status: 'running',
           owner: meshTask.owner || 'mesh-agent',
+          ...(meshTask.owner ? { mesh_node: meshTask.owner } : {}),
           updated_at: isoTimestamp(),
         });
         log(`KANBAN: ${taskId} → running (agent: ${meshTask.owner})`);
