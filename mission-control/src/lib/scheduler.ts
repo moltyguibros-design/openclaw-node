@@ -97,6 +97,74 @@ export function computeWaves(
   }
 }
 
+export interface DispatchPlan {
+  dispatchable: (typeof tasks.$inferSelect)[];
+  /** Dispatchable tasks whose predecessors are all done, highest autoPriority first. */
+  eligible: (typeof tasks.$inferSelect)[];
+  /** Dispatchable tasks waiting on a predecessor that is neither done nor itself dispatchable. */
+  blocked: string[];
+  waves: Wave[];
+}
+
+/** The tick's dispatch selection, shared with the read-only waves view. */
+export function planDispatch(db: ReturnType<typeof getDb>): DispatchPlan {
+  // Dispatchable: needs_approval=0 AND (status="ready" OR (status="queued" AND trigger_kind="none"))
+  const dispatchable = db
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.needsApproval, 0),
+        or(isNull(tasks.execution), ne(tasks.execution, "mesh")),
+        or(
+          eq(tasks.status, "ready"),
+          and(eq(tasks.status, "queued"), eq(tasks.triggerKind, "none"))
+        )
+      )
+    )
+    .all();
+
+  const allDeps = db.select().from(dependencies).all();
+  const depTargetMap = new Map<string, string[]>();
+  for (const dep of allDeps) {
+    const existing = depTargetMap.get(dep.targetId) || [];
+    existing.push(dep.sourceId);
+    depTargetMap.set(dep.targetId, existing);
+  }
+  const taskStatusLookup = new Map(
+    db
+      .select({ id: tasks.id, status: tasks.status })
+      .from(tasks)
+      .all()
+      .map((t) => [t.id, t.status] as const)
+  );
+
+  const eligible = dispatchable
+    .filter((t) => {
+      const preds = depTargetMap.get(t.id) || [];
+      return preds.every((pid) => taskStatusLookup.get(pid) === "done");
+    })
+    .sort((a, b) => (b.autoPriority || 0) - (a.autoPriority || 0));
+
+  // To a fixpoint, so a task behind a blocked task is blocked too.
+  const unblocked = new Set(dispatchable.map((t) => t.id));
+  let moved = true;
+  while (moved) {
+    moved = false;
+    for (const id of unblocked) {
+      const preds = depTargetMap.get(id) || [];
+      if (preds.some((pid) => taskStatusLookup.get(pid) !== "done" && !unblocked.has(pid))) {
+        unblocked.delete(id);
+        moved = true;
+      }
+    }
+  }
+  const blocked = dispatchable.map((t) => t.id).filter((id) => !unblocked.has(id));
+  const waves = computeWaves([...unblocked], depTargetMap, taskStatusLookup);
+
+  return { dispatchable, eligible, blocked, waves };
+}
+
 export interface SchedulerStatus {
   now: string;
   scheduled: { at: number; cron: number };
@@ -354,49 +422,8 @@ export function schedulerTick(): TickResult {
 
   const hasActiveTask = agentRunning.length > 0;
 
-  // Dispatchable: needs_approval=0 AND (status="ready" OR (status="queued" AND trigger_kind="none"))
-  const dispatchable = db
-    .select()
-    .from(tasks)
-    .where(
-      and(
-        eq(tasks.needsApproval, 0),
-        or(isNull(tasks.execution), ne(tasks.execution, "mesh")),
-        or(
-          eq(tasks.status, "ready"),
-          and(eq(tasks.status, "queued"), eq(tasks.triggerKind, "none"))
-        )
-      )
-    )
-    .all();
-
-  // Build dependency map for dispatch eligibility check
-  const allDeps = db.select().from(dependencies).all();
-  const depTargetMap = new Map<string, string[]>();
-  for (const dep of allDeps) {
-    const existing = depTargetMap.get(dep.targetId) || [];
-    existing.push(dep.sourceId);
-    depTargetMap.set(dep.targetId, existing);
-  }
-  const taskStatusLookup = new Map(
-    db
-      .select({ id: tasks.id, status: tasks.status })
-      .from(tasks)
-      .all()
-      .map((t) => [t.id, t.status] as const)
-  );
-
-  // Filter to tasks whose predecessors are all done
-  const eligible = dispatchable
-    .filter((t) => {
-      const preds = depTargetMap.get(t.id) || [];
-      return preds.every((pid) => taskStatusLookup.get(pid) === "done");
-    })
-    .sort((a, b) => (b.autoPriority || 0) - (a.autoPriority || 0));
-
-  // Compute waves for visibility (backlog info) but only dispatch 1
-  const eligibleIds = eligible.map((t) => t.id);
-  const waves = computeWaves(eligibleIds, depTargetMap, taskStatusLookup);
+  // Waves are for visibility (backlog info); only one eligible task is dispatched.
+  const { eligible, waves } = planDispatch(db);
   result.waves = waves.length > 0 ? waves : undefined;
 
   if (!hasActiveTask && eligible.length > 0) {
