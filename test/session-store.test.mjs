@@ -385,11 +385,18 @@ describe('search (FTS5)', () => {
     // sa has NATS in both roles; both should hit
     assert.ok(userOnly.length >= 1);
     assert.ok(assistantOnly.length >= 1);
+    // sb has Obsidian only in a user turn
+    assert.deepEqual(store.search('Obsidian', { role: 'assistant' }), []);
+    assert.ok(store.search('Obsidian', { role: 'user' }).some(r => r.sessionId === 'sb'));
   });
 
-  it('honors limit option', () => {
-    const limited = store.search('NATS', { limit: 1 });
-    assert.ok(limited.length <= 1);
+  it('honors limit option', async () => {
+    writeJsonl('sc.jsonl', [
+      { type: 'user', message: { content: 'NATS cluster sizing' }, timestamp: '2026-05-03T10:00:00Z' },
+    ]);
+    await store.importSession(join(TMP, 'sc.jsonl'), { source: 'test' });
+    assert.equal(store.search('NATS').length, 2);
+    assert.equal(store.search('NATS', { limit: 1 }).length, 1);
   });
 
   it('does not return sessions that do not match', () => {
