@@ -221,12 +221,6 @@ export default function LivePage() {
 function generateMockResponse(input: string): string {
   const lower = input.toLowerCase();
 
-  if (lower.includes("status") || lower.includes("how are")) {
-    return "All systems nominal. Mission Control is running, pipeline tasks are queued for Month 1 kickoff on March 2nd. No blockers detected.";
-  }
-  if (lower.includes("task") || lower.includes("what")) {
-    return "Current active pipeline: Arcane Rapture — 478 tasks across 12 months. Phase 0 (Foundation & Infrastructure) starts March 2nd with smart contracts, Unity scaffold, and lore bible.";
-  }
   if (lower.includes("hello") || lower.includes("hey") || lower.includes("hi")) {
     return "Hey. What do you need?";
   }

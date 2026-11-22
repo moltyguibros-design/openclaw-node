@@ -53,4 +53,8 @@ describe("removed dead code stays removed", () => {
     expect(read("app/observability/page.tsx")).not.toMatch(/eventIdSet|live SSE appends/);
     expect(read("../../docs/OBSERVABILITY.md")).not.toMatch(/system map|event timeline/i);
   });
+
+  it("the Live chat's canned replies no longer describe the removed Arcane pipeline", () => {
+    expect(read("app/live/page.tsx")).not.toMatch(/Arcane|March 2nd|478 tasks/);
+  });
 });
