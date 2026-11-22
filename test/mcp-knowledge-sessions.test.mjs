@@ -24,7 +24,6 @@ import {
   searchSessions,
   getStats,
   EMBEDDING_DIM,
-  MAX_CHUNK_CHARS,
   SNIPPET_LENGTH,
 } from '../lib/mcp-knowledge/core.mjs';
 

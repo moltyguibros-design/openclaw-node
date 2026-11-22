@@ -24,7 +24,7 @@ const skipReason = meshSkipReason();
 const assert = require('node:assert/strict');
 const { connect, StringCodec } = require('nats');
 const { withMemberTokens } = require('./helpers/collab-member.cjs');
-const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
+const { natsConnectOpts } = require('../lib/nats-resolve');
 
 const sc = StringCodec();
 const TEST_PREFIX = `regbug-${Date.now()}`;

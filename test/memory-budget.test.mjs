@@ -13,7 +13,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { MemoryBudget, createBudget } from '../lib/memory-budget.mjs';
-import { extractFacts, mergeFacts, cleanParentheticalChains, stripSupersedes, stripSpeaker, truncateAtWord } from '../lib/pre-compression-flush.mjs';
+import { extractFacts, mergeFacts, cleanParentheticalChains, stripSupersedes, truncateAtWord } from '../lib/pre-compression-flush.mjs';
 
 let tmpDir;
 

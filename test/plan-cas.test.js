@@ -12,7 +12,6 @@
  *
  * Run: node --test test/plan-cas.test.js
  */
-const fs = require('node:fs');
 const path = require('node:path');
 
 const { tmpDir } = require('./helpers/tmp-dir.cjs');

@@ -2,11 +2,11 @@
  * Tests for lib/rule-loader.js
  */
 
-const { describe, it, beforeEach, afterEach } = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
+const { tmpDir } = require('./helpers/tmp-dir.cjs');
 const {
   loadAllRules,
   matchRules,
@@ -18,18 +18,8 @@ const {
   MAX_RULES_CHARS,
 } = require('../lib/rule-loader');
 
-let tmpDir;
-
-function setup() {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rule-loader-test-'));
-}
-
-function teardown() {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
-}
-
-function writeRule(filename, content) {
-  fs.writeFileSync(path.join(tmpDir, filename), content);
+function writeRule(dir, filename, content) {
+  fs.writeFileSync(path.join(dir, filename), content);
 }
 
 // ── Frontmatter Parser ────────────────────────────
@@ -118,8 +108,8 @@ describe('globMatch', () => {
 
 describe('loadAllRules', () => {
   it('loads rules from directory', () => {
-    setup();
-    writeRule('security.md', `---
+    const dir = tmpDir('rule-loader-test-');
+    writeRule(dir, 'security.md', `---
 id: security
 tier: universal
 paths: ["**/*"]
@@ -128,7 +118,7 @@ priority: 100
 # Security
 - No secrets`);
 
-    writeRule('solidity.md', `---
+    writeRule(dir, 'solidity.md', `---
 id: solidity
 tier: framework
 paths: ["contracts/**"]
@@ -138,7 +128,7 @@ detect: ["hardhat.config.js"]
 # Solidity
 - Reentrancy guards`);
 
-    const rules = loadAllRules(tmpDir);
+    const rules = loadAllRules(dir);
     assert.strictEqual(rules.length, 2);
 
     const sec = rules.find(r => r.id === 'security');
@@ -150,7 +140,6 @@ detect: ["hardhat.config.js"]
     assert.strictEqual(sol.tier, 'framework');
     assert.deepStrictEqual(sol.detect, ['hardhat.config.js']);
 
-    teardown();
   });
 
   it('returns empty array for missing directory', () => {
@@ -159,12 +148,11 @@ detect: ["hardhat.config.js"]
   });
 
   it('skips non-md files', () => {
-    setup();
-    writeRule('security.md', `---\nid: security\ntier: universal\npaths: ["**/*"]\n---\n# Sec`);
-    writeRule('readme.txt', 'not a rule');
-    const rules = loadAllRules(tmpDir);
+    const dir = tmpDir('rule-loader-test-');
+    writeRule(dir, 'security.md', `---\nid: security\ntier: universal\npaths: ["**/*"]\n---\n# Sec`);
+    writeRule(dir, 'readme.txt', 'not a rule');
+    const rules = loadAllRules(dir);
     assert.strictEqual(rules.length, 1);
-    teardown();
   });
 });
 
@@ -257,43 +245,39 @@ describe('formatRulesForPrompt', () => {
 
 describe('detectFrameworks', () => {
   it('detects from package.json deps', () => {
-    setup();
-    fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({
+    const dir = tmpDir('rule-loader-test-');
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
       dependencies: { hardhat: '^2.0.0' },
       devDependencies: { react: '^18.0.0' },
     }));
 
-    const detected = detectFrameworks(tmpDir);
+    const detected = detectFrameworks(dir);
     assert.ok(detected.includes('solidity'));
     assert.ok(detected.includes('react'));
-    teardown();
   });
 
   it('detects from config files', () => {
-    setup();
-    fs.writeFileSync(path.join(tmpDir, 'tsconfig.json'), '{}');
-    fs.writeFileSync(path.join(tmpDir, 'foundry.toml'), '');
+    const dir = tmpDir('rule-loader-test-');
+    fs.writeFileSync(path.join(dir, 'tsconfig.json'), '{}');
+    fs.writeFileSync(path.join(dir, 'foundry.toml'), '');
 
-    const detected = detectFrameworks(tmpDir);
+    const detected = detectFrameworks(dir);
     assert.ok(detected.includes('typescript'));
     assert.ok(detected.includes('solidity'));
-    teardown();
   });
 
   it('detects from directories', () => {
-    setup();
-    fs.mkdirSync(path.join(tmpDir, 'ProjectSettings'));
+    const dir = tmpDir('rule-loader-test-');
+    fs.mkdirSync(path.join(dir, 'ProjectSettings'));
 
-    const detected = detectFrameworks(tmpDir);
+    const detected = detectFrameworks(dir);
     assert.ok(detected.includes('unity'));
-    teardown();
   });
 
   it('returns empty for empty directory', () => {
-    setup();
-    const detected = detectFrameworks(tmpDir);
+    const dir = tmpDir('rule-loader-test-');
+    const detected = detectFrameworks(dir);
     assert.deepStrictEqual(detected, []);
-    teardown();
   });
 });
 

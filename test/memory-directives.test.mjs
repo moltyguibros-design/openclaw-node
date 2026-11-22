@@ -176,19 +176,6 @@ describe('wrapOpenAI with directives', () => {
     return { publish: async () => {} };
   }
 
-  function createMockInjector(returnData = null) {
-    const data = returnData || {
-      concepts: [{ name: 'NATS', type: 'tool' }],
-      decisions: [],
-      snippets: [],
-    };
-    return {
-      retrieve: async (query, opts) => {
-        return { ...data, _query: query, _opts: opts };
-      },
-    };
-  }
-
   it('skips injection when @memory off is present', async () => {
     const { wrapOpenAI } = await import('../lib/publishers/openai-wrapper.mjs');
     let retrieveCalled = false;

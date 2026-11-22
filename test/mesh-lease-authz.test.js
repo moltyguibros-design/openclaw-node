@@ -12,7 +12,6 @@
  *
  * Run: node --test test/mesh-lease-authz.test.js
  */
-const fs = require('node:fs');
 const path = require('node:path');
 
 // Pin the side channels before the daemon loads: the tracer's obs DB, and an

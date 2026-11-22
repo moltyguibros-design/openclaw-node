@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { createExtractionStore, PROVENANCE_LOCAL } from '../lib/extraction-store.mjs';
+import { createExtractionStore } from '../lib/extraction-store.mjs';
 import { parsePublishDirective, PUBLISH_DIRECTIVE_REGEX } from '../lib/memory-directives.mjs';
 import { filterPrivateResults } from '../lib/retrieval-pipeline.mjs';
 import { lookupItem, listPublishedItems } from '../bin/publish-item.mjs';
