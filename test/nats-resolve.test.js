@@ -139,15 +139,14 @@ describe('nats-resolve', () => {
     assert.equal(opts.token, 'tok123');
   });
 
-  it('preserves quotes from env file values (no stripping)', () => {
+  it('strips surrounding quotes from env file values', () => {
     process.env.HOME = tmpDir;
     delete process.env.OPENCLAW_NATS;
     const envDir = path.join(tmpDir, '.openclaw');
     fs.mkdirSync(envDir, { recursive: true });
-    // Use double-quoted value — the module preserves surrounding quotes
-    fs.writeFileSync(path.join(envDir, 'openclaw.env'), 'OPENCLAW_NATS=nats://unquoted:4222\n');
+    fs.writeFileSync(path.join(envDir, 'openclaw.env'), 'OPENCLAW_NATS="nats://quoted:4222"\n');
     const mod = freshRequire();
-    assert.equal(mod.NATS_URL, 'nats://unquoted:4222');
+    assert.equal(mod.NATS_URL, 'nats://quoted:4222');
   });
 });
 

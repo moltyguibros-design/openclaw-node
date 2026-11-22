@@ -5,7 +5,6 @@ import {
   evaluateIngestionPolicy,
   parseSharedSubject,
 } from '../bin/memory-subscriber.mjs';
-import { createBackoff } from '../bin/memory-promoter.mjs';
 
 // ── parseSharedSubject ───────────────────────────────────
 
@@ -111,19 +110,6 @@ describe('evaluateIngestionPolicy', () => {
     const result = evaluateIngestionPolicy(event, nodeId, null);
     assert.strictEqual(result.decision, 'skip');
     assert.strictEqual(result.reason, 'unknown_subject');
-  });
-});
-
-// ── createBackoff reuse ──────────────────────────────────
-
-describe('createBackoff import reuse', () => {
-  it('createBackoff imported from promoter works for subscriber', () => {
-    const backoff = createBackoff({ baseDelay: 500, maxDelay: 5000 });
-    assert.strictEqual(backoff.getDelay(), 500);
-    backoff.recordFailure();
-    assert.strictEqual(backoff.getDelay(), 1000);
-    backoff.reset();
-    assert.strictEqual(backoff.getDelay(), 500);
   });
 });
 

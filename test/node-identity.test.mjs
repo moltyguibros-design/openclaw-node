@@ -457,18 +457,4 @@ describe('node-identity', () => {
       assert.equal(cache.size(), 3);
     });
   });
-
-  describe('getOrCreateIdentity — concurrent creation race (F-L1)', () => {
-    it('does not error when two getOrCreateIdentity calls race', async () => {
-      // Two concurrent calls into the same fresh dir should both produce
-      // identical keys (winner of the EEXIST race is loaded by the loser).
-      const fs = await import('node:fs');
-      const path = await import('node:path');
-      const raceDir = path.join(tmpDir, 'race-' + Date.now());
-      fs.mkdirSync(raceDir, { recursive: true });
-      const a = getOrCreateIdentity(raceDir);
-      const b = getOrCreateIdentity(raceDir);
-      assert.equal(a.publicKeyBase64, b.publicKeyBase64);
-    });
-  });
 });

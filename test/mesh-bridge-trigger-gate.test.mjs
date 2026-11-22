@@ -47,7 +47,7 @@ const card = (id, status, trigger, priority) => [
   '',
 ].join('\n');
 
-test('a triggered mesh card waits for ready; an untriggered or ready one dispatches', { skip, timeout: 30_000 }, async (t) => {
+test('a triggered mesh card waits for ready; a ready one dispatches', { skip, timeout: 30_000 }, async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mesh-bridge-trigger-'));
   const children = [];
   let nc;

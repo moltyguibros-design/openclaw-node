@@ -43,6 +43,10 @@ describe('sampleLayers', () => {
     const s = sampleLayers({ now, boot: 1, daemonStatePath: dsPath, roster: { up: [], down: CORE_SERVICES }, lastExtraction: null });
     assert.equal(s.interaction.active, false, 'idle past the window => not active even if state says ACTIVE');
     assert.equal(s.memory.working, false);
+
+    fs.writeFileSync(dsPath, JSON.stringify({ state: 'ENDED', pid: process.pid, lastActivityTime: now - 60_000 }));
+    const ended = sampleLayers({ now, boot: 1, daemonStatePath: dsPath, roster: { up: [], down: CORE_SERVICES }, lastExtraction: null });
+    assert.equal(ended.interaction.active, false, 'ENDED => not active even with fresh activity');
   });
 });
 
