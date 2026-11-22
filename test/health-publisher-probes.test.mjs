@@ -31,6 +31,15 @@ describe('mesh-health-publisher probes', () => {
     assert.equal(services.find((s) => s.name === 'mesh-task-daemon').status, 'active');
   });
 
+  it('Linux and macOS report the same service set', async () => {
+    const linux = await publisher.getServices(async () => missingUnit, false);
+    const mac = await publisher.getServices(async () => null, true);
+    assert.deepEqual(linux.map((s) => s.name), mac.map((s) => s.name));
+    for (const name of ['mesh-bridge', 'memory-daemon', 'mission-control']) {
+      assert.ok(linux.some((s) => s.name === name), `Linux never probes ${name}`);
+    }
+  });
+
   it('the role is the configured one, with a flag when the running services disagree', () => {
     const lead = [{ name: 'mesh-task-daemon', status: 'active' }];
     assert.deepEqual(publisher.reconcileRole('lead', lead),

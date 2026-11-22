@@ -79,36 +79,29 @@ function getMemory() {
   };
 }
 
-const LINUX_USER_SERVICES = [
-  "openclaw-mesh-task-daemon",
-  "openclaw-mesh-agent",
-  "openclaw-gateway",
-  "openclaw-mesh-health-publisher",
-  "openclaw-mesh-deploy-listener",
+const MESH_SERVICES = [
+  "mesh-task-daemon",
+  "mesh-bridge",
+  "mesh-agent",
+  "gateway",
+  "memory-daemon",
+  "mission-control",
+  "mesh-health-publisher",
+  "mesh-deploy-listener",
 ];
 
 async function getServices(run = runProbe, isMac = IS_MAC) {
   if (isMac) {
-    const serviceNames = [
-      "ai.openclaw.mesh-task-daemon",
-      "ai.openclaw.mesh-bridge",
-      "ai.openclaw.mesh-agent",
-      "ai.openclaw.gateway",
-      "ai.openclaw.memory-daemon",
-      "ai.openclaw.mission-control",
-      "ai.openclaw.mesh-health-publisher",
-      "ai.openclaw.mesh-deploy-listener",
-    ];
-    return Promise.all(serviceNames.map(async (name) => ({
-      name: name.replace("ai.openclaw.", ""),
-      ...launchdServiceStatus(await run("launchctl", ["list", name])),
+    return Promise.all(MESH_SERVICES.map(async (name) => ({
+      name,
+      ...launchdServiceStatus(await run("launchctl", ["list", `ai.openclaw.${name}`])),
     })));
   }
   // The installer renders every unit as a systemd --user unit.
   const props = "--property=LoadState,ActiveState,MainPID";
-  return Promise.all(LINUX_USER_SERVICES.map(async (name) => ({
-    name: name.replace("openclaw-", ""),
-    ...systemdServiceStatus(await run("systemctl", ["--user", "show", name, props])),
+  return Promise.all(MESH_SERVICES.map(async (name) => ({
+    name,
+    ...systemdServiceStatus(await run("systemctl", ["--user", "show", `openclaw-${name}`, props])),
   })));
 }
 
@@ -409,4 +402,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { gatherHealth, getServices, getAgentStatus, resolveConfiguredRole, reconcileRole, LINUX_USER_SERVICES };
+module.exports = { gatherHealth, getServices, getAgentStatus, resolveConfiguredRole, reconcileRole };
