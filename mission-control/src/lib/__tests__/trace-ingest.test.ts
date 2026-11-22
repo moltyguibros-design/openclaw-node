@@ -90,20 +90,24 @@ test("an event already written by a same-host daemon is stored once", async () =
   expect(c).toBe(1);
 });
 
-test("the server's instrumentation hook starts the ingester, but not during a build", async () => {
+test("the server's instrumentation hook starts the ingester and the retention prune, but not during a build", async () => {
   const g = globalThis as Record<string, unknown>;
   try {
     vi.stubEnv("NEXT_RUNTIME", "nodejs");
     vi.stubEnv("NEXT_PHASE", "phase-production-build");
     await (await import("@/instrumentation")).register();
     expect(g.__trace_ingest_timer).toBeFalsy();
+    expect(g.__obs_prune_timer).toBeFalsy();
 
     vi.stubEnv("NEXT_PHASE", "phase-production-server");
     await (await import("@/instrumentation")).register();
     await vi.waitFor(() => expect(bus.subs.map((s) => s.subject)).toEqual(["openclaw.trace.>"]));
+    expect(g.__obs_prune_timer).toBeTruthy();
   } finally {
     clearInterval(g.__trace_ingest_timer as ReturnType<typeof setInterval>);
     delete g.__trace_ingest_timer;
+    clearInterval(g.__obs_prune_timer as ReturnType<typeof setInterval>);
+    delete g.__obs_prune_timer;
   }
 });
 

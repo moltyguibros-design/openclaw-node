@@ -7,8 +7,24 @@ import { lt } from "drizzle-orm";
 
 const RETENTION_MS = 86_400_000;
 const PRUNE_EVERY_MS = 3_600_000;
-// runMigrations prunes at startup; this keeps the 24h retention true while MC stays up.
-let lastPruneAt = Date.now();
+
+const g = globalThis as unknown as { __obs_prune_timer?: ReturnType<typeof setInterval> | null };
+
+/** Drop events past the 24h retention, whoever wrote them (MC, same-host daemons, trace ingest). */
+export function pruneObservability() {
+  try {
+    getDb().delete(observabilityEvents).where(lt(observabilityEvents.timestamp, Date.now() - RETENTION_MS)).run();
+  } catch (err) {
+    console.error(`[tracer] observability prune failed: ${(err as Error).message}`);
+  }
+}
+
+/** Started once per server process (src/instrumentation.ts); runMigrations prunes at startup. */
+export function startObservabilityPrune() {
+  if (g.__obs_prune_timer) return;
+  g.__obs_prune_timer = setInterval(pruneObservability, PRUNE_EVERY_MS);
+  g.__obs_prune_timer.unref?.();
+}
 
 /** Summarize URL search params for trace logging (max 120 chars) */
 function summarizeParams(url: URL): string {
@@ -105,13 +121,7 @@ export function withTrace(
 /** Insert trace event into SQLite */
 function insertEvent(event: NewObservabilityEvent) {
   try {
-    const db = getDb();
-    db.insert(observabilityEvents).values(event).run();
-    const now = Date.now();
-    if (now - lastPruneAt >= PRUNE_EVERY_MS) {
-      lastPruneAt = now;
-      db.delete(observabilityEvents).where(lt(observabilityEvents.timestamp, now - RETENTION_MS)).run();
-    }
+    getDb().insert(observabilityEvents).values(event).run();
   } catch (err) {
     console.error(`[tracer] insertEvent failed: ${(err as Error).message}`);
   }
