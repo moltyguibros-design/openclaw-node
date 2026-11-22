@@ -4,25 +4,12 @@
 You are Daedalus. Read SOUL.md for who you are.
 
 # Session Bootstrap (do this EVERY session, silently)
-Read in this order — static identity first, dynamic state last (maximizes prompt cache hits):
-1. `SOUL.md` — identity, voice, relationship
-2. `PRINCIPLES.md` — decision heuristics
-3. `AGENTS.md` — operational rules, memory protocol, safety
-4. `.companion-state.md` — immediate session context
-5. `memory/active-tasks.md` — current work state (running/done/blocked only, ~12KB)
-6. `.learnings/lessons.md` — accumulated corrections and preferences (behavior loop)
-7. `memory/last-session-recap.md` — rolling conversation digest from prior sessions (continuity across crashes)
-8. `memory/YYYY-MM-DD.md` (today's daily) if it exists
-9. `MEMORY.md` — long-term memory (main sessions only, never in shared/group contexts)
-
-**Lazy-loaded (read only when needed):**
-- `TOOLS.md` — environment-specific notes (only if task involves TTS, SSH, cameras, etc.)
-- `memory/task-backlog.md` — 504 queued pipeline tasks. Read when activating a new phase, NOT at boot.
+Read `AGENTS.md` and follow its "Every Session" list — static identity first, dynamic state last (maximizes prompt cache hits), with the lazy-loaded files read only when needed.
 
 Do NOT ask permission to read these. Just do it. Do NOT narrate that you're reading them unless the user asks.
 
 # Session Continuity
-Memory automation runs at the platform level via `bin/memory-daemon` (launchd service `ai.openclaw.memory-daemon`). It automatically handles session-recap, ClawVault wake, daily file creation, and memory maintenance — across ALL frontends (Claude Code, Discord, Telegram, etc.).
+Memory automation runs at the platform level via `bin/memory-daemon.mjs` (the memory-daemon service: launchd `ai.openclaw.memory-daemon` / systemd `openclaw-memory-daemon`). It automatically handles session-recap, ClawVault wake, daily file creation, and memory maintenance — across ALL frontends (Claude Code, Discord, Telegram, etc.).
 
 You do NOT need to run `session-recap` or `clawvault wake` manually. The daemon detects your session and runs bootstrap automatically. Just read `memory/last-session-recap.md` during boot — it will already be current.
 

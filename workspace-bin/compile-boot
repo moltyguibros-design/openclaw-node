@@ -154,9 +154,10 @@ def compile_structured(section_name, section_content):
     - .companion-state.md (MANDATORY — if status:active + no session → crash recovery)
     - memory/active-tasks.md
     - .learnings/lessons.md
+    - memory/last-session-recap.md
     - memory/{today}.md
     - MEMORY.md (main session only)
-  commands: [bin/clawvault-local wake, check localhost:3000/api/tasks]
+  commands: [node bin/mc-health.mjs (once with --restart if unhealthy; exit 3 -> flag), bin/mc-api for any other /api route]
   lazy: [TOOLS.md, memory/task-backlog.md]"""
 
     # ── Memory ──
@@ -199,7 +200,8 @@ def compile_structured(section_name, section_content):
     # ── Task Completion ──
     if section_name == "Task Completion":
         return """task_reporting (HARD RULE — interrupt priority):
-  on_finish: "✅ [name] done. [one-liner]"
+  on_finish: "✅ [name] ready for review. [one-liner]"
+  then: status=waiting-user (never done; only the operator marks done)
   on_fail: "❌ [name] failed — [reason]."
   rules:
     - report IMMEDIATELY — never batch, never silently absorb sub-agent results
@@ -212,7 +214,7 @@ def compile_structured(section_name, section_content):
         return """task_tracking (file-driven, NOT API):
   file: memory/active-tasks.md (kanban reads every 3s)
   start: add/update entry with status=running
-  finish: update entry to status=done
+  finish: update entry to status=waiting-user (never done; only the operator marks done)
   also_update: .companion-state.md (feeds Live Session banner)
   backlog: memory/task-backlog.md (~46K tokens, read on-demand when activating a phase)"""
 

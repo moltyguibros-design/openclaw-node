@@ -36,3 +36,14 @@ test('numbered lists in identity docs count up without gaps', () => {
     });
   }
 });
+
+test('AGENTS.md "Every Session" is the one boot list, and CLAUDE.md points at it', () => {
+  const read = (f) => docs.find(([name]) => name === f)[1];
+  const everySession = read('AGENTS.md').match(/## Every Session\n[\s\S]*?\n## /)[0];
+  assert.match(everySession, /^\d+\. Read `memory\/last-session-recap\.md`/m);
+  assert.doesNotMatch(everySession, /clawvault-local wake/, 'the memory daemon runs the wake');
+  const bootstrap = read('CLAUDE.md').match(/# Session Bootstrap[^\n]*\n[\s\S]*?\n# /)[0];
+  assert.doesNotMatch(bootstrap, /^\d+\. /m, 'CLAUDE.md must not carry a second boot list');
+  assert.match(bootstrap, /AGENTS\.md.*"Every Session"/);
+  for (const [f, text] of docs) assert.doesNotMatch(text, /bin\/memory-daemon(?!\.mjs)/, f);
+});

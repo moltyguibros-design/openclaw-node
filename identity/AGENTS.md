@@ -26,9 +26,9 @@ Before doing anything else, read in this order (static identity first, dynamic s
    - If `status: active` but no session is running → previous session crashed. Run crash recovery (see Crash Recovery section in companion state).
 5. Read `memory/active-tasks.md` — current work state (running/done/blocked only, ~12KB)
 6. Read `.learnings/lessons.md` — accumulated corrections and preferences (behavior loop)
-7. Read `memory/YYYY-MM-DD.md` (today) for recent context
-8. **If in MAIN SESSION** (direct chat with your human): Also read `MEMORY.md`
-9. Run `clawvault-local wake` (if available) to recover active context and handoffs.
+7. Read `memory/last-session-recap.md` — rolling digest of prior sessions (continuity across crashes), kept current by the memory daemon
+8. Read `memory/YYYY-MM-DD.md` (today) for recent context
+9. **If in MAIN SESSION** (direct chat with your human): Also read `MEMORY.md`
 10. **Check Mission Control is healthy** — `node bin/mc-health.mjs`. If it is unhealthy or unreachable, run `node bin/mc-health.mjs --restart` once (a managed launchd/systemd restart with a 15-minute cooldown). If that does not restore health (exit 3), flag immediately. Never start a development server: Mission Control is a supervised service and a second copy would fight it for :3000. Call any other Mission Control `/api` route through `bin/mc-api` (e.g. `bin/mc-api /api/tasks`), which sends the session token.
 
 **Lazy-loaded (read only when relevant):**
@@ -48,7 +48,7 @@ Capture what matters. Decisions, context, things to remember. Skip the secrets u
 
 ### Memory Automation (Principle 11)
 
-All memory ops are fully automated by `bin/memory-daemon` (launchd, every 30s). No manual calls needed.
+All memory ops are fully automated by `bin/memory-daemon.mjs` (the memory-daemon service — launchd `ai.openclaw.memory-daemon` / systemd `openclaw-memory-daemon` — every 30s). No manual calls needed.
 - `bin/memory-maintenance` every 30min: archival, stale tasks, ClawVault checkpoint, daily file, MC sync
 - `bin/session-recap` every 10min: rolling 3-session digest
 - ClawVault: `clawvault-local` — `remember`, `search`, `vsearch` on-demand. Auto wake/checkpoint/sleep.

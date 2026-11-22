@@ -104,3 +104,38 @@ describe('compile-boot max_boot_tokens', { skip: !HAVE_PY_YAML && 'python3 with 
     assert.doesNotMatch(compileWithBudget(t, ['--all']).stderr, /WARNING/);
   });
 });
+
+function compileShipped(t, profile) {
+  const ws = mkdtempSync(join(tmpdir(), 'compile-boot-shipped-'));
+  t.after(() => rmSync(ws, { recursive: true, force: true }));
+  mkdirSync(join(ws, 'bin'));
+  mkdirSync(join(ws, '.boot'));
+  copyFileSync(join(ROOT, 'workspace-bin', 'compile-boot'), join(ws, 'bin', 'compile-boot'));
+  copyFileSync(join(ROOT, 'identity', 'AGENTS.md'), join(ws, 'AGENTS.md'));
+  copyFileSync(join(ROOT, 'boot', 'manifest.yaml'), join(ws, '.boot', 'manifest.yaml'));
+  const env = { ...process.env, HOME: ws, OPENCLAW_MC_URL: 'http://127.0.0.1:9', OPENCLAW_MC_TOKEN_FILE: join(ws, 'none') };
+  return spawnSync('python3', [join(ws, 'bin', 'compile-boot'), '--profile', profile], { env, encoding: 'utf8' });
+}
+
+describe('compile-boot structured rules follow identity/AGENTS.md', { skip: !HAVE_PY_YAML && 'python3 with PyYAML not available' }, () => {
+  for (const profile of ['main', 'lite', 'discord']) {
+    it(`${profile}: a finished task goes to waiting-user, and Mission Control is reached with its token`, (t) => {
+      const r = compileShipped(t, profile);
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /waiting-user/);
+      assert.doesNotMatch(r.stdout, /status=done/);
+      assert.doesNotMatch(r.stdout, /\] done\./);
+      assert.doesNotMatch(r.stdout, /localhost:3000\/api/);
+    });
+  }
+
+  it('the boot list reads the session recap, checks MC through mc-health and leaves the wake to the daemon', (t) => {
+    const r = compileShipped(t, 'main');
+    assert.equal(r.status, 0, r.stderr);
+    const boot = r.stdout.match(/boot:\n[\s\S]*?\n  lazy:/)[0];
+    assert.match(boot, /- memory\/last-session-recap\.md/);
+    assert.match(boot, /node bin\/mc-health\.mjs/);
+    assert.match(boot, /bin\/mc-api/);
+    assert.doesNotMatch(boot, /clawvault-local wake/);
+  });
+});
