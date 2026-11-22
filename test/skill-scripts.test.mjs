@@ -139,6 +139,21 @@ describe('clawddocs', () => {
     assert.match(skill, /web-fetch tool/);
     assert.doesNotMatch(skill, /docs\.clawd\.bot/);
   });
+
+  // Routing excluded "openclaw documentation", and the bundled snippets moved the
+  // gateway off loopback to 0.0.0.0:8080 with channel keys the node does not use.
+  it('routes on OpenClaw and ships no config snippets', () => {
+    const front = skill.split(/^---$/m)[1];
+    const list = (key) => (front.match(new RegExp(`^${key}:\\n((?:  - .*\\n)+)`, 'm'))?.[1] ?? '')
+      .split('\n').filter(Boolean).map((l) => l.replace(/^  - "?|"$/g, ''));
+    const triggers = list('triggers');
+    assert.ok(triggers.includes('openclaw documentation'), triggers.join(', '));
+    assert.deepEqual(triggers.filter((t) => /clawdbot/i.test(t)), []);
+    assert.ok(!list('negative_triggers').includes('openclaw documentation'));
+    assert.doesNotMatch(skill, /Clawdbot/);
+    assert.equal(existsSync(join(DIR, 'snippets')), false);
+    assert.doesNotMatch(skill, /snippets\/|0\.0\.0\.0/);
+  });
 });
 
 // The installer installs a skill's Python deps only from its requirements.txt, so

@@ -1,27 +1,26 @@
 ---
 name: clawddocs
-description: "Clawdbot documentation expert — decision tree navigation, doc fetching, and config snippets. Use when users ask how to set up, configure, or troubleshoot Clawdbot features."
+description: "OpenClaw documentation expert: decision-tree navigation and doc fetching from docs.openclaw.ai. Use when users ask how to set up, configure, or troubleshoot OpenClaw features."
 triggers:
-  - "clawdbot documentation"
-  - "how to configure clawdbot"
-  - "clawdbot setup"
-  - "clawdbot troubleshooting"
+  - "openclaw documentation"
+  - "how to configure openclaw"
+  - "openclaw setup"
+  - "openclaw troubleshooting"
   - "clawddocs"
 negative_triggers:
-  - "openclaw documentation"
   - "general coding help"
   - "write documentation for my project"
 ---
 
-# Clawdbot Documentation Expert
+# OpenClaw Documentation Expert
 
-**Capability Summary:** Clawdbot documentation expert skill with decision tree navigation, doc fetching from docs.openclaw.ai with the web-fetch tool, and config snippets for all Clawdbot features (providers, gateway, automation, platforms, tools).
+**Capability Summary:** OpenClaw documentation expert skill with decision tree navigation and doc fetching from docs.openclaw.ai with the web-fetch tool, covering providers, gateway, automation, platforms and tools.
 
-You are an expert on Clawdbot documentation. Use this skill to help users navigate, understand, and configure Clawdbot.
+You are an expert on OpenClaw documentation. Use this skill to help users navigate, understand, and configure OpenClaw.
 
 ## Quick Start
 
-"When a user asks about Clawdbot, first identify what they need:"
+"When a user asks about OpenClaw, first identify what they need:"
 
 ### 🎯 Decision Tree
 
@@ -97,27 +96,15 @@ Docker, Ansible, Bun, Nix, updating
 ### 📚 Reference (`/reference/`)
 Templates, RPC, device models
 
-## Config Snippets
-
-See `./snippets/common-configs.md` for ready-to-use configuration patterns:
-- Provider setup (Discord, Telegram, WhatsApp, etc.)
-- Gateway configuration
-- Agent defaults
-- Retry settings
-- Cron jobs
-- Skills configuration
-
 ## Workflow
 
 1. **Identify the need** using the decision tree above
 2. **Fetch the doc**: `https://docs.openclaw.ai/<path>` with the web-fetch tool (if unsure of the path, start from `https://docs.openclaw.ai/`)
-3. **Reference snippets** for config examples
-4. **Cite the source URL** when answering
+3. **Cite the source URL** when answering
 
 ## Tips
 
 - Answer only from a page you fetched in this conversation; if a fetch fails, say so instead of answering from memory
-- Offer specific config snippets from `snippets/`
 - Link to docs: `https://docs.openclaw.ai/<path>`
 
 ## Example Interactions
@@ -130,10 +117,12 @@ See `./snippets/common-configs.md` for ready-to-use configuration patterns:
 3. Provide the config snippet:
 ```json
 {
-  "discord": {
-    "guilds": {
-      "*": {
-        "requireMention": true
+  "channels": {
+    "discord": {
+      "guilds": {
+        "*": {
+          "requireMention": true
+        }
       }
     }
   }
