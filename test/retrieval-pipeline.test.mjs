@@ -569,6 +569,46 @@ describe('R19 (repair 5.2): channel failures are observable, never silent', () =
     }
   });
 
+  it('a knowledge DB without session_chunks_fts reports channel fts', async () => {
+    const reports = [];
+    setChannelErrorSink((channel, err) => reports.push({ channel, message: err.message }));
+    const knowledgeDb = createKnowledgeDb();
+    knowledgeDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet) VALUES ('s', 0, 'user', 'nats config', 'nats config')`).run();
+    try {
+      const result = await createRetrievalPipeline({ knowledgeDb }).retrieve('nats config');
+      assert.deepStrictEqual(result, []);
+      const fts = reports.find(r => r.channel === 'fts');
+      assert.ok(fts, JSON.stringify(reports));
+      assert.match(fts.message, /no such table/);
+    } finally {
+      knowledgeDb.close();
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
+  });
+
+  it('a broken mentions table reports theme-entity', () => {
+    const reports = [];
+    setChannelErrorSink((channel, err) => reports.push({ channel, message: err.message }));
+    const extractionDb = createExtractionDb();
+    const knowledgeDb = createKnowledgeDb();
+    seedExtractionDb(extractionDb);
+    try {
+      assert.equal(findMatchingEntities(extractionDb, 'NATS').length, 1);
+      extractionDb.exec('DROP TABLE mentions');
+      assert.deepStrictEqual(themeEntitySearch(extractionDb, knowledgeDb, 'NATS'), []);
+      assert.deepStrictEqual(reports.map(r => r.channel), ['theme-entity']);
+      assert.match(reports[0].message, /no such table: mentions/);
+    } finally {
+      extractionDb.close();
+      knowledgeDb.close();
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
+  });
+
   it('a throwing sink never breaks the channel', () => {
     setChannelErrorSink(() => { throw new Error('bad sink'); });
     try {

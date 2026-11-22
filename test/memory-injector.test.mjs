@@ -403,6 +403,61 @@ describe('writeBackReconsolidation — actually writes (F-C8)', () => {
     assert.equal(row.last_recalled, null);
     db.close();
   });
+
+  it('a failing write-back reports channel reconsolidation and never throws', () => {
+    const reports = [];
+    setChannelErrorSink((channel, err) => reports.push({ channel, message: err.message }));
+    const db = new Database(':memory:');
+    db.exec('CREATE TABLE entities (id INTEGER PRIMARY KEY, salience REAL)');
+    try {
+      writeBackReconsolidation(db, { entityIds: [1], decisionIds: [] });
+      assert.deepStrictEqual(reports.map(r => r.channel), ['reconsolidation']);
+      assert.match(reports[0].message, /last_recalled/);
+    } finally {
+      db.close();
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
+  });
+});
+
+describe('@memory only:X filter', () => {
+  it('a failing filter reports channel theme-filter and keeps the results', async () => {
+    const reports = [];
+    setChannelErrorSink((channel, err) => reports.push({ channel, message: err.message }));
+    const knowledgeDb = new Database(':memory:');
+    knowledgeDb.exec(`
+      CREATE TABLE session_chunks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+        turn_index INTEGER NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL, snippet TEXT NOT NULL);
+      CREATE VIRTUAL TABLE session_chunks_fts USING fts5(text, content='session_chunks', content_rowid='id');
+      CREATE TRIGGER session_chunks_fts_ins AFTER INSERT ON session_chunks BEGIN
+        INSERT INTO session_chunks_fts(rowid, text) VALUES (new.id, new.text);
+      END;
+    `);
+    knowledgeDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet)
+      VALUES ('session-1', 0, 'user', 'jetstream consumer setup', 'jetstream consumer setup')`).run();
+    const extractionDb = new Database(':memory:');
+    try {
+      const injector = createMemoryInjector({ knowledgeDb, extractionDb, llmClient: null });
+      const result = await injector.retrieve('jetstream consumer', {
+        embedFn: async () => null,
+        respectPrivacy: false,
+        themeFilter: 'nats',
+      });
+      assert.ok(result.snippets.some(s => s.sessionId === 'session-1'), 'the filter fails open');
+      const filter = reports.find(r => r.channel === 'theme-filter');
+      assert.ok(filter, JSON.stringify(reports.map(r => r.channel)));
+      assert.match(filter.message, /no such table/);
+    } finally {
+      knowledgeDb.close();
+      extractionDb.close();
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
+  });
 });
 
 describe('curateForRecall — related_sessions caps sessions, not chunks', () => {
