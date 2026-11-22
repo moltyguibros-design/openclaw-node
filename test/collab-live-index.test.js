@@ -95,6 +95,23 @@ describe('the live-session index', () => {
     assert.deepEqual(JSON.parse(sc.decode((await kv.get(LIVE_INDEX_KEY)).value)), {});
   });
 
+  it('a deleted session (JetStream DEL tombstone, empty value) reads as missing', async () => {
+    const kv = new CountingKV();
+    const store = new CollabStore(kv);
+    const session = createSession('T-del', spec);
+    await store.put(session);
+    await store.list({ status: 'recruiting' });
+    const tombstone = { value: new Uint8Array(0), operation: 'DEL' };
+    kv.store.set(session.session_id, tombstone);
+    assert.equal(await store.get(session.session_id), null);
+    assert.equal(await store._updateWithCAS(session.session_id, (s) => s), null);
+    assert.equal(await store.storeArtifact(session.session_id, 'k', 'v'), null);
+    assert.deepEqual(await store.list({ status: 'recruiting' }), []);
+    assert.deepEqual(await store.list(), []);
+    kv.store.set(LIVE_INDEX_KEY, tombstone);
+    assert.deepEqual((await store._readLiveIndex()).index, {});
+  });
+
   it('a full listing and a task lookup never return the index as a session', async () => {
     const store = new CollabStore(new CountingKV());
     const session = createSession('T-all', spec);

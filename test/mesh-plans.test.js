@@ -300,6 +300,17 @@ describe('PlanStore', () => {
     assert.equal(result, null);
   });
 
+  it('a deleted plan (JetStream DEL tombstone, empty value) reads as missing', async () => {
+    const kv = new MockKV();
+    const store = new PlanStore(kv);
+    const plan = createPlan({ parent_task_id: 'T-102', title: 'Tombstoned' });
+    await store.put(plan);
+    kv.store.set(plan.plan_id, { value: new Uint8Array(0), operation: 'DEL' });
+    assert.equal(await store.get(plan.plan_id), null);
+    assert.equal(await store._updateWithCAS(plan.plan_id, (p) => p), null);
+    assert.deepEqual(await store.list(), []);
+  });
+
   it('delete removes plan', async () => {
     const store = new PlanStore(new MockKV());
     const plan = createPlan({ parent_task_id: 'T-101', title: 'Delete me' });

@@ -140,6 +140,27 @@ function mockKv() {
   };
 }
 
+// nats 2.29.3 KV delete: writes a DEL marker with an empty payload, which
+// get() returns as-is and keys() skips.
+function tombstoneKv() {
+  const rows = new Map();
+  let rev = 0;
+  return {
+    async get(k) { const r = rows.get(k); return r ? { ...r } : null; },
+    async put(k, v) { rows.set(k, { value: v, revision: ++rev, operation: "PUT" }); },
+    async update(k, v, expected) {
+      const r = rows.get(k);
+      if (!r || r.revision !== expected) { const e = new Error("wrong last sequence"); e.code = "10071"; throw e; }
+      rows.set(k, { value: v, revision: ++rev, operation: "PUT" });
+    },
+    async delete(k) { rows.set(k, { value: new Uint8Array(0), revision: ++rev, operation: "DEL" }); },
+    async keys() {
+      const live = [...rows].filter(([, r]) => r.operation !== "DEL").map(([k]) => k);
+      return (async function* () { yield* live; })();
+    },
+  };
+}
+
 async function seed(store, task) { await store.put(task); return task; }
 const pending = (id, extra = {}) => ({ ...createTask({ task_id: id, title: id }), status: TASK_STATUS.PENDING_REVIEW, owner: "w1", ...extra });
 
@@ -263,6 +284,43 @@ describe("pruneTerminal() KV hygiene (P4-5)", () => {
     const store = new TaskStore(mockKv());
     await seed(store, { ...createTask({ task_id: "x", title: "t" }), status: TASK_STATUS.COMPLETED, completed_at: old });
     assert.deepEqual(await store.pruneTerminal({ maxAgeMs: 0, now }), []);
+  });
+});
+
+describe("a pruned task reads as missing (JetStream DEL tombstone)", () => {
+  const DAY = 86400000;
+  const now = Date.parse("2026-09-06T12:00:00Z");
+  const old = new Date(now - 30 * DAY).toISOString();
+
+  async function pruned() {
+    const store = new TaskStore(tombstoneKv());
+    await seed(store, { ...createTask({ task_id: "OLD", title: "t" }), status: TASK_STATUS.COMPLETED, completed_at: old });
+    assert.deepEqual(await store.pruneTerminal({ maxAgeMs: 14 * DAY, now }), ["OLD"]);
+    return store;
+  }
+
+  it("get() and _updateWithCAS() return null", async () => {
+    const store = await pruned();
+    assert.equal(await store.get("OLD"), null);
+    assert.equal(await store._updateWithCAS("OLD", (t) => t), null);
+  });
+
+  it("claim() skips a task depending on the pruned id instead of throwing", async () => {
+    const store = await pruned();
+    await seed(store, { ...createTask({ task_id: "DEP", title: "t", depends_on: ["OLD"] }), status: TASK_STATUS.QUEUED });
+    await seed(store, { ...createTask({ task_id: "FREE", title: "t" }), status: TASK_STATUS.QUEUED });
+    const claimed = await store.claim("node-a");
+    assert.equal(claimed.task_id, "FREE");
+  });
+
+  it("list() skips a key deleted between keys() and get()", async () => {
+    const kv = tombstoneKv();
+    const store = new TaskStore(kv);
+    await seed(store, { ...createTask({ task_id: "A", title: "t" }), status: TASK_STATUS.QUEUED });
+    await seed(store, { ...createTask({ task_id: "B", title: "t" }), status: TASK_STATUS.QUEUED });
+    const keys = kv.keys.bind(kv);
+    kv.keys = async () => { const it = await keys(); await kv.delete("B"); return it; };
+    assert.deepEqual((await store.list()).map((t) => t.task_id), ["A"]);
   });
 });
 
