@@ -239,13 +239,29 @@ describe('broadcast-emitter / broadcastFromConsolidation', () => {
 // ── TTL env override ──────────────────────────────────────────────────────
 
 describe('broadcast-emitter / TTL override', () => {
-  it('uses env-configured TTL', async () => {
+  it('uses opts.ttlMinutes', async () => {
     const nc = createMockNc();
     const b = createBroadcaster(nc, 'test-node', { ttlMinutes: 120 });
     const analysis = { llmAnalysis: { themes: ['a', 'b', 'c'], entities: [] } };
     await b.maybeBroadcast('How do I fix this?', analysis);
     assert.equal(nc.published[0].data.data.ttl_minutes, 120);
     b.stop();
+  });
+
+  it('uses OPENCLAW_BROADCAST_TTL_MIN when opts.ttlMinutes is absent', async () => {
+    const saved = process.env.OPENCLAW_BROADCAST_TTL_MIN;
+    process.env.OPENCLAW_BROADCAST_TTL_MIN = '120';
+    try {
+      const nc = createMockNc();
+      const b = createBroadcaster(nc, 'test-node');
+      const analysis = { llmAnalysis: { themes: ['a', 'b', 'c'], entities: [] } };
+      await b.maybeBroadcast('How do I fix this?', analysis);
+      assert.equal(nc.published[0].data.data.ttl_minutes, 120);
+      b.stop();
+    } finally {
+      if (saved === undefined) delete process.env.OPENCLAW_BROADCAST_TTL_MIN;
+      else process.env.OPENCLAW_BROADCAST_TTL_MIN = saved;
+    }
   });
 });
 

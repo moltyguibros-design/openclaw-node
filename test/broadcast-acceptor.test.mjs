@@ -77,9 +77,17 @@ function mockNatsConnection() {
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 describe('broadcast-acceptor constants', () => {
-  it('TOKEN_OVERLAP_THRESHOLD defaults to 0.3', () => {
-    assert.equal(typeof TOKEN_OVERLAP_THRESHOLD, 'number');
-    assert.ok(TOKEN_OVERLAP_THRESHOLD >= 0 && TOKEN_OVERLAP_THRESHOLD <= 1);
+  it('TOKEN_OVERLAP_THRESHOLD defaults to 0.3 and ACCEPTOR_TOKEN_OVERLAP overrides it', async () => {
+    const saved = process.env.ACCEPTOR_TOKEN_OVERLAP;
+    try {
+      delete process.env.ACCEPTOR_TOKEN_OVERLAP;
+      assert.equal((await import('../lib/broadcast-acceptor.mjs?default')).TOKEN_OVERLAP_THRESHOLD, 0.3);
+      process.env.ACCEPTOR_TOKEN_OVERLAP = '0.7';
+      assert.equal((await import('../lib/broadcast-acceptor.mjs?env')).TOKEN_OVERLAP_THRESHOLD, 0.7);
+    } finally {
+      if (saved === undefined) delete process.env.ACCEPTOR_TOKEN_OVERLAP;
+      else process.env.ACCEPTOR_TOKEN_OVERLAP = saved;
+    }
   });
 
   it('MAX_PENDING_OFFERS defaults to 10', () => {

@@ -8,7 +8,6 @@ import assert from 'node:assert/strict';
 import { randomUUID, generateKeyPairSync } from 'node:crypto';
 
 import {
-  RELEVANCE_THRESHOLD,
   MAX_ARTIFACTS_PER_OFFER,
   generateRelevanceSummary,
   buildOfferFromResults,
@@ -77,10 +76,17 @@ function mockNatsConnection() {
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 describe('broadcast-offerer constants', () => {
-  it('RELEVANCE_THRESHOLD defaults to 0.55', () => {
-    // May be overridden by env, but default is 0.55
-    assert.equal(typeof RELEVANCE_THRESHOLD, 'number');
-    assert.ok(RELEVANCE_THRESHOLD > 0 && RELEVANCE_THRESHOLD < 1);
+  it('RELEVANCE_THRESHOLD defaults to 0.55 and OFFERER_RELEVANCE_THRESHOLD overrides it', async () => {
+    const saved = process.env.OFFERER_RELEVANCE_THRESHOLD;
+    try {
+      delete process.env.OFFERER_RELEVANCE_THRESHOLD;
+      assert.equal((await import('../lib/broadcast-offerer.mjs?default')).RELEVANCE_THRESHOLD, 0.55);
+      process.env.OFFERER_RELEVANCE_THRESHOLD = '0.8';
+      assert.equal((await import('../lib/broadcast-offerer.mjs?env')).RELEVANCE_THRESHOLD, 0.8);
+    } finally {
+      if (saved === undefined) delete process.env.OFFERER_RELEVANCE_THRESHOLD;
+      else process.env.OFFERER_RELEVANCE_THRESHOLD = saved;
+    }
   });
 
   it('MAX_ARTIFACTS_PER_OFFER is 3', () => {
