@@ -5,8 +5,10 @@
  * no reasoning rules. -B keeps python from writing __pycache__ into the repo.
  */
 import { describe, it } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -41,5 +43,29 @@ describe('ui-ux-pro-max scripts load their bundled data', { skip: !HAVE_PY && 'p
       SCRIPTS,
     ], { encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
+  });
+});
+
+describe('ui-ux-pro-max --persist reports where it wrote', { skip: !HAVE_PY && 'python3 not available' }, () => {
+  function persist(extra) {
+    const out = tmpDir('uipro-');
+    const r = spawnSync('python3', ['-B', join(SCRIPTS, 'search.py'), 'saas dashboard', '--design-system', '--persist', '-o', out, ...extra], { encoding: 'utf8', cwd: out });
+    assert.equal(r.status, 0, r.stderr);
+    return { out, stdout: r.stdout };
+  }
+
+  it('prints the MASTER.md it wrote, and MASTER.md names its own pages dir', () => {
+    const { out, stdout } = persist([]);
+    const master = join(out, 'design-system', 'saas-dashboard', 'MASTER.md');
+    assert.ok(stdout.includes(master), stdout.slice(-600));
+    assert.ok(existsSync(master));
+    assert.match(readFileSync(master, 'utf8'), /`design-system\/saas-dashboard\/pages\/\[page-name\]\.md`/);
+  });
+
+  it('a page override names the project MASTER.md', () => {
+    const { out, stdout } = persist(['--page', 'dashboard']);
+    const page = join(out, 'design-system', 'saas-dashboard', 'pages', 'dashboard.md');
+    assert.ok(stdout.includes(page), stdout.slice(-600));
+    assert.match(readFileSync(page, 'utf8'), /`design-system\/saas-dashboard\/MASTER\.md`/);
   });
 });

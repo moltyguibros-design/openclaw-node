@@ -492,6 +492,10 @@ def generate_design_system(query: str, project_name: str = None, output_format: 
 
 
 # ============ PERSISTENCE FUNCTIONS ============
+def _project_slug(design_system: dict) -> str:
+    return design_system.get("project_name", "default").lower().replace(' ', '-')
+
+
 def persist_design_system(design_system: dict, page: str = None, output_dir: str = None, page_query: str = None) -> dict:
     """
     Persist design system to design-system/<project>/ folder using Master + Overrides pattern.
@@ -507,11 +511,7 @@ def persist_design_system(design_system: dict, page: str = None, output_dir: str
     """
     base_dir = Path(output_dir) if output_dir else Path.cwd()
     
-    # Use project name for project-specific folder
-    project_name = design_system.get("project_name", "default")
-    project_slug = project_name.lower().replace(' ', '-')
-    
-    design_system_dir = base_dir / "design-system" / project_slug
+    design_system_dir = base_dir / "design-system" / _project_slug(design_system)
     pages_dir = design_system_dir / "pages"
     
     created_files = []
@@ -560,7 +560,7 @@ def format_master_md(design_system: dict) -> str:
     # Logic header
     lines.append("# Design System Master File")
     lines.append("")
-    lines.append("> **LOGIC:** When building a specific page, first check `design-system/pages/[page-name].md`.")
+    lines.append(f"> **LOGIC:** When building a specific page, first check `design-system/{_project_slug(design_system)}/pages/[page-name].md`.")
     lines.append("> If that file exists, its rules **override** this Master file.")
     lines.append("> If not, strictly follow the rules below.")
     lines.append("")
@@ -823,7 +823,7 @@ def format_page_override_md(design_system: dict, page_name: str, page_query: str
     lines.append(f"> **Generated:** {timestamp}")
     lines.append(f"> **Page Type:** {page_overrides.get('page_type', 'General')}")
     lines.append("")
-    lines.append("> ⚠️ **IMPORTANT:** Rules in this file **override** the Master file (`design-system/MASTER.md`).")
+    lines.append(f"> ⚠️ **IMPORTANT:** Rules in this file **override** the Master file (`design-system/{_project_slug(design_system)}/MASTER.md`).")
     lines.append("> Only deviations from the Master are documented here. For all other rules, refer to the Master.")
     lines.append("")
     lines.append("---")
@@ -922,8 +922,6 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
     Uses the existing search infrastructure to find relevant style, UX, and layout
     data instead of hardcoded page types.
     """
-    from .core import search
-    
     page_lower = page_name.lower()
     query_lower = (page_query or "").lower()
     combined_context = f"{page_lower} {query_lower}"
