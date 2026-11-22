@@ -268,6 +268,29 @@ describe('read-only mesh CLIs bind to KV buckets, never create them', () => {
   });
 });
 
+// Nothing subscribes to mesh.health.<id> (only mesh.health.alerts is used), node-init
+// has no --repair option, and an object literal keeps only the last duplicate key.
+describe('mesh CLI dead code stays gone', () => {
+  it('node-init and mesh-node-remove publish no mesh.health.<id> announcement', () => {
+    for (const f of ['openclaw-node-init.js', 'mesh-node-remove.js']) {
+      assert.doesNotMatch(readFileSync(join(ROOT, 'bin', f), 'utf8'), /mesh\.health\./, f);
+    }
+  });
+
+  it('mesh-install.sh does not forward --repair to node-init', () => {
+    assert.doesNotMatch(readFileSync(join(ROOT, 'mesh-install.sh'), 'utf8'), /EXTRA_ARGS="\$EXTRA_ARGS --repair"/);
+  });
+
+  it('the daemon test surface lists each hook once', () => {
+    const src = readFileSync(join(ROOT, 'bin', 'mesh-task-daemon.js'), 'utf8');
+    const start = src.indexOf('module.exports.__test = {');
+    const literal = src.slice(start, src.indexOf('\n  };\n', start));
+    const keys = [...literal.matchAll(/^ {4}(\w+)(?::|\()/gm)].map((m) => m[1]);
+    assert.ok(keys.length > 10, 'keys parsed');
+    assert.deepEqual(keys.filter((k, i) => keys.indexOf(k) !== i), []);
+  });
+});
+
 // mesh-node-remove must undo every unit node-init installs (plus the health
 // publisher a full install adds): a deploy listener left behind keeps the
 // "removed" node on the bus and crash-loops once --purge deletes ~/openclaw.

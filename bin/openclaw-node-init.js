@@ -813,15 +813,6 @@ async function verifyNatsHealth(natsUrl, nodeId) {
     ok(`NATS connected: ${nc.getServer()}`);
 
     const sc = nats.StringCodec();
-    nc.publish(`mesh.health.${nodeId}`, sc.encode(JSON.stringify({
-      node_id: nodeId,
-      status: 'online',
-      event: 'node_joined',
-      os: os.platform(),
-      arch: os.arch(),
-      timestamp: new Date().toISOString(),
-    })));
-    ok('Health announcement published');
 
     try {
       const msg = await nc.request('mesh.tasks.list', sc.encode(JSON.stringify({ status: 'queued' })), { timeout: 5000 });

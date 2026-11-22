@@ -46,7 +46,6 @@ const GATEWAY_ERR_LOG = process.env.GATEWAY_ERR_LOG
 const LANE_STUCK_THRESHOLD_MS = 5 * 60 * 1000;   // 5 min before intervention
 const POLL_INTERVAL_MS = 15_000;                   // re-check for a missing or rotated log every 15s
 const COOLDOWN_MS = 60_000;                        // 1 min cooldown after SIGUSR1
-const INCIDENT_LOG = path.join(process.env.HOME, 'openclaw/shared/lane-watchdog.log');
 
 // --- State ---
 let lastInterventionAt = 0;
@@ -64,9 +63,6 @@ function log(msg) {
   const ts = new Date().toISOString();
   const line = `${ts} [lane-watchdog] ${msg}`;
   console.log(line);
-  try {
-    fs.appendFileSync(INCIDENT_LOG, line + '\n');
-  } catch { /* best effort */ }
 }
 
 function getGatewayPid() {

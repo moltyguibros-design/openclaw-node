@@ -23,6 +23,10 @@ test('shutdown closes the fs.watch watchers instead of unwatchFile, which only s
   assert.match(src, /if \(errWatcher\) errWatcher\.close\(\);/);
 });
 
+test('log lines go to stdout only, never into the retired ~/openclaw/shared folder', () => {
+  assert.doesNotMatch(read('bin/lane-watchdog.js'), /openclaw\/shared|appendFileSync/);
+});
+
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'lane-watchdog-'));
 process.env.HOME = tmpHome;
 const require = createRequire(import.meta.url);

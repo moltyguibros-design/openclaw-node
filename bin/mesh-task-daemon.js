@@ -3270,6 +3270,7 @@ if (require.main === module) {
     },
     startRecruitedSession: (id) => startRecruitedSession(id),
     handleCollabJoin: (msg) => handleCollabJoin(msg),
+    // test/daemon-circling-handlers.test.js, test/circling-parse-retry.test.mjs
     handleCollabReflect: (msg) => handleCollabReflect(msg),
     handleCollabJoinDispatch: async (session) =>
       collabStore.isRecruitingDone(session) ? startRecruitedSession(session.session_id) : false,
@@ -3277,8 +3278,6 @@ if (require.main === module) {
     handleCirclingStepTimeout: (id, snap) => handleCirclingStepTimeout(id, snap),
     handleCirclingGateApprove: (msg) => handleCirclingGateApprove(msg),
     handleCirclingGateReject: (msg) => handleCirclingGateReject(msg),
-    // test/daemon-circling-handlers.test.js, test/circling-parse-retry.test.mjs
-    handleCollabReflect: (msg) => handleCollabReflect(msg),
     completeCirclingSession: (id) => completeCirclingSession(id),
     sweepCollabRoundTimeouts: () => sweepCollabRoundTimeouts(),
     handleCollabLeave: (msg) => handleCollabLeave(msg),
@@ -3295,9 +3294,6 @@ if (require.main === module) {
     handleHeartbeat: (msg) => handleHeartbeat(msg),
     handleRelease: (msg) => handleRelease(msg),
     handleTaskApprove: (msg) => handleTaskApprove(msg),
-    handleCollabJoin: (msg) => handleCollabJoin(msg),
-    handleCollabLeave: (msg) => handleCollabLeave(msg),
-    handleCollabReflect: (msg) => handleCollabReflect(msg),
     handleTaskReject: (msg) => handleTaskReject(msg),
     handleCancel: (msg) => handleCancel(msg),
     handleUpdate: (msg) => handleUpdate(msg),

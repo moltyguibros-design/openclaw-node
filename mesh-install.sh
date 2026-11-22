@@ -254,9 +254,6 @@ EXTRA_ARGS=""
 if [ "$DRY_RUN" = "1" ]; then
   EXTRA_ARGS="--dry-run"
 fi
-if [ "$REPAIR" = "1" ]; then
-  EXTRA_ARGS="$EXTRA_ARGS --repair"
-fi
 
 cd "$MESH_DIR"
 MESH_JOIN_TOKEN="$TOKEN" node bin/openclaw-node-init.js $EXTRA_ARGS

@@ -12,7 +12,6 @@
  *
  * What it does:
  *   - Cancels any tasks claimed/running by the node (releases back to queue)
- *   - Publishes mesh.health.<nodeId> with status=removed
  *   - Removes node from MESH_NODES KV bucket (if it exists)
  *   - (Local mode only) Stops and removes the mesh-agent, deploy-listener and
  *     health-publisher launchd/systemd services
@@ -102,8 +101,6 @@ const cleanNatsState = tracer.wrapAsync('cleanNatsState', async function cleanNa
     return;
   }
 
-  const sc = nats.StringCodec();
-
   try {
     const nc = await nats.connect(connectOpts);
     ok(`NATS connected: ${nc.getServer()}`);
@@ -141,15 +138,6 @@ const cleanNatsState = tracer.wrapAsync('cleanNatsState', async function cleanNa
       console.warn(`[mesh-node-remove] clean MESH_NODES entry: ${err.message}`);
       ok('No MESH_NODES registry entry to remove');
     }
-
-    // 3. Publish removal announcement
-    nc.publish(`mesh.health.${nodeId}`, sc.encode(JSON.stringify({
-      node_id: nodeId,
-      status: 'removed',
-      event: 'node_removed',
-      timestamp: new Date().toISOString(),
-    })));
-    ok('Removal announcement published');
 
     await nc.drain();
   } catch (e) {
