@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -115,6 +116,24 @@ async function fixture(t, interval = 100, requestMux = false, owner = 'mesh', me
   const assertKanban = async () => assert.equal(await fs.readFile(kanban, 'utf8'), original);
   return { bridge, server, assertKanban, kanban, bus: { servers: env.OPENCLAW_NATS, token } };
 }
+
+// Only an agent heartbeats, so the 2-minute "Agent silent" warning may only run
+// between a claim and a terminal or review event. Tracking from submit (or for a
+// queued task on reconcile) rewrote next_action every 2 minutes on cards that were
+// just waiting for an agent or for review. The 2-minute clock is a constant of the
+// spawned process, so the gating is checked on the source.
+test('bridge tracks staleness only while an agent holds the task', () => {
+  const src = readFileSync(entry, 'utf8');
+  const body = (name) => src.slice(src.indexOf(`function ${name}(`), src.indexOf('\n}\n', src.indexOf(`function ${name}(`)));
+  assert.doesNotMatch(body('dispatchTask'), /lastHeartbeat\.set/);
+  const events = body('handleEvent');
+  const caseBody = (name) => events.slice(events.indexOf(`case '${name}':`), events.indexOf('return;', events.indexOf(`case '${name}':`)));
+  for (const name of ['claimed', 'started', 'heartbeat']) assert.match(caseBody(name), /lastHeartbeat\.set\(taskId/, name);
+  for (const name of ['pending_review', 'requeued', 'rejected']) assert.match(caseBody(name), /lastHeartbeat\.delete\(taskId\)/, name);
+  const seeds = [...body('reconcile').matchAll(/lastHeartbeat\.set/g)];
+  assert.equal(seeds.length, 1);
+  assert.match(body('reconcile'), /if \(meshTask\.status === 'claimed' \|\| meshTask\.status === 'running'\) \{\s*lastHeartbeat\.set/);
+});
 
 for (const signal of ['SIGTERM', 'SIGINT']) {
   test(`bridge ${signal} completes its real planned drain`, { skip, timeout: 20_000 }, async (t) => {

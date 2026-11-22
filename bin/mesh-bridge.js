@@ -160,18 +160,17 @@ async function reconcile() {
         default:
           // Still queued, claimed, or running — resume tracking
           log(`RECONCILE: ${task.task_id} still ${meshTask.status} — resuming tracking`);
-          if ((meshTask.status === 'claimed' || meshTask.status === 'running') && meshTask.owner) {
-            updateTaskInPlace(ACTIVE_TASKS_PATH, task.task_id, { mesh_node: meshTask.owner });
-          }
           dispatched.add(task.task_id);
-          lastHeartbeat.set(task.task_id, Date.now()); // init staleness tracking (#3)
+          if (meshTask.status === 'claimed' || meshTask.status === 'running') {
+            lastHeartbeat.set(task.task_id, Date.now());
+            if (meshTask.owner) updateTaskInPlace(ACTIVE_TASKS_PATH, task.task_id, { mesh_node: meshTask.owner });
+          }
           break;
       }
     } catch (err) {
       log(`RECONCILE: error checking ${task.task_id}: ${err.message} — will retry via events`);
       // Add to dispatched so we at least listen for events
       dispatched.add(task.task_id);
-      lastHeartbeat.set(task.task_id, Date.now()); // init staleness tracking (#3)
     }
   }
 
@@ -243,7 +242,6 @@ async function dispatchTask(task) {
   });
 
   dispatched.add(task.task_id);
-  lastHeartbeat.set(task.task_id, Date.now()); // start heartbeat tracking (#7)
   log(`UPDATED: ${task.task_id} → submitted`);
 }
 
@@ -614,6 +612,18 @@ function handleEvent(eventType, taskId, meshTask) {
           updated_at: isoTimestamp(),
         });
         log(`KANBAN: ${taskId} → running (agent: ${meshTask.owner})`);
+        lastHeartbeat.set(taskId, Date.now());
+        return;
+      case 'started':
+        log(`EVENT: ${eventType} ${taskId}`);
+        lastHeartbeat.set(taskId, Date.now());
+        return;
+      // No agent holds the task until the next claim, so nothing heartbeats.
+      case 'pending_review':
+      case 'requeued':
+      case 'rejected':
+        log(`EVENT: ${eventType} ${taskId}`);
+        lastHeartbeat.delete(taskId);
         return;
       case 'heartbeat':
         // Track heartbeat for staleness detection (#7)
@@ -621,7 +631,6 @@ function handleEvent(eventType, taskId, meshTask) {
         lastHeartbeat.set(taskId, Date.now());
         return;
       default:
-        // submitted, started — informational only
         log(`EVENT: ${eventType} ${taskId}`);
         return;
     }
