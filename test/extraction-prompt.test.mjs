@@ -359,13 +359,12 @@ describe('extractStructured', () => {
     );
   });
 
-  it('throws ZodError on schema-invalid result that coercer cannot save', async () => {
+  it('an empty JSON object is stored as an empty extraction', async () => {
     const mockClient = {
       generate: async () => ({
-        content: JSON.stringify({ /* missing required fields */ }),
+        content: JSON.stringify({}),
       }),
     };
-    // Coercer produces empty-array defaults → validates OK actually
     const result = await extractStructured(mockClient, []);
     assert.equal(result.entities.length, 0);
   });
