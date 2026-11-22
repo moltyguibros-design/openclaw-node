@@ -33,6 +33,8 @@ if ! $SKIP_LLM && ! $DRY_RUN && llm_url_is_local "$LLM_BASE_URL"; then
       if [ "$OS" = "macos" ]; then
         brew services start ollama >/dev/null 2>&1 || {
           (
+            # fd 9 is workspace.sh's timer-source copy lock; a detached ollama must not keep it.
+            exec 9>&-
             if [ -n "${OPENCLAW_NATS_LEGACY_LOCK_HELD:-}" ]; then
               lock_fd="${OPENCLAW_NATS_LEGACY_LOCK_HELD%%:*}"
               [[ "$lock_fd" =~ ^[0-9]+$ ]] || exit 1

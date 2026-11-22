@@ -1086,6 +1086,47 @@ test('--project drives framework rules and git hooks', () => {
   assert.ok(!rules.includes('unity.md'));
 });
 
+// On macOS workspace.sh holds the timer-source copy lock on fd 9 for the whole run. The
+// detached `ollama serve` fallback inherited fd 9, kept the lock after install.sh exited,
+// and every later install (and install-timer-hold.py) refused to run.
+test('the detached ollama fallback does not inherit the timer-source copy lock', (t) => {
+  if (spawnSync('sh', ['-c', 'command -v flock'], { encoding: 'utf8' }).status !== 0) {
+    t.skip('flock not installed');
+    return;
+  }
+  const comp = moduleSrc['components.sh'];
+  const start = comp.indexOf('brew services start ollama >/dev/null 2>&1 || {');
+  const end = comp.indexOf('\n        }\n', start);
+  assert.ok(start > 0 && end > start, 'the macOS ollama fallback must be found');
+  const block = comp.slice(start, end + '\n        }\n'.length);
+
+  const root = mkdtempSync(join(tmpdir(), 'openclaw-ollama-lock-'));
+  mkdirSync(join(root, 'logs'));
+  mkdirSync(join(root, 'fakebin'));
+  const marker = `${30 + Math.floor(Math.random() * 1000)}.731`;
+  writeFileSync(join(root, 'fakebin', 'brew'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  writeFileSync(join(root, 'fakebin', 'ollama'), `#!/bin/sh\nexec sleep ${marker}\n`, { mode: 0o755 });
+  t.after(() => {
+    spawnSync('pkill', ['-f', `sleep ${marker}`]);
+    rmSync(root, { recursive: true, force: true });
+  });
+  const lock = join(root, 'timer-source-copy.lock');
+  const env = { ...process.env, PATH: `${join(root, 'fakebin')}:${process.env.PATH}`, OPENCLAW_ROOT: root, LOCK: lock };
+  delete env.OPENCLAW_NATS_LEGACY_LOCK_HELD;
+  const r = spawnSync('bash', ['-c', `set -euo pipefail
+exec 9>>"$LOCK"; flock -n 9 || exit 3
+${block}`], { encoding: 'utf8', env });
+  assert.equal(r.status, 0, r.stderr);
+  let started = false;
+  for (let i = 0; i < 40 && !started; i++) {
+    started = spawnSync('pgrep', ['-f', `sleep ${marker}`]).status === 0;
+    if (!started) spawnSync('sleep', ['0.05']);
+  }
+  assert.ok(started, 'the fallback must have started ollama');
+  const relock = spawnSync('flock', ['-n', lock, 'true']);
+  assert.equal(relock.status, 0, 'the copy lock must be free once the installer exits');
+});
+
 // `install.sh --update` re-synced Mission Control's source but kept the old
 // .next, ran a loose `npm install`, never deleted routes removed from the repo,
 // and the unit's PATH could resolve a node other than the one the native deps
