@@ -45,3 +45,27 @@ describe('moltbook.sh request bodies', () => {
     assert.equal(body.submolt_id, '29beb7ee-ca7d-4290-9c2f-09926264866f');
   });
 });
+
+describe('moltbook-interact docs run the shipped script', () => {
+  const doc = (f) => readFileSync(join(ROOT, 'skills', 'moltbook-interact', f), 'utf8');
+
+  it('SKILL.md runs moltbook.sh through bash {baseDir} and logs replies inside the workspace', () => {
+    const skill = doc('SKILL.md');
+    const calls = skill.split('\n').filter((l) => /moltbook\.sh /.test(l));
+    assert.ok(calls.length >= 4);
+    for (const l of calls) assert.match(l, /^bash \{baseDir\}\/scripts\/moltbook\.sh /, l);
+    assert.doesNotMatch(skill, /\/workspace\//);
+    assert.match(skill, /`memory\/moltbook-replies\.txt`/);
+  });
+
+  it('README commands name a script that ships', () => {
+    const readme = doc('README.md');
+    assert.doesNotMatch(readme, /\.\/scripts\/moltbook\.sh|scripts\/test\.sh|export PATH|scripts\/moltbook\b(?!\.sh)/);
+    assert.match(readme, /^bash skills\/moltbook-interact\/scripts\/moltbook\.sh hot 5$/m);
+  });
+
+  it('moltbook.sh is committed executable like every other skill script', () => {
+    const r = spawnSync('git', ['ls-files', '-s', 'skills/moltbook-interact/scripts/moltbook.sh'], { cwd: ROOT, encoding: 'utf8' });
+    assert.match(r.stdout, /^100755 /);
+  });
+});
