@@ -459,6 +459,25 @@ describe('createAnomalyDetector', () => {
     assert.equal(second.length, 0);
   });
 
+  it('a non-extract memory.error fires memory_error with its own cooldown per boundary', () => {
+    const detector = createAnomalyDetector({ cooldownMs: 60000 });
+    const ts = new Date().toISOString();
+    const retrieve = detector.evaluate({ ts, op: 'memory.error', status: 'error', data: { boundary: 'retrieve' } });
+    assert.equal(retrieve.length, 1);
+    assert.equal(retrieve[0].alert_type, 'memory_error');
+    assert.match(retrieve[0].detail, /retrieve/);
+    assert.equal(retrieve[0].boundary, 'retrieve');
+    assert.deepEqual(detector.evaluate({ ts, op: 'memory.error', status: 'error', data: { boundary: 'retrieve' } }), []);
+
+    const extract = detector.evaluate({ ts, op: 'memory.error', status: 'error', session: 's1', data: { boundary: 'extract' } });
+    assert.equal(extract.length, 1);
+    assert.equal(extract[0].alert_type, 'extraction_failure');
+
+    const ingest = detector.evaluate({ ts, op: 'memory.error', status: 'error', data: { boundary: 'ingest' } });
+    assert.equal(ingest.length, 1, 'another boundary is not muted by the retrieve cooldown');
+    assert.equal(ingest[0].alert_type, 'memory_error');
+  });
+
   it('fires extraction_failure_rate when threshold crossed', () => {
     const detector = createAnomalyDetector({ extractionRateMinSample: 3, extractionRateThreshold: 0.5 });
     detector.evaluate({ ts: new Date().toISOString(), op: 'memory.extracted', status: 'noop' });

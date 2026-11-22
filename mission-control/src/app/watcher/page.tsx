@@ -105,6 +105,7 @@ function alertTypeLabel(t: string): string {
   switch (t) {
     case "extraction_failure": return "extraction failure";
     case "extraction_failure_rate": return "failure rate";
+    case "memory_error": return "memory error";
     case "stalled": return "stalled";
     default: return t;
   }
