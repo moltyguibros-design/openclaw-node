@@ -288,7 +288,7 @@ const MANIFEST = [
     description: 'nats-resolve.js, agent-activity.js, kanban-io.js, mesh-registry.js, mesh-tasks.js',
     risk: 'safe',
     repoPaths: ['lib/'],
-    // The workspace daemons (memory daemon, node-watch) import their own
+    // The workspace daemons (memory daemon, node-watch, health-watch) import their own
     // ../lib under the workspace, which install.sh copies from lib/ too.
     targets: [DIRS.CLI_LIB, DIRS.WORKSPACE_LIB],
     guardedTargets: [DIRS.WORKSPACE_LIB],
@@ -296,10 +296,10 @@ const MANIFEST = [
     servicesMac: ['ai.openclaw.mesh-task-daemon', 'ai.openclaw.mesh-bridge',
                   'ai.openclaw.mesh-agent', 'ai.openclaw.mesh-health-publisher',
                   'ai.openclaw.mesh-tool-discord', 'ai.openclaw.memory-daemon',
-                  'ai.openclaw.node-watch'],
+                  'ai.openclaw.node-watch', 'ai.openclaw.health-watch'],
     servicesLinux: ['openclaw-mesh-task-daemon', 'openclaw-mesh-bridge', 'openclaw-mesh-agent',
                     'openclaw-mesh-health-publisher', 'openclaw-mesh-tool-discord',
-                    'openclaw-memory-daemon', 'openclaw-node-watch'],
+                    'openclaw-memory-daemon', 'openclaw-node-watch', 'openclaw-health-watch'],
     restartsListener: true,
   },
 
@@ -357,7 +357,7 @@ const MANIFEST = [
     repoPaths: ['workspace-bin/', ...['node-watch.mjs', 'node-acceptance.mjs', 'openclaw-notify.mjs',
       'obsidian-graph-cache.mjs', 'observer.mjs', 'consolidation-scheduler.mjs', 'consolidate.mjs',
       'hyperagent.mjs', 'embed-probe.mjs', 'scheduler-heartbeat.mjs', 'memory-subscriber.mjs',
-      'memory-promoter.mjs', 'nats-legacy-lock.py'].map(f => `bin/${f}`)],
+      'memory-promoter.mjs', 'health-watch.mjs', 'nats-legacy-lock.py'].map(f => `bin/${f}`)],
     exclude: [
       // Owned by 'memory-daemon' and 'boot'.
       'workspace-bin/memory-daemon.mjs', 'workspace-bin/memory-maintenance.mjs', 'workspace-bin/compile-boot',
@@ -369,8 +369,8 @@ const MANIFEST = [
     ],
     targets: [DIRS.WORKSPACE_BIN],
     guardedTargets: [DIRS.WORKSPACE_BIN],
-    servicesMac: ['ai.openclaw.memory-daemon', 'ai.openclaw.node-watch'],
-    servicesLinux: ['openclaw-memory-daemon', 'openclaw-node-watch'],
+    servicesMac: ['ai.openclaw.memory-daemon', 'ai.openclaw.node-watch', 'ai.openclaw.health-watch'],
+    servicesLinux: ['openclaw-memory-daemon', 'openclaw-node-watch', 'openclaw-health-watch'],
   },
 
   // ── SOUL SYSTEM ─────────────────────────────────────────────────────────

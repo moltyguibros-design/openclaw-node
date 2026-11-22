@@ -1019,6 +1019,37 @@ test('every manifest unit ships its templates, execs a deployed entrypoint, and 
   }
 });
 
+test('mesh-deploy ships and restarts the same workspace bin set install.sh copies', () => {
+  const deploySrc = readFileSync(join(ROOT, 'bin/mesh-deploy.js'), 'utf8');
+  const component = (id) => {
+    const start = deploySrc.indexOf(`id: '${id}'`);
+    assert.ok(start > 0, `${id} component found`);
+    return deploySrc.slice(start, deploySrc.indexOf("id: '", start + 1));
+  };
+  const wsBin = component('workspace-bin');
+  const list = wsBin.match(/\.\.\.\[([^\]]+)\]\.map\(f => `bin\/\$\{f\}`\)/);
+  assert.ok(list, 'workspace-bin bin list parsed');
+  const shipped = new Set([...list[1].matchAll(/'([^']+)'/g)].map((m) => m[1]));
+  const loop = moduleSrc['workspace.sh'].match(/for _wsbin in ([^;]+); do/);
+  const copied = new Set(loop[1].replace(/\\\n/g, ' ').split(/\s+/).filter(Boolean));
+  assert.deepEqual([...shipped].sort(), [...copied].sort());
+
+  const services = (text, key) => [...(text.match(new RegExp(`${key}: \\[([^\\]]*)\\]`))?.[1] ?? '')
+    .matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  const manifest = JSON.parse(readFileSync(join(ROOT, 'services/service-manifest.json'), 'utf8'));
+  for (const { name, timer } of manifest) {
+    if (timer) continue;
+    const unit = readFileSync(join(ROOT, 'services/systemd', `${name}.service`), 'utf8');
+    const script = unit.match(/^ExecStart=.*\$\{OPENCLAW_WORKSPACE\}\/bin\/([\w.-]+)/m)?.[1];
+    if (!script || !copied.has(script)) continue;
+    const label = `ai.openclaw.${name.replace(/^openclaw-/, '')}`;
+    for (const id of ['workspace-bin', 'shared-lib']) {
+      assert.ok(services(component(id), 'servicesLinux').includes(name), `${id} never restarts ${name}`);
+      assert.ok(services(component(id), 'servicesMac').includes(label), `${id} never restarts ${label}`);
+    }
+  }
+});
+
 // OPENCLAW_TIMEZONE is a per-node setting: a unit that sets TZ renders it.
 test('unit templates and the daemon installer render TZ from OPENCLAW_TIMEZONE', () => {
   const templates = [
