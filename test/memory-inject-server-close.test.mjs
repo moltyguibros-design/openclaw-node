@@ -21,6 +21,7 @@ import http from 'node:http';
 
 const TMP_HOME = mkdtempSync(join(tmpdir(), 'mis-close-home-'));
 process.env.HOME = TMP_HOME;
+process.env.OPENCLAW_HOME = join(TMP_HOME, '.openclaw');
 delete process.env.INJECTION_LOG_DISABLED;
 delete process.env.INJECTION_LOG_PATH;
 

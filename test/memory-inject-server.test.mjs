@@ -20,6 +20,7 @@ import { join } from 'node:path';
 // Point the token file to a temp location BEFORE importing
 const TMP_HOME = mkdtempSync(join(tmpdir(), 'mis-test-home-'));
 process.env.HOME = TMP_HOME;
+process.env.OPENCLAW_HOME = join(TMP_HOME, '.openclaw');
 process.env.MEMORY_INJECT_PORT = '0';  // OS-assigned random port
 // Every /memory/inject request fires an unawaited injection-log write into
 // $HOME/.openclaw; one still landing during after()'s rmSync failed the hook

@@ -14,6 +14,7 @@ import { join } from 'node:path';
 
 const TMP = mkdtempSync(join(tmpdir(), 'fed-startup-'));
 process.env.HOME = TMP;
+process.env.OPENCLAW_HOME = join(TMP, '.openclaw');
 process.env.MEMORY_INJECT_PORT = '0';
 process.env.INJECTION_LOG_DISABLED = '1';
 after(() => rmSync(TMP, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
