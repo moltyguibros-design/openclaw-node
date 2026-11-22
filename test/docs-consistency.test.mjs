@@ -202,3 +202,27 @@ test('federation recipes start every memory daemon with OPENCLAW_FEDERATION=1 wh
   assert.match(section(deploy, '### Federation').text, /^\| `OPENCLAW_FEDERATION` \|/m);
   assert.match(section(read('docs/DOGFOOD_PROTOCOL.md'), '### All zeros in stats').text, /OPENCLAW_FEDERATION=1/);
 });
+
+test('MULTI_NODE_DEPLOY Part 2 runs the daemon as the operator on the spawned tree with the key it signs with', () => {
+  const doc = read('docs/MULTI_NODE_DEPLOY.md');
+  for (const stale of ['\\$(hostname)', '%h/.openclaw-%H', 'OPENCLAW_NODE_ID=%H', '/home/user/openclaw-nodedev']) {
+    assert.ok(!doc.includes(stale), `MULTI_NODE_DEPLOY still contains ${stale}`);
+  }
+  const units = doc.split('```').filter((b, i) => i % 2 === 1 && b.includes('[Service]') && b.includes('memory-daemon.mjs'));
+  assert.ok(units.length >= 1, 'systemd unit parse');
+  for (const unit of units) {
+    assert.match(unit, /^User=/m, 'a system unit without User= runs the daemon as root on /root');
+    assert.match(unit, /^Environment=OPENCLAW_HOME=\/home\/<operator>\/\.openclaw-alpha$/m);
+  }
+
+  const startCall = read('workspace-bin/memory-daemon.mjs').match(/startFederation\(nc, NODE_ID, \{[^}]*\}\)/)[0];
+  assert.doesNotMatch(startCall, /identityDir/);
+  assert.match(read('lib/node-identity.mjs'), /const dir = identityDir \|\| DEFAULT_IDENTITY_DIR;/);
+  assert.match(doc.slice(doc.indexOf('\n### 2.6 Per-node setup\n'), doc.indexOf('\n### 2.7 ')), /getOrCreateIdentity\(\)/);
+
+  assert.match(read('bin/spawn-node.mjs'), /const dbPath = join\(nodeRoot, 'state\.db'\);/);
+  const tree = section(doc, '### 1.2 Spawn node trees').text;
+  assert.doesNotMatch(tree, /state\/\s+#.*state\.db/);
+  assert.match(tree, /^ {2}state\.db +#/m);
+  assert.doesNotMatch(tree, /MEMORY\.md|\.companion-state\.md/);
+});

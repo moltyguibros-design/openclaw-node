@@ -109,13 +109,14 @@ This creates:
 
 ```
 ~/.openclaw-alpha/
-  config/node.json       # { id, port, nats_url, created_at }
-  workspace/             # MEMORY.md, .companion-state.md, etc.
+  config/node.json       # { id, port, nats_url, created_at, openclaw_home }
+  workspace/             # agent workspace (memory/, .knowledge.db)
   workspace/memory/      # daily memory files
   obsidian-local/        # concepts/, decisions/, sessions/, themes/, daily/
   artifacts/             # content-addressed artifact store
   logs/
-  state/                 # state.db (SQLite)
+  state/                 # (empty)
+  state.db               # SQLite (session, extraction, HyperAgent tables)
 ```
 
 ### 1.3 Generate identity keypairs
@@ -456,17 +457,20 @@ node bin/spawn-node.mjs --id charlie --nats-url nats://localhost:4222
 
 Note: each machine connects to its local NATS instance (`localhost:4222`). NATS cluster routing handles cross-machine communication.
 
-Generate the identity keypair:
+Generate the identity keypair. The daemon signs with `~/.openclaw/identity.key` of the user
+the unit runs as (not `OPENCLAW_HOME`), so run this as that user:
 
 ```bash
 node -e "
 import { getOrCreateIdentity } from './lib/node-identity.mjs';
-const id = getOrCreateIdentity('$HOME/.openclaw-\$(hostname)');
-console.log('Public key:', id.publicKeyBase64);
+console.log('Public key:', getOrCreateIdentity().publicKeyBase64);
 "
 ```
 
 ### 2.7 Start the daemon (systemd)
+
+Machine A shown; on machines B and C use `bravo` / `charlie` (the `--id` you spawned).
+Replace `<operator>` with the account that cloned the repo and spawned the tree.
 
 ```ini
 # /etc/systemd/system/openclaw-daemon.service
@@ -477,11 +481,12 @@ Requires=openclaw-nats.service
 
 [Service]
 Type=simple
+User=<operator>
 Environment=OPENCLAW_FEDERATION=1
-Environment=OPENCLAW_NODE_ID=%H
-Environment=OPENCLAW_HOME=%h/.openclaw-%H
+Environment=OPENCLAW_NODE_ID=alpha
+Environment=OPENCLAW_HOME=/home/<operator>/.openclaw-alpha
 Environment=OPENCLAW_NATS=nats://localhost:4222
-ExecStart=/usr/bin/node /home/user/openclaw-nodedev/workspace-bin/memory-daemon.mjs
+ExecStart=/usr/bin/node /home/<operator>/openclaw-nodedev/workspace-bin/memory-daemon.mjs
 Restart=always
 RestartSec=10
 
