@@ -242,12 +242,8 @@ describe('createAcceptor._processOffer', () => {
     offer.data.responding_to = undefined;
     const result = await acceptor._processOffer(offer);
     assert.equal(result.action, 'skip');
-    // After F-H2 fix, schema validation catches missing responding_to at the
-    // boundary (returns 'bad_schema') rather than later in flow ('no_responding_to').
-    assert.ok(
-      result.reason === 'no_responding_to' || result.reason === 'bad_schema',
-      `expected no_responding_to or bad_schema, got ${result.reason}`
-    );
+    assert.equal(result.reason, 'bad_schema');
+    assert.equal(acceptor.stats.schemaRejected, 1);
   });
 
   it('evicts oldest when maxPending exceeded', async () => {
