@@ -268,3 +268,45 @@ describe("custom ids stay on one line", () => {
     expect(res.status).toBe(400);
   });
 });
+
+// Handoff, soul prompts, mesh submit and the client's unencoded /api/tasks/${id} URLs all need a safe id.
+describe("custom ids use the safe id alphabet", () => {
+  const rowIds = async () => {
+    const { getRawDb } = await import("@/lib/db");
+    return (getRawDb().prepare("SELECT id FROM tasks ORDER BY id").all() as { id: string }[]).map((r) => r.id);
+  };
+  const postTask = async (body: object) => {
+    const { POST } = await import("@/app/api/tasks/route");
+    return POST(new NextRequest("http://x/api/tasks", { method: "POST", body: JSON.stringify({ title: "t", ...body }) }));
+  };
+  const postProject = async (body: object) => {
+    const { POST } = await import("@/app/api/projects/route");
+    return POST(new NextRequest("http://x/api/projects", { method: "POST", body: JSON.stringify({ title: "p", ...body }) }));
+  };
+
+  it("POST /api/tasks refuses an id outside the alphabet, including the reserved live-session id", async () => {
+    expect((await postTask({ id: "a/b" })).status).toBe(400);
+    expect((await postTask({ id: "__LIVE_SESSION__" })).status).toBe(400);
+    expect(await rowIds()).toEqual([]);
+  });
+
+  it("POST /api/tasks answers 409 for an id that already exists", async () => {
+    expect((await postTask({ id: "dup" })).status).toBe(201);
+    const res = await postTask({ id: "dup", title: "second" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("dup");
+  });
+
+  it("POST /api/tasks generates an id when the id is empty", async () => {
+    const res = await postTask({ id: "" });
+    expect(res.status).toBe(201);
+    expect((await res.json()).id).toMatch(/^T-\d{8}-\d{3}$/);
+  });
+
+  it("POST /api/projects refuses an id outside the alphabet and answers 409 for a duplicate", async () => {
+    expect((await postProject({ id: "p 1" })).status).toBe(400);
+    expect(await rowIds()).toEqual([]);
+    expect((await postProject({ id: "proj" })).status).toBe(201);
+    expect((await postProject({ id: "proj" })).status).toBe(409);
+  });
+});

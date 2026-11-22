@@ -8,6 +8,7 @@ import { syncTasksFromMarkdownIfChanged, syncTasksToMarkdown } from "@/lib/sync/
 import { logActivity } from "@/lib/activity";
 import { schedulerTick } from "@/lib/scheduler";
 import { generateTaskId } from "@/lib/task-id";
+import { isSafeId } from "@/lib/safe-path";
 import { getNats, sc } from "@/lib/nats";
 import { WORKSPACE_ROOT, AGENT_NAME, resolveDaemonNodeId } from "@/lib/config";
 import path from "path";
@@ -156,9 +157,11 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    // The id is written raw as the `- task_id:` line of active-tasks.md.
-    if (typeof body.id === "string" && /[\r\n]/.test(body.id)) {
-      return NextResponse.json({ error: "id must be a single line" }, { status: 400 });
+    if (body.id != null && body.id !== "" && !isSafeId(body.id)) {
+      return NextResponse.json(
+        { error: "id must be 1-128 letters, digits, '.', '_' or '-', starting with a letter or digit" },
+        { status: 400 }
+      );
     }
 
     // A recurring copy of a one-time trigger has no next time, so it never fires.
@@ -175,6 +178,9 @@ export async function POST(request: NextRequest) {
     const taskId = body.id || generateTaskId(db, now);
     if (body.parent_id && body.parent_id === taskId) {
       return NextResponse.json({ error: "A task cannot be its own parent" }, { status: 400 });
+    }
+    if (db.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, taskId)).get()) {
+      return NextResponse.json({ error: `task ${taskId} already exists` }, { status: 409 });
     }
 
     db.insert(tasks)
