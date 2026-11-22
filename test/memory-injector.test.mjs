@@ -1,7 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import {
+import { setChannelErrorSink } from '../lib/retrieval-pipeline.mjs';
+
+// injection-logger reads the flag at load, so the injector must load after it.
+process.env.INJECTION_LOG_DISABLED = '1';
+const {
   DEFAULT_TOKEN_BUDGET,
   CHARS_PER_TOKEN,
   estimateTokens,
@@ -13,9 +17,8 @@ import {
   curateForRecall,
   RECALL_CAPS,
   llmSeedTerms,
-} from '../lib/memory-injector.mjs';
-import { setChannelErrorSink } from '../lib/retrieval-pipeline.mjs';
-import { formatMemoryBlock } from '../lib/memory-formatter.mjs';
+} = await import('../lib/memory-injector.mjs');
+const { formatMemoryBlock } = await import('../lib/memory-formatter.mjs');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -200,12 +203,12 @@ describe('queryRelevantDecisions', () => {
 
 describe('createMemoryInjector', () => {
   it('returns an object with a retrieve method', () => {
-    const injector = createMemoryInjector({});
+    const injector = createMemoryInjector({ llmClient: null });
     assert.equal(typeof injector.retrieve, 'function');
   });
 
   it('retrieve returns empty result for null prompt', async () => {
-    const injector = createMemoryInjector({});
+    const injector = createMemoryInjector({ llmClient: null });
     const result = await injector.retrieve(null);
     assert.deepEqual(result.concepts, []);
     assert.deepEqual(result.decisions, []);
@@ -217,7 +220,7 @@ describe('createMemoryInjector', () => {
   it('retrieve returns structured result with mock embedFn', async () => {
     // No DBs — pipeline returns empty, but structure is correct
     const mockEmbedFn = async () => new Float32Array(1024);
-    const injector = createMemoryInjector({});
+    const injector = createMemoryInjector({ llmClient: null });
     const result = await injector.retrieve('How does NATS work?', {
       embedFn: mockEmbedFn,
     });
@@ -231,7 +234,7 @@ describe('createMemoryInjector', () => {
 
   it('retrieve respects custom tokenBudget', async () => {
     const mockEmbedFn = async () => new Float32Array(1024);
-    const injector = createMemoryInjector({});
+    const injector = createMemoryInjector({ llmClient: null });
     const result = await injector.retrieve('test query', {
       embedFn: mockEmbedFn,
       tokenBudget: 200,
