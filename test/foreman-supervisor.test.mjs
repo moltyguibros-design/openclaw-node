@@ -409,3 +409,16 @@ describe('foreman supervisor — configuration from the environment', () => {
     }
   });
 });
+
+describe('docs/foreman.md matches the worker runner', () => {
+  it('names the function that spawns the detached group and the output format the claude provider passes', async () => {
+    const doc = fs.readFileSync(new URL('../docs/foreman.md', import.meta.url), 'utf8');
+    const { PROVIDERS } = (await import('../lib/llm-providers.js')).default;
+    const args = PROVIDERS.claude.buildArgs('p', 'm', {}, '/tmp');
+    const format = args[args.indexOf('--output-format') + 1];
+    assert.match(fs.readFileSync(new URL('../lib/llm-run.js', import.meta.url), 'utf8'), /function runCli\([^)]*\) \{[\s\S]*?detached: true/);
+    assert.ok(doc.includes('`detached: true` in `runCli`'), 'docs/foreman.md must place the detached spawn in runCli');
+    for (const [hit, named] of doc.matchAll(/--output-format (\w+)/g)) assert.equal(named, format, `docs/foreman.md: "${hit}"`);
+    assert.ok(doc.includes(`\`claude -p --output-format ${format}\``));
+  });
+});
