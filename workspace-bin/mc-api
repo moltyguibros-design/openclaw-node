@@ -42,8 +42,8 @@ async function main() {
   if (args.length === 0 || args[0] === '-h' || args[0] === '--help') fail(2, USAGE);
   const method = METHODS.has(args[0].toUpperCase()) ? args.shift().toUpperCase() : 'GET';
   const [rawPath, bodyArg] = args;
-  if (!rawPath) fail(2, USAGE);
-  const apiPath = rawPath.startsWith('/api/') ? rawPath : `/api/${rawPath.replace(/^\/+(api\/)?/, '')}`;
+  if (!rawPath || (method === 'GET' && bodyArg !== undefined)) fail(2, USAGE);
+  const apiPath = rawPath.startsWith('/api/') ? rawPath : `/api/${rawPath.replace(/^\/*(api\/)?/, '')}`;
   const body = readBody(bodyArg);
 
   const tokenLib = path.join(__dirname, '..', 'lib', 'mc-session-token.mjs');

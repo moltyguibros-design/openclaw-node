@@ -87,6 +87,20 @@ describe('mc-api', () => {
     assert.equal(seen.at(-1).body, '{"facts":[]}');
   });
 
+  it('maps a path written without its leading slash onto /api once', async () => {
+    const r = await run(['api/tasks'], env);
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(seen.at(-1).url, '/api/tasks');
+  });
+
+  it('refuses a body given without a method as a usage error, not as MC down', async () => {
+    const before = seen.length;
+    const r = await run(['/api/tasks', '{"a":1}'], env);
+    assert.equal(r.code, 2, r.stderr);
+    assert.match(r.stderr, /usage:/);
+    assert.equal(seen.length, before);
+  });
+
   it('exits 22 with a token hint when MC refuses', async () => {
     const r = await run(['/api/tasks'], { ...env, OPENCLAW_MC_TOKEN_FILE: path.join(dir, 'missing') });
     assert.equal(r.code, 22);
