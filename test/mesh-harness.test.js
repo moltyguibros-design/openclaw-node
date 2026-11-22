@@ -340,6 +340,49 @@ describe('enforceScopeCheck directory-style scope entries', () => {
     assert.ok(fs.existsSync(path.join(dir, 'docs/x.md')));
     assert.ok(!fs.existsSync(path.join(dir, 'srcfoo.js')));
   });
+
+  function scratchRepo(t) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-harness-names-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.invalid');
+    git('config', 'user.name', 'test');
+    fs.mkdirSync(path.join(dir, 'src'));
+    fs.writeFileSync(path.join(dir, 'src/aXb.js'), 'v1\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'init');
+    return dir;
+  }
+
+  it('reverts a non-ASCII name and a glob-character name literally, sparing the in-scope edit the glob matches', (t) => {
+    const dir = scratchRepo(t);
+    fs.writeFileSync(path.join(dir, 'src/aXb.js'), 'edited\n');
+    fs.writeFileSync(path.join(dir, 'café.txt'), 'out\n');
+    fs.writeFileSync(path.join(dir, '*aXb.js'), 'out\n');
+
+    const result = enforceScopeCheck(dir, ['src/']);
+    assert.deepStrictEqual([...result.violations].sort(), ['*aXb.js', 'café.txt']);
+    assert.deepStrictEqual([...result.reverted].sort(), ['*aXb.js', 'café.txt']);
+    assert.ok(!fs.existsSync(path.join(dir, 'café.txt')));
+    assert.ok(!fs.existsSync(path.join(dir, '*aXb.js')));
+    assert.strictEqual(fs.readFileSync(path.join(dir, 'src/aXb.js'), 'utf8'), 'edited\n');
+  });
+
+  it('runMeshHarness scans an in-scope file with a non-ASCII name for forbidden patterns', (t) => {
+    const dir = scratchRepo(t);
+    fs.writeFileSync(path.join(dir, 'src/café.js'), 'console.log("debug")\n');
+    const result = runMeshHarness({
+      rules: [],
+      worktreePath: dir,
+      taskScope: ['src/'],
+      llmOutput: '',
+      hasMetric: true,
+      log: () => {},
+      role: { forbidden_patterns: [{ pattern: 'console\\.log', description: 'no console.log' }] },
+    });
+    assert.ok(result.violations.some(v => v.rule === 'forbidden:console\\.log' && v.file === 'src/café.js'));
+  });
 });
 
 // ── postCommitValidate ──────────────────────────
