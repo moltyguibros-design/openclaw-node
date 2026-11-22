@@ -73,6 +73,20 @@ test('a session that boots beside a live one is told so (no MEMORY.md re-freeze)
   assert.equal(second.othersLive, true);
 });
 
+test('of sessions booting in one tick on an empty node, only the first opens the node session', () => {
+  const tr = new SessionTracker(config);
+  const boots = tr.tick(seen('a', 'b'), 0);
+  assert.deepEqual(brief(boots), ['a:ENDED->BOOT', 'b:ENDED->BOOT']);
+  assert.deepEqual(boots.map(t => t.othersLive), [false, true]);
+  tr.completeBoot('a');
+  tr.completeBoot('b');
+
+  const tr2 = new SessionTracker(config);
+  tr2.tick(seen('a'), 0);
+  tr2.completeBoot('a');
+  assert.deepEqual(tr2.tick(seen('a', 'b', 'c'), MIN).map(t => t.othersLive), [true, true]);
+});
+
 test('restore reads the per-session list and the legacy single-session form', () => {
   const tr = new SessionTracker(config);
   tr.tick(seen('a', 'b'), 0);
