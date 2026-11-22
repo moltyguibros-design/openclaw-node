@@ -164,6 +164,28 @@ describe('node-init join-token trust provisioning', () => {
     });
   });
 
+  it('an empty key in openclaw.env stays empty instead of swallowing the next line', () => {
+    withHome((home) => {
+      const envPath = join(home, '.openclaw', 'openclaw.env');
+      writeFileSync(envPath, 'OPENCLAW_DEPLOY_TRUSTED_KEYS=\nOPENCLAW_NODE_ID=x\n');
+      updateEnvFile({}, { OPENCLAW_DEPLOY_TRUSTED_KEYS: 'k1' });
+      const env = readFileSync(envPath, 'utf8');
+      assert.match(env, /^OPENCLAW_DEPLOY_TRUSTED_KEYS=k1$/m);
+      assert.match(env, /^OPENCLAW_NODE_ID=x$/m);
+
+      writeFileSync(envPath, 'OPENCLAW_NATS=\nOPENCLAW_NODE_ID=x\n');
+      const fakeBin = join(home, 'fakebin');
+      mkdirSync(fakeBin);
+      writeFileSync(join(fakeBin, 'tailscale'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+      const r = spawnSync(process.execPath, ['-e', `require(${JSON.stringify(join(ROOT, 'bin', 'openclaw-node-init.js'))}).discoverNats(null)`], {
+        encoding: 'utf8', timeout: 30000,
+        env: { ...process.env, HOME: home, PATH: `${fakeBin}:${process.env.PATH}` },
+      });
+      assert.doesNotMatch(r.stdout, /Found existing NATS config/);
+      assert.match(r.stderr, /Tailscale not available/);
+    });
+  });
+
   it('provisionTrust creates the identity, trusts the lead, and the units render with the merged allowlist', () => {
     withHome((home) => {
       writeFileSync(join(home, '.openclaw', 'openclaw.env'), 'OPENCLAW_DEPLOY_TRUSTED_KEYS=opKey\n');

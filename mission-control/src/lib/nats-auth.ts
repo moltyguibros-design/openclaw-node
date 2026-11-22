@@ -70,7 +70,7 @@ export function resolveEnvKey(key: string, env: NodeJS.ProcessEnv = process.env)
     const envFile = openclawEnvFile();
     if (existsSync(envFile)) {
       const content = readFileSync(envFile, "utf8");
-      const match = content.match(new RegExp(`^\\s*${key}\\s*=\\s*(.+)`, "m"));
+      const match = content.match(new RegExp(`^[ \\t]*${key}[ \\t]*=[ \\t]*([^\\r\\n]*)`, "m"));
       if (match && match[1].trim()) return match[1].trim().replace(/^["']|["']$/g, "");
     }
   } catch {

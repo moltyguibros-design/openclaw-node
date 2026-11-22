@@ -58,6 +58,12 @@ describe("natsAuthOptions by mode", () => {
     expect(resolveEnvKey("OPENCLAW_NATS_AUTH")).toBe("banana");
   });
 
+  it("an empty key reads as unset instead of swallowing the next line", () => {
+    writeFileSync(join(home, "openclaw.env"), "OPENCLAW_NATS_AUTH=\nOPENCLAW_NATS_LEGACY_USER=lead-a\n");
+    expect(resolveEnvKey("OPENCLAW_NATS_AUTH")).toBeNull();
+    expect(resolveEnvKey("OPENCLAW_NATS_LEGACY_USER")).toBe("lead-a");
+  });
+
   it("nkey mode uses the identity when present, else the legacy user", () => {
     writeFileSync(join(home, "openclaw.env"), "OPENCLAW_NATS_AUTH=nkey\nOPENCLAW_NATS_LEGACY_USER=mc\n");
     expect(natsAuthOptions("abc")).toEqual({ user: "mc", pass: "abc" });

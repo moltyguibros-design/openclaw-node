@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { KV } from "nats";
 import { getHealthKv, sc } from "@/lib/nats";
+import { resolveEnvKey } from "@/lib/nats-auth";
 import { getDb, getRawDb } from "@/lib/db";
 import { tasks } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -318,17 +319,7 @@ async function gatherLocalHealth(): Promise<NodeHealth> {
     }
   }
 
-  const natsUrl = process.env.OPENCLAW_NATS || (() => {
-    try {
-      const envPath = path.join(OPENCLAW_ROOT, "openclaw.env");
-      if (fs.existsSync(envPath)) {
-        const content = fs.readFileSync(envPath, "utf-8");
-        const match = content.match(/^\s*OPENCLAW_NATS\s*=\s*(.+)/m);
-        if (match) return match[1].trim().replace(/^["']|["']$/g, "");
-      }
-    } catch (err) { console.warn(`[mesh/nodes] openclaw.env read failed: ${(err as Error).message}`); }
-    return "unknown";
-  })();
+  const natsUrl = resolveEnvKey("OPENCLAW_NATS") ?? "unknown";
 
   return {
     nodeId: NODE_ID,
@@ -545,17 +536,7 @@ export const GET = withTrace("mesh", "GET /api/mesh/nodes", async () => {
 
   // Add mesh-wide status
   const natsConnected = kv !== null;
-  const natsUrl = process.env.OPENCLAW_NATS || (() => {
-    try {
-      const envPath = path.join(OPENCLAW_ROOT, "openclaw.env");
-      if (fs.existsSync(envPath)) {
-        const content = fs.readFileSync(envPath, "utf-8");
-        const match = content.match(/^\s*OPENCLAW_NATS\s*=\s*(.+)/m);
-        if (match) return match[1].trim().replace(/^["']|["']$/g, "");
-      }
-    } catch (err) { console.warn(`[mesh/nodes] NATS URL env read failed: ${(err as Error).message}`); }
-    return "unknown";
-  })();
+  const natsUrl = resolveEnvKey("OPENCLAW_NATS") ?? "unknown";
   const meshStatus = {
     natsConnected,
     natsUrl,

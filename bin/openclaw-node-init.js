@@ -139,12 +139,12 @@ function updateEnvFile(sets, merges = {}) {
   const final = {};
   const setKey = (key, value) => {
     final[key] = value;
-    const re = new RegExp(`^\\s*${key}\\s*=.*$`, 'm');
+    const re = new RegExp(`^[ \\t]*${key}[ \\t]*=.*$`, 'm');
     content = re.test(content) ? content.replace(re, `${key}=${value}`) : `${content.replace(/\n?$/, '\n')}${key}=${value}\n`;
   };
   for (const [key, value] of Object.entries(sets)) setKey(key, value);
   for (const [key, values] of Object.entries(merges)) {
-    const m = content.match(new RegExp(`^\\s*${key}\\s*=\\s*(.*)$`, 'm'));
+    const m = content.match(new RegExp(`^[ \\t]*${key}[ \\t]*=[ \\t]*([^\\r\\n]*)`, 'm'));
     const current = (m ? m[1].trim().replace(/^["']|["']$/g, '') : '').split(',').map(x => x.trim()).filter(Boolean);
     for (const value of [].concat(values)) if (!current.includes(value)) current.push(value);
     setKey(key, current.join(','));
@@ -226,15 +226,10 @@ async function discoverNats(tokenNats) {
   }
 
   // Check existing config first
-  const envPath = path.join(os.homedir(), '.openclaw', 'openclaw.env');
-  if (fs.existsSync(envPath)) {
-    const content = fs.readFileSync(envPath, 'utf8');
-    const match = content.match(/^\s*OPENCLAW_NATS\s*=\s*(.+)/m);
-    if (match) {
-      const existing = match[1].trim();
-      ok(`Found existing NATS config: ${existing}`);
-      return existing;
-    }
+  const existing = require('../lib/nats-resolve').readEnvFileKey(path.join(os.homedir(), '.openclaw', 'openclaw.env'), 'OPENCLAW_NATS');
+  if (existing) {
+    ok(`Found existing NATS config: ${existing}`);
+    return existing;
   }
 
   // Scan Tailscale peers
@@ -1040,5 +1035,5 @@ if (require.main === module) main().catch(err => {
 
 module.exports = {
   renderServiceTemplate, serviceTemplateVars, SERVICE_TEMPLATE_VARS, parseJoinToken, updateEnvFile, provisionTrust,
-  installService, verifyServiceRunning, agentStartCommand, installMeshCode,
+  installService, verifyServiceRunning, agentStartCommand, installMeshCode, discoverNats,
 };
