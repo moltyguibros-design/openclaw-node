@@ -8,6 +8,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { isPrivateIp, assertPublicUrl } from '../workspace-bin/web-fetch.mjs';
+import { checkHttpOrigin } from '../lib/mcp-knowledge/server.mjs';
 
 describe('isPrivateIp', () => {
   for (const ip of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.1', '169.254.169.254',
@@ -59,19 +60,15 @@ describe('assertPublicUrl', () => {
   });
 });
 
-describe('mcp-knowledge HTTP Host/Origin gate (P5-7)', async () => {
-  let checkHttpOrigin;
-  try { ({ checkHttpOrigin } = await import('../lib/mcp-knowledge/server.mjs')); } catch { checkHttpOrigin = null; }
+describe('mcp-knowledge HTTP Host/Origin gate (P5-7)', () => {
   const self = { host: '127.0.0.1', port: 7895 };
 
-  it('accepts its own host with no Origin (curl / MCP clients)', (t) => {
-    if (!checkHttpOrigin) return t.skip('mcp sdk not installed');
+  it('accepts its own host with no Origin (curl / MCP clients)', () => {
     assert.equal(checkHttpOrigin({ host: '127.0.0.1:7895' }, self).ok, true);
     assert.equal(checkHttpOrigin({ host: 'localhost:7895' }, self).ok, true);
   });
 
-  it('refuses a foreign Host (DNS rebinding) and a foreign Origin (cross-site POST)', (t) => {
-    if (!checkHttpOrigin) return t.skip('mcp sdk not installed');
+  it('refuses a foreign Host (DNS rebinding) and a foreign Origin (cross-site POST)', () => {
     assert.equal(checkHttpOrigin({ host: 'attacker.example:7895' }, self).ok, false);
     assert.equal(checkHttpOrigin({ host: '127.0.0.1:7895', origin: 'http://evil.example' }, self).ok, false);
     assert.equal(checkHttpOrigin({ host: '127.0.0.1:7895', origin: 'http://127.0.0.1:3000' }, self).ok, false);
