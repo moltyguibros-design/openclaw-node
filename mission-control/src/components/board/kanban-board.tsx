@@ -169,10 +169,16 @@ export function KanbanBoard() {
   }, [dialogOpen, bulkMode, searchQuery]);
 
   // Bulk actions
-  const handleBulkMove = async (targetColumn: string) => {
-    for (const id of bulkSelection) {
-      await updateTask(id, { kanbanColumn: targetColumn });
+  const updateEach = async (ids: Iterable<string>, updates: Record<string, unknown>) => {
+    const failures: string[] = [];
+    for (const id of ids) {
+      await updateTask(id, updates).catch((err) => failures.push(`${id}: ${(err as Error).message}`));
     }
+    if (failures.length) alert(`Update failed:\n${failures.join("\n")}`);
+  };
+
+  const handleBulkMove = async (targetColumn: string) => {
+    await updateEach(bulkSelection, { kanbanColumn: targetColumn });
     setBulkSelection(new Set());
     setBulkAction(null);
   };
@@ -215,12 +221,12 @@ export function KanbanBoard() {
       setDoneConfirmTaskId(taskId);
       return;
     }
-    updateTask(taskId, { kanbanColumn: targetColumn });
+    updateEach([taskId], { kanbanColumn: targetColumn });
   };
 
   const confirmDone = () => {
     if (doneConfirmTaskId) {
-      updateTask(doneConfirmTaskId, { kanbanColumn: "done", force_done: true } as Record<string, unknown>);
+      updateEach([doneConfirmTaskId], { kanbanColumn: "done", force_done: true });
       setDoneConfirmTaskId(null);
     }
   };
@@ -323,10 +329,8 @@ export function KanbanBoard() {
                 highlight={bulkMode}
                 bulkMode={bulkMode}
                 bulkSelection={bulkSelection}
-                onClearDone={col === "done" ? async (visibleTasks) => {
-                  for (const t of visibleTasks) {
-                    await updateTask(t.id, { status: "archived" } as Record<string, unknown>);
-                  }
+                onClearDone={col === "done" ? (visibleTasks) => {
+                  updateEach(visibleTasks.map((t) => t.id), { status: "archived" });
                 } : undefined}
               />
             </div>
@@ -358,9 +362,7 @@ export function KanbanBoard() {
           <div className="w-px h-6 bg-border" />
           <button
             onClick={() => {
-              for (const id of bulkSelection) {
-                updateTask(id, { status: "done", force_done: true } as Record<string, unknown>);
-              }
+              updateEach(bulkSelection, { status: "done", force_done: true });
               setBulkSelection(new Set());
               setBulkAction(null);
             }}

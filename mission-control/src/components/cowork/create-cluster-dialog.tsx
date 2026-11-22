@@ -68,6 +68,8 @@ export function CreateClusterDialog({ open, onClose }: Props) {
       setName("");
       setDescription("");
       setSelectedNodes([]);
+    } catch (err) {
+      alert(`Create failed: ${(err as Error).message}`);
     } finally {
       setSaving(false);
     }

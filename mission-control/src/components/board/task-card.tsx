@@ -114,7 +114,9 @@ export function TaskCard({
   }
 
   const toggleSubItem = async (sub: Task) => {
-    await updateTask(sub.id, { status: checkOffToggle(sub.status) } as Record<string, unknown>);
+    await updateTask(sub.id, { status: checkOffToggle(sub.status) } as Record<string, unknown>).catch((err) =>
+      alert(`Update failed: ${(err as Error).message}`),
+    );
   };
 
   const handleAddSubItem = async () => {
@@ -129,6 +131,8 @@ export function TaskCard({
       });
       setNewItemTitle("");
       setAddingItem(false);
+    } catch (err) {
+      alert(`Add failed: ${(err as Error).message}`);
     } finally {
       setSaving(false);
     }

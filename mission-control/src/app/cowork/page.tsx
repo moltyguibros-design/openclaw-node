@@ -214,7 +214,12 @@ function AddNodeDialog({
   const [selectedRole, setSelectedRole] = useState("worker");
 
   const handleAdd = async (nodeId: string) => {
-    await addClusterMember(clusterId, nodeId, selectedRole);
+    try {
+      await addClusterMember(clusterId, nodeId, selectedRole);
+    } catch (err) {
+      alert(`Add failed: ${(err as Error).message}`);
+      return;
+    }
     onClose();
   };
 

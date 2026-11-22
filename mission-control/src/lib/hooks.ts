@@ -11,6 +11,19 @@ export async function fetcher(url: string) {
   return res.json();
 }
 
+// A refused write still revalidates, so a view that moved the item locally snaps back to the server's state.
+async function send(url: string, init: RequestInit, revalidate: string[]) {
+  const res = await fetch(url, init);
+  const body = await res.json().catch(() => null);
+  for (const key of revalidate) await mutate(key);
+  if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
+  return body;
+}
+
+function json(method: string, payload: unknown): RequestInit {
+  return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) };
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -102,37 +115,18 @@ export async function createTask(task: {
   project?: string;
   [key: string]: unknown;
 }) {
-  const res = await fetch("/api/tasks", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(task),
-  });
-  const data = await res.json();
-  await mutate("/api/tasks");
-  return data;
+  return send("/api/tasks", json("POST", task), ["/api/tasks"]);
 }
 
 export async function updateTask(
   id: string,
   updates: Partial<Omit<Task, "id" | "createdAt">>
 ) {
-  const res = await fetch(`/api/tasks/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
-  });
-  const data = await res.json();
-  await mutate("/api/tasks");
-  return data;
+  return send(`/api/tasks/${id}`, json("PATCH", updates), ["/api/tasks"]);
 }
 
 export async function deleteTask(id: string) {
-  const res = await fetch(`/api/tasks/${id}`, { method: "DELETE" });
-  await mutate("/api/tasks");
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error ?? `HTTP ${res.status}`);
-  }
+  await send(`/api/tasks/${id}`, { method: "DELETE" }, ["/api/tasks"]);
 }
 
 export function useMemorySearch(query: string, limit = 20, source?: string) {
@@ -264,15 +258,7 @@ export async function createProject(project: {
   owner?: string;
   status?: string;
 }) {
-  const res = await fetch("/api/projects", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(project),
-  });
-  const data = await res.json();
-  await mutate("/api/projects");
-  await mutate("/api/tasks");
-  return data;
+  return send("/api/projects", json("POST", project), ["/api/projects", "/api/tasks"]);
 }
 
 export async function createDependency(dep: {
@@ -280,14 +266,7 @@ export async function createDependency(dep: {
   targetId: string;
   type?: string;
 }) {
-  const res = await fetch("/api/dependencies", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(dep),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Failed to create dependency");
-  return data;
+  return send("/api/dependencies", json("POST", dep), []);
 }
 
 // --- Wikilink Graph ---
@@ -539,49 +518,31 @@ export async function createCluster(params: {
   maxRounds?: number;
   members?: Array<{ nodeId: string; role: string }>;
 }) {
-  const res = await fetch("/api/cowork/clusters", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
-  const data = await res.json();
-  await mutate("/api/cowork/clusters");
-  return data;
+  return send("/api/cowork/clusters", json("POST", params), ["/api/cowork/clusters"]);
 }
 
 export async function deleteCluster(id: string) {
-  await fetch(`/api/cowork/clusters/${id}`, { method: "DELETE" });
-  await mutate("/api/cowork/clusters");
+  await send(`/api/cowork/clusters/${id}`, { method: "DELETE" }, ["/api/cowork/clusters"]);
 }
 
 export async function addClusterMember(clusterId: string, nodeId: string, role: string) {
-  const res = await fetch(`/api/cowork/clusters/${clusterId}/members`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ nodeId, role }),
-  });
-  const data = await res.json();
-  await mutate("/api/cowork/clusters");
-  return data;
+  return send(`/api/cowork/clusters/${clusterId}/members`, json("POST", { nodeId, role }), [
+    "/api/cowork/clusters",
+  ]);
 }
 
 export async function updateClusterMember(clusterId: string, nodeId: string, role: string) {
-  const res = await fetch(`/api/cowork/clusters/${clusterId}/members`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ nodeId, role }),
-  });
-  const data = await res.json();
-  await mutate("/api/cowork/clusters");
-  return data;
+  return send(`/api/cowork/clusters/${clusterId}/members`, json("PATCH", { nodeId, role }), [
+    "/api/cowork/clusters",
+  ]);
 }
 
 export async function removeClusterMember(clusterId: string, nodeId: string) {
-  await fetch(
+  await send(
     `/api/cowork/clusters/${clusterId}/members?nodeId=${encodeURIComponent(nodeId)}`,
-    { method: "DELETE" }
+    { method: "DELETE" },
+    ["/api/cowork/clusters"],
   );
-  await mutate("/api/cowork/clusters");
 }
 
 export async function dispatchCollabTask(params: {
@@ -597,16 +558,11 @@ export async function dispatchCollabTask(params: {
   metric?: string;
   scope?: string[];
 }) {
-  const res = await fetch("/api/cowork/dispatch", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
-  const data = await res.json();
-  await mutate("/api/cowork/sessions");
-  await mutate("/api/cowork/clusters");
-  await mutate("/api/tasks");
-  return data;
+  return send("/api/cowork/dispatch", json("POST", params), [
+    "/api/cowork/sessions",
+    "/api/cowork/clusters",
+    "/api/tasks",
+  ]);
 }
 
 export async function interveneSession(params: {
@@ -614,16 +570,7 @@ export async function interveneSession(params: {
   sessionId: string;
   nodeId?: string;
 }) {
-  const res = await fetch("/api/cowork/intervene", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
-  const data = await res.json();
-  await mutate("/api/cowork/sessions");
-  await mutate("/api/tasks");
-  if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-  return data;
+  return send("/api/cowork/intervene", json("POST", params), ["/api/cowork/sessions", "/api/tasks"]);
 }
 
 // --- Mesh SSE integration ---
@@ -736,14 +683,7 @@ export async function createMeshTask(task: {
   metric?: string;
   [key: string]: unknown;
 }) {
-  const res = await fetch("/api/mesh/tasks", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(task),
-  });
-  const data = await res.json();
-  await mutate("/api/mesh/tasks");
-  return data;
+  return send("/api/mesh/tasks", json("POST", task), ["/api/mesh/tasks"]);
 }
 
 export async function updateMeshTask(
@@ -760,14 +700,7 @@ export async function updateMeshTask(
     exclude_nodes?: string[];
   }
 ) {
-  const res = await fetch(`/api/mesh/tasks/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
-  });
-  const data = await res.json();
-  await mutate("/api/mesh/tasks");
-  return data;
+  return send(`/api/mesh/tasks/${id}`, json("PATCH", updates), ["/api/mesh/tasks"]);
 }
 
 // --- Watcher ---

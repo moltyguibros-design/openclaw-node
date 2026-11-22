@@ -82,20 +82,15 @@ export function DispatchForm() {
         scope: scope.length > 0 ? scope : undefined,
       });
 
-      if (data.error) {
-        setResult({ ok: false, message: data.error, taskId: null });
-      } else {
-        setResult({
-          ok: true,
-          message: `Task ${data.taskId} dispatched to ${data.nodesAssigned?.length ?? 0} nodes`,
-          taskId: data.taskId,
-        });
-        // Reset form
-        setTitle("");
-        setDescription("");
-        setMetric("");
-        setScopeText("");
-      }
+      setResult({
+        ok: true,
+        message: `Task ${data.taskId} dispatched to ${data.nodesAssigned?.length ?? 0} nodes`,
+        taskId: data.taskId,
+      });
+      setTitle("");
+      setDescription("");
+      setMetric("");
+      setScopeText("");
     } catch (err) {
       setResult({ ok: false, message: (err as Error).message, taskId: null });
     } finally {

@@ -601,7 +601,9 @@ export default function RoadmapPage() {
   const handleBarDrag = useCallback(
     async (taskId: string, newLeft: number, newWidth: number) => {
       const node = allNodes.find((n) => n.id === taskId);
-      await updateTask(taskId, barDragUpdate(node, newLeft, newWidth, viewStart, dayWidth) as Record<string, unknown>);
+      await updateTask(taskId, barDragUpdate(node, newLeft, newWidth, viewStart, dayWidth) as Record<string, unknown>).catch(
+        (err) => alert(`Reschedule failed: ${(err as Error).message}`),
+      );
     },
     [viewStart, dayWidth, allNodes]
   );
@@ -1261,7 +1263,7 @@ export default function RoadmapPage() {
                         await updateTask(node.id, {
                           kanbanColumn: "backlog",
                           status: "queued",
-                        } as Record<string, unknown>);
+                        } as Record<string, unknown>).catch((err) => alert(`Send to Kanban failed: ${(err as Error).message}`));
                       }}
                       className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary p-0.5 mr-1 transition-colors"
                       title="Send to Kanban backlog"

@@ -27,6 +27,11 @@ interface EvolutionEvent {
   };
 }
 
+async function replyError(response: Response): Promise<string> {
+  const body = await response.json().catch(() => null);
+  return body?.error ?? `HTTP ${response.status}`;
+}
+
 function GuidePanel() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     structure: true,
@@ -337,6 +342,8 @@ export default function SoulsPage() {
           setPropagationTargets(eligible);
         }
       }
+    } else {
+      alert(`Review failed: ${await replyError(response)}`);
     }
   };
 
@@ -364,6 +371,8 @@ export default function SoulsPage() {
       setPropagationTargets((prev) =>
         prev.filter((s) => s.id !== targetSoulId)
       );
+    } else {
+      alert(`Propagation failed: ${await replyError(response)}`);
     }
   };
 

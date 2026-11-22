@@ -245,7 +245,7 @@ export default function CalendarPage() {
     const dateStr = format(date, "yyyy-MM-dd");
     await updateTask(draggedTaskId, {
       scheduled_date: dateStr,
-    } as Record<string, unknown>);
+    } as Record<string, unknown>).catch((err) => alert(`Reschedule failed: ${(err as Error).message}`));
     setDraggedTaskId(null);
   };
 

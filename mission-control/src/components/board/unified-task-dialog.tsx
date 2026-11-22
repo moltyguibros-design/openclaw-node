@@ -308,7 +308,7 @@ export function UnifiedTaskDialog({
     try {
       if (item) {
         // Update path — send superset of all fields
-        const result = await updateTask(item.id, {
+        await updateTask(item.id, {
           title,
           status,
           type: isHierarchyMode ? type : undefined,
@@ -343,10 +343,6 @@ export function UnifiedTaskDialog({
             scope: execFields.scope,
           } : {}),
         } as Record<string, unknown>);
-        if (result?.error) {
-          alert(`Update failed: ${result.error}`);
-          return;
-        }
       } else if (isHierarchyMode) {
         // Create hierarchy item
         const slug =
@@ -424,6 +420,8 @@ export function UnifiedTaskDialog({
         });
       }
       onClose();
+    } catch (err) {
+      alert(`Save failed: ${(err as Error).message}`);
     } finally {
       setSaving(false);
     }
@@ -471,9 +469,15 @@ export function UnifiedTaskDialog({
                   type="checkbox"
                   checked={!!acknowledgedAt}
                   onChange={async (e) => {
+                    const previous = acknowledgedAt;
                     const val = e.target.checked ? new Date().toISOString() : null;
                     setAcknowledgedAt(val);
-                    await updateTask(item.id, { acknowledged_at: val } as Record<string, unknown>);
+                    try {
+                      await updateTask(item.id, { acknowledged_at: val } as Record<string, unknown>);
+                    } catch (err) {
+                      setAcknowledgedAt(previous);
+                      alert(`Acknowledge failed: ${(err as Error).message}`);
+                    }
                   }}
                   className="h-5 w-5 rounded border-red-500/50 text-red-500 focus:ring-red-500/50 accent-red-500 cursor-pointer"
                 />

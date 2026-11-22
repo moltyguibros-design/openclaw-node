@@ -31,16 +31,20 @@ export function ClusterCard({
 
   const handleDelete = async () => {
     if (!confirm(`Archive cluster "${cluster.name}"?`)) return;
-    await deleteCluster(cluster.id);
+    await deleteCluster(cluster.id).catch((err) => alert(`Archive failed: ${(err as Error).message}`));
   };
 
   const handleRemoveMember = async (nodeId: string) => {
     if (!confirm(`Remove ${nodeId} from ${cluster.name}?`)) return;
-    await removeClusterMember(cluster.id, nodeId);
+    await removeClusterMember(cluster.id, nodeId).catch((err) =>
+      alert(`Remove failed: ${(err as Error).message}`),
+    );
   };
 
   const handleRoleChange = async (nodeId: string, role: string) => {
-    await updateClusterMember(cluster.id, nodeId, role);
+    await updateClusterMember(cluster.id, nodeId, role).catch((err) =>
+      alert(`Role change failed: ${(err as Error).message}`),
+    );
   };
 
   const statusDot: Record<string, string> = {
