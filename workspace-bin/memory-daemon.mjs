@@ -1383,13 +1383,10 @@ async function initFederationSubsystems(nc) {
   federationState.started = true;
   log('[federation] OPENCLAW_FEDERATION=1 — initializing federation subsystems');
 
-  // DB handles — same resolution as the retired daemon. Knowledge DB lives in
-  // the workspace (same path the daemon's own knowledge indexing uses);
-  // extraction tables live in state.db (C1 fix — one DB for reads and writes).
-  const dbDir = process.env.OPENCLAW_DB_DIR || PATHS.root;
-  const workspaceDir = process.env.OPENCLAW_WORKSPACE || path.join(PATHS.root, 'workspace');
-  const knowledgeDbPath = process.env.OPENCLAW_KNOWLEDGE_DB || path.join(workspaceDir, '.knowledge.db');
-  const extractionDbPath = process.env.OPENCLAW_EXTRACTION_DB || path.join(dbDir, 'state.db');
+  // The stores the daemon's own knowledge indexing writes; extraction tables
+  // live in state.db (C1 fix — one DB for reads and writes).
+  const knowledgeDbPath = PATHS.knowledgeDb;
+  const extractionDbPath = PATHS.stateDb;
   try {
     const { openStore } = await import('../lib/sqlite-store.mjs');
     federationState.knowledgeDb = fs.existsSync(knowledgeDbPath) ? openStore(knowledgeDbPath) : null;
@@ -1519,8 +1516,8 @@ async function main() {
     try {
       const probe = await runStoreHealthProbes({
         stateDb: PATHS.stateDb, knowledgeDb: PATHS.knowledgeDb, graphCacheDb: PATHS.graphCacheDb,
-        workspaceLib: path.join(PATHS.root, 'workspace', 'lib'),
-        workspaceDaemon: path.join(PATHS.root, 'workspace', 'bin', 'memory-daemon.mjs'),
+        workspaceLib: path.join(WORKSPACE, 'lib'),
+        workspaceDaemon: path.join(WORKSPACE, 'bin', 'memory-daemon.mjs'),
       });
       appendWatcherRecord(watcherOutputPath, probe);
       log(`[watcher] health probe: ${Object.entries(probe.stores).filter(([,v]) => v).length} stores checked`);

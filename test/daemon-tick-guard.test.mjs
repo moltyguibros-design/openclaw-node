@@ -198,6 +198,12 @@ test('transition pipelines stamp the Phase 2 throttles of the work they already 
   assert.ok(toEnded.indexOf("stampThrottle('lastObsidianSync')", sync) > sync, 'the final obsidian-sync must stamp lastObsidianSync');
 });
 
+test('the store-health probe inspects the workspace the daemon runs from', () => {
+  assert.match(daemonSrc, /workspaceLib: path\.join\(WORKSPACE, 'lib'\)/);
+  assert.match(daemonSrc, /workspaceDaemon: path\.join\(WORKSPACE, 'bin', 'memory-daemon\.mjs'\)/);
+  assert.doesNotMatch(daemonSrc, /path\.join\(PATHS\.root, 'workspace'/);
+});
+
 test('runSubprocess is traced with wrapAsync, so a failed or slow run is recorded', () => {
   assert.match(daemonSrc, /runSubprocess = tracer\.wrapAsync\('runSubprocess', runSubprocess, \{ tier: 2 \}\);/);
   assert.doesNotMatch(daemonSrc, /runSubprocess = tracer\.wrap\(/);
