@@ -234,6 +234,8 @@ info "Skills installed to $WORKSPACE/skills/ ($(ls -d "$REPO_DIR/skills"/*/ 2>/d
 # The rsync never deletes: a skill quarantined or removed from the repo stays
 # installed, and agents keep following it, until retired-files.txt archives it.
 retire_shipped_files skills "$WORKSPACE/skills"
+# Deleted from the repo: it installed moltbook-interact around the scanner gate.
+run rm -f "$WORKSPACE/skills/moltbook-interact/INSTALL.md"
 
 # Install skill-specific dependencies (npm/pip where needed)
 if $SANDBOX; then

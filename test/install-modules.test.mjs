@@ -438,6 +438,14 @@ test('every quarantined or deleted skill is archived out of an installed workspa
   rmSync(root, { recursive: true, force: true });
 });
 
+test('an --update drops the skill install docs the repo deleted, which installed around the scanner gate', () => {
+  const src = moduleSrc['workspace.sh'];
+  const rsync = src.indexOf('"$REPO_DIR/skills/" "$WORKSPACE/skills/"');
+  const drop = src.indexOf('run rm -f "$WORKSPACE/skills/moltbook-interact/INSTALL.md"');
+  assert.ok(rsync >= 0 && drop > rsync, 'workspace.sh removes the installed moltbook-interact/INSTALL.md after the skills rsync');
+  assert.equal(existsSync(join(ROOT, 'skills/moltbook-interact/INSTALL.md')), false);
+});
+
 test('installer links scoped packages into both deployed parent trees', () => {
   const workspace = moduleSrc['workspace.sh'];
   assert.ok(workspace.includes('for scoped_dir in "$pkgdir"*/'));

@@ -6,22 +6,44 @@ import { fileURLToPath } from 'node:url';
 
 const SKILLS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills');
 
-function markdown(dir) {
+function files(dir, exts = ['.md']) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const full = path.join(dir, e.name);
-    if (e.isDirectory()) return e.name === '_quarantine' || e.name === 'node_modules' ? [] : markdown(full);
-    return e.name.endsWith('.md') ? [full] : [];
+    if (e.isDirectory()) return e.name === '_quarantine' || e.name === 'node_modules' ? [] : files(full, exts);
+    return exts.some((x) => e.name.endsWith(x)) ? [full] : [];
   });
 }
+const markdown = (dir) => files(dir);
+const hitsOf = (list, re) => list.flatMap((file) => fs.readFileSync(file, 'utf8').split('\n')
+  .map((line, i) => (re.test(line) ? `${path.relative(SKILLS, file)}:${i + 1}: ${line.trim()}` : null))
+  .filter(Boolean));
 
 // Skill installs and updates go only through openclaw-skill-scanner/install-hook.sh
 // (operator decision, audit finding skills-a-l#8).
 describe('skill install gate', () => {
-  it('no loaded skill tells the agent to install or bulk-update skills around the scanner', () => {
-    const bypass = /npx skills (add|update)\b|clawd?hub update --all|npm update -g clawdbot/;
-    const hits = markdown(SKILLS).flatMap((file) => fs.readFileSync(file, 'utf8').split('\n')
-      .map((line, i) => (bypass.test(line) ? `${path.relative(SKILLS, file)}:${i + 1}: ${line.trim()}` : null))
-      .filter(Boolean));
+  // prompt-guard waits on the operator's scanner decision (skills-m-z-souls-identity#1): the
+  // skill gate blocks any commit to it. ui-ux-pro-max's upstream README clones for contributors.
+  const BYPASS_EXEMPT = new Set(['prompt-guard', 'ui-ux-pro-max/references/upstream-README.md']);
+  it('no loaded skill tells the agent to install or bulk-update skills or global packages around the scanner', () => {
+    const bypass = /npx skills (add|update)\b|clawd?hub update --all|npm update -g clawdbot|openclaw skills (install|add)\b|clawd?hub install\b|git clone \S*skill|npm install -g @/;
+    const shipped = files(SKILLS, ['.md', '.json']).filter((file) => {
+      const rel = path.relative(SKILLS, file).split(path.sep).join('/');
+      return !BYPASS_EXEMPT.has(rel) && !BYPASS_EXEMPT.has(rel.split('/')[0]);
+    });
+    assert.deepEqual(hitsOf(shipped, bypass), []);
+    const marketing = JSON.parse(fs.readFileSync(path.join(SKILLS, 'marketing-mode', 'skill.json'), 'utf8'));
+    assert.equal(marketing.install, undefined);
+    assert.equal(marketing.clawdbot.install, undefined);
+    assert.ok(!fs.existsSync(path.join(SKILLS, 'moltbook-interact', 'INSTALL.md')));
+  });
+
+  // install-hook.sh replaces an existing workspace copy with the ClawHub one, undoing the repo's fixes.
+  it('no repo-shipped skill tells the agent to reinstall or copy itself in', () => {
+    const gates = new Set(['_quarantine', 'find-skills', 'openclaw-skill-scanner']);
+    const hits = fs.readdirSync(SKILLS, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !gates.has(e.name))
+      .flatMap((e) => hitsOf(markdown(path.join(SKILLS, e.name)),
+        new RegExp(`install-hook\\.sh ${e.name}\\b|cp -r .*~/\\.openclaw/(workspace/)?skills/`)));
     assert.deepEqual(hits, []);
   });
 
@@ -46,12 +68,8 @@ describe('no clawdbot-era commands or paths', () => {
   const LEGACY_EXEMPT = new Set(['prompt-guard']);
   it('no loaded skill runs the clawdbot or clawdhub CLI or touches ~/.clawdbot', () => {
     const legacy = /(~|\$HOME)\/\.clawdbot\b|(^|[\s`$(])clawdhub\s+[a-z]|(^|[\s`$(])clawdbot\s+(skills|security|doctor|daemon|update|cron|gateway|config)\b/;
-    const hits = markdown(SKILLS)
-      .filter((file) => !LEGACY_EXEMPT.has(path.relative(SKILLS, file).split(path.sep)[0]))
-      .flatMap((file) => fs.readFileSync(file, 'utf8').split('\n')
-        .map((line, i) => (legacy.test(line) ? `${path.relative(SKILLS, file)}:${i + 1}: ${line.trim()}` : null))
-        .filter(Boolean));
-    assert.deepEqual(hits, []);
+    const docs = markdown(SKILLS).filter((file) => !LEGACY_EXEMPT.has(path.relative(SKILLS, file).split(path.sep)[0]));
+    assert.deepEqual(hitsOf(docs, legacy), []);
   });
 
   // Every grep against a missing ~/.clawdbot printed nothing, so the audit read as clean.

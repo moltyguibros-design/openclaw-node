@@ -32,14 +32,7 @@ This skill teaches OpenClaw to audit its own security posture using first-princi
 
 ## Installation
 
-```bash
-# Through the node's scanner gate
-bash skills/openclaw-skill-scanner/install-hook.sh clawdbot-security-check
-
-# Or clone for manual installation
-git clone https://github.com/TheSethRose/Clawdbot-Security-Check.git
-cp -r Clawdbot-Security-Check ~/.openclaw/workspace/skills/clawdbot-security-check
-```
+Ships with openclaw-node and is deployed by install.sh / mesh-deploy. Do not reinstall it from ClawHub: that replaces the repo's fixes.
 
 ## Usage
 

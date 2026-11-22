@@ -6,8 +6,8 @@ How to migrate from using CC_GodMode via CLAUDE.md to the OpenClaw Skill.
 
 | Aspect | CLAUDE.md (Claude Code) | OpenClaw Skill |
 |--------|------------------------|----------------|
-| Installation | Copy to project root | `bash skills/openclaw-skill-scanner/install-hook.sh cc-godmode` |
-| Updates | Manual copy | `bash skills/openclaw-skill-scanner/install-hook.sh cc-godmode` |
+| Installation | Copy to project root | Ships with openclaw-node |
+| Updates | Manual copy | Ships with openclaw-node (install.sh / mesh-deploy) |
 | Scope | Per-project | System-wide |
 | Discovery | Must know about it | ClawHub marketplace |
 | Agent files | `~/.claude/agents/` | Same (unchanged) |
@@ -16,9 +16,7 @@ How to migrate from using CC_GodMode via CLAUDE.md to the OpenClaw Skill.
 
 ### Step 1: Install the Skill
 
-```bash
-bash skills/openclaw-skill-scanner/install-hook.sh cc-godmode
-```
+Ships with openclaw-node and is deployed by install.sh / mesh-deploy. Do not reinstall it from ClawHub: that replaces the repo's fixes.
 
 ### Step 2: Verify Installation
 
@@ -190,11 +188,7 @@ No. Agent files are separate from the skill. Update them independently when CC_G
 
 ### Q: How do I get skill updates?
 
-```bash
-bash skills/openclaw-skill-scanner/install-hook.sh cc-godmode
-```
-
-The gate installs the current ClawHub version; it does not pin one.
+The skill ships with openclaw-node: install.sh --update or mesh-deploy brings the repo's version. Do not reinstall it from ClawHub: that replaces the repo's fixes.
 
 ## Getting Help
 

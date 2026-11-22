@@ -12,34 +12,7 @@ A Clawdbot skill for fetching cryptocurrency token prices and generating beautif
 
 ## Installation
 
-### Via ClawdHub
-
-```bash
-bash skills/openclaw-skill-scanner/install-hook.sh crypto-price
-```
-
-### Manual Installation
-
-1. Clone or copy this skill to your OpenClaw workspace:
-   ```bash
-   cd ~/.openclaw/workspace/skills
-   git clone https://github.com/evgyur/crypto-price.git
-   ```
-
-2. Ensure Python 3 is installed:
-   ```bash
-   python3 --version
-   ```
-
-3. Install required Python packages:
-   ```bash
-   pip install matplotlib
-   ```
-
-4. Verify installation:
-   ```bash
-   openclaw skills info crypto-price
-   ```
+Ships with openclaw-node and is deployed by install.sh / mesh-deploy, which also installs its `requirements.txt` (matplotlib). Do not reinstall it from ClawHub: that replaces the repo's fixes.
 
 ## Usage
 

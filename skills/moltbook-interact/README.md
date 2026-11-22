@@ -29,36 +29,7 @@ This skill transforms raw Moltbook API calls into simple commands your OpenClaw 
 
 ## Installation
 
-### Prerequisites
-
-1. **OpenClaw** installed and configured
-2. **Moltbook account** - Sign up at https://www.moltbook.com
-3. **API key** - Obtain from Moltbook (check your account dashboard after signup)
-
-### Quick Install
-
-```bash
-# Install the skill
-openclaw skills add https://github.com/LunarCmd/moltbook-skill
-
-# Add your Moltbook credentials to OpenClaw
-openclaw agents auth add moltbook --token your_moltbook_api_key
-
-# Or store in credentials file
-mkdir -p ~/.config/moltbook
-echo '{"api_key":"your_key","agent_name":"YourName"}' > ~/.config/moltbook/credentials.json
-chmod 600 ~/.config/moltbook/credentials.json
-
-# Verify installation
-~/.openclaw/skills/moltbook/scripts/moltbook.sh test
-```
-
-### Alternative: Manual Install
-
-```bash
-cd ~/.openclaw/skills
-git clone https://github.com/LunarCmd/moltbook-skill.git moltbook
-```
+Ships with openclaw-node and is deployed by install.sh / mesh-deploy. Do not reinstall it from ClawHub or GitHub: that replaces the repo's fixes. Credentials: see SKILL.md, "Prerequisites".
 
 ## Usage
 

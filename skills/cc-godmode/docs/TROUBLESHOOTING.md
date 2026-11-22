@@ -27,10 +27,7 @@ Common issues and solutions when using the CC_GodMode skill.
 ls ~/.openclaw/workspace/skills/ | grep cc-godmode
 ```
 
-2. Try reinstalling:
-```bash
-bash skills/openclaw-skill-scanner/install-hook.sh cc-godmode
-```
+2. Re-run `install.sh --update` (or mesh-deploy): the skill ships with openclaw-node. Do not reinstall it from ClawHub: that replaces the repo's fixes.
 
 3. Check skill directory:
 ```bash
@@ -50,10 +47,7 @@ ls ~/.openclaw/workspace/skills/cc-godmode/
 grep "version:" ~/.openclaw/workspace/skills/cc-godmode/SKILL.md
 ```
 
-2. Update to latest:
-```bash
-bash skills/openclaw-skill-scanner/install-hook.sh cc-godmode
-```
+2. The installed version is the one the node's openclaw-node checkout ships; update the node (`install.sh --update` or mesh-deploy), not the skill.
 
 ---
 
