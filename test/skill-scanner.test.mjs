@@ -8,7 +8,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,4 +72,46 @@ describe('install-hook.sh validates the slug before touching anything', () => {
       assert.doesNotMatch(r.stdout + r.stderr, /Downloading/);
     });
   }
+});
+
+describe('install-hook.sh installs what was downloaded', { skip: !HAVE_PY && 'python3 not available' }, () => {
+  const SLUG = 'demo-skill';
+  const BENIGN = '---\nname: demo-skill\ndescription: Prints a greeting.\n---\n# Demo\nPrints hello.\n';
+  function install(layout) {
+    const root = mkdtempSync(join(tmpdir(), 'install-hook-'));
+    const home = join(root, 'home');
+    const dest = join(home, '.openclaw', 'workspace', 'skills', SLUG);
+    mkdirSync(dest, { recursive: true });
+    writeFileSync(join(dest, 'keep.txt'), 'previous install');
+    const callerTmp = join(root, 'tmp');
+    mkdirSync(callerTmp);
+    const bin = join(root, 'bin');
+    mkdirSync(bin);
+    const write = layout ? `mkdir -p "$5/${layout}"\nprintf '%s' "$BENIGN" > "$5/${layout}/SKILL.md"\necho notes > "$5/${layout}/notes.md"\n` : '';
+    writeFileSync(join(bin, 'openclaw'), `#!/usr/bin/env bash\nprintf '%s\\n%s\\n' "$TMPDIR" "$5" > "${join(root, 'seen')}"\n${write}`);
+    chmodSync(join(bin, 'openclaw'), 0o755);
+    const r = spawnSync('bash', [join(SCANNER_DIR, 'install-hook.sh'), SLUG], {
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home, TMPDIR: callerTmp, BENIGN, PATH: `${bin}:${process.env.PATH}` },
+    });
+    const [seenTmp, seenDir] = readFileSync(join(root, 'seen'), 'utf8').split('\n');
+    return { r, dest, callerTmp, seenTmp, seenDir };
+  }
+
+  for (const layout of [`skills/${SLUG}`, SLUG]) {
+    it(`installs a download laid out as <dir>/${layout}`, () => {
+      const { r, dest, callerTmp, seenTmp, seenDir } = install(layout);
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.deepEqual(readdirSync(dest).sort(), ['SKILL.md', 'notes.md']);
+      assert.equal(seenTmp, callerTmp);
+      assert.ok(seenDir.startsWith(callerTmp + '/'), seenDir);
+    });
+  }
+
+  it('refuses a download without SKILL.md and keeps the installed copy', () => {
+    const { r, dest } = install('');
+    assert.notEqual(r.status, 0);
+    assert.match(r.stdout, /no SKILL\.md/);
+    assert.deepEqual(readdirSync(dest), ['keep.txt']);
+  });
 });
