@@ -1554,16 +1554,7 @@ async function main() {
       }
     })().catch(() => {}); // status iterator ends on close
 
-    const sub = natsConn.subscribe('mesh.memory.compaction_completed');
-    (async () => {
-      for await (const msg of sub) {
-        if (memoryBudget) {
-          memoryBudget.reload();
-          log('[nats] memory-budget reloaded via mesh.memory.compaction_completed');
-        }
-      }
-    })().catch(() => {}); // subscription ends on drain/close
-    log(`NATS connected (reconnect: infinite, wait: ${NATS_RECONNECT_OPTS.reconnectTimeWait}ms) — subscribed to mesh.memory.compaction_completed`);
+    log(`NATS connected (reconnect: infinite, wait: ${NATS_RECONNECT_OPTS.reconnectTimeWait}ms)`);
 
     // Initialize local event log for dual-write shadow mode
     try {
