@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = join(ROOT, 'workspace-bin', 'test-multi-soul-workflow');
+const ACCESS = join(ROOT, 'workspace-bin', 'clawvault-access-control');
 const HAVE_GIT = spawnSync('git', ['--version']).status === 0;
 
 test('the script launches a disposable Mission Control and removes it on exit', { skip: !HAVE_GIT && 'git not available' }, () => {
@@ -36,6 +37,10 @@ test('the script launches a disposable Mission Control and removes it on exit', 
   env | grep -E '^(HOME|DB_PATH|OPENCLAW_WORKSPACE|WORKSPACE_ROOT|OPENCLAW_STATE_DB|OPENCLAW_NATS|OPENCLAW_NATS_TOKEN)='
   echo "SOULS=$(jq '.souls | length' "$HOME/.openclaw/souls/registry.json")"
   echo "SEEDED=$(git -C "$HOME/.openclaw/souls" log --oneline | wc -l | tr -d ' ')"
+  access() { OPENCLAW_SOULS_DIR="$HOME/.openclaw/souls" node ${JSON.stringify(ACCESS)} blockchain-auditor "$1" read || true; }
+  echo "ACCESS_OWN=$(access private/blockchain-auditor)"
+  echo "ACCESS_HANDOFF=$(access handoffs)"
+  echo "ACCESS_OTHER=$(access private/lore-writer)"
 } > ${JSON.stringify(record)}
 exit 1
 `);
@@ -69,6 +74,9 @@ exit 1
     assert.equal(env.OPENCLAW_NATS_TOKEN, undefined);
     assert.equal(env.SOULS, '3');
     assert.equal(env.SEEDED, '1');
+    assert.equal(env.ACCESS_OWN, 'GRANTED', 'Test 5 needs the soul to read its own private memory');
+    assert.equal(env.ACCESS_HANDOFF, 'GRANTED', 'Test 2 needs the receiver to read handoffs');
+    assert.match(env.ACCESS_OTHER, /^DENIED/);
 
     assert.equal(existsSync(env.HOME), false, 'the sandbox must be removed on exit');
     assert.equal(existsSync(join(home, '.openclaw')), false, 'the caller HOME must not be written');

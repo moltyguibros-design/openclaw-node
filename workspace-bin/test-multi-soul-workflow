@@ -42,7 +42,7 @@ MC_TOKEN_FILE="$SANDBOX/.openclaw/config/mc-session-token"
 mkdir -p "$WORKSPACE" "$SOULS_DIR/blockchain-auditor/evolution"
 for soul in daedalus blockchain-auditor lore-writer; do
   mkdir -p "$SOULS_DIR/$soul"
-  echo '{"capabilities":[]}' > "$SOULS_DIR/$soul/capabilities.json"
+  printf '{"tools":[],"permissions":{"memory":{"shared":"read","private":["%s"],"handoffs":"readwrite"}}}\n' "$soul" > "$SOULS_DIR/$soul/capabilities.json"
 done
 cat > "$SOULS_DIR/registry.json" <<'JSON'
 {"version":"1.0.0","souls":[
