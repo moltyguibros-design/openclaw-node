@@ -181,16 +181,20 @@ describe('MeshRegistry', () => {
     assert.ok(registry.manifests.has('tracked'));
   });
 
-  it('heartbeat refreshes KV entries', async () => {
+  it('heartbeat refreshes KV entries', async (t) => {
     await registry.register({ name: 'hb-tool', methods: [] });
+    const read = async () => JSON.parse(decoder.decode((await mockKV.get('test-node.hb-tool')).value));
+    assert.equal((await read()).last_heartbeat, undefined);
 
-    // Start heartbeat (uses setInterval)
+    t.mock.timers.enable({ apis: ['setInterval'] });
     registry.startHeartbeat();
+    t.mock.timers.tick(60_000);
+    await new Promise(setImmediate);
 
-    // Verify timer was created
-    assert.ok(registry.heartbeatTimer);
+    const entry = await read();
+    assert.equal(entry.name, 'hb-tool');
+    assert.ok(!Number.isNaN(Date.parse(entry.last_heartbeat)));
 
-    // Cleanup
     await registry.shutdown();
   });
 });

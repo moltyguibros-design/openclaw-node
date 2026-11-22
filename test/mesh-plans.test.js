@@ -325,12 +325,12 @@ describe('PlanStore', () => {
 
   it('list returns all plans sorted by created_at', async () => {
     const store = new PlanStore(new MockKV());
-    const p1 = createPlan({ parent_task_id: 'T-A', title: 'First' });
-    const p2 = createPlan({ parent_task_id: 'T-B', title: 'Second' });
-    await store.put(p1);
-    await store.put(p2);
+    const newer = { ...createPlan({ parent_task_id: 'T-A', title: 'Newer' }), created_at: '2026-01-02T00:00:00.000Z' };
+    const older = { ...createPlan({ parent_task_id: 'T-B', title: 'Older' }), created_at: '2026-01-01T00:00:00.000Z' };
+    await store.put(newer);
+    await store.put(older);
     const all = await store.list();
-    assert.equal(all.length, 2);
+    assert.deepEqual(all.map((p) => p.plan_id), [older.plan_id, newer.plan_id]);
   });
 
   it('list filters by status', async () => {

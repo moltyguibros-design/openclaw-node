@@ -22,6 +22,6 @@ test('P2b: last_recalled still dominates created_at', () => {
 
 test('P2b: an item with no timestamp still defaults to recency=1 (unchanged)', () => {
   const noTime = { mention_count: 1, salience: 0.5 };
-  // frequency=log1p(1)=~0.693, salience=0.5, recency=1 -> score ~0.3466
-  assert.ok(recallScore(noTime) > 0, 'no-timestamp item still scores');
+  // frequency=log1p(1), salience=0.5, recency=1
+  assert.ok(Math.abs(recallScore(noTime) - Math.log1p(1) * 0.5) < 1e-12, 'recency defaults to 1');
 });

@@ -388,18 +388,23 @@ describe('runStoreHealthProbes', () => {
   it('reports WAL size when WAL file exists', async () => {
     const dbPath = path.join(tmpDir, 'wal-test.db');
     seedStateDb(dbPath);
-    const walPath = dbPath + '-wal';
-    assert.ok(fs.existsSync(walPath) || true);
-    const result = await runStoreHealthProbes({
-      stateDb: dbPath,
-      knowledgeDb: path.join(tmpDir, 'nope.db'),
-      graphCacheDb: path.join(tmpDir, 'nope.db'),
-      workspaceLib: '/nonexistent/lib',
-      workspaceDaemon: '/nonexistent/daemon',
-      Database,
-    });
-    assert.equal(typeof result.stores.state.wal_bytes, 'number');
-    assert.ok(result.stores.state.wal_bytes >= 0);
+    // The last connection to close checkpoints and deletes the WAL, so hold one open.
+    const holder = new Database(dbPath);
+    try {
+      holder.prepare('INSERT INTO decisions VALUES (?, ?)').run(2, 'hold wal');
+      assert.ok(fs.existsSync(dbPath + '-wal'));
+      const result = await runStoreHealthProbes({
+        stateDb: dbPath,
+        knowledgeDb: path.join(tmpDir, 'nope.db'),
+        graphCacheDb: path.join(tmpDir, 'nope.db'),
+        workspaceLib: '/nonexistent/lib',
+        workspaceDaemon: '/nonexistent/daemon',
+        Database,
+      });
+      assert.ok(result.stores.state.wal_bytes > 0);
+    } finally {
+      holder.close();
+    }
   });
 
   it('checks drift symlinks correctly', async () => {
