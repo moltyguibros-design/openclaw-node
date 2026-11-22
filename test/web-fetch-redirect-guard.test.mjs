@@ -20,9 +20,16 @@ const isPrivate = (ip) => ip !== '127.0.0.1' && isPrivateIp(ip);
 describe('guardedFetch', () => {
   let server, port;
   const hits = [];
+  const tricklers = [];
   before(async () => {
     server = http.createServer((req, res) => {
       hits.push(req.url);
+      if (req.url === '/big') { res.writeHead(200); return res.end(Buffer.alloc(3 * 1024 * 1024, 'a')); }
+      if (req.url === '/trickle') {
+        res.writeHead(200);
+        tricklers.push(setInterval(() => res.write('x'), 100));
+        return;
+      }
       if (req.url === '/to-metadata') { res.writeHead(302, { location: 'http://169.254.169.254/latest/meta-data/' }); return res.end(); }
       if (req.url === '/to-internal') { res.writeHead(302, { location: `http://internal.test:${port}/secret` }); return res.end(); }
       if (req.url === '/to-loopback-name') { res.writeHead(301, { location: `http://localhost:${port}/secret` }); return res.end(); }
@@ -35,7 +42,11 @@ describe('guardedFetch', () => {
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
     port = server.address().port;
   });
-  after(() => server.close());
+  after(() => {
+    tricklers.forEach(clearInterval);
+    server.closeAllConnections();
+    server.close();
+  });
 
   // public.test is the stand-in public host; internal.test resolves to RFC1918.
   const lookup = async (h) => {
@@ -61,6 +72,16 @@ describe('guardedFetch', () => {
     assert.equal(res.status, 200);
     assert.equal(res.body.toString(), 'ok');
     assert.equal(res.url, `${base()}/ok`);
+  });
+
+  it('refuses a response past the size cap instead of buffering it whole', async () => {
+    await assert.rejects(guardedFetch(`${base()}/big`, { lookup, isPrivate, maxBytes: 1024 * 1024 }), /exceeds 1048576 bytes/);
+  });
+
+  it('ends a body that trickles in under the idle timeout at the overall deadline', { timeout: 5000 }, async () => {
+    const started = Date.now();
+    await assert.rejects(guardedFetch(`${base()}/trickle`, { lookup, isPrivate, timeout: 500 }), /timed out/);
+    assert.ok(Date.now() - started < 2000, `settled after ${Date.now() - started} ms`);
   });
 
   it('caps redirect chains', async () => {

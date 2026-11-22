@@ -16,7 +16,7 @@
  * position, so an agent-supplied URL used to reach the NATS monitor, the
  * memory inject server, the cloud metadata endpoint or file:// paths. Only
  * http(s) to PUBLIC addresses is fetched — every sub-request and redirect
- * included — and output is capped.
+ * included — and each response and the output are capped.
  *
  * Chromium never touches the network itself: every request is fetched here by
  * guardedFetch (each redirect hop re-checked, each connection made to the
@@ -36,6 +36,7 @@ import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 
 export const MAX_OUTPUT_BYTES = Number(process.env.WEB_FETCH_MAX_BYTES) || 2 * 1024 * 1024;
+export const MAX_RESPONSE_BYTES = Number(process.env.WEB_FETCH_MAX_RESPONSE_BYTES) || 25 * 1024 * 1024;
 
 const BLOCKED_HOSTNAMES = new Set(['localhost', 'metadata', 'metadata.google.internal', 'instance-data']);
 
@@ -141,9 +142,12 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const HOP_HEADERS = new Set(['host', 'connection', 'keep-alive', 'content-length', 'transfer-encoding', 'accept-encoding', 'proxy-authorization', 'upgrade']);
 const withoutHeaders = (h, names) => Object.fromEntries(Object.entries(h).filter(([k]) => !names.includes(k.toLowerCase())));
 
-function requestOnce(url, { method, headers, body, lookup, isPrivate, timeout }) {
+const inflight = new Set();
+
+function requestOnce(url, { method, headers, body, lookup, isPrivate, timeout, maxBytes }) {
   const mod = url.protocol === 'https:' ? https : http;
   return new Promise((resolve, reject) => {
+    const fail = (err) => { req.destroy(err); reject(err); };
     const req = mod.request(url, {
       method,
       // identity: the body is handed to Chromium as-is, so it must not be compressed.
@@ -153,10 +157,19 @@ function requestOnce(url, { method, headers, body, lookup, isPrivate, timeout })
       timeout,
     }, (res) => {
       const chunks = [];
-      res.on('data', (c) => chunks.push(c));
+      let size = 0;
+      res.on('data', (c) => {
+        size += c.length;
+        if (size > maxBytes) return fail(new Error(`refused: response from ${url.href} exceeds ${maxBytes} bytes`));
+        chunks.push(c);
+      });
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
       res.on('error', reject);
     });
+    // The socket timeout is an idle timer: a body trickling in byte by byte never trips it.
+    const deadline = setTimeout(() => fail(new Error(`timed out fetching ${url.href}`)), timeout);
+    inflight.add(req);
+    req.on('close', () => { clearTimeout(deadline); inflight.delete(req); });
     req.on('timeout', () => req.destroy(new Error(`timed out fetching ${url.href}`)));
     req.on('error', reject);
     if (body?.length) req.write(body);
@@ -170,12 +183,12 @@ function requestOnce(url, { method, headers, body, lookup, isPrivate, timeout })
  */
 export async function guardedFetch(url, {
   method = 'GET', headers = {}, body = null, lookup = defaultLookup, isPrivate = isPrivateIp,
-  maxRedirects = 10, timeout = 30000,
+  maxRedirects = 10, timeout = 30000, maxBytes = MAX_RESPONSE_BYTES,
 } = {}) {
   let current = await assertPublicUrl(url, { lookup, isPrivate });
   let reqHeaders = withoutHeaders(headers, [...HOP_HEADERS]);
   for (let hop = 0; ; hop++) {
-    const res = await requestOnce(current, { method, headers: reqHeaders, body, lookup, isPrivate, timeout });
+    const res = await requestOnce(current, { method, headers: reqHeaders, body, lookup, isPrivate, timeout, maxBytes });
     if (!REDIRECT_STATUSES.has(res.status) || !res.headers.location) return { ...res, url: current.href };
     if (hop >= maxRedirects) throw new Error(`refused: more than ${maxRedirects} redirects`);
     const next = await assertPublicUrl(new URL(res.headers.location, current).href, { lookup, isPrivate });
@@ -276,6 +289,7 @@ async function main() {
   } finally {
     await browser.close();
     proxy.close();
+    for (const req of inflight) req.destroy();
   }
 }
 
