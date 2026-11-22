@@ -388,6 +388,26 @@ test('NODE_ACCEPTANCE says who runs the gate after a deploy and names the federa
   }
 });
 
+test('NODE_ACCEPTANCE check tables list exactly the checks the gate emits', () => {
+  const doc = read('docs/NODE_ACCEPTANCE.md');
+  const implemented = new Set([
+    ...[...read('lib/node-acceptance-probes.mjs').matchAll(/^\s+id: '([A-Z0-9-]+)', layer:/gm)].map((m) => m[1]),
+    ...[...read('lib/node-acceptance.mjs').matchAll(/^\s+\{ component: '\w+', +id: '([A-Z0-9-]+)'/gm)].map((m) => m[1]),
+  ]);
+  assert.ok(implemented.size >= 20, 'acceptance check id parse');
+  const tabled = new Set([...doc.matchAll(/^\| ([A-Z]{3}-L\d-[A-Z0-9]+|L0-[A-Z]+) \|/gm)].map((m) => m[1]));
+  for (const id of implemented) assert.ok(tabled.has(id), `NODE_ACCEPTANCE has no table row for ${id}`);
+  for (const id of tabled) assert.ok(implemented.has(id), `NODE_ACCEPTANCE tables ${id}, which the gate does not emit (list it under Not built)`);
+  assert.ok(doc.slice(doc.indexOf('\n### Not built\n'), doc.indexOf('\n## 12. ')).length > 20, 'NODE_ACCEPTANCE §11 needs a "### Not built" list');
+  const record = doc.slice(doc.indexOf('\n## 11. '), doc.indexOf('\n## 12. '));
+  for (const [hit] of doc.replace(record, '').matchAll(/\b(?:MEM|LLM|NET)-L\d-\d+\b/g)) {
+    assert.ok(implemented.has(hit), `NODE_ACCEPTANCE cites the retired ID ${hit} outside the §11 record`);
+  }
+  assert.doesNotMatch(doc.split('\n').slice(0, 8).join('\n'), /mocked unit tests|not yet run against a live node/);
+  assert.match(read('lib/node-acceptance-probes.mjs'), /note = \(process\.platform !== 'win32' && \(st\.mode & 0o077\)\) \? ` \(warning: mode/);
+  assert.match(doc.split('\n').find((l) => l.startsWith('| L0-TOKEN |')), /warning/);
+});
+
 test('README Distributed Mission Control describes the daemon submit path, daemon-side CAS and the tests that exist', () => {
   const readme = read('README.md');
   const start = readme.indexOf('\n## Distributed Mission Control\n');

@@ -1,8 +1,9 @@
 # Node Acceptance Protocol
 
 **Status:** BUILT for single-node (2026-06-15) — `bin/node-acceptance.mjs` + `lib/node-acceptance.mjs` +
-`lib/node-acceptance-probes.mjs` implement L0–L2 + L4 hard-tests across memory / LLM / network. 31
-mocked unit tests green; **not yet run against a live node** (operator will run it on the deployment).
+`lib/node-acceptance-probes.mjs` implement L0, L1, L2 and L4 checks across the memory, LLM, network,
+storage and federation axes; §4–§6 list each check under the ID the evidence report prints, and §11
+lists the designed checks that were not built. A node's runtime evidence is its run's report (§7.2).
 Inter-node L3 is specified but deferred (§8).
 **Owner principle:** MASTER_PLAN §4.1 (code on disk ≠ shipped), §4.7 (tests are not done-criteria),
 §5 (done requires runtime evidence). This protocol is the operational instance of §5 applied to a
@@ -125,22 +126,20 @@ so probes never pollute real memory, and is deleted in teardown (§7.4).
 
 | ID | Proves | Method | PASS threshold | Evidence captured | Builds on |
 |---|---|---|---|---|---|
-| MEM-L0-1 | DBs deployed | stat the 3 DB files | `state.db`, `.knowledge.db`, `graph-cache.db` all present + non-empty | paths + sizes + mtimes | COMPONENT_REGISTRY 6.1 |
-| MEM-L0-2 | inject token deployed | stat `~/.openclaw/config/memory-injection-token` | exists, mode `0600`, 64 bytes | `ls -l` line | 1.3 |
-| MEM-L0-3 | watched sources configured | read `~/.openclaw/config/transcript-sources.json` | ≥1 source dir exists + readable | source list | 1.1 |
-| MEM-L1-1 | daemon up | `launchctl list ai.openclaw.memory-daemon` → PID | PID present (reuse `parseLaunchctlPid`) | PID | health-check `checkDaemon` |
-| MEM-L1-2 | inject server up | TCP connect `:7893` + `POST /memory/inject` no-token → `401` | listening + auth enforced | status code | 1.3 |
-| MEM-L2-1 | **ingest works** | write a synthetic JSONL (nonce) into a watched source; poll `state.db` | `messages` count for the synthetic session grows within `pollInterval + 10s` | SQL before/after counts | session-store, append-delta 3.1 |
-| MEM-L2-2 | **extraction works** | trigger flush on the synthetic session (`openclaw-extract-now` / NATS); poll extraction tables | ≥1 row in `entities` with fresh `created_at`; result schema-valid | SQL row + validation result | extraction-store, schema 3.4 |
-| MEM-L2-3 | mentions carry grain | check `mentions.turn_index` for the synthetic rows | non-NULL on ≥1 mention | SQL value | 3.3 |
-| MEM-L2-4 | FTS+vec indexed | query `knowledge.db` `last_indexed`; confirm synthetic chunks present | `last_indexed` advanced after the session; nonce findable in FTS | SQL + FTS hit | 5.1 |
-| MEM-L2-5 | graph fresh | `graph-cache.db` `last_refresh_at` | within 1h (or advanced this run) | SQL value | 5.2 |
-| MEM-L2-6 | **all 5 retrieval channels live** | `POST /memory/inject` with token + the known-good query | `concepts≥1 ∧ decisions≥1 ∧ snippets≥1`; each of FTS/vec/entity/theme/spreading returns ≥1 | response body (per-channel counts) | 1.3 v5.3 done-criterion |
-| MEM-L2-7 | inject latency | time MEM-L2-6 (analysis-disabled or tolerant of the 1s LLM ceiling) | p95 < 500 ms excluding LLM analysis | measured ms | 1.3 target |
-| MEM-L4-1 | **gold round-trip** | inject a unique nonce *fact* via the synthetic session → after extract+index → query inject for the nonce | the nonce string appears in a returned snippet/concept | the matching block, verbatim | full pipeline |
-| MEM-L2-8 | watcher observing | tail `~/.openclaw/watcher.jsonl` | a record within the last health interval; no open `watcher.alert` | last record + alert state | 1.8 |
+| L0-DB | DBs deployed (storage axis) | stat the 3 DB files | `state.db`, `knowledge.db`, `graph-cache.db` all present + non-empty | size per DB | COMPONENT_REGISTRY 6.1 |
+| L0-DEPLOY | daemon deployed | access `workspace/bin/memory-daemon.mjs`, `workspace/lib/`, `workspace/packages/event-schemas/dist/index.js` | all present (the daemon exits at startup without the schemas) | daemon path | MASTER_PLAN §4.1 deploy gap |
+| L0-HYPERAGENT | HyperAgent deployed | access `workspace/bin/hyperagent.mjs` + `workspace/lib/hyperagent-store.mjs`, run the CLI with `--help` | both present; the CLI exits 0 and prints `hyperagent` | CLI path or stderr | HyperAgent plan |
+| L0-TOKEN | inject token deployed | stat `config/memory-injection-token` | exists; a mode other than `600` is a warning in the PASS detail, not a FAIL | path, mode, size | 1.3 |
+| MEM-L1-1 | daemon up | health-check `checkDaemon` (service PID) | PID present | PID | health-check |
+| MEM-L1-3 | state.db readable (storage axis) | health-check `checkSqlite`: open read-only, `SELECT 1` | answers | path | health-check |
+| STO-L1-1 | workspace writable (storage axis) | health-check `checkWorkspaceWritable`: write a probe file | write succeeds | path | health-check |
+| MEM-L2-INGEST | **ingest works** | import a synthetic nonce transcript through the session store | `messages` count for the synthetic session ≥ 2 | session id + count | session-store, append-delta 3.1 |
+| MEM-L2-INJECT | **retrieval answers** | authorized `POST /memory/inject` with a known query | HTTP 200, well-formed `items`, items > 0; SKIP while the store holds no entities, FAIL if it holds some and none come back | concepts/decisions/snippets counts + ms | 1.3 |
+| MEM-L4-ROUNDTRIP | **gold round-trip** | write a nonce transcript into the first configured transcript source, publish an extract trigger, poll `mentions` for the session (`ACCEPT_ROUNDTRIP_POLL_MS`, default 60 s), then query inject for the nonce | the nonce appears in the injected block | the matching block | full pipeline |
 
-> **MEM-L4-1 is the crown probe.** It is the single check that proves *the memory function actually
+MEM-L2-INJECT and MEM-L4-ROUNDTRIP need the LLM axis and are skipped with `--skip-axis llm`.
+
+> **MEM-L4-ROUNDTRIP is the crown probe.** It is the single check that proves *the memory function actually
 > works* on this node: a fact that did not exist before the run is created, extracted, indexed, and
 > retrieved by content. If only one memory check could run, it is this one.
 
@@ -154,15 +153,14 @@ answers `/api/tags`.
 
 | ID | Proves | Method | PASS threshold | Evidence | Builds on |
 |---|---|---|---|---|---|
-| LLM-L1-1 | server up | `GET :11434/api/tags` | HTTP 200 | model list | health-check `checkOllama` |
-| LLM-L1-2 | **configured model present** | the model named by `LLM_MODEL` is in `/api/tags` | exact name match (not "some model") | matched tag | MASTER_PLAN 3.2 |
-| LLM-L2-1 | **generation runs** | `POST :11434/api/generate` `{model:LLM_MODEL, prompt:"reply OK", stream:false}` | non-empty `response`, `eval_count>0`, within budget (default 30s, env `ACCEPT_GEN_BUDGET_MS`) | response text + eval_count + ms | llm-client |
-| LLM-L2-2 | **embedder runs** | embed a string with BGE-M3 via `@huggingface/transformers` | vector length = 1024, all finite, L2-norm > 0 | dim + norm | health-check `checkEmbedder`, embed-benchmark |
-| LLM-L2-3 | **production task works** | run the structured-extraction path on a tiny synthetic transcript | output passes `extraction-schema` validation (after `coerceExtractionResult`) | validation result + counts | extraction-prompt/schema 3.4 |
-| LLM-L2-4 | queue not stuck | read `ollama-queue` state snapshot | `consecutive_timeouts.{extraction,analysis} < 3`; no fallback in last 5 min | snapshot fields | ollama-queue, health-watch `deriveQueueStatus` |
-| LLM-L0-1 | RAM headroom (advisory) | `bin/check-llm-baseline.mjs` | advisory only — `WARN` not `FAIL` if under recommendation | advisor output | MASTER_PLAN 3.2 |
+| LLM-L1-1 | server up | health-check `checkOllama`: `GET :11434/api/tags` | HTTP 200 | model list | health-check |
+| LLM-L1-3 | embedder available | health-check `checkEmbedder`: the transformers package loads | loads | detail | health-check |
+| LLM-L2-MODEL | **configured model present** | the model named by `LLM_MODEL` is in `/api/tags` | exact name match (not "some model") | matched tag | MASTER_PLAN 3.2 |
+| LLM-L2-GEN | **generation runs** | `POST :11434/api/generate` with a short prompt | non-empty `response`, `eval_count>0`, within `ACCEPT_GEN_BUDGET_MS` (default 30 s) | response text + eval_count | llm-client |
+| LLM-L2-EMBED | **embedder runs** | embed a string with BGE-M3 | vector length = 1024, all finite, L2-norm > 0 | dim + norm | embed-benchmark |
+| LLM-L2-EXTRACT | **production task works** | run the structured-extraction path on a tiny synthetic transcript | schema-valid extraction | entity/decision/theme counts | extraction-prompt/schema 3.4 |
 
-> LLM-L2-3 is the LLM analogue of the gold round-trip: it proves the backing works for the *real* task
+> LLM-L2-EXTRACT is the LLM analogue of the gold round-trip: it proves the backing works for the *real* task
 > (schema-valid structured extraction), not just freeform text. A model that generates prose but fails
 > structured extraction is a failed LLM backing for this node's purpose.
 
@@ -176,20 +174,17 @@ that a server is listening.
 
 | ID | Proves | Method | PASS threshold | Evidence | Builds on |
 |---|---|---|---|---|---|
-| NET-L0-1 | NATS service installed | `launchctl list ai.openclaw.nats` → PID | PID present | PID | 7.1 |
-| NET-L1-1 | port listening | TCP connect `:4222` | connects | socket ok | 7.1 |
-| NET-L1-2 | monitor healthy | `GET :8222/healthz` | HTTP 200 | body | health-check `checkNats` |
-| NET-L1-3 | **JetStream enabled** | `GET :8222/jsz` | returns JS stats (api level, limits) | jsz JSON | 7.1 |
-| NET-L1-4 | per-node stream exists | stream info for `local-events-<NODE_ID>` | stream present, subjects exactly `local.<NODE_ID>.>` (a legacy `local.>` stream fails: it blocks every other node's stream) | stream config | 1.7 |
-| NET-L2-1 | **core pub/sub round-trip** | subscribe a probe subject, publish a nonce, await delivery | message received within 1s, payload matches | sent/received nonce + ms | nats-resolve |
-| NET-L2-2 | **JetStream durability** | publish a nonce to the stream, read it back via consumer | the published message is read back intact | seq + payload | 1.7 done-criterion |
-| NET-L2-3 | daemon connected | grep daemon log for `NATS connected` + stream-init line at boot | both lines present, current boot | log lines + ts | 0.4 |
-| NET-L2-4 | **extraction trigger round-trip** | publish `mesh.memory.extract_request.<nodeId>`; watch for a flush boundary (log/event) | a flush fires within `N` s | trigger→flush log pair | 1.6 done-criterion |
-| NET-L1-5 | mesh services loaded | `launchctl list` for the 5 `mesh-*` jobs | all loaded | launchctl rows | 4.1 |
+| NET-L1-2 | monitor healthy | health-check `checkNats`: `GET :8222/healthz` | HTTP 200 | body | health-check |
+| NET-L2-JSZ | **JetStream enabled** | `GET :8222/jsz` | HTTP 200 with JetStream stats | streams + memory | 7.1 |
+| NET-L2-STREAM | per-node stream exists | stream info for `local-events-<NODE_ID>` | present, subjects exactly `local.<NODE_ID>.>` (a legacy `local.>` stream fails: it blocks every other node's stream) | subjects + message count | 1.7 |
+| NET-L2-PUBSUB | **core pub/sub round-trip** | subscribe a probe subject, publish a nonce, await delivery | payload echoed within 1.5 s | subject | nats-resolve |
+| NET-L2-TRIGGER | extraction trigger publishes (advisory, `--deep` only) | publish `mesh.memory.extract_request.<nodeId>` | publish succeeds; the flush is not awaited | subject | 1.6 |
+| FED-L2-COORD | coordinator present (federation axis, advisory) | `mesh-task-daemon` unit state from systemd/launchd | running PID; a node without the coordinator (worker/standalone) is SKIP, not FAIL | unit state | node-watch `fed.coordinator` |
+| FED-L2-QUORUM | bus quorum (federation axis, advisory) | `GET :8222/jsz` `meta_cluster` | a single-node bus, or a raft leader elected; no leader is FAIL; bus unreachable is SKIP (NET-L2-JSZ owns it) | jsz detail | node-watch `fed.cluster.quorum` |
 
-> NET-L2-1/L2-2 distinguish "server up" (L1) from "messaging works" (L2). NET-L2-4 is the
-> network×memory cross-probe: it proves the *wire actually drives the pipeline*, which is the only thing
-> that ever exercised real-time extraction (1.6 notes the idle timer is otherwise the sole path).
+> NET-L2-JSZ/NET-L2-PUBSUB distinguish "server up" (L1) from "messaging works" (L2). The wire driving
+> the pipeline is proven end to end by MEM-L4-ROUNDTRIP, which publishes the extract trigger and waits
+> for its mentions; NET-L2-TRIGGER alone only shows the publish succeeds.
 
 ---
 
@@ -208,8 +203,8 @@ bin/node-acceptance.mjs [--profile single-node|federated] [--axis <axis>] [--jso
 - Exit `0` accepted · `1` rejected · `2` incomplete · `3` harness error.
 - **Reality-first (§4.5):** every value is re-probed live. The harness trusts no doc, including this one
   and COMPONENT_REGISTRY.
-- **Composition, not duplication:** reuses `lib/health-check.mjs` for L1 liveness; LLM-L2-4 (`ollama-queue`
-  snapshot) is not built yet; `node-identity` for L3 (future), `spawn-node` for the `federated` peer.
+- **Composition, not duplication:** reuses `lib/health-check.mjs` for L1 liveness; the `ollama-queue`
+  snapshot check is not built (§11); `node-identity` for L3 (future), `spawn-node` for the `federated` peer.
 
 ### 7.2 Output
 
@@ -220,10 +215,10 @@ embeds the captured evidence verbatim — it **is** the §5 runtime-evidence art
 ```
 Node Acceptance — node=daedalus profile=single-node — 2026-06-15T18:22:04Z
   L0 Presence   ████████  8/8   PASS
-  L1 Liveness   ███████░  7/8   FAIL (companion-bridge :8787 down → MEM/E2E-L4-2 SKIP)
+  L1 Liveness   ███████░  7/8   FAIL (companion-bridge :8787 down)
   L2 Functional ████████ 14/14  PASS
   L3 Inter-node  —  N/A (deferred this round)
-  L4 End-to-end ███████░  1/2   PASS (gold round-trip MEM-L4-1 ✓; bridge e2e SKIP)
+  L4 End-to-end ███████░  1/2   PASS (gold round-trip MEM-L4-ROUNDTRIP ✓)
 GATE: REJECTED — 1 FAIL. Evidence → ~/.openclaw/.node-acceptance.md
 ```
 
@@ -272,8 +267,8 @@ dogfood harness *witness* it. Cluster/peer setup: docs/MULTI_NODE_DEPLOY.md, doc
 
 | ID | Proves | Method | PASS threshold | Note |
 |---|---|---|---|---|
-| E2E-L4-1 | memory loop closes | = MEM-L4-1 gold round-trip | nonce fact retrievable | the deployable single-node e2e |
-| E2E-L4-2 | harness→LLM injection | with companion-bridge `:8787` up, send a prompt; inspect the upstream request | a memory block is present in the request to the LLM | `SKIP` while bridge is `INERT` (2.1); conditional |
+| E2E-L4-1 | memory loop closes | = MEM-L4-ROUNDTRIP gold round-trip | nonce fact retrievable | the deployable single-node e2e |
+| E2E-L4-2 | harness→LLM injection | with companion-bridge `:8787` up, send a prompt; inspect the upstream request | a memory block is present in the request to the LLM | not built (§11) |
 
 E2E-L4-2 depends on companion-bridge running as a daemon, which it currently is not (COMPONENT_REGISTRY
 2.1). Until it is, the gold round-trip (E2E-L4-1) is the binding end-to-end acceptance.
@@ -314,6 +309,34 @@ Each step is atomic, runtime-verifiable, and maps to a layer — suitable as a `
 6. **Enforcement wiring** — deploy-listener hook + optional schedule + done-contract reference. *Verify:* a red gate blocks deploy-complete.
 
 L3 (§8) is a **separate future block**, gated on federation being deployed.
+
+### Not built
+
+Checks this design specified that the gate does not run (their original IDs, so older reports and notes
+can be matched):
+
+- MEM-L0-3 — watched transcript sources configured (MEM-L4-ROUNDTRIP BLOCKs without one; there is no separate check)
+- MEM-L1-2 — the inject server refuses a request without the token (`401`)
+- MEM-L2-3 — mentions carry `turn_index`
+- MEM-L2-4 — `knowledge.db` FTS + vector index picked up the synthetic session
+- MEM-L2-5 — `graph-cache.db` refreshed within 1 h
+- MEM-L2-6 — each of the 5 retrieval channels returns ≥1 (MEM-L2-INJECT checks only the total)
+- MEM-L2-7 — inject latency p95 < 500 ms
+- MEM-L2-8 — `watcher.jsonl` fresh with no open `watcher.alert`
+- LLM-L0-1 — RAM headroom advisory (`bin/check-llm-baseline.mjs`)
+- LLM-L2-4 — `ollama-queue` not stuck
+- NET-L0-1 — the NATS service is loaded
+- NET-L1-1 — TCP connect to `:4222`
+- NET-L1-5 — the `mesh-*` services are loaded
+- NET-L2-2 — JetStream publish + read-back durability
+- NET-L2-3 — the daemon log shows NATS connected and the stream initialized at boot
+- NET-L2-4 — trigger → flush round-trip (NET-L2-TRIGGER only publishes)
+- E2E-L4-2 — harness → LLM injection through companion-bridge
+
+The other designed IDs were built under new names: MEM-L0-1 → L0-DB, MEM-L0-2 → L0-TOKEN, MEM-L2-1 →
+MEM-L2-INGEST, MEM-L2-2/MEM-L4-1 → MEM-L4-ROUNDTRIP, MEM-L2-6 (total only) → MEM-L2-INJECT, LLM-L1-2 →
+LLM-L2-MODEL, LLM-L2-1 → LLM-L2-GEN, LLM-L2-2 → LLM-L2-EMBED, LLM-L2-3 → LLM-L2-EXTRACT, NET-L1-3 →
+NET-L2-JSZ, NET-L1-4 → NET-L2-STREAM, NET-L2-1 → NET-L2-PUBSUB.
 
 ---
 
