@@ -1,8 +1,8 @@
 /**
  * injection-logger.test.mjs — Unit tests for lib/injection-logger.mjs
  *
- * Covers: logInjection (append + ensure dir + rotate), channelStats math,
- * promptExcerpt truncation, getLogPath, INJECTION_LOG_DISABLED env opt-out.
+ * Covers: logInjection (append + ensure dir + rotate), promptExcerpt
+ * truncation, INJECTION_LOG_DISABLED env opt-out.
  *
  * Run: node --test test/injection-logger.test.mjs
  */
@@ -20,28 +20,10 @@ process.env.INJECTION_LOG_PATH = LOG_PATH;
 process.env.INJECTION_LOG_ROTATE_BYTES = '1024';  // small for rotation tests
 delete process.env.INJECTION_LOG_DISABLED;
 
-const { logInjection, flushInjectionLog, channelStats, promptExcerpt, scrubSecrets, getLogPath } = await import('../lib/injection-logger.mjs');
+const { logInjection, flushInjectionLog, promptExcerpt, scrubSecrets } = await import('../lib/injection-logger.mjs');
 
 after(() => {
   rmSync(TMP, { recursive: true, force: true });
-});
-
-describe('getLogPath', () => {
-  it('returns the configured path', () => {
-    assert.equal(getLogPath(), LOG_PATH);
-  });
-});
-
-describe('channelStats', () => {
-  it('returns {candidates, kept} object', () => {
-    assert.deepEqual(channelStats(5, 2), { candidates: 5, kept: 2 });
-  });
-
-  it('defaults missing values to 0', () => {
-    assert.deepEqual(channelStats(), { candidates: 0, kept: 0 });
-    assert.deepEqual(channelStats(7), { candidates: 7, kept: 0 });
-    assert.deepEqual(channelStats(null, null), { candidates: 0, kept: 0 });
-  });
 });
 
 describe('promptExcerpt', () => {

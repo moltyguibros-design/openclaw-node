@@ -2,7 +2,6 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DIRECTIVE_REGEX,
-  DIRECTIVE_TYPES,
   parseMemoryDirective,
   replaceLastUserContent,
 } from '../lib/memory-directives.mjs';
@@ -25,16 +24,6 @@ describe('DIRECTIVE_REGEX', () => {
 
   it('matches @memory only:<theme>', () => {
     assert.ok(DIRECTIVE_REGEX.test('@memory only:nats'));
-  });
-});
-
-describe('DIRECTIVE_TYPES', () => {
-  it('contains all four directive types', () => {
-    assert.ok(DIRECTIVE_TYPES.has('off'));
-    assert.ok(DIRECTIVE_TYPES.has('deep'));
-    assert.ok(DIRECTIVE_TYPES.has('none'));
-    assert.ok(DIRECTIVE_TYPES.has('only'));
-    assert.equal(DIRECTIVE_TYPES.size, 4);
   });
 });
 

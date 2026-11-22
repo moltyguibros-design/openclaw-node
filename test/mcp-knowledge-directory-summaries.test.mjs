@@ -19,7 +19,6 @@ import {
   buildDirectorySummaries,
   deterministicSummary,
   titleOf,
-  ancestorsOf,
   listDirectoryTree,
   getDirectorySummary,
   searchDirectories,
@@ -115,10 +114,6 @@ describe('pure helpers', () => {
   it('titleOf prefers the first heading, else the basename', () => {
     assert.equal(titleOf('a/b/File Name.md', '# Real Title'), 'Real Title');
     assert.equal(titleOf('a/b/File Name.md', '(top)'), 'File Name');
-  });
-  it('ancestorsOf walks to the root', () => {
-    assert.deepEqual(ancestorsOf('a/b/c.md'), ['a/b', 'a', '']);
-    assert.deepEqual(ancestorsOf('c.md'), ['']);
   });
   it('normalizeDir strips ./ and slashes, refuses ..', () => {
     assert.equal(normalizeDir('./memory/'), 'memory');

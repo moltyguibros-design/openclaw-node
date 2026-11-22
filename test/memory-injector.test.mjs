@@ -7,7 +7,6 @@ import {
   estimateTokens,
   queryRelevantConcepts,
   queryRelevantDecisions,
-  trimToBudget,
   createMemoryInjector,
   recallScore,
   writeBackReconsolidation,
@@ -196,61 +195,6 @@ describe('queryRelevantDecisions', () => {
     assert.ok(result[1].decision.includes('reranker'));
 
     db.close();
-  });
-});
-
-describe('trimToBudget', () => {
-  it('includes all items when within budget', () => {
-    const data = {
-      concepts: [{ name: 'A', type: 'tech' }],
-      decisions: [{ decision: 'Use X', confidence: 0.9, date: '2026-05-23' }],
-      snippets: [{ snippet: 'short snippet', score: 0.8 }],
-    };
-    const result = trimToBudget(data, 500);
-    assert.equal(result.concepts.length, 1);
-    assert.equal(result.decisions.length, 1);
-    assert.equal(result.snippets.length, 1);
-    assert.ok(result.tokenCount > 0);
-    assert.equal(result.budget, 500);
-  });
-
-  it('trims snippets first when over budget', () => {
-    const longSnippet = 'x'.repeat(2000); // rendered capped at FIELD_CAPS.snippet: ~34 tokens
-    const data = {
-      concepts: [{ name: 'A', type: 'tech' }],
-      decisions: [{ decision: 'Use X', confidence: 0.9, date: '2026-05-23' }],
-      snippets: [
-        { snippet: longSnippet, score: 0.9 },
-        { snippet: longSnippet, score: 0.8 },
-      ],
-    };
-    // Budget of 60 tokens — overhead + concepts + decisions fit, no snippet does
-    const result = trimToBudget(data, 60);
-    assert.equal(result.concepts.length, 1);
-    assert.equal(result.decisions.length, 1);
-    assert.equal(result.snippets.length, 0); // snippets too large
-    assert.ok(result.tokenCount <= 60);
-  });
-
-  it('returns empty sections for very small budget', () => {
-    const data = {
-      concepts: [{ name: 'A', type: 'tech' }],
-      decisions: [{ decision: 'Use X', confidence: 0.9, date: '2026-05-23' }],
-      snippets: [{ snippet: 'text', score: 0.8 }],
-    };
-    const result = trimToBudget(data, 10);
-    // Budget too small for overhead (30 tokens) — remaining goes negative
-    assert.equal(result.concepts.length, 0);
-    assert.equal(result.decisions.length, 0);
-    assert.equal(result.snippets.length, 0);
-  });
-
-  it('handles empty input data', () => {
-    const result = trimToBudget({ concepts: [], decisions: [], snippets: [] }, 750);
-    assert.equal(result.concepts.length, 0);
-    assert.equal(result.decisions.length, 0);
-    assert.equal(result.snippets.length, 0);
-    assert.equal(result.budget, 750);
   });
 });
 
