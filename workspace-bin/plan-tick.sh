@@ -159,7 +159,9 @@ case "${FAIL_LIMIT}" in
 esac
 
 # Single-tick lock (mkdir atomicity; macOS has no flock). Reap stale >60min.
-# The `plan` file names the holder so the viewer can show which plan is ticking.
+# The `plan` file names the holder so the viewer can show which plan is ticking;
+# `owner` holds this tick's token, so a tick whose lock was reaped as stale never
+# deletes the lock the next holder took.
 if [ -d "${LOCK_DIR}" ]; then
   # GNU first: GNU `stat -f` prints filesystem info to stdout before failing; BSD rejects -c silently.
   LOCK_MTIME=$(stat -c %Y "${LOCK_DIR}" 2>/dev/null || stat -f %m "${LOCK_DIR}" 2>/dev/null || echo 0)
@@ -170,12 +172,15 @@ if [ -d "${LOCK_DIR}" ]; then
   log "info: reaping stale lock (age=${LOCK_AGE}s)"; rm -rf "${LOCK_DIR}"
 fi
 mkdir "${LOCK_DIR}" 2>/dev/null || { log "skip: lock race lost"; exit 0; }
+TICK_TOKEN="$$-$(date +%s)-${RANDOM}"
+printf '%s\n' "${TICK_TOKEN}" > "${LOCK_DIR}/owner"
+owns_lock() { [ "$(cat "${LOCK_DIR}/owner" 2>/dev/null)" = "${TICK_TOKEN}" ]; }
 # The agent runs in its own process group (so a timeout can kill all of it), which
 # also takes it out of the group launchd kills when it stops this job: sweep it here.
 AGENT_PGID=""
 cleanup() {
   if [ -n "${AGENT_PGID}" ]; then kill -TERM -- "-${AGENT_PGID}" 2>/dev/null || true; fi
-  rm -rf "${LOCK_DIR}" 2>/dev/null || true
+  if owns_lock; then rm -rf "${LOCK_DIR}" 2>/dev/null || true; fi
 }
 trap cleanup EXIT
 trap 'exit 129' HUP
@@ -415,6 +420,9 @@ close_gate() {
 # Ahead of the BLOCKED.md exit, so a run that closed and then blocked is graded too.
 CLOSED=0
 if [ "${POST_VERSION}" != "${VERSION:-}" ] && printf '%s' "${POST_VERSION}" | grep -qvE -- '-pre$|-mid$'; then
+  # The close check runs after the agent's whole budget: give it its own stale-lock
+  # window. Never a bare touch: on a reaped lock it would create a file, not the dir.
+  if owns_lock; then touch "${LOCK_DIR}"; fi
   if close_gate; then
     CLOSED=1
   else

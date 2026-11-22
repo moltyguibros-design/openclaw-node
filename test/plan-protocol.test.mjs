@@ -606,7 +606,7 @@ describe('plan-tick shares one repo lock and blames only its own silo for dirt',
   const GIT = 'git -c user.name=t -c user.email=t@t';
   let n = 0;
 
-  function repo(id) {
+  function repo(id, { agentExtra = '', env: extra = {} } = {}) {
     const root = path.join(tmp, `lockrepo${++n}`);
     const plan = path.join(root, 'memory-plan', 'plans', id);
     fs.mkdirSync(plan, { recursive: true });
@@ -626,11 +626,11 @@ describe('plan-tick shares one repo lock and blames only its own silo for dirt',
     sh(`git init -q . && git add -A && ${GIT} commit -q -m seed`);
     const seen = path.join(tmp, `lockseen${n}`);
     fs.writeFileSync(path.join(bin, 'claude'),
-      `#!/bin/bash\ncat >/dev/null\ncat memory-plan/.tick.lock/plan > '${seen}'\n${printStream(STREAMS.claude.answer)}\n`);
+      `#!/bin/bash\ncat >/dev/null\ncat memory-plan/.tick.lock/plan > '${seen}'\n${agentExtra}\n${printStream(STREAMS.claude.answer)}\n`);
     fs.chmodSync(path.join(bin, 'claude'), 0o755);
     const home = path.join(tmp, `lockhome${n}`);
     fs.mkdirSync(home);
-    const env = { PATH: `${bin}:${process.env.PATH}`, HOME: home, TMPDIR: tmp, WORKPLAN_CLOSE_CHECK: 'none' };
+    const env = { PATH: `${bin}:${process.env.PATH}`, HOME: home, TMPDIR: tmp, WORKPLAN_CLOSE_CHECK: 'none', ...extra };
     const tick = () => spawnSync('bash', [path.join(root, 'workspace-bin', 'plan-tick.sh'), id], { encoding: 'utf8', env });
     return { root, plan, seen, tick, blockPath: path.join(plan, 'BLOCKED.md') };
   }
@@ -669,6 +669,26 @@ describe('plan-tick shares one repo lock and blames only its own silo for dirt',
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.equal(fs.readFileSync(f.seen, 'utf8'), 'pruns\n');
     assert.equal(fs.existsSync(path.join(f.root, 'memory-plan', '.tick.lock')), false);
+  });
+
+  const close = (id) => `printf 'v1.1\\n' > memory-plan/plans/${id}/VERSION\n${GIT} commit -qam $'v1.1\\n\\nRuntime-Evidence: observed'`;
+
+  it("a tick whose lock was reaped does not delete the new holder's lock", () => {
+    // The close check runs at the repo root: it stands in for another plan's tick
+    // that reaped this one's lock as stale and took it.
+    const f = repo('preaped', { agentExtra: close('preaped'), env: {
+      WORKPLAN_CLOSE_CHECK: 'rm -rf memory-plan/.tick.lock && mkdir memory-plan/.tick.lock && echo other > memory-plan/.tick.lock/plan' } });
+    const r = f.tick();
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(fs.readFileSync(path.join(f.root, 'memory-plan', '.tick.lock', 'plan'), 'utf8'), 'other\n');
+  });
+
+  it('the close gate starts with a fresh lock window', () => {
+    const f = repo('pfresh', { agentExtra: `${close('pfresh')}\ntouch -t 200001010000 memory-plan/.tick.lock`, env: {
+      WORKPLAN_CLOSE_CHECK: '[ $(( $(date +%s) - $(stat -c %Y memory-plan/.tick.lock 2>/dev/null || stat -f %m memory-plan/.tick.lock) )) -lt 3600 ]' } });
+    const r = f.tick();
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(fs.existsSync(f.blockPath), false);
   });
 });
 
