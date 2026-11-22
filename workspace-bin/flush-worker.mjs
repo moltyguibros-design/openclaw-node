@@ -59,6 +59,7 @@ try {
     if (!check || check.shouldFlush) {
       let llmClient = null;
       let extractionStore = null;
+      let extractionStoreError = null;
       if (USE_LLM_EXTRACTION) {
         const { reportExtractionActivity } = await import('../lib/ollama-queue.mjs');
         reportExtractionActivity((m) => parentPort.postMessage(m));
@@ -67,12 +68,11 @@ try {
         try {
           const { createExtractionStore } = await import('../lib/extraction-store.mjs');
           extractionStore = createExtractionStore({ dbPath: stateDb, integrityCheck: 'quick' });
-        } catch {
-          // runFlush degrades to the regex path without a store — same behavior
-          // the daemon's own getExtractionStore() failure produces.
+        } catch (err) {
+          extractionStoreError = err.message;
         }
       }
-      const result = await runFlush(jsonlPath, memoryMdPath, { charBudget, llmClient, extractionStore });
+      const result = await runFlush(jsonlPath, memoryMdPath, { charBudget, llmClient, extractionStore, extractionStoreError });
       if (check) result.check = check;
       post({ ok: true, result });
     }

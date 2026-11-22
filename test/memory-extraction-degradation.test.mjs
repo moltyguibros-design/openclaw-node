@@ -67,3 +67,18 @@ test('P0: on a non-structured MEMORY.md the regex path writes normally (legacy p
   assert.equal(result.mode, 'regex');
   assert.match(readFileSync(memoryMd, 'utf8'), /\[user\]|\[assistant\]/, 'regex-only mode still merges into MEMORY.md');
 });
+
+test('P0: an extraction store that failed to open is a LOUD degradation', async () => {
+  const { jsonl, memoryMd } = setup();
+  writeFileSync(memoryMd, STRUCTURED);
+  const result = await runFlush(jsonl, memoryMd, {
+    charBudget: 2200,
+    llmClient: { generate: async () => { throw new Error('must not be called'); } },
+    extractionStore: null,
+    extractionStoreError: 'database disk image is malformed',
+  });
+  assert.equal(result.degraded, true);
+  assert.match(result.extraction_error, /extraction store unavailable: database disk image is malformed/);
+  assert.equal(result.mode, 'regex-diverted');
+  assert.equal(readFileSync(memoryMd, 'utf8'), STRUCTURED);
+});
