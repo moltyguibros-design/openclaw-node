@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// MC writes active-tasks.md beside the mesh bridge and memory daemon. Its old
+// MC writes active-tasks.md beside the mesh bridge and `mesh submit --id`. Its old
 // full rewrite from the DB reverted whatever they wrote after MC's last import
 // (status, mesh_task_id, mesh_node, extra fields).
 

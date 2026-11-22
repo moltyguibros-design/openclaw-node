@@ -23,9 +23,9 @@ let lastKnownMtime = 0;
 let lastWriteMtime = 0; // mtime right after WE wrote the file
 let lastImportTime = 0; // when we last ran a full import
 
-// Debounce: bridge writes every 10s, memory-daemon every 3s — each changes
-// mtime and triggers a full parse+upsert of every task. 5s cooldown prevents
-// redundant re-imports during active mesh operations.
+// Debounce: the mesh bridge can rewrite the file on every 10s dispatch cycle —
+// each write changes mtime and triggers a full parse+upsert of every task. 5s
+// cooldown prevents redundant re-imports during active mesh operations.
 const MIN_REIMPORT_INTERVAL_MS = 5000;
 
 /**
@@ -231,8 +231,8 @@ export function syncTasksFromMarkdownIfChanged(db: DrizzleDb): void {
  * Write MC's task changes to active-tasks.md: only the tasks and fields MC
  * changed since it last imported or wrote the file, edited in place under the
  * kanban lock (the kanban-io updateTaskInPlace contract). The mesh bridge and
- * memory daemon edit the same file; a full rewrite from the DB reverted
- * whatever they wrote after MC's last import.
+ * `mesh submit --id` edit the same file; a full rewrite from the DB reverted
+ * whatever they wrote after MC's last import. (The memory daemon only reads it.)
  *
  * "Changed" = the task's serialized field differs from task_sync_base (its
  * lines as MC last imported or wrote them). New DB tasks are appended, tasks
@@ -254,7 +254,7 @@ export function syncTasksToMarkdown(db: DrizzleDb): void {
   const after = new Map(current.map((t) => [t.id, fieldsOf(serializeTaskBlock(t))]));
   const stored = loadBaseline(db);
 
-  // P5-5: the mesh bridge and memory daemon write this file under the
+  // P5-5: the mesh bridge and `mesh submit --id` write this file under the
   // kanban-io mkdir lock; MC used to write beside them unlocked (lost-update
   // race). Same lock dir, same protocol — refuse to write without it.
   const file = activeTasksMd();
