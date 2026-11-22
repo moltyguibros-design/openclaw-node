@@ -37,7 +37,7 @@ describe('entity aliases (read-before-write)', () => {
   it('a mention with ref to a known entity becomes an alias, not a new row', () => {
     store.storeExtractionResult('s1', { ...base, entities: [ent('NATS JetStream')], decisions: [] });
     const id = store.db.prepare('SELECT id FROM entities').get().id;
-    const stats = store.storeExtractionResult('s2', { ...base, entities: [ent('jetstream', { ref: id })], decisions: [] });
+    const stats = store.storeExtractionResult('s2', { ...base, entities: [ent('jetstream', { ref: id })], decisions: [] }, undefined, { knownIds: { entities: new Set([id]), decisions: new Set() } });
     assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM entities').get().n, 1);
     assert.deepEqual(store.getEntityAliases(id), ['jetstream']);
     assert.equal(stats.entities_new, 0);
@@ -65,9 +65,23 @@ describe('entity aliases (read-before-write)', () => {
   });
 
   it('a bogus ref is ignored and the mention becomes a fresh entity', () => {
-    const stats = store.storeExtractionResult('s1', { ...base, entities: [ent('Nothing', { ref: 9999 })], decisions: [] });
+    const stats = store.storeExtractionResult('s1', { ...base, entities: [ent('Nothing', { ref: 9999 })], decisions: [] }, undefined, { knownIds: { entities: new Set([9999]), decisions: new Set() } });
     assert.equal(stats.entities_new, 1);
     assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM entity_aliases').get().n, 0);
+  });
+
+  it('a ref to an existing entity that was not shown is ignored', () => {
+    store.storeExtractionResult('s1', { ...base, entities: [ent('NATS JetStream')], decisions: [] });
+    const id = store.db.prepare('SELECT id FROM entities').get().id;
+    for (const opts of [{ knownIds: { entities: new Set(), decisions: new Set() } }, undefined]) {
+      const session = opts ? 's2' : 's3';
+      const stats = store.storeExtractionResult(session, { ...base, entities: [ent('Redis', { ref: id })], decisions: [] }, undefined, opts);
+      assert.equal(stats.aliases_added, 0);
+      assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM entity_aliases').get().n, 0);
+      assert.ok(store.db.prepare("SELECT id FROM entities WHERE name = 'Redis'").get(), 'Redis gets its own row');
+      assert.equal(store.db.prepare('SELECT mention_count FROM entities WHERE id = ?').get(id).mention_count, 1);
+    }
+    assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM entities').get().n, 2);
   });
 });
 
@@ -75,7 +89,7 @@ describe('decision supersession', () => {
   it('a decision naming supersedes marks the old one and recall/MEMORY.md drop it', () => {
     store.storeExtractionResult('s1', { ...base, entities: [], decisions: [dec('Use file storage for JetStream')] });
     const old = store.db.prepare('SELECT id FROM decisions').get().id;
-    const stats = store.storeExtractionResult('s2', { ...base, entities: [], decisions: [dec('Use memory storage for JetStream', { supersedes: old })] });
+    const stats = store.storeExtractionResult('s2', { ...base, entities: [], decisions: [dec('Use memory storage for JetStream', { supersedes: old })] }, undefined, { knownIds: { entities: new Set(), decisions: new Set([old]) } });
     assert.equal(stats.decisions_superseded, 1);
     const rows = store.db.prepare('SELECT id, decision, superseded_by FROM decisions ORDER BY id').all();
     assert.equal(rows[0].superseded_by, rows[1].id);
@@ -89,17 +103,28 @@ describe('decision supersession', () => {
   it('never supersedes itself, a missing id, or in a cycle; re-statement keeps superseded_by', () => {
     store.storeExtractionResult('s1', { ...base, entities: [], decisions: [dec('A')] });
     const a = store.db.prepare('SELECT id FROM decisions').get().id;
-    let stats = store.storeExtractionResult('s1', { ...base, entities: [], decisions: [dec('A', { supersedes: a })] });
+    const shown = (...ids) => ({ knownIds: { entities: new Set(), decisions: new Set(ids) } });
+    let stats = store.storeExtractionResult('s1', { ...base, entities: [], decisions: [dec('A', { supersedes: a })] }, undefined, shown(a));
     assert.equal(stats.decisions_superseded, 0);
-    stats = store.storeExtractionResult('s1', { ...base, entities: [], decisions: [dec('B', { supersedes: 4242 })] });
+    stats = store.storeExtractionResult('s1', { ...base, entities: [], decisions: [dec('B', { supersedes: 4242 })] }, undefined, shown(a, 4242));
     assert.equal(stats.decisions_superseded, 0);
     const b = store.db.prepare("SELECT id FROM decisions WHERE decision = 'B'").get().id;
-    store.storeExtractionResult('s1', { ...base, entities: [], decisions: [dec('B', { supersedes: a })] });
-    stats = store.storeExtractionResult('s1', { ...base, entities: [], decisions: [dec('A', { supersedes: b, rationale: 'restated' })] });
+    store.storeExtractionResult('s1', { ...base, entities: [], decisions: [dec('B', { supersedes: a })] }, undefined, shown(a, b));
+    stats = store.storeExtractionResult('s1', { ...base, entities: [], decisions: [dec('A', { supersedes: b, rationale: 'restated' })] }, undefined, shown(a, b));
     assert.equal(stats.decisions_superseded, 0, 'cycle refused');
     const rowA = store.db.prepare('SELECT rationale, superseded_by FROM decisions WHERE id = ?').get(a);
     assert.equal(rowA.rationale, 'restated', 'rationale replaces on re-statement');
     assert.equal(rowA.superseded_by, b, 'superseded_by is immutable on re-statement');
+  });
+
+  it('a supersedes naming a decision that was not shown is ignored', () => {
+    store.storeExtractionResult('s1', { ...base, entities: [], decisions: [dec('Use file storage')] });
+    const old = store.db.prepare('SELECT id FROM decisions').get().id;
+    for (const opts of [{ knownIds: { entities: new Set(), decisions: new Set() } }, undefined]) {
+      const stats = store.storeExtractionResult('s2', { ...base, entities: [], decisions: [dec('Use Redis for caching', { supersedes: old })] }, undefined, opts);
+      assert.equal(stats.decisions_superseded, 0);
+      assert.equal(store.db.prepare('SELECT superseded_by FROM decisions WHERE id = ?').get(old).superseded_by, null);
+    }
   });
 });
 
