@@ -27,6 +27,7 @@ Object.assign(process.env, {
   OPENCLAW_OBS_DB: path.join(TMP, 'obs.db'),
   OPENCLAW_STATE_DB: path.join(TMP, 'state.db'),
   MESH_MEMORY_RECALL: 'off',
+  MESH_FOREMAN: '0',
   // The shipped rules: no-assume-running is what declares the nats pre_check.
   OPENCLAW_HARNESS_RULES: path.join(__dirname, '..', 'config', 'harness-rules.json'),
   GIT_CONFIG_GLOBAL: '/dev/null',

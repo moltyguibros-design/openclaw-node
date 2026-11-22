@@ -32,6 +32,7 @@ Object.assign(process.env, {
   OPENCLAW_STATE_DB: path.join(TMP, 'state.db'),
   OPENCLAW_HARNESS_RULES: RULES,
   MESH_MEMORY_RECALL: 'off',
+  MESH_FOREMAN: '0',
   // The regex fallback is the scan under test; a host gitleaks would answer first.
   PATH: process.env.PATH.split(path.delimiter).filter((dir) => !fs.existsSync(path.join(dir, 'gitleaks'))).join(path.delimiter),
   GIT_CONFIG_GLOBAL: '/dev/null',

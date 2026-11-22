@@ -22,6 +22,7 @@ Object.assign(process.env, {
   OPENCLAW_STATE_DB: path.join(TMP, 'state.db'),
   MESH_LLM_PROVIDER: 'claude',
   MESH_ALLOW_MOCK_WORKERS: '1',
+  MESH_FOREMAN: '0',
 });
 
 const { describe, it, after } = require('node:test');

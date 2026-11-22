@@ -28,6 +28,7 @@ Object.assign(process.env, {
   OPENCLAW_OBS_DB: path.join(TMP, 'obs.db'),
   OPENCLAW_STATE_DB: path.join(TMP, 'state.db'),
   MESH_MEMORY_RECALL: 'off',
+  MESH_FOREMAN: '0',
   GIT_CONFIG_GLOBAL: '/dev/null',
   GIT_CONFIG_NOSYSTEM: '1',
   GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@example.invalid',
