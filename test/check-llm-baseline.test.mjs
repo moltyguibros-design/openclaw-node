@@ -71,4 +71,13 @@ describe('check-llm-baseline header', () => {
     const floor = src.match(/^const FLOOR_GB = (\d+);/m)[1];
     assert.match(src, new RegExp(`^ \\*   2 — system below floor \\(<${floor} GB total RAM\\)`, 'm'));
   });
+
+  it('names in its tier policy only the model tags it pulls', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(SCRIPT, 'utf8');
+    const pulled = new Set([...src.matchAll(/model: '([^']+)'/g)].map((m) => m[1]));
+    const documented = [...src.matchAll(/^ \*   ≥\d+ GB RAM\s+→ (\S+)/gm)].map((m) => m[1]);
+    assert.equal(documented.length, 3);
+    for (const tag of documented) assert.ok(pulled.has(tag), `header names ${tag}, TIERS pulls ${[...pulled].join(', ')}`);
+  });
 });

@@ -19,9 +19,9 @@
  *   1 — error (Ollama check failed, etc.)
  *
  * Tier policy (operator-authored, Block 3 §0):
- *   ≥48 GB RAM   → qwen3:32b-instruct-q4_K_M   (~18 GB)
- *   ≥32 GB RAM   → qwen3:14b-instruct-q4_K_M   (~9  GB)
- *   ≥16 GB RAM   → qwen3:8b-instruct-q4_K_M    (~5  GB)
+ *   ≥48 GB RAM   → qwen3:32b   (~18 GB)
+ *   ≥32 GB RAM   → qwen3:14b   (~9  GB)
+ *   ≥16 GB RAM   → qwen3:8b    (~5  GB)
  *   <16 GB RAM   → BELOW FLOOR — operator must use cloud LLM or skip extraction
  *
  * 4B tier is intentionally excluded per operator decision: JSON-mode reliability
@@ -34,7 +34,7 @@ import { parseArgs } from 'node:util';
 
 const GB = 1024 * 1024 * 1024;
 // Reserved RAM not available for LLM (OS + the rest of the node process + buffer).
-// Apple Silicon unified memory is more flexible; Linux/Windows need conservative reserve.
+// Informational only: the report shows it, and the tier is chosen on total RAM.
 const RESERVED_GB = 4;
 
 const TIERS = [
@@ -48,7 +48,7 @@ const TIERS = [
 
 const FLOOR_GB = 16;
 
-function recommend(totalGb, availGb) {
+function recommend(totalGb) {
   if (totalGb < FLOOR_GB) {
     return { tier: null, reason: `system has ${totalGb.toFixed(1)} GB RAM (< floor ${FLOOR_GB} GB)` };
   }
@@ -106,7 +106,7 @@ Options:
   const arch = os.arch();
   const cpus = os.cpus().length;
 
-  const rec = recommend(totalGb, availGb);
+  const rec = recommend(totalGb);
 
   const ollama = (opts.install || opts['check-ollama']) ? await checkOllama() : null;
 
