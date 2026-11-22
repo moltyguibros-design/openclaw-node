@@ -51,7 +51,7 @@ test('a log line does not wait on another writer holding the database lock', () 
 
 test('queued lines are written when the process exits', () => {
   const r = spawnSync(process.execPath, ['-e', `
-    const { createTracer } = require(${JSON.stringify(path.resolve('lib/tracer.js'))});
+    const { createTracer } = require(${JSON.stringify(require.resolve('../lib/tracer.js'))});
     createTracer('exit-test').log('info', 'last words');
     process.exit(0);
   `], { env: { ...process.env, OPENCLAW_OBS_DB: dbPath }, encoding: 'utf8' });
