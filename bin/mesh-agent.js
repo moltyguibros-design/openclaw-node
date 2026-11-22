@@ -382,9 +382,8 @@ function stoppedFor(taskId) {
 
 // Path (a): a notice signed by a trusted operator key naming this node and the task it holds.
 async function signedStop(notice) {
-  const { verifyOperatorRequest, trustedOperatorKeys, stripOperatorEnvelope } = await operatorAuth();
-  const trustedKeys = trustedOperatorKeys({ env: resolveEnvKey('OPENCLAW_OPERATOR_TRUSTED_KEYS') || '' });
-  const verdict = verifyOperatorRequest(notice, { trustedKeys });
+  const { verifyOperatorRequest, stripOperatorEnvelope } = await operatorAuth();
+  const verdict = verifyOperatorRequest(notice);
   if (!verdict.ok) return { ok: false, why: verdict.reason };
   const { task_id, target_node_id, reason } = stripOperatorEnvelope(notice);
   // The signature covers the target, so a notice signed for another node cannot be replayed here.

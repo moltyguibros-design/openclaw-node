@@ -22,15 +22,20 @@ import {
   OPERATOR_ENVELOPE_FIELDS,
 } from '../lib/operator-auth.mjs';
 
-let tmp, lead, peer;
+let tmp, lead, peer, savedHome;
 
+// HOME is the temp dir for the whole file: trustedOperatorKeys reads ~/.openclaw/openclaw.env,
+// which on a real node would otherwise leak the operator's own allowlist into these cases.
 before(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'operator-auth-'));
+  savedHome = process.env.HOME;
+  process.env.HOME = tmp;
   lead = getOrCreateIdentity(path.join(tmp, 'lead'));
   peer = getOrCreateIdentity(path.join(tmp, 'peer'));
   delete process.env.OPENCLAW_OPERATOR_TRUSTED_KEYS;
 });
 after(() => {
+  process.env.HOME = savedHome;
   fs.rmSync(tmp, { recursive: true, force: true });
   delete process.env.OPENCLAW_OPERATOR_TRUSTED_KEYS;
 });
@@ -121,6 +126,26 @@ describe('trustedOperatorKeys', () => {
   it('falls back to the local node identity (zero-config on the lead)', () => {
     const keys = trustedOperatorKeys({ identity: lead });
     assert.deepEqual(keys, [lead.publicKeyBase64]);
+  });
+
+  const withEnvFile = (keys, fn) => {
+    const file = path.join(tmp, '.openclaw', 'openclaw.env');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, `OPENCLAW_OPERATOR_TRUSTED_KEYS=${keys}\n`);
+    try { fn(); } finally { fs.rmSync(file); }
+  };
+
+  it('reads the allowlist the installer persists in ~/.openclaw/openclaw.env when the env var is unset', () => {
+    withEnvFile('k1,k2', () => {
+      assert.deepEqual(trustedOperatorKeys({ identity: lead }), ['k1', 'k2']);
+    });
+  });
+
+  it('a request signed by a key listed only in openclaw.env verifies with the default allowlist', () => {
+    withEnvFile(peer.publicKeyBase64, () => {
+      const req = signOperatorRequest({ mode: 'dev' }, { identity: peer, nodeId: 'peer' });
+      assert.deepEqual(verifyOperatorRequest(req, { seenIds: null }), { ok: true, reason: 'verified' });
+    });
   });
 });
 
