@@ -311,6 +311,74 @@ describe('plan-lint — [D] deferred state and drift checks', () => {
 
 });
 
+describe('plan-lint — the history surface grades the commit that closed VERSION', () => {
+  const GIT = 'git -c user.name=t -c user.email=t@t -c core.hooksPath=/dev/null';
+  const CANON_DOCS = ['MASTER_PLAN.md', 'PROTOCOL.md', 'FRAMEWORK_CANONICAL.md', 'COWORK_MODEL.md', 'BLOCK_TEMPLATE.md'];
+  const ROW = (step, st) => `| 1 | ${step} | v${step} | [${st}] | step ${step} |`;
+  const CONTRACT = (step) =>
+    `> **${step} — Goal:** g.\n> **Needs:** n.\n> **Feeds:** f.\n> **Verify:** code: v.\n`;
+  let n = 0;
+
+  const sh = (cwd, cmd) => {
+    const r = spawnSync('bash', ['-c', cmd], { cwd, encoding: 'utf8' });
+    assert.equal(r.status, 0, `${cmd}\n${r.stderr}`);
+  };
+  // Run from outside the repo, so plan-lint must find its git files from $REPO alone.
+  const lint = (root, id) => spawnSync('bash', [path.join(root, 'workspace-bin', 'plan-lint.sh'), id],
+    { cwd: os.tmpdir(), encoding: 'utf8' });
+
+  function gitSilo(id, { version, inventory }) {
+    const root = path.join(tmp, `histrepo${++n}`);
+    const plan = path.join(root, 'memory-plan', 'plans', id);
+    fs.mkdirSync(path.join(plan, 'tick-logs'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'memory-plan', 'canonical'));
+    fs.mkdirSync(path.join(root, 'workspace-bin'));
+    for (const d of CANON_DOCS) {
+      fs.writeFileSync(path.join(root, 'memory-plan', 'canonical', d), `# ${d}\n`);
+      fs.writeFileSync(path.join(plan, d), `# ${d}\n`);
+    }
+    fs.copyFileSync(path.join(REPO, 'workspace-bin', 'plan-lint.sh'), path.join(root, 'workspace-bin', 'plan-lint.sh'));
+    fs.writeFileSync(path.join(root, 'workspace-bin', `${id}-tick.sh`), '#!/bin/bash\ntrue\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(plan, 'tick-logs', '.gitkeep'), '');
+    fs.writeFileSync(path.join(plan, 'VERSION'), `${version}\n`);
+    fs.writeFileSync(path.join(plan, 'INVENTORY.md'), inventory);
+    fs.writeFileSync(path.join(plan, 'DECISIONS.md'), '## D1 — exists (2026-07-04)\n');
+    fs.writeFileSync(path.join(plan, 'COMPONENT_REGISTRY.md'), '## Family 1: x\n| **Status** | ok |\n');
+    fs.writeFileSync(path.join(plan, 'ROADMAP.md'), '# roadmap\n');
+    fs.writeFileSync(path.join(plan, 'TICK_PROMPT.md'), 'tick\n');
+    sh(root, 'git init -q .');
+    return { root, plan };
+  }
+  const CLOSED_V11 = `# INV\n\n${ROW('1.1', 'x')}\n${ROW('1.2', ' ')}\n\n${CONTRACT('1.1')}${CONTRACT('1.2')}`;
+
+  it('a shallow clone warns on a graft it cannot grade instead of blaming it for the close', () => {
+    const src = gitSilo('tsh', { version: 'v1.1', inventory: CLOSED_V11 });
+    sh(src.root, `git add -A && ${GIT} commit -q -m $'v1.1 close\\n\\nRuntime-Evidence: observed'`);
+    sh(src.root, `echo later > later.txt && git add later.txt && ${GIT} commit -q -m later`);
+    const clone = path.join(tmp, `histclone${n}`);
+    sh(tmp, `git clone -q --depth 1 file://${src.root} ${clone}`);
+
+    const r = lint(clone, 'tsh');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /\[WARN\] history +VERSION's closing commit is outside this shallow clone \(graft [0-9a-f]{7}\)/);
+    assert.doesNotMatch(r.stdout, /\[FAIL\]/);
+    assert.match(r.stdout, /^summary: .* → CONFORMANT$/m);
+
+    const full = lint(src.root, 'tsh');
+    assert.equal(full.status, 0, full.stdout + full.stderr);
+    assert.match(full.stdout, /\[PASS\] history +closing commit [0-9a-f]{7} carries a Runtime-Evidence: trailer/);
+  });
+
+  it('a full clone still FAILs a close without the trailer, whatever later commits carry', () => {
+    const src = gitSilo('tnotrailer', { version: 'v1.1', inventory: CLOSED_V11 });
+    sh(src.root, `git add -A && ${GIT} commit -q -m 'v1.1 close'`);
+    sh(src.root, `${GIT} commit -q --allow-empty -m $'later\\n\\nRuntime-Evidence: unrelated'`);
+    const r = lint(src.root, 'tnotrailer');
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stdout, /\[FAIL\] history +VERSION \(v1\.1\) was closed by [0-9a-f]{7} with no Runtime-Evidence: trailer/);
+  });
+});
+
 describe('plan-tick conformance gate — fails closed when plan-lint never reaches its verdict', () => {
   const ID = 'tgate';
   let root, plan, env, claudeLog;

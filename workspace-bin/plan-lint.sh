@@ -191,7 +191,13 @@ if [ "${OPEN_ROWS:-0}" -gt 0 ] && [ ! -f "$PLAN/BLOCKED.md" ] && git -C "$REPO" 
   # A CLOSED version (no -pre/-mid) whose closing commit carries no Runtime-Evidence:
   # trailer is a done-contract violation, not a hygiene warning: the step was
   # declared done with nothing observable behind it (MASTER_PLAN §5, review L4).
-  if [ -n "$vh" ] && [ -f "$PLAN/VERSION" ] && printf '%s' "$ver" | grep -qvE -- '-pre$|-mid$'; then
+  # In a shallow clone the graft commit shows every file as added, so it would be
+  # blamed for setting VERSION; the real closing commit is not in this clone.
+  # --path-format=absolute: the relative .git/shallow would resolve against the caller's cwd.
+  shallow=$(git -C "$REPO" rev-parse --path-format=absolute --git-path shallow 2>/dev/null || true)
+  if [ -n "$vh" ] && [ -f "$shallow" ] && grep -qx "$vh" "$shallow"; then
+    report WARN history "VERSION's closing commit is outside this shallow clone (graft ${vh:0:7}) — git fetch --unshallow to grade it"
+  elif [ -n "$vh" ] && [ -f "$PLAN/VERSION" ] && printf '%s' "$ver" | grep -qvE -- '-pre$|-mid$'; then
     if git -C "$REPO" log -1 --format='%B' "$vh" 2>/dev/null | grep -qE '^Runtime-Evidence:'; then
       report PASS history "closing commit ${vh:0:7} carries a Runtime-Evidence: trailer"
     else
