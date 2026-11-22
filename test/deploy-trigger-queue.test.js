@@ -51,6 +51,57 @@ describe('createTriggerQueue', () => {
     assert.deepEqual(ran, ['a', 'c', 'd'], 'an idle queue runs the next trigger straight away');
   });
 
+  it('a live trigger offered during a catch-up runs after it', async () => {
+    const ran = [];
+    let release;
+    const run = async (t) => {
+      ran.push(t.catchUp ? 'catch-up' : t.sha);
+      if (t.catchUp) await new Promise(r => { release = r; });
+    };
+    const q = createTriggerQueue(run);
+    q.offer({ catchUp: true });
+    await tick();
+    q.offer({ sha: 'b' });
+    release();
+    await tick(); await tick();
+    assert.deepEqual(ran, ['catch-up', 'b']);
+  });
+
+  it('a catch-up never replaces a pending live trigger', async () => {
+    const ran = [];
+    const superseded = [];
+    let release;
+    const run = async (t) => {
+      ran.push(t.catchUp ? 'catch-up' : t.sha);
+      if (t.sha === 'a') await new Promise(r => { release = r; });
+    };
+    const q = createTriggerQueue(run, { onSuperseded: (old, next) => superseded.push([old.sha, next.sha]) });
+    q.offer({ sha: 'a' });
+    await tick();
+    q.offer({ sha: 'b' });
+    q.offer({ catchUp: true });
+    assert.deepEqual(superseded, []);
+    release();
+    await tick(); await tick();
+    assert.deepEqual(ran, ['a', 'b']);
+  });
+
+  // A catch-up ran outside the queue: a trigger published before the startup
+  // subscription was lost, and one offered during a reconnect catch-up was
+  // dropped by executeDeploy's "Already deploying" guard.
+  it('startup and reconnect catch-ups go through the queue, after the subscription exists', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'bin', 'mesh-deploy-listener.js'), 'utf8');
+    const main = src.slice(src.indexOf('async function main()'));
+    const subscribed = main.indexOf("nc.subscribe('mesh.deploy.trigger')");
+    const firstCatchUp = main.indexOf('deployQueue.offer({ catchUp: true })');
+    assert.ok(subscribed > 0 && firstCatchUp > subscribed, 'subscribe before the startup catch-up');
+    assert.doesNotMatch(main, /await checkAndCatchUp/);
+    const statusLoop = main.slice(main.indexOf('for await (const s of nc.status())'));
+    assert.match(statusLoop.slice(0, 400), /deployQueue\.offer\(\{ catchUp: true \}\)/);
+    const exec = src.slice(src.indexOf('async function executeDeploy('), src.indexOf('// ── Node Registry'));
+    assert.doesNotMatch(exec, /Already deploying/);
+  });
+
   it('the subscription loop hands verified triggers to the queue instead of awaiting the deploy', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'bin', 'mesh-deploy-listener.js'), 'utf8');
     const loop = src.slice(src.indexOf('for await (const msg of sub)'), src.indexOf('// NATS status monitoring'));

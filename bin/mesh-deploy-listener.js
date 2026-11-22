@@ -343,7 +343,9 @@ function scheduleSelfRestart(services, { platform = os.platform(), spawnFn = spa
  * be undone by the next. `offer` never blocks, so the subscription loop keeps
  * verifying triggers on receipt — one that sat in the buffer through a long
  * deploy used to fail the 15-minute freshness check and raise a false
- * "Mesh deploy REJECTED" alarm.
+ * "Mesh deploy REJECTED" alarm. A catch-up (`{ catchUp: true }`) runs through
+ * the same queue so it never overlaps a live deploy, and never displaces a
+ * pending live trigger, which is at least as new as the catch-up marker.
  */
 function createTriggerQueue(run, { onSuperseded = () => {} } = {}) {
   let pending = null;
@@ -361,20 +363,16 @@ function createTriggerQueue(run, { onSuperseded = () => {} } = {}) {
     }
   }
   return {
-    offer(trigger) {
-      if (pending) onSuperseded(pending, trigger);
-      pending = trigger;
+    offer(item) {
+      if (item.catchUp && pending && !pending.catchUp) return;
+      if (pending) onSuperseded(pending, item);
+      pending = item;
       if (!running) pump();
     },
   };
 }
 
 async function executeDeploy(trigger, resultsKv, nodesKv, opts = {}) {
-  if (deploying) {
-    console.log(`[deploy-listener] Already deploying — ignoring trigger for ${trigger.sha} (from ${trigger.initiator || 'unknown'})`);
-    return;
-  }
-
   deploying = true;
   const startedAt = new Date().toISOString();
   // Sanitize sha for NATS KV key safety (KV rejects whitespace, path seps, etc.)
@@ -566,10 +564,8 @@ async function main() {
     setInterval(() => registerNode(nodesKv, { readHead: !deploying }), NODE_REGISTRY_HEARTBEAT_MS);
   }
 
-  // Check for missed deploys while we were offline
-  await checkAndCatchUp(resultsKv, nodesKv, latestKv);
-
-  // Subscribe to deploy triggers
+  // Subscribed before the startup catch-up: core NATS drops a trigger
+  // published while no subscription exists.
   const sub = nc.subscribe('mesh.deploy.trigger');
   console.log(`[deploy-listener] Listening on mesh.deploy.trigger`);
 
@@ -580,8 +576,11 @@ async function main() {
   // ESM helper loaded dynamically (this is CJS).
   const { verifyDeployTrigger } = await import('../lib/deploy-trigger-auth.mjs');
 
-  const deployQueue = createTriggerQueue(t => executeDeploy(t, resultsKv, nodesKv), {
+  const deployQueue = createTriggerQueue(item => (item.catchUp
+    ? checkAndCatchUp(resultsKv, nodesKv, latestKv)
+    : executeDeploy(item, resultsKv, nodesKv)), {
     onSuperseded: async (old, next) => {
+      if (old.catchUp) return;
       console.log(`[deploy-listener] Pending trigger ${old.sha} superseded by ${next.sha}`);
       // The same sha re-sent keeps its key for the deploy that is about to run.
       if (old.sha === next.sha) return;
@@ -620,6 +619,9 @@ async function main() {
     }
   })();
 
+  // Check for missed deploys while we were offline
+  deployQueue.offer({ catchUp: true });
+
   // Per-node status query from `fleet-deploy --status` (request/reply).
   const statusSub = nc.subscribe(`mesh.deploy.status.${NODE_ID}`);
   (async () => {
@@ -646,9 +648,7 @@ async function main() {
     for await (const s of nc.status()) {
       console.log(`[deploy-listener] NATS: ${s.type}`);
       // On reconnect, check for missed deploys
-      if (s.type === 'reconnect') {
-        await checkAndCatchUp(resultsKv, nodesKv, latestKv);
-      }
+      if (s.type === 'reconnect') deployQueue.offer({ catchUp: true });
     }
   })();
 

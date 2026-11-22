@@ -397,7 +397,6 @@ Some routes (mesh/nodes, workspace/files, workspace/read, memory/doc) are additi
 |-------|---------|
 | INFO | Startup: Node ID, Repo, NATS URL |
 | INFO | Deploy triggered (SHA, initiator) |
-| INFO | Already deploying (SHA, initiator) |
 | INFO | Running command |
 | INFO | Success at SHA |
 | ERROR | Deploy failed |
