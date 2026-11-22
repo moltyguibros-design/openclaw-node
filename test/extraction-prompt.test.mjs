@@ -128,6 +128,25 @@ describe('coerceExtractionResult', () => {
     assert.equal(out.relationships[2].type, 'depends_on');
   });
 
+  it('maps camelCase aliases and swaps endpoints for inverse relationship aliases', () => {
+    const out = coerceExtractionResult({
+      relationships: [
+        { source: 'crash', target: 'oom', type: 'caused_by' },
+        { source: 'a', target: 'b', type: 'Caused By' },
+        { source: 'deploy', target: 'test', type: 'precedes' },
+        { source: 'x', target: 'y', type: 'instanceOf' },
+        { source: 'p', target: 'q', type: 'leads_to' },
+      ],
+    });
+    assert.deepEqual(out.relationships, [
+      { source: 'oom', target: 'crash', type: 'causes' },
+      { source: 'b', target: 'a', type: 'causes' },
+      { source: 'test', target: 'deploy', type: 'follows' },
+      { source: 'x', target: 'y', type: 'instance_of' },
+      { source: 'p', target: 'q', type: 'causes' },
+    ]);
+  });
+
   it('drops relationships missing source/target/type', () => {
     const out = coerceExtractionResult({
       relationships: [
