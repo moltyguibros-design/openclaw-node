@@ -30,6 +30,16 @@ test('unterminated thinking block yields empty string (forces parse-failure path
   assert.equal(stripLlmOutput('Thinking...\ncut off mid-reasoning with no done marker'), '');
 });
 
+test('an answer with a prose line that merely begins "Thinking..." is kept', () => {
+  const answer = 'Here is the plan.\nThinking... about edge cases, we need X.\nDone.';
+  assert.equal(stripLlmOutput(answer), answer);
+});
+
+test('CRLF line endings become one line break, not two', () => {
+  assert.equal(stripLlmOutput('a\r\nb'), 'a\nb');
+  assert.equal(stripLlmOutput('spinner\rredraw'), 'spinner\nredraw');
+});
+
 test('plain output passes through untouched', () => {
   assert.equal(stripLlmOutput('## Findings\n- F1 fixed\n- F2 fixed'), '## Findings\n- F1 fixed\n- F2 fixed');
 });
