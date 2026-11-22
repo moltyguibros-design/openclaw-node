@@ -774,3 +774,50 @@ describe('activationSearch on path-keyed graph nodes', () => {
     assert.ok(results.every(r => r.session_id === 'session-002'), JSON.stringify(results));
   });
 });
+
+// Channels 3, 4 and 5 match the same seed text against entities and themes;
+// each match scans the whole table, so retrieve() does it once per prompt.
+describe('one entity and theme match per retrieve', () => {
+  it('scans entities and themes once and fuses the same results as the channels alone', async () => {
+    const knowledgeDb = createKnowledgeDb();
+    const extractionDb = createExtractionDb();
+    seedKnowledgeDb(knowledgeDb);
+    seedExtractionDb(extractionDb);
+    const graphCache = {
+      queryNeighbors(id) {
+        const edges = [{ source_id: 'concepts/nats', target_id: 'concepts/spreading-activation', weight: 1 }];
+        return { edges: edges.filter(e => e.source_id === id || e.target_id === id), neighbors: [] };
+      },
+    };
+    const query = 'NATS memory infrastructure';
+    const chanOpts = { respectPrivacy: false };
+    const expected = weightedRRF([
+      entitySearch(extractionDb, knowledgeDb, query, 30, chanOpts),
+      themeEntitySearch(extractionDb, knowledgeDb, query, 30, chanOpts),
+      activationSearch(extractionDb, knowledgeDb, graphCache, query, 20, chanOpts),
+      decisionFtsSearch(extractionDb, knowledgeDb, query, 30, chanOpts),
+    ], [1, 1, 1, 1]).slice(0, 10);
+
+    const counts = { entities: 0, themes: 0 };
+    const realPrepare = extractionDb.prepare.bind(extractionDb);
+    extractionDb.prepare = (sql) => {
+      if (/FROM entities\s+WHERE length\(name\) >= 2/.test(sql)) counts.entities++;
+      if (/FROM themes\s+WHERE length\(label\) >= 2/.test(sql)) counts.themes++;
+      return realPrepare(sql);
+    };
+    setChannelErrorSink(() => {}); // the fixture has no session FTS/vector tables
+    try {
+      const pipeline = createRetrievalPipeline({ knowledgeDb, extractionDb, graphCache, respect_privacy: false });
+      const results = await pipeline.retrieve(query);
+      assert.deepEqual(counts, { entities: 1, themes: 1 });
+      assert.ok(expected.length > 0);
+      assert.deepEqual(results, expected);
+    } finally {
+      knowledgeDb.close();
+      extractionDb.close();
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
+  });
+});

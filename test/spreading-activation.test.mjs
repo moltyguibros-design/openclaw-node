@@ -174,8 +174,9 @@ describe('createGraphAdapter', () => {
   it('wraps queryNeighbors into edgesFrom interface (bidirectional)', () => {
     const mockCache = {
       queryNeighbors(nodeId, opts) {
-        // vault links are citations, not arrows — the walk must see both ends
-        assert.equal(opts.direction, 'both');
+        // vault links are citations, not arrows — the walk must see both ends;
+        // only the edges are read, so the cache skips its neighbour lookups
+        assert.deepEqual(opts, { direction: 'both', edgesOnly: true });
         if (nodeId === 'A') {
           return [
             { source_id: 'A', target_id: 'B', edge_type: 'mentions', weight: 1 },

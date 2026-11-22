@@ -102,6 +102,11 @@ describe('obsidian-graph-cache', () => {
     const incoming = cache.queryNeighbors('concepts/alpha', { direction: 'incoming' });
     assert.equal(incoming.edges.length, 1);
     assert.equal(incoming.edges[0].source_id, 'concepts/beta');
+
+    // Spreading activation reads only the edges: no per-neighbour node lookup.
+    const edgesOnly = cache.queryNeighbors('concepts/alpha', { edgesOnly: true });
+    assert.deepEqual(edgesOnly.edges, result.edges);
+    assert.deepEqual(edgesOnly.neighbors, []);
     assert.equal(prepares, 0, 'queryNeighbors prepared SQL per call');
     cache.close();
   });

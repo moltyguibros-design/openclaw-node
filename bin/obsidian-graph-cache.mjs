@@ -168,6 +168,7 @@ export function createGraphCache(opts = {}) {
    * @param {string} nodeId
    * @param {object} [queryOpts]
    * @param {string} [queryOpts.direction] — 'outgoing', 'incoming', or 'both' (default)
+   * @param {boolean} [queryOpts.edgesOnly] — skip the neighbour node lookups (neighbors is [])
    * @returns {{ edges: Array, neighbors: Array }}
    */
   function queryNeighbors(nodeId, queryOpts = {}) {
@@ -175,6 +176,7 @@ export function createGraphCache(opts = {}) {
     const edgeRows = direction === 'outgoing' ? edgesOutgoing.all(nodeId)
       : direction === 'incoming' ? edgesIncoming.all(nodeId)
       : edgesBoth.all(nodeId, nodeId);
+    if (queryOpts.edgesOnly) return { edges: edgeRows, neighbors: [] };
 
     const neighborIds = new Set();
     for (const row of edgeRows) {
