@@ -131,6 +131,24 @@ function notifyDesktop(kind, title, message) {
   } catch { /* best-effort */ }
 }
 
+// Any client that can publish can send junk triggers at line rate, and each
+// popup spawns a notifier process: one alert per window, with a count.
+function createRejectionNotifier(notify, { windowMs = 5 * 60_000, now = Date.now } = {}) {
+  let lastAt = -Infinity;
+  let suppressed = 0;
+  return (message) => {
+    const t = now();
+    if (t - lastAt < windowMs) {
+      suppressed++;
+      return;
+    }
+    const extra = suppressed ? ` (+${suppressed} more rejected since the last alert)` : '';
+    suppressed = 0;
+    lastAt = t;
+    notify('block', 'Mesh deploy REJECTED', message + extra);
+  };
+}
+
 // ── Deploy Execution ─────────────────────────────────────────────────────
 
 function git(...args) {
@@ -575,6 +593,7 @@ async function main() {
   // OPENCLAW_REQUIRE_SIGNED_DEPLOY=0 accepts unsigned triggers, with a warning.
   // ESM helper loaded dynamically (this is CJS).
   const { verifyDeployTrigger } = await import('../lib/deploy-trigger-auth.mjs');
+  const notifyRejected = createRejectionNotifier(notifyDesktop);
 
   const deployQueue = createTriggerQueue(item => (item.catchUp
     ? checkAndCatchUp(resultsKv, nodesKv, latestKv)
@@ -608,7 +627,7 @@ async function main() {
         const auth = verifyDeployTrigger(trigger);
         if (!auth.ok) {
           console.error(`[deploy-listener] REJECTED deploy trigger: ${auth.reason} (sha=${trigger.sha}, initiator=${trigger.initiator || 'unknown'})`);
-          notifyDesktop('block', 'Mesh deploy REJECTED', `${auth.reason} (sha=${trigger.sha}, from ${trigger.initiator || 'unknown'})`);
+          notifyRejected(`${auth.reason} (sha=${trigger.sha}, from ${trigger.initiator || 'unknown'})`);
           continue;
         }
 
@@ -664,7 +683,10 @@ async function main() {
   console.log(`[deploy-listener] ═══ Ready ═══`);
 }
 
-module.exports = { shouldCatchUp, runDeploy, scheduleSelfRestart, upsertNodeRegistry, checkAndCatchUp, createTriggerQueue };
+module.exports = {
+  shouldCatchUp, runDeploy, scheduleSelfRestart, upsertNodeRegistry, checkAndCatchUp, createTriggerQueue,
+  createRejectionNotifier,
+};
 
 if (require.main === module) {
   main().catch(err => {

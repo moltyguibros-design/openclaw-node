@@ -18,7 +18,7 @@ process.env.OPENCLAW_IDENTITY_DIR = path.join(tmp, '.openclaw');
 process.env.OPENCLAW_OBS_DB = path.join(tmp, 'obs.db');
 process.env.OPENCLAW_NODE_ID = 'node-x';
 
-const { createTriggerQueue } = require('../bin/mesh-deploy-listener.js');
+const { createTriggerQueue, createRejectionNotifier } = require('../bin/mesh-deploy-listener.js');
 
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
@@ -107,5 +107,30 @@ describe('createTriggerQueue', () => {
     const loop = src.slice(src.indexOf('for await (const msg of sub)'), src.indexOf('// NATS status monitoring'));
     assert.match(loop, /verifyDeployTrigger\(trigger\)[\s\S]*deployQueue\.offer\(trigger\)/);
     assert.doesNotMatch(loop, /await executeDeploy/);
+  });
+});
+
+// Each rejected trigger spawned a notifier process and a popup, so a flood of
+// junk triggers from any client that can publish hit every node at line rate.
+describe('createRejectionNotifier', () => {
+  it('alerts once per window and reports how many rejections it held back', () => {
+    const calls = [];
+    let clock = 0;
+    const notify = createRejectionNotifier((...a) => calls.push(a), { windowMs: 1000, now: () => clock });
+    for (let i = 0; i < 100; i++) notify('bad sig');
+    assert.deepEqual(calls, [['block', 'Mesh deploy REJECTED', 'bad sig']]);
+    clock = 1000;
+    notify('bad sig 2');
+    assert.deepEqual(calls[1], ['block', 'Mesh deploy REJECTED', 'bad sig 2 (+99 more rejected since the last alert)']);
+    clock = 1001;
+    notify('bad sig 3');
+    assert.equal(calls.length, 2);
+  });
+
+  it('the subscription loop alerts through the notifier, and still logs every rejection', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'bin', 'mesh-deploy-listener.js'), 'utf8');
+    const loop = src.slice(src.indexOf('for await (const msg of sub)'), src.indexOf('// NATS status monitoring'));
+    assert.match(loop, /console\.error\(`\[deploy-listener\] REJECTED deploy trigger[\s\S]*notifyRejected\(/);
+    assert.doesNotMatch(loop, /notifyDesktop\('block'/);
   });
 });
