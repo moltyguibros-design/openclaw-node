@@ -51,6 +51,24 @@ describe('skill Python scripts', { skip: !HAVE_PY && 'python3 not available' }, 
     assert.equal(JSON.parse(r.stdout).error, 'missing symbol');
   });
 
+  // The stated "change over 24h" came from the 80% window kept for the chart, and a
+  // BTC/USDC symbol put a '/' into the chart filename, so savefig raised.
+  it('crypto-price measures the change over the full period and names the chart without a path separator', () => {
+    const probe = `
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("gpc", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+c = [(i * 900000, float(i), float(i), float(i), float(i)) for i in range(200)]
+plot, base = m._period_window(c, 24, 15)
+print(base == c[-96][4], len(plot), m._period_window(c[:1], 24, 15)[1],
+      "/" not in m._chart_path("BTC/USDC", 1)[len("/tmp/"):])
+`;
+    const r = spawnSync('python3', ['-I', '-B', '-c', probe,
+      join(SKILLS, 'crypto-price', 'scripts', 'get_price_chart.py')], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout.trim(), 'True 76 None True');
+  });
+
   it('gemini-deep-research sets HTTP timeouts and stops polling a cancelled interaction', () => {
     const stubDir = mkdtempSync(join(tmpdir(), 'deep-research-stub-'));
     try {

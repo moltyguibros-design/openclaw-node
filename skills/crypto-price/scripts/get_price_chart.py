@@ -649,12 +649,25 @@ def _build_chart(symbol, ohlc_rows, currency, label, use_gradient=False):
                    ha='right', va='center',
                    bbox=dict(boxstyle='round,pad=0.3', facecolor='#0f141c', edgecolor='white', linewidth=1))
 
-    ts = int(time.time())
-    chart_path = f"/tmp/crypto_chart_{symbol}_{ts}.png"
+    chart_path = _chart_path(symbol, int(time.time()))
     fig.tight_layout()
     fig.savefig(chart_path, dpi=150)
     plt.close(fig)
     return chart_path
+
+
+def _chart_path(symbol, ts):
+    return f"/tmp/crypto_chart_{re.sub(r'[^A-Za-z0-9]', '_', symbol)}_{ts}.png"
+
+
+def _period_window(candles, hours, candle_minutes):
+    full = max(2, int((hours * 60) / candle_minutes))
+    # The chart drops the oldest 20% for breathing room; the stated change still spans the full period.
+    plot_points = candles[-max(2, int(full * 0.8)):]
+    if len(candles) < 2:
+        return plot_points, None
+    base = candles[-full] if len(candles) >= full else candles[0]
+    return plot_points, base[4]
 
 
 def _normalize_hl_symbol(symbol):
@@ -797,22 +810,14 @@ def main():
             candles.append((ts_ms, open_price, high_price, low_price, close_price))
 
     candles.sort(key=lambda item: item[0])
-    if candles:
-        target = max(2, int((hours * 60) / candle_minutes))
-        target = int(target * 0.8)  # 20% fewer candles for breathing room
-        last_points = candles[-target:]
-    else:
-        last_points = []
+    last_points, price_period_ago = _period_window(candles, hours, candle_minutes)
 
     change_period = None
     change_period_percent = None
-    price_period_ago = None
 
-    if len(last_points) >= 2:
-        price_period_ago = last_points[0][4]
-        if price_period_ago:
-            change_period = price_usdt - price_period_ago
-            change_period_percent = (change_period / price_period_ago) * 100
+    if price_period_ago:
+        change_period = price_usdt - price_period_ago
+        change_period_percent = (change_period / price_period_ago) * 100
     chart_path = _build_chart(symbol_upper, last_points, currency, label, use_gradient)
 
     if change_period_percent is None:
