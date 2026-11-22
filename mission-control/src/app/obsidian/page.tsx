@@ -226,7 +226,7 @@ export default function ObsidianPage() {
 
         {/* Center: Graph */}
         <div className="flex-1 overflow-hidden">
-          {!graphLoading && filteredGraph && filteredGraph.nodes.length === 0 ? (
+          {!graphLoading && graph && graph.nodes.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-3">
               <p className="text-sm">No documents indexed yet</p>
               <p className="text-xs text-muted-foreground/60 max-w-xs text-center">

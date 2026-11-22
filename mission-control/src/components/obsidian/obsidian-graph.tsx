@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import type { ForceGraphMethods, NodeObject } from "react-force-graph-2d";
 import type { WikilinkGraphData } from "@/lib/hooks";
+import { forceGraphData } from "@/lib/graph-data";
 
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
   ssr: false,
@@ -38,6 +39,7 @@ export function ObsidianGraph({
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<ForceGraphMethods | undefined>(undefined);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const data = useMemo(() => (graph ? forceGraphData(graph) : null), [graph]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -132,10 +134,10 @@ export function ObsidianGraph({
     );
   }
 
-  if (!graph || graph.nodes.length === 0) {
+  if (!data || data.nodes.length === 0) {
     return (
       <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-        No documents indexed. Click &quot;Sync Memory&quot; first.
+        No documents match the current filters.
       </div>
     );
   }
@@ -146,7 +148,7 @@ export function ObsidianGraph({
         ref={fgRef}
         width={dimensions.width}
         height={dimensions.height}
-        graphData={{ nodes: graph.nodes, links: graph.links }}
+        graphData={data}
         nodeId="id"
         nodeLabel="title"
         nodeCanvasObject={paintNode}
