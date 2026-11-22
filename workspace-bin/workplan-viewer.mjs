@@ -1722,7 +1722,7 @@ function sseLive(req, res, resolve, allowSwitch) {
 
 const PLAN_PATH_RE = /^\/api\/plans\/([^/]+)(\/.*)?$/;
 
-const server = http.createServer(async (req, res) => {
+async function handleRequest(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -2062,6 +2062,18 @@ const server = http.createServer(async (req, res) => {
 
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('not found');
+}
+
+// A sync fs call that throws inside an async handler is an unhandled rejection, which
+// would exit the viewer; a plan dir can vanish or hold a broken symlink mid-request.
+const server = http.createServer(async (req, res) => {
+  try {
+    await handleRequest(req, res);
+  } catch (e) {
+    console.error(`[viewer] ${req.method} ${req.url} failed: ${e.stack || e}`);
+    if (!res.headersSent) json(res, { error: e.message }, 500);
+    else res.destroy();
+  }
 });
 
 server.listen(PORT, '127.0.0.1', () => {

@@ -322,6 +322,19 @@ test("the repo-level tick lock refuses run-once and shows only on the plan that 
   assert.equal(fs.readFileSync(path.join(f.root, 'ran'), 'utf8'), 'ran');
 });
 
+test('a filesystem error in one route answers 500 and the viewer stays up', async t => {
+  const f = await fixture(t, { prepare: (root, plan) => {
+    fs.symlinkSync(path.join(root, 'missing.md'), path.join(plan, 'NOTES.md'));
+    return {};
+  } });
+  const opts = { token: f.master };
+  const docs = await f.request('/api/plans/fixture/docs', opts);
+  assert.equal(docs.status, 500);
+  assert.match(JSON.parse(docs.text).error, /ENOENT/);
+  assert.equal((await f.request('/api/plans/fixture/state', opts)).status, 200);
+  assert.equal(f.child.exitCode, null);
+});
+
 test('default automation config points at the repo that holds memory-plan/plans', async t => {
   const f = await fixture(t);
   const r = await f.request('/api/plans/fixture/automation', { token: f.master });
