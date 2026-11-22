@@ -115,13 +115,13 @@ describe('evaluateIngestionPolicy', () => {
 
 describe('createSubscriber consumer identity', () => {
   it('names the durable consumer from the canonical node id (JetStream rejects dots)', async () => {
-    let durable = null;
+    let added = null;
     const nc = {
       jetstreamManager: async () => ({
         streams: { info: async () => ({ config: {} }) },
         consumers: {
           info: async () => { throw new Error('consumer not found'); },
-          add: async (_stream, cfg) => { durable = cfg.durable_name; },
+          add: async (_stream, cfg) => { added = cfg; },
         },
       }),
       jetstream: () => ({
@@ -137,7 +137,10 @@ describe('createSubscriber consumer identity', () => {
       onError: () => {},
     });
     await sub.stop();
-    assert.equal(durable, 'subscriber-moltymacs-virtual-machine');
+    assert.equal(added.durable_name, 'subscriber-moltymacs-virtual-machine');
+    assert.equal(added.max_deliver, 5, 'a nak is retried a bounded number of times');
+    assert.equal(added.ack_policy, 'explicit');
+    assert.equal(added.deliver_policy, 'new');
   });
 });
 
@@ -157,16 +160,16 @@ describe('createSubscriber projection', () => {
       }),
     };
   }
-  function message(log) {
+  function message(log, info) {
     const data = new TextEncoder().encode(JSON.stringify({ event_id: 'e1', promoted_from: { node_id: 'node-B' } }));
-    return { subject: 'kanban.events.task-1.kanban.created', data, ack: () => log.push('ack'), nak: () => log.push('nak') };
+    return { subject: 'kanban.events.task-1.kanban.created', data, info, ack: () => log.push('ack'), nak: (d) => log.push(['nak', d]) };
   }
   async function settled(log) {
-    while (!log.includes('ack') && !log.includes('nak')) await new Promise((r) => setTimeout(r, 2));
+    while (!log.some((e) => e === 'ack' || e[0] === 'nak')) await new Promise((r) => setTimeout(r, 2));
     await new Promise((r) => setTimeout(r, 20));
   }
 
-  it('awaits an async onIngest: a rejection naks and is not counted as ingested', async () => {
+  it('awaits an async onIngest: a rejection naks with a delay and is not counted as ingested', async () => {
     const log = [];
     const errors = [];
     const sub = await createSubscriber(fakeShared([message(log)]), 'node-A', {
@@ -175,9 +178,21 @@ describe('createSubscriber projection', () => {
     });
     await settled(log);
     await sub.stop();
-    assert.deepEqual(log, ['nak']);
+    assert.deepEqual(log, [['nak', 5000]]);
     assert.deepEqual(errors, [['projection', 'projection down']]);
     assert.deepEqual(sub.stats, { ingested: 0, skipped: 0, errors: 1 });
+  });
+
+  it('drops (acks) a message that keeps failing at the delivery cap', async () => {
+    const log = [];
+    const sub = await createSubscriber(fakeShared([message(log, { deliveryCount: 5 })]), 'node-A', {
+      onIngest: async () => { throw new Error('projection down'); },
+      onError: () => {},
+    });
+    await settled(log);
+    await sub.stop();
+    assert.deepEqual(log, ['ack']);
+    assert.equal(sub.stats.errors, 1);
   });
 
   it('acks only after an async onIngest settles', async () => {

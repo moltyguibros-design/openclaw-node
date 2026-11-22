@@ -7,8 +7,9 @@
  * each incoming event against an ingestion policy, filters out self-originated
  * events, and projects accepted events to local stores with provenance tracking.
  *
- * Mirrors the promoter's architecture (exponential backoff,
- * graceful shutdown) but operates in the reverse direction: shared → local.
+ * Operates in the reverse direction of the promoter: shared → local. A failed
+ * projection is retried with the federation layer's delayed nak and dropped at
+ * the consumer's max_deliver (settleFederationMessage).
  *
  * Usage:
  *   node bin/memory-subscriber.mjs
@@ -20,8 +21,8 @@
 
 import { resolveNodeId } from '../lib/node-id.js';
 import { createRequire } from 'node:module';
-import { ensureSharedStream, SHARED_STREAM_NAME } from '../lib/shared-event-stream.mjs';
-import { createBackoff } from './memory-promoter.mjs';
+import { ensureSharedStream, SHARED_STREAM_NAME, SHARED_CONSUMER_MAX_DELIVER } from '../lib/shared-event-stream.mjs';
+import { settleFederationMessage } from '../lib/federation-resilience.mjs';
 import { canonicalNodeId } from '../lib/local-event-log.mjs';
 
 const _require = createRequire(import.meta.url);
@@ -123,11 +124,10 @@ export function evaluateIngestionPolicy(event, nodeId, parsed) {
  *   F-N107 fix: was optional, which made an entire class of "subscriber wired
  *   but no consumer" bugs silent. Throw early so the misconfiguration is
  *   visible at startup. May be async: it is awaited before the ack, and a throw
- *   or rejection naks.
- * @param {object} [opts.backoffOpts] - Backoff controller options
+ *   or rejection naks with a delay.
  * @param {function} [opts.onSkip] - Callback(event, result) on skipped event
  * @param {function} [opts.onError] - Callback(context, err) on errors
- * @returns {Promise<{ stop: function, backoff: object, stats: object }>}
+ * @returns {Promise<{ stop: function, stats: object }>}
  */
 export async function createSubscriber(nc, nodeId, opts = {}) {
   // F-N107: fail fast on missing onIngest.
@@ -157,7 +157,7 @@ export async function createSubscriber(nc, nodeId, opts = {}) {
       else process.stderr.write(warn + '\n');
     }
   } catch { /* toString may fail on bound/native fns — ignore */ }
-  const { StringCodec } = _require('nats');
+  const { StringCodec, AckPolicy, DeliverPolicy } = _require('nats');
   const sc = StringCodec();
 
   // Ensure shared stream exists (degraded mode if unreachable)
@@ -172,18 +172,14 @@ export async function createSubscriber(nc, nodeId, opts = {}) {
   if (!sharedAvailable) {
     // Cannot subscribe without the stream — return a no-op subscriber
     // that can be stopped. The caller can retry on next tick.
-    const backoff = createBackoff(opts.backoffOpts);
-    backoff.recordFailure();
     return {
       stop() { return Promise.resolve(); },
-      backoff,
       stats: { ingested: 0, skipped: 0, errors: 0 },
     };
   }
 
   const js = nc.jetstream();
   const jsm = await nc.jetstreamManager();
-  const backoff = createBackoff(opts.backoffOpts);
 
   const consumerName = `subscriber-${canonicalNodeId(nodeId)}`;
 
@@ -193,7 +189,9 @@ export async function createSubscriber(nc, nodeId, opts = {}) {
   } catch {
     await jsm.consumers.add(SHARED_STREAM_NAME, {
       durable_name: consumerName,
-      deliver_policy: 'new',
+      ack_policy: AckPolicy.Explicit,
+      deliver_policy: DeliverPolicy.New,
+      max_deliver: SHARED_CONSUMER_MAX_DELIVER,
     });
   }
 
@@ -229,13 +227,11 @@ export async function createSubscriber(nc, nodeId, opts = {}) {
         try {
           // F-N107: opts.onIngest is validated as required at factory init.
           await opts.onIngest(event, parsed, provenance);
-          backoff.reset();
           stats.ingested++;
         } catch (err) {
-          backoff.recordFailure();
           stats.errors++;
           if (opts.onError) opts.onError('projection', err);
-          msg.nak();
+          settleFederationMessage(msg, { failed: true, eventId: event.event_id });
           continue;
         }
       } else {
@@ -254,7 +250,6 @@ export async function createSubscriber(nc, nodeId, opts = {}) {
       iter.stop();
       return processingLoop;
     },
-    backoff,
     stats,
   };
 }
