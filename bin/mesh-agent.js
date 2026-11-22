@@ -163,6 +163,13 @@ function injectHyperagentStrategy(parts, task) {
   parts.push('');
 }
 
+function injectSuccessCriteria(parts, task) {
+  if (!task.success_criteria?.length) return;
+  parts.push('## Success Criteria');
+  for (const c of task.success_criteria) parts.push(`- ${c}`);
+  parts.push('');
+}
+
 function injectRejection(parts, task) {
   if (!task?.rejection_reason) return;
   parts.push('## Previous Review');
@@ -700,13 +707,7 @@ function buildInitialPrompt(task) {
     parts.push('');
   }
 
-  if (task.success_criteria && task.success_criteria.length > 0) {
-    parts.push('## Success Criteria');
-    for (const c of task.success_criteria) {
-      parts.push(`- ${c}`);
-    }
-    parts.push('');
-  }
+  injectSuccessCriteria(parts, task);
 
   if (task.metric) {
     const safeMetric = isAllowedMetric(task.metric) ? task.metric : '[metric command filtered for security]';
@@ -772,6 +773,8 @@ function buildRetryPrompt(task, previousAttempts, attemptNumber) {
     parts.push('');
   }
 
+  injectSuccessCriteria(parts, task);
+
   parts.push('## Previous Attempts');
   for (let i = 0; i < previousAttempts.length; i++) {
     const a = previousAttempts[i];
@@ -793,6 +796,7 @@ function buildRetryPrompt(task, previousAttempts, attemptNumber) {
 
   if (task.scope && task.scope.length > 0) {
     parts.push('## Scope');
+    parts.push('Only modify these files/paths:');
     for (const s of task.scope) {
       parts.push(`- ${s}`);
     }
@@ -1411,14 +1415,7 @@ function buildCollabPrompt(task, roundNumber, sharedIntel, myScope, myRole, roun
   injectRole(parts, task.role);
   injectMemory(parts, task);
   injectHyperagentStrategy(parts, task);
-
-  if (task.success_criteria && task.success_criteria.length > 0) {
-    parts.push('## Success Criteria');
-    for (const c of task.success_criteria) {
-      parts.push(`- ${c}`);
-    }
-    parts.push('');
-  }
+  injectSuccessCriteria(parts, task);
 
   parts.push('## Instructions');
   if (roundRole === 'integrator') {

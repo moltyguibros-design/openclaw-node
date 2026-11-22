@@ -64,3 +64,13 @@ test('prepareMemoryRecall feeds the recalled block to the synchronous prompt bui
   assert.match(m.buildInitialPrompt(task), /Node memory \(task-relevant recall\)[\s\S]*QX-31/);
   assert.match(m.buildCollabPrompt(task, 1, '', [], 'worker'), /QX-31/);
 });
+
+test('a retry prompt keeps the success criteria and the scope restriction', () => {
+  const task = { task_id: 'R-1', title: 't', success_criteria: ['CRIT-ONE'], scope: ['src/a.js'], role: null, collaboration: { mode: 'parallel' } };
+  const retry = m.buildRetryPrompt(task, [{ approach: 'a', result: 'b' }], 2);
+  assert.match(retry, /## Success Criteria\n- CRIT-ONE/);
+  assert.match(retry, /## Scope\nOnly modify these files\/paths:\n- src\/a\.js/);
+  const once = (prompt) => prompt.split('CRIT-ONE').length - 1;
+  assert.equal(once(m.buildInitialPrompt(task)), 1);
+  assert.equal(once(m.buildCollabPrompt(task, 1, '', [], 'worker')), 1);
+});
