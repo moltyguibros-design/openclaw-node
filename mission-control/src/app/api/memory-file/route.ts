@@ -21,7 +21,7 @@ import { isSensitiveRelPath, resolveWithinRoot } from "@/lib/safe-path";
 export const dynamic = "force-dynamic";
 
 /** Directories under ~/.openclaw that hold credentials or raw transcripts, never documents. */
-const BLOCKED_DIRS = ["agents", "config", "nats", "identity", "node_modules"] as const;
+const BLOCKED_DIRS = ["agents", "config", "credentials", "nats", "identity", "node_modules"] as const;
 const MAX_BYTES = 2_000_000;
 
 export async function GET(request: NextRequest) {

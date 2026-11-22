@@ -14,6 +14,9 @@ beforeAll(async () => {
   fs.mkdirSync(logs, { recursive: true });
   const body = Array.from({ length: LINES }, (_, i) => JSON.stringify({ i, pad: "x".repeat(60) })).join("\n") + "\n";
   fs.writeFileSync(path.join(logs, "memory-injections.jsonl"), body);
+  fs.writeFileSync(path.join(root, "openclaw.json.new"), '{"gateway":{"auth":{"token":"t"}}}');
+  fs.mkdirSync(path.join(root, "credentials"));
+  fs.writeFileSync(path.join(root, "credentials", "oauth.json"), '{"refresh_token":"r"}');
   vi.stubEnv("WORKSPACE_ROOT", path.join(root, "workspace"));
   vi.resetModules();
   ({ GET } = await import("@/app/api/memory-file/route"));
@@ -39,4 +42,10 @@ test("tail mode returns the last N lines of a log larger than the read cap", asy
 test("a full read of a file larger than the cap is still refused", async () => {
   const res = await GET(url("path=workspace/logs/memory-injections.jsonl"));
   expect(res.status).toBe(413);
+});
+
+test("a pending openclaw.json render and the gateway's credentials/ dir are refused", async () => {
+  expect((await GET(url("path=openclaw.json.new"))).status).toBe(403);
+  expect((await GET(url("path=credentials/oauth.json"))).status).toBe(403);
+  expect((await GET(url("path=workspace/logs/memory-injections.jsonl&tail=1"))).status).toBe(200);
 });

@@ -71,6 +71,19 @@ describe("isSensitiveRelPath", () => {
       expect(isSensitiveRelPath(p, { blockedDirs: ["config", "agents"] })).toBe(true);
     }
   });
+  // mesh-deploy keeps openclaw.json.bak.<ISO>; install.sh --update renders <file>.new beside an existing one.
+  it("refuses backup and pending copies of a credential file", () => {
+    for (const p of [
+      "openclaw.json.new",
+      "openclaw.json.bak.2026-11-22t10-00-00-000z",
+      "auth-profiles.json.bak",
+      "identity.key.old",
+      "openclaw.env-old",
+    ]) {
+      expect(isSensitiveRelPath(p)).toBe(true);
+    }
+    expect(isSensitiveRelPath("notes/openclaw-json-notes.md")).toBe(false);
+  });
   it("refuses blocked directories in any segment", () => {
     expect(isSensitiveRelPath("agents/main/sessions/x.jsonl", { blockedDirs: ["agents"] })).toBe(true);
     expect(isSensitiveRelPath("projects/app/node_modules/pkg/index.js")).toBe(true);
