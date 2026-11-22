@@ -647,6 +647,7 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false } = {}
       await runSubprocess(clawvault, ['observe', '--cron'], 60000);
       log('  clawvault observe done');
     } catch (e) { log(`  clawvault observe failed: ${e.message}`); }
+    stampThrottle('lastClawvaultObserve');
   }
 
   // 8. ClawVault doctor — vault health check + auto-fix
@@ -673,6 +674,7 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false } = {}
     const imported = await runImportDirInWorker(loadTranscriptSources());
     if (imported.length > 0) log(`  session-store: imported ${imported.length} sessions`);
   } catch (e) { log(`  session-store import failed: ${e.message}`); emitErrorEvent('ingest', e); }
+  stampThrottle('lastSessionImport');
 
   log('Phase 0: Bootstrap complete');
 }
@@ -820,6 +822,15 @@ function loadThrottleState() {
 
 function saveThrottleState(state) {
   fs.writeFileSync(THROTTLE_STATE_FILE, JSON.stringify(state, null, 2));
+}
+
+// A transition pipeline that runs a Phase 2 step stamps it, or the same tick's
+// Phase 2 / vault maintenance repeats it.
+function stampThrottle(...keys) {
+  const throttle = loadThrottleState();
+  const now = Date.now();
+  for (const key of keys) throttle[key] = now;
+  saveThrottleState(throttle);
 }
 
 async function runHyperagentMaintenance(config) {
@@ -1151,6 +1162,7 @@ async function handleTransitions(transitions, config) {
         tasks.push(runSubprocess(clawvault, ['checkpoint', '--working-on', 'idle'], 15000).catch(() => {}));
       }
       await Promise.allSettled(tasks);
+      stampThrottle('lastRecap', 'lastClawvaultObserve');
     }
 
     // IDLE → ENDED: Full cleanup pipeline
@@ -1218,6 +1230,7 @@ async function handleTransitions(transitions, config) {
         await runSubprocess(clawvault, ['reflect'], 60000).catch(() => {});
         await runSubprocess(clawvault, ['archive'], 30000).catch(() => {});
         log('  clawvault observe+reflect+archive done');
+        stampThrottle('lastClawvaultObserve', 'lastClawvaultReflect', 'lastClawvaultArchive');
       }
 
       // 2. Sub-agent audit — extract trust data from this session
@@ -1231,6 +1244,7 @@ async function handleTransitions(transitions, config) {
       if (fs.existsSync(obsSync)) {
         await runSubprocess('node', [obsSync], 60000).catch(() => {});
         log('  final obsidian-sync done');
+        stampThrottle('lastObsidianSync');
       }
 
       // 4. ClawVault sleep — handoff + clean exit

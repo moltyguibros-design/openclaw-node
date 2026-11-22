@@ -181,6 +181,23 @@ test('the daemon owns the maintenance cadence: Phase 2 forces the run, Phase 0 s
   assert.match(phase0, /throttle\.lastMaintenance = Date\.now\(\);[\s\S]*saveThrottleState\(throttle\)/);
 });
 
+test('transition pipelines stamp the Phase 2 throttles of the work they already ran', () => {
+  const phase0 = daemonSrc.match(/async function runPhase0Bootstrap[\s\S]*?\n}\n/)[0];
+  const observe = phase0.indexOf("runSubprocess(clawvault, ['observe', '--cron']");
+  const importDir = phase0.indexOf('runImportDirInWorker(');
+  assert.ok(phase0.indexOf("stampThrottle('lastClawvaultObserve')", observe) > observe, 'Phase 0 observe must stamp lastClawvaultObserve');
+  assert.ok(phase0.indexOf("stampThrottle('lastSessionImport')", importDir) > importDir, 'Phase 0 import must stamp lastSessionImport');
+
+  const toIdle = daemonSrc.match(/if \(t\.from === STATES\.ACTIVE && t\.to === STATES\.IDLE\) \{[\s\S]*?\n    \}\n/)[0];
+  assert.match(toIdle, /await Promise\.allSettled\(tasks\);\n\s*stampThrottle\('lastRecap', 'lastClawvaultObserve'\);/);
+
+  const toEnded = daemonSrc.match(/if \(t\.from === STATES\.IDLE && t\.to === STATES\.ENDED\) \{[\s\S]*?\n    \}\n/)[0];
+  const archive = toEnded.indexOf("runSubprocess(clawvault, ['archive']");
+  assert.ok(toEnded.indexOf("stampThrottle('lastClawvaultObserve', 'lastClawvaultReflect', 'lastClawvaultArchive')", archive) > archive);
+  const sync = toEnded.indexOf("runSubprocess('node', [obsSync]");
+  assert.ok(toEnded.indexOf("stampThrottle('lastObsidianSync')", sync) > sync, 'the final obsidian-sync must stamp lastObsidianSync');
+});
+
 test('runSubprocess is traced with wrapAsync, so a failed or slow run is recorded', () => {
   assert.match(daemonSrc, /runSubprocess = tracer\.wrapAsync\('runSubprocess', runSubprocess, \{ tier: 2 \}\);/);
   assert.doesNotMatch(daemonSrc, /runSubprocess = tracer\.wrap\(/);
