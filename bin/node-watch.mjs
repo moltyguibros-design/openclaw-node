@@ -16,12 +16,11 @@
 
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { atomicWriteFile } from '../lib/atomic-write.mjs';
-import { runWatch, formatTable, formatReport, formatHtml, STATUS, watchTransitions, WATCH_TARGETS } from '../lib/node-watch.mjs';
+import { runWatch, formatTable, formatReport, formatHtml, STATUS, watchTransitions, WATCH_TARGETS, defaultWatchPaths } from '../lib/node-watch.mjs';
 
 let values;
 try {
@@ -48,10 +47,7 @@ try {
   process.exit(3);
 }
 
-const DEFAULT_REPORT = path.join(os.homedir(), '.openclaw', '.node-watch.md');
-const DEFAULT_HTML = path.join(os.homedir(), '.openclaw', '.node-watch.html');
-// Machine snapshot read by the Mission Control /diagnostics Watch dropdown.
-const DEFAULT_JSON = path.join(os.homedir(), '.openclaw', '.node-watch.json');
+const { report: DEFAULT_REPORT, html: DEFAULT_HTML, json: DEFAULT_JSON } = defaultWatchPaths();
 
 async function once(mode, includeHeavy) {
   const report = await runWatch({ mode, includeHeavy, axis: values.axis });

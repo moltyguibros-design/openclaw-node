@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   WATCH_TARGETS, runWatch, formatHtml, STATUS, watchTransitions, buildSourceMap,
   parseLaunchdPrint, gradeMeshServices, gradeRequiredServices, gradeGateway, probeCoreLaunchdServices, probeMeshServices,
-  probeGateway, probeCoordinator,
+  probeGateway, probeCoordinator, defaultWatchPaths,
 } from '../lib/node-watch.mjs';
 import { parseSystemdShow } from '../lib/fed-probes.mjs';
 import { resolveNodeConfig } from '../lib/node-acceptance.mjs';
@@ -1148,6 +1148,16 @@ describe('mem.ingest incremental transcript parse', () => {
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('node-watch default output paths', () => {
+  it('writes under the install root Mission Control derives from its workspace', () => {
+    assert.deepEqual(defaultWatchPaths({ OPENCLAW_WORKSPACE: '/x/root/workspace' }), {
+      report: '/x/root/.node-watch.md', html: '/x/root/.node-watch.html', json: '/x/root/.node-watch.json',
+    });
+    assert.equal(defaultWatchPaths({ WORKSPACE_ROOT: '/y/ws', OPENCLAW_WORKSPACE: '/x/root/workspace' }).json, '/y/.node-watch.json');
+    assert.equal(defaultWatchPaths({}).json, path.join(os.homedir(), '.openclaw', '.node-watch.json'));
   });
 });
 
