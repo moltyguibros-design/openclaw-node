@@ -30,7 +30,6 @@ VERSION = "1.0.0"
 DEFAULT_SKILLS_DIR = Path.home() / ".openclaw" / "workspace" / "skills"
 SCANNER_DIR = Path(__file__).parent.resolve()
 WHITELIST_FILE = SCANNER_DIR / "whitelist.json"
-REPORT_TEMPLATE = SCANNER_DIR / "report-template.md"
 SCANNABLE_EXTENSIONS = {".py", ".sh", ".js", ".ts", ".bash", ".zsh", ".rb", ".pl", ".php", ".md", ".yml", ".yaml", ".json", ".toml", ".cfg", ".ini", ".conf", ".env", ".txt"}
 
 # ─── Colors ──────────────────────────────────────────────────────────────────
