@@ -3,7 +3,7 @@
 /**
  * consolidation-scheduler.mjs — Schedules consolidation cycles during quiet periods.
  *
- * Launchd fires this script every 30 minutes (StartInterval 1800).
+ * Launchd (StartInterval 1800) or the systemd timer fires this script every 30 minutes.
  * The script checks whether the system is idle (no active LLM inference),
  * then requests cancellation after 5 minutes and waits for local completion.
  *
