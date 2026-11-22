@@ -326,8 +326,7 @@ describe('MemoryBudget dual-write', () => {
 });
 
 describe('R31 (repair 7.7): content samples are byte-capped', () => {
-  it('an oversized decision text is rejected by the schema', async () => {
-    const { MemoryEventSchema } = await import('../packages/event-schemas/dist/index.js');
+  it('an oversized decision text is rejected by the schema', () => {
     const event = buildMemoryEvent('memory.extracted', 's-cap', 'memory', {
       session_id: 's-cap', entities_count: 0, themes_count: 0, mentions_count: 0,
       decisions_count: 1, decision_texts: ['x'.repeat(10_000)],
@@ -336,8 +335,7 @@ describe('R31 (repair 7.7): content samples are byte-capped', () => {
     assert.throws(() => MemoryEventSchema.parse(event), /too_big|500/i);
   });
 
-  it('a producer-truncated decision text passes', async () => {
-    const { MemoryEventSchema } = await import('../packages/event-schemas/dist/index.js');
+  it('a producer-truncated decision text passes', () => {
     const event = buildMemoryEvent('memory.extracted', 's-cap', 'memory', {
       session_id: 's-cap', entities_count: 0, themes_count: 0, mentions_count: 0,
       decisions_count: 1, decision_texts: ['x'.repeat(10_000).slice(0, 500)],
