@@ -15,7 +15,7 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -78,5 +78,52 @@ describe('mcp-knowledge server entrypoint', () => {
     assert.equal(r.started, false, `importing ran main(); stderr: ${r.stderr}`);
     assert.equal(r.code, 0, `importer failed; stderr: ${r.stderr}`);
     assert.equal(r.stdout.trim(), 'function');
+  });
+});
+
+// bin/embed-existing-sessions.mjs had an endsWith(argv[1]) check: through a
+// symlinked dir, or a path with a space (percent-encoded in import.meta.url),
+// it exited 0 without migrating anything.
+describe('embed-existing-sessions entrypoint', () => {
+  const BIN = fileURLToPath(new URL('../bin', import.meta.url));
+  const MISSING = /session store not found/;
+  let dir;
+
+  before(() => {
+    dir = mkdtempSync(join(tmpdir(), 'embed-sessions-entry-'));
+    symlinkSync(BIN, join(dir, 'linked'));
+    symlinkSync(BIN, join(dir, 'with space'));
+  });
+
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const migrate = (script) => spawnSync(process.execPath, [
+    script,
+    '--session-db', join(dir, 'missing.db'),
+    '--knowledge-db', join(dir, 'k.db'),
+    '--checkpoint', join(dir, 'cp.json'),
+  ], { encoding: 'utf8' });
+
+  it('runs when launched by its real path', () => {
+    const r = migrate(join(BIN, 'embed-existing-sessions.mjs'));
+    assert.match(r.stderr, MISSING);
+  });
+
+  it('runs when launched through a symlinked directory', () => {
+    const r = migrate(join(dir, 'linked', 'embed-existing-sessions.mjs'));
+    assert.match(r.stderr, MISSING, `main never ran (exit ${r.status})`);
+  });
+
+  it('runs when launched from a path containing a space', () => {
+    const r = migrate(join(dir, 'with space', 'embed-existing-sessions.mjs'));
+    assert.match(r.stderr, MISSING, `main never ran (exit ${r.status})`);
+  });
+
+  it('does not run when imported', () => {
+    const url = pathToFileURL(join(BIN, 'embed-existing-sessions.mjs')).href;
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', `const m = await import(${JSON.stringify(url)}); console.log(typeof m.runMigration);`], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout.trim(), 'function');
+    assert.doesNotMatch(r.stderr, /embed-migration/);
   });
 });

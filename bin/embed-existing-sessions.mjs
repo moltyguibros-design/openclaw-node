@@ -15,9 +15,10 @@
  */
 
 import { openStore } from '../lib/sqlite-store.mjs';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { initDatabase, indexSessionTurns } from '../lib/mcp-knowledge/core.mjs';
@@ -176,8 +177,19 @@ export async function runMigration(opts = {}) {
 
 // ─── CLI entry point ─────────────────────────────────────────────────────────
 
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/^file:\/\//, ''));
-if (isMain) {
+// Other CLIs import DEFAULT_KNOWLEDGE_DB from here. Compare real paths: Node
+// resolves symlinks in the main module's URL (and percent-encodes spaces) but
+// keeps argv[1] as given.
+function isEntrypoint() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false; // argv[1] is not a path, e.g. `node -e '…' arg`
+  }
+}
+
+if (isEntrypoint()) {
   const { values } = parseArgs({
     options: {
       'session-db': { type: 'string', default: DEFAULT_SESSION_DB },
