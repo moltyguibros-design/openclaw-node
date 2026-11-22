@@ -24,8 +24,8 @@ export const MEMORY_MD = path.join(WORKSPACE_ROOT, "MEMORY.md");
 // ~/.openclaw). state.db holds the actual remembered content (entities,
 // decisions, themes); the memory vault holds the synthesized concept/session
 // notes — since the 2026-07-04 vault fusion it can live INSIDE the operator's
-// real Obsidian vault (obsidian-sync.json memoryVaultPath, same resolution as
-// lib/obsidian-vault.mjs getVaultPath), falling back to legacy obsidian-local.
+// real Obsidian vault (OBSIDIAN_VAULT_PATH, else obsidian-sync.json memoryVaultPath,
+// as lib/obsidian-vault.mjs getVaultPath), falling back to legacy obsidian-local.
 export const STATE_DB_PATH =
   process.env.OPENCLAW_STATE_DB ||
   process.env.STATE_DB_PATH ||
@@ -34,7 +34,10 @@ export const STATE_DB_PATH =
 function configuredMemoryVaultPath(): string | null {
   try {
     const cfg = JSON.parse(
-      fs.readFileSync(path.join(OPENCLAW_ROOT, "config", "obsidian-sync.json"), "utf8"),
+      fs.readFileSync(
+        process.env.OPENCLAW_OBSIDIAN_SYNC_CONFIG || path.join(OPENCLAW_ROOT, "config", "obsidian-sync.json"),
+        "utf8",
+      ),
     );
     if (!cfg.memoryVaultPath) return null;
     return path.isAbsolute(cfg.memoryVaultPath)
@@ -44,8 +47,10 @@ function configuredMemoryVaultPath(): string | null {
     return null;
   }
 }
+// OBSIDIAN_DIR stays first: workspace-bin/test-multi-soul-workflow sets it.
 export const OBSIDIAN_DIR =
   process.env.OBSIDIAN_DIR ||
+  process.env.OBSIDIAN_VAULT_PATH ||
   configuredMemoryVaultPath() ||
   path.join(path.dirname(WORKSPACE_ROOT), "obsidian-local");
 export const ACTIVE_TASKS_MD = path.join(MEMORY_DIR, "active-tasks.md");
@@ -54,6 +59,15 @@ export const CLAWVAULT_INDEX = path.join(CLAWVAULT_DIR, ".clawvault-index.json")
 export const HANDOFFS_DIR = path.join(CLAWVAULT_DIR, "handoffs");
 export const SOULS_DIR = path.join(OPENCLAW_ROOT, "souls");
 export const MC_SESSION_TOKEN_PATH = path.join(OPENCLAW_ROOT, "config", "mc-session-token");
+
+/** The root holding openclaw.env, openclaw.json and identity.key: OPENCLAW_HOME, else OPENCLAW_ROOT. */
+export function openclawHome(): string {
+  return process.env.OPENCLAW_HOME || OPENCLAW_ROOT;
+}
+
+export function openclawEnvFile(): string {
+  return path.join(openclawHome(), "openclaw.env");
+}
 
 // Lore knowledge base directories
 export const LORE_DIRS = [
@@ -66,7 +80,7 @@ export const LORE_DIRS = [
 // Override via env vars to use any agent name or human name.
 
 /** Name of the autonomous agent (shown in kanban, scheduler, notifications) */
-export const AGENT_NAME = resolveAgentName(process.env, path.join(OPENCLAW_ROOT, "openclaw.env"));
+export const AGENT_NAME = resolveAgentName(process.env, openclawEnvFile());
 
 /** Name of the human operator (shown in done-gate, manual task ownership) */
 export const HUMAN_NAME = process.env.OPENCLAW_HUMAN_NAME || "Gui";
@@ -89,7 +103,7 @@ export const NODE_ID = resolveDaemonNodeId();
 export function resolveDaemonNodeId(
   env: Record<string, string | undefined> = process.env,
   host: string = hostname(),
-  envFile: string = path.join(os.homedir(), ".openclaw", "openclaw.env"),
+  envFile: string = openclawEnvFile(),
 ): string {
   const fromEnv = (env.OPENCLAW_NODE_ID || "").trim();
   if (fromEnv) return fromEnv;

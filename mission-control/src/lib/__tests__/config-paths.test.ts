@@ -63,10 +63,19 @@ test("a non-default OPENCLAW_ROOT moves every MC store under it, not under ~/.op
   vi.stubEnv("HOME", home);
   vi.stubEnv("WORKSPACE_ROOT", path.join(root, "workspace"));
   vi.stubEnv("OPENCLAW_HOME", "");
+  for (const key of ["OPENCLAW_NODE_ID", "OPENCLAW_AGENT_NAME", "MESH_NODE_ID", "OPENCLAW_NATS_AUTH"]) vi.stubEnv(key, "");
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "openclaw.env"),
+    "OPENCLAW_NODE_ID=lead-a\nOPENCLAW_AGENT_NAME=Icarus\nOPENCLAW_NATS_AUTH=nkey\n",
+  );
   vi.resetModules();
 
   const config = await import("@/lib/config");
   expect(config.OPENCLAW_ROOT).toBe(root);
+  expect(config.NODE_ID).toBe("lead-a");
+  expect(config.AGENT_NAME).toBe("Icarus");
+  expect((await import("@/lib/nats-auth")).resolveNatsAuthMode()).toBe("nkey");
   expect(config.HANDOFFS_DIR).toBe(path.join(root, "workspace", "memory-vault", "handoffs"));
   expect(config.SOULS_DIR).toBe(path.join(root, "souls"));
   expect(config.MC_SESSION_TOKEN_PATH).toBe(path.join(root, "config", "mc-session-token"));
@@ -79,7 +88,27 @@ test("a non-default OPENCLAW_ROOT moves every MC store under it, not under ~/.op
   const { defaultMcTokenPath } = await import("../../../../lib/mc-session-token.mjs");
   expect(defaultMcTokenPath({ OPENCLAW_WORKSPACE: path.join(root, "workspace") })).toBe(config.MC_SESSION_TOKEN_PATH);
 
-  expect((await import("@/lib/nats-auth")).openclawHome()).toBe(root);
+  expect(config.openclawHome()).toBe(root);
+});
+
+test("OBSIDIAN_DIR honours OBSIDIAN_VAULT_PATH and OPENCLAW_OBSIDIAN_SYNC_CONFIG like lib/obsidian-vault.mjs", async () => {
+  const root = path.join(tmpHome(), "oc-root");
+  vi.stubEnv("WORKSPACE_ROOT", path.join(root, "workspace"));
+  vi.stubEnv("OBSIDIAN_DIR", "");
+  vi.stubEnv("OBSIDIAN_VAULT_PATH", "/v");
+  vi.resetModules();
+  expect((await import("@/lib/config")).OBSIDIAN_DIR).toBe("/v");
+
+  const cfg = path.join(tmpHome(), "obsidian-sync.json");
+  fs.writeFileSync(cfg, JSON.stringify({ memoryVaultPath: "/m" }));
+  vi.stubEnv("OBSIDIAN_VAULT_PATH", "");
+  vi.stubEnv("OPENCLAW_OBSIDIAN_SYNC_CONFIG", cfg);
+  vi.resetModules();
+  expect((await import("@/lib/config")).OBSIDIAN_DIR).toBe("/m");
+
+  vi.stubEnv("OBSIDIAN_DIR", "/explicit");
+  vi.resetModules();
+  expect((await import("@/lib/config")).OBSIDIAN_DIR).toBe("/explicit");
 });
 
 test("no MC module outside config.ts joins the home directory with .openclaw", () => {

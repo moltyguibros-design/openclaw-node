@@ -21,7 +21,7 @@ import { createPrivateKey } from "crypto";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { nkeyAuthenticator, nkeys, type Authenticator } from "nats";
-import { OPENCLAW_ROOT } from "./config";
+import { openclawEnvFile, openclawHome } from "./config";
 
 // The nkey seed codec is not exported by `nats` (nor by nkeys.js's public
 // entry), so it is vendored, as in lib/nats-nkey.js: prefix + payload +
@@ -63,15 +63,11 @@ function encodeSeed(role: number, seed32: Uint8Array): string {
 export type NatsAuthMode = "token" | "nkey" | "nkey-strict";
 const MODES: NatsAuthMode[] = ["token", "nkey", "nkey-strict"];
 
-export function openclawHome(): string {
-  return process.env.OPENCLAW_HOME || OPENCLAW_ROOT;
-}
-
-/** env → ~/.openclaw/openclaw.env (same regex as the node resolver). */
+/** env → openclaw.env (same regex as the node resolver). */
 export function resolveEnvKey(key: string, env: NodeJS.ProcessEnv = process.env): string | null {
   if (env[key]) return env[key] as string;
   try {
-    const envFile = join(openclawHome(), "openclaw.env");
+    const envFile = openclawEnvFile();
     if (existsSync(envFile)) {
       const content = readFileSync(envFile, "utf8");
       const match = content.match(new RegExp(`^\\s*${key}\\s*=\\s*(.+)`, "m"));
