@@ -38,7 +38,7 @@
 const { connect, StringCodec } = require('nats');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-agent');
-const { spawn, execSync, execFileSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
@@ -53,7 +53,7 @@ const { findRole, formatRoleForPrompt, validateRequiredOutputs } = require('../l
 const sc = StringCodec();
 const { NATS_URL, natsConnectOpts, resolveEnvKey } = require('../lib/nats-resolve');
 const { PROVIDERS, resolveProvider, resolveModel, isOpenClawWorkerProvider, taskProviderRefusal } = require('../lib/llm-providers');
-const { runProvider } = require('../lib/llm-run');
+const { runCli, runProvider } = require('../lib/llm-run');
 // One derivation for every daemon (lib/node-id) — the agent must claim tasks
 // under the same node_id the task daemon authorizes, or ownership checks fail.
 const NODE_ID = require('../lib/node-id').resolveNodeId();
@@ -1339,34 +1339,18 @@ function isAllowedMetric(cmd) {
 /**
  * Run the task's metric command. Returns { passed, output }.
  */
-function evaluateMetric(metric, cwd) {
+async function evaluateMetric(metric, cwd, { timeoutMs = 60000 } = {}) {
   const dir = cwd || WORKSPACE;
   const check = validateMetricCommand(metric, { cwd: dir });
   if (!check.allowed) {
     log(`WARNING: Metric command blocked by security filter: ${metric} (${check.reason})`);
-    return Promise.resolve({ passed: false, output: `Metric command blocked by security filter: ${check.reason}` });
+    return { passed: false, output: `Metric command blocked by security filter: ${check.reason}` };
   }
-  return new Promise((resolve) => {
-    const [program, ...args] = check.argv;
-    const child = spawn(program, args, {
-      cwd: dir,
-      env: process.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 60000, // 60s max for metric evaluation
-    });
-
-    let output = '';
-    child.stdout.on('data', (d) => { output += d.toString(); });
-    child.stderr.on('data', (d) => { output += d.toString(); });
-
-    child.on('close', (code) => {
-      resolve({ passed: code === 0, output: output.slice(-2000) }); // last 2K chars
-    });
-
-    child.on('error', (err) => {
-      resolve({ passed: false, output: err.message });
-    });
-  });
+  const [program, ...args] = check.argv;
+  const run = await runCli({ binary: program, args, cwd: dir, timeoutMs });
+  const output = run.stdout + (run.stderr ? (run.stdout ? '\n' : '') + run.stderr : '');
+  // Not outcome === 'ok': a metric that exits 0 without printing classifies as 'empty' and passes.
+  return { passed: run.exitCode === 0 && !run.timedOut && !run.spawnError, output: output.slice(-2000) };
 }
 
 // ── Collab Prompt Construction ────────────────────────

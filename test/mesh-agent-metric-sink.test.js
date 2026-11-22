@@ -69,4 +69,32 @@ describe('evaluateMetric', () => {
     assert.equal((await run(`node ${outside}`)).passed, false);
     assert.equal((await run('node ../outside.js')).passed, false);
   });
+
+  it('passes a metric that exits 0 without printing anything', async () => {
+    fs.writeFileSync(path.join(WORKTREE, 'silent.js'), '');
+    assert.equal((await run('node silent.js')).passed, true);
+  });
+
+  const settlesWithin = (promise, ms) => {
+    let timer;
+    return Promise.race([
+      promise,
+      new Promise((resolve) => { timer = setTimeout(() => resolve('hung'), ms); }),
+    ]).finally(() => clearTimeout(timer));
+  };
+
+  it('fails a metric that ignores SIGTERM at its deadline instead of hanging', async () => {
+    fs.writeFileSync(path.join(WORKTREE, 'trap.js'), "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);\n");
+    const r = await settlesWithin(agent.__test.evaluateMetric('node trap.js', WORKTREE, { timeoutMs: 500 }), 10000);
+    assert.notEqual(r, 'hung');
+    assert.equal(r.passed, false);
+  });
+
+  it('fails a metric whose child keeps its output pipe open', async () => {
+    fs.writeFileSync(path.join(WORKTREE, 'orphan.js'),
+      "require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' }); process.exit(0);\n");
+    const r = await settlesWithin(agent.__test.evaluateMetric('node orphan.js', WORKTREE, { timeoutMs: 500 }), 10000);
+    assert.notEqual(r, 'hung');
+    assert.equal(r.passed, false);
+  });
 });
