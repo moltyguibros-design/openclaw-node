@@ -47,3 +47,11 @@ test('AGENTS.md "Every Session" is the one boot list, and CLAUDE.md points at it
   assert.match(bootstrap, /AGENTS\.md.*"Every Session"/);
   for (const [f, text] of docs) assert.doesNotMatch(text, /bin\/memory-daemon(?!\.mjs)/, f);
 });
+
+// soul-prompt and POST /api/souls/daedalus/prompt build the daedalus preamble
+// from the souls copy, so it must not drift from the workspace identity.
+test('the daedalus soul mirrors the workspace SOUL and PRINCIPLES', () => {
+  for (const f of ['SOUL.md', 'PRINCIPLES.md']) {
+    assert.equal(fs.readFileSync(path.join(ROOT, 'souls', 'daedalus', f), 'utf8'), fs.readFileSync(path.join(ROOT, 'identity', f), 'utf8'), f);
+  }
+});
