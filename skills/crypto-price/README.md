@@ -95,7 +95,6 @@ The script returns JSON with the following structure:
   - Fractal swing high/low detection (true pivots, configurable window)
   - Volume bars (when available from API)
   - Last price highlighted on Y-axis
-  - Tomorrow font for crisp rendering
 - **Output**: PNG files saved to `/tmp/crypto_chart_{SYMBOL}_{timestamp}.png`
 
 ## Data Sources
@@ -143,13 +142,6 @@ Created for Clawdbot community. Originally part of Clawdbot bundled skills, rest
 ## Contributing
 
 Contributions welcome! Please feel free to submit a Pull Request.
-
-## Related Skills
-
-This skill works with slash command skills:
-- `/hype` - HYPE token price and chart
-- `/token <SYMBOL>` - Any token price and chart
-- `/btc`, `/eth`, `/sol`, etc. - Popular tokens
 
 ## Links
 
