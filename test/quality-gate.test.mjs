@@ -11,7 +11,7 @@ import { describe, it } from 'node:test';
 import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -102,5 +102,60 @@ describe('quality-gate --files', () => {
     const r = run(ws, ['--files', 'nope.js'], ws);
     assert.equal(r.status, 2, r.stdout + r.stderr);
     assert.match(r.stdout, /WARN \[input\]: nope\.js not found/);
+  });
+});
+
+describe('quality-gate TypeScript gate', () => {
+  const SYSTEM_PATH = '/usr/bin:/bin';
+  const tscOnSystemPath = spawnSync('bash', ['-c', 'command -v tsc'], { env: { PATH: SYSTEM_PATH } }).status === 0;
+
+  function project(t, { localTsc, pathTsc } = {}) {
+    const ws = tmpDir('quality-gate-ts-');
+    const proj = join(ws, 'projects', 'p');
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(join(proj, 'tsconfig.json'), '{}\n');
+    writeFileSync(join(proj, 'a.ts'), 'export const a = 1;\n');
+    const fakeBin = join(ws, 'fakebin');
+    mkdirSync(fakeBin);
+    const npxRecord = join(ws, 'npx-argv');
+    writeFileSync(join(fakeBin, 'npx'), `#!/bin/sh\necho "$@" > ${JSON.stringify(npxRecord)}\nexit 1\n`, { mode: 0o755 });
+    if (localTsc) {
+      mkdirSync(join(proj, 'node_modules', '.bin'), { recursive: true });
+      writeFileSync(join(proj, 'node_modules', '.bin', 'tsc'), localTsc, { mode: 0o755 });
+    }
+    if (pathTsc) writeFileSync(join(fakeBin, 'tsc'), pathTsc, { mode: 0o755 });
+    const r = spawnSync('bash', [SCRIPT, '--files', 'projects/p/a.ts'], {
+      cwd: ws,
+      encoding: 'utf8',
+      env: { PATH: `${fakeBin}:${SYSTEM_PATH}`, HOME: ws, OPENCLAW_WORKSPACE: ws },
+    });
+    return { ...r, npxCalled: existsSync(npxRecord) };
+  }
+
+  it('warns instead of fetching a registry package when no TypeScript is installed', { skip: tscOnSystemPath && 'tsc on /usr/bin:/bin' }, t => {
+    const r = project(t);
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stdout, /WARN \[typescript\]: no local TypeScript in .*projects\/p; not compiled/);
+    assert.equal(r.npxCalled, false);
+  });
+
+  it("fails on the project's own tsc errors", t => {
+    const r = project(t, { localTsc: '#!/bin/sh\necho "error TS1"\nexit 1\n' });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stdout, /FAIL \[typescript\]/);
+    assert.equal(r.npxCalled, false);
+  });
+
+  it("passes on the project's own clean tsc", t => {
+    const r = project(t, { localTsc: '#!/bin/sh\nexit 0\n' });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /OK \[typescript\]: Clean/);
+  });
+
+  it('uses a tsc on PATH when the project has none', t => {
+    const r = project(t, { pathTsc: '#!/bin/sh\nexit 0\n' });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /OK \[typescript\]: Clean/);
+    assert.equal(r.npxCalled, false);
   });
 });

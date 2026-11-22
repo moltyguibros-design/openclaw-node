@@ -110,12 +110,21 @@ if [ ${#TS_FILES[@]} -gt 0 ]; then
   fi
 
   if [ -n "$PROJECT_DIR" ] && [ -f "$PROJECT_DIR/tsconfig.json" ]; then
-    echo "  Checking TypeScript compilation..."
-    if ! (cd "$PROJECT_DIR" && npx --yes tsc --noEmit 2>&1 | tail -5); then
-      echo "  FAIL [typescript]: Compilation errors detected"
-      FAILURES=$((FAILURES + 1))
+    # Never npx: without a local typescript it installs and runs the unrelated
+    # registry package named `tsc`.
+    TSC="$PROJECT_DIR/node_modules/.bin/tsc"
+    [ -x "$TSC" ] || TSC="$(command -v tsc || true)"
+    if [ -z "$TSC" ]; then
+      echo "  WARN [typescript]: no local TypeScript in $PROJECT_DIR; not compiled"
+      WARNINGS=$((WARNINGS + 1))
     else
-      echo "  OK [typescript]: Clean"
+      echo "  Checking TypeScript compilation..."
+      if ! (cd "$PROJECT_DIR" && "$TSC" --noEmit 2>&1 | tail -5); then
+        echo "  FAIL [typescript]: Compilation errors detected"
+        FAILURES=$((FAILURES + 1))
+      else
+        echo "  OK [typescript]: Clean"
+      fi
     fi
   fi
 fi
