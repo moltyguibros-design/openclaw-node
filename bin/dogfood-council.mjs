@@ -19,7 +19,9 @@
  *
  * Environment:
  *   DOGFOOD_METRICS_PATH — override metrics output path
- *   DOGFOOD_NATS_URL     — NATS server URL (default: nats://localhost:4222)
+ *   DOGFOOD_NATS_URL     — NATS URL for the harness connection (default: OPENCLAW_NATS /
+ *                          openclaw.env via lib/nats-resolve; spawned node configs
+ *                          default to nats://localhost:4222)
  *
  * @module bin/dogfood-council
  */
@@ -39,9 +41,6 @@ const { natsConnectOpts } = createRequire(import.meta.url)('../lib/nats-resolve.
 
 /** Default metrics output path. */
 export const DEFAULT_METRICS_PATH = join(homedir(), '.openclaw', 'dogfood-metrics.jsonl');
-
-/** Default NATS URL for the dogfood harness. */
-export const DEFAULT_NATS_URL = 'nats://localhost:4222';
 
 /** Default council size. */
 export const COUNCIL_SIZE = 3;
@@ -486,7 +485,7 @@ export async function createDogfoodHarness(opts = {}) {
     try {
       const { connect } = await import('nats');
       nc = await connect(natsConnectOpts({ servers: natsUrl }));
-      log(`[dogfood] connected to NATS at ${natsUrl}`);
+      log(`[dogfood] connected to NATS at ${nc.getServer()}`);
     } catch (err) {
       log(`[dogfood] NATS connection failed: ${err.message} — running in offline mode`);
       nc = null;
@@ -602,7 +601,7 @@ async function main() {
 
 Options:
   --node-ids <a,b,c>     Comma-separated node identifiers (default: alpha,bravo,charlie)
-  --nats-url <url>       NATS server URL (default: nats://localhost:4222)
+  --nats-url <url>       Harness NATS URL (default: lib/nats-resolve; spawned nodes get nats://localhost:4222)
   --metrics-path <path>  Metrics JSONL output path (default: ~/.openclaw/dogfood-metrics.jsonl)
   --base-dir <dir>       Base directory for spawned nodes
   --duration <sec>       Auto-stop after N seconds (default: run until SIGINT)

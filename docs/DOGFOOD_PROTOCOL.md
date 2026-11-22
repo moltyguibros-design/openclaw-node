@@ -196,7 +196,7 @@ At ~200 bytes per line, a 24h run with 1 broadcast/minute produces ~280 KB. With
 
 ### NATS connection refused
 
-The harness expects NATS at `nats://localhost:4222` by default. Override with `--nats-url` or `DOGFOOD_NATS_URL` env var if your cluster is on different ports.
+The harness connects to the URL `lib/nats-resolve` resolves (`OPENCLAW_NATS`, then `~/.openclaw/openclaw.env`) unless `--nats-url` or `DOGFOOD_NATS_URL` is set; spawned node configs default to `nats://localhost:4222`. The `connected to NATS at` log line names the server it reached.
 
 ---
 
@@ -205,7 +205,7 @@ The harness expects NATS at `nats://localhost:4222` by default. Override with `-
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DOGFOOD_METRICS_PATH` | `~/.openclaw/dogfood-metrics.jsonl` | Metrics output path |
-| `DOGFOOD_NATS_URL` | `nats://localhost:4222` | NATS server URL |
+| `DOGFOOD_NATS_URL` | `OPENCLAW_NATS` / `~/.openclaw/openclaw.env` (`lib/nats-resolve`); spawned node configs default to `nats://localhost:4222` | NATS URL for the harness connection |
 | `OPENCLAW_SPAWN_BASE` | `~/.openclaw-` | Base prefix for spawned node trees |
 
 ---

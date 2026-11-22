@@ -22,7 +22,7 @@ Three tiers of integration, from tightest to loosest:
 
 ## Prerequisites
 
-- NATS server running (default `nats://localhost:4222`)
+- NATS server running (`NATS_URL`, else `OPENCLAW_NATS` / `~/.openclaw/openclaw.env` via `lib/nats-resolve`)
 - OpenClaw memory daemon running (`workspace-bin/memory-daemon.mjs`)
 - Node.js 22+ (for CLI tools and SDK wrappers)
 
@@ -30,7 +30,7 @@ Three tiers of integration, from tightest to loosest:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NATS_URL` | `nats://localhost:4222` | NATS server URL |
+| `NATS_URL` | `OPENCLAW_NATS` / `~/.openclaw/openclaw.env` (`lib/nats-resolve`) | NATS server URL |
 | `OPENCLAW_NODE_ID` | `~/.openclaw/openclaw.env`, else the short hostname | Node whose daemon the request goes to; must match the daemon's id |
 | `EXTRACTION_IDLE_THRESHOLD_SEC` | `2700` (45 min) | Idle timer before auto-extraction |
 

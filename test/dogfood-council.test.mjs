@@ -10,6 +10,8 @@ import assert from 'node:assert/strict';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import {
   createMetricEntry,
@@ -364,6 +366,15 @@ describe('constants', () => {
     assert.ok(MONITORED_SUBJECTS.includes('context.offer.>'));
     assert.ok(MONITORED_SUBJECTS.includes('context.accepted.>'));
     assert.equal(Object.keys(METRIC_TYPES).length, 7);
+  });
+
+  it('--help names lib/nats-resolve as the harness NATS default, not a fixed localhost URL', () => {
+    const bin = fileURLToPath(new URL('../bin/dogfood-council.mjs', import.meta.url));
+    const { stdout, status } = spawnSync(process.execPath, [bin, '--help'], { encoding: 'utf8' });
+    assert.equal(status, 0);
+    const line = stdout.split('\n').find((l) => l.trim().startsWith('--nats-url'));
+    assert.match(line, /nats-resolve/);
+    assert.doesNotMatch(line, /\(default: nats:\/\/localhost:4222\)/);
   });
 });
 

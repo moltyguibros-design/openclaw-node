@@ -6,7 +6,6 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
-  DEFAULT_NATS_URL,
   EXTRACT_SUBJECT,
   publishExtractDirect,
   createNatsPublisher,
@@ -21,10 +20,6 @@ import { runExtractNow } from '../bin/openclaw-extract-now.mjs';
 // --- publish-helper tests ---
 
 describe('publish-helper constants', () => {
-  it('exports DEFAULT_NATS_URL', () => {
-    assert.equal(DEFAULT_NATS_URL, 'nats://localhost:4222');
-  });
-
   it('exports EXTRACT_SUBJECT matching extraction-trigger', () => {
     assert.equal(EXTRACT_SUBJECT, 'mesh.memory.extract_request');
   });
