@@ -52,3 +52,15 @@ test('the heartbeat mesh check runs a probe that exists and is installed', () =>
   assert.ok(existsSync(join(ROOT, 'bin', 'node-acceptance.mjs')));
   assert.match(read('scripts/install/workspace.sh'), /for _wsbin in [^;]*\bnode-acceptance\.mjs\b/);
 });
+
+test('heartbeat maintenance defers to the shared throttle and names shipped files', () => {
+  const AGENTS = read('identity/AGENTS.md');
+  assert.match(HEARTBEAT, /`bin\/memory-maintenance\.mjs --verbose`/);
+  for (const doc of [HEARTBEAT, AGENTS]) assert.doesNotMatch(doc, /memory-maintenance(\.mjs)? --force/);
+  assert.doesNotMatch(HEARTBEAT, /via auto-checkpoint|20-min interval/);
+  for (const doc of [HEARTBEAT, AGENTS]) {
+    for (const [, name] of doc.matchAll(/`bin\/([\w./-]+)/g)) {
+      assert.ok(existsSync(join(ROOT, 'workspace-bin', name)) || existsSync(join(ROOT, 'bin', name)), `bin/${name} is not shipped`);
+    }
+  }
+});

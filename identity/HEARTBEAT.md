@@ -1,4 +1,4 @@
-# Heartbeat Protocol (20-min interval)
+# Heartbeat Protocol
 
 This file is the SINGLE SOURCE OF TRUTH for heartbeat behavior.
 AGENTS.md points here. All heartbeat logic lives here.
@@ -37,7 +37,7 @@ AGENTS.md points here. All heartbeat logic lives here.
 
 ## MANDATORY: Memory Maintenance (every heartbeat)
 
-1. Run `bin/memory-maintenance.mjs --force --verbose`
+1. Run `bin/memory-maintenance.mjs --verbose` (it skips itself when the memory daemon ran it in the last 30 min; the results file below still holds that run)
 2. Read `.tmp/maintenance-results` — if any warnings, report to Gui
 3. Specific attention:
    - ARCHIVAL: daily files >30 days → archived automatically
@@ -136,7 +136,7 @@ Before significant decisions, write a structured prediction:
 4. Watch for systematic overconfidence or complexity underestimates
 
 ## Current State
-- Memory maintenance: AUTOMATED via auto-checkpoint (every 30min) + heartbeat (every 20min)
+- Memory maintenance: automated by the memory daemon (every 30 min while a session is live, and at session start); the heartbeat runs it when it is due
 - Principle 11 active: all structural systems must be automated
 - Skill Quality Engineering: complete (Phases 1-6)
 - Routing eval baseline: 95.9% accuracy, 29 conflict pairs
