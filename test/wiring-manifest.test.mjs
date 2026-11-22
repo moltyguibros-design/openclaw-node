@@ -136,6 +136,35 @@ function stripImports(src) {
     ;
 }
 
+// Comments and the factory's own declaration are also in call position, so a
+// row whose factory is defined in its calledIn file could never fail. Comment
+// strips are anchored to line starts: an unanchored /* would open inside glob
+// strings such as 'test/**'.
+function isInvoked(src, name) {
+  const code = stripImports(src)
+    .replace(/^\s*\/\*[\s\S]*?\*\//gm, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(new RegExp(`(?:export\\s+)?(?:async\\s+)?function\\s*\\*?\\s*${name}\\s*\\(`, 'g'), '');
+  return new RegExp(`\\b${name}\\s*\\(`).test(code);
+}
+
+describe('isInvoked self-test', () => {
+  it('a definition plus a comment mention is not a call', () => {
+    assert.equal(isInvoked('async function f() {}\n// f (see x)\n', 'f'), false);
+    assert.equal(isInvoked('export async function f() {}\n/* f(x) */\n', 'f'), false);
+  });
+
+  it('a definition plus a real call is a call', () => {
+    assert.equal(isInvoked('function f() {}\nf();', 'f'), true);
+  });
+
+  it('dropping the only call of a factory defined in its calledIn file fails the row', () => {
+    const src = readFileSync(join(REPO_ROOT, 'bin/mesh-agent.js'), 'utf8');
+    assert.ok(src.includes('await reconcileKeptBranches();'));
+    assert.equal(isInvoked(src.replace('await reconcileKeptBranches();', ''), 'reconcileKeptBranches'), false);
+  });
+});
+
 describe('production wiring manifest', () => {
   for (const { factory, calledIn } of REQUIRED_PRODUCTION_WIRES) {
     it(`regression_F-N1: ${factory} is invoked (call position) in ${calledIn}`, () => {
@@ -145,13 +174,7 @@ describe('production wiring manifest', () => {
       } catch (err) {
         assert.fail(`expected entrypoint ${calledIn} to exist (${err.message})`);
       }
-      // Strip imports so a factory that's imported-but-never-called fails.
-      const stripped = stripImports(src);
-      // Match `factory(` or `factory (` — explicit call position. F-P110
-      // / F-Q412: previously the regex was just `\b${factory}\b` which
-      // a comment or leftover import would satisfy.
-      const callPattern = new RegExp(`\\b${factory}\\s*\\(`);
-      assert.match(stripped, callPattern,
+      assert.ok(isInvoked(src, factory),
         `${factory} must be INVOKED (call position) in ${calledIn} — not just imported. ` +
         `If the factory was renamed, update REQUIRED_PRODUCTION_WIRES. ` +
         `If intentionally inert, document the gap in memory-plan/plans/legacy/STUB_AUDIT.md and remove the row. ` +
