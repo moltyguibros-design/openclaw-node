@@ -836,3 +836,40 @@ describe('HyperAgentStore: integrity regressions', () => {
     assert.equal(selected.node_id, 'node-a');
   }));
 });
+
+// The pragmas a better-sqlite3 handle runs while fn does: every opener goes through openStore.
+async function pragmasWhile(fn) {
+  const Database = require('better-sqlite3');
+  const seen = [];
+  const original = Database.prototype.pragma;
+  Database.prototype.pragma = function pragma(source, ...rest) {
+    seen.push(String(source));
+    return original.call(this, source, ...rest);
+  };
+  try { await fn(); } finally { Database.prototype.pragma = original; }
+  return seen;
+}
+const integrityChecks = (pragmas) => pragmas.filter((p) => /integrity_check|quick_check/.test(p));
+
+describe('HyperAgentStore: integrity check on open', () => {
+  const dbs = [];
+  const tmpDb = () => {
+    const p = path.join(os.tmpdir(), `ha-integrity-${process.pid}-${dbs.length}.db`);
+    dbs.push(p);
+    return p;
+  };
+  after(() => {
+    for (const p of dbs) for (const suffix of ['', '-wal', '-shm']) { try { fs.unlinkSync(p + suffix); } catch {} }
+  });
+
+  it('integrityCheck: false opens without one; the default runs one full check', async () => {
+    const { createHyperAgentStore } = await import('../lib/hyperagent-store.mjs');
+    let skipped;
+    assert.deepEqual(integrityChecks(await pragmasWhile(() => { skipped = createHyperAgentStore({ dbPath: tmpDb(), integrityCheck: false }); })), []);
+    skipped.close();
+    let checked;
+    assert.deepEqual(integrityChecks(await pragmasWhile(() => { checked = createHyperAgentStore({ dbPath: tmpDb() }); })), ['integrity_check']);
+    checked.close();
+  });
+});
+

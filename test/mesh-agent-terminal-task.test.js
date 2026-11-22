@@ -151,3 +151,24 @@ describe('the worker stops cleanly on a task the daemon ended', () => {
     assert.ok(again && fs.existsSync(again), 'a kept branch does not block a re-claim');
   });
 });
+
+describe('per-task HyperAgent telemetry', () => {
+  it('opens state.db without a full integrity check (one per task end was a full read of the db)', async () => {
+    const Database = require('better-sqlite3');
+    const seen = [];
+    const original = Database.prototype.pragma;
+    Database.prototype.pragma = function pragma(source, ...rest) {
+      seen.push(String(source));
+      return original.call(this, source, ...rest);
+    };
+    try {
+      await agent.recordHyperagentTask({ task_id: 'T-IC', title: 'integrity' }, { outcome: 'success', iterations: 1, startedAt: Date.now(), notes: '' });
+    } finally {
+      Database.prototype.pragma = original;
+    }
+    assert.ok(seen.length > 0, 'the store was opened');
+    assert.deepEqual(seen.filter((p) => /integrity_check|quick_check/.test(p)), []);
+    assert.equal((await telemetryFor('T-IC')).length, 1);
+  });
+});
+

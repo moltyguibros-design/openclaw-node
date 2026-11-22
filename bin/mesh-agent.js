@@ -130,10 +130,12 @@ function taskTaxonomy(task) {
   };
 }
 
+// Both per-task opens skip the integrity check: a full one re-reads all of state.db
+// (transcripts, FTS) twice per task for a one-row read and a one-row write.
 async function prepareHyperagentStrategy(task) {
   try {
     const { createHyperAgentStore } = await import('../lib/hyperagent-store.mjs');
-    const store = createHyperAgentStore({ dbPath: process.env.OPENCLAW_STATE_DB || path.join(os.homedir(), '.openclaw', 'state.db') });
+    const store = createHyperAgentStore({ dbPath: process.env.OPENCLAW_STATE_DB || path.join(os.homedir(), '.openclaw', 'state.db'), integrityCheck: false });
     try {
       const { domain, subdomain } = taskTaxonomy(task);
       const strategy = store.getStrategy(domain, subdomain, NODE_ID);
@@ -476,7 +478,7 @@ function deriveExecutionClass(task, providerName) {
 async function recordHyperagentTask(task, { outcome, iterations, startedAt, notes, sessionId = null }) {
   try {
     const { createHyperAgentStore } = await import('../lib/hyperagent-store.mjs');
-    const store = createHyperAgentStore({ dbPath: process.env.OPENCLAW_STATE_DB || path.join(os.homedir(), '.openclaw', 'state.db') });
+    const store = createHyperAgentStore({ dbPath: process.env.OPENCLAW_STATE_DB || path.join(os.homedir(), '.openclaw', 'state.db'), integrityCheck: false });
     try {
       const { domain, subdomain } = taskTaxonomy(task);
       // Deterministic per task — recomputed here rather than threaded through
