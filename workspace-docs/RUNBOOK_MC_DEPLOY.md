@@ -6,7 +6,7 @@ repo: launchd (`ai.openclaw.mission-control`, `npm start`) execs from
 procedure. Type-only changes need no deploy.
 
 ## The two landmines (both bit us)
-1. **Lockfile npm-major skew** — CI and `npm ci` validate with npm 10 (Node 20/22); a lockfile
+1. **Lockfile npm-major skew** — CI and `npm ci` validate with npm 10 (bundled with Node 22); a lockfile
    touched by local npm 11 prunes entries npm 10 requires. ALWAYS install/regenerate with
    `npx -y npm@10`.
 2. **Node ABI skew** — the service's plist PATH resolves an fnm-managed Node 22 (ABI 127), NOT

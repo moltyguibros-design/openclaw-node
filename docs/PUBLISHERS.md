@@ -24,7 +24,7 @@ Three tiers of integration, from tightest to loosest:
 
 - NATS server running (`NATS_URL`, else `OPENCLAW_NATS` / `~/.openclaw/openclaw.env` via `lib/nats-resolve`)
 - OpenClaw memory daemon running (`workspace-bin/memory-daemon.mjs`)
-- Node.js 22+ (for CLI tools and SDK wrappers)
+- Node.js 22.12+ (for CLI tools and SDK wrappers)
 
 ## Environment Variables
 

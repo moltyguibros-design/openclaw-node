@@ -222,7 +222,7 @@ package manager's exit code.
 
 | Package | Purpose |
 |---|---|
-| `nodejs` (22+) | Runtime for daemon, MC, and Node.js scripts |
+| `nodejs` (22.12+) | Runtime for daemon, MC, and Node.js scripts |
 | `nats-server` | The message bus every subsystem talks through (single-node loopback by default; R=3 cluster is opt-in) |
 | `ollama` | Local LLM runtime for memory extraction + local mesh agents (skip with `--skip-llm`) |
 | `python3` + `python3-pip` | Runtime for boot compiler, trust registry, evolution |

@@ -116,13 +116,23 @@ test('operator docs state the Node baseline that package.json engines and the in
   const [, majorText, minorText] = read('package.json').match(/"node": ">=(\d+)\.(\d+)"/);
   const [major, minor] = [Number(majorText), Number(minorText)];
   assert.ok(read('scripts/install/prereqs.sh').includes(`[ "$major" -eq ${major} ] && [ "$minor" -ge ${minor} ]`), 'prereqs node_ok baseline');
-  const patterns = [/Node(?:\.js)? ?(?:\| )?≥ ?(\d+)/g, /Node(?:\.js)? (\d+)\+/g, /v(\d+)\+/g, /≥ v(\d+)\.0\.0/g, /nvm install (\d+)/g, /setup_(\d+)\.x/g];
-  for (const doc of ['docs/NODE_SPEC.md', 'docs/INSTALL_TEST_PROTOCOL.md', 'docs/MULTI_NODE_DEPLOY.md', 'docs/PUBLISHERS.md']) {
+  const floors = [
+    /Node(?:\.js)?\*{0,2} ?(?:\| )?(?:≥|>=) ?(\d+)(?:\.(\d+))?/g, /Node(?:\.js)? (\d+)(?:\.(\d+))?\+/g,
+    /`nodejs` \((\d+)(?:\.(\d+))?\+\)/g, /v(\d+)(?:\.(\d+))?\+/g, /node --version +# ≥ v(\d+)\.(\d+)/g,
+  ];
+  const installs = [/nvm install (\d+)/g, /setup_(\d+)\.x/g];
+  for (const doc of ['README.md', 'docs/DOGFOOD_PROTOCOL.md', 'docs/NODE_SPEC.md', 'docs/INSTALL_TEST_PROTOCOL.md', 'docs/MULTI_NODE_DEPLOY.md', 'docs/PUBLISHERS.md']) {
     const text = read(doc);
-    for (const re of patterns) {
-      for (const [hit, v] of text.matchAll(re)) assert.ok(Number(v) >= major, `${doc}: "${hit}" is below the Node ${major} baseline`);
+    for (const re of floors) {
+      for (const [hit, a, b = '0'] of text.matchAll(re)) {
+        assert.ok(Number(a) > major || (Number(a) === major && Number(b) >= minor), `${doc}: "${hit}" is below the Node ${major}.${minor} engines floor`);
+      }
+    }
+    for (const re of installs) {
+      for (const [hit, v] of text.matchAll(re)) assert.ok(Number(v) >= major, `${doc}: "${hit}" installs below Node ${major}`);
     }
   }
+  assert.doesNotMatch(read('workspace-docs/RUNBOOK_MC_DEPLOY.md'), /Node 20/);
   assert.doesNotMatch(read('docs/NODE_SPEC.md'), /operator installs \(brew\/nodejs\.org\)/);
 });
 

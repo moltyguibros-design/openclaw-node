@@ -8,7 +8,7 @@ The dogfood harness (`bin/dogfood-council.mjs`) is the observability layer for l
 
 ## Prerequisites
 
-- **Node.js >= 18** (same as the rest of OpenClaw)
+- **Node.js >= 22.12** (package.json engines)
 - **NATS cluster running** — see [docs/MULTI_NODE_DEPLOY.md](MULTI_NODE_DEPLOY.md) for setup
 - **3 openclaw node trees** — spawned via `bin/spawn-node.mjs` or configured manually
 - **Memory daemon running** on at least one node (to produce broadcasts)

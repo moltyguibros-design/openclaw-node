@@ -29,7 +29,7 @@ those five up.
 
 | Component | macOS source | Linux source | Consumed by |
 |---|---|---|---|
-| Node.js ≥22 (package.json engines) | brew `node@22` (auto; Homebrew required — prereqs.sh exits without it) | auto (NodeSource node_22.x apt) | every daemon |
+| Node.js ≥22.12 (package.json engines) | brew `node@22` (auto; Homebrew required — prereqs.sh exits without it) | auto (NodeSource node_22.x apt) | every daemon |
 | npm | ships with node | ships with node | MC, skills, repo deps |
 | **repo `node_modules`** (`nats`, `better-sqlite3`, …) | **install.sh runs `npm install` in the repo** | same | all mesh daemons (exec from repo), workspace symlinks |
 | **nats-server ≥2.10** | brew (auto if brew present) | pinned GitHub release binary → `/usr/local/bin` | the bus every subsystem talks through |

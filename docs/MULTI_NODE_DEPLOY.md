@@ -10,7 +10,7 @@ Each node machine needs:
 
 | Dependency | Version | Install |
 |-----------|---------|---------|
-| Node.js | ≥22 | [nodejs.org](https://nodejs.org) or `nvm install 22` |
+| Node.js | ≥22.12 | [nodejs.org](https://nodejs.org) or `nvm install 22` |
 | nats-server | ≥2.6.0 (JetStream) | macOS: `brew install nats-server` · Linux: [nats.io/download](https://nats.io/download/) |
 | nats CLI (optional) | any | `brew install nats-io/nats-tools/nats` or [github.com/nats-io/natscli](https://github.com/nats-io/natscli) |
 | Ollama (optional) | ≥0.24 | [ollama.com](https://ollama.com) — needed for LLM extraction + concept summaries |
@@ -18,7 +18,7 @@ Each node machine needs:
 Verify:
 
 ```bash
-node --version       # ≥ v22.0.0
+node --version       # ≥ v22.12.0
 nats-server --version # ≥ v2.6.0
 ```
 
