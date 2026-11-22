@@ -1,8 +1,8 @@
 /**
  * ollama-queue.test.mjs — Unit tests for lib/ollama-queue.mjs
  *
- * Covers: requestExtraction happy path, retry behavior (transient vs persistent),
- * OLLAMA_QUEUE_RETRIES env override, requestAnalysis fallback paths, getState
+ * Covers: requestExtraction happy path, retry behavior (transient vs persistent)
+ * with OLLAMA_QUEUE_RETRIES pinned to short delays, requestAnalysis fallback paths, getState
  * snapshot, stuck detection, shutdown drain, and the
  * tightened isTransient classification (HTTP 500 not retried, fetch failed
  * not retried, ECONNRESET retried).
@@ -14,8 +14,13 @@ import { describe, it, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
-import {
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { Worker } from 'node:worker_threads';
+
+// RETRY_DELAYS is read once at import. Three delays keep the four-attempt counts;
+// the 200 ms first one leaves the cancellation test a backoff window to land in.
+process.env.OLLAMA_QUEUE_RETRIES = '200,10,10';
+const {
   requestExtraction,
   requestAnalysis,
   getState,
@@ -28,8 +33,7 @@ import {
   clearExternalJob,
   reportExtractionActivity, applyWorkerLlmMessage,
   _resetForTesting,
-} from '../lib/ollama-queue.mjs';
-import { Worker } from 'node:worker_threads';
+} = await import('../lib/ollama-queue.mjs');
 
 // Hermetic against an operator's ~/.openclaw/openclaw.env raising the slot count.
 process.env.OLLAMA_NUM_PARALLEL ??= '1';
