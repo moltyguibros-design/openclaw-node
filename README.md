@@ -7,7 +7,7 @@ Installable package for deploying an OpenClaw node. Includes the full infrastruc
 - **HyperAgent Protocol** — evidence-driven strategy loop: task telemetry, structured reflection, and human-gated strategy proposals
 - **Mission Control** — Next.js web dashboard (kanban, timeline, graph visualization, memory browser)
 - **Soul System** — multi-soul orchestration with trust registry and evolution
-- **Skill Library** — 100+ skills for AI agent capabilities
+- **Skill Library** — 90 skills for AI agent capabilities
 - **Boot Compiler** — profile-aware boot artifact generation for multiple AI models
 - **ClawVault** — structured knowledge vault with search and handoffs
 - **Mesh Task Engine** — distributed task execution with Karpathy iteration (try → measure → keep/discard → retry)
@@ -175,7 +175,7 @@ bash uninstall.sh --purge  # Remove everything including all data
 ├── workspace/
 │   ├── bin/                  # All scripts (daemon, mesh-agent, etc.)
 │   ├── lib/                  # Shared libraries (rule-loader, harness, roles, plans)
-│   ├── skills/               # 100+ skill definitions
+│   ├── skills/               # 90 skill definitions (_quarantine/ is never installed)
 │   ├── memory/               # Daily logs, active tasks, archive
 │   ├── memory-vault/         # ClawVault structured knowledge
 │   ├── .boot/                # Compiled boot profiles
@@ -234,7 +234,8 @@ package manager's exit code.
 | `tailscale` | Mesh VPN. `install.sh` derives `--cluster-bind` from `tailscale ip -4`; without it multi-machine NATS clustering silently degrades to a single node. Installed but **not** authenticated — run `tailscale up` yourself. |
 | `homebrew` | macOS package manager. Installed by `bootstrap.sh` only; it also pulls in the Xcode Command Line Tools, which is where the compiler comes from. |
 | `pyyaml` (pip) | Required by `bin/compile-boot` for YAML parsing |
-| `scrot` (Linux) | Screenshot capture (fallback: gnome-screenshot, flameshot) |
+
+Optional on Linux: `workspace-bin/screenshot` needs one of scrot, gnome-screenshot, ImageMagick `import` or flameshot; the installer does not install them.
 
 ### Skills with their own dependencies
 
@@ -611,7 +612,7 @@ Worker grappes run one of three collaboration architectures:
 
 | Mode | Shape | Best for | Status |
 |---|---|---|---|
-| **adversarial** (circling) | 1 Worker + 2 Reviewers, asymmetric directed sub-rounds (see [Circling Strategy](#circling-strategy-asymmetric-multi-agent-review)) | High-stakes single artifact | **Built** — `COLLAB_MODE.CIRCLING_STRATEGY` in `lib/mesh-collab.js`, 112 tests; mesh agents run on-demand (service units ship autostart-off per the deployability overhaul) |
+| **adversarial** (circling) | 1 Worker + 2 Reviewers, asymmetric directed sub-rounds (see [Circling Strategy](#circling-strategy-asymmetric-multi-agent-review)) | High-stakes single artifact | **Built** — `COLLAB_MODE.CIRCLING_STRATEGY` in `lib/mesh-collab.js`; mesh agents run on-demand (service units ship autostart-off per the deployability overhaul) |
 | **cooperative** | propose-all / integrate-one / rotate-integrator rounds | Exploratory, no natural owner | **Built** — rotating integrator fixed at recruiting close; rotation skips dead members (aborts if none remain); a missing integration is recorded `degraded` and loud, never a silent placeholder |
 | **collaborative** | decompose → per-node subtasks → parallel work → merge + merge-review | Decomposable work (N independent pieces) | **Built** — merge-review votes are **binding**: completion requires a real merge artifact and approvals strictly above rejections, else the session aborts and the parent task fails |
 
@@ -929,7 +930,7 @@ delegation:
 **Tests:**
 
 ```bash
-# All circling tests (112 tests, no external deps)
+# All circling tests (no external deps)
 node --test test/collab-circling.test.js test/daemon-circling-handlers.test.js test/circling-comprehensive.test.js test/circling-parse-retry.test.mjs test/circling-adaptive-convergence.test.mjs test/circling-thinking-strip.test.mjs
 ```
 

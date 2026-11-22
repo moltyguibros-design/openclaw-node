@@ -214,6 +214,25 @@ test('OBSERVABILITY names only functions that exist, and only the mesh-deploy fu
   assert.doesNotMatch(doc, /\| memory-maintenance \|/);
 });
 
+test('README skill count, circling test notes and dependency table match the repo', () => {
+  const readme = read('README.md');
+  const skills = readdirSync(new URL('../skills/', import.meta.url))
+    .filter((d) => d !== '_quarantine' && readdirSync(new URL(`../skills/${d}/`, import.meta.url)).includes('SKILL.md')).length;
+  const counts = [...readme.matchAll(/(\d+\+?) skill(?:s for| definitions)/g)];
+  assert.ok(counts.length >= 2, 'README skill count parse');
+  for (const [hit, n] of counts) assert.equal(n, String(skills), `README "${hit}": ${skills} skills ship outside _quarantine`);
+
+  const adversarial = readme.split('\n').find((l) => l.startsWith('| **adversarial** (circling) |'));
+  assert.doesNotMatch(adversarial, /\d+ tests/);
+  assert.doesNotMatch(readme, /# All circling tests \(\d+/);
+
+  const installers = (read('bootstrap.sh') + read('scripts/install/prereqs.sh')).toLowerCase();
+  const deps = section(readme, '### System dependencies').text;
+  const packages = [...deps.matchAll(/^\| `([\w.-]+)`/gm)].map((m) => m[1]);
+  assert.ok(packages.length >= 10, 'dependency table parse');
+  for (const p of packages) assert.ok(installers.includes(p.toLowerCase()), `README says the installer installs ${p}; neither bootstrap.sh nor prereqs.sh does`);
+});
+
 test('FEDERATION_SPEC cites code by file and symbol, never by drifting line number', () => {
   const spec = read('docs/FEDERATION_SPEC.md');
   for (const [hit] of spec.matchAll(/[\w./-]+\.(?:m?js|ts|sh):\d+/g)) assert.fail(`FEDERATION_SPEC line anchor ${hit}`);
