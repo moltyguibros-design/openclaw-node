@@ -31,6 +31,13 @@ if [ -z "$CHANGED_SKILLS" ]; then
   exit 0
 fi
 
+# The scan reads the index being committed, not the working tree: a partial
+# `git add -p` or an edit after `git add` would otherwise scan other content.
+# checkout-index honours GIT_INDEX_FILE, so `git commit -a`/`<path>` work too.
+STAGED=$(mktemp -d "${TMPDIR:-/tmp}/skill-gate.XXXXXX")
+trap 'rm -rf "$STAGED"' EXIT
+git ls-files -z -- skills/ ':(exclude)skills/_quarantine' | git checkout-index -z --stdin --prefix="$STAGED/"
+
 # ── Scan each changed skill ──────────────────────────────────────────────────
 BLOCKED=0
 WARNED=0
@@ -42,14 +49,14 @@ for skill_name in $CHANGED_SKILLS; do
   fi
 
   # Skip if directory no longer exists (deleted skill)
-  if [ ! -d "$REPO_ROOT/skills/$skill_name" ]; then
+  if [ ! -d "$STAGED/skills/$skill_name" ]; then
     continue
   fi
 
   # scanner.py exits 1 exactly when a skill is dangerous (or missing), so its
   # status is not an error signal; the JSON decides. The default --dir is the
   # deployed ~/.openclaw tree, not the tree being committed.
-  SCAN_OUTPUT=$(python3 "$SCANNER" --dir "$REPO_ROOT/skills" --skill "$skill_name" --json 2>/dev/null) || true
+  SCAN_OUTPUT=$(python3 "$SCANNER" --dir "$STAGED/skills" --skill "$skill_name" --json 2>/dev/null) || true
 
   # No parseable report fails closed: an unscanned skill must not pass.
   RISK_SCORE=$(python3 -c "
