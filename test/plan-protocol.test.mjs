@@ -135,16 +135,17 @@ describe('validate-commit hook — gitleaks judged by exit code, not its text', 
     fs.writeFileSync(path.join(bin, 'gitleaks'),
       '#!/bin/sh\necho "$*" >> "$FAKE_GL_CALLS"\nprintf "%s\\n" "$FAKE_GL_OUT" >&2\nexit "$FAKE_GL_RC"\n', { mode: 0o755 });
   });
-  function commit(files, { out, rc }) {
+  function commit(files, { out, rc, command = 'git commit -m "fix: x"', pathFirst }) {
     const repo = path.join(tmp, `gl-repo-${n++}`);
     fs.mkdirSync(repo);
     spawnSync('git', ['init', '-q'], { cwd: repo });
     for (const [f, body] of Object.entries(files)) fs.writeFileSync(path.join(repo, f), body);
     spawnSync('git', ['add', ...Object.keys(files)], { cwd: repo });
+    const PATH = [pathFirst, bin, process.env.PATH].filter(Boolean).join(':');
     return spawnSync('bash', [hook], {
       cwd: repo, encoding: 'utf8',
-      input: JSON.stringify({ tool_input: { command: 'git commit -m "fix: x"' } }),
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_GL_OUT: out, FAKE_GL_RC: String(rc), FAKE_GL_CALLS: calls },
+      input: JSON.stringify({ tool_input: { command } }),
+      env: { ...process.env, PATH, FAKE_GL_OUT: out, FAKE_GL_RC: String(rc), FAKE_GL_CALLS: calls },
     });
   }
   it('passes a clean scan even though its output reads "no leaks found"', () => {
@@ -168,6 +169,27 @@ describe('validate-commit hook — gitleaks judged by exit code, not its text', 
     commit({ 'a.txt': 'hello\n' }, { out: 'INF no leaks found', rc: 0 });
     assert.match(fs.readFileSync(calls, 'utf8'), /^protect --staged/m);
     assert.doesNotMatch(fs.readFileSync(calls, 'utf8'), /^detect/m);
+  });
+  // macOS grep has no -P: the message extraction failed silently and the format check never ran.
+  it('checks the commit message format with a grep that has no -P', () => {
+    const realGrep = spawnSync('sh', ['-c', 'command -v grep'], { encoding: 'utf8' }).stdout.trim();
+    const bsd = path.join(tmp, 'bsd-grep-bin');
+    fs.mkdirSync(bsd, { recursive: true });
+    fs.writeFileSync(path.join(bsd, 'grep'),
+      `#!/bin/sh\nfor a in "$@"; do case "$a" in -*P*) echo "grep: invalid option -- P" >&2; exit 2 ;; esac; done\nexec ${realGrep} "$@"\n`,
+      { mode: 0o755 });
+    const opts = { out: 'INF no leaks found', rc: 0, pathFirst: bsd };
+    const WARN = /WARNING: Commit message doesn't follow conventional format/;
+    const bad = commit({ 'a.txt': 'hello\n' }, { ...opts, command: 'git commit -m "bad message"' });
+    assert.equal(bad.status, 0, bad.stdout + bad.stderr);
+    assert.match(bad.stdout, WARN);
+    const badSingle = commit({ 'a.txt': 'hello\n' }, { ...opts, command: "git commit -m 'bad message'" });
+    assert.match(badSingle.stdout, WARN);
+    for (const command of ["git commit -m 'fix: ok'", 'git commit -m "feat(x): ok"']) {
+      const ok = commit({ 'a.txt': 'hello\n' }, { ...opts, command });
+      assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+      assert.doesNotMatch(ok.stdout, WARN, command);
+    }
   });
 });
 
