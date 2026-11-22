@@ -32,6 +32,7 @@ const os = require('os');
 const path = require('path');
 const readline = require('readline');
 const { createTracer } = require('../lib/tracer');
+const { resolveNodeName, loadNodeAliases } = require('../lib/node-aliases');
 const tracer = createTracer('mesh-node-remove');
 
 // ── CLI args ──────────────────────────────────────────
@@ -45,9 +46,10 @@ function getArg(flag, defaultVal) {
   return idx >= 0 && args[idx + 1] ? args[idx + 1] : defaultVal;
 }
 
-const TARGET_NODE = getArg('--node', null);
-const LOCAL_MODE = !TARGET_NODE;
-const NODE_ID = TARGET_NODE || require('../lib/node-id').resolveNodeId();
+const TARGET_RAW = getArg('--node', null);
+const LOCAL_MODE = !TARGET_RAW;
+const LOCAL_ID = require('../lib/node-id').resolveNodeId();
+const NODE_ID = TARGET_RAW ? resolveNodeName(TARGET_RAW, { localId: LOCAL_ID, aliases: loadNodeAliases() }) : LOCAL_ID;
 
 // ── Logging ───────────────────────────────────────────
 
@@ -128,8 +130,13 @@ const cleanNatsState = tracer.wrapAsync('cleanNatsState', async function cleanNa
     // 2. Clean node registry (if MESH_NODES bucket exists)
     try {
       const nodeKv = await openMeshKv(js, 'MESH_NODES', {}, { waitMs: 0 });
-      await nodeKv.delete(nodeId);
-      ok(`Removed ${nodeId} from MESH_NODES registry`);
+      const existing = await nodeKv.get(nodeId);
+      if (existing && existing.value) {
+        await nodeKv.delete(nodeId);
+        ok(`Removed ${nodeId} from MESH_NODES registry`);
+      } else {
+        warn(`No MESH_NODES entry for ${nodeId} — check the node id`);
+      }
     } catch (err) {
       console.warn(`[mesh-node-remove] clean MESH_NODES entry: ${err.message}`);
       ok('No MESH_NODES registry entry to remove');
@@ -222,7 +229,7 @@ async function main() {
   console.log(`${BOLD}${RED}║   OpenClaw Mesh — Node Removal       ║${RESET}`);
   console.log(`${BOLD}${RED}╚══════════════════════════════════════╝${RESET}\n`);
 
-  log(`Target node: ${BOLD}${NODE_ID}${RESET}`);
+  log(`Target node: ${BOLD}${NODE_ID}${RESET}${TARGET_RAW && TARGET_RAW !== NODE_ID ? ` (from alias ${TARGET_RAW})` : ''}`);
   log(`Mode: ${LOCAL_MODE ? 'LOCAL (this machine)' : 'REMOTE (KV cleanup only)'}`);
   if (PURGE) log(`${RED}PURGE MODE — will delete all local files${RESET}`);
   console.log('');
