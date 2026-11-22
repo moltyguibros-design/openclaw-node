@@ -9,10 +9,19 @@ import { fileURLToPath } from 'node:url';
 const script = fileURLToPath(new URL('../workspace-bin/soul-prompt', import.meta.url));
 const trustRegistry = fileURLToPath(new URL('../workspace-bin/trust-registry', import.meta.url));
 
-function run(t, registry, { soulId = 'probe', registryJson } = {}) {
+const asJson = v => (typeof v === 'string' ? v : JSON.stringify(v));
+const lastLine = s => s.trim().split('\n').at(-1);
+
+function run(t, registry, { soulId = 'probe', registryJson, caps, genes } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soul-prompt-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(root, 'home/.openclaw/souls', soulId), { recursive: true });
+  const soulDir = path.join(root, 'home/.openclaw/souls', soulId);
+  fs.mkdirSync(soulDir, { recursive: true });
+  if (caps !== undefined) fs.writeFileSync(path.join(soulDir, 'capabilities.json'), asJson(caps));
+  if (genes !== undefined) {
+    fs.mkdirSync(path.join(soulDir, 'evolution'));
+    fs.writeFileSync(path.join(soulDir, 'evolution/genes.json'), asJson(genes));
+  }
   fs.mkdirSync(path.join(root, 'ws/bin'), { recursive: true });
   fs.copyFileSync(script, path.join(root, 'ws/bin/soul-prompt'));
   if (registry === 'real') fs.copyFileSync(trustRegistry, path.join(root, 'ws/bin/trust-registry'));
@@ -24,7 +33,7 @@ function run(t, registry, { soulId = 'probe', registryJson } = {}) {
   const r = spawnSync('bash', [path.join(root, 'ws/bin/soul-prompt'), soulId], {
     env: { ...process.env, HOME: path.join(root, 'home'), TMPDIR: root }, encoding: 'utf8',
   });
-  return { ...r, wsBin: path.join(root, 'ws/bin') };
+  return { ...r, wsBin: path.join(root, 'ws/bin'), root };
 }
 
 test('a half-open breaker with a probe allowed is not reported as open', t => {
@@ -63,4 +72,31 @@ test('a soul id with a quote still gets its own record', t => {
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.includes('Tier: developing'), r.stdout);
   assert.ok(r.stdout.includes('Track record: 5/5'), r.stdout);
+});
+
+const restrictedCaps = { tools: ['Read'], permissions: { restrictedActions: ['git push', 'deploy'] } };
+
+test('a gene without an id keeps the restricted actions and the subagent type', t => {
+  const r = run(t, null, { caps: restrictedCaps, genes: { genes: [{ category: 'x' }] } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes('## Restricted Actions (DO NOT execute these)'), r.stdout);
+  assert.ok(r.stdout.includes('- git push'), r.stdout);
+  assert.ok(r.stdout.includes('## ?'), r.stdout);
+  assert.equal(lastLine(r.stderr), 'Explore');
+});
+
+test('a soul id with a quote keeps its constraints and subagent type', t => {
+  const r = run(t, null, { soulId: "pro'be", caps: restrictedCaps });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes('Restricted Actions'), r.stdout);
+  assert.equal(lastLine(r.stderr), 'Explore');
+});
+
+test('an unreadable capabilities.json is reported instead of silently dropped', t => {
+  const r = run(t, null, { caps: '{not json', genes: { genes: [{ id: 'g1' }] } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes('Unavailable: capabilities.json unreadable'), r.stdout);
+  assert.ok(r.stdout.includes('## g1'), r.stdout);
+  assert.equal(lastLine(r.stderr), 'general-purpose');
+  assert.deepEqual(fs.readdirSync(r.root).filter(f => f.startsWith('soul-prompt-meta')), []);
 });

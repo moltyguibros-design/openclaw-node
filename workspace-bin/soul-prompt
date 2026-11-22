@@ -51,84 +51,83 @@ if [[ ! -d "$SOUL_DIR" ]]; then
   exit 1
 fi
 
-# --- Parse all JSON + determine subagent_type in a single subprocess ---
+# --- Genes + constraints markdown on stdout, subagent_type on stderr ---
 CAPS_FILE="${SOUL_DIR}/capabilities.json"
 GENES_FILE="${SOUL_DIR}/evolution/genes.json"
 
-# Single Python call: outputs subagent_type to fd3, genes markdown + constraints markdown to stdout
-PARSED=$(python3 -c "
-import json, sys, os
+# Each section degrades on its own, so a malformed genes.json cannot drop the
+# soul's Restricted Actions.
+META=$(mktemp "${TMPDIR:-/tmp}/soul-prompt-meta.XXXXXX")
+PARSED=$(python3 -B - "$CAPS_FILE" "$GENES_FILE" 2>"$META" <<'PY'
+import json, os, sys
 
-caps_file = '${CAPS_FILE}'
-genes_file = '${GENES_FILE}'
-out = []
+caps_file, genes_file = sys.argv[1:3]
+MALFORMED = (OSError, ValueError, AttributeError, TypeError)
 
-# --- Subagent type from capabilities ---
+
+def load(path):
+    if not os.path.isfile(path):
+        return None
+    with open(path) as f:
+        return json.load(f)
+
+
 subagent_type = 'general-purpose'
-caps = {}
-if os.path.isfile(caps_file):
-    caps = json.load(open(caps_file))
-    tools = caps.get('tools', [])
-    if not any(t in tools for t in ['Write', 'Edit', 'Bash']):
-        subagent_type = 'Explore'
-
+constraints = []
+try:
+    caps = load(caps_file)
+    if caps is not None:
+        tools = caps.get('tools', [])
+        if not any(t in tools for t in ('Write', 'Edit', 'Bash')):
+            subagent_type = 'Explore'
+        perms = caps.get('permissions', {})
+        memory = perms.get('memory', {})
+        restricted = perms.get('restrictedActions', [])
+        if memory or restricted or tools:
+            constraints += ['---', '', '# Operational Constraints', '']
+            if memory:
+                constraints.append('## Memory Access')
+                constraints += [f'- **{k}:** {v}' for k, v in memory.items()]
+                constraints.append('')
+            if restricted:
+                constraints.append('## Restricted Actions (DO NOT execute these)')
+                constraints += [f'- {r}' for r in restricted]
+                constraints.append('')
+            if tools:
+                constraints += ['## Available Tools', ', '.join(tools), '']
+except MALFORMED as err:
+    constraints = ['---', '', '# Operational Constraints', '',
+                   f'Unavailable: capabilities.json unreadable ({err}). Treat every destructive action as restricted.', '']
 print('SUBAGENT_TYPE=' + subagent_type, file=sys.stderr)
 
-# --- Genes markdown ---
-if os.path.isfile(genes_file):
-    data = json.load(open(genes_file))
-    genes = data.get('genes', [])
+genes_out = []
+try:
+    data = load(genes_file)
+    genes = data.get('genes', []) if data is not None else []
     if genes:
-        out.append('---')
-        out.append('')
-        out.append('# Learned Patterns (apply these during analysis)')
-        out.append('')
+        genes_out += ['---', '', '# Learned Patterns (apply these during analysis)', '']
         for gene in genes:
-            out.append(f'## {gene[\"id\"]}')
-            out.append(f'**Category:** {gene.get(\"category\", \"unknown\")}')
-            out.append(f'**Signal:** {gene.get(\"signal\", \"\")}')
-            for p in gene.get('preconditions', []):
-                out.append(f'  - {p}')
+            if not isinstance(gene, dict):
+                continue
+            genes_out.append(f"## {gene.get('id', '?')}")
+            genes_out.append(f"**Category:** {gene.get('category', 'unknown')}")
+            genes_out.append(f"**Signal:** {gene.get('signal', '')}")
+            genes_out += [f'  - {p}' for p in gene.get('preconditions', [])]
             strategy = gene.get('strategy', [])
             if strategy:
-                out.append('**Strategy:**')
-                for s in strategy:
-                    out.append(f'  1. {s}')
-            out.append('')
+                genes_out.append('**Strategy:**')
+                genes_out += [f'  1. {s}' for s in strategy]
+            genes_out.append('')
+except MALFORMED as err:
+    genes_out = ['---', '', '# Learned Patterns', '', f'Unavailable: genes.json unreadable ({err})', '']
 
-# --- Capabilities / constraints markdown ---
-if caps:
-    perms = caps.get('permissions', {})
-    memory = perms.get('memory', {})
-    restricted = perms.get('restrictedActions', [])
-    tools = caps.get('tools', [])
+print('\n'.join(genes_out + constraints))
+PY
+) || true
 
-    if memory or restricted or tools:
-        out.append('---')
-        out.append('')
-        out.append('# Operational Constraints')
-        out.append('')
-        if memory:
-            out.append('## Memory Access')
-            for k, v in memory.items():
-                out.append(f'- **{k}:** {v}')
-            out.append('')
-        if restricted:
-            out.append('## Restricted Actions (DO NOT execute these)')
-            for r in restricted:
-                out.append(f'- {r}')
-            out.append('')
-        if tools:
-            out.append('## Available Tools')
-            out.append(', '.join(tools))
-            out.append('')
-
-print('\n'.join(out))
-" 2>"${TMPDIR:-/tmp}/soul-prompt-meta.$$" || true)
-
-# Extract subagent type from stderr output (portable: no grep -P on macOS)
-SUBAGENT_TYPE=$(sed -n 's/^SUBAGENT_TYPE=//p' "${TMPDIR:-/tmp}/soul-prompt-meta.$$" 2>/dev/null || echo "general-purpose")
-rm -f "${TMPDIR:-/tmp}/soul-prompt-meta.$$"
+SUBAGENT_TYPE=$(sed -n 's/^SUBAGENT_TYPE=//p' "$META")
+rm -f "$META"
+[[ -n "$SUBAGENT_TYPE" ]] || SUBAGENT_TYPE=general-purpose
 echo "$SUBAGENT_TYPE" >&2
 
 # --- Assemble preamble ---
