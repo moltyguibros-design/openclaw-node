@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -336,5 +337,35 @@ describe('hook files exist', () => {
     const header = src.slice(0, src.indexOf('*/'));
     assert.doesNotMatch(header, /require\(['"]\.\/openclaw-trigger\.js['"]\)/);
     assert.match(header, /import \{ onResponse \} from '\.\/openclaw-trigger\.js'/);
+  });
+
+  // A forced id ({{hostname}}, or a .local host name) fails the extraction subject check, and a
+  // forced localhost bus has no listener on a cluster node: the CLI resolves both from openclaw.env.
+  it('the Continue template lets the CLI resolve the node id and bus itself', () => {
+    const cfg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'hooks/continue/openclaw-config.json'), 'utf8'));
+    assert.equal(cfg.openclaw.env?.OPENCLAW_NODE_ID, undefined);
+    assert.equal(cfg.openclaw.env?.NATS_URL, undefined);
+    assert.equal(cfg.openclaw.extraction_trigger.cwd, '{{OPENCLAW_REPO_DIR}}');
+  });
+
+  const HAVE_PY = spawnSync('python3', ['--version']).status === 0;
+  it('the OpenWebUI plugin finds the checkout under OPENCLAW_REPO_DIR and the standard install paths', { skip: !HAVE_PY && 'python3 not available' }, () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'owui-plugin-'));
+    const checkout = (dir) => {
+      fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'bin', 'openclaw-extract-now.mjs'), '');
+      return dir;
+    };
+    const find = (env) => spawnSync('python3', ['-I', '-c',
+      'import importlib.util,sys;s=importlib.util.spec_from_file_location("p",sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);print(m._find_repo_root())',
+      path.join(repoRoot, 'hooks/openwebui/openclaw-publisher-plugin.py')], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home, ...env } });
+    const deployed = checkout(path.join(home, '.openclaw-src', 'openclaw-node'));
+    assert.equal(find({}).stdout.trim(), deployed);
+    fs.rmSync(deployed, { recursive: true });
+    const meshInstall = checkout(path.join(home, 'openclaw'));
+    assert.equal(find({}).stdout.trim(), meshInstall);
+    const elsewhere = checkout(path.join(home, 'elsewhere'));
+    assert.equal(find({ OPENCLAW_REPO_DIR: elsewhere }).stdout.trim(), elsewhere);
+    fs.rmSync(home, { recursive: true, force: true });
   });
 });

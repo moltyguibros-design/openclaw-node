@@ -59,7 +59,7 @@ with the checkout's path written into it, and wires it to PreCompact through
 
 **Setup:**
 1. Copy `hooks/openwebui/openclaw-publisher-plugin.py` to your OpenWebUI plugins directory.
-2. Set `OPENCLAW_REPO_PATH` env var to the openclaw-nodedev repo root (auto-detected if in `~/openclaw-nodedev`).
+2. Set `OPENCLAW_REPO_DIR` to the openclaw-node checkout (auto-detected at `~/.openclaw-src/openclaw-node`, `~/openclaw` or `~/openclaw-nodedev`).
 3. Enable the plugin in OpenWebUI settings.
 
 **How it works:** The plugin calls `bin/openclaw-extract-now.mjs` via subprocess (fire-and-forget)
@@ -91,7 +91,8 @@ The connection persists across requests for efficiency.
 
 **Setup:**
 1. Review `hooks/continue/openclaw-config.json` for the configuration template.
-2. Add the extraction trigger to your Continue config.
+2. Add the extraction trigger to your Continue config, with `{{OPENCLAW_REPO_DIR}}` set to the checkout.
+   Leave the node id and bus unset: the CLI reads both from `~/.openclaw/openclaw.env`.
 
 **Limitations:** Continue's plugin API may not directly support post-response hooks.
 The config file is a template — actual integration depends on Continue's current plugin capabilities.
@@ -241,4 +242,4 @@ more timely extraction.
 - The publisher silently swallows errors — check NATS connectivity directly with `nats pub test "hello"`.
 
 **Python plugin can't find the repo**
-- Set `OPENCLAW_REPO_PATH=/path/to/openclaw-nodedev` in your environment.
+- Set `OPENCLAW_REPO_DIR=/path/to/checkout` in your environment.
