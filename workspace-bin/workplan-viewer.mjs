@@ -345,8 +345,7 @@ function latestLog(plan) {
   const dir = planTickLogDir(plan);
   const current = path.join(dir, 'current.log');
   if (fs.existsSync(current)) return current;
-  // Fallback: highest-mtime real tick log (NOT lexicographic — handles
-  // edge cases where filenames don't sort chronologically).
+  // Fallback: the newest tick log by its timestamped name.
   const logs = tickLogs(plan, 1);
   return logs.length ? path.join(dir, logs[0].name) : null;
 }
@@ -1417,7 +1416,7 @@ function describeToolCall(name, input) {
 function jsonlPathFor(logPath) {
   if (!logPath) return null;
   // current.log symlinks to <timestamp>.log; we need <timestamp>.jsonl.
-  const resolved = fs.realpathSync.native ? fs.realpathSync(logPath) : logPath;
+  const resolved = fs.realpathSync(logPath);
   if (resolved.endsWith('.log')) return resolved.slice(0, -4) + '.jsonl';
   return resolved + '.jsonl';
 }
