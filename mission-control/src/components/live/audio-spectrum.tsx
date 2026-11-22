@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useEffect } from "react";
+import { startSpectrum } from "@/lib/spectrum-loop";
 
 interface AudioSpectrumProps {
   analyser: AnalyserNode | null;
@@ -16,7 +17,7 @@ export function AudioSpectrum({
   barCount = 32,
 }: AudioSpectrumProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef = useRef<number>(0);
+  const drawRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -27,9 +28,7 @@ export function AudioSpectrum({
 
     const dataArray = new Uint8Array(analyser?.frequencyBinCount ?? barCount);
 
-    const draw = () => {
-      rafRef.current = requestAnimationFrame(draw);
-
+    const drawFrame = () => {
       const w = canvas.width;
       const h = canvas.height;
       ctx.clearRect(0, 0, w, h);
@@ -71,11 +70,8 @@ export function AudioSpectrum({
       }
     };
 
-    draw();
-
-    return () => {
-      cancelAnimationFrame(rafRef.current);
-    };
+    drawRef.current = drawFrame;
+    return startSpectrum(drawFrame, !!(analyser && isSpeaking));
   }, [analyser, isSpeaking, barCount, height]);
 
   // Resize canvas to match container
@@ -87,6 +83,7 @@ export function AudioSpectrum({
       for (const entry of entries) {
         canvas.width = entry.contentRect.width * window.devicePixelRatio;
         canvas.height = height * window.devicePixelRatio;
+        drawRef.current?.();
       }
     });
 
