@@ -8,7 +8,7 @@ const CONFIG_PATH = path.join(process.env.OPENCLAW_HOME || OPENCLAW_ROOT, "openc
 interface OpenclawConfig {
   agents?: {
     defaults?: {
-      heartbeat?: Record<string, string>;
+      heartbeat?: Record<string, unknown>;
       model?: Record<string, unknown>;
       compaction?: unknown;
       maxConcurrent?: number;
@@ -89,10 +89,9 @@ export async function PATCH(request: NextRequest) {
 
     // Heartbeat
     if (body.heartbeat !== undefined) {
-      const hb: Record<string, string> = { target: body.heartbeat.target || "none" };
-      if (body.heartbeat.every) {
-        hb.every = body.heartbeat.every;
-      }
+      const hb: Record<string, unknown> = { ...config.agents.defaults.heartbeat, target: body.heartbeat.target || "none" };
+      if (body.heartbeat.every) hb.every = body.heartbeat.every;
+      else delete hb.every;
       config.agents.defaults.heartbeat = hb;
     }
 

@@ -45,6 +45,24 @@ test("saving replaces openclaw.json by rename, keeps it 0600 and keeps the token
   expect(saved.agents.defaults.heartbeat).toEqual({ target: "last" });
 });
 
+// The settings page sends heartbeat {target, every?} on every save; keys it does not manage must survive.
+test("saving the heartbeat keeps the heartbeat keys Mission Control does not manage", async () => {
+  const activeHours = { start: "08:00", end: "22:00" };
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify({ agents: { defaults: { heartbeat: { target: "last", every: "1h", prompt: "p", activeHours } } } }),
+  );
+
+  expect((await patch({ heartbeat: { target: "last" }, maxConcurrent: 3 })).status).toBe(200);
+  let saved = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  expect(saved.agents.defaults.heartbeat).toEqual({ target: "last", prompt: "p", activeHours });
+  expect(saved.agents.defaults.maxConcurrent).toBe(3);
+
+  expect((await patch({ heartbeat: { target: "none", every: "30m" } })).status).toBe(200);
+  saved = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  expect(saved.agents.defaults.heartbeat).toEqual({ target: "none", every: "30m", prompt: "p", activeHours });
+});
+
 test.each([
   { maxConcurrent: "abc" },
   { maxConcurrent: 0 },
