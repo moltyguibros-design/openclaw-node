@@ -110,7 +110,7 @@ describe('spreadingActivation', () => {
     assert.ok(!ids.includes('C'), 'C should be filtered by threshold');
   });
 
-  it('returns empty for empty graph', () => {
+  it('a seed below the threshold yields nothing', () => {
     const graph = makeGraph({});
     const result = spreadingActivation({ A: 1.0 }, graph, {
       steps: 3,

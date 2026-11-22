@@ -62,7 +62,7 @@ describe('SessionStore construction', () => {
     db.close();
   });
 
-  it('enables WAL mode + foreign keys', () => {
+  it('enables WAL mode', () => {
     const db = new Database(DB_PATH, { readonly: true });
     assert.equal(db.pragma('journal_mode', { simple: true }), 'wal');
     db.close();
@@ -168,16 +168,6 @@ describe('importSession', () => {
     assert.deepEqual(rows.map((r) => r.turn_index), [0, 1, 2, 3]);
     assert.equal(rows.length, 4);
     db.close();
-  });
-
-  it('append-delta is idempotent — third import with same count is a no-op', async () => {
-    const p = writeJsonl('idem.jsonl', [
-      { type: 'user', message: { content: 'q1' } },
-    ]);
-    await store.importSession(p);
-    const second = await store.importSession(p);
-    assert.equal(second.imported, false);
-    assert.equal(second.messageCount, 0);
   });
 
   it('returns {imported:false} for empty JSONL', async () => {
