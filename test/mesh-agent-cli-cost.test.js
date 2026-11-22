@@ -93,6 +93,12 @@ describe('claude provider cost', () => {
     assert.equal(cut.vote, 'parse_error');
   });
 
+  it('a reflection outside a JSON block is a parse failure', () => {
+    const r = agent.__test.parseReflection('REFLECTION_START\nSUMMARY: s\nCONFIDENCE: 0.9\nVOTE: converged\nREFLECTION_END');
+    assert.equal(r.parse_failed, true);
+    assert.equal(r.vote, 'parse_error');
+  });
+
   it('runLLM reports an output under the cap untruncated', async () => {
     const result = await agent.__test.runLLM('prompt', { task_id: 'CAP-2', llm_provider: 'cli-text-stub', budget_minutes: 1 }, TMP);
     assert.equal(result.truncated, false);

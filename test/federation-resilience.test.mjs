@@ -77,10 +77,12 @@ describe('federation-resilience: createPeerTracker', () => {
     tracker.recordSeen('node-b');
     assert.equal(tracker.isAlive('node-a'), true);
     assert.equal(tracker.isAlive('node-b'), true);
-    assert.deepEqual(tracker.getDeadPeers(), []);
-    const status = tracker.getPeerStatus();
-    assert.equal(status.length, 2);
-    assert.equal(status.every(s => s.alive), true);
+    tracker.stop();
+  });
+
+  it('exposes only the methods the offerer and acceptor use', () => {
+    const tracker = createPeerTracker({ timeoutMs: 5000 });
+    assert.deepEqual(Object.keys(tracker).sort(), ['cleanup', 'isAlive', 'recordSeen', 'stop']);
     tracker.stop();
   });
 
@@ -93,9 +95,6 @@ describe('federation-resilience: createPeerTracker', () => {
     await new Promise(r => setTimeout(r, 80));
 
     assert.equal(tracker.isAlive('node-a'), false);
-    const dead = tracker.getDeadPeers();
-    assert.equal(dead.length, 1);
-    assert.equal(dead[0], 'node-a');
     tracker.stop();
   });
 
@@ -118,46 +117,56 @@ describe('federation-resilience: createPeerTracker', () => {
   it('returns true for never-tracked peers (unknown is not dead)', () => {
     const tracker = createPeerTracker({ timeoutMs: 5000 });
     assert.equal(tracker.isAlive('never-seen'), true);
-    assert.deepEqual(tracker.getDeadPeers(), []);
     tracker.stop();
   });
 });
 
 describe('federation-resilience: cleanupExpiredOffers', () => {
-  it('removes expired offers from array', () => {
+  it('removes expired offers from the pending Map', () => {
     const past = new Date(Date.now() - 60_000).toISOString();
     const future = new Date(Date.now() + 60_000).toISOString();
-    const offers = [
-      { event_id: 'a', data: { expires_at: past } },
-      { event_id: 'b', data: { expires_at: future } },
-      { event_id: 'c', data: { expires_at: past } },
-    ];
+    const offers = new Map([
+      ['a', { event_id: 'a', data: { expires_at: past } }],
+      ['b', { event_id: 'b', data: { expires_at: future } }],
+      ['c', { event_id: 'c', data: { expires_at: past } }],
+    ]);
     const removed = cleanupExpiredOffers(offers);
     assert.equal(removed, 2);
-    assert.equal(offers.length, 1);
-    assert.equal(offers[0].event_id, 'b');
+    assert.equal(offers.size, 1);
+    assert.deepEqual([...offers.keys()], ['b']);
   });
 
   it('keeps all valid offers', () => {
     const future = new Date(Date.now() + 60_000).toISOString();
-    const offers = [
-      { event_id: 'a', data: { expires_at: future } },
-      { event_id: 'b', data: { expires_at: future } },
-    ];
+    const offers = new Map([
+      ['a', { event_id: 'a', data: { expires_at: future } }],
+      ['b', { event_id: 'b', data: { expires_at: future } }],
+    ]);
     const removed = cleanupExpiredOffers(offers);
     assert.equal(removed, 0);
-    assert.equal(offers.length, 2);
+    assert.equal(offers.size, 2);
   });
 
   it('handles offers without expires_at (keeps them)', () => {
-    const offers = [
-      { event_id: 'a', data: {} },
-      { event_id: 'b', data: { expires_at: new Date(Date.now() - 60_000).toISOString() } },
-    ];
+    const offers = new Map([
+      ['a', { event_id: 'a', data: {} }],
+      ['b', { event_id: 'b', data: { expires_at: new Date(Date.now() - 60_000).toISOString() } }],
+    ]);
     const removed = cleanupExpiredOffers(offers);
     assert.equal(removed, 1);
+    assert.deepEqual([...offers.keys()], ['a']);
+  });
+
+  it('does not take an Array of offers', () => {
+    const offers = [{ event_id: 'a', data: { expires_at: new Date(Date.now() - 60_000).toISOString() } }];
+    assert.equal(cleanupExpiredOffers(offers), 0);
     assert.equal(offers.length, 1);
-    assert.equal(offers[0].event_id, 'a');
+  });
+
+  it('the acceptor cleans up on the shared OFFER_CLEANUP_INTERVAL_MS', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile(new URL('../lib/broadcast-acceptor.mjs', import.meta.url), 'utf8');
+    assert.match(src, /opts\.cleanupIntervalMs \?\? OFFER_CLEANUP_INTERVAL_MS/);
   });
 });
 
@@ -440,14 +449,14 @@ describe('federation-resilience: integration with real NATS', { skip: SKIP_INTEG
     const pending = acceptor.getPendingOffers(); // returns a copy
     // The original internal array may have been cleaned by the timer if start() was called
     // Test the cleanup function directly on a copy
-    const testOffers = [
-      { event_id: 'exp1', data: { expires_at: new Date(Date.now() - 1000).toISOString() } },
-      { event_id: 'valid1', data: { expires_at: new Date(Date.now() + 60_000).toISOString() } },
-    ];
+    const testOffers = new Map([
+      ['exp1', { event_id: 'exp1', data: { expires_at: new Date(Date.now() - 1000).toISOString() } }],
+      ['valid1', { event_id: 'valid1', data: { expires_at: new Date(Date.now() + 60_000).toISOString() } }],
+    ]);
     const removed = cleanup(testOffers);
     assert.equal(removed, 1);
-    assert.equal(testOffers.length, 1);
-    assert.equal(testOffers[0].event_id, 'valid1');
+    assert.equal(testOffers.size, 1);
+    assert.equal(testOffers.has('valid1'), true);
 
     acceptor.stop();
   });

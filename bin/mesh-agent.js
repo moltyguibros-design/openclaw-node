@@ -1532,27 +1532,8 @@ function parseReflection(output, { truncated = false } = {}) {
     }
   }
 
-  // Fallback: try legacy REFLECTION_START format for backwards compat
-  const legacyMatch = output.match(/REFLECTION_START\n?([\s\S]*?)REFLECTION_END/);
-  if (legacyMatch) {
-    log(`REFLECTION PARSE: Using legacy REFLECTION_START format (deprecated)`);
-    const block = legacyMatch[1];
-    const summary = (block.match(/SUMMARY:\s*(.+)/)?.[1] || '').trim();
-    const learnings = (block.match(/LEARNINGS:\s*(.+)/)?.[1] || '').trim();
-    const confidence = parseFloat(block.match(/CONFIDENCE:\s*([\d.]+)/)?.[1] || 'NaN');
-    const voteRaw = (block.match(/VOTE:\s*(\w+)/)?.[1] || '').trim().toLowerCase();
-    const vote = VALID_VOTES.has(voteRaw) ? voteRaw : 'parse_error';
-
-    return {
-      summary, learnings,
-      confidence: isNaN(confidence) ? 0.5 : confidence,
-      vote,
-      parse_failed: vote === 'parse_error',
-    };
-  }
-
   // No reflection block found at all
-  log(`REFLECTION PARSE FAILED: No JSON or legacy reflection block found in output`);
+  log(`REFLECTION PARSE FAILED: No JSON reflection block found in output`);
   return {
     summary: output.slice(-300),
     learnings: '',

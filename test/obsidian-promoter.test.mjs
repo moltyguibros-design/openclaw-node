@@ -338,9 +338,9 @@ describe('promoteConceptNotes', () => {
     const policy = { threshold: { concept_mention_count: 10 } };
     const asked = [];
     const client = {
-      async generate(messages) {
+      async generateAnalysis(messages) {
         asked.push(messages[1].content.match(/^Concept: (.*)$/m)[1]);
-        return { content: 'A concept summary that is long enough.' };
+        return { mode: 'llm', value: { content: 'A concept summary that is long enough.' } };
       },
     };
 

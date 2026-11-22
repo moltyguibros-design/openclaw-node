@@ -129,9 +129,9 @@ describe('buildConceptBody', () => {
 describe('generateConceptSummary', () => {
   it('calls LLM client and returns summary', async () => {
     const mockClient = {
-      async generate(messages, opts) {
+      async generateAnalysis(messages, opts) {
         assert.ok(messages[1].content.includes('NATS JetStream'));
-        return { content: 'NATS JetStream provides durable message streaming for the mesh.' };
+        return { mode: 'llm', value: { content: 'NATS JetStream provides durable message streaming for the mesh.' } };
       },
     };
     const result = await generateConceptSummary(mockClient, 'NATS JetStream', [
@@ -147,10 +147,15 @@ describe('generateConceptSummary', () => {
 
   it('returns null on client error', async () => {
     const mockClient = {
-      async generate() { throw new Error('timeout'); },
+      async generateAnalysis() { throw new Error('timeout'); },
     };
     const result = await generateConceptSummary(mockClient, 'Test', []);
     assert.equal(result, null);
+  });
+
+  it('returns null for a client without generateAnalysis', async () => {
+    const client = { generate: async () => ({ content: 'long enough summary text' }) };
+    assert.equal(await generateConceptSummary(client, 'X', []), null);
   });
 });
 
@@ -446,7 +451,7 @@ describe('queryConceptData + generateConceptNotes integration', () => {
     const db = seedDb();
     const vaultPath = join(tmpDir, 'vault-keep');
     const proseClient = {
-      generate: async () => ({ content: 'NATS JetStream is the persistence layer of the mesh.' }),
+      generateAnalysis: async () => ({ mode: 'llm', value: { content: 'NATS JetStream is the persistence layer of the mesh.' } }),
     };
 
     try {
@@ -488,9 +493,9 @@ describe('queryConceptData + generateConceptNotes integration', () => {
     const vaultPath = join(tmpDir, 'vault-refresh');
     const calls = [];
     const proseClient = {
-      generate: async (messages) => {
+      generateAnalysis: async (messages) => {
         calls.push(messages[1].content);
-        return { content: `Prose number ${calls.length} for this concept.` };
+        return { mode: 'llm', value: { content: `Prose number ${calls.length} for this concept.` } };
       },
     };
 
