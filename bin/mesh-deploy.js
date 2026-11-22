@@ -1236,8 +1236,12 @@ async function main() {
     }
     const fromSha = deployedBase(REPO_DIR);
     warn(`Rolling back ${fromSha.slice(0, 7)} → ${toSha.slice(0, 7)}`);
-    deploy({ repoDir: REPO_DIR, fromSha, toSha, dryRun, noRestart });
-    ok(`Rolled back to ${toSha.slice(0, 8)}`);
+    if (deployLocal) {
+      deploy({ repoDir: REPO_DIR, fromSha, toSha, dryRun, noRestart });
+      ok(`Rolled back to ${toSha.slice(0, 8)}`);
+    } else {
+      skip('This node is not targeted — local rollback skipped');
+    }
 
     if (deployRemote) {
       header('Rolling back remote nodes');
@@ -1251,14 +1255,15 @@ async function main() {
           await fleetDeploy(nc, {
             components: null,
             targetNodes,
-            dryRun: false,
+            sha: toSha.slice(0, 7),
+            dryRun,
             force: true,
             timeoutMs: 120000,
           });
         } finally {
           await nc.close();
         }
-        ok('Remote rollback triggered via fleet deploy');
+        if (!dryRun) ok('Remote rollback triggered via fleet deploy');
       } catch (err) {
         if (err.code === 'MODULE_NOT_FOUND') {
           warn('Fleet deploy not available — remote rollback skipped');

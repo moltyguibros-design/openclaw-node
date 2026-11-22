@@ -232,8 +232,7 @@ async function fleetDeploy(nc, opts) {
     return;
   }
 
-  // Get the current SHA to deploy
-  const sha = exec('git rev-parse --short HEAD', { cwd: REPO_DIR });
+  const sha = opts.sha || exec('git rev-parse --short HEAD', { cwd: REPO_DIR });
   const rawBranch = triggerBranch(REPO_DIR);
   const branch = rawBranch.replace(/[^a-zA-Z0-9._/-]/g, '');
   if (!branch || branch !== rawBranch) {
