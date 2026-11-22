@@ -296,6 +296,43 @@ describe('preCommitSecretScan', () => {
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     assert.strictEqual(preCommitSecretScan(dir).blocked, false);
   });
+
+  // A stand-in gitleaks on PATH that logs its argv, prints `output` to stderr and exits `code`.
+  function stubGitleaks(t, output, code) {
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-harness-gitleaks-'));
+    const log = path.join(bin, 'argv.log');
+    fs.writeFileSync(path.join(bin, 'gitleaks'), `#!/bin/sh\necho "$*" >> '${log}'\necho '${output}' >&2\nexit ${code}\n`, { mode: 0o755 });
+    const prevPath = process.env.PATH;
+    process.env.PATH = `${bin}${path.delimiter}${prevPath}`;
+    t.after(() => { process.env.PATH = prevPath; fs.rmSync(bin, { recursive: true, force: true }); });
+    return () => fs.readFileSync(log, 'utf8').trim();
+  }
+
+  it('runs gitleaks protect --staged and blocks on the leaks it reports', (t) => {
+    const argv = stubGitleaks(t, 'WRN leaks found: 1', 1);
+    const { dir } = repoWith({ 'notes.md': 'nothing sensitive here\n' });
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const result = preCommitSecretScan(dir);
+    assert.strictEqual(argv(), 'protect --staged --no-banner --redact');
+    assert.strictEqual(result.blocked, true);
+    assert.ok(result.findings.some(f => f.startsWith('gitleaks:')));
+  });
+
+  it('a gitleaks error does not block a clean change', (t) => {
+    stubGitleaks(t, 'error: unknown flag', 1);
+    const { dir } = repoWith({ 'notes.md': 'nothing sensitive here\n' });
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    assert.strictEqual(preCommitSecretScan(dir).blocked, false);
+  });
+
+  it('the regex fallback still runs when gitleaks finds nothing', (t) => {
+    stubGitleaks(t, 'INF no leaks found', 0);
+    const { dir } = repoWith({ 'config.js': `const ${'pass' + 'word'} = "hunter2-not-real";\n` });
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const result = preCommitSecretScan(dir);
+    assert.strictEqual(result.blocked, true);
+    assert.ok(result.findings.some(f => f.startsWith('regex:')));
+  });
 });
 
 describe('enforceScopeCheck directory-style scope entries', () => {
