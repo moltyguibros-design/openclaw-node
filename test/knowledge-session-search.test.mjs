@@ -1,9 +1,9 @@
 /**
  * The .knowledge.db session-search CLI was bin/session-search.mjs, the same
  * name as workspace-bin/session-search.mjs over state.db. It is now
- * bin/knowledge-session-search.mjs, and its --fts mode reduces a
- * natural-language question to AND-joined keywords: FTS5 cannot parse the
- * raw "?", and the quoted-phrase retry only matched the question verbatim.
+ * bin/knowledge-session-search.mjs, and its --fts mode and the hybrid FTS leg
+ * reduce a natural-language question to AND-joined keywords: FTS5 cannot parse
+ * the raw "?", and the quoted-phrase retry only matched the question verbatim.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { initDatabase, ftsSafeQuery } from '../lib/mcp-knowledge/core.mjs';
+import { initDatabase, ftsSafeQuery, hybridSearchSessions } from '../lib/mcp-knowledge/core.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const CLI = join(ROOT, 'bin', 'knowledge-session-search.mjs');
@@ -28,22 +28,38 @@ test('ftsSafeQuery keeps only keywords of three or more characters', () => {
   assert.equal(ftsSafeQuery('"a" is ?'), null);
 });
 
+test('ftsSafeQuery keeps accented letters inside their words', () => {
+  assert.equal(ftsSafeQuery('serveur configuré café'), 'serveur AND configuré AND café');
+  assert.equal(ftsSafeQuery('serveur configure\u0301'), 'serveur AND configure\u0301');
+});
+
+function seedSessionDb(dbPath) {
+  const db = initDatabase(dbPath);
+  const doc = db.prepare('INSERT INTO session_documents (session_id, source_path, content_hash, last_indexed, turn_count) VALUES (?, ?, ?, ?, ?)');
+  const chunk = db.prepare('INSERT INTO session_chunks (session_id, turn_index, role, text, snippet) VALUES (?, ?, ?, ?, ?)');
+  doc.run('s-nats', '/fake/s-nats.jsonl', 'h', 0, 1);
+  chunk.run('s-nats', 0, 'user', '[user] how the NATS server is configured with token auth', 'how the NATS server is configured');
+  doc.run('s-fr', '/fake/s-fr.jsonl', 'h', 0, 1);
+  chunk.run('s-fr', 0, 'user', '[user] le serveur est configuré avec un jeton', 'le serveur est configuré');
+  return db;
+}
+
 test('--fts finds a turn for a natural-language question', () => {
   const dir = mkdtempSync(join(tmpdir(), 'knowledge-session-search-'));
   try {
     const dbPath = join(dir, '.knowledge.db');
-    const db = initDatabase(dbPath);
-    db.prepare('INSERT INTO session_documents (session_id, source_path, content_hash, last_indexed, turn_count) VALUES (?, ?, ?, ?, ?)')
-      .run('s-nats', '/fake/s-nats.jsonl', 'h', 0, 1);
-    db.prepare('INSERT INTO session_chunks (session_id, turn_index, role, text, snippet) VALUES (?, ?, ?, ?, ?)')
-      .run('s-nats', 0, 'user', '[user] how the NATS server is configured with token auth', 'how the NATS server is configured');
-    db.close();
+    seedSessionDb(dbPath).close();
 
     const run = q => spawnSync(process.execPath, [CLI, q, '--fts', '--db', dbPath], { encoding: 'utf8' });
     let r = run('How is NATS configured?');
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /FTS search: .*\(1 results\)/);
     assert.match(r.stdout, /session=s-nats turn=0 role=user/);
+
+    r = run('serveur configuré');
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /FTS search: .*\(1 results\)/);
+    assert.match(r.stdout, /session=s-fr turn=0 role=user/);
 
     r = run('is ?');
     assert.equal(r.status, 0, r.stderr);
@@ -67,5 +83,17 @@ test('uses the workspace DB, not <cwd>/.knowledge.db', () => {
   } finally {
     rmSync(cwd, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('the hybrid FTS leg sanitizes a natural-language question', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'knowledge-session-search-'));
+  const db = seedSessionDb(join(dir, '.knowledge.db'));
+  try {
+    const results = await hybridSearchSessions(db, 'How is NATS configured?', 10);
+    assert.deepEqual(results.map(r => r.session_id), ['s-nats']);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
   }
 });
