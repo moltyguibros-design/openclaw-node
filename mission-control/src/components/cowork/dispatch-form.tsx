@@ -9,7 +9,7 @@ const MODES = ["parallel", "sequential", "review"] as const;
 const CONVERGENCES = ["unanimous", "majority", "coordinator"] as const;
 const SCOPE_STRATEGIES = ["shared", "leader_only", "partitioned"] as const;
 
-export function DispatchForm() {
+export function DispatchForm({ initialClusterId }: { initialClusterId?: string | null }) {
   const { clusters } = useClusters();
   const { data: nodesData } = useSWR<{
     nodes: Array<{ nodeId: string; status: string }>;
@@ -23,7 +23,7 @@ export function DispatchForm() {
     "cluster"
   );
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(
-    null
+    initialClusterId ?? null
   );
   const [manualNodes, setManualNodes] = useState<
     Array<{ nodeId: string; role: string }>

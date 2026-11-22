@@ -67,6 +67,20 @@ export function KanbanBoard() {
   );
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Cowork links here as /?task=<id>. useSearchParams would need a Suspense boundary on this static page.
+  const openedFromUrl = useRef(false);
+  useEffect(() => {
+    if (openedFromUrl.current) return;
+    const id = new URLSearchParams(window.location.search).get("task");
+    const task = id ? tasks.find((t) => t.id === id) : undefined;
+    if (!task) return;
+    openedFromUrl.current = true;
+    window.history.replaceState(null, "", window.location.pathname);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot (ref-guarded): opens the linked task once the poll has loaded it
+    setEditTask(task);
+    setDialogOpen(true);
+  }, [tasks]);
+
   // Filter tasks: exclude archived + roadmap hierarchy types, then apply search
   const filteredTasks = useMemo(() => {
     let filtered = tasks.filter(

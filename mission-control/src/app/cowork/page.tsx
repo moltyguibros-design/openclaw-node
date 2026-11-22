@@ -22,6 +22,7 @@ export default function CoworkPage() {
   const [tab, setTab] = useState<Tab>("sessions");
   const [createOpen, setCreateOpen] = useState(false);
   const [addNodeTarget, setAddNodeTarget] = useState<string | null>(null);
+  const [dispatchClusterId, setDispatchClusterId] = useState<string | null>(null);
 
   const { sessions: activeSessions, natsAvailable } = useCollabSessions(
     "recruiting,active",
@@ -42,7 +43,8 @@ export default function CoworkPage() {
     return map;
   }, [tasks]);
 
-  const handleDispatchFromCluster = (_clusterId: string) => {
+  const handleDispatchFromCluster = (clusterId: string) => {
+    setDispatchClusterId(clusterId);
     setTab("dispatch");
   };
 
@@ -189,7 +191,7 @@ export default function CoworkPage() {
         )}
 
         {/* Dispatch tab */}
-        {tab === "dispatch" && <DispatchForm />}
+        {tab === "dispatch" && <DispatchForm key={dispatchClusterId ?? "none"} initialClusterId={dispatchClusterId} />}
       </main>
     </div>
   );
