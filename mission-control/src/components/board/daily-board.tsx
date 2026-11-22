@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { UnifiedTaskDialog } from "./unified-task-dialog";
 import { useTasks, type Task } from "@/lib/hooks";
+import { DEPT_COLORS, deptFromTaskId } from "@/lib/task-description";
 import { Plus, ChevronLeft, ChevronRight, Calendar, GripVertical } from "lucide-react";
 import {
   format,
@@ -12,26 +13,6 @@ import {
   isToday,
   parseISO,
 } from "date-fns";
-
-const DEPT_COLORS: Record<string, string> = {
-  DEV: "#3B82F6",
-  CHAIN: "#8B5CF6",
-  ART: "#EC4899",
-  DESIGN: "#F59E0B",
-  NARR: "#14B8A6",
-  QA: "#10B981",
-  INFRA: "#6B7280",
-  MKT: "#EF4444",
-  COMM: "#06B6D4",
-  BIZ: "#22C55E",
-  LEGAL: "#F97316",
-  HIRE: "#A855F7",
-};
-
-function extractDept(taskId: string): string | null {
-  const match = taskId.match(/^([A-Z]+)-/);
-  return match ? match[1] : null;
-}
 
 function dayKey(date: Date): string {
   return format(date, "yyyy-MM-dd");
@@ -68,7 +49,7 @@ export function DailyBoard() {
       if (task.scheduledDate !== key) continue;
       if (task.type === "project" || task.type === "pipeline" || task.type === "phase") continue;
       filtered.push(task);
-      const dept = extractDept(task.id);
+      const dept = deptFromTaskId(task.id);
       if (dept) counts[dept] = (counts[dept] || 0) + 1;
     }
 
@@ -86,7 +67,7 @@ export function DailyBoard() {
   // Apply dept filter
   const visibleTasks = useMemo(() => {
     if (!deptFilter) return dayTasks;
-    return dayTasks.filter((t) => extractDept(t.id) === deptFilter);
+    return dayTasks.filter((t) => deptFromTaskId(t.id) === deptFilter);
   }, [dayTasks, deptFilter]);
 
   // Depts present on selected day
@@ -109,12 +90,12 @@ export function DailyBoard() {
   const goNext = () => setSelectedDate((d) => addDays(d, 1));
   const goToday = () => setSelectedDate(startOfDay(new Date()));
   const goStart = () => {
-    // Navigate to the earliest task date, or today if no tasks
-    const earliest = tasks.reduce((min: Date, t: Task) => {
-      const d = t.createdAt ? startOfDay(parseISO(t.createdAt)) : new Date();
-      return d < min ? d : min;
-    }, new Date());
-    setSelectedDate(startOfDay(earliest));
+    // scheduledDate is yyyy-MM-dd, so the lexical minimum is the earliest day.
+    const dates = tasks
+      .filter((t) => t.scheduledDate && t.type !== "project" && t.type !== "pipeline" && t.type !== "phase")
+      .map((t) => t.scheduledDate!)
+      .sort();
+    setSelectedDate(startOfDay(dates.length ? parseISO(dates[0]) : new Date()));
   };
 
   if (isLoading) {
@@ -284,7 +265,7 @@ export function DailyBoard() {
         )}
 
         {visibleTasks.map((task) => {
-          const dept = extractDept(task.id);
+          const dept = deptFromTaskId(task.id);
           const deptColor = dept ? DEPT_COLORS[dept] : "#6B7280";
           const isCritical = task.description?.includes("CRITICAL");
           const isImportant = task.description?.includes("IMPORTANT");

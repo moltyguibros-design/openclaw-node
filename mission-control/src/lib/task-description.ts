@@ -32,3 +32,9 @@ export function extractDept(description: string | null): string | null {
   if (tag) return tag[1];
   return segments(description).find((p) => Object.hasOwn(DEPT_COLORS, p)) ?? null;
 }
+
+/** Department from a dept-prefixed id ("DEV-M01-001"); Mission Control's own "T-YYYYMMDD-NNN" ids have none. */
+export function deptFromTaskId(taskId: string): string | null {
+  const m = taskId.match(/^([A-Z]+)-/);
+  return m && Object.hasOwn(DEPT_COLORS, m[1]) ? m[1] : null;
+}
