@@ -3,7 +3,7 @@
  *
  * Targeted coverage for the public API surface NOT already exercised by
  * memory-budget.test.mjs (which covers extractFacts, mergeFacts,
- * cleanParentheticalChains, stripSupersedes, stripSpeaker, truncateAtWord)
+ * cleanParentheticalChains, stripSupersedes, truncateAtWord)
  * or extraction-store.test.mjs (which covers runFlush integration).
  *
  * Covers here:
