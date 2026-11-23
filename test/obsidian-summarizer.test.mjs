@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, readdir, writeFile } from 'node:fs/promises';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -431,9 +431,14 @@ describe('queryConceptData + generateConceptNotes integration', () => {
   it('regression_F-N102 (now opt-IN): respectPrivacy:true filters for federation-era surfaces', async () => {
     const db = seedDb();
     db.exec(`UPDATE entities SET private = 1 WHERE name = 'NATS JetStream'`);
-    // Also private-ify the decision so it doesn't slip through coMentioned wikilinks.
-    db.exec(`UPDATE decisions SET private = 1`);
+    db.prepare(`INSERT INTO decisions (session_id, decision, rationale, confidence, created_at, private) VALUES (?, ?, ?, ?, ?, 1)`).run(
+      'session-002', 'Private call on spreading', 'internal', 0.9, '2026-05-15'
+    );
     const vaultPath = join(tmpDir, 'vault-privacy');
+    // An existing note makes the private entity's slug resolvable, so only the
+    // privacy filter can keep the link out.
+    await mkdir(join(vaultPath, 'concepts'), { recursive: true });
+    await writeFile(join(vaultPath, 'concepts', 'nats-jetstream.md'), '---\ntype: concept\n---\n');
 
     try {
       const result = await generateConceptNotes({
@@ -448,9 +453,9 @@ describe('queryConceptData + generateConceptNotes integration', () => {
 
       const spreadingContent = await readFile(
         join(vaultPath, 'concepts', 'spreading-activation.md'), 'utf-8');
-      assert.ok(!spreadingContent.includes('[[NATS JetStream]]'),
-        'filtered note must not wikilink to a private entity');
-      assert.ok(!spreadingContent.includes('Use NATS over RabbitMQ'),
+      assert.ok(!spreadingContent.includes('nats-jetstream'),
+        'filtered note must not link a private entity');
+      assert.ok(!spreadingContent.includes('Private call on spreading'),
         'private decision text must not leak into filtered note body');
     } finally {
       db.close();
