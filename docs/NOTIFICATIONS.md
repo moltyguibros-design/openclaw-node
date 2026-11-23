@@ -10,7 +10,7 @@ did nothing) is retired.
 emitter (workplan-viewer · plan ticks · node-watch · anything)
   │  bin/openclaw-notify.mjs  (or lib/notify.mjs directly)
   ▼
-~/.openclaw/notifications/ledger.jsonl     ← append-only truth: EVERY event lands
+~/.openclaw/notifications/ledger.jsonl     ← the truth: EVERY event lands
   │                                          here, delivered or not (method
   │                                          recorded: terminal-notifier /
   │                                          osascript / notify-send / muted / none)
@@ -48,7 +48,10 @@ deep-linking `?plan=<id>`) and node-watch WORKING↔BROKEN transitions (linking 
 
 ## Ledger format
 
-`~/.openclaw/notifications/ledger.jsonl` (override: `OPENCLAW_NOTIFY_LEDGER`):
+`~/.openclaw/notifications/ledger.jsonl` (override: `OPENCLAW_NOTIFY_LEDGER`).
+At 5 MB it is renamed to `ledger.jsonl.1` (replacing the previous one) and a new
+file starts, so history and Mission Control's view cover the current file; a
+caller-supplied `id` is deduplicated against both files.
 
 ```json
 {"v":1,"type":"notification","id":"<uuid>","ts":"…","source":"workplan","kind":"success","title":"…","subtitle":"…","message":"…","url":"…","icon":"…","node":"<hostname>","delivery":{"method":"terminal-notifier","clickable":true,"ok":true}}

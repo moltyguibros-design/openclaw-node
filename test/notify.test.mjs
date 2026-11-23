@@ -6,7 +6,7 @@ import os from 'node:os';
 import {
   notify, readLedger, appendLedger, recordClick, loadConfig, resolveIcon,
   buildDarwinArgs, buildLinuxArgs, dispatch, awaitClickAndOpen, notifyPaths,
-  findTerminalNotifier, DEFAULT_CONFIG, KINDS,
+  findTerminalNotifier, DEFAULT_CONFIG, KINDS, LEDGER_MAX_BYTES,
 } from '../lib/notify.mjs';
 
 let tmp, paths;
@@ -97,6 +97,19 @@ describe('ledger', () => {
     const limited = readLedger({ limit: 1 }, paths);
     assert.equal(limited.events.length, 1);
     assert.equal(limited.total, 2);
+  });
+  it('rotates to ledger.jsonl.1 past the size cap, keeping one older generation', () => {
+    const evt = (id) => ({ v: 1, type: 'notification', id, ts: `2026-07-04T10:00:0${id}Z`, title: 'x'.repeat(40) });
+    const cap = JSON.stringify(evt('1')).length * 2;
+    for (const id of ['1', '2', '3']) appendLedger(evt(id), paths, cap);
+    assert.deepEqual(readLedger({}, paths).events.map(e => e.id), ['3']);
+    assert.match(fs.readFileSync(`${paths.ledger}.1`, 'utf8'), /"id":"1".*\n.*"id":"2"/);
+    for (const id of ['4', '5']) appendLedger(evt(id), paths, cap);
+    assert.deepEqual(readLedger({}, paths).events.map(e => e.id), ['5']);
+    assert.doesNotMatch(fs.readFileSync(`${paths.ledger}.1`, 'utf8'), /"id":"1"/);
+  });
+  it('the default cap is 5 MB', () => {
+    assert.equal(LEDGER_MAX_BYTES, 5 * 1024 * 1024);
   });
 });
 
@@ -293,6 +306,16 @@ describe('notify (end to end, mocked dispatch)', () => {
     assert.equal(second.deduped, true);
     const events = readLedger({}, paths).events.filter((e) => e.id === 'hyperagent-proposal:7');
     assert.equal(events.length, 1, 'exactly one ledger identity');
+  });
+  it('a stable id already in the rotated generation is still deduped', async () => {
+    fs.mkdirSync(path.dirname(paths.ledger), { recursive: true });
+    fs.writeFileSync(`${paths.ledger}.1`, JSON.stringify({ v: 1, type: 'notification', id: 'hyperagent-proposal:8', ts: '2026-07-04T10:00:00Z' }) + '\n');
+    const again = await notify(
+      { id: 'hyperagent-proposal:8', title: 'P8 again' },
+      { paths, platform: 'darwin', exec: () => { throw new Error('must not dispatch'); } },
+    );
+    assert.equal(again.deduped, true);
+    assert.equal(fs.existsSync(paths.ledger), false);
   });
   it('every kind has a default sound and icon mapping', () => {
     for (const k of KINDS) {
