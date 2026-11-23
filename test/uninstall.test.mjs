@@ -160,3 +160,41 @@ test('uninstall --purge answered N or EOF changes nothing', linuxOnly, () => {
     }
   }
 });
+
+function putFiles(home, base, rels) {
+  for (const rel of rels) {
+    mkdirSync(dirname(join(home, base, rel)), { recursive: true });
+    writeFileSync(join(home, base, rel), 'x');
+  }
+}
+
+// The workspace skills dir is shared: install.sh rsyncs the repo's skills into it and
+// the scanner gate installs ClawHub skills next to them.
+test('uninstall keeps operator-installed skills and removes only the repo-shipped ones', linuxOnly, () => {
+  const fx = fixture();
+  try {
+    putFiles(fx.home, '.openclaw/workspace/skills', ['mesh/SKILL.md', 'find-skills/SKILL.md', 'my-clawhub-skill/SKILL.md', 'my-clawhub-skill/fix.md']);
+    const r = runUninstall(fx);
+    assert.equal(r.status, 0, r.stderr);
+    for (const shipped of ['mesh', 'find-skills']) {
+      assert.equal(existsSync(join(fx.home, '.openclaw/workspace/skills', shipped)), false, shipped);
+    }
+    assert.equal(existsSync(join(fx.home, '.openclaw/workspace/skills/my-clawhub-skill/fix.md')), true);
+    assert.match(r.stdout, /Kept operator-installed skills in .*\/workspace\/skills: my-clawhub-skill\n/);
+  } finally {
+    rmSync(fx.home, { recursive: true, force: true });
+  }
+});
+
+test('uninstall removes the workspace skills dir when only repo-shipped skills were in it', linuxOnly, () => {
+  const fx = fixture();
+  try {
+    putFiles(fx.home, '.openclaw/workspace/skills', ['mesh/SKILL.md']);
+    const r = runUninstall(fx);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(existsSync(join(fx.home, '.openclaw/workspace/skills')), false);
+    assert.doesNotMatch(r.stdout, /Kept operator-installed skills/);
+  } finally {
+    rmSync(fx.home, { recursive: true, force: true });
+  }
+});

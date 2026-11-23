@@ -160,6 +160,8 @@ bash uninstall.sh          # Remove services and scripts (keep memory data)
 bash uninstall.sh --purge  # Remove everything including all data
 ```
 
+The default mode removes only the skills this repo ships from `~/.openclaw/workspace/skills`; skills you installed yourself (ClawHub, through the scanner gate) stay there and are listed.
+
 ## Directory Structure (installed)
 
 ```

@@ -141,14 +141,29 @@ if $PURGE; then
 else
   info "Removing scripts and services (keeping memory data)..."
   rm -rf "$WORKSPACE/bin"
-  rm -rf "$WORKSPACE/skills"
+  # The scanner gate installs ClawHub skills into the same dir install.sh copies the repo's into.
+  KEPT_SKILLS=()
+  if [ -d "$WORKSPACE/skills" ]; then
+    for skill in "$REPO_DIR/skills"/*/; do
+      name="$(basename "$skill")"
+      case "$name" in dist|scripts|_quarantine) continue ;; esac
+      rm -rf "${WORKSPACE:?}/skills/$name"
+    done
+    for skill in "$WORKSPACE/skills"/*; do
+      [ -e "$skill" ] && KEPT_SKILLS+=("$(basename "$skill")")
+    done
+    rmdir "$WORKSPACE/skills" 2>/dev/null || true
+  fi
   rm -rf "$WORKSPACE/projects/mission-control/node_modules"
   rm -rf "$WORKSPACE/projects/mission-control/.next"
   rm -rf "$WORKSPACE/.boot"
   rm -rf "$WORKSPACE/lib" "$WORKSPACE/packages" "$WORKSPACE/node_modules"
   rm -rf "$HOME/openclaw/bin" "$HOME/openclaw/lib"
   rm -rf "$HOME/.openclaw/skills/mesh"
-  info "Removed scripts, skills, mesh CLI, and build artifacts"
+  info "Removed scripts, repo-shipped skills, mesh CLI, and build artifacts"
+  if [ "${#KEPT_SKILLS[@]}" -gt 0 ]; then
+    info "Kept operator-installed skills in $WORKSPACE/skills: ${KEPT_SKILLS[*]}"
+  fi
   info "Memory data preserved at $WORKSPACE/memory/"
   info "Run with --purge to remove everything"
 fi
