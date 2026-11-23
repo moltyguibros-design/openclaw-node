@@ -52,6 +52,20 @@ describe('skill quarantine', () => {
     assert.match(readFileSync(join(QUARANTINE, 'README.md'), 'utf8'), /`ontology` \|.*skills-m-z-souls-identity#19/);
   });
 
+  // It forbids the orchestrator to implement and delegates to eight helper agents and two
+  // tool servers that nothing here ships, so daedalus following it could not finish.
+  it('cc-godmode is quarantined, retired from deployed nodes, with its reason recorded', () => {
+    assert.ok(quarantined.includes('cc-godmode'));
+    assert.ok(!existsSync(join(ROOT, 'skills', 'cc-godmode')));
+    assert.match(readFileSync(join(QUARANTINE, 'README.md'), 'utf8'), /^\| `cc-godmode` \|.*skills-a-l#9/m);
+    assert.match(readFileSync(join(ROOT, 'scripts', 'install', 'retired-files.txt'), 'utf8'), /^skills cc-godmode$/m);
+  });
+
+  it('every quarantined skill is retired from deployed nodes', () => {
+    const retired = readFileSync(join(ROOT, 'scripts', 'install', 'retired-files.txt'), 'utf8');
+    assert.deepEqual(quarantined.filter(name => !new RegExp(`^skills ${name}$`, 'm').test(retired)), []);
+  });
+
   it('no quarantined skill is also in the live skills tree', () => {
     assert.deepEqual(quarantined.filter(name => existsSync(join(ROOT, 'skills', name))), []);
   });

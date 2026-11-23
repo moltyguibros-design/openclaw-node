@@ -13,7 +13,7 @@ const EVOLVER = join(ROOT, 'skills/_quarantine/capability-evolver');
 
 test('upstream maintainer and publishing scripts are not vendored', () => {
   assert.equal(existsSync(join(EVOLVER, 'scripts')), false);
-  assert.equal(existsSync(join(ROOT, 'skills/cc-godmode/scripts/build-skill.js')), false);
+  assert.equal(existsSync(join(ROOT, 'skills/_quarantine/cc-godmode/scripts/build-skill.js')), false);
   assert.ok(existsSync(join(EVOLVER, 'index.js')), 'the skill itself stays');
 });
 

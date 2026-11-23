@@ -44,6 +44,7 @@ skills self-reflection
 skills ontology
 skills google-drive
 skills fast-browser-use
+skills cc-godmode
 # Skills deleted from the repo.
 skills memory-setup
 skills memory-hygiene
