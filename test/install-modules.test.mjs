@@ -380,7 +380,7 @@ test('pair-session and its Teams transport are retired: not shipped, not documen
 test('the directory step leaves ~/.openclaw private to its owner, on a fresh install and on --update', () => {
   const src = moduleSrc['workspace.sh'];
   const block = src.slice(0, src.indexOf('# Step 3'));
-  const tmp = mkdtempSync(join(tmpdir(), 'oc-root-mode-'));
+  const tmp = tmpDir('oc-root-mode-');
   const root = join(tmp, '.openclaw');
   const step2 = () => spawnSync('bash', ['-c', `set -e; run() { "$@"; }; step() { :; }; info() { :; }\n${block}`], {
     encoding: 'utf8', env: { ...process.env, OPENCLAW_ROOT: root, WORKSPACE: join(root, 'workspace') },
@@ -868,7 +868,7 @@ test('install --update keeps an existing notify.json and writes the default only
   const start = src.indexOf('NOTIFY_CONFIG="$OPENCLAW_ROOT/config/notify.json"');
   assert.ok(start >= 0);
   const block = src.slice(start, src.indexOf('\nif $SANDBOX; then', start));
-  const root = mkdtempSync(join(tmpdir(), 'oc-notify-'));
+  const root = tmpDir('oc-notify-');
   mkdirSync(join(root, 'config'));
   const notify = join(root, 'config', 'notify.json');
   const muted = '{"enabled": false, "sources": {"x": false}}\n';
@@ -891,7 +891,7 @@ test('skill pip deps retry past PEP 668 like PyYAML does, and report success onl
   const start = src.indexOf('for skill_dir in "$WORKSPACE/skills"/*/; do');
   assert.ok(start >= 0);
   const loop = src.slice(start, src.indexOf('\ndone\n', start) + '\ndone\n'.length);
-  const tmp = mkdtempSync(join(tmpdir(), 'oc-skill-pip-'));
+  const tmp = tmpDir('oc-skill-pip-');
   mkdirSync(join(tmp, 'ws/skills/a'), { recursive: true });
   writeFileSync(join(tmp, 'ws/skills/a/requirements.txt'), 'requests>=2\n');
   mkdirSync(join(tmp, 'bin'));
@@ -1035,7 +1035,7 @@ test('the retired list names only files the repo no longer ships, and both deplo
   const entries = readFileSync(join(ROOT, 'scripts/install/retired-files.txt'), 'utf8').split('\n')
     .filter((l) => l.trim() && !l.startsWith('#')).map((l) => l.trim().split(/\s+/));
   assert.ok(entries.length > 0);
-  for (const name of ['extract-existing-sessions.mjs', 'fed-benchmark-driver.mjs', 'grappe-benchmark.mjs']) {
+  for (const name of ['fed-benchmark-driver.mjs', 'grappe-benchmark.mjs']) {
     assert.ok(entries.some(([g, n]) => g === 'mesh-bin' && n === name), `mesh-bin ${name} is not retired`);
   }
   const source = { 'workspace-bin': 'workspace-bin', 'mesh-bin': 'bin', skills: 'skills' };
@@ -1317,7 +1317,7 @@ test('--project git hooks run the deployed validators', () => {
     assert.match(readFileSync(join(ROOT, 'config/git-hooks', hook), 'utf8'), /^DEPLOYED_HOOK_DIR=""$/m,
       `this checkout's own ${hook} keeps using its in-repo validators`);
   }
-  const base = mkdtempSync(join(tmpdir(), 'openclaw-proj-hooks-'));
+  const base = tmpDir('openclaw-proj-hooks-');
   const home = join(base, 'home');
   mkdirSync(home, { recursive: true });
   const project = join(base, 'project');
@@ -1361,7 +1361,7 @@ test('the detached ollama fallback does not inherit the timer-source copy lock',
   assert.ok(start > 0 && end > start, 'the macOS ollama fallback must be found');
   const block = comp.slice(start, end + '\n        }\n'.length);
 
-  const root = mkdtempSync(join(tmpdir(), 'openclaw-ollama-lock-'));
+  const root = tmpDir('openclaw-ollama-lock-');
   mkdirSync(join(root, 'logs'));
   mkdirSync(join(root, 'fakebin'));
   const marker = `${30 + Math.floor(Math.random() * 1000)}.731`;
@@ -1482,7 +1482,7 @@ test('session-stop.sh runs on SessionEnd, and an --update merge drops its old St
   const end = integ.indexOf(endMark, start);
   assert.ok(start > 0 && end > start, 'the settings merge must be found');
   const block = integ.slice(start, end + endMark.length);
-  const root = mkdtempSync(join(tmpdir(), 'openclaw-settings-merge-'));
+  const root = tmpDir('openclaw-settings-merge-');
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const merge = (existing) => {
     const dst = join(root, 'settings.json');

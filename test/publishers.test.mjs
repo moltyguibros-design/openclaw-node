@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
 import { tmpDir } from './helpers/tmp-dir.cjs';
 
@@ -106,7 +105,7 @@ describe('createNatsPublisher', () => {
     const saved = { OPENCLAW_NODE_ID: process.env.OPENCLAW_NODE_ID, MESH_NODE_ID: process.env.MESH_NODE_ID, HOME: process.env.HOME };
     delete process.env.OPENCLAW_NODE_ID;
     delete process.env.MESH_NODE_ID;
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pub-home-'));
+    const home = tmpDir('pub-home-');
     fs.mkdirSync(path.join(home, '.openclaw'));
     fs.writeFileSync(path.join(home, '.openclaw', 'openclaw.env'), 'OPENCLAW_NODE_ID=custom-lead\n');
     process.env.HOME = home;
@@ -350,7 +349,7 @@ describe('hook files exist', () => {
 
   const HAVE_PY = spawnSync('python3', ['--version']).status === 0;
   it('the OpenWebUI plugin finds the checkout under OPENCLAW_REPO_DIR and the standard install paths', { skip: !HAVE_PY && 'python3 not available' }, () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'owui-plugin-'));
+    const home = tmpDir('owui-plugin-');
     const checkout = (dir) => {
       fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
       fs.writeFileSync(path.join(dir, 'bin', 'openclaw-extract-now.mjs'), '');

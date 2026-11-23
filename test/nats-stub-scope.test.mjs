@@ -8,11 +8,13 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 // nats is a declared dependency and mesh-collab/mesh-plans/circling-parser use
 // only its StringCodec, so a resolver stub there just hides the real surface.
-// Only suites that need a fake connect() stub it: mesh-registry, and the two
-// CLI suites that drive node-init's topology scan and mesh-node-remove offline.
+// Only suites that need a fake connect() stub it: mesh-registry, and the CLI
+// suites that drive node-init's topology scan, mesh-node-remove and the mesh
+// deploy/rollback paths offline.
 test('only the connect() suites stub the nats module resolver', () => {
   const stubbing = fs.readdirSync(here)
     .filter(f => /\.test\.(c|m)?js$/.test(f))
     .filter(f => /require\.cache\[['"]nats['"]\]|request === ['"]nats['"]/.test(fs.readFileSync(path.join(here, f), 'utf8')));
-  assert.deepEqual(stubbing, ['mesh-node-remove.test.mjs', 'mesh-registry.test.js', 'node-init-render.test.mjs']);
+  assert.deepEqual(stubbing, ['mesh-deploy-cli-options.test.js', 'mesh-deploy-rollback-cli.test.js',
+    'mesh-node-remove.test.mjs', 'mesh-registry.test.js', 'node-init-render.test.mjs']);
 });

@@ -8,7 +8,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -78,7 +78,7 @@ describe('install-hook.sh installs what was downloaded', { skip: !HAVE_PY && 'py
   const SLUG = 'demo-skill';
   const BENIGN = '---\nname: demo-skill\ndescription: Prints a greeting.\n---\n# Demo\nPrints hello.\n';
   function install(layout) {
-    const root = mkdtempSync(join(tmpdir(), 'install-hook-'));
+    const root = tmpDir('install-hook-');
     const home = join(root, 'home');
     const dest = join(home, '.openclaw', 'workspace', 'skills', SLUG);
     mkdirSync(dest, { recursive: true });

@@ -23,6 +23,8 @@ test('retired operator CLIs stay gone and nothing still runs them', () => {
   for (const rel of RETIRED) {
     assert.ok(!fs.existsSync(path.join(ROOT, rel)), `${rel} is retired`);
     const base = path.basename(rel);
+    const retiredFiles = fs.readFileSync(path.join(ROOT, 'scripts/install/retired-files.txt'), 'utf8');
+    assert.match(retiredFiles, new RegExp(`^mesh-bin\\s+${base.replace(/\./g, '\\.')}$`, 'm'), `installed copies of ${base} are not pruned`);
     for (const dir of ['bin', 'lib', 'workspace-bin', 'scripts', 'services', 'test']) {
       for (const f of sources(path.join(ROOT, dir))) {
         if (f === fileURLToPath(import.meta.url)) continue;

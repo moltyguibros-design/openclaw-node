@@ -1,8 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { mkdtemp, rm, readdir } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { rm, readdir } from 'node:fs/promises';
 import { tmpDir } from './helpers/tmp-dir.cjs';
 import Database from 'better-sqlite3';
 import yaml from 'js-yaml';
@@ -69,7 +68,7 @@ describe('decision notes (repair 2.9)', () => {
   });
 
   it('selects top-N by salience — decayed decisions still qualify (memory review V1-3)', async () => {
-    const vault = await mkdtemp(join(tmpdir(), 'vault-dec-'));
+    const vault = tmpDir('vault-dec-');
     const db = makeDb();
     db.prepare(`INSERT INTO decisions (session_id, decision, rationale, confidence, created_at, salience)
       VALUES ('s1', 'Adopt time-anchored decay', 'Compounding bug', 0.9, '2026-06-02T10:00:00Z', 0.8)`).run();
@@ -117,7 +116,7 @@ describe('theme notes (repair 2.9)', () => {
   });
 
   it('generates above-threshold themes, idempotent on rerun', async () => {
-    const vault = await mkdtemp(join(tmpdir(), 'vault-theme-'));
+    const vault = tmpDir('vault-theme-');
     const db = makeDb();
     db.prepare(`INSERT INTO themes (label, mention_count) VALUES ('big theme', 9)`).run();
     db.prepare(`INSERT INTO themes (label, mention_count) VALUES ('small theme', 1)`).run();
