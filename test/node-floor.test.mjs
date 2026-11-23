@@ -54,6 +54,47 @@ test('mesh-install.sh gates on node_ok and links the keg-only node@22 it install
   assert.doesNotMatch(src, /18\+/);
 });
 
+// The worker join piped NodeSource's setup script into `sudo -E bash`; bootstrap.sh and
+// prereqs.sh add the signed apt source instead.
+test('mesh-install.sh installs Node on apt from the signed NodeSource source, never a piped root script', () => {
+  const src = read('mesh-install.sh');
+  const fn = src.match(/^ensure_node\(\) \{\n[\s\S]*?\n\}\n/m)[0];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-install-node-'));
+  try {
+    const bin = path.join(dir, 'bin');
+    fs.mkdirSync(bin);
+    const tool = (name, body) => fs.writeFileSync(path.join(bin, name), `#!/bin/bash\n${body}\n`, { mode: 0o755 });
+    tool('apt-get', 'exit 0');
+    tool('curl', `echo "$*" >> "${dir}/curl.log"; echo FAKE-KEY`);
+    tool('sudo', [
+      `echo "$*" >> "${dir}/sudo.log"`,
+      `case "$1" in tee|gpg|bash) cat > "${dir}/stdin.$1" ;; esac`,
+      `[ "$*" = "apt-get install -y nodejs" ] && printf '#!/bin/sh\\necho v22.12.0\\n' > "${bin}/node" && chmod +x "${bin}/node"`,
+      'exit 0',
+    ].join('\n'));
+    for (const real of ['cat', 'chmod', 'printf']) {
+      const p = spawnSync('/bin/bash', ['-c', `command -v ${real}`], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } }).stdout.trim();
+      if (p.startsWith('/')) fs.symlinkSync(p, path.join(bin, real));
+    }
+    const script = `log() { :; }; ok() { :; }; warn() { :; }; die() { echo "DIE $1"; exit 1; }\n${nodeOkFrom('mesh-install.sh')}\n${fn}\nOS=linux\nensure_node`;
+    const r = spawnSync('/bin/bash', ['-c', script], { encoding: 'utf8', env: { PATH: bin } });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const sudo = fs.readFileSync(path.join(dir, 'sudo.log'), 'utf8');
+    assert.doesNotMatch(sudo, /^(-E )?bash/m, 'no downloaded script runs as root');
+    assert.equal(fs.existsSync(path.join(dir, 'stdin.bash')), false);
+    assert.match(sudo, /^apt-get update -y\napt-get install -y ca-certificates gnupg\nmkdir -p \/etc\/apt\/keyrings$/m);
+    assert.match(sudo, /^gpg --dearmor --yes -o \/etc\/apt\/keyrings\/nodesource\.gpg$/m);
+    assert.equal(fs.readFileSync(path.join(dir, 'stdin.gpg'), 'utf8'), 'FAKE-KEY\n');
+    assert.equal(fs.readFileSync(path.join(dir, 'stdin.tee'), 'utf8'),
+      'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main\n');
+    assert.match(sudo, /^tee \/etc\/apt\/sources\.list\.d\/nodesource\.list$/m);
+    assert.match(sudo, /^apt-get update -y\napt-get install -y nodejs$/m);
+    assert.equal(fs.readFileSync(path.join(dir, 'curl.log'), 'utf8'), '-fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key\n');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('engines say >=22.12 everywhere, and CI tests the floor instead of Node 20', () => {
   for (const rel of ['package.json', 'mission-control/package.json',
     'packages/openclaw-memory-context-engine/package.json', 'lib/mcp-knowledge/package.json']) {

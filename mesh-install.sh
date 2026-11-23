@@ -96,10 +96,17 @@ ensure_node() {
       die "Homebrew not found. Install Node.js 22.12+ manually or install Homebrew first."
     fi
   else
-    # Linux: NodeSource
+    # Linux: NodeSource. On apt, its signed source (as bootstrap.sh and prereqs.sh add it)
+    # rather than its setup script piped into a root shell; gpg and the CA bundle were
+    # that script's own first install.
     if command -v apt-get &>/dev/null; then
-      curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-      sudo apt-get install -y nodejs
+      sudo apt-get update -y && sudo apt-get install -y ca-certificates gnupg
+      sudo mkdir -p /etc/apt/keyrings
+      curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | sudo gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
+      echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+        | sudo tee /etc/apt/sources.list.d/nodesource.list >/dev/null
+      sudo apt-get update -y && sudo apt-get install -y nodejs
     elif command -v dnf &>/dev/null; then
       curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
       sudo dnf install -y nodejs
