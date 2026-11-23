@@ -695,6 +695,16 @@ test('retire_shipped_files moves dir/file names but never one that leaves the di
   assert.equal(existsSync(join(root, 'deployed', 'outside.js')), true);
 });
 
+// It grepped daemon source and reported session saving as not connected (it is) and the
+// opt-in federation parts as connected (they are off by default).
+test('openclaw-status is retired: not shipped, archived on update, named nowhere outside memory-plan', () => {
+  assert.equal(existsSync(join(ROOT, 'bin/openclaw-status.mjs')), false);
+  assert.match(readFileSync(join(ROOT, 'scripts/install/retired-files.txt'), 'utf8'), /^mesh-bin openclaw-status\.mjs$/m);
+  const r = spawnSync('git', ['grep', '-l', '-F', '-e', 'openclaw-status', '--', '.', ':!memory-plan',
+    ':!scripts/install/retired-files.txt', ':!test/install-modules.test.mjs'], { cwd: ROOT, encoding: 'utf8' });
+  assert.equal(r.stdout, '');
+});
+
 test('the directory step leaves ~/.openclaw private to its owner, on a fresh install and on --update', () => {
   const src = moduleSrc['workspace.sh'];
   const block = src.slice(0, src.indexOf('# Step 3'));

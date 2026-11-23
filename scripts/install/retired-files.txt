@@ -20,6 +20,9 @@ mesh-bin session-search.mjs
 mesh-bin extract-existing-sessions.mjs
 mesh-bin fed-benchmark-driver.mjs
 mesh-bin grappe-benchmark.mjs
+# openclaw-status grepped daemon source and misreported what was wired; node-watch
+# and node-acceptance probe the running node instead.
+mesh-bin openclaw-status.mjs
 # sync-to-harness: its "dry run" rewrote ~/openclaw (the deploy checkout) with
 # --delete and pushed to main.
 workspace-bin sync-to-harness

@@ -51,9 +51,9 @@ The failure mode this guards against is the May-2026 one (MASTER_PLAN intro): "t
 prints *startup complete* while hiding three disabled subsystems." A green PID and a passing test suite
 both reported success while the node produced ~0 working behavior. **Liveness ≠ acceptance.**
 
-`bin/openclaw-status.mjs` is *not* an acceptance gate either: it greps daemon **source** statically and
-(per COMPONENT_REGISTRY cross-component issues) introspects the *wrong* daemon, reporting false
-`NOT_WIRED`. **This protocol probes the running runtime, never source.**
+A static read of daemon **source** is *not* an acceptance gate either: the retired source-grepping
+status tool did exactly that and misreported what was wired (session saving as not connected, the opt-in
+federation parts as connected). **This protocol probes the running runtime, never source.**
 
 "100%" is defined precisely here: every **required** check in the node's profile returns `PASS` **with
 captured runtime evidence**. Anything unobservable is `SKIP`/`BLOCK`, never `PASS` — fake-passing is the
