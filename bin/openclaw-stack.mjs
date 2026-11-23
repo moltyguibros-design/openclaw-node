@@ -86,16 +86,15 @@ export function scanSystemdUnits(exec = execFileSync) {
 }
 
 export function readNatsCohort(home = OPENCLAW_HOME) {
+  const file = path.join(home, 'config', 'nats-writer-cohort.json');
   let declared;
   try {
-    declared = JSON.parse(fs.readFileSync(path.join(home, 'config', 'nats-writer-cohort.json'), 'utf8'));
+    declared = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (error) {
     if (error.code === 'ENOENT') return null;
-    throw error;
+    throw new Error(`${file}: ${error.message}`);
   }
-  if (!Array.isArray(declared?.activeLabels)) {
-    throw new Error(`${path.join(home, 'config', 'nats-writer-cohort.json')} has no activeLabels list`);
-  }
+  if (!Array.isArray(declared?.activeLabels)) throw new Error(`${file} has no activeLabels list`);
   return declared.activeLabels;
 }
 
@@ -271,6 +270,16 @@ function notifyResult(rows) {
   } catch { /* popup is best-effort; the table already printed */ }
 }
 
+// up and status fail closed on an unreadable bus layout; down never reads it.
+function startableUnits(units) {
+  try {
+    return selectUnitsToStart(units, JSON.parse(fs.readFileSync(MANIFEST, 'utf8')), readNatsCohort());
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
+}
+
 const cmd = process.argv[2] || 'status';
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const units = process.platform === 'darwin' ? scanLaunchdUnits() : scanSystemdUnits();
@@ -285,8 +294,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   delete process.env.OPENCLAW_NATS_LEGACY_REEXEC_ATTEMPT;
   delete process.env.OPENCLAW_NATS_LEGACY_LOCK_HELD;
 
-  const startable = selectUnitsToStart(units, JSON.parse(fs.readFileSync(MANIFEST, 'utf8')), readNatsCohort());
   if (cmd === 'up') {
+    const startable = startableUnits(units);
     const started = process.platform === 'darwin' ? up(startable) : upLinux(startable);
     const bridge = await startBridge();
     console.log(`started: ${started.length ? started.join(', ') : '(everything already running)'} · bridge: ${bridge}`);
@@ -299,7 +308,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     down(units);
     console.log('stack stopped (disabled units untouched)');
   } else if (cmd === 'status') {
-    const rows = await statusTable(units, startable);
+    const rows = await statusTable(units, startableUnits(units));
     printTable(rows);
     process.exit(rows.some(r => r.status === 'DOWN') ? 1 : 0);
   } else {

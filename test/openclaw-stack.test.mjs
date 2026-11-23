@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   scanLaunchdUnits, scanSystemdUnits, probePort, classify, shortId, PORTS, PERIODIC,
   selectUnitsToStart, readNatsCohort, summarize,
@@ -125,4 +127,47 @@ describe('selectUnitsToStart — up starts what the installer starts', () => {
     ];
     assert.deepEqual(summarize(rows), { live: 2, total: 3, bad: ['memory-daemon'] });
   });
+});
+
+// down never needs the bus layout: a hand-edited or corrupt cohort file must not keep it from stopping units.
+describe('openclaw-stack with an unreadable nats-writer-cohort.json', { skip: process.platform !== 'linux' && 'systemd path' }, () => {
+  const STACK = fileURLToPath(new URL('../bin/openclaw-stack.mjs', import.meta.url));
+  const run = (cohort, cmd) => {
+    const home = path.join(tmp, 'home');
+    const stub = path.join(tmp, 'stub');
+    fs.mkdirSync(path.join(home, '.openclaw', 'config'), { recursive: true });
+    fs.mkdirSync(stub, { recursive: true });
+    fs.writeFileSync(path.join(home, '.openclaw', 'config', 'nats-writer-cohort.json'), cohort);
+    fs.writeFileSync(path.join(stub, 'systemctl'), [
+      '#!/bin/sh',
+      'echo "$*" >> "$HOME/systemctl.log"',
+      'if [ "$2" = list-unit-files ]; then printf "openclaw-memory-daemon.service enabled\\nopenclaw-nats.service enabled\\n"; fi',
+      'exit 0',
+      '',
+    ].join('\n'), { mode: 0o755 });
+    fs.writeFileSync(path.join(stub, 'lsof'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    const r = spawnSync(process.execPath, [STACK, cmd], {
+      encoding: 'utf8',
+      env: { HOME: home, OPENCLAW_HOME: path.join(home, '.openclaw'), PATH: `${stub}:/usr/bin:/bin` },
+      timeout: 20000,
+    });
+    const log = fs.existsSync(path.join(home, 'systemctl.log')) ? fs.readFileSync(path.join(home, 'systemctl.log'), 'utf8') : '';
+    return { ...r, log };
+  };
+
+  for (const cohort of ['{"schema":1}\n', 'not json\n']) {
+    it(`down still stops every unit (${cohort.trim()})`, () => {
+      const r = run(cohort, 'down');
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.log, /^--user stop openclaw-memory-daemon\.service$/m);
+      assert.match(r.log, /^--user stop openclaw-nats\.service$/m);
+    });
+
+    it(`status reports the bad file and exits 1 without a stack trace (${cohort.trim()})`, () => {
+      const r = run(cohort, 'status');
+      assert.equal(r.status, 1);
+      assert.match(r.stderr, /nats-writer-cohort\.json/);
+      assert.doesNotMatch(r.stderr, /^\s+at /m);
+    });
+  }
 });
