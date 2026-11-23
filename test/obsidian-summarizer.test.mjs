@@ -129,16 +129,25 @@ describe('buildConceptBody', () => {
 
 describe('generateConceptSummary', () => {
   it('calls LLM client and returns summary', async () => {
+    let seen;
     const mockClient = {
       async generateAnalysis(messages, opts) {
+        seen = opts;
         assert.ok(messages[1].content.includes('NATS JetStream'));
         return { mode: 'llm', value: { content: 'NATS JetStream provides durable message streaming for the mesh.' } };
       },
     };
     const result = await generateConceptSummary(mockClient, 'NATS JetStream', [
       { session_id: 's1', salience: 0.9 },
-    ]);
-    assert.ok(result.includes('durable message streaming'));
+    ], { waitTimeoutMs: 5000 });
+    assert.equal(result, 'NATS JetStream provides durable message streaming for the mesh.');
+    assert.equal(seen.maxTokens, 256);
+    assert.equal(seen.waitTimeoutMs, 5000);
+  });
+
+  it('returns null when the analysis lane falls back', async () => {
+    const client = { generateAnalysis: async () => ({ mode: 'fallback', value: { content: 'long enough summary text' } }) };
+    assert.equal(await generateConceptSummary(client, 'X', []), null);
   });
 
   it('returns null when client is null', async () => {
@@ -454,16 +463,24 @@ describe('queryConceptData + generateConceptNotes integration', () => {
     const proseClient = {
       generateAnalysis: async () => ({ mode: 'llm', value: { content: 'NATS JetStream is the persistence layer of the mesh.' } }),
     };
+    let fallbacks = 0;
+    const busyClient = {
+      generateAnalysis: async () => { fallbacks++; return { mode: 'fallback' }; },
+    };
 
     try {
       await generateConceptNotes({ db, vaultPath, threshold: 5, client: proseClient });
       const withProse = await readFile(join(vaultPath, 'concepts', 'nats-jetstream.md'), 'utf-8');
       assert.ok(withProse.includes('persistence layer of the mesh'));
 
-      // Next cycle: LLM unavailable. The note must keep its prose, not
-      // regress to the placeholder.
-      await generateConceptNotes({ db, vaultPath, threshold: 5, client: null });
+      // The entity row changes so the note is rebuilt, and the analysis lane
+      // is busy: the note must keep its prose, not regress to the placeholder.
+      db.prepare(`UPDATE entities SET mention_count = 11, last_seen = '2026-05-21' WHERE name = 'NATS JetStream'`).run();
+      const busy = await generateConceptNotes({ db, vaultPath, threshold: 5, client: busyClient });
+      assert.equal(fallbacks, 1);
+      assert.deepEqual(busy.notes, ['nats-jetstream.md']);
       const afterOutage = await readFile(join(vaultPath, 'concepts', 'nats-jetstream.md'), 'utf-8');
+      assert.match(afterOutage, /mention_count: 11/);
       assert.ok(afterOutage.includes('persistence layer of the mesh'));
       assert.ok(!afterOutage.includes('_Summary not yet generated._'));
     } finally {
