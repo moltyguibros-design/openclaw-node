@@ -59,7 +59,7 @@ describe('mesh CLIs use lib/node-id.js', () => {
                    async get(k) { return { value: sc.encode(JSON.stringify(nodes[k])) }; } };
       const nc = { jetstream: () => ({ views: { kv: async () => kv } }) };
       require(${JSON.stringify(path.join(ROOT, 'bin', 'fleet-deploy.js'))})
-        .fleetDeploy(nc, { dryRun: true }).then(() => process.exit(0), e => { console.error(e); process.exit(1); });
+        .fleetDeploy(nc, { sha: 'abc1234', branch: 'main', dryRun: true }).then(() => process.exit(0), e => { console.error(e); process.exit(1); });
     `;
     const r = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', env: env({ MESH_NODE_ID: 'lead-x' }) });
     const out = strip(r.stdout);

@@ -61,11 +61,11 @@ describe('the latest catch-up marker', () => {
   after(() => { console.warn = savedWarn; fs.rmSync(tmp, { recursive: true, force: true }); });
 
   it('a fleet-wide deploy writes it; a targeted one publishes but leaves it on the fleet-wide sha', async () => {
-    await quiet(() => fleetDeploy(nc, { sha: 'aaaaaaa', timeoutMs: 1 }));
+    await quiet(() => fleetDeploy(nc, { sha: 'aaaaaaa', branch: 'main', timeoutMs: 1 }));
     assert.equal(marker('MESH_DEPLOY_LATEST').sha, 'aaaaaaa');
     assert.deepEqual(marker('MESH_DEPLOY_LATEST').nodes, ['all']);
 
-    await quiet(() => fleetDeploy(nc, { sha: 'bbbbbbb', targetNodes: ['canary'], timeoutMs: 1 }));
+    await quiet(() => fleetDeploy(nc, { sha: 'bbbbbbb', branch: 'main', targetNodes: ['canary'], timeoutMs: 1 }));
     assert.equal(published.at(-1).sha, 'bbbbbbb', 'the targeted trigger still goes out');
     assert.deepEqual(published.at(-1).nodes, ['canary']);
     assert.equal(marker('MESH_DEPLOY_LATEST').sha, 'aaaaaaa', 'the targeted deploy replaced the fleet-wide marker');

@@ -11,6 +11,7 @@
  */
 
 const { connect, StringCodec } = require('nats');
+const { execFileSync } = require('child_process');
 const path = require('path');
 const os = require('os');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
@@ -219,9 +220,13 @@ function triggerBranch(repoDir) {
 
 const noResults = expected => ({ expected, succeeded: 0, skipped: 0, failed: 0, missing: 0, stillDeploying: 0 });
 
+// The caller names the sha and branch it resolved (mesh-deploy: origin's tip),
+// never the lead checkout's HEAD, which a remote-only deploy leaves stale.
 async function fleetDeploy(nc, opts) {
-  const { components, targetNodes, dryRun, force, timeoutMs } = opts;
+  const { components, targetNodes, dryRun, force, timeoutMs, sha, branch } = opts;
   const timeout = timeoutMs || 120000; // 2 min default
+  if (!sha) throw new Error('fleetDeploy needs the sha to deploy (opts.sha)');
+  if (!/^[a-zA-Z0-9._/-]+$/.test(branch || '')) throw new Error(`Unsafe branch name: ${branch}`);
 
   const nodes = await discoverNodes(nc);
   // Exclude ourselves (we already deployed locally)
@@ -232,13 +237,6 @@ async function fleetDeploy(nc, opts) {
   if (remoteNodes.length === 0) {
     info('No remote nodes to deploy to');
     return noResults(0);
-  }
-
-  const sha = opts.sha || exec('git rev-parse --short HEAD', { cwd: REPO_DIR });
-  const rawBranch = triggerBranch(REPO_DIR);
-  const branch = rawBranch.replace(/[^a-zA-Z0-9._/-]/g, '');
-  if (!branch || branch !== rawBranch) {
-    throw new Error(`Unsafe branch name from local git: ${rawBranch}`);
   }
 
   header(`Fleet Deploy: ${sha} → ${remoteNodes.length} node(s)`);
@@ -421,10 +419,13 @@ async function main() {
     if (showStatusFlag) {
       await showStatus(nc);
     } else {
+      const branch = statusBranch(REPO_DIR);
+      execFileSync('git', ['fetch', 'origin', branch], { cwd: REPO_DIR, stdio: 'ignore', timeout: 60000 });
+      const sha = execFileSync('git', ['rev-parse', '--short', `origin/${branch}^{commit}`], { cwd: REPO_DIR, encoding: 'utf8' }).trim();
       const outcome = await fleetDeploy(nc, {
         components: components.length > 0 ? components : null,
         targetNodes: targetNodes.length > 0 ? targetNodes : null,
-        dryRun, force, timeoutMs,
+        sha, branch, dryRun, force, timeoutMs,
       });
       if (outcome.failed > 0) process.exitCode = 1;
     }

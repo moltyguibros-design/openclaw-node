@@ -26,7 +26,8 @@
  *   the affected components, then restart each affected service once. fromSha
  *   defaults to the sha this node last deployed in full (deploy state), not
  *   HEAD: the tree moves without a deploy (the lead's repo is a working
- *   checkout whose HEAD `mesh deploy` publishes), and a HEAD-based diff is empty.
+ *   checkout), and a HEAD-based diff is empty. The normal flow deploys, and
+ *   triggers the fleet with, origin's tip of the deploy branch.
  *
  * USAGE (run as node bin/mesh-deploy.js; bin/mesh.js `mesh deploy` only publishes a fleet trigger and takes --force/--component/--node):
  *   mesh deploy                       — deploy everything that changed
@@ -1392,7 +1393,7 @@ async function main() {
       header('Rolling back remote nodes');
       // Listeners check out the rollback sha exactly.
       const remote = await triggerFleet('deploy-rollback', {
-        components: null, targetNodes, sha: toSha.slice(0, 7), dryRun, force: true,
+        components: null, targetNodes, sha: toSha.slice(0, 7), branch: DEPLOY_BRANCH, dryRun, force: true,
       });
       if (remote.error?.code === 'MODULE_NOT_FOUND') warn('Fleet deploy not available — remote rollback skipped');
       else if (remote.error) fail(`Remote rollback failed: ${remote.error.message}`);
@@ -1418,19 +1419,23 @@ async function main() {
 
   // ═══ Normal deploy flow ═══
 
+  if (deployLocal) header(`Deploying to ${IS_MAC ? 'macOS' : 'Linux'} (${nodeRole()})`);
+
+  if (!fs.existsSync(REPO_DIR)) {
+    fail(`Repo not found at ${REPO_DIR}`);
+    console.log(`  Clone it: git clone https://github.com/moltyguibros-design/openclaw-node.git "${REPO_DIR}"`);
+    process.exit(1);
+  }
+
+  // One target for this node and the fleet, dry run or not: origin's tip. The
+  // lead's HEAD is a working checkout, and only the local deploy moves it.
+  info(`Fetching origin/${DEPLOY_BRANCH}...`);
+  git(REPO_DIR, ['fetch', 'origin', DEPLOY_BRANCH]);
+  const toSha = gitLine(REPO_DIR, ['rev-parse', `origin/${DEPLOY_BRANCH}^{commit}`]);
+  const toShort = gitLine(REPO_DIR, ['rev-parse', '--short', toSha]);
+
   if (deployLocal) {
-    header(`Deploying to ${IS_MAC ? 'macOS' : 'Linux'} (${nodeRole()})`);
-
-    if (!fs.existsSync(REPO_DIR)) {
-      fail(`Repo not found at ${REPO_DIR}`);
-      console.log(`  Clone it: git clone https://github.com/moltyguibros-design/openclaw-node.git "${REPO_DIR}"`);
-      process.exit(1);
-    }
-
-    info(`Fetching origin/${DEPLOY_BRANCH}...`);
-    git(REPO_DIR, ['fetch', 'origin', DEPLOY_BRANCH]);
     const head = gitLine(REPO_DIR, ['rev-parse', 'HEAD']);
-    const toSha = gitLine(REPO_DIR, ['rev-parse', `origin/${DEPLOY_BRANCH}^{commit}`]);
     if (!isAncestor(REPO_DIR, head, toSha)) {
       throw new Error(`HEAD ${head.slice(0, 8)} has commits that are not on origin/${DEPLOY_BRANCH} — ` +
         'push them first, or deploy an exact commit with --local --to <sha>');
@@ -1462,6 +1467,8 @@ async function main() {
     remote = await triggerFleet('deploy-cli', {
       components: filterIds.length > 0 ? filterIds : null,
       targetNodes,  // null: every node but this one
+      sha: toShort,
+      branch: DEPLOY_BRANCH,
       dryRun,
       force: forceAll,
     });
@@ -1477,8 +1484,7 @@ async function main() {
   // ── Summary ──
   if (!dryRun && (deployLocal || deployRemote)) {
     header('Deploy Complete');
-    const sha = exec('git rev-parse --short HEAD', { cwd: REPO_DIR, ignoreError: true });
-    console.log(`  Commit:  ${sha}`);
+    console.log(`  Commit:  ${toShort}`);
     console.log(`  Branch:  ${DEPLOY_BRANCH}`);
     console.log(`  Local:   ${deployLocal ? C.green('deployed') : C.dim('skipped')}`);
     console.log(`  Remote:  ${remote ? remoteSummary(remote) : C.dim('skipped')}`);

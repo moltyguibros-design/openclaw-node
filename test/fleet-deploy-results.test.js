@@ -73,7 +73,7 @@ describe('fleet-deploy result reporting', () => {
       outcome = await fleetDeploy(fakeNc({
         w1: { nodeId: 'w1', status: 'skipped', log: 'No matching components for role worker', durationSeconds: 0 },
         w2: { nodeId: 'w2', status: 'failed', errors: ['deploy script exited 1'], durationSeconds: 3 },
-      }), { components: ['mc'], timeoutMs: 5000 });
+      }), { sha: 'abc1234', branch: 'main', components: ['mc'], timeoutMs: 5000 });
     });
 
     assert.doesNotMatch(out, /\[FAIL\] w1/, out);
@@ -91,7 +91,7 @@ describe('fleet-deploy result reporting', () => {
       outcome = await fleetDeploy(fakeNc({
         w1: { nodeId: 'w1', status: 'deploying' },
         w2: { nodeId: 'w2', status: 'success', sha: 'abc1234', durationSeconds: 1 },
-      }), { timeoutMs: 1000 });
+      }), { sha: 'abc1234', branch: 'main', timeoutMs: 1000 });
     });
 
     assert.match(out, /w1 — still deploying/);

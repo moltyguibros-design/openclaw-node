@@ -91,7 +91,7 @@ describe('writers and the listener', () => {
       publish() {},
       jetstream() { return { views: { kv: async (name, opts) => { opened[name] = opts; return buckets[name]; } } }; },
     };
-    await fleetDeploy(nc, { timeoutMs: 5000 });
+    await fleetDeploy(nc, { sha: 'abc1234', branch: 'main', timeoutMs: 5000 });
 
     assert.equal(opened.MESH_DEPLOY_LATEST.ttl, undefined, 'the marker bucket must not expire');
     const [[key, written]] = buckets.MESH_DEPLOY_LATEST.puts;
