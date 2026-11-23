@@ -198,6 +198,30 @@ describe('generateRelevanceSummary', () => {
     assert.ok(logged.some(m => m.includes('ollama-busy-extraction')),
       `expected a log entry mentioning the fallback reason; got: ${JSON.stringify(logged)}`);
   });
+
+  // Built at runtime so the committed file holds no secret-shaped line.
+  const key = 'sk-' + 'Ab1'.repeat(15);
+  const keyResult = { snippet: `export OPENAI_API_KEY=${key} for staging`, session_id: 's', score: 0.8 };
+
+  it('scrubs a key out of the data-only summary', async () => {
+    const summary = await generateRelevanceSummary({ themes: ['staging'], entities: [] }, keyResult);
+    assert.ok(!summary.includes(key));
+    assert.ok(summary.includes('[REDACTED]'));
+  });
+
+  it('scrubs a key out of the LLM prompt and the LLM summary', async () => {
+    let captured = null;
+    const llmClient = {
+      generateAnalysis: async (messages) => {
+        captured = messages;
+        return { mode: 'llm', value: { content: 'Relevant: ' + key } };
+      },
+    };
+    const summary = await generateRelevanceSummary({ themes: ['staging'], entities: [] }, keyResult, { llmClient });
+    assert.ok(!summary.includes(key));
+    assert.ok(summary.includes('[REDACTED]'));
+    assert.ok(!captured[1].content.includes(key));
+  });
 });
 
 // ─── buildOfferFromResults ──────────────────────────────────────────────────
