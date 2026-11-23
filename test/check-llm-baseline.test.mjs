@@ -1,7 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, chmodSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -59,6 +59,19 @@ describe('check-llm-baseline CLI', () => {
     const r = run(20, ['--install']);
     assert.equal(r.status, 0, r.stderr.slice(-500));
     assert.match(r.stdout, /qwen3:8b is installed and ready/);
+  });
+
+  // Node resolves symlinks in the entry module's URL but keeps argv[1] as given, and
+  // llm-setup.sh calls the CLI through REPO_DIR's logical path (a symlinked code dir, macOS /tmp).
+  it('--json reports when run through a symlinked checkout', () => {
+    const link = join(dir, 'repo-link');
+    symlinkSync(join(dirname(SCRIPT), '..'), link);
+    const r = spawnSync(process.execPath, ['--import', preloadUrl, join(link, 'bin', 'check-llm-baseline.mjs'), '--json'], {
+      env: { ...process.env, FAKE_MEM_GB: '20' },
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout).recommendation.model, 'qwen3:8b');
   });
 });
 

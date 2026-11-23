@@ -32,7 +32,8 @@
 
 import os from 'node:os';
 import { execFile, spawn } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 const GB = 1024 * 1024 * 1024;
@@ -177,7 +178,7 @@ Options:
   }
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((e) => {
     console.error('Error:', e.message);
     process.exit(1);
