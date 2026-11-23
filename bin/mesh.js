@@ -456,11 +456,17 @@ async function cmdDeploy(args) {
 
   // Write "latest" marker so offline nodes can catch up. Same signed trigger —
   // an unsigned marker let anyone with KV write access steer catching-up nodes.
-  try {
-    const js = nc.jetstream();
-    const resultsKv = await openMeshKv(js, RESULTS_BUCKET, RESULTS_KV_OPTS, { waitMs: 0 });
-    await writeLatestMarker({ latestKv: await openLatestKv(js, { waitMs: 0 }), resultsKv }, signedTrigger);
-  } catch (err) { console.warn(`[mesh] write deploy latest marker: ${err.message}`); }
+  // Only a fleet-wide deploy moves it: a node that missed one and comes back
+  // after a targeted deploy must still catch up to it.
+  if (trigger.nodes.includes('all')) {
+    try {
+      const js = nc.jetstream();
+      const resultsKv = await openMeshKv(js, RESULTS_BUCKET, RESULTS_KV_OPTS, { waitMs: 0 });
+      await writeLatestMarker({ latestKv: await openLatestKv(js, { waitMs: 0 }), resultsKv }, signedTrigger);
+    } catch (err) { console.warn(`[mesh] write deploy latest marker: ${err.message}`); }
+  } else {
+    console.log('targeted deploy: catch-up marker unchanged');
+  }
 
   // Publish trigger
   nc.publish('mesh.deploy.trigger', sc.encode(JSON.stringify(signedTrigger)));

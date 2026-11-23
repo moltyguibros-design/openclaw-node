@@ -88,11 +88,21 @@ describe('mesh deploy options', () => {
     assert.deepEqual(r.bus.filter((e) => !e.publish?.startsWith('openclaw.trace.')), []);
   });
 
-  it('--node <registered> publishes the trigger', () => {
+  // A targeted deploy replaced the fleet-wide catch-up marker, so a node that
+  // missed an earlier fleet-wide deploy never caught up.
+  it('--node <registered> publishes the trigger and leaves the catch-up marker alone', () => {
     const r = meshOnBus('--node', 'w1');
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.ok(r.bus.some((e) => e.publish === 'mesh.deploy.trigger'), JSON.stringify(r.bus));
+    assert.deepEqual(r.bus.filter((e) => e.put), [], 'a targeted deploy wrote the latest marker');
+    assert.match(r.stdout, /targeted deploy: catch-up marker unchanged/);
     assert.match(r.stdout, /w1: success/);
+  });
+
+  it('a fleet-wide deploy writes the catch-up marker', () => {
+    const r = meshOnBus();
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual(r.bus.filter((e) => e.put).map((e) => e.put).sort(), ['MESH_DEPLOY_LATEST', 'MESH_DEPLOY_RESULTS']);
   });
 
   it('--force, --component <x> and --node <x> are accepted', () => {

@@ -275,8 +275,11 @@ async function fleetDeploy(nc, opts) {
   const signedTrigger = maybeSignDeployTrigger(trigger);
 
   // The "latest" catch-up marker carries the SAME signed trigger — an unsigned
-  // marker let anyone with KV write access steer every catching-up node.
-  await writeLatestMarker({ latestKv, resultsKv }, signedTrigger);
+  // marker let anyone with KV write access steer every catching-up node. Only a
+  // fleet-wide deploy moves it: a node that missed one and comes back after a
+  // targeted deploy must still catch up to it.
+  if (trigger.nodes.includes('all')) await writeLatestMarker({ latestKv, resultsKv }, signedTrigger);
+  else info('targeted deploy: catch-up marker unchanged');
 
   console.log(`Publishing deploy trigger: sha=${sha} nodes=${(targetNodes || ['all']).join(',')}`);
   nc.publish('mesh.deploy.trigger', sc.encode(JSON.stringify(signedTrigger)));
