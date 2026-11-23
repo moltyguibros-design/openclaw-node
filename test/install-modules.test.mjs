@@ -679,6 +679,27 @@ test('fresh installs schedule transcript-archive hourly on both platforms', () =
   assert.equal((moduleSrc['services.sh'].match(/mkdir -p [^\n]*"\$OPENCLAW_ROOT\/transcript-archive"/g) || []).length, 1);
 });
 
+// resolveNodeId reads only the process env, so a plist without OPENCLAW_NODE_ID traced,
+// logged and registered under the hostname while its systemd twin used the persisted id.
+test('macOS and Linux templates agree on the node-identity env', () => {
+  const manifest = JSON.parse(readFileSync(join(ROOT, 'services/service-manifest.json'), 'utf8'));
+  let compared = 0;
+  for (const { name } of manifest) {
+    const plistPath = join(ROOT, `services/launchd/ai.openclaw.${name.replace(/^openclaw-/, '')}.plist`);
+    const unitPath = join(ROOT, `services/systemd/${name}.service`);
+    if (!existsSync(plistPath) || !existsSync(unitPath)) continue;
+    compared++;
+    assert.equal(readFileSync(plistPath, 'utf8').includes('<key>OPENCLAW_NODE_ID</key>'),
+      /^Environment="?OPENCLAW_NODE_ID=/m.test(readFileSync(unitPath, 'utf8')), `${name}: OPENCLAW_NODE_ID on one platform only`);
+  }
+  assert.ok(compared > 10, `compared ${compared} services`);
+  for (const svc of ['mesh-task-daemon', 'mesh-tool-discord', 'mesh-health-publisher']) {
+    assert.match(readFileSync(join(ROOT, `services/launchd/ai.openclaw.${svc}.plist`), 'utf8'),
+      /<key>OPENCLAW_WORKSPACE<\/key>\s*<string>\$\{OPENCLAW_WORKSPACE\}<\/string>/, svc);
+  }
+  assert.doesNotMatch(readFileSync(join(ROOT, 'bin/mesh-task-daemon.js'), 'utf8'), /const NODE_ID = /);
+});
+
 test('every timer in the service manifest ships its launchd plist and its systemd service + timer', () => {
   const manifest = JSON.parse(readFileSync(join(ROOT, 'services/service-manifest.json'), 'utf8'));
   for (const { name, timer } of manifest.filter((s) => s.timer)) {

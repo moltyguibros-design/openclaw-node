@@ -61,7 +61,6 @@ const TASK_TTL_DAYS = parseInt(process.env.MESH_TASK_TTL_DAYS || '14'); // termi
 const LEASE_MS = parseInt(process.env.MESH_LEASE_MS || String(DEFAULT_LEASE_MS)); // owner must renew within this (heartbeat is 60s) — P4-5
 const TASK_TTL_MS = TASK_TTL_DAYS > 0 ? TASK_TTL_DAYS * 86400000 : 0;
 const CIRCLING_STEP_TIMEOUT_MS = parseInt(process.env.MESH_CIRCLING_STEP_TIMEOUT_MS || String(10 * 60 * 1000)); // 10 min default
-const NODE_ID = require('../lib/node-id').resolveNodeId();
 
 let nc, store, collabStore, planStore;
 
