@@ -676,9 +676,12 @@ test('an --update removes the files the repo deleted from inside shipped skills,
 
 test('installer links scoped packages into both deployed parent trees', () => {
   const workspace = moduleSrc['workspace.sh'];
-  assert.ok(workspace.includes('for scoped_dir in "$pkgdir"*/'));
+  assert.ok(readFileSync(join(ROOT, 'scripts/install/deps.sh'), 'utf8').includes('for scoped_dir in "$pkgdir"*/'));
   assert.ok(workspace.includes('link_dependency_tree "$MESH_NM" "$WS_NM"'));
   assert.ok(workspace.includes('link_dependency_tree "$MESH_NM" "$MESH_HOME_NM"'));
+  // The repo tree is the one dependency set: no second, partial install at the mesh home.
+  assert.ok(workspace.includes('MESH_NM="$REPO_DIR/node_modules"'));
+  assert.doesNotMatch(workspace, /npm init -y|npm install --no-save better-sqlite3/);
   assert.ok(moduleSrc['components.sh'].includes('$WORKSPACE/node_modules/@huggingface/transformers'));
   assert.ok(!moduleSrc['components.sh'].includes('$WORKSPACE/lib/mcp-knowledge/node_modules'));
 });
@@ -1114,9 +1117,11 @@ test('both dependency installers provide and gate rsync, which install.sh runs f
 // hand over a tree without dist/index.js.
 test('env.sh builds the event-schemas dist the memory daemon needs at startup', () => {
   const env = moduleSrc['env.sh'];
-  assert.match(env, /packages\/event-schemas\/dist\/index\.js/);
-  assert.match(env, /npx --yes --package typescript@5 tsc -p packages\/event-schemas\/tsconfig\.json/);
-  assert.match(env, /event-schemas build produced no dist\/index\.js[^\n]*\n\s*return 1/);
+  const deps = readFileSync(join(ROOT, 'scripts/install/deps.sh'), 'utf8');
+  assert.match(env, /^source "\$REPO_DIR\/scripts\/install\/deps\.sh"$/m);
+  assert.match(deps, /packages\/event-schemas\/dist\/index\.js/);
+  assert.match(deps, /npx --yes --package typescript@5 tsc -p packages\/event-schemas\/tsconfig\.json/);
+  assert.match(deps, /event-schemas build produced no dist\/index\.js[^\n]*\n\s*return 1/);
   assert.match(env, /^build_event_schemas "\$REPO_DIR" \|\| exit 1$/m);
   // The daemon's loader is the reason this matters: it fails loud on a missing dist.
   assert.match(readFileSync(join(ROOT, 'lib/event-schemas.mjs'), 'utf8'), /event-schemas dist missing/);
@@ -1127,8 +1132,8 @@ test('env.sh builds the event-schemas dist the memory daemon needs at startup', 
 // or a schema change on a persistent checkout.
 test('install --update reinstalls changed dependencies and rebuilds a stale event-schemas dist', () => {
   const env = moduleSrc['env.sh'];
-  const block = env.slice(env.indexOf('# ── Repo runtime dependencies ──'), env.indexOf('# ── Resolve the agent provider'));
-  assert.ok(block.length > 0, 'the dependency block must be found');
+  const block = env.slice(env.indexOf('# ── Repo runtime dependencies'), env.indexOf('# ── Resolve the agent provider'));
+  assert.ok(block.includes('install_repo_deps "$REPO_DIR"'), 'the dependency block must be found');
   const root = tmpDir('openclaw-deps-');
   const repo = join(root, 'repo');
   const put = (rel, text) => { mkdirSync(dirname(join(repo, rel)), { recursive: true }); writeFileSync(join(repo, rel), text); };
@@ -1153,7 +1158,7 @@ mkdir -p packages/event-schemas/dist
     const r = spawnSync('bash', ['-c', `set -euo pipefail
 DRY_RUN=false; info() { :; }; error() { echo "ERR $*"; }; run() { "$@"; }
 REPO_DIR=${JSON.stringify(repo)}
-${block}`], { encoding: 'utf8', env: { ...process.env, PATH: `${join(root, 'fakebin')}:${process.env.PATH}` } });
+${block.replace('$REPO_DIR/scripts/install/deps.sh', join(ROOT, 'scripts/install/deps.sh'))}`], { encoding: 'utf8', env: { ...process.env, PATH: `${join(root, 'fakebin')}:${process.env.PATH}` } });
     assert.equal(r.status, 0, r.stderr + r.stdout);
     return readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean);
   };
@@ -1183,6 +1188,58 @@ ${block}`], { encoding: 'utf8', env: { ...process.env, PATH: `${join(root, 'fake
   assert.deepEqual(run(), [], 'without src/ the shipped dist is kept');
   rmSync(dist);
   assert.deepEqual(run(), [tsc], 'a missing dist is still built');
+});
+
+// What a fleet deploy runs on each node when package.json, package-lock.json or
+// packages/ change: the same step, plus the workspace copies workspace.sh makes.
+test('deps.sh run standalone refreshes node_modules, the dist, workspace packages/ and the dependency links', () => {
+  const root = tmpDir('openclaw-deps-run-');
+  const repo = join(root, 'repo');
+  const ws = join(root, 'ws');
+  const put = (rel, text) => { mkdirSync(dirname(join(root, rel)), { recursive: true }); writeFileSync(join(root, rel), text); };
+  put('repo/package.json', '{"name":"r"}\n');
+  put('repo/package-lock.json', '{"v":1}\n');
+  put('repo/packages/event-schemas/tsconfig.json', '{}\n');
+  put('repo/packages/event-schemas/src/events.ts', 'export const a = 1;\n');
+  mkdirSync(ws);
+  const calls = join(root, 'calls.log');
+  put('fakebin/npm', `#!/bin/sh
+echo "npm $*" >> "${calls}"
+rm -rf node_modules && mkdir -p node_modules/nats node_modules/@scope/pkg
+[ -n "\${DEPS_TEST_NEW_PKG:-}" ] && mkdir -p "node_modules/$DEPS_TEST_NEW_PKG"
+exit 0
+`);
+  put('fakebin/npx', `#!/bin/sh
+echo "npx $*" >> "${calls}"
+mkdir -p packages/event-schemas/dist && echo built > packages/event-schemas/dist/index.js
+`);
+  spawnSync('chmod', ['+x', join(root, 'fakebin/npm'), join(root, 'fakebin/npx')]);
+  const run = (env = {}) => {
+    writeFileSync(calls, '');
+    const r = spawnSync('bash', [join(ROOT, 'scripts/install/deps.sh'), repo, ws], {
+      encoding: 'utf8',
+      env: { ...process.env, HOME: root, OPENCLAW_MESH_HOME: join(root, 'mesh'), PATH: `${join(root, 'fakebin')}:${process.env.PATH}`, ...env },
+    });
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    return readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean);
+  };
+
+  assert.deepEqual(run(), ['npm ci --omit=dev', 'npx --yes --package typescript@5 tsc -p packages/event-schemas/tsconfig.json']);
+  assert.equal(readFileSync(join(ws, 'packages/event-schemas/dist/index.js'), 'utf8'), 'built\n', 'the workspace gets the built dist');
+  for (const nm of [join(ws, 'node_modules'), join(root, 'mesh/node_modules')]) {
+    assert.equal(realpathSync(join(nm, 'nats')), realpathSync(join(repo, 'node_modules/nats')));
+    assert.equal(realpathSync(join(nm, '@scope/pkg')), realpathSync(join(repo, 'node_modules/@scope/pkg')));
+  }
+  assert.deepEqual(run(), [], 'nothing changed: no npm, no tsc');
+
+  put('repo/package-lock.json', '{"v":2}\n');
+  assert.deepEqual(run({ DEPS_TEST_NEW_PKG: 'added-dep' }), ['npm ci --omit=dev']);
+  assert.equal(realpathSync(join(ws, 'node_modules/added-dep')), realpathSync(join(repo, 'node_modules/added-dep')),
+    'a dependency the lockfile gained is linked where the workspace daemons resolve it');
+
+  const bad = spawnSync('bash', [join(ROOT, 'scripts/install/deps.sh'), repo], { encoding: 'utf8' });
+  assert.equal(bad.status, 2);
+  assert.match(bad.stderr, /usage: bash .*deps\.sh REPO_DIR WORKSPACE/);
 });
 
 // Provider-agnostic install (2026-09-08). The runtime drives nine providers

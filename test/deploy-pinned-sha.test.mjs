@@ -95,6 +95,10 @@ esac`);
 stub('npm', `case "$*" in
   "view openclaw version") echo "\${DEPLOY_TEST_NPM_OPENCLAW:-9.9.9}" ;;
   "prefix -g") echo "$DEPLOY_TEST_NPM_PREFIX" ;;
+  "ci --omit=dev") echo "npm-path0 \${PATH%%:*}" >> "$DEPLOY_TEST_CALLS"; rm -rf node_modules; mkdir -p node_modules/nats ;;
+esac`);
+stub('npx', `case "$*" in
+  *" tsc -p packages/event-schemas/tsconfig.json") mkdir -p packages/event-schemas/dist; echo "built $(cat packages/event-schemas/src/events.ts)" > packages/event-schemas/dist/index.js ;;
 esac`);
 // The banner the published CLI prints for --version.
 stub('openclaw', 'echo "OpenClaw ${DEPLOY_TEST_OPENCLAW:-1.0.0} (abcdef1)"');
@@ -285,7 +289,12 @@ describe('pinned-sha deploy through the listener (bare origin + node clone)', ()
 // os.platform() answer DEPLOY_TEST_PLATFORM, so the launchd and the systemd
 // restart paths both run on any host.
 const PRELOAD = path.join(ROOT, 'platform.cjs');
-write(ROOT, 'platform.cjs', "if (process.env.DEPLOY_TEST_PLATFORM) require('os').platform = () => process.env.DEPLOY_TEST_PLATFORM;\n");
+write(ROOT, 'platform.cjs', "if (process.env.DEPLOY_TEST_PLATFORM) require('os').platform = () => process.env.DEPLOY_TEST_PLATFORM;\n" +
+  "if (process.env.DEPLOY_TEST_EXECPATH) process.execPath = process.env.DEPLOY_TEST_EXECPATH;\n");
+// A node binary in a dir of its own, as NODE_BIN is: what a deploy runs npm under.
+const NODEBIN = path.join(ROOT, 'nodebin');
+fs.mkdirSync(NODEBIN);
+fs.symlinkSync(process.execPath, path.join(NODEBIN, 'node'));
 
 function makeNode(name, files) {
   const dir = path.join(ROOT, name);
@@ -951,5 +960,51 @@ describe('a deploy updates the workspace runtime the memory daemon and node-watc
     fs.symlinkSync(path.join(fx.node, 'lib'), ws('lib'));
     ranOk(fx.deploy(['--from', S2, '--to', S3], { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: UNITS }));
     assert.equal(git(fx.node, 'status', '--porcelain'), '', 'the deploy wrote into the checkout');
+  });
+});
+
+describe('a dependency or event-schemas change refreshes the node\'s dependencies (the deps component)', () => {
+  const UNITS = 'openclaw-mesh-agent openclaw-memory-daemon openclaw-node-watch openclaw-mesh-deploy-listener';
+  let fx, S1;
+  const env = { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: UNITS, DEPLOY_TEST_EXECPATH: path.join(NODEBIN, 'node') };
+  before(() => {
+    fx = makeNode('deps', {
+      'bin/mesh-agent.js': '// agent v0\n',
+      'package.json': '{"name":"r","dependencies":{"nats":"^2"}}\n',
+      'package-lock.json': '{"lockfileVersion":3,"v":0}\n',
+      'packages/event-schemas/tsconfig.json': '{}\n',
+      'packages/event-schemas/src/events.ts': 'v0',
+      'scripts/install/deps.sh': fs.readFileSync(path.join(REPO, 'scripts/install/deps.sh')),
+      'scripts/install/helpers.sh': fs.readFileSync(path.join(REPO, 'scripts/install/helpers.sh')),
+    });
+    write(fx.node, 'node_modules/nats/package.json', '{}\n');
+  });
+
+  it('a lockfile-only change runs npm ci in the checkout under the deploy\'s node and restarts the daemons', () => {
+    S1 = fx.commit('v1: lockfile', { 'package-lock.json': '{"lockfileVersion":3,"v":1}\n' });
+    const run = fx.deploy(['--from', fx.S0, '--to', S1], env);
+    ranOk(run);
+    assert.deepEqual(resultOf(run).components.map(c => c.id), ['deps']);
+    const calls = read(fx.callLog);
+    assert.ok(calls.includes(`npm ci --omit=dev @ ${fs.realpathSync(fx.node)}`), calls);
+    assert.ok(calls.includes(`npm-path0 ${NODEBIN}`), `npm ran under another node:\n${calls}`);
+    for (const svc of ['openclaw-mesh-agent', 'openclaw-memory-daemon', 'openclaw-node-watch']) {
+      assert.ok(resultOf(run).restarted.includes(svc), `${svc} kept the old modules: ${run.stdout}`);
+    }
+    assert.deepEqual(resultOf(run).deferredRestart, ['openclaw-mesh-deploy-listener']);
+    assert.ok(fs.realpathSync(fx.rt('.openclaw/workspace/node_modules/nats')).startsWith(fs.realpathSync(fx.node)),
+      'the workspace daemons resolve the reinstalled tree');
+  });
+
+  it('an event-schemas source change rebuilds the dist and copies packages/ to the workspace', () => {
+    fs.rmSync(fx.callLog, { force: true });
+    const S2 = fx.commit('v2: schema', { 'packages/event-schemas/src/events.ts': 'v2' });
+    const run = fx.deploy(['--from', S1, '--to', S2], env);
+    ranOk(run);
+    assert.deepEqual(resultOf(run).components.map(c => c.id), ['deps']);
+    assert.ok(!fx.calls().includes('npm ci --omit=dev'), 'the lockfile did not change: no reinstall');
+    assert.equal(read(path.join(fx.node, 'packages/event-schemas/dist/index.js')), 'built v2\n');
+    assert.equal(read(fx.rt('.openclaw/workspace/packages/event-schemas/dist/index.js')), 'built v2\n');
+    assert.equal(git(fx.node, 'status', '--porcelain', '--untracked-files=no'), '', 'the deploy dirtied the checkout');
   });
 });

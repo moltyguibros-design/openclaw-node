@@ -3,12 +3,12 @@
 /**
  * mesh-deploy.js v2 — Full-stack OpenClaw deployment across all nodes.
  *
- * Covers the repo-sourced runtime: mesh daemons and CLI, shared libs,
- * Mission Control, memory daemon, workspace scripts, souls, skills, boot
- * compiler and manifest, workspace docs, harness rules, config templates,
- * lane watchdog, log rotation and the Discord tool. The npm-sourced openclaw
- * CLI and companion-bridge deploy only when named. Service units change only
- * through install.sh.
+ * Covers the repo-sourced runtime: the repo node_modules and event-schemas
+ * dist, mesh daemons and CLI, shared libs, Mission Control, memory daemon,
+ * workspace scripts, souls, skills, boot compiler and manifest, workspace docs,
+ * harness rules, config templates, lane watchdog, log rotation and the Discord
+ * tool. The npm-sourced openclaw CLI and companion-bridge deploy only when
+ * named. Service units change only through install.sh.
  *
  * ARCHITECTURE:
  *   Each deployable component is defined in the MANIFEST with:
@@ -159,6 +159,21 @@ function gitLine(repoDir, args) {
   return git(repoDir, args).trim();
 }
 
+// npm builds native modules (better-sqlite3) for the node it runs under, so the
+// install scripts run with this deploy's node leading PATH. Under the deploy
+// listener that is the units' NODE_BIN, the node every daemon runs.
+const NODE_BIN_DIR = path.dirname(process.execPath);
+
+/** Run one of the checkout's install scripts, its output streamed into the deploy's. */
+function runRepoScript(repoDir, script, args, timeout) {
+  info(`Running ${script}...`);
+  execFileSync('bash', [path.join(repoDir, script), ...args], {
+    cwd: repoDir, timeout, stdio: ['ignore', 'inherit', 'inherit'],
+    env: { ...process.env, PATH: `${NODE_BIN_DIR}${path.delimiter}${process.env.PATH}` },
+  });
+  ok(`${script} done`);
+}
+
 function resolveCommit(repoDir, rev) {
   if (!rev || rev.startsWith('-')) return null;
   try { return gitLine(repoDir, ['rev-parse', '--verify', '--quiet', `${rev}^{commit}`]); } catch { return null; }
@@ -228,6 +243,31 @@ const LISTENER_SERVICE = IS_MAC ? 'ai.openclaw.mesh-deploy-listener' : 'openclaw
 // ═══════════════════════════════════════════════════════════════════════════
 
 const MANIFEST = [
+
+  // ── DEPENDENCIES ────────────────────────────────────────────────────────
+
+  {
+    id: 'deps',
+    name: 'Dependencies',
+    description: 'Repo node_modules and the event-schemas dist, refreshed when package.json, package-lock.json or packages/ change',
+    risk: 'careful',
+    repoPaths: ['package.json', 'package-lock.json', 'packages/'],
+    // Nothing is copied: install.sh's own step installs in the checkout (npm ci
+    // when package.json/package-lock.json differ from what node_modules came from),
+    // rebuilds a stale dist, and refreshes the workspace packages/ and its links.
+    targets: [],
+    // Every daemon that loads the repo's node_modules or the event-schemas dist.
+    servicesMac: ['ai.openclaw.mesh-task-daemon', 'ai.openclaw.mesh-bridge',
+                  'ai.openclaw.mesh-agent', 'ai.openclaw.mesh-health-publisher',
+                  'ai.openclaw.mesh-tool-discord', 'ai.openclaw.memory-daemon',
+                  'ai.openclaw.node-watch', 'ai.openclaw.health-watch'],
+    servicesLinux: ['openclaw-mesh-task-daemon', 'openclaw-mesh-bridge', 'openclaw-mesh-agent',
+                    'openclaw-mesh-health-publisher', 'openclaw-mesh-tool-discord',
+                    'openclaw-memory-daemon', 'openclaw-node-watch', 'openclaw-health-watch'],
+    restartsListener: true,
+    postInstall: (changedFiles, changes, { repoDir }) =>
+      runRepoScript(repoDir, 'scripts/install/deps.sh', [repoDir, DIRS.WORKSPACE], 900000),
+  },
 
   // ── MESH INFRASTRUCTURE ─────────────────────────────────────────────────
 

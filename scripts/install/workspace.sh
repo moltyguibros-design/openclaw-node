@@ -107,55 +107,12 @@ if [ -d "$REPO_DIR/packages" ]; then
   info "Event schemas installed to $WORKSPACE/packages/"
 fi
 
-# Symlink shared deps from repo/mesh node_modules → workspace node_modules
-# (ESM static imports don't resolve via NODE_PATH alone). `nats` and `js-yaml`
+# Symlink shared deps from the repo node_modules (env.sh installed it) into the
+# workspace node_modules (deps.sh link_dependency_tree). `nats` and `js-yaml`
 # are required by the workspace daemons' import graph (2026-07-11 audit).
 OPENCLAW_MESH_HOME="${OPENCLAW_MESH_HOME:-$HOME/openclaw}"
 MESH_NM="$REPO_DIR/node_modules"
-if [ ! -d "$MESH_NM/better-sqlite3" ]; then
-  MESH_NM="$OPENCLAW_MESH_HOME/node_modules"
-fi
-
-# If native deps still missing, install them at the mesh home
-if [ ! -d "$MESH_NM/better-sqlite3" ]; then
-  info "Installing native dependencies at $OPENCLAW_MESH_HOME/..."
-  run mkdir -p "$OPENCLAW_MESH_HOME"
-  if $DRY_RUN; then
-    info "  [dry-run] would npm init + install better-sqlite3 bindings in $OPENCLAW_MESH_HOME"
-  else
-    (cd "$OPENCLAW_MESH_HOME" && [ ! -f package.json ] && npm init -y >/dev/null 2>&1; npm install --no-save better-sqlite3 bindings 2>/dev/null) || warn "Native dep install failed — SQLite features may not work"
-  fi
-  MESH_NM="$OPENCLAW_MESH_HOME/node_modules"
-fi
-
 WS_NM="$WORKSPACE/node_modules"
-link_dependency_tree() {
-  local src="$1" dest="$2" pkgdir pkg scoped_dir scoped
-  LINKED_COUNT=0
-  run mkdir -p "$dest"
-  for pkgdir in "$src"/*/; do
-    [ -d "$pkgdir" ] || continue
-    pkg=$(basename "$pkgdir")
-    [ "$pkg" = ".bin" ] && continue
-    if [[ "$pkg" == @* ]]; then
-      run mkdir -p "$dest/$pkg"
-      for scoped_dir in "$pkgdir"*/; do
-        [ -d "$scoped_dir" ] || continue
-        scoped=$(basename "$scoped_dir")
-        if [ ! -e "$dest/$pkg/$scoped" ]; then
-          run ln -sfn "$pkgdir$scoped" "$dest/$pkg/$scoped"
-          LINKED_COUNT=$((LINKED_COUNT + 1))
-        fi
-      done
-    elif [ ! -e "$dest/$pkg" ]; then
-      run ln -sfn "$src/$pkg" "$dest/$pkg"
-      LINKED_COUNT=$((LINKED_COUNT + 1))
-    fi
-  done
-}
-
-# The copied daemons and mesh libraries are the root package's runtime code.
-# Their parent node_modules trees resolve to this one installed dependency set.
 link_dependency_tree "$MESH_NM" "$WS_NM"
 info "Shared dependencies symlinked to $WS_NM/ ($LINKED_COUNT new links from $MESH_NM)"
 
