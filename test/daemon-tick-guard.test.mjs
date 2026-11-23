@@ -165,7 +165,8 @@ test('the session-size floor is a named 1KB constant, not a bare 50KB (repair 4.
 });
 
 test('synthesized events carry session_id (R10, repair 2.10)', () => {
-  assert.match(daemonSrc, /buildMemoryEvent\('memory\.synthesized', sessionId, 'memory', \{\n    session_id: sessionId,/);
+  assert.match(daemonSrc, /buildMemoryEvent\('memory\.synthesized', sessionId, 'memory', synthesizedEventData\(sessionId, /);
+  assert.match(daemonSrc, /function synthesizedEventData\(sessionId, trigger, synthesis\) \{\n[^}]*return \{\n    session_id: sessionId,/);
 });
 
 test('the NATS retry timer never reads `running` before it is initialized', () => {

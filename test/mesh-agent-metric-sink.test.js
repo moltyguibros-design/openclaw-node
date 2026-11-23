@@ -70,11 +70,21 @@ describe('evaluateMetric', () => {
     assert.equal((await run('node ../outside.js')).passed, false);
   });
 
+  // The tracer keeps no in-process buffer, so the event is read off its NATS transport.
   it('traces the metric run for as long as it ran, with its result', async () => {
-    fs.writeFileSync(path.join(WORKTREE, 'slow.js'), 'setTimeout(() => {}, 150);\n');
-    await run('node slow.js');
-    const { getRecentEvents } = require('../lib/tracer.js');
-    const ev = getRecentEvents(50).find((e) => e.function === 'evaluateMetric' && e.args_summary.includes('slow.js'));
+    const tracer = require('../lib/tracer.js');
+    const published = [];
+    tracer.setNatsConnection({ publish: (_subject, payload) => published.push(JSON.parse(payload)), subscribe: () => ({ unsubscribe() {} }) },
+      { encode: (s) => s, decode: (s) => s });
+    const mode = tracer.getTraceMode();
+    tracer.setTraceMode('dev');
+    try {
+      fs.writeFileSync(path.join(WORKTREE, 'slow.js'), 'setTimeout(() => {}, 150);\n');
+      await run('node slow.js');
+    } finally {
+      tracer.setTraceMode(mode);
+    }
+    const ev = published.find((e) => e.function === 'evaluateMetric' && e.args_summary.includes('slow.js'));
     assert.ok(ev, 'an evaluateMetric trace event was emitted');
     assert.ok(ev.duration_ms >= 150, `duration_ms ${ev.duration_ms}`);
     assert.equal(ev.result_summary, '{passed,output}');
