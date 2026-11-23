@@ -146,7 +146,7 @@ assesses again.
 
 | Mode | Set by | What happens |
 |---|---|---|
-| **shadow** | default (`MESH_FOREMAN_ENFORCE` unset, empty, or anything but `1`) | Every assessment and decision is recorded; nothing is enforced. |
+| **shadow** | default (`MESH_FOREMAN_ENFORCE` unset, empty, or anything but `1`) | Every assessment and decision is recorded; nothing is enforced. A STOP or ESCALATE is recorded once per worker, as enforce would act once; later cycles for that worker record CONTINUE "worker already stopped in shadow" and count toward no ceiling. |
 | **enforce** | `MESH_FOREMAN_ENFORCE=1` | Decisions act as described above, and are recorded. |
 | off | `MESH_FOREMAN=0` | No supervisor is created. |
 

@@ -262,6 +262,33 @@ describe('foreman supervisor — STOP hysteresis on the tree (D3)', () => {
     assert.equal(supervisor.state.workers[0].warning_streak >= 3, true);
   });
 
+  it('shadow records the stop it would enforce once: no repeated STOP, no ceiling ESCALATE, one intervention', async () => {
+    const dir = tempRepo();
+    fs.writeFileSync(path.join(dir, 'wip.txt'), 'half done\n');
+    const timelinePath = timelineFor('shadow-once');
+    const supervisor = createSupervisor({ task, worktreePath: dir, assessor: createSimulatedAssessor([STUCK]), config: { ...fastConfig, enforce: false }, timelinePath }).start();
+    supervisor.workerStarted({ attempt: 1 }); supervisor.attach(fakeChild());
+    for (let i = 0; i < 30; i += 1) await supervisor.assessNow();
+    await supervisor.close();
+    assert.equal(supervisor.state.actions.STOP_WORKER, 1, JSON.stringify(supervisor.state.actions));
+    assert.equal(supervisor.state.actions.ESCALATE ?? 0, 0, JSON.stringify(supervisor.state.actions));
+    assert.equal(supervisor.state.interventions, 1);
+    const decisions = readTimeline(timelinePath).filter((r) => r.type === 'foreman.intervened');
+    const after = decisions.slice(decisions.findIndex((r) => r.action === ACTIONS.STOP_WORKER) + 1);
+    assert.ok(after.length >= 20);
+    assert.ok(after.every((r) => r.action === ACTIONS.CONTINUE && r.reason === 'worker already stopped in shadow'));
+
+    // A retry is a new worker: it is assessed from scratch.
+    const retry = createSupervisor({ task, worktreePath: dir, assessor: createSimulatedAssessor([STUCK]), config: { ...fastConfig, enforce: false } }).start();
+    retry.workerStarted({ attempt: 1 }); retry.attach(fakeChild());
+    for (let i = 0; i < 3; i += 1) await retry.assessNow();
+    retry.workerExited({ exitCode: 1 });
+    retry.workerStarted({ attempt: 2 }); retry.attach(fakeChild());
+    for (let i = 0; i < 3; i += 1) await retry.assessNow();
+    await retry.close();
+    assert.equal(retry.state.actions.STOP_WORKER, 2, JSON.stringify(retry.state.actions));
+  });
+
   it('a tree that cannot be snapshotted never confirms a stop — a null snapshot reads as changed', async () => {
     const dir = tempRepo();
     const execFileAsync = promisify(execFile);

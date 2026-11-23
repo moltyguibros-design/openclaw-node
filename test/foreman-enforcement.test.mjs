@@ -164,7 +164,11 @@ describe('foreman enforcement — the supervisor acts on its own decisions', () 
     assert.equal(supervisor.state.last_stop, null);
     const intervened = rows(summary.timeline).filter((r) => r.type === 'foreman.intervened');
     assert.ok(intervened.length >= 1);
-    assert.ok(intervened.every((r) => r.mode === 'shadow' && r.action === ACTIONS.STOP_WORKER));
+    assert.ok(intervened.every((r) => r.mode === 'shadow'));
+    assert.equal(intervened[0].action, ACTIONS.STOP_WORKER);
+    // Recorded once, as enforce would act once.
+    assert.ok(intervened.slice(1).every((r) => r.action === ACTIONS.CONTINUE && r.reason === 'worker already stopped in shadow'),
+      intervened.map((r) => `${r.action}: ${r.reason}`).join(' | '));
   });
 
   it('assessNow() returns the decision at the agent\'s decision points, or null without an assessment', async () => {
