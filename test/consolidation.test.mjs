@@ -17,6 +17,8 @@ import {
   evaluatePromotionCandidates,
 } from '../lib/consolidation.mjs';
 import { runConsolidationCycle } from '../bin/consolidate.mjs';
+import { createExtractionStore } from '../lib/extraction-store.mjs';
+import { raceWorkers } from './helpers/worker-race.mjs';
 import { existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -939,5 +941,38 @@ describe('R20 (repair 5.3): promotion emits on change only', () => {
       'a changed candidate set must emit');
 
     db.close();
+  });
+});
+
+describe('initConsolidationTables under concurrent cycles', () => {
+  it('two processes adding the missing column at once both finish', async () => {
+    const dir = tmpDir('consolidation-race-');
+    const consolidationUrl = new URL('../lib/consolidation.mjs', import.meta.url).href;
+    const sqliteStoreUrl = new URL('../lib/sqlite-store.mjs', import.meta.url).href;
+    for (let trial = 0; trial < 10; trial++) {
+      const dbPath = join(dir, `race-${trial}.db`);
+      const ex = createExtractionStore({ dbPath, integrityCheck: false });
+      initConsolidationTables(ex.db);
+      ex.close();
+      const raw = new Database(dbPath);
+      raw.exec('ALTER TABLE entities DROP COLUMN last_decayed_at');
+      raw.close();
+
+      const results = await raceWorkers({
+        setup: `
+          const { initConsolidationTables } = await import(workerData.consolidationUrl);
+          const { openStore } = await import(workerData.sqliteStoreUrl);`,
+        act: `
+          const db = openStore(workerData.dbPath, { integrityCheck: false });
+          try { initConsolidationTables(db); } finally { db.close(); }`,
+        data: { consolidationUrl, sqliteStoreUrl, dbPath },
+      });
+      assert.deepEqual(results, [{ ok: true }, { ok: true }], `trial ${trial}`);
+
+      const check = new Database(dbPath, { readonly: true });
+      const cols = check.pragma('table_info(entities)').filter((c) => c.name === 'last_decayed_at');
+      check.close();
+      assert.equal(cols.length, 1);
+    }
   });
 });

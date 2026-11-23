@@ -873,3 +873,35 @@ describe('HyperAgentStore: integrity check on open', () => {
   });
 });
 
+describe('HyperAgentStore: column migrations under concurrent openers', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-race-'));
+  after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('two processes adding the missing column at once both open the store', async () => {
+    const Database = require('better-sqlite3');
+    const { pathToFileURL } = require('url');
+    const { createHyperAgentStore } = await import('../lib/hyperagent-store.mjs');
+    const { raceWorkers } = await import('./helpers/worker-race.mjs');
+    const storeUrl = pathToFileURL(path.join(__dirname, '../lib/hyperagent-store.mjs')).href;
+    for (let trial = 0; trial < 10; trial++) {
+      const dbPath = path.join(dir, `race-${trial}.db`);
+      createHyperAgentStore({ dbPath, integrityCheck: false }).close();
+      const raw = new Database(dbPath);
+      raw.exec('ALTER TABLE ha_proposals DROP COLUMN applied_at');
+      raw.close();
+
+      const results = await raceWorkers({
+        setup: 'const { createHyperAgentStore } = await import(workerData.storeUrl);',
+        act: 'createHyperAgentStore({ dbPath: workerData.dbPath, integrityCheck: false }).close();',
+        data: { storeUrl, dbPath },
+      });
+      assert.deepEqual(results, [{ ok: true }, { ok: true }], `trial ${trial}`);
+
+      const check = new Database(dbPath, { readonly: true });
+      const cols = check.prepare('PRAGMA table_info(ha_proposals)').all().filter((c) => c.name === 'applied_at');
+      check.close();
+      assert.equal(cols.length, 1);
+    }
+  });
+});
+

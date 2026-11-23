@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 
 import { SessionStore } from '../lib/session-store.mjs';
+import { raceWorkers } from './helpers/worker-race.mjs';
 
 let TMP;
 let DB_PATH;
@@ -479,5 +480,30 @@ describe('state.db user_version belongs to the extraction store', () => {
       ex.close();
     }
     assert.throws(() => statSync(join(TMP, 'backups')), { code: 'ENOENT' });
+  });
+});
+
+describe('source_marker migration under concurrent openers', () => {
+  it('two processes adding the missing column at once both open the store', async () => {
+    const storeUrl = new URL('../lib/session-store.mjs', import.meta.url).href;
+    for (let trial = 0; trial < 10; trial++) {
+      const dbPath = join(TMP, `race-${trial}.db`);
+      new SessionStore({ dbPath, integrityCheck: false }).close();
+      const raw = new Database(dbPath);
+      raw.exec('ALTER TABLE sessions DROP COLUMN source_marker');
+      raw.close();
+
+      const results = await raceWorkers({
+        setup: 'const { SessionStore } = await import(workerData.storeUrl);',
+        act: 'new SessionStore({ dbPath: workerData.dbPath, integrityCheck: false }).close();',
+        data: { storeUrl, dbPath },
+      });
+      assert.deepEqual(results, [{ ok: true }, { ok: true }], `trial ${trial}`);
+
+      const check = new Database(dbPath, { readonly: true });
+      const cols = check.prepare('PRAGMA table_info(sessions)').all().filter((c) => c.name === 'source_marker');
+      check.close();
+      assert.equal(cols.length, 1);
+    }
   });
 });
