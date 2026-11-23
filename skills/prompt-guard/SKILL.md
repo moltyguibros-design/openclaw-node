@@ -21,11 +21,7 @@ Advanced prompt injection defense + operational security system for AI agents.
 
 ## HiveFence Integration (v2.6.0)
 
-Distributed threat intelligence: one agent's detection protects the entire network.
-
-```
-Agent A detects attack -> Reports to HiveFence -> Community validates -> All agents immunized
-```
+Distributed threat intelligence, opt-in and manual: `hivefence.py` reports patterns and votes on others' submissions. `detect.py` does not fetch community patterns; its detection uses only the built-in set.
 
 ```bash
 # CLI: check stats, fetch patterns, report threats, vote
@@ -56,7 +52,7 @@ python3 scripts/hivefence.py vote --id <pattern-id> --approve
 | LOW | Minor suspicious pattern | Log only |
 | MEDIUM | Clear manipulation attempt | Warn + Log |
 | HIGH | Dangerous command attempt | Block + Log |
-| CRITICAL | Immediate threat | Block + Notify owner |
+| CRITICAL | Immediate threat | Block + Log |
 
 ---
 
@@ -115,13 +111,13 @@ prompt_guard:
     LOW: log
     MEDIUM: warn
     HIGH: block
-    CRITICAL: block_notify
+    CRITICAL: block_notify  # an action label returned to the caller; detect.py notifies no one
   secret_protection:
     enabled: true
     block_config_display: true
     block_env_display: true
     block_token_requests: true
-  rate_limit:
+  rate_limit:  # per user, within one long-lived PromptGuard instance; each detect.py run starts a fresh count
     enabled: true
     max_requests: 30
     window_seconds: 60
@@ -133,8 +129,6 @@ prompt_guard:
     enabled: false
     api_url: https://hivefence-api.seojoon-kim.workers.dev/api/v1
     auto_report: false
-    auto_fetch: false
-    cache_path: ~/.openclaw/hivefence_cache.json
 ```
 
 ---
@@ -142,7 +136,7 @@ prompt_guard:
 ## Scripts
 
 ```bash
-python3 scripts/detect.py "message"              # Analyze message
+python3 scripts/detect.py "message"              # Analyze message; non-SAFE results append to logging.path (relative to the working directory)
 python3 scripts/detect.py --json --sensitivity paranoid "message"
 python3 scripts/analyze_log.py --summary          # Log analysis
 python3 scripts/analyze_log.py --user 123456 --since 2024-01-01
@@ -160,7 +154,7 @@ python3 scripts/audit.py --quick | --fix          # Quick check / auto-fix
 | LOW | (logged silently) |
 | MEDIUM | "That request looks suspicious. Could you rephrase?" |
 | HIGH | "This request cannot be processed for security reasons." |
-| CRITICAL | "Suspicious activity detected. The owner has been notified." |
+| CRITICAL | "This request was blocked and logged for security review." |
 | SECRET | "I cannot display tokens, API keys, or credentials. This is a security policy." |
 
 ---
