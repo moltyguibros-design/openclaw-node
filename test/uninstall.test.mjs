@@ -39,6 +39,13 @@ function fixture() {
   return { home, stub };
 }
 
+function putUnit({ home }) {
+  const unit = join(home, '.config/systemd/user/openclaw-memory-daemon.service');
+  mkdirSync(dirname(unit), { recursive: true });
+  writeFileSync(unit, '[Service]\n');
+  return unit;
+}
+
 function runUninstall({ home, stub }, args = [], input = '') {
   return spawnSync('bash', [UNINSTALL_SH, ...args], {
     env: { HOME: home, OPENCLAW_ROOT: join(home, '.openclaw'), PATH: `${stub}:/usr/bin:/bin` },
@@ -92,12 +99,34 @@ test('install-daemon is retired: uninstall removes the memory-daemon unit itself
 test('uninstall --purge also removes the launchers outside OPENCLAW_ROOT', linuxOnly, () => {
   const fx = fixture();
   try {
+    const unit = putUnit(fx);
     const r = runUninstall(fx, ['--purge'], 'y\n');
     assert.equal(r.status, 0, r.stderr);
+    assert.equal(existsSync(unit), false);
     assert.equal(existsSync(join(fx.home, '.openclaw')), false);
     assert.equal(existsSync(join(fx.home, 'openclaw')), false);
     for (const rel of LAUNCHERS) assert.equal(existsSync(join(fx.home, rel)), false, rel);
   } finally {
     rmSync(fx.home, { recursive: true, force: true });
+  }
+});
+
+test('uninstall --purge answered N or EOF changes nothing', linuxOnly, () => {
+  for (const input of ['n\n', '']) {
+    const fx = fixture();
+    try {
+      const unit = putUnit(fx);
+      const r = runUninstall(fx, ['--purge'], input);
+      assert.equal(r.status, 0, `${JSON.stringify(input)}: ${r.stderr}`);
+      assert.match(r.stdout, /nothing changed/, JSON.stringify(input));
+      for (const rel of [
+        ...LAUNCHERS,
+        '.openclaw/workspace/bin',
+        'openclaw/bin',
+      ]) assert.equal(existsSync(join(fx.home, rel)), true, `${JSON.stringify(input)}: ${rel}`);
+      assert.equal(existsSync(unit), true, JSON.stringify(input));
+    } finally {
+      rmSync(fx.home, { recursive: true, force: true });
+    }
   }
 });

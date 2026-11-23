@@ -49,6 +49,16 @@ echo ""
 echo "OpenClaw Node Uninstaller"
 echo ""
 
+if $PURGE; then
+  warn "PURGE mode: removing ALL OpenClaw data"
+  echo ""
+  read -r -p "Are you sure? This deletes ~/.openclaw entirely. [y/N] " confirm || confirm=""
+  case "$confirm" in
+    y|Y) ;;
+    *) info "Aborted, nothing changed."; exit 0 ;;
+  esac
+fi
+
 # Stop and remove services
 OS="$(uname -s)"
 if [ "$OS" = "Linux" ]; then
@@ -109,18 +119,10 @@ rm -rf "$HOME/Applications/OpenClaw Stack.app"
 rm -f "$HOME/.local/share/applications/openclaw-stack.desktop"
 
 if $PURGE; then
-  warn "PURGE mode: removing ALL OpenClaw data"
-  echo ""
-  read -p "Are you sure? This deletes ~/.openclaw entirely. [y/N] " confirm
-  if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-    rm -rf "$OPENCLAW_ROOT"
-    rm -rf "$HOME/openclaw"
-    info "Removed $OPENCLAW_ROOT"
-    info "Removed $HOME/openclaw (mesh shared folder + agent)"
-  else
-    info "Aborted."
-    exit 0
-  fi
+  rm -rf "$OPENCLAW_ROOT"
+  rm -rf "$HOME/openclaw"
+  info "Removed $OPENCLAW_ROOT"
+  info "Removed $HOME/openclaw (mesh shared folder + agent)"
 else
   info "Removing scripts and services (keeping memory data)..."
   rm -rf "$WORKSPACE/bin"
