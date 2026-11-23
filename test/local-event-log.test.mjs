@@ -143,6 +143,13 @@ function mockJetStream() {
         }
         streams.set(cfg.name, cfg);
       },
+      list: (subject) => ({
+        async *[Symbol.asyncIterator]() {
+          for (const config of streams.values()) {
+            if (config.subjects.some((s) => overlaps(s, subject))) yield { config };
+          }
+        },
+      }),
     },
   };
   const nc = {
@@ -169,6 +176,21 @@ describe('createLocalEventLog subject partition', () => {
       'local.daedalus.session.events.sess-1.memory.session_started',
       'local.moltymacs-virtual-machine.session.events.sess-1.memory.session_started',
     ]);
+  });
+
+  it('a legacy stream on local.> blocks the new stream: the error names it and the narrowing command', async () => {
+    const { nc, streams } = mockJetStream();
+    streams.set('local-events-daedalus', { name: 'local-events-daedalus', subjects: ['local.>'] });
+    await assert.rejects(
+      createLocalEventLog(nc, 'MoltyMacs-Virtual-Machine.local'),
+      (err) => {
+        assert.match(err.message, /local-events-moltymacs-virtual-machine/);
+        assert.match(err.message, /local-events-daedalus owns local\.>/);
+        assert.ok(err.message.includes("nats stream edit local-events-daedalus --subjects 'local.daedalus.>'"), err.message);
+        return true;
+      },
+    );
+    assert.deepEqual(streams.get('local-events-daedalus').subjects, ['local.>'], 'the legacy stream is the operator\'s to narrow');
   });
 
   it('creates the stream only when it is missing; any other info error surfaces', async () => {

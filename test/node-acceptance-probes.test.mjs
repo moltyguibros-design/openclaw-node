@@ -184,6 +184,24 @@ describe('node-acceptance probes — network', () => {
     const ctx = baseCtx({ natsConnect: async () => nc });
     assert.equal((await probeById(ctx, 'NET-L2-STREAM').run()).status, VERDICT.FAIL);
   });
+  it('NET-L2-STREAM FAIL when stream missing names the legacy stream that owns local.> and the command', async () => {
+    const nc = mockNc();
+    const listed = [];
+    nc.jetstreamManager = async () => ({
+      streams: {
+        info: async () => { throw new Error('stream not found'); },
+        list: (subject) => {
+          listed.push(subject);
+          return { async *[Symbol.asyncIterator]() { yield { config: { name: 'local-events-daedalus', subjects: ['local.>'] } }; } };
+        },
+      },
+    });
+    const r = await probeById(baseCtx({ natsConnect: async () => nc }), 'NET-L2-STREAM').run();
+    assert.equal(r.status, VERDICT.FAIL);
+    assert.deepEqual(listed, ['local.testnode.>']);
+    assert.match(r.detail, /local-events-daedalus owns local\.>/);
+    assert.ok(r.detail.includes("nats stream edit local-events-daedalus --subjects 'local.daedalus.>'"), r.detail);
+  });
   it('NET-L2-PUBSUB PASS on round-trip echo', async () => {
     assert.equal((await probeById(baseCtx(), 'NET-L2-PUBSUB').run()).status, VERDICT.PASS);
   });

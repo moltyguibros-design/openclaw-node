@@ -436,6 +436,17 @@ test('README Distributed Mission Control describes the daemon submit path, daemo
   assert.doesNotMatch(row, /CAS|conflict resolution|KV-to-DB/);
 });
 
+test('NODE_ACCEPTANCE gives the legacy local.> stream procedure the daemon and NET-L2-STREAM print', () => {
+  const net = section(read('docs/NODE_ACCEPTANCE.md'), '## 6. Axis: Network connection (local)').text;
+  const lel = read('lib/local-event-log.mjs');
+  assert.ok(lel.includes("nats stream edit ${name} --subjects 'local.${legacyId}.>'"), 'local-event-log remedy parse');
+  assert.ok(net.includes("`nats stream edit local-events-<old-id> --subjects 'local.<old-id>.>'`"), 'NODE_ACCEPTANCE §6 lacks the narrowing command');
+  assert.match(lel, /throw new Error\(`cannot create \$\{streamName\}/);
+  assert.match(read('workspace-bin/memory-daemon.mjs'), /log\(`Local event log unavailable \(\$\{evtErr\.message\}\)/);
+  assert.ok(net.includes('`Local event log unavailable (cannot create local-events-<NODE_ID>'), 'NODE_ACCEPTANCE §6 misquotes the daemon log');
+  assert.match(net, /Preserve its history first/);
+});
+
 test('MULTI_NODE_DEPLOY gives the INJECTION_TOKEN_BUDGET default memory-injector falls back to', () => {
   const fallback = read('lib/memory-injector.mjs').match(/INJECTION_TOKEN_BUDGET\) \|\| (\d+)/)[1];
   const rows = read('docs/MULTI_NODE_DEPLOY.md').split('\n').filter((l) => l.startsWith('| `INJECTION_TOKEN_BUDGET`'));

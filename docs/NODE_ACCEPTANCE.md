@@ -182,6 +182,15 @@ that a server is listening.
 | FED-L2-COORD | coordinator present (federation axis, advisory) | `mesh-task-daemon` unit state from systemd/launchd | running PID; a node without the coordinator (worker/standalone) is SKIP, not FAIL | unit state | node-watch `fed.coordinator` |
 | FED-L2-QUORUM | bus quorum (federation axis, advisory) | `GET :8222/jsz` `meta_cluster` | a single-node bus, or a raft leader elected; no leader is FAIL; bus unreachable is SKIP (NET-L2-JSZ owns it) | jsz detail | node-watch `fed.cluster.quorum` |
 
+> **Legacy `local.>` stream.** A node that ran the memory daemon before the per-node layout keeps a
+> stream on `local.>`, which claims every node's subjects. When it carries another node id (a renamed
+> node, e.g. `local-events-daedalus`), this node's stream cannot be created: the memory daemon logs
+> `Local event log unavailable (cannot create local-events-<NODE_ID> … stream local-events-<old-id> owns local.> …)`
+> and runs without an event log, and NET-L2-STREAM fails "not found" naming the same stream and command.
+> The code never edits that stream. Preserve its history first, then narrow it with
+> `nats stream edit local-events-<old-id> --subjects 'local.<old-id>.>'` (or remove it) and restart the
+> memory daemon. Narrowing deletes no stored message.
+
 > NET-L2-JSZ/NET-L2-PUBSUB distinguish "server up" (L1) from "messaging works" (L2). The wire driving
 > the pipeline is proven end to end by MEM-L4-ROUNDTRIP, which publishes the extract trigger and waits
 > for its mentions; NET-L2-TRIGGER alone only shows the publish succeeds.
