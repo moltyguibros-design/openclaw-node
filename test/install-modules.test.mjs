@@ -114,7 +114,7 @@ test('unit renders fill only the listed placeholders, so $MAINPID survives', () 
   const r = renderUnitCli('systemd', join(ROOT, 'services/systemd/openclaw-nats.service'), { HOME: '/h', NATS_SERVER_BIN: '/x/nats-server' });
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.includes('ExecReload=/bin/kill -HUP $MAINPID'), r.stdout);
-  assert.ok(r.stdout.includes('ExecStart=/x/nats-server --config /h/.openclaw/config/nats.conf'), r.stdout);
+  assert.ok(r.stdout.includes('ExecStart="/x/nats-server" --config "/h/.openclaw/config/nats.conf"'), r.stdout);
 });
 
 // envsubst put values into <string> raw, so '&' or '<' made the plist unparseable; the
@@ -148,6 +148,62 @@ test('unit renders survive & and < in values on every launchd template', (t) => 
     for (const a of plist.ProgramArguments || []) {
       if (a.includes('openclaw-node')) assert.ok(a.startsWith(`${repo}/`), `${f}: ${a}`);
     }
+  }
+});
+
+// systemd splits an unquoted ExecStart/Environment value on whitespace: a checkout under
+// "My Projects" ran node on ".../My" and lost NODE_PATH, and a key list written as
+// "k1, k2" dropped every key after the space from the deploy listener's allowlist.
+test('systemd units keep a spaced checkout path and a spaced key list whole', (t) => {
+  const tmp = tmpDir('oc-unit-quoting-');
+  const repo = join(tmp, 'My Projects', 'oc');
+  mkdirSync(repo, { recursive: true });
+  const keys = 'a+/=, b/+=';
+  const env = Object.fromEntries(unitNames().split(' ').map((n) => [n, `/v/${n.toLowerCase()}`]));
+  Object.assign(env, { HOME: tmp, NODE_BIN: process.execPath, OPENCLAW_REPO_DIR: repo, OPENCLAW_DEPLOY_TRUSTED_KEYS: keys, LLM_BASE_URL: 'http://h/x%20y' });
+  const unitDir = join(tmp, 'root', 'etc', 'systemd', 'system');
+  mkdirSync(unitDir, { recursive: true });
+  const rendered = {};
+  for (const f of readdirSync(join(ROOT, 'services/systemd'))) {
+    const r = renderUnitCli('systemd', join(ROOT, 'services/systemd', f), env);
+    assert.equal(r.status, 0, `${f}: ${r.stderr}`);
+    writeFileSync(join(unitDir, f), r.stdout);
+    rendered[f] = r.stdout;
+  }
+  const words = (s) => [...s.matchAll(/"([^"]*)"|(\S+)/g)].map((m) => m[1] ?? m[2]);
+  const envOf = (text) => Object.fromEntries([...text.matchAll(/^Environment=(.*)$/gm)]
+    .flatMap(([, line]) => words(line)).map((w) => [w.slice(0, w.indexOf('=')), w.slice(w.indexOf('=') + 1)]));
+  const listener = envOf(rendered['openclaw-mesh-deploy-listener.service']);
+  assert.equal(listener.OPENCLAW_DEPLOY_TRUSTED_KEYS, keys);
+  assert.equal(listener.OPENCLAW_REPO_DIR, repo);
+  const agent = rendered['openclaw-mesh-agent.service'];
+  assert.equal(envOf(agent).NODE_PATH, `${repo}/node_modules:${repo}/lib`);
+  assert.equal(envOf(agent).LLM_BASE_URL, 'http://h/x%%20y', 'a % in a value is a systemd specifier unless doubled');
+  assert.deepEqual(words(agent.match(/^ExecStart=(.*)$/m)[1]), [process.execPath, `${repo}/bin/mesh-agent.js`]);
+  assert.deepEqual(words(rendered['openclaw-log-rotate.service'].match(/^ExecStart=(.*)$/m)[1]), ['/bin/bash', `${repo}/bin/log-rotate`]);
+  const refused = renderUnitCli('systemd', join(ROOT, 'services/systemd/openclaw-mesh-agent.service'), { ...env, OPENCLAW_REPO_DIR: '/a"b' });
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /OPENCLAW_REPO_DIR contains a character a systemd unit cannot carry/);
+  const desktop = renderUnitCli('desktop', join(ROOT, 'services/launcher/openclaw-stack.desktop'), env);
+  assert.equal(desktop.status, 0, desktop.stderr);
+  assert.deepEqual(words(desktop.stdout.match(/^Exec=(.*)$/m)[1]), [process.execPath, `${repo}/bin/openclaw-stack.mjs`, 'up']);
+  assert.equal(renderUnitCli('desktop', join(ROOT, 'services/launcher/openclaw-stack.desktop'), { ...env, OPENCLAW_REPO_DIR: '/a$b' }).status, 1);
+
+  const envFile = join(tmp, 'openclaw.env');
+  writeFileSync(envFile, 'OPENCLAW_DEPLOY_TRUSTED_KEYS=k1, k2\n');
+  const merge = moduleSrc['config.sh'].match(/^merge_trusted_key\(\) \{\n[\s\S]*?\n\}\n/m)[0];
+  const m = spawnSync('bash', ['-c', `set -euo pipefail\nrun() { "$@"; }\n${merge}merge_trusted_key OPENCLAW_DEPLOY_TRUSTED_KEYS k2`],
+    { encoding: 'utf8', env: { PATH: process.env.PATH, ENV_FILE: envFile } });
+  assert.equal(m.status, 0, m.stderr);
+  assert.equal(readFileSync(envFile, 'utf8'), 'OPENCLAW_DEPLOY_TRUSTED_KEYS=k1,k2\n');
+
+  if (spawnSync('sh', ['-c', 'command -v systemd-analyze']).status !== 0) {
+    t.diagnostic('systemd-analyze not installed; unit verify skipped');
+    return;
+  }
+  for (const f of Object.keys(rendered)) {
+    const v = spawnSync('systemd-analyze', ['verify', `--root=${join(tmp, 'root')}`, f], { cwd: unitDir, encoding: 'utf8' });
+    assert.doesNotMatch(v.stderr, /Invalid environment assignment|My is not executable|Failed to resolve|Ignoring/, `${f}: ${v.stderr}`);
   }
 });
 
@@ -277,7 +333,7 @@ test('every unit whose entrypoint reads OPENCLAW_REPO_DIR sets it, on both OSes'
     ...readdirSync(join(ROOT, 'services/launchd')).map((f) => `services/launchd/${f}`),
     ...readdirSync(join(ROOT, 'services/systemd')).map((f) => `services/systemd/${f}`),
   ];
-  const setsRepoDir = (src) => /^Environment=OPENCLAW_REPO_DIR=\$\{OPENCLAW_REPO_DIR\}$/m.test(src)
+  const setsRepoDir = (src) => /^Environment="OPENCLAW_REPO_DIR=\$\{OPENCLAW_REPO_DIR\}"$/m.test(src)
     || /<key>OPENCLAW_REPO_DIR<\/key>\s*<string>\$\{OPENCLAW_REPO_DIR\}<\/string>/.test(src);
   let readers = 0;
   for (const rel of units) {
@@ -537,7 +593,7 @@ test('scheduler heartbeat helper is installer-owned and both units invoke it', (
   assert.ok(moduleSrc['workspace.sh'].includes('scheduler-heartbeat.mjs'));
   assert.ok(heartbeatLaunchd.includes('${NODE_BIN}'));
   assert.ok(heartbeatLaunchd.includes('${OPENCLAW_WORKSPACE}/bin/scheduler-heartbeat.mjs'));
-  assert.ok(heartbeatSystemd.includes('${NODE_BIN} ${OPENCLAW_WORKSPACE}/bin/scheduler-heartbeat.mjs'));
+  assert.ok(heartbeatSystemd.includes('"${NODE_BIN}" "${OPENCLAW_WORKSPACE}/bin/scheduler-heartbeat.mjs"'));
   assert.doesNotMatch(heartbeatLaunchd, /\/usr\/bin\/curl/);
   assert.doesNotMatch(heartbeatSystemd, /\/usr\/bin\/curl/);
   assert.doesNotMatch(`${heartbeatLaunchd}\n${heartbeatSystemd}`, /Authorization|Bearer/);
@@ -553,7 +609,7 @@ test('fresh installs schedule transcript-archive hourly on both platforms', () =
   assert.match(plist, /<key>StartInterval<\/key><integer>3600<\/integer>/);
   const service = readFileSync(join(ROOT, 'services/systemd/openclaw-transcript-archive.service'), 'utf8');
   assert.match(service, /^Type=oneshot$/m);
-  assert.match(service, /^ExecStart=\/bin\/sh \$\{OPENCLAW_WORKSPACE\}\/bin\/archive-transcripts\.sh$/m);
+  assert.match(service, /^ExecStart=\/bin\/sh "\$\{OPENCLAW_WORKSPACE\}\/bin\/archive-transcripts\.sh"$/m);
   assert.match(readFileSync(join(ROOT, 'services/systemd/openclaw-transcript-archive.timer'), 'utf8'), /^OnUnitActiveSec=3600$/m);
   assert.ok(existsSync(join(ROOT, 'workspace-bin/archive-transcripts.sh')), 'the installer copies workspace-bin/ to $WORKSPACE/bin/');
   // launchd will not start a job whose log directory is missing, and the plist
@@ -646,7 +702,7 @@ test('dry-run guards the Linux launcher render and exits 1 on a missing source',
   const svc = moduleSrc['services.sh'];
   const guard = svc.indexOf('[dry-run] would install $DESKTOP_DIR/openclaw-stack.desktop');
   assert.ok(guard > svc.indexOf('DESKTOP_DIR='), 'guard must follow DESKTOP_DIR=');
-  assert.ok(guard < svc.indexOf('envsubst < "$REPO_DIR/services/launcher/openclaw-stack.desktop"'), 'guard must precede the render');
+  assert.ok(guard < svc.indexOf('render_unit desktop "$REPO_DIR/services/launcher/openclaw-stack.desktop"'), 'guard must precede the render');
   assert.match(installSrc, /if \$DRY_RUN && \[ "\$DRY_RUN_ERRORS" -gt 0 \]; then\n[^\n]*\n\s+exit 1/);
 });
 
@@ -1180,7 +1236,7 @@ test('every manifest unit ships its templates, execs a deployed entrypoint, and 
         assert.ok(deployed(script), `${f} execs ${script}, which the installer never deploys`);
       }
       const nodeId = text.match(/<key>OPENCLAW_NODE_ID<\/key>\s*<string>([^<]*)<\/string>/)?.[1]
-        ?? text.match(/^Environment=OPENCLAW_NODE_ID=(.*)$/m)?.[1];
+        ?? text.match(/^Environment="OPENCLAW_NODE_ID=(.*)"$/m)?.[1];
       if (nodeId !== undefined) assert.equal(nodeId, '${OPENCLAW_NODE_ID}', `${f} hardcodes its node id`);
     }
   }
@@ -1226,7 +1282,7 @@ test('unit templates and the daemon installer render TZ from OPENCLAW_TIMEZONE',
   let withTz = 0;
   for (const f of templates) {
     const text = readFileSync(join(ROOT, 'services', f), 'utf8');
-    const tz = text.match(/^Environment=TZ=(.*)$/m)?.[1]
+    const tz = text.match(/^Environment="TZ=(.*)"$/m)?.[1]
       ?? text.match(/<key>TZ<\/key>\s*<string>([^<]*)<\/string>/)?.[1];
     if (tz === undefined) continue;
     withTz++;
@@ -1518,7 +1574,7 @@ exit 0
   const plist = readFileSync(join(ROOT, 'services/launchd/ai.openclaw.mission-control.plist'), 'utf8');
   assert.match(plist, /<key>PATH<\/key>\s*<string>\$\{NODE_BIN_DIR\}:/);
   const unit = readFileSync(join(ROOT, 'services/systemd/openclaw-mission-control.service'), 'utf8');
-  assert.match(unit, /^Environment=PATH=\$\{NODE_BIN_DIR\}:/m);
+  assert.match(unit, /^Environment="PATH=\$\{NODE_BIN_DIR\}:/m);
   assert.match(moduleSrc['env.sh'], /export NODE_BIN_DIR="\$\(dirname "\$NODE_BIN"\)"/);
 });
 

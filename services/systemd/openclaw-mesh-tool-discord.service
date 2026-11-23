@@ -4,16 +4,16 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${NODE_BIN} ${OPENCLAW_REPO_DIR}/bin/mesh-tool-discord.js
+ExecStart="${NODE_BIN}" "${OPENCLAW_REPO_DIR}/bin/mesh-tool-discord.js"
 Restart=on-failure
 RestartSec=5
-Environment=HOME=${HOME}
-Environment=PATH=${HOME}/.openclaw/workspace/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
-Environment=NODE_PATH=${OPENCLAW_REPO_DIR}/node_modules:${OPENCLAW_REPO_DIR}/lib
-Environment=OPENCLAW_NATS=${OPENCLAW_NATS}
-Environment=OPENCLAW_WORKSPACE=${OPENCLAW_WORKSPACE}
-Environment=OPENCLAW_NODE_ID=${OPENCLAW_NODE_ID}
-Environment=TZ=${OPENCLAW_TIMEZONE}
+Environment="HOME=${HOME}"
+Environment="PATH=${HOME}/.openclaw/workspace/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="NODE_PATH=${OPENCLAW_REPO_DIR}/node_modules:${OPENCLAW_REPO_DIR}/lib"
+Environment="OPENCLAW_NATS=${OPENCLAW_NATS}"
+Environment="OPENCLAW_WORKSPACE=${OPENCLAW_WORKSPACE}"
+Environment="OPENCLAW_NODE_ID=${OPENCLAW_NODE_ID}"
+Environment="TZ=${OPENCLAW_TIMEZONE}"
 WorkingDirectory=${OPENCLAW_REPO_DIR}
 StandardOutput=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-mesh-tool-discord.log
 StandardError=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-mesh-tool-discord.err

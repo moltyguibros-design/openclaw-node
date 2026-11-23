@@ -58,7 +58,7 @@ describe('node-init renders the shared service templates', () => {
   const renderAgent = (t) => renderServiceTemplate(readFileSync(join(ROOT, 'services', t), 'utf8'),
     serviceTemplateVars({ meshDir: '/opt/openclaw', nodeId: 'worker-7', config: { nats: 'nats://10.0.0.5:4222' } }), formatOf(t));
   const switchIn = (value) => {
-    assert.match(renderAgent('systemd/openclaw-mesh-agent.service'), new RegExp(`^Environment=MESH_FOREMAN_ENFORCE=${value}$`, 'm'));
+    assert.match(renderAgent('systemd/openclaw-mesh-agent.service'), new RegExp(`^Environment="MESH_FOREMAN_ENFORCE=${value}"$`, 'm'));
     assert.match(renderAgent('launchd/ai.openclaw.mesh-agent.plist'), new RegExp(`<key>MESH_FOREMAN_ENFORCE</key>\\s*<string>${value}</string>`));
   };
 
@@ -85,7 +85,7 @@ describe('node-init renders the shared service templates', () => {
       assert.match(renderAgent('launchd/ai.openclaw.mesh-agent.plist'),
         /<key>LLM_BASE_URL<\/key>\s*<string>http:\/\/192\.168\.64\.1:11434<\/string>/);
       assert.match(renderAgent('systemd/openclaw-mesh-agent.service'),
-        /^Environment=LLM_BASE_URL=http:\/\/192\.168\.64\.1:11434$/m);
+        /^Environment="LLM_BASE_URL=http:\/\/192\.168\.64\.1:11434"$/m);
       process.env.LLM_BASE_URL = 'http://localhost:11434';
       assert.match(renderAgent('launchd/ai.openclaw.mesh-agent.plist'),
         /<key>LLM_BASE_URL<\/key>\s*<string>http:\/\/192\.168\.64\.1:11434<\/string>/);
@@ -127,7 +127,7 @@ describe('node-init renders the shared service templates', () => {
   it('the mesh-agent PATH reaches the installer node dir and ~/.local/bin, after the dirs it already had', () => {
     assert.ok(SERVICE_TEMPLATE_VARS.includes('NODE_BIN_DIR'));
     const tail = `:${dirname(process.execPath)}:${homedir()}/.local/bin`;
-    const unitPath = renderAgent('systemd/openclaw-mesh-agent.service').match(/^Environment=PATH=(.*)$/m)[1];
+    const unitPath = renderAgent('systemd/openclaw-mesh-agent.service').match(/^Environment="PATH=(.*)"$/m)[1];
     const plistPath = renderAgent('launchd/ai.openclaw.mesh-agent.plist').match(/<key>PATH<\/key>\s*<string>([^<]*)<\/string>/)[1];
     for (const p of [unitPath, plistPath]) {
       assert.ok(p.endsWith(tail), p);

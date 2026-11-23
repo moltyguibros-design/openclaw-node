@@ -321,12 +321,14 @@ identity_pubkey_base64() {
 
 # Merge one key into a comma-separated allowlist variable in $ENV_FILE: keeps the
 # keys the operator added for other machines (a plain overwrite dropped them on
-# --update) and appends ours only when absent.
+# --update) and appends ours only when absent. Whitespace is dropped (base64 keys
+# hold none): a hand-written "k1, k2" hid k2 from the membership test, and systemd
+# splits an Environment= value on it.
 merge_trusted_key() {
   local var="$1" key="$2" current merged
   # grep exits 1 when the variable is absent; under set -e/pipefail that must
   # read as "empty", not abort the installer.
-  current="$( { grep "^${var}=" "$ENV_FILE" 2>/dev/null || true; } | head -1 | cut -d= -f2- | tr -d "\"'")"
+  current="$( { grep "^${var}=" "$ENV_FILE" 2>/dev/null || true; } | head -1 | cut -d= -f2- | tr -d "\"' \t")"
   case ",${current}," in
     *",${key},"*) merged="$current" ;;
     *) merged="${current:+${current},}${key}" ;;

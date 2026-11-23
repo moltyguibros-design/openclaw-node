@@ -4,19 +4,19 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${NODE_BIN} ${OPENCLAW_WORKSPACE}/bin/node-watch.mjs --watch --interval 60 --deep-interval 900 --quiet
+ExecStart="${NODE_BIN}" "${OPENCLAW_WORKSPACE}/bin/node-watch.mjs" --watch --interval 60 --deep-interval 900 --quiet
 Restart=always
 RestartSec=5
-Environment=HOME=${HOME}
-Environment=PATH=${HOME}/.openclaw/workspace/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
-Environment=NODE_PATH=${OPENCLAW_REPO_DIR}/node_modules:${OPENCLAW_WORKSPACE}/node_modules
-Environment=OPENCLAW_NATS=${OPENCLAW_NATS}
-Environment=OPENCLAW_WORKSPACE=${OPENCLAW_WORKSPACE}
-Environment=OPENCLAW_NODE_ID=${OPENCLAW_NODE_ID}
-Environment=LLM_MODEL=${LLM_MODEL}
-Environment=LLM_BASE_URL=${LLM_BASE_URL}
-Environment=OPENCLAW_REPO_DIR=${OPENCLAW_REPO_DIR}
-Environment=TZ=${OPENCLAW_TIMEZONE}
+Environment="HOME=${HOME}"
+Environment="PATH=${HOME}/.openclaw/workspace/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="NODE_PATH=${OPENCLAW_REPO_DIR}/node_modules:${OPENCLAW_WORKSPACE}/node_modules"
+Environment="OPENCLAW_NATS=${OPENCLAW_NATS}"
+Environment="OPENCLAW_WORKSPACE=${OPENCLAW_WORKSPACE}"
+Environment="OPENCLAW_NODE_ID=${OPENCLAW_NODE_ID}"
+Environment="LLM_MODEL=${LLM_MODEL}"
+Environment="LLM_BASE_URL=${LLM_BASE_URL}"
+Environment="OPENCLAW_REPO_DIR=${OPENCLAW_REPO_DIR}"
+Environment="TZ=${OPENCLAW_TIMEZONE}"
 WorkingDirectory=${OPENCLAW_WORKSPACE}
 StandardOutput=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-node-watch.log
 StandardError=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-node-watch.err

@@ -66,7 +66,7 @@ test('the token path follows the workspace root Mission Control derives, and bot
   const root = fileURLToPath(new URL('..', import.meta.url));
   const systemd = readFileSync(path.join(root, 'services/systemd/openclaw-scheduler-heartbeat.service'), 'utf8');
   const launchd = readFileSync(path.join(root, 'services/launchd/ai.openclaw.scheduler-heartbeat.plist'), 'utf8');
-  assert.match(systemd, /^Environment=OPENCLAW_WORKSPACE=\$\{OPENCLAW_WORKSPACE\}$/m);
+  assert.match(systemd, /^Environment="OPENCLAW_WORKSPACE=\$\{OPENCLAW_WORKSPACE\}"$/m);
   assert.match(launchd, /<key>OPENCLAW_WORKSPACE<\/key>\s*<string>\$\{OPENCLAW_WORKSPACE\}<\/string>/);
   for (const rel of ['bin/scheduler-heartbeat.mjs', 'workspace-bin/memory-maintenance.mjs']) {
     assert.doesNotMatch(readFileSync(path.join(root, rel), 'utf8'), /'\.openclaw', 'config', 'mc-session-token'/, rel);

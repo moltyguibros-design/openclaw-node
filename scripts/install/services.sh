@@ -256,13 +256,8 @@ elif [ "$OS" = "linux" ]; then
   run mkdir -p "$DESKTOP_DIR"
   if $DRY_RUN; then
     echo "  [dry-run] would install $DESKTOP_DIR/openclaw-stack.desktop"
-  elif command -v envsubst >/dev/null 2>&1; then
-    NODE_BIN="$NODE_BIN" OPENCLAW_REPO_DIR="$REPO_DIR" HOME="$HOME" \
-      envsubst < "$REPO_DIR/services/launcher/openclaw-stack.desktop" > "$DESKTOP_DIR/openclaw-stack.desktop"
-  else
-    sed -e "s|\${NODE_BIN}|$NODE_BIN|g" -e "s|\${OPENCLAW_REPO_DIR}|$REPO_DIR|g" -e "s|\${HOME}|$HOME|g" \
-      "$REPO_DIR/services/launcher/openclaw-stack.desktop" > "$DESKTOP_DIR/openclaw-stack.desktop"
+  elif render_unit desktop "$REPO_DIR/services/launcher/openclaw-stack.desktop" "$DESKTOP_DIR/openclaw-stack.desktop"; then
+    run chmod +x "$DESKTOP_DIR/openclaw-stack.desktop"
+    info "Stack launcher installed → $DESKTOP_DIR/openclaw-stack.desktop (app menu: OpenClaw Stack)"
   fi
-  run chmod +x "$DESKTOP_DIR/openclaw-stack.desktop"
-  info "Stack launcher installed → $DESKTOP_DIR/openclaw-stack.desktop (app menu: OpenClaw Stack)"
 fi
