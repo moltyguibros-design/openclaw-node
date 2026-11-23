@@ -1,6 +1,8 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getOrCreateIdentity, createSeenEventCache } from '../lib/node-identity.mjs';
@@ -173,4 +175,71 @@ describe('deploy-trigger-auth', () => {
     process.env.OPENCLAW_DEPLOY_TRUSTED_KEYS = 'keyA==, keyB==';
     assert.deepEqual(trustedDeployKeys(), ['keyA==', 'keyB==']);
   });
+});
+
+// Both publishers fell back to an unsigned trigger and catch-up marker when the
+// key could not be read or made, then said "Deploy trigger sent": every strict
+// listener rejected it and raised a security alert.
+describe('deploy publishers never send an unsigned trigger', () => {
+  const ROOT = fileURLToPath(new URL('..', import.meta.url));
+  let tmp, busLog, busStub;
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'deploy-sign-required-'));
+    // An identity key that cannot be read (a directory where the PEM should be).
+    mkdirSync(join(tmp, 'home', '.openclaw', 'identity.key'), { recursive: true });
+    // A lead checkout whose origin has its branch (fleet-deploy deploys origin's tip).
+    const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env,
+      GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' } });
+    git(tmp, 'init', '-q', '--bare', '-b', 'main', join(tmp, 'origin.git'));
+    git(tmp, 'clone', '-q', join(tmp, 'origin.git'), join(tmp, 'lead'));
+    git(join(tmp, 'lead'), 'commit', '-q', '--allow-empty', '-m', 'A');
+    git(join(tmp, 'lead'), 'push', '-q', 'origin', 'HEAD:main');
+    busLog = join(tmp, 'bus.jsonl');
+    busStub = join(tmp, 'bus-stub.js');
+    writeFileSync(busStub, `
+      const Module = require('module');
+      const fs = require('fs');
+      const load = Module._load;
+      const record = (e) => fs.appendFileSync(${JSON.stringify(busLog)}, JSON.stringify(e) + '\\n');
+      const enc = (o) => new TextEncoder().encode(JSON.stringify(o));
+      const kv = (name) => ({
+        keys: async () => (async function* () { yield 'w1'; })(),
+        get: async () => (name === 'MESH_NODES' ? { value: enc({ nodeId: 'w1', role: 'worker', lastSeen: new Date().toISOString() }) } : null),
+        put: async (k) => record({ put: name, key: k }),
+      });
+      const nc = {
+        subscribe: () => ({ unsubscribe() {} }),
+        publish: (subject) => { if (!subject.startsWith('openclaw.trace.')) record({ publish: subject }); },
+        flush: async () => {}, close: async () => {},
+        jetstream: () => ({ views: { kv: async (name) => kv(name) } }),
+      };
+      Module._load = function (request, ...rest) {
+        const mod = load.call(this, request, ...rest);
+        return request === 'nats' ? { ...mod, connect: async () => nc } : mod;
+      };
+    `);
+  });
+  afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+
+  const publish = (script, args) => {
+    const r = spawnSync(process.execPath, [join(ROOT, 'bin', script), ...args], {
+      encoding: 'utf8', cwd: ROOT,
+      env: {
+        ...process.env, HOME: join(tmp, 'home'), OPENCLAW_REPO_DIR: join(tmp, 'lead'), OPENCLAW_NODE_ID: 'lead-x',
+        OPENCLAW_OBS_DB: ':memory:', NODE_OPTIONS: `--require ${busStub}`,
+      },
+    });
+    const bus = existsSync(busLog) ? readFileSync(busLog, 'utf8').trim().split('\n').map(JSON.parse) : [];
+    return { ...r, bus };
+  };
+
+  for (const [script, args] of [['mesh.js', ['deploy']], ['fleet-deploy.js', ['--node', 'w1']]]) {
+    it(`${script} exits non-zero and writes neither the marker nor the trigger`, () => {
+      const r = publish(script, args);
+      assert.notEqual(r.status, 0, r.stdout + r.stderr);
+      assert.match(r.stdout + r.stderr, /\[deploy-auth\] could not sign trigger: /);
+      assert.deepEqual(r.bus, [], 'something reached the bus');
+      assert.doesNotMatch(r.stdout, /Deploy trigger sent|Trigger published/);
+    });
+  }
 });

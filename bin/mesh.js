@@ -449,10 +449,17 @@ async function cmdDeploy(args) {
     timestamp: new Date().toISOString(),
   };
 
-  // Sign the trigger (best-effort) so signed-deploy listeners accept it. C2:
-  // harmless when no listener enforces signatures; required once they do.
-  const { maybeSignDeployTrigger } = await import('../lib/deploy-trigger-auth.mjs');
-  const signedTrigger = maybeSignDeployTrigger(trigger);
+  // Every listener is strict by default and rejects an unsigned trigger, so the
+  // trigger (and the catch-up marker carrying it) goes out signed or not at all.
+  const { signDeployTrigger } = await import('../lib/deploy-trigger-auth.mjs');
+  let signedTrigger;
+  try {
+    signedTrigger = signDeployTrigger(trigger);
+  } catch (err) {
+    console.error(`[deploy-auth] could not sign trigger: ${err.message}`);
+    await nc.close();
+    process.exit(1);
+  }
 
   // Write "latest" marker so offline nodes can catch up. Same signed trigger —
   // an unsigned marker let anyone with KV write access steer catching-up nodes.
