@@ -101,4 +101,10 @@ test('both read-only NATS census CLIs are documented in docs/NATS_CLUSTER.md wit
     assert.match(source, /parser\.exit\(2,/, `${cli} exits 2 on refusal, as documented`);
   }
   assert.match(doc, /exit 2 when the census is\s+refused/);
+  const start = doc.indexOf('**Who holds the NATS install?');
+  const section = doc.slice(start, doc.indexOf('\n**', start + 2));
+  assert.match(section, /jetstream-3/, 'names all four stores the census requires');
+  assert.match(section, /legacy four-server/i, 'scopes the census to the legacy layout');
+  assert.match(section, /`include`/, 'names the include refusal');
+  assert.match(section, /nats-auth\.conf/, 'says current rendered configs include nats-auth.conf');
 });

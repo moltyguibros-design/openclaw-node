@@ -243,9 +243,19 @@ done
 
 **Who holds the NATS install? (read-only census, macOS):**
 
-Two read-only diagnostics, run from the repo root. Neither changes anything or
-certifies a state; both print a JSON report and exit 2 when the census is
-refused because the system could not be observed.
+Two read-only diagnostics from node-state-recovery step 1.2, built for the
+legacy four-server macOS layout (`ai.openclaw.nats`, `-1`, `-2`, `-3`), run from
+the repo root. Neither changes anything or certifies a state; both print a JSON
+report and exit 2 when the census is refused: the system could not be observed,
+or the node is not the legacy four-server layout.
+
+Both refuse unless all four stores `~/.openclaw/nats/jetstream`, `jetstream-1`,
+`jetstream-2` and `jetstream-3` exist. The live census also requires the four
+legacy LaunchAgents plists and their four mode-0600 configs, and refuses any
+config that contains an `include` token or a `$`. Every config rendered from
+the current templates includes `nats-auth.conf`, and a default install leaves
+`openclaw-nats-1..3` off, so exit 2 is expected on a current, merged or
+single-node install and does not mean the node is faulty.
 
 ```bash
 # launchd units, nats-server processes and JetStream store identities
