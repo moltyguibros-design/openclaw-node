@@ -270,7 +270,8 @@ export async function runTuningHarness(opts) {
   for (const config of configs) {
     const saved = applyConfig(config);
     try {
-      const pipeline = createRetrievalPipeline({ knowledgeDb, extractionDb, graphCache });
+      // Tuned for the local inject path, which recalls private rows.
+      const pipeline = createRetrievalPipeline({ knowledgeDb, extractionDb, graphCache, respect_privacy: false });
       const queryResults = await runConfigQueries(pipeline, queries, limit);
       allResults.push({ config, queryResults });
     } finally {

@@ -305,6 +305,70 @@ describe('wrapMiniMax', () => {
   });
 });
 
+// Entities and decisions are private by default, so a wrapper that let the
+// injector's fail-safe privacy default apply recalled almost nothing.
+describe('SDK wrappers recall the caller\'s own memory, private rows included', () => {
+  const EMPTY = { concepts: [], decisions: [], snippets: [] };
+  const recorder = () => {
+    const seen = [];
+    return { seen, injector: { retrieve: async (query, opts) => { seen.push(opts); return EMPTY; } } };
+  };
+  const openaiClient = () => ({
+    chat: { completions: { create: async (params) => ({ choices: [], _params: params }) } },
+  });
+  const prompts = ['what about NATS', 'what about NATS @memory deep', 'what about NATS @memory only:mesh'];
+
+  for (const [name, wrap, call] of [
+    ['wrapOpenAI', (inj) => wrapOpenAI(openaiClient(), { publish: async () => {} }, { injector: inj }),
+      (c, p) => c.chat.completions.create({ messages: [{ role: 'user', content: p }] })],
+    ['wrapMiniMax', (inj) => wrapMiniMax(openaiClient(), { publish: async () => {} }, { injector: inj }),
+      (c, p) => c.chat.completions.create({ messages: [{ role: 'user', content: p }] })],
+    ['wrapAnthropic', (inj) => wrapAnthropic({ messages: { create: async (params) => ({ _params: params }) } }, { publish: async () => {} }, { injector: inj }),
+      (c, p) => c.messages.create({ messages: [{ role: 'user', content: p }] })],
+    ['wrapGemini', (inj) => wrapGemini({ generateContent: async (content) => ({ _content: content }) }, { publish: async () => {} }, { injector: inj }),
+      (c, p) => c.generateContent(p)],
+  ]) {
+    it(`${name} passes respectPrivacy:false on every directive`, async () => {
+      const { seen, injector } = recorder();
+      const client = wrap(injector);
+      for (const p of prompts) await call(client, p);
+      assert.equal(seen.length, prompts.length);
+      assert.ok(seen.every(o => o.respectPrivacy === false), JSON.stringify(seen));
+    });
+  }
+
+  it('a real injector over a default-private store injects those concepts', async () => {
+    const { default: Database } = await import('better-sqlite3');
+    const { createExtractionStore } = await import('../lib/extraction-store.mjs');
+    const { createMemoryInjector } = await import('../lib/memory-injector.mjs');
+    const store = createExtractionStore({ dbPath: ':memory:', integrityCheck: false });
+    const knowledgeDb = new Database(':memory:');
+    try {
+      store.storeExtractionResult('sess-1', {
+        entities: [{ name: 'JetStreamQuorum', type: 'technology', salience: 0.8 }],
+        themes: [], decisions: [], actions: [], friction_signals: [], relationships: [],
+      });
+      assert.equal(store.db.prepare('SELECT private FROM entities').get().private, 1);
+      knowledgeDb.exec(`CREATE TABLE session_chunks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+        turn_index INTEGER NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL, snippet TEXT NOT NULL)`);
+      knowledgeDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet)
+        VALUES ('sess-1', 0, 'user', 'quorum setup', 'quorum setup')`).run();
+      const real = createMemoryInjector({ knowledgeDb, extractionDb: store.db, llmClient: null });
+      // No embedding model in the test: the vector channel stays empty.
+      const injector = { retrieve: (q, o) => real.retrieve(q, { ...o, embedFn: async () => null }) };
+      const client = openaiClient();
+      wrapOpenAI(client, { publish: async () => {} }, { injector });
+      const res = await client.chat.completions.create({ messages: [{ role: 'user', content: 'how is JetStreamQuorum doing' }] });
+      const system = res._params.messages.find(m => m.role === 'system');
+      assert.ok(system && system.content.includes('JetStreamQuorum'), JSON.stringify(res._params.messages));
+    } finally {
+      knowledgeDb.close();
+      store.close();
+    }
+  });
+});
+
 // --- CLI tool test ---
 
 describe('openclaw-extract-now', () => {
