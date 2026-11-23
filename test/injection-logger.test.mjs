@@ -65,6 +65,27 @@ describe('scrubSecrets', () => {
     assert.equal(scrubSecrets('export OPENAI_KEY=sk-' + 'A'.repeat(40)), 'export OPENAI_KEY=[REDACTED]');
     assert.equal(scrubSecrets('line1\nline2'), 'line1\nline2');
   });
+
+  // Built at runtime so the committed file holds no secret-shaped line.
+  const modernKeys = {
+    anthropic: 'sk-' + 'ant-api03-' + 'Ab1'.repeat(30) + '-_AA',
+    openaiProject: 'sk-' + 'proj-' + 'Ab1'.repeat(14),
+    openrouter: 'sk-' + 'or-v1-' + 'a1'.repeat(16),
+    githubFineGrained: 'github_' + 'pat_' + 'A1b'.repeat(10),
+    githubOauth: 'gh' + 'o_' + 'A'.repeat(36),
+    slackUser: 'xox' + 'p-' + '1234567890-' + 'a1'.repeat(16),
+    aws: 'AK' + 'IA' + 'ABCDEFGHIJ234567',
+  };
+  for (const [shape, k] of Object.entries(modernKeys)) {
+    it(`redacts the ${shape} key shape whole`, () => {
+      assert.equal(scrubSecrets(`key ${k} end`), 'key [REDACTED] end');
+    });
+  }
+
+  it('leaves kebab identifiers that merely contain sk- alone', () => {
+    const text = 'sk-folding-cube and task-' + 'abcdefghijklmnopqrstuvwxyz';
+    assert.equal(scrubSecrets(text), text);
+  });
 });
 
 describe('logInjection', () => {

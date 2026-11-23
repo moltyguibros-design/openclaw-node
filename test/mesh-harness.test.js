@@ -291,6 +291,13 @@ describe('preCommitSecretScan', () => {
     assert.strictEqual(git('diff', '--cached', '--name-only').toString(), '');
   });
 
+  it('blocks an Anthropic-style key the regex fallback used to miss', (t) => {
+    const key = 'sk-' + 'ant-api03-' + 'Ab1'.repeat(30);
+    const { dir } = repoWith({ 'k.js': `const k = "${key}";\n` });
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    assert.strictEqual(preCommitSecretScan(dir).blocked, true);
+  });
+
   it('passes a clean change', (t) => {
     const { dir } = repoWith({ 'notes.md': 'nothing sensitive here\n' });
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
