@@ -72,8 +72,9 @@ write_file() {
 
 # retire_shipped_files GROUP DIR — move the files retired-files.txt lists for GROUP
 # out of DIR into a dated archive. Moved, never deleted: an operator may still
-# want one back. Names with a slash or a .bak are refused, so nothing outside
-# DIR and no backup is ever moved.
+# want one back. A name is a file in DIR or one folder down (dir/file); one that
+# could leave DIR (an absolute path, a ..), a hidden name or a .bak is refused, so
+# nothing outside DIR and no backup is ever moved.
 retire_shipped_files() {
   local group="$1" dir="$2" key name
   local archive="$OPENCLAW_ROOT/retired/$(date +%Y-%m-%d)/$group"
@@ -82,13 +83,13 @@ retire_shipped_files() {
   case "$(cd "$dir" && pwd -P)/" in "$(cd "$REPO_DIR" && pwd -P)/"*) return 0 ;; esac
   while read -r key name; do
     [ "$key" = "$group" ] || continue
-    case "$name" in ''|*/*|.*|*.bak*) continue ;; esac
+    case "$name" in ''|/*|.*|*/.*|*..*|*/|*/*/*|*.bak*) continue ;; esac
     [ -e "$dir/$name" ] || [ -L "$dir/$name" ] || continue
     if [ -e "$archive/$name" ]; then
       warn "Retired $dir/$name left in place: $archive/$name already exists"
       continue
     fi
-    run mkdir -p "$archive"
+    run mkdir -p "$(dirname "$archive/$name")"
     run mv "$dir/$name" "$archive/$name"
     info "Retired $dir/$name → $archive/"
   done < "$REPO_DIR/scripts/install/retired-files.txt"

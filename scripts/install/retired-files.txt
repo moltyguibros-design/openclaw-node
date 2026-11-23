@@ -1,9 +1,11 @@
 # Files the installer once shipped and the repo no longer does. rsync never
 # deletes, so each stays runnable on a node until retire_shipped_files moves it
-# into ~/.openclaw/retired/<date>/<group>/. One "<group> <name>" per line, a bare
-# name in that deployed dir:
+# into ~/.openclaw/retired/<date>/<group>/. One "<group> <name>" per line, a name
+# in that deployed dir, at most one folder down (dir/file):
 #   workspace-bin  ~/.openclaw/workspace/bin   (from workspace-bin/)
 #   mesh-bin       ~/openclaw/bin              (from bin/)
+#   workspace-lib  ~/.openclaw/workspace/lib   (from lib/)
+#   mesh-lib       ~/openclaw/lib              (from lib/)
 #   skills         ~/.openclaw/workspace/skills (from skills/; mesh-deploy also
 #                  archives ~/.openclaw/skills copies)
 # Add a line when you delete or rename a shipped file, or quarantine a skill.
@@ -49,3 +51,12 @@ skills markdown-formatter
 skills search
 skills self-improving-agent-1-0-2
 skills clawdbot-filesystem
+# Deleted from lib/; node-watch's deploy-drift diff reports each one left behind.
+workspace-lib pair-transport-teams.js
+workspace-lib mcp-knowledge/bench.mjs
+workspace-lib mcp-knowledge/package-lock.json
+workspace-lib wakefulness.mjs
+mesh-lib pair-transport-teams.js
+mesh-lib mcp-knowledge/bench.mjs
+mesh-lib mcp-knowledge/package-lock.json
+mesh-lib wakefulness.mjs

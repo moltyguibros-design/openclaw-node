@@ -98,6 +98,7 @@ info "Promotion policy installed to $WORKSPACE/config/promotion-policy.yaml"
 run mkdir -p "$WORKSPACE/lib"
 run rsync -av --exclude='node_modules' \
   "$REPO_DIR/lib/" "$WORKSPACE/lib/"
+retire_shipped_files workspace-lib "$WORKSPACE/lib"
 info "Shared libraries installed to $WORKSPACE/lib/ (incl. mcp-knowledge)"
 
 # Event schemas — local-event-log.mjs imports ../packages/event-schemas/dist;
@@ -123,6 +124,7 @@ run mkdir -p "$MESH_BIN" "$MESH_LIB"
 run rsync -av "$REPO_DIR/bin/" "$MESH_BIN/"
 retire_shipped_files mesh-bin "$MESH_BIN"
 run rsync -av --exclude='node_modules' "$REPO_DIR/lib/" "$MESH_LIB/"
+retire_shipped_files mesh-lib "$MESH_LIB"
 run chmod +x "$MESH_BIN/"*.sh 2>/dev/null || true
 info "Mesh daemons installed to $MESH_BIN/ ($(ls -1 "$REPO_DIR/bin/" | wc -l | tr -d ' ') files)"
 info "Shared libraries installed to $MESH_LIB/"

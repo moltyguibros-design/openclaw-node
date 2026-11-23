@@ -567,6 +567,69 @@ test('pair-session and its Teams transport are retired: not shipped, not documen
   assert.doesNotMatch(readFileSync(join(ROOT, 'docs/OBSERVABILITY.md'), 'utf8'), /pair-transport-teams|TeamsTransport/);
 });
 
+// The lib rsyncs never delete, so node-watch's `diff -rq -x node_modules` of repo lib
+// against the deployed copy stayed BROKEN on every node updated past a lib deletion.
+const DELETED_LIB = ['pair-transport-teams.js', 'mcp-knowledge/bench.mjs', 'mcp-knowledge/package-lock.json', 'wakefulness.mjs'];
+
+test('an --update archives the lib files the repo deleted from both deployed lib copies', (t) => {
+  if (spawnSync('rsync', ['--version']).status !== 0) {
+    t.skip('rsync not installed');
+    return;
+  }
+  const retired = readFileSync(join(ROOT, 'scripts/install/retired-files.txt'), 'utf8');
+  const src = moduleSrc['workspace.sh'];
+  for (const [group, call, rsync] of [
+    ['workspace-lib', 'retire_shipped_files workspace-lib "$WORKSPACE/lib"', '"$REPO_DIR/lib/" "$WORKSPACE/lib/"'],
+    ['mesh-lib', 'retire_shipped_files mesh-lib "$MESH_LIB"', '"$REPO_DIR/lib/" "$MESH_LIB/"'],
+  ]) {
+    for (const f of DELETED_LIB) {
+      assert.equal(existsSync(join(ROOT, 'lib', f)), false, `lib/${f} still ships`);
+      assert.match(retired, new RegExp(`^${group} ${f.replace(/\./g, '\\.')}$`, 'm'));
+    }
+    assert.ok(src.indexOf(call) > src.indexOf(rsync), `${call} runs after the lib rsync`);
+
+    const root = tmpDir(`retired-${group}-`);
+    const lib = join(root, 'deployed', 'lib');
+    mkdirSync(lib, { recursive: true });
+    assert.equal(spawnSync('rsync', ['-a', '--exclude=node_modules', `${ROOT}/lib/`, `${lib}/`]).status, 0);
+    for (const f of DELETED_LIB) {
+      mkdirSync(dirname(join(lib, f)), { recursive: true });
+      writeFileSync(join(lib, f), 'stale\n');
+    }
+    const r = spawnSync('bash', ['-euc', `source "${join(ROOT, 'scripts/install/helpers.sh')}"; retire_shipped_files ${group} "$1"`, 'x', lib], {
+      encoding: 'utf8', env: { ...process.env, DRY_RUN: 'false', REPO_DIR: ROOT, OPENCLAW_ROOT: root },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const [dated] = readdirSync(join(root, 'retired'));
+    for (const f of DELETED_LIB) assert.equal(readFileSync(join(root, 'retired', dated, group, f), 'utf8'), 'stale\n', f);
+    const diff = spawnSync('diff', ['-rq', '-x', 'node_modules', join(ROOT, 'lib'), lib], { encoding: 'utf8' });
+    assert.equal(diff.status, 0, diff.stdout);
+  }
+});
+
+test('retire_shipped_files moves dir/file names but never one that leaves the dir, is hidden, nested twice or a backup', () => {
+  const root = tmpDir('retired-refused-');
+  const repo = join(root, 'repo');
+  mkdirSync(join(repo, 'scripts/install'), { recursive: true });
+  const refused = ['../outside.js', '/abs.js', '.hidden/x.js', 'sub/.x.js', 'sub/a/b.js', 'sub/x.bak.js', 'sub/../outside.js'];
+  writeFileSync(join(repo, 'scripts/install/retired-files.txt'), ['g sub/moved.js', ...refused.map((n) => `g ${n}`)].join('\n') + '\n');
+  const dir = join(root, 'deployed', 'lib');
+  for (const rel of ['sub/moved.js', 'sub/.x.js', 'sub/a/b.js', 'sub/x.bak.js', '.hidden/x.js']) {
+    mkdirSync(dirname(join(dir, rel)), { recursive: true });
+    writeFileSync(join(dir, rel), 'x');
+  }
+  writeFileSync(join(root, 'deployed', 'outside.js'), 'x');
+  const r = spawnSync('bash', ['-euc', `source "${join(ROOT, 'scripts/install/helpers.sh')}"; retire_shipped_files g "$1"`, 'x', dir], {
+    encoding: 'utf8', env: { ...process.env, DRY_RUN: 'false', REPO_DIR: repo, OPENCLAW_ROOT: root },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const [dated] = readdirSync(join(root, 'retired'));
+  assert.equal(existsSync(join(root, 'retired', dated, 'g', 'sub/moved.js')), true);
+  assert.equal(existsSync(join(dir, 'sub/moved.js')), false);
+  for (const rel of ['sub/.x.js', 'sub/a/b.js', 'sub/x.bak.js', '.hidden/x.js']) assert.equal(existsSync(join(dir, rel)), true, rel);
+  assert.equal(existsSync(join(root, 'deployed', 'outside.js')), true);
+});
+
 test('the directory step leaves ~/.openclaw private to its owner, on a fresh install and on --update', () => {
   const src = moduleSrc['workspace.sh'];
   const block = src.slice(0, src.indexOf('# Step 3'));
@@ -1421,7 +1484,7 @@ test('the retired list names only files the repo no longer ships, and both deplo
   for (const name of ['fed-benchmark-driver.mjs', 'grappe-benchmark.mjs']) {
     assert.ok(entries.some(([g, n]) => g === 'mesh-bin' && n === name), `mesh-bin ${name} is not retired`);
   }
-  const source = { 'workspace-bin': 'workspace-bin', 'mesh-bin': 'bin', skills: 'skills' };
+  const source = { 'workspace-bin': 'workspace-bin', 'mesh-bin': 'bin', skills: 'skills', 'workspace-lib': 'lib', 'mesh-lib': 'lib' };
   for (const [group, name] of entries) {
     assert.ok(source[group], `unknown group ${group}`);
     assert.ok(!existsSync(join(ROOT, source[group], name)), `${group} ${name} is still shipped`);
