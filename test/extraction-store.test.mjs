@@ -9,7 +9,7 @@ import path from 'path';
 import os from 'os';
 import { once } from 'node:events';
 import { Worker } from 'node:worker_threads';
-import { createExtractionStore } from '../lib/extraction-store.mjs';
+import { createExtractionStore, EXTRACTION_SCHEMA_VERSION } from '../lib/extraction-store.mjs';
 import { runFlush, USE_LLM_EXTRACTION } from '../lib/pre-compression-flush.mjs';
 import { backupStore } from '../lib/sqlite-store.mjs';
 
@@ -225,6 +225,26 @@ describe('createExtractionStore', () => {
     const counts = Object.fromEntries(store.db.prepare('SELECT label, mention_count FROM themes').all().map((r) => [r.label, r.mention_count]));
     assert.deepEqual(counts, { 'inflated by one busy session': 1, 'seen in two sessions': 2 });
     assert.equal(fs.readdirSync(path.join(tmpDir, 'backups', 'migration')).length, 1, 'backed up before the counts were rewritten');
+  });
+
+  // A rollback ran old code on a migrated store without a word; from here on the
+  // code refuses a store newer than itself and names the pre-upgrade backup.
+  it('refuses a store whose schema is newer than this code, naming the backup it can open', () => {
+    assert.equal(store.db.pragma('user_version', { simple: true }), EXTRACTION_SCHEMA_VERSION,
+      'a new store migrates to EXTRACTION_SCHEMA_VERSION: bump it with every new migration block');
+    const dbPath = store.db.prepare('PRAGMA database_list').get().file;
+    const dir = path.join(tmpDir, 'backups', 'migration');
+    backupStore(store.db, { dir, prefix: `test.db-v${EXTRACTION_SCHEMA_VERSION}`, now: new Date(Date.now() - 60_000) });
+    store.db.pragma(`user_version = ${EXTRACTION_SCHEMA_VERSION + 1}`);
+    store.close();
+    store = null;
+
+    assert.throws(() => createExtractionStore({ dbPath }), (err) => {
+      assert.match(err.message, new RegExp(`schema v${EXTRACTION_SCHEMA_VERSION + 1}, newer than this code's v${EXTRACTION_SCHEMA_VERSION}`));
+      assert.match(err.message, new RegExp(`backups/migration/test\\.db-v${EXTRACTION_SCHEMA_VERSION}-\\d{8}T\\d{9}Z\\.db`));
+      return true;
+    });
+    store = createExtractionStore({ dbPath: path.join(tmpDir, 'other.db') });
   });
 
   it('a second opener of an old store reuses a fresh migration backup instead of copying it again', () => {

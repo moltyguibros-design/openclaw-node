@@ -127,7 +127,8 @@ if (IS_MAC) {
 
 // What a node's clone needs to run bin/mesh-deploy.js.
 const DEPLOY_SCRIPT_FILES = ['bin/mesh-deploy.js', 'lib/mesh-roles.js', 'lib/tracer.js', 'lib/obs-db.js', 'lib/node-id.js', 'lib/node-aliases.js',
-  'scripts/install/retired-files.txt', 'scripts/install/mc-build.sh', 'scripts/install/deps.sh', 'scripts/install/helpers.sh'];
+  'lib/store-schema-guard.js', 'scripts/install/retired-files.txt', 'scripts/install/mc-build.sh', 'scripts/install/deps.sh',
+  'scripts/install/helpers.sh'];
 git(ROOT, 'init', '-q', '--bare', '-b', 'main', ORIGIN);
 git(ROOT, 'init', '-q', '-b', 'main', SEED);
 git(SEED, 'remote', 'add', 'origin', ORIGIN);
@@ -1126,5 +1127,61 @@ describe('a worker deploys what the installer put on it', () => {
     for (const svc of ['openclaw-memory-daemon', 'openclaw-mission-control']) {
       assert.ok(resultOf(run).restarted.includes(svc), `${svc}: ${run.stdout}`);
     }
+  });
+});
+
+// A rollback put code older than the memory store's schema in front of it:
+// nothing refused, and the old code carries no check of its own.
+describe('a rollback below the memory store\'s schema is refused and points to the backup', () => {
+  const env = { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: 'openclaw-mesh-agent' };
+  let fx, S1;
+  const backupName = 'state.db-v8-20261101T000000000Z.db';
+  before(() => {
+    fx = makeNode('schema-guard', {
+      'bin/mesh-agent.js': '// agent v0\n',
+      'lib/extraction-store.mjs': 'if (getVersion(db) < 8) setVersion(db, 8);\n',
+    });
+    ranOk(fx.deploy(['--force'], env));
+    S1 = fx.commit('v1: schema v9, and an agent that fails to start', {
+      'bin/mesh-agent.js': '// agent v1 BREAK_DEPLOY\n',
+      'lib/extraction-store.mjs': 'export const EXTRACTION_SCHEMA_VERSION = 9;\n',
+    });
+    // What the v1 memory daemon left mid-deploy: a store migrated to v9, after a v8 backup.
+    const Database = createRequire(import.meta.url)('better-sqlite3');
+    fs.mkdirSync(fx.rt('.openclaw/backups/migration'), { recursive: true });
+    write(fx.home, `.openclaw/backups/migration/${backupName}`, '');
+    const db = new Database(fx.rt('.openclaw/state.db'));
+    db.pragma('user_version = 9');
+    db.close();
+  });
+
+  it('the listener does not roll a failed deploy back onto code that cannot open the store', () => {
+    const script = `require(${JSON.stringify(path.join(REPO, 'bin', 'mesh-deploy-listener.js'))})
+      .runDeploy(${JSON.stringify({ sha: S1.slice(0, 7), branch: 'main', components: ['all'], initiator: 'lead-test' })})
+      .then(r => console.log('RESULT ' + JSON.stringify(r)));`;
+    const run = spawnSync(process.execPath, ['-e', script], {
+      encoding: 'utf8', cwd: fx.node,
+      env: { ...process.env, ...env, HOME: fx.home, OPENCLAW_REPO_DIR: fx.node, DEPLOY_TEST_CALLS: fx.callLog },
+    });
+    const result = JSON.parse(run.stdout.split('\n').find(l => l.startsWith('RESULT ')).slice('RESULT '.length));
+    assert.equal(result.status, 'failed', run.stdout);
+    assert.equal(result.rolledBack, false);
+    assert.match(result.errors.join('\n'), /rollback refused: .*state\.db is at memory-store schema v9, but .* code expects v8 or older/);
+    assert.ok(result.errors.join('\n').includes(backupName), result.errors.join('\n'));
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), S1, 'the node stays on the code that matches its store');
+  });
+
+  it('mesh deploy --rollback refuses it too, and --force rolls back anyway', () => {
+    const refused = fx.deploy(['--rollback'], env);
+    assert.equal(refused.status, 1, refused.stdout);
+    assert.match(refused.stdout, /state\.db is at memory-store schema v9/);
+    assert.ok(refused.stdout.includes(backupName), refused.stdout);
+    assert.match(refused.stdout, /--rollback --force/);
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), S1);
+
+    const forced = fx.deploy(['--rollback', '--force'], env);
+    ranOk(forced);
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), fx.S0);
+    assert.equal(read(fx.rt('openclaw/bin/mesh-agent.js')), '// agent v0\n');
   });
 });

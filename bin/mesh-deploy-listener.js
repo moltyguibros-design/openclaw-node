@@ -306,6 +306,13 @@ async function runDeploy(trigger, { forwardOnly = false } = {}) {
     // deploy, which fast-forwarded straight back onto the failed commit.
     if (touched && preSha && targetSha && preSha !== targetSha) {
       try {
+        // preSha's code may predate the schema the failed deploy migrated the
+        // memory store to: it would open it without a check of its own. The node
+        // stays on the tree that matches its store.
+        const refusal = require('../lib/store-schema-guard').schemaRollbackRefusal({
+          repoDir: REPO_DIR, toSha: preSha, dbPath: path.join(os.homedir(), '.openclaw', 'state.db'),
+        });
+        if (refusal) throw new Error(`rollback refused: ${refusal}`);
         if (git('rev-parse', 'HEAD') !== preSha) {
           console.log(`[deploy-listener] Rolling back ${targetSha.slice(0, 7)} → ${preSha.slice(0, 7)}`);
           git('checkout', '--detach', '--quiet', preSha);
@@ -318,7 +325,7 @@ async function runDeploy(trigger, { forwardOnly = false } = {}) {
         console.log(`[deploy-listener] Rolled back to ${preSha.slice(0, 7)} and redeployed`);
       } catch (rbErr) {
         result.rolledBack = false;
-        result.errors.push(`rollback failed: ${rbErr.message}`);
+        result.errors.push(rbErr.message.startsWith('rollback refused: ') ? rbErr.message : `rollback failed: ${rbErr.message}`);
         console.error(`[deploy-listener] ROLLBACK FAILED: ${rbErr.message} — node is at an unverified tree`);
       }
     }

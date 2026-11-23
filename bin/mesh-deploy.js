@@ -45,7 +45,9 @@
  *                                         linux, calos, mac, macos, moltymac); unknown ids
  *                                         are refused
  *   mesh deploy --rollback              — revert the last deploy (one that failed partway
- *                                         on this node first: back to the sha before it)
+ *                                         on this node first: back to the sha before it);
+ *                                         refused below the memory store's schema unless
+ *                                         --force
  *   mesh deploy --status                — show what's deployed vs what's in git
  *
  * ENVIRONMENT:
@@ -1359,6 +1361,16 @@ async function main() {
   if (doRollback) {
     header('Rolling Back Last Deploy');
     const state = loadDeployState();
+    // Older code carries no newer-schema check of its own: refuse to put it in
+    // front of a memory store a later deploy migrated, unless told to (--force).
+    const assertStoreSchema = (toSha) => {
+      const refusal = require('../lib/store-schema-guard').schemaRollbackRefusal({
+        repoDir: REPO_DIR, toSha, dbPath: path.join(DIRS.OPENCLAW_HOME, 'state.db'),
+      });
+      if (!refusal) return;
+      if (!forceAll) throw new Error(`${refusal} (or roll back anyway: mesh-deploy.js --rollback --force)`);
+      warn(`${refusal} — rolling back anyway (--force)`);
+    };
     // A deploy that failed partway on this node: revert it, not the one before.
     // The fleet never received it (the trigger goes out after the local deploy).
     const pendingSha = deployLocal ? resolveCommit(REPO_DIR, state.pendingSha) : null;
@@ -1370,6 +1382,7 @@ async function main() {
         return;
       }
       warn(`Rolling back ${pendingSha.slice(0, 7)} → ${toSha.slice(0, 7)}: reverting the failed deploy of ${pendingSha.slice(0, 7)}`);
+      assertStoreSchema(toSha);
       deploy({ repoDir: REPO_DIR, fromSha: pendingSha, toSha, dryRun, noRestart });
       ok(`Rolled back to ${toSha.slice(0, 8)}`);
       if (deployRemote) skip('Remote nodes never received the failed deploy — remote rollback skipped');
@@ -1387,6 +1400,7 @@ async function main() {
     const fromSha = deployedBase(REPO_DIR);
     warn(`Rolling back ${fromSha.slice(0, 7)} → ${toSha.slice(0, 7)}`);
     if (deployLocal) {
+      assertStoreSchema(toSha);
       deploy({ repoDir: REPO_DIR, fromSha, toSha, dryRun, noRestart });
       ok(`Rolled back to ${toSha.slice(0, 8)}`);
     } else {
