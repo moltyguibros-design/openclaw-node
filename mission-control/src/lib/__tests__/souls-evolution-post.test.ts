@@ -163,3 +163,38 @@ test("daedalus ships evolution seeds, no soul ships capsules.json, and no seed e
     expect(fs.readFileSync(path.join(dir, "events.jsonl"), "utf8"), soul).toBe("");
   }
 });
+
+const lines = (soul: string) =>
+  fs.existsSync(eventsFile(soul)) ? fs.readFileSync(eventsFile(soul), "utf8").split("\n").filter(Boolean) : [];
+
+test.each([
+  ["a missing summary", { summary: undefined }],
+  ["an empty category", { category: "" }],
+  ["an eventId outside the safe alphabet", { eventId: "../evt" }],
+  ["a proposedChange that is not an object", { proposedChange: "add a gene" }],
+])("%s is refused with 400 before anything is written", async (_name, overrides) => {
+  const res = await post("free", event(overrides));
+  expect(res.status).toBe(400);
+  expect(lines("free")).toEqual([]);
+  expect(await rows()).toEqual([]);
+});
+
+test("a duplicate eventId is refused with 409 and leaves one line", async () => {
+  expect((await post("free", event())).status).toBe(200);
+  const again = await post("free", event({ summary: "a retry" }));
+  expect(again.status).toBe(409);
+  expect(lines("free")).toHaveLength(1);
+  expect(JSON.parse(lines("free")[0]).summary).toBe("learned a thing");
+});
+
+test("a caller's reviewStatus is ignored: every posted event starts pending", async () => {
+  expect((await post("free", event({ reviewStatus: "approved", soulId: "s1" }))).status).toBe(200);
+  expect(await rows()).toEqual([{ soul_id: "free", event_id: "evt_1", review_status: "pending" }]);
+  expect(JSON.parse(lines("free")[0])).toMatchObject({ soulId: "free", reviewStatus: "pending" });
+});
+
+test("a failed append removes the row it just inserted", async () => {
+  fs.mkdirSync(eventsFile("free"), { recursive: true });
+  expect((await post("free", event())).status).toBe(500);
+  expect(await rows()).toEqual([]);
+});

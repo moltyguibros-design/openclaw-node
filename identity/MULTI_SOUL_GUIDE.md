@@ -195,10 +195,11 @@ bin/mc-api POST /api/souls/blockchain-auditor/evolution '{
         "signal": "...",
         "strategy": [...]
       }
-    },
-    "reviewStatus": "pending"
+    }
   }'
 ```
+
+`eventId` (letters, digits, `.`, `_`, `-`), `category`, `summary` and a `proposedChange` object are required (400 otherwise); an `eventId` already recorded is refused with 409. Every posted event starts `pending`: approval only happens through review.
 
 ### Reviewing Evolution Events
 

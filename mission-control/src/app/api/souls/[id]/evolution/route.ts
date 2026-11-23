@@ -133,32 +133,53 @@ export async function POST(
     if (!isSafeId(soulId)) {
       return NextResponse.json({ error: "invalid soul id" }, { status: 400 });
     }
-    const event: EvolutionEvent = await request.json();
-    const refusal = await captureRefusal(soulId, event.category);
+    const body = await request.json();
+    const { eventId, category, summary, proposedChange } = body ?? {};
+    const nonEmpty = (v: unknown) => typeof v === "string" && v.trim() !== "";
+    const isObject = proposedChange !== null && typeof proposedChange === "object" && !Array.isArray(proposedChange);
+    // approve can only find a safe eventId, and the row's NOT NULL columns
+    // would otherwise fail after the line was written.
+    if (!isSafeId(eventId) || !nonEmpty(category) || !nonEmpty(summary) || !isObject) {
+      return NextResponse.json(
+        { error: "eventId (letters, digits, . _ -), category, summary and a proposedChange object are required" },
+        { status: 400 }
+      );
+    }
+    const refusal = await captureRefusal(soulId, category);
     if (refusal) return refusal;
 
     const db = getDb();
+    const existing = db
+      .select({ id: soulEvolutionLog.id })
+      .from(soulEvolutionLog)
+      .where(eq(soulEvolutionLog.eventId, eventId))
+      .get();
+    if (existing) {
+      return NextResponse.json({ error: `event ${eventId} already exists` }, { status: 409 });
+    }
 
-    // Append to events.jsonl
-    const eventsPath = path.join(
-      SOULS_DIR,
-      soulId,
-      "evolution",
-      "events.jsonl"
-    );
-    await fs.mkdir(path.dirname(eventsPath), { recursive: true });
-    await fs.appendFile(eventsPath, JSON.stringify(event) + "\n");
-
-    // Log in database
+    // Approval only happens through PATCH, so a new event is always pending.
+    const event = { ...body, soulId, reviewStatus: "pending" };
     await db.insert(soulEvolutionLog).values({
       soulId,
-      eventId: event.eventId,
-      eventType: event.category,
-      description: event.summary,
-      reviewStatus: event.reviewStatus || "pending",
+      eventId,
+      eventType: category,
+      description: summary,
+      reviewStatus: "pending",
     });
 
-    return NextResponse.json({ success: true, eventId: event.eventId });
+    // The row goes first: approve reads the first matching line, so a line
+    // without a row would shadow a corrected retry.
+    const eventsPath = path.join(SOULS_DIR, soulId, "evolution", "events.jsonl");
+    try {
+      await fs.mkdir(path.dirname(eventsPath), { recursive: true });
+      await fs.appendFile(eventsPath, JSON.stringify(event) + "\n");
+    } catch (appendError) {
+      await db.delete(soulEvolutionLog).where(eq(soulEvolutionLog.eventId, eventId));
+      throw appendError;
+    }
+
+    return NextResponse.json({ success: true, eventId });
   } catch (error) {
     console.error("Failed to create evolution event:", error);
     return NextResponse.json(
