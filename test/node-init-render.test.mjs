@@ -306,6 +306,7 @@ describe('read-only mesh CLIs bind to KV buckets, never create them', () => {
     const Module = require('node:module');
     const opened = [];
     const fakeNats = {
+      ...require('nats'),
       StringCodec: () => ({ decode: (b) => String(b) }),
       connect: async () => ({
         jetstream: () => ({ views: { kv: async (bucket, opts) => {

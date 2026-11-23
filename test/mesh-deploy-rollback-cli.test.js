@@ -48,7 +48,7 @@ describe('mesh-deploy --rollback', () => {
           },
           discoverNodes: async () => [{ nodeId: 'worker-7' }],
         };
-        if (request === 'nats') return { connect: async () => ({ close: async () => {} }) };
+        if (request === 'nats') return { ...load.call(this, request, ...rest), connect: async () => ({ close: async () => {} }) };
         return load.call(this, request, ...rest);
       };
     `);
