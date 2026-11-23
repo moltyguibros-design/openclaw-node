@@ -484,11 +484,14 @@ Benchmarked on a ~250-file workspace:
 
 ### Running tests
 
-CI and the root `npm test` cover the knowledge server through `test/mcp-knowledge-*.test.mjs`.
+CI and the root `npm test` run `test/mcp-knowledge-*.test.mjs` without the embedding model:
+`test/mcp-knowledge-core.test.mjs` covers the scanner, the markdown and session chunkers, hashing,
+the schema and sqlite-vec; the other files seed chunks with synthetic vectors, and their cases
+that need the model skip (with a counted reason) unless it is available.
 
-`lib/mcp-knowledge/test.mjs` is a manual local suite (12 groups, every exported function plus
-the HTTP transport) that embeds with the real bge-m3 model, so it needs the ~2 GB model download
-on first run. CI does not run it:
+`lib/mcp-knowledge/test.mjs` is a manual local suite (7 groups: embedding, indexing, semantic
+search, findRelated, stats, the engine factory and the HTTP transport) that embeds with the real
+bge-m3 model, so it needs the ~2 GB model download on first run. CI does not run it:
 
 ```bash
 cd lib/mcp-knowledge

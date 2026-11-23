@@ -33,6 +33,20 @@ test('README knowledge-server tables name every tool and KNOWLEDGE_* variable th
   for (const v of vars) assert.ok(configTable.includes(`| \`${v}\` |`), `README config table lacks ${v}`);
 });
 
+test('README knowledge test coverage matches the manual suite and names the model-free root file', () => {
+  const readme = read('README.md');
+  const knowledge = section(readme, '## Semantic Knowledge Search (MCP)').start;
+  const text = section(readme, '### Running tests', knowledge).text;
+  const manual = read('lib/mcp-knowledge/test.mjs');
+  const groups = [...manual.matchAll(/^ {2}group\('\d+\. /gm)].length;
+  assert.ok(groups > 0, 'manual suite group parse');
+  assert.match(text, new RegExp(`\\(${groups} groups: `));
+  assert.match(manual, new RegExp(`^ \\* ${groups} groups that need the real embedder`, 'm'));
+  assert.ok(!/every exported function/.test(text + manual), 'neither claims every export is covered');
+  assert.match(text, /`test\/mcp-knowledge-core\.test\.mjs` covers the scanner/);
+  assert.match(read('test/mcp-knowledge-core.test.mjs'), /describe\('scanMarkdownFiles'/);
+});
+
 test('README says KNOWLEDGE_HOST is the only non-loopback Host the HTTP gate accepts, not 0.0.0.0', () => {
   const readme = read('README.md');
   assert.match(read('lib/mcp-knowledge/server.mjs'), /const self = new Set\(\[`\$\{host\}:\$\{port\}`, `localhost:\$\{port\}`/);
