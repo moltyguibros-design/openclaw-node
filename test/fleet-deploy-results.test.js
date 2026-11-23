@@ -99,4 +99,25 @@ describe('fleet-deploy result reporting', () => {
     assert.match(out, /Deploying:\s+1\b/);
     assert.deepEqual(outcome, { expected: 2, succeeded: 1, skipped: 0, failed: 0, missing: 0, stillDeploying: 1 });
   });
+
+  // Workers now build Mission Control, which outlasts a two-minute wait; the long
+  // wait must not hold the run for a node that never started (offline: it catches up).
+  it('waits for a node that is deploying past the start window, but not for one that never started', async () => {
+    const t0 = Date.now();
+    const results = {
+      get w1() {
+        return Date.now() - t0 < 1500
+          ? { nodeId: 'w1', status: 'deploying' }
+          : { nodeId: 'w1', status: 'success', sha: 'abc1234', durationSeconds: 2 };
+      },
+    };
+    let outcome;
+    const out = await captureOutput(async () => {
+      outcome = await fleetDeploy(fakeNc(results), { sha: 'abc1234', branch: 'main', timeoutMs: 20000, startWaitMs: 500 });
+    });
+    assert.ok(Date.now() - t0 < 10000, `held for ${Date.now() - t0} ms`);
+    assert.match(out, /w1 — deployed to abc1234/);
+    assert.match(out, /w2 — may be offline/);
+    assert.deepEqual(outcome, { expected: 2, succeeded: 1, skipped: 0, failed: 0, missing: 1, stillDeploying: 0 });
+  });
 });

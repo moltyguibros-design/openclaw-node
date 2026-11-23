@@ -346,9 +346,8 @@ const resultOf = run => JSON.parse(run.stdout.split('\n').find(l => l.startsWith
 const fileMode = p => fs.statSync(p).mode & 0o777;
 
 describe('`mesh deploy --force` on a live node leaves what the node owns alone', () => {
-  // A worker (Mission Control, whose build runs npm, is lead-only) with a live
-  // node's state: an operator-configured openclaw.json, learned soul genes and
-  // events, and a repo that carries a quarantined skill.
+  // A worker with a live node's state: an operator-configured openclaw.json,
+  // learned soul genes and events, and a repo that carries a quarantined skill.
   const LIVE_CONFIG = '{"gateway":"configured on this node: channels, tokens, auth profiles"}\n';
   const LEARNED_GENES = '{"genes":"learned on this node"}\n';
   const LEARNED_EVENTS = '{"event":"learned on this node"}\n';
@@ -1098,4 +1097,34 @@ describe('mesh deploy --rollback after a deploy that failed partway reverts the 
   });
 
   function state() { return JSON.parse(read(fx.rt('.openclaw/.deploy-state.json'))); }
+});
+
+// install.sh puts Mission Control, the memory daemon, the boot compiler and the
+// lane watchdog on every node; the deploy treated them as lead-only, so a
+// worker's copies never updated.
+describe('a worker deploys what the installer put on it', () => {
+  const env = { OPENCLAW_NODE_ROLE: 'worker', DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: 'openclaw-memory-daemon openclaw-mission-control' };
+  let fx;
+  before(() => {
+    fx = makeNode('worker-runtime', {
+      'workspace-bin/memory-daemon.mjs': '// daemon v0\n',
+      'mission-control/package.json': '{ "name": "mission-control" }\n',
+      'mission-control/src/app/page.tsx': "export default () => 'v0';\n",
+    });
+  });
+
+  it('the memory daemon and Mission Control reach a worker and restart there', () => {
+    const S1 = fx.commit('v1', {
+      'workspace-bin/memory-daemon.mjs': '// daemon v1\n',
+      'mission-control/src/app/page.tsx': "export default () => 'v1';\n",
+    });
+    const run = fx.deploy(['--from', fx.S0, '--to', S1], env);
+    ranOk(run);
+    assert.deepEqual(resultOf(run).components.map(c => c.id).sort(), ['mc', 'memory-daemon']);
+    assert.equal(read(fx.rt('.openclaw/workspace/bin/memory-daemon.mjs')), '// daemon v1\n');
+    assert.equal(read(fx.rt('.openclaw/workspace/projects/mission-control/src/app/page.tsx')), "export default () => 'v1';\n");
+    for (const svc of ['openclaw-memory-daemon', 'openclaw-mission-control']) {
+      assert.ok(resultOf(run).restarted.includes(svc), `${svc}: ${run.stdout}`);
+    }
+  });
 });

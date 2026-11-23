@@ -1196,6 +1196,10 @@ async function assertKnownNodes(ids) {
   }
 }
 
+// Every node may build Mission Control (npm ci + next build), so the run waits
+// for a deploying node as long as its listener lets the deploy run.
+const FLEET_RESULT_WAIT_MS = 20 * 60 * 1000;
+
 /** Publish a fleet trigger and wait for the nodes: { outcome } from fleetDeploy, or { error }. */
 async function triggerFleet(connName, opts) {
   try {
@@ -1204,7 +1208,7 @@ async function triggerFleet(connName, opts) {
     const { natsConnectOpts } = require('../lib/nats-resolve');
     const nc = await connect(natsConnectOpts({ name: connName, timeout: 10000 }));
     try {
-      return { outcome: await fleetDeploy(nc, { ...opts, timeoutMs: 120000 }) };
+      return { outcome: await fleetDeploy(nc, { ...opts, timeoutMs: FLEET_RESULT_WAIT_MS }) };
     } finally {
       await nc.close();
     }

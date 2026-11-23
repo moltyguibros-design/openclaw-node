@@ -220,10 +220,14 @@ function triggerBranch(repoDir) {
 
 const noResults = expected => ({ expected, succeeded: 0, skipped: 0, failed: 0, missing: 0, stillDeploying: 0 });
 
+// A node that has not written its 'deploying' status by then is offline or has
+// no listener: it catches up on reconnect, so a long wait never waits for it.
+const START_WAIT_MS = 120000;
+
 // The caller names the sha and branch it resolved (mesh-deploy: origin's tip),
 // never the lead checkout's HEAD, which a remote-only deploy leaves stale.
 async function fleetDeploy(nc, opts) {
-  const { components, targetNodes, dryRun, force, timeoutMs, sha, branch } = opts;
+  const { components, targetNodes, dryRun, force, timeoutMs, sha, branch, startWaitMs = START_WAIT_MS } = opts;
   const timeout = timeoutMs || 120000; // 2 min default
   if (!sha) throw new Error('fleetDeploy needs the sha to deploy (opts.sha)');
   if (!/^[a-zA-Z0-9._/-]+$/.test(branch || '')) throw new Error(`Unsafe branch name: ${branch}`);
@@ -333,7 +337,8 @@ async function fleetDeploy(nc, opts) {
       } catch (err) { console.warn(`[fleet-deploy] poll deploy result: ${err.message}`); }
     }
 
-    allDone = nodeResults.size >= expectedNodes.size;
+    const started = Date.now() - startTime >= startWaitMs;
+    allDone = [...expectedNodes].every(n => nodeResults.has(n) || (started && !deploying.has(n)));
     if (!allDone) await new Promise(r => setTimeout(r, 2000)); // Poll every 2s
   }
 
@@ -343,7 +348,7 @@ async function fleetDeploy(nc, opts) {
   const stillDeploying = unreported.filter(n => deploying.has(n));
   const missing = unreported.filter(n => !deploying.has(n));
   if (unreported.length > 0) {
-    warn(`${unreported.length} node(s) did not report a result within ${timeout / 1000}s:`);
+    warn(`${unreported.length} node(s) did not report a result:`);
     for (const n of stillDeploying) {
       console.log(`    ${C.yellow('●')} ${n} — still deploying (the listener allows up to 20 min)`);
     }

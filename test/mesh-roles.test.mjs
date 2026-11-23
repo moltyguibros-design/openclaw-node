@@ -31,11 +31,32 @@ describe('fleet component filter', () => {
       'souls', 'skills', 'boot', 'boot-manifest', 'workspace-docs', 'harness-rules', 'config', 'lane-watchdog',
       'log-rotate', 'mesh-tool-discord',
     ]);
-    // Workers install and run the log-rotate timer too (service-manifest role 'both').
-    assert.deepEqual(FLEET_COMPONENTS.worker, [
-      'deps', 'mesh-daemons', 'mesh-cli', 'shared-lib', 'workspace-bin', 'souls', 'skills', 'workspace-docs',
-      'harness-rules', 'config', 'log-rotate',
-    ]);
+    // Workers run everything the installer puts on them; only the Discord tool is lead-only.
+    assert.deepEqual(FLEET_COMPONENTS.worker, FLEET_COMPONENTS.lead.filter(id => id !== 'mesh-tool-discord'));
+  });
+
+  // mc, memory-daemon, boot and lane-watchdog were lead-only while install.sh put
+  // them on every node, so a worker's copies never updated and a lib deploy
+  // restarted its stale memory daemon on the new lib.
+  it('a component whose unit the installer puts on every node deploys on every node', () => {
+    const roleOf = new Map(JSON.parse(fs.readFileSync(path.join(REPO, 'services/service-manifest.json'), 'utf8'))
+      .map(u => [u.name, u.role]));
+    const src = fs.readFileSync(path.join(REPO, 'bin/mesh-deploy.js'), 'utf8');
+    const block = src.slice(src.indexOf('const MANIFEST = ['), src.indexOf('\n];', src.indexOf('const MANIFEST = [')));
+    const units = Object.fromEntries(block.split(/\n  \{\n/).slice(1).map(entry => [
+      entry.match(/^ {4}id: '([^']+)'/m)[1],
+      [...(entry.match(/servicesLinux: \[([^\]]*)\]/)?.[1] || '').matchAll(/'([^']+)'/g)].map(m => m[1]),
+    ]));
+    let checked = 0;
+    for (const comp of DEPLOY_COMPONENTS.filter(c => !c.localOnly)) {
+      const roles = units[comp.id].map(u => roleOf.get(u));
+      assert.ok(roles.every(Boolean), `${comp.id} restarts a unit the service manifest lacks: ${units[comp.id]}`);
+      if (roles.includes('both')) { assert.equal(comp.nodeFilter, 'all', comp.id); checked++; }
+      else if (roles.length > 0) assert.equal(comp.nodeFilter, 'lead', comp.id);
+    }
+    assert.ok(checked >= 6, `only ${checked} components checked`);
+    // No unit of their own: components.sh installs and compiles the boot profiles on every role.
+    for (const id of ['boot', 'boot-manifest']) assert.equal(DEPLOY_COMPONENTS.find(c => c.id === id).nodeFilter, 'all', id);
   });
 
   it('keeps the npm/git-sourced openclaw and companion local-only, but advertises them', () => {
@@ -148,8 +169,8 @@ describe('mesh-deploy MANIFEST and the role table are one list', () => {
 
   it('mesh-deploy refuses to run when the table names an id the MANIFEST lacks', () => {
     const src = fs.readFileSync(path.join(REPO, 'lib/mesh-roles.js'), 'utf8');
-    const run = runDeployWithRoles(src.replace("  { id: 'mc', nodeFilter: 'lead' },",
-      "  { id: 'mc', nodeFilter: 'lead' },\n  { id: 'gateway', nodeFilter: 'lead' },"));
+    const run = runDeployWithRoles(src.replace("  { id: 'mc', nodeFilter: 'all' },",
+      "  { id: 'mc', nodeFilter: 'all' },\n  { id: 'gateway', nodeFilter: 'lead' },"));
     assert.notEqual(run.status, 0);
     assert.match(run.stderr, /not in MANIFEST: gateway/);
   });

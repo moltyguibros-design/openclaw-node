@@ -98,6 +98,8 @@ describe('mesh-deploy fleet trigger sha', () => {
     assert.equal(r.triggers.length, 1, r.stdout);
     assert.equal(r.triggers[0].sha, short(shaB));
     assert.equal(r.triggers[0].branch, 'main');
+    // A worker may build Mission Control: the run waits as long as the listener lets a deploy run.
+    assert.match(r.stdout, /Waiting for 1 node\(s\) to report \(1200s timeout\)/);
     assert.equal(git(lead, 'rev-parse', 'HEAD'), shaA, 'a remote-only deploy moved the lead checkout');
   });
 
