@@ -38,7 +38,8 @@ async function fixture(t, { prepare = () => ({}) } = {}) {
   const child = spawn(process.execPath, [script], { cwd: root,
     env: { ...process.env, HOME: root, WORKPLAN_ROOTS: path.join(root, 'plans'),
       WORKPLAN_VIEWER_TOKEN_FILE: tokenFile, WORKPLAN_VIEWER_PORT: String(port),
-      MEMORY_PLAN_NOTIFY: 'off', PATH: path.join(root, 'bin') + path.delimiter + process.env.PATH, ...extraEnv },
+      MEMORY_PLAN_NOTIFY: 'off', PATH: path.join(root, 'bin') + path.delimiter + process.env.PATH,
+      WORKPLAN_VIEWER_PLATFORM: 'darwin', ...extraEnv },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -652,4 +653,35 @@ test('Resume reloads a scheduler that paused itself, never one the operator stop
   launchd.resetCalls();
   assert.equal((await unblock()).scheduler_reloaded, true);
   assert.match(launchd.calls(), /^bootstrap gui\/\d+ /m);
+});
+
+// On Linux, Start wrote a launchd plist under ~/Library/LaunchAgents and then failed on the missing
+// launchctl, and every later Resume reported a failed reload.
+test('on Linux the launchd routes refuse, write nothing under ~/Library, and Run one tick keeps its agent provider', async t => {
+  const f = await fixture(t, { prepare: () => ({ WORKPLAN_VIEWER_PLATFORM: 'linux' }) });
+  const opts = { token: f.master };
+  const seen = path.join(f.root, 'agent-provider');
+  const tick = path.join(f.root, 'env-tick.sh');
+  fs.writeFileSync(tick, '#!/bin/sh\nprintf %s "$WORKPLAN_AGENT_PROVIDER" > "' + seen + '"\n', { mode: 0o700 });
+  const config = { tick_command: tick, working_dir: f.root,
+    stdout_path: path.join(f.root, 'stdout'), stderr_path: path.join(f.root, 'stderr'), interval_seconds: 1800 };
+  for (const provider of ['codex', 'gemini']) {
+    fs.rmSync(seen, { force: true });
+    assert.equal((await f.request('/api/plans/fixture/automation/config',
+      { ...opts, method: 'PUT', body: { ...config, agent_provider: provider } })).status, 200);
+    assert.equal((await f.request('/api/plans/fixture/automation/run-once', { ...opts, method: 'POST' })).status, 200);
+    for (let i = 0; i < 50 && !(fs.existsSync(seen) && fs.statSync(seen).size); i++) await sleep(20);
+    assert.equal(fs.readFileSync(seen, 'utf8'), provider);
+  }
+  for (const route of ['load', 'unload', 'kickstart']) {
+    const r = await f.request('/api/plans/fixture/automation/' + route, { ...opts, method: 'POST' });
+    assert.equal(r.status, 501, route);
+    assert.match(JSON.parse(r.text).error, /launchd scheduling is macOS-only; use Run one tick/);
+  }
+  assert.equal(fs.existsSync(path.join(f.root, 'Library')), false);
+  assert.equal(JSON.parse((await f.request('/api/plans/fixture/automation', opts)).text).scheduler_supported, false);
+  assert.match((await f.request('/viewer-client.js')).text, /if \(s\.scheduler_supported === false\) \{\n\s+html \+= '<button[^\n]*btn-run-once/);
+  assert.equal((await f.request('/api/plans/fixture/block', { ...opts, method: 'POST', body: { content: 'Paused' } })).status, 200);
+  const resumed = JSON.parse((await f.request('/api/plans/fixture/unblock', { ...opts, method: 'POST' })).text);
+  assert.deepEqual([resumed.scheduler_reloaded, resumed.scheduler_error], [false, null]);
 });

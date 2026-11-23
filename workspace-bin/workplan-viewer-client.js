@@ -818,7 +818,9 @@ async function renderAutomation() {
     html += '<div class="note">A tick is currently running. Watch the Live tab. "Run one tick" refuses until it exits; while the scheduler\'s own tick runs, "Fire scheduled tick now" and schedule changes refuse too, and "Stop scheduler" stops that tick.</div>';
   }
   html += '<div class="actions">';
-  if (loaded) {
+  if (s.scheduler_supported === false) {
+    html += '<button type="button" class="secondary" id="btn-run-once" title="Spawn one tick directly">▶ Run one tick (manual)</button>';
+  } else if (loaded) {
     html += '<button type="button" class="primary" id="btn-kickstart" title="launchctl kickstart -k">▶ Fire scheduled tick now</button>';
     html += '<button type="button" class="secondary" id="btn-run-once" title="Spawn one tick directly (independent of launchd)">▶ Run one tick (manual)</button>';
     html += '<button type="button" class="danger" id="btn-unload" title="launchctl bootout">⏹ Stop scheduler (unload)</button>';
@@ -829,7 +831,9 @@ async function renderAutomation() {
     html += '<button type="button" class="secondary" id="btn-run-once" title="Spawn one tick directly without involving launchd. Useful for one-off testing.">▶ Run one tick (manual)</button>';
   }
   html += '</div>';
-  if (!loaded) {
+  if (s.scheduler_supported === false) {
+    html += '<div class="note" style="margin-top:14px;">Automatic chains run on macOS only (launchd); on this node, tick with "Run one tick".</div>';
+  } else if (!loaded) {
     html += '<div style="margin-top:14px;font-size:11px;color:var(--dim);">' +
       '<strong>What "Start scheduler" does:</strong> writes <code>' + esc(cfg.plist_path) + '</code>, ' +
       'then runs <code>launchctl bootstrap</code>. In ' + (cfg.mode === 'chain' ? 'chain' : 'interval') + ' mode, ' +

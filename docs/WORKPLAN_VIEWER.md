@@ -32,3 +32,8 @@ the file selected when it opened; select the log again after replacement.
 The viewer still operates each plan's existing automation configuration.
 Signing in does not start a scheduler or a tick. Automation remains a local
 operator capability, and enabling a plan still requires an explicit decision.
+
+The scheduler (Start, Stop and Fire scheduled tick now) is launchd, so it runs
+on macOS only; on Linux those routes answer 501 and write nothing, and a plan
+ticks through "Run one tick", which still honours the plan's `close_check` and
+`agent_provider`.

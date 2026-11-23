@@ -486,6 +486,10 @@ function planSummary(plan, { dirty = true } = {}) {
 // }
 
 const LAUNCH_AGENTS = path.join(os.homedir(), 'Library/LaunchAgents');
+// launchd is the only scheduler backend; elsewhere "Run one tick" is how a plan ticks.
+// WORKPLAN_VIEWER_PLATFORM stands in for process.platform in tests.
+const SCHEDULER_SUPPORTED = (process.env.WORKPLAN_VIEWER_PLATFORM || process.platform) === 'darwin';
+const SCHEDULER_UNSUPPORTED = 'launchd scheduling is macOS-only; use Run one tick';
 
 function deriveAutomationDefaults(plan) {
   // plan.root is <repo>/memory-plan/plans, the layout plan-tick.sh assumes.
@@ -698,6 +702,7 @@ async function getAutomationState(plan) {
   const lastTickName = logs.length ? logs[0].name : null;
   return {
     config: cfg,
+    scheduler_supported: SCHEDULER_SUPPORTED,
     plist_exists: plistExists,
     plist_interval_seconds: plistInterval,
     plist_mode: plistMode,
@@ -1863,15 +1868,16 @@ async function handleRequest(req, res) {
       // If the scheduler had auto-paused itself (plist exists but launchd no
       // longer has the job), bring it back up so the chain/interval resumes.
       // Stop scheduler removes the plist, so a deliberate stop stays stopped.
-      const cfg = readAutomationConfig(plan);
-      const plistExists = fs.existsSync(cfg.plist_path);
-      const status = await launchdStatus(cfg.plist_label);
       let scheduler_reloaded = false;
       let scheduler_error = null;
-      if (plistExists && !status.loaded) {
-        const r = await launchctlBoot(process.getuid(), cfg.plist_path, cfg.plist_label);
-        if (r.ok) scheduler_reloaded = true;
-        else scheduler_error = r.error;
+      if (SCHEDULER_SUPPORTED) {
+        const cfg = readAutomationConfig(plan);
+        const status = await launchdStatus(cfg.plist_label);
+        if (fs.existsSync(cfg.plist_path) && !status.loaded) {
+          const r = await launchctlBoot(process.getuid(), cfg.plist_path, cfg.plist_label);
+          if (r.ok) scheduler_reloaded = true;
+          else scheduler_error = r.error;
+        }
       }
       return json(res, {
         ok: true,
@@ -1918,10 +1924,12 @@ async function handleRequest(req, res) {
           return json(res, { error: 'throttle_seconds must be ≥ 10 (launchd minimum)' }, 400);
         }
         // The reload below boots the job out, which kills a running tick mid-step.
-        const status = await launchdStatus(next.plist_label);
+        const status = SCHEDULER_SUPPORTED ? await launchdStatus(next.plist_label) : { loaded: false, pid: null };
         if (status.pid) return json(res, { error: TICK_RUNNING }, 409);
         try {
           const saved = writeAutomationConfig(plan, next);
+          // close_check and agent_provider still reach "Run one tick" through automation.json.
+          if (!SCHEDULER_SUPPORTED) return json(res, { ok: true, config: saved, applied_to_plist: false, reloaded: false });
           // If plist exists OR launchd loaded, rewrite plist; reload if loaded.
           if (fs.existsSync(saved.plist_path) || status.loaded) {
             fs.mkdirSync(path.dirname(saved.plist_path), { recursive: true });
@@ -1936,6 +1944,11 @@ async function handleRequest(req, res) {
           return json(res, { error: e.message }, 500);
         }
       }).catch((e) => json(res, { error: e.message }, 400));
+    }
+
+    if (!SCHEDULER_SUPPORTED && req.method === 'POST'
+        && ['/automation/load', '/automation/unload', '/automation/kickstart'].includes(sub)) {
+      return json(res, { error: SCHEDULER_UNSUPPORTED }, 501);
     }
 
     if (sub === '/automation/load' && req.method === 'POST') {
