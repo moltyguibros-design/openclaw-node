@@ -306,3 +306,28 @@ describe('installer offers every built-in provider', () => {
     }
   });
 });
+
+// The mesh-agent units pass no *_PATH, so a binary the operator records in
+// openclaw.env must reach the agent through it, for every CLI provider.
+describe('provider binary paths', () => {
+  const PATH_KEYS = { claude: 'CLAUDE_PATH', openai: 'OPENAI_PATH', gemini: 'GEMINI_PATH', deepseek: 'DEEPSEEK_PATH',
+    kimi: 'KIMI_PATH', minimax: 'MINIMAX_PATH', ollama: 'OLLAMA_PATH', aider: 'AIDER_PATH' };
+  const binaries = (home, env = {}) => {
+    const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.endsWith('_PATH')));
+    const r = spawnSync(process.execPath, ['-e',
+      "const { PROVIDERS } = require('./lib/llm-providers.js'); console.log(JSON.stringify(Object.fromEntries(Object.entries(PROVIDERS).map(([k, p]) => [k, p.binary]))))"],
+    { cwd: path.join(__dirname, '..'), encoding: 'utf8', env: { ...clean, HOME: home, OPENCLAW_OBS_DB: ':memory:', ...env } });
+    assert.equal(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout);
+  };
+
+  it('every CLI provider takes its binary from openclaw.env when the environment has none', () => {
+    const home = tmpDir('provider-paths-');
+    fs.mkdirSync(path.join(home, '.openclaw'));
+    fs.writeFileSync(path.join(home, '.openclaw', 'openclaw.env'),
+      Object.entries(PATH_KEYS).map(([name, key]) => `${key}=/opt/${name}/bin/${name}`).join('\n') + '\n');
+    const fromFile = binaries(home);
+    for (const name of Object.keys(PATH_KEYS)) assert.equal(fromFile[name], `/opt/${name}/bin/${name}`, name);
+    assert.equal(binaries(home, { KIMI_PATH: '/usr/local/bin/kimi' }).kimi, '/usr/local/bin/kimi', 'the environment still wins');
+  });
+});
