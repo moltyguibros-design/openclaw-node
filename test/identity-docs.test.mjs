@@ -88,3 +88,13 @@ test('identity docs describe memory-maintenance as it runs: no archival, no exit
   const calls = body.match(/^\s+(await )?check\w+\(\);$/gm).length;
   assert.equal(Number(src.match(/Runs (\d+) systematic checks/)[1]), calls);
 });
+
+// Nothing archives daily files any more, so no doc may require, check or promise it.
+// memory/archive/ itself stays: it holds the monthly summaries.
+test('no identity doc promises daily-file archival', () => {
+  for (const [f, text] of docs) {
+    text.split('\n').forEach((line, i) => {
+      if (/archiv/i.test(line)) assert.doesNotMatch(line, /dail(y|ies)|30\s*d/i, `${f}:${i + 1}`);
+    });
+  }
+});

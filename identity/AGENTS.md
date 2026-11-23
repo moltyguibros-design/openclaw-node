@@ -62,7 +62,7 @@ All memory ops are fully automated by `bin/memory-daemon.mjs` (the memory-daemon
 - "Remember this" → write to `memory/YYYY-MM-DD.md` immediately. Mental notes don't survive restarts.
 - Structure: Active Context (this week) → Recent (this month) → Stable (long-term) → Archive Reference
 - Conflicts: recent entry wins unless older one is marked core preference
-- Decay: dailies archived after 30 days, MEMORY.md pruned of stale entries during maintenance
+- Decay: MEMORY.md pruned of stale entries during maintenance
 
 ## Task Completion — HARD RULE (INTERRUPT PRIORITY)
 

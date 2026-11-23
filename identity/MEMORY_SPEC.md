@@ -138,7 +138,6 @@ Each task entry MUST conform to this YAML-like schema:
 **Validation rules:**
 - Filename date MUST match the `# YYYY-MM-DD` header
 - File must not be empty (at minimum, the header)
-- Files >30 days old MUST be archived (violation if still in `memory/`)
 
 ### 2.4 memory/predictions.md
 
@@ -271,7 +270,6 @@ PHASE 2: Format (files parse correctly)
 PHASE 3: Freshness (nothing stale beyond thresholds)
   □ MEMORY.md modified within 7 days
   □ active-tasks.md modified within 48 hours (if any running tasks)
-  □ No daily files >30 days old in memory/ (should be archived)
   □ No predictions open >7 days without outcome
   □ No ERRORS.md entries pending >14 days
   □ .tmp/last-maintenance within 60 min (if session active)
@@ -307,7 +305,6 @@ Some violations can be repaired automatically by the checking node:
 |-----------|-------------|
 | Missing today's daily file | Create with header |
 | Stale predictions (>7d, no outcome) | Mark as expired |
-| Daily files >30d not archived | Run archival |
 | Missing `memory/archive/` dir | Create directory |
 | MEMORY.md >7 days stale | Flag for manual refresh (cannot auto-generate content) |
 | Running tasks >48h without update | Mark as stale, flag for review |
