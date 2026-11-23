@@ -36,6 +36,8 @@ Object.assign(process.env, {
   OPENCLAW_OBS_DB: ':memory:',
 });
 delete process.env.MESH_MEMORY_RECALL;
+// mesh-agent reads the inject token under OPENCLAW_HOME when set (CI exports one), not under this HOME.
+delete process.env.OPENCLAW_HOME;
 
 const require = createRequire(import.meta.url);
 const m = require('../bin/mesh-agent.js');

@@ -43,8 +43,10 @@ session('dddd4444', 'FOURTH', 4);
 session('eeee5555', 'FIFTH', 5);
 writeFileSync(join(sessions, 'ffff6666.jsonl'), '{"type":"session"}\n');
 
+// The fixture is the default node root ~/.openclaw; an inherited OPENCLAW_HOME (CI exports one) would replace it.
+const { OPENCLAW_HOME: _inheritedRoot, ...baseEnv } = process.env;
 const run = (...args) => spawnSync(process.execPath, [join(ROOT, 'workspace-bin/session-recap'), ...args], {
-  encoding: 'utf8', env: { ...process.env, HOME: home, OPENCLAW_WORKSPACE: ws },
+  encoding: 'utf8', env: { ...baseEnv, HOME: home, OPENCLAW_WORKSPACE: ws },
 });
 
 test('the floor is the daemon\'s 1KB, so short real sessions are candidates and header-only files are not', () => {

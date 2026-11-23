@@ -22,7 +22,9 @@ function setup(t) {
   fs.mkdirSync(home);
   fs.mkdirSync(cwd);
   const add = (name, p) => {
-    const r = spawnSync(process.execPath, [BIN, 'add', '--name', name, '--path', p], { cwd, encoding: 'utf8', env: { ...process.env, HOME: home } });
+    // The registry asserted on is ~/.openclaw's; an inherited OPENCLAW_HOME (CI exports one) would move it.
+    const { OPENCLAW_HOME: _inheritedRoot, ...env } = process.env;
+    const r = spawnSync(process.execPath, [BIN, 'add', '--name', name, '--path', p], { cwd, encoding: 'utf8', env: { ...env, HOME: home } });
     assert.equal(r.status, 0, r.stderr);
     return r.stdout;
   };

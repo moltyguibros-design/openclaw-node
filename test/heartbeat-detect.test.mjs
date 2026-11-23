@@ -22,6 +22,8 @@ import { join } from 'node:path';
 // our test fixtures, not the user's real ~/.openclaw config.
 const TMP_ROOT = mkdtempSync(join(tmpdir(), 'heartbeat-test-'));
 process.env.HOME = TMP_ROOT;
+// The registry below sits in the default node root; an inherited OPENCLAW_HOME (CI exports one) would win over it.
+delete process.env.OPENCLAW_HOME;
 mkdirSync(join(TMP_ROOT, '.openclaw/config'), { recursive: true });
 const TEST_GATEWAY_DIR = join(TMP_ROOT, 'gateway-sessions');
 mkdirSync(TEST_GATEWAY_DIR, { recursive: true });

@@ -318,11 +318,13 @@ describe('requestAnalysis fallback paths', () => {
   });
 
   it('reads OLLAMA_NUM_PARALLEL from ~/.openclaw/openclaw.env when the process env lacks it', async () => {
-    const prev = { slots: process.env.OLLAMA_NUM_PARALLEL, home: process.env.HOME };
+    const prev = { slots: process.env.OLLAMA_NUM_PARALLEL, home: process.env.HOME, root: process.env.OPENCLAW_HOME };
     const home = mkdtempSync(join(tmpdir(), 'ollama-queue-home-'));
     mkdirSync(join(home, '.openclaw'));
     writeFileSync(join(home, '.openclaw', 'openclaw.env'), 'LLM_MODEL=x\nOLLAMA_NUM_PARALLEL=4\n');
     delete process.env.OLLAMA_NUM_PARALLEL;
+    // The default root is the case under test; an inherited OPENCLAW_HOME (CI exports one) would replace it.
+    delete process.env.OPENCLAW_HOME;
     process.env.HOME = home;
     try {
       markExternalJob('w1', { type: 'extraction' });
@@ -331,7 +333,10 @@ describe('requestAnalysis fallback paths', () => {
       clearExternalJob('w1');
     } finally {
       process.env.HOME = prev.home;
-      process.env.OLLAMA_NUM_PARALLEL = prev.slots;
+      for (const [key, value] of [['OLLAMA_NUM_PARALLEL', prev.slots], ['OPENCLAW_HOME', prev.root]]) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
       rmSync(home, { recursive: true, force: true });
     }
   });
@@ -351,9 +356,10 @@ describe('requestAnalysis fallback paths', () => {
       clearExternalJob('w1');
     } finally {
       process.env.HOME = prev.home;
-      process.env.OLLAMA_NUM_PARALLEL = prev.slots;
-      if (prev.root === undefined) delete process.env.OPENCLAW_HOME;
-      else process.env.OPENCLAW_HOME = prev.root;
+      for (const [key, value] of [['OLLAMA_NUM_PARALLEL', prev.slots], ['OPENCLAW_HOME', prev.root]]) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
       rmSync(home, { recursive: true, force: true });
       rmSync(nodeRoot, { recursive: true, force: true });
     }
