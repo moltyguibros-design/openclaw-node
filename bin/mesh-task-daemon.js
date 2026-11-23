@@ -1982,15 +1982,20 @@ function notConvergedDigest(session) {
  * Also creates a new round in the session (for reflection storage).
  */
 async function startCirclingStep(sessionId) {
-  const session = await collabStore.get(sessionId);
-  if (!isLiveSession(session) || !session.circling) return;
-  await renewCollabParentLease(session.task_id);
+  const current = await collabStore.get(sessionId);
+  if (!isLiveSession(current) || !current.circling) return;
+  await renewCollabParentLease(current.task_id);
+
+  // Record step start time for timeout rehydration after daemon restart. CAS, not
+  // a blind put: a cancel during the lease renewal would otherwise be written over.
+  const session = await collabStore._updateWithCAS(sessionId, (s) => {
+    if (!isLiveSession(s) || !s.circling) return null;
+    s.circling.step_started_at = new Date().toISOString();
+    return s;
+  });
+  if (!session) return;
 
   const { phase, current_subround, current_step } = session.circling;
-
-  // Record step start time for timeout rehydration after daemon restart
-  session.circling.step_started_at = new Date().toISOString();
-  await collabStore.put(session);
 
   // Start a new round in the session for reflection storage
   // (each step gets its own round to keep reflections organized)
@@ -3268,6 +3273,8 @@ if (require.main === module) {
       if (ctx.planStore !== undefined) planStore = ctx.planStore;
     },
     startRecruitedSession: (id) => startRecruitedSession(id),
+    // test/collab-circling-step-cas.test.js
+    startCirclingStep: (id) => startCirclingStep(id),
     handleCollabJoin: (msg) => handleCollabJoin(msg),
     // test/daemon-circling-handlers.test.js, test/circling-parse-retry.test.mjs
     handleCollabReflect: (msg) => handleCollabReflect(msg),
