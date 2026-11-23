@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -395,9 +395,29 @@ test('no unit but the gateway points NODE_PATH at the ~/openclaw copy', () => {
   }
 });
 
+// env.sh replaced only '/' and '.', so a home or checkout path with '_' or a space
+// registered transcript sources Claude Code never creates.
+test('claude_project_path encodes the way Claude Code and agent-activity do', () => {
+  const { toClaudeProjectPath } = createRequire(import.meta.url)('../lib/agent-activity.js');
+  const fn = moduleSrc['env.sh'].match(/^claude_project_path\(\) \{\n[\s\S]*?\n\}\n/m)?.[0];
+  assert.ok(fn, 'env.sh defines claude_project_path');
+  const encode = (p) => spawnSync('bash', ['-c', `set -euo pipefail\n${fn}claude_project_path "$1"`, 'x', p], { encoding: 'utf8' });
+  const missing = '/home/john_doe/My Projects/x.y';
+  let r = encode(missing);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, `${toClaudeProjectPath(missing)}\n`);
+  assert.equal(r.stdout, '-home-john-doe-My-Projects-x-y\n');
+  const dir = tmpDir('oc-claude-path-');
+  mkdirSync(join(dir, 'real_dir'));
+  symlinkSync(join(dir, 'real_dir'), join(dir, 'link'));
+  r = encode(join(dir, 'link'));
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, `${toClaudeProjectPath(realpathSync(join(dir, 'link')))}\n`);
+});
+
 test('preserved behaviors sit in their modules', () => {
   assert.ok(moduleSrc['env.sh'].includes('claude_project_path() {'));
-  assert.ok(moduleSrc['env.sh'].includes("sed 's|[/.]|-|g'"));
+  assert.ok(moduleSrc['env.sh'].includes("sed 's|[^A-Za-z0-9]|-|g'"));
   // The Node >= 22 check moved into prereqs.sh (node_ok); system-deps.sh now
   // delegates to it rather than carrying its own version comparison.
   assert.ok(moduleSrc['system-deps.sh'].includes('PREREQ_SCRIPT'));

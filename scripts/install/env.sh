@@ -127,13 +127,14 @@ export OPENCLAW_NATS="${OPENCLAW_NATS:-nats://127.0.0.1:4222}"
 export OPENCLAW_NATS_TOKEN="${OPENCLAW_NATS_TOKEN:-}"
 
 # ── Claude Code project path encoding (for transcript-sources.json) ──
-# Claude encodes a project path by replacing / and . with - INCLUDING the leading
-# slash: /Users/x/repo → -Users-x-repo (leading dash kept). An earlier version
-# stripped the leading / first, so every rendered source path matched nothing on
-# disk and _detectActivity silently skipped them — memory ingest ran dark for 39h
-# after the 2026-07-14 re-render (memory_ingest_remediation audit).
+# Claude Code replaces every non-alphanumeric character of its real (symlink-
+# resolved) cwd with -, INCLUDING the leading slash: /Users/x/my_repo →
+# -Users-x-my-repo, as lib/agent-activity.js does. A path that does not exist yet
+# is encoded as given. A wrong encoding matches nothing on disk and _detectActivity
+# skips it silently: memory ingest ran dark for 39h after the 2026-07-14 re-render
+# (memory_ingest_remediation audit).
 claude_project_path() {
-  echo "$1" | sed 's|[/.]|-|g'
+  { (cd "$1" 2>/dev/null && pwd -P) || printf '%s\n' "$1"; } | sed 's|[^A-Za-z0-9]|-|g'
 }
 export CLAUDE_PROJECT_WORKSPACE="$(claude_project_path "$WORKSPACE")"
 export CLAUDE_PROJECT_HOME="$(claude_project_path "$HOME")"
