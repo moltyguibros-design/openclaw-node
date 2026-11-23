@@ -30,9 +30,10 @@
  * Usage:
  *   node mesh-agent.js                        # run worker (default provider)
  *   node mesh-agent.js --once                 # claim one task, execute, exit
- *   node mesh-agent.js --model sonnet         # override model
- *   node mesh-agent.js --provider openai      # use OpenAI backend
- *   node mesh-agent.js --dry-run              # claim + build prompt, don't execute
+ *   node mesh-agent.js --model <name>         # override model
+ *   node mesh-agent.js --provider <name>      # pick a provider from lib/llm-providers.js
+ *   node mesh-agent.js --dry-run              # read one task and print its prompt; claims nothing
+ *   node mesh-agent.js --dry-run --task <id>  # the same for a named task
  */
 
 const { connect, StringCodec } = require('nats');
@@ -332,6 +333,10 @@ function injectMemory(parts, task) {
 const args = process.argv.slice(2);
 const ONCE = args.includes('--once');
 const DRY_RUN = args.includes('--dry-run');
+const CLI_TASK_ID = (() => {
+  const idx = args.indexOf('--task');
+  return idx >= 0 && args[idx + 1] ? args[idx + 1] : null;
+})();
 const CLI_MODEL = (() => {
   const idx = args.indexOf('--model');
   return idx >= 0 && args[idx + 1] ? args[idx + 1] : null;
@@ -2130,11 +2135,6 @@ async function executeCollabTask(task) {
         ? buildCirclingPrompt(task, roundData)
         : buildCollabPrompt(task, round_number, shared_intel, my_scope, my_role, round_role);
 
-      if (DRY_RUN) {
-        log(`[DRY RUN] Collab prompt:\n${prompt}`);
-        break;
-      }
-
       // Execute provider (LLM or shell)
       const llmResult = await runLLM(prompt, task, worktreePath);
       const stop = stoppedFor(task.task_id);
@@ -2398,7 +2398,7 @@ async function executeTask(task) {
 }
 
 /**
- * Every exit from a supervised task — completion, release, dry run, or a throw
+ * Every exit from a supervised task — completion, release, or a throw
  * anywhere in the attempt loop — closes its supervisor: a loop left running would
  * keep assessing a task that is gone. A throw carries the supervisor's summary out
  * as `err.foremanNote`, because the telemetry row for a thrown task is written by
@@ -2462,12 +2462,6 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
     const prompt = attempt === 1
       ? buildInitialPrompt(task)
       : buildRetryPrompt(task, attempts, attempt);
-
-    if (DRY_RUN) {
-      log(`[DRY RUN] Prompt:\n${prompt}`);
-      await closeSupervision(supervisor, 'dry-run');
-      return;
-    }
 
     // Run LLM (with worktree isolation if available), supervised as it streams
     if (supervisor) supervisor.workerStarted({ attempt });
@@ -2773,6 +2767,25 @@ buildCirclingPrompt = tracer.wrap('buildCirclingPrompt', buildCirclingPrompt, { 
 parseReflection = tracer.wrap('parseReflection', parseReflection, { tier: 3 });
 parseCirclingReflection = tracer.wrap('parseCirclingReflection', parseCirclingReflection, { tier: 3 });
 
+// ── Dry run ───────────────────────────────────────────
+
+// A claim would take real work off the queue (and a released task cannot go back),
+// so the preview only reads: the named task, else the next queued one.
+async function dryRun(taskId = CLI_TASK_ID) {
+  const task = taskId
+    ? await natsRequest('mesh.tasks.get', { task_id: taskId })
+    : (await natsRequest('mesh.tasks.list', { status: 'queued' }))[0];
+  if (!task) {
+    log('[DRY RUN] No queued task to preview.');
+    return;
+  }
+  await prepareMemoryRecall(task);
+  const prompt = task.collaboration
+    ? buildCollabPrompt(task, 1, null, task.scope, 'worker', null)
+    : buildInitialPrompt(task);
+  log(`[DRY RUN] Prompt for ${task.task_id}:\n${prompt}`);
+}
+
 // ── Bus connection ────────────────────────────────────
 
 // The agent is on demand on both platforms and launchd never restarts it
@@ -2848,6 +2861,11 @@ async function main() {
   }
   setNatsConnection(nc, sc);
   log(`Connected to NATS`);
+  if (DRY_RUN) {
+    await dryRun();
+    await drainBus(nc);
+    return;
+  }
   let draining = false;
 
   (async () => {
@@ -2986,5 +3004,6 @@ module.exports.__test = {
   evaluateMetric,
   parseReflection,
   agentConnectOptions, connectToBus, drainBus,
+  dryRun,
 };
 // deploy-v7f0130b
