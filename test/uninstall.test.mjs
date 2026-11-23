@@ -169,14 +169,18 @@ function putFiles(home, base, rels) {
 }
 
 // The workspace skills dir is shared: install.sh rsyncs the repo's skills into it and
-// the scanner gate installs ClawHub skills next to them.
+// the scanner gate installs ClawHub skills next to them. A skill the repo quarantined
+// (google-drive) or deleted (deep-research) stays there until an update retires it.
 test('uninstall keeps operator-installed skills and removes only the repo-shipped ones', linuxOnly, () => {
   const fx = fixture();
   try {
-    putFiles(fx.home, '.openclaw/workspace/skills', ['mesh/SKILL.md', 'find-skills/SKILL.md', 'my-clawhub-skill/SKILL.md', 'my-clawhub-skill/fix.md']);
+    putFiles(fx.home, '.openclaw/workspace/skills', [
+      'mesh/SKILL.md', 'find-skills/SKILL.md', 'google-drive/SKILL.md', 'deep-research/SKILL.md',
+      'my-clawhub-skill/SKILL.md', 'my-clawhub-skill/fix.md',
+    ]);
     const r = runUninstall(fx);
     assert.equal(r.status, 0, r.stderr);
-    for (const shipped of ['mesh', 'find-skills']) {
+    for (const shipped of ['mesh', 'find-skills', 'google-drive', 'deep-research']) {
       assert.equal(existsSync(join(fx.home, '.openclaw/workspace/skills', shipped)), false, shipped);
     }
     assert.equal(existsSync(join(fx.home, '.openclaw/workspace/skills/my-clawhub-skill/fix.md')), true);

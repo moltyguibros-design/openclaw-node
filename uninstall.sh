@@ -183,6 +183,12 @@ else
       case "$name" in dist|scripts|_quarantine) continue ;; esac
       rm -rf "${WORKSPACE:?}/skills/$name"
     done
+    # A skill the repo quarantined or deleted stays installed until an update retires it.
+    while read -r group name; do
+      [ "$group" = skills ] || continue
+      case "$name" in ''|/*|.*|*/.*|*..*|*/|*/*/*|*.bak*) continue ;; esac
+      rm -rf "${WORKSPACE:?}/skills/$name"
+    done < "$REPO_DIR/scripts/install/retired-files.txt"
     for skill in "$WORKSPACE/skills"/*; do
       if [ -e "$skill" ]; then KEPT_SKILLS+=("$(basename "$skill")"); fi
     done
