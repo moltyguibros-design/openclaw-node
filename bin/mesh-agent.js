@@ -2351,10 +2351,6 @@ async function executeCollabTask(task) {
 // ── Task Execution ────────────────────────────────────
 
 /**
- * Execute a task with the Karpathy iteration pattern.
- * Try → measure → keep/discard → retry.
- */
-/**
  * Why this node cannot even start `task` (a provider it refuses or does not have,
  * a shell command the filter blocks), else null. Thrown inside the attempt loop,
  * these reached the daemon only as a lease expiry minutes later.
@@ -2370,6 +2366,10 @@ function taskStartError(task) {
   }
 }
 
+/**
+ * Execute a task with the Karpathy iteration pattern.
+ * Try → measure → keep/discard → retry.
+ */
 async function executeTask(task) {
   const startedAt = Date.now();
   log(`EXECUTING: ${task.task_id} "${task.title}" (budget: ${task.budget_minutes}m, metric: ${task.metric || 'none'}, max attempts: ${MAX_ATTEMPTS})`);
