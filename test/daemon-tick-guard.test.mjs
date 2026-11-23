@@ -151,7 +151,6 @@ test('IDLE→ENDED targets the ended session\'s own JSONL (R17, repair 4.4)', ()
   const branch = daemonSrc.match(/if \(t\.from === STATES\.IDLE && t\.to === STATES\.ENDED\) \{[\s\S]*?\n    \}\n/)[0];
   const targeted = branch.match(/const currentJsonl = findJsonlBySessionId\(sources, t\.sessionId\);/g) || [];
   assert.equal(targeted.length, 1, 'the ended session\'s own transcript is looked up once');
-  assert.match(branch, /runSubprocess\('node', \[subagentAudit, currentJsonl\]/, 'subagent-audit uses the same transcript as the flush');
   assert.doesNotMatch(branch, /findCurrentJsonl/, 'with concurrent sessions the newest file belongs to another session');
 });
 

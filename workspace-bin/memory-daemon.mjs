@@ -13,7 +13,7 @@
  *      - Imports sessions into SQLite archive (session-store)
  *   1. Status sync (every tick when active, ~5ms)
  *   2. Throttled background work (recap 10min, maintenance 30min,
- *      obsidian-sync 30min, trust-health 30min, session-import 10min)
+ *      obsidian-sync 30min, session-import 10min)
  *
  * v3 additions (Hermes-inspired):
  *   - Pre-compression memory flush (durable fact extraction before context loss)
@@ -584,7 +584,6 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false, previ
   const clawvault = path.join(WORKSPACE, config.clawvaultBin);
   const compileBoot = path.join(WORKSPACE, 'bin/compile-boot');
   const maintenance = path.join(WORKSPACE, 'bin/memory-maintenance.mjs');
-  const subagentAudit = path.join(WORKSPACE, 'bin/subagent-audit.mjs');
   const memoryDir = path.join(WORKSPACE, 'memory');
 
   // 1. Session recap of the last session that ended
@@ -612,14 +611,6 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false, previ
     log(`  created daily file: ${today}.md`);
   }
 
-  // 4. Sub-agent audit of the last session that ended
-  if (fs.existsSync(subagentAudit) && previousJsonl) {
-    try {
-      await runSubprocess('node', [subagentAudit, previousJsonl], 30000);
-      log(`  subagent-audit done on ${path.basename(previousJsonl).slice(0, 8)}`);
-    } catch (e) { log(`  subagent-audit failed: ${e.message}`); }
-  }
-
   // A transcript that appears beside a live session (a plan tick, a second
   // conversation) gets only the steps above: the node-wide ones below already
   // ran for the boot that opened the node session, and Phase 2's import keeps
@@ -629,7 +620,7 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false, previ
     return;
   }
 
-  // 5. Run maintenance (force)
+  // 4. Run maintenance (force)
   if (fs.existsSync(maintenance)) {
     try {
       await runSubprocess('node', [maintenance, '--force'], 60000);
@@ -641,7 +632,7 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false, previ
     saveThrottleState(throttle);
   }
 
-  // 6. Compile boot artifacts
+  // 5. Compile boot artifacts
   if (fs.existsSync(compileBoot)) {
     try {
       // Use /usr/bin/python3 explicitly — Homebrew python lacks pyyaml
@@ -651,7 +642,7 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false, previ
     } catch (e) { log(`  compile-boot failed: ${e.message}`); }
   }
 
-  // 7. ClawVault doctor — vault health check + auto-fix
+  // 6. ClawVault doctor — vault health check + auto-fix
   if (fs.existsSync(clawvault)) {
     try {
       await runSubprocess(clawvault, ['doctor', '--fix'], 30000);
@@ -659,7 +650,7 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false, previ
     } catch (e) { log(`  clawvault doctor failed: ${e.message}`); }
   }
 
-  // 8. Freeze MEMORY.md snapshot for deterministic prompt content
+  // 7. Freeze MEMORY.md snapshot for deterministic prompt content
   try {
     const budget = initMemoryBudget(config);
     budget.startSession();
@@ -667,7 +658,7 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false, previ
     log(`  memory-budget frozen ${stats.meterDisplay}`);
   } catch (e) { log(`  memory-budget freeze failed: ${e.message}`); }
 
-  // 9. Import changed sessions into SQLite archive (memory worker)
+  // 8. Import changed sessions into SQLite archive (memory worker)
   try {
     const imported = await runImportDirInWorker(loadTranscriptSources());
     if (imported.length > 0) log(`  session-store: imported ${imported.length} sessions`);
@@ -774,7 +765,7 @@ function runPhase1StatusSync(config, status, { newSession = false } = {}) {
 
 const THROTTLE_STATE_FILE = path.join(STATE_DIR, 'daemon-throttle.json');
 const THROTTLE_DEFAULTS = Object.freeze({
-  lastRecap: 0, lastMaintenance: 0, lastObsidianSync: 0, lastTrustHealth: 0,
+  lastRecap: 0, lastMaintenance: 0, lastObsidianSync: 0,
   lastSessionImport: 0, lastHyperagentReflect: 0, lastSynthesis: 0,
   lastKnowledgeIndex: 0, lastGraphCacheRefresh: 0,
 });
@@ -866,7 +857,7 @@ async function runPhase2ThrottledWork(config, sessions) {
   const now = Date.now();
   const throttle = loadThrottleState();
 
-  // Stage 1: Parallel — recap, maintenance, trust-health, session import, indexing, synthesis
+  // Stage 1: Parallel — recap, maintenance, session import, indexing, synthesis
   // These produce data. They run before Obsidian sync so fresh data gets pushed.
   const stage1 = [];
 
@@ -892,19 +883,6 @@ async function runPhase2ThrottledWork(config, sessions) {
         runSubprocess('node', [maint, '--force'], 60000)
           .then(() => log('  Phase 2: memory-maintenance done'))
           .catch(e => log(`  Phase 2: memory-maintenance failed: ${e.message}`))
-      );
-    }
-  }
-
-  // Trust registry health check (every 30min)
-  if (now - throttle.lastTrustHealth >= config.intervals.maintenanceMs) {
-    throttle.lastTrustHealth = now;
-    const audit = path.join(WORKSPACE, 'bin/subagent-audit.mjs');
-    if (fs.existsSync(audit)) {
-      stage1.push(
-        runSubprocess('node', [audit, '--health-check'], 15000)
-          .then(() => log('  Phase 2: trust-health done'))
-          .catch(e => log(`  Phase 2: trust-health failed: ${e.message}`))
       );
     }
   }
@@ -1044,8 +1022,8 @@ async function runNodeVaultMaintenance(config) {
   const now = Date.now();
   const throttle = loadThrottleState();
 
-  // Stage 2: Obsidian sync — runs AFTER stage 1 so fresh synthesis notes,
-  // trust-registry updates, and recaps are all picked up and pushed to vault.
+  // Stage 2: Obsidian sync — runs AFTER stage 1 so fresh synthesis notes
+  // and recaps are picked up and pushed to vault.
   if (now - throttle.lastObsidianSync >= config.intervals.obsidianSyncMs) {
     throttle.lastObsidianSync = now;
     const obsSync = path.join(WORKSPACE, 'bin/obsidian-sync.mjs');
@@ -1147,7 +1125,6 @@ async function handleTransitions(transitions, config) {
       log('Session ended — running full cleanup pipeline');
       const clawvault = path.join(WORKSPACE, config.clawvaultBin);
       const obsSync = path.join(WORKSPACE, 'bin/obsidian-sync.mjs');
-      const subagentAudit = path.join(WORKSPACE, 'bin/subagent-audit.mjs');
 
       // 0. Pre-compression flush (final chance to capture facts).
       // R17 fix (repair 4.4): flush the ENDED session's own transcript; with
@@ -1200,21 +1177,14 @@ async function handleTransitions(transitions, config) {
         log('  memory-budget: snapshot released');
       }
 
-      // 1. Sub-agent audit — extract trust data from this session
-      // (R17, repair 4.4: same ended-session targeting as the flush above)
-      if (fs.existsSync(subagentAudit) && currentJsonl) {
-        await runSubprocess('node', [subagentAudit, currentJsonl], 30000).catch(() => {});
-        log('  subagent-audit (end-of-session) done');
-      }
-
-      // 2. Final Obsidian sync — push all changes
+      // 1. Final Obsidian sync — push all changes
       if (fs.existsSync(obsSync)) {
         await runSubprocess('node', [obsSync], 60000).catch(() => {});
         log('  final obsidian-sync done');
         stampThrottle('lastObsidianSync');
       }
 
-      // 3. ClawVault sleep — handoff + clean exit
+      // 2. ClawVault sleep — handoff + clean exit
       if (fs.existsSync(clawvault)) {
         await runSubprocess(clawvault, ['sleep', 'session ended'], 15000).catch(() => {});
         log('  clawvault sleep done');

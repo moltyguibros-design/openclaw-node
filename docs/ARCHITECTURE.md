@@ -29,14 +29,12 @@ OpenClaw's memory system is a **platform-level service** independent of any fron
 │  │    │    ├─ session-recap --file <last ended session>         │  │
 │  │    │    ├─ clawvault wake + doctor                           │  │
 │  │    │    ├─ memory-maintenance --force                        │  │
-│  │    │    ├─ compile-boot --all                                │  │
-│  │    │    └─ subagent-audit (previous session)                 │  │
+│  │    │    └─ compile-boot --all                                │  │
 │  │    ├─ Phase 1: status sync (every tick, ~5ms)               │  │
 │  │    └─ Phase 2: throttled background work                    │  │
 │  │         ├─ session-recap (every 10min)                      │  │
 │  │         ├─ memory-maintenance (every 30min)                 │  │
 │  │         ├─ flush + synthesis of each active session (30min) │  │
-│  │         ├─ subagent-audit --health-check (every 30min)      │  │
 │  │         └─ obsidian-sync (every 30min, after stage 1)       │  │
 │  └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
@@ -68,7 +66,7 @@ Install: `install.sh` — `scripts/install/services.sh` renders `services/launch
 | `memory-maintenance.mjs` | node | 12 maintenance checks: archival, predictions, stale tasks, MEMORY.md freshness, companion-state, ClawVault checkpoint, MC sync, daily file, timestamps, ERRORS.md, consolidation, graph health | memory-daemon (30min) |
 | `session-recap` | node | Extracts rolling 2-session digest + session fingerprint (JSON sidecar) from JSONL transcripts | memory-daemon (10min) |
 | `obsidian-sync.mjs` | node | Push workspace artifacts to Obsidian vault. Hash-based change detection, 14 node-private + 39 shared routes across all 22 vault domains. REST API + file fallback. | memory-daemon (30min, after stage 1) |
-| `subagent-audit.mjs` | node | Scan JSONL for Task tool delegations, classify outcomes, update trust-registry + lessons. | memory-daemon (Phase 0 + 30min health check) |
+| `subagent-audit.mjs` | node | Scan JSONL for Task tool delegations, classify outcomes, update trust-registry + lessons (only with `--apply`). Report-only until its classifier is verified, so the daemon does not run it. | on-demand |
 | `clawvault-local` | bash | ClawVault wrapper with auto vault-path injection; with `OPENCLAW_SOUL_ID` set, runs only for a soul granted the whole vault | memory-daemon + on-demand |
 | `clawvault-access-control` | node | Soul memory access from `capabilities.json` `permissions.memory` (`lib/soul-memory-access.mjs`, also used by MC's handoff and soul-prompt routes) | clawvault-local + on-demand |
 | `compile-boot` | python | Compiles AGENTS.md into profile-aware boot artifacts (.boot/*.compiled.md). Fetches entity context from MC graph API (Option B: top 10 entities). | memory-daemon (session start) |
@@ -192,7 +190,6 @@ memory-daemon detects new session via JSONL mtime
   Phase 0 Bootstrap, every new transcript:
   → session-recap --file <the last session that ended> (capture what it did)
   → clawvault-local wake (restore active context)
-  → subagent-audit on previous session (scan delegations, update trust)
   Only the boot that opens the node session (no other session live):
   → memory-maintenance --force (catch up on any stale maintenance)
   → compile-boot --all (ensure boot artifacts are fresh)
@@ -210,7 +207,6 @@ Phase 2 — Throttled Background Work:
     Every 10min: session-recap (rolling 2-session digest)
     Every 30min: memory-maintenance (archival, predictions, stale tasks)
     Every 30min: pre-compression flush + synthesis of each active session
-    Every 30min: subagent-audit --health-check (trust registry)
   Stage 2 (after stage 1):
     Every 30min: obsidian-sync (push workspace → vault, hash-based)
 ```
@@ -233,7 +229,7 @@ Idle timeout (15min no JSONL writes) → IDLE
   → session-recap --file <that transcript>
   → clawvault-local checkpoint --working-on idle
 IDLE timeout (5min) → ENDED
-  → end-of-session flush, archive and subagent-audit of that transcript
+  → end-of-session flush and archive of that transcript
   → MEMORY.md snapshot released only when no other session is live
   → clawvault-local sleep
 ```
@@ -326,7 +322,6 @@ JSONL format (either works):
 memory-daemon.mjs (node)
   ├─ calls: session-recap (node)
   ├─ calls: memory-maintenance.mjs (node)
-  ├─ calls: subagent-audit.mjs (node)
   ├─ calls: obsidian-sync.mjs (node)
   ├─ calls: clawvault-local (bash + clawvault npm package)
   └─ calls: compile-boot (/usr/bin/python3 + pyyaml)

@@ -16,11 +16,9 @@
  *   node bin/subagent-audit.mjs --apply <jsonl-path>    # also write trust registry + lessons
  *   node bin/subagent-audit.mjs --health-check          # trust registry health
  *
- * Called by memory-daemon (without --apply):
- *   - session end and Phase 0 (bootstrap): audit the ended session's JSONL
- *     (both may see the same session; LEDGER_FILE keeps each delegation counted
- *     once when --apply writes)
- *   - Phase 2 (throttled): --health-check every 30min
+ * On demand only: the memory daemon stopped running it while it is report-only.
+ * Auditing one session twice is safe: LEDGER_FILE keeps each delegation counted
+ * once when --apply writes.
  */
 
 import { fileURLToPath } from 'url';
