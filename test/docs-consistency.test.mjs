@@ -164,6 +164,15 @@ test('PUBLISHERS.md calls the Claude Code PreCompact publisher wired only when t
   }
 });
 
+test('README does not call grappe membership signed or server-verified while the CLI writes it unsigned', () => {
+  const cli = read('bin/openclaw-grappe.mjs');
+  assert.doesNotMatch(cli, /\b(sign|verify)\w*\(/, 'the grappe CLI signs now: update this test and README');
+  assert.match(cli, /await kv\.update\(KEY_PREFIX \+ id/, 'join writes the member from the client');
+  const intro = read('README.md').split('\n').find((l) => l.startsWith('- **Federation / Grappe**'));
+  assert.doesNotMatch(intro, /signed-membership|join-token verified/);
+  assert.match(intro, /membership lives unsigned in the `GRAPPE_REGISTRY` KV/);
+});
+
 test('README Federation section carries the plan status while the federation block stands', () => {
   const fed = section(read('README.md'), '## Federation (Grappes)').text;
   let blocked = true;
