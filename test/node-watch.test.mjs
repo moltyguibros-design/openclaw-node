@@ -53,7 +53,7 @@ function makeCtx(over = {}) {
 
 const target = (id) => WATCH_TARGETS.find((t) => t.id === id);
 const W_OK = { status: STATUS.WORKING, detail: 'opens; integrity ok', evidence: '' };
-const envFor = (ctx, extra = {}) => ({ ctx, config: ctx.config, hc: {}, probes: {}, includeHeavy: true, ...extra });
+const envFor = (ctx, extra = {}) => ({ ctx, config: ctx.config, probes: {}, includeHeavy: true, ...extra });
 
 describe('node-watch honesty invariants', () => {
   it('launchd parsing distinguishes a running PID from a loaded stopped job', () => {
@@ -328,7 +328,6 @@ describe('node-watch honesty invariants', () => {
   it('a slow target is UNKNOWN (never WORKING) when not probed this cycle', async () => {
     const report = await runWatch({
       ctx: makeCtx(), config,
-      healthCheckFn: async () => ({}),
       probes: {},
       includeHeavy: false,
       targets: [target('obs.links')], // slow: true
@@ -350,7 +349,6 @@ describe('node-watch honesty invariants', () => {
   it('light/deep alternation neither fabricates a BROKEN nor hides a recovery', async () => {
     const light = await runWatch({
       ctx: makeCtx(), config,
-      healthCheckFn: async () => ({}),
       probes: {},
       includeHeavy: false,
       targets: [target('obs.links')],
@@ -418,7 +416,6 @@ describe('node-watch honesty invariants', () => {
     };
     const report = await runWatch({
       ctx: makeCtx(), config,
-      healthCheckFn: async () => ({}),
       probes, includeHeavy: true,
       targets: [t],
     });
@@ -627,9 +624,9 @@ describe('node-watch observed verdicts', () => {
     assert.equal(spawns, 5, 'a failed import is never cached');
   });
 
-  it('daemon WORKING/BROKEN from health-check', async () => {
-    assert.equal((await target('mem.daemon').run(envFor(makeCtx(), { hc: { daemon: { ok: true, detail: 'pid=1' } } }))).status, STATUS.WORKING);
-    assert.equal((await target('mem.daemon').run(envFor(makeCtx(), { hc: { daemon: { ok: false, detail: 'down' } } }))).status, STATUS.BROKEN);
+  it('daemon WORKING/BROKEN from the daemon process check', async () => {
+    assert.equal((await target('mem.daemon').run(envFor(makeCtx(), { checkDaemon: async () => ({ ok: true, detail: 'pid=1' }) }))).status, STATUS.WORKING);
+    assert.equal((await target('mem.daemon').run(envFor(makeCtx(), { checkDaemon: async () => ({ ok: false, detail: 'down' }) }))).status, STATUS.BROKEN);
   });
 
   it('state.db integrity ok → WORKING; absent → BROKEN', async () => {
@@ -859,18 +856,31 @@ describe('node-watch HTML dropdown view', () => {
 });
 
 describe('node-watch runner', () => {
+  // runWatch ran all six health-watch checks (the embedder import, a scratch write) every
+  // minute to read one field; mem.daemon now runs only the daemon process check.
+  it('mem.daemon comes from the daemon check alone, never the full health check', async () => {
+    let fullCheck = false;
+    const report = await runWatch({
+      ctx: makeCtx(), config, probes: {}, includeHeavy: false, targets: [target('mem.daemon')],
+      checkDaemon: async () => ({ ok: true, detail: 'pid=7' }),
+      healthCheckFn: async () => { fullCheck = true; return {}; },
+    });
+    assert.equal(fullCheck, false);
+    assert.deepEqual([report.results[0].status, report.results[0].detail], [STATUS.WORKING, 'pid=7']);
+  });
+
   it('runs all targets, tallies, and drains teardown', async () => {
     const ctx = makeCtx({ httpGet: async () => { throw new Error('bridge down'); }, checkVaultLinks: async () => ({ notes: 0, links: 0, resolved: 0, dangling: [] }) });
     ctx.teardown.push(async () => { ctx._cleaned = true; });
     const report = await runWatch({
       ctx, config,
-      healthCheckFn: async () => ({ daemon: { ok: true, detail: 'pid=1' } }),
+      checkDaemon: async () => ({ ok: true, detail: 'pid=1' }),
       probes: {},
       includeHeavy: true,
       targets: [target('mem.daemon'), target('obs.links'), target('llm.cloud')],
     });
     assert.equal(report.results.length, 3);
-    assert.equal(report.counts.WORKING, 1);   // daemon (hc.ok)
+    assert.equal(report.counts.WORKING, 1);   // daemon (process check ok)
     assert.equal(report.counts.UNKNOWN, 1);    // obs.links (no probe)
     assert.equal(report.counts.OFF, 1);        // cloud via bridge (bridge down → OFF)
     assert.equal(ctx._cleaned, true);
@@ -1188,14 +1198,6 @@ describe('node-watch CLI exit contract', () => {
 });
 
 describe('OPENCLAW_HOME node isolation', () => {
-  it('runWatch hands the spawn tree state.db and workspace to the L1 health check', async () => {
-    const spawn = resolveNodeConfig({ OPENCLAW_HOME: '/tmp/spawn/.openclaw-n2', OPENCLAW_NODE_ID: 'n2' });
-    let seen;
-    await runWatch({ ctx: makeCtx({ config: spawn }), config: spawn, probes: {}, targets: [target('obs.links')],
-      includeHeavy: false, healthCheckFn: async (o) => { seen = o; return {}; } });
-    assert.equal(seen.stateDb, '/tmp/spawn/.openclaw-n2/state.db');
-    assert.equal(seen.workspace, '/tmp/spawn/.openclaw-n2/workspace');
-  });
 
   it('a ~ transcript source expands to the user home, not into a spawn tree', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'node-watch-tilde-'));
