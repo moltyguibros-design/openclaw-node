@@ -216,15 +216,19 @@ function assertCommitted(repoDir) {
  * reading the env file), and every ${VAR} replaced — an unset one with
  * nothing, as envsubst does. The old regen only substituted keys present in
  * openclaw.env, which left a literal ${OPENCLAW_WORKSPACE} in openclaw.json.
+ * The first copy of a repeated key wins, as in config.sh and lib/nats-resolve.js.
  */
 function renderConfigTemplate(template, envText) {
   const vars = { ...process.env };
+  const fromFile = new Set();
   for (const line of envText.split('\n')) {
     if (/^\s*(#|$)/.test(line) || !line.includes('=')) continue;
     const key = line.slice(0, line.indexOf('=')).trim();
     // Same trim + one surrounding quote pair as scripts/install/config.sh.
     const value = line.slice(line.indexOf('=') + 1).trim().replace(/^(["'])(.*)\1$/, '$2');
-    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) vars[key] = value;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || fromFile.has(key)) continue;
+    fromFile.add(key);
+    vars[key] = value;
   }
   vars.OPENCLAW_WORKSPACE = DIRS.WORKSPACE;
   return template.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name) => vars[name] ?? '');

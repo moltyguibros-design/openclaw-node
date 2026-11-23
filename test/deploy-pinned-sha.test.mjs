@@ -448,7 +448,8 @@ describe('openclaw.json is rewritten only from a changed template, rendered as t
     // An earlier deploy installed the template; the operator has since configured the gateway.
     write(fx.home, '.openclaw/config/openclaw.json.template', TEMPLATE(0));
     write(fx.home, '.openclaw/openclaw.json', LIVE_CONFIG);
-    write(fx.home, '.openclaw/openclaw.env', '# node secrets\nDISCORD_BOT_TOKEN="discord-fixture"\n');
+    // A repeated key: the first copy wins, as the daemons and the installer read it.
+    write(fx.home, '.openclaw/openclaw.env', '# node secrets\nDISCORD_BOT_TOKEN="discord-fixture"\nDISCORD_BOT_TOKEN=later-duplicate\n');
   });
 
   it('a diff that changes another config/ file leaves openclaw.json alone', () => {

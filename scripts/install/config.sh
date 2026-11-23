@@ -27,8 +27,13 @@ if [ -f "$ENV_FILE" ]; then
   run chmod 600 "$ENV_FILE"
 fi
 
-# Source env file for config generation (safe key=value parsing — no shell execution)
+# Source env file for config generation (safe key=value parsing — no shell execution).
+# The first copy of a repeated key wins, as in lib/nats-resolve.js and Mission
+# Control: the daemons resolve from this file, so a last-wins export rendered
+# units with a value the daemons never read. A space-delimited list, not an
+# associative array: macOS runs this under bash 3.2.
 if [ -f "$ENV_FILE" ]; then
+  env_seen=" "
   while IFS= read -r line; do
     # Skip comments and empty lines
     [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
@@ -43,7 +48,10 @@ if [ -f "$ENV_FILE" ]; then
       \"*\"|\'*\') value="${value:1:${#value}-2}" ;;
     esac
     # Only export valid variable names
-    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && export "$key=$value"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    case "$env_seen" in *" $key "*) continue ;; esac
+    env_seen="$env_seen$key "
+    export "$key=$value"
   done < "$ENV_FILE"
 fi
 
@@ -74,7 +82,9 @@ if [ -z "${OPENCLAW_NATS_TOKEN:-}" ]; then
     if $DRY_RUN; then
       echo "  [dry-run] would persist a generated OPENCLAW_NATS_TOKEN to $ENV_FILE"
     else
-      echo "OPENCLAW_NATS_TOKEN=$OPENCLAW_NATS_TOKEN" >> "$ENV_FILE"
+      # Replaces a blank OPENCLAW_NATS_TOKEN= line: an appended second line sat
+      # under it, and the daemons read the blank first copy.
+      set_env_key OPENCLAW_NATS_TOKEN "$OPENCLAW_NATS_TOKEN"
       info "Generated OPENCLAW_NATS_TOKEN and persisted to $ENV_FILE"
     fi
   fi

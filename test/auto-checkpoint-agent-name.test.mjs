@@ -42,6 +42,13 @@ describe('auto-checkpoint dispatch signal', () => {
     assert.equal(r.consumed, true);
   });
 
+  // Mission Control names the signal file it writes from the first copy of a repeated key.
+  it('takes the first OPENCLAW_AGENT_NAME when openclaw.env repeats it, as Mission Control does', () => {
+    const r = run({ envFile: 'OPENCLAW_AGENT_NAME=Icarus\nOPENCLAW_AGENT_NAME=Old\n', signal: 'icarus-dispatch.json' });
+    assert.match(r.stdout, /NEW AUTOTASK FOR ICARUS: T-9/);
+    assert.equal(r.consumed, true);
+  });
+
   it('the environment wins over openclaw.env', () => {
     const r = run({ envFile: 'OPENCLAW_AGENT_NAME=Icarus\n', env: { OPENCLAW_AGENT_NAME: 'Talos' }, signal: 'talos-dispatch.json' });
     assert.match(r.stdout, /NEW AUTOTASK FOR TALOS: T-9/);

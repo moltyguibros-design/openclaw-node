@@ -15,8 +15,8 @@ export function resolveAgentName(
   const fromEnv = (env.OPENCLAW_AGENT_NAME || "").trim();
   if (fromEnv) return fromEnv;
   try {
-    const hits = [...fs.readFileSync(envFile, "utf8").matchAll(/^\s*OPENCLAW_AGENT_NAME\s*=(.*)$/gm)];
-    const fromFile = (hits.pop()?.[1] ?? "").trim().replace(/^["']|["']$/g, "");
+    const hit = fs.readFileSync(envFile, "utf8").match(/^\s*OPENCLAW_AGENT_NAME\s*=(.*)$/m);
+    const fromFile = (hit?.[1] ?? "").trim().replace(/^["']|["']$/g, "");
     if (fromFile) return fromFile;
   } catch {
     // no openclaw.env on this node

@@ -22,8 +22,8 @@ describe("resolveAgentName", () => {
     return path.join(dir, "openclaw.env");
   };
 
-  it("takes the environment first, then openclaw.env, then Daedalus", () => {
-    const file = envFile("OPENCLAW_AGENT_NAME=Old\nOPENCLAW_AGENT_NAME='Icarus'\n");
+  it("takes the environment first, then the first copy in openclaw.env, then Daedalus", () => {
+    const file = envFile("OPENCLAW_AGENT_NAME='Icarus'\nOPENCLAW_AGENT_NAME=Later\n");
     expect(resolveAgentName({ OPENCLAW_AGENT_NAME: "Talos" }, file)).toBe("Talos");
     expect(resolveAgentName({}, file)).toBe("Icarus");
     expect(resolveAgentName({}, path.join(os.tmpdir(), "no-such-dir", "openclaw.env"))).toBe("Daedalus");

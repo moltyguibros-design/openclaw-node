@@ -1140,6 +1140,40 @@ test('config.sh env-file parse keeps quotes, spacing and backslashes like render
   assert.equal(r.stdout, "Gui's node|quoted value|single|a  b|a\\b");
 });
 
+// A key listed twice in openclaw.env: the installer exported the last copy while the
+// daemons (lib/nats-resolve readEnvFileKey) and Mission Control read the first, and the
+// token step appended a second OPENCLAW_NATS_TOKEN line under a blank one, so the bus was
+// rendered with a token every daemon then read as empty. First copy wins everywhere.
+test('config.sh reads the first copy of a duplicated openclaw.env key, as the daemons do, and fills a blank token line in place', async () => {
+  const cfg = moduleSrc['config.sh'];
+  const loop = cfg.slice(cfg.indexOf('# Source env file for config generation'), cfg.indexOf('# Persist the node id'));
+  const tokenStep = cfg.slice(cfg.indexOf('# Generate OPENCLAW_NATS_TOKEN if not set'), cfg.indexOf('# LLM backend defaults'));
+  assert.ok(loop.includes('done < "$ENV_FILE"') && tokenStep.includes('OPENCLAW_NATS_TOKEN'));
+  const root = tmpDir('openclaw-envdup-');
+  const envFile = join(root, 'openclaw.env');
+  writeFileSync(envFile, 'OPENCLAW_NODE_ID=first\nOPENCLAW_NATS_TOKEN=\nOPENCLAW_NODE_ID=second\n', { mode: 0o600 });
+  const script = `set -euo pipefail
+DRY_RUN=false
+source "${join(ROOT, 'scripts/install/helpers.sh')}"
+unset OPENCLAW_NATS_TOKEN
+${loop}
+printf 'ID=%s\\n' "$OPENCLAW_NODE_ID"
+${tokenStep}
+printf 'TOKEN=%s\\n' "$OPENCLAW_NATS_TOKEN"`;
+  const r = spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { PATH: process.env.PATH, ENV_FILE: envFile } });
+  assert.equal(r.status, 0, r.stderr);
+  const require = createRequire(import.meta.url);
+  const { readEnvFileKey } = require('../lib/nats-resolve.js');
+  assert.match(r.stdout, /^ID=first$/m);
+  assert.equal(readEnvFileKey(envFile, 'OPENCLAW_NODE_ID'), 'first', 'the daemons read the same copy');
+  const token = r.stdout.match(/^TOKEN=([0-9a-f]{64})$/m)?.[1];
+  assert.ok(token, r.stdout);
+  const lines = readFileSync(envFile, 'utf8').split('\n').filter((l) => l.startsWith('OPENCLAW_NATS_TOKEN='));
+  assert.deepEqual(lines, [`OPENCLAW_NATS_TOKEN=${token}`], 'the blank line is filled, not shadowed by a second one');
+  assert.equal(readEnvFileKey(envFile, 'OPENCLAW_NATS_TOKEN'), token, 'the daemons read the token the bus was rendered with');
+  assert.equal(statSync(envFile).mode & 0o777, 0o600);
+});
+
 // P7-0: the deploy/operator trust allowlists must be seeded with the RAW base64
 // identity pubkey (what trustedDeployKeys() compares), not the SPKI PEM text of
 // identity.pub — that mismatch made strict signed deploy refuse every trigger on

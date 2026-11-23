@@ -33,7 +33,7 @@ fi
 # 1c. Check for dispatched auto-start task (written by scheduler)
 # The scheduler names the file after the agent; resolve the name as Mission Control does
 # (mission-control/src/lib/agent-name.ts): env, then openclaw.env, then Daedalus.
-AGENT_NAME="${OPENCLAW_AGENT_NAME:-$(sed -n 's/^[[:space:]]*OPENCLAW_AGENT_NAME[[:space:]]*=//p' "$HOME/.openclaw/openclaw.env" 2>/dev/null | tail -1 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e "s/^[\"']//" -e "s/[\"']\$//")}"
+AGENT_NAME="${OPENCLAW_AGENT_NAME:-$(sed -n 's/^[[:space:]]*OPENCLAW_AGENT_NAME[[:space:]]*=//p' "$HOME/.openclaw/openclaw.env" 2>/dev/null | head -n 1 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e "s/^[\"']//" -e "s/[\"']\$//")}"
 AGENT_NAME="${AGENT_NAME:-Daedalus}"
 DISPATCH_FILE="$STATE_DIR/$(printf '%s' "$AGENT_NAME" | tr '[:upper:]' '[:lower:]')-dispatch.json"
 if [ -f "$DISPATCH_FILE" ]; then

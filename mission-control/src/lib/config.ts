@@ -109,8 +109,8 @@ export function resolveDaemonNodeId(
   if (fromEnv) return fromEnv;
   let fromFile = "";
   try {
-    const hits = [...fs.readFileSync(envFile, "utf8").matchAll(/^\s*OPENCLAW_NODE_ID\s*=(.*)$/gm)];
-    fromFile = (hits.pop()?.[1] ?? "").trim().replace(/^["']|["']$/g, "");
+    const hit = fs.readFileSync(envFile, "utf8").match(/^\s*OPENCLAW_NODE_ID\s*=(.*)$/m);
+    fromFile = (hit?.[1] ?? "").trim().replace(/^["']|["']$/g, "");
   } catch {
     // no openclaw.env on this node
   }
@@ -131,8 +131,8 @@ export function resolveNodeRole(
   let role = (env.OPENCLAW_NODE_ROLE || "").trim();
   if (!role) {
     try {
-      const hits = [...fs.readFileSync(envFile, "utf8").matchAll(/^\s*OPENCLAW_NODE_ROLE\s*=(.*)$/gm)];
-      role = (hits.pop()?.[1] ?? "").trim().replace(/^["']|["']$/g, "");
+      const hit = fs.readFileSync(envFile, "utf8").match(/^\s*OPENCLAW_NODE_ROLE\s*=(.*)$/m);
+      role = (hit?.[1] ?? "").trim().replace(/^["']|["']$/g, "");
     } catch {
       // no openclaw.env on this node
     }
