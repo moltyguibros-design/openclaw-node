@@ -120,7 +120,7 @@ let _graphCache = null;
 function getGraphCache() {
   if (_graphCache) return _graphCache;
   try {
-    _graphCache = createGraphCache({ dbPath: PATHS.graphCacheDb, extractionStore: getExtractionStore() }); // P2: merge LLM typed edges
+    _graphCache = createGraphCache({ dbPath: PATHS.graphCacheDb, extractionStore: getExtractionStore(), ...(PATHS.vault && { vaultPath: PATHS.vault }) }); // P2: merge LLM typed edges
     log('Graph cache initialized');
     return _graphCache;
   } catch (err) {

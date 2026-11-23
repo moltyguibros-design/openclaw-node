@@ -1,8 +1,9 @@
 /**
  * memory-daemon-node-root.test.mjs — a node run with its own OPENCLAW_HOME
- * (bin/spawn-node.mjs) keeps the LLM-queue snapshot and its flush's vault notes
- * under that root. Both used to resolve under ~/.openclaw, so a spawned node
- * overwrote the main node's queue snapshot and wrote notes into its vault.
+ * (bin/spawn-node.mjs) keeps the LLM-queue snapshot, its flush's vault notes
+ * and the graph cache built from them under that root. They used to resolve
+ * under ~/.openclaw, so a spawned node overwrote the main node's queue
+ * snapshot, wrote notes into its vault, and indexed that vault instead of its own.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
+import Database from 'better-sqlite3';
 import { repo, daemonFixture, transcript, runDaemon, daemonLog, removeFixture } from './helpers/memory-daemon-harness.mjs';
 
 const EXTRACTION = {
@@ -68,6 +70,26 @@ for (const [label, nativeApi] of [['Ollama-native API', 'true'], ['OpenAI-compat
     }
   });
 }
+
+test('under OPENCLAW_HOME the graph cache indexes the node root vault the flush writes into', () => {
+  const fx = daemonFixture();
+  try {
+    const note = (vault, name) => {
+      fs.mkdirSync(path.join(vault, 'concepts'), { recursive: true });
+      fs.writeFileSync(path.join(vault, 'concepts', `${name}.md`), `---\ntype: concept\n---\n\n# ${name}\n`);
+    };
+    note(path.join(fx.node, 'obsidian-local'), 'node-root-concept');
+    note(path.join(fx.root, 'home', '.openclaw', 'obsidian-local'), 'main-node-concept');
+    runDaemon(fx, `config.intervals.maintenanceMs = 0; await daemon.runNodeVaultMaintenance(config);`);
+    assert.match(daemonLog(fx), /Phase 2: graph-cache refreshed: 1 nodes/);
+    const db = new Database(path.join(fx.node, 'graph-cache.db'), { readonly: true });
+    const labels = db.prepare('SELECT label FROM concept_graph_nodes').all().map((r) => r.label);
+    db.close();
+    assert.deepEqual(labels, ['node-root-concept'], 'the graph cache indexed the main node vault');
+  } finally {
+    removeFixture(fx);
+  }
+});
 
 test('the LLM-queue snapshot follows OPENCLAW_HOME, and stays in ~/.openclaw without it', () => {
   const fx = daemonFixture();
