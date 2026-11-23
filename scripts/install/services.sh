@@ -82,6 +82,9 @@ else
         run launchctl unload "$DEST" 2>/dev/null || true
         run launchctl load "$DEST"
         info "  Installed + loaded: $SVC_NAME"
+      elif [ "$SVC_NAME" = "openclaw-mesh-agent" ]; then
+        # RunAtLoad false: a load alone starts nothing.
+        info "  Installed: $SVC_NAME (on demand — launchctl load $DEST once, then start it with: launchctl kickstart gui/\$(id -u)/ai.openclaw.mesh-agent)"
       else
         info "  Installed: $SVC_NAME (load manually: launchctl load $DEST)"
       fi
@@ -133,6 +136,8 @@ else
           # start is a no-op on a running unit; restart applies the re-rendered unit and new code, as unload/load does on macOS.
           run systemctl --user restart "${SVC_NAME}.service"
           info "  Installed + started: $SVC_NAME"
+        elif [ "$SVC_NAME" = "openclaw-mesh-agent" ]; then
+          info "  Installed: $SVC_NAME (on demand — start it with: systemctl --user start openclaw-mesh-agent; enabling it would start it at every boot)"
         else
           info "  Installed: $SVC_NAME"
         fi
@@ -157,9 +162,9 @@ else
   if ! $ENABLE_SERVICES; then
     info "Services installed but NOT started. Use --enable-services to also start them."
     if [ "$OS" = "linux" ]; then
-      info "Or start individually: systemctl --user enable --now <service-name>"
+      info "Or start individually: systemctl --user enable --now <service-name> (the on-demand mesh agent: systemctl --user start openclaw-mesh-agent)"
     else
-      info "Or load individually: launchctl load ~/Library/LaunchAgents/ai.openclaw.<name>.plist"
+      info "Or load individually: launchctl load ~/Library/LaunchAgents/ai.openclaw.<name>.plist (the on-demand mesh agent then needs: launchctl kickstart gui/\$(id -u)/ai.openclaw.mesh-agent)"
     fi
   fi
 fi

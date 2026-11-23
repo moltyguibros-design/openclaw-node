@@ -144,7 +144,7 @@ async function fixture(t, interval = 1_000) {
     }
     return lastNullClaimAt;
   };
-  return { worker, server, assertEmpty, anchorClaim };
+  return { worker, server, config, env, assertEmpty, anchorClaim };
 }
 
 for (const signal of ['SIGTERM', 'SIGINT']) {
@@ -153,7 +153,7 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
     worker.proc.kill(signal);
     assert.deepEqual(await exited(worker), { code: 0, signal: null }, worker.output);
     assert.equal((worker.output.match(/Agent worker stopped\./g) || []).length, 1);
-    assert.ok(!worker.output.includes('permanently closed — exiting for launchd restart'));
+    assert.ok(!worker.output.includes('NATS connection closed'));
     await assertEmpty();
   });
 }
@@ -182,24 +182,71 @@ test('worker repeated signals during a held real drain complete once', { skip, t
   await assertEmpty();
 });
 
-for (const stopRequested of [false, true]) {
-  test(`worker unexpected permanent loss${stopRequested ? ' before requested drain starts' : ''} exits for restart`, { skip, timeout: 100_000 }, async t => {
-    const { worker, server, anchorClaim } = await fixture(t, stopRequested ? 60_000 : 1_000);
-    await anchorClaim();
-    if (stopRequested) {
-      worker.proc.kill('SIGTERM');
-      await until(() => worker.output.includes('Received SIGTERM'));
-    }
-    await stop(server.proc);
-    assert.deepEqual(await exited(worker, 45_000), { code: 1, signal: null }, worker.output);
-    assert.ok(worker.output.includes('permanently closed — exiting for launchd restart'), worker.output);
-    assert.ok(!worker.output.includes('Agent worker stopped.'), worker.output);
-    if (stopRequested) assert.ok(!worker.output.includes('Draining NATS...'), worker.output);
+// launchd never restarts the on-demand agent, so a bus outage must not end it.
+test('worker outlives a bus outage past the old 10-reconnect limit and resumes when the bus returns', { skip, timeout: 150_000 }, async t => {
+  const { worker, server, config, env, anchorClaim } = await fixture(t);
+  await anchorClaim();
+  await stop(server.proc);
+  await until(() => {
+    assert.equal(worker.result, null, worker.output);
+    return (worker.output.match(/NATS status: reconnecting$/gm) || []).length > 10;
+  }, 60_000);
+  const restarted = await startNatsServer(config);
+  t.after(() => stop(restarted.proc));
+  await until(() => /NATS status: reconnect$/m.test(worker.output), 15_000);
+  assert.equal(worker.result, null, worker.output);
+  const probe = await connect({ servers: env.OPENCLAW_NATS, token: env.OPENCLAW_NATS_TOKEN, maxReconnectAttempts: 0 });
+  t.after(() => probe.close());
+  const alive = JSON.parse(codec.decode((await probe.request(`mesh.agent.${env.OPENCLAW_NODE_ID}.alive`, codec.encode('{}'), { timeout: 3_000 })).data));
+  assert.deepEqual(alive, { alive: false, task_id: null });
+  assert.ok(!worker.output.includes('NATS connection closed'), worker.output);
+  // A claim sent just before the outage is answered by nobody: the loop sees the stop after its 60 s request timeout.
+  worker.proc.kill('SIGTERM');
+  assert.deepEqual(await exited(worker, 75_000), { code: 0, signal: null }, worker.output);
+  assert.equal((worker.output.match(/Agent worker stopped\./g) || []).length, 1);
+});
+
+test('worker started before the bus retries its first connect', { skip, timeout: 40_000 }, async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mesh-agent-first-'));
+  let proc;
+  let server;
+  t.after(async () => {
+    if (proc) await stop(proc);
+    if (server) await stop(server.proc);
+    await fs.rm(root, { recursive: true, force: true });
   });
-}
+  const home = path.join(root, 'home');
+  await fs.mkdir(path.join(home, '.openclaw', 'workspace'), { recursive: true, mode: 0o700 });
+  const port = await freePort();
+  assert.ok(!livePorts.includes(port));
+  const token = randomBytes(32).toString('hex');
+  const config = path.join(root, 'nats.conf');
+  await fs.writeFile(config, `listen: 127.0.0.1:${port}\nauthorization { token: ${JSON.stringify(token)} }\n`, { mode: 0o600 });
+  const env = {
+    PATH: process.env.PATH, HOME: home, TMPDIR: root, OPENCLAW_HOME: home,
+    OPENCLAW_IDENTITY_DIR: path.join(home, '.openclaw'),
+    OPENCLAW_NODE_ID: `early-worker-${randomBytes(8).toString('hex')}`,
+    OPENCLAW_NATS: `nats://127.0.0.1:${port}`, OPENCLAW_NATS_TOKEN: token, OPENCLAW_NATS_AUTH: 'token',
+    MESH_LLM_PROVIDER: 'openai', MESH_WORKSPACE: path.join(home, '.openclaw', 'workspace'),
+    MESH_WORKTREE_BASE: path.join(root, 'worktrees'), MESH_POLL_INTERVAL: '1000',
+    GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null',
+  };
+  if (process.env.NODE_PATH) env.NODE_PATH = process.env.NODE_PATH;
+  proc = spawn(process.execPath, [entry], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const worker = observe(proc);
+  await until(() => {
+    assert.equal(worker.result, null, worker.output);
+    return (worker.output.match(/NATS connect failed/g) || []).length >= 2;
+  }, 15_000);
+  server = await startNatsServer(config);
+  await until(() => worker.output.includes('Connected to NATS'), 20_000);
+  assert.equal(worker.result, null, worker.output);
+  proc.kill('SIGTERM');
+  assert.deepEqual(await exited(worker, 15_000), { code: 0, signal: null }, worker.output);
+});
 
 for (const interval of [1_000, null]) {
-  test(`worker ${interval === null ? 'default' : 'early'} request-subscription drain loss is not a clean stop`, { skip, timeout: 70_000 }, async t => {
+  test(`worker ${interval === null ? 'default' : 'early'} stop during a bus outage ends at the drain bound, not as a clean stop`, { skip, timeout: 70_000 }, async t => {
     const { worker, server, anchorClaim } = await fixture(t, interval);
     await anchorClaim();
     worker.proc.kill('SIGTERM');
@@ -207,38 +254,7 @@ for (const interval of [1_000, null]) {
     await stop(server.proc);
     assert.deepEqual(await exited(worker, 45_000), { code: 1, signal: null }, worker.output);
     assert.ok(worker.output.includes('Draining NATS...'), worker.output);
+    assert.match(worker.output, /Fatal: NATS drain did not (finish within|close the connection)/);
     assert.ok(!worker.output.includes('Agent worker stopped.'), worker.output);
   });
 }
-
-test('worker late request-subscription drain retains error-bearing permanent close failure', { skip, timeout: 120_000 }, async t => {
-  const calibration = await fixture(t, 60_000);
-  await calibration.anchorClaim();
-  calibration.server.proc.kill('SIGKILL');
-  await until(() => calibration.worker.output.includes('permanently closed — exiting for launchd restart'), 45_000);
-  assert.deepEqual(await exited(calibration.worker), { code: 1, signal: null }, calibration.worker.output);
-  const timestamp = (output, message) => {
-    const line = output.split('\n').find(line => line.includes(message));
-    assert.ok(line, output);
-    return Date.parse(line.match(/^\[([^\]]+)\]/)[1]);
-  };
-  const budget = timestamp(calibration.worker.output, 'permanently closed')
-    - timestamp(calibration.worker.output, 'NATS status: disconnect');
-  let interval = Math.round(budget - 1_000);
-  for (let attempt = 0; attempt < 3; attempt++) {
-    assert.ok(interval > 1_000);
-    const { worker, server, anchorClaim } = await fixture(t, interval);
-    await anchorClaim();
-    worker.proc.kill('SIGTERM');
-    server.proc.kill('SIGKILL');
-    assert.deepEqual(await exited(worker, 45_000), { code: 1, signal: null }, worker.output);
-    assert.ok(!worker.output.includes('Agent worker stopped.'), worker.output);
-    const drain = worker.output.indexOf('Draining NATS...');
-    const closed = worker.output.indexOf('permanently closed — exiting for launchd restart');
-    if (drain >= 0 && closed > drain && !worker.output.includes('Fatal:')) return;
-    assert.ok(attempt < 2, worker.output);
-    const observedBudget = closed >= 0 ? timestamp(worker.output, 'permanently closed')
-      - timestamp(worker.output, 'NATS status: disconnect') : budget;
-    interval = Math.round(observedBudget - (drain < 0 || closed < drain ? 2_000 : 500));
-  }
-});

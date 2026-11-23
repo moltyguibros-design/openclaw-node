@@ -5,7 +5,7 @@
     <key>Label</key>
     <string>ai.openclaw.mesh-agent</string>
     <key>Comment</key>
-    <string>OpenClaw Mesh Agent Worker — claims and executes tasks via Claude Code CLI. NOT auto-loaded — load manually with: launchctl load ~/Library/LaunchAgents/ai.openclaw.mesh-agent.plist</string>
+    <string>OpenClaw Mesh Agent Worker — claims and executes tasks via the configured agent CLI. On demand (RunAtLoad false, never restarted): once this plist is loaded, start it with: launchctl kickstart gui/$(id -u)/ai.openclaw.mesh-agent</string>
     <key>ProgramArguments</key>
     <array>
       <string>${NODE_BIN}</string>
@@ -49,7 +49,5 @@
       <key>MESH_FOREMAN_ENFORCE</key>
       <string>${MESH_FOREMAN_ENFORCE}</string>
     </dict>
-    <key>ThrottleInterval</key>
-    <integer>30</integer>
   </dict>
 </plist>

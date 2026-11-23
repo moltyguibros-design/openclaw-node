@@ -2773,6 +2773,47 @@ buildCirclingPrompt = tracer.wrap('buildCirclingPrompt', buildCirclingPrompt, { 
 parseReflection = tracer.wrap('parseReflection', parseReflection, { tier: 3 });
 parseCirclingReflection = tracer.wrap('parseCirclingReflection', parseCirclingReflection, { tier: 3 });
 
+// ── Bus connection ────────────────────────────────────
+
+// The agent is on demand on both platforms and launchd never restarts it
+// (KeepAlive false), so a bus outage (a NATS reload, a cluster change) must not
+// end it: it reconnects for as long as it runs, as the deploy listener does.
+function agentConnectOptions() {
+  return { ...natsConnectOpts(), timeout: 5000, reconnect: true, maxReconnectAttempts: -1, reconnectTimeWait: 2000 };
+}
+
+async function connectToBus(connectFn = connect, { sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  const opts = agentConnectOptions();
+  for (let attempt = 1; running; attempt++) {
+    try {
+      return await connectFn(opts);
+    } catch (err) {
+      const waitMs = Math.min(2000 * 2 ** (attempt - 1), 30000);
+      log(`NATS connect failed (${err.message}); retrying in ${waitMs / 1000}s`);
+      await sleep(waitMs);
+    }
+  }
+  return null;
+}
+
+// A drain during an outage waits for a bus that may never come back.
+const DRAIN_TIMEOUT_MS = 10000;
+async function drainBus(conn, timeoutMs = DRAIN_TIMEOUT_MS) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`NATS drain did not finish within ${timeoutMs}ms (bus unreachable)`)), timeoutMs);
+  });
+  try {
+    await Promise.race([conn.drain(), deadline]);
+    if (!conn.isClosed()) throw new Error('NATS drain did not close the connection');
+  } catch (err) {
+    await conn.close();
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ── Main Loop ─────────────────────────────────────────
 
 async function main() {
@@ -2800,19 +2841,15 @@ async function main() {
   log(`  Harness path:       ${HARNESS_PATH}`);
   log(`  Worktree base:      ${WORKTREE_BASE}`);
 
-  const natsOpts = natsConnectOpts();
-  nc = await connect({
-    ...natsOpts,
-    timeout: 5000,
-    reconnect: true,
-    maxReconnectAttempts: 10,
-    reconnectTimeWait: 2000,
-  });
+  nc = await connectToBus();
+  if (!nc) {
+    log('Stopped before the bus came up.');
+    return;
+  }
   setNatsConnection(nc, sc);
   log(`Connected to NATS`);
   let draining = false;
 
-  // Exit on permanent NATS disconnect so launchd restarts us
   (async () => {
     for await (const s of nc.status()) {
       log(`NATS status: ${s.type}`);
@@ -2821,9 +2858,11 @@ async function main() {
       }
     }
   })();
+  // Reconnects are unbounded, so only a fatal error (an auth failure the server
+  // keeps repeating) closes the connection: the agent cannot work without it.
   nc.closed().then(err => {
     if (draining && !err) return;
-    log('NATS connection permanently closed — exiting for launchd restart');
+    log(`NATS connection closed${err ? `: ${err.message}` : ''} — exiting`);
     process.exit(1);
   });
 
@@ -2912,8 +2951,7 @@ async function main() {
   recruitSub.unsubscribe();
   draining = true;
   log('Draining NATS...');
-  await nc.drain();
-  if (!nc.isClosed()) throw new Error('NATS drain did not close the connection');
+  await drainBus(nc);
   log('Agent worker stopped.');
 }
 
@@ -2947,5 +2985,6 @@ module.exports.__test = {
   onStopNotice, listenForStops,
   evaluateMetric,
   parseReflection,
+  agentConnectOptions, connectToBus, drainBus,
 };
 // deploy-v7f0130b
