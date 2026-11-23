@@ -7,6 +7,7 @@ import { WORKSPACE_ROOT } from "@/lib/config";
 const execFileAsync = promisify(execFile);
 
 const SKILL_AUDIT = path.join(WORKSPACE_ROOT, "bin", "skill-audit");
+const SKILLS_DIR = path.join(WORKSPACE_ROOT, "skills");
 
 /**
  * GET /api/skills/:id/health
@@ -25,7 +26,7 @@ export async function GET(
   try {
     const { stdout } = await execFileAsync(
       "python3",
-      [SKILL_AUDIT, "--skill", id, "--json"],
+      [SKILL_AUDIT, "--skill", id, "--json", "--skills-dir", SKILLS_DIR],
       { timeout: 10_000, cwd: WORKSPACE_ROOT }
     );
 

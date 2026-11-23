@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
+import { NextRequest } from "next/server";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -9,6 +10,7 @@ const WORKSPACE_BIN = path.join(__dirname, "..", "..", "..", "..", "workspace-bi
 
 let root: string;
 let GET: () => Promise<Response>;
+let health: (req: NextRequest, ctx: { params: Promise<{ id: string }> }) => Promise<Response>;
 
 beforeAll(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-skills-list-"));
@@ -28,6 +30,7 @@ beforeAll(async () => {
   vi.stubEnv("HOME", path.join(root, "home"));
   vi.resetModules();
   ({ GET } = await import("@/app/api/skills/list/route"));
+  ({ GET: health } = await import("@/app/api/skills/[id]/health/route"));
 });
 
 afterAll(() => {
@@ -42,4 +45,14 @@ test.skipIf(!HAVE_PY)("audits the skills of a workspace outside ~/.openclaw", as
   expect(res.status, JSON.stringify(body)).toBe(200);
   expect(body.total_skills).toBe(1);
   expect(body.skills.map((s: { name: string }) => s.name)).toEqual(["x"]);
+});
+
+test.skipIf(!HAVE_PY)("reports one skill's health from a workspace outside ~/.openclaw", async () => {
+  const get = (id: string) =>
+    health(new NextRequest(`http://localhost/api/skills/${id}/health`), { params: Promise.resolve({ id }) });
+  const res = await get("x");
+  const body = await res.json();
+  expect(res.status, JSON.stringify(body)).toBe(200);
+  expect(body.name).toBe("x");
+  expect((await get("nope")).status).toBe(404);
 });
