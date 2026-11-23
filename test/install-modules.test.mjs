@@ -93,34 +93,95 @@ test('the 3 unit-render dry-run guards live in services.sh', () => {
   assert.equal(installSrc.match(guard), null);
 });
 
+const unitNames = () => moduleSrc['services.sh'].match(/^UNIT_NAMES='([^']*)'$/m)?.[1];
+const renderUnitCli = (format, template, env) => spawnSync(process.execPath,
+  [join(ROOT, 'lib/render-unit.js'), format, unitNames(), template], { encoding: 'utf8', env });
+
 // Bare envsubst blanked every $VAR, so the NATS units shipped
-// `ExecReload=/bin/kill -HUP ` and check_rendered (which looks for ${VAR}) missed it.
-test('unit renders hand envsubst the placeholder list, so $MAINPID survives', (t) => {
-  const svc = moduleSrc['services.sh'];
-  assert.equal(svc.match(/envsubst < "\$TEMPLATE"/g), null);
-  const unitVars = svc.match(/UNIT_VARS='([^']*)'/)?.[1];
-  assert.ok(unitVars, 'services.sh must define UNIT_VARS');
+// `ExecReload=/bin/kill -HUP ` and the leftover check (which looks for ${VAR}) missed it.
+test('unit renders fill only the listed placeholders, so $MAINPID survives', () => {
+  const names = unitNames();
+  assert.ok(names, 'services.sh must define UNIT_NAMES');
   const templates = [
     ...readdirSync(join(ROOT, 'services/systemd')).map((f) => join(ROOT, 'services/systemd', f)),
     ...readdirSync(join(ROOT, 'services/launchd')).filter((f) => /^ai\.openclaw\..*\.plist$/.test(f)).map((f) => join(ROOT, 'services/launchd', f)),
   ];
   for (const f of templates) {
-    for (const [v] of readFileSync(f, 'utf8').matchAll(/\$\{[A-Za-z_][A-Za-z0-9_]*\}/g)) {
-      assert.ok(unitVars.split(' ').includes(v), `${v} in ${f} is missing from UNIT_VARS`);
+    for (const [, v] of readFileSync(f, 'utf8').matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) {
+      assert.ok(names.split(' ').includes(v), `\${${v}} in ${f} is missing from UNIT_NAMES`);
     }
   }
-  if (spawnSync('sh', ['-c', 'command -v envsubst']).status !== 0) {
-    t.diagnostic('envsubst not installed; render check skipped');
-    return;
-  }
-  const r = spawnSync('envsubst', [unitVars], {
-    encoding: 'utf8',
-    input: readFileSync(join(ROOT, 'services/systemd/openclaw-nats.service'), 'utf8'),
-    env: { PATH: process.env.PATH, HOME: '/h', NATS_SERVER_BIN: '/x/nats-server' },
-  });
+  const r = renderUnitCli('systemd', join(ROOT, 'services/systemd/openclaw-nats.service'), { HOME: '/h', NATS_SERVER_BIN: '/x/nats-server' });
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.includes('ExecReload=/bin/kill -HUP $MAINPID'), r.stdout);
   assert.ok(r.stdout.includes('ExecStart=/x/nats-server --config /h/.openclaw/config/nats.conf'), r.stdout);
+});
+
+// envsubst put values into <string> raw, so '&' or '<' made the plist unparseable; the
+// sed fallback (stock macOS has no envsubst) turned '&' into the placeholder text and
+// aborted the install after the unit had already been unloaded and reloaded.
+test('unit renders survive & and < in values on every launchd template', (t) => {
+  const svc = moduleSrc['services.sh'];
+  assert.doesNotMatch(svc, /envsubst "\$UNIT_VARS"/);
+  assert.doesNotMatch(svc, /s\|\\\$\{NPM_BIN\}\|/);
+  assert.ok(svc.indexOf('plutil -lint') > 0 && svc.indexOf('plutil -lint') < svc.indexOf('launchctl unload "$DEST"'),
+    'a plist is linted before launchctl unloads the running unit');
+  if (spawnSync('python3', ['-c', '']).status !== 0) {
+    t.diagnostic('python3 not installed; plist parse skipped');
+    return;
+  }
+  const repo = '/Users/a/R&D/openclaw-node';
+  const llm = 'http://h:11434/?a=1&b=<2>';
+  const env = Object.fromEntries(unitNames().split(' ').map((n) => [n, `/v/${n.toLowerCase()}`]));
+  Object.assign(env, { OPENCLAW_REPO_DIR: repo, LLM_BASE_URL: llm, HOME: '/h', NODE_BIN: '/n/node' });
+  const dir = join(ROOT, 'services/launchd');
+  for (const f of readdirSync(dir).filter((x) => /^ai\.openclaw\..*\.plist$/.test(x))) {
+    const r = renderUnitCli('plist', join(dir, f), env);
+    assert.equal(r.status, 0, `${f}: ${r.stderr}`);
+    const parsed = spawnSync('python3', ['-I', '-c', 'import json, plistlib, sys; print(json.dumps(plistlib.loads(sys.stdin.buffer.read())))'],
+      { input: r.stdout, encoding: 'utf8' });
+    assert.equal(parsed.status, 0, `${f} is not a valid plist: ${parsed.stderr}`);
+    const plist = JSON.parse(parsed.stdout);
+    if (plist.EnvironmentVariables && 'LLM_BASE_URL' in plist.EnvironmentVariables) {
+      assert.equal(plist.EnvironmentVariables.LLM_BASE_URL, llm, f);
+    }
+    for (const a of plist.ProgramArguments || []) {
+      if (a.includes('openclaw-node')) assert.ok(a.startsWith(`${repo}/`), `${f}: ${a}`);
+    }
+  }
+});
+
+test('render_unit keeps the installed unit when the render or the plist lint fails', () => {
+  const fn = moduleSrc['services.sh'].match(/^render_unit\(\) \{\n[\s\S]*?\n\}\n/m)?.[0];
+  assert.ok(fn, 'services.sh defines render_unit');
+  const dir = tmpDir('oc-render-unit-');
+  const bin = join(dir, 'bin');
+  mkdirSync(bin);
+  writeFileSync(join(dir, 'good.service'), 'ExecStart=${NODE_BIN} x\n');
+  writeFileSync(join(dir, 'bad.service'), 'ExecStart=${NODE_BIN} ${NOT_A_VAR}\n');
+  writeFileSync(join(dir, 'a.plist'), '<string>${HOME}</string>\n');
+  const render = (calls, plutilExit = 0) => {
+    writeFileSync(join(bin, 'plutil'), `#!/bin/sh\nexit ${plutilExit}\n`, { mode: 0o755 });
+    return spawnSync('bash', ['-c', `set -euo pipefail\nerror() { echo "$*" >&2; }\nRENDER_ERRORS=0\n${fn}${calls}\necho "errors=$RENDER_ERRORS"`], {
+      encoding: 'utf8',
+      env: { PATH: `${bin}:${process.env.PATH}`, HOME: '/h', NODE_BIN: process.execPath, REPO_DIR: ROOT, UNIT_NAMES: unitNames(), D: dir },
+    });
+  };
+  for (const f of ['good', 'bad', 'a']) writeFileSync(join(dir, `${f}.out`), 'old unit\n');
+
+  let r = render('render_unit systemd "$D/good.service" "$D/good.out"\nrender_unit systemd "$D/bad.service" "$D/bad.out" || echo skipped');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^skipped\nerrors=1$/m);
+  assert.equal(readFileSync(join(dir, 'good.out'), 'utf8'), `ExecStart=${process.execPath} x\n`);
+  assert.equal(readFileSync(join(dir, 'bad.out'), 'utf8'), 'old unit\n');
+
+  r = render('render_unit plist "$D/a.plist" "$D/a.out" || echo skipped', 1);
+  assert.match(r.stdout, /^skipped\nerrors=1$/m, r.stderr);
+  assert.equal(readFileSync(join(dir, 'a.out'), 'utf8'), 'old unit\n');
+  r = render('render_unit plist "$D/a.plist" "$D/a.out"', 0);
+  assert.match(r.stdout, /^errors=0$/m, r.stderr);
+  assert.equal(readFileSync(join(dir, 'a.out'), 'utf8'), '<string>/h</string>\n');
+  assert.deepEqual(readdirSync(dir).filter((f) => f.includes('.render.')), []);
 });
 
 // The gateway units hardcoded /usr/local/lib/node_modules/openclaw, which is not
@@ -132,10 +193,7 @@ test('gateway units run the openclaw package npm -g actually installed', () => {
     assert.ok(!src.includes('/usr/local/lib/node_modules'), f);
     assert.ok(!src.includes('2026.3.7'), `${f} carries a hardcoded service version`);
   }
-  const svc = moduleSrc['services.sh'];
-  assert.ok(svc.match(/UNIT_VARS='([^']*)'/)[1].split(' ').includes('${OPENCLAW_GATEWAY_JS}'));
-  const sedLists = svc.match(/-e "s\|\\\$\{NPM_BIN\}\|/g).length;
-  assert.equal(svc.match(/-e "s\|\\\$\{OPENCLAW_GATEWAY_JS\}\|\$OPENCLAW_GATEWAY_JS\|g"/g)?.length, sedLists, 'every sed fallback renders the gateway path');
+  assert.ok(unitNames().split(' ').includes('OPENCLAW_GATEWAY_JS'));
 
   const line = moduleSrc['env.sh'].split('\n').find((l) => l.startsWith('export OPENCLAW_GATEWAY_JS='));
   assert.ok(line, 'env.sh exports OPENCLAW_GATEWAY_JS');

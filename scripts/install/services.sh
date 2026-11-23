@@ -12,18 +12,24 @@ SYSTEMD_DEST="${OPENCLAW_SYSTEMD_DIR:-$HOME/.config/systemd/user}"
 INSTALLED_COUNT=0
 SKIPPED_COUNT=0
 RENDER_ERRORS=0
-# The sed fallback's placeholder list. Bare envsubst also blanks systemd's own
-# runtime variables ($MAINPID in the NATS units' ExecReload).
-UNIT_VARS='${HOME} ${NODE_BIN} ${NODE_BIN_DIR} ${OPENCLAW_WORKSPACE} ${OPENCLAW_NATS} ${OPENCLAW_NATS_TOKEN} ${OPENCLAW_NODE_ID} ${OPENCLAW_NODE_ROLE} ${OPENCLAW_DEPLOY_TRUSTED_KEYS} ${OPENCLAW_REPO_DIR} ${NPM_BIN} ${OPENCLAW_GATEWAY_JS} ${NATS_SERVER_BIN} ${MESH_LLM_PROVIDER} ${LLM_MODEL} ${LLM_BASE_URL} ${MESH_FOREMAN_ENFORCE} ${OPENCLAW_TIMEZONE}'
+# The placeholders lib/render-unit.js fills. Only these names are touched, so
+# systemd's own runtime variables ($MAINPID in the NATS units' ExecReload) survive.
+UNIT_NAMES='HOME NODE_BIN NODE_BIN_DIR OPENCLAW_WORKSPACE OPENCLAW_NATS OPENCLAW_NATS_TOKEN OPENCLAW_NODE_ID OPENCLAW_NODE_ROLE OPENCLAW_DEPLOY_TRUSTED_KEYS OPENCLAW_REPO_DIR NPM_BIN OPENCLAW_GATEWAY_JS NATS_SERVER_BIN MESH_LLM_PROVIDER LLM_MODEL LLM_BASE_URL MESH_FOREMAN_ENFORCE OPENCLAW_TIMEZONE'
 
-# Fail-loud render audit — a unit shipping a live ${VAR} placeholder is broken
-# by construction (the silent-unrendered class, 2026-07-11 audit).
-check_rendered() {
-  local f="$1" left
-  left=$(grep -oE '\$\{[A-Za-z_]+\}' "$f" 2>/dev/null | sort -u | tr '\n' ' ' || true)
-  if [ -n "${left// /}" ]; then
-    error "  UNRENDERED placeholders in $(basename "$f"): $left"
+# render_unit FORMAT TEMPLATE DEST — the render (and, for a plist, plutil) must
+# accept it before it replaces DEST, so a bad value never overwrites or reloads
+# a working unit. A leftover ${VAR} placeholder fails the render (the
+# silent-unrendered class, 2026-07-11 audit).
+render_unit() {
+  local fmt="$1" tmpl="$2" dest="$3" tmp="$3.render.$$"
+  if "$NODE_BIN" "$REPO_DIR/lib/render-unit.js" "$fmt" "$UNIT_NAMES" "$tmpl" > "$tmp" \
+    && { [ "$fmt" != plist ] || plutil -lint -s "$tmp"; }; then
+    mv "$tmp" "$dest"
+  else
+    rm -f "$tmp"
+    error "  $(basename "$dest") did not render; the installed unit is left as it was"
     RENDER_ERRORS=$((RENDER_ERRORS + 1))
+    return 1
   fi
 }
 
@@ -68,34 +74,7 @@ else
         continue
       fi
 
-      if command -v envsubst >/dev/null 2>&1; then
-        envsubst "$UNIT_VARS" < "$TEMPLATE" > "$DEST"
-      else
-        # NOTE: sed delimiter is |. If OPENCLAW_NATS_TOKEN ever contains |
-        # (unlikely — tokens are hex/base64), this substitution will break.
-        # Prefer envsubst (above) when available; it has no delimiter issue.
-        sed \
-          -e "s|\${HOME}|$HOME|g" \
-          -e "s|\${NODE_BIN}|$NODE_BIN|g" \
-          -e "s|\${NODE_BIN_DIR}|$NODE_BIN_DIR|g" \
-          -e "s|\${OPENCLAW_WORKSPACE}|$OPENCLAW_WORKSPACE|g" \
-          -e "s|\${OPENCLAW_NATS}|$OPENCLAW_NATS|g" \
-          -e "s|\${OPENCLAW_NATS_TOKEN}|$OPENCLAW_NATS_TOKEN|g" \
-          -e "s|\${OPENCLAW_NODE_ID}|$OPENCLAW_NODE_ID|g" \
-          -e "s|\${OPENCLAW_NODE_ROLE}|$OPENCLAW_NODE_ROLE|g" \
-          -e "s|\${OPENCLAW_DEPLOY_TRUSTED_KEYS}|${OPENCLAW_DEPLOY_TRUSTED_KEYS:-}|g" \
-          -e "s|\${OPENCLAW_REPO_DIR}|$OPENCLAW_REPO_DIR|g" \
-          -e "s|\${NPM_BIN}|$NPM_BIN|g" \
-          -e "s|\${OPENCLAW_GATEWAY_JS}|$OPENCLAW_GATEWAY_JS|g" \
-          -e "s|\${NATS_SERVER_BIN}|$NATS_SERVER_BIN|g" \
-          -e "s|\${MESH_LLM_PROVIDER}|$MESH_LLM_PROVIDER|g" \
-          -e "s|\${LLM_MODEL}|$LLM_MODEL|g" \
-          -e "s|\${LLM_BASE_URL}|$LLM_BASE_URL|g" \
-          -e "s|\${MESH_FOREMAN_ENFORCE}|${MESH_FOREMAN_ENFORCE:-}|g" \
-          -e "s|\${OPENCLAW_TIMEZONE}|$OPENCLAW_TIMEZONE|g" \
-          "$TEMPLATE" > "$DEST"
-      fi
-      check_rendered "$DEST"
+      render_unit plist "$TEMPLATE" "$DEST" || continue
 
       # Refresh only when this run manages the lifecycle — a bare unload
       # without a reload silently downs a running node (2026-07-11 audit).
@@ -113,6 +92,7 @@ else
 
       # Handle timer-based services (service + timer)
       if [ "$SVC_TIMER" = "true" ]; then
+        TIMER_RENDERED=true
         for ext in service timer; do
           TEMPLATE="$SYSTEMD_TEMPLATES/${SVC_NAME}.${ext}"
           DEST="$SYSTEMD_DEST/${SVC_NAME}.${ext}"
@@ -124,32 +104,9 @@ else
             info "  [dry-run] would render $TEMPLATE -> $DEST"
             continue
           fi
-          if command -v envsubst >/dev/null 2>&1; then
-            envsubst "$UNIT_VARS" < "$TEMPLATE" > "$DEST"
-          else
-            sed \
-              -e "s|\${HOME}|$HOME|g" \
-              -e "s|\${NODE_BIN}|$NODE_BIN|g" \
-              -e "s|\${NODE_BIN_DIR}|$NODE_BIN_DIR|g" \
-              -e "s|\${OPENCLAW_WORKSPACE}|$OPENCLAW_WORKSPACE|g" \
-              -e "s|\${OPENCLAW_NATS}|$OPENCLAW_NATS|g" \
-              -e "s|\${OPENCLAW_NATS_TOKEN}|$OPENCLAW_NATS_TOKEN|g" \
-              -e "s|\${OPENCLAW_NODE_ID}|$OPENCLAW_NODE_ID|g" \
-              -e "s|\${OPENCLAW_NODE_ROLE}|$OPENCLAW_NODE_ROLE|g" \
-          -e "s|\${OPENCLAW_DEPLOY_TRUSTED_KEYS}|${OPENCLAW_DEPLOY_TRUSTED_KEYS:-}|g" \
-              -e "s|\${OPENCLAW_REPO_DIR}|$OPENCLAW_REPO_DIR|g" \
-              -e "s|\${NPM_BIN}|$NPM_BIN|g" \
-              -e "s|\${OPENCLAW_GATEWAY_JS}|$OPENCLAW_GATEWAY_JS|g" \
-              -e "s|\${NATS_SERVER_BIN}|$NATS_SERVER_BIN|g" \
-              -e "s|\${MESH_LLM_PROVIDER}|$MESH_LLM_PROVIDER|g" \
-              -e "s|\${LLM_MODEL}|$LLM_MODEL|g" \
-              -e "s|\${LLM_BASE_URL}|$LLM_BASE_URL|g" \
-              -e "s|\${MESH_FOREMAN_ENFORCE}|${MESH_FOREMAN_ENFORCE:-}|g" \
-              -e "s|\${OPENCLAW_TIMEZONE}|$OPENCLAW_TIMEZONE|g" \
-              "$TEMPLATE" > "$DEST"
-          fi
-          check_rendered "$DEST"
+          render_unit systemd "$TEMPLATE" "$DEST" || TIMER_RENDERED=false
         done
+        $TIMER_RENDERED || continue
         if $ENABLE_SERVICES; then
           run systemctl --user daemon-reload
           run systemctl --user enable "${SVC_NAME}.timer"
@@ -169,31 +126,7 @@ else
           info "  [dry-run] would render $TEMPLATE -> $DEST"
           continue
         fi
-        if command -v envsubst >/dev/null 2>&1; then
-          envsubst "$UNIT_VARS" < "$TEMPLATE" > "$DEST"
-        else
-          sed \
-            -e "s|\${HOME}|$HOME|g" \
-            -e "s|\${NODE_BIN}|$NODE_BIN|g" \
-            -e "s|\${NODE_BIN_DIR}|$NODE_BIN_DIR|g" \
-            -e "s|\${OPENCLAW_WORKSPACE}|$OPENCLAW_WORKSPACE|g" \
-            -e "s|\${OPENCLAW_NATS}|$OPENCLAW_NATS|g" \
-            -e "s|\${OPENCLAW_NATS_TOKEN}|$OPENCLAW_NATS_TOKEN|g" \
-            -e "s|\${OPENCLAW_NODE_ID}|$OPENCLAW_NODE_ID|g" \
-            -e "s|\${OPENCLAW_NODE_ROLE}|$OPENCLAW_NODE_ROLE|g" \
-          -e "s|\${OPENCLAW_DEPLOY_TRUSTED_KEYS}|${OPENCLAW_DEPLOY_TRUSTED_KEYS:-}|g" \
-            -e "s|\${OPENCLAW_REPO_DIR}|$OPENCLAW_REPO_DIR|g" \
-            -e "s|\${NPM_BIN}|$NPM_BIN|g" \
-            -e "s|\${OPENCLAW_GATEWAY_JS}|$OPENCLAW_GATEWAY_JS|g" \
-            -e "s|\${NATS_SERVER_BIN}|$NATS_SERVER_BIN|g" \
-            -e "s|\${MESH_LLM_PROVIDER}|$MESH_LLM_PROVIDER|g" \
-            -e "s|\${LLM_MODEL}|$LLM_MODEL|g" \
-            -e "s|\${LLM_BASE_URL}|$LLM_BASE_URL|g" \
-            -e "s|\${MESH_FOREMAN_ENFORCE}|${MESH_FOREMAN_ENFORCE:-}|g" \
-            -e "s|\${OPENCLAW_TIMEZONE}|$OPENCLAW_TIMEZONE|g" \
-            "$TEMPLATE" > "$DEST"
-        fi
-        check_rendered "$DEST"
+        render_unit systemd "$TEMPLATE" "$DEST" || continue
         if [ "$SVC_AUTO" = "true" ] && $ENABLE_SERVICES; then
           run systemctl --user daemon-reload
           run systemctl --user enable "${SVC_NAME}.service"
@@ -216,7 +149,7 @@ else
   fi
 
   if [ "$RENDER_ERRORS" -gt 0 ]; then
-    error "$RENDER_ERRORS unit(s) rendered with live placeholders — aborting (fix the template/render mapping)"
+    error "$RENDER_ERRORS unit(s) failed to render and kept their previous version — aborting"
     exit 1
   fi
 

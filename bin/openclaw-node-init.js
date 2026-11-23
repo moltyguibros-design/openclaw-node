@@ -615,26 +615,14 @@ function serviceTemplateVars({ meshDir, nodeId, config }) {
   };
 }
 
-/**
- * Substitute ${VAR} placeholders. Every known variable is replaced (an
- * empty value is a legitimate render); any OTHER placeholder left in the
- * output is a template/renderer drift and fails loudly — the install.sh
- * path has the same check_rendered guard.
- */
-function renderServiceTemplate(templateText, vars) {
-  let out = templateText;
-  for (const name of SERVICE_TEMPLATE_VARS) {
-    out = out.split('${' + name + '}').join(vars[name] ?? '');
-  }
-  const leftover = out.match(/\$\{[A-Z_][A-Z0-9_]*\}/g);
-  if (leftover) throw new Error(`unrendered template variable(s): ${[...new Set(leftover)].join(', ')}`);
-  return out;
+function renderServiceTemplate(templateText, vars, format) {
+  return require('../lib/render-unit').renderUnit(templateText, vars, SERVICE_TEMPLATE_VARS, format);
 }
 
 function renderServiceFile(meshDir, relTemplate, vars) {
   const templatePath = path.join(meshDir, 'services', relTemplate);
   const text = fs.readFileSync(templatePath, 'utf8');
-  return renderServiceTemplate(text, vars);
+  return renderServiceTemplate(text, vars, relTemplate.endsWith('.plist') ? 'plist' : 'systemd');
 }
 
 const LAUNCHD_SERVICES = ['ai.openclaw.mesh-agent.plist', 'ai.openclaw.mesh-deploy-listener.plist'];
@@ -674,6 +662,13 @@ function installLaunchdService(meshDir, vars) {
   for (const r of rendered) {
     fs.writeFileSync(r.dest, r.text);
     ok(`Service rendered: ${r.dest}`);
+  }
+  // An invalid plist must not reach launchctl: the unload below would take the running daemon down.
+  try {
+    for (const r of rendered) execSync(`plutil -lint -s "${r.dest}"`, { stdio: 'pipe' });
+  } catch (e) {
+    fail(`Rendered plist rejected by plutil, services not reloaded: ${String(e.stdout || e.message).trim()}`);
+    return;
   }
   try {
     for (const r of rendered) {

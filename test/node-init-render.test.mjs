@@ -19,6 +19,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const { renderServiceTemplate, serviceTemplateVars, SERVICE_TEMPLATE_VARS } = require('../bin/openclaw-node-init.js');
 
 const vars = serviceTemplateVars({ meshDir: '/opt/openclaw', nodeId: 'worker-7', config: { nats: 'nats://10.0.0.5:4222', provider: 'deepseek' } });
+const formatOf = (t) => (t.endsWith('.plist') ? 'plist' : 'systemd');
 
 describe('node-init renders the shared service templates', () => {
   const templates = [
@@ -27,7 +28,7 @@ describe('node-init renders the shared service templates', () => {
   ];
   for (const t of templates) {
     it(`${t}: every placeholder is rendered and the node values land`, () => {
-      const out = renderServiceTemplate(readFileSync(join(ROOT, 'services', t), 'utf8'), vars);
+      const out = renderServiceTemplate(readFileSync(join(ROOT, 'services', t), 'utf8'), vars, formatOf(t));
       assert.doesNotMatch(out, /\$\{[A-Z_]+\}/, 'no placeholder survives');
       assert.ok(out.includes('nats://10.0.0.5:4222'), 'NATS URL from discovery');
       assert.ok(out.includes('worker-7'), 'node id');
@@ -55,7 +56,7 @@ describe('node-init renders the shared service templates', () => {
     }
   }
   const renderAgent = (t) => renderServiceTemplate(readFileSync(join(ROOT, 'services', t), 'utf8'),
-    serviceTemplateVars({ meshDir: '/opt/openclaw', nodeId: 'worker-7', config: { nats: 'nats://10.0.0.5:4222' } }));
+    serviceTemplateVars({ meshDir: '/opt/openclaw', nodeId: 'worker-7', config: { nats: 'nats://10.0.0.5:4222' } }), formatOf(t));
   const switchIn = (value) => {
     assert.match(renderAgent('systemd/openclaw-mesh-agent.service'), new RegExp(`^Environment=MESH_FOREMAN_ENFORCE=${value}$`, 'm'));
     assert.match(renderAgent('launchd/ai.openclaw.mesh-agent.plist'), new RegExp(`<key>MESH_FOREMAN_ENFORCE</key>\\s*<string>${value}</string>`));
@@ -97,7 +98,17 @@ describe('node-init renders the shared service templates', () => {
   });
 
   it('an unknown placeholder fails loudly instead of shipping ${GARBAGE} into a unit', () => {
-    assert.throws(() => renderServiceTemplate('ExecStart=${NODE_BIN} ${NOT_A_VAR}/x', vars), /unrendered template variable/);
+    assert.throws(() => renderServiceTemplate('ExecStart=${NODE_BIN} ${NOT_A_VAR}/x', vars, 'systemd'), /unrendered template variable/);
+  });
+
+  // The split/join render was literal but never XML-escaped, so '&' in a value made the plist unparseable.
+  it('plist values are XML-escaped and every value character stays literal', () => {
+    const plist = readFileSync(join(ROOT, 'services/launchd/ai.openclaw.mesh-agent.plist'), 'utf8');
+    const out = renderServiceTemplate(plist, { ...vars, LLM_BASE_URL: 'http://h/?a=1&b=<2>' }, 'plist');
+    assert.ok(out.includes('<string>http://h/?a=1&amp;b=&lt;2&gt;</string>'), out);
+    assert.ok(renderServiceTemplate('<string>${LLM_MODEL}</string>', { ...vars, LLM_MODEL: "$&|\\$'" }, 'plist')
+      .includes("<string>$&amp;|\\$'</string>"));
+    assert.equal(renderServiceTemplate('M=${LLM_MODEL}', { ...vars, LLM_MODEL: '$&|${HOME}' }, 'systemd'), 'M=$&|${HOME}');
   });
 
   it('the renderer knows every variable the templates use (drift lock)', () => {
@@ -213,7 +224,7 @@ describe('node-init join-token trust provisioning', () => {
       // The listener unit is rendered from process.env — the merged list must be there.
       const v = serviceTemplateVars({ meshDir: '/opt/openclaw', nodeId: 'worker-7', config: { nats: 'nats://a:4222' } });
       assert.equal(v.OPENCLAW_DEPLOY_TRUSTED_KEYS, `opKey,${self.publicKeyBase64},${LEAD_KEY}`);
-      const unit = renderServiceTemplate(readFileSync(join(ROOT, 'services/systemd/openclaw-mesh-deploy-listener.service'), 'utf8'), v);
+      const unit = renderServiceTemplate(readFileSync(join(ROOT, 'services/systemd/openclaw-mesh-deploy-listener.service'), 'utf8'), v, 'systemd');
       assert.ok(unit.includes(LEAD_KEY), 'deploy listener unit carries the lead key');
       // Idempotent: a second run adds nothing.
       provisionTrust({ leadNodeId: 'lead-1', leadPubkey: LEAD_KEY, natsAuth: 'nkey' }, 'worker-7');
@@ -369,6 +380,7 @@ describe('node-init leaves the mesh agent on demand', () => {
         stub('launchctl', 'if [ "$1" = list ]; then printf "321\\t0\\tai.openclaw.mesh-deploy-listener\\n-\\t0\\tai.openclaw.mesh-agent\\n"; fi\n');
         stub('loginctl');
         stub('sudo');
+        stub('plutil');
 
         const script = `
           const ni = require(${JSON.stringify(join(ROOT, 'bin', 'openclaw-node-init.js'))});
