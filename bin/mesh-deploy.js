@@ -558,8 +558,9 @@ const MANIFEST = [
       try {
         const current = exec('openclaw --version 2>/dev/null', { ignoreError: true });
         const latest = exec('npm view openclaw version 2>/dev/null', { ignoreError: true });
-        if (current && latest && current !== latest) {
-          return { changed: true, current, latest };
+        const installed = current.match(/\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?/)?.[0] || current;
+        if (installed && latest && installed !== latest) {
+          return { changed: true, current: installed, latest };
         }
       } catch (err) { console.warn(`[mesh-deploy] detect openclaw version: ${err.message}`); }
       return { changed: false };

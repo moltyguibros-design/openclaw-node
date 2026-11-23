@@ -92,8 +92,9 @@ stub('launchctl', `case "$1" in
 esac`);
 // The registry has a newer openclaw than the installed CLI: what made the old
 // fetching deploy run `npm update -g openclaw` on its own.
-stub('npm', 'case "$*" in "view openclaw version") echo 9.9.9 ;; esac');
-stub('openclaw', 'echo 1.0.0');
+stub('npm', 'case "$*" in "view openclaw version") echo "${DEPLOY_TEST_NPM_OPENCLAW:-9.9.9}" ;; esac');
+// The banner the published CLI prints for --version.
+stub('openclaw', 'echo "OpenClaw ${DEPLOY_TEST_OPENCLAW:-1.0.0} (abcdef1)"');
 stub('python3', '');
 if (IS_MAC) {
   for (const label of ['ai.openclaw.mesh-agent', 'ai.openclaw.mission-control']) {
@@ -476,6 +477,25 @@ describe('the openclaw CLI is installed only when named, and only at a pinned ve
   it('installs exactly the pinned version', () => {
     ranOk(fx.deploy(['--from', fx.S0, '--to', fx.S0, '--component', 'openclaw'], { OPENCLAW_CLI_VERSION: '2026.9.1' }));
     assert.deepEqual(fx.calls().filter(l => l.startsWith('npm ')), ['npm install -g openclaw@2026.9.1']);
+  });
+});
+
+describe('mesh-deploy --status compares the OpenClaw version, not the --version banner', () => {
+  let fx;
+  before(() => { fx = makeNode('status', { 'bin/mesh-agent.js': '// agent v0\n' }); });
+  const status = (installed, latest) => {
+    const run = fx.deploy(['--status'], { DEPLOY_TEST_OPENCLAW: installed, DEPLOY_TEST_NPM_OPENCLAW: latest });
+    ranOk(run);
+    return run.stdout.replace(/\x1b\[[0-9;]*m/g, '');
+  };
+
+  it('reports no update when the installed CLI is the registry version', () => {
+    assert.doesNotMatch(status('2026.11.6', '2026.11.6'), /Update available: OpenClaw Gateway/);
+  });
+
+  it('reports a newer registry version against the bare installed version', () => {
+    const out = status('2026.11.6', '2026.11.7');
+    assert.match(out, /Update available: OpenClaw Gateway\n {4}Current: 2026\.11\.6\n {4}Latest: {2}2026\.11\.7\n/);
   });
 });
 
