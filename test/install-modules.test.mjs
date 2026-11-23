@@ -1510,7 +1510,7 @@ test('a provider CLI that needs a newer Node is neither installed nor reported s
   const binaryFn = envSh.slice(envSh.indexOf('provider_binary() {'), envSh.indexOf('\n}\n', envSh.indexOf('provider_binary() {')) + 3);
   const root = tmpDir('oc-provider-floor-');
   mkdirSync(join(root, 'bin'));
-  const seat = (provider, nodeVersion, { onPath = false } = {}) => {
+  const seat = (provider, nodeVersion, { onPath = false, env = {} } = {}) => {
     rmSync(join(root, 'npm.log'), { force: true });
     writeFileSync(join(root, 'bin/node'), `#!/bin/sh\n[ "$1" = -v ] && echo ${nodeVersion}\n`, { mode: 0o755 });
     writeFileSync(join(root, 'bin/npm'), `#!/bin/sh\necho "$*" >> "${root}/npm.log"\n`, { mode: 0o755 });
@@ -1519,7 +1519,7 @@ test('a provider CLI that needs a newer Node is neither installed nor reported s
     const r = spawnSync('/bin/bash', ['-c', `source "${join(ROOT, 'scripts/install/helpers.sh')}"
 DRY_RUN=false OS=macos PROVIDER=${provider}
 ${binaryFn}
-${block}`, 'install.sh'], { encoding: 'utf8', env: { HOME: root, PATH: `${join(root, 'bin')}:/usr/bin:/bin` } });
+${block}`, 'install.sh'], { encoding: 'utf8', env: { HOME: root, PATH: `${join(root, 'bin')}:/usr/bin:/bin`, ...env } });
     assert.equal(r.status, 0, r.stderr);
     return { out: r.stdout, npm: existsSync(join(root, 'npm.log')) ? readFileSync(join(root, 'npm.log'), 'utf8') : '' };
   };
@@ -1546,6 +1546,19 @@ ${block}`, 'install.sh'], { encoding: 'utf8', env: { HOME: root, PATH: `${join(r
   assert.match(out, /Mind seated: kimi \(kimi on PATH\)/);
   ({ out, npm } = seat('openai', 'v22.12.0'));
   assert.equal(npm.trim(), 'install -g @openai/codex', 'a CLI with no floor above the installer\'s Node installs as before');
+
+  // The remedy the warning prints: the agent runs DEEPSEEK_PATH (lib/llm-providers.js),
+  // so a dsh installed under a newer Node seats the mind whatever Node is on PATH.
+  const ownDsh = join(root, 'node24-dsh');
+  writeFileSync(ownDsh, '#!/bin/sh\n', { mode: 0o755 });
+  ({ out, npm } = seat('deepseek', 'v22.23.5', { env: { DEEPSEEK_PATH: ownDsh } }));
+  assert.equal(npm, '');
+  assert.match(out, /Mind seated: deepseek \(.*node24-dsh from DEEPSEEK_PATH\)/);
+  assert.doesNotMatch(out, /needs Node/);
+  ({ out, npm } = seat('kimi', 'v22.23.5', { env: { KIMI_PATH: join(root, 'missing-kimi') } }));
+  assert.equal(npm, '', 'npm cannot fix a KIMI_PATH the agent will still run');
+  assert.match(out, /KIMI_PATH=.*missing-kimi is not an executable file/);
+  assert.doesNotMatch(out, /Mind seated/);
   rmSync(root, { recursive: true, force: true });
 });
 

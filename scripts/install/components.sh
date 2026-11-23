@@ -335,7 +335,17 @@ else
       kimi)   PKG="@moonshot-ai/kimi-code" NODE_FLOOR=22.19.0 ;;
       *)      PKG="" ;;
     esac
-    if [ -n "$NODE_FLOOR" ] && ! node_at_least "$NODE_FLOOR"; then
+    # The agent runs an operator-set *_PATH (lib/llm-providers.js; config.sh exported
+    # openclaw.env's copy), so that binary, not the Node on PATH, decides the seat.
+    BIN_SET="${!BIN_VAR:-}"
+    if [ -n "$BIN_SET" ]; then
+      if [ -x "$BIN_SET" ]; then
+        info "Mind seated: $PROVIDER ($BIN_SET from $BIN_VAR)"
+      else
+        warn "$BIN_VAR=$BIN_SET is not an executable file — the agent runs that path, so the $PROVIDER mind is NOT seated"
+        warn "Fix or remove $BIN_VAR in $ENV_FILE and re-run: bash $0 --update --provider=$PROVIDER"
+      fi
+    elif [ -n "$NODE_FLOOR" ] && ! node_at_least "$NODE_FLOOR"; then
       warn "$PKG needs Node >=$NODE_FLOOR, and this node runs $(node -v 2>/dev/null || echo 'no node') — the $PROVIDER mind is NOT seated"
       warn "Upgrade Node to >=$NODE_FLOOR and re-run: bash $0 --update --provider=$PROVIDER"
       warn "  or point $BIN_VAR at a '$BIN' that runs (one installed under Node >=$NODE_FLOOR)"
