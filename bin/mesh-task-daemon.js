@@ -3242,6 +3242,7 @@ if (require.main === module) {
       collabStore.isRecruitingDone(session) ? startRecruitedSession(session.session_id) : false,
     evaluateRound: (id) => evaluateRound(id),
     handleCirclingStepTimeout: (id, snap) => handleCirclingStepTimeout(id, snap),
+    hasCirclingStepTimer: (id) => circlingStepTimers.has(id),
     handleCirclingGateApprove: (msg) => handleCirclingGateApprove(msg),
     handleCirclingGateReject: (msg) => handleCirclingGateReject(msg),
     completeCirclingSession: (id) => completeCirclingSession(id),

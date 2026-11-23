@@ -385,6 +385,7 @@ describe('Daemon Circling: a step timer on a session that already ended', () => 
 
   it('a member leaving below min_nodes clears the step timer', async () => {
     const sid = await atStep2();
+    assert.equal(daemon.__test.hasCirclingStepTimer(sid), true);
     let reply;
     await daemon.__test.handleCollabLeave({
       data: sc.encode(JSON.stringify({ session_id: sid, node_id: 'node-revB', member_token: tokenFor('node-revB').token, reason: 'test' })),
@@ -392,6 +393,7 @@ describe('Daemon Circling: a step timer on a session that already ended', () => 
     });
     assert.equal(reply.ok, true, JSON.stringify(reply));
     assert.equal((await h.collabStore.get(sid)).status, COLLAB_STATUS.ABORTED);
+    assert.equal(daemon.__test.hasCirclingStepTimer(sid), false);
     const before = h.published.length;
 
     mock.timers.tick(STEP_TIMEOUT_MS + 1);
@@ -403,6 +405,7 @@ describe('Daemon Circling: a step timer on a session that already ended', () => 
 
   it('failing the parent task clears the step timer', async () => {
     const sid = await atStep2();
+    assert.equal(daemon.__test.hasCirclingStepTimer(sid), true);
     const parent = { task_id: 'test-task', owner: 'node-worker', collab_session_id: sid };
     daemon.__test.setContext({
       store: {
@@ -418,6 +421,7 @@ describe('Daemon Circling: a step timer on a session that already ended', () => 
     });
     assert.equal(reply.ok, true, JSON.stringify(reply));
     assert.equal((await h.collabStore.get(sid)).status, COLLAB_STATUS.ABORTED);
+    assert.equal(daemon.__test.hasCirclingStepTimer(sid), false);
     const before = h.published.length;
 
     mock.timers.tick(STEP_TIMEOUT_MS + 1);
