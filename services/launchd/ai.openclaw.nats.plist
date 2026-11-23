@@ -10,16 +10,16 @@
     <array>
       <string>${NATS_SERVER_BIN}</string>
       <string>--config</string>
-      <string>${HOME}/.openclaw/config/nats.conf</string>
+      <string>${OPENCLAW_ROOT}/config/nats.conf</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>${HOME}/.openclaw/logs/nats.log</string>
+    <string>${OPENCLAW_ROOT}/logs/nats.log</string>
     <key>StandardErrorPath</key>
-    <string>${HOME}/.openclaw/logs/nats.err</string>
+    <string>${OPENCLAW_ROOT}/logs/nats.err</string>
     <key>EnvironmentVariables</key>
     <dict>
       <key>HOME</key>

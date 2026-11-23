@@ -5,7 +5,7 @@ Description=OpenClaw Consolidation Scheduler — idle-checks then runs one memor
 Type=oneshot
 ExecStart="${NODE_BIN}" "${OPENCLAW_WORKSPACE}/bin/consolidation-scheduler.mjs"
 Environment="HOME=${HOME}"
-Environment="PATH=${HOME}/.openclaw/workspace/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PATH=${OPENCLAW_ROOT}/workspace/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="OPENCLAW_WORKSPACE=${OPENCLAW_WORKSPACE}"
 Environment="OPENCLAW_NATS=${OPENCLAW_NATS}"
 Environment="OPENCLAW_NODE_ID=${OPENCLAW_NODE_ID}"

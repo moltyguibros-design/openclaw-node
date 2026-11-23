@@ -18,9 +18,9 @@
       <string>${OPENCLAW_REPO_DIR}/bin/lane-watchdog.js</string>
     </array>
     <key>StandardOutPath</key>
-    <string>${HOME}/.openclaw/logs/lane-watchdog.log</string>
+    <string>${OPENCLAW_ROOT}/logs/lane-watchdog.log</string>
     <key>StandardErrorPath</key>
-    <string>${HOME}/.openclaw/logs/lane-watchdog.err.log</string>
+    <string>${OPENCLAW_ROOT}/logs/lane-watchdog.err.log</string>
     <key>EnvironmentVariables</key>
     <dict>
       <key>HOME</key>

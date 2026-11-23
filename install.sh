@@ -40,7 +40,8 @@ if [ "$(uname -s)" = Darwin ]; then
     fi
   fi
 fi
-OPENCLAW_ROOT="${OPENCLAW_ROOT:-$HOME/.openclaw}"
+# Exported: the unit and NATS conf templates render their paths from it.
+export OPENCLAW_ROOT="${OPENCLAW_ROOT:-$HOME/.openclaw}"
 WORKSPACE="$OPENCLAW_ROOT/workspace"
 ENV_FILE="$OPENCLAW_ROOT/openclaw.env"
 DRY_RUN=false

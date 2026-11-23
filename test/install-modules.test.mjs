@@ -126,10 +126,74 @@ test('unit renders fill only the listed placeholders, so $MAINPID survives', () 
     for (const [, v] of readFileSync(f, 'utf8').matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) used.add(v);
   }
   for (const v of names.split(' ')) assert.ok(used.has(v), `UNIT_NAMES lists ${v}, which no template uses`);
-  const r = renderUnitCli('systemd', join(ROOT, 'services/systemd/openclaw-nats.service'), { HOME: '/h', NATS_SERVER_BIN: '/x/nats-server' });
+  const r = renderUnitCli('systemd', join(ROOT, 'services/systemd/openclaw-nats.service'), { HOME: '/h', OPENCLAW_ROOT: '/h/.openclaw', NATS_SERVER_BIN: '/x/nats-server' });
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.includes('ExecReload=/bin/kill -HUP $MAINPID'), r.stdout);
   assert.ok(r.stdout.includes('ExecStart="/x/nats-server" --config "/h/.openclaw/config/nats.conf"'), r.stdout);
+});
+
+// install.sh writes configs under a custom OPENCLAW_ROOT, but every unit and NATS conf
+// template had ${HOME}/.openclaw written in, so nats-server looked for a config that was not there.
+test('unit and NATS conf templates follow OPENCLAW_ROOT; the default render is unchanged', () => {
+  const files = [];
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      if (e.isDirectory()) walk(join(d, e.name));
+      else files.push(join(d, e.name));
+    }
+  };
+  walk(join(ROOT, 'services'));
+  for (const f of files) assert.doesNotMatch(readFileSync(f, 'utf8'), /\$\{HOME\}\/\.openclaw/, f);
+  assert.match(moduleSrc['services.sh'], /^UNIT_NAMES='[^']*\bOPENCLAW_ROOT\b/m);
+  assert.match(readFileSync(INSTALL_SH, 'utf8'), /^export OPENCLAW_ROOT="\$\{OPENCLAW_ROOT:-\$HOME\/\.openclaw\}"$/m);
+
+  const custom = { HOME: '/h', OPENCLAW_ROOT: '/tmp/x', NATS_SERVER_BIN: '/x/nats-server' };
+  const unit = renderUnitCli('systemd', join(ROOT, 'services/systemd/openclaw-nats.service'), custom);
+  assert.equal(unit.status, 0, unit.stderr);
+  assert.ok(unit.stdout.includes('--config "/tmp/x/config/nats.conf"'), unit.stdout);
+  const plist = renderUnitCli('plist', join(ROOT, 'services/launchd/ai.openclaw.nats.plist'), custom);
+  assert.equal(plist.status, 0, plist.stderr);
+  assert.ok(plist.stdout.includes('<string>/tmp/x/config/nats.conf</string>'), plist.stdout);
+
+  const { renderUnit } = createRequire(import.meta.url)('../lib/render-unit.js');
+  const names = unitNames().split(' ');
+  const vars = { ...Object.fromEntries(names.map((n) => [n, `/v/${n.toLowerCase()}`])), HOME: '/h', OPENCLAW_ROOT: '/h/.openclaw' };
+  let compared = 0;
+  for (const [dir, fmt] of [['systemd', 'systemd'], ['launchd', 'plist'], ['launcher', 'desktop']]) {
+    for (const f of readdirSync(join(ROOT, 'services', dir)).filter((x) => /\.(service|plist|desktop)$/.test(x))) {
+      const text = readFileSync(join(ROOT, 'services', dir, f), 'utf8');
+      if (!text.includes('${OPENCLAW_ROOT}')) continue;
+      const before = text.replaceAll('${OPENCLAW_ROOT}', '${HOME}/.openclaw');
+      assert.equal(renderUnit(text, vars, names, fmt), renderUnit(before, vars, names, fmt), `${dir}/${f}`);
+      compared++;
+    }
+  }
+  assert.ok(compared >= 27, `compared ${compared} templates`);
+});
+
+// generate_config renders the NATS confs; its sed fallback (no envsubst) must fill ${OPENCLAW_ROOT} too.
+test('the NATS conf renders store_dir under OPENCLAW_ROOT', () => {
+  const cfg = moduleSrc['config.sh'];
+  const start = cfg.indexOf('generate_config() {');
+  const fn = cfg.slice(start, cfg.indexOf('\n}\n', start) + 3);
+  const dir = tmpDir('oc-nats-root-');
+  const bin = join(dir, 'bin');
+  mkdirSync(bin);
+  for (const tool of ['sed', 'cmp', 'chmod', 'rm', 'basename']) {
+    const found = spawnSync('bash', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).stdout.trim();
+    symlinkSync(found, join(bin, tool));
+  }
+  const out = join(dir, 'nats.conf');
+  const r = spawnSync('/bin/bash', ['-c', `set -eo pipefail
+info() { :; }; warn() { :; }; run() { "$@"; }
+${fn}
+generate_config "$1" "$2"`, 'x', join(ROOT, 'services/nats/nats-single.conf'), out], {
+    encoding: 'utf8',
+    env: { PATH: bin, DRY_RUN: 'false', HOME: '/h', OPENCLAW_ROOT: '/tmp/x', OPENCLAW_NODE_ID: 'n1', WORKSPACE: dir, REPO_DIR: dir },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(readFileSync(out, 'utf8'), /^ {2}store_dir: \/tmp\/x\/nats\/jetstream$/m);
+  assert.match(cfg, /\.replaceAll\("\$\{OPENCLAW_ROOT\}", process\.env\.OPENCLAW_ROOT\)/, 'the cluster render fills it too');
 });
 
 // envsubst put values into <string> raw, so '&' or '<' made the plist unparseable; the
@@ -347,7 +411,7 @@ test('NATS cluster plists come only from services/launchd, pointed at the render
   assert.ok(guide.includes('./install.sh --update'));
   for (const n of [1, 2, 3]) {
     const plist = readFileSync(join(ROOT, `services/launchd/ai.openclaw.nats-${n}.plist`), 'utf8');
-    assert.ok(plist.includes(`\${HOME}/.openclaw/config/nats-${n}.conf`), `nats-${n} plist must run the rendered config`);
+    assert.ok(plist.includes(`\${OPENCLAW_ROOT}/config/nats-${n}.conf`), `nats-${n} plist must run the rendered config`);
   }
 });
 
@@ -797,7 +861,7 @@ test('fresh installs schedule transcript-archive hourly on both platforms', () =
   assert.ok(existsSync(join(ROOT, 'workspace-bin/archive-transcripts.sh')), 'the installer copies workspace-bin/ to $WORKSPACE/bin/');
   // launchd will not start a job whose log directory is missing, and the plist
   // logs into the archive dir before the script can create it.
-  const logDir = plist.match(/<key>StandardErrorPath<\/key><string>\$\{HOME\}\/\.openclaw\/([^<]+)\/[^/<]+<\/string>/)?.[1];
+  const logDir = plist.match(/<key>StandardErrorPath<\/key><string>\$\{OPENCLAW_ROOT\}\/([^<]+)\/[^/<]+<\/string>/)?.[1];
   assert.equal(logDir, 'transcript-archive');
   assert.equal((moduleSrc['services.sh'].match(/mkdir -p [^\n]*"\$OPENCLAW_ROOT\/transcript-archive"/g) || []).length, 1);
 });

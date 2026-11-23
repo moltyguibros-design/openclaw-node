@@ -25,9 +25,9 @@
     </array>
     
     <key>StandardOutPath</key>
-    <string>${HOME}/.openclaw/logs/gateway.log</string>
+    <string>${OPENCLAW_ROOT}/logs/gateway.log</string>
     <key>StandardErrorPath</key>
-    <string>${HOME}/.openclaw/logs/gateway.err.log</string>
+    <string>${OPENCLAW_ROOT}/logs/gateway.err.log</string>
     <key>EnvironmentVariables</key>
     <dict>
     <key>HOME</key>

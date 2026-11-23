@@ -8,13 +8,13 @@ ExecStart="${NODE_BIN}" "${OPENCLAW_GATEWAY_JS}" gateway --port 18789
 Restart=always
 RestartSec=5
 Environment="HOME=${HOME}"
-Environment="PATH=${HOME}/.openclaw/workspace/.npm-global/bin:${HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PATH=${OPENCLAW_ROOT}/workspace/.npm-global/bin:${HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="NODE_PATH=${HOME}/openclaw/node_modules:${HOME}/openclaw/lib"
 Environment="OPENCLAW_NATS=${OPENCLAW_NATS}"
 Environment="OPENCLAW_WORKSPACE=${OPENCLAW_WORKSPACE}"
 Environment="TZ=${OPENCLAW_TIMEZONE}"
-StandardOutput=append:${HOME}/.openclaw/logs/gateway.log
-StandardError=append:${HOME}/.openclaw/logs/gateway.err
+StandardOutput=append:${OPENCLAW_ROOT}/logs/gateway.log
+StandardError=append:${OPENCLAW_ROOT}/logs/gateway.err
 
 [Install]
 WantedBy=default.target

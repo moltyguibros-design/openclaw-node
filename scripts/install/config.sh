@@ -138,7 +138,7 @@ generate_config() {
   else
     # Fallback: manual sed substitution
     sed \
-      -e "s|\${HOME}|$HOME|g" \
+      -e "s|\${OPENCLAW_ROOT}|$OPENCLAW_ROOT|g" \
       -e "s|\${OPENCLAW_WORKSPACE}|$WORKSPACE|g" \
       -e "s|\${OPENCLAW_REPO_DIR}|$REPO_DIR|g" \
       -e "s|\${OPENCLAW_NODE_ID}|$OPENCLAW_NODE_ID|g" \
@@ -238,13 +238,13 @@ if [ -n "$CLUSTER_PEERS" ]; then
       OPENCLAW_NATS_BIND_ADDR="$CLUSTER_BIND" \
       CLUSTER_PEERS="$CLUSTER_PEERS" \
       node -e '
-        const fs = require("fs"), os = require("os");
+        const fs = require("fs");
         const { renderClusterRoutes, replicasForPeers, parsePeers } = require(process.argv[1]);
         let t = fs.readFileSync(process.argv[2], "utf8");
         t = t.replaceAll("${OPENCLAW_NATS_SERVER_NAME}", process.env.OPENCLAW_NATS_SERVER_NAME)
              .replaceAll("${OPENCLAW_NATS_CLUSTER_PASS}", process.env.OPENCLAW_NATS_CLUSTER_PASS)
              .replaceAll("${OPENCLAW_NATS_BIND_ADDR}", process.env.OPENCLAW_NATS_BIND_ADDR)
-             .replaceAll("${HOME}", os.homedir())
+             .replaceAll("${OPENCLAW_ROOT}", process.env.OPENCLAW_ROOT)
              .replace("${OPENCLAW_NATS_CLUSTER_ROUTES}", renderClusterRoutes(process.env.CLUSTER_PEERS, {
                user: "openclaw-route", pass: process.env.OPENCLAW_NATS_CLUSTER_PASS,
              }));

@@ -8,7 +8,7 @@ ExecStart="${NODE_BIN}" "${OPENCLAW_WORKSPACE}/bin/node-watch.mjs" --watch --int
 Restart=always
 RestartSec=5
 Environment="HOME=${HOME}"
-Environment="PATH=${HOME}/.openclaw/workspace/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PATH=${OPENCLAW_ROOT}/workspace/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="NODE_PATH=${OPENCLAW_REPO_DIR}/node_modules:${OPENCLAW_WORKSPACE}/node_modules"
 Environment="OPENCLAW_NATS=${OPENCLAW_NATS}"
 Environment="OPENCLAW_WORKSPACE=${OPENCLAW_WORKSPACE}"
