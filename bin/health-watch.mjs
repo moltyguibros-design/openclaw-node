@@ -13,6 +13,8 @@
  *   HEALTH_ALERT_TARGETS — CSV of: file, nats, banner (default: file,nats,banner)
  *   OPENCLAW_WORKSPACE — workspace root (default: ~/.openclaw/workspace)
  *   NATS_URL — URL override for alert publishing (default: OPENCLAW_NATS via lib/nats-resolve.js)
+ *   OPENCLAW_SKIP_LLM — 1 when install.sh ran with --skip-llm/--sandbox: the ollama component
+ *     stays in the report but no longer counts toward the status
  */
 
 import {
@@ -263,9 +265,11 @@ export function deriveQueueStatus(qs) {
  * @param {number} [opts.intervalSec] — poll interval in seconds
  * @param {string[]} [opts.targets] — alert destinations
  * @param {Function} [opts.healthCheckFn] — override for testing
+ * @param {boolean} [opts.skipLlm] — leave ollama out of the status (default: OPENCLAW_SKIP_LLM=1)
+ * @param {{nats: Function, banner: Function}} [opts.alerters] — override for testing
  * @param {Function} [opts.onTick] — callback after each poll: (status, result, queueState) => void
  * @param {string} [opts.queueSnapshotPath] — daemon queue snapshot (default: ollama-queue QUEUE_STATE_PATH)
- * @returns {{ start: Function, stop: Function }}
+ * @returns {{ start: Function, stop: Function, tick: Function }}
  */
 export function createHealthWatch(opts = {}) {
   const envInterval = parseFloat(process.env.HEALTH_WATCH_INTERVAL_SEC);
@@ -274,6 +278,8 @@ export function createHealthWatch(opts = {}) {
   const targets = opts.targets || parseAlertTargets(process.env.HEALTH_ALERT_TARGETS);
   const checkFn = opts.healthCheckFn || runHealthCheck;
   const onTick = opts.onTick || null;
+  const skipLlm = opts.skipLlm ?? process.env.OPENCLAW_SKIP_LLM === '1';
+  const alerters = opts.alerters || { nats: alertNats, banner: alertBanner };
 
   let timer = null;
   let previousStatus = null;
@@ -282,7 +288,12 @@ export function createHealthWatch(opts = {}) {
 
   async function tick() {
     const result = await checkFn(opts.checkOpts || {});
-    const componentStatus = deriveStatus(result);
+    // A node installed with --skip-llm has no local model on purpose; counting it made the
+    // node 'degraded' forever and re-alerted every REPEAT_ALERT_SEC.
+    const counted = skipLlm
+      ? Object.fromEntries(Object.entries(result).filter(([name]) => name !== 'ollama'))
+      : result;
+    const componentStatus = deriveStatus(counted);
 
     // Augment with queue health
     const queueState = await getQueueHealth(opts.queueSnapshotPath);
@@ -309,13 +320,13 @@ export function createHealthWatch(opts = {}) {
     // reads its mtime for freshness, so it must be written every tick — a
     // healthy-once-then-silent file is indistinguishable from a dead monitor.
     if (targets.includes('file')) {
-      await alertFile(formatHealthReport(result) + formatQueueSection(queueState));
+      await alertFile(formatHealthReport(result, componentStatus) + formatQueueSection(queueState));
     }
 
     if (statusChanged || repeatDue) {
       const alertPromises = [];
-      if (targets.includes('nats')) alertPromises.push(alertNats(status, result));
-      if (targets.includes('banner')) alertPromises.push(alertBanner(status));
+      if (targets.includes('nats')) alertPromises.push(alerters.nats(status, result));
+      if (targets.includes('banner')) alertPromises.push(alerters.banner(status));
       await Promise.allSettled(alertPromises);
       lastAlertTime = now;
     }
@@ -347,7 +358,7 @@ export function createHealthWatch(opts = {}) {
     }
   }
 
-  return { start, stop };
+  return { start, stop, tick };
 }
 
 // ---------------------------------------------------------------------------

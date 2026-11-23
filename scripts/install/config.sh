@@ -73,6 +73,17 @@ if [ -f "$ENV_FILE" ]; then
 fi
 export OPENCLAW_NODE_ROLE="$NODE_ROLE"
 
+# --skip-llm/--sandbox install no local model on purpose; health-watch reads this
+# so the absent model is not alerted as a degraded node every 5 minutes. Never
+# written otherwise: an --update without the flag keeps the earlier choice (the
+# loop above exported it). Delete the line once a local model is installed.
+if $SKIP_LLM; then
+  if [ -f "$ENV_FILE" ]; then
+    set_env_key OPENCLAW_SKIP_LLM 1
+  fi
+  export OPENCLAW_SKIP_LLM=1
+fi
+
 # Generate OPENCLAW_NATS_TOKEN if not set — server-side auth token (D2, federation step 1.1).
 # Clients already resolve+send it via lib/nats-resolve.js; this closes the server-side gap.
 if [ -z "${OPENCLAW_NATS_TOKEN:-}" ]; then

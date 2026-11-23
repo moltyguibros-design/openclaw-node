@@ -37,6 +37,8 @@
       <string>${LLM_MODEL}</string>
       <key>LLM_BASE_URL</key>
       <string>${LLM_BASE_URL}</string>
+      <key>OPENCLAW_SKIP_LLM</key>
+      <string>${OPENCLAW_SKIP_LLM}</string>
       <key>HEALTH_WATCH_INTERVAL_SEC</key>
       <string>60</string>
     </dict>
