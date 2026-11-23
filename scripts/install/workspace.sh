@@ -196,9 +196,10 @@ retire_shipped_files skills "$WORKSPACE/skills"
 # Files deleted from inside shipped skills, which the rsync never removes: an INSTALL.md
 # that installed around the scanner gate, stale docs, and package.json files with no
 # dependencies that made the npm loop below re-run on every --update (npm wrote the
-# clawddocs lock there).
+# clawddocs lock there), and humanize-ai-text's detector-evasion rewriters.
 for f in moltbook-interact/INSTALL.md clawddocs/package.json clawddocs/package-lock.json \
   clawddocs/snippets/common-configs.md crypto-price/ARCHITECTURE.md \
+  humanize-ai-text/scripts/transform.py humanize-ai-text/scripts/compare.py \
   openclaw-skill-scanner/report-template.md; do
   run rm -f "$WORKSPACE/skills/$f"
 done

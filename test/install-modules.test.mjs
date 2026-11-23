@@ -771,6 +771,7 @@ test('an --update removes the files the repo deleted from inside shipped skills,
   const deleted = [
     'moltbook-interact/INSTALL.md', 'clawddocs/package.json', 'clawddocs/package-lock.json',
     'clawddocs/snippets/common-configs.md', 'crypto-price/ARCHITECTURE.md', 'openclaw-skill-scanner/report-template.md',
+    'humanize-ai-text/scripts/transform.py', 'humanize-ai-text/scripts/compare.py',
   ];
   for (const rel of deleted) assert.equal(existsSync(join(ROOT, 'skills', rel)), false, `${rel} still ships`);
   const src = moduleSrc['workspace.sh'];

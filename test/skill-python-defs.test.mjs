@@ -173,10 +173,8 @@ describe('skill Python dependencies', () => {
   });
 
   it('shipped SKILL.md files never run a script through a bare `python`, which nodes do not install', () => {
-    // humanize-ai-text waits on the operator's keep-or-quarantine decision (audit skills-a-l#21).
-    const pending = new Set(['humanize-ai-text']);
     const bare = /(?:^\s*|[|;&]\s*)python\s+(?:\{baseDir\}\/)?scripts\//m;
-    const skills = readdirSync(SKILLS).filter(d => !SKIP_DIRS.has(d) && !pending.has(d) && existsSync(join(SKILLS, d, 'SKILL.md')));
+    const skills = readdirSync(SKILLS).filter(d => !SKIP_DIRS.has(d) && existsSync(join(SKILLS, d, 'SKILL.md')));
     const offenders = skills.filter(d => bare.test(readFileSync(join(SKILLS, d, 'SKILL.md'), 'utf8')));
     assert.deepEqual(offenders, []);
     assert.match(readFileSync(join(SKILLS, 'web-search', 'SKILL.md'), 'utf8'), /^python3 \{baseDir\}\/scripts\/search\.py "<query>"$/m);
