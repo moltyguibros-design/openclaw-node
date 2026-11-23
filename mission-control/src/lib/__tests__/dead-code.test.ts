@@ -66,4 +66,14 @@ describe("removed dead code stays removed", () => {
     expect(fs.existsSync(path.join(src, "..", "scripts"))).toBe(false);
     expect(fs.readFileSync(path.join(src, "..", "eslint.config.mjs"), "utf8")).not.toMatch(/"scripts\/\*\*"/);
   });
+
+  // mc-lib#11 (operator choice B): only the task daemon writes MESH_TASKS; the watcher
+  // and merge stay as groundwork for a multi-node Mission Control.
+  it("mesh-kv.ts ships no MESH_TASKS writer and no header claiming a SQLite mirror", async () => {
+    const meshKv = await import("../sync/mesh-kv");
+    expect(meshKv).not.toHaveProperty("putMeshTask");
+    for (const name of ["listMeshTasks", "getMeshTask", "watchMeshTasks", "mergeTasks"]) expect(meshKv, name).toHaveProperty(name);
+    const text = read("lib/sync/mesh-kv.ts");
+    expect(text).not.toMatch(/kv\.put\(|Mirror KV entries into local SQLite|conflict resolution/);
+  });
 });

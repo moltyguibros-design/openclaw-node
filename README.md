@@ -1057,7 +1057,7 @@ mission-control/
 │   └── components/layout/
 │       └── sidebar.tsx            # Node badge (⬢ Lead / ◇ Worker)
 ├── src/lib/__tests__/
-│   ├── mesh-kv-sync.test.ts      # put/get/list, watcher, merge
+│   ├── mesh-kv-sync.test.ts      # get/list, watcher, merge
 │   └── mocks/mock-kv.ts          # Shared MockKV for all KV tests
 bin/
 └── mesh-task-daemon.js            # Proposal processing (30s enforcement loop)
@@ -1105,7 +1105,7 @@ No configuration needed on the lead — it works exactly as before. Workers just
 
 ```bash
 # MC KV-sync unit tests (no dependencies — run anywhere)
-cd mission-control && npx vitest run src/lib/__tests__/mesh-kv-sync.test.ts   # put/get/list, watcher, merge
+cd mission-control && npx vitest run src/lib/__tests__/mesh-kv-sync.test.ts   # get/list, watcher, merge
 # (cd mission-control && npm run test:unit runs the full MC unit suite)
 
 # Mesh task-status unit tests

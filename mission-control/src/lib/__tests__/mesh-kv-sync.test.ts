@@ -39,7 +39,6 @@ vi.mock("@/lib/config", () => ({
 import {
   listMeshTasks,
   getMeshTask,
-  putMeshTask,
   watchMeshTasks,
   mergeTasks,
   type MeshTaskEntry,
@@ -72,17 +71,22 @@ function task(over: Partial<MeshTaskEntry> = {}): MeshTaskEntry {
   };
 }
 
+/** What the task daemon does: MC itself never writes MESH_TASKS. */
+async function seed(t: MeshTaskEntry): Promise<number> {
+  return kv!.put(t.task_id, encoder.encode(JSON.stringify(t)));
+}
+
 beforeEach(() => {
   kv = new MockKV();
   cfg.nodeId = "worker-1";
   cfg.nodeRole = "worker";
 });
 
-// ── Read/write roundtrip ──
+// ── Reads ──
 
-describe("put/get/list roundtrip (production)", () => {
-  it("putMeshTask stores what getMeshTask reads back", async () => {
-    const rev = await putMeshTask(task({ task_id: "rt1", title: "Roundtrip" }));
+describe("get/list (production)", () => {
+  it("getMeshTask reads back a stored task with its revision", async () => {
+    const rev = await seed(task({ task_id: "rt1", title: "Roundtrip" }));
     expect(rev).toBeGreaterThan(0);
     const got = await getMeshTask("rt1");
     expect(got?.task.title).toBe("Roundtrip");
@@ -90,8 +94,8 @@ describe("put/get/list roundtrip (production)", () => {
   });
 
   it("listMeshTasks returns every stored task", async () => {
-    await putMeshTask(task({ task_id: "a" }));
-    await putMeshTask(task({ task_id: "b" }));
+    await seed(task({ task_id: "a" }));
+    await seed(task({ task_id: "b" }));
     const all = await listMeshTasks();
     expect(all.map((t) => t.task_id).sort()).toEqual(["a", "b"]);
   });
@@ -114,7 +118,7 @@ describe("watchMeshTasks (production)", () => {
     expect(watch).not.toBeNull();
     const iter = watch!.events[Symbol.asyncIterator]();
     const pending = iter.next();
-    await putMeshTask(task({ task_id: "w1", title: "Watched" }));
+    await seed(task({ task_id: "w1", title: "Watched" }));
     const ev = await pending;
     expect(ev.done).toBe(false);
     expect(ev.value.operation).toBe("PUT");

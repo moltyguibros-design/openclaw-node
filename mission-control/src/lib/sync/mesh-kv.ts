@@ -1,19 +1,14 @@
 /**
- * mesh-kv.ts — Sync engine for distributed Mission Control (Phase 2).
+ * mesh-kv.ts — read access to the MESH_TASKS KV bucket for Mission Control.
  *
- * Bridges NATS KV (mesh truth) ↔ local SQLite (MC database).
+ * The /api/mesh/tasks routes read through listMeshTasks and getMeshTask.
+ * watchMeshTasks and mergeTasks have no caller yet: they are kept as groundwork
+ * for a multi-node Mission Control.
  *
- * Responsibilities:
- *   - Watch MESH_TASKS KV bucket for real-time updates
- *   - Mirror KV entries into local SQLite (upsert with revision tracking)
- *   - Task creation and edits are NOT written here: they go through the task
- *     daemon (mesh.tasks.submit / the signed mesh.tasks.update), whose
- *     lib/mesh-tasks.js EDITABLE_TASK_FIELDS is the one list of editable fields
- *   - Handle conflict resolution (KV wins on workers, SQLite wins on lead)
- *
- * The /api/mesh/tasks routes read through listMeshTasks and getMeshTask; the
- * rest is groundwork for a multi-node Mission Control.
- * It does NOT run as a standalone daemon — it's part of the MC process.
+ * Nothing here writes MESH_TASKS. Only the task daemon does, behind its
+ * ownership checks: task creation and edits go through mesh.tasks.submit and
+ * the signed mesh.tasks.update, whose lib/mesh-tasks.js EDITABLE_TASK_FIELDS is
+ * the one list of editable fields.
  */
 
 import { getTasksKv, sc } from "@/lib/nats";
@@ -88,20 +83,6 @@ export async function getMeshTask(
     task: JSON.parse(sc.decode(entry.value)),
     revision: entry.revision,
   };
-}
-
-// ── KV Write Operations ──
-
-/**
- * Write a task to KV. Used by the lead to publish task state.
- * No CAS — overwrites unconditionally.
- */
-export async function putMeshTask(task: MeshTaskEntry): Promise<number> {
-  const kv = await getTasksKv();
-  if (!kv) throw new Error("NATS KV unavailable");
-
-  const rev = await kv.put(task.task_id, sc.encode(JSON.stringify(task)));
-  return rev;
 }
 
 // ── KV Watcher ──
