@@ -8,7 +8,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { readFileSync, readdirSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
@@ -126,15 +126,41 @@ describe('node-init renders the shared service templates', () => {
   });
 
   // The agent spawns its provider CLI by name; nvm/fnm/volta npm -g bins and Claude Code's
-  // native installer land in the node dir and ~/.local/bin. Appended, so nothing found today moves.
-  it('the mesh-agent PATH reaches the installer node dir and ~/.local/bin, after the dirs it already had', () => {
+  // native installer land in the node dir and ~/.local/bin. They lead, so the CLI's
+  // `#!/usr/bin/env node` gets the installer's node, not a distro or Homebrew one.
+  const agentPaths = (v) => [
+    renderServiceTemplate(readFileSync(join(ROOT, 'services/systemd/openclaw-mesh-agent.service'), 'utf8'), v, 'systemd')
+      .match(/^Environment="PATH=(.*)"$/m)[1],
+    renderServiceTemplate(readFileSync(join(ROOT, 'services/launchd/ai.openclaw.mesh-agent.plist'), 'utf8'), v, 'plist')
+      .match(/<key>PATH<\/key>\s*<string>([^<]*)<\/string>/)[1],
+  ];
+  it('the mesh-agent PATH leads with the installer node dir and ~/.local/bin', () => {
     assert.ok(SERVICE_TEMPLATE_VARS.includes('NODE_BIN_DIR'));
-    const tail = `:${dirname(process.execPath)}:${homedir()}/.local/bin`;
-    const unitPath = renderAgent('systemd/openclaw-mesh-agent.service').match(/^Environment="PATH=(.*)"$/m)[1];
-    const plistPath = renderAgent('launchd/ai.openclaw.mesh-agent.plist').match(/<key>PATH<\/key>\s*<string>([^<]*)<\/string>/)[1];
-    for (const p of [unitPath, plistPath]) {
-      assert.ok(p.endsWith(tail), p);
-      assert.match(p, /^[^:]*\/\.npm-global\/bin:/);
+    const head = `${dirname(process.execPath)}:${homedir()}/.local/bin:`;
+    for (const p of agentPaths(serviceTemplateVars({ meshDir: '/opt/openclaw', nodeId: 'worker-7', config: {} }))) {
+      assert.ok(p.startsWith(head), p);
+      assert.match(p, /\/\.npm-global\/bin:/);
+    }
+  });
+
+  it('a provider CLI in the node dir runs under the installer node when a system dir holds another node', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-path-'));
+    try {
+      const nodeDir = join(dir, 'nvm');
+      const sys = join(dir, 'sys');
+      mkdirSync(nodeDir);
+      mkdirSync(sys);
+      writeFileSync(join(sys, 'node'), '#!/bin/sh\necho system node\n', { mode: 0o755 });
+      symlinkSync(process.execPath, join(nodeDir, 'node'));
+      writeFileSync(join(nodeDir, 'claude'), '#!/usr/bin/env node\nconsole.log("installer node")\n', { mode: 0o755 });
+      const v = { ...serviceTemplateVars({ meshDir: '/opt/openclaw', nodeId: 'worker-7', config: {} }), NODE_BIN_DIR: nodeDir, HOME: join(dir, 'home') };
+      for (const p of agentPaths(v)) {
+        const PATH = p.split(':').map((d) => (d === '/usr/local/bin' || d === '/opt/homebrew/bin' ? sys : d)).join(':');
+        const r = spawnSync('claude', [], { encoding: 'utf8', env: { PATH } });
+        assert.equal(r.stdout.trim(), 'installer node', `${PATH}: ${r.stdout}${r.stderr}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
