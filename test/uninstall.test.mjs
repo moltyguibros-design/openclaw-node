@@ -109,8 +109,8 @@ test('uninstall --purge also removes the launchers outside OPENCLAW_ROOT', linux
     assert.equal(existsSync(join(fx.home, 'openclaw')), false);
     assert.equal(existsSync(join(fx.home, '.openclaw-src')), false);
     for (const rel of LAUNCHERS) assert.equal(existsSync(join(fx.home, rel)), false, rel);
-    for (const rel of ['.openclaw', 'openclaw', '.openclaw-src/openclaw-node']) {
-      assert.ok(r.stdout.includes(`    ${join(fx.home, rel)}\n`), `the prompt names ${rel}`);
+    for (const line of [".openclaw (the toolkit's files)", 'openclaw', '.openclaw-src/openclaw-node']) {
+      assert.ok(r.stdout.includes(`    ${join(fx.home, line)}\n`), `the prompt names ${line}`);
     }
   } finally {
     rmSync(fx.home, { recursive: true, force: true });
@@ -247,6 +247,54 @@ test('uninstall on macOS unloads the user LaunchAgents without sudo', linuxOnly,
     assert.match(logOf(fx.home, 'launchctl'), /^unload .*ai\.openclaw\.memory-daemon\.plist$/m);
     assert.equal(logOf(fx.home, 'sudo'), '');
     assert.doesNotMatch(r.stdout, /Legacy openclaw-mesh leftovers/);
+  } finally {
+    rmSync(fx.home, { recursive: true, force: true });
+  }
+});
+
+// ~/.openclaw is shared with the OpenClaw gateway, which stays installed: --purge removes
+// the toolkit's files and asks a second time before the product's.
+const TOOLKIT = [
+  'workspace/memory/keep.md', 'config/daemon.json', 'souls/daedalus/SOUL.md', 'logs/memory-daemon.log',
+  'state.db', 'openclaw.env', 'identity.key', '.mesh-secret', 'skills/mesh/SKILL.md',
+  'state/observer.jsonl', 'skills.retired-2026-01-01/old/SKILL.md', 'retired/2026-01-01/x',
+];
+const PRODUCT = [
+  'credentials/whatsapp/a/creds.json', 'state/openclaw.sqlite', 'agents/main/agent/openclaw-agent.sqlite',
+  'agents/main/sessions/s.jsonl', 'openclaw.json', 'devices/paired.json', 'skills/my-skill/SKILL.md',
+];
+
+function purgeFixture() {
+  const fx = fixture();
+  putFiles(fx.home, '.openclaw', [...TOOLKIT, ...PRODUCT]);
+  return fx;
+}
+
+test('uninstall --purge removes the toolkit files and keeps the OpenClaw product files on a second N or EOF', linuxOnly, () => {
+  for (const input of ['y\nn\n', 'y\n']) {
+    const fx = purgeFixture();
+    try {
+      const r = runUninstall(fx, ['--purge'], input);
+      assert.equal(r.status, 0, `${JSON.stringify(input)}: ${r.stderr}`);
+      for (const rel of TOOLKIT) assert.equal(existsSync(join(fx.home, '.openclaw', rel)), false, `${JSON.stringify(input)}: ${rel}`);
+      for (const rel of PRODUCT) assert.equal(existsSync(join(fx.home, '.openclaw', rel)), true, `${JSON.stringify(input)}: ${rel}`);
+      for (const rel of ['openclaw', '.openclaw-src']) assert.equal(existsSync(join(fx.home, rel)), false, rel);
+      for (const name of ['agents', 'credentials', 'devices', 'openclaw.json', 'skills', 'state']) {
+        assert.ok(r.stdout.includes(`    ${name}\n`), `${JSON.stringify(input)}: the second prompt lists ${name}`);
+      }
+      assert.match(r.stdout, /Kept OpenClaw's own files in /);
+    } finally {
+      rmSync(fx.home, { recursive: true, force: true });
+    }
+  }
+});
+
+test('uninstall --purge answered Y twice removes ~/.openclaw entirely', linuxOnly, () => {
+  const fx = purgeFixture();
+  try {
+    const r = runUninstall(fx, ['--purge'], 'y\ny\n');
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(existsSync(join(fx.home, '.openclaw')), false);
   } finally {
     rmSync(fx.home, { recursive: true, force: true });
   }

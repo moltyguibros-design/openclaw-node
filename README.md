@@ -162,6 +162,8 @@ bash uninstall.sh --purge  # Remove everything including all data
 
 The default mode removes only the skills this repo ships from `~/.openclaw/workspace/skills`; skills you installed yourself (ClawHub, through the scanner gate) stay there and are listed.
 
+`~/.openclaw` is shared with the OpenClaw gateway, which the uninstaller leaves installed. `--purge` removes the toolkit's files there (workspace and memory, config, souls, logs, `state.db`, `openclaw.env`, the node identity), `~/openclaw` and the bootstrap trees, then lists what is left (the gateway's credentials, pairings, agents and sessions, `openclaw.json`) and asks a second time before deleting it. Answering N, or no answer, keeps OpenClaw working.
+
 ## Directory Structure (installed)
 
 ```

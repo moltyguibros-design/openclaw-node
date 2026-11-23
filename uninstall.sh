@@ -3,7 +3,7 @@
 #
 # Usage:
 #   bash uninstall.sh              # Remove services and scripts (keep data)
-#   bash uninstall.sh --purge      # Remove everything including memory data
+#   bash uninstall.sh --purge      # Also remove the toolkit's data; asks again before OpenClaw's own files
 
 set -euo pipefail
 
@@ -52,13 +52,29 @@ echo ""
 echo "OpenClaw Node Uninstaller"
 echo ""
 
+# ~/.openclaw is shared with the OpenClaw gateway, which stays installed: --purge removes
+# only what the toolkit writes there and asks again before the rest (credentials,
+# pairings, agents and their sessions, openclaw.json).
+TOOLKIT_PATHS=(
+  workspace config services souls logs nats rules plan-templates share notifications foreman
+  retired 'skills.retired-*' transcript-archive preservation roles eval worktrees mesh-leases
+  obsidian-local artifacts run backups .tmp
+  'state.db' 'state.db-*' 'graph-cache.db' 'graph-cache.db-*' openclaw.env harness-rules.json
+  identity.key identity-registry.json .mesh-secret mesh-aliases.json mesh-providers.json
+  dogfood-metrics.jsonl 'watcher.jsonl' 'watcher.jsonl.1' .deploy-state.json .last-deploy.json
+  .embed-migration-checkpoint.json .node-watch.md .node-acceptance.md .install-acceptance.md
+  timer-transition-active timer-source-copy.lock timer-entry-installed
+  skills/mesh state/observer.jsonl state/memory-activity.jsonl state/observer-logpos.json
+)
+
 if $PURGE; then
-  PURGE_TARGETS=("$OPENCLAW_ROOT" "$HOME/openclaw")
+  PURGE_TARGETS=("$OPENCLAW_ROOT (the toolkit's files)" "$HOME/openclaw")
   for tree in "${BOOTSTRAP_TREES[@]}"; do
     if [ -d "$tree" ]; then PURGE_TARGETS+=("$tree"); fi
   done
   warn "PURGE mode: this deletes:"
   for target in "${PURGE_TARGETS[@]}"; do echo "    $target"; done
+  echo "The OpenClaw gateway's own files in $OPENCLAW_ROOT are asked about separately."
   echo ""
   read -r -p "Are you sure? [y/N] " confirm || confirm=""
   case "$confirm" in
@@ -126,9 +142,13 @@ rm -rf "$HOME/Applications/OpenClaw Stack.app"
 rm -f "$HOME/.local/share/applications/openclaw-stack.desktop"
 
 if $PURGE; then
-  rm -rf "$OPENCLAW_ROOT"
+  shopt -s nullglob dotglob
+  for pattern in "${TOOLKIT_PATHS[@]}"; do
+    for entry in "$OPENCLAW_ROOT"/$pattern; do rm -rf "$entry"; done
+  done
+  rmdir "$OPENCLAW_ROOT/skills" "$OPENCLAW_ROOT/state" 2>/dev/null || true
+  info "Removed the toolkit's files from $OPENCLAW_ROOT"
   rm -rf "$HOME/openclaw"
-  info "Removed $OPENCLAW_ROOT"
   info "Removed $HOME/openclaw (mesh shared folder + agent)"
   for tree in "${BOOTSTRAP_TREES[@]}"; do
     if [ -d "$tree" ]; then
@@ -137,6 +157,21 @@ if $PURGE; then
     fi
   done
   rmdir "$HOME/.openclaw-src" 2>/dev/null || true
+  REMAINING=("$OPENCLAW_ROOT"/*)
+  shopt -u nullglob dotglob
+  if [ "${#REMAINING[@]}" -eq 0 ]; then
+    rmdir "$OPENCLAW_ROOT" 2>/dev/null || true
+    info "Removed $OPENCLAW_ROOT"
+  else
+    echo ""
+    warn "Still in $OPENCLAW_ROOT: the OpenClaw gateway's own files (credentials, pairings, agents and sessions, openclaw.json) and anything else the toolkit did not write:"
+    for entry in "${REMAINING[@]}"; do echo "    ${entry#"$OPENCLAW_ROOT"/}"; done
+    read -r -p "Delete these too? OpenClaw then needs setting up again. [y/N] " confirm_product || confirm_product=""
+    case "$confirm_product" in
+      y|Y) rm -rf "$OPENCLAW_ROOT"; info "Removed $OPENCLAW_ROOT" ;;
+      *) info "Kept OpenClaw's own files in $OPENCLAW_ROOT" ;;
+    esac
+  fi
 else
   info "Removing scripts and services (keeping memory data)..."
   rm -rf "$WORKSPACE/bin"
@@ -149,7 +184,7 @@ else
       rm -rf "${WORKSPACE:?}/skills/$name"
     done
     for skill in "$WORKSPACE/skills"/*; do
-      [ -e "$skill" ] && KEPT_SKILLS+=("$(basename "$skill")")
+      if [ -e "$skill" ]; then KEPT_SKILLS+=("$(basename "$skill")"); fi
     done
     rmdir "$WORKSPACE/skills" 2>/dev/null || true
   fi
@@ -164,7 +199,7 @@ else
     info "Kept operator-installed skills in $WORKSPACE/skills: ${KEPT_SKILLS[*]}"
   fi
   info "Memory data preserved at $WORKSPACE/memory/"
-  info "Run with --purge to remove everything"
+  info "Run with --purge to remove the toolkit's data too"
 fi
 
 echo ""
