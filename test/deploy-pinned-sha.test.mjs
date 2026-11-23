@@ -1104,6 +1104,43 @@ describe('mesh deploy --rollback after a deploy that failed partway reverts the 
   function state() { return JSON.parse(read(fx.rt('.openclaw/.deploy-state.json'))); }
 });
 
+// A --rollback that failed partway recorded its own target as the failed deploy,
+// so the retried --rollback deployed forward onto the version being escaped.
+describe('a --rollback that fails partway is retried as the same rollback', () => {
+  const env = { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: 'openclaw-mesh-agent' };
+  let fx, S1;
+  const ws = rel => fx.rt(path.join('.openclaw/workspace', rel));
+  const state = () => JSON.parse(read(fx.rt('.openclaw/.deploy-state.json')));
+  before(() => {
+    fx = makeNode('rollback-retry', { 'bin/mesh-agent.js': '// agent v0\n', 'lib/shared.js': '// lib v0\n' });
+    S1 = fx.commit('v1', { 'bin/mesh-agent.js': '// agent v1\n', 'lib/shared.js': '// lib v1\n' });
+    ranOk(fx.deploy([], env));
+  });
+
+  it('the failed rollback records no pending deploy', () => {
+    const elsewhere = path.join(path.dirname(fx.home), 'rollback-retry-elsewhere');
+    fs.mkdirSync(elsewhere, { recursive: true });
+    fs.rmSync(ws('lib'), { recursive: true, force: true });
+    fs.symlinkSync(elsewhere, ws('lib'));
+    const run = fx.deploy(['--rollback'], env);
+    fs.rmSync(ws('lib'));
+    fs.mkdirSync(ws('lib'));
+    assert.equal(run.status, 1, run.stdout);
+    assert.match(run.stdout, /refusing to write through symlinked/);
+    assert.equal(state().pendingSha, undefined, 'the rollback target was recorded as a failed deploy');
+    assert.equal(state().deployedSha, S1);
+    assert.doesNotMatch(run.stdout, /Recover: /);
+  });
+
+  it('the retried --rollback reaches the version rolled back to', () => {
+    const run = fx.deploy(['--rollback'], env);
+    ranOk(run);
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), fx.S0);
+    assert.equal(read(fx.rt('openclaw/bin/mesh-agent.js')), '// agent v0\n');
+    assert.equal(state().deployedSha, fx.S0);
+  });
+});
+
 // install.sh puts Mission Control, the memory daemon, the boot compiler and the
 // lane watchdog on every node; the deploy treated them as lead-only, so a
 // worker's copies never updated.

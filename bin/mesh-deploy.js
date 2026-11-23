@@ -1013,13 +1013,14 @@ function restartService(svc, { probeOnly = false } = {}) {
  * Throws on any failed step. Never fetches: the caller brought toSha in.
  */
 function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false,
-                  dryRun = false, noRestart = false, pinned = false }) {
+                  dryRun = false, noRestart = false, pinned = false, recordPending = true }) {
   assertCommitted(repoDir);
   // A deploy that throws past this point leaves part of toSha installed. The
   // first such sha is kept until a run completes, so --rollback reverts it (and
-  // the listener's own rollback deploy, from it, does not replace it).
+  // the listener's own rollback deploy, from it, does not replace it). A
+  // --rollback records none: retried, it repeats the same rollback.
   let setPending = false;
-  if (!dryRun && fromSha !== toSha) {
+  if (recordPending && !dryRun && fromSha !== toSha) {
     const state = loadDeployState();
     if (!state.pendingSha) {
       Object.assign(state, { pendingSha: toSha, pendingFrom: fromSha });
@@ -1377,7 +1378,7 @@ async function main() {
     warn(`Rolling back ${fromSha.slice(0, 7)} → ${toSha.slice(0, 7)}`);
     if (deployLocal) {
       assertStoreSchema(toSha);
-      deploy({ repoDir: REPO_DIR, fromSha, toSha, dryRun, noRestart });
+      deploy({ repoDir: REPO_DIR, fromSha, toSha, dryRun, noRestart, recordPending: false });
       ok(`Rolled back to ${toSha.slice(0, 8)}`);
     } else {
       skip('This node is not targeted — local rollback skipped');
