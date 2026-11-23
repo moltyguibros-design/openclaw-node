@@ -91,6 +91,33 @@ test("a non-default OPENCLAW_ROOT moves every MC store under it, not under ~/.op
   expect(config.openclawHome()).toBe(root);
 });
 
+// The installer records the role only in openclaw.env, which MC's unit does not pass:
+// every worker's dashboard used to report itself as lead and write active-tasks.md.
+test("NODE_ROLE is read from openclaw.env when the environment does not set it", async () => {
+  const root = path.join(tmpHome(), "oc-root");
+  fs.mkdirSync(root, { recursive: true });
+  vi.stubEnv("WORKSPACE_ROOT", path.join(root, "workspace"));
+  vi.stubEnv("OPENCLAW_HOME", root);
+  vi.stubEnv("OPENCLAW_NODE_ROLE", "");
+  fs.writeFileSync(path.join(root, "openclaw.env"), "OPENCLAW_NODE_ID=w1\nOPENCLAW_NODE_ROLE=worker\n");
+  vi.resetModules();
+  expect((await import("@/lib/config")).NODE_ROLE).toBe("worker");
+});
+
+test("resolveNodeRole: environment, then openclaw.env, then lead; anything else is lead", async () => {
+  const { resolveNodeRole } = await import("@/lib/config");
+  const dir = tmpHome();
+  const envFile = path.join(dir, "openclaw.env");
+  fs.writeFileSync(envFile, "OPENCLAW_NODE_ROLE=worker\n");
+  expect(resolveNodeRole({}, envFile)).toBe("worker");
+  expect(resolveNodeRole({ OPENCLAW_NODE_ROLE: "lead" }, envFile)).toBe("lead");
+  expect(resolveNodeRole({ OPENCLAW_NODE_ROLE: " Worker " }, path.join(dir, "missing.env"))).toBe("worker");
+  expect(resolveNodeRole({}, path.join(dir, "missing.env"))).toBe("lead");
+  fs.writeFileSync(envFile, "OPENCLAW_NODE_ROLE=banana\n");
+  expect(resolveNodeRole({}, envFile)).toBe("lead");
+  expect(resolveNodeRole({ OPENCLAW_NODE_ROLE: "both" }, envFile)).toBe("lead");
+});
+
 test("OBSIDIAN_DIR honours OBSIDIAN_VAULT_PATH and OPENCLAW_OBSIDIAN_SYNC_CONFIG like lib/obsidian-vault.mjs", async () => {
   const root = path.join(tmpHome(), "oc-root");
   vi.stubEnv("WORKSPACE_ROOT", path.join(root, "workspace"));

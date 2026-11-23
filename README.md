@@ -1091,12 +1091,13 @@ The sidebar shows the node's identity:
 
 ### Configuration
 
-Two environment variables control behavior:
+Two settings control behavior. Mission Control reads each from its environment, else from
+`openclaw.env` (its service unit passes neither):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OPENCLAW_NODE_ROLE` | `lead` | `lead` or `worker`. Defaults to `lead` when unset (no auto-detection) |
-| `OPENCLAW_NODE_ID` | `os.hostname()` | Unique identifier for this node in the mesh |
+| `OPENCLAW_NODE_ROLE` | `lead` | `lead` or `worker`; the installer records it in `openclaw.env`. Any other value, or none, means `lead` |
+| `OPENCLAW_NODE_ID` | short hostname | Unique identifier for this node in the mesh (`MESH_NODE_ID`, then the lowercased short hostname, when neither sets it) |
 
 No configuration needed on the lead — it works exactly as before. Workers just need `OPENCLAW_NATS` pointed at the lead's NATS server.
 

@@ -121,8 +121,24 @@ export function resolveDaemonNodeId(
 }
 
 /** This node's role: "lead" (full authority) or "worker" (read + propose) */
-export const NODE_ROLE: "lead" | "worker" =
-  (process.env.OPENCLAW_NODE_ROLE as "lead" | "worker") || "lead";
+export const NODE_ROLE = resolveNodeRole();
+
+/** OPENCLAW_NODE_ROLE from the env, else from openclaw.env (where the installer records it), else lead. */
+export function resolveNodeRole(
+  env: Record<string, string | undefined> = process.env,
+  envFile: string = openclawEnvFile(),
+): "lead" | "worker" {
+  let role = (env.OPENCLAW_NODE_ROLE || "").trim();
+  if (!role) {
+    try {
+      const hits = [...fs.readFileSync(envFile, "utf8").matchAll(/^\s*OPENCLAW_NODE_ROLE\s*=(.*)$/gm)];
+      role = (hits.pop()?.[1] ?? "").trim().replace(/^["']|["']$/g, "");
+    } catch {
+      // no openclaw.env on this node
+    }
+  }
+  return role.toLowerCase() === "worker" ? "worker" : "lead";
+}
 
 /** Platform identifier for display */
 export const NODE_PLATFORM = process.platform === "darwin" ? "macOS" : "Linux";
