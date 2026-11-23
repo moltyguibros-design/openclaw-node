@@ -462,6 +462,28 @@ describe('detectClusters', () => {
 
     db.close();
   });
+
+  it('derives the same clusters from the pairs reinforceCoOccurrence already fetched', () => {
+    const db = createTestDb();
+    const five = ['s1', 's2', 's3', 's4', 's5'];
+    insertEntity(db, 'hub-a', 'concept', { sessions: [...five, 's6'] });
+    insertEntity(db, 'hub-b', 'concept', { sessions: five });
+    insertEntity(db, 'hub-c', 'concept', { sessions: [...five, 's6'] });
+    insertEntity(db, 'weak-a', 'concept', { sessions: ['s7', 's8', 's9'] });
+    insertEntity(db, 'weak-b', 'concept', { sessions: ['s7', 's8', 's9'] });
+
+    const own = detectClusters(db).clusters;
+    const { candidatePairs } = reinforceCoOccurrence(db);
+    assert.ok(Array.isArray(candidatePairs));
+    assert.ok(candidatePairs.some((p) => p.entity_a === 'weak-a' && p.shared_sessions === 3),
+      'reinforce sees the 3-session pair the cluster threshold drops');
+    const fromPairs = detectClusters(db, { pairs: candidatePairs }).clusters;
+
+    const key = (cs) => cs.map((c) => `${c.entities.join('+')}:${c.sessions}`).sort();
+    assert.deepEqual(key(fromPairs), key(own));
+    assert.deepEqual(key(own), ['hub-a+hub-b+hub-c:6']);
+    db.close();
+  });
 });
 
 describe('detectContradictions', () => {
@@ -693,6 +715,26 @@ describe('runConsolidationCycle', () => {
     ac.abort(new Error('hard cap'));
     const aborted = await runConsolidationCycle({ vaultPath: TEST_VAULT, db, signal: ac.signal });
     assert.deepEqual(Object.keys(aborted.phaseMs), ['init']);
+    db.close();
+  });
+
+  it('runs the mentions self-join once per cycle; clusters reuse the reinforce pairs', async () => {
+    const db = createTestDb();
+    const sessions = ['s1', 's2', 's3', 's4', 's5'];
+    insertEntity(db, 'join-a', 'concept', { sessions });
+    insertEntity(db, 'join-b', 'concept', { sessions });
+
+    const prepare = db.prepare.bind(db);
+    let selfJoins = 0;
+    db.prepare = (sql) => {
+      if (/FROM mentions m1\s+JOIN mentions m2/.test(sql)) selfJoins++;
+      return prepare(sql);
+    };
+    const result = await runConsolidationCycle({ vaultPath: tmpDir('cycle-selfjoin-'), db });
+    db.prepare = prepare;
+
+    assert.equal(selfJoins, 1);
+    assert.deepEqual(result.clusters.clusters.map((c) => c.entities), [['join-a', 'join-b']]);
     db.close();
   });
 

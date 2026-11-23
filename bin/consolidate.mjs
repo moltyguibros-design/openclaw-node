@@ -174,7 +174,7 @@ export async function runConsolidationCycle(opts = {}) {
 
     // 4. Detect clusters
     if (!abortInfo) abortInfo = checkpoint('clusters');
-    if (!abortInfo) { clusterResult = detectClusters(db); lap('clusters'); }
+    if (!abortInfo) { clusterResult = detectClusters(db, { pairs: reinforceResult?.candidatePairs }); lap('clusters'); }
 
     // 4b. Vault surfaces beyond concepts (BEFORE concept regeneration: the
     // concept writer links session notes via the resolver, so sessions must
