@@ -1224,6 +1224,14 @@ async function main() {
   const fromArg = argValue('--from');
   const toArg = argValue('--to');
 
+  // Not in pinned mode: the listener's rollback runs the previous sha's script
+  // with the forward deploy's --component args, which may name a newer id.
+  if (!toArg) {
+    const known = MANIFEST.map(c => c.id);
+    const unknown = filterIds.filter(id => id !== 'all' && !known.includes(id));
+    if (unknown.length > 0) throw new Error(`unknown component ${unknown.join(', ')} — known: ${known.join(', ')}`);
+  }
+
   // --node <id> (repeatable): exactly those nodes. An unknown name used to
   // match neither alias list and fell through to "this node + every node".
   const nodeNames = [];

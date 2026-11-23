@@ -87,4 +87,19 @@ describe('mesh-deploy.js --node', () => {
     assert.match(r.stdout, /Repo not found/);
     assert.doesNotMatch(r.stdout, /--node/);
   });
+
+  // A typo used to deploy nothing, exit 0, and publish a trigger every node skipped.
+  it('an unknown --component is refused before anything is fetched or published', () => {
+    const r = run('--component', 'skil');
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stdout, /DEPLOY_ERROR .*unknown component skil — known: .*\bskills\b/);
+    assert.doesNotMatch(r.stdout, /Deploying to|Fetching origin/);
+  });
+
+  it('known ids and all pass; pinned mode (the listener\'s rollback runs an older MANIFEST) is not checked', () => {
+    for (const args of [['--component', 'skills'], ['--component', 'all'], ['--local', '--to', 'abc1234', '--component', 'skil']]) {
+      const r = run(...args);
+      assert.doesNotMatch(r.stdout + r.stderr, /unknown component/, args.join(' '));
+    }
+  });
 });
