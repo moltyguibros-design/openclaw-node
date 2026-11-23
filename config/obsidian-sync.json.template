@@ -26,7 +26,7 @@
     { "pattern": "memory/*.md", "dest": "nodes/{nodeId}/daily/" },
     { "pattern": ".learnings/lessons.md", "dest": "nodes/{nodeId}/lessons/" },
     { "pattern": ".learnings/ERRORS.md", "dest": "nodes/{nodeId}/lessons/" },
-    { "pattern": ".companion-state.md", "dest": "nodes/{nodeId}/state/" },
+    { "pattern": ".daemon-state-*.md", "dest": "nodes/{nodeId}/state/" },
     { "pattern": ".tmp/trust-registry.json", "dest": "nodes/{nodeId}/trust/" },
     { "pattern": "memory-vault/handoffs/*.md", "dest": "nodes/{nodeId}/handoffs/" },
     { "pattern": "memory-vault/ledger/observations/**", "dest": "nodes/{nodeId}/observations/" },

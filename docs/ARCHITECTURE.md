@@ -132,7 +132,7 @@ The daemon polls JSONL transcript mtimes from a JSON registry every 30s. Any JSO
 │   ├── PRINCIPLES.md              # Decision heuristics
 │   ├── AGENTS.md                  # Operational rules (source of truth)
 │   ├── MEMORY.md                  # Curated long-term memory
-│   ├── .companion-state.md        # Live session banner (auto-flushed by daemon)
+│   ├── .daemon-state-<node>.md    # Session status + crash-recovery signal (written by daemon)
 │   ├── .learnings/lessons.md      # Accumulated corrections
 │   ├── .boot/                     # Compiled boot artifacts
 │   │   ├── manifest.yaml          # Section-to-profile mapping
@@ -200,7 +200,7 @@ memory-daemon detects new session via JSONL mtime
 ### During Active Session (ACTIVE state)
 ```
 Phase 1 — Status Sync (every tick, ~5ms):
-  → Update .companion-state.md with running/done counts
+  → Update .daemon-state-<node>.md with running/done counts
 
 Phase 2 — Throttled Background Work:
   Stage 1 (parallel):
@@ -378,7 +378,7 @@ python3 bin/compile-boot --all
 # 10. Verify
 launchctl list | grep openclaw         # PID present = running
 tail -5 .tmp/memory-daemon.log         # State transitions visible
-cat .companion-state.md                # last_flush is current
+cat .daemon-state-*.md                 # last_flush is current
 ```
 
 ### Adding a New Frontend
@@ -413,8 +413,8 @@ node bin/memory-maintenance.mjs --force --verbose
 node bin/obsidian-sync.mjs --dry-run --verbose
 node bin/subagent-audit.mjs --health-check
 
-# 5. Check companion state
-cat ~/.openclaw/workspace/.companion-state.md
+# 5. Check the daemon state file
+cat ~/.openclaw/workspace/.daemon-state-*.md
 
 # 6. Check session recap
 head -10 ~/.openclaw/workspace/memory/last-session-recap.md
@@ -453,7 +453,7 @@ Daemon v2 deployment (bash → Node.js): **COMPLETE**. 6 bugs fixed, all modules
 | V1 | Daemon running as KeepAlive Node.js process | ✅ PID active |
 | V2 | State machine: ENDED→BOOT→ACTIVE transitions logged | ✅ |
 | V3 | Phase 0 bootstrap runs on session start (recap, maintenance, compile-boot, audit) | ✅ |
-| V4 | Phase 1 status sync updates .companion-state.md | ✅ last_flush current |
+| V4 | Phase 1 status sync updates .daemon-state-<node>.md | ✅ last_flush current |
 | V5 | obsidian-sync dry-run: 15 synced, 354 unchanged, 0 errors | ✅ |
 | V6 | memory-maintenance: all 10 checks pass, 0 warnings | ✅ |
 | V7 | subagent-audit health-check: trust registry healthy (2 souls, circuits closed) | ✅ |

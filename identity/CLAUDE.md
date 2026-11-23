@@ -32,7 +32,6 @@ The kanban auto-reads `memory/active-tasks.md` every 3 seconds. No API calls nee
 - ❌ `[task name] failed — [reason].`
 - Parallel agents: report EACH one individually as they land
 - No silent completions. No batching. No waiting. The moment work finishes, Gui hears about it.
-- Also keep `.companion-state.md` current — it feeds the Live Session banner.
 This is non-negotiable. Treat it as an interrupt — stop whatever you're doing and report.
 
 # HARD RULE — Auto-Start Tasks (Kanban Daemon)

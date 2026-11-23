@@ -396,7 +396,7 @@ function discoverFiles(config) {
   // Also add 'memory' which is at workspace root
   dirsToScan.add('memory');
   dirsToScan.add('.learnings');
-  dirsToScan.add('.'); // for root-level files like ARCHITECTURE.md, .companion-state.md
+  dirsToScan.add('.'); // for root-level files like ARCHITECTURE.md, .daemon-state-<node>.md
 
   for (const dir of dirsToScan) {
     if (dir === '.') {

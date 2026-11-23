@@ -22,8 +22,8 @@ Before doing anything else, read in this order (static identity first, dynamic s
 3. Read `AGENTS.md` — operational rules (you're reading it now)
 
 **Tier 2 — Session state (changes per session, read last):**
-4. Read `.companion-state.md` — **MANDATORY. ALWAYS. NO EXCEPTIONS.** Immediate context from last turn.
-   - If `status: active` but no session is running → previous session crashed. Run crash recovery (see Crash Recovery section in companion state).
+4. Read `.daemon-state-<node>.md` (find it with `ls .daemon-state-*.md`) — **MANDATORY. ALWAYS. NO EXCEPTIONS.** The memory daemon's view of the last session.
+   - If `status: active` or `status: idle` but no session is live → the previous session crashed before its end-of-session flush. Run crash recovery (see the file's Crash Recovery section).
 5. Read `memory/active-tasks.md` — current work state (running/done/blocked only, ~12KB)
 6. Read `.learnings/lessons.md` — accumulated corrections and preferences (behavior loop)
 7. Read `memory/last-session-recap.md` — rolling digest of prior sessions (continuity across crashes), kept current by the memory daemon
@@ -86,7 +86,6 @@ The kanban board auto-reads `memory/active-tasks.md` every 3 seconds. **Do NOT P
 
 - **START non-trivial work:** Add/update entry in `memory/active-tasks.md` with `status: running`
 - **FINISH work:** Update entry to `status: waiting-user` (NEVER `done` — only Gui marks done)
-- **Keep `.companion-state.md` current** — it feeds the Live Session banner
 
 The kanban is reactive to the file. The file is the source of truth. No API calls needed from Daedalus.
 

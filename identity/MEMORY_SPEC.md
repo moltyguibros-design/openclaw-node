@@ -49,7 +49,7 @@ Every compliant node MUST have these files at its workspace root:
 
 | File | Required | Purpose | Max Staleness |
 |------|----------|---------|---------------|
-| `.companion-state.md` | YES | Immediate session context | 4 hours (if active) |
+| `.daemon-state-<node>.md` | YES | Immediate session context, written by the memory daemon | 4 hours (if active) |
 | `memory/active-tasks.md` | YES | Running/blocked/done tasks | 48 hours |
 | `.learnings/lessons.md` | YES | Accumulated corrections | 30 days |
 | `MEMORY.md` | YES | Curated long-term memory | 7 days |
@@ -169,11 +169,13 @@ Each task entry MUST conform to this YAML-like schema:
 - Each entry should have a date
 - No exact duplicate entries
 
-### 2.6 .companion-state.md
+### 2.6 `.daemon-state-<node>.md`
+
+Written only by the memory daemon (`lib/companion-state.mjs`); agents read it, never write it.
 
 ```markdown
 ## Session Status
-status: active|idle|crashed
+status: active|idle|ended
 started_at: <ISO-8601>
 last_flush: <ISO-8601>
 
@@ -188,7 +190,7 @@ last_flush: <ISO-8601>
 ```
 
 **Validation rules:**
-- `status: active` with no session running = stale (needs reset to idle)
+- `status: active` or `idle` with no session live = the previous session crashed before its end-of-session flush
 - `started_at` must be a valid timestamp
 - `last_flush` must be within 4 hours of current time (if status=active)
 
@@ -231,7 +233,7 @@ These internal references MUST be consistent:
 | `MEMORY.md` Active Context | `memory/YYYY-MM-DD.md` dates | Dates in Active Context must have corresponding daily files (or be within last 7 days) |
 | `active-tasks.md` artifacts | File paths | Referenced files must exist |
 | `AGENTS.md` automation table | `bin/` scripts | Referenced scripts must exist and be executable |
-| `.companion-state.md` active task | `active-tasks.md` | If companion-state references a task, it should exist in active-tasks |
+| `.daemon-state-<node>.md` active task | `active-tasks.md` | If the daemon state references a task, it should exist in active-tasks |
 | `HEARTBEAT.md` commands | `bin/` scripts | Referenced scripts must exist |
 | `lessons.md` tags | Valid tag set | Tags must be in: preference, correction, pattern, error, workflow |
 
@@ -265,7 +267,7 @@ PHASE 2: Format (files parse correctly)
   □ All task_ids are unique
   □ All timestamps parse to valid datetimes
   □ lessons.md entries have valid tags
-  □ companion-state.md has required fields
+  □ .daemon-state-<node>.md has required fields
 
 PHASE 3: Freshness (nothing stale beyond thresholds)
   □ MEMORY.md modified within 7 days
@@ -331,7 +333,7 @@ Non-auto-repairable violations (require human or node-owner intervention):
 - `SOUL.md` (each node has its own identity)
 - `MEMORY.md` (each node has its own memories)
 - `memory/*.md` (daily files are private)
-- `.companion-state.md` (session-local)
+- `.daemon-state-<node>.md` (session-local)
 - `.learnings/lessons.md` (per-node learning)
 - `memory/predictions.md` (per-node calibration)
 - Active tasks (per-node workload)

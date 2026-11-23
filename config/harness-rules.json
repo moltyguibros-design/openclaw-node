@@ -80,7 +80,7 @@
     "scope": [
       "local"
     ],
-    "content": "HARD RULE: At session start, BEFORE your first reply, silently read memory/last-session-recap.md, memory/active-tasks.md (first 50 lines), and .companion-state.md. Lead your first message with a brief status of where we left off. Never make the user re-orient you.",
+    "content": "HARD RULE: At session start, BEFORE your first reply, silently read memory/last-session-recap.md, memory/active-tasks.md (first 50 lines), and the memory daemon's .daemon-state-<node>.md (ls .daemon-state-*.md). Lead your first message with a brief status of where we left off. Never make the user re-orient you.",
     "pattern": null,
     "activateOn": null,
     "active": true,

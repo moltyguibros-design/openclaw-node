@@ -55,6 +55,12 @@ describe('obsidian-sync trust-registry route', () => {
   });
 });
 
+describe('obsidian-sync daemon state route', () => {
+  it('the template routes the daemon state file into the node state folder', () => {
+    assert.equal(routeFile('.daemon-state-n1.md', templateConfig())?.dest, 'nodes/n1/state/.daemon-state-n1.md');
+  });
+});
+
 describe('obsidian-sync nested ** routes', () => {
   it('keeps the subdirectories below the pattern prefix', () => {
     const config = templateConfig();

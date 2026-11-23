@@ -163,7 +163,7 @@ def compile_structured(section_name, section_content):
         return """boot:
   tier1: [SOUL.md, PRINCIPLES.md, AGENTS.md]
   tier2:
-    - .companion-state.md (MANDATORY — if status:active + no session → crash recovery)
+    - .daemon-state-<node>.md via ls .daemon-state-*.md (MANDATORY — if status:active|idle + no live session → crash recovery)
     - memory/active-tasks.md
     - .learnings/lessons.md
     - memory/last-session-recap.md
@@ -227,7 +227,6 @@ def compile_structured(section_name, section_content):
   file: memory/active-tasks.md (kanban reads every 3s)
   start: add/update entry with status=running
   finish: update entry to status=waiting-user (never done; only the operator marks done)
-  also_update: .companion-state.md (feeds Live Session banner)
   backlog: memory/task-backlog.md (~46K tokens, read on-demand when activating a phase)"""
 
     # ── Decision Stack ──

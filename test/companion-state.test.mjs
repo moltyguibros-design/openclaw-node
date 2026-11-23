@@ -8,7 +8,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderCompanionState } from '../lib/companion-state.mjs';
 
-const daemonSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'workspace-bin/memory-daemon.mjs'), 'utf8');
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+const daemonSrc = read('workspace-bin/memory-daemon.mjs');
 const tasks = { runningTasks: 'Standing by', runningCount: 0, doneCount: 2 };
 const field = (text, key) => text.match(new RegExp(`^${key}: (.+)$`, 'm'))[1];
 
@@ -37,4 +39,20 @@ test('the daemon writes active/idle per tick, ended after the end pipeline, and 
   assert.match(endBranch, /if \(!t\.othersLive\) runPhase1StatusSync\(config, 'ended'\);\n    \}\n$/);
   const phase1 = daemonSrc.match(/function runPhase1StatusSync[\s\S]*?\n\}\n/)[0];
   assert.equal(phase1.match(/readFileSync\(companion/g).length, 1, 'the companion file is read once per sync');
+});
+
+// The installer seeded a `.companion-state.md` saying `status: inactive` that nothing
+// ever rewrote, and the boot rules read it, so the crash check could never fire.
+test('no installer seed for .companion-state.md; every boot reader names the daemon file', () => {
+  assert.doesNotMatch(read('scripts/install/components.sh'), /companion-state/);
+  for (const rel of ['identity/AGENTS.md', 'identity/CLAUDE.md', 'identity/MEMORY_SPEC.md', 'config/harness-rules.json',
+    'workspace-bin/compile-boot', 'config/obsidian-sync.json.template', 'docs/ARCHITECTURE.md']) {
+    assert.doesNotMatch(read(rel), /\.companion-state\.md/, rel);
+  }
+  for (const rel of ['identity/AGENTS.md', 'identity/MEMORY_SPEC.md', 'config/harness-rules.json', 'workspace-bin/compile-boot']) {
+    assert.match(read(rel), /\.daemon-state-/, rel);
+  }
+  for (const rel of ['identity/AGENTS.md', 'identity/CLAUDE.md', 'workspace-bin/compile-boot']) {
+    assert.doesNotMatch(read(rel), /Live Session banner|also_update/, `${rel}: only the daemon writes the state file`);
+  }
 });

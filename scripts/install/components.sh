@@ -426,22 +426,6 @@ TASKS
   info "Created active-tasks.md"
 fi
 
-if [ ! -f "$WORKSPACE/.companion-state.md" ]; then
-  write_file "$WORKSPACE/.companion-state.md" << STATE
-## Session Status
-status: inactive
-started_at:
-last_flush: $(date -Iseconds)
-
-## Active Task
-(none)
-
-## Current State
-0 running, 0 done
-STATE
-  info "Created .companion-state.md"
-fi
-
 if [ ! -f "$WORKSPACE/.learnings/lessons.md" ]; then
   write_file "$WORKSPACE/.learnings/lessons.md" << LESSONS
 # Lessons Learned
