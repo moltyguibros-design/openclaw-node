@@ -106,7 +106,7 @@ async function reconcile() {
   // A claimed card's owner is the claiming node id, not 'mesh'; the daemon lookup below decides.
   const inflight = tasks.filter(t =>
     t.execution === 'mesh' &&
-    (t.status === 'running' || t.status === 'submitted')
+    (t.status === 'running' || t.status === 'submitted' || isAwaitingMeshReview(t))
   );
   if (inflight.length === 0) {
     log('RECONCILE: no orphaned mesh tasks found');
@@ -166,6 +166,12 @@ async function reconcile() {
           log(`RECONCILE: ${task.task_id} was cancelled`);
           handleCancelled(task.task_id, meshTask);
           freeSlot(task.task_id);
+          break;
+        case 'pending_review':
+          log(`RECONCILE: ${task.task_id} awaits mesh review — holding the dispatch slot`);
+          dispatched.add(task.task_id);
+          lastHeartbeat.delete(task.task_id);
+          if (!isAwaitingMeshReview(task)) markAwaitingReview(task.task_id);
           break;
         default:
           // Still queued, claimed, or running — resume tracking
@@ -635,9 +641,23 @@ function handleEvent(eventType, taskId, meshTask) {
         lastHeartbeat.set(taskId, Date.now());
         return;
       // No agent holds the task until the next claim, so nothing heartbeats.
+      // The slot stays held while a review is pending: dispatch is serial, and the
+      // card tells the operator what the queue is waiting on.
       case 'pending_review':
-      case 'requeued':
+        log(`EVENT: ${eventType} ${taskId}`);
+        lastHeartbeat.delete(taskId);
+        markAwaitingReview(taskId);
+        return;
       case 'rejected':
+        log(`EVENT: ${eventType} ${taskId}`);
+        lastHeartbeat.delete(taskId);
+        updateTaskInPlace(ACTIVE_TASKS_PATH, taskId, {
+          status: 'submitted',
+          next_action: `Rejected in mesh review, re-queued: ${truncateAtLine(meshTask?.rejection_reason || 'no reason', 100)}`,
+          updated_at: isoTimestamp(),
+        });
+        return;
+      case 'requeued':
         log(`EVENT: ${eventType} ${taskId}`);
         lastHeartbeat.delete(taskId);
         return;
@@ -656,6 +676,21 @@ function handleEvent(eventType, taskId, meshTask) {
   }
 }
 
+const MESH_REVIEW_PREFIX = 'mesh review:';
+
+function isAwaitingMeshReview(card) {
+  return card.status === 'waiting-user' && String(card.next_action || '').startsWith(MESH_REVIEW_PREFIX);
+}
+
+function markAwaitingReview(taskId) {
+  updateTaskInPlace(ACTIVE_TASKS_PATH, taskId, {
+    status: 'waiting-user',
+    next_action: `${MESH_REVIEW_PREFIX} mesh tasks approve ${taskId} | mesh tasks reject ${taskId} --reason ...`,
+    updated_at: isoTimestamp(),
+  });
+  log(`KANBAN: ${taskId} → waiting-user (mesh review pending)`);
+}
+
 function handleCompleted(taskId, meshTask) {
   const elapsed = meshTask.started_at && meshTask.completed_at
     ? ((new Date(meshTask.completed_at) - new Date(meshTask.started_at)) / 1000).toFixed(0)
@@ -667,15 +702,20 @@ function handleCompleted(taskId, meshTask) {
   const logPath = writeLog(taskId, meshTask, 'completed');
   const relLogPath = path.relative(WORKSPACE, logPath);
 
+  // The operator already reviewed it with `mesh tasks approve`; a second board review repeats that.
+  const approved = meshTask.reviewed_by === 'human';
+  const status = approved ? 'done' : 'waiting-user';
   updateTaskInPlace(ACTIVE_TASKS_PATH, taskId, {
-    status: 'waiting-user',
-    next_action: `Gui review — mesh completed in ${elapsed}s (${attemptCount} attempt${attemptCount !== 1 ? 's' : ''})`,
+    status,
+    next_action: approved
+      ? 'approved in mesh review'
+      : `Gui review — mesh completed in ${elapsed}s (${attemptCount} attempt${attemptCount !== 1 ? 's' : ''})`,
     updated_at: isoTimestamp(),
   }, {
     artifacts: [relLogPath],
   });
 
-  log(`KANBAN: ${taskId} → waiting-user (log: ${relLogPath})`);
+  log(`KANBAN: ${taskId} → ${status} (log: ${relLogPath})`);
 }
 
 function handleFailed(taskId, meshTask, reason) {
@@ -974,8 +1014,8 @@ async function main() {
 
 module.exports = {
   formatTaskYaml,
-  // test/mesh-bridge-reconcile.test.mjs
-  __test: { reconcile: () => reconcile(), dispatched, lastHeartbeat, setNc(c) { nc = c; } },
+  // test/mesh-bridge-reconcile.test.mjs, test/mesh-bridge-review.test.mjs
+  __test: { reconcile: () => reconcile(), handleEvent: (...args) => handleEvent(...args), dispatched, lastHeartbeat, setNc(c) { nc = c; } },
 };
 
 if (require.main === module) {
