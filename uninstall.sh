@@ -30,6 +30,8 @@ fi
 OPENCLAW_ROOT="${OPENCLAW_ROOT:-$HOME/.openclaw}"
 WORKSPACE="$OPENCLAW_ROOT/workspace"
 BOOTSTRAP_SRC="$HOME/.openclaw-src/openclaw-node"
+# bootstrap.sh keeps .old when install.sh fails and leaves .new after a cut download.
+BOOTSTRAP_TREES=("$BOOTSTRAP_SRC" "$BOOTSTRAP_SRC.old" "$BOOTSTRAP_SRC.new")
 PURGE=false
 
 for arg in "$@"; do
@@ -52,7 +54,9 @@ echo ""
 
 if $PURGE; then
   PURGE_TARGETS=("$OPENCLAW_ROOT" "$HOME/openclaw")
-  [ -d "$BOOTSTRAP_SRC" ] && PURGE_TARGETS+=("$BOOTSTRAP_SRC")
+  for tree in "${BOOTSTRAP_TREES[@]}"; do
+    if [ -d "$tree" ]; then PURGE_TARGETS+=("$tree"); fi
+  done
   warn "PURGE mode: this deletes:"
   for target in "${PURGE_TARGETS[@]}"; do echo "    $target"; done
   echo ""
@@ -127,11 +131,13 @@ if $PURGE; then
   rm -rf "$HOME/openclaw"
   info "Removed $OPENCLAW_ROOT"
   info "Removed $HOME/openclaw (mesh shared folder + agent)"
-  if [ -d "$BOOTSTRAP_SRC" ]; then
-    rm -rf "$BOOTSTRAP_SRC"
-    rmdir "$HOME/.openclaw-src" 2>/dev/null || true
-    info "Removed $BOOTSTRAP_SRC (bootstrap source tree)"
-  fi
+  for tree in "${BOOTSTRAP_TREES[@]}"; do
+    if [ -d "$tree" ]; then
+      rm -rf "$tree"
+      info "Removed $tree (bootstrap source tree)"
+    fi
+  done
+  rmdir "$HOME/.openclaw-src" 2>/dev/null || true
 else
   info "Removing scripts and services (keeping memory data)..."
   rm -rf "$WORKSPACE/bin"

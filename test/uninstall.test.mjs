@@ -117,6 +117,29 @@ test('uninstall --purge also removes the launchers outside OPENCLAW_ROOT', linux
   }
 });
 
+// bootstrap keeps openclaw-node.old when install.sh fails and leaves .new after an
+// interrupted download; both are its own trees under ~/.openclaw-src.
+test('uninstall --purge also removes the bootstrap .old and .new trees, with or without the live one', linuxOnly, () => {
+  for (const live of [true, false]) {
+    const fx = fixture();
+    try {
+      if (!live) rmSync(join(fx.home, '.openclaw-src/openclaw-node'), { recursive: true });
+      for (const rel of ['.openclaw-src/openclaw-node.old/node_modules/big/blob', '.openclaw-src/openclaw-node.new/x']) {
+        mkdirSync(dirname(join(fx.home, rel)), { recursive: true });
+        writeFileSync(join(fx.home, rel), 'x');
+      }
+      const r = runUninstall(fx, ['--purge'], 'y\n');
+      assert.equal(r.status, 0, r.stderr);
+      for (const rel of ['.openclaw-src/openclaw-node.old', '.openclaw-src/openclaw-node.new']) {
+        assert.ok(r.stdout.includes(`    ${join(fx.home, rel)}\n`), `live=${live}: the prompt names ${rel}`);
+      }
+      assert.equal(existsSync(join(fx.home, '.openclaw-src')), false, `live=${live}`);
+    } finally {
+      rmSync(fx.home, { recursive: true, force: true });
+    }
+  }
+});
+
 test('uninstall --purge answered N or EOF changes nothing', linuxOnly, () => {
   for (const input of ['n\n', '']) {
     const fx = fixture();
