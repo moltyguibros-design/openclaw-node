@@ -37,14 +37,15 @@ async function natsConnect() {
  */
 async function findDiscordToolNode(nc) {
   const js = nc.jetstream();
-  let kv;
+  let kv, keys;
   try {
     kv = await openMeshKv(js, 'MESH_TOOLS', { bindOnly: true }, { waitMs: 0 });
+    // A bind does not check the stream: a bucket nobody created yet fails here.
+    keys = await kv.keys();
   } catch {
     return null;
   }
 
-  const keys = await kv.keys();
   for await (const key of keys) {
     if (key.endsWith('.discord-history')) {
       const entry = await kv.get(key);
@@ -145,15 +146,15 @@ ENVIRONMENT:
   if (cmd === 'tools') {
     // List all mesh tools
     const js = nc.jetstream();
-    let kv;
+    let kv, keys;
     try {
       kv = await openMeshKv(js, 'MESH_TOOLS', { bindOnly: true }, { waitMs: 0 });
+      keys = await kv.keys();
     } catch {
       console.log('No tools registered.');
       await nc.close();
       return;
     }
-    const keys = await kv.keys();
     let found = false;
     for await (const key of keys) {
       const entry = await kv.get(key);

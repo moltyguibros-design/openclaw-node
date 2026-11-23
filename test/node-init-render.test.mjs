@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const { renderServiceTemplate, serviceTemplateVars, SERVICE_TEMPLATE_VARS } = require('../bin/openclaw-node-init.js');
+const { tmpDir } = require('./helpers/tmp-dir.cjs');
 
 const vars = serviceTemplateVars({ meshDir: '/opt/openclaw', nodeId: 'worker-7', config: { nats: 'nats://10.0.0.5:4222', provider: 'deepseek' } });
 const formatOf = (t) => (t.endsWith('.plist') ? 'plist' : 'systemd');
@@ -292,6 +293,37 @@ describe('read-only mesh CLIs bind to KV buckets, never create them', () => {
     const opens = [...src.matchAll(/openMeshKv\(js, 'MESH_TOOLS', ([^,]+),/g)].map((m) => m[1]);
     assert.equal(opens.length, 2);
     for (const o of opens) assert.equal(o, '{ bindOnly: true }');
+  });
+
+  // A bind does not check the stream, so a MESH_TOOLS nobody created yet fails at keys(),
+  // which sat outside the "no bucket" catch and ended the CLI with "stream not found".
+  it('discord-read treats a MESH_TOOLS bucket nobody created as no tools', () => {
+    const dir = tmpDir('discord-read-nobucket-');
+    const preload = join(dir, 'fake-nats.cjs');
+    writeFileSync(preload, `const Module = require('node:module');
+const realLoad = Module._load;
+const fake = {
+  StringCodec: () => ({ encode: (s) => Buffer.from(s), decode: (b) => String(b) }),
+  connect: async () => ({
+    subscribe: () => ({ unsubscribe() {} }), publish() {}, close: async () => {}, drain: async () => {},
+    jetstream: () => ({ views: { kv: async (bucket, opts) => {
+      if (!opts.bindOnly) throw new Error('read-only CLI tried to create ' + bucket);
+      return { keys: async () => { throw new Error('stream not found'); }, get: async () => null };
+    } } }),
+  }),
+};
+Module._load = function (request, ...rest) { return request === 'nats' ? fake : realLoad.call(this, request, ...rest); };
+`);
+    const run = (...args) => spawnSync(process.execPath, ['-r', preload, join(ROOT, 'bin', 'discord-read.js'), ...args], {
+      encoding: 'utf8', env: { PATH: process.env.PATH, HOME: dir, OPENCLAW_WORKSPACE: join(dir, 'ws'), OPENCLAW_NATS: 'nats://127.0.0.1:4222' },
+    });
+    let r = run('tools');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /^No tools registered\.$/m);
+    r = run('history', '123');
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /Discord history tool not found in registry/);
+    assert.doesNotMatch(r.stderr, /stream not found/);
   });
 });
 
