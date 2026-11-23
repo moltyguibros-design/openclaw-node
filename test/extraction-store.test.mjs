@@ -7,8 +7,11 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { once } from 'node:events';
+import { Worker } from 'node:worker_threads';
 import { createExtractionStore } from '../lib/extraction-store.mjs';
 import { runFlush, USE_LLM_EXTRACTION } from '../lib/pre-compression-flush.mjs';
+import { backupStore } from '../lib/sqlite-store.mjs';
 
 // Use a temporary database for each test
 let tmpDir;
@@ -222,6 +225,88 @@ describe('createExtractionStore', () => {
     const counts = Object.fromEntries(store.db.prepare('SELECT label, mention_count FROM themes').all().map((r) => [r.label, r.mention_count]));
     assert.deepEqual(counts, { 'inflated by one busy session': 1, 'seen in two sessions': 2 });
     assert.equal(fs.readdirSync(path.join(tmpDir, 'backups', 'migration')).length, 1, 'backed up before the counts were rewritten');
+  });
+
+  it('a second opener of an old store reuses a fresh migration backup instead of copying it again', () => {
+    const db = store.db;
+    db.pragma('user_version = 7');
+    const dbPath = db.prepare('PRAGMA database_list').get().file;
+    const dir = path.join(tmpDir, 'backups', 'migration');
+    backupStore(db, { dir, prefix: 'test.db-v7', now: new Date(Date.now() - 60_000) });
+    store.close();
+
+    store = createExtractionStore({ dbPath });
+    assert.equal(store.db.pragma('user_version', { simple: true }), 8);
+    assert.equal(fs.readdirSync(dir).length, 1);
+  });
+
+  it('two openers racing a pre-v4 store both succeed and migrate it once', async () => {
+    const seedPath = path.join(tmpDir, 'seed-v3.db');
+    {
+      const seed = createExtractionStore({ dbPath: seedPath });
+      const entity = seed.db.prepare(`INSERT INTO entities (name, type, canonical_name, first_seen, last_seen, mention_count)
+                                      VALUES (?, 'technology', ?, 't0', 't1', 0)`);
+      const mention = seed.db.prepare(`INSERT INTO mentions (entity_id, session_id, salience, created_at) VALUES (?, ?, 0.5, 't0')`);
+      seed.db.transaction(() => {
+        for (let i = 0; i < 1500; i++) {
+          mention.run(entity.run(`Tool${i}`, `Tool${i}`).lastInsertRowid, `s-${i}`);
+          mention.run(entity.run(`tool${i}`, `tool${i}`).lastInsertRowid, `s-${i + 1}`);
+        }
+      })();
+      seed.db.exec('DROP INDEX idx_entities_canonical');
+      seed.db.pragma('user_version = 3');
+      seed.close();
+    }
+    const rowsOf = (dbPath) => {
+      const s = createExtractionStore({ dbPath, integrityCheck: false });
+      try {
+        return {
+          version: s.db.pragma('user_version', { simple: true }),
+          entities: s.db.prepare('SELECT name, canonical_name, mention_count FROM entities ORDER BY name').all(),
+          mentions: s.db.prepare('SELECT COUNT(*) n FROM mentions').get().n,
+        };
+      } finally {
+        s.close();
+      }
+    };
+    const serialPath = path.join(tmpDir, 'serial.db');
+    fs.copyFileSync(seedPath, serialPath);
+    const serial = rowsOf(serialPath);
+    assert.equal(serial.entities.length, 1500);
+
+    const opener = `
+      const { parentPort, workerData } = require('node:worker_threads');
+      (async () => {
+        const { createExtractionStore } = await import(workerData.mod);
+        const gate = new Int32Array(workerData.gate);
+        parentPort.postMessage('ready');
+        Atomics.wait(gate, 0, 0);
+        try {
+          createExtractionStore({ dbPath: workerData.dbPath, integrityCheck: false }).close();
+          parentPort.postMessage({ ok: true });
+        } catch (err) {
+          parentPort.postMessage({ ok: false, error: err.message });
+        }
+      })();
+    `;
+    const mod = new URL('../lib/extraction-store.mjs', import.meta.url).href;
+    for (let trial = 0; trial < 10; trial++) {
+      const trialDir = path.join(tmpDir, `race-${trial}`);
+      fs.mkdirSync(trialDir);
+      const dbPath = path.join(trialDir, 'state.db');
+      fs.copyFileSync(seedPath, dbPath);
+      const gate = new SharedArrayBuffer(4);
+      const workers = [0, 1].map(() => new Worker(opener, { eval: true, workerData: { mod, gate, dbPath } }));
+      const exited = workers.map((w) => once(w, 'exit'));
+      const ready = workers.map((w) => once(w, 'message'));
+      const results = workers.map((w) => new Promise((resolve) => w.on('message', (m) => { if (m !== 'ready') resolve(m); })));
+      await Promise.all(ready);
+      Atomics.store(new Int32Array(gate), 0, 1);
+      Atomics.notify(new Int32Array(gate), 0);
+      assert.deepEqual(await Promise.all(results), [{ ok: true }, { ok: true }], `trial ${trial}`);
+      await Promise.all(exited);
+      assert.deepEqual(rowsOf(dbPath), serial, `trial ${trial}`);
+    }
   });
 
   it('re-extracting a decision refreshes rationale/confidence instead of duplicating', () => {
