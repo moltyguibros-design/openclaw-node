@@ -378,7 +378,7 @@ export function NetworkTopology({ nodes, meshStatus }: Props) {
                           ) : peer.relay ? (
                             <span className="text-yellow-400">Via relay ({peer.relay})</span>
                           ) : (
-                            <span className="text-zinc-400">Connected</span>
+                            <span className="text-zinc-400">{peer.idle ? "Idle" : "Connected"}</span>
                           )}
                           {peer.latency?.latencyMs != null && (
                             <span className="font-mono ml-2">

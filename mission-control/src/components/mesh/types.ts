@@ -68,6 +68,7 @@ export interface PeerView {
   ip?: string;
   os?: string;
   direct?: boolean;
+  idle?: boolean;
   relay?: string | null;
   latency?: { latencyMs?: number | null } | null;
   lastSeen?: string | null;

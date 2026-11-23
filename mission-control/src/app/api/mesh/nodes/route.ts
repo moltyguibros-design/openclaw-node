@@ -32,6 +32,7 @@ interface TailscaleStatusPeer {
   HostName?: string;
   TailscaleIPs?: string[];
   Online?: boolean;
+  Active?: boolean;
   OS?: string;
   LastSeen?: string;
   CurAddr?: string;
@@ -250,6 +251,7 @@ async function gatherLocalHealth(): Promise<NodeHealth> {
     online: boolean;
     os: string;
     lastSeen: string | null;
+    idle: boolean;
     direct: boolean;
     relay: string | null;
     latency: null;
@@ -280,8 +282,9 @@ async function gatherLocalHealth(): Promise<NodeHealth> {
             online: peer.Online || false,
             os: peer.OS || "unknown",
             lastSeen: peer.LastSeen || null,
-            direct: !!peer.CurAddr && !peer.Relay,
-            relay: peer.Relay || null,
+            idle: !peer.Active,
+            direct: !!peer.CurAddr,
+            relay: peer.Active && !peer.CurAddr ? (peer.Relay || null) : null,
             latency: null,
           });
         }

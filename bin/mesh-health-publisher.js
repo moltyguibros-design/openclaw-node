@@ -175,8 +175,9 @@ async function getTailscalePeers(run = runProbe) {
           os: peer.OS || 'unknown',
           lastSeen: peer.LastSeen || null,
           curAddr: peer.CurAddr || null,
-          relay: peer.Relay || null,
-          direct: !!peer.CurAddr && !peer.Relay,
+          idle: !peer.Active,
+          relay: peer.Active && !peer.CurAddr ? (peer.Relay || null) : null,
+          direct: !!peer.CurAddr,
         });
       }
     }

@@ -120,4 +120,27 @@ describe('mesh-health-publisher probes', () => {
     assert.ok(['lead', 'worker', 'unknown'].includes(health.role));
     assert.equal(typeof health.roleMismatch, 'boolean');
   });
+
+  // Tailscale's Relay is the peer's home DERP region, set for every peer; CurAddr is the
+  // direct endpoint and Active means traffic in the last ~2 min (ipnstate.PeerStatus).
+  it('a peer with a direct endpoint is direct, only an active peer without one is relayed, an inactive one is idle', async () => {
+    const status = {
+      Self: { TailscaleIPs: ['100.64.0.1'] },
+      Peer: {
+        a: { HostName: 'a', Online: true, Active: true, CurAddr: '1.2.3.4:41641', Relay: 'nyc' },
+        b: { HostName: 'b', Online: true, Active: true, CurAddr: '', Relay: 'nyc' },
+        c: { HostName: 'c', Online: true, Active: false, CurAddr: '', Relay: 'tor' },
+      },
+    };
+    const run = async (file, args) => (file === 'tailscale' && args.join(' ') === 'status --json' ? JSON.stringify(status) : null);
+    const nc = { info: { version: 'test' }, isClosed: () => false };
+    const { peers } = (await publisher.gatherHealth(nc, run)).tailscale;
+    const pick = (h) => {
+      const p = peers.find((x) => x.hostname === h);
+      return { direct: p.direct, relay: p.relay, idle: p.idle };
+    };
+    assert.deepEqual(pick('a'), { direct: true, relay: null, idle: false });
+    assert.deepEqual(pick('b'), { direct: false, relay: 'nyc', idle: false });
+    assert.deepEqual(pick('c'), { direct: false, relay: null, idle: true });
+  });
 });

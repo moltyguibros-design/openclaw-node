@@ -175,6 +175,30 @@ describe("GET /api/mesh/nodes", () => {
     expect(nodes["moltymac"].status).toBe("offline");
   });
 
+  // Tailscale's Relay is the home DERP region, set for every peer; CurAddr is the direct
+  // endpoint and Active means traffic in the last ~2 min.
+  it("reads direct from CurAddr, relays only an active peer without one, and marks inactive peers idle", async () => {
+    const nodes = await nodesFor("test-node", {
+      Peer: {
+        a: { HostName: "a", Online: true, Active: true, CurAddr: "1.2.3.4:41641", Relay: "nyc" },
+        b: { HostName: "b", Online: true, Active: true, CurAddr: "", Relay: "nyc" },
+        c: { HostName: "c", Online: true, Active: false, CurAddr: "", Relay: "tor" },
+      },
+    });
+    const local = nodes["test-node"] as unknown as {
+      tailscale: { peers: Array<{ hostname: string; direct: boolean; relay: string | null; idle: boolean }> };
+      peerConnectivity: string;
+    };
+    const pick = (h: string) => {
+      const p = local.tailscale.peers.find((x) => x.hostname === h)!;
+      return { direct: p.direct, relay: p.relay, idle: p.idle };
+    };
+    expect(pick("a")).toEqual({ direct: true, relay: null, idle: false });
+    expect(pick("b")).toEqual({ direct: false, relay: "nyc", idle: false });
+    expect(pick("c")).toEqual({ direct: false, relay: null, idle: true });
+    expect(local.peerConnectivity).toBe("some_relay");
+  });
+
   it("still treats the short hostname of an FQDN node id as local", async () => {
     const nodes = await nodesFor("calos.lan", { Self: { HostName: "calos" } });
     expect(nodes["calos"].health?.nodeId).toBe("calos.lan");

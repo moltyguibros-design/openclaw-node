@@ -252,8 +252,8 @@ export function NodeCard({ node, isExpanded: controlledExpanded, onToggle }: Pro
                     <span className="text-foreground/70">{peer.hostname || "unknown"}</span>
                     <span className="font-mono text-muted-foreground/40">{peer.ip || ""}</span>
                     {peer.online ? (
-                      <span className={`ml-auto ${peer.direct ? "text-green-400" : "text-yellow-400"}`}>
-                        {peer.direct ? "direct" : peer.relay ? `relay (${peer.relay})` : "relay"}
+                      <span className={`ml-auto ${peer.direct ? "text-green-400" : peer.idle ? "text-muted-foreground/60" : "text-yellow-400"}`}>
+                        {peer.direct ? "direct" : peer.idle ? "idle" : peer.relay ? `relay (${peer.relay})` : "relay"}
                         {peer.latency?.latencyMs != null && (
                           <span className="font-mono ml-1">{Math.round(peer.latency.latencyMs)}ms</span>
                         )}
