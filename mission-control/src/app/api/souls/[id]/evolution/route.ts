@@ -25,6 +25,39 @@ interface EvolutionEvent {
   reviewStatus: string;
 }
 
+async function readJson(file: string): Promise<Record<string, unknown> | null> {
+  try {
+    return JSON.parse(await fs.readFile(file, "utf-8"));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+}
+
+// What a soul may record is set in the registry (evolutionEnabled) and in its
+// capabilities.json (evolutionConfig.captureTypes; absent means any category).
+async function captureRefusal(soulId: string, category: unknown): Promise<NextResponse | null> {
+  const registry = (await readJson(path.join(SOULS_DIR, "registry.json"))) as
+    { souls?: Array<{ id: string; evolutionEnabled?: boolean }> } | null;
+  const soul = registry?.souls?.find((s) => s.id === soulId);
+  if (!soul) {
+    return NextResponse.json({ error: "Soul not found" }, { status: 404 });
+  }
+  if (soul.evolutionEnabled === false) {
+    return NextResponse.json({ error: `evolution is disabled for ${soulId}` }, { status: 409 });
+  }
+  const capabilities = (await readJson(path.join(SOULS_DIR, soulId, "capabilities.json"))) as
+    { evolutionConfig?: { captureTypes?: unknown } } | null;
+  const captureTypes = capabilities?.evolutionConfig?.captureTypes;
+  if (Array.isArray(captureTypes) && !captureTypes.includes(category)) {
+    return NextResponse.json(
+      { error: `category must be one of: ${captureTypes.join(", ")}` },
+      { status: 400 }
+    );
+  }
+  return null;
+}
+
 // GET /api/souls/:id/evolution - Get evolution events for a soul
 export async function GET(
   request: NextRequest,
@@ -101,6 +134,8 @@ export async function POST(
       return NextResponse.json({ error: "invalid soul id" }, { status: 400 });
     }
     const event: EvolutionEvent = await request.json();
+    const refusal = await captureRefusal(soulId, event.category);
+    if (refusal) return refusal;
 
     const db = getDb();
 
@@ -251,14 +286,20 @@ export async function PATCH(
         `Reviewer: ${reviewedBy}`,
       ].join("\n");
       const targetPath = path.join(SOULS_DIR, soulId, "evolution", "genes.json");
-      const original = await fs.readFile(targetPath, "utf-8");
+      // A soul's first approved gene creates its genes.json.
+      let original: string | null = null;
+      try {
+        original = await fs.readFile(targetPath, "utf-8");
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      }
 
       let branchCreated = false;
       let commitHash: string;
       try {
         await git("checkout", "-b", safeBranch);
         branchCreated = true;
-        const existing = JSON.parse(original);
+        const existing = original === null ? { version: "1.0.0", genes: [] } : JSON.parse(original);
         existing.genes.push(event.proposedChange.content);
         await fs.writeFile(targetPath, JSON.stringify(existing, null, 2));
         await git("add", `${soulId}/evolution/genes.json`);
@@ -274,7 +315,8 @@ export async function PATCH(
         // it was and its index entry, then the branch.
         try {
           if ((await git("rev-parse", "--abbrev-ref", "HEAD")) !== baseBranch) await git("checkout", baseBranch);
-          await fs.writeFile(targetPath, original);
+          if (original === null) await fs.rm(targetPath, { force: true });
+          else await fs.writeFile(targetPath, original);
           await git("reset", "-q", "--", `${soulId}/evolution/genes.json`);
           if (branchCreated) await git("branch", "-D", safeBranch);
         } catch (rollbackError) {

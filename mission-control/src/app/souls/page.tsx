@@ -78,8 +78,7 @@ function GuidePanel() {
 ├── capabilities.json    # Tools, permissions, evolution config
 └── evolution/
     ├── genes.json       # Learned patterns
-    ├── events.jsonl     # Evolution event log
-    └── capsules.json    # Knowledge snapshots`}
+    └── events.jsonl     # Evolution event log`}
             </pre>
           </div>
         )}
@@ -235,7 +234,6 @@ I am a [role] specializing in [domain]. My expertise:
           <div className="px-4 pb-4 border-t border-border pt-3">
             <pre className="text-xs bg-muted rounded p-3 overflow-auto">
 {`echo '{"version":"1.0.0","genes":[]}' > ~/.openclaw/souls/my-soul/evolution/genes.json
-echo '{"version":"1.0.0","capsules":[]}' > ~/.openclaw/souls/my-soul/evolution/capsules.json
 touch ~/.openclaw/souls/my-soul/evolution/events.jsonl`}
             </pre>
           </div>

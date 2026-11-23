@@ -27,15 +27,15 @@ souls/
 ├── daedalus/              # Orchestrator soul
 │   ├── SOUL.md
 │   ├── PRINCIPLES.md
-│   └── capabilities.json
+│   ├── capabilities.json
+│   └── evolution/
 ├── blockchain-auditor/    # Security specialist
 │   ├── SOUL.md
 │   ├── PRINCIPLES.md
 │   ├── capabilities.json
 │   └── evolution/
 │       ├── genes.json
-│       ├── events.jsonl
-│       └── capsules.json
+│       └── events.jsonl
 └── lore-writer/           # Narrative specialist
     └── ...
 ```
@@ -102,7 +102,6 @@ Returns:
 5. **Initialize evolution files:**
    ```bash
    echo '{"version":"1.0.0","genes":[]}' > ~/.openclaw/souls/my-soul/evolution/genes.json
-   echo '{"version":"1.0.0","capsules":[]}' > ~/.openclaw/souls/my-soul/evolution/capsules.json
    touch ~/.openclaw/souls/my-soul/evolution/events.jsonl
    ```
 
@@ -172,7 +171,7 @@ Reason: Requires deep Solidity security expertise
 
 ### How Evolution Works
 
-1. **Capture** — Soul writes evolution event to `evolution/events.jsonl` after task completion
+1. **Capture** — Soul posts an evolution event with `bin/mc-api POST /api/souls/<id>/evolution '<event json>'` after task completion. Mission Control appends it to `evolution/events.jsonl` and queues it for review; it refuses the event with 409 when the soul's registry entry has `evolutionEnabled: false`, and with 400 when its `category` is not in the soul's `capabilities.json` `evolutionConfig.captureTypes` (a soul without `captureTypes` may record any category). A line written to `events.jsonl` by hand never reaches review.
 2. **Review** — Daedalus sees pending event in Mission Control dashboard
 3. **Approve/Reject** — If approved, change is applied + git commit created
 

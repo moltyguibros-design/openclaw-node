@@ -92,6 +92,6 @@ Parent: Daedalus
 
 ## Review Cadence
 
-- After each QA cycle: log findings in evolution/events.jsonl
+- After each QA cycle: record findings as an evolution event with `bin/mc-api POST /api/souls/qa-evidence/evolution '<event json>'` (MULTI_SOUL_GUIDE.md, Soul Evolution)
 - Monthly: review common failure patterns for gene candidates
 - When UI framework updates: re-baseline visual expectations

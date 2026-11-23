@@ -69,6 +69,6 @@ Parent: Daedalus
 
 ## Review Cadence
 
-- After each lore piece: log learnings in evolution/events.jsonl
+- After each lore piece: record learnings as an evolution event with `bin/mc-api POST /api/souls/lore-writer/evolution '<event json>'` (MULTI_SOUL_GUIDE.md, Soul Evolution)
 - Monthly: review tone consistency across all lore
 - When game systems change: revisit lore for alignment
