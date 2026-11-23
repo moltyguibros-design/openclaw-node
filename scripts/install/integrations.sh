@@ -256,10 +256,10 @@ for hook in session-start validate-commit validate-push pre-compact session-stop
     run chmod +x "$HOOK_DST"
   fi
 done
-# The PreCompact hook runs the extraction trigger from this checkout.
+# The PreCompact hook runs the extraction trigger from this checkout. %q keeps any path
+# one literal word of the hook's own bash.
 if [ -f "${CLAUDE_DIR}/hooks/pre-compact.sh" ]; then
-  run sed -i.bak "s|^DEPLOYED_REPO_DIR=\"\"\$|DEPLOYED_REPO_DIR=\"${REPO_DIR}\"|" "${CLAUDE_DIR}/hooks/pre-compact.sh"
-  run rm -f "${CLAUDE_DIR}/hooks/pre-compact.sh.bak"
+  set_env_key DEPLOYED_REPO_DIR "$(printf '%q' "$REPO_DIR")" "${CLAUDE_DIR}/hooks/pre-compact.sh"
 fi
 info "Deployed Claude Code hooks"
 
@@ -273,8 +273,7 @@ if [ -n "$PROJECT_DIR" ]; then
       GHOOK_DST="${GIT_HOOKS_DIR}/${ghook}"
       if [ -f "$GHOOK_SRC" ] && [ ! -f "$GHOOK_DST" ]; then
         run cp "$GHOOK_SRC" "$GHOOK_DST"
-        run sed -i.bak "s|^DEPLOYED_HOOK_DIR=\"\"\$|DEPLOYED_HOOK_DIR=\"${CLAUDE_DIR}/hooks\"|" "$GHOOK_DST"
-        run rm -f "$GHOOK_DST.bak"
+        set_env_key DEPLOYED_HOOK_DIR "$(printf '%q' "${CLAUDE_DIR}/hooks")" "$GHOOK_DST"
         run chmod +x "$GHOOK_DST"
         info "Installed git hook: ${ghook}"
       fi

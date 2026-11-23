@@ -1757,6 +1757,48 @@ test('--project drives framework rules and git hooks', () => {
   assert.ok(!rules.includes('unity.md'));
 });
 
+// The deployed paths went into the hooks through a sed replacement, where '&', '|' and
+// '\' are special; a shell-quoted literal keeps the hooks' own bash syntax whole too.
+test('the hook paths the installer writes survive & | \\ " $ and spaces, and the hooks still run', async () => {
+  const base = tmpDir('openclaw-hook-literal-');
+  const odd = 'a&b|c\\d "e" $HOME f';
+  const repo = join(base, `repo ${odd}`);
+  symlinkSync(ROOT, repo);
+  const home = join(base, `home ${odd}`);
+  mkdirSync(home, { recursive: true });
+  const project = join(base, 'project');
+  mkdirSync(project);
+  const git = (...args) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: project, encoding: 'utf8' });
+  git('init', '-q', '-b', 'main');
+  const script = [
+    'REPO_DIR="$1"', 'OPENCLAW_ROOT="$2/.openclaw"', 'WORKSPACE="$OPENCLAW_ROOT/workspace"',
+    'DRY_RUN=false; SKIP_MESH=true', 'PROJECT_DIR="$3"', 'mkdir -p "$WORKSPACE"',
+    `source ${JSON.stringify(join(ROOT, 'scripts/install/helpers.sh'))}`,
+    `source ${JSON.stringify(join(ROOT, 'scripts/install/integrations.sh'))}`,
+  ].join('\n');
+  const r = spawnSync('bash', ['-c', script, 'x', repo, home, project], { cwd: base, encoding: 'utf8', env: { ...process.env, HOME: home } });
+  assert.equal(r.status, 0, r.stderr);
+
+  const claudeHooks = join(home, '.openclaw', 'workspace', '.claude', 'hooks');
+  const fakebin = join(base, 'fakebin');
+  mkdirSync(fakebin);
+  writeFileSync(join(fakebin, 'node'), `#!/bin/sh\necho "$*" >> "${join(base, 'node.log')}"\n`, { mode: 0o755 });
+  writeFileSync(join(fakebin, 'gitleaks'), '#!/bin/sh\necho "WRN leaks found: 1" >&2\nexit 1\n', { mode: 0o755 });
+  const env = { ...process.env, PATH: `${fakebin}:${process.env.PATH}` };
+  delete env.OPENCLAW_REPO_DIR;
+  writeFileSync(join(base, 'node.log'), '');
+  const pre = spawnSync('bash', [join(claudeHooks, 'pre-compact.sh')], { encoding: 'utf8', env, cwd: base });
+  assert.equal(pre.status, 0, pre.stderr);
+  for (let i = 0; i < 100 && !readFileSync(join(base, 'node.log'), 'utf8'); i++) await new Promise((res) => setTimeout(res, 50));
+  assert.equal(readFileSync(join(base, 'node.log'), 'utf8').trim(), `${repo}/bin/openclaw-extract-now.mjs --triggered-by=claude-code-pre-compact`);
+
+  writeFileSync(join(project, 'a.txt'), 'hello\n');
+  git('add', 'a.txt');
+  const commit = spawnSync('bash', [join(project, '.git', 'hooks', 'pre-commit')], { cwd: project, encoding: 'utf8', env });
+  assert.equal(commit.status, 2, commit.stdout + commit.stderr);
+  assert.match(commit.stdout, /gitleaks detected secrets/);
+});
+
 // The git hooks copied into a --project repo delegated to ${ROOT}/.claude/hooks, which
 // only this checkout has, so in the project they validated nothing and exited 0.
 test('--project git hooks run the deployed validators', () => {
@@ -1775,7 +1817,7 @@ test('--project git hooks run the deployed validators', () => {
   assert.equal(r.status, 0, r.stderr);
   const deployed = join(home, '.openclaw', 'workspace', '.claude', 'hooks');
   assert.match(readFileSync(join(project, '.git', 'hooks', 'pre-commit'), 'utf8'),
-    new RegExp(`^DEPLOYED_HOOK_DIR="${deployed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"$`, 'm'));
+    new RegExp(`^DEPLOYED_HOOK_DIR=${deployed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
 
   const fakebin = join(base, 'fakebin');
   mkdirSync(fakebin);
@@ -1990,7 +2032,7 @@ test('the deployed PreCompact hook fires the extraction trigger from the checkou
   mkdirSync(join(claudeDir, 'hooks'), { recursive: true });
   mkdirSync(join(root, 'fakebin'));
   writeFileSync(join(root, 'fakebin', 'node'), `#!/bin/sh\necho "$*" >> "${join(root, 'node.log')}"\n`, { mode: 0o755 });
-  const deploy = spawnSync('bash', ['-c', `set -euo pipefail; run() { "$@"; }; REPO_DIR="${ROOT}"; CLAUDE_DIR="${claudeDir}"\n${block}`], { encoding: 'utf8' });
+  const deploy = spawnSync('bash', ['-c', `set -euo pipefail; source "${join(ROOT, 'scripts/install/helpers.sh')}"; DRY_RUN=false; REPO_DIR="${ROOT}"; CLAUDE_DIR="${claudeDir}"\n${block}`], { encoding: 'utf8' });
   assert.equal(deploy.status, 0, deploy.stderr);
 
   const env = { ...process.env, PATH: `${join(root, 'fakebin')}:${process.env.PATH}` };
