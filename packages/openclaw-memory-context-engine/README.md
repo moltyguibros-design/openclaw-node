@@ -14,10 +14,12 @@ the conversation through unchanged, so unlike the publisher wrappers the model
 still sees the directive text), reconsolidation write-back, and **extraction** —
 the daemon already tails `~/.openclaw/agents/*/sessions/*.jsonl` and flushes on
 idle / session end / pre-compaction size, so this plugin records nothing.
-Compaction is delegated to OpenClaw's native compactor through
-`openclaw/plugin-sdk/core`. The engine declares `ownsCompaction` only once that
-import has resolved; if it fails, the plugin logs one warning and leaves
-compaction to the host.
+Compaction runs in OpenClaw's delegating mode: the engine always declares
+`ownsCompaction: false`, so the gateway keeps its built-in auto-compaction, and
+`compact()` (used by `/compact` and overflow recovery) calls
+`delegateCompactionToRuntime` from `openclaw/plugin-sdk/core`. If that import
+fails the plugin logs one warning and `compact()` returns `ok: false`
+(`host_compaction_unavailable`).
 
 ## Install
 

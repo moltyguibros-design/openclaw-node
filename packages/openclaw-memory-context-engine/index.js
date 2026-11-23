@@ -10,18 +10,17 @@
 import { createMemoryClient } from './memory-client.js';
 import { createMemoryContextEngine, ENGINE_ID, ENGINE_VERSION, FRONTEND_TAG } from './context-engine.js';
 
-// OpenClaw's own compactor, for sessions this engine does not archive. The
-// host exports it from its plugin SDK; resolved lazily so the package loads
-// (and tests run) without the host installed. Without it the engine does not
-// claim compaction, so the host keeps running its own.
+// OpenClaw's own compactor, which compact() delegates to (the engine never
+// owns compaction); resolved lazily so the package loads and tests run
+// without the host installed.
 async function loadRuntimeCompaction(logger) {
   let fn;
   try {
     const mod = await import('openclaw/plugin-sdk/core');
     fn = typeof mod?.delegateCompactionToRuntime === 'function' ? mod.delegateCompactionToRuntime : undefined;
-    if (!fn) logger.warn?.(`${ENGINE_ID}: openclaw/plugin-sdk/core has no delegateCompactionToRuntime; leaving compaction to the host`);
+    if (!fn) logger.warn?.(`${ENGINE_ID}: openclaw/plugin-sdk/core has no delegateCompactionToRuntime; compact() will report host_compaction_unavailable`);
   } catch (err) {
-    logger.warn?.(`${ENGINE_ID}: openclaw/plugin-sdk/core did not load (${err.message}); leaving compaction to the host`);
+    logger.warn?.(`${ENGINE_ID}: openclaw/plugin-sdk/core did not load (${err.message}); compact() will report host_compaction_unavailable`);
   }
   return fn;
 }
@@ -59,7 +58,6 @@ const plugin = {
         config,
         logger,
         runtimeCompact: (params) => compactionReady.then(() => (runtimeCompact ? runtimeCompact(params) : undefined)),
-        hasRuntimeCompaction: () => typeof runtimeCompact === 'function',
       }));
       logger.info(`${ENGINE_ID} v${ENGINE_VERSION}: context engine registered (inject ${client.injectUrl})`);
     }

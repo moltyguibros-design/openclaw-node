@@ -9,11 +9,11 @@
  *   - EXTRACTION is the daemon's too: it tails the gateway's session JSONL
  *     (transcript-sources.json) and flushes on idle / session end / size, so
  *     ingest, afterTurn and commitTurn here record nothing.
- *   - COMPACTION is the host's: the engine does not own an archive, so
- *     compact() hands the request to OpenClaw's native compactor when the
- *     host exposes one, and otherwise reports "not compacted" honestly.
- *     info.ownsCompaction is true only while that delegate is available, so
- *     a host whose SDK delegate did not load keeps running its own compactor.
+ *   - COMPACTION is the host's (OpenClaw's delegating mode): info.ownsCompaction
+ *     is always false, so the host keeps its built-in auto-compaction, and
+ *     compact() (called for /compact and overflow recovery) hands the request
+ *     to OpenClaw's delegateCompactionToRuntime. If that delegate is
+ *     unavailable or fails, compact() reports ok:false.
  *
  * Pure factory: no I/O of its own beyond the injected client, so the whole
  * surface is testable against a fake inject server.
@@ -71,12 +71,8 @@ export function isBypassed(sessionKey, patterns) {
  * @param {object} [deps.config]
  * @param {{info:Function, warn?:Function, error:Function}} deps.logger
  * @param {(params:object)=>Promise<object>} [deps.runtimeCompact] — OpenClaw's native compactor, when the host exposes it
- * @param {()=>boolean} [deps.hasRuntimeCompaction] — whether runtimeCompact can compact now (it may resolve lazily)
  */
-export function createMemoryContextEngine({
-  client, config = {}, logger, runtimeCompact,
-  hasRuntimeCompaction = () => typeof runtimeCompact === 'function',
-}) {
+export function createMemoryContextEngine({ client, config = {}, logger, runtimeCompact }) {
   const autoRecall = config.autoRecall !== false;
   const maxInjectedChars = Number(config.maxInjectedChars) || DEFAULT_MAX_INJECTED_CHARS;
   const bypass = Array.isArray(config.bypassSessionPatterns) ? config.bypassSessionPatterns : [];
@@ -117,7 +113,7 @@ export function createMemoryContextEngine({
       id: ENGINE_ID,
       name: 'openclaw-node memory',
       version: ENGINE_VERSION,
-      get ownsCompaction() { return hasRuntimeCompaction() === true; },
+      ownsCompaction: false,
       transcriptSemantics: {
         currentTurnFence: 'before-current-turn-entry-v1',
         turnAdvancementIdempotency: 'atomic-idempotent-v1',
@@ -172,10 +168,12 @@ export function createMemoryContextEngine({
           const r = await runtimeCompact(params);
           if (r && typeof r === 'object') return r;
         } catch (err) {
-          warnOnce(`host compaction failed: ${err.message}`);
+          const reason = `host compaction failed: ${err.message}`;
+          warnOnce(reason);
+          return { ok: false, compacted: false, reason };
         }
       }
-      return { ok: true, compacted: false, reason: 'no_engine_archive_host_compaction_unavailable' };
+      return { ok: false, compacted: false, reason: 'host_compaction_unavailable' };
     },
   };
 

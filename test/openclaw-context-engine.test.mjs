@@ -111,7 +111,7 @@ describe('context engine', () => {
   it('declares the OpenClaw ≥2026.8.1 transcript semantics', () => {
     const e = createMemoryContextEngine({ client: mkClient(), logger: logger(), runtimeCompact: async () => ({ ok: true }) });
     assert.equal(e.info.id, ENGINE_ID);
-    assert.equal(e.info.ownsCompaction, true);
+    assert.equal(e.info.ownsCompaction, false);
     assert.equal(e.info.transcriptSemantics.currentTurnFence, 'before-current-turn-entry-v1');
     assert.equal(e.info.transcriptSemantics.turnAdvancementIdempotency, 'atomic-idempotent-v1');
   });
@@ -191,25 +191,27 @@ describe('context engine', () => {
     assert.equal(await e.afterTurn({ sessionId: 's', sessionFile: '/x', messages: [], prePromptMessageCount: 0 }), undefined);
   });
 
-  it('compact delegates to the host compactor and reports honestly without one', async () => {
+  it('compact delegates to the host compactor and reports ok:false when it cannot', async () => {
     const calls = [];
-    const withHost = createMemoryContextEngine({ client: mkClient(), logger: logger(), runtimeCompact: async (p) => { calls.push(p); return { ok: true, compacted: true, result: { tokensBefore: 10, tokensAfter: 5 } }; } });
-    const r = await withHost.compact({ sessionId: 's', sessionFile: '/x', tokenBudget: 100 });
-    assert.equal(r.compacted, true);
+    const hostResult = { ok: true, compacted: true, result: { tokensBefore: 10, tokensAfter: 5 } };
+    const withHost = createMemoryContextEngine({ client: mkClient(), logger: logger(), runtimeCompact: async (p) => { calls.push(p); return hostResult; } });
+    assert.equal(await withHost.compact({ sessionId: 's', sessionFile: '/x', tokenBudget: 100 }), hostResult);
     assert.equal(calls[0].sessionId, 's');
+    const unavailable = { ok: false, compacted: false, reason: 'host_compaction_unavailable' };
     const without = createMemoryContextEngine({ client: mkClient(), logger: logger() });
-    assert.deepEqual(await without.compact({ sessionId: 's', sessionFile: '/x' }), { ok: true, compacted: false, reason: 'no_engine_archive_host_compaction_unavailable' });
+    assert.deepEqual(await without.compact({ sessionId: 's', sessionFile: '/x' }), unavailable);
+    const empty = createMemoryContextEngine({ client: mkClient(), logger: logger(), runtimeCompact: async () => undefined });
+    assert.deepEqual(await empty.compact({ sessionId: 's', sessionFile: '/x' }), unavailable);
     const broken = createMemoryContextEngine({ client: mkClient(), logger: logger(), runtimeCompact: async () => { throw new Error('nope'); } });
-    assert.equal((await broken.compact({ sessionId: 's', sessionFile: '/x' })).compacted, false);
+    assert.deepEqual(await broken.compact({ sessionId: 's', sessionFile: '/x' }), { ok: false, compacted: false, reason: 'host compaction failed: nope' });
   });
 
-  it('claims compaction only while a host compactor is available', () => {
-    assert.equal(createMemoryContextEngine({ client: mkClient(), logger: logger() }).info.ownsCompaction, false);
-    let ready = false;
-    const lazy = createMemoryContextEngine({ client: mkClient(), logger: logger(), runtimeCompact: async () => ({ ok: true }), hasRuntimeCompaction: () => ready });
-    assert.equal(lazy.info.ownsCompaction, false);
-    ready = true;
-    assert.equal(lazy.info.ownsCompaction, true);
+  it('never claims compaction (delegating mode)', () => {
+    for (const runtimeCompact of [undefined, async () => ({ ok: true, compacted: true })]) {
+      const e = createMemoryContextEngine({ client: mkClient(), logger: logger(), runtimeCompact });
+      assert.equal(e.info.ownsCompaction, false);
+      assert.equal(Object.getOwnPropertyDescriptor(e.info, 'ownsCompaction').get, undefined);
+    }
   });
 });
 
@@ -232,9 +234,9 @@ describe('plugin entry', () => {
     const engine = engines.get(ENGINE_ID)();
     const out = await engine.assemble({ sessionId: 's', messages: [userMsg('hello there')], tokenBudget: 100000 });
     assert.match(out.systemPromptAddition, /\[memory:/);
-    // compact without the host SDK installed → honest not-compacted, and the
-    // engine leaves compaction to the host with one warning
-    assert.equal((await engine.compact({ sessionId: 's', sessionFile: '/x' })).compacted, false);
+    // without the host SDK installed compact() reports it could not compact,
+    // with one warning, and the engine still never claims compaction
+    assert.deepEqual(await engine.compact({ sessionId: 's', sessionFile: '/x' }), { ok: false, compacted: false, reason: 'host_compaction_unavailable' });
     assert.equal(engine.info.ownsCompaction, false);
     assert.equal(log.lines.filter(([lvl, m]) => lvl === 'warn' && /plugin-sdk\/core did not load/.test(m)).length, 1);
     const recall = await tools.get('memory_recall').execute('t1', { query: 'jetstream' });
