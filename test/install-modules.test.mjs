@@ -111,6 +111,11 @@ test('unit renders fill only the listed placeholders, so $MAINPID survives', () 
       assert.ok(names.split(' ').includes(v), `\${${v}} in ${f} is missing from UNIT_NAMES`);
     }
   }
+  const used = new Set();
+  for (const f of [...templates, join(ROOT, 'services/launcher/openclaw-stack.desktop')]) {
+    for (const [, v] of readFileSync(f, 'utf8').matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) used.add(v);
+  }
+  for (const v of names.split(' ')) assert.ok(used.has(v), `UNIT_NAMES lists ${v}, which no template uses`);
   const r = renderUnitCli('systemd', join(ROOT, 'services/systemd/openclaw-nats.service'), { HOME: '/h', NATS_SERVER_BIN: '/x/nats-server' });
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.includes('ExecReload=/bin/kill -HUP $MAINPID'), r.stdout);
@@ -805,6 +810,17 @@ generate_config "$1" "$2"`, 'x', template, out], {
     assert.match(r.stdout, /WARN Config openclaw\.json differs .* openclaw\.json\.new/);
   }
   assert.match(cfg, /\[ -n "\$CLUSTER_PEERS" \] \|\| generate_config "\$REPO_DIR\/services\/nats\/nats-single\.conf"/);
+});
+
+// A '|' in a value no template needs still aborted the sed render under set -e.
+test("generate_config's sed fallback substitutes only placeholders its templates use", () => {
+  const cfg = moduleSrc['config.sh'];
+  const keys = [...cfg.matchAll(/-e "s\|\\\$\{([A-Z_]+)\}\|/g)].map((m) => m[1]);
+  const inputs = [...cfg.matchAll(/generate_config "\$REPO_DIR\/([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(keys.length > 5 && inputs.length > 5, `parsed ${keys.length} keys, ${inputs.length} inputs`);
+  const used = new Set(inputs.flatMap((f) => [...readFileSync(join(ROOT, f), 'utf8').matchAll(/\$\{([A-Z_]+)\}/g)].map((m) => m[1])));
+  assert.deepEqual(keys.filter((k) => !used.has(k)), []);
+  assert.deepEqual([...used].filter((k) => !keys.includes(k)), []);
 });
 
 // A cluster node's --update ran without --cluster-peers and rendered the

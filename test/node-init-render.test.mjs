@@ -120,6 +120,9 @@ describe('node-init renders the shared service templates', () => {
       }
     }
     for (const v of used) assert.ok(SERVICE_TEMPLATE_VARS.includes(v), `template variable ${v} is not rendered by node-init`);
+    const anyTemplate = ['launchd', 'systemd'].flatMap((dir) => readdirSync(join(ROOT, 'services', dir))
+      .map((f) => readFileSync(join(ROOT, 'services', dir, f), 'utf8'))).join('\n');
+    for (const v of SERVICE_TEMPLATE_VARS) assert.ok(anyTemplate.includes(`\${${v}}`), `node-init renders ${v}, which no template uses`);
   });
 
   // The agent spawns its provider CLI by name; nvm/fnm/volta npm -g bins and Claude Code's

@@ -580,7 +580,7 @@ function installService(osInfo, meshDir, config) {
 // ${VAR} substitution, and retires the legacy second listener.
 const SERVICE_TEMPLATE_VARS = [
   'HOME', 'NODE_BIN', 'NODE_BIN_DIR', 'NPM_BIN', 'NATS_SERVER_BIN', 'OPENCLAW_WORKSPACE', 'OPENCLAW_REPO_DIR',
-  'OPENCLAW_NATS', 'OPENCLAW_NATS_TOKEN', 'OPENCLAW_NODE_ID', 'OPENCLAW_NODE_ROLE',
+  'OPENCLAW_NATS', 'OPENCLAW_NODE_ID', 'OPENCLAW_NODE_ROLE',
   'OPENCLAW_DEPLOY_TRUSTED_KEYS', 'MESH_LLM_PROVIDER', 'LLM_MODEL', 'LLM_BASE_URL',
   'MESH_FOREMAN_ENFORCE', 'OPENCLAW_TIMEZONE',
 ];
@@ -599,7 +599,6 @@ function serviceTemplateVars({ meshDir, nodeId, config }) {
     OPENCLAW_WORKSPACE: env.OPENCLAW_WORKSPACE || path.join(home, '.openclaw', 'workspace'),
     OPENCLAW_REPO_DIR: meshDir,
     OPENCLAW_NATS: config.nats,
-    OPENCLAW_NATS_TOKEN: env.OPENCLAW_NATS_TOKEN || '',
     OPENCLAW_NODE_ID: nodeId,
     OPENCLAW_NODE_ROLE: env.OPENCLAW_NODE_ROLE || 'worker',
     OPENCLAW_DEPLOY_TRUSTED_KEYS: env.OPENCLAW_DEPLOY_TRUSTED_KEYS || '',
