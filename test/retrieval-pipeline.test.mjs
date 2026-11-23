@@ -353,10 +353,9 @@ describe('entitySearch', () => {
 
   it('returns chunks from sessions where matched entities appear', () => {
     const results = entitySearch(eDb, kDb, 'How does NATS work?', 10);
-    assert.ok(results.length > 0);
-    // NATS entity is mentioned in session-001 and session-002
-    const sessionIds = new Set(results.map(r => r.session_id));
-    assert.ok(sessionIds.has('session-001') || sessionIds.has('session-002'));
+    // NATS is mentioned in session-001 (salience 0.9) and session-002 (0.7)
+    assert.deepStrictEqual(results.map(r => `${r.session_id}:${r.turn_index}`),
+      ['session-001:1', 'session-001:0', 'session-002:1', 'session-002:0']);
     // Results have RRF-compatible shape
     assert.ok('chunk_id' in results[0]);
     assert.ok('snippet' in results[0]);
