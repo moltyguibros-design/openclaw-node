@@ -19,7 +19,7 @@ const path = require('node:path');
 
 const { tmpDir } = require('./helpers/tmp-dir.cjs');
 const TMP = tmpDir('role-validation-');
-process.env.OPENCLAW_OBS_DB = path.join(TMP, 'obs.db');
+process.env.OPENCLAW_OBS_DB = ':memory:';
 process.env.HOME = TMP;
 
 const { describe, it } = require('node:test');

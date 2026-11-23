@@ -60,7 +60,23 @@ test('tmpDir() removes its dirs on exit, even after a failure', () => {
 // per-run leak.
 const FIXED_WORK_DIR = /^mesh-agent-work-/;
 
+// obs-db flushes on exit after tmp-dir's remover has run, so an obs DB inside
+// a tmpDir() dir re-creates that dir.
+test('a test file on tmpDir() keeps the obs DB in memory', () => {
+  const offenders = readdirSync(TEST_DIR)
+    .filter((f) => /\.test\.(js|mjs|cjs)$/.test(f))
+    .filter((f) => {
+      const src = readFileSync(join(TEST_DIR, f), 'utf8');
+      return src.includes('helpers/tmp-dir.cjs') && /OPENCLAW_OBS_DB['"]?\s*[:=](?!\s*['"]:memory:['"])/.test(src);
+    });
+  assert.deepEqual(offenders, [], "set OPENCLAW_OBS_DB to ':memory:'");
+});
+
 for (const suite of [
+  'collab-max-rounds-review.test.js',
+  'collab-member-token.test.js',
+  'daemon-role-validation.test.js',
+  'daemon-terminal-task.test.js',
   'mesh-agent-metric-sink.test.js',
   'plan-cas.test.js',
   'mesh-agent-cli-cost.test.js',

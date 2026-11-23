@@ -14,12 +14,7 @@
  *
  * Run: node --test test/daemon-terminal-task.test.js
  */
-const fs = require('node:fs');
-const path = require('node:path');
-
-const { tmpDir } = require('./helpers/tmp-dir.cjs');
-const TMP = tmpDir('terminal-task-');
-process.env.OPENCLAW_OBS_DB = path.join(TMP, 'obs.db');
+process.env.OPENCLAW_OBS_DB = ':memory:';
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
