@@ -655,6 +655,8 @@ test('every quarantined or deleted skill is archived out of an installed workspa
   const quarantined = readdirSync(join(ROOT, 'skills/_quarantine'), { withFileTypes: true })
     .filter((d) => d.isDirectory()).map((d) => d.name);
   assert.ok(quarantined.includes('capability-evolver'));
+  // Every Drive request and the standing OAuth grant go through maton.ai.
+  assert.ok(quarantined.includes('google-drive'));
   for (const s of quarantined) {
     assert.equal(existsSync(join(ROOT, 'skills', s)), false, `${s} still ships`);
     assert.equal(existsSync(join(ROOT, 'skills/_quarantine', s, 'SKILL.md')), true, `${s} has no SKILL.md in _quarantine`);

@@ -42,6 +42,7 @@ skills auto-updater
 skills proactive-messages
 skills self-reflection
 skills ontology
+skills google-drive
 # Skills deleted from the repo.
 skills memory-setup
 skills memory-hygiene

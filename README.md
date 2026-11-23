@@ -7,7 +7,7 @@ Installable package for deploying an OpenClaw node. Includes the full infrastruc
 - **HyperAgent Protocol** — evidence-driven strategy loop: task telemetry, structured reflection, and human-gated strategy proposals
 - **Mission Control** — Next.js web dashboard (kanban, timeline, graph visualization, memory browser)
 - **Soul System** — multi-soul orchestration with trust registry and evolution
-- **Skill Library** — 90 skills for AI agent capabilities
+- **Skill Library** — 89 skills for AI agent capabilities
 - **Boot Compiler** — profile-aware boot artifact generation for multiple AI models
 - **ClawVault** — structured knowledge vault with search and handoffs
 - **Mesh Task Engine** — distributed task execution with Karpathy iteration (try → measure → keep/discard → retry)
@@ -183,7 +183,7 @@ The default mode removes only the skills this repo ships from `~/.openclaw/works
 ├── workspace/
 │   ├── bin/                  # All scripts (daemon, mesh-agent, etc.)
 │   ├── lib/                  # Shared libraries (rule-loader, harness, roles, plans)
-│   ├── skills/               # 90 skill definitions (_quarantine/ is never installed)
+│   ├── skills/               # 89 skill definitions (_quarantine/ is never installed)
 │   ├── memory/               # Daily logs, active tasks, archive
 │   ├── memory-vault/         # ClawVault structured knowledge
 │   ├── .boot/                # Compiled boot profiles
