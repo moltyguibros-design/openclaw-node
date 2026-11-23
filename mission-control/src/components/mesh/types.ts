@@ -57,7 +57,7 @@ export interface MeshNode {
   nats: NodeHealth["nats"] | null;
   cpuLoadPercent: number | null;
   isNatsHost: boolean;
-  peerConnectivity: "all_direct" | "some_relay" | "degraded" | "unknown";
+  peerConnectivity: "all_direct" | "some_relay" | "degraded" | "idle" | "unknown";
 }
 
 // Peers come from bin/mesh-health-publisher.js (latency is set only on the cycles

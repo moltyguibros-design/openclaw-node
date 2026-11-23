@@ -199,6 +199,22 @@ describe("GET /api/mesh/nodes", () => {
     expect(local.peerConnectivity).toBe("some_relay");
   });
 
+  // Idle peers have no live path, so they are neither direct nor relayed.
+  it("summarises connectivity over active peers only", async () => {
+    const connectivity = async (peer: Record<string, unknown>) => {
+      vi.resetModules();
+      const nodes = await nodesFor("test-node", {
+        Peer: { ...peer, idle: { HostName: "idle", Online: true, Active: false, CurAddr: "", Relay: "tor" } },
+      });
+      return (nodes["test-node"] as unknown as { peerConnectivity: string }).peerConnectivity;
+    };
+    expect(await connectivity({})).toBe("idle");
+    expect(await connectivity({ b: { HostName: "b", Online: true, Active: true, CurAddr: "", Relay: "nyc" } })).toBe("degraded");
+    expect(await connectivity({ a: { HostName: "a", Online: true, Active: true, CurAddr: "1.2.3.4:41641", Relay: "nyc" } })).toBe(
+      "all_direct",
+    );
+  });
+
   it("still treats the short hostname of an FQDN node id as local", async () => {
     const nodes = await nodesFor("calos.lan", { Self: { HostName: "calos" } });
     expect(nodes["calos"].health?.nodeId).toBe("calos.lan");

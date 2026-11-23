@@ -25,6 +25,7 @@ interface TailscalePeer {
   online: boolean;
   latencyMs: number | null;
   relay: boolean;
+  idle?: boolean;
 }
 
 // Shape of a peer entry in `tailscale status --json` output
@@ -96,7 +97,7 @@ interface MeshNode {
   nats: NodeHealth["nats"] | null;
   cpuLoadPercent: number | null;
   isNatsHost: boolean;
-  peerConnectivity: "all_direct" | "some_relay" | "degraded" | "unknown";
+  peerConnectivity: "all_direct" | "some_relay" | "degraded" | "idle" | "unknown";
 }
 
 // ── Local Cache ──────────────────────────────────────────────────────────
@@ -117,14 +118,16 @@ const STALE_OFFLINE = 120; // >120s → offline (matches KV TTL)
 /** Derive peer connectivity summary from tailscale peer data */
 function derivePeerConnectivity(
   health: NodeHealth | null
-): "all_direct" | "some_relay" | "degraded" | "unknown" {
+): "all_direct" | "some_relay" | "degraded" | "idle" | "unknown" {
   const peers = health?.tailscale?.peers;
   if (!peers || peers.length === 0) return "unknown";
   const onlinePeers = peers.filter((p) => p.online);
   if (onlinePeers.length === 0) return "degraded";
-  const relayCount = onlinePeers.filter((p) => p.relay).length;
+  const activePeers = onlinePeers.filter((p) => !p.idle);
+  if (activePeers.length === 0) return "idle";
+  const relayCount = activePeers.filter((p) => p.relay).length;
   if (relayCount === 0) return "all_direct";
-  if (relayCount < onlinePeers.length) return "some_relay";
+  if (relayCount < activePeers.length) return "some_relay";
   return "degraded";
 }
 

@@ -15,11 +15,16 @@ function formatNodeShort(nodeId: string): string {
 export function getPeerInfo(
   from: MeshNode,
   to: MeshNode
-): { latencyMs: number | null; relay: boolean; online: boolean } | null {
+): { latencyMs: number | null; relay: boolean; idle: boolean; online: boolean } | null {
   const toIp = to.tailscale?.selfIp || to.health?.tailscaleIp;
   const peer = (from.tailscale?.peers ?? []).find((p) => p.ip && p.ip === toIp);
   if (!peer) return null;
-  return { latencyMs: peer.latency?.latencyMs ?? null, relay: !peer.direct, online: !!peer.online };
+  return {
+    latencyMs: peer.latency?.latencyMs ?? null,
+    relay: !peer.direct && !peer.idle,
+    idle: !!peer.idle,
+    online: !!peer.online,
+  };
 }
 
 export function CellContent({
@@ -60,7 +65,10 @@ export function CellContent({
       {info.relay && (
         <span className="text-yellow-400/60 ml-1 text-[8px]">(relay)</span>
       )}
-      {!info.relay && latency !== null && (
+      {info.idle && (
+        <span className="text-muted-foreground/60 ml-1 text-[8px]">(idle)</span>
+      )}
+      {!info.relay && !info.idle && latency !== null && (
         <span className="text-green-400/40 ml-1 text-[8px]">(direct)</span>
       )}
     </span>

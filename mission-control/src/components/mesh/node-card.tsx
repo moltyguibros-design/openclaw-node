@@ -199,6 +199,8 @@ export function NodeCard({ node, isExpanded: controlledExpanded, onToggle }: Pro
                 <span className="text-yellow-400">⚡ Via relay</span>
               ) : node.peerConnectivity === "degraded" ? (
                 <span className="text-red-400">✗ Degraded</span>
+              ) : node.peerConnectivity === "idle" ? (
+                <span className="text-muted-foreground/60">○ Idle</span>
               ) : (
                 <span className="text-zinc-500">— No peer data</span>
               )}

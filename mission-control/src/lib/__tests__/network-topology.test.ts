@@ -63,7 +63,7 @@ it("labels an inactive Tailscale peer idle in the topology, not relayed or merel
   expect(peerRow(html, "peer-idle")).not.toContain("Connected");
 });
 
-it("labels an inactive Tailscale peer idle on the node card", () => {
+function cardNode(): MeshNode {
   const n = node("local", "darwin", "100.64.0.1", true);
   n.tailscale = { peers, selfIp: "100.64.0.1", natType: "unknown" };
   n.health = {
@@ -76,9 +76,23 @@ it("labels an inactive Tailscale peer idle on the node card", () => {
     stats: { tasksToday: 0, successRate: 0, tokenSpendTodayUsd: 0 },
     tailscale: n.tailscale,
   };
-  const html = renderToStaticMarkup(createElement(NodeCard, { node: n, isExpanded: true }));
+  return n;
+}
+
+it("labels an inactive Tailscale peer idle on the node card", () => {
+  const html = renderToStaticMarkup(createElement(NodeCard, { node: cardNode(), isExpanded: true }));
   expect(peerRow(html, "peer-direct")).toContain(">direct");
   expect(peerRow(html, "peer-relay")).toContain("relay (nyc)");
   expect(peerRow(html, "peer-idle")).toContain(">idle");
   expect(peerRow(html, "peer-idle")).not.toContain("relay");
+});
+
+it("shows a node whose online peers are all idle as Idle, not Direct or without peer data", () => {
+  const n = cardNode();
+  n.peerConnectivity = "idle";
+  const html = renderToStaticMarkup(createElement(NodeCard, { node: n, isExpanded: true }));
+  const row = html.slice(html.indexOf(">Connection<"), html.indexOf(">Data age<"));
+  expect(row).toContain("Idle");
+  expect(row).not.toContain("Direct");
+  expect(row).not.toContain("No peer data");
 });

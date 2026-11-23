@@ -33,7 +33,7 @@ describe("Connection Matrix peer lookup", () => {
       { hostname: "b", ip: "100.64.0.2", online: true, direct: true, relay: "nyc", latency: { latencyMs: 12 } },
     ]);
     const info = getPeerInfo(a, b);
-    expect(info).toEqual({ latencyMs: 12, relay: false, online: true });
+    expect(info).toEqual({ latencyMs: 12, relay: false, idle: false, online: true });
     const html = cell(info);
     expect(html).toContain("12.0ms");
     expect(html).toContain("(direct)");
@@ -45,8 +45,21 @@ describe("Connection Matrix peer lookup", () => {
       { hostname: "b", ip: "100.64.0.2", online: true, direct: false, relay: "nyc" },
     ]);
     const info = getPeerInfo(a, b);
-    expect(info).toEqual({ latencyMs: null, relay: true, online: true });
+    expect(info).toEqual({ latencyMs: null, relay: true, idle: false, online: true });
     expect(cell(info)).toContain("?");
+  });
+
+  it("labels an idle peer idle, neither relayed nor direct", () => {
+    const b = node("b-node", "100.64.0.2", []);
+    const a = node("a-node", "100.64.0.1", [
+      { hostname: "b", ip: "100.64.0.2", online: true, direct: false, idle: true, relay: null, latency: { latencyMs: 12 } },
+    ]);
+    const info = getPeerInfo(a, b);
+    expect(info).toEqual({ latencyMs: 12, relay: false, idle: true, online: true });
+    const html = cell(info);
+    expect(html).toContain("(idle)");
+    expect(html).not.toContain("(relay)");
+    expect(html).not.toContain("(direct)");
   });
 
   it("does not match a peer with no IP to a node with no Tailscale IP", () => {
