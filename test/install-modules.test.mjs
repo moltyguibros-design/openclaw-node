@@ -1566,6 +1566,44 @@ test('node_at_least compares the running Node with a MAJOR.MINOR.PATCH floor', (
   rmSync(root, { recursive: true, force: true });
 });
 
+// The minimax argv (`exec --auto [--model M] -- PROMPT`) is the Rust crate
+// minimax-cli's, from 0.7.0. The npm packages minimax-cli and @hmbown/minimax-cli
+// both install a `minimax` with no exec, which fails every task: the docs and the
+// menu named only "minimax-cli", and the operator installs this CLI by hand.
+test('every place that lists the minimax provider names the crate whose argv it runs', () => {
+  const comp = moduleSrc['components.sh'];
+  const row = (file) => readFileSync(join(ROOT, file), 'utf8').split('\n').find((l) => l.startsWith('| `MESH_LLM_PROVIDER`'));
+  const places = {
+    menu: comp.split('\n').find((l) => l.includes('6) minimax')),
+    'README.md': row('README.md'),
+    'docs/NODE_SPEC.md': row('docs/NODE_SPEC.md'),
+    'lib/llm-providers.js': readFileSync(join(ROOT, 'lib/llm-providers.js'), 'utf8').split('\n').find((l) => l.includes('─── MiniMax')),
+  };
+  for (const [place, line] of Object.entries(places)) {
+    assert.ok(line, `${place}: the minimax entry must be found`);
+    assert.match(line, /minimax-cli >=0\.7/, place);
+  }
+  for (const place of ['menu', 'README.md', 'docs/NODE_SPEC.md']) assert.match(places[place], /cargo install minimax-cli --locked/, place);
+  assert.doesNotMatch(comp, /minimax\)\s+PKG=/, 'no npm package ships an exec-capable minimax');
+
+  const start = comp.indexOf('    BIN="$(provider_binary "$PROVIDER")"');
+  const block = comp.slice(start, comp.indexOf('    export OPENCLAW_PROVIDER="$PROVIDER"'));
+  const envSh = moduleSrc['env.sh'];
+  const binaryFn = envSh.slice(envSh.indexOf('provider_binary() {'), envSh.indexOf('\n}\n', envSh.indexOf('provider_binary() {')) + 3);
+  const root = tmpDir('oc-provider-minimax-');
+  mkdirSync(join(root, 'bin'));
+  writeFileSync(join(root, 'bin/npm'), `#!/bin/sh\necho "$*" >> "${root}/npm.log"\n`, { mode: 0o755 });
+  const r = spawnSync('/bin/bash', ['-c', `source "${join(ROOT, 'scripts/install/helpers.sh')}"
+DRY_RUN=false OS=macos PROVIDER=minimax
+${binaryFn}
+${block}`, 'install.sh'], { encoding: 'utf8', env: { HOME: root, PATH: `${join(root, 'bin')}:/usr/bin:/bin` } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(existsSync(join(root, 'npm.log')), false);
+  assert.match(r.stdout, /cargo install minimax-cli --locked/);
+  assert.doesNotMatch(r.stdout, /Mind seated/);
+  rmSync(root, { recursive: true, force: true });
+});
+
 // Virgin-Mac wave 2 (2026-09-08): the embedder prefetch failed and printed only
 // "prefetch failed", discarding core.mjs's precise cause (403 / offline / disk).
 // A cold embedder then fails MEM-L2-INJECT on the next gate run with no

@@ -302,7 +302,7 @@ else
       echo "    3) gemini    (Gemini CLI)"
       echo "    4) deepseek  (DeepSeek dsh; needs Node >=24.9.0)"
       echo "    5) kimi      (Kimi Code CLI; needs Node >=22.19.0)"
-      echo "    6) minimax   (minimax-cli)"
+      echo "    6) minimax   (Rust crate minimax-cli >=0.7: cargo install minimax-cli --locked)"
       echo "    7) aider"
       echo "    8) ollama    (local model — solo tasks only; grappe workers refuse it, D11)"
       echo "    9) none for now (seat it later with: bash install.sh --update --provider=NAME)"
@@ -351,6 +351,9 @@ else
       command -v "$BIN" >/dev/null 2>&1 && info "Mind seated: $PROVIDER ($BIN)" || warn "'$BIN' still not on PATH"
     else
       warn "$PROVIDER chosen but the '$BIN' CLI is not on PATH — install it (or set $BIN_VAR) and re-run: bash $0 --update"
+      if [ "$PROVIDER" = minimax ]; then
+        warn "  minimax is the Rust crate minimax-cli >=0.7: cargo install minimax-cli --locked (the npm minimax-cli and @hmbown/minimax-cli have no exec)"
+      fi
     fi
     export OPENCLAW_PROVIDER="$PROVIDER"
     export MESH_LLM_PROVIDER="$PROVIDER"
