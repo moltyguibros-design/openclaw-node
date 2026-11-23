@@ -47,10 +47,11 @@ const REQUIRED_PRODUCTION_WIRES = [
   { factory: 'createIdentityRegistry', calledIn: 'lib/federation-startup.mjs' },
   { factory: 'createSeenEventCache',   calledIn: 'lib/federation-startup.mjs' },
 
-  // Subscriber + in-process consolidation scheduler are wired from the same
-  // federation section of the one daemon.
+  // The subscriber is wired from the federation section of the one daemon.
+  // Consolidation cycles are the standalone timer's (its CLI builds the
+  // scheduler); the daemon only broadcasts (broadcastConsolidation above).
   { factory: 'createSubscriber',       calledIn: 'workspace-bin/memory-daemon.mjs' },
-  { factory: 'createConsolidationScheduler', calledIn: 'workspace-bin/memory-daemon.mjs' },
+  { factory: 'createConsolidationScheduler', calledIn: 'bin/consolidation-scheduler.mjs' },
   // STUB_AUDIT wiring: Channel 5 (spreading activation) — the daemon's
   // getGraphCache() constructs it and both the inject server and federation
   // reuse the instance. (The extraction trigger + runFlush wires are locked

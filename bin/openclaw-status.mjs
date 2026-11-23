@@ -115,9 +115,10 @@ const subsystems = [
     notWiredFix: 'Daemon must import + call createExtractionTrigger(nc, nodeId, { runFlush }). Without this, the PreCompact hooks publish to a subject with no subscriber.',
   },
   {
-    name: 'Consolidation scheduler',
-    check: () => isInvoked(daemonSrc, 'createConsolidationScheduler'),
-    notWiredFix: 'Wire createConsolidationScheduler in daemon',
+    name: 'Federation: consolidation broadcast',
+    // The cycle itself is the openclaw-consolidation-scheduler timer unit.
+    check: () => isInvoked(daemonSrc, 'broadcastConsolidation'),
+    notWiredFix: 'Daemon must call federation.broadcastConsolidation() on the consolidation cadence',
   },
   {
     name: 'Memory budget event recorder',

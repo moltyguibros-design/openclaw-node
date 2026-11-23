@@ -52,7 +52,7 @@ import { createExtractionTrigger } from '../lib/extraction-trigger.mjs';
 import { ensureSharedStream, inspectSharedStream, verifySharedStreamConfig } from '../lib/shared-event-stream.mjs';
 import { NATS_RECONNECT_OPTS } from '../lib/federation-resilience.mjs';
 import { createConcurrencyGuard } from '../lib/concurrency-guard.mjs';
-import { exportStateSnapshot, getState as getOllamaQueueState, setStateObserver, markExternalJob, clearExternalJob, foldWorkerQueueState, applyWorkerLlmMessage } from '../lib/ollama-queue.mjs';
+import { exportStateSnapshot, setStateObserver, markExternalJob, clearExternalJob, foldWorkerQueueState, applyWorkerLlmMessage } from '../lib/ollama-queue.mjs';
 import { loadEventSchemas } from '../lib/event-schemas.mjs';
 import { createMemoryWatcher, runStoreHealthProbes, appendWatcherRecord } from '../lib/memory-watcher.mjs';
 import { initDatabase as initKnowledgeDb } from '../lib/mcp-knowledge/core.mjs';
@@ -1319,13 +1319,14 @@ runSubprocess = tracer.wrapAsync('runSubprocess', runSubprocess, { tier: 2 });
 //     registry + seen-event replay cache + broadcaster/offerer/acceptor
 //     (F-N1/N2/N3). Offerer+acceptor need both DBs; broadcast-only otherwise.
 //     The :7893 inject server drives it per prompt (broadcast, acceptance,
-//     [peer-memory] block) and the scheduler below broadcasts after a cycle.
+//     [peer-memory] block) and a timer below broadcasts consolidated context.
 //   - memory-subscriber (bin/memory-subscriber.mjs): still gated on
 //     OPENCLAW_SUBSCRIBER_PROJECTION=stub (F-P107/F-P113 — no Block 11
 //     projection yet).
-//   - in-process consolidation scheduler (bin/consolidation-scheduler.mjs):
-//     the multi-node mode the dormant daemon wired. Single-node production
-//     keeps using the standalone openclaw-consolidation-scheduler timer unit.
+//   - a consolidation broadcast every DEFAULT_INTERVAL_MS. The cycle itself is
+//     the openclaw-consolidation-scheduler timer every node runs, federation
+//     on or off: a second, in-process scheduler ran cycles beside it on the
+//     same state.db and vault, without events.
 // The graph cache and extraction trigger are NOT duplicated here — the live
 // daemon already wires both (getGraphCache above, createExtractionTrigger in
 // initNatsSubsystems); federation reuses the same graphCache instance.
@@ -1335,7 +1336,7 @@ const federationState = {
   started: false,
   federation: null,
   subscriber: null,
-  scheduler: null,
+  broadcastTimer: null,
   knowledgeDb: null,
   extractionDb: null,
 };
@@ -1402,23 +1403,12 @@ async function initFederationSubsystems(nc) {
     log(`[federation] subscriber startup failed (${err.message}) — continuing without subscriber`);
   }
 
-  // In-process consolidation scheduler — periodic cycle with hard-cap
-  // (F-N100: signal propagates through runConsolidationCycle to each step).
-  try {
-    const { createConsolidationScheduler } = await import('../bin/consolidation-scheduler.mjs');
-    federationState.scheduler = createConsolidationScheduler({
-      dbPath: extractionDbPath,
-      getStateFn: getOllamaQueueState,
-      log: (m) => log(m),
-      onCycleComplete: () => federationState.federation?.broadcastConsolidation(),
-    });
-    if (federationState.extractionDb) {
-      federationState.scheduler.start();
-      log('[federation] consolidation scheduler started (in-process)');
-    }
-  } catch (err) {
-    log(`[federation] consolidation scheduler startup failed (${err.message}) — continuing without it`);
-  }
+  const { DEFAULT_INTERVAL_MS } = await import('../bin/consolidation-scheduler.mjs');
+  federationState.broadcastTimer = setInterval(() => {
+    federationState.federation?.broadcastConsolidation()
+      .catch((err) => log(`[federation] consolidation broadcast failed: ${err.message}`));
+  }, DEFAULT_INTERVAL_MS);
+  federationState.broadcastTimer.unref();
 
   log('[federation] init complete');
 }
@@ -1645,11 +1635,9 @@ async function main() {
     if (extractionTrigger) {
       extractionTrigger.stop();
     }
-    // Federation teardown (no-ops unless OPENCLAW_FEDERATION=1 wired them) —
-    // same order as the retired daemon: scheduler, subscriber, then federation.
-    if (federationState.scheduler) {
-      try { await federationState.scheduler.stop(); } catch (_) {}
-    }
+    // Federation teardown (no-ops unless OPENCLAW_FEDERATION=1 wired them):
+    // broadcast timer, subscriber, then federation.
+    if (federationState.broadcastTimer) clearInterval(federationState.broadcastTimer);
     if (federationState.subscriber) {
       try { await federationState.subscriber.stop(); } catch (_) {}
     }

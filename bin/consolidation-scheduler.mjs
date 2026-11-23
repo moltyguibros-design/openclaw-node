@@ -8,7 +8,7 @@
  * then requests cancellation after 5 minutes and waits for local completion.
  *
  * Idle detection has two paths:
- *   - In-process: reads ollama-queue.getState() directly (when imported by daemon)
+ *   - In-process: reads ollama-queue.getState() directly (an importer passes getStateFn)
  *   - Standalone: reads the daemon's fresh exported queue-state snapshot
  *
  * Usage:

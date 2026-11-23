@@ -110,7 +110,7 @@ Written to `~/.openclaw/openclaw.env` by install (generated where marked ⚙; RA
 | **openclaw-nats** (single-node) | **yes** | nats-server binary, rendered conf | the loopback message bus + JetStream KV. Everything else talks through it |
 | openclaw-nats-1/2/3 | no (upgrade path) | operator (federation step 1.5 runbook) | R=3 cluster for production resilience |
 | openclaw-memory-daemon | yes | workspace tree, ollama (degrades honestly) | watches Claude transcripts → extraction → memory files/DB → event spine. Unit execs `workspace-bin/memory-daemon.mjs`; federation wiring (broadcaster/offerer/acceptor + subscriber) is built into the same daemon behind `OPENCLAW_FEDERATION=1` (default off, dormant until multi-node lands) |
-| openclaw-consolidation-scheduler | yes (timer 30 min) | memory-daemon DB | idle-time memory consolidation cycles |
+| openclaw-consolidation-scheduler | yes (timer 30 min) | memory-daemon DB | idle-time memory consolidation cycles; the one consolidation owner, also with federation on (the daemon then only broadcasts on the same cadence) |
 | openclaw-mesh-task-daemon | yes (lead) | bus, repo node_modules | task coordinator: task KV, collab/circling sessions, plan waves |
 | openclaw-mesh-bridge | yes (lead) | bus | kanban ⇄ mesh dispatch + result sync |
 | openclaw-mesh-health-publisher | yes | bus | heartbeats node health into MESH_NODE_HEALTH KV |
