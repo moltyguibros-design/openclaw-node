@@ -130,6 +130,18 @@ describe('coreServiceRoster — Linux', () => {
   });
 });
 
+describe('coreServices — one node-up definition on both platforms', () => {
+  // macOS counted the autostart-off gateway, pinning node uptime below 100% on a healthy node.
+  it('darwin and linux name the same services, all of them installer-autostarted', () => {
+    const manifest = JSON.parse(fs.readFileSync(new URL('../services/service-manifest.json', import.meta.url), 'utf8'));
+    const names = (platform) => coreServices(platform).map((s) => s.replace(/^ai\.openclaw\./, '').replace(/^openclaw-/, '')).sort();
+    assert.deepEqual(names('darwin'), names('linux'));
+    for (const name of names('darwin')) {
+      assert.equal(manifest.find((s) => s.name === `openclaw-${name}`)?.autostart, true, `${name} is not autostart:true`);
+    }
+  });
+});
+
 describe('coreServiceRoster — macOS', () => {
   const launchctl = (labels) => (cmd, args) => {
     assert.equal(cmd, 'launchctl');
