@@ -51,6 +51,11 @@ const lastHeartbeat = new Map();
 const STALE_WARNING_MS = 2 * 60 * 1000; // 2 minutes without heartbeat → warn on card
 const HEARTBEAT_CHECK_INTERVAL = 30000;  // check every 30s
 
+function freeSlot(taskId) {
+  if (dispatched.delete(taskId)) log(`SLOT FREED: ${taskId} (${dispatched.size} remaining)`);
+  lastHeartbeat.delete(taskId);
+}
+
 // ── Logging ─────────────────────────────────────────
 
 const _logger = require('../lib/logger').createLogger('mesh-bridge');
@@ -137,6 +142,7 @@ async function reconcile() {
           // Don't bounce the card back to blocked. Just log and skip.
           log(`RECONCILE: ${task.task_id} shows running but not in daemon — skipping (possible MC drag artifact)`);
         }
+        freeSlot(task.task_id);
         continue;
       }
 
@@ -144,18 +150,22 @@ async function reconcile() {
         case 'completed':
           log(`RECONCILE: ${task.task_id} already completed — processing result`);
           handleCompleted(task.task_id, meshTask);
+          freeSlot(task.task_id);
           break;
         case 'failed':
           log(`RECONCILE: ${task.task_id} already failed — processing result`);
           handleFailed(task.task_id, meshTask, 'failed');
+          freeSlot(task.task_id);
           break;
         case 'released':
           log(`RECONCILE: ${task.task_id} was released — processing result`);
           handleFailed(task.task_id, meshTask, 'released');
+          freeSlot(task.task_id);
           break;
         case 'cancelled':
           log(`RECONCILE: ${task.task_id} was cancelled`);
           handleCancelled(task.task_id, meshTask);
+          freeSlot(task.task_id);
           break;
         default:
           // Still queued, claimed, or running — resume tracking
@@ -640,9 +650,7 @@ function handleEvent(eventType, taskId, meshTask) {
         log(`EVENT: ${eventType} ${taskId}`);
         return;
     }
-    dispatched.delete(taskId);
-    log(`SLOT FREED: ${taskId} (${dispatched.size} remaining)`);
-    lastHeartbeat.delete(taskId);
+    freeSlot(taskId);
   } catch (err) {
     log(`ERROR handling event ${eventType} for ${taskId}: ${err.message}`);
   }
@@ -964,7 +972,11 @@ async function main() {
   log('Bridge stopped.');
 }
 
-module.exports = { formatTaskYaml };
+module.exports = {
+  formatTaskYaml,
+  // test/mesh-bridge-reconcile.test.mjs
+  __test: { reconcile: () => reconcile(), dispatched, lastHeartbeat, setNc(c) { nc = c; } },
+};
 
 if (require.main === module) {
   process.on('SIGINT', () => { running = false; log('SIGINT received...'); });
