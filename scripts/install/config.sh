@@ -261,8 +261,8 @@ if [ -n "$CLUSTER_PEERS" ]; then
     fi
     # Persist: replica target, cluster pass, the peers and bind address (re-renders
     # on --update), and point every local consumer at the bound address (the
-    # server no longer listens on 127.0.0.1). Exported too: the units and
-    # .env.local rendered later in this run read the environment, not the file.
+    # server no longer listens on 127.0.0.1). Exported too: the units rendered
+    # later in this run read the environment, not the file.
     for kv in "OPENCLAW_KV_REPLICAS=$KV_REPLICAS" "OPENCLAW_NATS_CLUSTER_PASS=$OPENCLAW_NATS_CLUSTER_PASS" \
               "OPENCLAW_NATS_CLUSTER_PEERS=$CLUSTER_PEERS" "OPENCLAW_NATS_CLUSTER_BIND=$CLUSTER_BIND" \
               "OPENCLAW_NATS=nats://$CLUSTER_BIND:4222"; do

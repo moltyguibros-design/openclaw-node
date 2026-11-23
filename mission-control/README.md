@@ -20,8 +20,11 @@ The installer writes `.env.local`:
 - `DB_PATH`: the Mission Control SQLite database (default
   `$WORKSPACE_ROOT/projects/mission-control/data/mission-control.db`).
 - `OPENCLAW_HOME`: the OpenClaw home (default `~/.openclaw`).
-- `OPENCLAW_NATS`, `OPENCLAW_NATS_TOKEN`, `OPENCLAW_NATS_AUTH`: mesh connectivity. When unset,
-  each falls back to `~/.openclaw/openclaw.env`.
+
+Mesh connectivity (`OPENCLAW_NATS`, `OPENCLAW_NATS_TOKEN`, `OPENCLAW_NATS_AUTH`) and the voice key
+(`GOOGLE_API_KEY`) are read from `$OPENCLAW_HOME/openclaw.env`, not from `.env.local`: edit them
+there and restart Mission Control. `install.sh --update` removes the copies older installs wrote
+into `.env.local`.
 
 ## Deploy
 

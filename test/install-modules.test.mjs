@@ -2043,6 +2043,69 @@ exit 0
   assert.match(moduleSrc['env.sh'], /export NODE_BIN_DIR="\$\(dirname "\$NODE_BIN"\)"/);
 });
 
+// .env.local froze the bus URL, token, auth mode and voice key on the first install, and
+// Next loads it into process.env ahead of openclaw.env: every later openclaw.env edit
+// (council token, nkey mode, GOOGLE_API_KEY) never reached Mission Control.
+test('Mission Control .env.local carries no bus or voice settings, and --update strips the frozen copies', () => {
+  const comp = moduleSrc['components.sh'];
+  const block = comp.slice(comp.indexOf('# Create .env.local for MC if not exists'),
+    comp.indexOf('# Ensure data directory exists for SQLite'));
+  assert.ok(block.includes('write_file'), 'the .env.local step must be found');
+  const root = tmpDir('openclaw-mc-envlocal-');
+  const mc = join(root, 'mc');
+  mkdirSync(mc, { recursive: true });
+  const run = (dryRun = 'false') => spawnSync('bash', ['-c', `set -euo pipefail
+source "${join(ROOT, 'scripts/install/helpers.sh')}"
+DRY_RUN=${dryRun}
+MC_DIR="${mc}" WORKSPACE="${root}/ws" OPENCLAW_ROOT="${root}/home" ENV_FILE="${root}/openclaw.env"
+OPENCLAW_NATS=nats://127.0.0.1:4222 OPENCLAW_NATS_TOKEN=tok OPENCLAW_NATS_AUTH=token GOOGLE_API_KEY=gk
+${block}`], { encoding: 'utf8' });
+  const frozen = /^(OPENCLAW_NATS|OPENCLAW_NATS_TOKEN|OPENCLAW_NATS_AUTH|GEMINI_API_KEY)=/m;
+  writeFileSync(join(root, 'openclaw.env'), 'A=1\n', { mode: 0o600 });
+
+  const fresh = run();
+  assert.equal(fresh.status, 0, fresh.stderr + fresh.stdout);
+  const rendered = readFileSync(join(mc, '.env.local'), 'utf8');
+  assert.match(rendered, /^OPENCLAW_HOME=.*\/home$/m);
+  assert.doesNotMatch(rendered, frozen);
+  assert.equal(statSync(join(mc, '.env.local')).mode & 0o777, 0o600);
+
+  const legacy = [
+    '# Mission Control Environment', `WORKSPACE_ROOT=${root}/ws`, `OPENCLAW_HOME=${root}/home`, 'DB_PATH=/x/data/mission-control.db', '',
+    '# NATS (mesh connectivity — resolved from openclaw.env if not set here)',
+    'OPENCLAW_NATS=nats://127.0.0.1:4222', 'OPENCLAW_NATS_TOKEN=old', 'OPENCLAW_NATS_AUTH=token', '',
+    '# TTS (optional — falls back to Edge TTS if missing)', 'GEMINI_API_KEY=handset', 'OPENCLAW_NATS_TOKEN_HINT=kept', '',
+  ].join('\n');
+  writeFileSync(join(mc, '.env.local'), legacy, { mode: 0o600 });
+  const dry = run('true');
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.equal(readFileSync(join(mc, '.env.local'), 'utf8'), legacy, '--dry-run leaves the file as it is');
+  assert.equal(readFileSync(join(root, 'openclaw.env'), 'utf8'), 'A=1\n');
+
+  const update = run();
+  assert.equal(update.status, 0, update.stderr + update.stdout);
+  const after = readFileSync(join(mc, '.env.local'), 'utf8');
+  assert.doesNotMatch(after, frozen);
+  for (const kept of [`WORKSPACE_ROOT=${root}/ws`, `OPENCLAW_HOME=${root}/home`, 'DB_PATH=/x/data/mission-control.db', 'OPENCLAW_NATS_TOKEN_HINT=kept']) {
+    assert.ok(after.split('\n').includes(kept), `${kept} must survive the cleanup`);
+  }
+  assert.match(update.stdout, /\.env\.local/);
+  assert.equal(statSync(join(mc, '.env.local')).mode & 0o777, 0o600, 'the cleanup keeps mode 600');
+  assert.equal(readFileSync(join(root, 'openclaw.env'), 'utf8'), 'A=1\nGOOGLE_API_KEY=handset\n',
+    'a voice key only .env.local held moves to openclaw.env instead of being lost');
+
+  const again = run();
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(readFileSync(join(mc, '.env.local'), 'utf8'), after, 'a clean file is left alone');
+
+  writeFileSync(join(mc, '.env.local'), 'GEMINI_API_KEY=stale\n', { mode: 0o600 });
+  const owned = run();
+  assert.equal(owned.status, 0, owned.stderr);
+  assert.equal(readFileSync(join(mc, '.env.local'), 'utf8'), '');
+  assert.equal(readFileSync(join(root, 'openclaw.env'), 'utf8'), 'A=1\nGOOGLE_API_KEY=handset\n',
+    'a GOOGLE_API_KEY already in openclaw.env wins over the stale copy');
+});
+
 // session-stop.sh was wired to Stop, which Claude Code fires after every assistant turn,
 // so each turn appended a false "Session ended" block to the day's memory log.
 test('session-stop.sh runs on SessionEnd, and an --update merge drops its old Stop entry', (t) => {

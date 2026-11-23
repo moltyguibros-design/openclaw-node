@@ -543,7 +543,8 @@ every machine:
    password user, and reloads nats-server), then restart the daemons.
 2. **Workers:** set `OPENCLAW_NATS_AUTH=nkey` in `openclaw.env`, restart the daemons. Workers
    authenticate with their own key and can no longer publish `mesh.deploy.trigger`.
-3. **Mission Control:** set `OPENCLAW_NATS_AUTH=nkey` in `mission-control/.env.local`, restart.
+3. **Mission Control:** reads the mode from the same `openclaw.env` (steps 1 and 2 cover it);
+   restart it.
 4. **Lead:** set `OPENCLAW_NATS_LEGACY_USER=0`, run `--sync-nats` again (drops the password
    user), and set `OPENCLAW_NATS_AUTH=nkey-strict` everywhere. Anything still sending the old
    token now fails with `Authorization Violation` in `~/.openclaw/logs/nats.err`.

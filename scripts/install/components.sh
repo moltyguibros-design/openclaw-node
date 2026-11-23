@@ -186,24 +186,36 @@ else
 fi
 
 # Create .env.local for MC if not exists
+# The bus URL, token, auth mode and voice key are NOT written here: Next loads
+# .env.local ahead of openclaw.env (OPENCLAW_HOME), so a copy froze them at their
+# install-day values and every later openclaw.env edit never reached MC.
 if [ ! -f "$MC_DIR/.env.local" ]; then
   write_file "$MC_DIR/.env.local" << MCENV
 # Mission Control Environment
 WORKSPACE_ROOT=$WORKSPACE
 OPENCLAW_HOME=$OPENCLAW_ROOT
 DB_PATH=$MC_DIR/data/mission-control.db
-
-# NATS (mesh connectivity — resolved from openclaw.env if not set here)
-OPENCLAW_NATS=${OPENCLAW_NATS:-}
-OPENCLAW_NATS_TOKEN=${OPENCLAW_NATS_TOKEN:-}
-OPENCLAW_NATS_AUTH=${OPENCLAW_NATS_AUTH:-token}
-
-# TTS (optional — falls back to Edge TTS if missing)
-GEMINI_API_KEY=${GOOGLE_API_KEY:-}
 MCENV
-  # Holds the NATS token and an API key — never leave it at the default umask.
   run chmod 600 "$MC_DIR/.env.local"
   info "Created Mission Control .env.local (mode 600)"
+fi
+MC_FROZEN_KEYS='^(OPENCLAW_NATS|OPENCLAW_NATS_TOKEN|OPENCLAW_NATS_AUTH|GEMINI_API_KEY)='
+if grep -qE "$MC_FROZEN_KEYS" "$MC_DIR/.env.local" 2>/dev/null; then
+  if $DRY_RUN; then
+    echo "  [dry-run] would remove the frozen OPENCLAW_NATS*/GEMINI_API_KEY lines from $MC_DIR/.env.local"
+  else
+    # A voice key only .env.local held (set by hand) moves to openclaw.env instead of being lost.
+    mc_voice_key="$(sed -n 's/^GEMINI_API_KEY=//p' "$MC_DIR/.env.local" | tail -n 1)"
+    if [ -n "$mc_voice_key" ] && [ -f "$ENV_FILE" ] && ! grep -q '^GOOGLE_API_KEY=.' "$ENV_FILE"; then
+      set_env_key GOOGLE_API_KEY "$mc_voice_key"
+      info "Moved Mission Control's GEMINI_API_KEY to GOOGLE_API_KEY in $ENV_FILE"
+    fi
+    mc_env_tmp="$(mktemp "$MC_DIR/.env.local.XXXXXX")"
+    grep -vE "$MC_FROZEN_KEYS" "$MC_DIR/.env.local" > "$mc_env_tmp" || true
+    cat "$mc_env_tmp" > "$MC_DIR/.env.local"
+    rm -f "$mc_env_tmp"
+    info "Removed the frozen OPENCLAW_NATS, OPENCLAW_NATS_TOKEN, OPENCLAW_NATS_AUTH and GEMINI_API_KEY lines from Mission Control .env.local: openclaw.env is their only source"
+  fi
 fi
 
 # Ensure data directory exists for SQLite

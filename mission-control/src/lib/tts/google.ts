@@ -1,4 +1,5 @@
 import type { TtsProvider, TtsRequest, TtsResponse } from "./types";
+import { resolveEnvKey } from "../nats-auth";
 
 const GEMINI_TTS_ENDPOINT =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent";
@@ -33,9 +34,9 @@ export function createGoogleTtsProvider(): TtsProvider {
   return {
     name: "google",
     async synthesize(req: TtsRequest): Promise<TtsResponse> {
-      const apiKey = process.env.GEMINI_API_KEY;
+      const apiKey = process.env.GEMINI_API_KEY || resolveEnvKey("GOOGLE_API_KEY");
       if (!apiKey) {
-        throw new Error("GEMINI_API_KEY not configured");
+        throw new Error("GOOGLE_API_KEY not configured (openclaw.env)");
       }
 
       const response = await fetch(GEMINI_TTS_ENDPOINT, {
