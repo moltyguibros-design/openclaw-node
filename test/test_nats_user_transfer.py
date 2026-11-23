@@ -20,6 +20,9 @@ import test_journal_hold as hold_fixture
 from journal_hold import JournaledHold, describe
 
 
+owner_fixture = unittest.skipIf(os.geteuid() == 0, 'owner fixtures need a non-root uid')
+
+
 class UserTransferTest(unittest.TestCase):
     def test_root_validates_excluded_job_schema_and_boot(self):
         prior = fixture_module.full_node_inventory()
@@ -91,6 +94,7 @@ class UserTransferTest(unittest.TestCase):
         transfer = journal.transfer_nats(transaction, hold, observe)
         return fixture, journal, transaction, transfer
 
+    @owner_fixture
     def test_root_refuses_live_owner_then_pins_exact_transfer(self):
         fixture, journal, transaction, transfer = self.prepared()
         with patch.object(module, 'boot_identity', return_value='boot-a'):
@@ -102,6 +106,7 @@ class UserTransferTest(unittest.TestCase):
                 self.assertEqual(reader.observation['baseline_sha256'], journal.records[0]['sha256'])
                 self.assertEqual(reader.recheck(), reader.observation)
 
+    @owner_fixture
     def test_root_refuses_a_changed_head_and_wrong_boot(self):
         fixture, journal, transaction, _ = self.prepared()
         journal.close()
@@ -116,6 +121,7 @@ class UserTransferTest(unittest.TestCase):
                 with self.assertRaisesRegex(module.Refused, 'journal chain differs'):
                     reader.recheck()
 
+    @owner_fixture
     def test_root_refuses_pending_file_and_mismatched_node_receipt(self):
         fixture, journal, transaction, _ = self.prepared()
         journal.close()
@@ -133,6 +139,7 @@ class UserTransferTest(unittest.TestCase):
             with self.assertRaisesRegex(module.Refused, 'node receipt differs'):
                 module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
+    @owner_fixture
     def test_root_requires_transfer_intent_to_be_the_last_record(self):
         fixture, journal, transaction, _ = self.prepared()
         journal._append_durable('verified', intent=999, unit='nats', action='unload',
@@ -142,6 +149,7 @@ class UserTransferTest(unittest.TestCase):
             with self.assertRaisesRegex(module.Refused, 'transfer intent differs'):
                 module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
+    @owner_fixture
     def test_root_refuses_transfer_without_original_hold_certificate(self):
         fixture = fixture_module.JournalTests('test_nats_transfer_freezes_user_journal_before_root_outcome')
         fixture.setUp()
@@ -155,6 +163,7 @@ class UserTransferTest(unittest.TestCase):
             with self.assertRaisesRegex(module.Refused, 'no unique original execution hold'):
                 module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
+    @owner_fixture
     def test_root_refuses_replaced_owner_lock_during_recheck(self):
         fixture, journal, transaction, _ = self.prepared()
         journal.close()
@@ -166,6 +175,7 @@ class UserTransferTest(unittest.TestCase):
                 with self.assertRaisesRegex(module.Refused, 'lock changed during root admission'):
                     reader.recheck()
 
+    @owner_fixture
     def test_root_tolerates_owner_finder_metadata(self):
         fixture, journal, transaction, transfer = self.prepared()
         journal.close()
@@ -176,6 +186,7 @@ class UserTransferTest(unittest.TestCase):
             with module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction) as reader:
                 self.assertEqual(reader.observation['head'], transfer['sha256'])
 
+    @owner_fixture
     def test_root_refuses_unknown_forward_event(self):
         fixture, journal, transaction, _ = self.prepared('restoration-intent')
         journal.close()
@@ -183,6 +194,7 @@ class UserTransferTest(unittest.TestCase):
             with self.assertRaisesRegex(module.Refused, 'outside the forward window'):
                 module.UserTransfer(fixture.node_lock, fixture.root, os.getuid(), transaction)
 
+    @owner_fixture
     @unittest.skipUnless(sys.platform == 'darwin', 'requires the native execution-hold observer')
     def test_root_reads_real_gate_and_hold_transfer(self):
         fixture = fixture_module.JournalTests('test_nats_transfer_freezes_user_journal_before_root_outcome')
