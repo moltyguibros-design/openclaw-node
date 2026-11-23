@@ -16,6 +16,7 @@ import {
   DEFAULT_TTL_MINUTES,
   MIN_THEMES_FOR_BROADCAST,
 } from '../lib/broadcast-emitter.mjs';
+import { createExtractionStore } from '../lib/extraction-store.mjs';
 
 // ── Mock NATS connection ──────────────────────────────────────────────────
 
@@ -33,6 +34,21 @@ function createMockNc() {
     },
   };
 }
+
+function seedStore({ themes = {}, entities = {} }) {
+  const { db } = createExtractionStore({ dbPath: ':memory:' });
+  const now = new Date().toISOString();
+  const theme = db.prepare('INSERT INTO themes (label, first_seen, last_seen, private) VALUES (?, ?, ?, ?)');
+  for (const [label, priv] of Object.entries(themes)) theme.run(label, now, now, priv);
+  const entity = db.prepare('INSERT INTO entities (name, type, first_seen, last_seen, private) VALUES (?, ?, ?, ?, ?)');
+  for (const [name, priv] of Object.entries(entities)) entity.run(name, 'tech', now, now, priv);
+  return db;
+}
+
+const PUBLISHED = seedStore({
+  themes: { memory: 0, federation: 0, broadcast: 0, a: 0, b: 0, c: 0 },
+  entities: { NATS: 0, JetStream: 0 },
+});
 
 // ── inferIntensity ────────────────────────────────────────────────────────
 
@@ -121,7 +137,7 @@ describe('broadcast-emitter / inferProblemClass', () => {
 describe('broadcast-emitter / maybeBroadcast', () => {
   it('suppresses when themes < 3', async () => {
     const nc = createMockNc();
-    const b = createBroadcaster(nc, 'test-node');
+    const b = createBroadcaster(nc, 'test-node', { extractionDb: PUBLISHED });
     const result = await b.maybeBroadcast('hello', { llmAnalysis: { themes: ['a', 'b'], entities: [] } });
     assert.equal(result.suppressed, true);
     assert.equal(result.reason, 'insufficient_themes');
@@ -131,7 +147,7 @@ describe('broadcast-emitter / maybeBroadcast', () => {
 
   it('emits when themes >= 3 and schema validates', async () => {
     const nc = createMockNc();
-    const b = createBroadcaster(nc, 'test-node');
+    const b = createBroadcaster(nc, 'test-node', { extractionDb: PUBLISHED });
     const analysis = { llmAnalysis: { themes: ['memory', 'federation', 'broadcast'], entities: ['NATS'] } };
     const result = await b.maybeBroadcast('How do I fix this?', analysis);
     assert.equal(result.suppressed, false);
@@ -146,7 +162,7 @@ describe('broadcast-emitter / maybeBroadcast', () => {
 
   it('rate limits within 60s window', async () => {
     const nc = createMockNc();
-    const b = createBroadcaster(nc, 'test-node', { rateLimitMs: 100 });
+    const b = createBroadcaster(nc, 'test-node', { extractionDb: PUBLISHED, rateLimitMs: 100 });
     const analysis = { llmAnalysis: { themes: ['a', 'b', 'c'], entities: [] } };
 
     const r1 = await b.maybeBroadcast('How do I fix this?', analysis);
@@ -161,7 +177,7 @@ describe('broadcast-emitter / maybeBroadcast', () => {
 
   it('deduplicates within dedup window', async () => {
     const nc = createMockNc();
-    const b = createBroadcaster(nc, 'test-node', { rateLimitMs: 0, dedupWindowMs: 60_000 });
+    const b = createBroadcaster(nc, 'test-node', { extractionDb: PUBLISHED, rateLimitMs: 0, dedupWindowMs: 60_000 });
     const analysis = { llmAnalysis: { themes: ['memory', 'federation', 'broadcast'], entities: ['NATS'] } };
 
     const r1 = await b.maybeBroadcast('How do I fix this?', analysis);
@@ -177,7 +193,7 @@ describe('broadcast-emitter / maybeBroadcast', () => {
 
   it('skips passive + unchanged theme set after 5 turns', async () => {
     const nc = createMockNc();
-    const b = createBroadcaster(nc, 'test-node', { rateLimitMs: 0, dedupWindowMs: 0 });
+    const b = createBroadcaster(nc, 'test-node', { extractionDb: PUBLISHED, rateLimitMs: 0, dedupWindowMs: 0 });
     const analysis = { llmAnalysis: { themes: ['a', 'b', 'c'], entities: [] } };
     const passivePrompt = 'The system is running fine.';
 
@@ -191,6 +207,63 @@ describe('broadcast-emitter / maybeBroadcast', () => {
     assert.equal(r.suppressed, true);
     assert.equal(r.reason, 'passive_unchanged');
 
+    b.stop();
+  });
+});
+
+describe('broadcast-emitter / maybeBroadcast carries only published names', () => {
+  const KEY = 'sk-' + 'A'.repeat(40);
+  const store = seedStore({
+    themes: { memory: 0, federation: 0, debugging: 0, 'medical leave': 1, [`rotate ${KEY}`]: 0 },
+    entities: { NATS: 0, acme: 1, ['ghp_' + 'b'.repeat(36)]: 0 },
+  });
+
+  it('drops private and never-published names and sends the published ones as stored', async () => {
+    const nc = createMockNc();
+    const b = createBroadcaster(nc, 'test-node', { extractionDb: store });
+    const result = await b.maybeBroadcast('How do I fix this?', { llmAnalysis: {
+      themes: ['MEMORY', 'Federation', 'debugging', 'medical leave', 'brand-new project'],
+      entities: ['nats', 'acme', 'Dr. Martin', KEY],
+    } });
+    assert.equal(result.suppressed, false, JSON.stringify(result));
+    assert.deepEqual(nc.published[0].data.data.themes, ['memory', 'federation', 'debugging']);
+    assert.deepEqual(nc.published[0].data.data.entities, ['NATS']);
+    b.stop();
+  });
+
+  it('suppresses with reason private when fewer than 3 published themes survive', async () => {
+    const nc = createMockNc();
+    const b = createBroadcaster(nc, 'test-node', { extractionDb: store });
+    const result = await b.maybeBroadcast('How do I fix this?', { llmAnalysis: {
+      themes: ['memory', 'medical leave', 'brand-new project'], entities: ['NATS'],
+    } });
+    assert.deepEqual(result, { suppressed: true, reason: 'private' });
+    assert.equal(nc.published.length, 0);
+    b.stop();
+  });
+
+  it('never publishes a key-shaped name, even one stored as published', async () => {
+    const nc = createMockNc();
+    const b = createBroadcaster(nc, 'test-node', { extractionDb: store });
+    const result = await b.maybeBroadcast('How do I fix this?', { llmAnalysis: {
+      themes: ['memory', 'federation', 'debugging', `rotate ${KEY}`],
+      entities: ['NATS', 'ghp_' + 'b'.repeat(36)],
+    } });
+    assert.equal(result.suppressed, false, JSON.stringify(result));
+    const wire = JSON.stringify(nc.published[0].data);
+    assert.ok(!wire.includes(KEY) && !wire.includes('ghp_'), wire);
+    assert.deepEqual(nc.published[0].data.data.entities, ['NATS']);
+    b.stop();
+  });
+
+  it('publishes nothing per prompt without an extraction store to check against', async () => {
+    const nc = createMockNc();
+    const b = createBroadcaster(nc, 'test-node');
+    const result = await b.maybeBroadcast('How do I fix this?', { llmAnalysis: {
+      themes: ['memory', 'federation', 'debugging'], entities: ['NATS'],
+    } });
+    assert.deepEqual(result, { suppressed: true, reason: 'private' });
+    assert.equal(nc.published.length, 0);
     b.stop();
   });
 });
@@ -241,7 +314,7 @@ describe('broadcast-emitter / broadcastFromConsolidation', () => {
 describe('broadcast-emitter / TTL override', () => {
   it('uses opts.ttlMinutes', async () => {
     const nc = createMockNc();
-    const b = createBroadcaster(nc, 'test-node', { ttlMinutes: 120 });
+    const b = createBroadcaster(nc, 'test-node', { extractionDb: PUBLISHED, ttlMinutes: 120 });
     const analysis = { llmAnalysis: { themes: ['a', 'b', 'c'], entities: [] } };
     await b.maybeBroadcast('How do I fix this?', analysis);
     assert.equal(nc.published[0].data.data.ttl_minutes, 120);
@@ -253,7 +326,7 @@ describe('broadcast-emitter / TTL override', () => {
     process.env.OPENCLAW_BROADCAST_TTL_MIN = '120';
     try {
       const nc = createMockNc();
-      const b = createBroadcaster(nc, 'test-node');
+      const b = createBroadcaster(nc, 'test-node', { extractionDb: PUBLISHED });
       const analysis = { llmAnalysis: { themes: ['a', 'b', 'c'], entities: [] } };
       await b.maybeBroadcast('How do I fix this?', analysis);
       assert.equal(nc.published[0].data.data.ttl_minutes, 120);

@@ -39,6 +39,7 @@ import {
   createOfferer,
   buildOfferFromResults,
 } from '../lib/broadcast-offerer.mjs';
+import { createExtractionStore } from '../lib/extraction-store.mjs';
 import {
   createAcceptor,
   formatPeerMemoryBlock,
@@ -158,7 +159,13 @@ describe('federation-2node: real NATS integration', { skip: SKIP ? 'nats-server 
   // ─── Test: Broadcast publishes to real JetStream ─────────────────────────
 
   it('broadcast publishes a signed event to real JetStream and it persists', async () => {
+    const { db: storeA } = createExtractionStore({ dbPath: ':memory:' });
+    const now = new Date().toISOString();
+    for (const label of ['federation', 'nats', 'configuration']) {
+      storeA.prepare('INSERT INTO themes (label, first_seen, last_seen, private) VALUES (?, ?, ?, 0)').run(label, now, now);
+    }
     const broadcaster = createBroadcaster(ncA, NODE_A, {
+      extractionDb: storeA,
       rateLimitMs: 0,
       dedupWindowMs: 0,
       identity: identityA,
@@ -169,6 +176,7 @@ describe('federation-2node: real NATS integration', { skip: SKIP ? 'nats-server 
       { llmAnalysis: { themes: ['federation', 'nats', 'configuration'], entities: ['NATS', 'JetStream'] } },
     );
     broadcaster.stop();
+    storeA.close();
 
     assert.equal(result.suppressed, false, 'broadcast should not be suppressed');
     assert.ok(result.eventId, 'broadcast should return an eventId');

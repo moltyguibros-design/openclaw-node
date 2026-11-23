@@ -38,6 +38,8 @@ import {
   generateRelevanceSummary,
 } from '../lib/broadcast-offerer.mjs';
 
+import { createExtractionStore } from '../lib/extraction-store.mjs';
+
 import {
   createAcceptor,
   computeTokenOverlap,
@@ -224,8 +226,15 @@ describe('cross-node integration: full broadcast → offer → accepted round-tr
   });
 
   it('completes the full round-trip: broadcast → offerer → acceptor → accepted', async () => {
-    // 1. Node A broadcasts
+    // 1. Node A broadcasts the themes it has published
+    const { db: storeA } = createExtractionStore({ dbPath: ':memory:' });
+    const now = new Date().toISOString();
+    for (const label of ['memory', 'federation', 'retrieval']) {
+      storeA.prepare('INSERT INTO themes (label, first_seen, last_seen, private) VALUES (?, ?, ?, 0)').run(label, now, now);
+    }
+    storeA.prepare('INSERT INTO entities (name, type, first_seen, last_seen, private) VALUES (?, ?, ?, ?, 0)').run('NATS', 'tech', now, now);
     const broadcasterA = createBroadcaster(ncA, NODE_A, {
+      extractionDb: storeA,
       rateLimitMs: 0,
       dedupWindowMs: 0,
     });
@@ -235,6 +244,7 @@ describe('cross-node integration: full broadcast → offer → accepted round-tr
       { llmAnalysis: { themes: ['memory', 'federation', 'retrieval'], entities: ['NATS'] } },
     );
     broadcasterA.stop();
+    storeA.close();
 
     assert.equal(broadcastResult.suppressed, false, 'broadcast should not be suppressed');
     assert.ok(broadcastResult.eventId, 'broadcast should have an eventId');

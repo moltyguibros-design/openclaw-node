@@ -150,7 +150,7 @@ These thresholds define a well-functioning 3-node council during a 24-hour dogfo
 
 The broadcast rate reflects how actively the council's agents are working. Expect variation by time of day — active coding sessions produce more themes than idle periods. A 24-hour run should show clear active/idle cycles.
 
-Low broadcast rate with active sessions means the broadcaster's theme detection threshold (MIN_THEMES_FOR_BROADCAST = 3) may be too strict for the content being discussed.
+A per-prompt broadcast carries only names already published in the extraction store (`private = 0`, the rule the consolidation broadcast follows); private, never-seen and credential-shaped names stay on the node, and the broadcast is suppressed (`reason: 'private'`) when fewer than three published themes remain. Low broadcast rate with active sessions therefore means either that few of the themes being discussed are published, or that the theme threshold (MIN_THEMES_FOR_BROADCAST = 3) is too strict for the content.
 
 ### Offer-to-Acceptance Ratio
 

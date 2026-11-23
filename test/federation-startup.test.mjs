@@ -107,6 +107,33 @@ test('startFederation shares a peer tracker and broadcasts published context aft
   }
 });
 
+test('startFederation hands the broadcaster its extraction store, so a per-prompt broadcast keeps private names home', async () => {
+  const published = [];
+  const extractionDb = seedStore();
+  const now = new Date().toISOString();
+  for (const label of ['nats', 'jetstream']) {
+    extractionDb.prepare('INSERT INTO themes (label, first_seen, last_seen, private) VALUES (?, ?, ?, 0)').run(label, now, now);
+  }
+  const fed = await startFederation(mockNc(published), 'node-a', {
+    extractionDb,
+    knowledgeDb: extractionDb,
+    identityDir: join(TMP, 'identity'),
+  });
+  try {
+    const r = await fed.broadcaster.maybeBroadcast('how do I fix the nats consumer?', { llmAnalysis: {
+      themes: ['shared-theme', 'nats', 'jetstream', 'secret-theme'],
+      entities: ['PublicThing', 'PrivateThing', 'sk-' + 'Z'.repeat(40)],
+    } });
+    assert.equal(r.suppressed, false, JSON.stringify(r));
+    const [b] = published.filter((p) => p.subject === 'context.broadcast.node-a');
+    assert.deepEqual(b.event.data.themes, ['shared-theme', 'nats', 'jetstream']);
+    assert.deepEqual(b.event.data.entities, ['PublicThing']);
+  } finally {
+    await fed.stop();
+    extractionDb.close();
+  }
+});
+
 test('the inject server checks acceptance, broadcasts the prompt and appends the top peer offer', async () => {
   const calls = [];
   const peerBlock = '[peer-memory: from node-b]\nsomething useful\n[end peer-memory]';
