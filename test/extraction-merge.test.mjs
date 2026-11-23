@@ -213,6 +213,30 @@ describe('runFlush ignores gateway tool results it never extracts from', () => {
   });
 });
 
+describe('runFlush fact count', () => {
+  it('counts the stored kinds only: entities + decisions + themes, never friction signals', async () => {
+    const jsonlPath = path.join(tmpDir, 'facts.jsonl');
+    fs.writeFileSync(jsonlPath, [
+      { type: 'user', message: { role: 'user', content: 'The consumer keeps stalling, this is painful.' }, timestamp: '2026-09-21T10:00:00Z' },
+      { type: 'assistant', message: { role: 'assistant', content: 'Raise max_ack_pending on the durable consumer.' }, timestamp: '2026-09-21T10:00:05Z' },
+    ].map((m) => JSON.stringify(m)).join('\n'));
+    const client = { async generate() { return { content: JSON.stringify({
+      entities: [ent('NATS JetStream'), ent('durable consumer')],
+      themes: [{ label: 'consumer tuning', hierarchy: ['nats'] }],
+      decisions: [dec('Raise max_ack_pending')],
+      relationships: [],
+      actions: ['debugging'],
+      friction_signals: [{ signal: 'consumer stalls', severity: 'high' }, { signal: 'painful', severity: 'low' }],
+    }) }; } };
+    const result = await runFlush(jsonlPath, path.join(tmpDir, 'MEMORY.md'), {
+      vaultPath: path.join(tmpDir, 'vault'), llmClient: client, extractionStore: store, sessionId: 'facts',
+    });
+    assert.equal(result.mode, 'llm');
+    assert.equal(result.facts, 4);
+    assert.equal(result.added, 4);
+  });
+});
+
 describe('runFlush read-before-write', () => {
   it('shows the extractor the known memories and reports the merge outcome', async () => {
     store.storeExtractionResult('earlier', { ...base, entities: [ent('NATS JetStream')], decisions: [dec('Use file storage for JetStream')] });

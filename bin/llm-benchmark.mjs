@@ -44,7 +44,7 @@ const TURN_TEMPLATES = [
   { role: 'user', content: 'That confirms the Gulf 1 result. FTS5 is fundamentally broken for natural language. Semantic is the way forward.' },
   { role: 'assistant', content: 'Agreed. The FTS5 tokenizer treats spaces as AND operators, so multi-word queries become intersection searches. That\'s why "where did we discuss NATS" returns nothing — it needs all tokens present in one chunk.' },
   { role: 'user', content: 'Let\'s move on to the extraction schema. What fields do we need for the ExtractionResult?' },
-  { role: 'assistant', content: 'Based on the reference plan: entities (name, type, salience), themes (label, hierarchy), actions, decisions (decision, rationale, confidence), friction_signals (signal, severity), and relationships (source, target, type).' },
+  { role: 'assistant', content: 'Based on the reference plan: entities (name, type, salience), themes (label, hierarchy), decisions (decision, rationale, confidence), and relationships (source, target, type).' },
   { role: 'user', content: 'Add a "context" field to decisions — I want to know which part of the conversation led to each decision.' },
   { role: 'assistant', content: 'Good idea. I\'ll add a context field with the relevant turn indices. That also helps with provenance tracking when decisions are promoted to the shared stream.' },
   { role: 'user', content: 'The artifact store needs a cleanup job. Some of the .meta.json sidecars are orphaned.' },

@@ -338,10 +338,13 @@ describe('buildExtractionPrompt', () => {
     const out = buildExtractionPrompt([]);
     assert.match(out[0].content, /entities/);
     assert.match(out[0].content, /themes/);
-    assert.match(out[0].content, /actions/);
     assert.match(out[0].content, /decisions/);
-    assert.match(out[0].content, /friction_signals/);
     assert.match(out[0].content, /relationships/);
+  });
+
+  it('asks for nothing the store never keeps (no actions, no friction signals)', () => {
+    const sys = buildExtractionPrompt([])[0].content;
+    assert.doesNotMatch(sys, /"actions"|\*\*actions\*\*|friction/i);
   });
 
   it('user message includes the conversation messages', () => {

@@ -62,6 +62,17 @@ describe('ExtractionResultSchema', () => {
     assert.equal(result.actions.length, 0);
   });
 
+  it('accepts a reply without actions and friction_signals, which are no longer requested', () => {
+    const result = validateExtractionResult({
+      entities: [{ name: 'X', type: 'concept', salience: 0.5 }],
+      themes: [],
+      decisions: [],
+      relationships: [],
+    });
+    assert.deepEqual(result.actions, []);
+    assert.deepEqual(result.friction_signals, []);
+  });
+
   it('rejects when a required top-level field is missing', () => {
     const missing = {
       entities: [{ name: 'X', type: 'concept', salience: 0.5 }],

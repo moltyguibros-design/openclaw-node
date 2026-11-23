@@ -150,9 +150,7 @@ export async function runLlmExtraction(client, messages, sessionId) {
         entityCount: result.entities.length,
         themeCount: result.themes.length,
         decisionCount: result.decisions.length,
-        frictionCount: result.friction_signals.length,
         relationshipCount: result.relationships.length,
-        actionCount: result.actions.length,
         charLength: memoryContent.length,
       },
     };
@@ -262,7 +260,7 @@ export function formatComparison(results) {
     lines.push(`| Avg decisions per session | — | ${agg.llm.avgDecisions} |`);
   }
 
-  lines.push(`| Categories/types | ${agg.regex.allCategories.join(', ') || 'none'} | ${agg.llm ? 'entities, themes, decisions, friction, relationships, actions' : '—'} |`);
+  lines.push(`| Categories/types | ${agg.regex.allCategories.join(', ') || 'none'} | ${agg.llm ? 'entities, themes, decisions, relationships' : '—'} |`);
   lines.push('');
   lines.push('---');
   lines.push('');
@@ -302,9 +300,7 @@ export function formatComparison(results) {
       lines.push(`- Entities: ${r.llm.metrics.entityCount}`);
       lines.push(`- Themes: ${r.llm.metrics.themeCount}`);
       lines.push(`- Decisions: ${r.llm.metrics.decisionCount}`);
-      lines.push(`- Friction signals: ${r.llm.metrics.frictionCount}`);
       lines.push(`- Relationships: ${r.llm.metrics.relationshipCount}`);
-      lines.push(`- Actions: ${r.llm.metrics.actionCount}`);
       lines.push(`- MEMORY.md length: ${r.llm.metrics.charLength} chars`);
       lines.push('');
       lines.push('<details><summary>LLM MEMORY.md output</summary>');
