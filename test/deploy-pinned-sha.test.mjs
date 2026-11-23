@@ -1041,3 +1041,61 @@ describe('a Mission Control build that fails keeps the previous build and fails 
     assert.ok(!fs.existsSync(fx.rt('.openclaw/workspace/projects/mission-control/.next.prev')));
   });
 });
+
+// A `mesh deploy` that failed partway on the lead left the components before the
+// failure copied, and --rollback (lastSha, deployedBase) then reverted the deploy
+// before it, leaving the files only the failed commit had added.
+describe('mesh deploy --rollback after a deploy that failed partway reverts the failed deploy', () => {
+  const env = { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: 'openclaw-mesh-agent' };
+  let fx, S1, S2;
+  const ws = rel => fx.rt(path.join('.openclaw/workspace', rel));
+  before(() => {
+    fx = makeNode('partial', { 'bin/mesh-agent.js': '// agent v0\n', 'lib/shared.js': '// lib v0\n' });
+    S1 = fx.commit('v1', { 'bin/mesh-agent.js': '// agent v1\n', 'lib/shared.js': '// lib v1\n' });
+    ranOk(fx.deploy([], env));
+  });
+
+  it('records the failed sha, keeps lastSha, and prints the recovery command', () => {
+    S2 = fx.commit('v2', {
+      'bin/mesh-agent.js': '// agent v2\n',
+      'bin/mesh-bridge.js': '// bridge, new in v2\n',
+      'lib/shared.js': '// lib v2\n',
+    });
+    // shared-lib (after mesh-daemons) refuses a workspace lib linked outside the checkout.
+    const elsewhere = path.join(path.dirname(fx.home), 'partial-elsewhere');
+    fs.mkdirSync(elsewhere, { recursive: true });
+    fs.rmSync(ws('lib'), { recursive: true, force: true });
+    fs.symlinkSync(elsewhere, ws('lib'));
+    const run = fx.deploy([], env);
+    assert.equal(run.status, 1, run.stdout);
+    assert.match(run.stdout, /refusing to write through symlinked/);
+    assert.equal(read(fx.rt('openclaw/bin/mesh-agent.js')), '// agent v2\n', 'mesh-daemons ran before the failure');
+    assert.equal(state().pendingSha, S2);
+    assert.equal(state().deployedSha, S1);
+    assert.equal(state().lastSha, fx.S0);
+    assert.match(run.stdout, /node bin\/mesh-deploy\.js --rollback .*failed deploy of /);
+    fs.rmSync(ws('lib'));
+    fs.mkdirSync(ws('lib'));
+  });
+
+  it('--rollback reverts that deploy to the last good one, removing what only it added', () => {
+    const run = fx.deploy(['--rollback'], env);
+    ranOk(run);
+    assert.match(run.stdout, new RegExp(`reverting the failed deploy of ${S2.slice(0, 7)}`));
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), S1);
+    assert.equal(read(fx.rt('openclaw/bin/mesh-agent.js')), '// agent v1\n');
+    assert.ok(!fs.existsSync(fx.rt('openclaw/bin/mesh-bridge.js')), 'the failed deploy\'s new file stayed');
+    assert.equal(state().pendingSha, undefined);
+    assert.equal(state().deployedSha, S1);
+    assert.equal(state().lastSha, fx.S0, 'reverting a failed deploy is not a version to roll back to');
+  });
+
+  it('a later --rollback goes back to the deploy before, as before', () => {
+    const run = fx.deploy(['--rollback'], env);
+    ranOk(run);
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), fx.S0);
+    assert.equal(read(fx.rt('openclaw/bin/mesh-agent.js')), '// agent v0\n');
+  });
+
+  function state() { return JSON.parse(read(fx.rt('.openclaw/.deploy-state.json'))); }
+});

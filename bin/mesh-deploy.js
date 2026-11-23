@@ -43,7 +43,8 @@
  *                                         (~/.openclaw/mesh-aliases.json; legacy: ubuntu,
  *                                         linux, calos, mac, macos, moltymac); unknown ids
  *                                         are refused
- *   mesh deploy --rollback              — revert last deploy
+ *   mesh deploy --rollback              — revert the last deploy (one that failed partway
+ *                                         on this node first: back to the sha before it)
  *   mesh deploy --status                — show what's deployed vs what's in git
  *
  * ENVIRONMENT:
@@ -1040,6 +1041,18 @@ function restartService(svc, { probeOnly = false } = {}) {
 function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false,
                   dryRun = false, noRestart = false, pinned = false }) {
   assertCommitted(repoDir);
+  // A deploy that throws past this point leaves part of toSha installed. The
+  // first such sha is kept until a run completes, so --rollback reverts it (and
+  // the listener's own rollback deploy, from it, does not replace it).
+  let setPending = false;
+  if (!dryRun && fromSha !== toSha) {
+    const state = loadDeployState();
+    if (!state.pendingSha) {
+      Object.assign(state, { pendingSha: toSha, pendingFrom: fromSha });
+      saveDeployState(state);
+      setPending = true;
+    }
+  }
   if (!dryRun && gitLine(repoDir, ['rev-parse', 'HEAD']) !== toSha) {
     info(`Checking out ${toSha.slice(0, 8)}`);
     git(repoDir, ['checkout', '--detach', '--quiet', toSha]);
@@ -1117,7 +1130,7 @@ function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false,
       if (comp.validate()) ok(`${comp.name}: validated`);
       else warn(`${comp.name}: validation failed — check manually`);
     }
-    recordDeploy({ fromSha, toSha, filterIds, deployed });
+    recordDeploy({ fromSha, toSha, filterIds, deployed, setPending });
   }
 
   return {
@@ -1135,12 +1148,20 @@ function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false,
  * --component run leaves the other components behind. lastSha (the --rollback
  * target) moves only when this run changed something and left a version that
  * had actually been deployed — not on a run that deploys nothing, and not on
- * the listener's rollback away from a sha that failed.
+ * a rollback away from a sha that failed. The failed deploy's pendingSha clears
+ * once the run that set it, a complete run, or its revert succeeds.
  */
-function recordDeploy({ fromSha, toSha, filterIds, deployed }) {
+function recordDeploy({ fromSha, toSha, filterIds, deployed, setPending }) {
   const state = loadDeployState();
   const complete = filterIds.every(id => id === 'all');
-  const leftDeployedVersion = fromSha !== toSha && (!state.deployedSha || state.deployedSha === fromSha);
+  const revertsPending = !!state.pendingSha && fromSha === state.pendingSha;
+  const leftDeployedVersion = fromSha !== toSha && !revertsPending &&
+    (!state.deployedSha || state.deployedSha === fromSha);
+  const clearsPending = !!state.pendingSha && (setPending || complete || revertsPending);
+  if (clearsPending) {
+    delete state.pendingSha;
+    delete state.pendingFrom;
+  }
   if (deployed.length > 0) {
     if (leftDeployedVersion) state.lastSha = fromSha;
     state.lastDeploy = new Date().toISOString();
@@ -1149,7 +1170,7 @@ function recordDeploy({ fromSha, toSha, filterIds, deployed }) {
     }
   }
   if (complete) state.deployedSha = toSha;
-  if (complete || deployed.length > 0) saveDeployState(state);
+  if (complete || deployed.length > 0 || clearsPending) saveDeployState(state);
 }
 
 /** Refuse --node ids the fleet registry has never seen, before anything deploys. */
@@ -1333,6 +1354,22 @@ async function main() {
   if (doRollback) {
     header('Rolling Back Last Deploy');
     const state = loadDeployState();
+    // A deploy that failed partway on this node: revert it, not the one before.
+    // The fleet never received it (the trigger goes out after the local deploy).
+    const pendingSha = deployLocal ? resolveCommit(REPO_DIR, state.pendingSha) : null;
+    if (pendingSha) {
+      const toSha = resolveCommit(REPO_DIR, state.pendingFrom);
+      if (!toSha) {
+        fail(`pendingFrom in deploy state is not a commit in ${REPO_DIR}: ${JSON.stringify(state.pendingFrom).slice(0, 50)}`);
+        process.exitCode = 1;
+        return;
+      }
+      warn(`Rolling back ${pendingSha.slice(0, 7)} → ${toSha.slice(0, 7)}: reverting the failed deploy of ${pendingSha.slice(0, 7)}`);
+      deploy({ repoDir: REPO_DIR, fromSha: pendingSha, toSha, dryRun, noRestart });
+      ok(`Rolled back to ${toSha.slice(0, 8)}`);
+      if (deployRemote) skip('Remote nodes never received the failed deploy — remote rollback skipped');
+      return;
+    }
     if (!state.lastSha) {
       fail('No previous deploy state found — cannot rollback');
       return;
@@ -1451,6 +1488,11 @@ async function main() {
 
 main().catch(err => {
   fail(`Deploy error: ${err.message}`);
+  // The listener (pinned, --to) reverts a failed deploy itself.
+  const { pendingSha } = loadDeployState();
+  if (pendingSha && !process.argv.includes('--to')) {
+    info(`Recover: node bin/mesh-deploy.js --rollback (reverts the failed deploy of ${pendingSha.slice(0, 7)})`);
+  }
   console.log(`DEPLOY_ERROR ${JSON.stringify(err.message)}`); // the cause the listener reports
   process.exit(1);
 });
