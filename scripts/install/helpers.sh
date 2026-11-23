@@ -42,7 +42,7 @@ DRY_RUN_ERRORS=0
 # raw `cat > "$dest" <<EOF` form bypassed run()'s dry-run guard, so
 # --dry-run was rewriting MEMORY.md, active-tasks.md, .env.local and the
 # notification config on real installs. Dry-run prints and discards.
-# set_env_key VAR VALUE [FILE] — set or replace one KEY=value line in an env
+# set_env_key VAR VALUE [FILE] — set or replace every KEY=value line in an env
 # file (default $ENV_FILE). Idempotent; honours --dry-run. The value reaches awk
 # through ENVIRON: in a sed replacement '&' and '|' were special. Written back with
 # cat, not mv, so the secrets file keeps its 600 mode and owner.
@@ -52,7 +52,7 @@ set_env_key() {
     echo "  [dry-run] would set ${var}=${value} in ${file}"
   elif grep -q "^${var}=" "$file" 2>/dev/null; then
     tmp="$(mktemp "${file}.XXXXXX")"
-    V="$value" awk -v k="$var" 'index($0, k "=") == 1 && !done { print k "=" ENVIRON["V"]; done = 1; next } 1' "$file" > "$tmp"
+    V="$value" awk -v k="$var" 'index($0, k "=") == 1 { print k "=" ENVIRON["V"]; next } 1' "$file" > "$tmp"
     cat "$tmp" > "$file"
     rm -f "$tmp"
   else

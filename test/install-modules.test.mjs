@@ -241,6 +241,10 @@ test('set_env_key writes values literally and keeps the env file private', () =>
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /\[dry-run\]/);
   assert.equal(readFileSync(file, 'utf8'), 'A=1\nLLM_BASE_URL=\nZ=2\n');
+  // config.sh imports the env file last-line-wins, so a duplicate left stale reaches the units.
+  writeFileSync(file, 'LLM_BASE_URL=old\nA=1\nLLM_BASE_URL=old\nLLM_BASE_URLX=keep\n');
+  assert.equal(setKey('http://n/?a=1&b|c').status, 0);
+  assert.equal(readFileSync(file, 'utf8'), 'LLM_BASE_URL=http://n/?a=1&b|c\nA=1\nLLM_BASE_URL=http://n/?a=1&b|c\nLLM_BASE_URLX=keep\n');
   assert.deepEqual(readdirSync(dir), ['openclaw.env']);
   for (const [f, src] of [['llm-setup.sh', readFileSync(join(ROOT, 'scripts/install/llm-setup.sh'), 'utf8')], ['config.sh', moduleSrc['config.sh']]]) {
     assert.doesNotMatch(src, /sed -i[^\n]*\^(LLM_|OPENCLAW_|\$\{?var|\$key)/, `${f} rewrites env keys with sed`);
