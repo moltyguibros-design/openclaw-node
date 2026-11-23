@@ -23,6 +23,8 @@
  *   ≥32 GB RAM   → qwen3:14b   (~9  GB)
  *   ≥16 GB RAM   → qwen3:8b    (~5  GB)
  *   <16 GB RAM   → BELOW FLOOR — operator must use cloud LLM or skip extraction
+ * Each bound allows TIER_SLACK_GB under it: Linux MemTotal is a little below the
+ * installed size (16 GB reports ~15.7 GB), macOS reports the full amount.
  *
  * 4B tier is intentionally excluded per operator decision: JSON-mode reliability
  * is too low below 8B for this task.
@@ -30,6 +32,7 @@
 
 import os from 'node:os';
 import { execFile, spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
 const GB = 1024 * 1024 * 1024;
@@ -47,13 +50,14 @@ const TIERS = [
 ];
 
 const FLOOR_GB = 16;
+const TIER_SLACK_GB = 1;
 
-function recommend(totalGb) {
-  if (totalGb < FLOOR_GB) {
+export function recommend(totalGb) {
+  if (totalGb < FLOOR_GB - TIER_SLACK_GB) {
     return { tier: null, reason: `system has ${totalGb.toFixed(1)} GB RAM (< floor ${FLOOR_GB} GB)` };
   }
   for (const t of TIERS) {
-    if (totalGb >= t.min_gb) return { tier: t };
+    if (totalGb >= t.min_gb - TIER_SLACK_GB) return { tier: t };
   }
   return { tier: null, reason: 'no tier matched (should not happen)' };
 }
@@ -173,7 +177,9 @@ Options:
   }
 }
 
-main().catch((e) => {
-  console.error('Error:', e.message);
-  process.exit(1);
-});
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  main().catch((e) => {
+    console.error('Error:', e.message);
+    process.exit(1);
+  });
+}

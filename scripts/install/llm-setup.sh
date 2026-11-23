@@ -84,19 +84,16 @@ if [ "$MODE" != embedder ] && [ -z "$ENDPOINT" ]; then
 fi
 
 # ---------- what does this machine warrant? ----------
-# Tiers mirror bin/check-llm-baseline.mjs: >=48GB qwen3:32b, >=32GB qwen3:14b,
-# >=16GB qwen3:8b, below that no local tier is viable.
-if [ "$(uname -s)" = Darwin ]; then
-  RAM_GB=$(( $(sysctl -n hw.memsize) / 1024 / 1024 / 1024 ))
-else
-  RAM_GB=$(( $(awk '/MemTotal/{print $2}' /proc/meminfo) / 1024 / 1024 ))
-fi
-
-if   [ "$RAM_GB" -ge 48 ]; then REC=qwen3:32b; REC_GB=18
-elif [ "$RAM_GB" -ge 32 ]; then REC=qwen3:14b; REC_GB=9
-elif [ "$RAM_GB" -ge 16 ]; then REC=qwen3:8b;  REC_GB=5
-else                            REC="";        REC_GB=0
-fi
+# bin/check-llm-baseline.mjs owns the tier policy; it exits 2 below the floor, with
+# the JSON still printed.
+read -r RAM_GB REC REC_GB < <("$NODE_BIN" "$REPO_DIR/bin/check-llm-baseline.mjs" --json 2>/dev/null | "$NODE_BIN" -e '
+  let s = "";
+  process.stdin.on("data", (d) => s += d).on("end", () => {
+    const { system, recommendation: r } = JSON.parse(s);
+    console.log(system.total_ram_gb.toFixed(1), r.model || "-", r.size_gb || 0);
+  });
+')
+[ "$REC" = "-" ] && REC=""
 
 CURRENT=$(grep -m1 '^LLM_MODEL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
 # transformers.js caches beside its package (core.mjs sets no cacheDir), reached through the
@@ -233,9 +230,9 @@ elif $TTY_OK; then
       esac
       # Undersized picks are allowed but named for what they are: the model will
       # swap or refuse to load rather than fail cleanly at pull time.
-      case "$CHOICE" in
-        qwen3:32b) [ "$RAM_GB" -lt 48 ] && warn "$CHOICE on ${RAM_GB} GB will swap badly" ;;
-        qwen3:14b) [ "$RAM_GB" -lt 32 ] && warn "$CHOICE on ${RAM_GB} GB will swap badly" ;;
+      case "$CHOICE:$REC" in
+        qwen3:32b:qwen3:32b|qwen3:14b:qwen3:32b|qwen3:14b:qwen3:14b) ;;
+        qwen3:32b:*|qwen3:14b:*) warn "$CHOICE on ${RAM_GB} GB will swap badly" ;;
       esac
       ;;
     *) CHOICE="" ;;

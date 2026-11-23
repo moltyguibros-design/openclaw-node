@@ -55,7 +55,10 @@ on your RAM tier, plus ~2 GB for the `Xenova/bge-m3` embedder. That never starts
 
 Tiers follow `bin/check-llm-baseline.mjs`: ≥48 GB → `qwen3:32b`, ≥32 GB → `qwen3:14b`,
 ≥16 GB → `qwen3:8b`. Below 16 GB there is no viable local tier and wave 2 says so instead
-of downloading something that will thrash.
+of downloading something that will thrash. Each bound allows 1 GB under it, because Linux
+reports a little less than the installed RAM (a 16 GB box shows ~15.7 GB). The installer
+applies the tier to `LLM_MODEL` only on a full install; `--update` keeps the configured
+model, and wave 2 is how you move an existing node to a bigger one.
 
 The prompt reads `/dev/tty`, not stdin — under `curl … | bash` stdin is the script itself.
 **With no terminal (CI, cron, `nohup`) it skips rather than hangs or downloads unattended.**

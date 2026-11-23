@@ -56,14 +56,15 @@ if ! $SKIP_LLM && ! $DRY_RUN && llm_url_is_local "$LLM_BASE_URL"; then
 
   if curl -fsS --max-time 3 "$LLM_BASE_URL/api/tags" >/dev/null 2>&1; then
     # RAM-tier model pick — upgrades only the shipped floor default, never an
-    # operator-customized value
+    # operator-customized value, and only on a full install: an --update must not
+    # start a multi-GB pull and switch an existing node's model (wave 2 does that).
     TIER_MODEL=$("$NODE_BIN" "$REPO_DIR/bin/check-llm-baseline.mjs" --json 2>/dev/null | "$NODE_BIN" -e '
       let s = "";
       process.stdin.on("data", (d) => s += d).on("end", () => {
         try { console.log(JSON.parse(s).recommendation?.model || ""); } catch { console.log(""); }
       });
     ' 2>/dev/null || echo "")
-    if [ -n "$TIER_MODEL" ] && [ "$LLM_MODEL" = "qwen3:8b" ] && [ "$TIER_MODEL" != "qwen3:8b" ]; then
+    if ! $UPDATE_ONLY && [ -n "$TIER_MODEL" ] && [ "$LLM_MODEL" = "qwen3:8b" ] && [ "$TIER_MODEL" != "qwen3:8b" ]; then
       run sed -i.bak "s|^LLM_MODEL=qwen3:8b$|LLM_MODEL=$TIER_MODEL|" "$ENV_FILE" && run rm -f "$ENV_FILE.bak"
       export LLM_MODEL="$TIER_MODEL"
       info "RAM-tier upgrade: LLM_MODEL=$TIER_MODEL"
