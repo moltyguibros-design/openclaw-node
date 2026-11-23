@@ -58,11 +58,11 @@ echo ""
 TOOLKIT_PATHS=(
   workspace config services souls logs nats rules plan-templates share notifications foreman
   retired 'skills.retired-*' transcript-archive preservation roles eval worktrees mesh-leases
-  obsidian-local artifacts run backups .tmp
+  obsidian-local artifacts run backups .tmp harness
   'state.db' 'state.db-*' 'graph-cache.db' 'graph-cache.db-*' openclaw.env harness-rules.json
   identity.key identity-registry.json .mesh-secret mesh-aliases.json mesh-providers.json
   dogfood-metrics.jsonl 'watcher.jsonl' 'watcher.jsonl.1' .deploy-state.json .last-deploy.json
-  .embed-migration-checkpoint.json .node-watch.md .node-acceptance.md .install-acceptance.md
+  .embed-migration-checkpoint.json '.node-watch.*' .node-acceptance.md .install-acceptance.md
   timer-transition-active timer-source-copy.lock timer-entry-installed
   skills/mesh state/observer.jsonl state/memory-activity.jsonl state/observer-logpos.json
 )

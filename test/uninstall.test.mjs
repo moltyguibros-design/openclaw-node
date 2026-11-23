@@ -258,6 +258,8 @@ const TOOLKIT = [
   'workspace/memory/keep.md', 'config/daemon.json', 'souls/daedalus/SOUL.md', 'logs/memory-daemon.log',
   'state.db', 'openclaw.env', 'identity.key', '.mesh-secret', 'skills/mesh/SKILL.md',
   'state/observer.jsonl', 'skills.retired-2026-01-01/old/SKILL.md', 'retired/2026-01-01/x',
+  'harness/1.4.0/install.sh', 'harness/1.5.0/install.sh',
+  '.node-watch.md', '.node-watch.json', '.node-watch.html',
 ];
 const PRODUCT = [
   'credentials/whatsapp/a/creds.json', 'state/openclaw.sqlite', 'agents/main/agent/openclaw-agent.sqlite',
@@ -295,6 +297,19 @@ test('uninstall --purge answered Y twice removes ~/.openclaw entirely', linuxOnl
     const r = runUninstall(fx, ['--purge'], 'y\ny\n');
     assert.equal(r.status, 0, r.stderr);
     assert.equal(existsSync(join(fx.home, '.openclaw')), false);
+  } finally {
+    rmSync(fx.home, { recursive: true, force: true });
+  }
+});
+
+test('uninstall --purge on a node without the gateway removes ~/.openclaw without a second prompt', linuxOnly, () => {
+  const fx = fixture();
+  try {
+    putFiles(fx.home, '.openclaw', TOOLKIT);
+    const r = runUninstall(fx, ['--purge'], 'y\n');
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(existsSync(join(fx.home, '.openclaw')), false);
+    assert.doesNotMatch(r.stdout, /Delete these too\?/);
   } finally {
     rmSync(fx.home, { recursive: true, force: true });
   }
