@@ -37,6 +37,12 @@ describe('decision notes (repair 2.9)', () => {
     assert.equal(f, decisionNoteFilename(d));
   });
 
+  it('a credential in the decision text never reaches the filename', () => {
+    const key = 'sk-ant-api03-' + 'Q'.repeat(40);
+    const f = decisionNoteFilename({ created_at: '2026-06-02T19:00:00Z', decision: `Use ${key} for staging` });
+    assert.equal(f, '2026-06-02-use-redacted-for-staging.md');
+  });
+
   it('note body carries rationale, concept links, session link', () => {
     const note = buildDecisionNote(
       { decision: 'Use NATS', rationale: 'Simpler ops', confidence: 0.9, salience: 0.6, created_at: '2026-06-02T19:00:00Z', session_id: 's1' },

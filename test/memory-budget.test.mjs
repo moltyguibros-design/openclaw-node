@@ -256,6 +256,16 @@ describe('extractFacts assistant extraction', () => {
     assert.ok(categories.includes('finding'), 'Should detect finding category');
   });
 
+  it('the regex fallback redacts credentials before they reach MEMORY.md', () => {
+    const key = 'sk-proj-' + 'K'.repeat(40);
+    const facts = extractFacts([
+      { role: 'user', content: `the api endpoint is https://api.example.test with key ${key} and we'll use it` },
+      { role: 'user', content: `please store ${key} somewhere safe for the deploy` },
+    ]);
+    assert.ok(facts.length > 0);
+    for (const f of facts) assert.ok(!f.fact.includes('sk-proj'), f.fact);
+  });
+
   it('tool-role messages are excluded from extraction', () => {
     const messages = [
       { role: 'tool', content: "don't use this pattern, always prefer the other approach for consistency" },
