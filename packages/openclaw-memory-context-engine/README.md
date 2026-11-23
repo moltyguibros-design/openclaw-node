@@ -42,7 +42,7 @@ and the daemon's `memory.injected` events (Mission Control → watcher) show
 | Key | Default | Meaning |
 |---|---|---|
 | `injectUrl` | `http://127.0.0.1:7893` | Must be loopback; the client refuses anything else. |
-| `tokenPath` | `~/.openclaw/config/memory-injection-token` | Re-read on every request. |
+| `tokenPath` | `$OPENCLAW_HOME/config/memory-injection-token` (`~/.openclaw/...` when `OPENCLAW_HOME` is unset, as the daemon writes it) | Re-read on every request. |
 | `autoRecall` | `true` | Inject on every turn. |
 | `maxInjectedChars` | `6000` | Longer blocks are cut on a line boundary. |
 | `timeoutMs` | `12000` | Above the daemon's worst case (up to 8 s of LLM query analysis, then embedding and retrieval: about 9–11 s); the turn can wait that long. On timeout the turn proceeds without memory. |

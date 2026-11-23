@@ -266,7 +266,8 @@ function injectRole(parts, roleId) {
 //      disables memory entirely.
 const MEMORY_INJECT_CAP = Number(process.env.MESH_MEMORY_INJECT_CHARS ?? 4000);
 const MEMORY_INJECT_PORT = Number(process.env.MEMORY_INJECT_PORT || 7893);
-const MEMORY_INJECT_TOKEN_PATH = path.join(process.env.HOME || '', '.openclaw', 'config', 'memory-injection-token');
+// The daemon's node root, as lib/memory-daemon-paths.mjs resolves it.
+const MEMORY_INJECT_TOKEN_PATH = path.join(process.env.OPENCLAW_HOME || path.join(process.env.HOME || '', '.openclaw'), 'config', 'memory-injection-token');
 
 // Async with an abort timeout: a synchronous curl here froze the agent's event loop
 // (alive checks, heartbeats, NATS) for as long as the inject-server took to answer.

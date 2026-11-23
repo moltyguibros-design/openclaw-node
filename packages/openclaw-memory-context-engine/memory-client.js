@@ -12,7 +12,12 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 export const DEFAULT_INJECT_URL = 'http://127.0.0.1:7893';
-export const DEFAULT_TOKEN_PATH = join(homedir(), '.openclaw/config/memory-injection-token');
+
+// Where the daemon writes it: OPENCLAW_HOME is the node root (default ~/.openclaw),
+// as in lib/memory-daemon-paths.mjs, which this package may not import.
+export function defaultTokenPath(env = process.env, home = homedir()) {
+  return join(env.OPENCLAW_HOME || join(home, '.openclaw'), 'config', 'memory-injection-token');
+}
 // Above the daemon's worst case: up to 8 s of LLM query analysis
 // (DEFAULT_ANALYSIS_TIMEOUT) plus embedding and retrieval, ~9-11 s observed.
 // Under it, a cold or contended turn ran without memory while the daemon
@@ -35,7 +40,7 @@ export function expandHome(p) {
  */
 export function createMemoryClient(opts = {}) {
   const injectUrl = (opts.injectUrl || DEFAULT_INJECT_URL).replace(/\/+$/, '');
-  const tokenPath = expandHome(opts.tokenPath || DEFAULT_TOKEN_PATH);
+  const tokenPath = expandHome(opts.tokenPath || defaultTokenPath());
   const timeoutMs = Number(opts.timeoutMs) || DEFAULT_TIMEOUT_MS;
   const doFetch = opts.fetch || globalThis.fetch;
 

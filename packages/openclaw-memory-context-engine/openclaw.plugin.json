@@ -19,7 +19,7 @@
     "tokenPath": {
       "label": "Token file",
       "placeholder": "~/.openclaw/config/memory-injection-token",
-      "help": "Bearer token the daemon writes on first start (0600). Re-read on every request so a rotated token is picked up without a restart."
+      "help": "Bearer token the daemon writes on first start (0600), under $OPENCLAW_HOME/config when OPENCLAW_HOME is set. Re-read on every request so a rotated token is picked up without a restart."
     },
     "autoRecall": {
       "label": "Auto-recall",
