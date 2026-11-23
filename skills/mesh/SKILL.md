@@ -69,7 +69,7 @@ To run something on another node, submit it as a task: a worker claims it and re
 
 ```bash
 mesh plan templates                                   # available templates
-mesh plan create --template <id> --context "<text>"   # [--parent-task <id>] [--set subtask.field=value]
+mesh plan create --template <id> --parent-task <task-id> --context "<text>"   # [--set subtask.field=value]
 mesh plan list [--status <status>]
 mesh plan show <plan-id>                              # full plan with subtask tree
 mesh plan approve <plan-id>                           # approve and start executing

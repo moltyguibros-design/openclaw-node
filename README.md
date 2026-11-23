@@ -746,14 +746,14 @@ Multi-phase workflows defined as YAML templates. Plans decompose into subtasks d
 # List available templates
 mesh plan templates
 
-# Create a plan from template
-mesh plan create --template team-feature --context "Add token expiry logic"
+# Create a plan from template, under an existing task (submit one first with mesh submit)
+mesh plan create --template team-feature --parent-task T-123 --context "Add token expiry logic"
 
 # Inspect the full subtask tree before approving
 mesh plan show PLAN-xxx
 
 # Override template defaults
-mesh plan create --template team-feature --context "..." \
+mesh plan create --template team-feature --parent-task T-123 --context "..." \
   --set implement.delegation.mode=collab_mesh \
   --set test.budget_minutes=30
 

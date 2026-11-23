@@ -591,8 +591,8 @@ async function cmdPlan(args) {
         }
       }
 
-      if (!templateId) {
-        console.error('Usage: mesh plan create --template <id> --context "<description>" [--parent-task <task-id>] [--set subtask.field=value]');
+      if (!templateId || !parentTaskId) {
+        console.error('Usage: mesh plan create --template <id> --parent-task <task-id> --context "<description>" [--set subtask.field=value]');
         process.exit(1);
       }
 
@@ -830,8 +830,8 @@ async function cmdPlan(args) {
         '',
         '  mesh plan templates                     List available templates',
         '  mesh plan create --template <id>        Create plan from template',
+        '    --parent-task <task-id>                Existing task the plan belongs to (required)',
         '    --context "<description>"              Context for template variables',
-        '    --parent-task <task-id>                Link to parent task',
         '    --set subtask.field=value              Override subtask fields post-instantiation',
         '                                           e.g., --set implement.delegation.mode=collab_mesh',
         '                                                 --set test.budget_minutes=30',

@@ -189,7 +189,7 @@ describe('instantiateTemplate', () => {
   it('instantiates with variable substitution', () => {
     const dir = path.join(__dirname, '..', 'config', 'plan-templates');
     const template = loadTemplate(path.join(dir, 'team-bugfix.yaml'));
-    const plan = instantiateTemplate(template, 'Login redirect loop');
+    const plan = instantiateTemplate(template, 'Login redirect loop', { parent_task_id: 'T-002' });
 
     assert.ok(plan.title.includes('Login redirect loop'));
     assert.ok(plan.subtasks[0].title.includes('Login redirect loop'));
@@ -198,7 +198,7 @@ describe('instantiateTemplate', () => {
   it('auto-routes subtasks with mode: auto', () => {
     const dir = path.join(__dirname, '..', 'config', 'plan-templates');
     const template = loadTemplate(path.join(dir, 'team-feature.yaml'));
-    const plan = instantiateTemplate(template, 'test feature');
+    const plan = instantiateTemplate(template, 'test feature', { parent_task_id: 'T-003' });
 
     const impl = plan.subtasks.find(s => s.subtask_id === 'implement');
     assert.ok(impl.delegation.mode !== 'auto', 'auto should be resolved by autoRoutePlan');
@@ -209,18 +209,44 @@ describe('instantiateTemplate', () => {
       id: 'odd-budgets',
       phases: [{ subtasks: [{ id: 'neg', title: 'neg', budget_minutes: -1 }, { id: 'frac', title: 'frac', budget_minutes: 1.5 }] }],
     };
-    const plan = instantiateTemplate(template, 'x');
+    const plan = instantiateTemplate(template, 'x', { parent_task_id: 'T-004' });
     assert.deepStrictEqual(plan.subtasks.map(s => s.budget_minutes), [15, 1.5]);
   });
 
   it('marks critical subtasks', () => {
     const dir = path.join(__dirname, '..', 'config', 'plan-templates');
     const template = loadTemplate(path.join(dir, 'team-feature.yaml'));
-    const plan = instantiateTemplate(template, 'test');
+    const plan = instantiateTemplate(template, 'test', { parent_task_id: 'T-005' });
 
     const design = plan.subtasks.find(s => s.subtask_id === 'design');
     const impl = plan.subtasks.find(s => s.subtask_id === 'implement');
     assert.strictEqual(design.critical, true);
     assert.strictEqual(impl.critical, false);
+  });
+
+  // The daemon refuses a plan whose parent task does not exist; an invented
+  // TEMPLATE-* parent made every flagless `mesh plan create` fail at the server.
+  it('requires a parent task id instead of inventing one', () => {
+    const dir = path.join(__dirname, '..', 'config', 'plan-templates');
+    const template = loadTemplate(path.join(dir, 'team-feature.yaml'));
+    assert.throws(() => instantiateTemplate(template, 'test'), /parent_task_id is required/);
+  });
+});
+
+describe('mesh plan create CLI', () => {
+  it('exits 1 with the usage line before connecting when --parent-task is missing', () => {
+    const { spawnSync } = require('node:child_process');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-create-cli-'));
+    try {
+      const r = spawnSync(process.execPath, [path.join(__dirname, '..', 'bin', 'mesh.js'), 'plan', 'create', '--template', 'team-feature', '--context', 'x'], {
+        encoding: 'utf8', timeout: 20000,
+        env: { PATH: process.env.PATH, HOME: home, OPENCLAW_NATS: 'nats://127.0.0.1:1', OPENCLAW_OBS_DB: ':memory:' },
+      });
+      assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+      assert.match(r.stderr, /Usage: mesh plan create --template <id> --parent-task <task-id>/);
+      assert.doesNotMatch(r.stderr + r.stdout, /ECONNREFUSED|CONNECTION_REFUSED|not found/);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 });
