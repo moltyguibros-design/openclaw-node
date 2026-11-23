@@ -15,6 +15,6 @@ test('only the connect() suites stub the nats module resolver', () => {
   const stubbing = fs.readdirSync(here)
     .filter(f => /\.test\.(c|m)?js$/.test(f))
     .filter(f => /require\.cache\[['"]nats['"]\]|request === ['"]nats['"]/.test(fs.readFileSync(path.join(here, f), 'utf8')));
-  assert.deepEqual(stubbing, ['mesh-deploy-cli-options.test.js', 'mesh-deploy-rollback-cli.test.js',
+  assert.deepEqual(stubbing, ['deploy-pinned-sha.test.mjs', 'mesh-deploy-cli-options.test.js', 'mesh-deploy-rollback-cli.test.js',
     'mesh-node-remove.test.mjs', 'mesh-registry.test.js', 'node-init-render.test.mjs']);
 });

@@ -528,6 +528,63 @@ describe('boot profiles are recompiled with --all after a compiler, manifest or 
   });
 });
 
+// The fleet half of `mesh deploy` with fleet-deploy and nats replaced: what
+// fleetDeploy reports, or a bus that refuses the connect, decides the summary
+// line and the exit status.
+const FLEET_STUB = path.join(ROOT, 'fleet-stub.cjs');
+write(ROOT, 'fleet-stub.cjs', `
+const Module = require('module');
+const load = Module._load;
+Module._load = function (request, ...rest) {
+  if (request.endsWith('/fleet-deploy')) return { fleetDeploy: async () => JSON.parse(process.env.DEPLOY_TEST_FLEET_OUTCOME) };
+  if (request.endsWith('/nats-resolve')) return { natsConnectOpts: o => o };
+  if (request === 'nats') return { connect: async () => {
+    if (process.env.DEPLOY_TEST_NATS_DOWN) throw new Error('connect ECONNREFUSED 127.0.0.1:4222');
+    return { close: async () => {} };
+  } };
+  return load.call(this, request, ...rest);
+};
+`);
+
+describe('mesh deploy reports the fleet outcome in its summary and exit status', () => {
+  let fx;
+  const outcome = o => JSON.stringify({ expected: 1, succeeded: 0, skipped: 0, failed: 0, missing: 0, stillDeploying: 0, ...o });
+  const deployFleet = env => {
+    const run = spawnSync(process.execPath, ['--require', FLEET_STUB, path.join(fx.node, 'bin', 'mesh-deploy.js')], {
+      cwd: fx.node, encoding: 'utf8',
+      env: { ...process.env, HOME: fx.home, OPENCLAW_REPO_DIR: fx.node, DEPLOY_TEST_CALLS: fx.callLog, ...env },
+    });
+    return { ...run, stdout: run.stdout.replace(/\x1b\[[0-9;]*m/g, '') };
+  };
+  before(() => { fx = makeNode('fleet-outcome', { 'bin/mesh-agent.js': '// agent v0\n' }); });
+
+  it('a failed node fails the run', () => {
+    const run = deployFleet({ DEPLOY_TEST_FLEET_OUTCOME: outcome({ failed: 1 }) });
+    assert.equal(run.status, 1, run.stdout);
+    assert.match(run.stdout, /Remote:\s+FAILED \(1 of 1 node/);
+    assert.doesNotMatch(run.stdout, /Remote:\s+deployed/);
+  });
+
+  it('an unreachable bus fails the run', () => {
+    const run = deployFleet({ DEPLOY_TEST_NATS_DOWN: '1' });
+    assert.equal(run.status, 1, run.stdout);
+    assert.match(run.stdout, /Fleet deploy failed: connect ECONNREFUSED/);
+    assert.match(run.stdout, /Remote:\s+FAILED/);
+  });
+
+  it('a node pending catch-up is partial, not a failure', () => {
+    const run = deployFleet({ DEPLOY_TEST_FLEET_OUTCOME: outcome({ missing: 1 }) });
+    ranOk(run);
+    assert.match(run.stdout, /Remote:\s+partial \(1 pending catch-up, 0 still deploying\)/);
+  });
+
+  it('every node succeeded or skipped: deployed', () => {
+    const run = deployFleet({ DEPLOY_TEST_FLEET_OUTCOME: outcome({ expected: 2, succeeded: 1, skipped: 1 }) });
+    ranOk(run);
+    assert.match(run.stdout, /Remote:\s+deployed/);
+  });
+});
+
 describe('a deploy restarts only the services that are running', () => {
   let fx, S1;
   before(() => {

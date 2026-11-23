@@ -68,15 +68,35 @@ describe('fleet-deploy result reporting', () => {
   after(() => { console.warn = savedWarn; fs.rmSync(tmp, { recursive: true, force: true }); });
 
   it("a 'skipped' node is reported as skipped, not as a failure", async () => {
-    const out = await captureOutput(() => fleetDeploy(fakeNc({
-      w1: { nodeId: 'w1', status: 'skipped', log: 'No matching components for role worker', durationSeconds: 0 },
-      w2: { nodeId: 'w2', status: 'failed', errors: ['deploy script exited 1'], durationSeconds: 3 },
-    }), { components: ['mc'], timeoutMs: 5000 }));
+    let outcome;
+    const out = await captureOutput(async () => {
+      outcome = await fleetDeploy(fakeNc({
+        w1: { nodeId: 'w1', status: 'skipped', log: 'No matching components for role worker', durationSeconds: 0 },
+        w2: { nodeId: 'w2', status: 'failed', errors: ['deploy script exited 1'], durationSeconds: 3 },
+      }), { components: ['mc'], timeoutMs: 5000 });
+    });
 
     assert.doesNotMatch(out, /\[FAIL\] w1/, out);
     assert.match(out, /w1 — skipped: No matching components for role worker/);
     assert.match(out, /\[FAIL\] w2 — failed after 3s/);
     assert.match(out, /Skipped:\s+1\b/);
     assert.match(out, /Failed:\s+1\b/);
+    assert.deepEqual(outcome, { expected: 2, succeeded: 0, skipped: 1, failed: 1, missing: 0, stillDeploying: 0 });
+  });
+
+  // The listener allows a deploy 20 minutes; this wait is 2.
+  it("a node last seen 'deploying' is still deploying, not offline", async () => {
+    let outcome;
+    const out = await captureOutput(async () => {
+      outcome = await fleetDeploy(fakeNc({
+        w1: { nodeId: 'w1', status: 'deploying' },
+        w2: { nodeId: 'w2', status: 'success', sha: 'abc1234', durationSeconds: 1 },
+      }), { timeoutMs: 1000 });
+    });
+
+    assert.match(out, /w1 — still deploying/);
+    assert.doesNotMatch(out, /w1 — may be offline/);
+    assert.match(out, /Deploying:\s+1\b/);
+    assert.deepEqual(outcome, { expected: 2, succeeded: 1, skipped: 0, failed: 0, missing: 0, stillDeploying: 1 });
   });
 });

@@ -1151,6 +1151,39 @@ async function assertKnownNodes(ids) {
   }
 }
 
+/** Publish a fleet trigger and wait for the nodes: { outcome } from fleetDeploy, or { error }. */
+async function triggerFleet(connName, opts) {
+  try {
+    const { fleetDeploy } = require('./fleet-deploy');
+    const { connect } = require('nats');
+    const { natsConnectOpts } = require('../lib/nats-resolve');
+    const nc = await connect(natsConnectOpts({ name: connName, timeout: 10000 }));
+    try {
+      return { outcome: await fleetDeploy(nc, { ...opts, timeoutMs: 120000 }) };
+    } finally {
+      await nc.close();
+    }
+  } catch (error) {
+    return { error };
+  }
+}
+
+// A node that never reported catches up on reconnect, so only an error or a
+// failed node fails the run.
+function fleetFailed({ outcome, error }) {
+  return !!error || outcome.failed > 0;
+}
+
+function remoteSummary({ outcome, error }) {
+  if (error) return C.red(`FAILED (${error.message.split('\n')[0]})`);
+  if (outcome.failed > 0) return C.red(`FAILED (${outcome.failed} of ${outcome.expected} node(s))`);
+  if (outcome.expected === 0) return C.dim('no remote nodes');
+  if (outcome.missing + outcome.stillDeploying > 0) {
+    return C.yellow(`partial (${outcome.missing} pending catch-up, ${outcome.stillDeploying} still deploying)`);
+  }
+  return C.green('deployed');
+}
+
 // ── Tracer Instrumentation ───────────────────────────────────────────────
 planComponents = tracer.wrap('planComponents', planComponents, { tier: 2, category: 'lifecycle' });
 installFiles = tracer.wrap('installFiles', installFiles, { tier: 2, category: 'lifecycle' });
@@ -1291,32 +1324,15 @@ async function main() {
 
     if (deployRemote) {
       header('Rolling back remote nodes');
-      try {
-        const { fleetDeploy } = require('./fleet-deploy');
-        const { connect } = require('nats');
-        const { natsConnectOpts: natsOpts } = require('../lib/nats-resolve');
-        const nc = await connect(natsOpts({ name: 'deploy-rollback', timeout: 10000 }));
-        try {
-          // Trigger fleet deploy at the rollback SHA — listeners check it out exactly
-          await fleetDeploy(nc, {
-            components: null,
-            targetNodes,
-            sha: toSha.slice(0, 7),
-            dryRun,
-            force: true,
-            timeoutMs: 120000,
-          });
-        } finally {
-          await nc.close();
-        }
-        if (!dryRun) ok('Remote rollback triggered via fleet deploy');
-      } catch (err) {
-        if (err.code === 'MODULE_NOT_FOUND') {
-          warn('Fleet deploy not available — remote rollback skipped');
-        } else {
-          fail(`Remote rollback failed: ${err.message}`);
-        }
-      }
+      // Listeners check out the rollback sha exactly.
+      const remote = await triggerFleet('deploy-rollback', {
+        components: null, targetNodes, sha: toSha.slice(0, 7), dryRun, force: true,
+      });
+      if (remote.error?.code === 'MODULE_NOT_FOUND') warn('Fleet deploy not available — remote rollback skipped');
+      else if (remote.error) fail(`Remote rollback failed: ${remote.error.message}`);
+      else if (remote.outcome.failed > 0) fail(`Remote rollback failed on ${remote.outcome.failed} of ${remote.outcome.expected} node(s)`);
+      else if (!dryRun) ok('Remote rollback triggered via fleet deploy');
+      if (fleetFailed(remote)) process.exitCode = 1;
     }
     return;
   }
@@ -1375,32 +1391,21 @@ async function main() {
     warn(`${localOnlyIds.join(', ')}: local-only (not from this repo) — run \`mesh deploy --local --component <id>\` on each node`);
     if (fleetIds.length === 0) deployRemote = false;
   }
+  let remote = null;
   if (deployRemote) {
-    try {
-      const { fleetDeploy } = require('./fleet-deploy');
-      const { connect } = require('nats');
-      const { natsConnectOpts: natsOpts2 } = require('../lib/nats-resolve');
-
-      const nc = await connect(natsOpts2({ name: 'deploy-cli', timeout: 10000 }));
-      try {
-        await fleetDeploy(nc, {
-          components: filterIds.length > 0 ? filterIds : null,
-          targetNodes,  // null: every node but this one
-          dryRun,
-          force: forceAll,
-          timeoutMs: 120000,
-        });
-      } finally {
-        await nc.close();
-      }
-    } catch (err) {
-      if (err.code === 'MODULE_NOT_FOUND') {
-        warn('Fleet deploy not available (fleet-deploy.js or nats not found)');
-        info('Install: npm install nats && copy fleet-deploy.js to bin/');
-      } else {
-        fail(`Fleet deploy failed: ${err.message}`);
-      }
+    remote = await triggerFleet('deploy-cli', {
+      components: filterIds.length > 0 ? filterIds : null,
+      targetNodes,  // null: every node but this one
+      dryRun,
+      force: forceAll,
+    });
+    if (remote.error?.code === 'MODULE_NOT_FOUND') {
+      warn('Fleet deploy not available (fleet-deploy.js or nats not found)');
+      info('Install: npm install nats && copy fleet-deploy.js to bin/');
+    } else if (remote.error) {
+      fail(`Fleet deploy failed: ${remote.error.message}`);
     }
+    if (fleetFailed(remote)) process.exitCode = 1;
   }
 
   // ── Summary ──
@@ -1410,7 +1415,7 @@ async function main() {
     console.log(`  Commit:  ${sha}`);
     console.log(`  Branch:  ${DEPLOY_BRANCH}`);
     console.log(`  Local:   ${deployLocal ? C.green('deployed') : C.dim('skipped')}`);
-    console.log(`  Remote:  ${deployRemote ? C.green('deployed') : C.dim('skipped')}`);
+    console.log(`  Remote:  ${remote ? remoteSummary(remote) : C.dim('skipped')}`);
     console.log('');
   }
 }

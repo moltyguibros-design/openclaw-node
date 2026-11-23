@@ -42,7 +42,10 @@ describe('mesh-deploy --rollback', () => {
       const load = Module._load;
       Module._load = function (request, ...rest) {
         if (request.endsWith('fleet-deploy')) return {
-          fleetDeploy: async (nc, o) => fs.appendFileSync(${JSON.stringify(out)}, JSON.stringify(o) + '\\n'),
+          fleetDeploy: async (nc, o) => {
+            fs.appendFileSync(${JSON.stringify(out)}, JSON.stringify(o) + '\\n');
+            return { expected: 1, succeeded: o.dryRun ? 0 : 1, skipped: 0, failed: 0, missing: 0, stillDeploying: 0 };
+          },
           discoverNodes: async () => [{ nodeId: 'worker-7' }],
         };
         if (request === 'nats') return { connect: async () => ({ close: async () => {} }) };

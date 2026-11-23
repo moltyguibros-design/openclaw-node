@@ -217,6 +217,8 @@ function triggerBranch(repoDir) {
   return b === 'HEAD' ? (process.env.OPENCLAW_DEPLOY_BRANCH || 'main') : b;
 }
 
+const noResults = expected => ({ expected, succeeded: 0, skipped: 0, failed: 0, missing: 0, stillDeploying: 0 });
+
 async function fleetDeploy(nc, opts) {
   const { components, targetNodes, dryRun, force, timeoutMs } = opts;
   const timeout = timeoutMs || 120000; // 2 min default
@@ -229,7 +231,7 @@ async function fleetDeploy(nc, opts) {
 
   if (remoteNodes.length === 0) {
     info('No remote nodes to deploy to');
-    return;
+    return noResults(0);
   }
 
   const sha = opts.sha || exec('git rev-parse --short HEAD', { cwd: REPO_DIR });
@@ -249,7 +251,7 @@ async function fleetDeploy(nc, opts) {
 
   if (dryRun) {
     info('Dry run — would publish deploy trigger. No changes made.');
-    return;
+    return noResults(remoteNodes.length);
   }
 
   // Get the results KV bucket
@@ -286,6 +288,7 @@ async function fleetDeploy(nc, opts) {
 
   const expectedNodes = new Set(remoteNodes.map(n => n.nodeId));
   const nodeResults = new Map(); // nodeId → { status, ... }
+  const deploying = new Set();
   const startTime = Date.now();
   let allDone = false;
 
@@ -300,10 +303,11 @@ async function fleetDeploy(nc, opts) {
           const result = JSON.parse(sc.decode(entry.value));
 
           if (result.status === 'deploying') {
-            // Still working — skip for now
+            deploying.add(nodeId);
             continue;
           }
 
+          deploying.delete(nodeId);
           nodeResults.set(nodeId, result);
           const dur = result.durationSeconds || '?';
 
@@ -334,9 +338,14 @@ async function fleetDeploy(nc, opts) {
 
   // Report stragglers
   console.log('');
-  const missing = [...expectedNodes].filter(n => !nodeResults.has(n));
-  if (missing.length > 0) {
-    warn(`${missing.length} node(s) did not report within ${timeout / 1000}s:`);
+  const unreported = [...expectedNodes].filter(n => !nodeResults.has(n));
+  const stillDeploying = unreported.filter(n => deploying.has(n));
+  const missing = unreported.filter(n => !deploying.has(n));
+  if (unreported.length > 0) {
+    warn(`${unreported.length} node(s) did not report a result within ${timeout / 1000}s:`);
+    for (const n of stillDeploying) {
+      console.log(`    ${C.yellow('●')} ${n} — still deploying (the listener allows up to 20 min)`);
+    }
     for (const n of missing) {
       console.log(`    ${C.yellow('●')} ${n} — may be offline, will auto-catch-up on reconnect`);
     }
@@ -353,8 +362,10 @@ async function fleetDeploy(nc, opts) {
   console.log(`  Succeeded: ${C.green(succeeded.toString())}`);
   if (skipped > 0) console.log(`  Skipped:   ${C.yellow(skipped.toString())} (nothing to deploy on that node)`);
   if (failed > 0) console.log(`  Failed:    ${C.red(failed.toString())}`);
+  if (stillDeploying.length > 0) console.log(`  Deploying: ${C.yellow(stillDeploying.length.toString())} (still running)`);
   if (missing.length > 0) console.log(`  Pending:   ${C.yellow(missing.length.toString())} (will auto-catch-up)`);
   console.log('');
+  return { expected: expectedNodes.size, succeeded, skipped, failed, missing: missing.length, stillDeploying: stillDeploying.length };
 }
 
 // ── Tracer Instrumentation ───────────────────────────────────────────────
@@ -407,11 +418,12 @@ async function main() {
     if (showStatusFlag) {
       await showStatus(nc);
     } else {
-      await fleetDeploy(nc, {
+      const outcome = await fleetDeploy(nc, {
         components: components.length > 0 ? components : null,
         targetNodes: targetNodes.length > 0 ? targetNodes : null,
         dryRun, force, timeoutMs,
       });
+      if (outcome.failed > 0) process.exitCode = 1;
     }
   } finally {
     await nc.close();
