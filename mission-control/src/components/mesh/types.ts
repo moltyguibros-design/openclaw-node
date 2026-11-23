@@ -7,7 +7,7 @@ export interface NodeHealth {
   mem: { total: number; free: number };
   uptimeSeconds: number;
   cpuLoadPercent?: number;
-  services: Array<{ name: string; status: string; pid?: number }>;
+  services: Array<{ name: string; status: string; pid?: number; autostart?: boolean }>;
   agent: {
     status: string;
     currentTask: string | null;

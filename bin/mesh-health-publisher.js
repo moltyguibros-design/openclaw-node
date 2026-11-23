@@ -42,6 +42,10 @@ const IS_MAC = os.platform() === "darwin";
 
 const { ROLE_COMPONENTS, requireNodeRole } = require('../lib/mesh-roles');
 const { launchdServiceStatus, systemdServiceStatus } = require('../lib/service-status');
+// Whether a service is meant to run on its own (the installer starts only the
+// autostart ones), so a stopped on-demand one is not reported as an outage.
+const AUTOSTART = new Map(require('../services/service-manifest.json')
+  .map((s) => [s.name.replace(/^openclaw-/, ''), s.autostart]));
 
 // ── Circuit Breaker State ───────────────────────────────────────────────
 let consecutiveFailures = 0;
@@ -94,6 +98,7 @@ async function getServices(run = runProbe, isMac = IS_MAC) {
   if (isMac) {
     return Promise.all(MESH_SERVICES.map(async (name) => ({
       name,
+      autostart: AUTOSTART.get(name),
       ...launchdServiceStatus(await run("launchctl", ["list", `ai.openclaw.${name}`])),
     })));
   }
@@ -101,6 +106,7 @@ async function getServices(run = runProbe, isMac = IS_MAC) {
   const props = "--property=LoadState,ActiveState,MainPID";
   return Promise.all(MESH_SERVICES.map(async (name) => ({
     name,
+    autostart: AUTOSTART.get(name),
     ...systemdServiceStatus(await run("systemctl", ["--user", "show", `openclaw-${name}`, props])),
   })));
 }

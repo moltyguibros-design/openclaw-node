@@ -31,6 +31,18 @@ describe('mesh-health-publisher probes', () => {
     assert.equal(services.find((s) => s.name === 'mesh-task-daemon').status, 'active');
   });
 
+  it('each service carries its manifest autostart on both platforms', async () => {
+    for (const isMac of [false, true]) {
+      const services = await publisher.getServices(async () => (isMac ? null : missingUnit), isMac);
+      const autostart = Object.fromEntries(services.map((s) => [s.name, s.autostart]));
+      assert.equal(autostart['mesh-agent'], false);
+      assert.equal(autostart.gateway, false);
+      assert.equal(autostart['mesh-task-daemon'], true);
+      assert.equal(autostart['memory-daemon'], true);
+      assert.ok(services.every((s) => typeof s.autostart === 'boolean'), JSON.stringify(services));
+    }
+  });
+
   it('Linux and macOS report the same service set', async () => {
     const linux = await publisher.getServices(async () => missingUnit, false);
     const mac = await publisher.getServices(async () => null, true);

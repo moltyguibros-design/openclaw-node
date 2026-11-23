@@ -50,6 +50,16 @@ describe('summarizeNode', () => {
     assert.deepEqual(n.problems, ['mesh-agent: inactive']);
   });
 
+  it('a stopped on-demand service (autostart false) is not a problem; a stopped autostart one is', () => {
+    const onDemand = summarizeNode('w1', { reportedAt: at(5), services: [{ name: 'mesh-agent', status: 'down', autostart: false }] }, NOW);
+    assert.equal(onDemand.overall, 'ok');
+    assert.deepEqual(onDemand.problems, []);
+    assert.deepEqual(onDemand.services, [{ name: 'mesh-agent', status: 'down', autostart: false }]);
+    const expected = summarizeNode('w1', { reportedAt: at(5), services: [{ name: 'memory-daemon', status: 'down', autostart: true }] }, NOW);
+    assert.equal(expected.overall, 'degraded');
+    assert.deepEqual(expected.problems, ['memory-daemon: down']);
+  });
+
   it('a nearly full disk is degraded', () => {
     assert.equal(summarizeNode('w1', { reportedAt: at(5), services: [], diskPercent: 95 }, NOW).overall, 'degraded');
   });

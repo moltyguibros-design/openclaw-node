@@ -49,7 +49,8 @@ interface NodeHealth {
   mem: { total: number; free: number };
   uptimeSeconds: number;
   cpuLoadPercent?: number;
-  services: Array<{ name: string; status: string; pid?: number }>;
+  // autostart comes from services/service-manifest.json (absent in older publishers' records).
+  services: Array<{ name: string; status: string; pid?: number; autostart?: boolean }>;
   agent: {
     status: string;
     currentTask: string | null;
@@ -451,9 +452,10 @@ export const GET = withTrace("mesh", "GET /api/mesh/nodes", async () => {
       lastSeen = new Date(reportedAt).toISOString();
 
       if (staleSeconds < STALE_DEGRADED) {
-        // Fresh data — check for service-level degradation
+        // Fresh data — check for service-level degradation. A stopped
+        // on-demand service (worker agent, gateway) is not an outage.
         const hasDownService = health.services.some(
-          (s) => s.status === "down" || s.status === "error"
+          (s) => (s.status === "down" && s.autostart !== false) || s.status === "error"
         );
         const highDisk = health.diskPercent > 85;
         status = hasDownService || highDisk ? "degraded" : "online";

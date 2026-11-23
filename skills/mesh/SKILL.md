@@ -47,7 +47,9 @@ mesh health --json          # {"overall": ..., "nodes": [{"nodeId", "overall", "
 
 Per node: `down` — no health entry, or the last report is older than 60 seconds;
 `degraded` — a listed service is not `active` (services `not-found` on that node are
-ignored), or the disk is ≥ 90% full; `ok` — otherwise. `mesh health` exits 1 unless
+ignored, and so is a stopped on-demand service, `autostart: false` in
+`services/service-manifest.json`: the worker agent and the gateway), or the disk is
+≥ 90% full; `ok` — otherwise. `mesh health` exits 1 unless
 everything reported is `ok`; `problems` says what is wrong on that node.
 
 ### Tasks

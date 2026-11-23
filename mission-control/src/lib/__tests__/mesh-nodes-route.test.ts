@@ -154,6 +154,26 @@ describe("GET /api/mesh/nodes", () => {
     });
   });
 
+  it("a stopped on-demand service (autostart false) leaves a node online; a stopped autostart one degrades it", async () => {
+    const withAgent = (autostart: boolean) => ({
+      nodeId: "peer-a",
+      services: [{ name: "mesh-agent", status: "down", autostart }],
+      diskPercent: 10,
+      reportedAt: new Date().toISOString(),
+    });
+    const statusWith = async (autostart: boolean) => {
+      vi.resetModules();
+      kvState.kv = {
+        keys: async () => (async function* () { yield "peer-a"; })(),
+        get: async () => ({ value: new TextEncoder().encode(JSON.stringify(withAgent(autostart))) }),
+      };
+      const body: RouteBody = await (await (await loadGet())()).json();
+      return body.nodes.find((n) => n.nodeId === "peer-a")!.status;
+    };
+    expect(await statusWith(false)).toBe("online");
+    expect(await statusWith(true)).toBe("degraded");
+  });
+
   it("bounds today's token stats in token_usage's own 'YYYY-MM-DD HH:MM:SS' format", async () => {
     cp.rawAll.mockClear();
     await (await loadGet())();
