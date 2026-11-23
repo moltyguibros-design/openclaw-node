@@ -1567,7 +1567,10 @@ def main():
     guard = PromptGuard(config)
     result = guard.analyze(args.message, context)
     if result.severity != Severity.SAFE:
-        guard.log_detection(result, args.message, context)
+        try:
+            guard.log_detection(result, args.message, context)
+        except OSError as e:
+            print(f"prompt-guard: could not write the security log: {e}", file=sys.stderr)
 
     if args.json:
         print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
