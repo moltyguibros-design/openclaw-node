@@ -73,6 +73,19 @@ test('HEARTBEAT.md claims no commit gate the installer never enables and no sing
   assert.match(text, /bash skills\/openclaw-skill-scanner\/install-hook\.sh <clawhub-slug>/);
 });
 
+// AGENTS.md asks first for anything that leaves the machine; the unattended
+// heartbeat listed pushing and committing others' work as safe without asking.
+test('HEARTBEAT.md never lets the unattended agent push or commit work it did not author', () => {
+  const text = docs.find(([f]) => f === 'HEARTBEAT.md')[1];
+  const safe = text.match(/## Proactive Work \(safe to do without asking\)\n([\s\S]*?)\n## /)[1];
+  for (const line of safe.split('\n').filter((l) => l.startsWith('- '))) {
+    assert.doesNotMatch(line.replace('(ask before pushing)', ''), /\bpush/i, line);
+    assert.doesNotMatch(line, /commit[^\n]*uncommitted work/i, line);
+  }
+  assert.match(safe, /Commit your own changes \(ask before pushing\)/);
+  assert.match(text, /`uncommitted_work`: report it; commit only your own changes/);
+});
+
 // memory-maintenance stopped archiving daily files in June (checkArchival went with the
 // hourly daily-log writer) and exits 0 on warnings.
 test('identity docs describe memory-maintenance as it runs: no archival, no exit 1', () => {

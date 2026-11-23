@@ -98,7 +98,7 @@ if os.path.isdir(projects_dir):
                     "type": "uncommitted_work",
                     "description": f"Uncommitted changes in projects/{proj}: {summary}",
                     "task_id": None,
-                    "action": "review_and_commit"
+                    "action": "report"
                 })
         except (subprocess.TimeoutExpired, OSError):
             pass

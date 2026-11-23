@@ -101,3 +101,20 @@ test('OPENCLAW_WORKSPACE overrides the script location', t => {
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /circuit_recovery/);
 });
+
+test('uncommitted work in a project is surfaced to report, not to commit', t => {
+  const { ws, bin } = fixture(t);
+  const proj = path.join(ws, 'projects', 'p1');
+  fs.mkdirSync(proj, { recursive: true });
+  const git = (...a) => assert.equal(spawnSync('git', ['-C', proj, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).status, 0);
+  git('init', '-q');
+  fs.writeFileSync(path.join(proj, 'a.txt'), 'one\n');
+  git('add', 'a.txt');
+  git('commit', '-q', '--no-verify', '-m', 'seed');
+  fs.writeFileSync(path.join(proj, 'a.txt'), 'two\n');
+  const r = scan(bin, ws);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const trigger = JSON.parse(r.stdout.slice(0, r.stdout.lastIndexOf(']') + 1)).find((x) => x.type === 'uncommitted_work');
+  assert.ok(trigger, r.stdout);
+  assert.equal(trigger.action, 'report');
+});

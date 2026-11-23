@@ -83,7 +83,7 @@ AGENTS.md points here. All heartbeat logic lives here.
 1. Run `bin/proactive-scan --dry-run`
 2. If triggers found:
    - `stale_task`: Check on the running task, escalate if needed
-   - `uncommitted_work`: Review and commit if appropriate
+   - `uncommitted_work`: report it; commit only your own changes
    - `circuit_recovery`: Consider probe delegation to recovered soul
 3. Only spawn agents for triggers that align with active project priorities
 
@@ -101,11 +101,11 @@ AGENTS.md points here. All heartbeat logic lives here.
 - Read and organize memory files
 - Check on projects (git status, etc.)
 - Update documentation
-- Commit and push your own changes
+- Commit your own changes (ask before pushing)
 - Review and update MEMORY.md
 - Run `bin/proactive-scan` to discover actionable triggers
 - Act on stale tasks (check status, escalate blockers)
-- Commit clean uncommitted work in project directories
+- Report uncommitted work in project directories
 - Probe recovered souls via delegation (circuit breaker half-open)
 
 ## Prediction-Outcome Calibration
