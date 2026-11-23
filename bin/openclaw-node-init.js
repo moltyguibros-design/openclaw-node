@@ -585,6 +585,8 @@ const SERVICE_TEMPLATE_VARS = [
   'MESH_FOREMAN_ENFORCE', 'OPENCLAW_TIMEZONE',
 ];
 
+const serviceWorkspace = () => process.env.OPENCLAW_WORKSPACE || path.join(os.homedir(), '.openclaw', 'workspace');
+
 function serviceTemplateVars({ meshDir, nodeId, config }) {
   const home = os.homedir();
   const env = process.env;
@@ -596,7 +598,7 @@ function serviceTemplateVars({ meshDir, nodeId, config }) {
     NODE_BIN_DIR: path.dirname(process.execPath),
     NPM_BIN: env.NPM_BIN || path.join(path.dirname(process.execPath), 'npm'),
     NATS_SERVER_BIN: env.NATS_SERVER_BIN || '/usr/local/bin/nats-server',
-    OPENCLAW_WORKSPACE: env.OPENCLAW_WORKSPACE || path.join(home, '.openclaw', 'workspace'),
+    OPENCLAW_WORKSPACE: serviceWorkspace(),
     OPENCLAW_REPO_DIR: meshDir,
     OPENCLAW_NATS: config.nats,
     OPENCLAW_NODE_ID: nodeId,
@@ -635,6 +637,13 @@ function agentStartCommand(osInfo) {
   return osInfo.serviceType === 'launchd'
     ? 'launchctl kickstart gui/$(id -u)/ai.openclaw.mesh-agent'
     : `systemctl --user start ${ON_DEMAND_UNIT}`;
+}
+
+// The files a rendered unit appends its stdout/stderr to; the journal holds none of it.
+function serviceLogPaths(osInfo, unit) {
+  const name = osInfo.serviceType === 'launchd' ? unit.replace(/^openclaw-/, '') : unit;
+  const base = path.join(serviceWorkspace(), '.tmp', name);
+  return { out: `${base}.log`, err: `${base}.err` };
 }
 
 function installLaunchdService(meshDir, vars) {
@@ -780,7 +789,8 @@ function verifyServiceRunning(osInfo, { settleMs = 8000 } = {}) {
         return true;
       } else {
         fail(`Deploy listener not running (systemd status: ${status})`);
-        fail('Check logs: journalctl --user -u openclaw-mesh-deploy-listener -n 20');
+        fail(`Check logs: tail -n 20 ${serviceLogPaths(osInfo, 'openclaw-mesh-deploy-listener').err}`);
+        fail('Start status: systemctl --user status openclaw-mesh-deploy-listener');
         return false;
       }
     } catch {
@@ -1006,7 +1016,7 @@ async function main() {
   console.log(`  2. The mesh agent is on demand. Start it with: ${agentStartCommand(osInfo)}`);
   if (osInfo.serviceType === 'systemd') {
     console.log(`  3. Check it: systemctl --user status openclaw-mesh-agent`);
-    console.log(`  4. View logs: journalctl --user -u openclaw-mesh-agent -f`);
+    console.log(`  4. View logs: tail -f ${serviceLogPaths(osInfo, ON_DEMAND_UNIT).out}`);
   } else {
     console.log(`  3. Check it: launchctl list | grep mesh-agent`);
     console.log(`  4. View logs: tail -f ~/.openclaw/workspace/.tmp/mesh-agent.log`);
@@ -1021,5 +1031,5 @@ if (require.main === module) main().catch(err => {
 
 module.exports = {
   renderServiceTemplate, serviceTemplateVars, SERVICE_TEMPLATE_VARS, parseJoinToken, updateEnvFile, provisionTrust,
-  installService, verifyServiceRunning, agentStartCommand, installMeshCode, discoverNats, discoverTopology,
+  installService, verifyServiceRunning, agentStartCommand, serviceLogPaths, installMeshCode, discoverNats, discoverTopology,
 };

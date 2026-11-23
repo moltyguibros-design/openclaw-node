@@ -139,6 +139,26 @@ describe('node-init renders the shared service templates', () => {
     }
   });
 
+  // The units append stdout/stderr to files, so the journalctl hints showed only systemd's
+  // own lifecycle lines on a Linux node, never the listener's error.
+  it('the log hints name the files the rendered units write', () => {
+    const { serviceLogPaths } = require('../bin/openclaw-node-init.js');
+    for (const unit of ['openclaw-mesh-agent', 'openclaw-mesh-deploy-listener']) {
+      const service = renderServiceTemplate(readFileSync(join(ROOT, `services/systemd/${unit}.service`), 'utf8'), vars, 'systemd');
+      assert.deepEqual(serviceLogPaths({ serviceType: 'systemd' }, unit), {
+        out: service.match(/^StandardOutput=append:(.*)$/m)[1], err: service.match(/^StandardError=append:(.*)$/m)[1],
+      });
+      const plist = renderServiceTemplate(readFileSync(join(ROOT, `services/launchd/ai.openclaw.${unit.replace(/^openclaw-/, '')}.plist`), 'utf8'), vars, 'plist');
+      assert.deepEqual(serviceLogPaths({ serviceType: 'launchd' }, unit), {
+        out: plist.match(/<key>StandardOutPath<\/key>\s*<string>([^<]*)<\/string>/)[1],
+        err: plist.match(/<key>StandardErrorPath<\/key>\s*<string>([^<]*)<\/string>/)[1],
+      });
+    }
+    const src = readFileSync(join(ROOT, 'bin/openclaw-node-init.js'), 'utf8');
+    assert.doesNotMatch(src, /journalctl --user -u openclaw-mesh-deploy-listener -n 20/);
+    assert.doesNotMatch(src, /journalctl --user -u openclaw-mesh-agent -f/);
+  });
+
   it('never writes the legacy second listener name', () => {
     const src = readFileSync(join(ROOT, 'bin', 'openclaw-node-init.js'), 'utf8');
     assert.ok(!/writeFileSync\([^)]*deploy-listener/.test(src.replace(/mesh-deploy-listener/g, '')), 'inline deploy-listener writer is gone');
