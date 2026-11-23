@@ -19,7 +19,7 @@ test('no transition and no Phase 2 pass runs clawvault observe, reflect or archi
   try {
     const a = transcript(fx, 'aaaa1111', 30);
     runDaemon(fx, `
-      await daemon.handleTransitions([{ from: 'ENDED', to: 'BOOT', sessionId: 'aaaa1111', jsonlPath: ${JSON.stringify(a)}, othersLive: true, previousJsonl: null }], config);
+      await daemon.handleTransitions([{ from: 'ENDED', to: 'BOOT', sessionId: 'aaaa1111', jsonlPath: ${JSON.stringify(a)}, othersLive: false, previousJsonl: null }], config);
       await daemon.handleTransitions([{ from: 'ACTIVE', to: 'IDLE', sessionId: 'aaaa1111', jsonlPath: ${JSON.stringify(a)} }], config);
       await daemon.handleTransitions([{ from: 'IDLE', to: 'ENDED', sessionId: 'aaaa1111', jsonlPath: ${JSON.stringify(a)}, othersLive: true }], config);
       config.intervals.sessionRecapMs = 0;

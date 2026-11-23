@@ -189,13 +189,15 @@ The daemon polls JSONL transcript mtimes from a JSON registry every 30s. Any JSO
 ### Session Start (ENDED → BOOT → ACTIVE)
 ```
 memory-daemon detects new session via JSONL mtime
-  Phase 0 Bootstrap:
+  Phase 0 Bootstrap, every new transcript:
   → session-recap --file <the last session that ended> (capture what it did)
   → clawvault-local wake (restore active context)
-  → clawvault-local doctor (verify vault integrity)
+  → subagent-audit on previous session (scan delegations, update trust)
+  Only the boot that opens the node session (no other session live):
   → memory-maintenance --force (catch up on any stale maintenance)
   → compile-boot --all (ensure boot artifacts are fresh)
-  → subagent-audit on previous session (scan delegations, update trust)
+  → clawvault-local doctor (verify vault integrity)
+  → MEMORY.md snapshot frozen, transcript directory imported
 ```
 
 ### During Active Session (ACTIVE state)

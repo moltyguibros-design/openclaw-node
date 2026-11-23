@@ -612,7 +612,24 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false, previ
     log(`  created daily file: ${today}.md`);
   }
 
-  // 4. Run maintenance (force)
+  // 4. Sub-agent audit of the last session that ended
+  if (fs.existsSync(subagentAudit) && previousJsonl) {
+    try {
+      await runSubprocess('node', [subagentAudit, previousJsonl], 30000);
+      log(`  subagent-audit done on ${path.basename(previousJsonl).slice(0, 8)}`);
+    } catch (e) { log(`  subagent-audit failed: ${e.message}`); }
+  }
+
+  // A transcript that appears beside a live session (a plan tick, a second
+  // conversation) gets only the steps above: the node-wide ones below already
+  // ran for the boot that opened the node session, and Phase 2's import keeps
+  // the archive current.
+  if (othersLive) {
+    log('Phase 0: Bootstrap complete (node-wide steps already ran for a live session)');
+    return;
+  }
+
+  // 5. Run maintenance (force)
   if (fs.existsSync(maintenance)) {
     try {
       await runSubprocess('node', [maintenance, '--force'], 60000);
@@ -624,7 +641,7 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false, previ
     saveThrottleState(throttle);
   }
 
-  // 5. Compile boot artifacts
+  // 6. Compile boot artifacts
   if (fs.existsSync(compileBoot)) {
     try {
       // Use /usr/bin/python3 explicitly — Homebrew python lacks pyyaml
@@ -632,14 +649,6 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false, previ
       await runSubprocess(py, [compileBoot, '--all'], 30000);
       log('  compile-boot done');
     } catch (e) { log(`  compile-boot failed: ${e.message}`); }
-  }
-
-  // 6. Sub-agent audit of the last session that ended
-  if (fs.existsSync(subagentAudit) && previousJsonl) {
-    try {
-      await runSubprocess('node', [subagentAudit, previousJsonl], 30000);
-      log(`  subagent-audit done on ${path.basename(previousJsonl).slice(0, 8)}`);
-    } catch (e) { log(`  subagent-audit failed: ${e.message}`); }
   }
 
   // 7. ClawVault doctor — vault health check + auto-fix
@@ -650,16 +659,13 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false, previ
     } catch (e) { log(`  clawvault doctor failed: ${e.message}`); }
   }
 
-  // 8. Freeze MEMORY.md snapshot for deterministic prompt content. A session
-  // that boots beside a live one keeps the snapshot that one is reading.
-  if (!othersLive) {
-    try {
-      const budget = initMemoryBudget(config);
-      budget.startSession();
-      const stats = budget.getStats();
-      log(`  memory-budget frozen ${stats.meterDisplay}`);
-    } catch (e) { log(`  memory-budget freeze failed: ${e.message}`); }
-  }
+  // 8. Freeze MEMORY.md snapshot for deterministic prompt content
+  try {
+    const budget = initMemoryBudget(config);
+    budget.startSession();
+    const stats = budget.getStats();
+    log(`  memory-budget frozen ${stats.meterDisplay}`);
+  } catch (e) { log(`  memory-budget freeze failed: ${e.message}`); }
 
   // 9. Import changed sessions into SQLite archive (memory worker)
   try {
