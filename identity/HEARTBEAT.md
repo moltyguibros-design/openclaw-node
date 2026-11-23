@@ -40,7 +40,6 @@ AGENTS.md points here. All heartbeat logic lives here.
 1. Run `bin/memory-maintenance.mjs --verbose` (it skips itself when the memory daemon ran it in the last 30 min; the results file below still holds that run)
 2. Read `.tmp/maintenance-results` — if any warnings, report to Gui
 3. Specific attention:
-   - ARCHIVAL: daily files >30 days → archived automatically
    - PREDICTIONS: open >7 days → expired automatically
    - STALE_TASKS: running >24h → flagged
    - MEMORY_STALE: MEMORY.md >7 days old → needs manual update (do it NOW)

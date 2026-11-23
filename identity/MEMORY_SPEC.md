@@ -68,7 +68,7 @@ Every compliant node MUST have these files at its workspace root:
 | File | Required | Purpose |
 |------|----------|---------|
 | `bin/auto-checkpoint` | YES | Memory daemon (session start, flush, recap, maintenance) |
-| `bin/memory-maintenance.mjs` | YES | Periodic maintenance (archival, predictions, stale tasks, sync) |
+| `bin/memory-maintenance.mjs` | YES | Periodic maintenance (predictions, stale tasks, sync) |
 | `bin/session-recap` | YES | Rolling conversation digest |
 
 ### Tier 5 — Optional Infrastructure
@@ -207,7 +207,6 @@ last_flush: <ISO-8601>
 | Companion state flush | auto-checkpoint | Every tool activity |
 | Daily file creation | auto-checkpoint (session start) | Once per session |
 | Memory maintenance (full) | auto-checkpoint | 30 min |
-| Daily file archival | memory-maintenance | 30 min (checks; archives >30d files) |
 | Prediction closure | memory-maintenance | 30 min (checks; closes >7d predictions) |
 | Stale task detection | memory-maintenance | 30 min |
 | MEMORY.md freshness check | memory-maintenance | 30 min |
@@ -245,9 +244,8 @@ These internal references MUST be consistent:
 
 ```bash
 bin/memory-maintenance.mjs --force --verbose
-# Exit 0 = healthy
-# Exit 1 = warnings (non-critical degradation)
-# Exit 2 = critical failure (structurally broken)
+# Exit 0 = ran (warnings, if any, are in .tmp/maintenance-results)
+# Exit 2 = fatal error
 ```
 
 Additionally, read `.tmp/maintenance-results` for specific findings.

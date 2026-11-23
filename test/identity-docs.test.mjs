@@ -72,3 +72,19 @@ test('HEARTBEAT.md claims no commit gate the installer never enables and no sing
   assert.doesNotMatch(text, /95\.9%|Pre-commit hook active|active via core\.hooksPath/);
   assert.match(text, /bash skills\/openclaw-skill-scanner\/install-hook\.sh <clawhub-slug>/);
 });
+
+// memory-maintenance stopped archiving daily files in June (checkArchival went with the
+// hourly daily-log writer) and exits 0 on warnings.
+test('identity docs describe memory-maintenance as it runs: no archival, no exit 1', () => {
+  for (const f of ['HEARTBEAT.md', 'AGENTS.md', 'MEMORY_SPEC.md']) {
+    const text = docs.find(([name]) => name === f)[1];
+    text.split('\n').forEach((line, i) => {
+      if (/memory-maintenance|ARCHIVAL:/.test(line)) assert.doesNotMatch(line, /archiv/i, `${f}:${i + 1}`);
+    });
+  }
+  assert.doesNotMatch(docs.find(([f]) => f === 'MEMORY_SPEC.md')[1], /Exit 1/);
+  const src = fs.readFileSync(path.join(ROOT, 'workspace-bin', 'memory-maintenance.mjs'), 'utf8');
+  const body = src.match(/results\.length = 0;\n([\s\S]*?)\n\n/)[1];
+  const calls = body.match(/^\s+(await )?check\w+\(\);$/gm).length;
+  assert.equal(Number(src.match(/Runs (\d+) systematic checks/)[1]), calls);
+});

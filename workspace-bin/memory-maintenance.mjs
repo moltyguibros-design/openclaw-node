@@ -2,7 +2,7 @@
 /**
  * memory-maintenance.mjs — Automated memory system maintenance (Node.js port)
  *
- * Runs 13 systematic checks with auto-remediation.
+ * Runs 11 systematic checks with auto-remediation.
  * Replaces the macOS-only bash script with cross-platform Node.js.
  *
  * Usage:

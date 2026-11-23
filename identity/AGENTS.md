@@ -49,7 +49,7 @@ Capture what matters. Decisions, context, things to remember. Skip the secrets u
 ### Memory Automation (Principle 11)
 
 All memory ops are fully automated by `bin/memory-daemon.mjs` (the memory-daemon service — launchd `ai.openclaw.memory-daemon` / systemd `openclaw-memory-daemon` — every 30s). No manual calls needed.
-- `bin/memory-maintenance.mjs` every 30min: archival, stale tasks, ClawVault checkpoint, daily file, MC sync
+- `bin/memory-maintenance.mjs` every 30min: predictions, stale tasks, ClawVault checkpoint, MC sync
 - `bin/session-recap` every 10min: rolling 3-session digest
 - ClawVault: `clawvault-local` — `remember`, `search`, `vsearch` on-demand. Auto wake/checkpoint/sleep.
 - Heartbeat: runs `bin/memory-maintenance.mjs --verbose` first. See HEARTBEAT.md.
