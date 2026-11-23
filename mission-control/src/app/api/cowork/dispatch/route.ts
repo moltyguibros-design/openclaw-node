@@ -25,11 +25,11 @@ export async function POST(request: NextRequest) {
     description,
     clusterId,
     nodes: manualNodes,
-    mode = "parallel",
-    convergence = { type: "unanimous" },
+    mode,
+    convergence,
     scopeStrategy = "shared",
     budgetMinutes = 30,
-    maxRounds = 5,
+    maxRounds,
     metric,
     scope = [],
   } = body;
@@ -41,9 +41,10 @@ export async function POST(request: NextRequest) {
   // Resolve nodes from cluster or manual list
   const db = getDb();
   let nodeIds: string[] = [];
+  let cluster: typeof clusters.$inferSelect | undefined;
 
   if (clusterId) {
-    const cluster = db.select().from(clusters).where(eq(clusters.id, clusterId)).get();
+    cluster = db.select().from(clusters).where(eq(clusters.id, clusterId)).get();
     if (!cluster || cluster.status !== "active") {
       return NextResponse.json(
         { error: `Cluster "${clusterId}" is not active` },
@@ -72,17 +73,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const conv = convergence ?? { type: cluster?.defaultConvergence ?? "unanimous" };
+
   // Build collaboration spec (bridge reads this from markdown)
   const collabSpec = {
-    mode,
+    mode: mode ?? cluster?.defaultMode ?? "parallel",
     min_nodes: Math.min(nodeIds.length, 2),
     max_nodes: nodeIds.length,
     join_window_s: 30,
-    max_rounds: maxRounds,
+    max_rounds: maxRounds ?? cluster?.maxRounds ?? 5,
     convergence: {
-      type: convergence.type || "unanimous",
-      threshold: (convergence.threshold ?? 66) / 100,
-      metric: convergence.metric || null,
+      type: conv.type || "unanimous",
+      threshold: (conv.threshold ?? 66) / 100,
+      metric: conv.metric || null,
       min_quorum: Math.min(nodeIds.length, 2),
     },
     scope_strategy: scopeStrategy,

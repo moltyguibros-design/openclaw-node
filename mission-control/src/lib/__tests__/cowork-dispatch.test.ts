@@ -51,11 +51,13 @@ function dispatch(nodes: unknown[]) {
   return post({ nodes });
 }
 
-async function seedCluster(status: string) {
+async function seedCluster(status: string, defaults: { mode?: string; convergence?: string; maxRounds?: number } = {}) {
   const raw = await openDb();
   raw
-    .prepare("INSERT INTO clusters (id, name, status, updated_at) VALUES ('c', 'C', ?, ?)")
-    .run(status, new Date().toISOString());
+    .prepare(
+      "INSERT INTO clusters (id, name, status, updated_at, default_mode, default_convergence, max_rounds) VALUES ('c', 'C', ?, ?, ?, ?, ?)"
+    )
+    .run(status, new Date().toISOString(), defaults.mode ?? "parallel", defaults.convergence ?? "unanimous", defaults.maxRounds ?? 5);
   const member = raw.prepare("INSERT INTO cluster_members (cluster_id, node_id) VALUES ('c', ?)");
   member.run("a");
   member.run("b");
@@ -94,4 +96,36 @@ test("an unknown cluster id is refused", async () => {
   const res = await post({ clusterId: "missing", nodes: [{ nodeId: "a" }, { nodeId: "b" }] });
   expect(res.status).toBe(400);
   expect(db!.prepare("SELECT count(*) AS n FROM tasks").get()).toEqual({ n: 0 });
+});
+
+function collabOf(taskId: string) {
+  const row = db!.prepare("SELECT collaboration FROM tasks WHERE id = ?").get(taskId) as { collaboration: string };
+  return JSON.parse(row.collaboration);
+}
+
+test("a cluster's default mode, convergence and max rounds apply when the body omits them", async () => {
+  await seedCluster("active", { mode: "review", convergence: "majority", maxRounds: 3 });
+  const res = await post({ clusterId: "c" });
+  expect(res.status).toBe(200);
+  const spec = collabOf((await res.json()).taskId);
+  expect(spec.mode).toBe("review");
+  expect(spec.convergence.type).toBe("majority");
+  expect(spec.max_rounds).toBe(3);
+});
+
+test("explicit body settings override the cluster defaults", async () => {
+  await seedCluster("active", { mode: "review", convergence: "majority", maxRounds: 3 });
+  const res = await post({ clusterId: "c", mode: "sequential", convergence: { type: "coordinator" }, maxRounds: 7 });
+  const spec = collabOf((await res.json()).taskId);
+  expect(spec.mode).toBe("sequential");
+  expect(spec.convergence.type).toBe("coordinator");
+  expect(spec.max_rounds).toBe(7);
+});
+
+test("a manual dispatch without settings uses parallel / unanimous / 5 rounds", async () => {
+  const res = await dispatch([{ nodeId: "a" }, { nodeId: "b" }]);
+  const spec = collabOf((await res.json()).taskId);
+  expect(spec.mode).toBe("parallel");
+  expect(spec.convergence.type).toBe("unanimous");
+  expect(spec.max_rounds).toBe(5);
 });

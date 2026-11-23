@@ -521,7 +521,7 @@ export async function createCluster(params: {
   defaultConvergence?: string;
   convergenceThreshold?: number;
   maxRounds?: number;
-  members?: Array<{ nodeId: string; role: string }>;
+  members?: Array<{ nodeId: string }>;
 }) {
   return send("/api/cowork/clusters", json("POST", params), ["/api/cowork/clusters"]);
 }
@@ -530,14 +530,8 @@ export async function deleteCluster(id: string) {
   await send(`/api/cowork/clusters/${id}`, { method: "DELETE" }, ["/api/cowork/clusters"]);
 }
 
-export async function addClusterMember(clusterId: string, nodeId: string, role: string) {
-  return send(`/api/cowork/clusters/${clusterId}/members`, json("POST", { nodeId, role }), [
-    "/api/cowork/clusters",
-  ]);
-}
-
-export async function updateClusterMember(clusterId: string, nodeId: string, role: string) {
-  return send(`/api/cowork/clusters/${clusterId}/members`, json("PATCH", { nodeId, role }), [
+export async function addClusterMember(clusterId: string, nodeId: string) {
+  return send(`/api/cowork/clusters/${clusterId}/members`, json("POST", { nodeId }), [
     "/api/cowork/clusters",
   ]);
 }
@@ -554,7 +548,7 @@ export async function dispatchCollabTask(params: {
   title: string;
   description?: string;
   clusterId?: string;
-  nodes?: Array<{ nodeId: string; role: string }>;
+  nodes?: Array<{ nodeId: string }>;
   mode?: string;
   convergence?: { type: string; threshold?: number; metric?: string };
   scopeStrategy?: string;

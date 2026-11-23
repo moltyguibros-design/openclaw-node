@@ -15,7 +15,6 @@ import {
   dispatchCollabTask,
   interveneSession,
   removeClusterMember,
-  updateClusterMember,
   updateMeshTask,
   updateTask,
 } from "../hooks";
@@ -54,8 +53,7 @@ const refusable: Array<[string, () => Promise<unknown>]> = [
   ["createDependency", () => createDependency({ sourceId: "a", targetId: "b" })],
   ["createCluster", () => createCluster({ name: "c" })],
   ["deleteCluster", () => deleteCluster("c")],
-  ["addClusterMember", () => addClusterMember("c", "n", "worker")],
-  ["updateClusterMember", () => updateClusterMember("c", "n", "worker")],
+  ["addClusterMember", () => addClusterMember("c", "n")],
   ["removeClusterMember", () => removeClusterMember("c", "n")],
   ["dispatchCollabTask", () => dispatchCollabTask({ title: "x" })],
   ["createMeshTask", () => createMeshTask({ title: "x" })],

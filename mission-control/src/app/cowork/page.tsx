@@ -14,7 +14,6 @@ import { ClusterCard } from "@/components/cowork/cluster-card";
 import { CreateClusterDialog } from "@/components/cowork/create-cluster-dialog";
 import { DispatchForm } from "@/components/cowork/dispatch-form";
 import useSWR from "swr";
-import { RolePicker } from "@/components/cowork/role-picker";
 
 type Tab = "sessions" | "clusters" | "dispatch";
 
@@ -213,11 +212,9 @@ function AddNodeDialog({
     (n) => !existingNodeIds.includes(n.nodeId)
   );
 
-  const [selectedRole, setSelectedRole] = useState("worker");
-
   const handleAdd = async (nodeId: string) => {
     try {
-      await addClusterMember(clusterId, nodeId, selectedRole);
+      await addClusterMember(clusterId, nodeId);
     } catch (err) {
       alert(`Add failed: ${(err as Error).message}`);
       return;
@@ -238,10 +235,6 @@ function AddNodeDialog({
           </button>
         </div>
         <div className="px-4 py-3 space-y-2">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-xs text-muted-foreground">Role:</span>
-            <RolePicker value={selectedRole} onChange={setSelectedRole} />
-          </div>
           {meshNodes.map((node) => (
             <button
               key={node.nodeId}

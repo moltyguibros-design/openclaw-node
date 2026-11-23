@@ -9,8 +9,7 @@ import {
   Send,
 } from "lucide-react";
 import type { ClusterView } from "@/lib/hooks";
-import { deleteCluster, removeClusterMember, updateClusterMember } from "@/lib/hooks";
-import { RoleBadge, RolePicker } from "./role-picker";
+import { deleteCluster, removeClusterMember } from "@/lib/hooks";
 
 interface ClusterCardProps {
   cluster: ClusterView;
@@ -38,12 +37,6 @@ export function ClusterCard({
     if (!confirm(`Remove ${nodeId} from ${cluster.name}?`)) return;
     await removeClusterMember(cluster.id, nodeId).catch((err) =>
       alert(`Remove failed: ${(err as Error).message}`),
-    );
-  };
-
-  const handleRoleChange = async (nodeId: string, role: string) => {
-    await updateClusterMember(cluster.id, nodeId, role).catch((err) =>
-      alert(`Role change failed: ${(err as Error).message}`),
     );
   };
 
@@ -96,7 +89,6 @@ export function ClusterCard({
             <span className="font-mono text-[11px]">
               {m.nodeId.split("-")[0]}
             </span>
-            <RoleBadge role={m.role} />
           </span>
         ))}
       </div>
@@ -151,18 +143,12 @@ export function ClusterCard({
                 />
                 <span className="font-mono text-xs">{m.nodeId}</span>
               </div>
-              <div className="flex items-center gap-2">
-                <RolePicker
-                  value={m.role}
-                  onChange={(role) => handleRoleChange(m.nodeId, role)}
-                />
-                <button
-                  onClick={() => handleRemoveMember(m.nodeId)}
-                  className="text-muted-foreground hover:text-red-400 transition-colors"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
+              <button
+                onClick={() => handleRemoveMember(m.nodeId)}
+                className="text-muted-foreground hover:text-red-400 transition-colors"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
             </div>
           ))}
           <div className="flex justify-end pt-2">

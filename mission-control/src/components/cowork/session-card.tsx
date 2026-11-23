@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import type { CollabSession, CollabArtifact, Task } from "@/lib/hooks";
 import { interveneSession } from "@/lib/hooks";
-import { RoleBadge } from "./role-picker";
+import { RoleBadge } from "./role-badge";
 
 // Worker artifacts are stored as { summary, artifacts } objects (or bare strings
 // on simpler paths). Render the human summary — never a raw "[object Object]".
