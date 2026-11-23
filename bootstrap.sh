@@ -334,6 +334,7 @@ ok "baseline complete"
 # Fetch the repo and hand off
 # ============================================================
 step "Fetching $REPO@$REF"
+SRC_OLD=""
 if [ -n "${OPENCLAW_SRC:-}" ]; then
   SRC="$OPENCLAW_SRC"
   [ -f "$SRC/install.sh" ] || die "OPENCLAW_SRC=$SRC has no install.sh"
@@ -350,7 +351,7 @@ else
   # On a re-run the units exec from $SRC: swap only once the new tree is whole,
   # and keep the old one until install.sh succeeds.
   rm -rf "$SRC.old"
-  if [ -d "$SRC" ]; then mv "$SRC" "$SRC.old"; fi
+  if [ -d "$SRC" ]; then SRC_OLD="$SRC.old"; mv "$SRC" "$SRC_OLD"; fi
   mv "$SRC.new" "$SRC"
   ok "source at $SRC"
 fi
@@ -374,7 +375,7 @@ if [ $RC -ne 0 ]; then
   err "install.sh exited $RC — dependencies were fine, the failure is downstream."
   exit $RC
 fi
-rm -rf "$SRC.old"
+[ -z "$SRC_OLD" ] || rm -rf "$SRC_OLD"
 ok "wave 1 complete — node installed and running (no models yet)"
 
 # ============================================================

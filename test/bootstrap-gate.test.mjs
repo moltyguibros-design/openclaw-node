@@ -104,3 +104,19 @@ test('a re-run keeps the live source tree when the download fails, and swaps it 
   assert.equal(existsSync(`${src}.new`), false);
   assert.equal(existsSync(`${src}.old`), false);
 });
+
+// Only the fetch moves a tree aside; beside an operator's own OPENCLAW_SRC checkout a
+// sibling .old is theirs (a `cp -r x x.old` backup), and wave 1 deleted it.
+test('a run on OPENCLAW_SRC leaves a sibling .old directory alone', (t) => {
+  const { run, dir } = sandbox(t);
+  const src = join(dir, 'code', 'openclaw-node');
+  mkdirSync(src, { recursive: true });
+  writeFileSync(join(src, 'install.sh'), 'exit 0\n');
+  mkdirSync(`${src}.old`);
+  writeFileSync(join(`${src}.old`, 'backup.txt'), 'precious\n');
+  const r = run(['--skip-llm', '--role=worker'], { OPENCLAW_SRC: src });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /using existing checkout/);
+  assert.match(r.stdout, /wave 1 complete/);
+  assert.equal(readFileSync(join(`${src}.old`, 'backup.txt'), 'utf8'), 'precious\n');
+});
