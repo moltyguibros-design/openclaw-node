@@ -564,7 +564,7 @@ async function renderBlock() {
       '<div id="block-toast"></div>' +
       '<div class="doc-render">' + esc(data.content || '(empty)') + '</div>';
     $('btn-resume').addEventListener('click', async () => {
-      if (!confirm('Resume the plan?\n\nDeletes BLOCKED.md so the next tick runs. If the scheduler was auto-unloaded by a previous fast-exit, it will also be reloaded.')) return;
+      if (!confirm('Resume the plan?\n\nDeletes BLOCKED.md so the next tick runs. A scheduler that paused itself is reloaded; one you stopped stays stopped.')) return;
       const res = await doUnblock();
       if (res.error) showToast('block-toast', 'Error: ' + res.error, true);
       else {
@@ -958,7 +958,7 @@ async function renderAutomation() {
   });
   const unloadBtn = $('btn-unload');
   if (unloadBtn) unloadBtn.addEventListener('click', async () => {
-    if (!confirm('Unload the scheduler? No more automated ticks will fire until you load it again.')) return;
+    if (!confirm('Unload the scheduler? No more automated ticks will fire until you start it again (its plist is removed; Start rebuilds it from the saved config).')) return;
     const r2 = await viewerClient.request('/api/plans/' + state.planId + '/automation/unload', { method: 'POST' });
     const res = await r2.json();
     if (res.error) showToast('action-toast', 'Error: ' + res.error, true);

@@ -627,3 +627,29 @@ test('Fire-now and schedule changes refuse while the scheduled tick runs, and ki
   const client = (await f.request('/viewer-client.js')).text;
   assert.ok(!client.includes('Most actions will refuse'), 'the client names exactly which actions refuse');
 });
+
+// Stop scheduler left the plist on disk, so Resume took a deliberate stop for a self-pause.
+test('Resume reloads a scheduler that paused itself, never one the operator stopped', async t => {
+  let launchd;
+  const f = await fixture(t, { prepare: (root) => { launchd = statefulLaunchctl(root); return {}; } });
+  const opts = { token: f.master };
+  const plist = path.join(f.root, 'fixture.plist');
+  const block = () => f.request('/api/plans/fixture/block', { ...opts, method: 'POST', body: { content: 'Paused' } });
+  const unblock = async () => JSON.parse((await f.request('/api/plans/fixture/unblock', { ...opts, method: 'POST' })).text);
+  assert.equal((await f.request('/api/plans/fixture/automation/config', { ...opts, method: 'PUT', body: schedulerConfig(f) })).status, 200);
+
+  assert.equal((await f.request('/api/plans/fixture/automation/load', { ...opts, method: 'POST' })).status, 200);
+  assert.equal((await f.request('/api/plans/fixture/automation/unload', { ...opts, method: 'POST' })).status, 200);
+  assert.equal(fs.existsSync(plist), false, 'Stop removes the plist; Start regenerates it');
+  assert.equal((await block()).status, 200);
+  launchd.resetCalls();
+  assert.equal((await unblock()).scheduler_reloaded, false);
+  assert.doesNotMatch(launchd.calls(), /bootstrap/);
+
+  assert.equal((await f.request('/api/plans/fixture/automation/load', { ...opts, method: 'POST' })).status, 200);
+  launchd.selfPause();
+  assert.equal((await block()).status, 200);
+  launchd.resetCalls();
+  assert.equal((await unblock()).scheduler_reloaded, true);
+  assert.match(launchd.calls(), /^bootstrap gui\/\d+ /m);
+});

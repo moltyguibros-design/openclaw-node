@@ -1862,6 +1862,7 @@ async function handleRequest(req, res) {
       }
       // If the scheduler had auto-paused itself (plist exists but launchd no
       // longer has the job), bring it back up so the chain/interval resumes.
+      // Stop scheduler removes the plist, so a deliberate stop stays stopped.
       const cfg = readAutomationConfig(plan);
       const plistExists = fs.existsSync(cfg.plist_path);
       const status = await launchdStatus(cfg.plist_label);
@@ -1959,6 +1960,9 @@ async function handleRequest(req, res) {
       const cfg = readAutomationConfig(plan);
       const r = await launchctlBootout(process.getuid(), cfg.plist_label, cfg.plist_path);
       if (!r.ok) return json(res, { error: r.error }, 500);
+      // /unblock reloads a plist that is on disk but not loaded, which must mean the
+      // tick paused itself (plan-tick keeps the plist); Start regenerates it from automation.json.
+      fs.rmSync(cfg.plist_path, { force: true });
       const state = await getAutomationState(plan);
       return json(res, { ok: true, msg: r.msg || 'unloaded', state });
     }
