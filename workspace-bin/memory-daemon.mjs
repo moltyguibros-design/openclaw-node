@@ -577,7 +577,7 @@ function initMemoryBudget(config) {
 // PHASE 0: SESSION-START BOOTSTRAP
 // ============================================================
 
-async function runPhase0Bootstrap(sessionId, config, { othersLive = false } = {}) {
+async function runPhase0Bootstrap(sessionId, config, { othersLive = false, previousJsonl = null } = {}) {
   log(`Phase 0: Bootstrap for session ${sessionId?.slice(0, 8) || 'unknown'}`);
 
   const recap = path.join(WORKSPACE, 'bin/session-recap');
@@ -587,12 +587,12 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false } = {}
   const subagentAudit = path.join(WORKSPACE, 'bin/subagent-audit.mjs');
   const memoryDir = path.join(WORKSPACE, 'memory');
 
-  // 1. Session recap of previous session
-  if (fs.existsSync(recap)) {
+  // 1. Session recap of the last session that ended
+  if (fs.existsSync(recap) && previousJsonl) {
     try {
-      await runSubprocess('node', [recap, '--previous'], 30000);
-      log('  session-recap --previous done');
-    } catch (e) { log(`  session-recap --previous failed: ${e.message}`); }
+      await runSubprocess('node', [recap, '--file', previousJsonl], 30000);
+      log(`  session-recap of previous session ${path.basename(previousJsonl).slice(0, 8)} done`);
+    } catch (e) { log(`  session-recap of previous session failed: ${e.message}`); }
   }
 
   // 2. ClawVault wake
@@ -634,16 +634,11 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false } = {}
     } catch (e) { log(`  compile-boot failed: ${e.message}`); }
   }
 
-  // 6. Sub-agent audit of previous session
-  if (fs.existsSync(subagentAudit)) {
+  // 6. Sub-agent audit of the last session that ended
+  if (fs.existsSync(subagentAudit) && previousJsonl) {
     try {
-      // Find the previous session's JSONL
-      const sources = loadTranscriptSources();
-      const prevJsonl = findPreviousJsonl(sources);
-      if (prevJsonl) {
-        await runSubprocess('node', [subagentAudit, prevJsonl], 30000);
-        log(`  subagent-audit done on ${path.basename(prevJsonl).slice(0, 8)}`);
-      }
+      await runSubprocess('node', [subagentAudit, previousJsonl], 30000);
+      log(`  subagent-audit done on ${path.basename(previousJsonl).slice(0, 8)}`);
     } catch (e) { log(`  subagent-audit failed: ${e.message}`); }
   }
 
@@ -685,52 +680,12 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false } = {}
   log('Phase 0: Bootstrap complete');
 }
 
-function findPreviousJsonl(sources) {
-  const all = [];
-  for (const source of sources) {
-    if (!fs.existsSync(source.path)) continue;
-    try {
-      const files = fs.readdirSync(source.path).filter(f => f.endsWith('.jsonl'));
-      for (const f of files) {
-        const full = path.join(source.path, f);
-        try {
-          const stat = fs.statSync(full);
-          if (stat.size < MIN_SESSION_BYTES) continue; // skip header-only noise (repair 4.6)
-          all.push({ path: full, mtime: stat.mtimeMs });
-        } catch (err) { console.warn(`[memory-daemon] prev jsonl stat failed for ${full}: ${err.message}`); continue; }
-      }
-    } catch (err) { console.warn(`[memory-daemon] prev jsonl readdir failed for ${source.path}: ${err.message}`); continue; }
-  }
-  all.sort((a, b) => b.mtime - a.mtime);
-  return all.length > 1 ? all[1].path : null; // second most recent = previous
-}
-
 // R-floor fix (repair 4.6): below this a session file is header-only noise.
 // The old floor was a bare 50KB literal, which silently excluded every
 // short-but-real conversation from the interval/NATS flush paths and from
 // ended-session targeting; the 1.4 extraction dedup makes re-considering
 // small sessions cheap.
 const { MIN_SESSION_BYTES } = require('../lib/session-floor');
-
-function findCurrentJsonl(sources) {
-  const all = [];
-  for (const source of sources) {
-    if (!fs.existsSync(source.path)) continue;
-    try {
-      const files = fs.readdirSync(source.path).filter(f => f.endsWith('.jsonl'));
-      for (const f of files) {
-        const full = path.join(source.path, f);
-        try {
-          const stat = fs.statSync(full);
-          if (stat.size < MIN_SESSION_BYTES) continue;
-          all.push({ path: full, mtime: stat.mtimeMs });
-        } catch (err) { console.warn(`[memory-daemon] current jsonl stat failed for ${full}: ${err.message}`); continue; }
-      }
-    } catch (err) { console.warn(`[memory-daemon] current jsonl readdir failed for ${source.path}: ${err.message}`); continue; }
-  }
-  all.sort((a, b) => b.mtime - a.mtime);
-  return all.length > 0 ? all[0].path : null; // most recent = current
-}
 
 function findJsonlBySessionId(sources, sessionId) {
   if (!sessionId) return null;
@@ -744,6 +699,17 @@ function findJsonlBySessionId(sources, sessionId) {
     } catch { /* file doesn't exist in this source */ }
   }
   return null;
+}
+
+// The transcripts of the tracked sessions in the given states: each flush
+// targets its own session, never "the newest file", which belongs to whichever
+// of several concurrent sessions wrote last.
+function sessionTranscripts(sessions, states) {
+  const sources = loadTranscriptSources();
+  return sessions
+    .filter(s => states.includes(s.state))
+    .map(s => ({ sessionId: s.sessionId, jsonl: findJsonlBySessionId(sources, s.sessionId) }))
+    .filter(s => s.jsonl);
 }
 
 function sourceOfJsonl(sources, jsonlPath) {
@@ -900,7 +866,7 @@ async function runHyperagentMaintenance(config) {
   }
 }
 
-async function runPhase2ThrottledWork(config, sessionState) {
+async function runPhase2ThrottledWork(config, sessions) {
   const now = Date.now();
   const throttle = loadThrottleState();
 
@@ -1034,30 +1000,30 @@ async function runPhase2ThrottledWork(config, sessionState) {
     }
   }
 
-  // 30-min interval synthesis during active sessions (D2, step 4.5)
-  if (sessionState === STATES.ACTIVE && now - throttle.lastSynthesis >= config.intervals.synthesisMs) {
+  // 30-min interval synthesis of every active session (D2, step 4.5)
+  const activeTranscripts = sessionTranscripts(sessions, [STATES.ACTIVE]);
+  if (activeTranscripts.length > 0 && now - throttle.lastSynthesis >= config.intervals.synthesisMs) {
     throttle.lastSynthesis = now;
     stage1.push(
       (async () => {
-        try {
-          const sources = loadTranscriptSources();
-          const currentJsonl = findCurrentJsonl(sources);
-          if (!currentJsonl) return;
-          const memoryMd = path.join(WORKSPACE, 'MEMORY.md');
-          const budget = initMemoryBudget(config);
-          const result = await serializeFlush(() => runFlushInWorker(currentJsonl, memoryMd, {
-            charBudget: budget.charBudget,
-          }));
-          log(`  Phase 2: interval synthesis [${result.mode || 'regex'}]: ${result.facts} facts found, ${result.added} added`);
-          handleFlushResult(result, {
-            trigger: 'Phase 2: interval synthesis',
-            sessionId: path.basename(currentJsonl, '.jsonl'),
-            synthesisLabel: 'interval',
-          });
-          if (memoryBudget && (result.added > 0 || result.merged > 0)) {
-            memoryBudget.reload();
-          }
-        } catch (e) { log(`  Phase 2: interval synthesis failed: ${e.message}`); emitErrorEvent('extract', e); }
+        const memoryMd = path.join(WORKSPACE, 'MEMORY.md');
+        const budget = initMemoryBudget(config);
+        for (const { sessionId, jsonl } of activeTranscripts) {
+          try {
+            const result = await serializeFlush(() => runFlushInWorker(jsonl, memoryMd, {
+              charBudget: budget.charBudget,
+            }));
+            log(`  Phase 2: interval synthesis [${result.mode || 'regex'}] ${sessionId.slice(0, 8)}: ${result.facts} facts found, ${result.added} added`);
+            handleFlushResult(result, {
+              trigger: 'Phase 2: interval synthesis',
+              sessionId,
+              synthesisLabel: 'interval',
+            });
+            if (memoryBudget && (result.added > 0 || result.merged > 0)) {
+              memoryBudget.reload();
+            }
+          } catch (e) { log(`  Phase 2: interval synthesis of ${sessionId.slice(0, 8)} failed: ${e.message}`); emitErrorEvent('extract', e, sessionId); }
+        }
       })()
     );
   }
@@ -1067,6 +1033,48 @@ async function runPhase2ThrottledWork(config, sessionState) {
   }
 
   saveThrottleState(throttle);
+}
+
+// A NATS extract request names no session: it flushes every live one.
+async function runRequestedFlush(sessions, config) {
+  if (natsFlushQueued) {
+    log('[nats] flush already queued — coalescing request');
+    return;
+  }
+  const live = sessionTranscripts(sessions, [STATES.ACTIVE, STATES.IDLE]);
+  if (live.length === 0) {
+    log('[nats] skipping extraction — no live session');
+    return;
+  }
+  natsFlushQueued = true;
+  try {
+    const memoryMd = path.join(WORKSPACE, 'MEMORY.md');
+    const budget = initMemoryBudget(config);
+    for (const { sessionId, jsonl } of live) {
+      try {
+        // shouldFlush only stats the transcript; the flush that may follow
+        // parses it, so both run IN the worker (checkShouldFlush) and the
+        // event loop never touches the JSONL.
+        const result = await serializeFlush(() => runFlushInWorker(jsonl, memoryMd, {
+          charBudget: budget.charBudget,
+          checkShouldFlush: true,
+          contextWindowTokens: config.contextWindowTokens || 200000,
+        }));
+        if (!result.skippedByCheck) {
+          log(`  nats-triggered flush [${result.mode || 'regex'}] ${sessionId.slice(0, 8)}: ${result.facts} facts, ${result.added} added, ${result.merged} merged`);
+          handleFlushResult(result, {
+            trigger: 'nats-triggered flush',
+            sessionId,
+            synthesisLabel: 'manual',
+          });
+          if (memoryBudget && (result.added > 0 || result.merged > 0)) {
+            memoryBudget.reload();
+            log('  memory-budget: snapshot reloaded after nats-triggered flush');
+          }
+        }
+      } catch (e) { log(`  nats-triggered flush of ${sessionId.slice(0, 8)} failed: ${e.message}`); emitErrorEvent('extract', e, sessionId); }
+    }
+  } finally { natsFlushQueued = false; }
 }
 
 async function runNodeVaultMaintenance(config) {
@@ -1116,7 +1124,7 @@ async function handleTransitions(transitions, config) {
     // ENDED → BOOT: Full bootstrap
     if (t.from === STATES.ENDED && t.to === STATES.BOOT) {
       if (!t.othersLive) runPhase1StatusSync(config, 'active', { newSession: true });
-      await runPhase0Bootstrap(t.sessionId, config, { othersLive: t.othersLive });
+      await runPhase0Bootstrap(t.sessionId, config, { othersLive: t.othersLive, previousJsonl: t.previousJsonl });
       booted.push(t.sessionId);
     }
 
@@ -1160,8 +1168,8 @@ async function handleTransitions(transitions, config) {
       }
 
       const tasks = [];
-      if (fs.existsSync(recap)) {
-        tasks.push(runSubprocess('node', [recap], 30000).catch(() => {}));
+      if (fs.existsSync(recap) && currentJsonl) {
+        tasks.push(runSubprocess('node', [recap, '--file', currentJsonl], 30000).catch(() => {}));
       }
       if (fs.existsSync(clawvault)) {
         tasks.push(runSubprocess(clawvault, ['observe', '--cron'], 60000).catch(() => {}));
@@ -1611,42 +1619,7 @@ async function main() {
         log,
         onExtract: async (payload) => {
           log(`[nats] extraction requested by ${payload.triggered_by || 'unknown'}`);
-          if (sm.state !== STATES.ACTIVE && sm.state !== STATES.IDLE) {
-            log(`[nats] skipping extraction — session state is ${sm.state}`);
-            return;
-          }
-          if (natsFlushQueued) {
-            log('[nats] flush already queued — coalescing request');
-            return;
-          }
-          const currentJsonl = findCurrentJsonl(loadTranscriptSources());
-          if (!currentJsonl) return;
-          natsFlushQueued = true;
-          try {
-            // shouldFlush only stats the transcript; the flush that may follow
-            // parses it, so both run IN the worker (checkShouldFlush) and the
-            // event loop never touches the JSONL.
-            const memoryMd = path.join(WORKSPACE, 'MEMORY.md');
-            const budget = initMemoryBudget(config);
-            const result = await serializeFlush(() => runFlushInWorker(currentJsonl, memoryMd, {
-              charBudget: budget.charBudget,
-              checkShouldFlush: true,
-              contextWindowTokens: config.contextWindowTokens || 200000,
-            }));
-            if (!result.skippedByCheck) {
-              log(`  nats-triggered flush [${result.mode || 'regex'}]: ${result.facts} facts, ${result.added} added, ${result.merged} merged`);
-              handleFlushResult(result, {
-                trigger: 'nats-triggered flush',
-                sessionId: path.basename(currentJsonl, '.jsonl'),
-                synthesisLabel: 'manual',
-              });
-              if (memoryBudget && (result.added > 0 || result.merged > 0)) {
-                memoryBudget.reload();
-                log('  memory-budget: snapshot reloaded after nats-triggered flush');
-              }
-            }
-          } catch (e) { log(`  nats-triggered flush failed: ${e.message}`); emitErrorEvent('extract', e, path.basename(currentJsonl, '.jsonl')); }
-          finally { natsFlushQueued = false; }
+          await runRequestedFlush(sm.sessions, config);
         },
       });
       await extractionTrigger.start();
@@ -1818,7 +1791,7 @@ async function main() {
 
       // 5.1. Phase 2: Throttled work (when ACTIVE or IDLE)
       if (sm.state === STATES.ACTIVE || sm.state === STATES.IDLE) {
-        await runPhase2ThrottledWork(config, sm.state);
+        await runPhase2ThrottledWork(config, sm.sessions);
       }
       await runNodeVaultMaintenance(config);
 
@@ -1870,4 +1843,4 @@ if (process.env.OPENCLAW_MEMORY_DAEMON_NO_AUTOSTART !== '1') {
   });
 }
 
-export { runNodeVaultMaintenance, handleFlushResult, sourceOfJsonl, extractedEventData, synthesizedEventData, detectActivity };
+export { runNodeVaultMaintenance, handleFlushResult, sourceOfJsonl, extractedEventData, synthesizedEventData, detectActivity, handleTransitions, runPhase2ThrottledWork, runRequestedFlush };

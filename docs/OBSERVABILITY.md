@@ -425,8 +425,6 @@ The dashboard page is a trace log that polls `/api/observability/events` every 3
 | `loadDaemonState` | memory-daemon | 2 | Loads persisted daemon state — logged to detect state corruption or version mismatches. |
 | `loadConfig` | memory-daemon | 2 | Loads daemon configuration — logs effective config for debugging. |
 | `loadTranscriptSources` | memory-daemon | 2 | Discovers transcript source directories — logs source count and paths. |
-| `findCurrentJsonl` | memory-daemon | 2 | Finds the current session's JSONL file — logged to track session file resolution. |
-| `findPreviousJsonl` | memory-daemon | 2 | Finds the previous session's JSONL file — logged for session continuity debugging. |
 
 ### 8.2 Obsidian Sync (vault sync, lessons propagation)
 

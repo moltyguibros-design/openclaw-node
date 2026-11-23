@@ -161,7 +161,7 @@ test('the session-size floor is a named 1KB constant, not a bare 50KB (repair 4.
   const { MIN_SESSION_BYTES } = createRequire(import.meta.url)('../lib/session-floor.js');
   assert.equal(MIN_SESSION_BYTES, 1024);
   const uses = daemonSrc.match(/MIN_SESSION_BYTES/g) || [];
-  assert.equal(uses.length, 5, 'declaration + the activity scan + all three lookup sites (previous/current/by-id)');
+  assert.equal(uses.length, 3, 'declaration + the activity scan + the by-session-id lookup');
 });
 
 test('synthesized events carry session_id (R10, repair 2.10)', () => {

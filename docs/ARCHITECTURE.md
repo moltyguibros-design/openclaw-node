@@ -26,7 +26,7 @@ OpenClaw's memory system is a **platform-level service** independent of any fron
 │  │    ├─ State machine: ENDED → BOOT → ACTIVE → IDLE → ENDED  │  │
 │  │    ├─ detect_activity() — JSONL mtime via registry           │  │
 │  │    ├─ Phase 0: session bootstrap (ENDED→BOOT)               │  │
-│  │    │    ├─ session-recap --previous                          │  │
+│  │    │    ├─ session-recap --file <last ended session>         │  │
 │  │    │    ├─ clawvault wake + observe + doctor                 │  │
 │  │    │    ├─ memory-maintenance --force                        │  │
 │  │    │    ├─ compile-boot --all                                │  │
@@ -190,7 +190,7 @@ The daemon polls JSONL transcript mtimes from a JSON registry every 30s. Any JSO
 ```
 memory-daemon detects new session via JSONL mtime
   Phase 0 Bootstrap:
-  → session-recap --previous (capture what last session did)
+  → session-recap --file <the last session that ended> (capture what it did)
   → clawvault-local wake (restore active context)
   → clawvault-local observe --cron (scan recent entries)
   → clawvault-local doctor (verify vault integrity)
@@ -220,7 +220,7 @@ Each transcript written concurrently is its own session with its own timers
 (lib/session-tracker.mjs); a second session starting never ends the first.
 
 Idle timeout (15min no JSONL writes) → IDLE
-  → Final session-recap
+  → session-recap --file <that transcript>
   → clawvault-local observe (capture final activity)
 IDLE timeout (5min) → ENDED
   → end-of-session flush, archive and subagent-audit of that transcript

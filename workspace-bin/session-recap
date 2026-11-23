@@ -20,6 +20,7 @@
  * Total bootstrap read cost: ≤40 lines.
  *
  * FLAGS:
+ *   --file <path> Digest exactly this transcript (the daemon names the session it means).
  *   --previous    Digest the previous session (not current). Use at session start.
  *   --all-recent  Digest the 3 most recent NON-current sessions. Full catch-up.
  *   --list        Show recent JSONL files with sizes and dates.
@@ -282,6 +283,7 @@ function buildDigest(file) {
 // --- Main ---
 function main() {
   const args = process.argv.slice(2);
+  const fileArg = args.indexOf("--file");
   const previousMode = args.includes("--previous");
   const allRecentMode = args.includes("--all-recent");
   const listMode = args.includes("--list");
@@ -305,7 +307,13 @@ function main() {
   // --previous: digest only the previous session (offset=1)
   // default: digest the most recent (offset=0, current session)
   let targets = [];
-  if (allRecentMode) {
+  if (fileArg >= 0) {
+    const file = args[fileArg + 1];
+    if (file && fs.existsSync(file)) {
+      const stat = fs.statSync(file);
+      targets.push({ name: path.basename(file), path: file, mtime: stat.mtimeMs, size: stat.size, source: path.dirname(file) });
+    }
+  } else if (allRecentMode) {
     // Skip offset 0 (current session), take next 3
     targets = findJsonlFiles().slice(1, 4);
   } else if (previousMode) {

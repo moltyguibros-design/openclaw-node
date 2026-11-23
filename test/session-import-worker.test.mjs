@@ -15,7 +15,7 @@ test('the daemon does no session-store import on its main thread', () => {
 });
 
 test('boot and Phase 2 run the directory import in the worker; session end archives through the worker', () => {
-  const phase0 = daemonSrc.match(/async function runPhase0Bootstrap[\s\S]*?\nfunction findPreviousJsonl/)[0];
+  const phase0 = daemonSrc.match(/async function runPhase0Bootstrap[\s\S]*?\n\}\n/)[0];
   assert.match(phase0, /runImportDirInWorker\(/);
   const phase2Import = daemonSrc.match(/throttle\.lastSessionImport = now;[\s\S]*?\n  \}\n/)[0];
   assert.match(phase2Import, /runImportDirInWorker\(/);

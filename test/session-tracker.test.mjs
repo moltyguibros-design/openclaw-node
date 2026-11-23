@@ -140,3 +140,23 @@ test('the daemon drives the per-session tracker and completes every finished boo
   assert.match(endBranch, /traceEmitter\.forget\(t\.jsonlPath\)/);
   assert.doesNotMatch(daemonSrc, /traceEmitter\.reset\(\)/);
 });
+
+test('a boot carries the transcript of the last session that ended, across a daemon restart', () => {
+  const tr = new SessionTracker(config);
+  const [first] = tr.tick(seen('a'), 0);
+  assert.equal(first.previousJsonl, null);
+  tr.completeBoot('a');
+  tr.tick(seen(), 6 * MIN);
+  assert.deepEqual(brief(tr.tick(seen(), 22 * MIN)), ['a:IDLE->ENDED']);
+  // b is live beside the next boot; the previous session is still a.
+  tr.tick(seen('b'), 23 * MIN);
+  tr.completeBoot('b');
+  const [boot] = tr.tick(seen('b', 'c'), 24 * MIN);
+  assert.deepEqual(brief([boot]), ['c:ENDED->BOOT']);
+  assert.equal(boot.previousJsonl, '/t/a.jsonl');
+
+  const copy = new SessionTracker(config);
+  copy.restore(JSON.parse(JSON.stringify(tr.toJSON())));
+  const [afterRestart] = copy.tick(seen('d'), 25 * MIN);
+  assert.equal(afterRestart.previousJsonl, '/t/a.jsonl');
+});
