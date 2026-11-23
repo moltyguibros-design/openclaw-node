@@ -128,11 +128,14 @@ test('bridge tracks staleness only while an agent holds the task', () => {
   assert.doesNotMatch(body('dispatchTask'), /lastHeartbeat\.set/);
   const events = body('handleEvent');
   const caseBody = (name) => events.slice(events.indexOf(`case '${name}':`), events.indexOf('return;', events.indexOf(`case '${name}':`)));
-  for (const name of ['claimed', 'started', 'heartbeat']) assert.match(caseBody(name), /lastHeartbeat\.set\(taskId/, name);
+  for (const name of ['claimed', 'heartbeat']) assert.match(caseBody(name), /lastHeartbeat\.set\(taskId/, name);
+  // A collab session's parent is started by the daemon, and no agent heartbeats it.
+  assert.match(caseBody('started'), /trackHeartbeat\(taskId, meshTask\?\.owner\)/);
+  assert.match(body('trackHeartbeat'), /if \(isSessionOwner\(owner\)\) lastHeartbeat\.delete\(taskId\);\s*else lastHeartbeat\.set\(taskId/);
   for (const name of ['pending_review', 'requeued', 'rejected']) assert.match(caseBody(name), /lastHeartbeat\.delete\(taskId\)/, name);
-  const seeds = [...body('reconcile').matchAll(/lastHeartbeat\.set/g)];
+  const seeds = [...body('reconcile').matchAll(/lastHeartbeat\.set|trackHeartbeat\(/g)];
   assert.equal(seeds.length, 1);
-  assert.match(body('reconcile'), /if \(meshTask\.status === 'claimed' \|\| meshTask\.status === 'running'\) \{\s*lastHeartbeat\.set/);
+  assert.match(body('reconcile'), /if \(meshTask\.status === 'claimed' \|\| meshTask\.status === 'running'\) \{\s*trackHeartbeat\(task\.task_id, meshTask\.owner\)/);
 });
 
 for (const signal of ['SIGTERM', 'SIGINT']) {

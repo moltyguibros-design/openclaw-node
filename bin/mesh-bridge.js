@@ -25,6 +25,7 @@ const { readTasks, updateTaskInPlace: updateTaskInPlaceAsync, appendTaskBlock, i
 const sc = StringCodec();
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
 const { subtaskReportForCard } = require('../lib/mesh-plans');
+const { isSessionOwner } = require('../lib/mesh-tasks');
 const DISPATCH_INTERVAL = parseInt(process.env.BRIDGE_DISPATCH_INTERVAL || '10000'); // 10s
 const LOG_DIR = path.join(WORKSPACE, 'memory', 'mesh-logs');
 
@@ -50,6 +51,13 @@ const MAX_SUBMIT_FAILURES = 3;
 const lastHeartbeat = new Map();
 const STALE_WARNING_MS = 2 * 60 * 1000; // 2 minutes without heartbeat → warn on card
 const HEARTBEAT_CHECK_INTERVAL = 30000;  // check every 30s
+
+// A collab session owns its parent task: no node heartbeats it, and the daemon
+// keeps it alive for the session's budget instead.
+function trackHeartbeat(taskId, owner) {
+  if (isSessionOwner(owner)) lastHeartbeat.delete(taskId);
+  else lastHeartbeat.set(taskId, Date.now());
+}
 
 function freeSlot(taskId) {
   if (dispatched.delete(taskId)) log(`SLOT FREED: ${taskId} (${dispatched.size} remaining)`);
@@ -178,7 +186,7 @@ async function reconcile() {
           log(`RECONCILE: ${task.task_id} still ${meshTask.status} — resuming tracking`);
           dispatched.add(task.task_id);
           if (meshTask.status === 'claimed' || meshTask.status === 'running') {
-            lastHeartbeat.set(task.task_id, Date.now());
+            trackHeartbeat(task.task_id, meshTask.owner);
             if (meshTask.owner) updateTaskInPlace(ACTIVE_TASKS_PATH, task.task_id, { mesh_node: meshTask.owner });
           }
           break;
@@ -638,7 +646,7 @@ function handleEvent(eventType, taskId, meshTask) {
         return;
       case 'started':
         log(`EVENT: ${eventType} ${taskId}`);
-        lastHeartbeat.set(taskId, Date.now());
+        trackHeartbeat(taskId, meshTask?.owner);
         return;
       // No agent holds the task until the next claim, so nothing heartbeats.
       // The slot stays held while a review is pending: dispatch is serial, and the

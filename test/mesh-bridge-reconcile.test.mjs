@@ -82,3 +82,23 @@ test('a task still running at reconcile keeps its slot', async () => {
   assert.equal(bridge.dispatched.has('T-1'), true);
   assert.equal(bridge.lastHeartbeat.has('T-1'), true);
 });
+
+// A collab session owns its parent task (owner collab:<session>) and no node
+// heartbeats it, so tracking it stamped "Agent silent" on the card every 2 minutes.
+test('a started event for a session-owned parent starts no heartbeat tracking; a node owner still does', () => {
+  seed('submitted');
+  bridge.lastHeartbeat.clear();
+  bridge.handleEvent('started', 'T-1', { ...meshTask('running'), owner: 'collab:S-1' });
+  assert.equal(bridge.lastHeartbeat.has('T-1'), false);
+  bridge.handleEvent('started', 'T-1', meshTask('running'));
+  assert.equal(bridge.lastHeartbeat.has('T-1'), true);
+});
+
+test('a session-owned parent still running at reconcile keeps its slot without heartbeat tracking', async () => {
+  seed('running');
+  bridge.lastHeartbeat.clear();
+  daemonAnswers({ ok: true, data: { ...meshTask('running'), owner: 'collab:S-1' } });
+  await bridge.reconcile();
+  assert.equal(bridge.dispatched.has('T-1'), true);
+  assert.equal(bridge.lastHeartbeat.has('T-1'), false);
+});
