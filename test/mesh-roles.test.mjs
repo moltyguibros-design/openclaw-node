@@ -59,14 +59,21 @@ describe('fleet component filter', () => {
     for (const id of ['boot', 'boot-manifest']) assert.equal(DEPLOY_COMPONENTS.find(c => c.id === id).nodeFilter, 'all', id);
   });
 
-  it('keeps the npm/git-sourced openclaw and companion local-only, but advertises them', () => {
+  it('keeps the npm-sourced openclaw local-only, but advertises it', () => {
     for (const role of ['lead', 'worker']) {
       assert.ok(!FLEET_COMPONENTS[role].includes('openclaw'));
-      assert.ok(!FLEET_COMPONENTS[role].includes('companion'));
       assert.ok(ROLE_COMPONENTS[role].includes('openclaw'));
     }
-    assert.ok(ROLE_COMPONENTS.lead.includes('companion'));
-    assert.ok(!ROLE_COMPONENTS.worker.includes('companion'));
+  });
+
+  // It pulled an unpinned companion-adapter tip, built even when the pull failed,
+  // and restarted the gateway, which does not run the bridge.
+  it('has no companion component', () => {
+    assert.ok(!DEPLOY_COMPONENTS.some(c => c.id === 'companion'));
+    const run = runDeployWithRoles(fs.readFileSync(path.join(REPO, 'lib/mesh-roles.js'), 'utf8'), ['--component', 'companion']);
+    assert.notEqual(run.status, 0);
+    assert.match(run.stdout, /DEPLOY_ERROR .*unknown component companion — known: /);
+    assert.doesNotMatch(fs.readFileSync(path.join(REPO, 'bin/mesh-deploy.js'), 'utf8'), /companion/i);
   });
 
   it('a fleet trigger naming config reaches the deploy on a lead', async () => {

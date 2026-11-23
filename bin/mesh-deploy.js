@@ -7,8 +7,8 @@
  * dist, mesh daemons and CLI, shared libs, Mission Control, memory daemon,
  * workspace scripts, souls, skills, boot compiler and manifest, workspace docs,
  * harness rules, config templates, lane watchdog, log rotation and the Discord
- * tool. The npm-sourced openclaw CLI and companion-bridge deploy only when
- * named. Service units change only through install.sh.
+ * tool. The npm-sourced openclaw CLI deploys only when named. Service units
+ * change only through install.sh.
  *
  * ARCHITECTURE:
  *   Each deployable component is defined in the MANIFEST with:
@@ -105,7 +105,6 @@ const DIRS = {
   BOOT:             path.join(WORKSPACE, '.boot'),
   BOOT_SRC:         path.join(WORKSPACE, 'bin'),  // compile-boot lives here
   SERVICES_MAC:     path.join(HOME, 'Library', 'LaunchAgents'),
-  COMPANION:        path.join(HOME, 'companion-adapter'),
   DEPLOY_STATE:     path.join(HOME, '.openclaw', '.deploy-state.json'),
 };
 
@@ -628,45 +627,6 @@ const MANIFEST = [
       info(`Installing OpenClaw gateway ${version}...`);
       exec(`npm install -g openclaw@${version}`, { timeout: 180000 });
       ok(`OpenClaw ${version} installed`);
-    },
-  },
-
-  // ── COMPANION BRIDGE ────────────────────────────────────────────────────
-
-  {
-    id: 'companion',
-    name: 'Companion Bridge',
-    description: 'companion-bridge npm package + local adapter.ts patches',
-    risk: 'careful',
-    repoPaths: [],
-    targets: [],
-    servicesMac: ['ai.openclaw.gateway'],
-    servicesLinux: ['openclaw-gateway'],
-    detect: () => {
-      try {
-        if (fs.existsSync(DIRS.COMPANION)) {
-          const status = exec('git status --porcelain', { cwd: DIRS.COMPANION, ignoreError: true });
-          if (status) return { changed: true, reason: 'uncommitted local changes' };
-        }
-        const current = exec('npm ls companion-bridge --json 2>/dev/null', { ignoreError: true });
-        const latest = exec('npm view companion-bridge version 2>/dev/null', { ignoreError: true });
-        if (current && latest) {
-          return { changed: !current.includes(latest), current, latest };
-        }
-      } catch (err) { console.warn(`[mesh-deploy] detect companion version: ${err.message}`); }
-      return { changed: false };
-    },
-    install: (dryRun) => {
-      if (dryRun) {
-        info('Would update companion-bridge');
-        return;
-      }
-      if (fs.existsSync(DIRS.COMPANION)) {
-        info('Pulling companion-bridge source...');
-        exec('git pull origin main', { cwd: DIRS.COMPANION, ignoreError: true });
-        exec('npm install && npm run build', { cwd: DIRS.COMPANION, timeout: 120000 });
-        ok('companion-bridge rebuilt');
-      }
     },
   },
 
