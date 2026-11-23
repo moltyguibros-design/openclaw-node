@@ -73,7 +73,6 @@ function cardNode(): MeshNode {
     uptimeSeconds: 60,
     agent: { status: "idle", currentTask: null, llm: null, model: null },
     capabilities: [],
-    stats: { tasksToday: 0, successRate: 0, tokenSpendTodayUsd: 0 },
     tailscale: n.tailscale,
   };
   return n;

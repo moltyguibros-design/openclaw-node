@@ -224,43 +224,6 @@ function getNatsInfo(nc, natsUrl) {
   } catch (err) { console.warn(`[health-publisher] get NATS info: ${err.message}`); return { serverUrl: 'unknown', connected: false, serverVersion: 'unknown', isHost: false }; }
 }
 
-// performance.jsonl only grows; re-parse it only when it changed or the day rolled.
-let nodeStatsCache = null;
-
-function getNodeStats() {
-  try {
-    const perfPath = path.join(os.homedir(), '.openclaw', 'workspace', 'memory', 'performance.jsonl');
-    if (!fs.existsSync(perfPath)) return { tasksToday: 0, successRate: 1.0, tokenSpendTodayUsd: 0 };
-
-    const today = new Date().toISOString().slice(0, 10);
-    const st = fs.statSync(perfPath);
-    const key = `${today}:${st.mtimeMs}:${st.size}`;
-    if (nodeStatsCache?.key === key) return nodeStatsCache.stats;
-    const lines = fs.readFileSync(perfPath, 'utf-8').split('\n').filter(Boolean);
-
-    let completed = 0, failed = 0, tokens = 0;
-    for (const line of lines) {
-      try {
-        const entry = JSON.parse(line);
-        if (!entry.completed_at || !entry.completed_at.startsWith(today)) continue;
-        if (entry.node_id && entry.node_id !== NODE_ID) continue;
-        if (entry.outcome === 'completed' || entry.outcome === 'success') completed++;
-        else if (entry.outcome === 'failed' || entry.outcome === 'error') failed++;
-        if (entry.token_cost_usd) tokens += entry.token_cost_usd;
-      } catch (err) { console.warn(`[health-publisher] parse perf line: ${err.message}`); continue; }
-    }
-
-    const total = completed + failed;
-    const stats = {
-      tasksToday: total,
-      successRate: total > 0 ? completed / total : 1.0,
-      tokenSpendTodayUsd: Math.round(tokens * 100) / 100,
-    };
-    nodeStatsCache = { key, stats };
-    return stats;
-  } catch (err) { console.warn(`[health-publisher] get node stats: ${err.message}`); return { tasksToday: 0, successRate: 1.0, tokenSpendTodayUsd: 0 }; }
-}
-
 let publishCount = 0;
 let lastRoleMismatch = false;
 
@@ -310,7 +273,6 @@ async function gatherHealth(nc, run = runProbe) {
     tailscale: tsData,
     nats: natsInfo,
     cpuLoadPercent: getCpuLoad(),
-    stats: getNodeStats(),
     reportedAt: new Date().toISOString(),
   };
 }

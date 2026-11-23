@@ -133,6 +133,14 @@ describe('mesh-health-publisher probes', () => {
     assert.equal(typeof health.roleMismatch, 'boolean');
   });
 
+  // mesh-bin#17: nothing writes performance.jsonl, so the stats were fixed defaults.
+  it('the health record carries no task/spend stats and the publisher reads no performance.jsonl', async () => {
+    const health = await publisher.gatherHealth({ info: { version: 'test' }, isClosed: () => false }, async () => null);
+    assert.equal('stats' in health, false);
+    const src = readFileSync(new URL('../bin/mesh-health-publisher.js', import.meta.url), 'utf8');
+    assert.doesNotMatch(src, /performance\.jsonl|getNodeStats/);
+  });
+
   // Tailscale's Relay is the peer's home DERP region, set for every peer; CurAddr is the
   // direct endpoint and Active means traffic in the last ~2 min (ipnstate.PeerStatus).
   it('a peer with a direct endpoint is direct, only an active peer without one is relayed, an inactive one is idle', async () => {

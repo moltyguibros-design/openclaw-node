@@ -17,11 +17,6 @@ export interface NodeHealth {
     budgetRemainingSeconds?: number;
   };
   capabilities: string[];
-  stats: {
-    tasksToday: number;
-    successRate: number;
-    tokenSpendTodayUsd: number;
-  };
   tailscale?: {
     peers: PeerView[];
     selfIp: string;

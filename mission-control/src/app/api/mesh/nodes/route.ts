@@ -59,11 +59,6 @@ interface NodeHealth {
     budgetRemainingSeconds?: number;
   };
   capabilities: string[];
-  stats: {
-    tasksToday: number;
-    successRate: number;
-    tokenSpendTodayUsd: number;
-  };
   tailscale?: {
     peers: TailscalePeer[];
     selfIp: string;
@@ -363,7 +358,6 @@ async function gatherLocalHealth(): Promise<NodeHealth> {
       };
     })(),
     capabilities: [],
-    stats: { tasksToday: 0, successRate: 1.0, tokenSpendTodayUsd: 0 },
     tailscale: tailscaleData,
     nats: { serverUrl: natsUrl, connected: false, serverVersion: "unknown", isHost: false },
     deployVersion:

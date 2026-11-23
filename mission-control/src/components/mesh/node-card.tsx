@@ -9,7 +9,6 @@ import {
   Wifi,
   WifiOff,
   Clock,
-  Coins,
   ChevronDown,
   ChevronRight,
   Star,
@@ -345,18 +344,6 @@ export function NodeCard({ node, isExpanded: controlledExpanded, onToggle }: Pro
               )}
             </div>
           ))}
-        </div>
-      )}
-
-      {/* ── Today's Stats ───────────────────────────────────────── */}
-      {h && (
-        <div className="border-t border-border/50 px-4 py-2 flex items-center gap-4 text-[10px] text-muted-foreground">
-          <span>Today: {h.stats.tasksToday} tasks</span>
-          <span>{Math.round(h.stats.successRate * 100)}% success</span>
-          <span className="flex items-center gap-0.5">
-            <Coins className="h-3 w-3" />
-            ${h.stats.tokenSpendTodayUsd.toFixed(2)}
-          </span>
         </div>
       )}
 
